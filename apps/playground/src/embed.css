@@ -1,0 +1,62 @@
+/* This Host only sizes its own containers. Surface styling ships with each package. */
+body {
+  margin: 0;
+  background: #e9edf2;
+  font-family: system-ui, sans-serif;
+}
+.embed-host {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.embed-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  font-size: 12px;
+}
+.embed-controls output {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+}
+.embed-boundary {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+}
+.embed-history {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+}
+.embed-surface {
+  flex: 1;
+  min-height: 0;
+}
+.embed-content {
+  flex-shrink: 0;
+  font-size: 11px;
+  background: white;
+  padding: 4px;
+}
+.embed-content pre {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.embed-template-preview {
+  position: fixed;
+  inset: 8% 12%;
+  z-index: 50;
+  width: auto;
+  overflow: auto;
+  border: 1px solid #bbc5d4;
+  border-radius: 10px;
+  box-shadow: 0 8px 40px #24324644;
+}

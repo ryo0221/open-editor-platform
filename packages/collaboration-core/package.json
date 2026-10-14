@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/collaboration-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@noble/hashes": "1.8.0",
+    "@editor-platform/editor-core": "*"
+  }
+}

@@ -1,0 +1,65 @@
+:root {
+  --space-gap: 16px;
+  --brand-color: #19334d;
+  font-family: Arial, sans-serif;
+  color: #19334d;
+  background: #f4f7fb;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding: 24px;
+}
+section[aria-label='Reference card'] {
+  background: white;
+  border: 1px solid #ccd5df;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 100%;
+  box-shadow: 0 12px 32px #19334d12;
+}
+.reference-body {
+  display: contents;
+}
+footer {
+  font-size: 14px;
+  color: #667588;
+}
+p {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.4;
+}
+img {
+  width: 100%;
+  max-width: 360px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+button {
+  font: inherit;
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: 1px solid #19334d;
+  cursor: pointer;
+}
+button[data-variant='primary'] {
+  background: #19334d;
+  color: white;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+input {
+  font: inherit;
+  padding: 12px;
+  border: 1px solid #ccd5df;
+  border-radius: 8px;
+}
+#app-status {
+  margin: 16px 0;
+}

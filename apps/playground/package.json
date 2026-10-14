@@ -1,0 +1,29 @@
+{
+  "name": "@editor-platform/playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@editor-platform/react-ui": "*",
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/document": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/review-surfaces": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/collaboration-adapters": "*",
+    "prosemirror-collab": "1.3.1",
+    "@editor-platform/templates": "*",
+    "@editor-platform/template-ui": "*",
+    "@editor-platform/office-export-ui": "*",
+    "@editor-platform/office-import-ui": "*",
+    "@editor-platform/office-import-core": "*",
+    "@editor-platform/design-react-core": "*",
+    "@editor-platform/design-react": "*"
+  }
+}

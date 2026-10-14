@@ -1,0 +1,282 @@
+[
+  {
+    "file": "fonts-opensymbol_4%3a102.12+LibO25.2.3-2+deb13u6_all.deb",
+    "sha256": "9bf3b5927d2bcec59482b7a0aaf2e6c60fffeeecb47939fc5bfd18a8f815a5a0",
+    "bytes": 128200
+  },
+  {
+    "file": "libabw-0.1-1_0.1.3-1+b2_amd64.deb",
+    "sha256": "97fc7fe0b773f24badadf000bbe297d1af08f03cda3e96f07599da8e0eecabc6",
+    "bytes": 123632
+  },
+  {
+    "file": "libargon2-1_0~20190702+dfsg-4+b2_amd64.deb",
+    "sha256": "a54a6640be69c29c1e43b14ee464484a6f20e33fe73200c02949cfeb03228547",
+    "bytes": 21432
+  },
+  {
+    "file": "libbox2d2_2.4.1-3+b3_amd64.deb",
+    "sha256": "0f4ded020a1626790dd4d2780dfb9566e58b82e7009d9d82cacbaeeb9ab2f6b2",
+    "bytes": 95960
+  },
+  {
+    "file": "libclucene-contribs1t64_2.3.3.4+dfsg-1.2+b1_amd64.deb",
+    "sha256": "7ec73a0d85db45c6d2933b65a363be19e3128de44c37cc9f0bc7c08c07d744a0",
+    "bytes": 84372
+  },
+  {
+    "file": "libclucene-core1t64_2.3.3.4+dfsg-1.2+b1_amd64.deb",
+    "sha256": "b02d2e355eb528c5989673284b599d24470e735405ab88dea8b415f0deccbc81",
+    "bytes": 512272
+  },
+  {
+    "file": "libcmis-0.6-6t64_0.6.2-2.1+b1_amd64.deb",
+    "sha256": "650ee757c434ff21f6037a1d6ddfaae39e2b1bc548bf53128c0bd8df4a6ad0ee",
+    "bytes": 442248
+  },
+  {
+    "file": "libe-book-0.1-1_0.1.3-2+b4_amd64.deb",
+    "sha256": "f97e6c597ed7ff0991e7595fcda330f6a9ecabdc453c287fa616d058502c21b1",
+    "bytes": 205264
+  },
+  {
+    "file": "libeot0_0.01-5+b2_amd64.deb",
+    "sha256": "13ef6133e95d835979743762e1eeaa3c737b43c88750b27d67b2aaf8ab85941d",
+    "bytes": 27212
+  },
+  {
+    "file": "libepubgen-0.1-1_0.1.1-1+b2_amd64.deb",
+    "sha256": "30b36b265dcd1d12ba82cc1bcabbfe608111ff51fc8f977d415f43fc3e2fef6b",
+    "bytes": 156140
+  },
+  {
+    "file": "libetonyek-0.1-1_0.1.12-1_amd64.deb",
+    "sha256": "335c1b980ce133ff7727f6947ce8ce54e73ff18976d0fbba6596909b3056204e",
+    "bytes": 840380
+  },
+  {
+    "file": "libexttextcat-2.0-0_3.4.7-1+b1_amd64.deb",
+    "sha256": "6169774f5de01272c23dcd6980e72da33021c27fe8e4b01b53fb92eadcb3f0bc",
+    "bytes": 14260
+  },
+  {
+    "file": "libexttextcat-data_3.4.7-1_all.deb",
+    "sha256": "da52fe38e350c55ca35e90eaecb8a43bc91c19c40d1dd6bb01c126027163a912",
+    "bytes": 175944
+  },
+  {
+    "file": "libfreehand-0.1-1_0.1.2-3_amd64.deb",
+    "sha256": "c35675e151742ef9221722b2d99cbdbfb715409825040a96560334d7b0780523",
+    "bytes": 267480
+  },
+  {
+    "file": "libharfbuzz-icu0_10.2.0-1+deb13u1_amd64.deb",
+    "sha256": "0b45d951629e98673c0da73b2bcd0886a467d833bb3b7499892a168f247165d2",
+    "bytes": 15452
+  },
+  {
+    "file": "libhyphen0_2.8.8-7+b2_amd64.deb",
+    "sha256": "fa9dca7b8cf1381fd52800c44a385c5725a78a88bd705f7c39b1046a5293435e",
+    "bytes": 30664
+  },
+  {
+    "file": "liblangtag-common_0.6.7-1_all.deb",
+    "sha256": "8ed9f3b81754d8ebef0ef828e577ee2593f5d867710f1173f48f70beb8428061",
+    "bytes": 190556
+  },
+  {
+    "file": "liblangtag1_0.6.7-1+b2_amd64.deb",
+    "sha256": "b39985380d5921b3231e166b1101361f24656a63104065fedc590db77c8a2259",
+    "bytes": 51168
+  },
+  {
+    "file": "libmhash2_0.9.9.9-10_amd64.deb",
+    "sha256": "dee230ca116f5bf8728988f66a0d1e55571fd61baedc40bca32ca2ce65a7b8f0",
+    "bytes": 92436
+  },
+  {
+    "file": "libmspub-0.1-1_0.1.4-3+b5_amd64.deb",
+    "sha256": "b61352973ddea1a2e7757ebfc63b3f11e99f9cd8f74605f9a697116e91d27bf6",
+    "bytes": 179260
+  },
+  {
+    "file": "libmwaw-0.3-3_0.3.22-1+b2_amd64.deb",
+    "sha256": "c9dd28b15703d4bda59ff634922cdfaecfea046b222e0c0ef57470d244f40fbe",
+    "bytes": 2839816
+  },
+  {
+    "file": "libmythes-1.2-0_2%3a1.2.5-1+b2_amd64.deb",
+    "sha256": "0bb8a93fac6f42aa8a2c0970d80bce5a36766912b2117f50c94e116568ebe7e7",
+    "bytes": 10824
+  },
+  {
+    "file": "libnumbertext-1.0-0_1.0.11-4+b2_amd64.deb",
+    "sha256": "7c55b355af32e5211d4b4cf1bd2ad00e342980cd816aeee15b153062d3e8b434",
+    "bytes": 109064
+  },
+  {
+    "file": "libnumbertext-data_1.0.11-4_all.deb",
+    "sha256": "3d11ce427e22a8f7e9272f917f68c0413a0e5e4c66a7fa530e257069fcb4c5e1",
+    "bytes": 70424
+  },
+  {
+    "file": "libodfgen-0.1-1_0.1.8-2+b2_amd64.deb",
+    "sha256": "37b734370aff96ef61f8b654ef73c6ec3a34034aa1972dae419053189ed58397",
+    "bytes": 312584
+  },
+  {
+    "file": "liborcus-0.18-0_0.19.2-6+b1_amd64.deb",
+    "sha256": "065b4c2ca5f4309de06010c566c95b877d8ab2b7ce9941f2247186e61ab93926",
+    "bytes": 432096
+  },
+  {
+    "file": "liborcus-parser-0.18-0_0.19.2-6+b1_amd64.deb",
+    "sha256": "cd47851ff053f1e1412471fc28b4ce42d31b151b1a493d167d3a8a74688abb04",
+    "bytes": 116132
+  },
+  {
+    "file": "libpagemaker-0.0-0_0.0.4-1+b2_amd64.deb",
+    "sha256": "a04fb1d49f592b2be256395e9f1e232c011f849fdd3cd3f13a4580b3eedc98d2",
+    "bytes": 81944
+  },
+  {
+    "file": "libqxp-0.0-0_0.0.2-1+b4_amd64.deb",
+    "sha256": "4a333f805e2c1f34a0f3507f7bcfdaf54f6ddcd3c8f02f22c9cd89ce54636767",
+    "bytes": 128204
+  },
+  {
+    "file": "librasqal3t64_0.9.33-2.1+b2_amd64.deb",
+    "sha256": "9d3b3ea9901d57d50dcd9c0335bba3f0ae95bfba11cb2a5331f1c9b40591ea9f",
+    "bytes": 190772
+  },
+  {
+    "file": "librdf0t64_1.0.17-4+b1_amd64.deb",
+    "sha256": "d41105f9fed3fea6a0edb6d13dddb9f6fb3fdd611fb38ab23227ccf482596cd7",
+    "bytes": 106632
+  },
+  {
+    "file": "libreoffice-base-core_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "6b9b8969cc3bfe7cc22ea3786680b49704afaa680f33a12192607b7331018648",
+    "bytes": 800360
+  },
+  {
+    "file": "libreoffice-common_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "98c1e8a88160d9e0c53384d72b15bb7f793a00204a32541ed794889fa9d85b3c",
+    "bytes": 21748088
+  },
+  {
+    "file": "libreoffice-core_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "39eecbea8b6577ba096d8b56da3bb7b220f6493699737c705227768b70e4744f",
+    "bytes": 32157584
+  },
+  {
+    "file": "libreoffice-draw_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "be28daa4158e62f502a2cff1193b65958079f844dba74334b7ad427392248eb6",
+    "bytes": 2995284
+  },
+  {
+    "file": "libreoffice-impress_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "5c1f4608251229808c38f3091d06f719e3204bf99b336a0778a77ea1f3d6b7f1",
+    "bytes": 746748
+  },
+  {
+    "file": "libreoffice-style-colibre_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "ac2be45c7b1d11e1387daf8d1f14136aa1cbcedd1dd633ffd544a0b353008740",
+    "bytes": 7330160
+  },
+  {
+    "file": "libreoffice-uiconfig-common_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "898b3754b0b85e2536daca0223e2364684b928fb975d305ec7545c083b73a195",
+    "bytes": 385044
+  },
+  {
+    "file": "libreoffice-uiconfig-draw_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "0966471a4033f37ec29f0deac3e409779308026476ea59a7543b7c1ab48579c0",
+    "bytes": 120188
+  },
+  {
+    "file": "libreoffice-uiconfig-impress_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "4186f0bd9465b0a2c59fe9754a81575521a2b120370a13f1543a1fa10be03d5e",
+    "bytes": 178392
+  },
+  {
+    "file": "libreoffice-uiconfig-writer_4%3a25.2.3-2+deb13u6_all.deb",
+    "sha256": "3e99eb7725c1e63828c037dd5113171a6d96df185014ec2d3cb0a3fc4b1fd44f",
+    "bytes": 300904
+  },
+  {
+    "file": "libreoffice-writer_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "b81aec404b10c549774104a54cbc8225b0d1107524ff0e827941de25fe868d7c",
+    "bytes": 9850868
+  },
+  {
+    "file": "libstaroffice-0.0-0_0.0.7-1+b2_amd64.deb",
+    "sha256": "22f3ec03f1143ba33fe35d5580e1074760b831d3e8edd2589df23f5f8327df16",
+    "bytes": 735280
+  },
+  {
+    "file": "libuno-cppu3t64_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "4ea930d353236cf6ce52306d8338320a04911cd37c92b163ac60ce9fe1c28cf7",
+    "bytes": 119076
+  },
+  {
+    "file": "libuno-cppuhelpergcc3-3t64_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "fbe04776df5e664e787d1334821bfc1f53fac7376460055a69b0b2ddb264e3b6",
+    "bytes": 319724
+  },
+  {
+    "file": "libuno-purpenvhelpergcc3-3t64_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "21432912c8ea9131ae03c49b244a63bd23ab7b9f3ded524b792c47a203eb23fd",
+    "bytes": 51804
+  },
+  {
+    "file": "libuno-sal3t64_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "54e28f7ce90bd1a1bb1290037408be34be7c66f60d867f7f62a82f5d986bb7ef",
+    "bytes": 217524
+  },
+  {
+    "file": "libuno-salhelpergcc3-3t64_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "fa2c2792ce1b0e4473493bd1ca5e3cd7f26b1c26d1e8ef880837d730c719765d",
+    "bytes": 53144
+  },
+  {
+    "file": "libwps-0.4-4_0.4.14-2+b2_amd64.deb",
+    "sha256": "9e5bdd4e0be21ddf35ffc50e7ba3924cbe2119f4fd8b0969a1cb23a09da7bb67",
+    "bytes": 912788
+  },
+  {
+    "file": "libxmlsec1t64-nss_1.2.41-1+b1_amd64.deb",
+    "sha256": "17f936486ac308ae649fcb07f50594c426cd05e04998c12d057976c9ace41a6a",
+    "bytes": 65980
+  },
+  {
+    "file": "libxmlsec1t64_1.2.41-1+b1_amd64.deb",
+    "sha256": "bb5fdbea42a51b86b9105dff2d3ee656ee59cbb6d09f411c0b064659e429db21",
+    "bytes": 154912
+  },
+  {
+    "file": "libzmf-0.0-0_0.0.2-1+b9_amd64.deb",
+    "sha256": "3aab45838e94a6bd3e78a9ec6adf53e5235ccc3bc6739329b89c7edcef94d8f5",
+    "bytes": 86880
+  },
+  {
+    "file": "libzxcvbn0_2.5+dfsg-2+b2_amd64.deb",
+    "sha256": "7b7cfa06f02436b628e8c8a561d6bcf33debeaf25ff30bf48e761600e475282d",
+    "bytes": 859604
+  },
+  {
+    "file": "python3-uno_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "e2abc8b462e0648ff3f4de8dbf8e1496ebb3e034573af6d860037fca65c712ba",
+    "bytes": 172880
+  },
+  {
+    "file": "uno-libs-private_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "ec995e5c002c8db975073a1d208d5c7f9ae4654d4c10fa48910fa403bec2e962",
+    "bytes": 238284
+  },
+  {
+    "file": "ure_4%3a25.2.3-2+deb13u6_amd64.deb",
+    "sha256": "a545af3b8dde30fc85d31c6b7dea14257562a956c6c8173f0e6b28980f39f69e",
+    "bytes": 1250944
+  }
+]

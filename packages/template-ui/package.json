@@ -1,0 +1,33 @@
+{
+  "name": "@editor-platform/template-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/templates": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/document": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/collaboration-adapters": "*",
+    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/review-surfaces": "*",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-history": "1.5.1",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.6"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@editor-platform/graph-reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/structured-data-graph": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

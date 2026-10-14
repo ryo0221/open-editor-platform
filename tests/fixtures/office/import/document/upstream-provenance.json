@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/LibreOffice/core",
+  "ref": "libreoffice-25.2.3.2",
+  "path": "sw/qa/extras/ooxmlexport/data/numbering1.docx",
+  "gitBlobSha1": "55b4af3e858472dc8c3fd7eb348e6cd528d845d8",
+  "sha256": "2bf7f3873d8b756ccacb028563743d7ba858c5e26f6848b484208f150856430b",
+  "license": "MPL-2.0, upstream COPYING.MPL included",
+  "verification": "Original unmodified public bytes. Verified in fixed LibreOffice, not Microsoft Word."
+}

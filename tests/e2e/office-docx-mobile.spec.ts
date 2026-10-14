@@ -1,0 +1,53 @@
+import { test, expect, nativeArtifact } from './fixtures';
+import {
+  importOfficeDocument,
+  officeDocument,
+  openDocx,
+  prepareDocx,
+  acceptDocx,
+} from './office-docx-fixtures';
+import { officeDownload } from './office-fixtures';
+
+for (const width of [390, 768])
+  test(`DOCX dialog, consent and retained preview remain reachable at ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1024 });
+    await importOfficeDocument(page, officeDocument());
+    const before = await nativeArtifact(page),
+      dialog = await openDocx(page);
+    await prepareDocx(dialog);
+    await acceptDocx(dialog);
+    await page.screenshot({ path: info.outputPath(`docx-${width}.png`), fullPage: true });
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await dialog.getByRole('button', { name: 'Minimize DOCX export', exact: true }).click();
+    await expect(dialog.getByLabel('DOCX counts')).toBeHidden();
+    await dialog.getByRole('button', { name: 'Expand DOCX export', exact: true }).click();
+    await expect(dialog.getByRole('checkbox', { name: /I accept all/ })).toBeChecked();
+    const bytes = await officeDownload(page, dialog, 'Download DOCX');
+    expect(bytes.length).toBeGreaterThan(1000);
+    await dialog.getByRole('button', { name: 'Close DOCX export', exact: true }).click();
+    expect(await nativeArtifact(page)).toEqual(before);
+  });
+
+test('Independent Host exports DOCX with its own styling at 390px', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/embed.html');
+  await page.getByRole('combobox', { name: 'Surface', exact: true }).selectOption('document');
+  const source = await page.locator('.embed-content pre').textContent();
+  const dialog = await openDocx(page);
+  await prepareDocx(dialog);
+  await acceptDocx(dialog);
+  const bounds = await dialog.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+  expect((await officeDownload(page, dialog, 'Download DOCX')).length).toBeGreaterThan(1000);
+  await page.screenshot({ path: info.outputPath('docx-independent-host-390.png'), fullPage: true });
+  expect(await page.locator('.embed-content pre').textContent()).toBe(source);
+  await expect(page.getByRole('button', { name: 'Host Undo', exact: true })).toBeDisabled();
+});

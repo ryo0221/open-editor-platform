@@ -1,0 +1,20 @@
+{
+  "name": "@editor-platform/slide-export",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plan": "./src/plan-api.ts",
+    "./raster": "./src/raster.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/export-core": "*",
+    "@editor-platform/office-adapters": "*",
+    "@editor-platform/slide": "*",
+    "fflate": "0.8.3",
+    "pptxgenjs": "4.0.1"
+  }
+}

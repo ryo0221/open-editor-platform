@@ -1,0 +1,21 @@
+{
+  "name": "@editor-platform/whiteboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./sections": "./src/sections.ts"
+  },
+  "dependencies": {
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-ui": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@editor-platform/spatial-index",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./experimental": "./src/runtime.ts"
+  }
+}

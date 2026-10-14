@@ -1,0 +1,324 @@
+.ep-review,
+.ep-file-body,
+.ep-text-view {
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #263246;
+}
+.ep-file-lines {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+.ep-diff-heading {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 16px;
+  background: #f6f8fb;
+  border-bottom: 1px solid #dfe4ed;
+  font: 12px/1.4 system-ui;
+  color: #67758b;
+}
+.ep-diff-row.split,
+.ep-diff-heading.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.ep-diff-cell,
+.ep-file-line {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px 4px 0;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  background: white;
+  color: inherit;
+  align-items: flex-start;
+  font:
+    13px/22px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  overflow: hidden;
+}
+.ep-diff-cell code,
+.ep-file-line code {
+  white-space: pre;
+  font: inherit;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+.wrap .ep-diff-cell code,
+.wrap .ep-file-line code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ep-review .ep-diff-cell code {
+  overflow: hidden;
+}
+.ep-code-text {
+  display: block;
+  width: max-content;
+  transform: translateX(var(--ep-code-scroll, 0px));
+}
+.wrap .ep-code-text {
+  width: auto;
+  transform: none;
+}
+.ep-code-scroll {
+  flex: 0 0 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-top: 1px solid #dfe4ed;
+}
+.ep-diff-cell.added {
+  background: #e7f5eb;
+}
+.ep-diff-cell.removed {
+  background: #fff0ed;
+}
+.ep-diff-cell.selected,
+.ep-file-line.selected {
+  background: #dee6ff;
+  box-shadow: inset 3px 0 #526bda;
+}
+.ep-diff-cell.ep-diff-empty {
+  background: #f5f6f8;
+}
+.ep-diff-row.split > .ep-diff-cell:first-child {
+  border-right: 1px solid #dce2eb;
+}
+.ep-line-number {
+  flex: 0 0 52px;
+  text-align: right;
+  padding-right: 10px;
+  color: #7a8596;
+  user-select: none;
+}
+.ep-line-sign {
+  flex: 0 0 18px;
+  color: #8390a2;
+  user-select: none;
+}
+.ep-diff-gap {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  border-top: 1px solid #dce4f2;
+  border-bottom: 1px solid #dce4f2;
+  border-radius: 0;
+  background: #eef2fa;
+  color: #4e6387;
+  text-align: left;
+  padding: 6px 18px;
+}
+.ep-token-keyword {
+  color: #914db2;
+}
+.ep-token-string {
+  color: #377d65;
+}
+.ep-review-nav,
+.ep-review-info,
+.ep-file-info,
+.ep-file-nav {
+  padding: 12px;
+  overflow-wrap: anywhere;
+  font: 13px/1.5 system-ui;
+}
+.ep-review-nav button,
+.ep-review-info button,
+.ep-file-info button,
+.ep-file-nav button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 4px 0;
+  padding: 8px;
+  border: 1px solid #e1e6ee;
+  border-radius: 5px;
+  background: #fff;
+  color: inherit;
+}
+.ep-review-nav button[aria-pressed='true'] {
+  background: #eaf0ff;
+  border-color: #9aade9;
+}
+.ep-toolbar-check {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  white-space: nowrap;
+  font: 12px system-ui;
+}
+.ep-review-search {
+  max-width: 145px;
+}
+.ep-source-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.ep-source-pair textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: 12px/1.5 monospace;
+}
+.ep-source-pair label {
+  min-width: 0;
+}
+.ep-empty {
+  padding: 24px;
+  color: #7b8493;
+}
+.ep-asset-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px;
+  background: #eef1f6;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+.ep-asset-scroll.pan {
+  cursor: grab;
+}
+.ep-asset-scroll.region {
+  cursor: crosshair;
+}
+.ep-pdf-page,
+.ep-image-page {
+  display: block;
+  position: relative;
+  background: white;
+  box-shadow: 0 2px 14px #20304020;
+  flex: none;
+  max-width: none;
+}
+.ep-pdf-page canvas {
+  display: block;
+  max-width: none;
+}
+.ep-pdf-overlay {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+}
+.ep-file-region {
+  fill: #526edd22;
+  stroke: #526edd;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+.ep-file-region.active {
+  stroke: #c15b22;
+  stroke-dasharray: 5 3;
+  fill: #ffb56122;
+}
+.ep-file-region.resolved {
+  stroke: #879080;
+  fill: #87908018;
+}
+.ep-pdf-thumbnail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 160px;
+  width: calc(100% - 24px);
+  margin: 12px;
+  border: 1px solid #dbe2ed;
+  border-radius: 5px;
+  background: #f1f4f8;
+  padding: 8px;
+  font: 12px system-ui;
+  color: #58657a;
+}
+.ep-pdf-thumbnail canvas {
+  max-width: 100%;
+  height: auto !important;
+}
+.ep-pdf-thumbnail[aria-pressed='true'] {
+  border: 2px solid #6880d6;
+  background: #eaf0ff;
+}
+.ep-file-error {
+  padding: 12px;
+  background: #fff3e6;
+  margin: 0;
+  font: 13px system-ui;
+}
+@media (max-width: 600px) {
+  .ep-source-pair {
+    grid-template-columns: 1fr;
+  }
+  .ep-line-number {
+    flex-basis: 34px;
+  }
+  .ep-line-sign {
+    flex-basis: 13px;
+  }
+  .ep-diff-cell,
+  .ep-file-line {
+    font-size: 11px;
+  }
+  .ep-asset-scroll {
+    padding: 16px;
+  }
+}
+/* pdf.js TextLayer layout, scoped to this Viewer (no global Host navigation styles). */
+.ep-pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.ep-pdf-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+}
+.ep-pdf-text-layer > :not(.markedContent),
+.ep-pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.ep-pdf-text-layer .markedContent {
+  display: contents;
+}
+.ep-pdf-text-layer ::selection {
+  background: #3267c866;
+}
+.ep-pdf-text-layer .ep-pdf-text-match {
+  background: #ffce5470;
+}
+
+.ep-review-retained-source {
+  max-height: 50vh;
+  overflow: auto;
+  white-space: pre;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@editor-platform/review-surfaces",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "pdfjs-dist": "5.6.205",
+    "lucide-react": "1.51.0"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

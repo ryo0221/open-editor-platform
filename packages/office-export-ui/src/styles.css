@@ -1,0 +1,125 @@
+.office-export-dialog,
+.office-export-dialog * {
+  box-sizing: border-box;
+}
+.office-export-dialog {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: min(480px, calc(100vw - 24px));
+  max-height: 85vh;
+  overflow: auto;
+  /* Below the ordinary toolbars/menus, above the editing canvas and inspectors. */
+  z-index: 35;
+  background: #fff;
+  border: 1px solid #a9b8cd;
+  border-radius: 12px;
+  box-shadow: 0 12px 40px #24385430;
+  padding: 16px;
+  color: #253044;
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+.office-export-dialog header {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  background: white;
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.office-export-dialog h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.office-export-dialog p {
+  margin: 10px 0;
+}
+.office-export-options {
+  display: grid;
+  gap: 8px;
+}
+.office-export-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.office-export-dialog select {
+  max-width: 100%;
+  padding: 5px;
+}
+.office-export-dialog input[type='checkbox'] {
+  margin-right: 5px;
+}
+.office-export-dialog small {
+  color: #536378;
+}
+.office-export-dialog footer,
+.office-export-dialog nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.office-export-dialog button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: white;
+  border: 1px solid #d5dae2;
+  border-radius: 3px;
+  padding: 6px 9px;
+}
+.office-export-dialog button:hover {
+  background: #f0f3f8;
+}
+.office-export-dialog button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.office-export-dialog :is(input, select) {
+  font: inherit;
+  color: inherit;
+}
+.office-export-diagnostics {
+  padding-left: 22px;
+  max-height: 220px;
+  overflow: auto;
+}
+.office-export-diagnostics li {
+  margin: 8px 0;
+}
+.office-export-locate {
+  display: block;
+  text-align: left;
+  margin: 3px 0;
+}
+.office-export-consent {
+  display: block;
+  padding: 10px 0;
+}
+.office-export-dialog [role='alert'] {
+  color: #9e2727;
+  background: #fff0ef;
+  padding: 8px;
+}
+@media (max-width: 600px) {
+  .office-export-dialog {
+    right: 12px;
+    bottom: 10px;
+    max-height: 78vh;
+    padding: 12px;
+  }
+  .office-export-diagnostics {
+    max-height: 150px;
+  }
+  .office-export-dialog header {
+    top: -12px;
+  }
+}

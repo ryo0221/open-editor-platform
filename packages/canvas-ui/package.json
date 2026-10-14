@@ -1,0 +1,26 @@
+{
+  "name": "@editor-platform/canvas-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./text-engine": "./src/text-engine.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/spatial-index": "*",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-history": "1.5.1",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.6"
+  },
+  "peerDependencies": {
+    "react-dom": "^19.1.1",
+    "react": "^19.1.1"
+  }
+}

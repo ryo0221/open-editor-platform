@@ -1,0 +1,24 @@
+{
+  "name": "@editor-platform/design",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./prototype": "./src/prototype.ts",
+    "./publication": "./src/component-publication.ts",
+    "./web-contract": "./src/web-contract.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/react-ui-core": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

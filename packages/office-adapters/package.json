@@ -1,0 +1,18 @@
+{
+  "name": "@editor-platform/office-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
+    "./node": "./src/node.ts",
+    "./raster": "./src/raster.ts"
+  },
+  "dependencies": {
+    "@editor-platform/export-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@resvg/resvg-wasm": "2.6.2",
+    "@napi-rs/canvas": "0.1.100"
+  }
+}

@@ -1,0 +1,79 @@
+.react-ui-surface {
+  padding: 16px;
+  min-width: 0;
+}
+.react-ui-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.react-ui-toolbar label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.react-ui-columns {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 220px;
+  gap: 12px;
+}
+.react-ui-columns aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border, #ccd5df);
+  border-radius: 8px;
+  max-height: 700px;
+  overflow: auto;
+}
+.react-ui-tree,
+.react-ui-tree ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.react-ui-tree ul {
+  padding-left: 12px;
+}
+.react-ui-tree button {
+  width: 100%;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
+}
+.react-ui-surface textarea {
+  width: 100%;
+  min-width: 0;
+}
+.react-ui-columns aside label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.react-ui-preview-scroll {
+  overflow: auto;
+  min-width: 0;
+}
+.react-ui-preview-scroll iframe {
+  border: 0;
+  outline: 1px solid #ccd5df;
+  box-sizing: content-box;
+  max-width: none;
+  background: white;
+}
+.react-ui-columns button[aria-pressed='true'] {
+  background: #d8e9ff;
+}
+.react-ui-surface [role='alert'] {
+  color: #a52424;
+}
+@media (max-width: 800px) {
+  .react-ui-columns {
+    grid-template-columns: 1fr;
+  }
+  .react-ui-columns aside {
+    max-height: 220px;
+    overflow: auto;
+  }
+}

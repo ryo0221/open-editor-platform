@@ -1,0 +1,17 @@
+{
+  "app": "LibreOffice 25.2.3.2 520(Build:2)",
+  "os": "Debian 13 amd64",
+  "font": "Noto Sans CJK JP 2.004",
+  "authoring": "New LibreOffice Writer/Impress documents through public UNO objects. No self-export input and no OOXML mutation.",
+  "license": "Task-authored test fixtures, CC0-1.0",
+  "files": [
+    {
+      "file": "external.pptx",
+      "sha256": "f2a3628351164388a31e33abae7386040dc038f2878702986a38775109c8b4dc"
+    },
+    {
+      "file": "external.docx",
+      "sha256": "e68b9a8393f72da28d557cd65a8daaf3ea18d3511f706a326c9bd308433a065e"
+    }
+  ]
+}

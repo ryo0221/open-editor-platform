@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 2,
+  "width": 720,
+  "height": 960,
+  "slides": [
+    {
+      "id": "G08-portrait",
+      "title": "日本語・英数字・rich text",
+      "background": "#ffffff",
+      "objects": [
+        {
+          "id": "G02-title",
+          "type": "text",
+          "text": "日本語・英数字・rich text",
+          "fill": "#253044",
+          "bounds": {
+            "x": 32,
+            "y": 20,
+            "width": 640,
+            "height": 48
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 28,
+            "padding": 4
+          }
+        },
+        {
+          "id": "jp",
+          "type": "text",
+          "text": "日本語の資料：受付改善、費用と効果。「確認済み」です。",
+          "fill": "#000000",
+          "bounds": {
+            "x": 40,
+            "y": 90,
+            "width": 640,
+            "height": 55
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 28,
+            "padding": 4
+          }
+        },
+        {
+          "id": "rich",
+          "type": "text",
+          "text": "太字 Bold / italic / 下線 / 取消線",
+          "fill": "#253044",
+          "bounds": {
+            "x": 40,
+            "y": 160,
+            "width": 640,
+            "height": 65
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 26,
+            "padding": 4
+          },
+          "runs": [
+            {
+              "text": "太字 Bold",
+              "style": {
+                "bold": true,
+                "color": "#a12626"
+              }
+            },
+            {
+              "text": " / italic",
+              "style": {
+                "italic": true
+              }
+            },
+            {
+              "text": " / 下線",
+              "style": {
+                "underline": true
+              }
+            },
+            {
+              "text": " / 取消線",
+              "style": {
+                "strike": true
+              }
+            }
+          ]
+        }
+      ],
+      "notes": "明示的に選択した時だけ出力するノート。A&B <sample>",
+      "backgroundImage": "data:image/png;base64,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"
+    },
+    {
+      "id": "G08-hidden",
+      "title": "日本語・英数字・rich text",
+      "background": "#ffffff",
+      "objects": [
+        {
+          "id": "G02-title",
+          "type": "text",
+          "text": "日本語・英数字・rich text",
+          "fill": "#253044",
+          "bounds": {
+            "x": 32,
+            "y": 20,
+            "width": 640,
+            "height": 48
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 28,
+            "padding": 4
+          }
+        },
+        {
+          "id": "jp",
+          "type": "text",
+          "text": "日本語の資料：受付改善、費用と効果。「確認済み」です。",
+          "fill": "#253044",
+          "bounds": {
+            "x": 40,
+            "y": 90,
+            "width": 640,
+            "height": 55
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 28,
+            "padding": 4
+          }
+        },
+        {
+          "id": "rich",
+          "type": "text",
+          "text": "太字 Bold / italic / 下線 / 取消線",
+          "fill": "#253044",
+          "bounds": {
+            "x": 40,
+            "y": 160,
+            "width": 640,
+            "height": 65
+          },
+          "typography": {
+            "fontFamily": "Noto Sans CJK JP",
+            "fontSize": 26,
+            "padding": 4
+          },
+          "runs": [
+            {
+              "text": "太字 Bold",
+              "style": {
+                "bold": true,
+                "color": "#a12626"
+              }
+            },
+            {
+              "text": " / italic",
+              "style": {
+                "italic": true
+              }
+            },
+            {
+              "text": " / 下線",
+              "style": {
+                "underline": true
+              }
+            },
+            {
+              "text": " / 取消線",
+              "style": {
+                "strike": true
+              }
+            }
+          ]
+        }
+      ],
+      "notes": "明示的に選択した時だけ出力するノート。A&B <sample>",
+      "hidden": true
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@reference/ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/components.tsx"
+  },
+  "peerDependencies": {
+    "react": "19.1.1"
+  },
+  "dependencies": {
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/react-ui-preview": "*",
+    "@editor-platform/design-react-core": "*",
+    "@editor-platform/design-react-preview": "*"
+  }
+}

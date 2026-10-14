@@ -1,0 +1,29 @@
+{
+  "name": "@editor-platform/office-export-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./host": "./src/host.tsx",
+    "./slide": "./src/slide.tsx",
+    "./pptx-job": "./src/pptx-job.ts",
+    "./document": "./src/document.tsx",
+    "./docx-job": "./src/docx-job.ts",
+    "./mermaid-frame-page": "./src/mermaid-frame-page.ts"
+  },
+  "dependencies": {
+    "@editor-platform/export-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/slide-export": "*",
+    "@editor-platform/office-adapters": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/document": "*",
+    "@editor-platform/document-export": "*",
+    "mermaid": "11.17.2",
+    "@resvg/resvg-wasm": "2.6.2",
+    "lucide-react": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

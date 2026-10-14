@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/LibreOffice/core",
+  "ref": "libreoffice-25.2.3.2",
+  "path": "sd/qa/unit/data/pptx/ooxtheme.pptx",
+  "gitBlobSha1": "f0f3f2575894f715759a18439588cb149996140b",
+  "sha256": "c1694ff0017be3ec44322e1cfb0b04724dfec8028147c55685e8c8ae99977d50",
+  "license": "MPL-2.0 (upstream COPYING.MPL included)",
+  "acquired": "2026-10-05",
+  "producerMetadata": {
+    "application": "Microsoft Office PowerPoint",
+    "version": "16.0000",
+    "fonts": [
+      "Arial",
+      "Trebuchet MS",
+      "Wingdings 3"
+    ]
+  },
+  "provenanceLimit": "Producer is recorded from the original file metadata, not independently reproduced in Microsoft Office. Verification uses fixed LibreOffice 25.2.3.2 and reports font substitution. Original bytes are unchanged."
+}

@@ -1,0 +1,17 @@
+{
+  "version": "Noto CJK Sans2.004",
+  "release": "https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004",
+  "archive": {
+    "file": "03_NotoSansCJK-OTC.zip",
+    "url": "https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/03_NotoSansCJK-OTC.zip",
+    "bytes": 104680673,
+    "sha256": "528f4e1b25ff3badb0321b38d015d954c4c0de926c7830ef50e4a1948f6a3eed"
+  },
+  "fonttools": {
+    "version": "4.61.1",
+    "file": "fonttools-4.61.1-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/c7/4e/ce75a57ff3aebf6fc1f4e9d508b8e5810618a33d900ad6c19eb30b290b97/fonttools-4.61.1-py3-none-any.whl",
+    "bytes": 1148996,
+    "sha256": "17d2bf5d541add43822bcf0c43d7d847b160c9bb01d15d5007d84e2217aaa371"
+  }
+}

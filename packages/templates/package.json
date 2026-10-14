@@ -1,0 +1,23 @@
+{
+  "name": "@editor-platform/templates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/collaboration-adapters": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/document": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/review-surfaces": "*",
+    "prosemirror-transform": "1.11.0",
+    "@editor-platform/reuse-core": "*"
+  }
+}

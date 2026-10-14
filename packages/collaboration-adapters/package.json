@@ -1,0 +1,31 @@
+{
+  "name": "@editor-platform/collaboration-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts"
+  },
+  "dependencies": {
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/document": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/review-surfaces": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "prosemirror-collab": "1.3.1",
+    "prosemirror-transform": "1.11.0",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-model": "1.25.12",
+    "@editor-platform/canvas-ui": "*",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-view": "1.42.6",
+    "@editor-platform/reuse-core": "*"
+  }
+}

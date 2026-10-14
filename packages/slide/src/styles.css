@@ -1,0 +1,108 @@
+.slide-thumb-row {
+  margin: 10px 0;
+}
+.slide-thumb {
+  display: block;
+  width: 100%;
+  border: 1px solid #d6dce7;
+  border-radius: 2px;
+  padding: 7px;
+  background: #f6f7fa;
+  text-align: left;
+}
+.slide-thumb[aria-pressed='true'] {
+  border: 2px solid #3267c8;
+  padding: 6px;
+  background: #edf3ff;
+}
+.slide-thumb > span {
+  font-size: 10px;
+  display: flex;
+  gap: 4px;
+}
+.slide-thumb svg {
+  width: 100%;
+  display: block;
+  margin: 4px 0;
+  box-shadow: 0 1px 4px #0002;
+}
+.slide-thumb small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thumb-actions {
+  display: flex;
+  justify-content: center;
+}
+.thumb-actions .ep-icon-button {
+  height: 26px;
+  min-width: 30px;
+}
+.table-edit {
+  overflow: auto;
+  max-height: 300px;
+}
+.table-edit > div {
+  display: flex;
+  gap: 4px;
+}
+.table-edit .ep-field {
+  min-width: 80px;
+}
+.presenting {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #202329;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.presenting > svg {
+  width: 100%;
+  height: calc(100% - 44px);
+  min-height: 0;
+}
+.presenting footer {
+  height: 44px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: white;
+}
+.presenting input {
+  width: 65px;
+  color: #253044;
+}
+.layers {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+.layers li {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #eef0f3;
+  gap: 3px;
+}
+.layers li > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 8px 4px;
+}
+.layers button {
+  border: 0;
+  font-size: 11px;
+}
+.layers button[aria-pressed='true'] {
+  background: #e2ebfb;
+  color: #2258ad;
+}

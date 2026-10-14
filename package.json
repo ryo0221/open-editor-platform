@@ -1,0 +1,77 @@
+{
+  "name": "open-editor-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "spatial:build": "node scripts/build-spatial-wasm.mjs",
+    "spatial:test": "node scripts/build-spatial-wasm.mjs --test",
+    "fonts:fetch": "node scripts/fetch-office-fonts.mjs",
+    "fonts:check": "node scripts/check-office-fonts.mjs",
+    "predev": "npm run fonts:check",
+    "dev": "vite --host 0.0.0.0",
+    "prebuild": "npm run fonts:check",
+    "build": "tsc --noEmit && vite build && vite build --config vite.react-ui.config.ts",
+    "react-ui:dev": "vite --config vite.react-ui.config.ts",
+    "react-ui:preview": "vite preview --config vite.react-ui.config.ts",
+    "react-ui:export-host": "node scripts/react-ui-export-host.mjs",
+    "prepreview": "node scripts/check-office-fonts.mjs dist/office-fonts",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "pretest": "npm run fonts:check",
+    "test": "node scripts/test-unit.mjs",
+    "test:tooling": "node --test scripts/tests/*.test.mjs",
+    "check:files": "node scripts/check-large-files.mjs",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e",
+    "smoke": "node scripts/smoke.mjs",
+    "format": "prettier --write .",
+    "collaboration:server": "node scripts/collaboration-server.mjs"
+  },
+  "dependencies": {
+    "dompurify": "3.4.16",
+    "fflate": "0.8.3",
+    "lucide-react": "1.51.0",
+    "mermaid": "11.17.2",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.6.205",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.5.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-tables": "1.8.5",
+    "prosemirror-view": "1.42.6",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.36.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.18.6",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "@vitejs/plugin-react": "4.7.0",
+    "eslint": "9.36.0",
+    "fake-indexeddb": "6.2.4",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.44.1",
+    "vite": "6.4.1",
+    "vitest": "3.2.4",
+    "esbuild": "0.25.12"
+  },
+  "overrides": {
+    "katex": "0.18.2"
+  },
+  "license": "AGPL-3.0-only"
+}

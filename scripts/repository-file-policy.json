@@ -1,0 +1,23 @@
+{
+  "generatedRoots": [
+    "docs/exports/",
+    "docs/screenshots/",
+    "docs/verification/",
+    "docs/scale/"
+  ],
+  "sourceExtensions": [
+    ".md",
+    ".py",
+    ".sh",
+    ".mjs",
+    ".ts"
+  ],
+  "generatedNames": [
+    "proposal.md",
+    "saxes-README.md"
+  ],
+  "generatedNameFragments": [
+    "error-context"
+  ],
+  "retainedPaths": []
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@editor-platform/structured-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./views": "./src/views.ts",
+    "./session": "./src/session.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/canvas-ui": "*",
+    "lucide-react": "1.51.0",
+    "@editor-platform/property-input": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@editor-platform/document",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./engine": "./src/engine.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/office-export-ui": "*",
+    "@editor-platform/reuse-core": "*",
+    "@pdf-lib/fontkit": "1.1.1",
+    "dompurify": "3.4.16",
+    "lucide-react": "1.51.0",
+    "mermaid": "11.17.2",
+    "pdf-lib": "1.17.1",
+    "prosemirror-commands": "1.7.2",
+    "prosemirror-keymap": "1.2.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-schema-list": "1.5.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-tables": "1.8.5",
+    "prosemirror-transform": "1.11.0",
+    "prosemirror-view": "1.42.6"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

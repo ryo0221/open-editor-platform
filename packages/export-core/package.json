@@ -1,0 +1,13 @@
+{
+  "name": "@editor-platform/export-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "color-name": "2.0.0"
+  }
+}

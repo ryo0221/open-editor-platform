@@ -1,0 +1,67 @@
+body {
+  margin: 0;
+  background: #e2e8f0;
+  color: #172033;
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+}
+.graph-reference-host {
+  max-width: 1500px;
+  margin: auto;
+  padding: 16px;
+}
+.graph-reference-host h1 {
+  font-size: 24px;
+  margin: 0;
+}
+.graph-host-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+.graph-reference-host button,
+.graph-reference-host select {
+  font: inherit;
+  padding: 6px;
+  border: 1px solid #94a3b8;
+  border-radius: 5px;
+  background: white;
+}
+.graph-host-surface {
+  height: 650px;
+  min-height: 0;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.graph-reference-host pre {
+  max-height: 250px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.graph-reference-host [role='alert'] {
+  color: #b91c1c;
+  overflow-wrap: anywhere;
+}
+.graph-reference-host article {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+@media (max-width: 760px) {
+  .graph-reference-host {
+    padding: 8px;
+  }
+  .graph-reference-host h1 {
+    font-size: 20px;
+  }
+  .graph-host-surface {
+    height: 700px;
+  }
+}

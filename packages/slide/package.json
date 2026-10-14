@@ -1,0 +1,22 @@
+{
+  "name": "@editor-platform/slide",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts"
+  },
+  "dependencies": {
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/office-export-ui": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

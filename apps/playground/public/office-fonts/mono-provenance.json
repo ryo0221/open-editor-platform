@@ -1,0 +1,20 @@
+[
+  {
+    "file": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a",
+    "faceIndex": 5,
+    "fontTools": "4.61.1",
+    "latinAdvances": [
+      500
+    ]
+  },
+  {
+    "file": "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "sha256": "faa5f3656a78b2e2d450d27fe8382c778bc2b6bb5ea29c986664a6a435056ceb",
+    "faceIndex": 5,
+    "fontTools": "4.61.1",
+    "latinAdvances": [
+      500
+    ]
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "name": "@editor-platform/office-import-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/office-import-core": "*",
+    "@editor-platform/slide-import": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/template-ui": "*",
+    "@editor-platform/office-adapters": "*",
+    "@editor-platform/document-import": "*",
+    "@editor-platform/document": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

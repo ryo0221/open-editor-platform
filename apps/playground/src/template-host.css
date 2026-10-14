@@ -1,0 +1,76 @@
+body {
+  margin: 0;
+  background: #f3f6f4;
+  color: #233b30;
+  font:
+    15px/1.6 system-ui,
+    sans-serif;
+}
+.template-host {
+  max-width: 1180px;
+  margin: 24px auto;
+  padding: 0 20px;
+}
+.template-host header {
+  border-bottom: 1px solid #cbd8ce;
+  padding-bottom: 20px;
+}
+.template-host button,
+.template-host select,
+.template-host textarea {
+  font: inherit;
+  padding: 9px;
+  border: 1px solid #bdccc2;
+  border-radius: 6px;
+  background: white;
+}
+.template-host button {
+  cursor: pointer;
+  min-height: 44px;
+}
+.template-host button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.template-host label {
+  display: block;
+  margin: 14px 0;
+}
+.template-host select,
+.template-host textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.template-host textarea {
+  display: block;
+  width: 100%;
+}
+.template-host-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.template-host section {
+  min-width: 0;
+  background: white;
+  padding: 20px;
+  margin: 20px 0;
+  border: 1px solid #d3dfd7;
+  border-radius: 12px;
+}
+.template-host [role='alert'] {
+  color: #982930;
+  background: #fff0ed;
+  padding: 12px;
+}
+@media (max-width: 700px) {
+  .template-host-grid {
+    grid-template-columns: 1fr;
+  }
+  .template-host {
+    padding: 0 12px;
+  }
+  .template-host section {
+    padding: 12px;
+  }
+}

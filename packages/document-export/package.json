@@ -1,0 +1,16 @@
+{
+  "name": "@editor-platform/document-export",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plan": "./src/plan-api.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/export-core": "*",
+    "@editor-platform/document": "*",
+    "docx": "9.6.1"
+  }
+}
