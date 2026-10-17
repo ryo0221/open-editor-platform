@@ -562,6 +562,25 @@ export function chartPrimitives(d: Drawing): SvgPrimitive[] {
   return nodes;
 }
 /** Resources belong to a drawing occurrence. Exporters can provide a stable document-local ID. */
+/** SVG image documents use their own root aspect ratio when embedded in an image viewport. */
+function fittedImageSource(src: string, imageFit: Drawing['imageFit']): string {
+  const prefix = 'data:image/svg+xml;base64,';
+  if (!src.startsWith(prefix)) return src;
+  try {
+    // Keep UTF-8 bytes intact; only the ASCII root attribute changes for rendering.
+    const svg = atob(src.slice(prefix.length));
+    const root = svg.match(/<svg\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/)?.[0];
+    if (!root) return src;
+    const clean = root.replace(/\s+preserveAspectRatio\s*=\s*(?:"[^"]*"|'[^']*')/g, '');
+    const close = clean.endsWith('/>') ? '/>' : '>';
+    const aspect = imageFit === 'fit' ? 'xMidYMid meet' : 'xMidYMid slice';
+    const fitted = clean.slice(0, -close.length) + ` preserveAspectRatio="${aspect}"` + close;
+    return prefix + btoa(svg.replace(root, fitted));
+  } catch {
+    // Preserve the existing missing-image behavior for an invalid data URI.
+    return src;
+  }
+}
 export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): SvgPrimitive[] {
   if (d.hidden) return [];
   d = { ...d, id: resourceId };
@@ -579,7 +598,7 @@ export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): Sv
           y: b.y + crop.y,
           width: b.width * crop.scale,
           height: b.height * crop.scale,
-          href: d.src ?? '',
+          href: fittedImageSource(d.src, d.imageFit),
           preserveAspectRatio: d.imageFit === 'fit' ? 'xMidYMid meet' : 'xMidYMid slice',
         }),
       ]),

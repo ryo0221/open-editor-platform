@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Video workflow candidate</title>
+  <style>
+    body {
+      font: 16px system-ui;
+      max-width: 1050px;
+      margin: 24px auto;
+      padding: 0 18px;
+      color: #202738;
+      background: #f5f7fb;
+    }
+    header {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    label {
+      display: grid;
+      gap: 8px;
+    }
+    button,
+    input {
+      font: inherit;
+      max-width: 100%;
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 360px;
+      background: #101522;
+      margin: 20px 0;
+    }
+    #summary {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 11px monospace;
+    }
+    #timeline {
+      overflow: auto;
+      background: white;
+      padding: 12px;
+    }
+    p {
+      line-height: 1.5;
+    }
+  </style>
+  <h1>Video timeline</h1>
+  <p>
+    Private review Host • explicit BT.709 AVC + optional audio • 16 MiB per original.<br />Known SDR
+    candidate: stereo 48 kHz, 25 fps, up to 10 s export / 60 s playback, 16:9 source ≤640×360.
+    Indexed audio/frame preview and 1080p A/V MP4 export. HDR and large archives remain unsupported.
+    Silent/wider files use browser reference preview.
+  </p>
+  <header>
+    <label>Import MP4<input id="import" type="file" accept="video/mp4" /></label
+    ><label>Open portable scaffold<input id="open" type="file" accept=".vbp" /></label
+    ><button id="save">Save project bundle</button>
+    <button id="export" disabled>Export MP4</button>
+    <button id="cancel-export">Cancel export</button>
+  </header>
+  <label>Preview frame (25 fps)<input id="preview-frame" type="number" min="0" value="0" /></label>
+  <button id="play-preview">Play audio + video</button
+  ><button id="stop-preview">Stop playback</button>
+  <p id="preview-accuracy"></p>
+  <p id="playback-status" role="status"></p>
+  <button id="seek-preview">Preview timeline frame</button>
+  <p id="status" role="status"></p>
+  <canvas id="preview" width="320" height="180" aria-label="Timeline preview"></canvas>
+  <section id="timeline" aria-label="Video timeline"></section>
+  <details>
+    <summary>Review native model</summary>
+    <pre id="summary"></pre>
+  </details>
+  <script type="module" src="/host.js"></script>
+</html>

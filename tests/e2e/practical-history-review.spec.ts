@@ -87,6 +87,12 @@ test('R6-01: a cell edit during a delayed Undo keeps its history and invalidates
   await openData(page);
   const release = await holdUndo(page);
   try {
+    // The server has applied Undo, but its receipt is still held. Let the
+    // ordinary poll adopt that row before starting a new private cell buffer;
+    // otherwise the row update correctly invalidates the in-progress edit.
+    await expect(cell(page, 'Quantity')).toHaveText('1');
+    await expect(cell(page, 'Price')).toHaveText('10');
+    await expect(page.locator('.save-status')).toContainText('1 pending');
     const submitted = page.waitForResponse(
       (r) => r.url().includes('/collaboration-api/submit?') && r.request().method() === 'POST',
     );

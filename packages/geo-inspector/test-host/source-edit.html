@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Retained source Point editing</title>
+    <style>
+      body {
+        font: 16px/1.5 system-ui;
+        background: #edf3f7;
+        color: #173247;
+        margin: 16px;
+      }
+      main {
+        max-width: 960px;
+        margin: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Retained source Point fixture</h1>
+      <p>
+        Synthetic partial CSV import with an explicit verified-closure profile. Originals and
+        exclusions are held in memory. No durable Save or restart capability in this fixture.
+      </p>
+      <div id="editor"></div>
+    </main>
+    <script type="module" src="./source-edit-test.ts"></script>
+  </body>
+</html>

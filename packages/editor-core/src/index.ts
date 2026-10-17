@@ -14,6 +14,8 @@ export type Region =
 export interface ElementAddress {
   artifactId: string;
   elementId: string;
+  /** Scope for element IDs that are unique only within a native page. */
+  pageId?: string;
   region?: Region;
 }
 export interface Selection {
@@ -115,6 +117,7 @@ export class EditorSession<T> {
   private readonly sessionId = newId('session');
   private sequence = 0;
   private mergeKey: string | undefined;
+  private validatingHistory = false;
   private value: T;
   constructor(content: T) {
     this.value = clone(content);
@@ -126,7 +129,23 @@ export class EditorSession<T> {
   get revision(): LocalDraftRevision {
     return { kind: 'local-draft', sessionId: this.sessionId, sequence: this.sequence };
   }
+  private assertMutationAvailable() {
+    if (this.validatingHistory) throw new Error('HistoryValidationReentrancy');
+  }
+  /** Validation is synchronous, receives a private copy, and must return undefined.
+   * Neither the copy nor a returned value becomes canonical history. */
+  private validateHistory(candidate: T, validateCandidate?: (candidate: T) => void) {
+    if (!validateCandidate) return;
+    this.validatingHistory = true;
+    try {
+      const result: unknown = validateCandidate(clone(candidate));
+      if (result !== undefined) throw new Error('HistoryValidationMustBeSynchronous');
+    } finally {
+      this.validatingHistory = false;
+    }
+  }
   breakHistoryGroup() {
+    this.assertMutationAvailable();
     this.mergeKey = undefined;
   }
   get canUndo() {
@@ -136,10 +155,12 @@ export class EditorSession<T> {
     return this.future.length > 0;
   }
   execute(cmd: EditorCommand<T>) {
+    this.assertMutationAvailable();
     return clone(this.executeView(cmd));
   }
   /** Immutable result for rendering; content/execute/undo/redo remain caller-owned copies. */
   executeView(cmd: EditorCommand<T>) {
+    this.assertMutationAvailable();
     if (cmd.context && !['local', 'proposal', 'restore'].includes(cmd.context.origin))
       throw new Error(
         'EditorSession only supports local edits; remote edits require a collaboration adapter',
@@ -156,7 +177,10 @@ export class EditorSession<T> {
     this.sequence++;
     return this.value;
   }
-  undo() {
+  /** Optional synchronous pre-commit validation; throws leave all history state untouched. */
+  undo(validateCandidate?: (candidate: T) => void) {
+    this.assertMutationAvailable();
+    if (this.canUndo) this.validateHistory(this.past[this.past.length - 1], validateCandidate);
     this.breakHistoryGroup();
     if (this.canUndo) {
       this.future.push(this.value);
@@ -165,7 +189,10 @@ export class EditorSession<T> {
     }
     return clone(this.value);
   }
-  redo() {
+  /** Same validation semantics as undo; omitted callback preserves existing behavior. */
+  redo(validateCandidate?: (candidate: T) => void) {
+    this.assertMutationAvailable();
+    if (this.canRedo) this.validateHistory(this.future[this.future.length - 1], validateCandidate);
     this.breakHistoryGroup();
     if (this.canRedo) {
       this.past.push(this.value);

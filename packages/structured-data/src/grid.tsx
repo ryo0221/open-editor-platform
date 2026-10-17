@@ -187,7 +187,8 @@ export function DataGrid({
       ),
     ),
     end = Math.min(entries.length, start + Math.ceil(height / 36) + 14),
-    width = (c: Column) => view.widths[c.id] ?? 160,
+    // Column IDs may match Object.prototype names; inherited entries are not saved widths.
+    width = (c: Column) => (Object.hasOwn(view.widths, c.id) ? (view.widths[c.id] ?? 160) : 160),
     totalWidth = 44 + columns.reduce((sum, c) => sum + width(c), 0);
   // Retain the full model and keyboard column order; only mount the horizontal
   // viewport plus overscan. Frozen columns and a private in-progress editor stay

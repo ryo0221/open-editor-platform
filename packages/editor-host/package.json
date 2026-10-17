@@ -1,0 +1,11 @@
+{
+  "name": "@editor-platform/editor-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*"
+  }
+}

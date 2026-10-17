@@ -18,4 +18,5 @@ export * from './export';
 export * from './edit';
 export * from './revision';
 export * from './proposal';
+export * from './diff';
 export { styleProblem as reactUiStyleProblem } from './layout';

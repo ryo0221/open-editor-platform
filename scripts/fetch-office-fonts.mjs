@@ -1,5 +1,4 @@
 import { URL } from 'node:url';
-import { constants } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { link, copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -37,8 +36,7 @@ try {
     await mkdir(cache, { recursive: true });
     for (const pin of [pins.archive, pins.fonttools])
       process.stdout.write(`${pin.file}: ${await downloadPinned(pin, join(cache, pin.file))}\n`);
-    // Extraction is private working data, never a publicDir/build asset.
-    const staged = await mkdtemp(join(cache, '.extract-'));
+    const staged = await mkdtemp(join(root, '.extract-'));
     try {
       const result = spawnSync(
         python,
@@ -62,17 +60,7 @@ try {
         try {
           await link(join(staged, face.file), join(root, face.file));
         } catch (error) {
-          if (error.code === 'EXDEV') {
-            try {
-              await copyFile(
-                join(staged, face.file),
-                join(root, face.file),
-                constants.COPYFILE_EXCL,
-              );
-            } catch (copyError) {
-              if (copyError.code !== 'EEXIST') throw copyError;
-            }
-          } else if (error.code !== 'EEXIST') throw error;
+          if (error.code !== 'EEXIST') throw error;
         }
       }
       await inspectOfficeFonts(root);

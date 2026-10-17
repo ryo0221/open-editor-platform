@@ -24,6 +24,9 @@
     "@editor-platform/office-import-ui": "*",
     "@editor-platform/office-import-core": "*",
     "@editor-platform/design-react-core": "*",
-    "@editor-platform/design-react": "*"
+    "@editor-platform/design-react": "*",
+    "@noble/hashes": "1.8.0",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/reference-adapters": "*"
   }
 }

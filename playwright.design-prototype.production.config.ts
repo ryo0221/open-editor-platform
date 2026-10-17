@@ -5,12 +5,14 @@ export default defineConfig({
   projects: base.projects!.map((p) => ({
     ...p,
     testMatch:
-      p.name === 'mobile' ? /design-prototype-mobile\.spec\.ts/ : /design-prototype\.spec\.ts/,
+      p.name === 'mobile'
+        ? /design-(?:prototype-(?:mobile|toggle)|virtualization)\.spec\.ts/
+        : /design-(?:prototype(?:-toggle)?|virtualization)\.spec\.ts/,
   })),
   workers: 1,
   reporter: [['list']],
   outputDir: '/tmp/design-prototype-production-results',
-  testMatch: /design-prototype(?:-mobile)?\.spec\.ts/,
+  testMatch: /design-(?:prototype(?:-(?:mobile|toggle))?|virtualization)\.spec\.ts/,
   use: { ...base.use, baseURL: 'http://127.0.0.1:4173' },
   webServer: [
     {

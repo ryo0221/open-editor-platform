@@ -1,4 +1,7 @@
 import { test, expect, create, nativeArtifact } from './fixtures';
+import type { SlideContent } from '@editor-platform/slide';
+import type { DesignContent } from '@editor-platform/design';
+import type { WhiteboardContent } from '@editor-platform/whiteboard';
 
 for (const kind of ['slide', 'design', 'whiteboard'] as const)
   test(`Canvas ${kind} selected text formatting commits once, cancels and exports rich runs`, async ({
@@ -16,16 +19,44 @@ for (const kind of ['slide', 'design', 'whiteboard'] as const)
       .first()
       .dblclick();
     const editor = page.getByRole('textbox', { name: 'Edit canvas text', exact: true });
-    await editor.fill('日本語の計画を確認する');
+    // Use ProseMirror's Select All command, as in issue2-slide: fill() only
+    // selects the DOM range, which a pending editor selection sync can replace.
+    await editor.press('Control+a');
+    await page.keyboard.insertText('日本語の計画を確認する');
+    // Layout widgets may visually wrap runs; assert the complete text content.
+    await expect(editor).toHaveJSProperty('textContent', '日本語の計画を確認する');
     await editor.press('Control+Home');
     await editor.press('Shift+ArrowRight');
     await editor.press('Shift+ArrowRight');
     await editor.press('Shift+ArrowRight');
+    await expect
+      .poll(() =>
+        editor.evaluate((element) => {
+          const selection = window.getSelection();
+          return selection?.anchorNode && element.contains(selection.anchorNode)
+            ? selection.toString()
+            : null;
+        }),
+      )
+      .toBe('日本語');
     await page.getByRole('button', { name: 'Selected text bold', exact: true }).click();
     await page.getByLabel('Selected text color', { exact: true }).fill('#cc3300');
     await expect(editor.locator('strong')).toHaveText('日本語');
     await editor.press('Control+Enter');
-    const content = (await nativeArtifact(page)).draft.content;
+    const content = (await nativeArtifact(page)).draft.content as
+      | SlideContent
+      | DesignContent
+      | WhiteboardContent;
+    const elements =
+      'slides' in content
+        ? content.slides[0].objects
+        : 'elements' in content
+          ? content.elements
+          : content.nodes;
+    expect(
+      elements.find((element) => ('type' in element ? element.type : element.kind) === 'text')!
+        .text,
+    ).toBe('日本語の計画を確認する');
     expect(JSON.stringify(content)).toContain('"bold":true');
     expect(JSON.stringify(content)).toContain('#cc3300');
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
@@ -63,7 +94,9 @@ for (const kind of ['slide', 'design', 'whiteboard'] as const)
       (await page.getByRole('button', { name: 'Selected text bold', exact: true }).boundingBox())!
         .height,
     ).toBeLessThan(45);
-    await editor.fill('取消する');
+    await editor.press('Control+a');
+    await page.keyboard.insertText('取消する');
+    await expect(editor).toHaveJSProperty('textContent', '取消する');
     await editor.press('Escape');
     expect((await nativeArtifact(page)).draft.content).toEqual(content);
     await page.reload();

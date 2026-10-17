@@ -58,9 +58,10 @@ export function reactUiLayoutAt(document: ReactUiDocument, node: ReactUiNode, wi
     ),
   );
 }
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 function declarations(document: ReactUiDocument, style: ReactUiStyle): string {
   return Object.entries(resolveReactUiStyle(document, style))
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => compare(a, b))
     .map(([key, value]) => `${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}:${value};`)
     .join('');
 }
@@ -68,7 +69,7 @@ export function reactUiCss(document: ReactUiDocument): string {
   return (
     document.nodes
       .slice()
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => compare(a.id, b.id))
       .flatMap((node) => [
         `.${reactUiClassName(node.id)}{${declarations(document, node.layout.base)}}`,
         ...document.breakpoints
@@ -102,7 +103,7 @@ function tsType(schema: ReactValueSchema): string {
       break;
     case 'object':
       result = `{ ${Object.entries(schema.fields)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => compare(a, b))
         .map(([key, field]) => `${key}${field.required ? '' : '?'}: ${tsType(field.schema)};`)
         .join(' ')} }`;
       break;
@@ -111,12 +112,14 @@ function tsType(schema: ReactValueSchema): string {
 }
 export interface ReactUiExport {
   fingerprint: string;
+  generator: typeof reactUiGenerator;
   files: Record<
     'Screen.tsx' | 'Screen.css' | 'manifest.json' | 'composition.json' | 'README.md',
     string
   >;
   ownership: 'generated-directory-only';
 }
+export const reactUiGenerator = Object.freeze({ id: 'react-ui-tsx', version: '2.0.1' });
 /** Atomic text bundle; Host copies pinned dependency bytes into its generated directory. */
 export function exportReactUi(
   document: ReactUiDocument,
@@ -140,7 +143,7 @@ export function exportReactUi(
   document = plan.document;
   const components = document.components
     .slice()
-    .sort((a, b) => reactComponentKey(a.ref).localeCompare(reactComponentKey(b.ref)));
+    .sort((a, b) => compare(reactComponentKey(a.ref), reactComponentKey(b.ref)));
   const lines = [
     'import { Fragment, useEffect, useState } from "react";',
     `import ${reactUiExpression('./' + cssFile)};`,
@@ -181,31 +184,42 @@ export function exportReactUi(
       return `[${(value as JsonValue[]).map((v) => expr(schema.items, v)).join(',')}]`;
     if (schema.type === 'object')
       return `{${Object.entries(value as Record<string, JsonValue>)
-        .sort(([a], [b]) => a.localeCompare(b))
+        .sort(([a], [b]) => compare(a, b))
         .map(([key, v]) => `${reactUiExpression(key)}:${expr(schema.fields[key].schema, v)}`)
         .join(',')}}`;
     return reactUiExpression(value);
   };
   const props = [
-    ...Object.entries(document.inputs).map(
-      ([key, field]) => `  ${key}${field.required ? '' : '?'}: ${tsType(field.schema)};`,
-    ),
-    ...Object.entries(document.callbacks).map(
-      ([key, callback]) =>
-        `  ${key}${options.optionalCallbacks ? '?' : ''}: (${callback.parameters.map((schema, i) => `arg${i}: ${tsType(schema)}`).join(', ')}) => void;`,
-    ),
+    ...Object.entries(document.inputs)
+      .sort(([a], [b]) => compare(a, b))
+      .map(([key, field]) => `  ${key}${field.required ? '' : '?'}: ${tsType(field.schema)};`),
+    ...Object.entries(document.callbacks)
+      .sort(([a], [b]) => compare(a, b))
+      .map(
+        ([key, callback]) =>
+          `  ${key}${options.optionalCallbacks ? '?' : ''}: (${callback.parameters.map((schema, i) => `arg${i}: ${tsType(schema)}`).join(', ')}) => void;`,
+      ),
   ];
   lines.push(`export interface ${symbol}Props {\n${props.join('\n')}\n}`);
   lines.push(
-    'function useViewportWidth() { const [width, setWidth] = useState(() => typeof window === "undefined" ? 0 : window.innerWidth); useEffect(() => { const update = () => setWidth(window.innerWidth); window.addEventListener("resize", update); update(); return () => window.removeEventListener("resize", update); }, []); return width; }',
+    'function useViewportWidth() {',
+    '  const [width, setWidth] = useState(() => typeof window === "undefined" ? 0 : window.innerWidth);',
+    '  useEffect(() => {',
+    '    const update = () => setWidth(window.innerWidth);',
+    '    window.addEventListener("resize", update);',
+    '    update();',
+    '    return () => window.removeEventListener("resize", update);',
+    '  }, []);',
+    '  return width;',
+    '}',
   );
   lines.push(
     `export function ${symbol}(props: ${symbol}Props) {`,
-    'const width = useViewportWidth();',
+    '  const width = useViewportWidth();',
   );
-  for (const [key, field] of Object.entries(document.inputs))
+  for (const [key, field] of Object.entries(document.inputs).sort(([a], [b]) => compare(a, b)))
     lines.push(
-      `const input_${key} = ${Object.hasOwn(field, 'default') ? `props.${key} === undefined ? ${expr(field.schema, field.default!)} : props.${key}` : `props.${key}`};`,
+      `  const input_${key} = ${Object.hasOwn(field, 'default') ? `props.${key} === undefined ? ${expr(field.schema, field.default!)} : props.${key}` : `props.${key}`};`,
     );
   const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
   const render = (id: string): string => {
@@ -215,9 +229,7 @@ export function exportReactUi(
     );
     const component = components[i];
     const attributes = [`key={${reactUiExpression(node.id)}}`];
-    for (const [key, field] of Object.entries(component.props).sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
+    for (const [key, field] of Object.entries(component.props).sort(([a], [b]) => compare(a, b))) {
       const binding = node.bindings[key];
       if (binding?.kind === 'data')
         attributes.push(
@@ -228,7 +240,7 @@ export function exportReactUi(
           `${key}={${expr(field.schema, Object.hasOwn(node.props, key) ? node.props[key] : field.default!)}}`,
         );
     }
-    for (const [key, binding] of Object.entries(node.bindings))
+    for (const [key, binding] of Object.entries(node.bindings).sort(([a], [b]) => compare(a, b)))
       if (binding.kind === 'callback') attributes.push(`${key}={props.${binding.callback}}`);
     if (component.layout === 'className')
       attributes.push(`className=${reactUiExpression(reactUiClassName(id))}`);
@@ -243,25 +255,36 @@ export function exportReactUi(
         `style={{...${reactUiExpression(resolveReactUiStyle(document, node.layout.base))}${styles.length ? ',' + styles.join(',') : ''}}}`,
       );
     }
-    for (const [key, slot] of Object.entries(component.slots))
-      attributes.push(
-        `${slot.prop}={<Fragment>${(node.slots[key] ?? []).map(render).join('')}</Fragment>}`,
-      );
-    const element = `<C${i} ${attributes.join(' ')} />`;
+    for (const [key, slot] of Object.entries(component.slots).sort(([a], [b]) => compare(a, b))) {
+      const children = node.slots[key] ?? [];
+      if (children.length)
+        attributes.push(
+          `${slot.prop}={<Fragment>\n${children.map(render).join('\n')}\n</Fragment>}`,
+        );
+    }
+    const element = `<C${i}\n${attributes.map((a) => '  ' + a.replace(/\n/g, '\n  ')).join('\n')}\n/>`;
     return component.layout === 'wrapper'
-      ? `<div key={${reactUiExpression(id)}} className=${reactUiExpression(reactUiClassName(id))}>${element}</div>`
+      ? `<div key={${reactUiExpression(id)}} className=${reactUiExpression(reactUiClassName(id))}>\n${element.replace(/^/gm, '  ')}\n</div>`
       : element;
   };
-  let jsx = `<Fragment>${document.roots.map(render).join('')}</Fragment>`;
+  let jsx = `<Fragment>\n${document.roots.map(render).join('\n')}\n</Fragment>`;
   for (const id of [...document.environment.providerOrder].reverse()) {
     const i = document.environment.dependencies.findIndex((d) => d.id === id);
     const dependency = document.environment.dependencies[i];
     if (dependency.kind === 'provider')
-      jsx = `<P${i} {...${reactUiExpression(dependency.props)}}>${jsx}</P${i}>`;
+      jsx = `<P${i} {...${reactUiExpression(dependency.props)}}>\n${jsx.replace(/^/gm, '  ')}\n</P${i}>`;
   }
-  lines.push('void width;', `return (${jsx});`, '}', `export default ${symbol};`);
+  lines.push(
+    '  void width;',
+    '  return (',
+    jsx.replace(/^/gm, '    '),
+    '  );',
+    '}',
+    `export default ${symbol};`,
+  );
   const manifest = {
     schemaVersion: 1,
+    generator: reactUiGenerator,
     fingerprint: plan.fingerprint,
     environment: document.environment,
     registrations: components,
@@ -272,6 +295,7 @@ export function exportReactUi(
   };
   return deepFreeze({
     fingerprint: plan.fingerprint,
+    generator: reactUiGenerator,
     ownership: plan.ownership,
     files: {
       'Screen.tsx': lines.join('\n') + '\n',

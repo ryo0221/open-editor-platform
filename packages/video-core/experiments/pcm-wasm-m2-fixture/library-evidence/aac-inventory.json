@@ -1,0 +1,23 @@
+{
+  "bundleSha256": "a8f777ab53d8d654bd2339e974de8c80f457e68943afd72e7e55ca0f0dbea214",
+  "wasmSha256": "8488acb0bc9f43055b83600cc4c2c07d20f07675aa65671f91ac1d75515845d9",
+  "wasmBytes": 509386,
+  "memories": [
+    {
+      "initialPages": 276,
+      "initialBytes": 18087936,
+      "maximumPages": 32768,
+      "maximumBytes": 2147483648
+    }
+  ],
+  "memorySection": {
+    "sectionOffset": 1277,
+    "payloadOffset": 1279,
+    "payloadBytes": 7,
+    "payloadHex": "01019402808002",
+    "sectionHex": "050701019402808002"
+  },
+  "accountingScope": "Existing codec-owned heap, separate from accepted managed PCM/native-audio backing ledger. Not a total process memory guarantee. No fit/non-fit inference from comparing these different scopes.",
+  "managedPcmBudgetBytes": 8388608,
+  "method": "Static embedded-binary section decode; no worker/WASM instantiated. Maximum is a growth limit, not resident allocation."
+}

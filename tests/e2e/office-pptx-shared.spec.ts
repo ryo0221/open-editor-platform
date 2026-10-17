@@ -1,5 +1,6 @@
+import { test } from './office-runtime-fixtures';
 import { strFromU8, unzipSync } from 'fflate';
-import { test, expect, nativeArtifact } from './fixtures';
+import { expect, nativeArtifact } from './fixtures';
 import { artifactMenu } from './template-fixtures';
 import type { Page } from '@playwright/test';
 import { confirmed, monitor, value } from './practical-fixtures';
@@ -133,7 +134,11 @@ test('G10 unfinished composition blocks PPTX capture while keeping the local tex
   await page.keyboard.insertText('未確定の入力を保持');
   await editor.dispatchEvent('compositionstart', { data: '保持' });
   await dialog.getByRole('button', { name: 'Prepare PPTX preview', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toContainText('Finish text composition');
+  // The Host's existing Inputs flush reports the addressed Canvas boundary.
+  await expect(dialog.getByRole('alert')).toHaveText(
+    'Canvas文字: 日本語などの入力変換を確定してから保存してください。',
+  );
+  await expect(dialog.getByLabel('PPTX counts')).toHaveCount(0);
   await expect(editor).toBeVisible();
   await expect(editor).toContainText('未確定の入力を保持');
   await page.screenshot({ path: info.outputPath('pptx-ime-retained.png'), fullPage: true });

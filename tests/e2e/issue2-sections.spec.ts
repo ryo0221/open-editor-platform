@@ -60,7 +60,7 @@ test('ID-Q01–03 infinite board Sections preserve membership and distinguish re
   );
   expect(moved.nodes[1]).toEqual(original.nodes[1]);
   // Move a root object into another Section; endpoint IDs remain stable and Undo restores membership.
-  await page.getByRole('button', { name: 'Layer sticky 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Layer 調査の付箋', exact: true }).click();
   await value(page, 'Element x', String(original.nodes[1].bounds.x));
   await value(page, 'Element y', String(original.nodes[1].bounds.y));
   await expect(page.getByLabel('Object Section')).toHaveValue(original.sections[1].id);
@@ -68,7 +68,7 @@ test('ID-Q01–03 infinite board Sections preserve membership and distinguish re
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.getByLabel('Object Section')).toHaveValue(original.sections[0].id);
   await page
-    .getByRole('button', { name: 'Layer sticky 2', exact: true })
+    .getByRole('button', { name: 'Layer アイデアの付箋', exact: true })
     .click({ modifiers: ['Shift'] });
   await page.getByRole('button', { name: 'Connect selected', exact: true }).click();
   await page.getByRole('button', { name: 'Go to Section 調査', exact: true }).click();
@@ -112,6 +112,7 @@ test('ID-Q03 pointer drag previews Section membership and commits it once with c
   ] as const) {
     await camera(page, x, 0);
     await page.getByRole('button', { name: 'Add sticky', exact: true }).click();
+    await value(page, 'Text', `${title} note`);
     await page.getByRole('button', { name: 'Board actions', exact: true }).click();
     await page
       .getByRole('button', { name: 'Section around selected objects', exact: true })
@@ -119,14 +120,14 @@ test('ID-Q03 pointer drag previews Section membership and commits it once with c
     await page.keyboard.press('Escape');
     await value(page, 'Section title', title);
   }
-  await page.getByRole('button', { name: 'Layer sticky 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Layer Left note', exact: true }).click();
   await page
-    .getByRole('button', { name: 'Layer sticky 2', exact: true })
+    .getByRole('button', { name: 'Layer Right note', exact: true })
     .click({ modifiers: ['Shift'] });
   await page.getByRole('button', { name: 'Connect selected', exact: true }).click();
   const before = (await native(page)).draft.content;
   await page.getByRole('button', { name: 'Fit board', exact: true }).click();
-  await page.getByRole('button', { name: 'Layer sticky 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Layer Left note', exact: true }).click();
   const canvas = page.getByRole('application', { name: 'Whiteboard canvas' });
   const from = (await canvas.getByRole('button', { name: 'sticky 1', exact: true }).boundingBox())!;
   const to = (await canvas.getByRole('button', { name: 'sticky 2', exact: true }).boundingBox())!;

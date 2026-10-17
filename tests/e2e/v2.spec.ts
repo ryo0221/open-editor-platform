@@ -39,13 +39,13 @@ test('whiteboard nodes, connector, pointer move/resize, undo, comments and SVG e
   await value(page, 'Element x', '620');
   await value(page, 'Element y', '250');
   await value(page, 'Text', 'Make it tangible');
-  await page.getByRole('button', { name: 'Layer shape 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Layer Collect ideas', exact: true }).click();
   await page
     .getByRole('button', { name: 'Layer shape 2', exact: true })
     .click({ modifiers: ['Shift'] });
   await page.getByRole('button', { name: 'Connect selected', exact: true }).click();
   await expect(page.getByTestId('board-connector')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Layer sticky 3', exact: true }).click();
+  await page.getByRole('button', { name: 'Layer Make it tangible', exact: true }).click();
   const box = (await page.getByRole('button', { name: 'sticky 3', exact: true }).boundingBox())!,
     oldX = await page.getByLabel('Element x', { exact: true }).inputValue();
   await page.mouse.move(box.x + 50, box.y + 50);

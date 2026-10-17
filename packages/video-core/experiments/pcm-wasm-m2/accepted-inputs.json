@@ -1,0 +1,345 @@
+{
+  "baseRuntime": "a9f209eb465ba361245fe497082f24f2c12b8c81",
+  "acceptedFiles": [
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/Cargo.lock",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "70d7e3078ad6d8b7ceb5c6221bd7735d0521d3b5ee71d42241a074e9e76a14a3"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/Cargo.toml",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "f4122cc59155ef4af171566df5786923bf188cf62af7e9beac2b491a44a4e08a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/README.md",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "ad9c8be3b10503b80cc553afde56625c874560cd9c07e6defd56542c4f6d3cc3"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/VERIFICATION.md",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "244946ff4fd8af9eb780eb83b175596ef2d3b96c738077a17e9c7f7e0a930c18"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/adapter.test.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "54c8cd76bf83e7e9ad1ad791febc739368a731b571dbc3b46b1870c896e4493e"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/adapter.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "c2b3b96be2580ebbdebf3d517413a5473fd606ada8a89ed40c7414b50bfae699"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/build.mjs",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "81b6fb1009fe3ca6b7e725b77c9e89d8aab778c84909ffa0ad5654dd7247d600"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/check.mjs",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "bdae04ff9762692be98033d793bf56a21d335ecba8f5bfb30622b98c7bebf161"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/faults.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "ba83057d41d4117321319e1d9b3f8a2b3750fc7a2e2dee2db61aa609e9877e9b"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/frozen/render.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "c57f409efff9bf1551c26fce819f99c63bf118d68e8746e8bdf3c7938ebb4b53"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/frozen/time.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/guard-check.mjs",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "df060d43e602458d1a2d797cac1967e8eb96faefe4fbf1afeb87709107439505"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/install-toolchain.py",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "547a9cd0368f40dd0af320137a0e9e4c4a1f037912ea2ef6d713f7a8dfc4e1d7"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/kernel.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "ff41c01469e25e5c3709578a2e689ce53a78a1b9e9f2fb37e04e721ecde55a47"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/oracle-inputs.json",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "cdbfb090247a0a9c54d807ca683d7e6c843173a3ae8d009f036fd3c7af8a9c84"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/oracle.test.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "1d4d7516a8b4148eca622981ae7bfae7fbcd53201f8790d5198cd8f18cef2e39"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/prepare.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "02942dff2e71846ab3eb31a995cb0f5da1b780d7594f4f6d91b275bfca46120f"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/rust-toolchain.toml",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "ccffa35644e680f8f6db9451a12eb61ba5273d1deed2250ede13edaf37a6c98d"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/src/lib.rs",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "f6bc624cc4874e79a3045b54f168a5e07216a7cc8a1a398e9052dc0c3b939542"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/suite.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "f8d70bed90c3b9425fb280ce6a946a77f18e4c795fd925d51780077fccff00bc"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-r0/toolchain-inputs.json",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "fd88e85db7a8210c1378e35e934f00aadf134d0d41c0f73a9fa8ff042dd768e8"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-v1/scheduled-audio.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "85a6ab32bea599ec376afe5fda4c851b7e581c4c164bdee9554da0eea31deec1"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-v1/selection.ts",
+      "pin": "391edb1ddac3e30ae20ec4bbc571093a2670761e",
+      "sha256": "23f978bbd2999bf8aca08c2cab39daf5e596e2514b382da1294492ce6ef2bd6f"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/ACTUAL-AAC-VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "050a2b568403e6e414599e81d2b707047266c499a86c3cc2a51219e579bb9798"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/CONSUMER-CONTRACT.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "0fd744d0f8f01630a7388d9237abe6c165626b435267dcc4ced14f3742a7ffb0"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/CONSUMER-VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "440fada37e7c165266c8b45fab6faba0b768ace7f7bde89d3d2e9cf519f5422c"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/LIFECYCLE-AAC-VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b0a39c93b19b2cf29033eccef70d34b823d18e17abd2f92a2aa6fb2528fe1ece"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/PCM-BUDGET-SCOPE.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "63e6c1c902b0004b462d3e74ab9a5b7d68658dce9fac99097e7099edfcf33207"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/README.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "e834b2cfac63944a5559dc053a40c9db2a2dfaf982d884d270250e8612406d9a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/REAL-CONSUMER-MAPPING.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "20d6b3212d9b67d505a16b1f179eff8f600ea07027adebc75c018b27fb63f93b"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/REAL-CONSUMER-SOURCES.json",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "266b1785b7597c3fb9b1f7da02783ec5fb15e27abb7cdcb1ab52ded0c4d82884"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/REAL-LIBRARY-VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "50aa714f8e578f56acba1d8a888334a65ab3b4ab44837e01d564dc24502e9063"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/SCOPE-VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "7f957376c7fcb2d0e45d10a9e2d8ee1e6cc311215cc3bc02235e57e0073414fe"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/VERIFICATION.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "157528b72302815ea002e959e2a5c4d4c3a57e8e4f9fcde8088d25804bf8c315"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/aac-inventory.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "1a86e4b477fc5b1490fe23f19dd26ef16428fb001076f9923f3068d9733b250b"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/actual-aac-browser.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "9b4ca61ff408a882dc9df949de15d8e54d97fa0635364cc99d7b35c340aafdae"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/actual-aac-check.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "974410d0ff42e64d0a7c68f985f70c03d3bc9d691d8298d09a00c85c2eafa345"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/check.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "0a8d7a3cd0b5b4d94272e5037a3344d4e9c098b124fc9f81723c9d35eac480fb"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/consumer-ownership.test.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "2dc314039c561e64cbbbad297c211df109da0178db6c5b328667976c2a4e4a36"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/consumer-ownership.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "444c66fd1756c887d63593b8201a582ea71a270e9be77dea936c17bec362ab97"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/fixture-check.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "dcc8220202e5edc3865ee07e8208e45021824be732639b0c7fe89715d7add151"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/freeze.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "463369dd6f084465b7aeac87ac17e0cac18c648af087f9dc0c4de73dda2eda4a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/core.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "8763b8ff6123f6dcdc981c18e8e06933dff9b96c99e2b5e133d637f6a5f19cc6"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/experiments/pcm-renderer/render.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "af19c2eec849a6658a3030ecf16cdae910c2c8e82b5a6df084acd3a786bbd220"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/experiments/pcm-renderer/session.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "06b3f361eb6a6b2e50cd0dc2d1ed92f7acd89936c340d324f522498d6e45022a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/evaluate.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "52d16932338b100124430dceae2a316108f4b9c8ffed1e34f2630247ac362b6c"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/model.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "d2350ccaf733dca313065c46b3c014a62461d773297d736335d01dfa29046474"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/time.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v1/evaluate.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "ad8358134edf8f01a64e5f12fae0742965adaf3bae239c8ab1e22195d973347f"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v1/model.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b08eaeb4eff7ecdf7527b59ca06bbb864c453bc2fcc5bde7b9dd6524bc6ee1a4"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v1/validation.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "3352ea59979d9196ed39178dc1f8ed1c3920f9698a4ee4994d0ea83cf0e0468a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v2/gain.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "421061c49f662d3341d94401e42c85d4549ecaa5138fbdf24162bfbd49eb2746"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v2/model.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "bb0769f6827d0202618476be4b2b8154d37f444d1a2e279496f42914c4967a05"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/v2/validation.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b2fa618baa790f2c5c9f0ec9f989710c816a000430c3bac0bf221f299571220e"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-core/src/validation.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b5081a3c0952ef2bcfd5eb0fa84c94ed03a0f0fadbbf1420510efc3756713a6a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-metadata/host-media/file-source/timing-v1.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "1651c2ccf116a181f08f6c6f651caed0b7f2605743715d0386835b4fb4c0b88d"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-metadata/host-media/m2/mix-v2.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "e81f1ebc0697ffd9a85879aad7f99e880d77d2c555839049780c11e2acc92bff"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/frozen/packages/video-metadata/host-media/m2/requests.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b1d4412364ac074f49d8cead11a0c56fed6ec85d8a818016afdb68c820b290a9"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/library-evidence/MPL-2.0.txt",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/library-evidence/NOTICE.md",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "96b95d6250f7499ba6a1b137066eccb9be3024fae8a20237c6371b5162dea726"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/library-evidence/aac-inventory.json",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b4ea354c8ee33187b201d9164ea19a90caca7908ff25514c20769a14551d5a7e"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/library-evidence/inputs.json",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "23fbd02f635ca5f4acd06cea41f9ebff0d69558cb8b13a75b99c69dc0b5c17fa"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/lifecycle-aac-browser.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "7e02d5112e781660002c6c148085aa74833e5783ffea7ba8352931509311cf60"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/lifecycle-aac-check.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "b5a9db64674926a6db8cfa0d59aebc65e76e02e6e60d5d96656177b2b1b4630a"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/oracle-inputs.json",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "3c00df6ecc6946f8c1e82779d1c48e8a01db2eb882c716ff43e33d4e8a4c22a5"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/port.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "f3b21627fc7cbb642db2911829b88496de749b9d11dcaaea0f124f858c3d4c80"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/real-library-check.mjs",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "a1ea2e5d513ae2b63b821368d998b3de59f89624be2433e619ed827132f1b87e"
+    },
+    {
+      "path": "packages/video-core/experiments/pcm-wasm-m2-fixture/real-library-fixture.ts",
+      "pin": "27252ddce4c85b1e2e797a5078de048d60168f58",
+      "sha256": "c516c0ab2469a11b5995c06c4831e10605709c8757a822d811844457645bf0b3"
+    }
+  ]
+}

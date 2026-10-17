@@ -51,9 +51,20 @@ test('#44 native Graph keeps two node buffers and Host Save flushes them togethe
     page.getByRole('button', { name: 'Select node Planning', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Select node Pending Research', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Select node Pending Planning', exact: true }),
+  ).toBeVisible();
+  // Redo updates the canvas before the queued IndexedDB write completes.
+  await expect(page.locator('.save-status')).toHaveText('Saved locally');
   await page.reload();
   await expect(
     page.getByRole('button', { name: 'Select node Pending Research', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Select node Pending Planning', exact: true }),
   ).toBeVisible();
 });
 test('#43 #44 #49 Data Graph opens its record and Fields; labels follow renames and Form saves through Host', async ({
@@ -101,6 +112,7 @@ test('#43 #44 #49 Data Graph opens its record and Fields; labels follow renames 
   await fields.getByRole('button', { name: 'Apply field settings', exact: true }).click();
   await save(page, 2);
   await page.reload();
+  await expect(page.getByLabel('Data projection', { exact: true })).toBeVisible();
   await dataProjection(page, 'Graph');
   await page.getByRole('button', { name: 'Select node Form saved by Host', exact: true }).click();
   await expect(page.getByLabel('Display name', { exact: true })).toHaveValue('Form saved by Host');
@@ -638,6 +650,8 @@ test('#44 Host Save reveals the invalid hidden record while retaining a differen
   );
   await page.keyboard.press('Control+s');
   await page.reload();
+  // Reload resolves before the asynchronous local library restores the active artifact.
+  await expect(page.getByLabel('Artifact name', { exact: true })).toHaveValue('relations');
   await dataProjection(page, 'Form');
   await expect(page.getByLabel('Record Name', { exact: true })).toHaveValue(
     'Retained first record',

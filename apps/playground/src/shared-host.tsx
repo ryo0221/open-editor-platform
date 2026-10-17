@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { PrivateVideoEntry } from './private-video/catalog';
 import { createArtifact } from '@editor-platform/artifact-core';
 import { type DomainCodec, type Operation } from '@editor-platform/collaboration-core';
 import {
@@ -300,7 +301,17 @@ async function connect(
     stop,
   };
 }
-export function ReferencePlayground() {
+export function ReferencePlayground({
+  privateEntries,
+  onOpenPrivateEditor,
+  privateM2Entries,
+  onOpenPrivateM2,
+}: {
+  privateEntries?: PrivateVideoEntry[];
+  onOpenPrivateEditor?(id?: string): void;
+  privateM2Entries?: PrivateVideoEntry[];
+  onOpenPrivateM2?(id?: string): void;
+} = {}) {
   const [shared, setShared] = useState<SharedPlaygroundConnection>();
   const [error, setError] = useState('');
   const [opening, setOpening] = useState(new URLSearchParams(location.search).has('shared'));
@@ -361,6 +372,10 @@ export function ReferencePlayground() {
     );
   return (
     <App
+      privateEntries={privateEntries}
+      privateM2Entries={privateM2Entries}
+      onOpenPrivateM2={onOpenPrivateM2}
+      onOpenPrivateEditor={onOpenPrivateEditor}
       shared={shared}
       onStartShared={async (record) => {
         const result = await connect(record.id, record.kind as Kind, 'A', record);

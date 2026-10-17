@@ -22,7 +22,11 @@ test('CSV type preview is reversible, reports invalid cells and imports original
   await dialog.getByLabel('Import type Code').selectOption('text');
   await expect(dialog.getByRole('cell', { name: '001', exact: true })).toBeVisible();
   await dialog.getByLabel('Import type Date').selectOption('date');
-  await expect(dialog.getByRole('status')).toContainText('Row 1, Date: Enter a valid date');
+  const diagnostics = dialog.getByRole('status').getByRole('listitem');
+  await expect(diagnostics).toHaveCount(1);
+  await expect(diagnostics).toHaveText(
+    'Row 2, field 3 Date · value "2026-02-30": Enter a valid date (YYYY-MM-DD). CSVまたは列対応を修正してください。',
+  );
   await expect(dialog.getByRole('button', { name: 'Import records', exact: true })).toBeDisabled();
   await dialog.getByLabel('Import type Date').selectOption('text');
   await dialog.getByRole('button', { name: 'Import records', exact: true }).click();

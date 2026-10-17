@@ -21,7 +21,23 @@ export class CollaborationClient<T> {
   pending: Operation[] = [];
   receipts = new Map<string, Receipt>();
   held = new Map<string, Receipt>();
-  status: 'closed' | 'connecting' | 'online' | 'disconnected' | 'resync-required' = 'closed';
+  private connectionStatus:
+    | 'closed'
+    | 'connecting'
+    | 'online'
+    | 'disconnected'
+    | 'resync-required' = 'closed';
+  private statusRevision = 0;
+  private connectionAllowsRecovery = true;
+  get status() {
+    return this.connectionStatus;
+  }
+  set status(value: typeof this.connectionStatus) {
+    // A second failure may have the same display value. It still supersedes an
+    // older in-flight sync's success.
+    this.statusRevision++;
+    this.connectionStatus = value;
+  }
   readonly view = { zoom: 1, panel: false, page: '' };
   private epoch = 0;
   private permissionSignature = '';
@@ -75,14 +91,17 @@ export class CollaborationClient<T> {
   }
   async open() {
     const epoch = ++this.epoch;
+    this.connectionAllowsRecovery = true;
     this.status = 'connecting';
     this.stopStatus?.();
     this.stopStatus = this.adapter.subscribeStatus((status) => {
       if (epoch !== this.epoch) return;
       if (status.type === 'permissions') this.installPermissions(status.principal);
-      else if (this.status !== status.state) {
+      else {
+        this.connectionAllowsRecovery = status.state === 'online';
+        const changed = this.status !== status.state;
         this.status = status.state;
-        this.onChange();
+        if (changed) this.onChange();
       }
     });
     // Subscribe first; updates racing snapshot installation are buffered.
@@ -225,6 +244,7 @@ export class CollaborationClient<T> {
   }
   async sync() {
     const epoch = this.epoch;
+    const statusRevision = this.statusRevision;
     const permissions = await this.adapter.permissions();
     if (epoch !== this.epoch) return;
     this.installPermissions(permissions);
@@ -243,6 +263,17 @@ export class CollaborationClient<T> {
       }
     }
     this.recompute();
+    // Only a complete read/reconciliation can recover a transport failure.
+    // Explicit adapter stops, close and failures arriving during this sync win.
+    if (
+      epoch === this.epoch &&
+      statusRevision === this.statusRevision &&
+      this.connectionAllowsRecovery &&
+      this.status === 'disconnected'
+    ) {
+      this.status = 'online';
+      this.onChange();
+    }
   }
   async reconnect() {
     await this.open();

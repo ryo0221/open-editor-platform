@@ -1,0 +1,21 @@
+{
+  "pin": "f60aa218a7c27831b3aa359b057c0b60bbdbb73a",
+  "planPin": "c2c3130bf4136a3b34f343487a09c920b4e26bdb",
+  "change": "Only the render module import is redirected from the Core barrel to the frozen time dependency. All seven imported runtime symbols originate in time.ts; no shared new preparation or accumulation code.",
+  "files": [
+    {
+      "original": "packages/video-core/experiments/pcm-renderer/render.ts",
+      "gitBlob": "af8e8f3615c53054b3fa11611eea625942323b32",
+      "originalSha256": "1316abd268144fee9d6cb5223cb49f8a7a090c9faded6ca2a3178fdfc43793ed",
+      "frozen": "frozen/render.ts",
+      "frozenSha256": "c57f409efff9bf1551c26fce819f99c63bf118d68e8746e8bdf3c7938ebb4b53"
+    },
+    {
+      "original": "packages/video-core/src/time.ts",
+      "gitBlob": "e2a5472afc308cad573c00512b6bbff66d4d74d9",
+      "originalSha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999",
+      "frozen": "frozen/time.ts",
+      "frozenSha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999"
+    }
+  ]
+}

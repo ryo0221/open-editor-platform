@@ -101,6 +101,11 @@ styleと元CSS/Providerの実描画一致はW5の同環境・幅別比較で検�
 
 ## native保存と決定的出力
 
+#38では任意empty slotのpropをpreview／TSX双方で省略し、map走査順に依存しない
+multiline出力を生成器 `react-ui-tsx@2.0.1` として固定する。Native v1と意味のある
+順序を維持する。[登録抽出・意味的差分](react-ui-portability.md)と
+[#35のimmutable版出力](artifact-output-contract.md)は既存保存／明示採用を再利用する。
+
 ```ts
 import {
   loadReactUiDocument,

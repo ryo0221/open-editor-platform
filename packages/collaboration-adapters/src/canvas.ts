@@ -1,3 +1,4 @@
+import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import {
   copy,
   fail,
@@ -33,9 +34,11 @@ const fields = new Set([
 ]);
 function canvas<T>(
   domain: Domain,
-  validate: (v: unknown) => v is T,
+  validateNative: (v: unknown) => v is T,
   access: Access<T>,
 ): DomainCodec<T> {
+  const validate = (value: unknown): value is T =>
+    validateNative(value) && !containsEmbeddedReference(value);
   const resource = (content: T, key: string): unknown => {
     const [id, field] = key.split('/');
     return field
@@ -70,6 +73,11 @@ function canvas<T>(
       return ids.has(anchor.elementId) ? { ...anchor, orphan: true } : anchor;
     },
     apply(content, action): Effect<T> {
+      if (containsEmbeddedReference(content) || containsEmbeddedReference(action.payload))
+        fail(
+          'invalid-operation',
+          '参照埋め込みの共有編集は未対応です。ローカルで編集してください。',
+        );
       if (action.type === 'domain.restore') {
         if (!validate(action.payload.content)) fail('invalid-operation', 'Invalid restore content');
         return {

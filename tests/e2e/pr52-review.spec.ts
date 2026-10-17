@@ -445,11 +445,14 @@ test('PR #52 an ordinary image keeps semantics/alt/fit when made a component and
   await page
     .getByLabel('Insert image file', { exact: true })
     .setInputFiles('tests/fixtures/office/images/quadrants.png');
+  await expect(page.getByLabel('Image alt text', { exact: true })).toBeVisible();
   await page.getByLabel('Element HTML meaning').selectOption('img');
+  await expect(page.getByLabel('Element HTML meaning')).toHaveValue('img');
   await page.getByLabel('Image alt text', { exact: true }).fill('部品として公開する色の比較');
   await page.getByLabel('Image alt text', { exact: true }).press('Enter');
   const before = (await nativeArtifact(page)).draft.content as DesignContent;
   const image = before.elements.find((element) => element.alt === '部品として公開する色の比較')!;
+  expect(image.web?.tag).toBe('img');
   await page.getByRole('button', { name: 'Make component', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'React component publication' });
   await expect(

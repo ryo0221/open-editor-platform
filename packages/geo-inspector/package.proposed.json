@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/geo-inspector",
+  "version": "0.0.0-experiment.1",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@editor-platform/geo-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/extension-contract": "*"
+  },
+  "devDependencies": { "@editor-platform/extension-runtime": "*" }
+}

@@ -342,6 +342,7 @@ export async function authorReusableComponent(options: {
   domain: Domain;
   content: NativeContent;
   ids: string[];
+  slideSelection?: { pageId: string; elementId: string }[];
   name: string;
   libraryId?: string;
   definitionId?: string;
@@ -369,6 +370,7 @@ export async function authorReusableComponent(options: {
     options.domain,
     options.content,
     data === 'view' ? [] : fieldIds,
+    options.slideSelection,
   );
   if (isStructuredData(selected)) {
     selected.rows = [];

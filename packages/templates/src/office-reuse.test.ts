@@ -101,7 +101,7 @@ beforeAll(async () => {
       }),
     );
   }
-}, 120000);
+}, 30000);
 function slots(content: NativeContent): AuthoredSlot[] {
   const candidates = slotCandidates(content),
     title = candidates.find((c) => c.type === 'text' && String(c.value).startsWith('外部作成'))!,

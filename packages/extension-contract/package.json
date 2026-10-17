@@ -1,0 +1,16 @@
+{
+  "name": "@editor-platform/extension-contract",
+  "version": "0.0.0-draft.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./draft2": "./src/draft2.ts",
+    "./controlled-surface": "./src/controlled-surface.ts",
+    "./schema-experiment": "./src/schema-experiment.ts",
+    "./schema-edit-experiment": "./src/schema-edit-experiment.ts"
+  },
+  "dependencies": {
+    "@editor-platform/editor-core": "*"
+  }
+}

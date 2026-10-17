@@ -26,6 +26,7 @@
     "prosemirror-keymap": "1.2.3",
     "prosemirror-commands": "1.7.2",
     "prosemirror-view": "1.42.6",
-    "@editor-platform/reuse-core": "*"
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/artifact-references": "*"
   }
 }

@@ -305,7 +305,6 @@ describe('declared PresentationML capabilities', () => {
     expect(() => create(next)).not.toThrow();
     expect(next.preview.slides[0].objects).toHaveLength(0);
   });
-  // Full boundary fixtures verify limits without declaring an interaction SLA.
   it('enforces exact page and object limits', async () => {
     expect(
       (await prepared(pptx(Array.from({ length: 100 }, () => sp(1))))).preview.slides,
@@ -320,7 +319,7 @@ describe('declared PresentationML capabilities', () => {
     await expect(
       prepared(pptx([Array.from({ length: 10001 }, (_, i) => sp(i + 1)).join('')])),
     ).rejects.toMatchObject({ code: 'OBJECT_LIMIT' });
-  }, 120000);
+  }, 30000);
   it('flattens translated/scaled/rotated nested groups exactly once, blocking skew', async () => {
     const group = (xfrm: string, body: string) =>
       `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="2" name="group"/></p:nvGrpSpPr><p:grpSpPr>${xfrm}</p:grpSpPr>${body}</p:grpSp>`;

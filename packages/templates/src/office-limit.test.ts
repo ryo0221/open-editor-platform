@@ -50,8 +50,6 @@ function largePng() {
     chunk('IEND', Buffer.alloc(0)),
   ]);
 }
-// This conformance case constructs and imports a real multi-MiB image twice.
-// Its deadline bounds the complete fixture workflow, not an interactive SLA.
 for (const domain of ['slide', 'document'] as const)
   it(`T05 ${domain}: a real in-budget Office picture is rejected by the smaller fixed-template limit`, async () => {
     const image = largePng();
@@ -115,4 +113,4 @@ for (const domain of ['slide', 'document'] as const)
         slots: [],
       }),
     ).rejects.toMatchObject({ code: 'template-limit' });
-  }, 120000);
+  }, 30000);

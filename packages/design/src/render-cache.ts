@@ -1,4 +1,4 @@
-import { deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
+import { clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import type { Bounds, Drawing } from '@editor-platform/editor-core';
 import {
   designDrawingProjector,
@@ -14,6 +14,21 @@ interface RenderedElement {
   bounds: Bounds;
   rotation: number | undefined;
   drawings: Drawing[];
+}
+
+/** One owned drawing snapshot per React render, including mutable Host inputs.
+ * Recreate this scope on every mutable Host render; identity is not a revision.
+ * The Host's records remain mutable and are never frozen by the view.
+ */
+export function designRenderSnapshot(
+  source: DesignContent,
+  cache: ReturnType<typeof createDesignRenderCache>,
+) {
+  const content = isDeepFrozen(source) ? source : deepFreeze(clone(source));
+  const elements = new Map(content.elements.map((element) => [element.id, element]));
+  const draw = cache(content);
+  return (raw: DesignElement, bounds = raw.bounds, rotation = raw.rotation) =>
+    draw(elements.get(raw.id)!, bounds, rotation);
 }
 
 /** Private view projections; public model/export APIs still produce fresh values. */

@@ -1,4 +1,10 @@
 import {
+  validEmbeddedReference,
+  validReferenceItems,
+  describeReference,
+  type EmbeddedReference,
+} from '@editor-platform/artifact-references';
+import {
   clone,
   describeChanges,
   isDeepFrozen,
@@ -45,6 +51,8 @@ export interface ChartSnapshot {
   legend?: boolean;
 }
 export interface SlideObject extends VisualStyle {
+  /** Reference source is canonical; src is a retained rendering cache. */
+  reference?: EmbeddedReference;
   id: string;
   type: SlideObjectType;
   bounds: Bounds;
@@ -317,7 +325,7 @@ export function slideDiff(a: SlideContent, b: SlideContent): CompareResult {
         old?.objects ?? [],
         next?.objects ?? [],
         (o) => `${next?.title ?? old!.title} / ${o.type}: ${o.text.slice(0, 40) || 'object'}`,
-        (o) => describeDrawing(slideDrawing(o)),
+        (o) => describeDrawing(slideDrawing(o)) + describeReference(o),
       ),
     );
   }
@@ -338,6 +346,7 @@ export function slidePaintOrder(s: Slide) {
 export function slideDrawing(o: SlideObject): Drawing {
   return {
     ...o,
+    imageFit: o.reference ? (o.reference.fit === 'cover' ? 'fill' : 'fit') : o.imageFit,
     // Vector geometry is owned by Design, not by undeclared imported fields.
     vector: undefined,
     kind: o.type,
@@ -363,6 +372,7 @@ function validObject(o: SlideObject): boolean {
     typeof o.text === 'string' &&
     typeof o.fill === 'string' &&
     validVisualStyle(o) &&
+    (o.reference === undefined || (o.type === 'image' && validEmbeddedReference(o.reference))) &&
     ['text', 'shape', 'image', 'chart', 'group', 'table'].includes(o.type) &&
     validBounds(o.bounds) &&
     (o.chart === undefined ||
@@ -403,7 +413,8 @@ export function isDeck(value: unknown): value is SlideContent {
         typeof s.background === 'string' &&
         Array.isArray(s.objects) &&
         validObjects(s.objects),
-    )
+    ) &&
+    validReferenceItems(d.slides.flatMap((s) => s.objects))
   );
 }
 
@@ -550,7 +561,16 @@ export const patchObjects = (
       if (!('locked' in patch || 'hidden' in patch)) assertEditable(geometry(s), ids);
       return {
         ...s,
-        objects: s.objects.map((o) => (ids.includes(o.id) ? patchVisualStyle(o, patch) : o)),
+        objects: s.objects.map((o) => {
+          if (!ids.includes(o.id)) return o;
+          const next = patchVisualStyle(o, patch);
+          if (next.reference && patch.imageFit !== undefined)
+            next.reference = {
+              ...next.reference,
+              fit: patch.imageFit === 'fill' ? 'cover' : 'contain',
+            };
+          return next;
+        }),
       };
     }),
   }));

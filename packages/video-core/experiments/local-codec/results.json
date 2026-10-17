@@ -1,0 +1,451 @@
+{
+  "codeCommit": "825034a0a4285e428d9bc8a6899be12e2d0dd688",
+  "hevc": [
+    {
+      "name": "hevc8",
+      "mode": "decode",
+      "status": "PASS",
+      "detail": {
+        "code": 1,
+        "steps": 13,
+        "frameCount": 12,
+        "firstFrame": {
+          "pts": 0,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p",
+          "md5": "7a22be5156a54c2f3e94d59d01e9a687",
+          "primaries": 2,
+          "transfer": 2,
+          "matrix": 2,
+          "range": 1
+        },
+        "lastFrame": {
+          "pts": 5632,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p",
+          "md5": "a60293627b9975cf3ec55b1da3ea3e2e",
+          "primaries": 2,
+          "transfer": 2,
+          "matrix": 2,
+          "range": 1
+        }
+      }
+    },
+    {
+      "name": "hevc8",
+      "mode": "cancel",
+      "status": "PASS",
+      "detail": {
+        "code": -108,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "hevc8",
+      "mode": "packet-limit",
+      "status": "PASS",
+      "detail": {
+        "code": -109,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "decode",
+      "status": "FAIL",
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n11 !== 12\n",
+      "detail": {
+        "code": 1,
+        "steps": 13,
+        "frameCount": 11,
+        "firstFrame": {
+          "pts": 0,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p10le",
+          "md5": "fdf30982e01b3fc379ca5abd5fa96929",
+          "primaries": 9,
+          "transfer": 18,
+          "matrix": 9,
+          "range": 1
+        },
+        "lastFrame": {
+          "pts": 6656,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p10le",
+          "md5": "2527919e30070a76deadb0661cdea8ed",
+          "primaries": 9,
+          "transfer": 18,
+          "matrix": 9,
+          "range": 1
+        }
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "cancel",
+      "status": "PASS",
+      "detail": {
+        "code": -108,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "packet-limit",
+      "status": "PASS",
+      "detail": {
+        "code": -109,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "decode",
+      "status": "PASS",
+      "detail": {
+        "code": 1,
+        "steps": 13,
+        "frameCount": 12,
+        "firstFrame": {
+          "pts": 1024,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p10le",
+          "md5": "fdf30982e01b3fc379ca5abd5fa96929",
+          "primaries": 9,
+          "transfer": 18,
+          "matrix": 9,
+          "range": 1
+        },
+        "lastFrame": {
+          "pts": 8192,
+          "duration": 512,
+          "num": 1,
+          "den": 12800,
+          "width": 96,
+          "height": 64,
+          "pixel": "yuv420p10le",
+          "md5": "a5ef32831a79949220fc2b0f244f4c20",
+          "primaries": 9,
+          "transfer": 18,
+          "matrix": 9,
+          "range": 1
+        }
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "cancel",
+      "status": "PASS",
+      "detail": {
+        "code": -108,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "packet-limit",
+      "status": "PASS",
+      "detail": {
+        "code": -109,
+        "steps": 2,
+        "frameCount": 0
+      }
+    },
+    {
+      "name": "malformed",
+      "status": "PASS",
+      "detail": {
+        "code": -1094995529,
+        "steps": 0,
+        "frameCount": 0
+      }
+    }
+  ],
+  "h264": [
+    {
+      "name": "1920x1080-24-1",
+      "status": "PASS",
+      "bytes": 113136,
+      "sha256": "b16e6c4dd9279ea2c0250c144c9af24554b7eba2d2e9bb22c3cbbceb33e072c5",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    },
+    {
+      "name": "1920x1080-25-1",
+      "status": "PASS",
+      "bytes": 113136,
+      "sha256": "b47886996ff5e7873237c2261c5462646d3d5b3d271a55be0c61c3032e30223b",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    },
+    {
+      "name": "1920x1080-30000-1001",
+      "status": "PASS",
+      "bytes": 113136,
+      "sha256": "075128ef657ea0da27089c6d1225d0578bdd7698598b29bc83de0ef0c4d7e86e",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    },
+    {
+      "name": "1080x1920-24-1",
+      "status": "PASS",
+      "bytes": 112874,
+      "sha256": "0a3ace0391b97c533024aa0e43bf3d554d59531d02f62f26dae2222486ebc0d6",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    },
+    {
+      "name": "1080x1920-25-1",
+      "status": "PASS",
+      "bytes": 112874,
+      "sha256": "a996b36e76e373859d27a183af6f73dd2d1b7f983553c0905d7453f3562d23cd",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    },
+    {
+      "name": "1080x1920-30000-1001",
+      "status": "PASS",
+      "bytes": 112874,
+      "sha256": "cdbc6077e46cf19912a7122cdb9b7bb28396a684b732d6bde535c70c2711c7a8",
+      "frames": 12,
+      "ptsToleranceSeconds": 2e-6,
+      "colorTolerance8bit": 8
+    }
+  ],
+  "aac": [
+    {
+      "name": "aac-44100-1-0",
+      "status": "FAIL",
+      "count": 1,
+      "rate": 44100,
+      "origin": 0,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "19f2916fd0715263ce056955657af10491820f30e11f6dc50068f3d7966c8593"
+    },
+    {
+      "name": "aac-44100-1-0.125",
+      "status": "FAIL",
+      "count": 1,
+      "rate": 44100,
+      "origin": 0.125,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "bfd40fcdb3a25deee7e58d6987f74f2e209dce0b073e08211ed4b3dd053b5433"
+    },
+    {
+      "name": "aac-44100-17-0",
+      "status": "FAIL",
+      "count": 17,
+      "rate": 44100,
+      "origin": 0,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "86b3613df07de550f1b78fded28753e4d755ee2b894467bbd9fae9318361d600"
+    },
+    {
+      "name": "aac-44100-17-0.125",
+      "status": "FAIL",
+      "count": 17,
+      "rate": 44100,
+      "origin": 0.125,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "b6a0be2a799e6a5b79faa077e6fe626d0b781658dad01c198feac3af053acadb"
+    },
+    {
+      "name": "aac-44100-44223-0",
+      "status": "FAIL",
+      "count": 44223,
+      "rate": 44100,
+      "origin": 0,
+      "browserFrames": 46080,
+      "ffmpegFrames": 46080,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "f0bb66678e895e56541a1257f96ac75b9788a137e3d450043132fdad0bb188b1"
+    },
+    {
+      "name": "aac-44100-44223-0.125",
+      "status": "FAIL",
+      "count": 44223,
+      "rate": 44100,
+      "origin": 0.125,
+      "browserFrames": 46080,
+      "ffmpegFrames": 46080,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "a7e69c949da99a6eb1c86f73238a0f79b4462d64bc33942106d7d70e1964c0c8"
+    },
+    {
+      "name": "aac-48000-1-0",
+      "status": "FAIL",
+      "count": 1,
+      "rate": 48000,
+      "origin": 0,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "62e449de25ee5b5f92c998e8421f9e4e97a6784382b8943e16ebab2c81785142"
+    },
+    {
+      "name": "aac-48000-1-0.125",
+      "status": "FAIL",
+      "count": 1,
+      "rate": 48000,
+      "origin": 0.125,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "ef482564c79078f218b54bd417210b8f6bb9b9eca29f20d4af2e9f6e8525c5de"
+    },
+    {
+      "name": "aac-48000-17-0",
+      "status": "FAIL",
+      "count": 17,
+      "rate": 48000,
+      "origin": 0,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "e6327415b9c4c22f65be2b2a86a67c21b462498a841aa0d7f451fa0efe7e559b"
+    },
+    {
+      "name": "aac-48000-17-0.125",
+      "status": "FAIL",
+      "count": 17,
+      "rate": 48000,
+      "origin": 0.125,
+      "browserFrames": 2048,
+      "ffmpegFrames": 2048,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "b21a4abe4681e20b31e52f7e6b3185de40430e82cbe03cbde6725c050b7d03fd"
+    },
+    {
+      "name": "aac-48000-48123-0",
+      "status": "FAIL",
+      "count": 48123,
+      "rate": 48000,
+      "origin": 0,
+      "browserFrames": 49152,
+      "ffmpegFrames": 49152,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "aa4efbecc877069b2aef46af8e64be5492ae6a944c7ffdfd7a78ef3b8c55f8eb"
+    },
+    {
+      "name": "aac-48000-48123-0.125",
+      "status": "FAIL",
+      "count": 48123,
+      "rate": 48000,
+      "origin": 0.125,
+      "browserFrames": 49152,
+      "ffmpegFrames": 49152,
+      "checks": {
+        "browserFrameCount": false,
+        "ffmpegFrameCount": false,
+        "rate": true,
+        "channels": true,
+        "origin": true
+      },
+      "sha256": "77ddb4fd99ae6ddfa878962971a395a6f1c69560bfb1be3425c9da495838302e"
+    }
+  ]
+}

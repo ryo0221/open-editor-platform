@@ -148,14 +148,14 @@ camera controls remain usable. The trusted Host must also reject content edits.
 
 Graph reading Hosts can configure these public props (also accepted by `NativeGraphSurface`):
 
-| Prop                | Default    | Behavior                                                                                                       |
-| ------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
-| `showInspector`     | `true`     | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.    |
-| `initialView`       | `'origin'` | `'fit'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable.                     |
-| `fitOnFilterChange` | `false`    | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera. |
+| Prop                | Default                                  | Behavior                                                                                                                                               |
+| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `showInspector`     | `true`                                   | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.                                            |
+| `initialView`       | `'origin'`                               | `'fit'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable.                                                             |
+| `fitOnFilterChange` | `false`                                  | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera.                                         |
 | `nodeSize`          | 200px width, automatic height (min 70px) | Optional fixed `{width,height}` or `(node) => ({width,height})`, 40–4000 logical px per axis. Supplied invalid sizes retain the fixed 200×70 fallback. |
-| `visibleEdgeTypes`  | all        | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                        |
-| `highlightAdjacent` | `false`    | Emphasize the selected node and its direct neighbors/edges in the complete graph.                              |
+| `visibleEdgeTypes`  | all                                      | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                                                                |
+| `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                      |
 
 Camera, sizes, filters and emphasis do not change content, native versions or Undo.
 Validation, diagnostics and selection notifications continue to use the complete graph,
@@ -404,6 +404,18 @@ See [audit scope](issues-53-73-audit.md) and its verification record for tested 
 Document print/PDF checklist markers use `[x]` / `[ ]` for checked/unchecked state, so generated markers do not require glyphs absent from the fixed CJK font. Native checklist content is unchanged.
 
 ## Design frame prototypes
+
+Design retains the full native model for selection, editing and export while culling bounded
+offscreen CanvasObjects with 128 CSS-pixel overscan. Selected objects, transform previews and
+active text editors stay mounted. Expanded text and image failure UI remain mounted. Hosts supplying
+`extension.render` retain all CanvasObjects because that callback can paint beyond native bounds.
+At fit-all, all visible drawings still render.
+Large Design layer trees window their rows; search covers the complete tree, Arrow Up/Down and
+Home/End reach unmounted rows, and an active rename field remains mounted while scrolling.
+
+`CanvasStage` offers this as opt-in `virtualize` plus `CanvasTarget.paintBounds` in world pixels.
+Only supply a conservative bound for all painted content; omitted bounds always render. Slide and
+Whiteboard retain their existing default rendering. This option never filters semantic targets.
 
 `DesignSurface` includes ordinary interaction/flow settings and an Open prototype action.
 A Host can also embed the separate viewer using public packages and the existing UI CSS:

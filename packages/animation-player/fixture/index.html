@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Animation Player prototype</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E" />
+  </head>
+  <body>
+    <h1>Read-only Animation prototype</h1>
+    <p>Rectangles, transforms and nested composition only. No editing or saving.</p>
+    <div id="stage" style="width: min(100%, 640px); height: 360px; background: #f1f5f9"></div>
+    <p>
+      <button id="play">Play</button> <button id="pause">Pause</button>
+      <button id="close">Close preview</button>
+    </p>
+    <label>Seek tick <input id="tick" type="range" min="0" max="240000" value="0" /></label>
+    <p id="status" role="status">Preparing</p>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

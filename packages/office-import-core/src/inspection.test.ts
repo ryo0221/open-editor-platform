@@ -147,8 +147,6 @@ describe('bounded Office inspection', () => {
     });
   });
 });
-// Real maximum-size expansion and cancellation need a bounded conformance budget.
-// Keep every byte limit and cancellation assertion unchanged.
 it('accepts the exact XML/entry/expanded byte caps and cancels actual expansion', async () => {
   const max = importLimits.xmlBytes;
   const xml = new Uint8Array(max).fill(32);
@@ -165,7 +163,7 @@ it('accepts the exact XML/entry/expanded byte caps and cancels actual expansion'
   const pending = readOfficeZip(expanded, controller.signal);
   setTimeout(() => controller.abort(), 0);
   await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
-}, 120000);
+}, 30000);
 it('accepts exactly 32 MiB compressed bytes with stored data', async () => {
   const overhead = zipSync({ 'x.bin': new Uint8Array() }, { level: 0 }).length;
   const zip = zipSync(
@@ -176,4 +174,4 @@ it('accepts exactly 32 MiB compressed bytes with stored data', async () => {
   expect((await readOfficeZip(zip)).get('x.bin')?.length).toBe(
     importLimits.compressedBytes - overhead,
   );
-}, 120000);
+}, 30000);

@@ -1,0 +1,16 @@
+{
+  "name": "@editor-platform/extension-reference",
+  "version": "0.0.0-draft.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/extension-runtime": "*",
+    "@editor-platform/extension-sample": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/video-core": "*",
+    "@editor-platform/video-metadata": "*"
+  }
+}

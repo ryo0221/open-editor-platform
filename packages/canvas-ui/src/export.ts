@@ -80,6 +80,7 @@ export async function exportPages(
   format: 'svg' | 'png' | 'pdf',
   scale = 1,
   name = 'export',
+  referenceManifest?: string,
 ) {
   if (!pages.length) throw new Error('Choose at least one page to export');
   if (format === 'pdf') {
@@ -92,11 +93,17 @@ export async function exportPages(
       const page = pdf.addPage([source.width * 0.75, source.height * 0.75]);
       page.drawImage(image, { x: 0, y: 0, width: page.getWidth(), height: page.getHeight() });
     }
+    if (referenceManifest)
+      await pdf.attach(strToU8(referenceManifest), 'references.json', {
+        mimeType: 'application/json',
+        description: 'Exact committed artifact sources used by this export',
+      });
     const bytes = await pdf.save();
     downloadBlob(`${name}.pdf`, new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }));
     return;
   }
   const files: Record<string, Uint8Array> = {};
+  if (referenceManifest) files['references.json'] = strToU8(referenceManifest);
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i];
     files[

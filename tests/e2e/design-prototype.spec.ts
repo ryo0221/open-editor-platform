@@ -382,7 +382,9 @@ test('normal Host waits for delayed authority rejection and preserves comment fo
       const result = await fetch('/collaboration-api/editor/reference-permissions?domain=design', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ writable: false, expiresAt: Date.now() - 1 }),
+        // Revoke writes independently of expiry; the expiry/presence race has
+        // deterministic authority coverage in editor-recovery.test.ts.
+        body: JSON.stringify({ writable: false, expiresAt: Date.now() + 3600000 }),
       });
       if (!result.ok) throw new Error('Failed to revoke reference permission');
     });
@@ -470,7 +472,7 @@ async function referenceGrant(page: import('@playwright/test').Page, writable: b
     const result = await fetch('/collaboration-api/editor/reference-permissions?domain=design', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ writable, expiresAt: Date.now() + (writable ? 3600000 : -1) }),
+      body: JSON.stringify({ writable, expiresAt: Date.now() + 3600000 }),
     });
     if (!result.ok) throw new Error('Failed to change reference permission');
   }, writable);
@@ -499,7 +501,9 @@ async function rejectSubmission(
     release();
   }
   await expect(page.locator('.save-status')).toContainText(`${retainedCount} retained edit(s)`);
-  await page.unroute('**/collaboration-api/submit?*');
+  // Keep the released gate as pass-through until page teardown. Toggling
+  // interception here can strand a concurrent background polling request.
+  // A later rejection installs a newer gate; existing gates are already released.
 }
 
 async function retainedCheckpoint(page: import('@playwright/test').Page) {

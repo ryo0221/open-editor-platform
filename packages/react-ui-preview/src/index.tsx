@@ -128,8 +128,11 @@ export function ReactComposition({
             throw new Error(`Invalid Host event arguments: ${event}`);
           callback?.(node.id, event, args as JsonValue[]);
         };
-    for (const [slotId, slot] of Object.entries(registered.slots))
-      props[slot.prop] = createElement(Fragment, null, ...(node.slots[slotId] ?? []).map(render));
+    for (const [slotId, slot] of Object.entries(registered.slots)) {
+      const children = node.slots[slotId] ?? [];
+      if (children.length)
+        props[slot.prop] = createElement(Fragment, null, ...children.map(render));
+    }
     const className = reactUiClassName(node.id);
     if (registered.layout === 'className') props.className = className;
     if (registered.layout === 'style') props.style = reactUiLayoutAt(document, node, width);

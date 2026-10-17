@@ -153,3 +153,22 @@ it('routes private view draft Undo before native history and keeps Redo availabl
   expect(inputs.getSnapshot().dirty).toBe(1);
   expect(inputs.history('redo')).toBe(false);
 });
+it('rolls back a registration when synchronous listener notification throws', () => {
+  const inputs = new EditorInputs();
+  const prepare = vi.fn(() => () => {});
+  const stop = inputs.subscribe(() => {
+    throw new Error('listener failed');
+  });
+  expect(() =>
+    inputs.register({
+      label: 'never-owned',
+      read: () => ({ dirty: true }),
+      prepare,
+      focus: () => {},
+    }),
+  ).toThrow('Input registration rollback notification failed');
+  stop();
+  expect(inputs.getSnapshot().dirty).toBe(0);
+  inputs.flush();
+  expect(prepare).not.toHaveBeenCalled();
+});

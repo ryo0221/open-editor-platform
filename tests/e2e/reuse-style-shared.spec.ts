@@ -1,6 +1,7 @@
 import { test, expect, nativeArtifact } from './fixtures';
 import { brandStyleFlow } from './reuse-style-fixtures';
-import { reuseMenu, reuseHistory } from './reuse-fixtures';
+import { reuseMenu } from './reuse-fixtures';
+import { reuseSharedHistory } from './reuse-shared-history-fixture';
 import type { DocumentContent } from '@editor-platform/document/model';
 
 test('R06/R07 an open input form preserves the peer mode and a lost combined receipt is idempotent', async ({
@@ -76,12 +77,12 @@ test('R06/R07 an open input form preserves the peer mode and a lost combined rec
   );
   expect(lost).toBe(true);
   await expect.poll(async () => (await nativeArtifact(b)).draft.content).toEqual(current);
-  await reuseHistory(a, 'Undo');
+  await reuseSharedHistory(a, 'Undo');
   await expect.poll(async () => (await nativeArtifact(a)).draft.content).toEqual(peerContent);
   const undone = (await nativeArtifact(a)).draft.content as DocumentContent;
   expect(undone.reuse!.instances[0].mode).toBe('dark');
   expect(undone.blocks.some((block) => block.text === '案件Aの本文')).toBe(true);
-  await reuseHistory(a, 'Redo');
+  await reuseSharedHistory(a, 'Redo');
   await expect.poll(async () => (await nativeArtifact(b)).draft.content).toEqual(current);
   await a.screenshot({ path: info.outputPath('shared-token-mode.png'), fullPage: true });
   await a.unroute('**/collaboration-api/proposal/apply?*');

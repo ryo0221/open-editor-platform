@@ -1,5 +1,12 @@
 # Open Editor Platform
 
+Issue #264 adds reference embeds from committed Data/Graph versions to Document,
+Slide, Design and Whiteboard. Choose **fixed** or **follow saved changes** at creation;
+source updates affect rendering without entering destination Undo. Native files retain
+exact source hashes and Graph Profiles. See the [public contract](docs/artifact-references.md)
+and [verification](docs/verification/issue-264/README.md). Shared reference editing and
+Office/React live-reference export are explicitly unsupported.
+
 Issues #255–#257 add opt-in 10px Design reusable text, public text-fit preflight,
 attributed vector shapes with token-bound fill/stroke, and Noto Sans CJK SVG defaults.
 Existing immutable definitions keep their hashes and layout behavior. See the
@@ -13,10 +20,6 @@ Compact arc flags and XML-safe provenance are supported; template overflow diagn
 identify the input field while empty placeholders keep their geometry and sizing.
 Text expansion accounts for rich line height/padding and updated sibling layout;
 vector records require own fields that survive native JSON save/reload.
-Linked Design updates compare vector geometry and provenance atomically while preserving
-local overrides. Text-fit preflight checks the minimum on effective rich runs. Slide and
-Whiteboard adoption preserve imported opaque vector metadata. See the
-[correction evidence](docs/verification/issues-255-257/typography-layout-review-258.md#post-merge-vector-and-run-minimum-correction).
 
 Design now stores frame interactions and named prototype flows. The ordinary Inspector
 edits element and component-part links; the separate prototype view runs navigation,

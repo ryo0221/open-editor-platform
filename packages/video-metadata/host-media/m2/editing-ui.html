@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video — local review</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      color: #e6edf3;
+      background: #121922;
+      color-scheme: dark;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+    }
+    main {
+      max-width: 1040px;
+      margin: auto;
+    }
+    h1 {
+      font-size: 28px;
+    }
+    label {
+      display: block;
+      margin: 14px 0;
+    }
+    input,
+    select,
+    button {
+      font: inherit;
+      padding: 9px;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    label input,
+    label select {
+      display: block;
+      margin-top: 5px;
+    }
+    button {
+      border: 1px solid #64758a;
+      border-radius: 7px;
+      background: #253a52;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    #actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 20px 0;
+    }
+    canvas {
+      display: block;
+      background: #05080b;
+      width: auto;
+      max-width: 100%;
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+    }
+    pre,
+    #playback {
+      overflow: auto;
+      max-height: 220px;
+      font-size: 12px;
+    }
+    #status {
+      border-left: 3px solid #69b8df;
+      padding: 10px;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 480px) {
+      body {
+        padding: 14px;
+      }
+      button {
+        flex: 1 1 140px;
+      }
+      input,
+      select {
+        width: 100%;
+      }
+    }
+  </style>
+  <main aria-label="Video editor"></main>
+  <script src="/run.js"></script>
+</html>

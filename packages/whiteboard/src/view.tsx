@@ -1,3 +1,15 @@
+import { EditorInputsContext } from '@editor-platform/editor-ui';
+import {
+  assertReferenceItems,
+  referenceExportManifest,
+} from '@editor-platform/artifact-references';
+import {
+  ReferenceTools,
+  ReferenceWarnings,
+  ReferenceInspector,
+  useReferenceItems,
+  type ReferenceSurfaceProps,
+} from '@editor-platform/artifact-references/react';
 import { useContext } from 'react';
 import { EditorExportGuardContext } from '@editor-platform/editor-ui';
 import { useRef, useState, useMemo, useEffect } from 'react';
@@ -62,6 +74,7 @@ import {
   boardPreview,
   transformBoardCommand,
   boardBounds,
+  boardSelection,
   sectionMembers,
   sectionAt,
   nodeSection,
@@ -69,7 +82,7 @@ import {
 import { exportBoardSvg } from './export';
 import { WhiteboardPortsEditor } from './ports';
 import { boardNodeTarget, boardSectionTarget, renderBoardTarget } from './canvas-targets';
-export interface WhiteboardSurfaceProps {
+export interface WhiteboardSurfaceProps extends ReferenceSurfaceProps {
   content: WhiteboardContent;
   execute: (command: EditorCommand<WhiteboardContent>) => void | boolean;
   select: (ids: string[], region?: Region) => void;
@@ -77,6 +90,8 @@ export interface WhiteboardSurfaceProps {
   layout?: Partial<EditorLayoutProps>;
 }
 export function WhiteboardSurface({
+  references,
+  focusReferenceId,
   content: source,
   execute,
   select,
@@ -84,7 +99,10 @@ export function WhiteboardSurface({
   layout,
 }: WhiteboardSurfaceProps) {
   const guardExport = useContext(EditorExportGuardContext);
+  const inputs = useContext(EditorInputsContext);
   const content = useMemo(() => migrateWhiteboard(source), [source]);
+  const projectedNodes = useReferenceItems(content.nodes, references);
+  const projectedById = new Map(projectedNodes.map((n) => [n.id, n]));
   const nodes = useMemo(
     () => new Map(content.nodes.map((node, index) => [node.id, { node, index }])),
     [content],
@@ -143,14 +161,24 @@ export function WhiteboardSurface({
     chosen = content.nodes.filter((n) => ids.includes(n.id)),
     connector = content.connectors.find((c) => c.id === connectorId),
     selectedSection = ids.length === 1 ? content.sections?.find((s) => s.id === ids[0]) : undefined;
-  const exportState = useRef({ content, ids, selectedSection });
-  exportState.current = { content, ids, selectedSection };
+  useEffect(() => {
+    if (focusReferenceId) setSelected([focusReferenceId]);
+  }, [focusReferenceId]);
+  const exportState = useRef({ content, ids, selectedSection, references });
+  exportState.current = { content, ids, selectedSection, references };
   const apply = (cmd: EditorCommand<WhiteboardContent>) => {
     if (readOnly) return false;
+    const checked: EditorCommand<WhiteboardContent> = {
+      ...cmd,
+      apply(current) {
+        const next = cmd.apply(migrateWhiteboard(current));
+        assertReferenceItems(next.nodes);
+        return next;
+      },
+    };
     try {
-      if (!cmd.readonlyInput) cmd.apply(content);
-      if (execute({ ...cmd, apply: (current) => cmd.apply(migrateWhiteboard(current)) }) === false)
-        return false;
+      if (!checked.readonlyInput) checked.apply(content);
+      if (execute(checked) === false) return false;
       setError('');
       return true;
     } catch (e) {
@@ -279,7 +307,9 @@ export function WhiteboardSurface({
   async function output(format: 'svg' | 'png', scope: string) {
     try {
       guardExport?.();
-      const { content, ids, selectedSection } = exportState.current;
+      const initial = exportState.current;
+      let content = initial.content;
+      const { ids, selectedSection } = initial;
       const exportIds =
         scope === 'all'
           ? undefined
@@ -287,6 +317,29 @@ export function WhiteboardSurface({
             ? ids.filter((id) => content.sections?.some((s) => s.id === id))
             : ids;
       if (exportIds && !exportIds.length) throw new Error('Select objects or a Section first');
+      const included = exportIds && boardSelection(content, exportIds);
+      const visible = new Set(
+        whiteboardPaintOrder(content)
+          .filter((n) => !n.hidden)
+          .map((n) => n.id),
+      );
+      let exported = content.nodes.filter(
+        (n) => (!included || included.has(n.id)) && visible.has(n.id),
+      );
+      if (exported.some((n) => n.reference)) {
+        if (!references) throw new Error('参照付きの出力には参照接続が必要です。');
+        exported = await references.capture(exported);
+        if (exportState.current.references !== references)
+          throw new Error('取得中に参照接続が変わりました。再実行してください。');
+        if (
+          exportState.current.content !== content ||
+          inputs?.getSnapshot().dirty ||
+          inputs?.getSnapshot().composing
+        )
+          throw new Error('取得中に入力が変わりました。再実行してください。');
+        const captured = new Map(exported.map((n) => [n.id, n]));
+        content = { ...content, nodes: content.nodes.map((n) => captured.get(n.id) ?? n) };
+      }
       const box = boardBounds(content, exportIds);
       if (format === 'png' && (box.width + 60) * (box.height + 60) > 32_000_000)
         throw new Error('This board is too large for a full-size PNG. Export a Section or SVG.');
@@ -302,6 +355,7 @@ export function WhiteboardSurface({
         format,
         1,
         'whiteboard',
+        referenceExportManifest(exported),
       );
     } catch (e) {
       setError((e as Error).message);
@@ -425,217 +479,232 @@ export function WhiteboardSurface({
     </>
   );
   const inspector = (
-    <fieldset disabled={readOnly} className="inspector-fields">
-      {selectedSection ? (
-        <Section title="Section">
-          <CommitInput
-            label="Section title"
-            value={selectedSection.title}
-            onCommit={(title) => apply(updateSection(selectedSection.id, { title }))}
-          />
-          <label className="ep-field">
-            Section background
-            <input
-              type="color"
-              aria-label="Section background"
-              value={selectedSection.background}
-              onChange={(e) =>
-                apply(updateSection(selectedSection.id, { background: e.target.value }))
-              }
-            />
-          </label>
-          {(['x', 'y', 'width', 'height'] as const).map((key) => (
+    <>
+      <ReferenceInspector
+        item={content.nodes.find((n) => ids.length === 1 && n.id === ids[0])}
+        resolver={references}
+        readOnly={readOnly}
+        patch={(patch) =>
+          apply(
+            patchNodes(ids, {
+              ...patch,
+              imageFit: (patch.reference ?? chosen[0]?.reference)?.fit === 'cover' ? 'fill' : 'fit',
+            }),
+          )
+        }
+      />
+      <fieldset disabled={readOnly} className="inspector-fields">
+        {selectedSection ? (
+          <Section title="Section">
             <CommitInput
-              key={key}
-              label={`Section ${key}`}
-              value={selectedSection.bounds[key]}
-              type="number"
-              min={key === 'width' || key === 'height' ? 40 : undefined}
-              onCommit={(v) =>
-                apply(
-                  transformBoardCommand([selectedSection.id], {
-                    dx: key === 'x' ? Number(v) - selectedSection.bounds.x : 0,
-                    dy: key === 'y' ? Number(v) - selectedSection.bounds.y : 0,
-                    dw: key === 'width' ? Number(v) - selectedSection.bounds.width : 0,
-                    dh: key === 'height' ? Number(v) - selectedSection.bounds.height : 0,
-                  }),
-                )
-              }
-            />
-          ))}
-          <p>{sectionMembers(content, selectedSection.id).length} members · no clipping</p>
-          <button onClick={() => apply(dissolveSection(selectedSection.id))}>
-            Dissolve Section
-          </button>
-          <button onClick={() => apply(dissolveSection(selectedSection.id, true))}>
-            Delete Section and contents
-          </button>
-          <button onClick={() => void output('svg', 'section')}>Export Section SVG</button>
-        </Section>
-      ) : connector ? (
-        <>
-          <Section title="Connector">
-            <CommitInput
-              label="Connector label"
-              value={connector.label}
-              onCommit={(label) => apply(updateConnector(connector.id, { label }))}
+              label="Section title"
+              value={selectedSection.title}
+              onCommit={(title) => apply(updateSection(selectedSection.id, { title }))}
             />
             <label className="ep-field">
-              Routing
-              <select
-                aria-label="Connector routing"
-                value={connector.routing ?? 'straight'}
+              Section background
+              <input
+                type="color"
+                aria-label="Section background"
+                value={selectedSection.background}
                 onChange={(e) =>
+                  apply(updateSection(selectedSection.id, { background: e.target.value }))
+                }
+              />
+            </label>
+            {(['x', 'y', 'width', 'height'] as const).map((key) => (
+              <CommitInput
+                key={key}
+                label={`Section ${key}`}
+                value={selectedSection.bounds[key]}
+                type="number"
+                min={key === 'width' || key === 'height' ? 40 : undefined}
+                onCommit={(v) =>
                   apply(
-                    updateConnector(connector.id, {
-                      routing: e.target.value as WhiteboardConnector['routing'],
+                    transformBoardCommand([selectedSection.id], {
+                      dx: key === 'x' ? Number(v) - selectedSection.bounds.x : 0,
+                      dy: key === 'y' ? Number(v) - selectedSection.bounds.y : 0,
+                      dw: key === 'width' ? Number(v) - selectedSection.bounds.width : 0,
+                      dh: key === 'height' ? Number(v) - selectedSection.bounds.height : 0,
                     }),
                   )
                 }
-              >
-                {['straight', 'elbow', 'curve'].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-            <CommitInput
-              label="Connector stroke"
-              value={connector.stroke ?? '#637187'}
-              onCommit={(stroke) => apply(updateConnector(connector.id, { stroke }))}
-            />
-            <CommitInput
-              label="Connector width (px)"
-              type="number"
-              min={1}
-              value={connector.strokeWidth ?? 2}
-              onCommit={(v) => apply(updateConnector(connector.id, { strokeWidth: Number(v) }))}
-            />
-            <label className="ep-field">
-              Arrowheads
-              <select
-                aria-label="Connector arrowheads"
-                value={connector.arrowhead ?? 'end'}
-                onChange={(e) =>
-                  apply(
-                    updateConnector(connector.id, {
-                      arrowhead: e.target.value as WhiteboardConnector['arrowhead'],
-                    }),
-                  )
-                }
-              >
-                {['none', 'end', 'both'].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-            {(['from', 'to'] as const).map((side) => (
-              <div key={side}>
-                <label className="ep-field">
-                  {side} node
-                  <select
-                    aria-label={`${side} node`}
-                    value={connector[side]}
-                    onChange={(e) =>
-                      apply(
-                        updateConnector(connector.id, {
-                          [side]: e.target.value,
-                          [`${side}Port`]: 'auto',
-                          [`${side}Point`]: { x: 0, y: 0 },
-                        }),
-                      )
-                    }
-                  >
-                    <option value="">Free endpoint</option>
-                    {content.nodes
-                      .filter((n) => n.kind !== 'freehand')
-                      .map((n, i) => (
-                        <option key={n.id} value={n.id}>
-                          {n.name || `${n.kind} ${i + 1}`}
+              />
+            ))}
+            <p>{sectionMembers(content, selectedSection.id).length} members · no clipping</p>
+            <button onClick={() => apply(dissolveSection(selectedSection.id))}>
+              Dissolve Section
+            </button>
+            <button onClick={() => apply(dissolveSection(selectedSection.id, true))}>
+              Delete Section and contents
+            </button>
+            <button onClick={() => void output('svg', 'section')}>Export Section SVG</button>
+          </Section>
+        ) : connector ? (
+          <>
+            <Section title="Connector">
+              <CommitInput
+                label="Connector label"
+                value={connector.label}
+                onCommit={(label) => apply(updateConnector(connector.id, { label }))}
+              />
+              <label className="ep-field">
+                Routing
+                <select
+                  aria-label="Connector routing"
+                  value={connector.routing ?? 'straight'}
+                  onChange={(e) =>
+                    apply(
+                      updateConnector(connector.id, {
+                        routing: e.target.value as WhiteboardConnector['routing'],
+                      }),
+                    )
+                  }
+                >
+                  {['straight', 'elbow', 'curve'].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              <CommitInput
+                label="Connector stroke"
+                value={connector.stroke ?? '#637187'}
+                onCommit={(stroke) => apply(updateConnector(connector.id, { stroke }))}
+              />
+              <CommitInput
+                label="Connector width (px)"
+                type="number"
+                min={1}
+                value={connector.strokeWidth ?? 2}
+                onCommit={(v) => apply(updateConnector(connector.id, { strokeWidth: Number(v) }))}
+              />
+              <label className="ep-field">
+                Arrowheads
+                <select
+                  aria-label="Connector arrowheads"
+                  value={connector.arrowhead ?? 'end'}
+                  onChange={(e) =>
+                    apply(
+                      updateConnector(connector.id, {
+                        arrowhead: e.target.value as WhiteboardConnector['arrowhead'],
+                      }),
+                    )
+                  }
+                >
+                  {['none', 'end', 'both'].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              {(['from', 'to'] as const).map((side) => (
+                <div key={side}>
+                  <label className="ep-field">
+                    {side} node
+                    <select
+                      aria-label={`${side} node`}
+                      value={connector[side]}
+                      onChange={(e) =>
+                        apply(
+                          updateConnector(connector.id, {
+                            [side]: e.target.value,
+                            [`${side}Port`]: 'auto',
+                            [`${side}Point`]: { x: 0, y: 0 },
+                          }),
+                        )
+                      }
+                    >
+                      <option value="">Free endpoint</option>
+                      {content.nodes
+                        .filter((n) => n.kind !== 'freehand')
+                        .map((n, i) => (
+                          <option key={n.id} value={n.id}>
+                            {n.name || `${n.kind} ${i + 1}`}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="ep-field">
+                    {side} port
+                    <select
+                      aria-label={`${side} port`}
+                      value={connector[`${side}Port`] ?? 'auto'}
+                      onChange={(e) =>
+                        apply(updateConnector(connector.id, { [`${side}Port`]: e.target.value }))
+                      }
+                    >
+                      {['auto', 'top', 'right', 'bottom', 'left'].map((v) => (
+                        <option key={v}>{v}</option>
+                      ))}
+                      {nodes.get(connector[side])?.node.ports?.map((port) => (
+                        <option key={port.key} value={port.key}>
+                          {port.label}
                         </option>
                       ))}
-                  </select>
-                </label>
-                <label className="ep-field">
-                  {side} port
-                  <select
-                    aria-label={`${side} port`}
-                    value={connector[`${side}Port`] ?? 'auto'}
-                    onChange={(e) =>
-                      apply(updateConnector(connector.id, { [`${side}Port`]: e.target.value }))
-                    }
-                  >
-                    {['auto', 'top', 'right', 'bottom', 'left'].map((v) => (
-                      <option key={v}>{v}</option>
-                    ))}
-                    {nodes.get(connector[side])?.node.ports?.map((port) => (
-                      <option key={port.key} value={port.key}>
-                        {port.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            ))}
-            <button onClick={() => action('delete')}>Delete connector</button>
-            <p className="hint">
-              Drag an endpoint onto a node edge to attach it. Dropping on empty space makes it a
-              free endpoint. Deleting a connected node removes incident connectors; Undo restores
-              them.
-            </p>
-          </Section>
-        </>
-      ) : (
-        <VisualInspector
-          items={chosen.map(whiteboardDrawing)}
-          onGeometry={geometry}
-          onPatch={({ fill, ...patch }) =>
-            apply(patchNodes(ids, { ...patch, ...(fill ? { color: fill } : {}) }))
-          }
-          onReplace={(file) => {
-            void readImage(file)
-              .then((src) => apply(patchNodes(ids, { src })))
-              .catch((e) => setError(String(e)));
-          }}
-        />
-      )}
-      {!connector && chosen.length > 0 && (
-        <Section title="Membership">
-          <label className="ep-field">
-            Section
-            <select
-              aria-label="Object Section"
-              value={nodeSection(content, chosen[0]) ?? ''}
-              onChange={(e) => apply(assignSection(ids, e.target.value || undefined))}
-            >
-              <option value="">Outside Sections</option>
-              {content.sections?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title}
-                </option>
+                    </select>
+                  </label>
+                </div>
               ))}
-            </select>
-          </label>
-        </Section>
-      )}
-      {chosen.length === 1 && !connector && (
-        <WhiteboardPortsEditor
-          ports={chosen[0].ports}
-          used={content.connectors.flatMap((c) =>
-            [
-              c.from === chosen[0].id ? c.fromPort : undefined,
-              c.to === chosen[0].id ? c.toPort : undefined,
-            ].filter((p): p is string => !!p),
-          )}
-          onChange={(ports) => apply(patchNodes([chosen[0].id], { ports }))}
-        />
-      )}
-      {!connector && !chosen.length && !selectedSection && (
-        <p>
-          Insert shapes, connect two selected nodes, or draw with the pen. Space pans temporarily;
-          Ctrl/⌘ + wheel zooms at the pointer.
-        </p>
-      )}
-    </fieldset>
+              <button onClick={() => action('delete')}>Delete connector</button>
+              <p className="hint">
+                Drag an endpoint onto a node edge to attach it. Dropping on empty space makes it a
+                free endpoint. Deleting a connected node removes incident connectors; Undo restores
+                them.
+              </p>
+            </Section>
+          </>
+        ) : (
+          <VisualInspector
+            items={chosen.map(whiteboardDrawing)}
+            onGeometry={geometry}
+            onPatch={({ fill, ...patch }) =>
+              apply(patchNodes(ids, { ...patch, ...(fill ? { color: fill } : {}) }))
+            }
+            onReplace={(file) => {
+              void readImage(file)
+                .then((src) => apply(patchNodes(ids, { src, reference: undefined })))
+                .catch((e) => setError(String(e)));
+            }}
+          />
+        )}
+        {!connector && chosen.length > 0 && (
+          <Section title="Membership">
+            <label className="ep-field">
+              Section
+              <select
+                aria-label="Object Section"
+                value={nodeSection(content, chosen[0]) ?? ''}
+                onChange={(e) => apply(assignSection(ids, e.target.value || undefined))}
+              >
+                <option value="">Outside Sections</option>
+                {content.sections?.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </Section>
+        )}
+        {chosen.length === 1 && !connector && (
+          <WhiteboardPortsEditor
+            ports={chosen[0].ports}
+            used={content.connectors.flatMap((c) =>
+              [
+                c.from === chosen[0].id ? c.fromPort : undefined,
+                c.to === chosen[0].id ? c.toPort : undefined,
+              ].filter((p): p is string => !!p),
+            )}
+            onChange={(ports) => apply(patchNodes([chosen[0].id], { ports }))}
+          />
+        )}
+        {!connector && !chosen.length && !selectedSection && (
+          <p>
+            Insert shapes, connect two selected nodes, or draw with the pen. Space pans temporarily;
+            Ctrl/⌘ + wheel zooms at the pointer.
+          </p>
+        )}
+      </fieldset>
+    </>
   );
   function edgeRender(projected: CanvasTarget[], handlesOnly = false) {
     const targetAt = (point: { x: number; y: number }) =>
@@ -833,6 +902,20 @@ export function WhiteboardSurface({
   }
   const toolbar = (
     <>
+      <ReferenceTools
+        identity={ids.join(',')}
+        resolver={references}
+        readOnly={readOnly}
+        insert={(reference, src, label) =>
+          add('image', {
+            reference,
+            src,
+            alt: label,
+            imageFit: 'fit',
+            bounds: { x: 80, y: 140, width: 700, height: 320 },
+          })
+        }
+      />
       <InsertTools
         readOnly={readOnly}
         onShape={(shape: ShapeKind) => add('shape', { shape, text: '' })}
@@ -966,6 +1049,7 @@ export function WhiteboardSurface({
       {...layout}
     >
       <div ref={viewport} style={{ height: '100%' }}>
+        <ReferenceWarnings items={content.nodes} resolver={references} />
         {error && (
           <div className="surface-error" role="alert">
             {error}
@@ -984,7 +1068,10 @@ export function WhiteboardSurface({
           readOnly={readOnly}
           targets={[
             ...(content.sections ?? []).map((s) => boardSectionTarget(s, view.zoom)),
-            ...paintOrder.map((n) => boardNodeTarget(n, nodes.get(n.id)!.index)),
+            ...paintOrder.map((n) => {
+              const src = (projectedById.get(n.id) ?? n).src;
+              return boardNodeTarget(src === n.src ? n : { ...n, src }, nodes.get(n.id)!.index);
+            }),
           ]}
           onSelect={choose}
           previewTransform={(ids, delta) => boardPreview(content, ids, delta)}

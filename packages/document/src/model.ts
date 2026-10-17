@@ -1,4 +1,11 @@
 import {
+  validEmbeddedReference,
+  validReferenceItems,
+  describeReference,
+  referenceExportManifest,
+  type EmbeddedReference,
+} from '@editor-platform/artifact-references';
+import {
   clone,
   diffElements,
   isDeepFrozen,
@@ -66,6 +73,7 @@ export function nestedLists(item: DocumentListItem): NonNullable<DocumentListIte
   );
 }
 export interface DocumentBlock {
+  reference?: EmbeddedReference;
   id: string;
   type: BlockType;
   text: string;
@@ -359,6 +367,7 @@ export function documentDiff(a: DocumentContent, b: DocumentContent): CompareRes
     !block
       ? undefined
       : exportMarkdown({ schemaVersion: 2, blocks: [block] }).trim() +
+        describeReference(block) +
         formatting(block) +
         `\n[${block.type}; alignment: ${block.align ?? 'left'}; indent: ${block.indent ?? 0}${block.width ? `; width: ${block.width}` : ''}${block.columnWidths ? `; columns: ${block.columnWidths.join(', ')}` : ''}${block.merges?.length ? `; merged cells: ${block.merges.map((m) => `${m.row + 1}:${m.col + 1} (${m.rows}×${m.cols})`).join(', ')}` : ''}]`;
   return {
@@ -594,7 +603,7 @@ export function exportHtml(doc: DocumentContent): string {
       return `<p style="${style}">${text}</p>`;
     })
     .join('\n');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><title>Document</title><style>body{max-width:800px;margin:40px auto;font:16px/1.6 system-ui;padding:16px}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #aaa;padding:8px}th{background:#f1f4f9}img{max-width:100%;height:auto}figure{margin:16px 0}figcaption{color:#667085;font-size:13px}pre{white-space:pre-wrap}a{color:#3957bd}code{font-family:monospace}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'"><title>Document</title>${referenceExportManifest(doc.blocks.filter((block) => !block.hidden)) ? `<meta name="artifact-references" content="${escapeHtml(referenceExportManifest(doc.blocks.filter((block) => !block.hidden))!)}"/>` : ''}<style>body{max-width:800px;margin:40px auto;font:16px/1.6 system-ui;padding:16px}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #aaa;padding:8px}th{background:#f1f4f9}img{max-width:100%;height:auto}figure{margin:16px 0}figcaption{color:#667085;font-size:13px}pre{white-space:pre-wrap}a{color:#3957bd}code{font-family:monospace}</style></head><body>${body}</body></html>`;
 }
 function validSpans(value: unknown): value is InlineSpan[] {
   return (
@@ -725,7 +734,8 @@ export function isDocument(value: unknown): value is DocumentContent {
         Number.isFinite(d.page.margin) &&
         d.page.margin >= 24 &&
         d.page.margin <= 160)) &&
-    validBlocks(d.blocks)
+    validBlocks(d.blocks) &&
+    validReferenceItems(d.blocks)
   );
 }
 const checkedBlockLists = new WeakSet<DocumentBlock[]>();
@@ -761,6 +771,8 @@ function validBlocks(blocks: DocumentBlock[]): boolean {
         (b.merges === undefined || validMerges(b)) &&
         (b.level === undefined || (Number.isInteger(b.level) && b.level >= 1 && b.level <= 6)) &&
         (b.src === undefined || (typeof b.src === 'string' && (!b.src || safeAssetUrl(b.src)))) &&
+        (b.reference === undefined ||
+          (b.type === 'image' && validEmbeddedReference(b.reference))) &&
         [
           'heading',
           'paragraph',

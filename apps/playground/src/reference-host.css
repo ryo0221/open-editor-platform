@@ -1,0 +1,30 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font:
+    14px system-ui,
+    sans-serif;
+}
+.reference-host {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.reference-host > header,
+.reference-host > nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  flex-wrap: wrap;
+}
+.reference-host > .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.reference-host > p[role='alert'] {
+  color: #a4343b;
+}

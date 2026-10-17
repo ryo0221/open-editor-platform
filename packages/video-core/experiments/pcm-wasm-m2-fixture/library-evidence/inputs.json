@@ -1,0 +1,342 @@
+{
+  "package": "mediabunny",
+  "version": "1.61.3",
+  "files": [
+    {
+      "path": "dist/modules/shared/aac-misc.js",
+      "sha256": "c8dac38aee86b0950475da4a1e195a215a4828c2080268d22573babb581e60b2"
+    },
+    {
+      "path": "dist/modules/shared/ac3-misc.js",
+      "sha256": "222083675bd08e11a52fd8215a0bd3af995dd62d3e6a7313d496dd0903ab2cb3"
+    },
+    {
+      "path": "dist/modules/shared/bitstream.js",
+      "sha256": "527ec409647a07c8d3a9ccd945c61db1dceedfe3533f1256bdab9371055780f1"
+    },
+    {
+      "path": "dist/modules/shared/dts-misc.js",
+      "sha256": "305eccf234ab3153b6c11c6c434051385b654e1cd7f5faefafc7a64fc407ab43"
+    },
+    {
+      "path": "dist/modules/shared/mp3-misc.js",
+      "sha256": "abc88be5cd537073963e10be92e6355819220360d756b482c7c851d778e472c0"
+    },
+    {
+      "path": "dist/modules/src/adts/adts-demuxer.js",
+      "sha256": "93801ff68ab9121f01e58fa6fa25a06af17d1bf6f0c27d8bc7973402c3c7c111"
+    },
+    {
+      "path": "dist/modules/src/adts/adts-muxer.js",
+      "sha256": "f3e6e2806d85e22c15f9caa148ec7af2d860c21489dfd04dd4d0c76637587948"
+    },
+    {
+      "path": "dist/modules/src/adts/adts-reader.js",
+      "sha256": "ea8df3aa2fe41c9afc14a6c98f56d473c010c4db6ed4e0889962ee1129fba031"
+    },
+    {
+      "path": "dist/modules/src/aes.js",
+      "sha256": "334bcda96bff65ff9b0247cec04522cc1dc80b583d052ab07a4a799b5ab03ed0"
+    },
+    {
+      "path": "dist/modules/src/codec-data.js",
+      "sha256": "559d15865d8594f4b76d840bb13c4f81fa5a808b2a107c8e2b3dde11919941b9"
+    },
+    {
+      "path": "dist/modules/src/codec.js",
+      "sha256": "a3e253112318b2a0a053a948beded1f3877991b6ef8a047e782817e1cdb43843"
+    },
+    {
+      "path": "dist/modules/src/conversion.js",
+      "sha256": "eea00b74f5544381e5d49b6fc0e4bdb199becaabdde487f4cdf530aa2aa4e4a7"
+    },
+    {
+      "path": "dist/modules/src/custom-coder.js",
+      "sha256": "03dc7a8cf76b5d2f9e8704d0d33cd714eed08dbc9957ff9f4e722cdd0a5c5377"
+    },
+    {
+      "path": "dist/modules/src/decode.js",
+      "sha256": "3d8e3b581be4d8bf0ecde649db8f2e0b9cc2a09e346b28fe30b93bd3d2d5b05b"
+    },
+    {
+      "path": "dist/modules/src/demuxer.js",
+      "sha256": "74c71b6e4a540ffc2229e85bd331571547a390e657285a7e556c338e5ac96988"
+    },
+    {
+      "path": "dist/modules/src/encode.js",
+      "sha256": "1720841c25a557039aa8e9235c619d525ba219cc518d544ea0edb6ffbbd2d73b"
+    },
+    {
+      "path": "dist/modules/src/flac/flac-demuxer.js",
+      "sha256": "758bd553c986037d59b4139f8bdbc990762995ee06d36310154e79c44ff763ee"
+    },
+    {
+      "path": "dist/modules/src/flac/flac-misc.js",
+      "sha256": "3879c8a4016b9c2cc82d5e7ccbe99e2a8bb13b3b62de66360e7c9ccea76172b4"
+    },
+    {
+      "path": "dist/modules/src/flac/flac-muxer.js",
+      "sha256": "15e779e7c271bdc633b00d0f2a7a7b37a51f8168b3d1584b9d8e7efc62963f58"
+    },
+    {
+      "path": "dist/modules/src/hls/hls-demuxer.js",
+      "sha256": "4ff8c54604a19ecc4fd28f582800f7bd165e7f8b0eab9cd77aeddb14d516663b"
+    },
+    {
+      "path": "dist/modules/src/hls/hls-misc.js",
+      "sha256": "a00dec53a1dd221b50640ac550eaf3bc7f5da980f9e69c9035e884a37fbf4cc2"
+    },
+    {
+      "path": "dist/modules/src/hls/hls-muxer.js",
+      "sha256": "ed3ceaa221758e9e0bb8ba7693af5c067950e5afb803eefbe03ffffe670debd4"
+    },
+    {
+      "path": "dist/modules/src/hls/hls-segmented-input.js",
+      "sha256": "594fd2e18760a6f245048b3516937f430f9b5f00dfe7661d156d3d73808e88f3"
+    },
+    {
+      "path": "dist/modules/src/id3.js",
+      "sha256": "d5ef8dcb79f631ced528417d6671264112c91396a04e19e526ca18015fd931d3"
+    },
+    {
+      "path": "dist/modules/src/index.js",
+      "sha256": "9236aa229772332a4f5ed04e453d8794a84311468012a9dd0de78e35301d39c0"
+    },
+    {
+      "path": "dist/modules/src/input-format.js",
+      "sha256": "e3d0b9592c384d4c8fdd4316607509feea88fef9b5abd86d499561e3464368ee"
+    },
+    {
+      "path": "dist/modules/src/input-track.js",
+      "sha256": "62d92b4168479cc3b870f776a385bf3d99519abe4710e0c4e765b9a52084ebde"
+    },
+    {
+      "path": "dist/modules/src/input.js",
+      "sha256": "06d8747512f394356d8480b0a18507ff5798c9d282771d1212b79e341dff9833"
+    },
+    {
+      "path": "dist/modules/src/isobmff/isobmff-boxes.js",
+      "sha256": "f833faaa2b3e2ec8da17089282f9eb122a03845cfd60735e103021a187b86ae3"
+    },
+    {
+      "path": "dist/modules/src/isobmff/isobmff-demuxer.js",
+      "sha256": "dedd752aef9931e2ab463cf50ad752a3a86b0b79d0060517b811d1881354a40a"
+    },
+    {
+      "path": "dist/modules/src/isobmff/isobmff-misc.js",
+      "sha256": "b18147ea5ecd7a6eff5ee35c912a818d0fce67eb0cd43fe18eb1ac2f9bb870bd"
+    },
+    {
+      "path": "dist/modules/src/isobmff/isobmff-muxer.js",
+      "sha256": "f6dd74e749ad8bf84745ad85022ae7759755a3c869638042ceb277ccbdfa5186"
+    },
+    {
+      "path": "dist/modules/src/isobmff/isobmff-reader.js",
+      "sha256": "0d572b70f0a71a0057548990d645b4404f913791ce89b65118b149d9ef8addee"
+    },
+    {
+      "path": "dist/modules/src/logging.js",
+      "sha256": "8ea04ec2708ae6458e758feeac5434a15f695e71f516ab7129e2047e444aa044"
+    },
+    {
+      "path": "dist/modules/src/matroska/ebml.js",
+      "sha256": "47beb4eaa3edc9a65e4047d61cd923a067d30196f2e6a21444a499d13f449488"
+    },
+    {
+      "path": "dist/modules/src/matroska/matroska-demuxer.js",
+      "sha256": "bdbae8a5706fb5d2bc891ee58f8b016647436c0cb4f4a6b7d720e938296da2a4"
+    },
+    {
+      "path": "dist/modules/src/matroska/matroska-misc.js",
+      "sha256": "0e97b7d06659a3b81c62a858e06be1457b99ed971ae6c741762b8c83617fd533"
+    },
+    {
+      "path": "dist/modules/src/matroska/matroska-muxer.js",
+      "sha256": "531ea55a6e46bb78ac6b9b52be76c95a57e21626d8422af3d6b427e21fcec049"
+    },
+    {
+      "path": "dist/modules/src/media-sink.js",
+      "sha256": "00d9cb485c47085c3eefc3a05d50014866cdf4d65851e15241760a288a0f122d"
+    },
+    {
+      "path": "dist/modules/src/media-source.js",
+      "sha256": "1c60a60034eff049d8ee1a973de7ef665bb8e648ee14854227150556e25f9088"
+    },
+    {
+      "path": "dist/modules/src/metadata.js",
+      "sha256": "dda49ab5e5230fa874c73f44d1e0963f18ff3f4e2a81229cc75fb713b365e981"
+    },
+    {
+      "path": "dist/modules/src/misc.js",
+      "sha256": "8d12fa80d5793c14a3d71909723af9c584ee096e4140c2cf6c78afab7629917b"
+    },
+    {
+      "path": "dist/modules/src/mp3/mp3-demuxer.js",
+      "sha256": "fbf57f9a05d7cc74e5a62bcd4d3884122fde6b8802c2eb57054b7fabf662e665"
+    },
+    {
+      "path": "dist/modules/src/mp3/mp3-muxer.js",
+      "sha256": "88fb19eb7164d911bcf73e5ebf7f9acf39f62eac50f64cb2d01df71846dcab45"
+    },
+    {
+      "path": "dist/modules/src/mp3/mp3-reader.js",
+      "sha256": "3ccee5ef547029e94ba00cf1cce1e8523eac2f1cd0bdc061949caef4f319303a"
+    },
+    {
+      "path": "dist/modules/src/mp3/mp3-writer.js",
+      "sha256": "af1622b39d2c69a3e638e47d704f0d74fa43154731949783b8eec73f451b6164"
+    },
+    {
+      "path": "dist/modules/src/mpeg-ts/mpeg-ts-demuxer.js",
+      "sha256": "7e2310106c723a29adac8cdece35f4d7e4f10d5a83d47e4f9b37f847aec62b6f"
+    },
+    {
+      "path": "dist/modules/src/mpeg-ts/mpeg-ts-misc.js",
+      "sha256": "62b41afc052c43ace7a08b0b6e2c13e6dfd50b3e65d6ab5f393b5f7b1762e97f"
+    },
+    {
+      "path": "dist/modules/src/mpeg-ts/mpeg-ts-muxer.js",
+      "sha256": "5f8f4d18a5b885e71cfb4824f8beae79152fb32b31e9a9219da8ceb5ef4df559"
+    },
+    {
+      "path": "dist/modules/src/muxer.js",
+      "sha256": "3129f18d22c7044abfb53ae61068d0b232fdbca1e31d7133110a172b5acc9e35"
+    },
+    {
+      "path": "dist/modules/src/node.js",
+      "sha256": "f9fbb4d674ff92ecb3d35fd8c58d7d68ce05769e26f8a142975f13037af1a741"
+    },
+    {
+      "path": "dist/modules/src/ogg/ogg-demuxer.js",
+      "sha256": "0a21fc919e6a24fe1be5e6e62a03353781eb989434dafe7ea90af748d25989e0"
+    },
+    {
+      "path": "dist/modules/src/ogg/ogg-misc.js",
+      "sha256": "ddf9c571f42b41a664b75002e4e15c536f93594ad16d74fad707bb6434b3a88a"
+    },
+    {
+      "path": "dist/modules/src/ogg/ogg-muxer.js",
+      "sha256": "2ba7fcb1ef076354e9c8e99397fa0ecf2ed95bc40af8e9722ba5d1a9f201bbd9"
+    },
+    {
+      "path": "dist/modules/src/ogg/ogg-reader.js",
+      "sha256": "d8b7f641eeff339d2310e61c9ff3379e6817b0d1831399b4ebb75d91be9ad26d"
+    },
+    {
+      "path": "dist/modules/src/output-format.js",
+      "sha256": "e51e9874b92701d7fa896f48f57fd5b23b4d18bc913fd5fda90832419e85f9a2"
+    },
+    {
+      "path": "dist/modules/src/output.js",
+      "sha256": "699dae1192ee789c32577a0cf2e9980d41845af4e66b8ba626e6ba87f9b511b3"
+    },
+    {
+      "path": "dist/modules/src/packet.js",
+      "sha256": "3f8a7af5289a4ef053b6b2172e7e576f9e62b5114b236a2bdc8dfac69529edce"
+    },
+    {
+      "path": "dist/modules/src/pcm.js",
+      "sha256": "8c9721d0b114a0241b30b16085bef38c8def009147396f37320ddb613a0b4f78"
+    },
+    {
+      "path": "dist/modules/src/reader.js",
+      "sha256": "ca1c5fe8169c6355545191c6c0183135759f248c1ce1de5c51821545c7bea445"
+    },
+    {
+      "path": "dist/modules/src/resample.js",
+      "sha256": "250ea3fae52f17d38ed2d63e8fc453e46f0841c784963095dc9e71bf8442d486"
+    },
+    {
+      "path": "dist/modules/src/sample.js",
+      "sha256": "bc8525161fff7467c25aab3f83bbf1a1dc602ae869a5b572c6dbba1a6cc4dfb9"
+    },
+    {
+      "path": "dist/modules/src/segmented-input.js",
+      "sha256": "dc7309ab41ab5181367b8873b5c431d8e2240132b2412fba2f5836beaf9d6eca"
+    },
+    {
+      "path": "dist/modules/src/source.js",
+      "sha256": "b9653528b9a6c5acdf763468f824de7b22539165b927b5e4f067d63b8eeb280d"
+    },
+    {
+      "path": "dist/modules/src/subtitles.js",
+      "sha256": "4131d7d5a16d7d9c1cea4b31eebb13b795928a810bf9106f0ec468e4f6cba2ee"
+    },
+    {
+      "path": "dist/modules/src/target.js",
+      "sha256": "e9f155967f4f3d05306088ce9d805e676ee105142b4fe65f5dbc069f18c8f3ae"
+    },
+    {
+      "path": "dist/modules/src/version.js",
+      "sha256": "3536d676d317b7a2cf20a56560756e234f084697900c83b14e62a0a05b08882a"
+    },
+    {
+      "path": "dist/modules/src/wave/riff-writer.js",
+      "sha256": "083589206c6cb71b88cfbf907dd13cae7efc2ec9c60f0add021e5b98e88bd7bc"
+    },
+    {
+      "path": "dist/modules/src/wave/wave-demuxer.js",
+      "sha256": "908863c6b29f9d5976b4dd62f287f872bde3c6d807b3f0e1612e66379b37c80e"
+    },
+    {
+      "path": "dist/modules/src/wave/wave-muxer.js",
+      "sha256": "8863ec0cac040385f384ae99391e34beb7e1aeaefdb529ecd4d743eae29437e1"
+    },
+    {
+      "path": "dist/modules/src/writer.js",
+      "sha256": "c3a226a40875d81f5e782707816429aa3bad5a877947444efa85b7064dfd0178"
+    },
+    {
+      "path": "package.json",
+      "sha256": "f8cf1d42f0f505230f146a8af0d5097655636a149d5496d128a23d9d23a98f43"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    }
+  ],
+  "excerpts": [
+    {
+      "source": "dist/modules/src/sample.js",
+      "firstLine": 1711,
+      "lastLine": 1717,
+      "text": "export class AudioSampleResource {\n    constructor() {\n        /** @internal */\n        this._referenceCount = 0;\n    }\n}\n/**\n"
+    },
+    {
+      "source": "dist/modules/src/sample.js",
+      "firstLine": 1747,
+      "lastLine": 1772,
+      "text": "        else if (init instanceof AudioSampleResource) {\n            this._data = init;\n            init._referenceCount++;\n            this.format = init.getFormat();\n            if (!AUDIO_SAMPLE_FORMATS.has(this.format)) {\n                throw new TypeError('getFormat() must return an AudioSampleFormat.');\n            }\n            this.sampleRate = init.getSampleRate();\n            if (!Number.isInteger(this.sampleRate) || this.sampleRate <= 0) {\n                throw new TypeError('getSampleRate() must return a positive integer.');\n            }\n            this.numberOfFrames = init.getNumberOfFrames();\n            if (!Number.isInteger(this.numberOfFrames) || this.numberOfFrames < 0) {\n                throw new TypeError('getNumberOfFrames() must return a non-negative integer.');\n            }\n            this.numberOfChannels = init.getNumberOfChannels();\n            if (!Number.isInteger(this.numberOfChannels) || this.numberOfChannels <= 0) {\n                throw new TypeError('getNumberOfChannels() must return a positive integer.');\n            }\n            this.timestamp = init.getTimestamp();\n            if (!Number.isFinite(this.timestamp)) {\n                throw new TypeError('getTimestamp() must return a finite number.');\n            }\n            this.duration = this.numberOfFrames / this.sampleRate;\n        }\n        else {\n"
+    },
+    {
+      "source": "dist/modules/src/sample.js",
+      "firstLine": 2036,
+      "lastLine": 2061,
+      "text": "    clone() {\n        if (this._closed) {\n            throw new Error('AudioSample is closed.');\n        }\n        if (this._data instanceof AudioSampleResource) {\n            const sample = new AudioSample(this._data);\n            sample.setTimestamp(this.timestamp); // Make sure the timestamp is correct\n            return sample;\n        }\n        else if (isAudioData(this._data)) {\n            const sample = new AudioSample(this._data.clone());\n            sample.setTimestamp(this.timestamp);\n            return sample;\n        }\n        else {\n            return new AudioSample({\n                format: this.format,\n                sampleRate: this.sampleRate,\n                numberOfFrames: this.numberOfFrames,\n                numberOfChannels: this.numberOfChannels,\n                timestamp: this.timestamp,\n                data: this._data,\n            });\n        }\n    }\n    /**\n"
+    },
+    {
+      "source": "dist/modules/src/sample.js",
+      "firstLine": 2127,
+      "lastLine": 2145,
+      "text": "    close() {\n        if (this._closed) {\n            return;\n        }\n        finalizationRegistry?.unregister(this);\n        if (this._data instanceof AudioSampleResource) {\n            this._data._referenceCount--;\n            if (this._data._referenceCount === 0) {\n                this._data.close();\n            }\n        }\n        else if (isAudioData(this._data)) {\n            this._data.close();\n        }\n        else {\n            this._data = new Uint8Array(0);\n        }\n        this._closed = true;\n    }\n"
+    },
+    {
+      "source": "dist/modules/src/media-source.js",
+      "firstLine": 1771,
+      "lastLine": 1786,
+      "text": "            if (this.customEncoder) {\n                this.customEncoderQueueSize++;\n                // We clone the sample so it cannot be closed on us from the outside before it reaches the encoder\n                const clonedSample = audioSample.clone();\n                const promise = this.customEncoderCallSerializer\n                    .call(() => this.customEncoder.encode(clonedSample))\n                    .catch((error) => this.setError(error))\n                    .finally(() => {\n                    this.customEncoderQueueSize--;\n                    clonedSample.close();\n                });\n                if (this.customEncoderQueueSize >= 4) {\n                    await promise;\n                }\n                await this.lastMuxerPromise; // Allow the writer to apply backpressure\n            }\n"
+    },
+    {
+      "source": "dist/modules/src/media-source.js",
+      "firstLine": 2133,
+      "lastLine": 2158,
+      "text": "export class AudioSampleSource extends AudioSource {\n    /**\n     * Creates a new {@link AudioSampleSource} whose samples are encoded according to the specified\n     * {@link AudioEncodingConfig}.\n     */\n    constructor(encodingConfig) {\n        validateAudioEncodingConfig(encodingConfig);\n        super(encodingConfig.codec);\n        this._encoder = new AudioEncoderWrapper(this, encodingConfig);\n    }\n    /**\n     * Encodes an audio sample and then adds it to the output.\n     *\n     * @returns A Promise that resolves once the output is ready to receive more samples. You should await this Promise\n     * to respect writer and encoder backpressure.\n     */\n    add(audioSample) {\n        if (!(audioSample instanceof AudioSample)) {\n            throw new TypeError('audioSample must be an AudioSample.');\n        }\n        return this._encoder.add(audioSample, false);\n    }\n    /** @internal */\n    _flushAndClose(forceClose) {\n        return this._encoder.flushAndClose(forceClose);\n    }\n"
+    },
+    {
+      "source": "dist/modules/src/misc.js",
+      "firstLine": 766,
+      "lastLine": 773,
+      "text": "export class CallSerializer {\n    constructor() {\n        this.currentPromise = Promise.resolve();\n    }\n    call(fn) {\n        return this.currentPromise = this.currentPromise.then(fn);\n    }\n}\n"
+    }
+  ]
+}

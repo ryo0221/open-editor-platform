@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Geo inspector independent Host</title>
+    <style>
+      body {
+        margin: 0;
+        background: #edf3f7;
+        color: #172c3b;
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 900px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      h1 {
+        font-size: 25px;
+        line-height: 1.2;
+      }
+      p {
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Geo independent Host</h1>
+      <p>Local synthetic fixture • fixed read-only capture • experimental draft.2</p>
+      <p id="status" role="status">Starting</p>
+      <div id="surface"></div>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

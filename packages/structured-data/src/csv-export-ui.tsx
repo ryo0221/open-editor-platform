@@ -24,7 +24,7 @@ export function CsvExportDialog({
   const [error, setError] = useState('');
   const preview = prepareCsvExport(data, scope, view);
   return (
-    <Dialog title="CSV export scope" onClose={onClose}>
+    <Dialog exportScope title="CSV export scope" onClose={onClose}>
       <label>
         Rows
         <select

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Local geographic data import</title>
+    <style>
+      body {
+        font: 16px/1.5 system-ui;
+        color: #173247;
+        background: #edf3f7;
+        margin: 16px;
+      }
+      main {
+        max-width: 960px;
+        margin: auto;
+      }
+      section {
+        background: white;
+        padding: 16px;
+        border: 1px solid #aac0cf;
+        border-radius: 8px;
+        margin: 16px 0;
+        overflow-wrap: anywhere;
+      }
+      label {
+        display: block;
+        margin: 8px 0;
+      }
+      input:not([type='checkbox']),
+      select {
+        display: block;
+        max-width: 100%;
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px;
+        font: inherit;
+      }
+      input[type='checkbox'] {
+        margin-right: 8px;
+      }
+      button {
+        padding: 8px;
+        margin: 6px;
+        font: inherit;
+      }
+      fieldset {
+        min-width: 0;
+        margin: 12px 0;
+      }
+      svg {
+        max-width: 100%;
+        height: auto;
+      }
+      table button {
+        white-space: nowrap;
+      }
+      circle {
+        fill: #176a93;
+        stroke: white;
+        stroke-width: 3;
+      }
+      [aria-pressed='true'] circle {
+        fill: #ad4c00;
+        stroke: #351a00;
+      }
+      :focus-visible {
+        outline: 3px solid #195f99;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local geographic data import</h1>
+      <p>
+        Private import preparation and explicit native commit. This test Host retains originals in
+        memory only; no durable source-backed Save or export.
+      </p>
+      <div id="workbench"></div>
+      <button id="undo">Undo import</button><button id="redo">Redo import</button>
+      <div id="imported"></div>
+    </main>
+    <script type="module" src="./import-test.ts"></script>
+  </body>
+</html>

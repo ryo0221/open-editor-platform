@@ -3,6 +3,20 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { reuseHash } from '@editor-platform/reuse-core';
 import { prepareReactScreenProposal, type ReactUiDocument } from '@editor-platform/react-ui-core';
+import type { Locator, Page } from '@playwright/test';
+
+async function captureCard(page: Page, card: Locator, path: string) {
+  // Compare both renderers in the same foreground/paint state. Keep exact PNG
+  // equality; do not tolerate differing pixels or alter the component styles.
+  await page.bringToFront();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  return card.screenshot({ path });
+}
 
 for (const screen of ['product', 'form', 'revised'] as const) {
   test(`W5 ${screen}: identical preview/export at 390/1024/1400px and real callback redraw`, async ({
@@ -78,12 +92,16 @@ for (const screen of ['product', 'form', 'revised'] as const) {
               });
               await expect(output).toBeVisible();
               if (screen === 'product') await expect(output.getByRole('img')).toBeVisible();
-              const before = await preview.screenshot({
-                path: info.outputPath(`preview-${width}.png`),
-              });
-              const after = await output.screenshot({
-                path: info.outputPath(`export-${width}.png`),
-              });
+              const before = await captureCard(
+                page,
+                preview,
+                info.outputPath(`preview-${width}.png`),
+              );
+              const after = await captureCard(
+                independent,
+                output,
+                info.outputPath(`export-${width}.png`),
+              );
               expect(after.equals(before), `Identical ${screen} initial pixels at ${width}px`).toBe(
                 true,
               );
@@ -112,16 +130,18 @@ for (const screen of ['product', 'form', 'revised'] as const) {
                   exact: true,
                 }),
               ).toBeVisible();
+              const exportedInteraction = await captureCard(
+                independent,
+                output,
+                info.outputPath(`export-interaction-${width}.png`),
+              );
+              const previewInteraction = await captureCard(
+                page,
+                preview,
+                info.outputPath(`preview-interaction-${width}.png`),
+              );
               expect(
-                (
-                  await output.screenshot({
-                    path: info.outputPath(`export-interaction-${width}.png`),
-                  })
-                ).equals(
-                  await preview.screenshot({
-                    path: info.outputPath(`preview-interaction-${width}.png`),
-                  }),
-                ),
+                exportedInteraction.equals(previewInteraction),
                 `Identical callback redraw at ${width}px`,
               ).toBe(true);
               expect(await independent.locator('iframe').count()).toBe(0);

@@ -1,4 +1,5 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+import * as engine from './engine';
 import { EditorState, TextSelection, type Transaction } from 'prosemirror-state';
 import { splitBlock } from 'prosemirror-commands';
 import { addRowAfter, addColumnAfter } from 'prosemirror-tables';
@@ -147,4 +148,72 @@ it('retains only unchanged owned blocks while matching the wire projection exact
   );
   expect(next.content.blocks[0]).not.toBe(sourceWithSignedZero.blocks[0]);
   expect(Object.is(next.content.blocks[0].indent, 0)).toBe(true);
+});
+
+it('local EditorView projection reuses persistent untouched nodes across typing and keeps wire parity', async () => {
+  const { createLocalDocumentCommand } = await import('./local-engine-command');
+  const prepare = createLocalDocumentCommand();
+  let content = deepFreeze(fixture());
+  let state = EditorState.create({ doc: contentToNode(content), plugins: [stableIds] });
+  content = prepare(content, state.doc, context).content;
+  const unchanged = content.blocks[1];
+  for (const text of ['a', 'b', 'c']) {
+    const applied = state.applyTransaction(state.tr.insertText(text, 1));
+    const result = prepare(content, applied.state.doc, context);
+    expect(result.content).toEqual(
+      documentUpdateCommand(content, captureDocumentUpdate(applied.transactions), context).apply(
+        content,
+      ),
+    );
+    expect(result.content.blocks[1]).toBe(unchanged);
+    expect(result.command.apply(structuredClone(content))).toBe(result.content);
+    state = applied.state;
+    content = result.content;
+  }
+  const external = deepFreeze({
+    ...content,
+    blocks: content.blocks.map((b, i) =>
+      i ? { id: b.id, type: 'table' as const, text: '', cells: [['External']] } : b,
+    ),
+  });
+  const replaced = EditorState.create({ doc: contentToNode(external), plugins: [stableIds] });
+  expect(prepare(external, replaced.doc, context).content.blocks[1].cells).toEqual([['External']]);
+});
+
+it('projects only the changed top-level engine node after initialization', async () => {
+  const { createLocalDocumentCommand } = await import('./local-engine-command');
+  const prepare = createLocalDocumentCommand();
+  let source = deepFreeze(fixture());
+  let state = EditorState.create({ doc: contentToNode(source), plugins: [stableIds] });
+  source = prepare(source, state.doc, context).content;
+  const project = vi.spyOn(engine, 'nodeToContent');
+  try {
+    state = state.applyTransaction(state.tr.insertText('x', 1)).state;
+    const next = prepare(source, state.doc, context);
+    expect(next.content.blocks[0].text).toContain('x');
+    expect(project).toHaveBeenCalledTimes(1);
+    expect(project.mock.calls[0][0].childCount).toBe(1);
+    expect(next.content.blocks[1]).toBe(source.blocks[1]);
+  } finally {
+    project.mockRestore();
+  }
+});
+
+it('does not certify an identity shortcut through hidden mutable children or accessors', async () => {
+  const { sameDocumentProjection } = await import('./local-engine-command');
+  const hidden = { text: 'mutable' };
+  const value = Object.defineProperty({ text: 'visible' }, 'hidden', { value: hidden });
+  deepFreeze(value);
+  expect(sameDocumentProjection(value, value)).toBe(false);
+  hidden.text = 'changed';
+  expect(sameDocumentProjection(value, value)).toBe(false);
+  const getter = deepFreeze({
+    get text() {
+      return hidden.text;
+    },
+  });
+  expect(sameDocumentProjection(getter, getter)).toBe(false);
+  const owned = deepFreeze({ text: 'owned', nested: { text: 'stable' } });
+  expect(sameDocumentProjection(owned, owned)).toBe(true);
+  expect(sameDocumentProjection(owned, structuredClone(owned))).toBe(true);
 });

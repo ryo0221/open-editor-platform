@@ -215,6 +215,14 @@ export function convertDesignToReact(
     throw new ReactUiError([
       err('native-settings', '$', 'Valid native Design and explicit Web settings are required'),
     ]);
+  if (content.elements.some((e) => e.reference))
+    throw new ReactUiError([
+      err(
+        'reference-export-unsupported',
+        '$',
+        '参照埋め込みのReact変換は未対応です。参照付きnative JSONまたは静的画像出力を使ってください。',
+      ),
+    ]);
   const settings = content.web;
   const diagnostics: ReactUiDiagnostic[] = [];
   const primitives: NativePrimitive[] = [];

@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
     "./views": "./src/views.ts",
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./charts": "./src/charts.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

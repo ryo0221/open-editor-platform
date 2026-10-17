@@ -1,0 +1,17 @@
+{
+  "name": "@editor-platform/artifact-references",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react": "./src/react.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-ui": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

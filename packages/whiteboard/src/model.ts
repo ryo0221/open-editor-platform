@@ -1,3 +1,9 @@
+import {
+  validEmbeddedReference,
+  validReferenceItems,
+  describeReference,
+  type EmbeddedReference,
+} from '@editor-platform/artifact-references';
 import { exportBoardSvg } from './export';
 import { validNativeReuse, type ReuseState } from '@editor-platform/reuse-core';
 import {
@@ -44,6 +50,7 @@ export type WhiteboardNodeKind =
   | 'group'
   | 'freehand';
 export interface WhiteboardNode extends VisualStyle {
+  reference?: EmbeddedReference;
   id: string;
   kind: WhiteboardNodeKind;
   bounds: Bounds;
@@ -182,7 +189,7 @@ export function whiteboardDiff(a: WhiteboardContent, b: WhiteboardContent): Comp
         b.nodes,
         (n) => `${n.kind}: ${n.text.slice(0, 40)}`,
         (n) =>
-          `${describeDrawing(whiteboardDrawing(n))}\nSection: ${[...(b.sections ?? []), ...(a.sections ?? [])].find((s) => s.id === n.sectionId)?.title ?? 'none'}\nGroup: ${n.groupId ?? 'none'}`,
+          `${describeDrawing(whiteboardDrawing(n))}${describeReference(n)}\nSection: ${[...(b.sections ?? []), ...(a.sections ?? [])].find((s) => s.id === n.sectionId)?.title ?? 'none'}\nGroup: ${n.groupId ?? 'none'}`,
       ),
       ...describeChanges(
         a.connectors,
@@ -295,6 +302,7 @@ export function whiteboardPaintOrder(d: WhiteboardContent) {
 export function whiteboardDrawing(n: WhiteboardNode): Drawing {
   return {
     ...n,
+    imageFit: n.reference ? (n.reference.fit === 'cover' ? 'fill' : 'fit') : n.imageFit,
     // Vector geometry is owned by Design, not by undeclared imported fields.
     vector: undefined,
     kind:
@@ -344,6 +352,8 @@ function validNode(node: WhiteboardNode): boolean {
     typeof node.text === 'string' &&
     typeof node.color === 'string' &&
     validVisualStyle(node) &&
+    (node.reference === undefined ||
+      (node.kind === 'image' && validEmbeddedReference(node.reference))) &&
     validBoardPorts(node.ports) &&
     [
       'rectangle',
@@ -369,6 +379,7 @@ export function isWhiteboard(value: unknown): value is WhiteboardContent {
   const nodes = new Set(d.nodes.map((n) => n?.id));
   return (
     (d.schemaVersion === 1 || d.schemaVersion === 2 || d.schemaVersion === 3) &&
+    validReferenceItems(d.nodes) &&
     validNativeReuse(d.reuse, 'whiteboard') &&
     (d.sections === undefined ||
       (Array.isArray(d.sections) &&
@@ -465,7 +476,16 @@ export const patchNodes = (
     if (!('locked' in patch || 'hidden' in patch)) assertEditable(geometry(d), ids);
     return {
       ...d,
-      nodes: d.nodes.map((n) => (ids.includes(n.id) ? patchVisualStyle(n, patch) : n)),
+      nodes: d.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const next = patchVisualStyle(n, patch);
+        if (next.reference && patch.imageFit !== undefined)
+          next.reference = {
+            ...next.reference,
+            fit: patch.imageFit === 'fill' ? 'cover' : 'contain',
+          };
+        return next;
+      }),
     };
   });
 export const alignNodes = (

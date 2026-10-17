@@ -25,6 +25,9 @@ preview幅は390/1024/1400px。Save version、History、native JSONは既存Arti
 
 ## 元部品を登録するHost
 
+汎用の型抽出CLI、Host方針ファイル、候補改訂とcompositionの差分APIは
+[portability手引き](react-ui-portability.md)を参照する。抽出候補は確認前に採用しない。
+
 pureは`@editor-platform/react-ui-core`、通常Viewは`@editor-platform/react-ui`、
 別originでのHost rendererは`@editor-platform/react-ui-preview`の公開entrypointを使う。
 ReactUiSurfaceへcontent/readOnly/execute/select/runtimeを渡し、既存EditorSessionのcommand経路へ接続する。
@@ -72,6 +75,9 @@ Hostは専用origin/CSP/配布、Provider順序/props、tokensの固定mode/変�
 fixtureのasset IDはHostの固定asset mapで解決する。任意URLはasset型へ入れない。
 
 ## TSXをフロントエンドへ組み込む
+
+保存済みimmutable版をHostへ渡す場合は[#35の成果物出力契約](artifact-output-contract.md)で
+source／generator／出力hashを固定する。配置先・承認状態・後続生成はHostが決める。
 
 「Export React TSX」は検査後にScreen.tsx/Screen.css/manifest.json/composition.json/README.mdと
 Hostが供給する固定CSS/assetsをZIPにする。純粋な`exportReactUi(document, resolution)`は同じ

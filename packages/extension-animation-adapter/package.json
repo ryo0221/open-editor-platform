@@ -1,0 +1,18 @@
+{
+  "name": "@editor-platform/extension-animation-adapter",
+  "version": "0.0.0-experiment.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/extension-runtime": "*",
+    "@editor-platform/animation": "*",
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/animation-player": "*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  }
+}

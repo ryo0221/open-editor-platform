@@ -1,7 +1,8 @@
+import { test } from './office-runtime-fixtures';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { docxStructure } from '../fixtures/office/docx-structure';
 import type { DocumentContent } from '@editor-platform/document/model';
-import { test, expect, nativeArtifact } from './fixtures';
+import { expect, nativeArtifact } from './fixtures';
 import {
   importOfficeDocument,
   openDocx,

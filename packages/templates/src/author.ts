@@ -1,3 +1,4 @@
+import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import { clone, contentHash, newId } from '@editor-platform/artifact-core';
 import { isDeck } from '@editor-platform/slide/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
@@ -69,36 +70,63 @@ export function slotCandidates(content: NativeContent): SlotCandidate[] {
   walk(content, []);
   return result;
 }
+function assertNoArtifactReferences(content: NativeContent): void {
+  if (containsEmbeddedReference(content))
+    problem(
+      'unsupported-template',
+      '参照を含む範囲はテンプレート／再利用部品にできません。参照を解除してから保存してください。',
+    );
+}
 export function selectTemplateContent(
   domain: Domain,
   source: NativeContent,
   ids?: string[],
+  slideSelection?: { pageId: string; elementId: string }[],
 ): NativeContent {
   assertTemplateSize(source, templateLimits.expandedBytes);
   const d = clone(source);
-  assertNative(domain, d);
-  if (!ids?.length) return d;
+  // isDeck validates every page's native schema and hierarchy. Slide object IDs
+  // are page-local; defer template-wide uniqueness until the selected objects
+  // and their group closure have been extracted below.
+  if (!(domain === 'slide' && ids?.length && isDeck(d))) assertNative(domain, d);
+  if (!ids?.length) {
+    assertNoArtifactReferences(d);
+    return d;
+  }
   const adopted = 'reuse' in d ? d.reuse : undefined;
   if ('reuse' in d) delete d.reuse;
   const chosen = new Set(ids);
   if (domain === 'slide' && isDeck(d)) {
-    for (const page of d.slides)
-      for (let i = 0; i < page.objects.length; i++)
-        for (const object of page.objects)
+    d.slides = d.slides.flatMap((p) => {
+      const chosen = new Set(
+        slideSelection?.length
+          ? slideSelection
+              .filter((address) => address.pageId === p.id)
+              .map((address) => address.elementId)
+          : ids,
+      );
+      for (let i = 0; i < p.objects.length; i++)
+        for (const object of p.objects)
           if (object.groupId && chosen.has(object.groupId)) chosen.add(object.id);
-    d.slides = d.slides
-      .filter((p) => chosen.has(p.id) || p.objects.some((o) => chosen.has(o.id)))
-      .map((p) => ({
-        ...p,
-        objects: chosen.has(p.id)
-          ? p.objects
-          : p.objects
-              .filter((o) => chosen.has(o.id) || (!!o.groupId && chosen.has(o.groupId)))
-              .map((o) => ({
-                ...o,
-                groupId: o.groupId && chosen.has(o.groupId) ? o.groupId : undefined,
-              })),
-      }));
+      if (!chosen.has(p.id) && !p.objects.some((object) => chosen.has(object.id))) return [];
+      return [
+        {
+          ...p,
+          objects: chosen.has(p.id)
+            ? p.objects
+            : p.objects
+                .filter(
+                  (object) =>
+                    chosen.has(object.id) || (!!object.groupId && chosen.has(object.groupId)),
+                )
+                .map((object) => ({
+                  ...object,
+                  groupId:
+                    object.groupId && chosen.has(object.groupId) ? object.groupId : undefined,
+                })),
+        },
+      ];
+    });
   } else if (domain === 'whiteboard' && isWhiteboard(d)) {
     for (const n of d.nodes) if (n.sectionId && chosen.has(n.sectionId)) chosen.add(n.id);
     for (let i = 0; i < d.nodes.length; i++)
@@ -162,6 +190,7 @@ export function selectTemplateContent(
     if (adopted.instances.length) Object.assign(d, { reuse: adopted });
   }
   assertNative(domain, d);
+  assertNoArtifactReferences(d);
   return d;
 }
 export interface AuthoredSlot {
@@ -176,6 +205,7 @@ export async function saveAsTemplate(options: {
   domain: Domain;
   content: NativeContent;
   ids?: string[];
+  slideSelection?: { pageId: string; elementId: string }[];
   name: string;
   purpose: string;
   category: string;
@@ -193,6 +223,7 @@ export async function saveAsTemplate(options: {
     options.domain,
     options.content,
     options.kind === 'fragment' ? options.ids : undefined,
+    options.slideSelection,
   );
   const authored = options.composition
     ? captureComposition(content, options.composition)

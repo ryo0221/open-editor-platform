@@ -27,7 +27,22 @@ export class EditorInputs {
   };
   register(boundary: EditorInputBoundary): () => void {
     this.boundaries.add(boundary);
-    this.changed();
+    try {
+      this.changed();
+    } catch (error) {
+      // A synchronous notification must not strand a boundary whose disposer
+      // could not be returned to the caller.
+      this.boundaries.delete(boundary);
+      try {
+        this.changed();
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'Input registration rollback notification failed',
+        );
+      }
+      throw error;
+    }
     return () => {
       this.boundaries.delete(boundary);
       this.changed();

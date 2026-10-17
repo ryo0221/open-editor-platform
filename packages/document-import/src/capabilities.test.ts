@@ -162,7 +162,7 @@ it('enforces 2,000 source blocks and 50,000 logical table cells at their exact b
   expect(exact.preview.blocks[0].cells).toHaveLength(250);
   expect(exact.preview.blocks[0].cells![0]).toHaveLength(200);
   await expect(make(input(table(201)))).rejects.toMatchObject({ code: 'TABLE_CELL_LIMIT' });
-}, 120000);
+}, 30000);
 it('resolves theme system colors and diagnoses unknown used numbering properties', async () => {
   const theme = `<a:theme xmlns:a="${ns.a}"><a:themeElements><a:clrScheme><a:dk1><a:sysClr val="windowText" lastClr="123456"/></a:dk1></a:clrScheme></a:themeElements></a:theme>`;
   const themed = input(

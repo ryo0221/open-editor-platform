@@ -46,7 +46,9 @@ export function OfficeExportHost({
   const current = useRef({ capture, guard });
   current.current = { capture, guard };
   const composition = useRef({ active: false, sequence: 0 });
-  const [privateInputs] = useState(() => new Set<object>());
+  const inheritedInputs = useContext(EditorUncommittedInputContext);
+  const [ownedInputs] = useState(() => new Set<object>());
+  const privateInputs = inheritedInputs ?? ownedInputs;
   useEffect(() => {
     const start = () => {
       composition.current = { active: true, sequence: composition.current.sequence + 1 };

@@ -1,4 +1,11 @@
 import {
+  validEmbeddedReference,
+  validReferenceItems,
+  containsEmbeddedReference,
+  describeReference,
+  type EmbeddedReference,
+} from '@editor-platform/artifact-references';
+import {
   validDesignReactReference,
   validDesignWebData,
   validDesignWebElement,
@@ -67,6 +74,8 @@ export type DesignElementType =
   | 'shape'
   | 'react';
 export interface DesignElement extends VisualStyle {
+  /** Reference source is canonical; src is a retained rendering cache. */
+  reference?: EmbeddedReference;
   /** Colorable path geometry belongs to native Design shapes. */
   vector?: DesignVector;
   interactions?: DesignInteraction[];
@@ -516,6 +525,10 @@ export const createComponent = (
       const all = descendantIds(d.elements, ids),
         parts = d.elements.filter((e) => all.has(e.id)),
         box = unionBounds(roots.map((e) => e.bounds));
+      if (parts.some((e) => e.reference))
+        throw new Error(
+          '参照埋め込みのcomponent authoringは未対応です。参照を明示的に解除してください。',
+        );
       const first = parts[0];
       const c: DesignComponent = {
         id: componentId,
@@ -793,6 +806,7 @@ function projectDesignDrawing(
     {
       ...e,
       id: drawingId,
+      imageFit: raw.reference ? (raw.reference.fit === 'cover' ? 'fill' : 'fit') : e.imageFit,
       textSourcePath: textOwner ? [...textOwner, 'text'] : undefined,
       vector: e.type === 'shape' && validDesignVector(e.vector) ? e.vector : undefined,
       clipBounds: frameClips(index, raw),
@@ -820,7 +834,7 @@ export function designDiff(a: DesignContent, b: DesignContent): CompareResult {
       .join('\n') ?? 'Inherited / none';
   const describe = (e: DesignElement, side: 'before' | 'after' = 'after') => {
     const context = side === 'before' ? a : b;
-    return `${e.name}\nParent: ${context.elements.find((p) => p.id === e.parentId)?.name ?? 'pasteboard'}\n${designDrawings(context, e).map(describeDrawing).join('\n\n')}${e.layout ? `\nLayout: ${e.layout.direction}, gap ${e.layout.gap}, padding ${e.layout.padding}` : ''}${e.componentId ? `\nComponent: ${context.components.find((c) => c.id === e.componentId)?.name ?? e.componentId}` : ''}\nInteractions: ${interactions(e.interactions)}${
+    return `${e.name}${describeReference(e)}\nParent: ${context.elements.find((p) => p.id === e.parentId)?.name ?? 'pasteboard'}\n${designDrawings(context, e).map(describeDrawing).join('\n\n')}${e.layout ? `\nLayout: ${e.layout.direction}, gap ${e.layout.gap}, padding ${e.layout.padding}` : ''}${e.componentId ? `\nComponent: ${context.components.find((c) => c.id === e.componentId)?.name ?? e.componentId}` : ''}\nInteractions: ${interactions(e.interactions)}${
       e.overrides
         ? `\nPart interactions: ${Object.entries(e.overrides)
             .filter(([, p]) => p.interactions !== undefined)
@@ -905,6 +919,7 @@ function validElement(e: DesignElement): boolean {
     (e.interactions === undefined || validDesignInteractions(e.interactions)) &&
     (e.overrides === undefined || validDesignOverrides(e.overrides)) &&
     validVisualStyle(e) &&
+    (e.reference === undefined || (e.type === 'image' && validEmbeddedReference(e.reference))) &&
     (e.vector === undefined || (e.type === 'shape' && validDesignVector(e.vector))) &&
     ['frame', 'rectangle', 'text', 'image', 'group', 'instance', 'shape', 'react'].includes(
       e.type,
@@ -944,10 +959,12 @@ function validComponent(c: DesignComponent): boolean {
   if (checkedComponents.has(c)) return true;
   const valid =
     !!c &&
+    !containsEmbeddedReference(c) &&
     typeof c.id === 'string' &&
     typeof c.name === 'string' &&
     (c.web === undefined || validDesignWebComponent(c.web)) &&
     !!c.template &&
+    (c.template as Partial<DesignElement>).reference === undefined &&
     ['text', 'rectangle', 'image', 'shape', 'group', 'frame', 'instance'].includes(
       c.template.type,
     ) &&
@@ -968,6 +985,7 @@ export function isDesign(value: unknown): value is DesignContent {
   return (
     (d.schemaVersion === 1 || d.schemaVersion === 2) &&
     Array.isArray(d.elements) &&
+    validReferenceItems(d.elements) &&
     Array.isArray(d.components) &&
     validNativeReuse(d.reuse, 'design') &&
     (d.prototyping === undefined || validDesignPrototype(d.prototyping)) &&
@@ -1012,6 +1030,7 @@ function validDesignOverrides(value: unknown, depth = 0): boolean {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !validVisualStyle(raw))
       return false;
     const p = raw as Partial<DesignElement>;
+    if (p.reference !== undefined) return false;
     if (p.vector !== undefined && !validDesignVector(p.vector)) return false;
     if (p.interactions !== undefined && !validDesignInteractions(p.interactions)) return false;
     if (p.bounds !== undefined && !validBounds(p.bounds)) return false;
@@ -1131,13 +1150,18 @@ export const patchDesign = (
     if (!('locked' in patch || 'hidden' in patch)) assertEditable(d.elements, ids);
     return layoutDesign({
       ...d,
-      elements: d.elements.map((e) =>
-        ids.includes(e.id)
-          ? e.type === 'instance' && ('text' in patch || 'fill' in patch || 'src' in patch)
-            ? { ...e, overrides: { ...e.overrides, root: { ...e.overrides?.root, ...patch } } }
-            : patchVisualStyle(e, patch)
-          : e,
-      ),
+      elements: d.elements.map((e) => {
+        if (!ids.includes(e.id)) return e;
+        if (e.type === 'instance' && ('text' in patch || 'fill' in patch || 'src' in patch))
+          return { ...e, overrides: { ...e.overrides, root: { ...e.overrides?.root, ...patch } } };
+        const next = patchVisualStyle(e, patch);
+        if (next.reference && patch.imageFit !== undefined)
+          next.reference = {
+            ...next.reference,
+            fit: patch.imageFit === 'fill' ? 'cover' : 'contain',
+          };
+        return next;
+      }),
     });
   });
 export const overrideInstance = (

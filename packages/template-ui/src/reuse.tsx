@@ -74,6 +74,7 @@ type SaveComponentProps = {
   domain: Domain;
   content: NativeContent;
   ids: string[];
+  slideSelection?: { pageId: string; elementId: string }[];
   catalog: CatalogAdapter;
   privateSettings?: PrivateViewSettings;
   onClose(): void;
@@ -107,6 +108,7 @@ function SaveNativeComponentDialog(props: SaveComponentProps) {
         domain: props.domain,
         content: props.content,
         ids: props.ids,
+        slideSelection: props.slideSelection,
         name,
         ...(props.domain === 'slide' ? { slide } : {}),
         ...(props.domain === 'data' ? { data } : {}),

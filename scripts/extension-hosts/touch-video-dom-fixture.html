@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Product-free touch capture comparison</title>
+  <style>
+    body {
+      margin: 24px;
+    }
+    #canvas {
+      height: 180px;
+      margin-top: 900px;
+      touch-action: pan-y;
+    }
+    #move {
+      touch-action: none;
+    }
+    #undo {
+      margin-top: 620px;
+    }
+    footer {
+      height: 150px;
+    }
+  </style>
+  <!-- No Editor packages. Preserve the sibling capture target, preventDefault,
+       release/focus, scroll-to-button sequence used by the product comparison. -->
+  <div id="canvas" tabindex="0"></div>
+  <button id="move">Move selected clip</button
+  ><br />
+  <button id="undo">Undo</button
+  ><button id="redo">Redo</button>
+  <footer></footer>
+  <script>
+    const canvas = document.querySelector('#canvas');
+    const move = document.querySelector('#move');
+    const variant = new URL(location.href).searchParams.get('variant');
+    if (variant === 'no-scroll') document.querySelector('#undo').style.marginTop = '0';
+    const captureTarget = variant === 'same-capture' ? move : canvas;
+    let position = 0,
+      revision = 0,
+      drag,
+      past = [],
+      future = [];
+    move.onpointerdown = (event) => {
+      drag = { start: event.clientX, delta: 0 };
+      canvas.focus({ preventScroll: true });
+      captureTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    canvas.onpointermove = move.onpointermove = (event) => {
+      if (drag) drag.delta = event.clientX - drag.start;
+    };
+    canvas.onpointerup = move.onpointerup = (event) => {
+      if (!drag) return;
+      const delta = drag.delta;
+      drag = undefined;
+      captureTarget.releasePointerCapture(event.pointerId);
+      if (delta) {
+        past.push(position);
+        position += delta;
+        future = [];
+        revision++;
+      }
+      if (variant !== 'no-focus') move.focus({ preventScroll: true });
+    };
+    canvas.onpointercancel = move.onpointercancel = () => {
+      drag = undefined;
+    };
+    document.querySelector('#undo').onclick = () => {
+      if (past.length) {
+        future.push(position);
+        position = past.pop();
+        revision++;
+      }
+    };
+    document.querySelector('#redo').onclick = () => {
+      if (future.length) {
+        past.push(position);
+        position = future.pop();
+        revision++;
+      }
+    };
+    globalThis.host = {
+      state: () => ({
+        content: { position },
+        revision: { sequence: revision },
+        inputs: { dirty: Number(!!drag) },
+        canUndo: past.length > 0,
+        canRedo: future.length > 0,
+      }),
+    };
+    globalThis.ready = true;
+  </script>
+</html>

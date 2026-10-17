@@ -1,12 +1,19 @@
 # Status and limitations
 
-## Design reusable text and graphics (#255–#257)
+## Artifact reference embeds (#264)
 
-Post-merge corrections cover linked vector adoption/override preservation and effective
-rich-run minimum sizing. Vector updates are limited to Design; Slide/Whiteboard preserve
-imported opaque vector metadata during adoption. Exact tested source, failures and scoped
-browser evidence are in the
-[correction report](verification/issues-255-257/typography-layout-review-258.md#post-merge-vector-and-run-minimum-correction).
+Data tables/charts and Profile-backed Graphs can be embedded into local Document,
+Slide, Design and Whiteboard. Creation explicitly chooses fixed or follow; only saved
+versions are published. Hosts inject permission-aware reads, notifications and source
+navigation. Runtime refresh does not mutate destination history; saves/exports capture
+one exact revision per source. Missing targets, permission loss, offline caches and stale
+responses are distinct states. Native closure/hash validation, static graphic manifests,
+and a public-only independent Host are included. Shared references and Office/React
+reference export fail closed. Existing static images/charts retain their meaning.
+See [contract](artifact-references.md) and [actual checks](verification/issue-264/README.md).
+Performance acceptance remains paused; this does not publish an updated extension.
+
+## Design reusable text and graphics (#255–#257)
 
 Design reusable authoring accepts explicit overflow/minFontSize settings down to 10px;
 Document/Slide defaults remain 16px. `measureTemplateTextFit` shares insertion preflight.

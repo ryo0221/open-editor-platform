@@ -163,6 +163,7 @@ test('ordinary Data: Grid→Graph→Form common Undo and persisted layout, unkno
   expect(moved.graphView?.positions.research.x).toBe(50);
   await save(page, 1);
   await page.reload();
+  await expect(page.getByLabel('Data projection', { exact: true })).toBeVisible();
   await dataProjection(page, 'Graph');
   const reloaded = (await nativeArtifact(page)).draft.content as StructuredData;
   expect(reloaded).toEqual(moved);
@@ -685,7 +686,7 @@ test('protected new records: normal defaults, atomic CSV rejection and Undo', as
   expect(added.rows.at(-1)?.values).not.toHaveProperty('computed');
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   expect((await nativeArtifact(page)).draft.content).toEqual(original);
-  const importCsv = async (text: string, submit = true) => {
+  const importCsv = async (text: string) => {
     await page.getByLabel('Import CSV file', { exact: true }).setInputFiles({
       name: 'records.csv',
       mimeType: 'text/csv',
@@ -693,16 +694,19 @@ test('protected new records: normal defaults, atomic CSV rejection and Undo', as
     });
     const dialog = page.getByRole('dialog', { name: 'CSV import preview', exact: true });
     await dialog.getByLabel('Append to matching fields', { exact: true }).check();
-    if (submit) await dialog.getByRole('button', { name: 'Import records', exact: true }).click();
     return dialog;
   };
-  const refused = await importCsv('Name,Category\nBypass,Topic\nNew record,Topic', false);
+  const refused = await importCsv('Name,Category\nBypass,Topic\nNew record,Topic');
+  await expect(
+    refused.getByText('Read-only fields cannot be imported; choose an editable target field'),
+  ).toBeVisible();
   await expect(refused.getByRole('button', { name: 'Import records', exact: true })).toBeDisabled();
-  await expect(refused.getByText(/Read-only fields cannot be imported/)).toBeVisible();
   await page.keyboard.press('Escape');
   expect((await nativeArtifact(page)).draft.content).toEqual(original);
   await expect(page.getByRole('button', { name: 'Undo', exact: true }).first()).toBeDisabled();
-  await importCsv('Category\nResource');
+  const accepted = await importCsv('Category\nResource');
+  await expect(accepted.getByRole('button', { name: 'Import records', exact: true })).toBeEnabled();
+  await accepted.getByRole('button', { name: 'Import records', exact: true }).click();
   const imported = (await nativeArtifact(page)).draft.content as StructuredData;
   expect(imported.rows).toHaveLength(original.rows.length + 1);
   expect(imported.rows.at(-1)?.values.name).toBe('New record');

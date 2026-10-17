@@ -43,6 +43,8 @@ export const CanvasPresenceContext = createContext<
 >([]);
 export interface CanvasTarget extends GeometryItem {
   label: string;
+  /** Conservative world paint extent. Omit for unbounded/custom rendering. */
+  paintBounds?: Bounds;
   text?: string;
   typography?: TextStyle;
   runs?: TextRun[];
@@ -247,6 +249,8 @@ export interface CanvasStageProps {
   view?: CanvasView;
   onViewChange?: (view: CanvasView) => void;
   hideControls?: boolean;
+  /** Cull only bounded offscreen drawings; all targets retain interaction semantics. */
+  virtualize?: boolean;
   onEditText?: (
     id: string,
     text: string,
@@ -320,6 +324,7 @@ export function CanvasStage({
   view: externalView,
   onViewChange,
   hideControls,
+  virtualize = false,
   onEditText,
   onAction,
   onImage,
@@ -627,6 +632,35 @@ export function CanvasStage({
     height: size.height / view.zoom,
   };
   const backgroundBounds = space === 'infinite' ? viewportBounds : { x: 0, y: 0, width, height };
+  const overscan = 128 / view.zoom;
+  const paintViewport = {
+    x: viewportBounds.x - overscan,
+    y: viewportBounds.y - overscan,
+    width: viewportBounds.width + 2 * overscan,
+    height: viewportBounds.height + 2 * overscan,
+  };
+  const rendered = virtualize
+    ? visible.filter((target) => {
+        // Domain previews may include unchanged elements. Retain only geometry
+        // that actually moved, including descendants changed by Frame layout.
+        const geometry = preview?.get(target.id);
+        const transformed =
+          geometry &&
+          (geometry.bounds.x !== target.bounds.x ||
+            geometry.bounds.y !== target.bounds.y ||
+            geometry.bounds.width !== target.bounds.width ||
+            geometry.bounds.height !== target.bounds.height ||
+            geometry.rotation !== (target.rotation ?? 0));
+        return (
+          !target.paintBounds ||
+          selected.includes(target.id) ||
+          transformed ||
+          editing?.id === target.id ||
+          target.textParts?.some((part) => part.id === editing?.id) ||
+          intersectsRotated(paintViewport, target.paintBounds)
+        );
+      })
+    : visible;
   return (
     <div className="canvas-stage" ref={stage}>
       <svg
@@ -852,7 +886,7 @@ export function CanvasStage({
           {typeof underlay === 'function'
             ? underlay(targets.map((t) => ({ ...t, ...preview?.get(t.id) })))
             : underlay}
-          {visible.map((t) => (
+          {rendered.map((t) => (
             <CanvasObject
               key={t.id}
               target={

@@ -79,7 +79,8 @@ Separate corrective draft, based on main `8a6cffad6916d489d1777bd2f5ee7b8bb65a24
 No concurrent corrective PR was present at initial or pre-publication lookup. PR #259's
 Video integration branch was not checked out or changed.
 
-Review findings: linked vector adoption and effective rich-run minimum.
+Review sources: vector adoption
+and effective run minimum.
 
 The change adds `vector` to the existing three-way native fields. Geometry and provenance
 adopt together; native local overrides (including explicit default-equal values) remain

@@ -1,6 +1,7 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, Unlock, Layers } from 'lucide-react';
 import { IconButton } from '@editor-platform/editor-ui';
+import { LayerWindow } from './layer-window';
 export interface LayerEntry {
   id: string;
   parentId?: string;
@@ -21,6 +22,7 @@ interface LayerNavigatorProps {
   onReparent?: (id: string, parentId?: string) => void;
   onReorder?: (id: string, delta: number) => void;
   readOnly?: boolean;
+  virtualize?: boolean;
 }
 export function LayerNavigator(props: LayerNavigatorProps) {
   // Geometry edits leave the layer list unchanged. Forward events to the latest
@@ -62,10 +64,12 @@ const LayerTree = memo(
     onReparent,
     onReorder,
     readOnly = false,
+    virtualize = false,
   }: LayerNavigatorProps) {
     const [query, setQuery] = useState(''),
       [collapsed, setCollapsed] = useState<string[]>([]),
-      [rename, setRename] = useState<string>();
+      [rename, setRename] = useState<string>(),
+      [dragging, setDragging] = useState<string>();
     const dragged = useRef('');
     const byId = new Map(entries.map((entry) => [entry.id, entry]));
     const depth = (entry: LayerEntry) => {
@@ -111,6 +115,11 @@ const LayerTree = memo(
       }
       return true;
     });
+    const positions = new Map<string, { position: number; total: number }>();
+    for (const siblings of childrenByParent.values())
+      siblings.forEach((entry, index) =>
+        positions.set(entry.id, { position: index + 1, total: siblings.length }),
+      );
     return (
       <>
         <input
@@ -120,20 +129,32 @@ const LayerTree = memo(
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <div role="tree" aria-label="Layers" className="layer-tree">
-          {shown.map((e) => {
+        <LayerWindow
+          entries={shown}
+          selected={selected}
+          editing={rename}
+          dragging={dragging}
+          virtualize={virtualize}
+          query={query}
+        >
+          {(e) => {
             const children = !!childrenByParent.get(e.id)?.length;
             return (
               <div
                 key={e.id}
+                data-layer-id={e.id}
                 role="treeitem"
                 aria-selected={selected.includes(e.id)}
                 aria-level={depth(e) + 1}
+                aria-posinset={positions.get(e.id)?.position}
+                aria-setsize={positions.get(e.id)?.total}
                 aria-expanded={children ? !collapsed.includes(e.id) : undefined}
                 draggable={!readOnly}
                 onDragStart={() => {
                   dragged.current = e.id;
+                  setDragging(e.id);
                 }}
+                onDragEnd={() => setDragging(undefined)}
                 onDragOver={(ev) => ev.preventDefault()}
                 onDrop={(ev) => {
                   ev.preventDefault();
@@ -221,8 +242,8 @@ const LayerTree = memo(
                 />
               </div>
             );
-          })}
-        </div>
+          }}
+        </LayerWindow>
         {onReparent && (
           <button
             disabled={readOnly || !selected.length}
@@ -236,6 +257,7 @@ const LayerTree = memo(
   },
   (previous, next) =>
     previous.readOnly === next.readOnly &&
+    previous.virtualize === next.virtualize &&
     previous.onSelect === next.onSelect &&
     previous.onReveal === next.onReveal &&
     previous.onRename === next.onRename &&

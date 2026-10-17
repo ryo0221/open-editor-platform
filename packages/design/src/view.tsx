@@ -1,4 +1,16 @@
-import { memo, useContext, useMemo, type ReactNode } from 'react';
+import { EditorInputsContext } from '@editor-platform/editor-ui';
+import {
+  assertReferenceItems,
+  referenceExportManifest,
+} from '@editor-platform/artifact-references';
+import {
+  ReferenceTools,
+  ReferenceWarnings,
+  ReferenceInspector,
+  useReferenceItems,
+  type ReferenceSurfaceProps,
+} from '@editor-platform/artifact-references/react';
+import { memo, useContext, useMemo, useImperativeHandle, type Ref, type ReactNode } from 'react';
 import { EditorExportGuardContext } from '@editor-platform/editor-ui';
 import { ComponentPublicationDialog } from './component-publication-ui';
 import { DesignPrototypeSurface, type DesignPrototypeSurfaceProps } from './prototype-view';
@@ -6,7 +18,13 @@ import { DesignInteractionSettings, DesignPrototypeSettings } from './prototype-
 import { setDesignInteractions } from './prototype';
 import { useEffect, useRef, useState } from 'react';
 import { Frame, Component, Scan, Plus, Download } from 'lucide-react';
-import { clone, newId, canonicalJson } from '@editor-platform/artifact-core';
+import {
+  clone,
+  newId,
+  canonicalJson,
+  isDeepFrozen,
+  deepFreeze,
+} from '@editor-platform/artifact-core';
 import {
   command,
   descendantIds,
@@ -69,7 +87,8 @@ import {
   type DesignElementType,
 } from './model';
 import { designWebTagsFor, type DesignWebTag } from './web-contract';
-import { createDesignRenderCache } from './render-cache';
+import { createDesignRenderCache, designRenderSnapshot } from './render-cache';
+import { designPaintBounds } from './paint-bounds';
 const DesignDrawings = memo(function DesignDrawings({
   drawings,
   textParts = [],
@@ -110,7 +129,7 @@ export interface DesignSurfaceExtension {
   /** An opaque Host element paints its slot subtree once; the native tree stays editable. */
   canvasOwner?(element: DesignElement): string | undefined;
 }
-export interface DesignSurfaceProps {
+export interface DesignSurfaceProps extends ReferenceSurfaceProps {
   prototype?: Omit<DesignPrototypeSurfaceProps, 'content' | 'onClose'>;
   extension?: DesignSurfaceExtension;
   content: DesignContent;
@@ -123,7 +142,17 @@ export interface DesignSurfaceProps {
   readOnly?: boolean;
   layout?: Partial<EditorLayoutProps>;
 }
-export function DesignSurface({
+export function DesignSurface(props: DesignSurfaceProps) {
+  // A Host render is a revision boundary even if it mutates the same input object.
+  // Local camera/panel state lives below this boundary and retains that snapshot.
+  const renderContent = isDeepFrozen(props.content)
+    ? props.content
+    : deepFreeze(clone(props.content));
+  return <DesignSurfaceEditor {...props} renderContent={renderContent} />;
+}
+function DesignSurfaceEditor({
+  references,
+  focusReferenceId,
   content,
   execute,
   select,
@@ -135,16 +164,23 @@ export function DesignSurface({
   publicationReadOnlyReason,
   onPublicationClosed,
   prototype,
-}: DesignSurfaceProps) {
-  const [prototyping, setPrototyping] = useState(false);
+  renderContent,
+}: DesignSurfaceProps & { renderContent: DesignContent }) {
+  const prototypeControl = useRef<{ open(): void }>(null);
+  const projectedElements = useReferenceItems(content.elements, references);
+  const projectedById = new Map(projectedElements.map((e) => [e.id, e]));
   const guardExport = useContext(EditorExportGuardContext);
+  const inputs = useContext(EditorInputsContext);
   const [publication, setPublication] = useState<string>();
   useEffect(() => {
     if (publicationRequest) setPublication(publicationRequest);
   }, [publicationRequest]);
   const renderCache = useMemo(createDesignRenderCache, []);
-  const project = useMemo(() => renderCache(content), [content, renderCache]);
-  const elements = useMemo(() => new Map(content.elements.map((e) => [e.id, e])), [content]);
+  const project = useMemo(
+    () => designRenderSnapshot(renderContent, renderCache),
+    [renderContent, renderCache],
+  );
+  const elements = new Map(content.elements.map((e) => [e.id, e]));
   const scopedTexts = useMemo(() => {
     const map = new Map<
       string,
@@ -192,13 +228,24 @@ export function DesignSurface({
   const ids = selected.filter((id) => content.elements.some((e) => e.id === id)),
     chosen = content.elements.filter((e) => ids.includes(e.id)),
     element = chosen.length === 1 ? chosen[0] : undefined;
-  const exportState = useRef({ content, ids, padding, transparent, scale, extension });
-  exportState.current = { content, ids, padding, transparent, scale, extension };
+  useEffect(() => {
+    if (focusReferenceId) setSelected([focusReferenceId]);
+  }, [focusReferenceId]);
+  const exportState = useRef({ content, ids, padding, transparent, scale, extension, references });
+  exportState.current = { content, ids, padding, transparent, scale, extension, references };
   const apply = (cmd: EditorCommand<DesignContent>) => {
     if (readOnly) return false;
+    const checked: EditorCommand<DesignContent> = {
+      ...cmd,
+      apply(current) {
+        const next = cmd.apply(current);
+        assertReferenceItems(next.elements);
+        return next;
+      },
+    };
     try {
-      if (!cmd.readonlyInput) cmd.apply(content);
-      if (execute(cmd) === false) return false;
+      if (!checked.readonlyInput) checked.apply(content);
+      if (execute(checked) === false) return false;
       setError('');
       return true;
     } catch (e) {
@@ -313,7 +360,9 @@ export function DesignSurface({
   async function output(format: 'svg' | 'png', scope: string) {
     try {
       guardExport?.();
-      const { content, ids, padding, transparent, scale, extension } = exportState.current;
+      const initial = exportState.current;
+      let content = initial.content;
+      const { ids, padding, transparent, scale, extension } = initial;
       const frames = content.elements.filter((e) => e.type === 'frame');
       const groups =
         scope === 'frames'
@@ -322,6 +371,27 @@ export function DesignSurface({
             ? [ids]
             : [content.elements.map((e) => e.id)];
       if (scope === 'selection' && !ids.length) throw new Error('Select elements to export');
+      const included = descendantIds(content.elements, groups.flat());
+      const visible = new Set(
+        designPaintOrder(content)
+          .filter((e) => !e.hidden)
+          .map((e) => e.id),
+      );
+      let exported = content.elements.filter((e) => included.has(e.id) && visible.has(e.id));
+      if (exported.some((e) => e.reference)) {
+        if (!references) throw new Error('参照付きの出力には参照接続が必要です。');
+        exported = await references.capture(exported);
+        if (exportState.current.references !== references)
+          throw new Error('取得中に参照接続が変わりました。再実行してください。');
+        if (
+          exportState.current.content !== content ||
+          inputs?.getSnapshot().dirty ||
+          inputs?.getSnapshot().composing
+        )
+          throw new Error('取得中に入力が変わりました。再実行してください。');
+        const captured = new Map(exported.map((e) => [e.id, e]));
+        content = { ...content, elements: content.elements.map((e) => captured.get(e.id) ?? e) };
+      }
       const pages = groups.map((group) => {
         extension?.beforeGraphicExport?.(group);
         const all = descendantIds(content.elements, group),
@@ -339,7 +409,7 @@ export function DesignSurface({
           height: box.height + padding * 2,
         };
       });
-      await exportPages(pages, format, scale, 'design');
+      await exportPages(pages, format, scale, 'design', referenceExportManifest(exported));
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -352,390 +422,430 @@ export function DesignSurface({
   const canvasOwners = new Map(content.elements.map((e) => [e.id, extension?.canvasOwner?.(e)]));
   const canvasSelection = [...new Set(ids.map((id) => canvasOwners.get(id) ?? id))];
   const inspector = (
-    <fieldset disabled={readOnly} className="inspector-fields">
-      <DesignPrototypeSettings content={content} element={element} apply={apply} />
-      <VisualInspector
-        items={chosen.map((e) => {
-          const first = designDrawings(content, e)[0];
-          return { ...first, id: e.id, bounds: e.bounds, text: appearance(content, e).text };
-        })}
-        onPatch={(patch) => apply(patchDesign(ids, patch))}
-        onGeometry={geometry}
-        onReplace={(file) => {
-          void readImage(file)
-            .then((src) => apply(patchDesign(ids, { src })))
-            .catch((e) => setError(String(e)));
-        }}
+    <>
+      <ReferenceInspector
+        item={element}
+        resolver={references}
+        readOnly={readOnly}
+        patch={(patch) =>
+          apply(
+            patchDesign(ids, {
+              ...patch,
+              imageFit: (patch.reference ?? element?.reference)?.fit === 'cover' ? 'fill' : 'fit',
+            }),
+          )
+        }
       />
-      {extension?.inspector?.(extensionContext)}
-      {element && element.type !== 'instance' && element.type !== 'react' && (
-        <Section title="HTML semantics">
-          <label>
-            HTML meaning
-            <select
-              aria-label="Element HTML meaning"
-              value={element.web?.tag ?? ''}
-              onChange={(event) =>
-                apply(
-                  patchDesign([element.id], {
-                    web: {
-                      ...element.web,
-                      tag: event.target.value ? (event.target.value as DesignWebTag) : undefined,
-                    },
-                  }),
-                )
-              }
-            >
-              <option value="">意味を選択</option>
-              {designWebTagsFor(element.type).map((tag) => (
-                <option key={tag}>{tag}</option>
-              ))}
-            </select>
-          </label>
-          {element.type === 'image' && (
-            <p>imgには画像の内容を説明するaltが必要です。Image alt textを設定してください。</p>
-          )}
-        </Section>
-      )}
-      {element && (
-        <>
-          <Section title={`${element.type} settings`}>
-            <CommitInput
-              label="Layer name"
-              value={element.name}
-              onCommit={(name) => apply(patchDesign(ids, { name }))}
-            />
-            <label className="ep-field">
-              Parent frame / group
+      <fieldset disabled={readOnly} className="inspector-fields">
+        <ReferenceWarnings items={content.elements} resolver={references} />
+        <DesignPrototypeSettings content={content} element={element} apply={apply} />
+        <VisualInspector
+          items={chosen.map((e) => {
+            const first = designDrawings(content, e)[0];
+            return { ...first, id: e.id, bounds: e.bounds, text: appearance(content, e).text };
+          })}
+          onPatch={(patch) => apply(patchDesign(ids, patch))}
+          onGeometry={geometry}
+          onReplace={(file) => {
+            void readImage(file)
+              .then((src) => apply(patchDesign(ids, { src, reference: undefined })))
+              .catch((e) => setError(String(e)));
+          }}
+        />
+        {extension?.inspector?.(extensionContext)}
+        {element && element.type !== 'instance' && element.type !== 'react' && (
+          <Section title="HTML semantics">
+            <label>
+              HTML meaning
               <select
-                aria-label="Parent layer"
-                value={element.parentId ?? ''}
-                onChange={(e) => apply(reparentElement(element.id, e.target.value || undefined))}
+                aria-label="Element HTML meaning"
+                value={element.web?.tag ?? ''}
+                onChange={(event) =>
+                  apply(
+                    patchDesign([element.id], {
+                      web: {
+                        ...element.web,
+                        tag: event.target.value ? (event.target.value as DesignWebTag) : undefined,
+                      },
+                    }),
+                  )
+                }
               >
-                <option value="">Root</option>
-                {content.elements
-                  .filter((e) => ['frame', 'group'].includes(e.type) && e.id !== element.id)
-                  .map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name}
-                    </option>
-                  ))}
+                <option value="">意味を選択</option>
+                {designWebTagsFor(element.type).map((tag) => (
+                  <option key={tag}>{tag}</option>
+                ))}
               </select>
             </label>
-            {element.type === 'frame' && (
-              <>
-                <label className="ep-field">
-                  Frame preset
-                  <select
-                    aria-label="Frame preset"
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      const [width, height] = e.target.value.split('x').map(Number);
-                      if (element.layout?.sizing === 'hug')
-                        setPreset({ id: element.id, width, height });
-                      else apply(applyFramePreset(element.id, width, height));
-                    }}
-                    value={
-                      ['390x844', '1440x900', '800x600'].includes(
-                        `${element.bounds.width}x${element.bounds.height}`,
-                      )
-                        ? `${element.bounds.width}x${element.bounds.height}`
-                        : ''
-                    }
-                  >
-                    <option value="">Custom</option>
-                    <option value="390x844">Phone · 390×844</option>
-                    <option value="1440x900">Desktop · 1440×900</option>
-                    <option value="800x600">Card sheet · 800×600</option>
-                  </select>
-                </label>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={element.clipContent ?? false}
-                    onChange={(e) => apply(patchDesign(ids, { clipContent: e.target.checked }))}
-                  />{' '}
-                  Clip frame content
-                </label>
-              </>
+            {element.type === 'image' && (
+              <p>imgには画像の内容を説明するaltが必要です。Image alt textを設定してください。</p>
             )}
           </Section>
-          {['frame', 'group'].includes(element.type) && (
-            <Section title="Auto layout">
+        )}
+        {element && (
+          <>
+            <Section title={`${element.type} settings`}>
+              <CommitInput
+                label="Layer name"
+                value={element.name}
+                onCommit={(name) => apply(patchDesign(ids, { name }))}
+              />
               <label className="ep-field">
-                Direction
+                Parent frame / group
                 <select
-                  aria-label="Layout direction"
-                  value={element.layout?.direction ?? 'absolute'}
-                  onChange={(e) =>
-                    apply(
-                      patchDesign(ids, {
-                        layout: {
-                          gap: 16,
-                          padding: 16,
-                          align: 'start',
-                          sizing: 'fixed',
-                          ...element.layout,
-                          direction: e.target.value as 'row' | 'column' | 'absolute',
-                        },
-                      }),
-                    )
-                  }
+                  aria-label="Parent layer"
+                  value={element.parentId ?? ''}
+                  onChange={(e) => apply(reparentElement(element.id, e.target.value || undefined))}
                 >
-                  {['absolute', 'row', 'column'].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
+                  <option value="">Root</option>
+                  {content.elements
+                    .filter((e) => ['frame', 'group'].includes(e.type) && e.id !== element.id)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name}
+                      </option>
+                    ))}
                 </select>
               </label>
-              {element.layout && (
+              {element.type === 'frame' && (
                 <>
-                  <div className="ep-fields">
-                    <CommitInput
-                      label="Layout gap (px)"
-                      type="number"
-                      min={0}
-                      value={element.layout.gap}
-                      onCommit={(v) =>
-                        apply(patchDesign(ids, { layout: { ...element.layout!, gap: Number(v) } }))
-                      }
-                    />
-                    <CommitInput
-                      label="Layout padding (px)"
-                      type="number"
-                      min={0}
-                      value={element.layout.padding}
-                      onCommit={(v) =>
-                        apply(
-                          patchDesign(ids, { layout: { ...element.layout!, padding: Number(v) } }),
-                        )
-                      }
-                    />
-                  </div>
                   <label className="ep-field">
-                    Alignment
+                    Frame preset
                     <select
-                      aria-label="Layout alignment"
-                      value={element.layout.align}
-                      onChange={(e) =>
-                        apply(
-                          patchDesign(ids, {
-                            layout: {
-                              ...element.layout!,
-                              align: e.target.value as 'start' | 'center' | 'end',
-                            },
-                          }),
+                      aria-label="Frame preset"
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const [width, height] = e.target.value.split('x').map(Number);
+                        if (element.layout?.sizing === 'hug')
+                          setPreset({ id: element.id, width, height });
+                        else apply(applyFramePreset(element.id, width, height));
+                      }}
+                      value={
+                        ['390x844', '1440x900', '800x600'].includes(
+                          `${element.bounds.width}x${element.bounds.height}`,
                         )
+                          ? `${element.bounds.width}x${element.bounds.height}`
+                          : ''
                       }
                     >
-                      {['start', 'center', 'end'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
+                      <option value="">Custom</option>
+                      <option value="390x844">Phone · 390×844</option>
+                      <option value="1440x900">Desktop · 1440×900</option>
+                      <option value="800x600">Card sheet · 800×600</option>
                     </select>
                   </label>
-                  <label className="ep-field">
-                    Container sizing
-                    <select
-                      aria-label="Container sizing"
-                      value={element.layout.sizing}
-                      onChange={(e) =>
-                        apply(
-                          patchDesign(ids, {
-                            layout: {
-                              ...element.layout!,
-                              sizing: e.target.value as 'fixed' | 'hug',
-                            },
-                          }),
-                        )
-                      }
-                    >
-                      <option>fixed</option>
-                      <option>hug</option>
-                    </select>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={element.clipContent ?? false}
+                      onChange={(e) => apply(patchDesign(ids, { clipContent: e.target.checked }))}
+                    />{' '}
+                    Clip frame content
                   </label>
                 </>
               )}
             </Section>
-          )}
-          <Section title="Size behavior" open={false}>
-            <select
-              aria-label="Element sizing"
-              value={element.sizing ?? 'fixed'}
-              onChange={(e) =>
-                apply(patchDesign(ids, { sizing: e.target.value as 'fixed' | 'hug' | 'fill' }))
-              }
-            >
-              <option>fixed</option>
-              <option>hug</option>
-              <option>fill</option>
-            </select>
-            {content.elements.some((p) => p.id === element.parentId && p.type === 'frame') &&
-              (['horizontal', 'vertical'] as const).map((axis) => (
-                <label key={axis} className="ep-field">
-                  {axis} constraint
+            {['frame', 'group'].includes(element.type) && (
+              <Section title="Auto layout">
+                <label className="ep-field">
+                  Direction
                   <select
-                    aria-label={`${axis} constraint`}
-                    value={element.constraints?.[axis] ?? (axis === 'horizontal' ? 'left' : 'top')}
+                    aria-label="Layout direction"
+                    value={element.layout?.direction ?? 'absolute'}
                     onChange={(e) =>
                       apply(
                         patchDesign(ids, {
-                          constraints: {
-                            horizontal: 'left',
-                            vertical: 'top',
-                            ...element.constraints,
-                            [axis]: e.target.value,
+                          layout: {
+                            gap: 16,
+                            padding: 16,
+                            align: 'start',
+                            sizing: 'fixed',
+                            ...element.layout,
+                            direction: e.target.value as 'row' | 'column' | 'absolute',
                           },
                         }),
                       )
                     }
                   >
-                    {(axis === 'horizontal'
-                      ? ['left', 'right', 'center', 'stretch', 'scale']
-                      : ['top', 'bottom', 'center', 'stretch', 'scale']
-                    ).map((rule) => (
-                      <option key={rule}>{rule}</option>
+                    {['absolute', 'row', 'column'].map((v) => (
+                      <option key={v}>{v}</option>
                     ))}
                   </select>
                 </label>
-              ))}
-          </Section>
-          {component && (
-            <Section title="Component instance">
-              <p>
-                {component.name} ·{' '}
-                {definition ? 'Editing shared definition' : 'Instance overrides only'}
-              </p>
-              <button aria-pressed={definition} onClick={() => setDefinition(!definition)}>
-                Edit shared definition
-              </button>
-              <button onClick={() => apply(resetInstance(element.id))}>Reset overrides</button>
-              <button onClick={() => apply(detachInstance(element.id))}>Detach instance</button>
-              {(
-                component.elements ?? [{ id: 'root', name: component.name, ...component.template }]
-              ).map((part) => {
-                const override = element.overrides?.[part.id];
-                return (
-                  <div key={part.id} className="component-card">
-                    <strong>{part.name}</strong>
-                    <DesignInteractionSettings
-                      content={content}
-                      label={`Part interaction ${part.name}`}
-                      value={definition ? part.interactions : override?.interactions}
-                      inherited={part.interactions}
-                      onChange={(value) =>
-                        apply(setDesignInteractions(element.id, value, part.id, definition))
-                      }
-                      onInherit={
-                        definition
-                          ? undefined
-                          : () => apply(setDesignInteractions(element.id, undefined, part.id))
-                      }
-                    />
-                    <CommitInput
-                      label={`Component text ${part.name}`}
-                      value={definition ? part.text : (override?.text ?? part.text)}
-                      onCommit={(text) =>
-                        apply(
-                          definition
-                            ? part.id === 'root'
-                              ? updateComponent(component.id, { text })
-                              : updateComponentPart(component.id, part.id, { text })
-                            : overrideInstance(element.id, part.id, { text }),
-                        )
-                      }
-                    />
-                    <CommitInput
-                      label={`Component fill ${part.name}`}
-                      value={definition ? part.fill : (override?.fill ?? part.fill)}
-                      onCommit={(fill) =>
-                        apply(
-                          definition
-                            ? part.id === 'root'
-                              ? updateComponent(component.id, { fill })
-                              : updateComponentPart(component.id, part.id, { fill })
-                            : overrideInstance(element.id, part.id, { fill }),
-                        )
-                      }
-                    />
-                  </div>
-                );
-              })}
-            </Section>
-          )}
-          <Section title="Shared styles">
-            <label className="ep-field">
-              Style
-              <select
-                aria-label="Shared style"
-                value={element.styleId ?? ''}
-                onChange={(e) => apply(patchDesign(ids, { styleId: e.target.value || undefined }))}
-              >
-                <option value="">Local appearance</option>
-                {content.styles?.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              onClick={() => {
-                const style = {
-                  id: newId('style'),
-                  name: `Style ${(content.styles?.length ?? 0) + 1}`,
-                  appearance: {
-                    fill: element.fill,
-                    stroke: element.stroke,
-                    typography: element.typography,
-                  },
-                };
-                apply(
-                  command('design.style', 'Create shared style', (d) => ({
-                    ...d,
-                    styles: [...(d.styles ?? []), style],
-                    elements: d.elements.map((e) =>
-                      ids.includes(e.id) ? { ...e, styleId: style.id } : e,
-                    ),
-                  })),
-                );
-              }}
-            >
-              Create style from selection
-            </button>
-            {element.styleId && (
-              <>
-                <p className="hint">
-                  Updates affect all{' '}
-                  {content.elements.filter((e) => e.styleId === element.styleId).length} linked
-                  elements.
-                </p>
-                <CommitInput
-                  label="Shared style fill"
-                  value={
-                    content.styles?.find((s) => s.id === element.styleId)?.appearance.fill ??
-                    element.fill
-                  }
-                  onCommit={(fill) =>
-                    apply(
-                      command('design.style-update', 'Update shared style', (d) => ({
-                        ...d,
-                        styles: d.styles?.map((s) =>
-                          s.id === element.styleId
-                            ? { ...s, appearance: { ...s.appearance, fill } }
-                            : s,
-                        ),
-                      })),
-                    )
-                  }
-                />
-              </>
+                {element.layout && (
+                  <>
+                    <div className="ep-fields">
+                      <CommitInput
+                        label="Layout gap (px)"
+                        type="number"
+                        min={0}
+                        value={element.layout.gap}
+                        onCommit={(v) =>
+                          apply(
+                            patchDesign(ids, { layout: { ...element.layout!, gap: Number(v) } }),
+                          )
+                        }
+                      />
+                      <CommitInput
+                        label="Layout padding (px)"
+                        type="number"
+                        min={0}
+                        value={element.layout.padding}
+                        onCommit={(v) =>
+                          apply(
+                            patchDesign(ids, {
+                              layout: { ...element.layout!, padding: Number(v) },
+                            }),
+                          )
+                        }
+                      />
+                    </div>
+                    <label className="ep-field">
+                      Alignment
+                      <select
+                        aria-label="Layout alignment"
+                        value={element.layout.align}
+                        onChange={(e) =>
+                          apply(
+                            patchDesign(ids, {
+                              layout: {
+                                ...element.layout!,
+                                align: e.target.value as 'start' | 'center' | 'end',
+                              },
+                            }),
+                          )
+                        }
+                      >
+                        {['start', 'center', 'end'].map((v) => (
+                          <option key={v}>{v}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="ep-field">
+                      Container sizing
+                      <select
+                        aria-label="Container sizing"
+                        value={element.layout.sizing}
+                        onChange={(e) =>
+                          apply(
+                            patchDesign(ids, {
+                              layout: {
+                                ...element.layout!,
+                                sizing: e.target.value as 'fixed' | 'hug',
+                              },
+                            }),
+                          )
+                        }
+                      >
+                        <option>fixed</option>
+                        <option>hug</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+              </Section>
             )}
-          </Section>
-        </>
-      )}
-    </fieldset>
+            <Section title="Size behavior" open={false}>
+              <select
+                aria-label="Element sizing"
+                value={element.sizing ?? 'fixed'}
+                onChange={(e) =>
+                  apply(patchDesign(ids, { sizing: e.target.value as 'fixed' | 'hug' | 'fill' }))
+                }
+              >
+                <option>fixed</option>
+                <option>hug</option>
+                <option>fill</option>
+              </select>
+              {content.elements.some((p) => p.id === element.parentId && p.type === 'frame') &&
+                (['horizontal', 'vertical'] as const).map((axis) => (
+                  <label key={axis} className="ep-field">
+                    {axis} constraint
+                    <select
+                      aria-label={`${axis} constraint`}
+                      value={
+                        element.constraints?.[axis] ?? (axis === 'horizontal' ? 'left' : 'top')
+                      }
+                      onChange={(e) =>
+                        apply(
+                          patchDesign(ids, {
+                            constraints: {
+                              horizontal: 'left',
+                              vertical: 'top',
+                              ...element.constraints,
+                              [axis]: e.target.value,
+                            },
+                          }),
+                        )
+                      }
+                    >
+                      {(axis === 'horizontal'
+                        ? ['left', 'right', 'center', 'stretch', 'scale']
+                        : ['top', 'bottom', 'center', 'stretch', 'scale']
+                      ).map((rule) => (
+                        <option key={rule}>{rule}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+            </Section>
+            {component && (
+              <Section title="Component instance">
+                <p>
+                  {component.name} ·{' '}
+                  {definition ? 'Editing shared definition' : 'Instance overrides only'}
+                </p>
+                <button aria-pressed={definition} onClick={() => setDefinition(!definition)}>
+                  Edit shared definition
+                </button>
+                <button onClick={() => apply(resetInstance(element.id))}>Reset overrides</button>
+                <button onClick={() => apply(detachInstance(element.id))}>Detach instance</button>
+                {(
+                  component.elements ?? [
+                    { id: 'root', name: component.name, ...component.template },
+                  ]
+                ).map((part) => {
+                  const override = element.overrides?.[part.id];
+                  return (
+                    <div key={part.id} className="component-card">
+                      <strong>{part.name}</strong>
+                      <DesignInteractionSettings
+                        content={content}
+                        label={`Part interaction ${part.name}`}
+                        value={definition ? part.interactions : override?.interactions}
+                        inherited={part.interactions}
+                        onChange={(value) =>
+                          apply(setDesignInteractions(element.id, value, part.id, definition))
+                        }
+                        onInherit={
+                          definition
+                            ? undefined
+                            : () => apply(setDesignInteractions(element.id, undefined, part.id))
+                        }
+                      />
+                      <CommitInput
+                        label={`Component text ${part.name}`}
+                        value={definition ? part.text : (override?.text ?? part.text)}
+                        onCommit={(text) =>
+                          apply(
+                            definition
+                              ? part.id === 'root'
+                                ? updateComponent(component.id, { text })
+                                : updateComponentPart(component.id, part.id, { text })
+                              : overrideInstance(element.id, part.id, { text }),
+                          )
+                        }
+                      />
+                      <CommitInput
+                        label={`Component fill ${part.name}`}
+                        value={definition ? part.fill : (override?.fill ?? part.fill)}
+                        onCommit={(fill) =>
+                          apply(
+                            definition
+                              ? part.id === 'root'
+                                ? updateComponent(component.id, { fill })
+                                : updateComponentPart(component.id, part.id, { fill })
+                              : overrideInstance(element.id, part.id, { fill }),
+                          )
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </Section>
+            )}
+            <Section title="Shared styles">
+              <label className="ep-field">
+                Style
+                <select
+                  aria-label="Shared style"
+                  value={element.styleId ?? ''}
+                  onChange={(e) =>
+                    apply(patchDesign(ids, { styleId: e.target.value || undefined }))
+                  }
+                >
+                  <option value="">Local appearance</option>
+                  {content.styles?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={() => {
+                  const style = {
+                    id: newId('style'),
+                    name: `Style ${(content.styles?.length ?? 0) + 1}`,
+                    appearance: {
+                      fill: element.fill,
+                      stroke: element.stroke,
+                      typography: element.typography,
+                    },
+                  };
+                  apply(
+                    command('design.style', 'Create shared style', (d) => ({
+                      ...d,
+                      styles: [...(d.styles ?? []), style],
+                      elements: d.elements.map((e) =>
+                        ids.includes(e.id) ? { ...e, styleId: style.id } : e,
+                      ),
+                    })),
+                  );
+                }}
+              >
+                Create style from selection
+              </button>
+              {element.styleId && (
+                <>
+                  <p className="hint">
+                    Updates affect all{' '}
+                    {content.elements.filter((e) => e.styleId === element.styleId).length} linked
+                    elements.
+                  </p>
+                  <CommitInput
+                    label="Shared style fill"
+                    value={
+                      content.styles?.find((s) => s.id === element.styleId)?.appearance.fill ??
+                      element.fill
+                    }
+                    onCommit={(fill) =>
+                      apply(
+                        command('design.style-update', 'Update shared style', (d) => ({
+                          ...d,
+                          styles: d.styles?.map((s) =>
+                            s.id === element.styleId
+                              ? { ...s, appearance: { ...s.appearance, fill } }
+                              : s,
+                          ),
+                        })),
+                      )
+                    }
+                  />
+                </>
+              )}
+            </Section>
+          </>
+        )}
+      </fieldset>
+    </>
   );
   const toolbar = (
     <>
+      <ReferenceTools
+        identity={ids.join(',')}
+        resolver={references}
+        readOnly={readOnly}
+        insert={(reference, src, label) =>
+          add('image', {
+            reference,
+            src,
+            alt: label,
+            imageFit: 'fit',
+            bounds: { x: 80, y: 140, width: 700, height: 320 },
+          })
+        }
+      />
       <InsertTools
         onShape={(shape: ShapeKind) => add('shape', { shape, text: '' })}
         onText={() => add('text')}
@@ -811,6 +921,7 @@ export function DesignSurface({
       </div>
       {tab === 'layers' ? (
         <LayerNavigator
+          virtualize
           entries={content.elements.map((e) => ({ ...e, type: e.type }))}
           selected={ids}
           onSelect={choose}
@@ -852,24 +963,11 @@ export function DesignSurface({
   );
   return (
     <>
-      {prototyping && (
-        <div
-          onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase()))
-              e.stopPropagation();
-          }}
-        >
-          <Dialog title="Design prototype" onClose={() => setPrototyping(false)}>
-            <div style={{ height: 'min(72vh, 800px)', width: 'min(660px, calc(94vw - 48px))' }}>
-              <DesignPrototypeSurface
-                content={content}
-                {...prototype}
-                onClose={() => setPrototyping(false)}
-              />
-            </div>
-          </Dialog>
-        </div>
-      )}
+      <DesignPrototypeController
+        control={prototypeControl}
+        content={{ ...content, elements: projectedElements }}
+        prototype={prototype}
+      />
       <EditorLayout
         viewKey="design"
         leftLabel="Design navigator"
@@ -877,8 +975,10 @@ export function DesignSurface({
         toolbar={
           <>
             <button
-              onClick={() => setPrototyping(true)}
-              disabled={!content.elements.some((e) => e.type === 'frame' && !e.hidden)}
+              onClick={() => prototypeControl.current?.open()}
+              disabled={
+                !content.elements.some((element) => element.type === 'frame' && !element.hidden)
+              }
             >
               Open prototype
             </button>
@@ -924,6 +1024,7 @@ export function DesignSurface({
             </div>
           )}
           <CanvasStage
+            virtualize
             label="Design canvas"
             space="infinite"
             previewTransform={(ids, delta) => designPreview(content, ids, delta)}
@@ -936,6 +1037,9 @@ export function DesignSurface({
               .map((e) => ({
                 ...e,
                 label: `Design object ${e.name}`,
+                paintBounds: extension?.render
+                  ? undefined
+                  : designPaintBounds(project(e), e.bounds, e.rotation),
                 text: appearance(content, e).text,
                 textDrawing: project(e).find((drawing) => drawing.id === e.id),
                 editableText: e.type === 'text' || e.type === 'shape' || e.type === 'rectangle',
@@ -977,13 +1081,16 @@ export function DesignSurface({
               if (external) return external;
               return (
                 <DesignDrawings
-                  drawings={project(raw, target.bounds, target.rotation).map((drawing) =>
-                    target.textParts?.some(
+                  drawings={project(raw, target.bounds, target.rotation).map((original) => {
+                    const drawing = raw.reference
+                      ? { ...original, src: projectedById.get(raw.id)?.src }
+                      : original;
+                    return target.textParts?.some(
                       (part) => part.id === target.editingTextId && part.drawingId === drawing.id,
                     )
                       ? { ...drawing, text: '', runs: undefined }
-                      : drawing,
-                  )}
+                      : drawing;
+                  })}
                   textParts={target.textParts}
                 />
               );
@@ -1050,4 +1157,37 @@ export function DesignSurface({
       )}
     </>
   );
+}
+
+// Keep visibility outside both the expensive Surface and the mobile toolbar menu.
+// Closing that menu must not unmount an active prototype or lose its navigation.
+function DesignPrototypeController({
+  control,
+  content,
+  prototype,
+}: {
+  control: Ref<{ open(): void }>;
+  content: DesignContent;
+  prototype?: DesignSurfaceProps['prototype'];
+}) {
+  const [prototyping, setPrototyping] = useState(false);
+  useImperativeHandle(control, () => ({ open: () => setPrototyping(true) }), []);
+  return prototyping ? (
+    <div
+      onKeyDown={(event) => {
+        if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(event.key.toLowerCase()))
+          event.stopPropagation();
+      }}
+    >
+      <Dialog title="Design prototype" onClose={() => setPrototyping(false)}>
+        <div style={{ height: 'min(72vh, 800px)', width: 'min(660px, calc(94vw - 48px))' }}>
+          <DesignPrototypeSurface
+            content={content}
+            {...prototype}
+            onClose={() => setPrototyping(false)}
+          />
+        </div>
+      </Dialog>
+    </div>
+  ) : null;
 }

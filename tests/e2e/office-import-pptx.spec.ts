@@ -1,5 +1,6 @@
+import { test } from './office-runtime-fixtures';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { test, expect, nativeArtifact, save } from './fixtures';
+import { expect, nativeArtifact, save } from './fixtures';
 import { prepareSlideImport } from '@editor-platform/slide-import';
 import { decodeNodeOfficeImage } from '@editor-platform/office-adapters/node';
 import { materializeOfficeImport } from '@editor-platform/office-import-core';

@@ -1,0 +1,22 @@
+{
+  "name": "@editor-platform/extension-runtime",
+  "version": "0.0.0-draft.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./draft2": "./src/draft2.ts",
+    "./reference": "./src/draft2/reference.ts",
+    "./controlled": "./src/controlled.ts",
+    "./schema-experiment": "./src/schema-experiment.ts",
+    "./schema-edit-experiment": "./src/schema-edit-experiment.ts"
+  },
+  "dependencies": {
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/artifact-core": "*"
+  },
+  "devDependencies": {
+    "@editor-platform/extension-sample": "*"
+  }
+}

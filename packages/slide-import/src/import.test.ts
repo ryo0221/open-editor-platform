@@ -216,8 +216,6 @@ describe('independent LibreOffice presentation import', () => {
     expect(await store.list()).toHaveLength(1);
   });
 });
-// Seven real exported pages include multiple isolated native-image decodes and
-// raster conversions. This bounds conformance verification, not interaction SLA.
 it('I07 imports the separate self-export corpus as editable native elements with source text order', async () => {
   const native = JSON.parse(
     await readFile('tests/fixtures/office/corpus/pptx/golden.native.json', 'utf8'),
@@ -264,7 +262,7 @@ it('I07 imports the separate self-export corpus as editable native elements with
   expect(
     new Set(deck.slides[2].objects.filter((o) => o.type === 'shape').map((o) => o.shape)).size,
   ).toBe(13);
-}, 180000);
+}, 60000);
 it('inspects the independent upstream Office theme fixture and declares its unsupported decoration', async () => {
   const input = {
     bytes: new Uint8Array(await readFile('tests/fixtures/office/import/upstream/ooxtheme.pptx')),

@@ -39,7 +39,10 @@ test('QL-03 thirty sticky notes: Sections, connectors, group move, membership, p
   const select = async (index: number, shift = false) => {
     const n = original.nodes[index];
     await page
-      .getByRole('button', { name: `Layer ${n.name || `${n.kind} ${index + 1}`}`, exact: true })
+      .getByRole('button', {
+        name: `Layer ${n.name || n.text?.replace(/\s+/g, ' ').trim().slice(0, 64) || `${n.kind} ${index + 1}`}`,
+        exact: true,
+      })
       .click({ modifiers: shift ? ['Shift'] : [] });
   };
   await select(0);

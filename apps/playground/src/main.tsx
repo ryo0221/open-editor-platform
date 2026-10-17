@@ -1,4 +1,4 @@
 import { createRoot } from 'react-dom/client';
-import { ReferencePlayground } from './shared-host';
+import { NormalHost } from './private-video/NormalHost';
 import './styles.css';
-createRoot(document.getElementById('root')!).render(<ReferencePlayground />);
+createRoot(document.getElementById('root')!).render(<NormalHost />);

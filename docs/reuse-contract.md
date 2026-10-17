@@ -159,3 +159,11 @@ recipe, variant and public input/asset against the existing materialization API.
 This does not replace edited native content with a prototype or rewrite immutable
 version hashes. Ordinary Data diagnostic cells remain editable; they are not new
 template samples. The playground performs this check before importing an artifact.
+
+Slide component authoring accepts optional `slideSelection` page/object addresses through
+`authorReusableComponent`. Hosts should preserve page IDs from native selection addresses:
+object IDs alone can refer to different objects on different pages. Template and reusable
+selection share the same page-scoped extraction and reference checks.
+Native page-local schema/hierarchy validation precedes extraction. Template-wide uniqueness is
+checked after the selected objects and group closure are retained, so unrelated page-local IDs do
+not reject multi-page fragments. Duplicate IDs within the published selection still fail.

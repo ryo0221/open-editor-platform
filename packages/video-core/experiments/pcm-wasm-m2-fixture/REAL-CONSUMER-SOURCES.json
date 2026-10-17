@@ -1,0 +1,99 @@
+{
+  "acceptedVideoDocs": "87c7aef1d47aefdf37cff5591be59f4ca8df77bb",
+  "acceptedVideoTested": "1cbb0cb3f972814094753a3dca2c1bf493f9d6e3",
+  "packages": {
+    "mediabunny": "1.61.3",
+    "@mediabunny/aac-encoder": "1.61.3"
+  },
+  "packageFiles": [
+    {
+      "path": "mediabunny/package.json",
+      "sha256": "f8cf1d42f0f505230f146a8af0d5097655636a149d5496d128a23d9d23a98f43",
+      "bytes": 4625
+    },
+    {
+      "path": "mediabunny/LICENSE",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+      "bytes": 16726
+    },
+    {
+      "path": "mediabunny/dist/modules/src/sample.js",
+      "sha256": "bc8525161fff7467c25aab3f83bbf1a1dc602ae869a5b572c6dbba1a6cc4dfb9",
+      "bytes": 114994
+    },
+    {
+      "path": "mediabunny/dist/modules/src/sample.d.ts",
+      "sha256": "d0261bd2d33f4103dab202cc3ab387ab1dda75742eb6d8f04d7b45c76b661f1e",
+      "bytes": 27255
+    },
+    {
+      "path": "mediabunny/dist/modules/src/media-source.js",
+      "sha256": "1c60a60034eff049d8ee1a973de7ef665bb8e648ee14854227150556e25f9088",
+      "bytes": 119479
+    },
+    {
+      "path": "mediabunny/dist/modules/src/misc.js",
+      "sha256": "8d12fa80d5793c14a3d71909723af9c584ee096e4140c2cf6c78afab7629917b",
+      "bytes": 46561
+    },
+    {
+      "path": "mediabunny/dist/modules/src/output.js",
+      "sha256": "699dae1192ee789c32577a0cf2e9980d41845af4e66b8ba626e6ba87f9b511b3",
+      "bytes": 29722
+    },
+    {
+      "path": "@mediabunny/aac-encoder/package.json",
+      "sha256": "3732d66a3c3b15a8447498c9dfceb66200e8e0f46d337d7e56aad9daacb6b554",
+      "bytes": 1332
+    },
+    {
+      "path": "@mediabunny/aac-encoder/LICENSE",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+      "bytes": 16726
+    },
+    {
+      "path": "@mediabunny/aac-encoder/dist/bundles/mediabunny-aac-encoder.mjs",
+      "sha256": "a8f777ab53d8d654bd2339e974de8c80f457e68943afd72e7e55ca0f0dbea214",
+      "bytes": 999289
+    },
+    {
+      "path": "@mediabunny/aac-encoder/src/encoder.ts",
+      "sha256": "1d60aab093a8c1ca0fb83909765499fae239b946a880b9e61f2c31b0018e1bc9",
+      "bytes": 9626
+    },
+    {
+      "path": "@mediabunny/aac-encoder/src/encode.worker.ts",
+      "sha256": "96d970b9bf6887b0ee8e707a08cb7be2d3c73259ec442874bfdf2d3747c3f5e7",
+      "bytes": 6526
+    },
+    {
+      "path": "@mediabunny/aac-encoder/src/bridge.c",
+      "sha256": "a04e07961c47ca113710398ac8e2ea39b21e2eb1bd109685cd909a3e09f937dc",
+      "bytes": 4634
+    }
+  ],
+  "repositoryFiles": [
+    {
+      "path": "packages/video-metadata/host-media/product-build.mjs",
+      "gitBlob": "6ac372a399dc163a103a868d7c9bddd254d6d553",
+      "sha256": "06b974b2210f6c57e3bc26325f64cd6b35454c57c36303a524bac587d2458184"
+    },
+    {
+      "path": "packages/video-metadata/host-media/encoder-state.mjs",
+      "gitBlob": "a9206d1a1ef2aa66b56b4c5bd0a0db0f13de0393",
+      "sha256": "8db489eb5258781d9259c77704ac0d0f8af24bfd0d664a50e6294ec6f6cbba63"
+    },
+    {
+      "path": "packages/video-metadata/host-media/m2/product-codec-v2.mjs",
+      "gitBlob": "7c2d74e6846a6dfac99261d9a5b9d06a90bdb7ab",
+      "sha256": "b710889cbc705a39cc1d1b33f383c91527472909183210a7af02bbdccc5f5623"
+    },
+    {
+      "path": "packages/video-metadata/host-media/m2/playback-v2.mjs",
+      "gitBlob": "62d54664642035b8043702fa459b4befcdfaf3af",
+      "sha256": "8d23141875c2c15763216c61dbd1bd97e6c13a31195904ce84e071e898b8180c"
+    }
+  ],
+  "patchedAacBodySha256": "ba4bc68f52d57efe2bd47da3df9a0bbbadf4e8a07daa321c79ca11f7824345fb",
+  "capture": "Accepted unchanged productBuild executed with transformAacForTest capturing its patched body without further transformation. Build only, no encoder executed. Capture/metafile outside Git at /tmp/m2-real-consumer-review. Embedded worker is part of hash-pinned AAC bundle; TypeScript and C sources aid reading, shipped bundle authoritative."
+}

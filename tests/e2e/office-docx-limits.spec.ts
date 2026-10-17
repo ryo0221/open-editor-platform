@@ -1,3 +1,4 @@
+import { breakOfficeRenderer, recordOfficeRuntime } from './office-runtime-fixtures';
 import { test, expect } from './fixtures';
 import { officeDownload } from './office-fixtures';
 import {
@@ -95,55 +96,66 @@ test('D10 DOCX over-limit input cannot be accepted or downloaded', async ({ page
 test('D08/D10 a failed diagram renderer retries and cancelling its frame prevents late output', async ({
   page,
   context,
-}) => {
+}, info) => {
   test.setTimeout(90000);
-  const source = officeDocument();
-  source.blocks.push({
-    id: 'diagram',
-    type: 'mermaid',
-    text: 'flowchart LR\n A[受付] --> B[完了]',
-  });
-  await importOfficeDocument(page, source);
-  const dialog = await openDocx(page);
-  await dialog.getByLabel('DOCX Mermaid', { exact: true }).selectOption('image');
-  await context.route('**/index_bg-*.wasm', (r) =>
-    r.fulfill({ contentType: 'application/wasm', body: Buffer.from('broken') }),
-  );
-  await prepareDocx(dialog);
-  await acceptDocx(dialog);
-  expect(
-    (await docxReport(page, dialog)).diagnostics.some(
-      (d) => d.code === 'MERMAID_FAILED' && d.severity === 'error',
-    ),
-  ).toBe(true);
-  await expect(dialog.getByRole('button', { name: 'Download DOCX', exact: true })).toBeDisabled();
-  await context.unroute('**/index_bg-*.wasm');
-  await prepareDocx(dialog);
-  await acceptDocx(dialog);
-  await expect(dialog.getByLabel('DOCX counts')).toContainText('Errors: 0');
-  expect((await officeDownload(page, dialog, 'Download DOCX')).length).toBeGreaterThan(1000);
-  let seen = false;
-  let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await context.route('**/office-mermaid.html', async (r) => {
-    seen = true;
-    await held;
-    await r.continue().catch(() => {});
-  });
-  await dialog.getByRole('button', { name: 'Refresh DOCX preview', exact: true }).click();
-  await expect.poll(() => seen).toBe(true);
-  const files: string[] = [];
-  page.on('download', (d) => files.push(d.suggestedFilename()));
-  await dialog.getByRole('button', { name: 'Cancel export', exact: true }).click();
-  await expect(page.locator('iframe[title="Office diagram rendering"]')).toHaveCount(0);
-  release();
-  await context.unroute('**/office-mermaid.html');
-  await page.waitForTimeout(1200);
-  expect(files).toEqual([]);
-  await prepareDocx(dialog);
-  await acceptDocx(dialog);
-  await officeDownload(page, dialog, 'Download DOCX');
-  expect(files.filter((f) => f.endsWith('.docx'))).toHaveLength(1);
+  const attachRuntime = recordOfficeRuntime(page, info);
+  try {
+    const source = officeDocument();
+    source.blocks.push({
+      id: 'diagram',
+      type: 'mermaid',
+      text: 'flowchart LR\n A[受付] --> B[完了]',
+    });
+    await importOfficeDocument(page, source);
+    const dialog = await openDocx(page);
+    await dialog.getByLabel('DOCX Mermaid', { exact: true }).selectOption('image');
+    const fault = await breakOfficeRenderer(context, page);
+    await prepareDocx(dialog);
+    await acceptDocx(dialog);
+    expect(
+      fault.blocked.length,
+      'the targeted renderer WASM must actually be blocked',
+    ).toBeGreaterThan(0);
+    await info.attach('office-wasm-fault', {
+      body: JSON.stringify(fault.blocked, null, 2),
+      contentType: 'application/json',
+    });
+    expect(
+      (await docxReport(page, dialog)).diagnostics.some(
+        (d) => d.code === 'MERMAID_FAILED' && d.severity === 'error',
+      ),
+    ).toBe(true);
+    await expect(dialog.getByRole('button', { name: 'Download DOCX', exact: true })).toBeDisabled();
+    await fault.stop();
+    await prepareDocx(dialog);
+    await acceptDocx(dialog);
+    await expect(dialog.getByLabel('DOCX counts')).toContainText('Errors: 0');
+    expect((await officeDownload(page, dialog, 'Download DOCX')).length).toBeGreaterThan(1000);
+    let seen = false;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await context.route('**/office-mermaid.html', async (r) => {
+      seen = true;
+      await held;
+      await r.continue().catch(() => {});
+    });
+    await dialog.getByRole('button', { name: 'Refresh DOCX preview', exact: true }).click();
+    await expect.poll(() => seen).toBe(true);
+    const files: string[] = [];
+    page.on('download', (d) => files.push(d.suggestedFilename()));
+    await dialog.getByRole('button', { name: 'Cancel export', exact: true }).click();
+    await expect(page.locator('iframe[title="Office diagram rendering"]')).toHaveCount(0);
+    release();
+    await context.unroute('**/office-mermaid.html');
+    await page.waitForTimeout(1200);
+    expect(files).toEqual([]);
+    await prepareDocx(dialog);
+    await acceptDocx(dialog);
+    await officeDownload(page, dialog, 'Download DOCX');
+    expect(files.filter((f) => f.endsWith('.docx'))).toHaveLength(1);
+  } finally {
+    await attachRuntime();
+  }
 });

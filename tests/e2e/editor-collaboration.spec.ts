@@ -401,9 +401,9 @@ test('EI-Q05 normal Whiteboard: Sections, connectors, move/resize and private ca
   ).toBeVisible();
   await b.getByRole('button', { name: 'Add sticky', exact: true }).click();
   await confirmed(b);
-  await b.getByRole('button', { name: 'Layer sticky 1', exact: true }).click();
+  await b.getByRole('button', { name: 'Layer Research', exact: true }).click();
   await b
-    .getByRole('button', { name: 'Layer sticky 2', exact: true })
+    .getByRole('button', { name: 'Layer A new idea', exact: true })
     .click({ modifiers: ['Shift'] });
   await b.getByRole('button', { name: 'Connect selected', exact: true }).click();
   await confirmed(b);

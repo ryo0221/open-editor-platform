@@ -9,7 +9,7 @@ function nativeContent(content: Content): NativeContent {
 }
 import { test, expect, create, nativeArtifact, setDocumentText } from './fixtures';
 import { artifactMenu } from './template-fixtures';
-import { reuseHistory } from './reuse-fixtures';
+import { reuseSharedHistory } from './reuse-shared-history-fixture';
 import { readStructure } from '@editor-platform/templates';
 test('#27 independent shared Document: native peer text, retry, structure addition and selective Undo', async ({
   page: a,
@@ -71,12 +71,12 @@ test('#27 independent shared Document: native peer text, retry, structure additi
     ).toHaveLength(3);
     await setDocumentText(b, 'h2', '他者が直接編集');
     await expect(a.locator('.ProseMirror h2').first()).toHaveText('他者が直接編集');
-    await reuseHistory(a, 'Undo');
+    await reuseSharedHistory(a, 'Undo');
     const undone = (await nativeArtifact(a)).draft.content;
     expect(readStructure(nativeContent(undone), id).items).toHaveLength(2);
     expect(JSON.stringify(undone)).toContain('他者が直接編集');
     expect(JSON.stringify(undone)).toContain('他者の本文を保持');
-    await reuseHistory(a, 'Redo');
+    await reuseSharedHistory(a, 'Redo');
     expect(
       readStructure(nativeContent((await nativeArtifact(a)).draft.content), id).items,
     ).toHaveLength(3);
@@ -136,15 +136,17 @@ test('#27 shared compound Design text protects peer edits and retains a conflict
     await textB.press('Control+a');
     await b.keyboard.insertText('他者編集');
     await textB.press('Control+Enter');
-    await expect(
-      a
-        .getByRole('application', { name: 'Design canvas', exact: true })
-        .getByText('他者編集', { exact: true })
-        .first(),
-    ).toBeVisible();
+    // The canvas deliberately displays the private buffer while editing this part.
+    // Its Inspector value reflects the peer's canonical text without replacing that buffer.
+    const peerText = a.getByRole('textbox', { name: 'Component text 見出し', exact: true });
+    await expect(peerText).toHaveCount(1);
+    await expect(peerText).toHaveValue('他者編集');
+    await expect(textA).toContainText('私の未確定入力');
     await textA.press('Control+Enter');
     await expect(textA).toContainText('私の未確定入力');
-    await expect(a.getByRole('alert').first()).toContainText('変更されました');
+    await expect(a.getByRole('alert')).toHaveText(
+      '文字または書式が変更済み、または編集できません。入力をコピーして現在値を確認してください。',
+    );
     await a.screenshot({ path: info.outputPath('shared-compound-text-conflict.png') });
     await textA.press('Escape');
     const native = (await nativeArtifact(a)).draft.content;

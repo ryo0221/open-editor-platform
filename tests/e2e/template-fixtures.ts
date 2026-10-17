@@ -26,7 +26,7 @@ export async function downloadText(page: Page, name: string) {
   await page.getByRole('button', { name, exact: true }).click();
   if (name === 'Export CSV')
     await page
-      .getByRole('dialog', { name: 'Export CSV' })
+      .getByRole('dialog', { name: 'CSV export scope', exact: true })
       .getByRole('button', { name: 'Download CSV' })
       .click();
   return readFile((await (await pending).path())!, 'utf8');

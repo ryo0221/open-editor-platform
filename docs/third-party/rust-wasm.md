@@ -1,6 +1,6 @@
 # Rust standard-library notice for the optional Wasm asset
 
-The spatial crate is original repository code under AGPLv3-only in this release. Its generated Wasm
+The spatial crate is original repository code under MIT. Its generated Wasm
 links Rust 1.90.0's standard library; the crate has no registry dependencies.
 Rust's standard library is available under MIT or Apache-2.0. Retain the selected
 license and applicable upstream third-party notices when distributing the binary.

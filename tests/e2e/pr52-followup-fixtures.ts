@@ -205,9 +205,15 @@ export async function imageFirstPublicSlot(page: Page) {
   await page.goto('/');
   await importUsability(page, 'design', design);
   const open = async () => {
+    // Reload returns before the persisted artifact and its private panels are restored.
+    await expect(page.getByLabel('Artifact name', { exact: true })).toHaveValue(
+      'Usability fixture',
+    );
+    const navigator = page.getByRole('button', { name: 'Toggle Design navigator', exact: true });
+    await expect(navigator).toBeVisible();
     const components = page.getByRole('button', { name: 'Components', exact: true });
-    if (!(await components.isVisible()))
-      await page.getByRole('button', { name: 'Toggle Design navigator', exact: true }).click();
+    if ((await navigator.getAttribute('aria-pressed')) === 'false') await navigator.click();
+    await expect(components).toBeVisible();
     await components.click();
     await page.getByRole('button', { name: 'React公開設定 First image', exact: true }).click();
   };

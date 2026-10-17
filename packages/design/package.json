@@ -16,7 +16,8 @@
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/reuse-core": "*",
-    "@editor-platform/react-ui-core": "*"
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/artifact-references": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1"

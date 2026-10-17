@@ -1,0 +1,221 @@
+{
+  "codeCommit": "8cf47cabaeb7ac55f6ae36a645f31f8e476bc21c",
+  "lifecycle": [
+    {
+      "name": "allocation-io-cancel-bounds",
+      "status": "PASS",
+      "cases": 14
+    },
+    {
+      "name": "repeated-failure-reopen-release",
+      "status": "PASS",
+      "cycles": 16,
+      "baselineHeap": 144,
+      "heapAfter": [144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144]
+    },
+    {
+      "name": "terminate-and-new-worker",
+      "status": "PASS",
+      "terminations": 3
+    }
+  ],
+  "faults": [
+    {
+      "fault": 1,
+      "code": -101,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 2,
+      "code": -102,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 3,
+      "code": -102,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 4,
+      "code": -104,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 5,
+      "code": -48,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 6,
+      "code": -48,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 7,
+      "code": -105,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 8,
+      "code": -105,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 9,
+      "code": -107,
+      "steps": 3,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 10,
+      "code": -29,
+      "steps": 0,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "fault": 0,
+      "code": -108,
+      "steps": 2,
+      "autoHandles": 0,
+      "closedHandles": 0,
+      "heap": 144,
+      "frames": 0,
+      "hashes": []
+    },
+    {
+      "size": 0,
+      "code": -100,
+      "autoHandles": 0
+    },
+    {
+      "size": 16777217,
+      "code": -100,
+      "autoHandles": 0
+    },
+    {
+      "limit": 1001,
+      "code": -100,
+      "autoHandles": 0
+    }
+  ],
+  "hevc": [
+    {
+      "name": "hevc8",
+      "mode": "decode",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc8",
+      "mode": "cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc8",
+      "mode": "packet-limit",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "decode",
+      "status": "FAIL",
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n11 !== 12\n"
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr",
+      "mode": "packet-limit",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "decode",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-no-edit",
+      "mode": "packet-limit",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-explicit-duration",
+      "mode": "decode",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-explicit-duration",
+      "mode": "cancel",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-explicit-duration",
+      "mode": "packet-limit",
+      "status": "PASS"
+    },
+    {
+      "name": "hevc10-hlg-vfr-explicit-duration",
+      "mode": "deferred-receive",
+      "status": "PASS"
+    },
+    {
+      "name": "malformed",
+      "status": "PASS"
+    }
+  ]
+}

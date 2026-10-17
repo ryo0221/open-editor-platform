@@ -170,3 +170,10 @@ A source accepted by the larger Office input limits can fail template save; the
 error is explicit and no catalog entry is written. Existing native artifacts remain
 independent of the catalog and can be shared, saved/reloaded and exported by another
 Host. Both-domain evidence is tracked in #16 verification.
+
+Slide fragment authoring can pass `slideSelection` addresses (`pageId`, `elementId`) to
+`selectTemplateContent` / `saveAsTemplate`. Scoped selection and group expansion stay within
+each addressed page, where object IDs are unique. Whole-artifact authoring keeps the whole
+content and its reference rejection. Omitted addresses preserve the existing ID-only behavior.
+The Slide Surface supplies its active page as the optional third `select` callback argument;
+Hosts must retain that value on selection addresses before opening scoped authoring.

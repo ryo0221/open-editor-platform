@@ -107,6 +107,11 @@ npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.s
 
 ## PRに必要な説明
 
+React UIの汎用登録抽出・改訂／構成差分は[portability手引き](react-ui-portability.md)、
+保存済み版からのファイル受け渡しは[成果物出力契約](artifact-output-contract.md)を参照する。
+TypeScript toolingはHost/build時の任意packageで、通常Editor runtimeの依存にはしない。
+元実装／依存hash・wrapper等の方針・承認／配置はHostが提供する。
+
 - 利用者のどの操作がどう変わるか、どのkind/capabilityに影響するか。
 - 変更したschema/public APIと、既存Artifact・旧version・既存Hostへの影響。
 - 必須条件と条件付き条件の結果、適用外の理由、未実施・未対応・既知の制限。
@@ -129,3 +134,12 @@ npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.s
 | 実際に表示されたpreviewを検証せずmetadataだけで対応済みにする | 宣言した成果物を独立Host/実際の対象で検証する                      |
 | 狭いviewportの成功を実機・全browserの成功と書く               | 検証環境と未実施対象を明記する                                     |
 | importしたJSONをcommandやJSとして実行する                     | データとして検証し、trusted codeのcommandへ変換する                |
+
+## Artifact Host integration example
+
+The [public Host contract](host-integration.md) and `apps/artifact-host` show per-ID
+local Session ownership, attach/detach, save results, domain-specific formats and
+readonly/failure handling without Playground dependencies. Actual Site Host sources
+live separately in `apps/studio-demo`. Use the condition matrix
+for verified scope and unrun environments; this example does not certify shared or
+production authorization/durability.

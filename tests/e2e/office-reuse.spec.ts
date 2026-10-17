@@ -234,6 +234,9 @@ for (const domain of ['slide', 'document'] as const) {
       .toBe(true);
     const preview = page.getByRole('region', { name: 'Host prepared preview', exact: true });
     const result = async () => {
+      // Creation is asynchronous; the previous result remains visible while
+      // applying. Wait for this creation to finish before exporting its result.
+      await expect(preview).toHaveCount(0);
       const pending = page.waitForEvent('download');
       await page.getByRole('button', { name: 'Export template result', exact: true }).click();
       return JSON.parse(await readFile((await (await pending).path())!, 'utf8'));

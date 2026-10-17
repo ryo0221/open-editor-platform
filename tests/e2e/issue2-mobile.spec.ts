@@ -61,6 +61,11 @@ for (const width of [390, 768])
           mimeType: 'application/pdf',
           buffer: Buffer.from(await pdf.save()),
         });
+        await expect(page.getByRole('dialog', { name: 'Replace source', exact: true })).toHaveCount(
+          0,
+        );
+        await expect(page.getByLabel('Rendered PDF page 1', { exact: true })).toBeVisible();
+        // Replacement closes the previous toolbar menu; PDF controls live in a fresh menu.
         await page.getByRole('button', { name: 'More editor tools', exact: true }).click();
         await page.getByRole('button', { name: 'Next PDF page', exact: true }).click();
         await expect(page.getByLabel('PDF page', { exact: true })).toHaveValue('2');

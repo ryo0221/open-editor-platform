@@ -32,6 +32,12 @@ export default defineConfig({
   ],
   webServer: [
     {
+      command: 'node scripts/design-react-export-server.mjs',
+      url: 'http://127.0.0.1:4176/health',
+      reuseExistingServer: false,
+      timeout: 120000,
+    },
+    {
       command: 'node scripts/react-ui-export-server.mjs',
       url: 'http://127.0.0.1:4175',
       reuseExistingServer: false,

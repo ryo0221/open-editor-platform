@@ -1,0 +1,113 @@
+{
+  "pin": "c27b96cf7ebb6bafa2581b6b5bf0be45152a2348",
+  "scope": "Whole numerical dependency closure from deterministic decoded planes through source renderer, request ordering, gain/fade, mix and final guard. Native decoding/ownership excluded.",
+  "change": "Only package-barrel imports redirected to frozen/core.ts; local paths and all original numerical statements unchanged. Facade selects original source exports; no live numerical imports.",
+  "facadeSha256": "8763b8ff6123f6dcdc981c18e8e06933dff9b96c99e2b5e133d637f6a5f19cc6",
+  "files": [
+    {
+      "original": "packages/video-core/experiments/pcm-renderer/render.ts",
+      "gitBlob": "af8e8f3615c53054b3fa11611eea625942323b32",
+      "originalSha256": "1316abd268144fee9d6cb5223cb49f8a7a090c9faded6ca2a3178fdfc43793ed",
+      "frozen": "frozen/packages/video-core/experiments/pcm-renderer/render.ts",
+      "frozenSha256": "af19c2eec849a6658a3030ecf16cdae910c2c8e82b5a6df084acd3a786bbd220"
+    },
+    {
+      "original": "packages/video-core/experiments/pcm-renderer/session.ts",
+      "gitBlob": "b4ce5ba741dfd5a0789120401a48e92d6fafd6e9",
+      "originalSha256": "e39c5fa5229a7ef3f42f94a624c4084c250f5bec1bd00dbd66697f60fefe48c8",
+      "frozen": "frozen/packages/video-core/experiments/pcm-renderer/session.ts",
+      "frozenSha256": "06b3f361eb6a6b2e50cd0dc2d1ed92f7acd89936c340d324f522498d6e45022a"
+    },
+    {
+      "original": "packages/video-core/src/evaluate.ts",
+      "gitBlob": "239cdbeb8360dc4dffa8ac913e237a7e648b57c8",
+      "originalSha256": "52d16932338b100124430dceae2a316108f4b9c8ffed1e34f2630247ac362b6c",
+      "frozen": "frozen/packages/video-core/src/evaluate.ts",
+      "frozenSha256": "52d16932338b100124430dceae2a316108f4b9c8ffed1e34f2630247ac362b6c"
+    },
+    {
+      "original": "packages/video-core/src/model.ts",
+      "gitBlob": "9cd717aaf2ded5cb7201d46631044c15ace3fb73",
+      "originalSha256": "d2350ccaf733dca313065c46b3c014a62461d773297d736335d01dfa29046474",
+      "frozen": "frozen/packages/video-core/src/model.ts",
+      "frozenSha256": "d2350ccaf733dca313065c46b3c014a62461d773297d736335d01dfa29046474"
+    },
+    {
+      "original": "packages/video-core/src/time.ts",
+      "gitBlob": "e2a5472afc308cad573c00512b6bbff66d4d74d9",
+      "originalSha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999",
+      "frozen": "frozen/packages/video-core/src/time.ts",
+      "frozenSha256": "54e0e390e1dd0d9a2439659894e59e7192fd25086462c13e8c75aa7f211ab999"
+    },
+    {
+      "original": "packages/video-core/src/v1/evaluate.ts",
+      "gitBlob": "667fdb8650eae51997c089bea5ee0956d177158c",
+      "originalSha256": "ad8358134edf8f01a64e5f12fae0742965adaf3bae239c8ab1e22195d973347f",
+      "frozen": "frozen/packages/video-core/src/v1/evaluate.ts",
+      "frozenSha256": "ad8358134edf8f01a64e5f12fae0742965adaf3bae239c8ab1e22195d973347f"
+    },
+    {
+      "original": "packages/video-core/src/v1/model.ts",
+      "gitBlob": "29db8c89fd6fc877f8ba9fca0b908d0e01240f21",
+      "originalSha256": "b08eaeb4eff7ecdf7527b59ca06bbb864c453bc2fcc5bde7b9dd6524bc6ee1a4",
+      "frozen": "frozen/packages/video-core/src/v1/model.ts",
+      "frozenSha256": "b08eaeb4eff7ecdf7527b59ca06bbb864c453bc2fcc5bde7b9dd6524bc6ee1a4"
+    },
+    {
+      "original": "packages/video-core/src/v1/validation.ts",
+      "gitBlob": "7dc8927cfa07098184653503680ceb0be1c2da29",
+      "originalSha256": "3352ea59979d9196ed39178dc1f8ed1c3920f9698a4ee4994d0ea83cf0e0468a",
+      "frozen": "frozen/packages/video-core/src/v1/validation.ts",
+      "frozenSha256": "3352ea59979d9196ed39178dc1f8ed1c3920f9698a4ee4994d0ea83cf0e0468a"
+    },
+    {
+      "original": "packages/video-core/src/v2/gain.ts",
+      "gitBlob": "632be7ef6abfba1ccaa7bbd077c575e71399d82e",
+      "originalSha256": "421061c49f662d3341d94401e42c85d4549ecaa5138fbdf24162bfbd49eb2746",
+      "frozen": "frozen/packages/video-core/src/v2/gain.ts",
+      "frozenSha256": "421061c49f662d3341d94401e42c85d4549ecaa5138fbdf24162bfbd49eb2746"
+    },
+    {
+      "original": "packages/video-core/src/v2/model.ts",
+      "gitBlob": "2324e43ce9ea0aa1adec12628beb276db8382df9",
+      "originalSha256": "bb0769f6827d0202618476be4b2b8154d37f444d1a2e279496f42914c4967a05",
+      "frozen": "frozen/packages/video-core/src/v2/model.ts",
+      "frozenSha256": "bb0769f6827d0202618476be4b2b8154d37f444d1a2e279496f42914c4967a05"
+    },
+    {
+      "original": "packages/video-core/src/v2/validation.ts",
+      "gitBlob": "f97709395c0814ace6a867ed392c88dde1267667",
+      "originalSha256": "b2fa618baa790f2c5c9f0ec9f989710c816a000430c3bac0bf221f299571220e",
+      "frozen": "frozen/packages/video-core/src/v2/validation.ts",
+      "frozenSha256": "b2fa618baa790f2c5c9f0ec9f989710c816a000430c3bac0bf221f299571220e"
+    },
+    {
+      "original": "packages/video-core/src/validation.ts",
+      "gitBlob": "46dcc1cc4dd86fe942611386c5bf98094e4654cb",
+      "originalSha256": "b5081a3c0952ef2bcfd5eb0fa84c94ed03a0f0fadbbf1420510efc3756713a6a",
+      "frozen": "frozen/packages/video-core/src/validation.ts",
+      "frozenSha256": "b5081a3c0952ef2bcfd5eb0fa84c94ed03a0f0fadbbf1420510efc3756713a6a"
+    },
+    {
+      "original": "packages/video-metadata/host-media/file-source/timing-v1.ts",
+      "gitBlob": "ec372e090130a65a1d1143fce90801c2a1b4ab49",
+      "originalSha256": "18189034a8c2183221d617354557d05c19db10ad8ddc1ab5c309d16ecf7e7f2b",
+      "frozen": "frozen/packages/video-metadata/host-media/file-source/timing-v1.ts",
+      "frozenSha256": "1651c2ccf116a181f08f6c6f651caed0b7f2605743715d0386835b4fb4c0b88d"
+    },
+    {
+      "original": "packages/video-metadata/host-media/m2/mix-v2.ts",
+      "gitBlob": "d8f6d82acace808b9bbce79d2287d779d73b6a57",
+      "originalSha256": "de22e849107c1a40743c4a3a251781ad51594483e509585028342842364d023f",
+      "frozen": "frozen/packages/video-metadata/host-media/m2/mix-v2.ts",
+      "frozenSha256": "e81f1ebc0697ffd9a85879aad7f99e880d77d2c555839049780c11e2acc92bff"
+    },
+    {
+      "original": "packages/video-metadata/host-media/m2/requests.ts",
+      "gitBlob": "7cc7a95e896b09d27ca6df8194df6152a4c82cdf",
+      "originalSha256": "8b6fa73d41d7bd5a1f7d12ff6f56b1ee5e812f74d298f92c5f6aace263595790",
+      "frozen": "frozen/packages/video-metadata/host-media/m2/requests.ts",
+      "frozenSha256": "b1d4412364ac074f49d8cead11a0c56fed6ec85d8a818016afdb68c820b290a9"
+    }
+  ]
+}

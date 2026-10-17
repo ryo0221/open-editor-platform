@@ -18,6 +18,9 @@ export const test = base.extend<{ browserErrors: void }>({
 export { expect };
 export async function nativeArtifact(page: Page): Promise<StoredArtifact> {
   await page.getByRole('button', { name: 'Export artifact', exact: true }).click();
+  // Read canonical output only after queued shared edits/history are confirmed.
+  // This waits for the existing UI state; it neither retries nor submits edits.
+  await expect(page.locator('.save-status')).not.toContainText(/\b[1-9]\d* pending\b/);
   const pending = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export JSON', exact: true }).click();
   const file = await pending;

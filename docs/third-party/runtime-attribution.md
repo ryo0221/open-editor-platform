@@ -12,6 +12,12 @@ font files or native decoder binaries. Installed libraries keep their upstream
 licenses. This notice supplement does not relicense them under AGPL or certify
 every possible downstream binary distribution.
 
+The independent Artifact Host also bundles `typescript@5.9.2` for its declared
+TSX compilation path. Its published Apache license and complete
+`ThirdPartyNoticeText.txt` are retained. The supplement also records the
+`jszip@3.10.1` version observed in the current graph; older version notices remain
+as retained attribution rather than being silently removed.
+
 ## Material outside a package root license file
 
 - `@pdf-lib/fontkit@1.1.1` publishes an MIT declaration and author/contributor

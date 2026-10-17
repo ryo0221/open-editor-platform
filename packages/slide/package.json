@@ -13,7 +13,8 @@
     "@editor-platform/editor-core": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-ui": "*",
-    "@editor-platform/office-export-ui": "*"
+    "@editor-platform/office-export-ui": "*",
+    "@editor-platform/artifact-references": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1",

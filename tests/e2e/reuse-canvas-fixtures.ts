@@ -153,12 +153,24 @@ export async function boardComponentFlow(page: Page) {
   await library(page, '接続付きノード v1');
   await apply(page, '部品ライブラリ');
   const inserted = (await nativeArtifact(page)).draft.content as WhiteboardContent;
-  if (!(await page.getByRole('button', { name: 'Layer text 2', exact: true }).isVisible()))
-    await page.getByRole('button', { name: 'Toggle Board navigator', exact: true }).click();
-  await page.getByRole('button', { name: 'Layer text 2', exact: true }).click();
-  await page
-    .getByRole('button', { name: 'Layer text 1', exact: true })
-    .click({ modifiers: ['Shift'] });
+  expect(inserted.nodes).toHaveLength(2);
+  expect(inserted.nodes.map((node) => node.kind)).toEqual(['text', 'text']);
+  const navigator = page.getByRole('button', { name: 'Toggle Board navigator', exact: true });
+  await expect(navigator).toBeVisible();
+  if ((await navigator.getAttribute('aria-pressed')) === 'false') await navigator.click();
+  const layers = page.getByRole('tree', { name: 'Layers', exact: true }).getByRole('button', {
+    name: /^Layer /,
+  });
+  await expect(layers).toHaveCount(2);
+  // These two ungrouped nodes retain native order; their text-derived labels may match.
+  await layers.nth(1).click();
+  const canvas = page.getByRole('application', { name: 'Whiteboard canvas', exact: true });
+  const selectedNode = (id: string) => canvas.locator(`[data-canvas-target=${JSON.stringify(id)}]`);
+  await expect(selectedNode(inserted.nodes[1].id)).toHaveAttribute('aria-pressed', 'true');
+  await expect(selectedNode(inserted.nodes[0].id)).toHaveAttribute('aria-pressed', 'false');
+  await layers.nth(0).click({ modifiers: ['Shift'] });
+  for (const node of inserted.nodes)
+    await expect(selectedNode(node.id)).toHaveAttribute('aria-pressed', 'true');
   await canvasTool(page, 'Connect selected');
   await page.getByRole('button', { name: 'Connection 1', exact: true }).click();
   if (!(await page.getByRole('combobox', { name: 'from port', exact: true }).isVisible()))

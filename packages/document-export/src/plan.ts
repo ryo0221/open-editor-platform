@@ -100,6 +100,13 @@ export async function prepareDocumentDocx(
       ids.add(d.id);
     }
   };
+  if (content.blocks.some((b) => b.reference))
+    add(
+      'REFERENCE_EXPORT_UNSUPPORTED',
+      'error',
+      '参照埋め込みのDOCX出力は未対応です。HTML／Markdownまたは参照付きnative JSONを使ってください。',
+      { domain: 'document' },
+    );
   if ((await contentHash(content)) !== input.basis.contentHash)
     add('SNAPSHOT_HASH_MISMATCH', 'error', 'Captured content does not match its declared hash');
   if (content.reuse && (content.reuse.instances.length || content.reuse.artifactMode))

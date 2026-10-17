@@ -1,0 +1,21 @@
+{
+  "name": "@editor-platform/extension-sample",
+  "version": "0.0.0-draft.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./animation-viewer": "./src/animation-viewer/index.ts",
+    "./controlled-counter": "./src/controlled-counter.ts"
+  },
+  "dependencies": {
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/animation-player": "*"
+  },
+  "devDependencies": {
+    "@editor-platform/extension-runtime": "*"
+  }
+}

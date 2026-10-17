@@ -1,4 +1,12 @@
 import {
+  ReferenceResolver,
+  ReferenceError,
+  type ReferenceOption,
+} from '@editor-platform/artifact-references';
+import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
+import { captureArtifactReferences, validateArtifactReferenceHistory } from './artifact-references';
+import type { PrivateVideoEntry } from './private-video/catalog';
+import {
   NativeGraphSurface,
   relationProfile,
   isGraphDocument,
@@ -116,6 +124,7 @@ import {
 } from '@editor-platform/editor-core';
 import {
   DocumentSurface,
+  captureDocumentReferences,
   documentDiff,
   exportHtml,
   exportMarkdown,
@@ -240,12 +249,20 @@ export interface SharedPlaygroundConnection {
   hostActions?: { label: string; run(): void | Promise<void> }[];
 }
 export interface PlaygroundProps {
+  privateEntries?: PrivateVideoEntry[];
+  privateM2Entries?: PrivateVideoEntry[];
+  onOpenPrivateM2?(id?: string): void;
+  onOpenPrivateEditor?(id?: string): void;
   extensions?: EditorExtensions;
   inspectorSlot?: ReactNode;
   shared?: SharedPlaygroundConnection;
   onStartShared?(record: StoredArtifact): Promise<void>;
 }
 export default function App({
+  privateEntries = [],
+  privateM2Entries = [],
+  onOpenPrivateM2,
+  onOpenPrivateEditor,
   extensions = {},
   inspectorSlot,
   shared,
@@ -259,6 +276,7 @@ export default function App({
     domain: Domain;
     content: NativeContent;
     ids: string[];
+    slideSelection?: { pageId: string; elementId: string }[];
     reuse: boolean;
     privateSettings?: PrivateViewSettings;
     session?: SharedEditorSession<Content>;
@@ -308,6 +326,85 @@ export default function App({
   const [loadErrors, setLoadErrors] = useState<Record<string, string>>({});
   const recordsRef = useRef(records);
   const [activeId, setActiveId] = useState('');
+  const referenceSavedRecords = useRef(new Map<string, StoredArtifact>());
+  const referenceNotifications = useRef(new Set<(id: string) => void>());
+  const referenceReturn = useRef<ElementAddress | undefined>(undefined);
+  const referenceNavigation = useRef<
+    (sourceId: string, elementId: string, pageId?: string) => void
+  >(() => {});
+  const references = useMemo(
+    () =>
+      new ReferenceResolver(
+        {
+          async list() {
+            const options: ReferenceOption[] = [];
+            for (const a of referenceSavedRecords.current.values()) {
+              const content = a.versions.at(-1)?.content;
+              if (isStructuredData(content)) {
+                const views = [{ id: 'default', name: 'Default view' }, ...(content.views ?? [])];
+                for (const view of views)
+                  for (const kind of ['table', 'chart'])
+                    options.push({
+                      label: `${a.name} · ${view.name} · ${kind}`,
+                      source: {
+                        artifactId: a.id,
+                        domain: 'data',
+                        target: { kind, viewId: view.id },
+                      },
+                    });
+              } else if (isGraphDocument(content))
+                options.push({
+                  label: `${a.name} · Graph`,
+                  source: {
+                    artifactId: a.id,
+                    domain: 'structured-graph',
+                    target: { kind: 'graph', viewId: content.id },
+                  },
+                });
+            }
+            return options;
+          },
+          async read(source) {
+            const a = referenceSavedRecords.current.get(source.artifactId);
+            if (!a || a.kind !== source.domain)
+              throw new ReferenceError('missing-source', '保存済みの参照元が見つかりません。');
+            const version = a.versions.at(-1);
+            if (!version)
+              throw new ReferenceError('missing-source', '参照元をversionとして保存してください。');
+            return {
+              artifactId: a.id,
+              domain: a.kind,
+              versionId: version.versionId,
+              revision: a.versions.length,
+              contentHash: version.contentHash,
+              content: version.content,
+              dependencies: isGraphDocument(version.content)
+                ? [
+                    {
+                      id: `profile:${relationProfile.id}:${relationProfile.version}`,
+                      content: relationProfile,
+                      contentHash: await contentHash(relationProfile),
+                    },
+                  ]
+                : [],
+            };
+          },
+          subscribe(listener) {
+            referenceNotifications.current.add(listener);
+            return () => {
+              referenceNotifications.current.delete(listener);
+            };
+          },
+          open(source, elementId, pageId) {
+            referenceNavigation.current(source.artifactId, elementId, pageId);
+          },
+        },
+        nativeReferenceAdapters,
+        activeId,
+      ),
+    [activeId],
+  );
+
   const inputs = useMemo(() => new EditorInputs(), [activeId]);
   const inputStatus = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot);
   const [loaded, setLoaded] = useState(false);
@@ -399,6 +496,7 @@ export default function App({
   }, [proposal]);
   const sessions = useRef(new Map<string, EditorSession<Content>>());
   const writeQueue = useRef(Promise.resolve());
+  const privateTransition = useRef(false);
   const failedWrites = useRef(new Set<string>());
   const submittingComments = useRef(new Set<string>());
   // Retain identities across uncertain/failed delivery; retry must not duplicate a thread.
@@ -438,6 +536,7 @@ export default function App({
     inputs,
     selection,
     preview: !!sharedPreview,
+    readOnly,
   });
   useLayoutEffect(() => {
     currentTarget.current = {
@@ -446,6 +545,7 @@ export default function App({
       inputs,
       selection,
       preview: !!sharedPreview,
+      readOnly,
     };
   });
   useEffect(() => {
@@ -467,15 +567,17 @@ export default function App({
         for (const a of values) {
           try {
             if (!validContent(a.kind, a.draft.content)) throw new Error('Invalid stored content');
+            if (a.versions.some((v) => !validContent(a.kind, v.content)))
+              throw new Error('Invalid stored version');
             if (a.kind === 'structured-graph') {
-              if (a.versions.some((v) => !validContent(a.kind, v.content)))
-                throw new Error('Invalid stored Graph version');
               for (const v of a.versions)
                 if ((await contentHash(v.content)) !== v.contentHash)
                   throw new Error('Stored Graph version hash mismatch');
             }
             a.versions.forEach(deepFreeze);
+            await validateArtifactReferenceHistory(a, references);
             opened.set(a.id, createLocalSession(a.draft.content));
+            referenceSavedRecords.current.set(a.id, a);
           } catch (e) {
             failures[a.id] = String(e);
           }
@@ -521,6 +623,10 @@ export default function App({
     const completion = writeQueue.current
       .then(() => storage.put(record))
       .then(() => {
+        const priorSource = referenceSavedRecords.current.get(record.id);
+        referenceSavedRecords.current.set(record.id, record);
+        if (priorSource?.versions.at(-1)?.versionId !== record.versions.at(-1)?.versionId)
+          for (const notify of referenceNotifications.current) notify(record.id);
         failedWrites.current.delete(record.id);
         if (generation === saveGeneration.current)
           setStatus(failedWrites.current.size ? 'Not saved' : 'Saved locally');
@@ -536,6 +642,52 @@ export default function App({
       });
     writeQueue.current = completion.then(() => {});
     return completion;
+  }
+  async function openPrivateEditor(id?: string, m2 = false) {
+    const open = m2 ? onOpenPrivateM2 : onOpenPrivateEditor;
+    if (!open || shared || busy || savingVersion.current || !loaded || privateTransition.current)
+      return;
+    privateTransition.current = true;
+    if (!flushInputs()) {
+      privateTransition.current = false;
+      return;
+    }
+    const target = currentTarget.current;
+    const generation = saveGeneration.current;
+    const queue = writeQueue.current;
+    let inputChanged = false;
+    const stop = inputs.subscribe(() => {
+      inputChanged = true;
+    });
+    setBusy(true);
+    try {
+      await queue;
+      const current = currentTarget.current;
+      const pending = inputs.getSnapshot();
+      if (
+        inputChanged ||
+        pending.dirty ||
+        pending.composing ||
+        generation !== saveGeneration.current ||
+        queue !== writeQueue.current ||
+        current.activeId !== target.activeId ||
+        current.inputs !== inputs ||
+        current.shared !== target.shared ||
+        current.preview !== target.preview
+      )
+        throw new Error(
+          'Editor changed while waiting to switch. Your draft and pending input are retained; finish saving and try again.',
+        );
+      if (failedWrites.current.size)
+        throw new Error('Resolve the local save error before switching Editors');
+      open(id);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      stop();
+      privateTransition.current = false;
+      setBusy(false);
+    }
   }
   async function reuseBatchBasis(id: string) {
     const current = reuseBatchAccess.current;
@@ -636,6 +788,33 @@ export default function App({
     setInspector(false);
     editorEvents.emit('artifact', { artifactId: id });
   }
+  referenceNavigation.current = (sourceId, elementId, pageId) => {
+    if (!flushInputs()) return;
+    if (shared) throw new Error('参照元へ移動する前に共有接続を終了してください。');
+    if (!recordsRef.current.some((a) => a.id === sourceId))
+      throw new Error('参照元が見つかりません。');
+    referenceReturn.current = { artifactId: activeId, elementId, pageId };
+    activate(sourceId);
+  };
+  function returnFromReference() {
+    if (!flushInputs() || !referenceReturn.current) return;
+    const target = referenceReturn.current;
+    activate(target.artifactId);
+    setRevealAddress(target);
+    referenceReturn.current = undefined;
+  }
+  function assertReferenceCaptureCurrent(id: string, content: Content, writing = false) {
+    if (
+      (writing && currentTarget.current.readOnly) ||
+      currentTarget.current.activeId !== id ||
+      recordsRef.current.find((a) => a.id === id)?.draft.content !== content ||
+      inputs.getSnapshot().dirty ||
+      inputs.getSnapshot().composing
+    )
+      throw new Error(
+        '取得中に成果物または入力が変わりました。入力を保持しています。再実行してください。',
+      );
+  }
   function create(nextKind: Kind) {
     if (!flushInputs()) return;
     if (shared) {
@@ -683,12 +862,13 @@ export default function App({
     });
     editorEvents.emit('command', { artifactId: active.id, type: direction, label: direction });
   }
-  function select(ids: string | string[], region?: Region) {
+  function select(ids: string | string[], region?: Region, pageId?: string) {
     if (!active) return;
     const next: Selection = {
       addresses: (typeof ids === 'string' ? [ids] : ids).map((elementId) => ({
         artifactId: active.id,
         elementId,
+        ...(pageId ? { pageId } : {}),
         ...(region ? { region } : {}),
       })),
     };
@@ -729,7 +909,14 @@ export default function App({
     setBusy(true);
     savingVersion.current = true;
     try {
-      const committed = await commitVersion(saved, 'local-user', reason || 'Manual save');
+      const captured = await captureArtifactReferences(saved.draft.content, references);
+      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true);
+      const committed = await commitVersion(
+        { ...saved, draft: { ...saved.draft, content: captured } },
+        'local-user',
+        reason || 'Manual save',
+      );
+      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true);
       const latest = recordsRef.current.find((a) => a.id === active.id)!;
       const result = {
         ...committed,
@@ -737,7 +924,8 @@ export default function App({
         annotations: latest.annotations,
         draft: { ...latest.draft, baseVersionId: committed.draft.baseVersionId },
       };
-      persist(result);
+      if (!(await persist(result)))
+        throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
       setReason('');
       editorEvents.emit('version', {
         artifactId: result.id,
@@ -946,6 +1134,7 @@ export default function App({
       const text = await file.text();
       let record: StoredArtifact;
       let nativeName: string | undefined;
+      let importedArtifactId: string | undefined;
       if (/\.md$/i.test(file.name)) {
         record = makeArtifact('document', 1);
         record.draft.content = importMarkdown(text);
@@ -964,6 +1153,7 @@ export default function App({
         } else {
           const artifact = deserializeArtifact(text);
           nativeName = artifact.name;
+          importedArtifactId = artifact.id;
           if (
             !validContent(artifact.kind, artifact.draft.content) ||
             artifact.versions.some((v) => !validContent(artifact.kind, v.content))
@@ -1012,6 +1202,11 @@ export default function App({
             record.kind as Domain,
             nativeContent(version.content),
           );
+      // Reference sources retain exported IDs; check self-addresses in that original scope.
+      await validateArtifactReferenceHistory(
+        { ...record, id: importedArtifactId ?? record.id },
+        references,
+      );
       record.name = nativeName ?? file.name.replace(/\.(md|csv|json)$/i, '');
       record.provenance = {
         source: 'imported',
@@ -1069,6 +1264,9 @@ export default function App({
         ids: currentTarget.current.selection.addresses
           .filter((address) => address.artifactId === record.id)
           .map((address) => address.elementId),
+        slideSelection: currentTarget.current.selection.addresses
+          .filter((address) => address.artifactId === record.id && address.pageId)
+          .map((address) => ({ pageId: address.pageId!, elementId: address.elementId })),
         reuse,
         privateSettings: clone(privateViewsRef.current[record.id]),
         session: currentTarget.current.shared?.session,
@@ -1091,8 +1289,13 @@ export default function App({
           '待機中に入力が変更されました。入力を確定して書き出しをやり直してください。',
         );
       const current = readCanonicalRecord(active.id);
-      const document = current.draft.content;
-      if (!isDocument(document)) throw new Error('Document content is unavailable');
+      if (!isDocument(current.draft.content)) throw new Error('Document content is unavailable');
+      const document = await captureDocumentReferences(
+        current.draft.content,
+        references,
+        format === 'markdown',
+      );
+      if (!sharedSession) assertReferenceCaptureCurrent(current.id, current.draft.content);
       downloadText(
         `${current.name}.${format === 'markdown' ? 'md' : 'html'}`,
         format === 'markdown' ? exportMarkdown(document) : exportHtml(document),
@@ -1133,7 +1336,17 @@ export default function App({
     }
     if (active) {
       const current = recordsRef.current.find((record) => record.id === active.id)!;
-      downloadText(`${current.name}.artifact.json`, serializeArtifact(current), 'application/json');
+      try {
+        const captured = await captureArtifactReferences(current.draft.content, references);
+        assertReferenceCaptureCurrent(current.id, current.draft.content);
+        downloadText(
+          `${current.name}.artifact.json`,
+          serializeArtifact({ ...current, draft: { ...current.draft, content: captured } }),
+          'application/json',
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     }
   }
   function requestProposal() {
@@ -1232,7 +1445,8 @@ export default function App({
     [],
   );
   const surfaceSelect = useMemo(
-    () => (ids: string | string[], region?: Region) => currentActions.current.select(ids, region),
+    () => (ids: string | string[], region?: Region, pageId?: string) =>
+      currentActions.current.select(ids, region, pageId),
     [],
   );
   const whiteboardLayout = useMemo(() => ({ viewKey: `whiteboard:${active?.id}` }), [active?.id]);
@@ -1313,6 +1527,11 @@ export default function App({
                     aria-expanded={navOpen}
                     onClick={() => setNavOpen(!navOpen)}
                   />
+                  {referenceReturn.current && referenceReturn.current.artifactId !== activeId && (
+                    <button type="button" onClick={returnFromReference}>
+                      埋め込み先に戻る
+                    </button>
+                  )}
                   {active ? (
                     <input
                       className="artifact-title"
@@ -1836,6 +2055,7 @@ export default function App({
                     domain={authoring.domain}
                     content={authoring.content}
                     ids={authoring.ids}
+                    slideSelection={authoring.slideSelection}
                     catalog={personalTemplates}
                     onClose={() => setAuthoring(undefined)}
                     onSaved={() => setStatus('Template saved locally')}
@@ -2029,6 +2249,44 @@ export default function App({
                   >
                     Officeから新規作成
                   </button>
+                  {!shared && onOpenPrivateEditor && (
+                    <section aria-label="Private Video projects">
+                      <button disabled={!loaded || busy} onClick={() => void openPrivateEditor()}>
+                        New Video project (private)
+                      </button>
+                      {privateEntries.map((entry) => (
+                        <button
+                          key={entry.id}
+                          data-private-project={entry.id}
+                          disabled={!loaded || busy}
+                          onClick={() => void openPrivateEditor(entry.id)}
+                        >
+                          {entry.name}
+                        </button>
+                      ))}
+                    </section>
+                  )}
+                  {!shared && onOpenPrivateM2 && (
+                    <section aria-label="Private Video M2 projects">
+                      <button
+                        disabled={!loaded || busy}
+                        aria-label="Video（複数素材・音声編集）"
+                        onClick={() => void openPrivateEditor(undefined, true)}
+                      >
+                        Video（複数素材・音声編集）
+                      </button>
+                      {privateM2Entries.map((entry) => (
+                        <button
+                          key={entry.id}
+                          data-private-m2-project={entry.id}
+                          disabled={!loaded || busy}
+                          onClick={() => void openPrivateEditor(entry.id, true)}
+                        >
+                          {entry.name}
+                        </button>
+                      ))}
+                    </section>
+                  )}
                   <nav aria-label="Artifacts">
                     {records.map((a) => (
                       <button
@@ -2127,6 +2385,26 @@ export default function App({
                         テンプレートを探す
                       </button>
                       <div className="welcome-tools">
+                        {!shared && onOpenPrivateEditor && (
+                          <button
+                            aria-label="New Video project (private)"
+                            disabled={!loaded || busy}
+                            onClick={() => void openPrivateEditor()}
+                          >
+                            <strong>New Video project (private)</strong>
+                            <small>Local Video review integration</small>
+                          </button>
+                        )}
+                        {!shared && onOpenPrivateM2 && (
+                          <button
+                            disabled={!loaded || busy}
+                            aria-label="Video（複数素材・音声編集）"
+                            onClick={() => void openPrivateEditor(undefined, true)}
+                          >
+                            <strong>Video（複数素材・音声編集）</strong>
+                            <small>Private local validation</small>
+                          </button>
+                        )}
                         {Object.entries(kinds).map(([k, v]) => (
                           <button
                             key={k}
@@ -2218,6 +2496,8 @@ export default function App({
                               )}
                               {rendered.document && (
                                 <DocumentSurface
+                                  references={sharedSession ? undefined : references}
+                                  focusReferenceId={revealAddress?.elementId}
                                   key={
                                     sharedPreview
                                       ? `preview:${sharedPreview.id}:${sharedPreview.preview.token}`
@@ -2428,6 +2708,8 @@ export default function App({
                               )}{' '}
                               {rendered.whiteboard && (
                                 <MemoWhiteboardSurface
+                                  references={sharedSession ? undefined : references}
+                                  focusReferenceId={revealAddress?.elementId}
                                   key={active.id}
                                   layout={whiteboardLayout}
                                   content={rendered.whiteboard}
@@ -2438,6 +2720,8 @@ export default function App({
                               )}{' '}
                               {rendered.design && (
                                 <MemoDesignSurface
+                                  references={sharedSession ? undefined : references}
+                                  focusReferenceId={revealAddress?.elementId}
                                   key={active.id}
                                   prototype={{
                                     artifactId: active.id,
@@ -2555,6 +2839,8 @@ export default function App({
                               )}{' '}
                               {rendered.slide && (
                                 <SlideSurface
+                                  references={sharedSession ? undefined : references}
+                                  focusReferenceId={revealAddress?.elementId}
                                   focusAddress={revealAddress}
                                   key={active.id}
                                   content={rendered.slide}

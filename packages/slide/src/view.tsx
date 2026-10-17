@@ -1,3 +1,14 @@
+import {
+  assertReferenceItems,
+  referenceExportManifest,
+} from '@editor-platform/artifact-references';
+import {
+  ReferenceTools,
+  ReferenceWarnings,
+  ReferenceInspector,
+  useReferenceItems,
+  type ReferenceSurfaceProps,
+} from '@editor-platform/artifact-references/react';
 import { lazy, memo, Suspense, useContext, useMemo, useLayoutEffect } from 'react';
 import {
   EditorExportGuardContext,
@@ -108,16 +119,17 @@ function canvasTarget(object: SlideObject, index: number): SlideCanvasTarget {
 function renderCanvasTarget(target: CanvasTarget) {
   return <DrawingView drawing={slideDrawing(target as SlideCanvasTarget)} />;
 }
-export interface SlideSurfaceProps {
+export interface SlideSurfaceProps extends ReferenceSurfaceProps {
   content: SlideContent;
   execute: (cmd: EditorCommand<SlideContent>) => void | boolean;
-  select: (ids: string | string[], region?: Region) => void;
+  select: (ids: string | string[], region?: Region, pageId?: string) => void;
   dataSnapshots?: ChartSnapshot[];
   readOnly?: boolean;
   layout?: Partial<EditorLayoutProps>;
   focusAddress?: ElementAddress;
 }
 export function SlideSurface({
+  references,
   content,
   execute,
   select,
@@ -146,7 +158,8 @@ export function SlideSurface({
     if (!focusAddress || lastFocus.current === focusAddress) return;
     const page = content.slides.find(
       (p) =>
-        p.id === focusAddress.elementId || p.objects.some((o) => o.id === focusAddress.elementId),
+        (!focusAddress.pageId || p.id === focusAddress.pageId) &&
+        (p.id === focusAddress.elementId || p.objects.some((o) => o.id === focusAddress.elementId)),
     );
     if (!page) return;
     lastFocus.current = focusAddress;
@@ -160,17 +173,40 @@ export function SlideSurface({
     objects = slide?.objects ?? [],
     ids = selected.filter((id) => objects.some((o) => o.id === id)),
     chosen = objects.filter((o) => ids.includes(o.id));
-  const exportState = useRef({ content, slide, pages });
-  exportState.current = { content, slide, pages };
+  const projectedObjects = useReferenceItems(
+    content.slides.flatMap((s) => s.objects),
+    references,
+  );
+  let projectionOffset = 0;
+  const projectedByPage = new Map(
+    content.slides.map((page) => {
+      const items = projectedObjects.slice(
+        projectionOffset,
+        projectionOffset + page.objects.length,
+      );
+      projectionOffset += page.objects.length;
+      return [page.id, new Map(items.map((o) => [o.id, o]))];
+    }),
+  );
+  const exportState = useRef({ content, slide, pages, references });
+  exportState.current = { content, slide, pages, references };
   const objectIndex = useMemo(
     () => new Map(objects.map((object, index) => [object.id, { object, index }])),
     [objects],
   );
   const apply = (cmd: EditorCommand<SlideContent>) => {
     if (readOnly) return false;
+    const checked: EditorCommand<SlideContent> = {
+      ...cmd,
+      apply(current) {
+        const next = cmd.apply(current);
+        assertReferenceItems(next.slides.flatMap((page) => page.objects));
+        return next;
+      },
+    };
     try {
-      if (!cmd.readonlyInput) cmd.apply(content);
-      if (execute(cmd) === false) return false;
+      if (!checked.readonlyInput) checked.apply(content);
+      if (execute(checked) === false) return false;
       setError('');
       return true;
     } catch (e) {
@@ -178,9 +214,9 @@ export function SlideSurface({
       return false;
     }
   };
-  const choose = (next: string[]) => {
+  const choose = (next: string[], pageId = slide?.id) => {
     setSelected(next);
-    select(next);
+    select(next, undefined, pageId);
   };
   const layerActions = useRef({
     choose,
@@ -295,13 +331,47 @@ export function SlideSurface({
   async function output(format: 'svg' | 'png' | 'pdf', scope: string, scale: number) {
     try {
       guardExport?.();
-      const { content, slide, pages } = exportState.current;
-      const slides =
+      const initial = exportState.current;
+      const content = initial.content;
+      const { pages } = initial;
+      let slides =
         format === 'pdf' || scope === 'all'
           ? content.slides
           : scope === 'selected'
             ? content.slides.filter((s) => pages.includes(s.id))
-            : [slide];
+            : content.slides.filter((s) => s.id === initial.slide?.id);
+      const visibleByPage = new Map(
+        slides.map((s) => [
+          s.id,
+          new Set(
+            slidePaintOrder(s)
+              .filter((o) => !o.hidden)
+              .map((o) => o.id),
+          ),
+        ]),
+      );
+      let exported = slides.flatMap((s) =>
+        s.objects.filter((o) => visibleByPage.get(s.id)!.has(o.id)),
+      );
+      if (exported.some((o) => o.reference)) {
+        if (!references) throw new Error('参照付きの出力には参照接続が必要です。');
+        exported = await references.capture(exported);
+        if (exportState.current.references !== references)
+          throw new Error('取得中に参照接続が変わりました。再実行してください。');
+        if (
+          exportState.current.content !== content ||
+          inputs?.getSnapshot().dirty ||
+          inputs?.getSnapshot().composing
+        )
+          throw new Error('取得中に入力が変わりました。再実行してください。');
+        let offset = 0;
+        slides = slides.map((s) => ({
+          ...s,
+          objects: s.objects.map((o) =>
+            visibleByPage.get(s.id)!.has(o.id) ? exported[offset++] : o,
+          ),
+        }));
+      }
       await exportPages(
         slides.filter(Boolean).map((s) => ({
           name: s.title,
@@ -312,6 +382,7 @@ export function SlideSurface({
         format,
         scale,
         'slide-deck',
+        referenceExportManifest(exported),
       );
       setError('');
     } catch (e) {
@@ -321,6 +392,20 @@ export function SlideSurface({
   const object = chosen.length === 1 ? chosen[0] : undefined;
   const toolbar = (
     <>
+      <ReferenceTools
+        identity={slide?.id}
+        resolver={references}
+        readOnly={readOnly}
+        insert={(reference, src, label) =>
+          add('image', {
+            reference,
+            src,
+            alt: label,
+            imageFit: 'fit',
+            bounds: { x: 80, y: 140, width: 700, height: 320 },
+          })
+        }
+      />
       <InsertTools
         readOnly={readOnly}
         onShape={(s) => {
@@ -509,7 +594,14 @@ export function SlideSurface({
                 <svg viewBox={`0 0 ${content.width} ${content.height}`} aria-hidden="true">
                   <rect width={content.width} height={content.height} fill={s.background} />
                   {slidePaintOrder(s).map((o) => (
-                    <DrawingView key={o.id} drawing={slideDrawing(o)} />
+                    <DrawingView
+                      key={o.id}
+                      drawing={slideDrawing(
+                        o.reference && references
+                          ? { ...o, src: references.get(o.reference).projection?.src }
+                          : o,
+                      )}
+                    />
                   ))}
                 </svg>
                 <small>{s.title}</small>
@@ -565,126 +657,146 @@ export function SlideSurface({
     </>
   );
   const inspector = (
-    <fieldset disabled={readOnly} className="inspector-fields">
-      {slide && (
-        <>
-          <Section title="Page settings" open={!chosen.length}>
-            <CommitInput
-              label="Slide title"
-              value={slide.title}
-              onCommit={(title) => apply(updateSlide(slide.id, { title }))}
-            />
-            <label className="ep-field">
-              Page size
-              <select
-                aria-label="Slide size"
-                value={`${content.width}x${content.height}`}
-                onChange={(e) => {
-                  const [width, height] = e.target.value.split('x').map(Number);
-                  apply(resizeDeck(width, height));
-                }}
-              >
-                <option value={`${content.width}x${content.height}`}>
-                  {content.width} × {content.height}
-                </option>
-                <option value="960x540">16:9</option>
-                <option value="960x720">4:3</option>
-              </select>
-            </label>
-            <div className="ep-fields">
-              {(['width', 'height'] as const).map((k) => (
-                <CommitInput
-                  key={k}
-                  label={`Page ${k} (px)`}
-                  type="number"
-                  min={100}
-                  max={6000}
-                  value={content[k]}
-                  onCommit={(v) =>
-                    apply(
-                      resizeDeck(
-                        k === 'width' ? Number(v) : content.width,
-                        k === 'height' ? Number(v) : content.height,
-                      ),
-                    )
-                  }
-                />
-              ))}
-            </div>
-            <p className="ep-muted">
-              Changing page size keeps object positions and sizes. Content outside the page is
-              clipped in presentation and export.
-            </p>
-            <CommitInput
-              label="Slide background"
-              value={slide.background}
-              onCommit={(background) => apply(updateSlide(slide.id, { background }))}
-            />
-            <label>
-              <input
-                type="checkbox"
-                checked={slide.hidden ?? false}
-                onChange={(e) => apply(updateSlide(slide.id, { hidden: e.target.checked }))}
-              />{' '}
-              Skip during presentation
-            </label>
-          </Section>
-          <VisualInspector
-            items={chosen.map(slideDrawing)}
-            onPatch={(patch) => apply(patchObjects(slide.id, ids, patch))}
-            onGeometry={geometry}
-            onReplace={(f) => {
-              void readImage(f)
-                .then((src) => apply(patchObjects(slide.id, ids, { src })))
-                .catch((e) => setError(String(e)));
-            }}
-          />
-          {object?.type === 'table' && object.table && (
-            <TableInspector
-              object={object}
-              onChange={(table) => apply(updateObject(slide.id, object.id, { table }))}
-            />
-          )}
-          {object?.type === 'chart' && object.chart && (
-            <Section title="Chart data">
+    <>
+      <ReferenceInspector
+        item={object}
+        pageId={slide?.id}
+        resolver={references}
+        readOnly={readOnly}
+        patch={(patch) =>
+          object &&
+          apply(
+            updateObject(slide.id, object.id, {
+              ...patch,
+              imageFit: (patch.reference ?? object.reference)?.fit === 'cover' ? 'fill' : 'fit',
+            }),
+          )
+        }
+      />
+      <fieldset disabled={readOnly} className="inspector-fields">
+        {slide && (
+          <>
+            <Section title="Page settings" open={!chosen.length}>
+              <CommitInput
+                label="Slide title"
+                value={slide.title}
+                onCommit={(title) => apply(updateSlide(slide.id, { title }))}
+              />
               <label className="ep-field">
-                Chart type
+                Page size
                 <select
-                  aria-label="Chart type"
-                  value={object.chart.type ?? 'bar'}
-                  onChange={(e) =>
-                    apply(
-                      updateObject(slide.id, object.id, {
-                        chart: { ...object.chart!, type: e.target.value as 'bar' | 'line' | 'pie' },
-                      }),
-                    )
-                  }
+                  aria-label="Slide size"
+                  value={`${content.width}x${content.height}`}
+                  onChange={(e) => {
+                    const [width, height] = e.target.value.split('x').map(Number);
+                    apply(resizeDeck(width, height));
+                  }}
                 >
-                  {['bar', 'line', 'pie'].map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
+                  <option value={`${content.width}x${content.height}`}>
+                    {content.width} × {content.height}
+                  </option>
+                  <option value="960x540">16:9</option>
+                  <option value="960x720">4:3</option>
                 </select>
               </label>
-              <ChartEditor
-                chart={object.chart}
-                onChange={(chart) => apply(updateObject(slide.id, object.id, { chart }))}
-              />
-              <p className="hint">
-                Imported charts are static snapshots. Edit these values explicitly; source data
-                changes do not alter this slide.
+              <div className="ep-fields">
+                {(['width', 'height'] as const).map((k) => (
+                  <CommitInput
+                    key={k}
+                    label={`Page ${k} (px)`}
+                    type="number"
+                    min={100}
+                    max={6000}
+                    value={content[k]}
+                    onCommit={(v) =>
+                      apply(
+                        resizeDeck(
+                          k === 'width' ? Number(v) : content.width,
+                          k === 'height' ? Number(v) : content.height,
+                        ),
+                      )
+                    }
+                  />
+                ))}
+              </div>
+              <p className="ep-muted">
+                Changing page size keeps object positions and sizes. Content outside the page is
+                clipped in presentation and export.
               </p>
+              <CommitInput
+                label="Slide background"
+                value={slide.background}
+                onCommit={(background) => apply(updateSlide(slide.id, { background }))}
+              />
+              <label>
+                <input
+                  type="checkbox"
+                  checked={slide.hidden ?? false}
+                  onChange={(e) => apply(updateSlide(slide.id, { hidden: e.target.checked }))}
+                />{' '}
+                Skip during presentation
+              </label>
             </Section>
-          )}
-          <Section title="Speaker notes" open={false}>
-            <CommitInput
-              label="Speaker notes"
-              value={slide.notes ?? ''}
-              onCommit={(notes) => apply(updateSlide(slide.id, { notes }))}
+            <VisualInspector
+              items={chosen.map(slideDrawing)}
+              onPatch={(patch) => apply(patchObjects(slide.id, ids, patch))}
+              onGeometry={geometry}
+              onReplace={(f) => {
+                void readImage(f)
+                  .then((src) => apply(patchObjects(slide.id, ids, { src, reference: undefined })))
+                  .catch((e) => setError(String(e)));
+              }}
             />
-          </Section>
-        </>
-      )}
-    </fieldset>
+            {object?.type === 'table' && object.table && (
+              <TableInspector
+                object={object}
+                onChange={(table) => apply(updateObject(slide.id, object.id, { table }))}
+              />
+            )}
+            {object?.type === 'chart' && object.chart && (
+              <Section title="Chart data">
+                <label className="ep-field">
+                  Chart type
+                  <select
+                    aria-label="Chart type"
+                    value={object.chart.type ?? 'bar'}
+                    onChange={(e) =>
+                      apply(
+                        updateObject(slide.id, object.id, {
+                          chart: {
+                            ...object.chart!,
+                            type: e.target.value as 'bar' | 'line' | 'pie',
+                          },
+                        }),
+                      )
+                    }
+                  >
+                    {['bar', 'line', 'pie'].map((t) => (
+                      <option key={t}>{t}</option>
+                    ))}
+                  </select>
+                </label>
+                <ChartEditor
+                  chart={object.chart}
+                  onChange={(chart) => apply(updateObject(slide.id, object.id, { chart }))}
+                />
+                <p className="hint">
+                  Imported charts are static snapshots. Edit these values explicitly; source data
+                  changes do not alter this slide.
+                </p>
+              </Section>
+            )}
+            <Section title="Speaker notes" open={false}>
+              <CommitInput
+                label="Speaker notes"
+                value={slide.notes ?? ''}
+                onCommit={(notes) => apply(updateSlide(slide.id, { notes }))}
+              />
+            </Section>
+          </>
+        )}
+      </fieldset>
+    </>
   );
   const playable = content.slides.filter((s) => !s.hidden),
     present = playable[Math.min(presentIndex, playable.length - 1)];
@@ -731,6 +843,7 @@ export function SlideSurface({
         }
         {...layout}
       >
+        <ReferenceWarnings items={objects} resolver={references} />
         {error && (
           <div role="alert" className="surface-error">
             {error}
@@ -747,9 +860,10 @@ export function SlideSurface({
             view={view}
             onViewChange={setView}
             selected={ids}
-            targets={slidePaintOrder(slide).map((o) =>
-              canvasTarget(o, objectIndex.get(o.id)!.index),
-            )}
+            targets={slidePaintOrder(slide).map((o) => {
+              const src = (projectedByPage.get(slide.id)?.get(o.id) ?? o).src;
+              return canvasTarget(src === o.src ? o : { ...o, src }, objectIndex.get(o.id)!.index);
+            })}
             onSelect={choose}
             onTransform={(ids, delta) => apply(transformObjects(slide.id, ids, delta))}
             onDelete={() => action('delete')}
@@ -781,7 +895,7 @@ export function SlideSurface({
             onNavigate={(address) => {
               if (!content.slides.some((s) => s.id === address.slideId)) return;
               setActiveId(address.slideId!);
-              choose(address.elementId ? [address.elementId] : []);
+              choose(address.elementId ? [address.elementId] : [], address.slideId);
             }}
           />
         </Suspense>
@@ -807,7 +921,14 @@ export function SlideSurface({
             >
               <rect width={content.width} height={content.height} fill={present.background} />
               {slidePaintOrder(present).map((o) => (
-                <DrawingView key={o.id} drawing={slideDrawing(o)} />
+                <DrawingView
+                  key={o.id}
+                  drawing={slideDrawing(
+                    o.reference && references
+                      ? { ...o, src: references.get(o.reference).projection?.src }
+                      : o,
+                  )}
+                />
               ))}
             </svg>
           ) : (

@@ -244,4 +244,4 @@ it('I07 maps the independent self-export corpus to editable native Word structur
     .replaceAll('\n', '')
     .replaceAll('\t', '');
   expect(target).toBe(sourceText.replaceAll('\n', '').replaceAll('\t', ''));
-}, 180000);
+}, 60000);

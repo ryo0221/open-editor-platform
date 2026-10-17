@@ -1,3 +1,4 @@
+import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import { EditorState, type Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { Step, Transform, Mapping } from 'prosemirror-transform';
@@ -135,7 +136,7 @@ export const documentCodec: DomainCodec<DocumentContent> = {
   domain: 'document',
   validate: (v): v is DocumentContent => {
     try {
-      return isDocument(v) && validIds(v);
+      return isDocument(v) && validIds(v) && !containsEmbeddedReference(v);
     } catch {
       return false;
     }

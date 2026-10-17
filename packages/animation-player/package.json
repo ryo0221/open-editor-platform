@@ -1,0 +1,15 @@
+{
+  "name": "@editor-platform/animation-player",
+  "version": "0.0.0-prototype.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./preview": "./src/preview.ts",
+    "./resources": "./src/resources.ts",
+    "./v1": "./src/v1.ts"
+  },
+  "dependencies": {
+    "@editor-platform/animation-core": "*"
+  }
+}

@@ -1,3 +1,4 @@
+import { referenceExportManifest } from '@editor-platform/artifact-references';
 import { PDFDocument } from 'pdf-lib';
 import { addPdfText, preparePdfTextFont, type PrintedTextLine } from './pdf-text';
 import { layoutPrintTable, tableLineHeight } from './print-layout';
@@ -482,6 +483,11 @@ export async function renderDocumentPages(content: DocumentContent) {
 export async function exportDocumentPdf(content: DocumentContent) {
   const { pages, textPages } = await renderDocumentLayout(content),
     pdf = await PDFDocument.create();
+  const manifest = referenceExportManifest(content.blocks.filter((block) => !block.hidden));
+  if (manifest)
+    await pdf.attach(new TextEncoder().encode(manifest), 'references.json', {
+      mimeType: 'application/json',
+    });
   const font = await preparePdfTextFont(pdf, textPages);
   for (const [index, canvas] of pages.entries()) {
     const w = canvas.width / 2,

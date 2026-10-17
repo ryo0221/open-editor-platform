@@ -1,3 +1,4 @@
+import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { guardDataCommand, assertDataReadable } from '@editor-platform/structured-data/session';
 import {
@@ -272,7 +273,24 @@ export function createLocalSession(content: Content): EditorSession<Content> {
             ).apply(value);
           },
         });
-      return super.executeView(cmd);
+      const validate = isDeck(current)
+        ? isDeck
+        : isDocument(current)
+          ? isDocument
+          : isDesign(current)
+            ? isDesign
+            : isWhiteboard(current)
+              ? isWhiteboard
+              : undefined;
+      return super.executeView({
+        ...cmd,
+        apply(value) {
+          const next = cmd.apply(value);
+          if (validate ? !validate(next) : containsEmbeddedReference(next))
+            throw new Error('参照埋め込みの形式または資源上限が不正です。');
+          return next;
+        },
+      });
     }
   }
   return new LocalSession(content);

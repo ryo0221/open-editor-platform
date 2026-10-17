@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E" />
+    <title>Animation rectangle v1 gate</title>
+  </head>
+  <body>
+    <h1>Animation rectangle v1</h1>
+    <p>Explicit migration creates a new draft. Original prototype bytes and hash stay unchanged.</p>
+    <button id="migrate">Migrate to v1 draft</button>
+    <p id="status" role="status">Prototype retained</p>
+    <div id="stage" style="width: min(100%, 640px); height: 360px; background: #f1f5f9"></div>
+    <label>Seek tick <input id="tick" type="range" min="0" max="240000" value="0" disabled /></label
+    ><button id="close" disabled>Close preview</button>
+    <script type="module" src="/v1.ts"></script>
+  </body>
+</html>

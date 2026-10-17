@@ -1,0 +1,12 @@
+{
+  "name": "@editor-platform/react-ui-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "typescript": "5.9.2"
+  }
+}

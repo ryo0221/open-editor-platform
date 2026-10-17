@@ -1,13 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { officeMermaidHtml } from './scripts/dev/office-mermaid-html.mjs';
 import { fileURLToPath } from 'node:url';
+import { privateVideoBuild } from './scripts/dev/private-video.mjs';
 export default defineConfig({
   root: 'apps/playground',
-  plugins: [react()],
+  plugins: [react(), officeMermaidHtml(), privateVideoBuild()],
   worker: { format: 'es' },
-  // Resolve Mermaid's dependencies separately so lockfile security updates apply
-  // to the emitted runtime instead of using its older prebundled dependencies.
-  // Chunks remain lazy-loaded and esbuild still minifies them.
+  // Resolve dependencies separately so security pins apply to emitted Mermaid
+  // code; the minified upstream entry bundles older sanitizer/math dependencies.
   resolve: {
     alias: [
       {
@@ -24,9 +25,19 @@ export default defineConfig({
     proxy: { '/collaboration-api': 'http://127.0.0.1:4180' },
   },
   preview: { proxy: { '/collaboration-api': 'http://127.0.0.1:4180' } },
-  // Prebundle the lazy PDF entry before the first viewer is opened. Otherwise a
-  // cold dev server can invalidate module URLs in an already-open editor.
-  optimizeDeps: { include: ['pdfjs-dist', 'prosemirror-collab', 'prosemirror-transform'] },
+  // Prebundle lazy PDF/Office entries before the first import/export. Otherwise
+  // a cold dev server can reload an already-open editor when discovering them.
+  optimizeDeps: {
+    include: [
+      'pdfjs-dist',
+      'prosemirror-collab',
+      'prosemirror-transform',
+      'saxes',
+      '@resvg/resvg-wasm',
+      'docx',
+      'pptxgenjs',
+    ],
+  },
   build: {
     rollupOptions: {
       treeshake: false,
@@ -36,6 +47,9 @@ export default defineConfig({
         ),
         templates: fileURLToPath(new URL('./apps/playground/template-host.html', import.meta.url)),
         playground: fileURLToPath(new URL('./apps/playground/index.html', import.meta.url)),
+        referenceHost: fileURLToPath(
+          new URL('./apps/playground/reference-host.html', import.meta.url),
+        ),
         graphHost: fileURLToPath(new URL('./apps/playground/graph-host.html', import.meta.url)),
         embed: fileURLToPath(new URL('./apps/playground/embed.html', import.meta.url)),
         officeMermaid: fileURLToPath(

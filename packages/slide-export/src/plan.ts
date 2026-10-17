@@ -95,6 +95,13 @@ export async function prepareSlidePptx(
   }
   if (!valid) return invalidPlan('Invalid Slide content or export basis', input?.basis);
   const deck = input.content as SlideContent;
+  if (deck.slides.some((s) => s.objects.some((o) => o.reference)))
+    add(
+      'REFERENCE_EXPORT_UNSUPPORTED',
+      'error',
+      '参照埋め込みのPPTX出力は未対応です。SVG／PNG／PDFまたは参照付きnative JSONを使ってください。',
+      { domain: 'slide' },
+    );
   if (deck.reuse && (deck.reuse.instances.length || deck.reuse.artifactMode))
     add(
       'REUSABLE_LINKS_RESOLVED',

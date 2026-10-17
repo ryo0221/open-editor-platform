@@ -465,3 +465,134 @@ it('notifies a polling Host when permissions expire without any content update',
     clock.mockRestore();
   }
 });
+
+describe('successful sync connection recovery', () => {
+  it('recovers a failed transport without resending uncertain edits or changing their IDs', async () => {
+    const { d, codec, adapter } = fixture();
+    const session = new SharedEditorSession(codec, adapter);
+    await session.open();
+    const submit = vi.spyOn(adapter, 'submit').mockRejectedValue(new Error('Lost transport'));
+    session.execute(insertObject(d.slides[0].id, 'shape'));
+    await session.flush();
+    const retained = session.checkpoint();
+    expect(session.client.status).toBe('disconnected');
+    await session.sync();
+    expect(session.client.status).toBe('online');
+    expect(session.checkpoint().queue).toEqual(retained.queue);
+    expect(session.checkpoint().client.pending).toEqual(retained.client.pending);
+    expect(session.checkpoint().rejected).toEqual(retained.rejected);
+    expect(submit).toHaveBeenCalledTimes(1);
+    session.suspend(() => {});
+  });
+
+  it('retains rejected input and its already-created retry proposal through recovery', async () => {
+    const { d, codec, adapter, base, authority } = fixture();
+    const session = new SharedEditorSession(codec, adapter);
+    await session.open();
+    const submit = adapter.submit;
+    const submitted = vi.spyOn(adapter, 'submit').mockImplementation(async (op) => {
+      base.setPermissions({ writable: false, scopes: ['*'] });
+      return submit(op);
+    });
+    session.execute(insertObject(d.slides[0].id, 'shape'));
+    await session.flush();
+    expect(session.rejected).toHaveLength(1);
+    base.setPermissions({ writable: true, scopes: ['*'] });
+    const retry = await session.previewRetained();
+    const retained = session.checkpoint().rejected;
+    const error = session.error;
+    session.client.status = 'disconnected';
+    await session.sync();
+    expect(session.client.status).toBe('online');
+    expect(session.checkpoint().rejected).toEqual(retained);
+    expect(session.error).toBe(error);
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(authority.snapshot().revision).toBe(0);
+    await session.applyProposal(retry.id, retry.preview.token);
+    expect(session.rejected).toHaveLength(0);
+    expect(authority.snapshot().content.slides[0].objects).toHaveLength(1);
+    expect(authority.snapshot().revision).toBe(1);
+    session.close();
+  });
+
+  it.each(['close', 'stop', 'new failure'] as const)(
+    'does not replace %s arriving after a sync begins',
+    async (interruption) => {
+      const { codec, adapter } = fixture();
+      let status!: Parameters<EditorHostAdapter<unknown>['subscribeStatus']>[0];
+      const subscribe = adapter.subscribeStatus;
+      adapter.subscribeStatus = (listener) => {
+        status = listener;
+        return subscribe(listener);
+      };
+      const session = new SharedEditorSession(codec, adapter);
+      await session.open();
+      session.client.status = 'disconnected';
+      let reached!: () => void, release!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const changes = adapter.changes;
+      adapter.changes = async (revision) => {
+        const result = await changes(revision);
+        reached();
+        await held;
+        return result;
+      };
+      const sync = session.sync();
+      await entered;
+      if (interruption === 'close') session.close();
+      else if (interruption === 'stop') status({ type: 'connection', state: 'disconnected' });
+      else session.client.status = 'disconnected';
+      release();
+      await sync;
+      expect(session.client.status).toBe(interruption === 'close' ? 'closed' : 'disconnected');
+      if (interruption === 'stop') {
+        await session.sync();
+        expect(session.client.status).toBe('disconnected');
+      }
+      session.close();
+    },
+  );
+
+  it('rejects a presence update racing expiry, then recovers without widening permission', async () => {
+    const { codec, adapter, base, authority } = fixture();
+    const session = new SharedEditorSession(codec, adapter);
+    await session.open();
+    const presence = adapter.presence;
+    let expire = true;
+    adapter.presence = async (value) => {
+      if (expire) {
+        expire = false;
+        base.setPermissions({ writable: false, scopes: [], expiresAt: Date.now() - 1 });
+      }
+      return presence(value);
+    };
+    await expect(session.sync()).rejects.toMatchObject({
+      code: 'unauthorized',
+      message: 'Session expired',
+    });
+    // The polling Host records the failed sync, as in shared-host.tsx.
+    session.client.status = 'disconnected';
+    expect(session.readOnly).toBe(true);
+    const checkpoint = session.checkpoint();
+    await session.sync();
+    expect(session.client.status).toBe('online');
+    expect(session.readOnly).toBe(true);
+    expect(session.client.permissions).toMatchObject({ writable: false, scopes: [] });
+    expect(() => session.execute(insertObject(session.content.slides[0].id, 'shape'))).toThrow(
+      'Shared session is read only or expired',
+    );
+    expect(session.checkpoint().queue).toEqual(checkpoint.queue);
+    expect(authority.snapshot().revision).toBe(0);
+    expect(session.presences).toEqual([]);
+    base.setPermissions({ writable: true, scopes: ['*'], expiresAt: Date.now() + 3600000 });
+    await session.sync();
+    expect(session.status).toContain('Shared · confirmed');
+    expect(session.readOnly).toBe(false);
+    session.close();
+  });
+});

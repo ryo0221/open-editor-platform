@@ -1,0 +1,11 @@
+{
+  "name": "@editor-platform/reference-artifact-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/HostApp.tsx",
+    "./model": "./src/model.ts",
+    "./preview": "./src/preview.tsx"
+  }
+}

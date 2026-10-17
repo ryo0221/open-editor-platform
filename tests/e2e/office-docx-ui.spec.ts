@@ -1,6 +1,7 @@
+import { test } from './office-runtime-fixtures';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
-import { test, expect, nativeArtifact, setDocumentText } from './fixtures';
+import { expect, nativeArtifact, setDocumentText } from './fixtures';
 import { officeDownload } from './office-fixtures';
 import {
   officeDocument,

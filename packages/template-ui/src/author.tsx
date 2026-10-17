@@ -35,6 +35,7 @@ function SaveLegacyTemplateDialog({
   domain,
   content,
   ids,
+  slideSelection,
   catalog,
   onClose,
   onSaved,
@@ -42,6 +43,7 @@ function SaveLegacyTemplateDialog({
   domain: Domain;
   content: NativeContent;
   ids: string[];
+  slideSelection?: { pageId: string; elementId: string }[];
   catalog: CatalogAdapter;
   onClose(): void;
   onSaved?(definition: TemplateDefinition): void;
@@ -60,11 +62,16 @@ function SaveLegacyTemplateDialog({
     [componentInputs, setComponentInputs] = useState<Record<string, CompositionInput>>({});
   const chosen = useMemo(() => {
     try {
-      return selectTemplateContent(domain, content, kind === 'fragment' ? ids : undefined);
+      return selectTemplateContent(
+        domain,
+        content,
+        kind === 'fragment' ? ids : undefined,
+        slideSelection,
+      );
     } catch {
       return content;
     }
-  }, [domain, content, ids, kind]);
+  }, [domain, content, ids, kind, slideSelection]);
   const members = 'reuse' in chosen ? (chosen.reuse?.instances ?? []) : [];
   const candidates = useMemo(
     () => slotCandidates(chosen).filter((c) => !compose || !compositionOwnsPath(chosen, c.path)),
@@ -83,6 +90,7 @@ function SaveLegacyTemplateDialog({
         domain,
         content,
         ids: kind === 'fragment' ? ids : undefined,
+        slideSelection,
         kind,
         name,
         purpose,

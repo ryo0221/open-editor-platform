@@ -171,7 +171,13 @@ export function Menu({
         />
       </span>
       {open && (
-        <div id={id} className={`ep-menu-content ${align}`} role="dialog" aria-label={label}>
+        <div
+          id={id}
+          className={`ep-menu-content ${align}`}
+          data-editor-menu
+          role="dialog"
+          aria-label={label}
+        >
           {children}
         </div>
       )}
@@ -182,8 +188,10 @@ export function Dialog({
   title,
   children,
   onClose,
+  exportScope = false,
 }: {
   title: string;
+  exportScope?: boolean;
   children: ReactNode;
   onClose: () => void;
 }) {
@@ -196,6 +204,7 @@ export function Dialog({
   return (
     <dialog
       className="ep-dialog"
+      data-editor-export-scope={exportScope || undefined}
       aria-label={title}
       ref={ref}
       onCancel={(e) => {

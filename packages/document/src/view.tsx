@@ -1,6 +1,15 @@
+import { createDocumentTextMetrics } from './text-metrics';
+import { captureDocumentReferences } from './references';
+import {
+  ReferenceTools,
+  ReferenceInspector,
+  type ReferenceSurfaceProps,
+  ReferenceImage,
+} from '@editor-platform/artifact-references/react';
 import { useContext } from 'react';
 import {
   EditorExportGuardContext,
+  EditorInputsContext,
   EditorOfficeCapabilitiesContext,
 } from '@editor-platform/editor-ui';
 import { useEffect, useRef, useState, useCallback, useMemo, memo, lazy, Suspense } from 'react';
@@ -78,7 +87,7 @@ import {
   jumpToBlock,
   formatBlock,
 } from './engine';
-import { localDocumentCommand } from './local-engine-command';
+import { createLocalDocumentCommand, sameDocumentProjection } from './local-engine-command';
 import {
   makeBlock,
   safeLink,
@@ -99,7 +108,7 @@ const DocumentDocxDialog = lazy(() =>
     default: module.DocumentDocxDialog,
   })),
 );
-const wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+
 export const blockLabels: Record<BlockType, string> = {
   heading: 'Heading',
   paragraph: 'Paragraph',
@@ -113,14 +122,16 @@ export const blockLabels: Record<BlockType, string> = {
   html: 'HTML preview',
   'react-preview': 'React adapter',
 };
-function Embedded({ block }: { block: DocumentBlock }) {
+function Embedded({
+  block,
+  references,
+}: {
+  block: DocumentBlock;
+  references?: ReferenceSurfaceProps['references'];
+}) {
   return block.type === 'image' ? (
     <figure>
-      <img
-        src={block.src}
-        alt={block.alt || 'Document image'}
-        style={{ width: block.width ?? '100%' }}
-      />
+      <ReferenceImage item={block} resolver={references} width={block.width} />
       {block.caption && <figcaption>{block.caption}</figcaption>}
     </figure>
   ) : block.type === 'mermaid' ? (
@@ -197,7 +208,7 @@ const DocumentOutlineRow = memo(function DocumentOutlineRow({
     </button>
   );
 });
-export interface DocumentSurfaceProps {
+export interface DocumentSurfaceProps extends ReferenceSurfaceProps {
   textEngine?: DocumentTextBridge;
   content: DocumentContent;
   execute: (command: EditorCommand<DocumentContent>) => void;
@@ -209,7 +220,8 @@ export interface DocumentSurfaceProps {
   layout?: Pick<EditorLayoutProps, 'panels' | 'defaultPanels' | 'onPanelsChange' | 'viewKey'>;
 }
 export function DocumentSurface({
-  content,
+  references,
+  content: hostContent,
   execute,
   select,
   selectedId,
@@ -219,12 +231,27 @@ export function DocumentSurface({
   layout,
   textEngine,
 }: DocumentSurfaceProps) {
+  const emitted = useRef<{
+    blocks?: DocumentBlock[];
+    key?: string;
+    content?: DocumentContent;
+  } | null>(null);
+  const previousContent = emitted.current?.content;
+  // A Host may return a mutable clone of the exact content just emitted. Compare
+  // values before reusing our owned snapshot; identity alone never certifies a Host tree.
+  const content =
+    previousContent && sameDocumentProjection(previousContent, hostContent)
+      ? previousContent
+      : hostContent;
+  const localDocumentCommand = useMemo(createLocalDocumentCommand, []);
   const guardExport = useContext(EditorExportGuardContext);
+  const inputs = useContext(EditorInputsContext);
   const officeCapability = useContext(EditorOfficeCapabilitiesContext);
   const mount = useRef<HTMLDivElement>(null),
     view = useRef<EditorView | null>(null),
-    callbacks = useRef({ content, execute, select, readOnly, annotations, textEngine });
-  callbacks.current = { content, execute, select, readOnly, annotations, textEngine };
+    callbacks = useRef({ content, execute, select, readOnly, annotations, textEngine, references });
+  callbacks.current = { content, execute, select, readOnly, annotations, textEngine, references };
+  const embeddedViews = useRef(new Set<() => void>());
   const chooseOutline = useCallback((id: string) => {
     const editor = view.current;
     if (!editor) return;
@@ -245,8 +272,7 @@ export function DocumentSurface({
   const [docxOpen, setDocxOpen] = useState(false);
   // Only blocks belong to the text engine. Retained definitions/page settings
   // must not rebuild its DOM or be serialized on every React render.
-  const emitted = useRef<{ blocks?: DocumentBlock[]; key?: string } | null>(null),
-    typing = useRef({ key: newId('typing'), time: 0, position: -1 });
+  const typing = useRef({ key: newId('typing'), time: 0, position: -1 });
   if (emitted.current === null)
     emitted.current = {
       blocks: isDeepFrozen(content.blocks) ? content.blocks : undefined,
@@ -307,7 +333,11 @@ export function DocumentSurface({
           dom.dataset.blockId = node.attrs.id;
           const root = createRoot(dom);
           roots.add(root);
-          const render = () => root.render(<Embedded block={node.attrs.block} />);
+          const render = () =>
+            root.render(
+              <Embedded block={node.attrs.block} references={callbacks.current.references} />,
+            );
+          embeddedViews.current.add(render);
           render();
           return {
             dom,
@@ -319,6 +349,7 @@ export function DocumentSurface({
               return true;
             },
             destroy() {
+              embeddedViews.current.delete(render);
               roots.delete(root);
               queueMicrotask(() => root.unmount());
             },
@@ -373,8 +404,8 @@ export function DocumentSurface({
           const applied = bridge
             ? (bridge.dispatch(tr), { state: bridge.state, transactions: [] })
             : editor.state.applyTransaction(tr);
-          editor.updateState(applied.state);
-          setEngineState(applied.state);
+          let update: ReturnType<typeof localDocumentCommand> | undefined;
+          let updateTime = 0;
           if (applied.transactions.some((t) => t.docChanged)) {
             const now = Date.now(),
               isTyping =
@@ -389,24 +420,26 @@ export function DocumentSurface({
               previousPosition !== typing.current.position
             )
               typing.current.key = newId('typing');
-            const { command: cmd, content: next } = localDocumentCommand(
-              callbacks.current.content,
-              applied.state.doc,
-              {
-                origin: 'local',
-                transactionId: newId('transaction'),
-                ...(isTyping ? { mergeKey: typing.current.key } : {}),
-              },
-            );
-            emitted.current = { blocks: next.blocks };
-            callbacks.current.content = next;
-            callbacks.current.execute(cmd);
-            typing.current.time = now;
-            typing.current.position = tr.selection.from;
-            setError('');
+            update = localDocumentCommand(callbacks.current.content, applied.state.doc, {
+              origin: 'local',
+              transactionId: newId('transaction'),
+              ...(isTyping ? { mergeKey: typing.current.key } : {}),
+            });
+            updateTime = now;
           } else if (tr.selectionSet) {
             typing.current.key = newId('typing');
             typing.current.position = tr.selection.from;
+          }
+          // Projection/reference validation above completes before any editor/native mutation.
+          editor.updateState(applied.state);
+          setEngineState(applied.state);
+          if (update) {
+            emitted.current = { blocks: update.content.blocks, content: update.content };
+            callbacks.current.content = update.content;
+            callbacks.current.execute(update.command);
+            typing.current.time = updateTime;
+            typing.current.position = tr.selection.from;
+            setError('');
           }
           const block = activeTextRange(applied.state);
           if (block)
@@ -483,6 +516,9 @@ export function DocumentSurface({
     };
   }, []);
   useEffect(() => {
+    for (const render of embeddedViews.current) render();
+  }, [references]);
+  useEffect(() => {
     const editor = view.current;
     if (editor) editor.updateState(editor.state);
   }, [annotations]);
@@ -492,17 +528,52 @@ export function DocumentSurface({
     const resolved = resolveDocumentAddress(content, focusAddress),
       range = resolved.address.region;
     if (resolved.state !== 'Current') return;
+    let stopReveal: (() => void) | undefined;
     editor.state.doc.descendants((node, pos) => {
-      if (!node.isTextblock || node.attrs.id !== resolved.address.elementId) return;
+      if (node.attrs.id !== resolved.address.elementId) return;
+      if (node.type.name === 'embedded') {
+        editor.focus();
+        editor.dispatch(
+          editor.state.tr
+            .setSelection(NodeSelection.create(editor.state.doc, pos))
+            .scrollIntoView(),
+        );
+        const dom = editor.nodeDOM(pos);
+        if (dom instanceof HTMLElement) {
+          const reveal = () => {
+            const selected = editor.state.selection;
+            if (
+              view.current === editor &&
+              selected instanceof NodeSelection &&
+              selected.node.attrs.id === node.attrs.id
+            )
+              dom.scrollIntoView({ block: 'center', inline: 'nearest' });
+          };
+          // React node views and their images can acquire their height after selection.
+          let frame = requestAnimationFrame(reveal);
+          const loaded = () => {
+            cancelAnimationFrame(frame);
+            frame = requestAnimationFrame(reveal);
+          };
+          dom.addEventListener('load', loaded, { capture: true, once: true });
+          stopReveal = () => {
+            cancelAnimationFrame(frame);
+            dom.removeEventListener('load', loaded, true);
+          };
+        }
+        return false;
+      }
+      if (!node.isTextblock) return;
       const start = range?.type === 'text' ? range.start : 0,
         end = range?.type === 'text' ? range.end : 0;
+      editor.focus();
       editor.dispatch(
         editor.state.tr
           .setSelection(TextSelection.create(editor.state.doc, pos + 1 + start, pos + 1 + end))
           .scrollIntoView(),
       );
-      editor.focus();
     });
+    return () => stopReveal?.();
   }, [focusAddress]);
   useEffect(() => {
     const editor = view.current;
@@ -514,7 +585,7 @@ export function DocumentSurface({
       input.disabled = readOnly;
     });
     const previous = emitted.current!;
-    if (previous.blocks === content.blocks && isDeepFrozen(content.blocks)) return;
+    if (previous.blocks && sameDocumentProjection(previous.blocks, content.blocks)) return;
     const key = canonicalJson(content.blocks),
       previousKey = previous.key ?? canonicalJson(previous.blocks);
     emitted.current = {
@@ -555,7 +626,20 @@ export function DocumentSurface({
     const generation = ++printGeneration.current;
     setPrintPages(null);
     try {
-      const pages = await renderDocumentPages(content);
+      guardExport?.();
+      const initial = callbacks.current.content;
+      const captured = await captureDocumentReferences(initial, references);
+      if (callbacks.current.references !== references)
+        throw new Error('取得中に参照接続が変わりました。再実行してください。');
+      if (
+        callbacks.current.content !== initial ||
+        inputs?.getSnapshot().dirty ||
+        inputs?.getSnapshot().composing
+      )
+        throw new Error('取得中に入力が変わりました。再実行してください。');
+      const pages = await renderDocumentPages(captured);
+      if (callbacks.current.references !== references)
+        throw new Error('取得中に参照接続が変わりました。再実行してください。');
       if (generation === printGeneration.current)
         setPrintPages(pages.map((p) => p.toDataURL('image/png')));
     } catch (e) {
@@ -751,6 +835,13 @@ export function DocumentSurface({
               {toolButton('Move block down', ArrowDown, () => move(1))}
               {toolButton('Delete block', Trash2, remove)}
             </div>
+            <ReferenceInspector
+              item={selected}
+              fitSupported={false}
+              resolver={references}
+              readOnly={readOnly}
+              patch={(patch) => patchBlock(patch)}
+            />
             <fieldset disabled={readOnly}>
               {selected.type === 'image' ? (
                 <>
@@ -860,7 +951,16 @@ export function DocumentSurface({
     setExporting(true);
     try {
       guardExport?.();
-      const snapshot = callbacks.current.content;
+      const initial = callbacks.current.content;
+      const snapshot = await captureDocumentReferences(initial, references, format === 'md');
+      if (callbacks.current.references !== references)
+        throw new Error('取得中に参照接続が変わりました。再実行してください。');
+      if (
+        callbacks.current.content !== initial ||
+        inputs?.getSnapshot().dirty ||
+        inputs?.getSnapshot().composing
+      )
+        throw new Error('取得中に入力が変わりました。再実行してください。');
       if (format === 'pdf') await exportDocumentPdf(snapshot);
       else
         downloadBlob(
@@ -876,14 +976,8 @@ export function DocumentSurface({
       setExporting(false);
     }
   }
-  const words = content.blocks
-    .map((b) => (b.type === 'table' ? (b.cells?.flat().join(' ') ?? '') : b.text))
-    .join(' ');
-  const wordCount = useMemo(() => {
-    let count = 0;
-    for (const segment of wordSegmenter.segment(words)) if (segment.isWordLike) count++;
-    return count;
-  }, [words]);
+  const countText = useMemo(createDocumentTextMetrics, []);
+  const textMetrics = countText(content.blocks);
   return (
     <EditorLayout
       {...layout}
@@ -895,7 +989,8 @@ export function DocumentSurface({
       status={
         <>
           <span>
-            {wordCount} words · {words.length} characters · {content.blocks.length} blocks
+            {textMetrics.words} words · {textMetrics.characters} characters ·{' '}
+            {content.blocks.length} blocks
           </span>
           <span className="ep-spacer" />
           <span>{readOnly ? 'Read only' : 'Rich text · / to insert'}</span>
@@ -982,6 +1077,14 @@ export function DocumentSurface({
             label="Insert block"
             disabled={readOnly}
             onClick={() => setInsertOpen(true)}
+          />
+          <ReferenceTools
+            identity={selected?.id}
+            resolver={references}
+            readOnly={readOnly}
+            insert={(reference, src, label) =>
+              insert('image', { reference, src, alt: label, width: 600 })
+            }
           />
           <label className="ep-upload" title="Insert image">
             <ImagePlus size={19} />

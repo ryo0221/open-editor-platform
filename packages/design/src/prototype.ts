@@ -134,8 +134,23 @@ export function designPrototypeTargets(d: DesignContent, frameId: string): Desig
 
 export function diagnoseDesignPrototype(d: DesignContent): DesignPrototypeDiagnostic[] {
   const diagnostics: DesignPrototypeDiagnostic[] = [];
+  const frames = new Set(
+    d.elements.filter((e) => e.type === 'frame' && !e.hidden).map((e) => e.id),
+  );
+  const components = new Map(d.components.map((component) => [component.id, component]));
+  // Alternative navigation histories and different flows often inspect the same
+  // frame. This cache is scoped to this synchronous diagnosis, never Host identity.
+  const targets = new Map<string, DesignPrototypeTarget[]>();
+  const frameTargets = (id: string) => {
+    let value = targets.get(id);
+    if (!value) {
+      value = designPrototypeTargets(d, id);
+      targets.set(id, value);
+    }
+    return value;
+  };
   const checkFrame = (id: string, path: string) => {
-    if (!frame(d, id))
+    if (!frames.has(id))
       diagnostics.push({
         code: 'missing-frame',
         path,
@@ -168,11 +183,9 @@ export function diagnoseDesignPrototype(d: DesignContent): DesignPrototypeDiagno
       });
       return;
     }
-    d.components
-      .find((c) => c.id === id)
-      ?.elements?.forEach((e) => {
-        if (e.type === 'instance' && e.componentId) cycles(e.componentId, [...path, id], depth + 1);
-      });
+    components.get(id)?.elements?.forEach((e) => {
+      if (e.type === 'instance' && e.componentId) cycles(e.componentId, [...path, id], depth + 1);
+    });
   };
   d.components.forEach((c) => cycles(c.id, [], 0));
   if (d.prototyping?.startFrameId)
@@ -190,7 +203,7 @@ export function diagnoseDesignPrototype(d: DesignContent): DesignPrototypeDiagno
         to = flow.frameIds[i];
       const reachable: DesignPrototypeState[] = [];
       for (const state of states)
-        for (const target of designPrototypeTargets(d, from))
+        for (const target of frameTargets(from))
           for (const { action } of target.interactions) {
             try {
               const next = applyDesignPrototypeAction(d, state, action).state;

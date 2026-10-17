@@ -27,7 +27,8 @@
     "prosemirror-state": "1.4.4",
     "prosemirror-tables": "1.8.5",
     "prosemirror-transform": "1.11.0",
-    "prosemirror-view": "1.42.6"
+    "prosemirror-view": "1.42.6",
+    "@editor-platform/artifact-references": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1",

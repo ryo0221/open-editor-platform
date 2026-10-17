@@ -538,19 +538,6 @@ export function FileSurface({
               setReplaceDialog(true);
             }}
           />
-          <input
-            ref={upload}
-            hidden
-            type="file"
-            aria-label="Open file"
-            accept="image/*,text/*,.log,.md,.pdf"
-            disabled={readOnly}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void openFile(file);
-              e.target.value = '';
-            }}
-          />
           {isPdf && (
             <>
               <input
@@ -713,6 +700,19 @@ export function FileSurface({
       {...layout}
     >
       <div className="ep-file-body">
+        <input
+          ref={upload}
+          hidden
+          type="file"
+          aria-label="Open file"
+          accept="image/*,text/*,.log,.md,.pdf"
+          disabled={readOnly}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void openFile(file);
+            e.target.value = '';
+          }}
+        />
         {isPdf && pdfSearch.truncated && (
           <p role="status" className="ep-muted">
             検索結果の一部を表示しています。各ページの先頭10,000件まで移動できます。検索語を絞り込んでください。

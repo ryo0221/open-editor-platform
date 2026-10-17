@@ -1,0 +1,22 @@
+{
+  "name": "@editor-platform/animation",
+  "version": "0.0.0-prototype.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./controlled-contract": "./src/controlled-contract.ts",
+    "./controlled": "./src/controlled.tsx",
+    "./controlled.css": "./src/controlled.css"
+  },
+  "dependencies": {
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/animation-player": "*",
+    "@editor-platform/editor-core": "*",
+    "react": "19.1.1",
+    "@editor-platform/extension-contract": "*"
+  },
+  "devDependencies": {
+    "react-dom": "19.1.1"
+  }
+}

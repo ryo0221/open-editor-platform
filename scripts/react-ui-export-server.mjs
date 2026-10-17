@@ -8,7 +8,7 @@ import console from 'node:console';
 
 // Verification-only server. Build fixed, independent React apps before announcing readiness.
 const repo = fileURLToPath(new URL('../', import.meta.url));
-const screens = ['unbound', 'product', 'form', 'revised'];
+const screens = ['unbound', 'product', 'form', 'revised', 'portable'];
 for (const screen of screens) {
   const result = spawnSync(process.execPath, ['scripts/react-ui-export-host.mjs', screen], {
     cwd: repo,
