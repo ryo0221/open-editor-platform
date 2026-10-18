@@ -22,11 +22,6 @@
       "mode": "100644"
     },
     {
-      "path": "ADDITIONAL-PERMISSION-DRAFT.md",
-      "sha256": "cce27436898390c7c89a5ee225502a83d2457bc9f3d25c43d994c2dd5c19815d",
-      "mode": "100644"
-    },
-    {
       "path": "AGENTS.md",
       "sha256": "5e189dcdd7bc503dc429797ff3b3fc2b263fc1cea12390f1612f4f6fb08960a2",
       "mode": "100644"
@@ -233,7 +228,7 @@
     },
     {
       "path": "apps/playground/package.json",
-      "sha256": "dbc4482a879cf48d07c19286f2b1cc2756e04a38e464680627dc5709cf4b93b6",
+      "sha256": "da8fb08b971fe82fff0c71f05b3d9c3546a9f78a0de5342ac27e91b175c695b5",
       "mode": "100644"
     },
     {
@@ -268,7 +263,7 @@
     },
     {
       "path": "apps/playground/src/App.tsx",
-      "sha256": "c87de8eabd3cc9573299cfb3ce592066a26dc4ee08e4a376db62d4b7b4b98d9f",
+      "sha256": "04ae136ffec25a50a0a6226289ae491366639f7500303d8448e2987550d1d71d",
       "mode": "100644"
     },
     {
@@ -297,6 +292,51 @@
       "mode": "100644"
     },
     {
+      "path": "apps/playground/src/geo/controller.test.ts",
+      "sha256": "0b763c816159980c4f1f1dd00e172edbc38ad7a536a0d2be8e13dbb6e252f482",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/controller.ts",
+      "sha256": "11d215bccee253f34ecf87c1242058da0c6d6d6918a8f55765dd6ea8af9b7c52",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/data-join.tsx",
+      "sha256": "4e0b0c14cea17f5e58a8af0045ecf8ad7d31a9bad778577717eb1fef714c59fd",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/geo-slide-transfer.ts",
+      "sha256": "c84bb46f0706d0cc8534f478c85059bdd20821db1d28172ef40fea4fe790c458",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/geo-source-envelope.ts",
+      "sha256": "f22c36f5e5def11299f38193d30567f058a550b62051f50a5a0c7c04e2ffa846",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/geo-source-profile.ts",
+      "sha256": "53a5053d372eb9351fbc20e58cbc2cd19318a5ee2a2dedb1d6c0c72494a8dabe",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/geo-source-refresh.ts",
+      "sha256": "8dea656afa30eb83c128978385a855f667700731ded776d977695620e343f501",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/resources.ts",
+      "sha256": "b860a203339ef6cfddb487d9527344b9448aabd67c85190e8842af3f95e4b022",
+      "mode": "100644"
+    },
+    {
+      "path": "apps/playground/src/geo/surface.tsx",
+      "sha256": "407811878a8b0b5931fc78fdfb45861ebd1d4b05625ba4b94167858ced44e0b1",
+      "mode": "100644"
+    },
+    {
       "path": "apps/playground/src/graph-host.tsx",
       "sha256": "d0440bd62d12bc27a063ab31cbf7731f6957be73f69b5822b5848e86557ed9d9",
       "mode": "100644"
@@ -308,7 +348,7 @@
     },
     {
       "path": "apps/playground/src/model.ts",
-      "sha256": "01a6fb4da255e7564601ce3e6769bbcdc295cfe77e48def7f5a36c9e9228b9ee",
+      "sha256": "10ae36e22023c6d5a7830a00d62ddaf67fe186e6a5f4f1c3fa1a6a609946be7c",
       "mode": "100644"
     },
     {
@@ -428,7 +468,7 @@
     },
     {
       "path": "apps/playground/src/shared-host.tsx",
-      "sha256": "911c34200f3656e0f6b7eaf209a6a543e6af368b04dcedc95188b5aca7d55dfe",
+      "sha256": "b84a3f015b510ae84e1d7d10361510e9e36e1e160843c064b53ae9142ef5da28",
       "mode": "100644"
     },
     {
@@ -602,18 +642,8 @@
       "mode": "100644"
     },
     {
-      "path": "COMMERCIAL-LICENSING.md",
-      "sha256": "0d97583c77c11b572657accd0792c8c4c16f860ca1af864f383d7b3c647001c2",
-      "mode": "100644"
-    },
-    {
       "path": "CONTRIBUTING.md",
-      "sha256": "f870920cb894b727ac641ffd2bf12e1533b31e48b4e8a91c11cafd03201565a3",
-      "mode": "100644"
-    },
-    {
-      "path": "CONTRIBUTOR-LICENSING.md",
-      "sha256": "f1af75d74d5992fb279de5004bcf488494e4e61e929a66000d23a0f10834ae08",
+      "sha256": "5a8f48061a52fbeaec0e204f4d3c8baba52c3fe1f58f9d89c81fc1ec1926cbdc",
       "mode": "100644"
     },
     {
@@ -698,7 +728,12 @@
     },
     {
       "path": "docs/embedding.md",
-      "sha256": "40c0becf78669da0961ea4082da953b054e42dfc05b24c228f1872e5216b2ce2",
+      "sha256": "06ab3ab30ee01f305428027aa73ba8cf4828a2b7933cc0b751bc69f5f000f688",
+      "mode": "100644"
+    },
+    {
+      "path": "docs/geo-guide.md",
+      "sha256": "182b68029881c46235125dbffdc0bb46d74047d1585cc5d11676e6b7f15e1b65",
       "mode": "100644"
     },
     {
@@ -729,26 +764,6 @@
     {
       "path": "docs/large-file-exceptions.json",
       "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/legacy-mit.md",
-      "sha256": "47a2ffa62741de78bb279b4f47ba619ef23ce4658d8d1138e590d9eccc3a8b50",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/legal/commercial-acceptance.md",
-      "sha256": "434027ed0ee63bcd73b067603fc6d01b1bb86f42eae39beefaac331269eb2696",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/legal/NOTICE.ja.md",
-      "sha256": "7c0cfb3ce03e9417bc4fafa1eb4af87e56ae269a8e483d9159f543f303210213",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/legal/NOTICE.zh-CN.md",
-      "sha256": "8c8e4c9c3674e5e3c7f78ff8612693248a3e22e10f0d4f437068a5ac8cd3859c",
       "mode": "100644"
     },
     {
@@ -794,16 +809,6 @@
     {
       "path": "docs/react-ui-portability.md",
       "sha256": "c938e942ca148d2323011c56aa5be21190cc2309a730df543a790d4750126ce7",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/release/COMMERCIAL-OEM-GATE.md",
-      "sha256": "208e70d8beee77eec40c28b1683e9345f6f469ca509f76eb2501e0a5b699c7b7",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/release/OSS-PREVIEW-GATE.md",
-      "sha256": "867545e678eae39b3d125a00ba5b518a354624e3eff3f60b43f6c0a38849126a",
       "mode": "100644"
     },
     {
@@ -897,11 +902,6 @@
       "mode": "100644"
     },
     {
-      "path": "docs/third-party/khroma-MIT.txt",
-      "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
-      "mode": "100644"
-    },
-    {
       "path": "docs/third-party/napi-rs-canvas-MIT.txt",
       "sha256": "8802fecf9da4367bc23bcf20b21cc143785fc6c92b152f3fa7fbe6ce08d344d6",
       "mode": "100644"
@@ -922,28 +922,8 @@
       "mode": "100644"
     },
     {
-      "path": "docs/third-party/runtime-attribution.md",
-      "sha256": "4fd4d21e7436e229619c7b805247ce39bb6f2bc558e39510f04448c17db73af5",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/third-party/RUNTIME-NOTICES.txt",
-      "sha256": "d8079f206db742489c904209c10d082d92a99c5df758864b60baf5ebc7b5ceeb",
-      "mode": "100644"
-    },
-    {
       "path": "docs/third-party/rust-wasm.md",
       "sha256": "07467b814000ce915429454aaacc6ab17ebe20be24dfa35211c117bb8a0dbbad",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/third-party/saxes-ISC.txt",
-      "sha256": "07648979cea27b8674d6ac23367410fa082b381e68574454090a800e9a58fd09",
-      "mode": "100644"
-    },
-    {
-      "path": "docs/third-party/security-dispositions.md",
-      "sha256": "65d1e34002172e2dcb9f45af4d4e60abef363413e9ce5bfb6eb2739ea5120246",
       "mode": "100644"
     },
     {
@@ -977,8 +957,13 @@
       "mode": "100644"
     },
     {
+      "path": "docs/verification/issue-269/completion.md",
+      "sha256": "eff528c6e920db6cd16965b0ec263597a904e5bcb477141c943c008640128ccd",
+      "mode": "100644"
+    },
+    {
       "path": "docs/verification/issue-269/follow-up.md",
-      "sha256": "0e5dfda11b36e69a56854ad8d0034916ad6b883d313f47abf8efdc6f971f87de",
+      "sha256": "32c4e974190380a52d7a602738ff1d38ed2439665f09b4ae7b441d2243399f6a",
       "mode": "100644"
     },
     {
@@ -1087,63 +1072,73 @@
       "mode": "100644"
     },
     {
-      "path": "DUAL-LICENSING.md",
-      "sha256": "2bb48cff5f1c4d9e6446ff74fad62148a3280b17ff7f78a70c06f317fbbbff40",
-      "mode": "100644"
-    },
-    {
       "path": "eslint.config.js",
       "sha256": "67691af9ec137bdc470bd556773c74d32ef976d96cdf6c5a4b11b922d69a0df5",
       "mode": "100644"
     },
     {
-      "path": "legal/CONTRIBUTOR-AGREEMENT-DRAFT.md",
-      "sha256": "1aebfeb2f1cbf1cfda3c8baddcab92000259c5e154209673b4aa10e00fff76de",
+      "path": "examples/reference-extension-host/geo-data-export.ts",
+      "sha256": "beb5818afc482825d2772e82e2bfe1ca5735b698ccf4ee270e862cca207a8ec3",
       "mode": "100644"
     },
     {
-      "path": "legal/COUNSEL-SIGNOFF-PACKET.md",
-      "sha256": "1994d3af968402769031ab447502745499f75f0e62af2b3b0a6acd0f84e117dc",
+      "path": "examples/reference-extension-host/geo-derived-closure.ts",
+      "sha256": "1ba7d5c0af436bba57dd68305f197e493d91ae2389d54936c317862880991fe6",
       "mode": "100644"
     },
     {
-      "path": "legal/EDITOR-EXTENSION-BOUNDARY-DECISIONS.md",
-      "sha256": "e2d9a90d9c698764f54f165cf6350d43b7ba0da225fd1ce188ce558a90dd47e0",
+      "path": "examples/reference-extension-host/geo-slide-transfer.ts",
+      "sha256": "c84bb46f0706d0cc8534f478c85059bdd20821db1d28172ef40fea4fe790c458",
       "mode": "100644"
     },
     {
-      "path": "legal/PUBLICATION-READINESS.md",
-      "sha256": "f9cda53e1b7c0d8363e910b3dc8452e89521c64c6cd21d44c3f38f28ef44e117",
+      "path": "examples/reference-extension-host/geo-source-adapter.ts",
+      "sha256": "dc31a670c8ca6a6748ad6d548d380017eec18ad878f3d7731ee59c2420b9f375",
       "mode": "100644"
     },
     {
-      "path": "legal/RIGHTS-PROVENANCE-PATENT-TEST-AUDIT.md",
-      "sha256": "75a60e8647a1eed1dcc210ac30263b4f67da6a41fa38078519059c752d3c87a5",
+      "path": "examples/reference-extension-host/geo-source-envelope.ts",
+      "sha256": "f22c36f5e5def11299f38193d30567f058a550b62051f50a5a0c7c04e2ffa846",
+      "mode": "100644"
+    },
+    {
+      "path": "examples/reference-extension-host/geo-source-profile.ts",
+      "sha256": "53a5053d372eb9351fbc20e58cbc2cd19318a5ee2a2dedb1d6c0c72494a8dabe",
+      "mode": "100644"
+    },
+    {
+      "path": "examples/reference-extension-host/geo-source-refresh.ts",
+      "sha256": "8dea656afa30eb83c128978385a855f667700731ded776d977695620e343f501",
+      "mode": "100644"
+    },
+    {
+      "path": "examples/reference-extension-host/geo-source-save.ts",
+      "sha256": "f85c90373ac74507a8fbe4cdba1f05ab2b55a23149cd0936ccffe36b91b7132a",
+      "mode": "100644"
+    },
+    {
+      "path": "examples/reference-extension-host/geo-source-storage.ts",
+      "sha256": "49116def7e033ba7ef52f1d1c89359b6e0a9455d4370c8ffe753b15b62b22f32",
+      "mode": "100644"
+    },
+    {
+      "path": "examples/reference-extension-host/geo-workspace.ts",
+      "sha256": "f469e0c50e8a7abe4e69be1b0106a6b6ab142057cb9b66d352a3e43390a0e658",
       "mode": "100644"
     },
     {
       "path": "LICENSE",
-      "sha256": "d8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee",
-      "mode": "100644"
-    },
-    {
-      "path": "LICENSE-GUIDE.md",
-      "sha256": "a52c42d940bd6f640ea239408ac56cc5489325e0acf440069c88aa3e89e0590b",
-      "mode": "100644"
-    },
-    {
-      "path": "LICENSE-SCOPE.md",
-      "sha256": "62995ebb6c936bdaaf6e9b1cc36f8f6a3baee2f4eaed2963f9406d7addbc5af3",
+      "sha256": "49e8075355586092fb7558e940201044c859b69d0ce3178738f86d72849a7a0e",
       "mode": "100644"
     },
     {
       "path": "package-lock.json",
-      "sha256": "be50c4e9f950c30b8d3761a905ed43184396e4a9d8280df78724fc1808b1b561",
+      "sha256": "352d16b710a36d9db5eebc182fb57ae9bf133e953778c31cdfdccc6f61f1ad65",
       "mode": "100644"
     },
     {
       "path": "package.json",
-      "sha256": "e329e984aba57825d1fd2dd64393c437f81e5740c3b6e6cc5cdafb812483d790",
+      "sha256": "9b871a422555f56db00e3f4b0cd336c8e51653967ed5d82d40e21b4e91edbbc5",
       "mode": "100644"
     },
     {
@@ -1558,7 +1553,7 @@
     },
     {
       "path": "packages/artifact-references/src/react.tsx",
-      "sha256": "cdbd4686334b17d5c16fccfe3e8ca8c191eb0efb9a28ee2fbaa21ee6f79e348a",
+      "sha256": "37f2861b11ed1a136ce07ca5fbd5a24c92288fcacc1789ab0bd02557d1beacfc",
       "mode": "100644"
     },
     {
@@ -1573,7 +1568,7 @@
     },
     {
       "path": "packages/canvas-ui/src/index.tsx",
-      "sha256": "e69721c6f5be4765190c003d16f19ea98fa9e98f1080e1eb770fb9d3fb5ba067",
+      "sha256": "deec7ae2952abb12436dc785b310e2986835699f11f07ac05eb35f1261cfc0e3",
       "mode": "100644"
     },
     {
@@ -2243,7 +2238,7 @@
     },
     {
       "path": "packages/document/package.json",
-      "sha256": "3287e7441026322a7bb7193cf126abecad86f0ec63d9b4eabb97b05071e5e83f",
+      "sha256": "53ef4731d110f9971cbff5333610abbc4b6217f60bb25a57eab785f9a6345205",
       "mode": "100644"
     },
     {
@@ -2323,7 +2318,7 @@
     },
     {
       "path": "packages/document/src/styles.css",
-      "sha256": "da9a19b33fa2b368e39b7aa4355850fb0574d8a376cbccd6887ccfac8fe1f4e2",
+      "sha256": "7cffb752c1aa629ada4fbdf0bada29c0094ce5e752229791ee13e5f316f750b4",
       "mode": "100644"
     },
     {
@@ -2348,7 +2343,7 @@
     },
     {
       "path": "packages/document/src/view.tsx",
-      "sha256": "79fea84a9532d411de626c91343a49a99a30771f782cb3af71c0b88dc04f6c7c",
+      "sha256": "6f11d84ed4c6513a701ca132d343583774f9c77662f52c726ea0175812ecefcd",
       "mode": "100644"
     },
     {
@@ -2368,7 +2363,7 @@
     },
     {
       "path": "packages/editor-core/src/drawing.ts",
-      "sha256": "7ebce1b875ac359498067c624979a2d53d36ccf1a46007e8eeb42f8b5c2fe20d",
+      "sha256": "52b82e2d8afa5af6ea131dac4a4c773529bcd104bbbdbac2e485728fb1a899a5",
       "mode": "100644"
     },
     {
@@ -2409,6 +2404,11 @@
     {
       "path": "packages/editor-core/src/inputs.ts",
       "sha256": "645e098a25d11580f90e6d61e4ecd7c343f8bfa91bd2e8eeeef231af77bbdc70",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/editor-core/src/text-visibility.test.ts",
+      "sha256": "685bdf3df344f136a93a06a3bd8c51e8f67ee4f3f43201bcbb59847e503a0ee1",
       "mode": "100644"
     },
     {
@@ -2773,22 +2773,37 @@
     },
     {
       "path": "packages/geo-core/README.md",
-      "sha256": "1980bfda07f2f7b422178246901675c5828fbaae5e1186cf3e162a8be6af66fc",
+      "sha256": "4bda311bf92a4262118c898046095153385670c505747b20fdb9527219eec352",
       "mode": "100644"
     },
     {
       "path": "packages/geo-core/src/commands.ts",
-      "sha256": "f512ae2df89b300f7005dc82c3c1fee7f4eef9813717f2622f6d8178fac73b0c",
+      "sha256": "524d7a5b5e202fa76ae84a56612eda12e9354331e6d605c0c39a8cfc443f9410",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/data-export.test.ts",
+      "sha256": "735c8cb85e3854453435d9fa047347e1ad349bca3ecbe639b04d4ac1aaa39f3c",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/data-export.ts",
+      "sha256": "28bad0943702ea4d0bd72d66a855c6de1357b57e681d0e8654e0c47967c9de0b",
       "mode": "100644"
     },
     {
       "path": "packages/geo-core/src/geo.test.ts",
-      "sha256": "e927cbe6a37faafcc6a30fcb161c6b0577db7310f8485c6c18b6d16498c73407",
+      "sha256": "8a7c046ff6698f7c4b8643c3a70597f990c634a314ec3c3708ce62f4e8e24ceb",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/geometry.ts",
+      "sha256": "ad445480cd9190903b30f7a772954ea67bffea62ecedaa3684e61bc93cd446a7",
       "mode": "100644"
     },
     {
       "path": "packages/geo-core/src/import-adapter.ts",
-      "sha256": "56a269c80e1a5005316db0354cce41545df5ee2026086aa224a97d5d0ce67167",
+      "sha256": "a4fb3c19a0e03e1ab2a0ad714da3c2a5560619f5cb1f5f9cc91b86f7ec07293f",
       "mode": "100644"
     },
     {
@@ -2813,7 +2828,7 @@
     },
     {
       "path": "packages/geo-core/src/index.ts",
-      "sha256": "de02a050e450832b1a10c0a495fdc8a7592a48e509dbd8453c6307a3c17b8e0f",
+      "sha256": "05d9dcd6fc53ce11c6491cb2b640ebde1a8882508325478db6095dcd3997881a",
       "mode": "100644"
     },
     {
@@ -2833,12 +2848,37 @@
     },
     {
       "path": "packages/geo-core/src/model.ts",
-      "sha256": "248f91ca87c372aece4b699cd8bf6f14f28dd686c370a4a2fa0da976781dba4e",
+      "sha256": "3952267ab221a125589c24971ffe275432af59a8091fe7b660b2d7bfc3c579c0",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/scene.ts",
+      "sha256": "aeb7f0a0a9e2090f8112123602b1f547b96c037d22c5783efcfe34b78531dc5b",
       "mode": "100644"
     },
     {
       "path": "packages/geo-core/src/validation.ts",
-      "sha256": "4fb092f33f2b56ebcf4b0298a0395faa4ebb315d4226a5e44f35591914bd1db0",
+      "sha256": "50312dc0a53d57db761767459db695f497b312b486f97de19831ca6c63d15e62",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/workspace-analysis.ts",
+      "sha256": "4139b512dbe49fcf666adcb2db99e8565546c2f9e8c59ed9e5da4e00f665297a",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/workspace-model.ts",
+      "sha256": "613788f4c8230df9787b6ff02b6cfdd58feb26f91f32403be7e8f1a49981bcd4",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/workspace-validation.ts",
+      "sha256": "3ba7a469d93b420a85f6549fb93e78d81d39335da84eabddac980e46fffa84e8",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-core/src/workspace.test.ts",
+      "sha256": "c337cc602dcccfc79ba2e1f30379d2ea025c4522314630fcfb5e78a696521253",
       "mode": "100644"
     },
     {
@@ -2867,6 +2907,11 @@
       "mode": "100644"
     },
     {
+      "path": "packages/geo-inspector/src/data-export/surface.ts",
+      "sha256": "51bbca2ac2e902a32e3372bce4705f33f3f44a1d26c2494f295f46ce3423555e",
+      "mode": "100644"
+    },
+    {
       "path": "packages/geo-inspector/src/definition.ts",
       "sha256": "4dbc9f662b2b019aac3b61d9a08c6f6f05b853d91678bc5c865c0751967acc8c",
       "mode": "100644"
@@ -2878,7 +2923,7 @@
     },
     {
       "path": "packages/geo-inspector/src/import-experiment-entry.ts",
-      "sha256": "cec1a6f7591a738ba066ce562deab46324efa5a3cd477cdf766f0b7d324c6a00",
+      "sha256": "6bdb7b954c9ea1e03feccbebbd855adb69f557318abfe7fb84fa2138aaa110e8",
       "mode": "100644"
     },
     {
@@ -2898,7 +2943,7 @@
     },
     {
       "path": "packages/geo-inspector/src/import-workbench/surface.ts",
-      "sha256": "bb7a85183e65cccab5dedb5b429f5174cf22e7a051aadacd0edbbe7f3a148dd9",
+      "sha256": "7e9fb07f7b4c1c6dc2d17ac4d5f0bb75e3ec3f0fb39d80d3dfbf509f78b18502",
       "mode": "100644"
     },
     {
@@ -3008,12 +3053,37 @@
     },
     {
       "path": "packages/geo-inspector/src/point-save-entry.ts",
-      "sha256": "dd00faaef8f5e79773a63180917dd0dc18b67807699456215670c0b1fda547f4",
+      "sha256": "a1d980eaca5f38b2ce9db0a16d0280496c7a36c364293c4b004520e8ef5a346f",
       "mode": "100644"
     },
     {
       "path": "packages/geo-inspector/src/surface.ts",
       "sha256": "c8d82e9b3ac41aa157957adb4508a979000ee0825e40dfbf59d2da0dd3ad73c1",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/src/workspace/photo.test.ts",
+      "sha256": "3515c269fce6b44ee1c51d448c1ad7fa4012460ad7f03f5f548677e704de9ba1",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/src/workspace/photo.ts",
+      "sha256": "3df2b67662a6223816cfe95c947bcb408fb102102540b9886b968d4f410fc5d2",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/src/workspace/png.ts",
+      "sha256": "13e80d16933a52da2a9a1170371eb5e7f68aacb33e3a779ba5e8412e02d7a6e7",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/src/workspace/port.ts",
+      "sha256": "be78a1af8d250f4e25bc1138d920cb9dbc12f5f7cbdbf0e6289588da26eef00c",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/src/workspace/surface.ts",
+      "sha256": "560a5cb4e38ae383767e372d721d1fa16ee564ed9be7378fa8077a6c602190b4",
       "mode": "100644"
     },
     {
@@ -3029,6 +3099,16 @@
     {
       "path": "packages/geo-inspector/test-host/edit.html",
       "sha256": "b18febeb33763c7728809c6ed98ac8f24a4166f1d9b76d6bd8f0d7c3bd5901fd",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/test-host/export-test.ts",
+      "sha256": "992e4407891d00a5bf78d7bf72cd7edcce44183271f519605c018fee3cb77ef1",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/test-host/export.html",
+      "sha256": "33acc4b58b7563e88c108f503bce1d4efceabb5a4ab396b2e297ebc8344d7102",
       "mode": "100644"
     },
     {
@@ -3092,8 +3172,23 @@
       "mode": "100644"
     },
     {
+      "path": "packages/geo-inspector/test-host/workspace-test.ts",
+      "sha256": "8269fca3da08223f58714c88ad1b05df71bffe307b4581a93f35119a648d67c2",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/test-host/workspace.html",
+      "sha256": "328859a78d4d3b922e571ab2762490d83849c69b1450b364b2e6de123cea390f",
+      "mode": "100644"
+    },
+    {
       "path": "packages/geo-inspector/tests/edit.spec.ts",
       "sha256": "ded67f292fc2c41155f084042fd97f6fc2bc3d38b235a2f4bc8c5fc7b4a92162",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/geo-inspector/tests/export.spec.ts",
+      "sha256": "2e5cdec0787e3d9edea6428c4284be50895eccb994412583f3f69862d9477aef",
       "mode": "100644"
     },
     {
@@ -3137,13 +3232,18 @@
       "mode": "100644"
     },
     {
+      "path": "packages/geo-inspector/tests/workspace.spec.ts",
+      "sha256": "a62480df56d13d785e416704755725537c72f1c604e483ba69edd0113b525346",
+      "mode": "100644"
+    },
+    {
       "path": "packages/geo-inspector/verification.md",
       "sha256": "77dd9bd468cd5bff32b2ddcfa26cf80c3021eb11405e58c5eed6f2cfa6fdfc90",
       "mode": "100644"
     },
     {
       "path": "packages/geo-inspector/vite.config.ts",
-      "sha256": "54d92802c12e4ae7dc0eefa4a45f599001c1e48d0089644670e2f5c4cc1401ee",
+      "sha256": "1da44709c546be2eed847402824fa5c5e2f00f46d9e15f2a2e55bb8f56135bdb",
       "mode": "100644"
     },
     {
@@ -3188,7 +3288,7 @@
     },
     {
       "path": "packages/office-export-ui/package.json",
-      "sha256": "9c3e32173bfa76a584f282ee76c51c9271cca02a9c4cbbb890af87bd0b7a7795",
+      "sha256": "30ba84cb046e1e3e0908f8e35dd67eb991365d37fd362d01094ce6a55016b9da",
       "mode": "100644"
     },
     {
@@ -3533,12 +3633,12 @@
     },
     {
       "path": "packages/reference-adapters/package.json",
-      "sha256": "f4574f270e2a4f361359da1e953541224b6ada6285dc6dc211e3c8245ab1a380",
+      "sha256": "efc513254770de3d5917b6f0594d0c3d1602bd939a3173520da0ebc905d61771",
       "mode": "100644"
     },
     {
       "path": "packages/reference-adapters/src/index.ts",
-      "sha256": "d6ee750c698757e8d4b78a0fac3a3529fe95bfa1f004394ec1bfe8fceb8fccae",
+      "sha256": "ead80d5aaa29c63abbca3fdbdfa7e6b282895c403767a4bded0830503381f29d",
       "mode": "100644"
     },
     {
@@ -3978,7 +4078,7 @@
     },
     {
       "path": "packages/structured-data/src/data.test.ts",
-      "sha256": "a9e93f82734e73c922811fa4e42504f4dcf92d03588c7d49d1c25f785be061d7",
+      "sha256": "8d044d10adf57e584597cee38e20813572cb3d30b8e271cdd3163fa36e5795a2",
       "mode": "100644"
     },
     {
@@ -4008,7 +4108,7 @@
     },
     {
       "path": "packages/structured-data/src/model.ts",
-      "sha256": "deb4cbeac449aed8630b7f234d98c4a22c4aca627050ca1718a543c2bc67d316",
+      "sha256": "b0b995e028894e33a3b61330b55b71c9e0257b266c438aa189c03fba65b13e19",
       "mode": "100644"
     },
     {
@@ -6817,6 +6917,11 @@
       "mode": "100644"
     },
     {
+      "path": "playwright.geo.production.config.ts",
+      "sha256": "6e8480a9c344e61800bea562dea63b58ea8a8a659cd4ee056680ef7e69f1b18b",
+      "mode": "100644"
+    },
+    {
       "path": "playwright.graph.production.config.ts",
       "sha256": "aa142b2bc151e1f9470e5685dedc4fab37843c947279d1a41890f2058280c56e",
       "mode": "100644"
@@ -6824,6 +6929,11 @@
     {
       "path": "playwright.host.config.ts",
       "sha256": "17a97b53b1fc1f9da56f0e0fb09d65aeeb00996f390c1e1e268c91168250fbd4",
+      "mode": "100644"
+    },
+    {
+      "path": "playwright.issue269.acceptance.config.ts",
+      "sha256": "95a92f23e9ae8abd5b61db8aa90bb832753a53d399b604c90523b2b369e0791e",
       "mode": "100644"
     },
     {
@@ -6878,7 +6988,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "60da75338d7144722d1781eebd32a5e1f966f7bbcd21e7ab4440e56971ea547c",
+      "sha256": "c9d7bb251df05e1e419161080f64f23582fda8783070e809ec547824ff209a0a",
       "mode": "100644"
     },
     {
@@ -7002,8 +7112,23 @@
       "mode": "100644"
     },
     {
+      "path": "scripts/extension-hosts/geo-data-export-check.mjs",
+      "sha256": "84cfdde68170aeca0ad91431bf4c92b6486e5e6868edb346c550593dd24f7ce0",
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/extension-hosts/geo-data-export.test.ts",
+      "sha256": "ebaea77bd591043e06ad10fed77295f7380a2f11c3ccb694462af735ac28c078",
+      "mode": "100644"
+    },
+    {
       "path": "scripts/extension-hosts/geo-edit-check.mjs",
       "sha256": "38e02ac65b717f33e0e0dd135625d9a5b01273eb379f85a19352b04717579567",
+      "mode": "100644"
+    },
+    {
+      "path": "scripts/extension-hosts/geo-export-inputs-check.mjs",
+      "sha256": "5489b0be5d2b8a2b57787a460455b2e47e008bc626c112e97075aeebf1be9fc7",
       "mode": "100644"
     },
     {
@@ -7083,12 +7208,12 @@
     },
     {
       "path": "scripts/extension-hosts/geo-source-storage.config.ts",
-      "sha256": "1a016c84bd5117925bb6cb4bf706307b85411ed24dcae1a6256f0445e95ebf60",
+      "sha256": "1be2cc15930964577d948a70511ad4ad1f7147f60d4e7ed65627554ccd25ae63",
       "mode": "100644"
     },
     {
       "path": "scripts/extension-hosts/geo-source-storage.test.ts",
-      "sha256": "73d7294c7edc32ad0bcd4694126a3b2f2fcad8fcd56770574ee6b07b6b38802f",
+      "sha256": "f54c4a51153d2e0b2626525e4ece677294ead823b473d1adce44b320a380f3fa",
       "mode": "100644"
     },
     {
@@ -7183,7 +7308,7 @@
     },
     {
       "path": "scripts/extension-hosts/prepare.mjs",
-      "sha256": "d6c187997646ad909c4b6587796bcd24f8ec5fa6ae78a31f0c3cb5edec232c53",
+      "sha256": "b731dcc02183a2b24b6e8266a35c8c4517e8d442f6a7bef2033f244126233ca5",
       "mode": "100644"
     },
     {
@@ -7542,11 +7667,6 @@
       "mode": "100644"
     },
     {
-      "path": "scripts/test-unit.mjs",
-      "sha256": "2c302f86aa29203aba9345a818740cc14445145d63d499c56ef034e2cc411c98",
-      "mode": "100644"
-    },
-    {
       "path": "scripts/tests/host-output-verifier.test.mjs",
       "sha256": "63c121be29bb13a31e0ee7861e58fe06712e1f470dd9df06abb8e6421ff97cc2",
       "mode": "100644"
@@ -7592,11 +7712,6 @@
       "mode": "100644"
     },
     {
-      "path": "SECURITY.md",
-      "sha256": "d594b0de292813e6e052d1f5ff1ef12cb37f785bf9238a8f4000a9ffb0093bcb",
-      "mode": "100644"
-    },
-    {
       "path": "tests/e2e/artifact-references-review.spec.ts",
       "sha256": "6a251b476c935c97dcd5800522d12f36ebdb472ddfe9a26c56d4fa52c55d94eb",
       "mode": "100644"
@@ -7627,6 +7742,11 @@
       "mode": "100644"
     },
     {
+      "path": "tests/e2e/canvas-text-visibility.spec.ts",
+      "sha256": "6db20bf060c69d24d9796103f90d8a2b4ac156fc3ba798a33ad74732066828f1",
+      "mode": "100644"
+    },
+    {
       "path": "tests/e2e/collaboration-mobile.spec.ts",
       "sha256": "c88e11be19812a16a2dd4113f2188bb6f72dd0fe290f3ffabb96bf47543734f9",
       "mode": "100644"
@@ -7653,12 +7773,12 @@
     },
     {
       "path": "tests/e2e/design-prototype-toggle.spec.ts",
-      "sha256": "0206f8fd02655d1b8a01575a4e50a34a27634e11331022e16c02d89b43e30372",
+      "sha256": "1f211d55a2dc84f0c6d5ef8f5dbf8dc2ac55e88930bf0ab17cc011f8f020cc7b",
       "mode": "100644"
     },
     {
       "path": "tests/e2e/design-prototype.spec.ts",
-      "sha256": "95bdcb0a07a3b8a76f0b6b904966f23b88a21af351fac7aa0de1a7e2bb7343b3",
+      "sha256": "100445bd95760a59946e23ebcd7c149eb9218d7cac0d8170ae817dbdeef890de",
       "mode": "100644"
     },
     {
@@ -7713,7 +7833,7 @@
     },
     {
       "path": "tests/e2e/document-performance.spec.ts",
-      "sha256": "257cff642f60f9e81f7806cc32743cef2328b08eb099068f45097397581380ba",
+      "sha256": "aac4926ef835ccfd5f3bde2cf8a2195f4220c6d63b402eccf8b5a6fde53f00b8",
       "mode": "100644"
     },
     {
@@ -7734,6 +7854,11 @@
     {
       "path": "tests/e2e/fixtures.ts",
       "sha256": "2be16131802a7cf3926b7f7594808619ca7b4bb447aed868f88e148783ff4b94",
+      "mode": "100644"
+    },
+    {
+      "path": "tests/e2e/geo-workspace.spec.ts",
+      "sha256": "f00e3488581d6537df3346cf047e383e89ca28357dc92e192f2e31d3ed19cf32",
       "mode": "100644"
     },
     {
@@ -7858,7 +7983,7 @@
     },
     {
       "path": "tests/e2e/office-docx-ui.spec.ts",
-      "sha256": "790bfd37fcb3e272d91586ad09c337e75a9db4d7e7246a46d107ac05bbd3dd70",
+      "sha256": "974dba98d8ba7850c2063410a7377d153f7c2ef15e849020877a4d42a137e740",
       "mode": "100644"
     },
     {
@@ -8064,11 +8189,6 @@
     {
       "path": "tests/e2e/react-ui.spec.ts",
       "sha256": "d3388546bf6861a7ac7d1661993584b7eebda0474a0ab6ad86628c1da288e1ee",
-      "mode": "100644"
-    },
-    {
-      "path": "tests/e2e/release-security.spec.ts",
-      "sha256": "ea9939c1a1fae1b0c26a76e590d56e35feb481c7e66ff613a74cec854d3516df",
       "mode": "100644"
     },
     {
@@ -8323,7 +8443,7 @@
     },
     {
       "path": "tests/e2e/template-structure-fixtures.ts",
-      "sha256": "0e861d5ae1e8a864a7cf86f1f083b15b4fe65cd373eb2a117f93ac1ad2897bb0",
+      "sha256": "24ea2e9547fa334e4cf947822e9a7da90339e1ef3d781e5848d6f327e0fb722a",
       "mode": "100644"
     },
     {
@@ -8333,7 +8453,7 @@
     },
     {
       "path": "tests/e2e/template-structure-review-fixtures.ts",
-      "sha256": "d813d8e39e7d3c6f5a04152cf658f8ca48fd1e40a7279bca7f3e407bc0229f30",
+      "sha256": "359370b0943a6604abe6894457158a7df75fef5488f66fe9e4664b794a863872",
       "mode": "100644"
     },
     {
@@ -8348,7 +8468,7 @@
     },
     {
       "path": "tests/e2e/template-structure-shared.spec.ts",
-      "sha256": "75d94e31259c1f19a29a0cbb3a69dcb52fac0e70e29b844e83307d111f65d54c",
+      "sha256": "5443cac0bf33c7264f66f17379110864e8f56a4aeb820a7d547bc9a1e2a81d2f",
       "mode": "100644"
     },
     {
@@ -8392,6 +8512,11 @@
       "mode": "100644"
     },
     {
+      "path": "tests/fixtures/canvas-text-visibility/host.tsx",
+      "sha256": "c67286c405244ee5c128189a48a879d16cc21bb43949ca07c9b76eebf2d63a14",
+      "mode": "100644"
+    },
+    {
       "path": "tests/fixtures/design-prototype/content.ts",
       "sha256": "73def0f03f6a2daf67daf35c4b42cb4afa7d4f529de236102882688173e6b76e",
       "mode": "100644"
@@ -8403,7 +8528,12 @@
     },
     {
       "path": "tests/fixtures/design-prototype/large-host.tsx",
-      "sha256": "6b4de71ce19882894940879836f64adc6ddbf8a3694dd03496194281217649cc",
+      "sha256": "24fd27ffadbf03893328c9e80f5b310e731ba8a5c03fd5da7182c67106e3e8bf",
+      "mode": "100644"
+    },
+    {
+      "path": "tests/fixtures/design-prototype/large.html",
+      "sha256": "17fa1cd84305e2598ee88bf6fa9d2cfdc63c14a497596f358e23896f339c3709",
       "mode": "100644"
     },
     {
@@ -8433,7 +8563,12 @@
     },
     {
       "path": "tests/fixtures/document-performance/host.tsx",
-      "sha256": "e6959328561119574cf558676c45b95151dd6c1867fb03b1d0975044df0784b1",
+      "sha256": "fba4a5fd4b062c21001a025086f6d6b9e03b11dc40c4140f5d39f3e35b0c3d0d",
+      "mode": "100644"
+    },
+    {
+      "path": "tests/fixtures/document-performance/index.html",
+      "sha256": "5e9f567d92c8d861c86ca78cbe288eec85171269294b071caf8275f62803c3d2",
       "mode": "100644"
     },
     {
@@ -8728,12 +8863,17 @@
     },
     {
       "path": "vite.artifact-host.config.ts",
-      "sha256": "79ed158bb8b06fde3238f459d3b45e7a0c2cced054dd26061a48d2ca28a7ebdc",
+      "sha256": "caab81d3a38998bf4ea7f70da1c7f2a0ce381ecaf75f0ac2451ee1b5c43e567e",
       "mode": "100644"
     },
     {
       "path": "vite.config.ts",
-      "sha256": "200791dc97b604fc0241ee145385e25f6d6ec465c3737bec19977bfd0af15357",
+      "sha256": "eef5530a7009c23a5b4e146f5b7346eab56b3bdb8d28531c2c44ed96293eeb42",
+      "mode": "100644"
+    },
+    {
+      "path": "vite.issue269.config.ts",
+      "sha256": "2b1d7478820b98c3cc76da1bf7658b193d83c394fb38992e85426d7c4e5d18c2",
       "mode": "100644"
     },
     {

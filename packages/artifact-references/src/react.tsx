@@ -84,7 +84,7 @@ export function ReferenceTools({
           source: values.length ? '0' : '',
           error: values.length
             ? ''
-            : '保存済みのData／Graphがありません。元を保存してから再取得してください。',
+            : '保存済みのData／Graph／Geoがありません。元を保存してから再取得してください。',
         });
       }
     } catch (e) {

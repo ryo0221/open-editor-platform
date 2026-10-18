@@ -24,7 +24,7 @@ export default defineConfig({
       {
         find: /^mermaid$/,
         replacement: fileURLToPath(
-          new URL('./node_modules/mermaid/dist/mermaid.core.mjs', import.meta.url),
+          new URL('./node_modules/mermaid/dist/mermaid.esm.min.mjs', import.meta.url),
         ),
       },
     ],

@@ -9,12 +9,19 @@ import type {
 } from './model';
 import { assertGeo, id, record } from './validation';
 import { checkedJson } from './json-boundary';
+import { assertEditableGeometry } from './geometry';
+import type { GeoWorkspace } from './workspace-model';
 export type GeoAction =
   | { type: 'addFeature'; layerId: string; feature: Feature }
   | { type: 'deleteFeature'; layerId: string; featureId: string }
   | { type: 'replaceGeometry'; layerId: string; featureId: string; geometry: Geometry | null }
   | { type: 'setAttribute'; layerId: string; featureId: string; fieldId: string; value: Scalar }
-  | { type: 'importLayer'; layer: VectorLayer; source: SourceSnapshot };
+  | { type: 'importLayer'; layer: VectorLayer; source: SourceSnapshot }
+  | { type: 'createLayer'; layer: VectorLayer }
+  | { type: 'retainSource'; source: SourceSnapshot }
+  | { type: 'refreshLayer'; layer: VectorLayer }
+  | { type: 'setWorkspace'; workspace: GeoWorkspace }
+  | { type: 'deleteLayer'; layerId: string };
 export interface Revision {
   kind?: 'local-draft';
   sessionId: string;
@@ -55,6 +62,19 @@ function assertCommand(command: unknown, budgets: Budgets): asserts command is G
   for (const action of command.actions) {
     if (!record(action)) return bad();
     switch (action.type) {
+      case 'deleteLayer':
+        if (!keys(action, ['type', 'layerId']) || !id(action.layerId)) return bad();
+        break;
+      case 'setWorkspace':
+        if (!keys(action, ['type', 'workspace']) || !record(action.workspace)) return bad();
+        break;
+      case 'createLayer':
+      case 'refreshLayer':
+        if (!keys(action, ['type', 'layer']) || !record(action.layer)) return bad();
+        break;
+      case 'retainSource':
+        if (!keys(action, ['type', 'source']) || !record(action.source)) return bad();
+        break;
       case 'importLayer':
         if (
           !keys(action, ['type', 'layer', 'source']) ||
@@ -104,8 +124,6 @@ function assertCommand(command: unknown, budgets: Budgets): asserts command is G
     }
   }
 }
-const editable = (g: Geometry | null) =>
-  g === null || g.type === 'Point' || g.type === 'LineString';
 /** Pure application. Caller supplies fresh trusted authority/revision, never payload authority. */
 export function applyGeoCommand(
   content: GeoDocument,
@@ -122,6 +140,32 @@ export function applyGeoCommand(
   assertGeo(content, context.budgets);
   const next = structuredClone(content);
   for (const a of command.actions) {
+    if (a.type === 'deleteLayer') {
+      if (!next.layers.some((l) => l.id === a.layerId)) throw Error('missing-layer');
+      next.layers = next.layers.filter((l) => l.id !== a.layerId);
+      continue;
+    }
+    if (a.type === 'setWorkspace') {
+      next.workspace = structuredClone(a.workspace);
+      continue;
+    }
+    if (a.type === 'retainSource') {
+      next.sources.push(structuredClone(a.source));
+      continue;
+    }
+    if (a.type === 'createLayer') {
+      if (a.layer.features.some((f) => f.sourceRef)) throw Error('manual-layer-source-ref');
+      for (const f of a.layer.features) assertEditableGeometry(f.geometry);
+      next.layers.push(structuredClone(a.layer));
+      continue;
+    }
+    if (a.type === 'refreshLayer') {
+      const index = next.layers.findIndex((l) => l.id === a.layer.id);
+      if (index < 0) throw Error('missing-layer');
+      if (a.layer.features.some((f) => !f.sourceRef)) throw Error('refresh-source-required');
+      next.layers[index] = structuredClone(a.layer);
+      continue;
+    }
     if (a.type === 'importLayer') {
       next.layers.push(structuredClone(a.layer));
       next.sources.push(structuredClone(a.source));
@@ -130,7 +174,7 @@ export function applyGeoCommand(
     const layer = next.layers.find((l) => l.id === a.layerId);
     if (!layer) throw new Error('missing-layer');
     if (a.type === 'addFeature') {
-      if (!editable(a.feature.geometry)) throw new Error('geometry-readonly-topology-pending');
+      assertEditableGeometry(a.feature.geometry);
       layer.features.push(structuredClone(a.feature));
       continue;
     }
@@ -142,8 +186,8 @@ export function applyGeoCommand(
         layer.features.splice(index, 1);
         break;
       case 'replaceGeometry':
-        if (!editable(feature.geometry) || !editable(a.geometry))
-          throw new Error('geometry-readonly-topology-pending');
+        assertEditableGeometry(feature.geometry);
+        assertEditableGeometry(a.geometry);
         feature.geometry = structuredClone(a.geometry);
         break;
       case 'setAttribute':

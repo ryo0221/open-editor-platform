@@ -461,7 +461,8 @@ export function importCsv(source: string): StructuredData {
     const type: ColumnType =
       values.length && values.every((v) => /^(true|false)$/i.test(v))
         ? 'boolean'
-        : values.length && values.every((v) => Number.isFinite(Number(v)))
+        : values.length &&
+            values.every((v) => Number.isFinite(Number(v)) && !/^[+-]?0\d/.test(v.trim()))
           ? 'number'
           : 'text';
     return { id: newId('col'), name, type };

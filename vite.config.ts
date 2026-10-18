@@ -7,14 +7,14 @@ export default defineConfig({
   root: 'apps/playground',
   plugins: [react(), officeMermaidHtml(), privateVideoBuild()],
   worker: { format: 'es' },
-  // Resolve dependencies separately so security pins apply to emitted Mermaid
-  // code; the minified upstream entry bundles older sanitizer/math dependencies.
+  // Use Mermaid's shipped ESM chunks. Disable Rollup's expensive whole-graph
+  // tree-shaking; chunks remain lazy-loaded and esbuild still minifies them.
   resolve: {
     alias: [
       {
         find: /^mermaid$/,
         replacement: fileURLToPath(
-          new URL('./node_modules/mermaid/dist/mermaid.core.mjs', import.meta.url),
+          new URL('./node_modules/mermaid/dist/mermaid.esm.min.mjs', import.meta.url),
         ),
       },
     ],

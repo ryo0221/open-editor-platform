@@ -25,20 +25,3 @@ hashes. It contains no private source revision or Git author metadata. Maintaine
 the private source-to-public revision correspondence separately. Synchronization uses
 ordinary review PRs, including deletions; it never merges the private Git history or
 rewrites the public main branch.
-
-## Licensing and contributions
-
-The planned public source license is GNU AGPLv3-only, with an optional
-**separate commercial/OEM license** for users requiring rights beyond AGPL.
-AGPL allows fee-based software and SaaS when its terms are met. Earlier MIT
-grants remain valid for copies lawfully received under MIT.
-
-Code PRs need a rights/provenance review, and before accepting code intended
-for dual licensing, maintainers must obtain written permission enabling both
-AGPL and alternative commercial sublicensing, including required patent rights.
-See [CONTRIBUTOR-LICENSING](CONTRIBUTOR-LICENSING.md). An unauthorised upstream
-relicense of third-party contributions is never allowed.
-
-Independent Editors may be developed without submitting a PR. The proposed
-additional permission for proprietary extensions is **not effective yet**;
-the legal scope of a combined work depends on its architecture and licenses.

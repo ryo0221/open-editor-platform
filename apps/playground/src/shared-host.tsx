@@ -50,8 +50,8 @@ async function connect(
   actor: 'A' | 'B' | 'C',
   initial?: StoredArtifact,
 ) {
-  if (domain === 'structured-graph')
-    throw new Error('Structured Graph is local-only; shared editing is not supported');
+  if (domain === 'structured-graph' || domain === 'geo')
+    throw new Error('This domain is local-only; shared editing is not supported');
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {

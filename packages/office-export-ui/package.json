@@ -19,7 +19,7 @@
     "@editor-platform/slide": "*",
     "@editor-platform/document": "*",
     "@editor-platform/document-export": "*",
-    "mermaid": "11.17.2",
+    "mermaid": "11.12.0",
     "@resvg/resvg-wasm": "2.6.2",
     "lucide-react": "*"
   },

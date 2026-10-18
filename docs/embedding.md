@@ -403,6 +403,27 @@ See [audit scope](issues-53-73-audit.md) and its verification record for tested 
 
 Document print/PDF checklist markers use `[x]` / `[ ]` for checked/unchecked state, so generated markers do not require glyphs absent from the fixed CJK font. Native checklist content is unchanged.
 
+## Large native text
+
+`DrawingView` keeps the full native text and assigns it to the SVG text's `aria-label` while
+omitting screen text lines far outside the existing native clip, with four maximum-font ems of
+overscan. Fit sizing and vertical alignment still use the complete text; expanded text keeps
+every line. Low-level
+`drawingPrimitives` / `textPrimitives` default to full output; `{ visibleTextOnly: true }` opts
+into screen pruning. Native/SVG/Office exports retain full text.
+
+In `CanvasStage`, each `CanvasObject` is a button named by `CanvasTarget.label`; its descendants
+are presentational. The inner text's `aria-label` does not add its full text to that button's
+accessible name. Design, Slide and Whiteboard canvas objects retain their existing target labels;
+this change does not establish full-text screen-reader access through those objects.
+
+Documents above 200 native blocks let supported browsers skip offscreen text layout/paint.
+Every ProseMirror node remains mounted for search, native selection, editing and history.
+Active text stays rendered, and ordinary find/outline/DOCX diagnostic navigation uses the
+editor's native selection scroll. Print renders all content; browsers without the CSS features
+render normally.
+The Host keeps its existing content/command contract. See [targeted checks](verification/issue-269/completion.md).
+
 ## Design frame prototypes
 
 Design retains the full native model for selection, editing and export while culling bounded

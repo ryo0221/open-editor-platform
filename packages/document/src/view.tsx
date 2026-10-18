@@ -256,8 +256,8 @@ export function DocumentSurface({
     const editor = view.current;
     if (!editor) return;
     const tr = jumpToBlock(editor.state, id);
-    if (tr) editor.dispatch(tr);
     editor.focus();
+    if (tr) editor.dispatch(tr);
     callbacks.current.select(id);
   }, []);
   const [engineState, setEngineState] = useState<EditorState | null>(null),
@@ -283,8 +283,27 @@ export function DocumentSurface({
     const roots = new Set<Root>();
     const editor = new EditorView(mount.current, {
       decorations(state) {
-        if (!callbacks.current.annotations.length) return DecorationSet.empty;
         const decorations: Decoration[] = [];
+        if (state.doc.childCount > 200 || callbacks.current.content.blocks.length > 200) {
+          // Selection endpoints need their measured geometry before ProseMirror
+          // scrolls to a distant find/outline result or a keyboard caret move.
+          const active = new Set<number>();
+          for (const point of [state.selection.$from, state.selection.$to]) {
+            if (!point.depth || !point.node(1).isTextblock) continue;
+            const from = point.before(1);
+            if (active.has(from)) continue;
+            active.add(from);
+            decorations.push(
+              Decoration.node(from, from + point.node(1).nodeSize, {
+                class: 'ep-document-active-text',
+              }),
+            );
+          }
+        }
+        if (!callbacks.current.annotations.length)
+          return decorations.length
+            ? DecorationSet.create(state.doc, decorations)
+            : DecorationSet.empty;
         const semantic = nodeToContent(state.doc, callbacks.current.content);
         for (const annotation of callbacks.current.annotations)
           for (const original of annotation.anchor.addresses) {
@@ -765,12 +784,14 @@ export function DocumentSurface({
     if (!editor || !matches.length) return;
     const i = (index + matches.length) % matches.length;
     setMatchIndex(i);
+    // ProseMirror scrolls its text selection only while the DOM selection is in
+    // the editor. Focus before measuring a previously skipped search result.
+    editor.focus();
     editor.dispatch(
       editor.state.tr
         .setSelection(TextSelection.create(editor.state.doc, matches[i].from, matches[i].to))
         .scrollIntoView(),
     );
-    editor.focus();
   }
   function replaceMatches(all: boolean) {
     const editor = view.current;
@@ -1167,6 +1188,7 @@ export function DocumentSurface({
         )}
         <div
           className="ep-document-page"
+          data-window-text={content.blocks.length > 200 || undefined}
           style={{
             padding: content.page?.margin ?? 64,
             width: content.page?.size === 'Letter' ? 816 : 794,
@@ -1185,8 +1207,8 @@ export function DocumentSurface({
               select(address.blockId);
               if (view.current) {
                 const transaction = jumpToBlock(view.current.state, address.blockId);
-                if (transaction) view.current.dispatch(transaction);
                 view.current.focus();
+                if (transaction) view.current.dispatch(transaction);
               }
             }}
           />

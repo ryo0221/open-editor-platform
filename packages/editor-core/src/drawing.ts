@@ -409,10 +409,50 @@ export function layoutDrawingText(d: Drawing) {
   return { fontSize: font, padding: pad, lines, totalHeight: total, startY: start, x };
 }
 export type DrawingTextLayout = ReturnType<typeof layoutDrawingText>;
-export function textPrimitives(d: Drawing): SvgPrimitive[] {
+export interface DrawingRenderOptions {
+  /** Screen rendering may omit lines outside the existing clip, retaining font overscan.
+   * Native text/layout and the default export primitives always retain the full content. */
+  visibleTextOnly?: boolean;
+}
+export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
   const { fontSize: font, lines, startY: start, x } = layoutDrawingText(d);
+  const margin = 4 * lines.reduce((size, line) => Math.max(size, line.ascent), font);
+  let offset = 0;
+  const renderedLines = lines.flatMap((line) => {
+    const top = start + offset;
+    offset += line.height;
+    if (
+      options.visibleTextOnly &&
+      s.overflow !== 'expand' &&
+      (start + offset < b.y - margin || top > b.y + b.height + margin)
+    )
+      return [];
+    return [
+      p('tspan', { x, y: top + line.ascent }, [
+        ...(s.list ? ['• '] : []),
+        ...line.runs.map((run) =>
+          p(
+            'tspan',
+            {
+              'font-family': run.style?.fontFamily ?? s.fontFamily ?? defaultDrawingFontFamily,
+              'font-size': run.style?.fontSize ?? font,
+              'font-weight': run.style?.bold ? '700' : '400',
+              'font-style': run.style?.italic ? 'italic' : 'normal',
+              'text-decoration':
+                [run.style?.underline ? 'underline' : '', run.style?.strike ? 'line-through' : '']
+                  .filter(Boolean)
+                  .join(' ') || 'none',
+              'letter-spacing': run.style?.letterSpacing ?? 0,
+              fill: run.style?.color ?? s.color ?? (d.kind === 'text' ? d.fill : '#253044'),
+            },
+            [run.text],
+          ),
+        ),
+      ]),
+    ];
+  });
   const text = p(
     'text',
     {
@@ -425,34 +465,9 @@ export function textPrimitives(d: Drawing): SvgPrimitive[] {
       'letter-spacing': s.letterSpacing ?? 0,
       fill: s.color ?? (d.kind === 'text' ? d.fill : '#253044'),
       'text-anchor': s.align === 'center' ? 'middle' : s.align === 'right' ? 'end' : 'start',
+      ...(options.visibleTextOnly ? { 'aria-label': d.text } : {}),
     },
-    lines.map((line, i) =>
-      p(
-        'tspan',
-        { x, y: start + lines.slice(0, i).reduce((n, l) => n + l.height, 0) + line.ascent },
-        [
-          ...(s.list ? ['• '] : []),
-          ...line.runs.map((run) =>
-            p(
-              'tspan',
-              {
-                'font-family': run.style?.fontFamily ?? s.fontFamily ?? defaultDrawingFontFamily,
-                'font-size': run.style?.fontSize ?? font,
-                'font-weight': run.style?.bold ? '700' : '400',
-                'font-style': run.style?.italic ? 'italic' : 'normal',
-                'text-decoration':
-                  [run.style?.underline ? 'underline' : '', run.style?.strike ? 'line-through' : '']
-                    .filter(Boolean)
-                    .join(' ') || 'none',
-                'letter-spacing': run.style?.letterSpacing ?? 0,
-                fill: run.style?.color ?? s.color ?? (d.kind === 'text' ? d.fill : '#253044'),
-              },
-              [run.text],
-            ),
-          ),
-        ],
-      ),
-    ),
+    renderedLines,
   );
   return s.overflow === 'expand'
     ? [text]
@@ -581,7 +596,11 @@ function fittedImageSource(src: string, imageFit: Drawing['imageFit']): string {
     return src;
   }
 }
-export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): SvgPrimitive[] {
+export function drawingPrimitives(
+  d: Drawing,
+  resourceId = newId('graphic'),
+  options: DrawingRenderOptions = {},
+): SvgPrimitive[] {
   if (d.hidden) return [];
   d = { ...d, id: resourceId };
   const b = d.bounds;
@@ -636,15 +655,18 @@ export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): Sv
               stroke: d.stroke ?? '#8e9eb5',
               'stroke-width': 1,
             }),
-            ...textPrimitives({
-              ...d,
-              id: `${d.id}-${r}-${c}`,
-              kind: 'text',
-              bounds: cell,
-              text: rows[r][c] ?? '',
-              typography: { fontSize: 16, padding: 8, ...d.typography, bold: r === 0 },
-              fill: '#253044',
-            }),
+            ...textPrimitives(
+              {
+                ...d,
+                id: `${d.id}-${r}-${c}`,
+                kind: 'text',
+                bounds: cell,
+                text: rows[r][c] ?? '',
+                typography: { fontSize: 16, padding: 8, ...d.typography, bold: r === 0 },
+                fill: '#253044',
+              },
+              options,
+            ),
           );
         x += widths[c];
       }
@@ -665,7 +687,7 @@ export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): Sv
       }),
     ];
   else if (d.kind === 'group') nodes = [];
-  else if (d.kind === 'text') nodes = textPrimitives(d);
+  else if (d.kind === 'text') nodes = textPrimitives(d, options);
   else {
     if (d.vector) {
       const v = d.vector.viewBox;
@@ -704,7 +726,7 @@ export function drawingPrimitives(d: Drawing, resourceId = newId('graphic')): Sv
         ),
       ];
     } else nodes = shapePrimitives(d.shape ?? 'rectangle', b, d, d.fill);
-    if (d.text) nodes.push(...textPrimitives(d));
+    if (d.text) nodes.push(...textPrimitives(d, options));
   }
   const cx = b.x + b.width / 2,
     cy = b.y + b.height / 2;

@@ -143,6 +143,11 @@ for (const kind of ['reference', 'independent']) {
         'geo-source-storage.ts',
         'geo-source-adapter.ts',
         'geo-source-profile.ts',
+        'geo-data-export.ts',
+        'geo-workspace.ts',
+        'geo-source-refresh.ts',
+        'geo-derived-closure.ts',
+        'geo-slide-transfer.ts',
         'geo-storage.ts',
         '<define:EDITOR_PINS>',
       ].includes(name) ||

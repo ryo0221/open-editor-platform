@@ -83,7 +83,7 @@ export function createImportWorkbench(
     node('h2', 'Import local CSV or GeoJSON'),
     node(
       'p',
-      'Preview before importing. Source references are retained. Imported source-backed data cannot yet use the source-free edit/save path.',
+      'Preview before importing. The Host retains source references and reports which editing and saving capabilities are available.',
     ),
   );
   const controls = node('div'),
@@ -105,7 +105,17 @@ export function createImportWorkbench(
     first = input(csv, 'First coordinate column'),
     second = input(csv, 'Second coordinate column');
   const axis = select(csv, 'CSV coordinate order', ['longitude-latitude', 'latitude-longitude']);
-  const missing = select(csv, 'Missing coordinate policy', ['reject', 'preserve-null']);
+  const missing = select(csv, 'Missing coordinate policy', [
+    'reject',
+    'preserve-null',
+    'attribute-table',
+  ]);
+  csv.append(
+    node(
+      'p',
+      'For a join-only CSV choose attribute-table and map all columns as scalar fields. Coordinate columns are then unnecessary.',
+    ),
+  );
   controls.append(csv);
   const fields = node('fieldset');
   fields.append(node('legend', 'Scalar column/property mapping'));
@@ -313,7 +323,10 @@ export function createImportWorkbench(
       const selected = file.files?.[0];
       if (!selected) throw new Error('Choose a local file');
       if (selected.size > limits.sourceBytes) throw new Error('source-byte-limit');
-      const planId = `import-${crypto.randomUUID()}`;
+      // Full 128-bit identity, encoded compactly so200 four-attribute records fit
+      // the existing controlled/save envelope. Existing imported IDs never change.
+      const planId = 'i' + btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))))
+        .replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
       activePlan = planId;
       const selectedFormat = format.value as 'csv' | 'geojson';
       const mapping = mappings.map((f) => ({
@@ -337,7 +350,7 @@ export function createImportWorkbench(
                 firstCoordinate: first.value,
                 secondCoordinate: second.value,
                 axis: axis.value as 'longitude-latitude' | 'latitude-longitude',
-                missingCoordinates: missing.value as 'reject' | 'preserve-null',
+                missingCoordinates: missing.value as 'reject' | 'preserve-null' | 'attribute-table',
               },
             }
           : {}),

@@ -16,7 +16,7 @@ export interface SourceSnapshot {
   pin: Pin;
   resourceId: string;
   bytesHash: string;
-  format: 'geojson' | 'csv';
+  format: 'geojson' | 'csv' | 'png' | 'jpeg';
   adapterVersion: string;
   declaredCrs: 'OGC:CRS84';
   axis: 'longitude-latitude';
@@ -46,6 +46,7 @@ export interface GeoDocument {
   schemaVersion: 1;
   layers: VectorLayer[];
   sources: SourceSnapshot[];
+  workspace?: import('./workspace-model').GeoWorkspace;
 }
 export interface Diagnostic {
   code: string;
@@ -76,6 +77,7 @@ export interface ReadonlyKeyJoin {
 }
 export interface OutputReceipt {
   input: Pin;
+  derivedInputs?: Pin[];
   sources: SourceSnapshot[];
   namedViewId: string;
   rendererVersion: string;

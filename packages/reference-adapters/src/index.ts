@@ -1,3 +1,4 @@
+import { assertGeo, renderGeoSvg, fitGeoExtent, type GeoDocument } from '@editor-platform/geo-core';
 import {
   ReferenceError,
   svgReferenceProjection,
@@ -190,4 +191,43 @@ export const graphReferenceAdapter: ReferenceAdapter = {
     );
   },
 };
-export const nativeReferenceAdapters = [dataReferenceAdapter, graphReferenceAdapter];
+export const geoReferenceAdapter: ReferenceAdapter = {
+  domain: 'geo',
+  validate(snapshot) {
+    assertGeo(snapshot.content, {
+      actions: 10,
+      bytes: 65536,
+      depth: 24,
+      layers: 10,
+      features: 200,
+      vertices: 1000,
+    });
+    if (snapshot.dependencies.length)
+      throw new ReferenceError('error', 'Geo reference has unexpected dependencies');
+  },
+  project(snapshot, target) {
+    const content = snapshot.content as GeoDocument;
+    if (target.kind !== 'map' || target.columnIds || target.rowIds || target.nodeIds)
+      throw new ReferenceError('unsupported', 'Geo reference requires a saved map view');
+    const view = content.workspace?.views.find((v) => v.id === target.viewId);
+    if (target.viewId !== 'default' && !view) missing('Saved map view was deleted');
+    return svgReferenceProjection(
+      renderGeoSvg(
+        content,
+        {
+          width: 1000,
+          height: 700,
+          extent: view?.extent ?? fitGeoExtent(content),
+          ...(view ? { view } : {}),
+        },
+        { actions: 10, bytes: 65536, depth: 24, layers: 10, features: 200, vertices: 1000 },
+      ),
+      view?.name ?? 'Geographic map',
+    );
+  },
+};
+export const nativeReferenceAdapters = [
+  dataReferenceAdapter,
+  graphReferenceAdapter,
+  geoReferenceAdapter,
+];

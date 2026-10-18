@@ -129,7 +129,7 @@ const DrawingContents = memo(
     }
     return (
       <>
-        {drawingPrimitives(drawing, id).map((node, index) =>
+        {drawingPrimitives(drawing, id, { visibleTextOnly: true }).map((node, index) =>
           svgReact(node, index, () => setFailedSource(drawing.src)),
         )}
       </>

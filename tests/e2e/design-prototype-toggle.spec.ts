@@ -2,38 +2,47 @@ import { writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { test, expect } from './fixtures';
 let bundled: Promise<{ js: string; css: string }> | undefined;
+const development = process.env.ISSUE269_DEV === '1';
+const measure = process.env.ISSUE269_MEASURE === '1';
 for (const mode of ['mutable', 'immutable']) {
-  test(`large ${mode} Design: prototype toggles preserve the editing projection`, async ({
+  test(`large ${mode} ${development ? 'dev StrictMode' : 'production'} Design: prototype toggles preserve the editing projection`, async ({
     page,
   }, info) => {
-    test.setTimeout(120000);
-    bundled ??= build({
-      entryPoints: ['tests/fixtures/design-prototype/large-host.tsx'],
-      bundle: true,
-      write: false,
-      outdir: '/tmp/design-prototype-large',
-      format: 'iife',
-      minify: true,
-      define: { 'process.env.NODE_ENV': '"production"' },
-    }).then((result) => ({
-      js: result.outputFiles!.find((file) => file.path.endsWith('.js'))!.text,
-      css: result.outputFiles!.find((file) => file.path.endsWith('.css'))!.text,
-    }));
-    const bundle = await bundled;
-    await page.route('**/large-design.js', (route) =>
-      route.fulfill({ contentType: 'text/javascript', body: bundle.js }),
-    );
-    await page.route('**/large-design.css', (route) =>
-      route.fulfill({ contentType: 'text/css', body: bundle.css }),
-    );
-    await page.route('**/large-design.html*', (route) =>
-      route.fulfill({
-        contentType: 'text/html',
-        body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/large-design.css"></head><body style="margin:0"><div id="root"></div><script src="/large-design.js"></script></body></html>',
-      }),
-    );
+    test.setTimeout(180000);
+    if (!development)
+      bundled ??= build({
+        entryPoints: ['tests/fixtures/design-prototype/large-host.tsx'],
+        bundle: true,
+        write: false,
+        outdir: '/tmp/design-prototype-large',
+        format: 'iife',
+        minify: true,
+        define: { 'process.env.NODE_ENV': '"production"' },
+      }).then((result) => ({
+        js: result.outputFiles!.find((file) => file.path.endsWith('.js'))!.text,
+        css: result.outputFiles!.find((file) => file.path.endsWith('.css'))!.text,
+      }));
+    if (!development) {
+      const bundle = (await bundled)!;
+      await page.route('**/large-design.js', (route) =>
+        route.fulfill({ contentType: 'text/javascript', body: bundle.js }),
+      );
+      await page.route('**/large-design.css', (route) =>
+        route.fulfill({ contentType: 'text/css', body: bundle.css }),
+      );
+      await page.route('**/large-design.html*', (route) =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/large-design.css"></head><body style="margin:0"><div id="root"></div><script src="/large-design.js"></script></body></html>',
+        }),
+      );
+    }
     const loadStart = Date.now();
-    await page.goto(`/large-design.html?${mode}`);
+    await page.goto(
+      development
+        ? `/tests/fixtures/design-prototype/large.html?${mode}&strict`
+        : `/large-design.html?${mode}`,
+    );
     await expect(page.getByRole('application', { name: 'Design canvas', exact: true })).toBeVisible(
       { timeout: 90000 },
     );
@@ -53,8 +62,10 @@ for (const mode of ['mutable', 'immutable']) {
       stats: window.designPrototypeProbe.stats,
       dom: document.querySelectorAll('*').length,
     }));
+    expect(before.dom).toBeLessThan(60000);
     const timings: { open: number; close: number }[] = [];
-    for (let i = 0; i < 3; i++) {
+    const warmup = measure ? 5 : 0;
+    for (let i = 0; i < (measure ? warmup + 20 : 3); i++) {
       await showOpenButton();
       const open = await page.evaluate(async () => {
         const start = performance.now();
@@ -87,6 +98,8 @@ for (const mode of ['mutable', 'immutable']) {
         JSON.stringify(
           {
             mode,
+            development,
+            warmup,
             loadMs,
             stats: before.stats,
             dom: before.dom,
@@ -101,6 +114,18 @@ for (const mode of ['mutable', 'immutable']) {
       expect(await page.evaluate(() => window.designPrototypeProbe.visits())).toBe(before.visits);
       expect(await page.evaluate(() => window.designPrototypeProbe.draws())).toBe(before.draws);
       expect(await page.evaluate(() => window.designPrototypeProbe.native())).toBe(before.native);
+    }
+    if (measure) {
+      for (const action of ['open', 'close'] as const) {
+        const samples = timings
+          .slice(warmup)
+          .map((sample) => sample[action])
+          .sort((a, b) => a - b);
+        expect(
+          samples[Math.ceil(samples.length * 0.95) - 1],
+          `${action} p95 <= 500ms`,
+        ).toBeLessThanOrEqual(500);
+      }
     }
     await info.attach('toggle-measurements', {
       body: JSON.stringify(

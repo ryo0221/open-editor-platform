@@ -425,7 +425,7 @@ describe('Geo M0 functional contracts', () => {
     ref.layers[0].features[0].sourceRef.sourceId = 1;
     expect(errors(ref)).toContain('source-ref');
   });
-  it('review R5: interactive creation refuses polygons/Multi; import preserves them', () => {
+  it('review R5 / M1: interactive creation refuses holes/Multi; import preserves them', () => {
     for (const geometry of [
       { type: 'MultiPoint', coordinates: [[0, 0]] },
       {
@@ -436,6 +436,12 @@ describe('Geo M0 functional contracts', () => {
             [1, 0],
             [1, 1],
             [0, 0],
+          ],
+          [
+            [0.2, 0.2],
+            [0.4, 0.2],
+            [0.4, 0.4],
+            [0.2, 0.2],
           ],
         ],
       },

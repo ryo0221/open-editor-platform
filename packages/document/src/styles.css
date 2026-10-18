@@ -20,6 +20,26 @@
   font: 16px/1.65 system-ui;
   overflow-wrap: anywhere;
 }
+@media screen {
+  @supports (content-visibility: auto) and (contain-intrinsic-block-size: auto 1lh) {
+    /* Let the browser skip offscreen text layout/paint while ProseMirror keeps
+       every native node, selection, composing DOM and find target mounted.
+       Auto sizes remember measured heights after a block enters the viewport. */
+    .ep-document-page[data-window-text] .ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, pre) {
+      content-visibility: auto;
+      contain-intrinsic-block-size: auto 4lh;
+    }
+    .ep-document-page[data-window-text] .ProseMirror > :is(h1, h2, h3, h4, h5, h6) {
+      contain-intrinsic-block-size: auto 2lh;
+    }
+    .ep-document-page[data-window-text] .ProseMirror > pre {
+      contain-intrinsic-block-size: auto 8lh;
+    }
+    .ep-document-page[data-window-text] .ProseMirror > .ep-document-active-text {
+      content-visibility: visible;
+    }
+  }
+}
 .ep-document-page .ProseMirror p {
   margin: 0.6em 0;
 }

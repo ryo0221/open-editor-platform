@@ -190,28 +190,11 @@ Third-party license and provenance notices remain attached to their respective a
 
 ## License
 
-Open Editor Platform is proposed for licensing under **GNU AGPLv3-only**
-([LICENSE](LICENSE)) **or** an alternative written commercial/OEM agreement
-from duly authorized rightsholders. AGPLv3 permits **commercial use, sale,
-redistribution and SaaS** when its terms are satisfied, without a license fee
-to the project. Companies needing a closed-source licensing path may negotiate
-an alternative agreement. A paid product alone does not require an OEM license.
+Project source is licensed under [MIT](LICENSE). Third-party dependencies, fonts
+and upstream test fixtures retain their own license/provenance notices.
 
-See [dual licensing](DUAL-LICENSING.md), [license guide](LICENSE-GUIDE.md),
-[commercial OEM](COMMERCIAL-LICENSING.md), [third-party scope](LICENSE-SCOPE.md),
-and [the proposed, not-yet-adopted independent Editor exception](ADDITIONAL-PERMISSION-DRAFT.md).
-Prior MIT copies keep their earlier license; project dependencies, fonts and
-fixtures keep their own notices. This repository's release is not yet approved.
 
-## Preview release and support
-
-The project is preparing an AGPLv3 OSS Preview. Release candidates require
-recorded rights/provenance, security, export-integrity and reproducible build/test
-checks before becoming public. See [the OSS Preview release gate](docs/release/OSS-PREVIEW-GATE.md)
-and [the current publication checklist](legal/PUBLICATION-READINESS.md).
-
-Separate proprietary commercial/OEM licensing is **not yet being offered**;
-[its launch gate](docs/release/COMMERCIAL-OEM-GATE.md) is independent of
-AGPL-compliant usage. The [Independent Editor additional-permission draft](ADDITIONAL-PERMISSION-DRAFT.md)
-is not an effective exception. The project provides no guaranteed security
-updates, support or SLAs. See [Security Policy](SECURITY.md).
+Geo is available in the Playground artifact library. It supports local geographic
+editing, pinned Data joins, map styling and fixed PNG or explicit fixed/follow
+Slide map references. See [the Geo guide](docs/geo-guide.md) for the complete flow,
+resource limits and the explicit adoption boundary for Data updates.

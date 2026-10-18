@@ -1,5 +1,6 @@
 import { checkedJson } from './json-boundary';
 import type { Budgets, Diagnostic, GeoDocument } from './model';
+import { assertGeoWorkspace } from './workspace-validation';
 export const record = (v: unknown): v is Record<string, unknown> =>
   v !== null &&
   typeof v === 'object' &&
@@ -32,7 +33,7 @@ export function validateGeo(value: unknown, limits: Budgets): Diagnostic[] {
   const keys = (v: Record<string, unknown>, allowed: string[], path: string) => {
     if (Object.keys(v).some((k) => !allowed.includes(k))) error('unknown-field', path);
   };
-  keys(value, ['schemaVersion', 'layers', 'sources'], '$');
+  keys(value, ['schemaVersion', 'layers', 'sources', 'workspace'], '$');
   const sourceIds = new Set<string>();
   for (const [i, s] of value.sources.entries()) {
     const p = `sources[${i}]`;
@@ -47,7 +48,7 @@ export function validateGeo(value: unknown, limits: Budgets): Diagnostic[] {
       !id(s.pin.versionId) ||
       !hash(s.pin.contentHash) ||
       typeof s.format !== 'string' ||
-      !['geojson', 'csv'].includes(s.format) ||
+      !['geojson', 'csv', 'png', 'jpeg'].includes(s.format) ||
       typeof s.adapterVersion !== 'string' ||
       s.declaredCrs !== 'OGC:CRS84' ||
       s.axis !== 'longitude-latitude' ||
@@ -232,6 +233,13 @@ export function validateGeo(value: unknown, limits: Budgets): Diagnostic[] {
   }
   if (features > limits.features) error('feature-limit', '$');
   if (vertices > limits.vertices) error('vertex-limit', '$');
+  if (value.workspace !== undefined && !d.some((item) => item.severity === 'error')) {
+    try {
+      assertGeoWorkspace(value.workspace, value as unknown as GeoDocument, limits);
+    } catch (cause) {
+      error(cause instanceof Error ? cause.message : 'workspace', 'workspace');
+    }
+  }
   return d;
 }
 export function assertGeo(value: unknown, limits: Budgets): asserts value is GeoDocument {
