@@ -7,8 +7,8 @@ export default defineConfig({
   root: 'apps/playground',
   plugins: [react(), officeMermaidHtml(), privateVideoBuild()],
   worker: { format: 'es' },
-  // Resolve dependencies separately so security pins apply to emitted Mermaid
-  // code; the minified upstream entry bundles older sanitizer/math dependencies.
+  // Resolve sanitizer/math dependencies separately so the existing public security pins
+  // apply to emitted Mermaid code instead of upstream's bundled older copies.
   resolve: {
     alias: [
       {

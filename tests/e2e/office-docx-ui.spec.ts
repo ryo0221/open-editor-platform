@@ -16,6 +16,44 @@ import { nodeDocx, docxOptions } from '../fixtures/office/docx-node';
 import { openWhole } from './template-fixtures';
 import type { DocumentContent } from '@editor-platform/document/model';
 
+test('DOCX diagnostics reveal a distant paragraph in a large Document without editing it', async ({
+  page,
+}, info) => {
+  const source = officeDocument();
+  source.blocks.push(
+    ...Array.from({ length: 400 }, (_, index) => ({
+      id: `diagnostic-${index}`,
+      type: 'paragraph' as const,
+      text: `Distant paragraph ${index}. Native content remains editable. `.repeat(4),
+      // A valid native size that DOCX must round produces an addressed diagnostic.
+      ...(index === 399 ? { style: { fontSize: 14.2 } } : {}),
+    })),
+  );
+  await importOfficeDocument(page, source);
+  const before = await nativeArtifact(page);
+  const body = page.getByRole('textbox', { name: 'Document body', exact: true });
+  await body.press('Control+Home');
+  await expect(body.locator(':scope > [data-block-id]')).toHaveCount(403);
+  const target = body.locator('[data-block-id="diagnostic-399"]');
+  await expect(target).not.toBeInViewport();
+  expect(await target.evaluate((node) => getComputedStyle(node).contentVisibility)).toBe('auto');
+  const dialog = await openDocx(page);
+  await prepareDocx(dialog);
+  // Reading/copying a warning can leave the DOM selection in the export panel.
+  await dialog.locator('.office-export-diagnostics strong').first().selectText();
+  expect(
+    await dialog.evaluate((node) => node.contains(window.getSelection()?.focusNode ?? null)),
+  ).toBe(true);
+  await dialog.getByRole('button', { name: 'Go to block 403', exact: true }).click();
+  await expect(body).toBeFocused();
+  await expect(target).toBeInViewport();
+  expect(await target.evaluate((node) => getComputedStyle(node).contentVisibility)).toBe('visible');
+  await dialog.getByRole('button', { name: 'Close DOCX export', exact: true }).click();
+  await expect(target).toBeInViewport();
+  await page.screenshot({ path: info.outputPath('docx-distant-paragraph.png') });
+  expect(await nativeArtifact(page)).toEqual(before);
+});
+
 test('D11 ordinary template edit and DOCX output equal the Host API without changing history', async ({
   page,
 }, info) => {
@@ -29,7 +67,9 @@ test('D11 ordinary template edit and DOCX output equal the Host API without chan
   await expect(form).toHaveCount(0);
   await setDocumentText(page, 'h1', '担当者が通常の操作で編集した提案書');
   const before = await nativeArtifact(page);
-  const undo = await page.getByRole('button', { name: 'Undo', exact: true }).isEnabled();
+  // Mobile hides the header action; its enabled state still reflects native history.
+  const undoButton = page.getByRole('button', { name: 'Undo', exact: true, includeHidden: true });
+  const undo = await undoButton.isEnabled();
   expect(
     requests.some((url) => /docx-worker|pptx-worker|docx-adapter|pptxgen|office-fonts/.test(url)),
   ).toBe(false);
@@ -50,7 +90,7 @@ test('D11 ordinary template edit and DOCX output equal the Host API without chan
   expect(docxStructure(actual)).toEqual(docxStructure(expected.bytes));
   expect(report).toEqual(expected.report);
   expect(await nativeArtifact(page)).toEqual(before);
-  expect(await page.getByRole('button', { name: 'Undo', exact: true }).isEnabled()).toBe(undo);
+  expect(await undoButton.isEnabled()).toBe(undo);
   expect(requests.some((url) => /pptx-worker|pptxgen/.test(url))).toBe(false);
   await page.screenshot({ path: info.outputPath('docx-preflight.png'), fullPage: true });
   await writeFile(info.outputPath('ordinary.docx'), actual);

@@ -154,9 +154,11 @@ npx playwright test --config playwright.design-prototype.production.config.ts te
 
 ## Remaining acceptance
 
-Fit-all still mounts every visible Frame and remains above 500ms in these diagnostic samples.
+This section records limits at this earlier checkpoint. The subsequent
+[completion](completion.md) addresses clipped screen text and offscreen Document rendering.
+At this checkpoint, fit-all mounts every visible Frame and remains above 500ms in these diagnostic samples.
 The original consuming artifact/Markdown and its dev/StrictMode environment are NOT RUN here.
 Document paragraph virtualization is not implemented; #271's local-input correction is retained.
 No full-scene level-of-detail/raster preview or consuming-application latency guarantee is claimed.
-Keep #269 open for real-data confirmation and the full-scene target. #270 can close when its fix
-is merged. No CI dispatch, public sync, deployment or broad performance acceptance was performed.
+The full-scene target and real-data confirmation remained open here. #270 subsequently closed
+when #272 merged. No CI dispatch, public sync, deployment or broad performance acceptance was performed.

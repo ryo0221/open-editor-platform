@@ -27,6 +27,9 @@
     "@editor-platform/design-react": "*",
     "@noble/hashes": "1.8.0",
     "@editor-platform/artifact-references": "*",
-    "@editor-platform/reference-adapters": "*"
+    "@editor-platform/reference-adapters": "*",
+    "@editor-platform/geo-core": "*",
+    "@editor-platform/geo-inspector": "*",
+    "@editor-platform/extension-contract": "*"
   }
 }

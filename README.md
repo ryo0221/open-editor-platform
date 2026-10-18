@@ -215,3 +215,9 @@ Separate proprietary commercial/OEM licensing is **not yet being offered**;
 AGPL-compliant usage. The [Independent Editor additional-permission draft](ADDITIONAL-PERMISSION-DRAFT.md)
 is not an effective exception. The project provides no guaranteed security
 updates, support or SLAs. See [Security Policy](SECURITY.md).
+
+
+Geo is available in the Playground artifact library. It supports local geographic
+editing, pinned Data joins, map styling and fixed PNG or explicit fixed/follow
+Slide map references. See [the Geo guide](docs/geo-guide.md) for the complete flow,
+resource limits and the explicit adoption boundary for Data updates.

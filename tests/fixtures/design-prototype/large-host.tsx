@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { canonicalJson, deepFreeze } from '@editor-platform/artifact-core';
 import { EditorSession } from '@editor-platform/editor-core';
@@ -136,4 +136,12 @@ function Host() {
     </div>
   );
 }
-createRoot(document.getElementById('root')!).render(<Host />);
+createRoot(document.getElementById('root')!).render(
+  new URLSearchParams(location.search).has('strict') ? (
+    <StrictMode>
+      <Host />
+    </StrictMode>
+  ) : (
+    <Host />
+  ),
+);

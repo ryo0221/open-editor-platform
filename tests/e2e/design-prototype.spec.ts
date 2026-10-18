@@ -240,6 +240,10 @@ test('shared normal Design sends interaction and flow metadata through authority
     await expect(
       b.getByLabel('Element interaction click target frame', { exact: true }),
     ).toHaveValue('Review');
+    // The peer projection may arrive before the originator receives the Redo
+    // acknowledgement. Start the next dependent edit after both are confirmed.
+    await expect(a.locator('.save-status')).toContainText('Shared · confirmed');
+    await expect(b.locator('.save-status')).toContainText('Shared · confirmed');
     await a.getByLabel('Saved prototype start frame', { exact: true }).selectOption('Review');
     await expect(b.getByLabel('Saved prototype start frame', { exact: true })).toHaveValue(
       'Review',

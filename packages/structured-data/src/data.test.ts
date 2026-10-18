@@ -115,3 +115,9 @@ describe('structured data', () => {
     expect(() => addColumn({ id: 'x', name: 'Name', type: 'text' }).apply(d)).toThrow();
   });
 });
+
+it('keeps leading-zero CSV keys as text for cross-artifact joins', () => {
+  const data = importCsv('branch,sales\n01,100\n02,400');
+  expect(data.columns.map((c) => c.type)).toEqual(['text', 'number']);
+  expect(data.rows[0].values[data.columns[0].id]).toBe('01');
+});

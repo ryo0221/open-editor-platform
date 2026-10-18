@@ -113,6 +113,7 @@ function offsets(b: Buffer) {
   const nameLength = b.readUInt16LE(start + 28);
   return { start, nameLength, extra: start + 46 + nameLength };
 }
+// Real file/ZIP/native-codec IO is a functional closure check, not a 5-second speed gate.
 it('F01 >32MiB file-only ZIP64 reconstructs an empty Host with retained-only original closure', async () => {
   const d = await dir(),
     originalPath = join(d, 'original.bin'),
@@ -169,7 +170,7 @@ it('F01 >32MiB file-only ZIP64 reconstructs an empty Host with retained-only ori
     { encoding: 'utf8' },
   );
   expect(evidence.trim()).toBe('4');
-});
+}, 30_000);
 it.each([
   'tamper',
   'missing',

@@ -39,12 +39,12 @@ export function assertGeoSaveCapacity(
   const bounded = (value: unknown) => {
     let nodes = 0;
     const visit = (v: unknown, depth: number) => {
-      if (++nodes > 4096 || depth > 24) throw Error('GeoSaveCapacity');
+      if (++nodes > 4096 || depth > 24) throw Error(`GeoSaveCapacity: envelope nodes/depth ${nodes}/${depth}`);
       if (v && typeof v === 'object') for (const child of Object.values(v)) visit(child, depth + 1);
     };
     visit(value, 0);
-    if (new TextEncoder().encode(JSON.stringify(value)).length > 65536)
-      throw Error('GeoSaveCapacity');
+    const bytes = new TextEncoder().encode(JSON.stringify(value)).length;
+    if (bytes > 65536) throw Error(`GeoSaveCapacity: envelope bytes ${bytes} >65536`);
   };
   bounded({ operationId: long, capture, content });
   for (const lastSave of outcomes)

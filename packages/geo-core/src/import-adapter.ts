@@ -38,7 +38,7 @@ export interface ImportRequest {
     firstCoordinate: string;
     secondCoordinate: string;
     axis: 'longitude-latitude' | 'latitude-longitude';
-    missingCoordinates: 'reject' | 'preserve-null';
+    missingCoordinates: 'reject' | 'preserve-null' | 'attribute-table';
   };
 }
 export interface IdAssignment {
@@ -129,12 +129,13 @@ export function validateRequest(
       ]) ||
       !(csv.idColumn === null || (typeof csv.idColumn === 'string' && csv.idColumn.length > 0)) ||
       typeof csv.firstCoordinate !== 'string' ||
-      !csv.firstCoordinate ||
+      (csv.missingCoordinates !== 'attribute-table' && !csv.firstCoordinate) ||
       typeof csv.secondCoordinate !== 'string' ||
-      !csv.secondCoordinate ||
-      csv.firstCoordinate === csv.secondCoordinate ||
+      (csv.missingCoordinates !== 'attribute-table' && !csv.secondCoordinate) ||
+      (csv.missingCoordinates !== 'attribute-table' &&
+        csv.firstCoordinate === csv.secondCoordinate) ||
       !['longitude-latitude', 'latitude-longitude'].includes(csv.axis as string) ||
-      !['reject', 'preserve-null'].includes(csv.missingCoordinates as string)
+      !['reject', 'preserve-null', 'attribute-table'].includes(csv.missingCoordinates as string)
     )
       throw new Error('csv-mapping');
   }
@@ -260,8 +261,9 @@ export function adaptImport(
       throw new Error('csv-header');
     const mapped = new Set([
       ...request.fields.map((f) => f.input),
-      csv.firstCoordinate,
-      csv.secondCoordinate,
+      ...(csv.missingCoordinates === 'attribute-table'
+        ? []
+        : [csv.firstCoordinate, csv.secondCoordinate]),
       ...(csv.idColumn ? [csv.idColumn] : []),
     ]);
     if ([...mapped].some((h) => !header.includes(h)) || header.some((h) => !mapped.has(h)))
@@ -280,7 +282,9 @@ export function adaptImport(
       const first = properties[csv.firstCoordinate],
         second = properties[csv.secondCoordinate];
       let geometry: Geometry | null = null;
-      if (first === '' && second === '' && csv.missingCoordinates === 'preserve-null') {
+      if (csv.missingCoordinates === 'attribute-table') {
+        // Explicit table mode has no coordinate columns; all rows remain selectable.
+      } else if (first === '' && second === '' && csv.missingCoordinates === 'preserve-null') {
         diagnostics.push(diagnostic('null-geometry', `row:${i}`, 'warning'));
       } else {
         const numeric = (v: unknown): v is string =>

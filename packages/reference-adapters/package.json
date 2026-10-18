@@ -10,6 +10,7 @@
     "@editor-platform/artifact-references": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/structured-data": "*",
-    "@editor-platform/structured-graph": "*"
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/geo-core": "*"
   }
 }

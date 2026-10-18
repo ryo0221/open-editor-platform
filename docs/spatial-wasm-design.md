@@ -116,7 +116,8 @@ and pass its bytes through the experimental loader.
 Bundling/deployment and asset policy belong to that Host. The verification fixture
 serves the real binary through a test route. No binary, base64 build or download
 of executable code is added to normal Playground startup. The crate is original
-MIT-licensed repository code; the generated binary links the toolchain standard
+repository code; distribution follows the applicable source license and notices.
+The generated binary links the toolchain standard
 library. Rust compiler executables are not shipped with the SDK.
 
 ## Proposed measurement after explicit resumption

@@ -1,5 +1,16 @@
 # Status and limitations
 
+## Geo workspace
+
+The local Playground registers Geo with immutable versions and native map references.
+CSV/GeoJSON preview, atomic Point/Line/simple Polygon editing, map/table selection,
+styles/metrics/legends, named views, fixed PNG/Slide output, staged reimport,
+asset photographs and version comparisons use native commands and retained resources.
+Saved Data joins pin both inputs and require explicit refresh adoption. Slide map
+references default to fixed; following newly saved Geo versions is an explicit choice.
+See [the Geo guide](../docs/geo-guide.md) for workflows, bounded resources and renderer
+limitations. This adds no shared Geo domain, background tiles or geocoding.
+
 ## Artifact reference embeds (#264)
 
 Data tables/charts and Profile-backed Graphs can be embedded into local Document,

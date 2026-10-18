@@ -1,10 +1,17 @@
+import { GeoSurface } from './geo/surface';
+import { validateGeoRecord } from './geo/resources';
+import type { GeoDocument } from '@editor-platform/geo-core';
 import {
   ReferenceResolver,
   ReferenceError,
   type ReferenceOption,
 } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
-import { captureArtifactReferences, validateArtifactReferenceHistory } from './artifact-references';
+import {
+  artifactReferenceItems,
+  captureArtifactReferences,
+  validateArtifactReferenceHistory,
+} from './artifact-references';
 import type { PrivateVideoEntry } from './private-video/catalog';
 import {
   NativeGraphSurface,
@@ -188,8 +195,9 @@ import {
   referenceTextRevision,
   referenceEnvironmentRevision,
 } from '../../react-ui-reference/src/catalog';
-type NativeContent = Exclude<Content, ReactUiDocument | GraphDocument>;
+type NativeContent = Exclude<Content, ReactUiDocument | GraphDocument | GeoDocument>;
 function nativeContent(content: Content): NativeContent {
+  if (validContent('geo', content)) throw new Error('Geo has no template/reuse adapter');
   if (isGraphDocument(content)) throw new Error('Graph has no template/reuse adapter');
   if (validContent('react-ui', content))
     throw new Error('React UI uses its Host registrations, not native reusable definitions');
@@ -229,6 +237,7 @@ const MemoDesignSurface = memo(function ReferenceDesignSurface(
 const MemoWhiteboardSurface = memo(WhiteboardSurface);
 function checkedContent(content: unknown) {
   return {
+    geo: validContent('geo', content) ? (content as GeoDocument) : undefined,
     graph: isGraphDocument(content) ? content : undefined,
     reactUi: validContent('react-ui', content) ? (content as ReactUiDocument) : undefined,
     document: isDocument(content) ? content : undefined,
@@ -352,6 +361,19 @@ export default function App({
                         target: { kind, viewId: view.id },
                       },
                     });
+              } else if (a.kind === 'geo' && validContent('geo', content)) {
+                for (const view of [
+                  { id: 'default', name: 'Current map' },
+                  ...((content as GeoDocument).workspace?.views ?? []),
+                ])
+                  options.push({
+                    label: `${a.name} · ${view.name} · Map`,
+                    source: {
+                      artifactId: a.id,
+                      domain: 'geo',
+                      target: { kind: 'map', viewId: view.id },
+                    },
+                  });
               } else if (isGraphDocument(content))
                 options.push({
                   label: `${a.name} · Graph`,
@@ -574,6 +596,7 @@ export default function App({
                 if ((await contentHash(v.content)) !== v.contentHash)
                   throw new Error('Stored Graph version hash mismatch');
             }
+            if (a.kind === 'geo') await validateGeoRecord(a);
             a.versions.forEach(deepFreeze);
             await validateArtifactReferenceHistory(a, references);
             opened.set(a.id, createLocalSession(a.draft.content));
@@ -803,11 +826,17 @@ export default function App({
     setRevealAddress(target);
     referenceReturn.current = undefined;
   }
-  function assertReferenceCaptureCurrent(id: string, content: Content, writing = false) {
+  function assertReferenceCaptureCurrent(
+    id: string,
+    content: Content,
+    writing = false,
+    allowNativeChanges = false,
+  ) {
     if (
       (writing && currentTarget.current.readOnly) ||
       currentTarget.current.activeId !== id ||
-      recordsRef.current.find((a) => a.id === id)?.draft.content !== content ||
+      (!allowNativeChanges &&
+        recordsRef.current.find((a) => a.id === id)?.draft.content !== content) ||
       inputs.getSnapshot().dirty ||
       inputs.getSnapshot().composing
     )
@@ -909,14 +938,20 @@ export default function App({
     setBusy(true);
     savingVersion.current = true;
     try {
+      if (saved.kind === 'geo') await validateGeoRecord(saved);
       const captured = await captureArtifactReferences(saved.draft.content, references);
-      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true);
+      // Plain native versions can commit their owned capture while later native edits remain
+      // in the draft. References and Geo resource admission retain strict identity checks.
+      const plainCapture =
+        saved.kind !== 'geo' &&
+        !artifactReferenceItems(saved.draft.content).some((item) => item.reference);
+      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true, plainCapture);
       const committed = await commitVersion(
         { ...saved, draft: { ...saved.draft, content: captured } },
         'local-user',
         reason || 'Manual save',
       );
-      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true);
+      assertReferenceCaptureCurrent(saved.id, saved.draft.content, true, plainCapture);
       const latest = recordsRef.current.find((a) => a.id === active.id)!;
       const result = {
         ...committed,
@@ -1162,7 +1197,9 @@ export default function App({
           for (const version of artifact.versions)
             if ((await contentHash(version.content)) !== version.contentHash)
               throw new Error('Version content hash mismatch');
-          const id = newId('artifact');
+          const id = artifact.kind === 'geo' ? artifact.id : newId('artifact');
+          if (artifact.kind === 'geo' && recordsRef.current.some((r) => r.id === id))
+            throw Error('This Geo artifact already exists. Open it from the artifact list.');
           record = {
             ...artifact,
             id,
@@ -1174,6 +1211,12 @@ export default function App({
             })),
             annotations: [],
           };
+          if (record.kind === 'geo') {
+            const rawGeo = value as StoredArtifact;
+            record.geoResources = rawGeo.geoResources;
+            record.geoDataInputs = rawGeo.geoDataInputs;
+            await validateGeoRecord(record);
+          }
           const raw = value as { annotations?: unknown };
           if (raw.annotations !== undefined) {
             if (!Array.isArray(raw.annotations) || !raw.annotations.every(isAnnotation))
@@ -1191,13 +1234,17 @@ export default function App({
           }
         }
       }
-      if (record.kind !== 'react-ui' && record.kind !== 'structured-graph')
+      if (record.kind !== 'react-ui' && record.kind !== 'structured-graph' && record.kind !== 'geo')
         await validateNativeReusableDefinitions(
           record.kind as Domain,
           nativeContent(record.draft.content),
         );
       for (const version of record.versions)
-        if (record.kind !== 'react-ui' && record.kind !== 'structured-graph')
+        if (
+          record.kind !== 'react-ui' &&
+          record.kind !== 'structured-graph' &&
+          record.kind !== 'geo'
+        )
           await validateNativeReusableDefinitions(
             record.kind as Domain,
             nativeContent(version.content),
@@ -1642,11 +1689,13 @@ export default function App({
                             Redo
                           </button>
                         </div>
-                        {active.kind !== 'react-ui' && active.kind !== 'structured-graph' && (
-                          <button onClick={() => setStyleLibraryOpen(true)}>
-                            トークン・スタイル
-                          </button>
-                        )}
+                        {active.kind !== 'react-ui' &&
+                          active.kind !== 'structured-graph' &&
+                          active.kind !== 'geo' && (
+                            <button onClick={() => setStyleLibraryOpen(true)}>
+                              トークン・スタイル
+                            </button>
+                          )}
                         {['design', 'document', 'slide', 'whiteboard', 'data'].includes(
                           active.kind,
                         ) && (
@@ -1673,7 +1722,7 @@ export default function App({
                             </button>
                           </>
                         )}
-                        {!['review', 'file', 'react-ui', 'structured-graph'].includes(
+                        {!['review', 'file', 'react-ui', 'structured-graph', 'geo'].includes(
                           active.kind,
                         ) && (
                           <button disabled={readOnly} onClick={() => setTemplateKind('fragment')}>
@@ -1688,33 +1737,38 @@ export default function App({
                           )}
                         <button
                           disabled={
-                            active.kind === 'react-ui' || active.kind === 'structured-graph'
+                            active.kind === 'react-ui' ||
+                            active.kind === 'structured-graph' ||
+                            active.kind === 'geo'
                           }
                           onClick={() => setTemplateKind('preset')}
                         >
                           スタイル・表示プリセット
                         </button>
-                        {!['review', 'file', 'react-ui', 'structured-graph'].includes(
+                        {!['review', 'file', 'react-ui', 'structured-graph', 'geo'].includes(
                           active.kind,
                         ) && (
                           <button disabled={readOnly} onClick={() => startAuthoring(false)}>
                             テンプレートとして保存
                           </button>
                         )}
-                        {!shared && onStartShared && active.kind !== 'structured-graph' && (
-                          <button
-                            onClick={() => {
-                              if (!flushInputs()) return;
-                              const current = recordsRef.current.find(
-                                (record) => record.id === active.id,
-                              );
-                              if (current)
-                                void onStartShared(current).catch((e) => setError(String(e)));
-                            }}
-                          >
-                            Open collaboratively
-                          </button>
-                        )}
+                        {!shared &&
+                          onStartShared &&
+                          active.kind !== 'structured-graph' &&
+                          active.kind !== 'geo' && (
+                            <button
+                              onClick={() => {
+                                if (!flushInputs()) return;
+                                const current = recordsRef.current.find(
+                                  (record) => record.id === active.id,
+                                );
+                                if (current)
+                                  void onStartShared(current).catch((e) => setError(String(e)));
+                              }}
+                            >
+                              Open collaboratively
+                            </button>
+                          )}
                         {shared && (
                           <>
                             <a href={shared.peerUrl} target="_blank" rel="noreferrer">
@@ -1955,13 +2009,19 @@ export default function App({
                       const artifact = await applyInstantiation(prepared, {
                         list: async () =>
                           (await storage.list())
-                            .filter((r) => r.kind !== 'react-ui' && r.kind !== 'structured-graph')
+                            .filter(
+                              (r) =>
+                                r.kind !== 'react-ui' &&
+                                r.kind !== 'structured-graph' &&
+                                r.kind !== 'geo',
+                            )
                             .map(nativeRecord),
                         get: async (id) => {
                           const record = await storage.get(id);
                           return record &&
                             record.kind !== 'react-ui' &&
-                            record.kind !== 'structured-graph'
+                            record.kind !== 'structured-graph' &&
+                            record.kind !== 'geo'
                             ? nativeRecord(record)
                             : undefined;
                         },
@@ -2011,7 +2071,8 @@ export default function App({
                 {structureOpen &&
                   active &&
                   active.kind !== 'react-ui' &&
-                  active.kind !== 'structured-graph' && (
+                  active.kind !== 'structured-graph' &&
+                  active.kind !== 'geo' && (
                     <TemplateStructurePanel
                       catalog={templateCatalog}
                       local={personalTemplates}
@@ -2062,15 +2123,18 @@ export default function App({
                     onComponentSaved={() => setStatus('Reusable component published locally')}
                   />
                 )}
-                {styleLibraryOpen && active && active.kind !== 'structured-graph' && (
-                  <TokenStyleLibrary
-                    domain={active.kind as Domain}
-                    catalog={templateCatalog}
-                    writeCatalog={personalTemplates}
-                    readOnly={readOnly}
-                    onClose={() => setStyleLibraryOpen(false)}
-                  />
-                )}
+                {styleLibraryOpen &&
+                  active &&
+                  active.kind !== 'structured-graph' &&
+                  active.kind !== 'geo' && (
+                    <TokenStyleLibrary
+                      domain={active.kind as Domain}
+                      catalog={templateCatalog}
+                      writeCatalog={personalTemplates}
+                      readOnly={readOnly}
+                      onClose={() => setStyleLibraryOpen(false)}
+                    />
+                  )}
                 {reuseBatchOpen && (
                   <ReusableBatchDialog
                     catalog={templateCatalog}
@@ -2080,9 +2144,13 @@ export default function App({
                         (r) =>
                           r.id !== active?.id &&
                           r.kind !== 'react-ui' &&
-                          r.kind !== 'structured-graph',
+                          r.kind !== 'structured-graph' &&
+                          r.kind !== 'geo',
                       ),
-                      ...(active && active.kind !== 'react-ui' && active.kind !== 'structured-graph'
+                      ...(active &&
+                      active.kind !== 'react-ui' &&
+                      active.kind !== 'structured-graph' &&
+                      active.kind !== 'geo'
                         ? [active]
                         : []),
                     ].map((r) => ({
@@ -2096,46 +2164,52 @@ export default function App({
                     onClose={() => setReuseBatchOpen(false)}
                   />
                 )}
-                {reusableOpen && active && active.kind !== 'structured-graph' && (
-                  <ReusableLibrary
-                    catalog={templateCatalog}
-                    writeCatalog={personalTemplates}
-                    readOnly={readOnly}
-                    inspect={reusableOpen === 'inspect'}
-                    privateSettings={templateViewSettings[active.id]}
-                    onPrivateSettings={(settings, expected) =>
-                      savePrivateSettings(active.id, settings, expected)
-                    }
-                    onClose={() => setReusableOpen(undefined)}
-                    target={{
-                      artifactId: active.id,
-                      domain: active.kind as Domain,
-                      content: nativeContent(active.draft.content),
-                      ids: selection.addresses.map((a) => a.elementId),
-                      shared: nativeShared(sharedSession),
-                    }}
-                    onApply={(prepared) => {
-                      if (!active || prepared.proposal.artifactId !== active.id || readOnly)
-                        throw new Error('Target changed or is read only');
-                      if (!sharedSession) {
-                        const next = sessions.current.get(active.id)!.execute(
-                          command(
-                            'reuse.apply',
-                            prepared.proposal.summary,
-                            (value) => applyLocalTemplate(prepared, nativeContent(value)),
-                            {
-                              origin: 'proposal',
-                              transactionId: prepared.id,
-                              proposalId: prepared.id,
-                            },
-                          ),
-                        );
-                        persist({ ...editedDraft(active, next), annotations: active.annotations });
+                {reusableOpen &&
+                  active &&
+                  active.kind !== 'structured-graph' &&
+                  active.kind !== 'geo' && (
+                    <ReusableLibrary
+                      catalog={templateCatalog}
+                      writeCatalog={personalTemplates}
+                      readOnly={readOnly}
+                      inspect={reusableOpen === 'inspect'}
+                      privateSettings={templateViewSettings[active.id]}
+                      onPrivateSettings={(settings, expected) =>
+                        savePrivateSettings(active.id, settings, expected)
                       }
-                      if (prepared.insertedIds[0]) select(prepared.insertedIds[0]);
-                    }}
-                  />
-                )}
+                      onClose={() => setReusableOpen(undefined)}
+                      target={{
+                        artifactId: active.id,
+                        domain: active.kind as Domain,
+                        content: nativeContent(active.draft.content),
+                        ids: selection.addresses.map((a) => a.elementId),
+                        shared: nativeShared(sharedSession),
+                      }}
+                      onApply={(prepared) => {
+                        if (!active || prepared.proposal.artifactId !== active.id || readOnly)
+                          throw new Error('Target changed or is read only');
+                        if (!sharedSession) {
+                          const next = sessions.current.get(active.id)!.execute(
+                            command(
+                              'reuse.apply',
+                              prepared.proposal.summary,
+                              (value) => applyLocalTemplate(prepared, nativeContent(value)),
+                              {
+                                origin: 'proposal',
+                                transactionId: prepared.id,
+                                proposalId: prepared.id,
+                              },
+                            ),
+                          );
+                          persist({
+                            ...editedDraft(active, next),
+                            annotations: active.annotations,
+                          });
+                        }
+                        if (prepared.insertedIds[0]) select(prepared.insertedIds[0]);
+                      }}
+                    />
+                  )}
                 {reusableAnnotation && active && reusableAnnotation.artifactId === active.id && (
                   <ReusableAnnotationDialog
                     target={{
@@ -2492,6 +2566,40 @@ export default function App({
                                     },
                                   ]}
                                   beforeExport={exportGuard}
+                                />
+                              )}
+                              {rendered.geo && !sharedSession && session && (
+                                <GeoSurface
+                                  key={active.id}
+                                  artifact={active}
+                                  session={session as EditorSession<Content>}
+                                  inputs={inputs}
+                                  readOnly={readOnly}
+                                  records={[...referenceSavedRecords.current.values()]}
+                                  saved={() => {
+                                    const a = referenceSavedRecords.current.get(active.id);
+                                    if (!a) throw Error('Geo artifact not saved');
+                                    return a;
+                                  }}
+                                  execute={(cmd, resources, dataInputs) => {
+                                    if (readOnly) return false;
+                                    try {
+                                      const s = sessions.current.get(active.id)!,
+                                        a = recordsRef.current.find((a) => a.id === active.id)!;
+                                      const next = s.executeView(cmd as EditorCommand<Content>);
+                                      persist({
+                                        ...editedDraft(a, next),
+                                        ...(resources ? { geoResources: resources } : {}),
+                                        ...(dataInputs ? { geoDataInputs: dataInputs } : {}),
+                                      });
+                                      return true;
+                                    } catch (e) {
+                                      setError(String(e));
+                                      return false;
+                                    }
+                                  }}
+                                  history={history}
+                                  save={saveVersion}
                                 />
                               )}
                               {rendered.document && (
@@ -3054,187 +3162,139 @@ export default function App({
                             </button>
                           </aside>
                         )}
-                        {inspector && active.kind !== 'structured-graph' && (
-                          <aside className="inspector" aria-label="Comments inspector">
-                            <div className="ep-dialog-heading">
-                              <h2>Comments & annotations</h2>
-                              <IconButton
-                                icon={X}
-                                label="Close comments"
-                                onClick={() => setInspector(false)}
-                              />
-                            </div>
-                            <p className="selection-label">
-                              {isReview(active.draft.content) &&
-                                selection.addresses.map((address) => {
-                                  const file = isReview(active.draft.content)
-                                    ? active.draft.content.files.find(
-                                        (file) => file.id === address.elementId,
-                                      )
-                                    : undefined;
-                                  return (
-                                    <span key={address.elementId}>
-                                      {file?.name} ·{' '}
-                                      {address.region?.type === 'lines'
-                                        ? address.region.revisionId
-                                        : ''}{' '}
-                                      ·{' '}
-                                    </span>
-                                  );
-                                })}
-                              {selection.addresses.length
-                                ? `${selection.addresses.length} element selected${selection.addresses[0].region ? ` · ${selection.addresses[0].region.type}` : ''}`
-                                : 'Select an element to anchor a comment.'}
-                            </p>
-                            <label>
-                              Comment
-                              <textarea
-                                aria-label="Comment"
-                                rows={3}
-                                placeholder="Leave a note on this selection…"
-                                value={comment}
-                                onChange={(e) => setComment(e.target.value)}
-                              />
-                            </label>
-                            <button
-                              className="primary"
-                              disabled={readOnly || !selection.addresses.length || !comment.trim()}
-                              onClick={() => addComment()}
-                            >
-                              Add comment
-                            </button>
-                            {['review', 'file'].includes(active.kind) &&
-                              templateViewSettings[active.id]?.$annotation && (
-                                <button
-                                  disabled={readOnly || selection.addresses.length !== 1}
-                                  onClick={() =>
-                                    setReusableAnnotation(clone(selection.addresses[0]))
-                                  }
-                                >
-                                  設定から注釈を作成
-                                </button>
-                              )}
-                            <label className="resolved-toggle">
-                              <input
-                                type="checkbox"
-                                checked={showResolved}
-                                onChange={(e) => setShowResolved(e.target.checked)}
-                              />{' '}
-                              Show resolved
-                            </label>
-                            {active.annotations
-                              .filter((a) => showResolved || !a.resolved)
-                              .map((a) => (
-                                <article
-                                  className={`comment-thread ${a.resolved ? 'resolved' : ''}`}
-                                  key={a.id}
-                                  style={
-                                    a.color
-                                      ? { borderLeft: `4px solid ${a.color}`, paddingLeft: 8 }
-                                      : undefined
-                                  }
-                                >
-                                  <small>
-                                    {a.anchor.addresses[0].region?.type ?? 'element'} ·{' '}
-                                    {a.resolved ? 'Resolved' : 'Open'} ·{' '}
-                                    {anchorState(content, a.anchor.addresses[0])}
-                                  </small>
+                        {inspector &&
+                          active.kind !== 'structured-graph' &&
+                          active.kind !== 'geo' && (
+                            <aside className="inspector" aria-label="Comments inspector">
+                              <div className="ep-dialog-heading">
+                                <h2>Comments & annotations</h2>
+                                <IconButton
+                                  icon={X}
+                                  label="Close comments"
+                                  onClick={() => setInspector(false)}
+                                />
+                              </div>
+                              <p className="selection-label">
+                                {isReview(active.draft.content) &&
+                                  selection.addresses.map((address) => {
+                                    const file = isReview(active.draft.content)
+                                      ? active.draft.content.files.find(
+                                          (file) => file.id === address.elementId,
+                                        )
+                                      : undefined;
+                                    return (
+                                      <span key={address.elementId}>
+                                        {file?.name} ·{' '}
+                                        {address.region?.type === 'lines'
+                                          ? address.region.revisionId
+                                          : ''}{' '}
+                                        ·{' '}
+                                      </span>
+                                    );
+                                  })}
+                                {selection.addresses.length
+                                  ? `${selection.addresses.length} element selected${selection.addresses[0].region ? ` · ${selection.addresses[0].region.type}` : ''}`
+                                  : 'Select an element to anchor a comment.'}
+                              </p>
+                              <label>
+                                Comment
+                                <textarea
+                                  aria-label="Comment"
+                                  rows={3}
+                                  placeholder="Leave a note on this selection…"
+                                  value={comment}
+                                  onChange={(e) => setComment(e.target.value)}
+                                />
+                              </label>
+                              <button
+                                className="primary"
+                                disabled={
+                                  readOnly || !selection.addresses.length || !comment.trim()
+                                }
+                                onClick={() => addComment()}
+                              >
+                                Add comment
+                              </button>
+                              {['review', 'file'].includes(active.kind) &&
+                                templateViewSettings[active.id]?.$annotation && (
                                   <button
-                                    disabled={
-                                      anchorState(content, a.anchor.addresses[0]) !== 'Current'
+                                    disabled={readOnly || selection.addresses.length !== 1}
+                                    onClick={() =>
+                                      setReusableAnnotation(clone(selection.addresses[0]))
                                     }
-                                    onClick={() => {
-                                      setRevealAddress({ ...a.anchor.addresses[0] });
-                                      setSelection(a.anchor);
-                                      setView('Editor');
-                                    }}
                                   >
-                                    Jump to annotation
+                                    設定から注釈を作成
                                   </button>
-                                  {a.anchor.addresses[0].region?.type === 'lines' && (
+                                )}
+                              <label className="resolved-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={showResolved}
+                                  onChange={(e) => setShowResolved(e.target.checked)}
+                                />{' '}
+                                Show resolved
+                              </label>
+                              {active.annotations
+                                .filter((a) => showResolved || !a.resolved)
+                                .map((a) => (
+                                  <article
+                                    className={`comment-thread ${a.resolved ? 'resolved' : ''}`}
+                                    key={a.id}
+                                    style={
+                                      a.color
+                                        ? { borderLeft: `4px solid ${a.color}`, paddingLeft: 8 }
+                                        : undefined
+                                    }
+                                  >
                                     <small>
-                                      {a.anchor.addresses[0].region.side ?? 'text'} · lines{' '}
-                                      {a.anchor.addresses[0].region.start}–
-                                      {a.anchor.addresses[0].region.end}
+                                      {a.anchor.addresses[0].region?.type ?? 'element'} ·{' '}
+                                      {a.resolved ? 'Resolved' : 'Open'} ·{' '}
+                                      {anchorState(content, a.anchor.addresses[0])}
                                     </small>
-                                  )}
-                                  {a.comments.map((c) => (
-                                    <div key={c.id}>
-                                      <strong>{c.author}</strong>
-                                      <p>{c.body}</p>
-                                      <time>{new Date(c.createdAt).toLocaleString()}</time>
-                                    </div>
-                                  ))}
-                                  <button
-                                    disabled={readOnly}
-                                    onClick={() => {
-                                      if (sharedSession) {
-                                        try {
-                                          sharedSession.actions([
-                                            {
-                                              type: 'thread.resolve',
-                                              target: a.id,
-                                              payload: { value: !a.resolved },
-                                            },
-                                          ]);
-                                        } catch (e) {
-                                          setError(String(e));
-                                        }
-                                        return;
+                                    <button
+                                      disabled={
+                                        anchorState(content, a.anchor.addresses[0]) !== 'Current'
                                       }
-                                      const updated = { ...a, resolved: !a.resolved };
-                                      persist({
-                                        ...active,
-                                        annotations: active.annotations.map((t) =>
-                                          t.id === a.id ? updated : t,
-                                        ),
-                                      });
-                                      editorEvents.emit('annotation', updated);
-                                    }}
-                                  >
-                                    {a.resolved ? 'Reopen' : 'Resolve'}
-                                  </button>
-                                  <details>
-                                    <summary>Reply</summary>
-                                    <form
-                                      onSubmit={(e) => {
-                                        e.preventDefault();
-                                        const form = e.currentTarget;
-                                        const body = String(
-                                          new FormData(form).get('reply') ?? '',
-                                        ).trim();
-                                        if (!body || readOnly) return;
+                                      onClick={() => {
+                                        setRevealAddress({ ...a.anchor.addresses[0] });
+                                        setSelection(a.anchor);
+                                        setView('Editor');
+                                      }}
+                                    >
+                                      Jump to annotation
+                                    </button>
+                                    {a.anchor.addresses[0].region?.type === 'lines' && (
+                                      <small>
+                                        {a.anchor.addresses[0].region.side ?? 'text'} · lines{' '}
+                                        {a.anchor.addresses[0].region.start}–
+                                        {a.anchor.addresses[0].region.end}
+                                      </small>
+                                    )}
+                                    {a.comments.map((c) => (
+                                      <div key={c.id}>
+                                        <strong>{c.author}</strong>
+                                        <p>{c.body}</p>
+                                        <time>{new Date(c.createdAt).toLocaleString()}</time>
+                                      </div>
+                                    ))}
+                                    <button
+                                      disabled={readOnly}
+                                      onClick={() => {
                                         if (sharedSession) {
                                           try {
                                             sharedSession.actions([
                                               {
-                                                type: 'thread.reply',
+                                                type: 'thread.resolve',
                                                 target: a.id,
-                                                payload: {
-                                                  id: newId('comment'),
-                                                  text: body,
-                                                  createdAt: new Date().toISOString(),
-                                                },
+                                                payload: { value: !a.resolved },
                                               },
                                             ]);
-                                            form.reset();
                                           } catch (e) {
                                             setError(String(e));
                                           }
                                           return;
                                         }
-                                        const updated = {
-                                          ...a,
-                                          comments: [
-                                            ...a.comments,
-                                            {
-                                              id: newId('comment'),
-                                              body,
-                                              author: 'local-user',
-                                              createdAt: new Date().toISOString(),
-                                            },
-                                          ],
-                                        };
+                                        const updated = { ...a, resolved: !a.resolved };
                                         persist({
                                           ...active,
                                           annotations: active.annotations.map((t) =>
@@ -3242,18 +3302,70 @@ export default function App({
                                           ),
                                         });
                                         editorEvents.emit('annotation', updated);
-                                        form.reset();
                                       }}
                                     >
-                                      <input aria-label="Reply text" name="reply" required />
-                                      <button>Post reply</button>
-                                    </form>
-                                  </details>
-                                </article>
-                              ))}
-                            {inspectorSlot}
-                          </aside>
-                        )}
+                                      {a.resolved ? 'Reopen' : 'Resolve'}
+                                    </button>
+                                    <details>
+                                      <summary>Reply</summary>
+                                      <form
+                                        onSubmit={(e) => {
+                                          e.preventDefault();
+                                          const form = e.currentTarget;
+                                          const body = String(
+                                            new FormData(form).get('reply') ?? '',
+                                          ).trim();
+                                          if (!body || readOnly) return;
+                                          if (sharedSession) {
+                                            try {
+                                              sharedSession.actions([
+                                                {
+                                                  type: 'thread.reply',
+                                                  target: a.id,
+                                                  payload: {
+                                                    id: newId('comment'),
+                                                    text: body,
+                                                    createdAt: new Date().toISOString(),
+                                                  },
+                                                },
+                                              ]);
+                                              form.reset();
+                                            } catch (e) {
+                                              setError(String(e));
+                                            }
+                                            return;
+                                          }
+                                          const updated = {
+                                            ...a,
+                                            comments: [
+                                              ...a.comments,
+                                              {
+                                                id: newId('comment'),
+                                                body,
+                                                author: 'local-user',
+                                                createdAt: new Date().toISOString(),
+                                              },
+                                            ],
+                                          };
+                                          persist({
+                                            ...active,
+                                            annotations: active.annotations.map((t) =>
+                                              t.id === a.id ? updated : t,
+                                            ),
+                                          });
+                                          editorEvents.emit('annotation', updated);
+                                          form.reset();
+                                        }}
+                                      >
+                                        <input aria-label="Reply text" name="reply" required />
+                                        <button>Post reply</button>
+                                      </form>
+                                    </details>
+                                  </article>
+                                ))}
+                              {inspectorSlot}
+                            </aside>
+                          )}
                       </div>
                     </>
                   )}

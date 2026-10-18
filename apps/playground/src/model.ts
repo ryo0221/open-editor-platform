@@ -1,3 +1,6 @@
+import { emptyGeo, assertGeo, type GeoDocument } from '@editor-platform/geo-core';
+import type { SourceClosure } from './geo/geo-source-envelope';
+import type { ReferenceSnapshot } from '@editor-platform/artifact-references';
 import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { guardDataCommand, assertDataReadable } from '@editor-platform/structured-data/session';
@@ -48,6 +51,7 @@ import { createDeck, isDeck, type SlideContent } from '@editor-platform/slide';
 import { isReactUiDocument, type ReactUiDocument } from '@editor-platform/react-ui-core';
 import { createReferenceDocument } from '../../react-ui-reference/src/catalog';
 export type Content =
+  | GeoDocument
   | GraphDocument
   | ReactUiDocument
   | DocumentContent
@@ -58,6 +62,7 @@ export type Content =
   | DesignContent
   | SlideContent;
 export type Kind =
+  | 'geo'
   | 'structured-graph'
   | 'document'
   | 'data'
@@ -69,10 +74,13 @@ export type Kind =
   | 'react-ui';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
+  geoResources?: SourceClosure[];
+  geoDataInputs?: ReferenceSnapshot[];
   /** Reference Host conversion receipt: an immutable baseline for explicit three-way review. */
   designReactConversion?: { sourceArtifactId: string; sourceHash: string; basis: ReactUiDocument };
 }
 export const kinds: Record<Kind, { label: string; icon: string; description: string }> = {
+  geo: { label: 'Geo', icon: '◎', description: 'Map geographic features and pinned Data values' },
   'structured-graph': {
     label: 'Structured Graph',
     icon: '⌘',
@@ -93,29 +101,46 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
 };
 export function makeArtifact(kind: Kind, count: number): StoredArtifact {
   const content: Content =
-    kind === 'structured-graph'
-      ? createRelationGraph()
-      : kind === 'react-ui'
-        ? createReferenceDocument()
-        : kind === 'document'
-          ? createDocument()
-          : kind === 'data'
-            ? createData()
-            : kind === 'review'
-              ? createReview()
-              : kind === 'whiteboard'
-                ? createWhiteboard()
-                : kind === 'design'
-                  ? createDesign()
-                  : kind === 'slide'
-                    ? createDeck()
-                    : createFile();
+    kind === 'geo'
+      ? emptyGeo()
+      : kind === 'structured-graph'
+        ? createRelationGraph()
+        : kind === 'react-ui'
+          ? createReferenceDocument()
+          : kind === 'document'
+            ? createDocument()
+            : kind === 'data'
+              ? createData()
+              : kind === 'review'
+                ? createReview()
+                : kind === 'whiteboard'
+                  ? createWhiteboard()
+                  : kind === 'design'
+                    ? createDesign()
+                    : kind === 'slide'
+                      ? createDeck()
+                      : createFile();
   return {
     ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
     annotations: [],
   };
 }
 export function validContent(kind: string, content: unknown): content is Content {
+  if (kind === 'geo') {
+    try {
+      assertGeo(content, {
+        actions: 10,
+        bytes: 65536,
+        depth: 24,
+        layers: 10,
+        features: 200,
+        vertices: 1000,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
   if (kind === 'structured-graph') {
     try {
       if (!isGraphDocument(content)) return false;
@@ -242,6 +267,15 @@ export function anchorState(
 
 /** Common local apply boundary, including headless/template/proposal paths. */
 export function createLocalSession(content: Content): EditorSession<Content> {
+  if (validContent('geo', content))
+    assertGeo(content, {
+      actions: 10,
+      bytes: 65536,
+      depth: 24,
+      layers: 10,
+      features: 200,
+      vertices: 1000,
+    });
   if (isStructuredData(content)) assertDataReadable(content);
   if (isGraphDocument(content)) assertGraph(content, relationProfile);
   class LocalSession extends EditorSession<Content> {
@@ -271,6 +305,15 @@ export function createLocalSession(content: Content): EditorSession<Content> {
               },
               relationProfile,
             ).apply(value);
+          },
+        });
+      if (validContent('geo', current))
+        return super.executeView({
+          ...cmd,
+          apply(value) {
+            const next = cmd.apply(value);
+            if (!validContent('geo', next)) throw Error('Invalid Geo command');
+            return next;
           },
         });
       const validate = isDeck(current)

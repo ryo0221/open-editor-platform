@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Geographic data export</title>
+    <style>
+      body {
+        font: 16px/1.5 system-ui;
+        margin: 16px;
+        color: #173247;
+        background: #edf3f7;
+      }
+      main {
+        max-width: 960px;
+        margin: auto;
+      }
+      section {
+        padding: 16px;
+        margin: 16px 0;
+        background: white;
+        border: 1px solid #aac0cf;
+        border-radius: 8px;
+        overflow-wrap: anywhere;
+      }
+      fieldset {
+        min-width: 0;
+      }
+      label {
+        display: block;
+        margin: 12px 0;
+      }
+      button,
+      select {
+        font: inherit;
+        max-width: 100%;
+        padding: 8px;
+        box-sizing: border-box;
+        margin: 4px 0;
+      }
+      select {
+        display: block;
+        width: 100%;
+      }
+      input[type='checkbox'] {
+        margin-right: 8px;
+      }
+      :focus-visible {
+        outline: 3px solid #195f99;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Geographic data export</h1>
+      <p>
+        Synthetic local Host. Exports a fixed in-memory version after checking its hash and original
+        bytes. This fixture does not provide durable storage or installed Host adoption.
+      </p>
+      <div id="export"></div>
+    </main>
+    <script type="module" src="./export-test.ts"></script>
+  </body>
+</html>

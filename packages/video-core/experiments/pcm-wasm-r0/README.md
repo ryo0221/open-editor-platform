@@ -139,7 +139,7 @@ Cargo has **zero third-party dependencies**. Compiler-supplied core/compiler-bui
 are part of the official Rust target distribution. Build output includes complete
 installed Rust/Cargo notices, COPYRIGHT-library.html, COPYRIGHT.html and their
 license texts with hashes, rather than only a link. This private repository has
-no root LICENSE; the existing public-export MIT overlay is copied under an explicit
+no root LICENSE; the public-export license overlay is copied under an explicit
 `EXISTING-PUBLIC-EXPORT-LICENSE-NOT-A-PRIVATE-LICENSE-GRANT` name solely as existing
 provenance. It does not grant a new license to this private backend. No package,
 dependency or repository license is changed. Generated WASM, raw logs, manifests,

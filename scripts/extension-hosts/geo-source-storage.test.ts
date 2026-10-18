@@ -471,3 +471,86 @@ describe('private source-backed envelope storage', () => {
     expect((await store().inspect()).versions).toBe(1);
   });
 });
+
+it('retains and verifies the complete pinned join dependency; missing or forged projections never write', async () => {
+  const { createPinnedGeoJoin, emptyGeoWorkspace } = await import('@editor-platform/geo-core');
+  const a = await record();
+  const content = a.request.content;
+  content.layers = [
+    {
+      id: 'left',
+      name: 'Map',
+      crs: 'OGC:CRS84',
+      axis: 'longitude-latitude',
+      fields: [{ id: 'code', name: 'Code', type: 'string' }],
+      features: [
+        {
+          id: 'f',
+          rowId: 'r',
+          geometry: { type: 'Point', coordinates: [1, 2] },
+          values: { code: '01' },
+        },
+      ],
+    },
+    {
+      id: 'right',
+      name: 'Table',
+      crs: 'OGC:CRS84',
+      axis: 'longitude-latitude',
+      fields: [
+        { id: 'code', name: 'Code', type: 'string' },
+        { id: 'value', name: 'Value', type: 'number' },
+      ],
+      features: [{ id: 't', rowId: 'tr', geometry: null, values: { code: '01', value: 10 } }],
+    },
+  ];
+  a.request.capture.contentHash = a.nativeVersion.contentHash = await contentHash(content);
+  const s = store();
+  expect((await s.commit(a, null, signal())).state).toBe('committed');
+  const b = await record(2, 'v1');
+  b.request.content = structuredClone(content);
+  const pin = {
+    artifactId: 'geo',
+    versionId: 'v1',
+    contentHash: 'sha256:' + a.nativeVersion.contentHash,
+  };
+  const join = createPinnedGeoJoin(
+    content,
+    pin,
+    {
+      id: 'join',
+      layerId: 'left',
+      tableLayerId: 'right',
+      leftFieldId: 'code',
+      rightFieldId: 'code',
+      cardinality: 'one-to-one',
+    },
+    { actions: 10, bytes: 65536, depth: 24, layers: 10, features: 200, vertices: 1000 },
+  );
+  b.request.content.workspace = { ...emptyGeoWorkspace(), joins: [join] };
+  b.request.capture.contentHash = b.nativeVersion.contentHash = await contentHash(
+    b.request.content,
+  );
+  expect((await s.commit(b, 'v1', signal())).state).toBe('committed');
+  expect((await store().load())!.request.content).toEqual(b.request.content);
+  const forged = await record(3, 'v2');
+  forged.request.content = structuredClone(b.request.content);
+  forged.request.content.workspace!.joins[0].rows[0].values.value = 99;
+  forged.request.capture.contentHash = forged.nativeVersion.contentHash = await contentHash(
+    forged.request.content,
+  );
+  expect(await s.commit(forged, 'v2', signal())).toMatchObject({
+    state: 'no-write',
+    code: 'GeoDerivedJoinMismatch',
+  });
+  const missing = structuredClone(forged);
+  missing.request.content.workspace!.joins[0].inputs.right.versionId = 'missing';
+  missing.request.capture.contentHash = missing.nativeVersion.contentHash = await contentHash(
+    missing.request.content,
+  );
+  expect(await s.commit(missing, 'v2', signal())).toMatchObject({
+    state: 'no-write',
+    code: 'GeoDerivedVersionMissing',
+  });
+  expect((await s.inspect()).versions).toBe(2);
+});

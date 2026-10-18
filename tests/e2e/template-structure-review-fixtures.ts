@@ -3,7 +3,7 @@ import { isReactUiDocument } from '@editor-platform/react-ui-core';
 import type { Content } from '../../apps/playground/src/model';
 import type { NativeContent } from '@editor-platform/templates';
 function nativeContent(content: Content): NativeContent {
-  if (isReactUiDocument(content) || isGraphDocument(content))
+  if (isReactUiDocument(content) || isGraphDocument(content) || 'layers' in content)
     throw new Error('Expected native content');
   return content;
 }
