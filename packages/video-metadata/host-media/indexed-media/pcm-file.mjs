@@ -6,7 +6,7 @@ import { Input, BlobSource, ALL_FORMATS, EncodedPacketSink } from 'mediabunny';
 import { mp4Index } from '../mp4-index.mjs';
 import { metadataBlob } from './metadata.ts';
 import { abortable, micros } from '../native-video.mjs';
-import { WindowCollector } from '../../../video-core/experiments/pcm-renderer/render.ts';
+import { WindowCollector } from '../../../video-core/src/pcm/render.ts';
 const need = (ok, message) => {
   if (!ok) throw Error(message);
 };

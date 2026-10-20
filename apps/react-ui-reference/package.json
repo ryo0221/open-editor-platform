@@ -7,12 +7,16 @@
     ".": "./src/components.tsx"
   },
   "peerDependencies": {
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
   },
   "dependencies": {
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/react-ui-preview": "*",
     "@editor-platform/design-react-core": "*",
-    "@editor-platform/design-react-preview": "*"
+    "@editor-platform/design-react-preview": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/artifact-core": "*"
   }
 }

@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { Ledger, ModuleInput, prepareModule } from './kernel';
+import { Ledger, ModuleInput, prepareModule } from '../../src/pcm/kernel';
 const make = (length: number) => () => new Uint8Array(length);
 it('refuses full-ledger startup before constructing input and rolls back factory failures', () => {
   const realm = new Ledger(64),

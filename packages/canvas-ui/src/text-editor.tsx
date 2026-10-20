@@ -184,9 +184,20 @@ export function CanvasTextEditor({
       decorations: (state) =>
         currentDrawing.current ? canvasTextLayout(state, currentDrawing.current).decorations : null,
       handleKeyDown(_view, event) {
-        if (bridge && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        if (event.isComposing || _view.composing) return false;
+        if (
+          bridge &&
+          !callbacks.current.readOnly &&
+          (event.ctrlKey || event.metaKey) &&
+          !event.altKey &&
+          ['z', 'y'].includes(event.key.toLowerCase())
+        ) {
           event.preventDefault();
-          bridge.history(event.shiftKey ? 'redo' : 'undo');
+          try {
+            bridge.history(event.shiftKey || event.key.toLowerCase() === 'y' ? 'redo' : 'undo');
+          } catch (error) {
+            setError(String(error));
+          }
           return true;
         }
         if (

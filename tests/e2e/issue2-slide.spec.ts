@@ -15,7 +15,7 @@ async function number(page: import('@playwright/test').Page, label: string, valu
 }
 async function version(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
 }
 async function replaceCanvasText(page: import('@playwright/test').Page, text: string) {

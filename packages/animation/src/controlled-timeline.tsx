@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, useState } from 'react';
-import type { Track } from '@editor-platform/animation-core';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 interface Props {
-  track?: Track;
+  track?: { keys: readonly { id: string; tick: number; value: number | string }[] };
+  movingIds?: readonly string[];
+  basis?: string;
   duration: number;
   tick: number;
   selected: string | null;
@@ -10,7 +11,7 @@ interface Props {
   move(id: string, tick: number): void;
   seek(tick: number): void;
   report(message: string): void;
-  start(): boolean;
+  start(id?: string): boolean;
   cancelMove(): void;
   disabled: boolean;
 }
@@ -24,6 +25,8 @@ interface Draft {
 }
 export function KeyTimeline({
   track,
+  movingIds,
+  basis,
   duration,
   tick,
   selected,
@@ -56,7 +59,7 @@ export function KeyTimeline({
   const reason = (d: Draft) =>
     !Number.isSafeInteger(d.tick) || d.tick < 0 || d.tick > duration
       ? 'Key tick is outside the composition range'
-      : track?.keys.some((k) => k.id !== d.id && k.tick === d.tick)
+      : track?.keys.some((k) => k.id !== d.id && !movingIds?.includes(k.id) && k.tick === d.tick)
         ? 'A key already exists at that tick'
         : null;
   const cancel = () => {
@@ -64,6 +67,9 @@ export function KeyTimeline({
     cancelMove();
     report('Key move cancelled; native content unchanged');
   };
+  useEffect(() => {
+    if (active.current) cancel();
+  }, [basis, disabled]);
   function commit() {
     const d = active.current;
     if (!d) return;
@@ -158,7 +164,7 @@ export function KeyTimeline({
                   e.preventDefault();
                   select(k.id);
                   e.currentTarget.focus();
-                  if (!start()) return;
+                  if (!start(k.id)) return;
                   e.currentTarget.setPointerCapture(e.pointerId);
                   update({
                     id: k.id,
@@ -192,7 +198,7 @@ export function KeyTimeline({
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
                     e.preventDefault();
-                    if (!active.current && !start()) return;
+                    if (!active.current && !start(k.id)) return;
                     const d =
                       active.current?.id === k.id
                         ? active.current

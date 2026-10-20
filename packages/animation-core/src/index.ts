@@ -13,3 +13,11 @@ export {
   migratePrototypeToV1Command,
 } from './v1';
 export { putRectangleLayerV1, removeAnimationTrackV1 } from './edit-v1';
+export { prepareRectangleAnimationV1Sync } from './prepare';
+export * from './embedding';
+export {
+  inspectAnimationLayerSubtreeV1,
+  duplicateAnimationLayerV1,
+  removeAnimationLayerV1,
+  type AnimationLayerSubtreeV1,
+} from './layer-actions-v1';

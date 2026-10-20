@@ -1,64 +1,65 @@
 import { shapePath, type Bounds, type Drawing } from '@editor-platform/editor-core';
 
+const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) =>
+  (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t * t * p2 + t ** 3 * p3;
+/** Roots of a cubic Bézier coordinate's derivative (candidate extrema). */
+function cubicRoots(p0: number, p1: number, p2: number, p3: number) {
+  const a = -p0 + 3 * p1 - 3 * p2 + p3,
+    c = p1 - p0,
+    q = 2 * (p0 - 2 * p1 + p2);
+  if (Math.abs(a) < 1e-10) return Math.abs(q) < 1e-10 ? [] : [-c / q];
+  const disc = q * q - 4 * a * c;
+  return disc < 0 ? [] : [(-q + Math.sqrt(disc)) / (2 * a), (-q - Math.sqrt(disc)) / (2 * a)];
+}
+/** Local paint extent, starting from the nominal object box. */
+class Extent {
+  left = 0;
+  top = 0;
+  constructor(
+    public right: number,
+    public bottom: number,
+  ) {}
+  include(x: number, y: number) {
+    this.left = Math.min(this.left, x);
+    this.right = Math.max(this.right, x);
+    this.top = Math.min(this.top, y);
+    this.bottom = Math.max(this.bottom, y);
+  }
+}
+/** Includes every segment end point and cubic extremum of a native M/L/H/V/C/Z path. */
+function includePath(extent: Extent, path: string) {
+  const tokens = path.match(/[MLHVCZ]|[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi) ?? [];
+  let i = 0,
+    x = 0,
+    y = 0,
+    sx = 0,
+    sy = 0;
+  const next = () => Number(tokens[i++]);
+  while (i < tokens.length) {
+    const command = tokens[i++];
+    if (command === 'M' || command === 'L') {
+      x = next();
+      y = next();
+      if (command === 'M') [sx, sy] = [x, y];
+    } else if (command === 'H') x = next();
+    else if (command === 'V') y = next();
+    else if (command === 'Z') [x, y] = [sx, sy];
+    else if (command === 'C') {
+      const [x1, y1, x2, y2, nx, ny] = [next(), next(), next(), next(), next(), next()];
+      for (const t of [...cubicRoots(x, x1, x2, nx), ...cubicRoots(y, y1, y2, ny)])
+        if (t > 0 && t < 1) extent.include(cubic(x, x1, x2, nx, t), cubic(y, y1, y2, ny, t));
+      [x, y] = [nx, ny];
+    } else throw Error('Unknown native shape path');
+    extent.include(x, y);
+  }
+}
 /** Include cubic extrema outside the nominal object box (notably the cloud's right edge). */
 export function shapeRasterBounds(drawing: Drawing): Bounds {
   const b = drawing.bounds;
   if (drawing.kind !== 'shape') return { ...b };
   const kind = drawing.shape ?? 'rectangle';
-  let left = 0,
-    top = 0,
-    right = b.width,
-    bottom = b.height;
-  const include = (x: number, y: number) => {
-    left = Math.min(left, x);
-    right = Math.max(right, x);
-    top = Math.min(top, y);
-    bottom = Math.max(bottom, y);
-  };
-  const path = shapePath(kind, b.width, b.height);
-  const tokens = path.match(/[MLHVCZ]|[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi) ?? [];
-  let x = 0,
-    y = 0,
-    sx = 0,
-    sy = 0;
-  const value = (p0: number, p1: number, p2: number, p3: number, t: number) =>
-    (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t * t * p2 + t ** 3 * p3;
-  const roots = (p0: number, p1: number, p2: number, p3: number) => {
-    const a = -p0 + 3 * p1 - 3 * p2 + p3,
-      c = p1 - p0,
-      q = 2 * (p0 - 2 * p1 + p2);
-    if (Math.abs(a) < 1e-10) return Math.abs(q) < 1e-10 ? [] : [-c / q];
-    const disc = q * q - 4 * a * c;
-    return disc < 0 ? [] : [(-q + Math.sqrt(disc)) / (2 * a), (-q - Math.sqrt(disc)) / (2 * a)];
-  };
-  for (let i = 0; i < tokens.length; ) {
-    const command = tokens[i++];
-    if (command === 'M' || command === 'L') {
-      x = Number(tokens[i++]);
-      y = Number(tokens[i++]);
-      if (command === 'M') {
-        sx = x;
-        sy = y;
-      }
-    } else if (command === 'H') x = Number(tokens[i++]);
-    else if (command === 'V') y = Number(tokens[i++]);
-    else if (command === 'Z') {
-      x = sx;
-      y = sy;
-    } else if (command === 'C') {
-      const x1 = Number(tokens[i++]),
-        y1 = Number(tokens[i++]),
-        x2 = Number(tokens[i++]),
-        y2 = Number(tokens[i++]),
-        nx = Number(tokens[i++]),
-        ny = Number(tokens[i++]);
-      for (const t of [...roots(x, x1, x2, nx), ...roots(y, y1, y2, ny)])
-        if (t > 0 && t < 1) include(value(x, x1, x2, nx, t), value(y, y1, y2, ny, t));
-      x = nx;
-      y = ny;
-    } else throw Error('Unknown native shape path');
-    include(x, y);
-  }
+  const extent = new Extent(b.width, b.height);
+  includePath(extent, shapePath(kind, b.width, b.height));
   if (
     kind === 'arrow' ||
     kind === 'double-arrow' ||
@@ -66,13 +67,14 @@ export function shapeRasterBounds(drawing: Drawing): Bounds {
     drawing.arrowhead === 'both'
   ) {
     const endY = kind === 'elbow' ? b.height : kind === 'curve' ? 0 : b.height / 2;
-    include(b.width - 10, endY - 6);
-    include(b.width, endY + 6);
+    extent.include(b.width - 10, endY - 6);
+    extent.include(b.width, endY + 6);
   }
   if (kind === 'double-arrow' || drawing.arrowhead === 'both') {
-    include(0, b.height / 2 - 6);
-    include(10, b.height / 2 + 6);
+    extent.include(0, b.height / 2 - 6);
+    extent.include(10, b.height / 2 + 6);
   }
+  const { left, top, right, bottom } = extent;
   return { x: b.x + left, y: b.y + top, width: right - left, height: bottom - top };
 }
 

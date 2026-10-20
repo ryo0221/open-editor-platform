@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { time, videoCommandV1, type VideoContentV1 } from '@editor-platform/video-core';
 import { prepareSourceRequests } from './requests';
-import { sourceAt } from '../../../video-core/experiments/pcm-renderer/render';
+import { sourceAt } from '../../../video-core/src/pcm/render';
 function fixture(): VideoContentV1 {
   return {
     schema: 'video-core-prototype-v1',

@@ -14,7 +14,8 @@
     "@editor-platform/editor-core": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-ui": "*",
-    "@editor-platform/artifact-references": "*"
+    "@editor-platform/artifact-references": "*",
+    "lucide-react": "1.51.0"
   },
   "peerDependencies": {
     "react": "^19.1.1"

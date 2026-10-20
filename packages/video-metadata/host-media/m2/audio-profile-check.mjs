@@ -40,7 +40,7 @@ import {inspectAudioOriginalV2} from './packages/video-metadata/host-media/m2/au
 import {inspectOriginalV1} from './packages/video-metadata/host-media/file-source/inspect-v1.ts';
 import {createPcmFile} from './packages/video-metadata/host-media/indexed-media/pcm-file.mjs';
 import {scratchStatus} from './packages/video-metadata/host-media/indexed-media/scratch.mjs';
-import {PcmRenderSession} from './packages/video-core/experiments/pcm-renderer/session.ts';
+import {PcmRenderSession} from './packages/video-core/src/pcm/session.ts';
 import {time,subtract} from '@editor-platform/video-core';
 import {prepareAudioImportV2} from './packages/video-metadata/host-media/m2/audio-import-v2.ts';
 globalThis.checkAdmission=async()=>{

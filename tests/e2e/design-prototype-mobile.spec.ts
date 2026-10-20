@@ -1,5 +1,22 @@
 import { test, expect } from './fixtures';
-import { independentPrototype, followPrototype } from './design-prototype-fixtures';
+import {
+  independentPrototype,
+  followPrototype,
+  assertStyledPrototypeVisibility,
+  assertStyledPrototypeTransform,
+} from './design-prototype-fixtures';
+
+test('#27 mobile styled composite transforms keep visible geometry clickable and annotatable', async ({
+  page,
+}, info) => {
+  await assertStyledPrototypeTransform(page, info);
+});
+
+test('#27 mobile styled hidden prototype frames reject navigation and stay out of the start picker', async ({
+  page,
+}, info) => {
+  await assertStyledPrototypeVisibility(page, info);
+});
 test('mobile taps complete five frames including a centered overlay with no native edit', async ({
   page,
 }, info) => {

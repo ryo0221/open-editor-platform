@@ -1,6 +1,6 @@
 import { containsEmbeddedReference } from '@editor-platform/artifact-references';
+import { isDeck, hasSlideAnimations } from '@editor-platform/slide/model';
 import { clone, contentHash, newId } from '@editor-platform/artifact-core';
-import { isDeck } from '@editor-platform/slide/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { isDesign } from '@editor-platform/design/model';
 import { isDocument } from '@editor-platform/document/model';
@@ -71,6 +71,11 @@ export function slotCandidates(content: NativeContent): SlotCandidate[] {
   return result;
 }
 function assertNoArtifactReferences(content: NativeContent): void {
+  if (isDeck(content) && hasSlideAnimations(content))
+    problem(
+      'unsupported-template',
+      'Animation を含む範囲のテンプレート／再利用部品化は未対応です。',
+    );
   if (containsEmbeddedReference(content))
     problem(
       'unsupported-template',

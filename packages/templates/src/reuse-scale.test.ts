@@ -105,7 +105,7 @@ it('sends identical adjacent closures once, retains complete inverses, and rejec
   expect(authority.undo(actor, applied.operationId).status).toBe('accepted');
   const current = authority.snapshot();
   const proposalOperation = operation(codec, current, actor, actions);
-  authority.register({
+  authority.register(actor, {
     schema: 1,
     id: 'uncompacted-proposal',
     artifactId: current.artifactId,

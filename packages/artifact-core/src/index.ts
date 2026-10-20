@@ -111,6 +111,37 @@ export function canonicalJson(value: unknown): string {
   }
   return JSON.stringify(value) ?? 'null';
 }
+/** Equivalent to `canonicalJson(a) === canonicalJson(b)` for JSON data, without
+ * serializing either side. Shared or equal large strings compare without copying. */
+export function canonicalEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a === 'string' || typeof b === 'string') return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      // canonicalJson renders holes as empty slots, so `Array(1)` and `[]` agree while
+      // `[undefined]` does not. Sparse (or unequal-length) arrays use its exact output.
+      if (!(i in a) || !(i in b)) return canonicalJson(a) === canonicalJson(b);
+      if (!canonicalEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const objectA = !!a && typeof a === 'object',
+    objectB = !!b && typeof b === 'object';
+  if (objectA !== objectB) return false;
+  if (!objectA) return (JSON.stringify(a) ?? 'null') === (JSON.stringify(b) ?? 'null');
+  const left = a as Record<string, unknown>,
+    right = b as Record<string, unknown>,
+    keys = Object.keys(right).filter((key) => right[key] !== undefined);
+  let count = 0;
+  for (const key of Object.keys(left)) {
+    if (left[key] === undefined) continue;
+    count++;
+    if (!Object.prototype.propertyIsEnumerable.call(right, key)) return false;
+    if (!canonicalEqual(left[key], right[key])) return false;
+  }
+  return count === keys.length;
+}
 export async function contentHash(content: unknown): Promise<string> {
   const bytes = await crypto.subtle.digest(
     'SHA-256',

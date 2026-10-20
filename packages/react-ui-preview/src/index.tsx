@@ -1,7 +1,6 @@
 import { Component, createElement, Fragment, type ComponentType, type ReactNode } from 'react';
 import {
-  inspectReactRuntimeResolution,
-  prepareReactUiExport,
+  prepareReactUiComposition,
   reactComponentKey,
   reactUiClassName,
   reactUiLayoutAt,
@@ -23,10 +22,13 @@ export interface ReactPreviewRuntime {
   assets: Record<string, string>;
 }
 export class ReactPreviewBoundary extends Component<
-  { children: ReactNode; onError(diagnostics: ReactUiDiagnostic[]): void },
-  { failed: boolean }
+  { children: ReactNode; onError(diagnostics: ReactUiDiagnostic[]): void; resetKey?: string },
+  { failed: boolean; resetKey?: string }
 > {
-  state = { failed: false };
+  state: { failed: boolean; resetKey?: string } = { failed: false };
+  static getDerivedStateFromProps(props: { resetKey?: string }, state: { resetKey?: string }) {
+    return props.resetKey !== state.resetKey ? { failed: false, resetKey: props.resetKey } : null;
+  }
   static getDerivedStateFromError() {
     return { failed: true };
   }
@@ -89,15 +91,14 @@ export function ReactComposition({
   mode?: 'edit' | 'interact';
   select?(nodeId: string): void;
 }) {
-  prepareReactUiExport(document, runtime.resolution);
-  const issues = inspectReactRuntimeResolution(document, runtime.resolution);
-  if (issues.length) throw new Error(issues.map((d) => d.message).join('; '));
+  document = prepareReactUiComposition(document, runtime.resolution);
   const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
+  const componentMap = new Map(
+    document.components.map((component) => [reactComponentKey(component.ref), component]),
+  );
   const render = (id: string): ReactNode => {
     const node: ReactUiNode = nodeMap.get(id)!;
-    const registered = document.components.find(
-      (c) => reactComponentKey(c.ref) === reactComponentKey(node.component),
-    )!;
+    const registered = componentMap.get(reactComponentKey(node.component))!;
     const implementation = runtime.components[reactComponentKey(node.component)];
     if (!implementation) throw new Error(`Missing pinned implementation: ${registered.name}`);
     const props: Record<string, unknown> = {};

@@ -9,6 +9,7 @@ import {
   type Selection,
   type EditorState,
   type Transaction,
+  type Command,
 } from 'prosemirror-state';
 import {
   baseKeymap,
@@ -689,7 +690,78 @@ export const nextTableCell: import('prosemirror-state').Command = (state, dispat
       : undefined,
   );
 };
+/** Selected, pending or contiguous link under a caret, across formatting runs. */
+export function activeDocumentLink(state: EditorState) {
+  const { $from, empty, from, to } = state.selection;
+  const link = documentSchema.marks.link;
+  // Non-inclusive marks disappear from $from.marks() at either edge. Prefer
+  // the right link at a boundary between different URLs, then the left link.
+  const mark =
+    link.isInSet(
+      state.storedMarks ?? (!empty ? $from.nodeAfter?.marks : undefined) ?? $from.marks(),
+    ) ??
+    (empty
+      ? (link.isInSet($from.nodeAfter?.marks ?? []) ?? link.isInSet($from.nodeBefore?.marks ?? []))
+      : undefined);
+  if (!mark) return;
+  if (!empty) return { from, to, href: mark.attrs.href as string };
+  const parent = $from.parent;
+  let child = parent.childAfter($from.parentOffset);
+  if (!child.node || !mark.isInSet(child.node.marks))
+    child = parent.childBefore($from.parentOffset);
+  if (!child.node || !mark.isInSet(child.node.marks))
+    return mark.isInSet(state.storedMarks ?? [])
+      ? { from, to, href: mark.attrs.href as string }
+      : undefined;
+  let start = $from.start() + child.offset,
+    end = start + child.node.nodeSize,
+    left = child.index,
+    right = child.index + 1;
+  while (left > 0 && mark.isInSet(parent.child(left - 1).marks))
+    start -= parent.child(--left).nodeSize;
+  while (right < parent.childCount && mark.isInSet(parent.child(right).marks))
+    end += parent.child(right++).nodeSize;
+  return { from: start, to: end, href: mark.attrs.href as string };
+}
+/** Apply replaces link attributes; removing a link is an explicit separate action. */
+export function setDocumentLink(href: string | null): import('prosemirror-state').Command {
+  return (state, dispatch) => {
+    if (href !== null && !safeLink(href)) return false;
+    const range = state.selection.empty ? activeDocumentLink(state) : state.selection;
+    const type = documentSchema.marks.link;
+    const tr = state.tr;
+    if (range) {
+      if (href === null) tr.removeMark(range.from, range.to, type);
+      else tr.addMark(range.from, range.to, type.create({ href }));
+    } else if (href !== null) tr.addStoredMark(type.create({ href }));
+    if (range && state.selection.empty && href !== null) tr.addStoredMark(type.create({ href }));
+    if (href === null) tr.removeStoredMark(type);
+    dispatch?.(tr);
+    return true;
+  };
+}
+/** A line break stays within the current block; code keeps its newline semantics. */
+export const insertDocumentBreak: import('prosemirror-state').Command = chainCommands(
+  newlineInCode,
+  (state, dispatch) => {
+    const node = documentSchema.nodes.hard_break;
+    if (!state.selection.$from.parent.inlineContent) return false;
+    dispatch?.(
+      state.tr
+        .replaceSelectionWith(node.create(), false)
+        .ensureMarks(state.storedMarks ?? state.selection.$from.marks())
+        .scrollIntoView(),
+    );
+    return true;
+  },
+);
 export function documentPlugins() {
+  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const mark = (name: 'bold' | 'italic' | 'underline' | 'strike' | 'code'): Command => {
+    const toggle = toggleMark(documentSchema.marks[name]);
+    return (state, dispatch, view) =>
+      view?.editable === false ? false : toggle(state, dispatch, view);
+  };
   return [
     stableIds,
     columnResizing(),
@@ -704,9 +776,12 @@ export function documentPlugins() {
       ),
       Tab: chainCommands(nextTableCell, sinkListItem(documentSchema.nodes.list_item)),
       'Shift-Tab': chainCommands(goToNextCell(-1), liftListItem(documentSchema.nodes.list_item)),
-      'Mod-b': toggleMark(documentSchema.marks.bold),
-      'Mod-i': toggleMark(documentSchema.marks.italic),
-      'Mod-u': toggleMark(documentSchema.marks.underline),
+      'Mod-b': mark('bold'),
+      'Mod-i': mark('italic'),
+      'Mod-u': mark('underline'),
+      'Mod-Shift-x': mark('strike'),
+      [mac ? 'Ctrl-Shift-c' : 'Mod-`']: mark('code'),
+      'Shift-Enter': insertDocumentBreak,
     }),
     keymap(baseKeymap),
   ];

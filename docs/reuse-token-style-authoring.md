@@ -10,6 +10,21 @@ in the `shared` domain and returns its locked closure. `authorReusableStyle` acc
 a `DomainStyle`, an exact token `DefinitionRef` and retained dependency definitions.
 It checks the domain's supported bindings and all token modes before publication.
 The published subset and DTCG exchange limits remain in [the contract](reuse-contract.md).
+Hosts can import `TokenSetForm` and `TokenSetFormProps` from
+`@editor-platform/template-ui`. It is a controlled form: pass a native `TokenSet`
+as `value` and retain each proposed full set in `onChange`. Drafts may be invalid
+while editing. Validate with `validateTokenSet` or the authoring APIs before
+publication. For DTCG JSON use `importDtcg` / `exportDtcg`; the form accepts the
+native token model, not a DTCG document. Persistence, revision publication and
+history remain Host-owned.
+
+The mode-name input follows replacement `value.modes` while clean, including when
+focused. A user-edited draft stays visible across Host updates until blur; blur
+proposes its mode list on top of the latest Host value. An unchanged input does
+not call `onChange`. A selected editing mode that is absent from the replacement
+set displays base values. Internal add/delete actions use `type="button"`, so a
+Host may place the component inside its own form without those actions submitting it.
+
 The UI supports typed primitive values, aliases, mode overrides, saved drafts,
 revision publication, archive/restore and portable packs. Mode names are explicit;
 an absent mode is diagnosed, never substituted silently.

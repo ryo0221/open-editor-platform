@@ -128,6 +128,10 @@ const bundle = exportReactUi(reloaded, trustedHostResolution);
 ```
 
 `load`/`parse`はschema・登録/環境のhashを検査し、deep-frozenな所有copyを返す。
+`load`自身が検査・所有したimmutable結果を再度渡す場合は、その同じ結果を再利用する。
+外部のmutable/shallow-frozen/deep-frozen入力はこの証明を持たず、毎回検査して所有する。
+純粋な構成診断とfingerprintだけを所有結果へ保持し、返したdiagnosticsは呼出元が変更できるcopy。
+Hostのruntime/依存解決は、同じ構成でも出力のたびに検査する。
 unknownなfield/版、functions/accessors/toJSON/hidden properties、cycle、prototype汚染キー、
 非finite値、sparse array、上限超過を採用前に拒否する。
 getterやserialization hookを読んでから検査することはない。
@@ -169,6 +173,7 @@ URLを返すだけでnetwork取得やiframe作成を行わない。
 readyはexact解決、selectionはeditのstable node、callbackはinteractの登録event/引数、
 errorは対象付きdiagnostic。受信したcallbackが構成を直接変更することはない。
 Surfaceはこれを別origin iframe/error UI/restartへ接続する。ready前はiframe操作を待つ。
+`ReactPreviewBoundary.resetKey`は新requestで失敗状態を再試行し、正常なDOMは維持する。
 起動の`ReactPreviewBootstrap`はsource/originとstrict shapeを確認し、Host Reactが準備できてから
 renderを送る。bootstrapはtransportの準備だけで、composition/runtimeのexact attestationは
 session/request/revision付きreadyで引き続き必要となる。
@@ -195,4 +200,4 @@ Host/人が承認するまで採用しない。例・画像比較は[導入手�
 入力/callback、幅別比較をW2から
 W5まで順番に記録した。
 [導入・独立Host・出力組込例](react-ui-integration.md)を参照する。
-性能の追加測定・調整は停止中であり、schema上限や少数fixtureの機能成功を性能合格とは扱わない。
+2026-10-18の[固定性能受入](verification/issue-24/README.md)は21部品/500 node/深さ4/3幅/3反復で95 Hardと7 native回帰判定を通過した。schema上限や任意の利用先・部品規模の性能保証へ拡張しない。関係外の追加測定は停止中。

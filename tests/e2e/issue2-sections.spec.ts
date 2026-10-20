@@ -83,7 +83,7 @@ test('ID-Q01–03 infinite board Sections preserve membership and distinguish re
   await camera(page, 50300, 50200);
   expect((await native(page)).draft.content).toEqual(beforeCamera);
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
   await page.reload();
   await expect(

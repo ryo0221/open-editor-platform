@@ -45,6 +45,13 @@ import {
   previewSharedTemplate,
   applySharedTemplate,
 } from './apply';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 const A: Principal = { actorId: 'A', clientId: 'A', sessionId: 'A', writable: true, scopes: ['*'] };
 const B: Principal = { ...A, actorId: 'B', clientId: 'B', sessionId: 'B' };
 const get = (id: string) => builtinTemplates.find((d) => d.templateId === id)!;
@@ -62,7 +69,8 @@ function adapter(authority: Authority<NativeContent>, actor = A) {
   return Object.assign(localAdapter(authority, actor), {
     versions: async () => [],
     undo: async (id: string, redo?: boolean) => authority.undo(actor, id, redo),
-    registerProposal: async (p: Parameters<typeof authority.register>[0]) => authority.register(p),
+    registerProposal: async (p: Parameters<typeof authority.register>[1]) =>
+      authority.register(actor, p),
     previewProposal: async (id: string) => authority.preview(actor, id),
     applyProposal: async (id: string, token: string) => authority.applyProposal(actor, id, token),
   }) as unknown as EditorHostAdapter<NativeContent>;
@@ -180,7 +188,7 @@ describe('TP-Q05/06/07: normal checked proposals', () => {
       codec = templateCodec('slide'),
       authority = new Authority(codec, initial('deck', codec, createDeck()));
     const p = await prepareInsertion(d, d.sample, authority.snapshot(), A);
-    authority.register(p.proposal);
+    authority.register({ ...proposalHost, actorId: p.proposal.sourceActorId }, p.proposal);
     expect(() => authority.preview({ ...A, writable: false }, p.id)).toThrow();
   });
 });

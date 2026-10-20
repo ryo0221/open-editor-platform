@@ -25,12 +25,14 @@ export function ReactUiTree({
 }) {
   const [destination, setDestination] = useState('root');
   const [error, setError] = useState('');
-  const node = document.nodes.find((n) => n.id === selectedId);
+  const nodes = new Map(document.nodes.map((node) => [node.id, node]));
+  const components = new Map(
+    document.components.map((component) => [reactComponentKey(component.ref), component]),
+  );
+  const node = nodes.get(selectedId ?? '');
   const forbidden = new Set(node ? reactUiSubtree(document, node.id) : []);
   const targets = document.nodes.flatMap((n) => {
-    const component = document.components.find(
-      (c) => reactComponentKey(c.ref) === reactComponentKey(n.component),
-    );
+    const component = components.get(reactComponentKey(n.component));
     return Object.keys(component?.slots ?? {}).map((slotId) => ({ nodeId: n.id, slotId }));
   });
   const parent =
@@ -45,7 +47,7 @@ export function ReactUiTree({
     }
   };
   const render = (id: string, seen: Set<string> = new Set()): ReactNode => {
-    const n = document.nodes.find((n) => n.id === id);
+    const n = nodes.get(id);
     if (!n || seen.has(id)) return null;
     const next = new Set([...seen, id]);
     return (

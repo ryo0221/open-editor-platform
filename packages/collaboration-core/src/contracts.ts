@@ -9,7 +9,8 @@ export type Domain =
   | 'data'
   | 'review'
   | 'file'
-  | 'react-ui';
+  | 'react-ui'
+  | 'animation';
 export type Origin = 'human' | 'agent' | 'proposal' | 'undo' | 'redo' | 'restore';
 export interface Identity {
   actorId: string;
@@ -20,6 +21,10 @@ export interface Principal extends Identity {
   writable: boolean;
   scopes: string[];
   expiresAt?: number;
+  /** Origins this connection may declare on submitted operations. Defaults to
+   * human and locally reviewed proposal input; `agent` needs an explicit Host grant.
+   * Undo, redo, restore and authority proposal provenance are never client-declared. */
+  origins?: Origin[];
 }
 export interface Action {
   type: string;
@@ -140,7 +145,8 @@ export interface DomainCodec<T> {
    * on failure. Its result may share unchanged branches with the input. */
   applyReadonly?: DomainCodec<T>['apply'];
   rebaseInverse?(event: Accepted<T>, later: Accepted<T>[], current: Snapshot<T>): Action[];
-  mapAnchor?(anchor: Anchor, before: T, action: Action): Anchor;
+  /** The trusted apply boundary supplies the completed content for stable-ID relocation. */
+  mapAnchor?(anchor: Anchor, before: T, action: Action, after?: T): Anchor;
   validateAnchor(content: T, anchor: Anchor): boolean;
 }
 export interface Accepted<T = unknown> {
@@ -240,9 +246,17 @@ export function validateOperation(value: unknown): asserts value is Operation {
   if (!o || o.protocol !== 1 || o.schema !== 1)
     fail('schema-mismatch', 'Unsupported protocol/schema');
   if (
-    !['document', 'slide', 'design', 'whiteboard', 'data', 'review', 'file', 'react-ui'].includes(
-      o.domain,
-    ) ||
+    ![
+      'document',
+      'slide',
+      'design',
+      'whiteboard',
+      'data',
+      'review',
+      'file',
+      'react-ui',
+      'animation',
+    ].includes(o.domain) ||
     !['human', 'agent', 'proposal', 'undo', 'redo', 'restore'].includes(o.origin)
   )
     fail('schema-mismatch', 'Invalid domain/origin');

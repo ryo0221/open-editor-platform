@@ -18,12 +18,14 @@ import {
 } from '@editor-platform/react-ui-preview';
 import * as components from './components';
 import * as revisedComponents from './components-v2';
+import DependencyBadge from './dependency-badge';
 import {
   referenceComponents,
   referenceResolution,
   referenceImage,
   referenceResolutionFor,
   referenceTextRevision,
+  referenceDependencyComponent,
 } from './catalog';
 import '../public/styles/tokens.css';
 const parentOrigin = new URL(location.href).searchParams.get('parentOrigin');
@@ -37,11 +39,13 @@ const trustedOrigin = new URL(parentOrigin).origin;
 const runtime: ReactPreviewRuntime = {
   resolution: referenceResolution,
   components: Object.fromEntries(
-    [...referenceComponents, referenceTextRevision].map((c) => [
+    [...referenceComponents, referenceTextRevision, referenceDependencyComponent].map((c) => [
       reactComponentKey(c.ref),
-      (c === referenceTextRevision
-        ? revisedComponents.Text
-        : components[c.name as keyof typeof components]) as unknown as ComponentType<
+      (c === referenceDependencyComponent
+        ? DependencyBadge
+        : c === referenceTextRevision
+          ? revisedComponents.Text
+          : components[c.name as keyof typeof components]) as unknown as ComponentType<
         Record<string, unknown>
       >,
     ]),
@@ -177,7 +181,7 @@ function HostPreview() {
   if (!request) return <p>Waiting for composition</p>;
   return (
     <ReactPreviewBoundary
-      key={request.requestId}
+      resetKey={request.requestId}
       onError={(diagnostics) => {
         failed.current = request.requestId;
         send({ type: 'error', diagnostics } as Parameters<typeof send>[0]);

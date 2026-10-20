@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH=/workspace/.tools/node-v20.20.2-linux-x64/bin:$PATH
+export PATH=/workspace/.tools/node-v24.19.0-linux-x64/bin:$PATH
 export npm_config_cache=/workspace/.npm-cache
 export npm_config_update_notifier=false
 export PLAYWRIGHT_BROWSERS_PATH=/workspace/.cache/ms-playwright
@@ -13,4 +13,5 @@ export XDG_DATA_HOME=/workspace/.local/share
 # This is test-runner process configuration; iframe/CSP/content isolation stays enabled.
 export MOZ_DISABLE_CONTENT_SANDBOX=1
 export EDITOR_WEBKIT_EXECUTABLE=/workspace/.tools/webkit-launch
-exec npx playwright test --config=playwright.cross.config.ts "$@"
+export E2E_SUITE=cross
+exec npx playwright test "$@"

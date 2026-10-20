@@ -1,3 +1,4 @@
+import { assertGeoBackgroundSettings } from './background';
 import type { Budgets, GeoDocument, Pin, Scalar } from './model';
 import type { GeoWorkspace, GeoLayerStyle, GeoAnnotation } from './workspace-model';
 import { id, hash, record } from './validation';
@@ -216,7 +217,15 @@ export function assertGeoWorkspace(
   w.styles.forEach(style);
   w.annotations.forEach(annotation);
   for (const view of w.views) {
-    object(view, ['id', 'name', 'extent', 'styles', 'annotations']);
+    object(view, [
+      'id',
+      'name',
+      'extent',
+      'styles',
+      'annotations',
+      ...('backgrounds' in view ? ['backgrounds'] : []),
+    ]);
+    if (view.backgrounds !== undefined) assertGeoBackgroundSettings(view.backgrounds);
     requireValue(text(view.name) && !!view.name.trim(), 'view-name');
     assertGeoExtent(view.extent);
     array(view.styles, limits.layers);

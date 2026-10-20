@@ -1,8 +1,25 @@
 import { test, expect, create, nativeArtifact, save } from './fixtures';
-import { independentPrototype, followPrototype } from './design-prototype-fixtures';
+import {
+  independentPrototype,
+  followPrototype,
+  assertStyledPrototypeVisibility,
+  assertStyledPrototypeTransform,
+} from './design-prototype-fixtures';
 import { diagnoseDesignPrototype } from '@editor-platform/design/prototype';
 import type { DesignContent } from '@editor-platform/design/model';
 import { prototypeFixture } from '../fixtures/design-prototype/content';
+
+test('#27 styled composite transforms keep visible geometry clickable and annotatable', async ({
+  page,
+}, info) => {
+  await assertStyledPrototypeTransform(page, info);
+});
+
+test('#27 styled hidden prototype frames reject navigation and stay out of the start picker', async ({
+  page,
+}, info) => {
+  await assertStyledPrototypeVisibility(page, info);
+});
 
 test('prototype visits five frames, hints instance parts and keeps native content/history private', async ({
   page,
@@ -427,7 +444,7 @@ test('normal Host waits for delayed authority rejection and preserves comment fo
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   await expect.poll(async () => (await nativeArtifact(page)).versions.length).toBe(1);
   const { artifactMenu } = await import('./template-fixtures');
@@ -594,7 +611,7 @@ test('comment retry preserves unrelated rejected input and retained replay canno
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   expect((await retainedCheckpoint(page)).rejected).toEqual(unrelated);
   expect((await nativeArtifact(page)).versions).toHaveLength(0);
@@ -611,7 +628,7 @@ test('comment retry preserves unrelated rejected input and retained replay canno
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   await expect.poll(async () => (await nativeArtifact(page)).versions.length).toBe(1);
   await page.getByRole('button', { name: 'More artifact actions', exact: true }).click();

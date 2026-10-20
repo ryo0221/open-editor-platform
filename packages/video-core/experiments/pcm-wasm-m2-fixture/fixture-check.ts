@@ -10,9 +10,9 @@ import {
 } from './frozen/packages/video-metadata/host-media/m2/mix-v2';
 import { PcmRenderSession } from './frozen/packages/video-core/experiments/pcm-renderer/session';
 import type { WindowPlan } from './frozen/packages/video-core/experiments/pcm-renderer/render';
-import { Ledger, prepareModule } from '../pcm-wasm-r0/kernel';
-import { PcmBackend } from '../pcm-wasm-r0/adapter';
-import { SelectedPcmSession, APPROVED_WASM_SHA } from '../pcm-wasm-v1/selection';
+import { Ledger, prepareModule } from '../../src/pcm/kernel';
+import { PcmBackend } from '../../src/pcm/adapter';
+import { SelectedPcmSession, APPROVED_WASM_SHA } from '../../src/pcm/selection';
 import { sourcePort, type PcmLease } from './port';
 const bytes = new Uint8Array(readFileSync(process.argv[2]));
 assert.equal(createHash('sha256').update(bytes).digest('hex'), APPROVED_WASM_SHA);

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
-import { Ledger, ARENA_BYTES, MEMORY_BYTES } from '../pcm-wasm-r0/kernel';
-import { ScheduledAudio } from '../pcm-wasm-v1/scheduled-audio';
+import { Ledger, ARENA_BYTES, MEMORY_BYTES } from '../../src/pcm/kernel';
+import { ScheduledAudio } from '../../src/pcm/scheduled-audio';
 import {
   FixtureOwner,
   plane,

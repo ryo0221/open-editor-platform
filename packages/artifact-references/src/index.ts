@@ -279,13 +279,11 @@ export function validReferenceItems(items: ReferenceItem[]): boolean {
     new TextEncoder().encode(canonicalJson(references)).length <= referenceLimits.closureBytes
   );
 }
+export const referenceLimitMessage =
+  '参照情報が不正か上限を超えています（64件・保持情報の合計4 MiBまで）。';
 /** Check a complete prospective destination before committing it or its history. */
 export function assertReferenceItems(items: ReferenceItem[]): void {
-  if (!validReferenceItems(items))
-    throw new ReferenceError(
-      'error',
-      '参照情報が不正か上限を超えています（64件・保持情報の合計4 MiBまで）。',
-    );
+  if (!validReferenceItems(items)) throw new ReferenceError('error', referenceLimitMessage);
 }
 export function svgReferenceProjection(svg: string, label: string): ReferenceProjection {
   const bytes = new TextEncoder().encode(svg);

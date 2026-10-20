@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./backgrounds": "./src/background-catalog.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@noble/hashes": "1.8.0"
   }
 }

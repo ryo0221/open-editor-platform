@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { Ledger, ModuleInput, prepareModule } from '../pcm-wasm-r0/kernel';
-import { APPROVED_WASM_SHA, selectedPcmSession } from '../pcm-wasm-v1/selection';
-import { configureM2PcmFactory, m2PcmDiagnostics } from './owners';
+import { Ledger, ModuleInput, prepareModule } from '../../src/pcm/kernel';
+import { APPROVED_WASM_SHA, selectedPcmSession } from '../../src/pcm/selection';
+import { configureM2PcmFactory, m2PcmDiagnostics } from '../../src/pcm/owners';
 const [file, destination] = process.argv.slice(2);
 const original = await readFile(file),
   n = original.byteLength;

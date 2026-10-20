@@ -28,4 +28,6 @@ export interface AnimationPlaybackPort {
 export interface AnimationControlledSurfaceProps {
   readonly editor: ControlledSurfaceController<AnimationContent>;
   readonly playback: AnimationPlaybackPort;
+  /** Ordinary Hosts provide their own common Undo/Redo/version toolbar. */
+  readonly hostActions?: 'surface' | 'external';
 }

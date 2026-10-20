@@ -1,5 +1,10 @@
 import type { DesignWebSettings } from '@editor-platform/design/web-contract';
-import { referenceEnvironment, referenceComponents } from './catalog';
+import {
+  referenceEnvironment,
+  referenceComponents,
+  referenceDependencyEnvironment,
+  referenceDependencyComponent,
+} from './catalog';
 /** Reference Host registration only. No product code or inferred HTML roles. */
 export const referenceDesignSettings: DesignWebSettings = {
   schemaVersion: 1,
@@ -10,6 +15,11 @@ export const referenceDesignSettings: DesignWebSettings = {
   fixture: {},
   breakpoints: [{ id: 'desktop', minWidth: 800 }],
   pages: [],
+};
+export const referenceDependencyDesignSettings: DesignWebSettings = {
+  ...referenceDesignSettings,
+  environment: referenceDependencyEnvironment,
+  registrations: [...referenceComponents, referenceDependencyComponent],
 };
 
 import {
@@ -47,9 +57,12 @@ export function reviewedNativeCard(componentIds: string[]): RegisteredReactCompo
 }
 export function referenceDesignRegistrations(content: DesignContent): RegisteredReactComponent[] {
   const ids = content.components.filter((c) => c.web).map((c) => c.id);
-  return ids.length
+  const base = ids.length
     ? [...referenceComponents.filter((c) => c.name !== 'Card'), reviewedNativeCard(ids)]
     : referenceComponents;
+  return content.web?.environment.ref.id === referenceDependencyEnvironment.ref.id
+    ? [...base, referenceDependencyComponent]
+    : base;
 }
 export function referenceDesignRuntime(content: DesignContent): ReactRuntimeAdapter {
   const reviewed = reviewedCardRegistrations(

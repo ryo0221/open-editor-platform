@@ -1,5 +1,5 @@
 import { time, add, subtract, compare, sampleIndex } from '@editor-platform/video-core';
-import { PcmRenderSession } from '../../../video-core/experiments/pcm-renderer/session.ts';
+import { PcmRenderSession } from '../../../video-core/src/pcm/session.ts';
 import { createPcmFile } from './pcm-file.mjs';
 import { createVideoWindow } from './video-window.mjs';
 const rate = 48000;

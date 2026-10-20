@@ -38,7 +38,9 @@ across browsers. Outgoing easing owns each segment; before/after track endpoints
 Validation bounds are provisional refusal limits, not scale/performance acceptance.
 Migration to rectangle v1 is explicit and returns a new draft/ordinary command.
 No old immutable versions are rewritten; nested/asset migration is currently rejected.
-Root Host/registration, domain tables and README/status are intentionally left to #76.
+The later [local Playground/Slide connection](../../docs/animation/playground-slide-integration.md)
+adds the ordinary Host's v1 kind and retained-source embedding. The wider #74 epic
+and shared/editor-wide capabilities remain separate.
 See verification for exact commits and gates.
 
 Preparation shares a 32 MiB JSON-copy budget and 500,000-node budget across root,

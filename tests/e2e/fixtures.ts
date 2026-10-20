@@ -39,7 +39,7 @@ export async function save(page: Page, n: number) {
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   await page.getByRole('button', { name: 'History and compare', exact: true }).click();
   await expect(page.getByRole('tab', { name: `History (${n})`, exact: true })).toBeVisible();
@@ -112,7 +112,7 @@ export async function addField(page: Page, name: string, type: string) {
   await page.getByRole('button', { name: 'Create field', exact: true }).click();
 }
 export const tinyPng = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
   'base64',
 );
 

@@ -101,10 +101,56 @@ export async function validateDefinition(raw: unknown): Promise<TemplateDefiniti
     problem('template-schema', 'Malformed template definition');
   }
 }
+const artifactSchemas: Record<string, number[]> = {
+  slide: [1, 2],
+  whiteboard: [1, 2, 3],
+  design: [1, 2],
+  document: [1, 2],
+  data: [1, 2],
+  review: [1, 2],
+  file: [1, 2],
+};
+const inputTypes = [
+  'text',
+  'rich-text',
+  'number',
+  'boolean',
+  'date',
+  'enum',
+  'asset',
+  'url',
+  'object',
+  'list',
+  'table',
+  'chart',
+];
 async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
   assertTemplateSize(raw);
   if (!raw || typeof raw !== 'object') problem('template-schema', 'Expected a template definition');
   const d = raw as TemplateDefinition;
+  checkIdentity(d);
+  checkMetadata(d);
+  if (invalidCollections(d) || invalidOverflow(d) || d.preview?.renderer !== 'native')
+    problem('template-schema', 'Invalid binding, input or layout definition');
+  validateFields(d.inputs);
+  const { hash, ...unsigned } = d;
+  if (hash !== (await contentHash(unsigned)))
+    problem('hash-mismatch', 'Template hash does not match its immutable definition');
+  const assetIds = await checkAssets(d.assets);
+  checkSource(d);
+  checkBindings(d.bindings, d.content ?? d.preset, d.inputs);
+  checkRepeats(d);
+  walkAssetReferences(d.content, assetIds);
+  walkAssetReferences(d.repeats, assetIds);
+  validateComposition(d);
+  validateStructure(d);
+  if (d.content && 'reuse' in d.content)
+    for (const closure of d.content.reuse?.closures ?? []) await validateReusableClosure(closure);
+  expandTemplate(d, d.sample);
+  return clone(d);
+}
+/** Schema version, domain, kind, identity and the domain's artifact schema. */
+function checkIdentity(d: TemplateDefinition) {
   if (
     d.schemaVersion !== 1 ||
     !domains.includes(d.domain) ||
@@ -114,17 +160,11 @@ async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
     d.templateVersion < 1
   )
     problem('template-schema', 'Unsupported template schema or identity');
-  const schemas: Record<string, number[]> = {
-    slide: [1, 2],
-    whiteboard: [1, 2, 3],
-    design: [1, 2],
-    document: [1, 2],
-    data: [1, 2],
-    review: [1, 2],
-    file: [1, 2],
-  };
-  if (!schemas[d.domain].includes(d.artifactSchema))
+  if (!artifactSchemas[d.domain].includes(d.artifactSchema))
     problem('domain-schema', 'Unsupported artifact schema');
+}
+/** Catalog text, string lists and declared capabilities. */
+function checkMetadata(d: TemplateDefinition) {
   for (const key of ['name', 'description', 'purpose', 'category'] as const)
     if (typeof d[key] !== 'string' || !d[key].trim()) problem('template-schema', `Missing ${key}`);
   for (const key of ['tags', 'locales', 'capabilities', 'targets'] as const)
@@ -132,13 +172,19 @@ async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
       problem('template-schema', `Invalid ${key}`);
   if (d.capabilities.some((c) => !capabilities.includes(c)))
     problem('capability', 'Template requires unsupported capabilities');
-  if (
+}
+function invalidCollections(d: TemplateDefinition) {
+  return (
     !Array.isArray(d.inputs) ||
     !Array.isArray(d.bindings) ||
     !Array.isArray(d.repeats) ||
     !Array.isArray(d.assets) ||
     !d.sample ||
-    typeof d.sample !== 'object' ||
+    typeof d.sample !== 'object'
+  );
+}
+function invalidOverflow(d: TemplateDefinition) {
+  return (
     !d.overflow ||
     !['reflow', 'paginate', 'expand', 'error'].includes(d.overflow.policy) ||
     !Number.isInteger(d.overflow.maxItems) ||
@@ -146,58 +192,49 @@ async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
     d.overflow.maxItems > 100 ||
     !Number.isFinite(d.overflow.minFontSize) ||
     d.overflow.minFontSize < (d.domain === 'design' ? 10 : 12) ||
-    (d.overflow.textScope !== undefined && d.overflow.textScope !== 'instance') ||
-    d.preview?.renderer !== 'native'
-  )
-    problem('template-schema', 'Invalid binding, input or layout definition');
-  const validateFields = (fields: InputField[]) => {
-    const keys = new Set<string>();
-    for (const f of fields) {
-      if (
-        !f ||
-        !safeKey.test(f.key) ||
-        keys.has(f.key) ||
-        typeof f.label !== 'string' ||
-        typeof f.description !== 'string' ||
-        ![
-          'text',
-          'rich-text',
-          'number',
-          'boolean',
-          'date',
-          'enum',
-          'asset',
-          'url',
-          'object',
-          'list',
-          'table',
-          'chart',
-        ].includes(f.type)
-      )
-        problem('input-schema', 'Invalid or duplicate slot');
-      keys.add(f.key);
-      if (f.fields && !Array.isArray(f.fields)) problem('input-schema', 'Invalid object fields');
-      if (f.type === 'object' && !f.fields) problem('input-schema', 'Object requires fields');
-      if (['table', 'chart'].includes(f.type) && !f.item)
-        problem('input-schema', 'Table/chart requires an item schema');
-      for (const key of ['min', 'max', 'maxLength'] as const)
-        if (f[key] !== undefined && !Number.isFinite(f[key]))
-          problem('input-schema', 'Input bounds must be finite');
-      if ((f.min ?? -Infinity) > (f.max ?? Infinity) || (f.maxLength ?? 0) < 0)
-        problem('input-schema', 'Invalid input bounds');
-      if (f.fields) validateFields(f.fields);
-      if (f.item) validateFields([f.item]);
-      if (f.type === 'enum' && (!f.options?.length || f.options.some((v) => typeof v !== 'string')))
-        problem('input-schema', 'Enum requires choices');
-    }
-  };
-  validateFields(d.inputs);
-  const { hash, ...unsigned } = d;
-  if (hash !== (await contentHash(unsigned)))
-    problem('hash-mismatch', 'Template hash does not match its immutable definition');
+    (d.overflow.textScope !== undefined && d.overflow.textScope !== 'instance')
+  );
+}
+function validateFields(fields: InputField[]) {
+  const keys = new Set<string>();
+  for (const f of fields) validateField(f, keys);
+}
+/** One input slot and, recursively, its object fields and list/table item schema. */
+function validateField(f: InputField, keys: Set<string>) {
+  if (invalidSlot(f, keys)) problem('input-schema', 'Invalid or duplicate slot');
+  keys.add(f.key);
+  if (f.fields && !Array.isArray(f.fields)) problem('input-schema', 'Invalid object fields');
+  if (f.type === 'object' && !f.fields) problem('input-schema', 'Object requires fields');
+  if (['table', 'chart'].includes(f.type) && !f.item)
+    problem('input-schema', 'Table/chart requires an item schema');
+  validateFieldBounds(f);
+  if (f.fields) validateFields(f.fields);
+  if (f.item) validateFields([f.item]);
+  if (f.type === 'enum' && (!f.options?.length || f.options.some((v) => typeof v !== 'string')))
+    problem('input-schema', 'Enum requires choices');
+}
+function invalidSlot(f: InputField, keys: Set<string>) {
+  return (
+    !f ||
+    !safeKey.test(f.key) ||
+    keys.has(f.key) ||
+    typeof f.label !== 'string' ||
+    typeof f.description !== 'string' ||
+    !inputTypes.includes(f.type)
+  );
+}
+function validateFieldBounds(f: InputField) {
+  for (const key of ['min', 'max', 'maxLength'] as const)
+    if (f[key] !== undefined && !Number.isFinite(f[key]))
+      problem('input-schema', 'Input bounds must be finite');
+  if ((f.min ?? -Infinity) > (f.max ?? Infinity) || (f.maxLength ?? 0) < 0)
+    problem('input-schema', 'Invalid input bounds');
+}
+/** Portable image manifest: budget, identity, media type and content hash. */
+async function checkAssets(assets: TemplateDefinition['assets']) {
   const assetIds = new Set<string>();
   let assetCharacters = 0;
-  for (const asset of d.assets) {
+  for (const asset of assets) {
     if (typeof asset?.data !== 'string') problem('missing-asset', 'Invalid asset data');
     assetCharacters += asset.data.length;
     if (
@@ -215,6 +252,10 @@ async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
       problem('missing-asset', 'Invalid, duplicate or damaged asset');
     assetIds.add(asset.id);
   }
+  return assetIds;
+}
+/** Presets carry settings only; other kinds carry native content of the declared schema. */
+function checkSource(d: TemplateDefinition) {
   if (d.kind === 'preset') {
     if (
       !d.preset ||
@@ -231,67 +272,60 @@ async function checkDefinition(raw: unknown): Promise<TemplateDefinition> {
     )
       problem('domain-schema', 'Native content or artifact schema does not match');
   }
-  const checkBindings = (
-    bindings: Binding[],
-    source: unknown,
-    fields: InputField[],
-    repeat = false,
-  ) => {
-    for (const b of bindings) {
-      if (
-        !b ||
-        !Array.isArray(b.path) ||
-        !b.path.length ||
-        b.path.some(
-          (k) =>
-            !['string', 'number'].includes(typeof k) ||
-            ['__proto__', 'constructor', 'prototype', 'reuse'].includes(String(k)),
-        ) ||
-        !['value', 'text', 'rich', 'list', 'table', 'chart', 'asset'].includes(b.mode) ||
-        (!repeat && !fieldAt(fields, b.slot)) ||
-        at(source, b.path) === undefined
-      )
-        problem('invalid-binding', `Invalid native binding: ${b?.slot ?? 'unknown'}`);
-    }
-  };
-  checkBindings(d.bindings, d.content ?? d.preset, d.inputs);
+}
+function checkBindings(bindings: Binding[], source: unknown, fields: InputField[], repeat = false) {
+  for (const b of bindings) {
+    if (
+      !b ||
+      !Array.isArray(b.path) ||
+      !b.path.length ||
+      b.path.some(
+        (k) =>
+          !['string', 'number'].includes(typeof k) ||
+          ['__proto__', 'constructor', 'prototype', 'reuse'].includes(String(k)),
+      ) ||
+      !['value', 'text', 'rich', 'list', 'table', 'chart', 'asset'].includes(b.mode) ||
+      (!repeat && !fieldAt(fields, b.slot)) ||
+      at(source, b.path) === undefined
+    )
+      problem('invalid-binding', `Invalid native binding: ${b?.slot ?? 'unknown'}`);
+  }
+}
+function checkRepeats(d: TemplateDefinition) {
   for (const repeat of d.repeats) {
     const f = fieldAt(d.inputs, repeat.slot);
-    if (
-      !f ||
-      !['list', 'table'].includes(f.type) ||
-      !Array.isArray(repeat.prototype) ||
-      !Array.isArray(at(d.content, repeat.path)) ||
-      !Array.isArray(repeat.bindings) ||
-      (repeat.beforeId !== undefined &&
-        !(at(d.content, repeat.path) as { id?: string }[]).some((v) => v.id === repeat.beforeId)) ||
-      (repeat.columns !== undefined && (!Number.isInteger(repeat.columns) || repeat.columns < 1)) ||
-      [repeat.stepX, repeat.stepY].some((v) => v !== undefined && !Number.isFinite(v)) ||
-      (repeat.chunkSize !== undefined &&
-        (!Number.isInteger(repeat.chunkSize) || repeat.chunkSize < 1))
-    )
-      problem('invalid-binding', 'Invalid repeat target');
+    if (!f || invalidRepeat(d, repeat, f)) problem('invalid-binding', 'Invalid repeat target');
     checkBindings(repeat.bindings, repeat.prototype, f.item?.fields ?? [], true);
     for (const b of repeat.bindings)
       if (b.slot !== '$' && !fieldAt(f.item?.fields ?? [], b.slot))
         problem('invalid-binding', 'Unknown repeat item slot');
   }
-  const walk = (v: unknown) => {
-    if (typeof v === 'string' && v.startsWith('asset://') && !assetIds.has(v.slice(8)))
-      problem('missing-asset', `Missing asset ${v}`);
-    if (v && typeof v === 'object')
-      Object.entries(v).forEach(([key, value]) => {
-        if (key !== 'reuse') walk(value);
-      });
-  };
-  walk(d.content);
-  walk(d.repeats);
-  validateComposition(d);
-  validateStructure(d);
-  if (d.content && 'reuse' in d.content)
-    for (const closure of d.content.reuse?.closures ?? []) await validateReusableClosure(closure);
-  expandTemplate(d, d.sample);
-  return clone(d);
+}
+function invalidRepeat(
+  d: TemplateDefinition,
+  repeat: TemplateDefinition['repeats'][number],
+  f: InputField,
+) {
+  return (
+    !['list', 'table'].includes(f.type) ||
+    !Array.isArray(repeat.prototype) ||
+    !Array.isArray(at(d.content, repeat.path)) ||
+    !Array.isArray(repeat.bindings) ||
+    (repeat.beforeId !== undefined &&
+      !(at(d.content, repeat.path) as { id?: string }[]).some((v) => v.id === repeat.beforeId)) ||
+    (repeat.columns !== undefined && (!Number.isInteger(repeat.columns) || repeat.columns < 1)) ||
+    [repeat.stepX, repeat.stepY].some((v) => v !== undefined && !Number.isFinite(v)) ||
+    (repeat.chunkSize !== undefined &&
+      (!Number.isInteger(repeat.chunkSize) || repeat.chunkSize < 1))
+  );
+}
+function walkAssetReferences(v: unknown, assetIds: Set<string>) {
+  if (typeof v === 'string' && v.startsWith('asset://') && !assetIds.has(v.slice(8)))
+    problem('missing-asset', `Missing asset ${v}`);
+  if (v && typeof v === 'object')
+    Object.entries(v).forEach(([key, value]) => {
+      if (key !== 'reuse') walkAssetReferences(value, assetIds);
+    });
 }
 function applyBinding(
   root: unknown,
@@ -363,11 +397,22 @@ function transformBounds(value: unknown, x: number, y: number) {
   }
   Object.values(value).forEach((v) => transformBounds(v, x, y));
 }
-export function expandTemplate(
-  d: TemplateDefinition,
-  input: unknown,
-  options: { includeSampleRows?: boolean; remap?: boolean; preserveEmptyAssets?: boolean } = {},
-) {
+type ExpandOptions = {
+  includeSampleRows?: boolean;
+  remap?: boolean;
+  preserveEmptyAssets?: boolean;
+};
+type Repeat = TemplateDefinition['repeats'][number];
+/** One expansion's slot owners, text paths and structure part ids, filled while binding. */
+interface Expansion {
+  d: TemplateDefinition;
+  options: ExpandOptions;
+  slots: Map<string, string>;
+  textOwners: Map<object, string>;
+  textSlots: Map<string, string>;
+  structureParts: Record<string, string>;
+}
+export function expandTemplate(d: TemplateDefinition, input: unknown, options: ExpandOptions = {}) {
   assertTemplateSize(input, templateLimits.expandedBytes);
   const validation = validateInputs(d.inputs, input);
   if (!validation.valid)
@@ -387,124 +432,158 @@ export function expandTemplate(
   // Legacy templates keep independent-copy semantics, including older snapshots
   // which accidentally captured optional reusable metadata.
   if (!d.composition && 'reuse' in content) delete content.reuse;
-  const slots = new Map<string, string>();
-  const textOwners = new Map<object, string>();
-  const textSlots = new Map<string, string>();
-  const bind = (root: unknown, binding: Binding, values: unknown, slot = binding.slot) => {
-    const owner = at(root, binding.path.slice(0, -1)) as { id?: string };
-    if (owner?.id) slots.set(owner.id, slot);
-    if (owner && binding.path.at(-1) === 'text') textOwners.set(owner, slot);
-    applyBinding(root, binding, values, d.assets);
-    if (
-      d.structure &&
-      binding.mode === 'asset' &&
-      binding.optional &&
-      binding.path.at(-1) === 'src' &&
-      at(root, binding.path) === ''
-    ) {
-      const image = at(root, binding.path.slice(0, -1)) as Record<string, unknown>;
-      const instance = at(root, [binding.path[0]]) as { componentId?: string };
-      const scopedImage =
-        d.domain === 'design' &&
-        binding.path[1] === 'overrides' &&
-        d.content &&
-        'components' in d.content &&
-        d.content.components
-          .find((c) => c.id === instance?.componentId)
-          ?.elements?.some((e) => e.id === binding.path[2] && e.type === 'image');
-      if (image && (image.type === 'image' || image.kind === 'image' || scopedImage))
-        image.hidden = true;
-    }
+  const x: Expansion = {
+    d,
+    options,
+    slots: new Map(),
+    textOwners: new Map(),
+    textSlots: new Map(),
+    structureParts: {},
   };
-  for (const b of d.bindings) bind(content, b, inputs);
-  const structureParts: Record<string, string> = {};
-  for (const [repeatIndex, repeat] of d.repeats.entries()) {
-    const shape = d.structure?.repeat === repeatIndex ? structureItems(d, inputs) : undefined;
-    const raw = inputAt(inputs, repeat.slot);
-    if (!Array.isArray(raw)) problem('invalid-input', 'Expected repeat items', repeat.slot);
-    if (raw.length > d.overflow.maxItems)
-      problem('overflow', 'Too many repeated items', repeat.slot);
-    const chunks: unknown[] = repeat.chunkSize
-      ? Array.from({ length: Math.ceil(raw.length / repeat.chunkSize) }, (_, i) =>
-          raw.slice(i * repeat.chunkSize!, (i + 1) * repeat.chunkSize!),
-        )
-      : raw;
-    const records = chunks.flatMap((item, i) => {
-      const mapped = remapNative(
-        repeat.prototype,
-        undefined,
-        shape ? `repeat_${shape.ids[i]}` : undefined,
-      );
-      const copy = mapped.content;
-      if (shape)
-        for (const p of repeat.prototype as { id: string }[])
-          structureParts[itemPart(shape.ids[i], p.id)] = mapped.ids.get(p.id)!;
-      for (const b of repeat.bindings)
-        bind(copy, b, item, shape ? `${repeat.slot}.${shape.ids[i]}.${b.slot}` : repeat.slot);
-      transformBounds(
-        copy,
-        (i % (shape?.columns ?? repeat.columns ?? 1)) * (repeat.stepX ?? 0),
-        Math.floor(i / (shape?.columns ?? repeat.columns ?? 1)) * (repeat.stepY ?? 0),
-      );
-      return copy;
-    });
-    const existing = at(content, repeat.path) as { id?: string }[];
-    const before = repeat.beforeId ? existing.findIndex((v) => v.id === repeat.beforeId) : -1;
-    setAt(
-      content,
-      repeat.path,
-      before >= 0
-        ? [...existing.slice(0, before), ...records, ...existing.slice(before)]
-        : repeat.append
-          ? [...existing, ...records]
-          : records,
-    );
-  }
-  const resolve = (v: unknown, path: (string | number)[] = []): unknown => {
-    if (typeof v === 'string' && v.startsWith('asset://'))
-      return (
-        d.assets.find((a) => a.id === v.slice(8))?.data ??
-        problem('missing-asset', 'Missing portable asset')
-      );
-    if (Array.isArray(v))
-      return v
-        .filter(
-          (x) =>
-            options.preserveEmptyAssets ||
-            !!d.composition ||
-            !!d.structure ||
-            !(x && typeof x === 'object' && 'src' in x && x.src === ''),
-        )
-        .map((value, index) => resolve(value, [...path, index]));
-    if (v && typeof v === 'object') {
-      if (textOwners.has(v)) textSlots.set(JSON.stringify([...path, 'text']), textOwners.get(v)!);
-      return Object.fromEntries(
-        Object.entries(v).map(([k, x]) => [k, k === 'reuse' ? clone(x) : resolve(x, [...path, k])]),
-      );
-    }
-    return v;
-  };
-  content = resolve(content) as NativeContent;
+  for (const b of d.bindings) bindSlot(x, content, b, inputs);
+  for (const [repeatIndex, repeat] of d.repeats.entries())
+    expandRepeat(x, content, repeat, repeatIndex, inputs);
+  content = resolveAssets(x, content) as NativeContent;
   if (d.composition) applyCompositionInputs(content, d.composition, inputs, d.assets);
   if (d.composition) projectCompositionMembers(content, d.composition);
-  if (d.domain === 'design' && isDesign(content)) {
-    if (d.overflow.policy === 'expand') {
-      if (d.overflow.textScope === 'instance') {
-        content = layoutDesign(content);
-        expandDesignInstanceText(content);
-      } else
-        for (const e of content.elements) {
-          if (e.type === 'text') {
-            const size = e.typography?.fontSize ?? 20;
-            e.bounds.height = Math.max(
-              e.bounds.height,
-              textLines(e.text, e.bounds.width - 16, e.typography).length * size * 1.3 + 16,
-            );
-          }
-        }
-    }
-    content = layoutDesign(content);
+  content = layoutExpanded(d, content, options.includeSampleRows);
+  content = migrateNative(d.domain, content);
+  retainStructure(d, content, x.structureParts, inputs);
+  assertTemplateSize(content, templateLimits.expandedBytes);
+  if (options.remap !== false) content = remapExpanded(x, content);
+  assertNative(d.domain, content);
+  const diagnostics = expansionDiagnostics(x, content);
+  if (diagnostics.some((diagnostic) => diagnostic.severity === 'error'))
+    throw new TemplateError('overflow', 'Input does not fit this layout', diagnostics);
+  return { content, settings: undefined, inputs, diagnostics };
+}
+/** Applies one binding, recording which slot owns the bound native part and text. */
+function bindSlot(
+  x: Expansion,
+  root: unknown,
+  binding: Binding,
+  values: unknown,
+  slot = binding.slot,
+) {
+  const owner = at(root, binding.path.slice(0, -1)) as { id?: string };
+  if (owner?.id) x.slots.set(owner.id, slot);
+  if (owner && binding.path.at(-1) === 'text') x.textOwners.set(owner, slot);
+  applyBinding(root, binding, values, x.d.assets);
+  if (
+    x.d.structure &&
+    binding.mode === 'asset' &&
+    binding.optional &&
+    binding.path.at(-1) === 'src' &&
+    at(root, binding.path) === ''
+  )
+    hideEmptyImage(x.d, root, binding);
+}
+function hideEmptyImage(d: TemplateDefinition, root: unknown, binding: Binding) {
+  const image = at(root, binding.path.slice(0, -1)) as Record<string, unknown>;
+  const instance = at(root, [binding.path[0]]) as { componentId?: string };
+  const scopedImage =
+    d.domain === 'design' &&
+    binding.path[1] === 'overrides' &&
+    d.content &&
+    'components' in d.content &&
+    d.content.components
+      .find((c) => c.id === instance?.componentId)
+      ?.elements?.some((e) => e.id === binding.path[2] && e.type === 'image');
+  if (image && (image.type === 'image' || image.kind === 'image' || scopedImage))
+    image.hidden = true;
+}
+/** Expands one repeat's items from its prototype and splices them at its native path. */
+function expandRepeat(
+  x: Expansion,
+  content: NativeContent,
+  repeat: Repeat,
+  repeatIndex: number,
+  inputs: Record<string, InputValue>,
+) {
+  const { d } = x;
+  const shape = d.structure?.repeat === repeatIndex ? structureItems(d, inputs) : undefined;
+  const raw = inputAt(inputs, repeat.slot);
+  if (!Array.isArray(raw)) problem('invalid-input', 'Expected repeat items', repeat.slot);
+  if (raw.length > d.overflow.maxItems) problem('overflow', 'Too many repeated items', repeat.slot);
+  const chunks: unknown[] = repeat.chunkSize
+    ? Array.from({ length: Math.ceil(raw.length / repeat.chunkSize) }, (_, i) =>
+        raw.slice(i * repeat.chunkSize!, (i + 1) * repeat.chunkSize!),
+      )
+    : raw;
+  const records = chunks.flatMap((item, i) => repeatRecord(x, repeat, shape, item, i));
+  const existing = at(content, repeat.path) as { id?: string }[];
+  const before = repeat.beforeId ? existing.findIndex((v) => v.id === repeat.beforeId) : -1;
+  setAt(
+    content,
+    repeat.path,
+    before >= 0
+      ? [...existing.slice(0, before), ...records, ...existing.slice(before)]
+      : repeat.append
+        ? [...existing, ...records]
+        : records,
+  );
+}
+function repeatRecord(
+  x: Expansion,
+  repeat: Repeat,
+  shape: ReturnType<typeof structureItems> | undefined,
+  item: unknown,
+  i: number,
+) {
+  const mapped = remapNative(
+    repeat.prototype,
+    undefined,
+    shape ? `repeat_${shape.ids[i]}` : undefined,
+  );
+  const copy = mapped.content;
+  if (shape)
+    for (const p of repeat.prototype as { id: string }[])
+      x.structureParts[itemPart(shape.ids[i], p.id)] = mapped.ids.get(p.id)!;
+  for (const b of repeat.bindings)
+    bindSlot(x, copy, b, item, shape ? `${repeat.slot}.${shape.ids[i]}.${b.slot}` : repeat.slot);
+  transformBounds(
+    copy,
+    (i % (shape?.columns ?? repeat.columns ?? 1)) * (repeat.stepX ?? 0),
+    Math.floor(i / (shape?.columns ?? repeat.columns ?? 1)) * (repeat.stepY ?? 0),
+  );
+  return copy;
+}
+/** Inlines portable assets, drops unfilled legacy images and records bound text paths. */
+function resolveAssets(x: Expansion, v: unknown, path: (string | number)[] = []): unknown {
+  if (typeof v === 'string' && v.startsWith('asset://'))
+    return (
+      x.d.assets.find((a) => a.id === v.slice(8))?.data ??
+      problem('missing-asset', 'Missing portable asset')
+    );
+  if (Array.isArray(v))
+    return v
+      .filter(
+        (item) =>
+          x.options.preserveEmptyAssets ||
+          !!x.d.composition ||
+          !!x.d.structure ||
+          !(item && typeof item === 'object' && 'src' in item && item.src === ''),
+      )
+      .map((value, index) => resolveAssets(x, value, [...path, index]));
+  if (v && typeof v === 'object') {
+    if (x.textOwners.has(v))
+      x.textSlots.set(JSON.stringify([...path, 'text']), x.textOwners.get(v)!);
+    return Object.fromEntries(
+      Object.entries(v).map(([k, item]) => [
+        k,
+        k === 'reuse' ? clone(item) : resolveAssets(x, item, [...path, k]),
+      ]),
+    );
   }
+  return v;
+}
+/** Applies the expand overflow policy and Data sample-row choice to the expanded content. */
+function layoutExpanded(
+  d: TemplateDefinition,
+  content: NativeContent,
+  includeSampleRows?: boolean,
+): NativeContent {
+  if (d.domain === 'design' && isDesign(content)) content = layoutExpandedDesign(d, content);
   if (d.domain === 'whiteboard' && isWhiteboard(content) && d.overflow.policy === 'expand')
     for (const section of content.sections ?? []) {
       const nodes = content.nodes.filter((n) => n.sectionId === section.id);
@@ -517,35 +596,49 @@ export function expandTemplate(
         ...nodes.map((n) => n.bounds.y + n.bounds.height - section.bounds.y + 30),
       );
     }
-  if (d.domain === 'data' && isStructuredData(content) && options.includeSampleRows === false)
+  if (d.domain === 'data' && isStructuredData(content) && includeSampleRows === false)
     content.rows = [];
-  content = migrateNative(d.domain, content);
-  retainStructure(d, content, structureParts, inputs);
-  assertTemplateSize(content, templateLimits.expandedBytes);
-  if (options.remap !== false) {
-    const remapped = remapNative(content);
-    for (const [old, id] of remapped.ids) if (slots.has(old)) slots.set(id, slots.get(old)!);
-    const paths = [...textSlots];
-    textSlots.clear();
-    for (const [key, slot] of paths) {
-      const path = JSON.parse(key) as (string | number)[];
-      const mapped = path.map((part, index) =>
-        path[index - 1] === 'overrides' && typeof part === 'string'
-          ? (remapped.ids.get(part) ?? part)
-          : part,
-      );
-      textSlots.set(JSON.stringify(mapped), slot);
-    }
-    content = remapped.content;
+  return content;
+}
+function layoutExpandedDesign(d: TemplateDefinition, content: DesignContent) {
+  if (d.overflow.policy === 'expand') {
+    if (d.overflow.textScope === 'instance') {
+      content = layoutDesign(content);
+      expandDesignInstanceText(content);
+    } else
+      for (const e of content.elements) {
+        if (e.type === 'text') {
+          const size = e.typography?.fontSize ?? 20;
+          e.bounds.height = Math.max(
+            e.bounds.height,
+            textLines(e.text, e.bounds.width - 16, e.typography).length * size * 1.3 + 16,
+          );
+        }
+      }
   }
-  assertNative(d.domain, content);
-  const diagnostics =
-    isDesign(content) && d.overflow.textScope === 'instance'
-      ? collectLayoutDiagnostics(d, content, (path) => textSlots.get(JSON.stringify(path)))
-      : layoutDiagnostics(d, content).map((d) => ({ ...d, path: slots.get(d.path) ?? d.path }));
-  if (diagnostics.some((x) => x.severity === 'error'))
-    throw new TemplateError('overflow', 'Input does not fit this layout', diagnostics);
-  return { content, settings: undefined, inputs, diagnostics };
+  return layoutDesign(content);
+}
+/** Assigns fresh native ids and carries slot owners and override text paths across them. */
+function remapExpanded(x: Expansion, content: NativeContent) {
+  const remapped = remapNative(content);
+  for (const [old, id] of remapped.ids) if (x.slots.has(old)) x.slots.set(id, x.slots.get(old)!);
+  const paths = [...x.textSlots];
+  x.textSlots.clear();
+  for (const [key, slot] of paths) {
+    const path = JSON.parse(key) as (string | number)[];
+    const mapped = path.map((part, index) =>
+      path[index - 1] === 'overrides' && typeof part === 'string'
+        ? (remapped.ids.get(part) ?? part)
+        : part,
+    );
+    x.textSlots.set(JSON.stringify(mapped), slot);
+  }
+  return remapped.content;
+}
+function expansionDiagnostics(x: Expansion, content: NativeContent) {
+  return isDesign(content) && (x.d.overflow.textScope === 'instance' || !!x.d.structure)
+    ? collectLayoutDiagnostics(x.d, content, (path) => x.textSlots.get(JSON.stringify(path)))
+    : layoutDiagnostics(x.d, content).map((d) => ({ ...d, path: x.slots.get(d.path) ?? d.path }));
 }
 /** Deterministic template preflight, in native pixels; this is not a font-metric measurement. */
 export function measureTemplateTextFit(options: {
@@ -728,7 +821,10 @@ function collectLayoutDiagnostics(
   designTextPath?: (path: readonly (string | number)[]) => string | undefined,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const designInstanceText = isDesign(content) && d.overflow.textScope === 'instance';
+  // Variable Design recipes bind their bodies through instance overrides. Checking
+  // only the definition's placeholder text can silently accept clipped user input.
+  const designInstanceText =
+    isDesign(content) && (d.overflow.textScope === 'instance' || !!d.structure);
   const error = (path: string, message: string) =>
     diagnostics.push({ code: 'overflow', path, message, severity: 'error' });
   const walk = (v: unknown, recurse = true, path?: string) => {

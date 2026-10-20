@@ -9,7 +9,6 @@ import {
   id,
   object,
   ReactUiError,
-  same,
   unique,
 } from './data';
 import { loadReactUiDocument } from './document';
@@ -27,6 +26,9 @@ import {
   type ReactValueSchema,
   type ReactRuntimeResolution,
 } from './types';
+
+const documentDiagnostics = new WeakMap<ReactUiDocument, readonly ReactUiDiagnostic[]>();
+const documentFingerprints = new WeakMap<ReactUiDocument, string>();
 
 function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
   const diagnostics: ReactUiDiagnostic[] = [];
@@ -108,7 +110,13 @@ function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
         `${path}.component`,
         'Exact component registration is missing; retain the reference and obtain it from Host',
       );
-    else if (!same(component.ref, node.component))
+    // The map key already matches registry/component/version, and load checked
+    // all five reference fields. Compare both exact pins without hashing each
+    // reference again for every node in the composition.
+    else if (
+      component.ref.contractHash !== node.component.contractHash ||
+      component.ref.implementationHash !== node.component.implementationHash
+    )
       add(
         'component-mismatch',
         `${path}.component`,
@@ -275,7 +283,14 @@ function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
 export function inspectReactUiDocument(raw: unknown): ReactUiInspection {
   try {
     const document = loadReactUiDocument(raw);
-    return { document, diagnostics: inspect(document) };
+    let diagnostics = documentDiagnostics.get(document);
+    if (!diagnostics) {
+      diagnostics = deepFreeze(inspect(document));
+      documentDiagnostics.set(document, diagnostics);
+    }
+    // Public observations remain caller-owned; editing a diagnostic cannot turn
+    // a cached invalid composition into a successful export.
+    return { document, diagnostics: diagnostics.map((value) => ({ ...value })) };
   } catch (error) {
     return {
       diagnostics:
@@ -322,7 +337,12 @@ export function inspectReactRuntimeResolution(
 ): ReactUiDiagnostic[] {
   const resolution = validateReactRuntimeResolution(raw),
     diagnostics: ReactUiDiagnostic[] = [];
-  if (!same(document.environment.ref, resolution.environment))
+  const expectedEnvironment = document.environment.ref;
+  if (
+    expectedEnvironment.id !== resolution.environment.id ||
+    expectedEnvironment.version !== resolution.environment.version ||
+    expectedEnvironment.hash !== resolution.environment.hash
+  )
     diagnostics.push(
       diagnostic(
         'runtime-environment',
@@ -330,11 +350,18 @@ export function inspectReactRuntimeResolution(
         'Host resolved a different environment version/hash',
       ),
     );
+  // Validation above admits exactly these reference fields. Match identities
+  // once and compare both complete pins without rehashing every reference.
+  const resolvedComponents = new Map(
+    resolution.components.map((ref) => [reactComponentKey(ref), ref]),
+  );
   for (const component of document.components) {
-    const resolved = resolution.components.find(
-      (r) => reactComponentKey(r) === reactComponentKey(component.ref),
-    );
-    if (!resolved || !same(resolved, component.ref))
+    const resolved = resolvedComponents.get(reactComponentKey(component.ref));
+    if (
+      !resolved ||
+      resolved.contractHash !== component.ref.contractHash ||
+      resolved.implementationHash !== component.ref.implementationHash
+    )
       diagnostics.push(
         diagnostic(
           'runtime-component',
@@ -354,18 +381,20 @@ export function inspectReactRuntimeResolution(
       );
   return diagnostics;
 }
-/** W1 deterministic plan. Every semantic/runtime failure blocks even a partial success plan. */
-export function prepareReactUiExport(
+const defaultOutputPaths = Object.freeze([
+  'Screen.tsx',
+  'Screen.css',
+  'manifest.json',
+  'composition.json',
+  'README.md',
+]);
+/** Validate the owned composition and current exact runtime/output constraints.
+ * Rendering does not need to compute a fingerprint for an export plan. */
+export function prepareReactUiComposition(
   raw: unknown,
   resolution: unknown,
-  outputPaths: readonly string[] = [
-    'Screen.tsx',
-    'Screen.css',
-    'manifest.json',
-    'composition.json',
-    'README.md',
-  ],
-): ReactUiExportPlan {
+  outputPaths: readonly string[] = defaultOutputPaths,
+): ReactUiDocument {
   const inspected = inspectReactUiDocument(raw);
   if (!inspected.document || inspected.diagnostics.length)
     throw new ReactUiError(inspected.diagnostics);
@@ -385,9 +414,23 @@ export function prepareReactUiExport(
         ),
       );
   if (diagnostics.length) throw new ReactUiError(diagnostics);
+  return document;
+}
+/** W1 deterministic plan. Every semantic/runtime failure blocks even a partial success plan. */
+export function prepareReactUiExport(
+  raw: unknown,
+  resolution: unknown,
+  outputPaths: readonly string[] = defaultOutputPaths,
+): ReactUiExportPlan {
+  const document = prepareReactUiComposition(raw, resolution, outputPaths);
+  let fingerprint = documentFingerprints.get(document);
+  if (!fingerprint) {
+    fingerprint = reuseHash(document);
+    documentFingerprints.set(document, fingerprint);
+  }
   return deepFreeze({
     document,
-    fingerprint: reuseHash(document),
+    fingerprint,
     files: [...outputPaths],
     imports: document.components.map((c) => c.import),
     dependencies: document.environment.dependencies,

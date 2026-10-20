@@ -1,6 +1,7 @@
 import {
   validEmbeddedReference,
   validReferenceItems,
+  referenceLimitMessage,
   containsEmbeddedReference,
   describeReference,
   type EmbeddedReference,
@@ -18,13 +19,14 @@ import {
 } from './web-contract';
 import {
   clone,
+  canonicalJson,
   describeChanges,
   isDeepFrozen,
   newId,
   type CompareResult,
 } from '@editor-platform/artifact-core';
 import {
-  command,
+  command as nativeCommand,
   withCommandReads,
   drawingSvg,
   alignGeometry,
@@ -51,8 +53,9 @@ import {
   hierarchyPaintOrder,
   type Bounds,
   type EditorCommand,
+  shapeNames,
 } from '@editor-platform/editor-core';
-import { validNativeReuse, type ReuseState } from '@editor-platform/reuse-core';
+import { validNativeReuse, record, type ReuseState } from '@editor-platform/reuse-core';
 import { reactComponentKey } from '@editor-platform/react-ui-core';
 import {
   remapDesignInteractionTargets,
@@ -63,7 +66,10 @@ import {
 } from './prototype-contract';
 export * from './prototype-contract';
 import { validDesignVector, type DesignVector } from './vector';
+import { captureDesignData, designId, rejectDesign } from './command-data';
+export { DesignCommandError } from './command-data';
 export * from './vector';
+export * from './intents';
 export type DesignElementType =
   | 'frame'
   | 'rectangle'
@@ -149,12 +155,16 @@ export interface DesignContent {
 /** Projection-only native text location; never stored in Design content or SVG. */
 export interface DesignDrawing extends Drawing {
   textSourcePath?: readonly (string | number)[];
+  /** Instance-local text address, independent of drawing IDs and definition ownership. */
+  instanceText?: { elementId: string; partIds: readonly string[]; name: string };
 }
 type DesignSourcePath = (string | number)[];
 interface DesignDrawingSources {
   content: DesignContent;
   components: ReadonlyMap<string, DesignSourcePath>;
   owners: DesignSourcePath[];
+  instance?: { elementId: string; partIds: string[] };
+  locked?: boolean;
 }
 function designValueAt(
   content: DesignContent,
@@ -172,8 +182,11 @@ export const createDesign = (): DesignContent => ({
   components: [],
 });
 export function makeDesignElement(type: DesignElementType, index = 0): DesignElement {
+  return defaultDesignElement(type, index, newId('design'));
+}
+function defaultDesignElement(type: DesignElementType, index: number, id: string): DesignElement {
   return {
-    id: newId('design'),
+    id,
     type,
     name: `${type[0].toUpperCase() + type.slice(1)} ${index + 1}`,
     bounds: {
@@ -186,17 +199,360 @@ export function makeDesignElement(type: DesignElementType, index = 0): DesignEle
     fill: type === 'frame' ? '#ffffff' : type === 'text' ? '#304a39' : '#d4e3cf',
   };
 }
+export interface DesignPlacement {
+  id?: string;
+  bounds?: Bounds;
+  parentId?: string;
+  /** Position in the native flat elements array, inclusive 0..length. */
+  index?: number;
+}
+export interface DesignInsertOptions extends DesignPlacement {
+  src?: string;
+}
+export interface DesignInsertionCommand extends EditorCommand<DesignContent> {
+  readonly elementId: string;
+}
+function command(
+  type: string,
+  label: string,
+  apply: (content: DesignContent) => DesignContent,
+): EditorCommand<DesignContent> {
+  return nativeCommand(type, label, (current) => {
+    const next = apply(current);
+    assertDesignContent(next);
+    return next;
+  });
+}
+/** Trusted Hosts may guard arbitrary commands and current access at execution. */
+export function guardDesignCommand(
+  value: EditorCommand<DesignContent>,
+  writable: () => boolean = () => true,
+): EditorCommand<DesignContent> {
+  return {
+    ...value,
+    apply(current) {
+      if (!writable()) rejectDesign('design-read-only', 'Design is read only');
+      const next = value.apply(value.readonlyInput ? current : clone(current));
+      assertDesignContent(next);
+      return next;
+    },
+  };
+}
+export function assertDesignContent(value: unknown): asserts value is DesignContent {
+  if (!isDesign(value)) {
+    // isDesign also refuses an over-budget reference closure; report that limit first.
+    const elements = (value as { elements?: unknown } | null)?.elements;
+    if (Array.isArray(elements) && !validReferenceItems(elements))
+      rejectDesign('design-content', referenceLimitMessage);
+    rejectDesign('design-content', 'Command produced invalid Design content');
+  }
+  if (new Set(value.components.map((c) => c.id)).size !== value.components.length)
+    rejectDesign('design-content', 'Duplicate Design component ID');
+}
+function targetElement(d: DesignContent, id: string): DesignElement {
+  const e = d.elements.find((e) => e.id === id);
+  if (!e) rejectDesign('design-target', 'Design element not found', id);
+  return e;
+}
+function targetComponent(d: DesignContent, id: string): DesignComponent {
+  const c = d.components.find((c) => c.id === id);
+  if (!c) rejectDesign('design-target', 'Design component not found', id);
+  return c;
+}
+const elementFields = new Set([
+  'type',
+  'name',
+  'bounds',
+  'text',
+  'fill',
+  'src',
+  'parentId',
+  'componentId',
+  'overrides',
+  'styleId',
+  'clipContent',
+  'layout',
+  'sizing',
+  'constraints',
+  'reference',
+  'vector',
+  'interactions',
+  'react',
+  'web',
+  'webSlots',
+  'webProps',
+  'shape',
+  'stroke',
+  'strokeWidth',
+  'dash',
+  'opacity',
+  'radius',
+  'rotation',
+  'flipX',
+  'flipY',
+  'locked',
+  'hidden',
+  'typography',
+  'runs',
+  'imageFit',
+  'crop',
+  'alt',
+  'arrowhead',
+]);
+function componentPart(c: DesignComponent, id: string): DesignElement {
+  const part = c.elements?.find((e) => e.id === id);
+  if (part) return part;
+  if (!c.elements && id === 'root')
+    return {
+      ...defaultDesignElement(c.template.type, 0, id),
+      ...c.template,
+      bounds: { x: 0, y: 0, width: c.width, height: c.height },
+    };
+  return rejectDesign('design-target', 'Design component part not found', id);
+}
+function patchFields(value: unknown, allowed: readonly string[], path: string) {
+  if (!record(value) || Object.keys(value).some((key) => !allowed.includes(key)))
+    rejectDesign('design-patch', 'Unknown or invalid structured Design patch field', path);
+  return value;
+}
+const textStyleFields = [
+  'fontFamily',
+  'fontSize',
+  'bold',
+  'italic',
+  'underline',
+  'strike',
+  'color',
+  'lineHeight',
+  'letterSpacing',
+  'align',
+  'verticalAlign',
+  'padding',
+  'list',
+  'overflow',
+];
+/** Close native envelopes only. Public props, slot/breakpoint maps and retained
+ * foreign content keep their declared dictionary/domain-owned semantics. Web,
+ * React and interaction structures use their existing strict validators below. */
+function assertPatchStructures(patch: Record<string, unknown>, path: string) {
+  const structures: Record<string, readonly string[]> = {
+    bounds: ['x', 'y', 'width', 'height'],
+    layout: ['direction', 'gap', 'padding', 'align', 'sizing'],
+    constraints: ['horizontal', 'vertical'],
+    crop: ['x', 'y', 'scale'],
+    typography: textStyleFields,
+  };
+  for (const [key, allowed] of Object.entries(structures))
+    if (patch[key] !== undefined) patchFields(patch[key], allowed, `${path}.${key}`);
+  if (patch.runs !== undefined) {
+    if (!Array.isArray(patch.runs)) rejectDesign('design-patch', 'Expected text runs', path);
+    patch.runs.forEach((run, i) => {
+      const r = patchFields(run, ['text', 'style'], `${path}.runs.${i}`);
+      if (r.style !== undefined) patchFields(r.style, textStyleFields, `${path}.runs.${i}.style`);
+    });
+  }
+  if (patch.vector !== undefined) {
+    const vector = patchFields(patch.vector, ['viewBox', 'paths', 'provenance'], `${path}.vector`);
+    patchFields(vector.viewBox, structures.bounds, `${path}.vector.viewBox`);
+    patchFields(
+      vector.provenance,
+      ['source', 'name', 'version', 'license'],
+      `${path}.vector.provenance`,
+    );
+  }
+  if (patch.reference !== undefined) {
+    const ref = patchFields(
+      patch.reference,
+      ['schemaVersion', 'source', 'mode', 'fit', 'snapshot'],
+      `${path}.reference`,
+    );
+    const source = patchFields(
+      ref.source,
+      ['artifactId', 'domain', 'target'],
+      `${path}.reference.source`,
+    );
+    patchFields(
+      source.target,
+      ['kind', 'viewId', 'columnIds', 'rowIds', 'nodeIds'],
+      `${path}.reference.source.target`,
+    );
+    const snapshot = patchFields(
+      ref.snapshot,
+      ['artifactId', 'domain', 'versionId', 'revision', 'contentHash', 'content', 'dependencies'],
+      `${path}.reference.snapshot`,
+    );
+    if (!Array.isArray(snapshot.dependencies))
+      rejectDesign('design-patch', 'Expected reference dependencies', path);
+    snapshot.dependencies.forEach((dependency, i) =>
+      patchFields(
+        dependency,
+        ['id', 'contentHash', 'content'],
+        `${path}.reference.snapshot.dependencies.${i}`,
+      ),
+    );
+  }
+}
+function assertElementChange(
+  d: DesignContent,
+  element: DesignElement,
+  patch: unknown,
+  scope = d.elements,
+  templateOnly = false,
+): asserts patch is Partial<DesignElement> {
+  assertPatchShape(element, patch);
+  const next = { ...element, ...patch } as DesignElement;
+  if (!validElement(next))
+    rejectDesign('design-patch', 'Invalid Design element values', element.id);
+  // Schema 1/2 component templates can have type instance without retaining a
+  // componentId. Only the synthetic template projection skips that element check.
+  if (next.type === 'instance' && !templateOnly) targetComponent(d, next.componentId ?? '');
+  if (patch.parentId !== undefined) assertParentPatch(scope, element, patch.parentId);
+  if (patch.styleId !== undefined && !d.styles?.some((s) => s.id === patch.styleId))
+    rejectDesign('design-target', 'Design style not found', element.id);
+  if (patch.interactions !== undefined)
+    assertDesignInteractionTargets(d, patch.interactions as DesignInteraction[]);
+  if (patch.overrides !== undefined)
+    assertOverridesPatch(d, next, patch.overrides as Record<string, unknown>);
+}
+function assertPatchShape(
+  element: DesignElement,
+  patch: unknown,
+): asserts patch is Partial<DesignElement> {
+  if (!record(patch) || Object.keys(patch).some((key) => !elementFields.has(key)))
+    rejectDesign('design-patch', 'Unknown or immutable Design element field', element.id);
+  assertPatchStructures(patch, element.id);
+  if (Object.hasOwn(patch, 'type') && patch.type !== element.type)
+    rejectDesign('design-type', 'Element type is immutable in a Design patch', element.id);
+  if (Object.hasOwn(patch, 'react')) assertReactPatch(element, patch.react);
+}
+function assertReactPatch(element: DesignElement, react: unknown) {
+  if (
+    element.type !== 'react' ||
+    !element.react ||
+    !record(react) ||
+    ['component', 'import', 'slots'].some(
+      (key) =>
+        canonicalJson(react[key]) !==
+        canonicalJson(element.react![key as keyof DesignReactReference]),
+    )
+  )
+    rejectDesign(
+      'design-react',
+      'Use registered React commands to change component identity or slots',
+      element.id,
+    );
+}
+function assertParentPatch(scope: DesignElement[], element: DesignElement, parentId: unknown) {
+  if (
+    typeof parentId !== 'string' ||
+    !scope.some((e) => e.id === parentId && ['frame', 'group'].includes(e.type))
+  )
+    rejectDesign('design-parent', 'Parent must be an existing frame or group', element.id);
+  if (descendantIds(scope, [element.id]).has(parentId as string))
+    rejectDesign('design-parent', 'A layer cannot become its own ancestor', element.id);
+  assertEditable(scope, [parentId as string]);
+}
+function assertOverridesPatch(
+  d: DesignContent,
+  next: DesignElement,
+  overrides: Record<string, unknown>,
+) {
+  const c = targetComponent(d, next.componentId ?? '');
+  for (const [id, override] of Object.entries(overrides))
+    assertElementChange(d, componentPart(c, id), override, c.elements ?? [], !c.elements);
+  if (
+    c.elements &&
+    !validElements(
+      c.elements.map((part) =>
+        applyDesignOverride(part, (overrides as DesignElement['overrides'])?.[part.id]),
+      ),
+    )
+  )
+    rejectDesign('design-patch', 'Invalid effective component part hierarchy or values');
+}
+export function assertDesignInteractionTargets(
+  d: DesignContent,
+  interactions: DesignInteraction[] | undefined,
+): void {
+  if (
+    interactions !== undefined &&
+    (!validDesignInteractions(interactions) ||
+      interactions.some(
+        (i) =>
+          'frameId' in i.action &&
+          !d.elements.some(
+            (e) => e.type === 'frame' && e.id === ('frameId' in i.action ? i.action.frameId : ''),
+          ),
+      ))
+  )
+    rejectDesign('design-prototype-target', 'Interaction target must be an existing Design frame');
+}
+function insertPlaced(
+  d: DesignContent,
+  element: DesignElement,
+  options: DesignPlacement,
+): DesignContent {
+  const raw: unknown = options;
+  if (
+    !record(raw) ||
+    Object.keys(raw).some((k) => !['id', 'bounds', 'parentId', 'index', 'src'].includes(k))
+  )
+    rejectDesign('design-placement', 'Unknown Design insertion option');
+  if (options.id !== undefined) designId(options.id);
+  if (options.bounds !== undefined && !validBounds(options.bounds))
+    rejectDesign('design-bounds', 'Invalid insertion bounds');
+  designId(element.id);
+  if (d.elements.some((e) => e.id === element.id))
+    rejectDesign('design-id', 'Duplicate Design element ID', element.id);
+  if (options.parentId !== undefined) {
+    const parent = targetElement(d, options.parentId);
+    if (!['frame', 'group'].includes(parent.type))
+      rejectDesign('design-parent', 'Parent must be a frame or group', options.parentId);
+    assertEditable(d.elements, [parent.id]);
+  }
+  const index = options.index ?? d.elements.length;
+  if (!Number.isSafeInteger(index) || index < 0 || index > d.elements.length)
+    rejectDesign('design-index', 'Insertion index must be within the native elements array');
+  const elements = [...d.elements];
+  elements.splice(index, 0, {
+    ...element,
+    ...(options.bounds ? { bounds: clone(options.bounds) } : {}),
+    ...(options.parentId === undefined ? {} : { parentId: options.parentId }),
+  });
+  return { ...d, elements };
+}
 export const insertElement = (
   type: DesignElementType,
-  src?: string,
-): EditorCommand<DesignContent> =>
-  command('design.insert', `Add ${type}`, (d) => ({
-    ...d,
-    elements: [
-      ...d.elements,
-      { ...makeDesignElement(type, d.elements.length), ...(src ? { src } : {}) },
-    ],
-  }));
+  source?: string | DesignInsertOptions,
+): DesignInsertionCommand => {
+  if (source !== undefined && typeof source !== 'string' && !record(source as unknown))
+    rejectDesign('design-placement', 'Expected an image source string or insertion options');
+  const options = captureDesignData(
+    typeof source === 'string' ? (source ? { src: source } : {}) : (source ?? {}),
+  );
+  const elementId = options.id ?? newId('design');
+  return {
+    ...withCommandReads(
+      command('design.insert', `Add ${type}`, (d) => {
+        if (!['frame', 'rectangle', 'text', 'image', 'group', 'shape'].includes(type))
+          rejectDesign(
+            'design-type',
+            'Use the registered component insertion API for instances and React',
+          );
+        return insertPlaced(
+          d,
+          {
+            ...defaultDesignElement(type, d.elements.length, elementId),
+            ...(options.src === undefined ? {} : { src: options.src }),
+          },
+          options,
+        );
+      }),
+      { content: ['*'] },
+    ),
+    elementId,
+  };
+};
 /** Create an editable, attributed icon/path shape; colors use normal fill/stroke styles. */
 export function makeDesignVector(vector: DesignVector, index = 0): DesignElement {
   if (!validDesignVector(vector)) throw new Error('Invalid Design vector geometry or provenance');
@@ -218,11 +574,15 @@ export function makeDesignVector(vector: DesignVector, index = 0): DesignElement
 export const updateElement = (
   id: string,
   patch: Partial<Omit<DesignElement, 'id'>>,
-): EditorCommand<DesignContent> =>
-  command('design.update', 'Edit element', (d) => ({
-    ...d,
-    elements: d.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-  }));
+): EditorCommand<DesignContent> => {
+  const owned = captureDesignData(patch);
+  return command('design.update', 'Edit element', (d) => {
+    const e = targetElement(d, id);
+    assertEditable(d.elements, [id]);
+    assertElementChange(d, e, owned);
+    return { ...d, elements: d.elements.map((e) => (e.id === id ? { ...e, ...owned } : e)) };
+  });
+};
 function descendants(d: DesignContent, ids: string[]): Set<string> {
   const all = new Set(ids);
   let added = true;
@@ -239,13 +599,30 @@ function descendants(d: DesignContent, ids: string[]): Set<string> {
 export const transformElements = (
   ids: string[],
   delta: TransformDelta,
-): EditorCommand<DesignContent> =>
-  withCommandReads<DesignContent>(
-    immutableCommand('design.transform', 'Transform elements', (d) =>
-      transformDesign(d, ids, delta),
-    ),
+): EditorCommand<DesignContent> => {
+  ids = captureDesignData(ids);
+  delta = captureDesignData(delta);
+  return withCommandReads<DesignContent>(
+    immutableCommand('design.transform', 'Transform elements', (d) => {
+      if (
+        !record(delta as unknown) ||
+        Object.keys(delta).some((key) => !['dx', 'dy', 'dw', 'dh', 'rotation'].includes(key)) ||
+        ['dx', 'dy', 'dw', 'dh'].some(
+          (key) =>
+            typeof delta[key as keyof TransformDelta] !== 'number' ||
+            !Number.isFinite(delta[key as keyof TransformDelta]),
+        ) ||
+        (delta.rotation !== undefined && !Number.isFinite(delta.rotation))
+      )
+        rejectDesign('design-transform', 'Invalid Design transform delta');
+      for (const id of ids) targetElement(d, id);
+      const next = transformDesign(d, ids, delta);
+      assertDesignContent(next);
+      return next;
+    }),
     { geometry: ids },
   );
+};
 
 /** Relationships stay fixed throughout one geometry/layout operation. */
 function designGeometryIndex(elements: DesignElement[]) {
@@ -519,6 +896,7 @@ export const createComponent = (
 ): EditorCommand<DesignContent> =>
   withCommandReads<DesignContent>(
     command('design.component', 'Create component', (d) => {
+      designId(componentId);
       const ids = typeof input === 'string' ? [input] : input,
         roots = assertEditable(d.elements, ids, true);
       if (!roots.length) throw new Error('Select at least one element');
@@ -589,37 +967,89 @@ export const createComponent = (
     }),
     { content: typeof input === 'string' ? [input] : input },
   );
-export const insertInstance = (id: string): EditorCommand<DesignContent> =>
-  withCommandReads<DesignContent>(
-    command('design.instance', 'Insert component instance', (d) => {
-      const c = d.components.find((c) => c.id === id);
-      if (!c) throw new Error('Component not found');
-      const element = makeDesignElement('instance', d.elements.length);
-      return {
-        ...d,
-        elements: [
-          ...d.elements,
+export const insertInstance = (
+  id: string,
+  placement: DesignPlacement = {},
+): DesignInsertionCommand => {
+  if (!record(placement as unknown))
+    rejectDesign('design-placement', 'Expected instance insertion options');
+  const options = captureDesignData(placement);
+  const elementId = options.id ?? newId('design');
+  return {
+    ...withCommandReads(
+      command('design.instance', 'Insert component instance', (d) => {
+        if (Object.hasOwn(options, 'src'))
+          rejectDesign('design-placement', 'Instance placement does not accept src');
+        const c = targetComponent(d, id);
+        const element = defaultDesignElement('instance', d.elements.length, elementId);
+        return insertPlaced(
+          d,
           {
             ...element,
             name: `${c.name} instance`,
             componentId: c.id,
             bounds: { ...element.bounds, width: c.width, height: c.height },
           },
-        ],
-      };
-    }),
-    { content: [id] },
-  );
+          options,
+        );
+      }),
+      { content: ['*'] },
+    ),
+    elementId,
+  };
+};
 export const updateComponent = (
   id: string,
   patch: Partial<DesignComponent['template']>,
-): EditorCommand<DesignContent> =>
-  command('design.component-update', 'Update component definition', (d) => ({
-    ...d,
-    components: d.components.map((c) =>
-      c.id === id ? { ...c, template: { ...c.template, ...patch } } : c,
-    ),
-  }));
+): EditorCommand<DesignContent> => {
+  const owned = captureDesignData(patch);
+  return command('design.component-update', 'Update component definition', (d) => {
+    const c = targetComponent(d, id);
+    assertElementChange(
+      d,
+      {
+        ...defaultDesignElement(c.template.type, 0, 'root'),
+        ...c.template,
+        bounds: { x: 0, y: 0, width: c.width, height: c.height },
+      },
+      owned,
+      [],
+      true,
+    );
+    if (
+      Object.keys(owned).some(
+        (key) =>
+          ![
+            'type',
+            'text',
+            'fill',
+            'typography',
+            'runs',
+            'stroke',
+            'strokeWidth',
+            'opacity',
+            'shape',
+            'radius',
+            'dash',
+            'alt',
+            'imageFit',
+            'crop',
+            'web',
+            'interactions',
+            'vector',
+            'src',
+          ].includes(key),
+      )
+    )
+      rejectDesign('design-patch', 'Unsupported Design component template field', id);
+    return {
+      ...d,
+      components: d.components.map((c) =>
+        c.id === id ? { ...c, template: { ...c.template, ...owned } } : c,
+      ),
+    };
+  });
+};
 export function appearance(d: DesignContent, e: DesignElement): DesignElement {
   const c = e.type === 'instance' ? d.components.find((c) => c.id === e.componentId) : undefined,
     shared = d.styles?.find((s) => s.id === e.styleId)?.appearance ?? {};
@@ -696,6 +1126,31 @@ function instanceParts(
     };
   });
 }
+function designPartAppearance(
+  d: DesignContent,
+  part: DesignElement,
+  override?: Partial<DesignElement>,
+): DesignElement {
+  const nested =
+    part.type === 'instance'
+      ? d.components.find((c) => c.id === (override?.componentId ?? part.componentId))
+      : undefined;
+  const primitive = nested && !nested.elements;
+  const styled = appearance(d, {
+    ...part,
+    ...(override?.styleId ? { styleId: override.styleId } : {}),
+    ...(primitive
+      ? { componentId: nested.id, overrides: override?.overrides ?? part.overrides }
+      : {}),
+  });
+  const patched = applyDesignOverride(styled, override);
+  // Resolve primitive templates before direct part overrides, then explicit roots.
+  return {
+    ...(primitive ? applyDesignOverride(patched, override?.overrides?.root) : patched),
+    ...(primitive ? { type: styled.type } : {}),
+    styleId: undefined,
+  };
+}
 /** The same effective layout, overrides and world geometry used by canvas/export. */
 export function designInstanceElements(
   d: DesignContent,
@@ -704,18 +1159,13 @@ export function designInstanceElements(
 ): DesignElement[] {
   const c = d.components.find((c) => c.id === raw.componentId);
   if (!c?.elements) return [];
-  const effective = c.elements.map((part) => {
-    const override = raw.overrides?.[part.id];
-    const styled = appearance(d, {
-      ...part,
-      ...(override?.styleId ? { styleId: override.styleId } : {}),
-    });
-    return { ...applyDesignOverride(styled, override), styleId: undefined };
-  });
+  const effective = c.elements.map((part) =>
+    designPartAppearance(d, part, raw.overrides?.[part.id]),
+  );
   const local = effective.some((part) => part.layout && part.layout.direction !== 'absolute')
     ? layoutDesignElements(effective)
     : effective;
-  return instanceParts({ ...c, elements: local }, { ...raw, overrides: {} }, idFor);
+  return instanceParts({ ...c, elements: local }, { ...appearance(d, raw), overrides: {} }, idFor);
 }
 /** Call-scoped projector for one immutable render/export snapshot. */
 export function designDrawingProjector(d: DesignContent) {
@@ -731,9 +1181,97 @@ export function designDrawingProjector(d: DesignContent) {
       owners: elements.has(raw.id) ? [elements.get(raw.id)!] : [],
     });
 }
-export function designDrawings(d: DesignContent, raw: DesignElement): Drawing[] {
+export function designDrawings(d: DesignContent, raw: DesignElement): DesignDrawing[] {
   return designDrawingProjector(d)(raw);
 }
+/** Private drawing-hierarchy IDs for instance parts that cannot alias native records. */
+function allocatePartIds(d: DesignContent, instanceId: string, c: DesignComponent) {
+  const occupied = new Set(d.elements.map((e) => e.id));
+  const partIds = new Map<string, string>();
+  for (const part of c.elements ?? []) {
+    const base = `${instanceId}-${part.id}`;
+    let id = base,
+      suffix = 0;
+    while (occupied.has(id)) id = `${base}-${suffix++}`;
+    occupied.add(id);
+    partIds.set(part.id, id);
+  }
+  return partIds;
+}
+/** Source paths that own a part's editable values, most specific first. */
+function partOwners(
+  raw: DesignElement,
+  part: DesignElement,
+  partOwner: DesignSourcePath,
+  enclosingOwner: DesignSourcePath | undefined,
+  primitive: DesignComponent | undefined,
+  sources: DesignDrawingSources,
+): DesignSourcePath[] {
+  if (!primitive) return [...(enclosingOwner ? [enclosingOwner] : []), partOwner];
+  return [
+    ...(enclosingOwner ? [[...enclosingOwner, 'overrides', 'root'], enclosingOwner] : []),
+    ...(raw.overrides?.[part.id]?.overrides === undefined
+      ? [[...partOwner, 'overrides', 'root']]
+      : []),
+    [...sources.components.get(primitive.id)!, 'template'],
+  ];
+}
+function projectInstanceParts(
+  d: DesignContent,
+  raw: DesignElement,
+  e: DesignElement,
+  c: DesignComponent & { elements: DesignElement[] },
+  drawingId: string,
+  sources: DesignDrawingSources,
+  locked: boolean,
+  overrideOwner: DesignSourcePath | undefined,
+): DesignDrawing[] {
+  const partIds = allocatePartIds(d, raw.id, c);
+  const parts = designInstanceElements(d, e, (id) => partIds.get(id)!);
+  const virtual = {
+    ...d,
+    elements: [...d.elements.filter((e) => e.id !== raw.id), e, ...parts],
+    components: d.components.filter((x) => x.id !== c.id),
+  };
+  const addresses = new Map(
+    c.elements.map((part, partIndex) => [
+      partIds.get(part.id)!,
+      { drawingId: `${drawingId}-${part.id}`, part, partIndex },
+    ]),
+  );
+  const virtualIndex = new Map(virtual.elements.map((e) => [e.id, e]));
+  // Private hierarchy IDs cannot alias native records. Keep existing public
+  // drawing addresses while preserving ancestor clipping and hidden state.
+  return designPaintOrder(virtual)
+    .filter((e) => addresses.has(e.id))
+    .flatMap((e) => {
+      const address = addresses.get(e.id)!;
+      const native = applyDesignOverride(address.part, raw.overrides?.[address.part.id]);
+      const primitive =
+        native.type === 'instance'
+          ? d.components.find((c) => c.id === native.componentId && !c.elements)
+          : undefined;
+      const partOwner = [...sources.components.get(c.id)!, 'elements', address.partIndex];
+      const enclosingOwner = overrideOwner
+        ? [...overrideOwner, 'overrides', address.part.id]
+        : undefined;
+      return projectDesignDrawing(virtual, e, virtualIndex, address.drawingId, {
+        ...sources,
+        instance: {
+          elementId: sources.instance?.elementId ?? raw.id,
+          partIds: [
+            ...(sources.instance?.partIds ?? []),
+            address.part.id,
+            ...(primitive ? ['root'] : []),
+          ],
+        },
+        locked: locked || lockedAncestor(virtual, virtualIndex, e),
+        owners: partOwners(raw, address.part, partOwner, enclosingOwner, primitive, sources),
+      });
+    });
+}
+const drawingKind = (type: DesignElement['type']): DesignDrawing['kind'] =>
+  type === 'text' ? 'text' : type === 'image' ? 'image' : type === 'group' ? 'group' : 'shape';
 function projectDesignDrawing(
   d: DesignContent,
   raw: DesignElement,
@@ -741,88 +1279,138 @@ function projectDesignDrawing(
   drawingId: string,
   sources: DesignDrawingSources,
 ): DesignDrawing[] {
-  if (raw.hidden) return [];
+  const e = appearance(d, raw);
+  if (raw.hidden || e.hidden) return [];
+  const locked = sources.locked || !!raw.locked || !!e.locked;
   const c =
     raw.type === 'instance' ? d.components.find((c) => c.id === raw.componentId) : undefined;
   const overrideOwner = sources.owners.find(
     (path) => designValueAt(sources.content, path)?.overrides !== undefined,
   );
-  if (c?.elements) {
-    const occupied = new Set(d.elements.map((e) => e.id));
-    const partIds = new Map<string, string>();
-    for (const part of c.elements) {
-      const base = `${raw.id}-${part.id}`;
-      let id = base,
-        suffix = 0;
-      while (occupied.has(id)) id = `${base}-${suffix++}`;
-      occupied.add(id);
-      partIds.set(part.id, id);
-    }
-    const parts = designInstanceElements(d, raw, (id) => partIds.get(id)!);
-    const virtual = {
-      ...d,
-      elements: [...d.elements.filter((e) => e.id !== raw.id), raw, ...parts],
-      components: d.components.filter((x) => x.id !== c.id),
-    };
-    const addresses = new Map(
-      c.elements.map((part, partIndex) => [
-        partIds.get(part.id)!,
-        {
-          drawingId: `${drawingId}-${part.id}`,
-          part,
-          partIndex,
-        },
-      ]),
+  if (c?.elements)
+    return projectInstanceParts(
+      d,
+      raw,
+      e,
+      { ...c, elements: c.elements },
+      drawingId,
+      sources,
+      locked,
+      overrideOwner,
     );
-    const virtualIndex = new Map(virtual.elements.map((e) => [e.id, e]));
-    // Private hierarchy IDs cannot alias native records. Keep existing public
-    // drawing addresses while preserving ancestor clipping and hidden state.
-    return designPaintOrder(virtual)
-      .filter((e) => addresses.has(e.id))
-      .flatMap((e) => {
-        const address = addresses.get(e.id)!;
-        return projectDesignDrawing(virtual, e, virtualIndex, address.drawingId, {
-          ...sources,
-          owners: [
-            ...(overrideOwner ? [[...overrideOwner, 'overrides', address.part.id]] : []),
-            [...sources.components.get(c.id)!, 'elements', address.partIndex],
-          ],
-        });
-      });
-  }
-  const e = appearance(d, raw);
-  const textOwners =
-    c && !c.elements
-      ? [
-          ...(overrideOwner ? [[...overrideOwner, 'overrides', 'root']] : []),
-          [...sources.components.get(c.id)!, 'template'],
-          ...sources.owners,
-        ]
-      : sources.owners;
+  const primitive = c && !c.elements ? c : undefined;
+  const { textOwner, textInstance } = textSource(raw, primitive, sources, overrideOwner);
+  const editable =
+    !!textInstance &&
+    textInstance.partIds.length <= 16 &&
+    !locked &&
+    unlockedVisibleText(d, index, raw, e);
+  return [
+    leafDrawing(
+      e,
+      raw,
+      drawingId,
+      index,
+      textOwner,
+      editable ? { ...textInstance!, name: raw.name } : undefined,
+    ),
+  ];
+}
+/** A primitive (template-only) instance edits its template text through the instance root. */
+const unlockedVisibleText = (
+  d: DesignContent,
+  index: ReadonlyMap<string, DesignElement>,
+  raw: DesignElement,
+  e: DesignElement,
+) =>
+  !e.locked &&
+  !e.hidden &&
+  !lockedAncestor(d, index, raw) &&
+  ['text', 'shape', 'rectangle'].includes(e.type);
+function textSource(
+  raw: DesignElement,
+  primitive: DesignComponent | undefined,
+  sources: DesignDrawingSources,
+  overrideOwner: DesignSourcePath | undefined,
+) {
+  const textOwners = primitive
+    ? [
+        ...(overrideOwner ? [[...overrideOwner, 'overrides', 'root']] : []),
+        [...sources.components.get(primitive.id)!, 'template'],
+        ...sources.owners,
+      ]
+    : sources.owners;
   const textOwner = textOwners.find(
     (path) => typeof designValueAt(sources.content, path)?.text === 'string',
   );
-  return [
-    {
-      ...e,
-      id: drawingId,
-      imageFit: raw.reference ? (raw.reference.fit === 'cover' ? 'fill' : 'fit') : e.imageFit,
-      textSourcePath: textOwner ? [...textOwner, 'text'] : undefined,
-      vector: e.type === 'shape' && validDesignVector(e.vector) ? e.vector : undefined,
-      clipBounds: frameClips(index, raw),
-      kind:
-        e.type === 'text'
-          ? 'text'
-          : e.type === 'image'
-            ? 'image'
-            : e.type === 'group'
-              ? 'group'
-              : 'shape',
-      shape: e.shape ?? 'rectangle',
-      typography: e.typography ?? { fontSize: 28 },
-      text: e.type === 'frame' ? '' : e.text,
-    },
-  ];
+  const textInstance = primitive
+    ? {
+        elementId: sources.instance?.elementId ?? raw.id,
+        partIds: [...(sources.instance?.partIds ?? []), 'root'],
+      }
+    : sources.instance;
+  return { textOwner, textInstance };
+}
+function leafDrawing(
+  e: DesignElement,
+  raw: DesignElement,
+  drawingId: string,
+  index: ReadonlyMap<string, DesignElement>,
+  textOwner: DesignSourcePath | undefined,
+  instanceText: DesignDrawing['instanceText'],
+): DesignDrawing {
+  return {
+    ...e,
+    id: drawingId,
+    imageFit: raw.reference ? (raw.reference.fit === 'cover' ? 'fill' : 'fit') : e.imageFit,
+    textSourcePath: textOwner ? [...textOwner, 'text'] : undefined,
+    instanceText,
+    vector: e.type === 'shape' && validDesignVector(e.vector) ? e.vector : undefined,
+    clipBounds: frameClips(index, raw),
+    kind: drawingKind(e.type),
+    shape: e.shape ?? 'rectangle',
+    typography: e.typography ?? { fontSize: 28 },
+    text: e.type === 'frame' ? '' : e.text,
+  };
+}
+function lockedAncestor(
+  d: DesignContent,
+  index: ReadonlyMap<string, DesignElement>,
+  e: DesignElement,
+): boolean {
+  const seen = new Set<string>();
+  let parent = e.parentId ? index.get(e.parentId) : undefined;
+  while (parent && !seen.has(parent.id)) {
+    const effective = appearance(d, parent);
+    if (parent.locked || parent.hidden || effective.locked || effective.hidden) return true;
+    seen.add(parent.id);
+    parent = parent.parentId ? index.get(parent.parentId) : undefined;
+  }
+  return false;
+}
+function assertDesignPathEditable(
+  d: DesignContent,
+  scope: DesignElement[],
+  id: string,
+  skipSelf = false,
+) {
+  const index = new Map(scope.map((e) => [e.id, e]));
+  const seen = new Set<string>();
+  let element = index.get(id);
+  while (element && !seen.has(element.id)) {
+    const effective = appearance(d, element);
+    if (
+      (!skipSelf || element.id !== id) &&
+      (element.locked || element.hidden || effective.locked || effective.hidden)
+    )
+      rejectDesign(
+        'design-target',
+        'Unlock and show the addressed element and its ancestors before editing',
+        id,
+      );
+    seen.add(element.id);
+    element = element.parentId ? index.get(element.parentId) : undefined;
+  }
 }
 export function designDiff(a: DesignContent, b: DesignContent): CompareResult {
   const interactions = (items: DesignInteraction[] | undefined) =>
@@ -901,47 +1489,84 @@ export function exportDesignSvg(
     options.background,
   );
 }
-/** Parent backgrounds precede their own children; sibling order remains the stored layer order. */
+/** Native paint order with effective visibility, including hidden ancestor subtrees. */
 export function designPaintOrder(d: DesignContent): DesignElement[] {
-  return hierarchyPaintOrder(d.elements, (e) => e.parentId);
+  return hierarchyPaintOrder(
+    d.elements.map((e) => (!e.hidden && appearance(d, e).hidden ? { ...e, hidden: true } : e)),
+    (e) => e.parentId,
+  );
 }
 const checkedElements = new WeakSet<DesignElement>();
 const checkedElementLists = new WeakSet<DesignElement[]>();
 const checkedComponents = new WeakSet<DesignComponent>();
-function validElement(e: DesignElement): boolean {
-  if (checkedElements.has(e)) return true;
-  const valid =
-    !!e &&
+const optional = <T>(value: T | undefined, check: (value: T) => boolean) =>
+  value === undefined || check(value);
+const oneOf = (values: readonly unknown[]) => (value: unknown) => values.includes(value);
+const validLayout = (layout: NonNullable<DesignElement['layout']>) =>
+  record(layout) &&
+  ['row', 'column', 'absolute'].includes(layout.direction) &&
+  Number.isFinite(layout.gap) &&
+  layout.gap >= 0 &&
+  Number.isFinite(layout.padding) &&
+  layout.padding >= 0 &&
+  ['start', 'center', 'end'].includes(layout.align) &&
+  ['fixed', 'hug'].includes(layout.sizing);
+const validCrop = (crop: NonNullable<DesignElement['crop']>) =>
+  !!crop &&
+  Number.isFinite(crop.x) &&
+  Number.isFinite(crop.y) &&
+  Number.isFinite(crop.scale) &&
+  crop.scale > 0;
+const validConstraints = (constraints: NonNullable<DesignElement['constraints']>) =>
+  !!constraints &&
+  ['left', 'right', 'center', 'stretch', 'scale'].includes(constraints.horizontal) &&
+  ['top', 'bottom', 'center', 'stretch', 'scale'].includes(constraints.vertical);
+const validWebSlots = (slots: NonNullable<DesignElement['webSlots']>) =>
+  validDesignWebData(slots) &&
+  Object.values(slots).every(
+    (ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string'),
+  );
+const validImageSource = (src: string) =>
+  src === '' ||
+  (typeof src === 'string' && /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/.test(src));
+const optionalStringKeys = ['parentId', 'componentId', 'styleId', 'alt', 'dash'] as const;
+/** Per-record element checks, in evaluation order. Relationships are checked on the list. */
+const elementChecks: ((e: DesignElement) => boolean)[] = [
+  (e) =>
     typeof e.id === 'string' &&
     typeof e.name === 'string' &&
     typeof e.text === 'string' &&
-    typeof e.fill === 'string' &&
-    (e.interactions === undefined || validDesignInteractions(e.interactions)) &&
-    (e.overrides === undefined || validDesignOverrides(e.overrides)) &&
-    validVisualStyle(e) &&
-    (e.reference === undefined || (e.type === 'image' && validEmbeddedReference(e.reference))) &&
-    (e.vector === undefined || (e.type === 'shape' && validDesignVector(e.vector))) &&
-    ['frame', 'rectangle', 'text', 'image', 'group', 'instance', 'shape', 'react'].includes(
-      e.type,
-    ) &&
-    (e.react === undefined || validDesignReactReference(e.react)) &&
-    (e.webProps === undefined || validDesignWebData(e.webProps)) &&
-    (e.webSlots === undefined ||
-      (validDesignWebData(e.webSlots) &&
-        Object.values(e.webSlots).every(
-          (ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string'),
-        ))) &&
-    (e.type !== 'react' || !!e.react) &&
-    (e.web === undefined || validDesignWebElement(e.web)) &&
-    validBounds(e.bounds) &&
-    (e.constraints === undefined ||
-      (!!e.constraints &&
-        ['left', 'right', 'center', 'stretch', 'scale'].includes(e.constraints.horizontal) &&
-        ['top', 'bottom', 'center', 'stretch', 'scale'].includes(e.constraints.vertical))) &&
-    (e.src === undefined ||
-      e.src === '' ||
-      (typeof e.src === 'string' &&
-        /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/.test(e.src)));
+    typeof e.fill === 'string',
+  (e) => optional(e.interactions, validDesignInteractions),
+  (e) => optional(e.overrides, (o) => validDesignOverrides(o)),
+  (e) => validVisualStyle(e),
+  (e) => optional(e.reference, (r) => e.type === 'image' && validEmbeddedReference(r)),
+  (e) => optional(e.vector, (v) => e.type === 'shape' && validDesignVector(v)),
+  (e) =>
+    ['frame', 'rectangle', 'text', 'image', 'group', 'instance', 'shape', 'react'].includes(e.type),
+  (e) => optional(e.react, validDesignReactReference),
+  (e) => optional(e.webProps, validDesignWebData),
+  (e) => optional(e.webSlots, validWebSlots),
+  (e) => e.type !== 'react' || !!e.react,
+  (e) => optional(e.web, validDesignWebElement),
+  (e) => validBounds(e.bounds),
+  (e) => optional(e.layout, validLayout),
+  (e) => optional(e.sizing, oneOf(['fixed', 'hug', 'fill'])),
+  (e) => optional(e.clipContent, (v) => typeof v === 'boolean'),
+  (e) => optional(e.shape, oneOf(shapeNames)),
+  (e) => optional(e.imageFit, oneOf(['fit', 'fill'])),
+  (e) => optional(e.arrowhead, oneOf(['none', 'end', 'both'])),
+  (e) => optional(e.strokeWidth, (v) => v >= 0),
+  (e) => optional(e.radius, (v) => v >= 0),
+  (e) => optional(e.crop, validCrop),
+  (e) =>
+    optionalStringKeys.every((key) => optional(e[key] as unknown, (v) => typeof v === 'string')),
+  (e) => optional(e.constraints, validConstraints),
+  (e) => optional(e.src, validImageSource),
+];
+function validElement(e: DesignElement): boolean {
+  if (checkedElements.has(e)) return true;
+  const valid = !!e && elementChecks.every((check) => check(e));
   if (valid && isDeepFrozen(e)) checkedElements.add(e);
   return valid;
 }
@@ -955,6 +1580,18 @@ function validElements(elements: DesignElement[]): boolean {
   if (valid && isDeepFrozen(elements)) checkedElementLists.add(elements);
   return valid;
 }
+const validComponentTemplate = (t: DesignComponent['template']) =>
+  !!t &&
+  (t as Partial<DesignElement>).reference === undefined &&
+  ['text', 'rectangle', 'image', 'shape', 'group', 'frame', 'instance'].includes(t.type) &&
+  typeof t.text === 'string' &&
+  typeof t.fill === 'string' &&
+  optional(t.interactions, validDesignInteractions) &&
+  validVisualStyle(t) &&
+  optional(t.vector, (v) => t.type === 'shape' && validDesignVector(v)) &&
+  optional(t.web, validDesignWebElement);
+const validComponentSize = (c: DesignComponent) =>
+  Number.isFinite(c.width) && c.width >= 1 && Number.isFinite(c.height) && c.height >= 1;
 function validComponent(c: DesignComponent): boolean {
   if (checkedComponents.has(c)) return true;
   const valid =
@@ -962,20 +1599,10 @@ function validComponent(c: DesignComponent): boolean {
     !containsEmbeddedReference(c) &&
     typeof c.id === 'string' &&
     typeof c.name === 'string' &&
-    (c.web === undefined || validDesignWebComponent(c.web)) &&
-    !!c.template &&
-    (c.template as Partial<DesignElement>).reference === undefined &&
-    ['text', 'rectangle', 'image', 'shape', 'group', 'frame', 'instance'].includes(
-      c.template.type,
-    ) &&
-    typeof c.template.text === 'string' &&
-    typeof c.template.fill === 'string' &&
-    (c.template.interactions === undefined || validDesignInteractions(c.template.interactions)) &&
-    validVisualStyle(c.template) &&
-    (c.template.vector === undefined ||
-      (c.template.type === 'shape' && validDesignVector(c.template.vector))) &&
-    (c.template.web === undefined || validDesignWebElement(c.template.web)) &&
-    (c.elements === undefined || (Array.isArray(c.elements) && validElements(c.elements)));
+    validComponentSize(c) &&
+    optional(c.web, validDesignWebComponent) &&
+    validComponentTemplate(c.template) &&
+    optional(c.elements, (elements) => Array.isArray(elements) && validElements(elements));
   if (valid && isDeepFrozen(c)) checkedComponents.add(c);
   return valid;
 }
@@ -1024,41 +1651,44 @@ function validReferencedVectorOverrides(content: DesignContent): boolean {
   );
 }
 
+/** Override layouts are partial: each present field must still be valid. */
+function validOverrideLayout(layout: Partial<NonNullable<DesignElement['layout']>>): boolean {
+  if (typeof layout !== 'object' || Array.isArray(layout)) return false;
+  for (const key of ['gap', 'padding'] as const)
+    if (layout[key] !== undefined && (!Number.isFinite(layout[key]) || layout[key] < 0))
+      return false;
+  return (
+    optional(layout.direction, oneOf(['row', 'column', 'absolute'])) &&
+    optional(layout.align, oneOf(['start', 'center', 'end'])) &&
+    optional(layout.sizing, oneOf(['fixed', 'hug']))
+  );
+}
+const overrideStringKeys = [
+  'id',
+  'name',
+  'text',
+  'fill',
+  'src',
+  'parentId',
+  'componentId',
+  'styleId',
+] as const;
+function validDesignOverride(raw: unknown, depth: number): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !validVisualStyle(raw)) return false;
+  const p = raw as Partial<DesignElement>;
+  return (
+    p.reference === undefined &&
+    optional(p.vector, validDesignVector) &&
+    optional(p.interactions, validDesignInteractions) &&
+    optional(p.bounds, validBounds) &&
+    overrideStringKeys.every((key) => optional(p[key] as unknown, (v) => typeof v === 'string')) &&
+    (!p.layout || validOverrideLayout(p.layout)) &&
+    optional(p.overrides, (o) => validDesignOverrides(o, depth + 1))
+  );
+}
 function validDesignOverrides(value: unknown, depth = 0): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value) || depth >= 16) return false;
-  return Object.values(value).every((raw) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !validVisualStyle(raw))
-      return false;
-    const p = raw as Partial<DesignElement>;
-    if (p.reference !== undefined) return false;
-    if (p.vector !== undefined && !validDesignVector(p.vector)) return false;
-    if (p.interactions !== undefined && !validDesignInteractions(p.interactions)) return false;
-    if (p.bounds !== undefined && !validBounds(p.bounds)) return false;
-    if (
-      ['id', 'name', 'text', 'fill', 'src', 'parentId', 'componentId', 'styleId'].some(
-        (key) =>
-          (p as Record<string, unknown>)[key] !== undefined &&
-          typeof (p as Record<string, unknown>)[key] !== 'string',
-      )
-    )
-      return false;
-    if (p.layout) {
-      if (typeof p.layout !== 'object' || Array.isArray(p.layout)) return false;
-      for (const key of ['gap', 'padding'] as const)
-        if (p.layout[key] !== undefined && (!Number.isFinite(p.layout[key]) || p.layout[key] < 0))
-          return false;
-      if (
-        p.layout.direction !== undefined &&
-        !['row', 'column', 'absolute'].includes(p.layout.direction)
-      )
-        return false;
-      if (p.layout.align !== undefined && !['start', 'center', 'end'].includes(p.layout.align))
-        return false;
-      if (p.layout.sizing !== undefined && !['fixed', 'hug'].includes(p.layout.sizing))
-        return false;
-    }
-    return p.overrides === undefined || validDesignOverrides(p.overrides, depth + 1);
-  });
+  return Object.values(value).every((raw) => validDesignOverride(raw, depth));
 }
 export function layoutDesign(d: DesignContent): DesignContent {
   return layoutOwnedDesign(clone(d));
@@ -1066,6 +1696,14 @@ export function layoutDesign(d: DesignContent): DesignContent {
 export function layoutDesignElements(elements: DesignElement[]): DesignElement[] {
   return layoutOwnedDesign({ schemaVersion: 2, elements: clone(elements), components: [] })
     .elements;
+}
+/** Offset within the free cross-axis space for a flow layout's alignment. */
+const crossAlignOffset = (l: NonNullable<DesignElement['layout']>, free: number) =>
+  l.align === 'center' ? free / 2 : l.align === 'end' ? free : 0;
+function hugText(child: DesignElement) {
+  const font = child.typography?.fontSize ?? 28;
+  child.bounds.width = Math.max(20, Math.min(600, child.text.length * font * 0.6 + 8));
+  child.bounds.height = font * 1.3 + 8;
 }
 /** The caller owns every element; layout writes only element geometry. */
 function layoutOwnedDesign(
@@ -1097,20 +1735,12 @@ function layoutOwnedDesign(
       for (const child of children) {
         const old = { ...child.bounds };
         if (child.sizing === 'fill') child.bounds[size] = fillSize;
-        if (child.sizing === 'hug' && child.type === 'text') {
-          const font = child.typography?.fontSize ?? 28;
-          child.bounds.width = Math.max(20, Math.min(600, child.text.length * font * 0.6 + 8));
-          child.bounds.height = font * 1.3 + 8;
-        }
+        if (child.sizing === 'hug' && child.type === 'text') hugText(child);
         child.bounds[axis] = cursor;
         child.bounds[cross] =
           parent.bounds[cross] +
           l.padding +
-          (l.align === 'center'
-            ? (parent.bounds[crossSize] - 2 * l.padding - child.bounds[crossSize]) / 2
-            : l.align === 'end'
-              ? parent.bounds[crossSize] - 2 * l.padding - child.bounds[crossSize]
-              : 0);
+          crossAlignOffset(l, parent.bounds[crossSize] - 2 * l.padding - child.bounds[crossSize]);
         const placed = { ...child.bounds };
         child.bounds = old;
         placeDesignElement(index, child.id, placed);
@@ -1130,6 +1760,7 @@ export const reparentElement = (id: string, parentId?: string): EditorCommand<De
   command('design.reparent', 'Move element to frame', (d) => {
     const element = d.elements.find((e) => e.id === id);
     if (!element) throw new Error('Element not found');
+    assertEditable(d.elements, [id]);
     if (parentId && (id === parentId || descendantIds(d.elements, [id]).has(parentId)))
       throw new Error('A layer cannot become its own ancestor');
     if (
@@ -1137,6 +1768,7 @@ export const reparentElement = (id: string, parentId?: string): EditorCommand<De
       !d.elements.some((e) => e.id === parentId && ['frame', 'group'].includes(e.type))
     )
       throw new Error('Choose a frame or group');
+    if (parentId) assertEditable(d.elements, [parentId]);
     return layoutDesign({
       ...d,
       elements: d.elements.map((e) => (e.id === id ? { ...e, parentId } : e)),
@@ -1145,9 +1777,12 @@ export const reparentElement = (id: string, parentId?: string): EditorCommand<De
 export const patchDesign = (
   ids: string[],
   patch: Partial<DesignElement>,
-): EditorCommand<DesignContent> =>
-  command('design.properties', 'Edit properties', (d) => {
-    if (!('locked' in patch || 'hidden' in patch)) assertEditable(d.elements, ids);
+): EditorCommand<DesignContent> => {
+  patch = captureDesignData(patch);
+  return command('design.properties', 'Edit properties', (d) => {
+    for (const id of ids) assertElementChange(d, targetElement(d, id), patch);
+    if (!Object.keys(patch).every((key) => ['locked', 'hidden'].includes(key)))
+      assertEditable(d.elements, ids);
     return layoutDesign({
       ...d,
       elements: d.elements.map((e) => {
@@ -1164,24 +1799,196 @@ export const patchDesign = (
       }),
     });
   });
+};
+interface OverrideEdit {
+  d: DesignContent;
+  part: string | readonly string[];
+  path: readonly string[];
+  patch: Partial<DesignElement>;
+  stateOnly: boolean;
+}
+const isPrimitiveInstance = (d: DesignContent, e: DesignElement) =>
+  e.type === 'instance' && d.components.some((c) => c.id === e.componentId && !c.elements);
+/** Guard each scoped level; a primitive template/root is the leaf and keeps only the wrapper's guard. */
+function assertNestedPartEditable(
+  edit: OverrideEdit,
+  instance: DesignElement,
+  component: DesignComponent,
+  remaining: readonly string[],
+  effective: DesignElement,
+) {
+  const { d, stateOnly } = edit;
+  const key = remaining[0];
+  const primitiveRoot =
+    stateOnly &&
+    remaining.length === 2 &&
+    remaining[1] === 'root' &&
+    isPrimitiveInstance(d, effective);
+  const scope = component.elements?.map((p) =>
+    primitiveRoot && p.id === key
+      ? {
+          ...applyDesignOverride(
+            appearance(d, { ...p, componentId: undefined, overrides: undefined }),
+            { ...instance.overrides?.[p.id], overrides: undefined },
+          ),
+          componentId: undefined,
+          styleId: undefined,
+          overrides: undefined,
+        }
+      : designPartAppearance(d, p, instance.overrides?.[p.id]),
+  ) ?? [effective];
+  assertDesignPathEditable(d, scope, key, stateOnly && remaining.length === 1);
+}
+/** The addressed part: merge the patch into its existing override. */
+function leafInstanceOverride(
+  edit: OverrideEdit,
+  instance: DesignElement,
+  key: string,
+  effective: DesignElement,
+): Partial<DesignElement> {
+  const { patch } = edit;
+  const previous = instance.overrides?.[key];
+  const root = previous?.overrides?.root;
+  // A legacy direct edit must update any scoped values that would otherwise
+  // mask it. Keep untouched root fields and explicit override-map replacement.
+  if (root && isPrimitiveInstance(edit.d, effective) && !Object.hasOwn(patch, 'overrides')) {
+    const changed = Object.fromEntries(
+      Object.entries(patch).filter(([field]) => Object.hasOwn(root, field)),
+    );
+    return {
+      ...previous,
+      ...patch,
+      overrides: {
+        ...previous.overrides,
+        root: applyDesignOverride(root as DesignElement, changed),
+      },
+    };
+  }
+  return { ...previous, ...patch };
+}
+/**
+ * A first scoped edit must retain visible legacy direct styling above the
+ * definition's inherited root fields. Existing explicit root fields still win.
+ */
+function scopedIntermediate(
+  d: DesignContent,
+  instance: DesignElement,
+  key: string,
+  effective: DesignElement,
+): DesignElement {
+  if (effective.type !== 'instance')
+    rejectDesign('design-target', 'Intermediate component part is not an instance', key);
+  const child = targetComponent(d, effective.componentId ?? '');
+  if (child.elements) return effective;
+  const inheritedRoot = effective.overrides?.root ?? {};
+  const direct = Object.fromEntries(
+    Object.entries(instance.overrides?.[key] ?? {}).filter(
+      ([field]) => field !== 'overrides' && Object.hasOwn(inheritedRoot, field),
+    ),
+  );
+  return {
+    ...effective,
+    overrides: {
+      ...effective.overrides,
+      root: applyDesignOverride(
+        applyDesignOverride(inheritedRoot as DesignElement, direct),
+        instance.overrides?.[key]?.overrides?.root,
+      ),
+    },
+  };
+}
+/**
+ * Native override maps replace inherited maps. Retain their effective siblings
+ * so editing a nested label cannot erase another local value.
+ */
+function nestedInstanceOverride(
+  edit: OverrideEdit,
+  instance: DesignElement,
+  remaining: readonly string[],
+): Partial<DesignElement> {
+  const { d, part, path } = edit;
+  const component = targetComponent(d, instance.componentId ?? '');
+  const key = remaining[0];
+  const target = componentPart(component, key);
+  const effective = applyDesignOverride(target, instance.overrides?.[key]);
+  if (typeof part !== 'string' || path.length > 1)
+    assertNestedPartEditable(edit, instance, component, remaining, effective);
+  if (remaining.length === 1) return leafInstanceOverride(edit, instance, key, effective);
+  const next = scopedIntermediate(d, instance, key, effective);
+  return {
+    ...instance.overrides?.[key],
+    overrides: {
+      ...next.overrides,
+      [remaining[1]]: nestedInstanceOverride(edit, next, remaining.slice(1)),
+    },
+  };
+}
 export const overrideInstance = (
   id: string,
-  part: string,
+  part: string | readonly string[],
   patch: Partial<DesignElement>,
-): EditorCommand<DesignContent> =>
-  command('design.override', 'Override component instance', (d) => ({
-    ...d,
-    elements: d.elements.map((e) =>
-      e.id === id
-        ? { ...e, overrides: { ...e.overrides, [part]: { ...e.overrides?.[part], ...patch } } }
-        : e,
-    ),
-  }));
+): EditorCommand<DesignContent> => {
+  patch = captureDesignData(patch);
+  const path = captureDesignData(typeof part === 'string' ? [part] : part);
+  if (!Array.isArray(path) || !path.length || path.length > 16)
+    rejectDesign('design-target', 'Expected 1–16 component part IDs');
+  path.forEach((key) => designId(key, 'partIds'));
+  const stateOnly =
+    Object.keys(patch).length > 0 &&
+    Object.keys(patch).every((key) => ['locked', 'hidden'].includes(key));
+  const edit = command('design.override', 'Override component instance', (d) => {
+    const e = targetElement(d, id);
+    if (e.type !== 'instance')
+      rejectDesign('design-target', 'Expected a Design component instance', id);
+    const c = targetComponent(d, e.componentId ?? '');
+    if (typeof part === 'string') assertEditable(d.elements, [id]);
+    else
+      assertDesignPathEditable(
+        d,
+        stateOnly && !c.elements && path.length === 1
+          ? d.elements.map((item) =>
+              item.id === id ? { ...item, componentId: undefined, overrides: undefined } : item,
+            )
+          : d.elements,
+        id,
+      );
+    const nested = (instance: DesignElement, remaining: readonly string[]) =>
+      nestedInstanceOverride({ d, part, path, patch, stateOnly }, instance, remaining);
+    const first = path[0];
+    const value = nested(e, path);
+    assertElementChange(d, componentPart(c, first), value, c.elements ?? [], !c.elements);
+    if (
+      c.elements &&
+      !validElements(
+        c.elements.map((item) =>
+          applyDesignOverride(item, item.id === first ? value : e.overrides?.[item.id]),
+        ),
+      )
+    )
+      rejectDesign(
+        'design-patch',
+        'Override would produce invalid component part hierarchy or values',
+        first,
+      );
+    return {
+      ...d,
+      elements: d.elements.map((e) =>
+        e.id === id ? { ...e, overrides: { ...e.overrides, [first]: value } } : e,
+      ),
+    };
+  });
+  // The native adapter expands this instance into its qualified definition/style/ancestor graph.
+  return withCommandReads(edit, { content: [id] });
+};
 export const resetInstance = (id: string): EditorCommand<DesignContent> =>
-  command('design.reset-instance', 'Reset instance overrides', (d) => ({
-    ...d,
-    elements: d.elements.map((e) => (e.id === id ? { ...e, overrides: {} } : e)),
-  }));
+  command('design.reset-instance', 'Reset instance overrides', (d) => {
+    const element = targetElement(d, id);
+    if (element.type !== 'instance')
+      rejectDesign('design-target', 'Expected a Design component instance', id);
+    targetComponent(d, element.componentId ?? '');
+    assertEditable(d.elements, [id]);
+    return { ...d, elements: d.elements.map((e) => (e.id === id ? { ...e, overrides: {} } : e)) };
+  });
 export const detachInstance = (id: string): EditorCommand<DesignContent> =>
   command('design.detach', 'Detach component instance', (d) => {
     const e = d.elements.find((e) => e.id === id),
@@ -1208,15 +2015,29 @@ export const updateComponentPart = (
   componentId: string,
   partId: string,
   patch: Partial<DesignElement>,
-): EditorCommand<DesignContent> =>
-  command('design.definition', 'Edit shared component definition', (d) => ({
-    ...d,
-    components: d.components.map((c) =>
-      c.id === componentId
-        ? { ...c, elements: c.elements?.map((e) => (e.id === partId ? { ...e, ...patch } : e)) }
-        : c,
-    ),
-  }));
+): EditorCommand<DesignContent> => {
+  patch = captureDesignData(patch);
+  return command('design.definition', 'Edit shared component definition', (d) => {
+    const c = targetComponent(d, componentId);
+    if (!c.elements)
+      rejectDesign(
+        'design-target',
+        'Use updateComponent for a template-only definition',
+        componentId,
+      );
+    const part = componentPart(c, partId);
+    assertEditable(c.elements, [partId]);
+    assertElementChange(d, part, patch, c.elements);
+    return {
+      ...d,
+      components: d.components.map((c) =>
+        c.id === componentId
+          ? { ...c, elements: c.elements?.map((e) => (e.id === partId ? { ...e, ...patch } : e)) }
+          : c,
+      ),
+    };
+  });
+};
 export const arrangeDesign = (
   ids: string[],
   action: string,

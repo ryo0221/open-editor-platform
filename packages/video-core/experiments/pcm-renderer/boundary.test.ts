@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { PcmRenderSession } from './session';
+import { PcmRenderSession } from '../../src/pcm/session';
 import { time, multiply, add, subtract } from '@editor-platform/video-core';
 import {
   planWindow,
@@ -9,7 +9,7 @@ import {
   type Mapping,
   type PcmWindow,
   type BoundaryMode,
-} from './render';
+} from '../../src/pcm/render';
 const signal = () => new AbortController().signal;
 const map = (count: number, rate: number): Mapping => ({
   start: time(0),

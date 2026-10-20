@@ -28,6 +28,43 @@ export { videoTimelineFixture } from './edit-fixture';
 
 const schema = 'video-core-prototype-v0' as const;
 const format = (value: Time) => `${value.value}/${value.timescale}`;
+const trackLabel = (track: VideoContent['sequence']['tracks'][number]) =>
+  `${track.id} · ${track.kind} · ${track.locked ? 'locked' : 'unlocked'}`;
+function clipLabel(clip: VideoContent['sequence']['clips'][number]) {
+  const window =
+    clip.kind === 'video'
+      ? `[${format(clip.sourceIn)}, ${format(clip.sourceOut)}) rate ${format(clip.rate)}`
+      : `samples [${clip.sampleIn}, ${clip.sampleOut})`;
+  return `${clip.id} [${format(clip.start)}, ${format(add(clip.start, clip.duration))}) s · source ${clip.sourceId}/${clip.streamId} · ${window} · link ${clip.linkGroupId ?? 'none'}`;
+}
+function isDemoOrderable(content: VideoContent) {
+  try {
+    assertVideoDemoContent(content);
+    return true;
+  } catch {
+    return false;
+  }
+}
+interface ButtonState {
+  canOrder: boolean;
+  inputKind: 'trim' | 'duration' | undefined;
+  canEdit: boolean;
+  canSave: boolean;
+  /** Uncommitted typing, IME composition or gesture. */
+  pending: boolean;
+  selected: boolean;
+}
+function buttonDisabled(name: string, state: ButtonState): boolean {
+  if ((name === 'Move earlier' || name === 'Move later') && !state.canOrder) return true;
+  if (name === 'Apply sequence duration' && state.inputKind === 'trim') return true;
+  if (name === 'Apply independent trim' && state.inputKind === 'duration') return true;
+  if (name === 'Save native JSON') return !state.canSave;
+  if (name === 'Cancel inputs') return !state.pending;
+  return (
+    !state.canEdit ||
+    (!state.selected && !['Undo', 'Redo', 'Apply sequence duration'].includes(name))
+  );
+}
 function parseTime(value: string): Time {
   const match = /^(-?\d+)(?:\/(\d+))?$/.exec(value.trim());
   if (!match) throw Error('Use integer seconds or numerator/denominator seconds');
@@ -244,41 +281,22 @@ export function videoTimelineExtension(
           duration.disabled = !view.canEdit || inputKind === 'trim';
           timeline.replaceChildren();
           for (const track of content.sequence.tracks) {
-            timeline.append(
-              element(
-                'h3',
-                `${track.id} · ${track.kind} · ${track.locked ? 'locked' : 'unlocked'}`,
-              ),
-            );
+            timeline.append(element('h3', trackLabel(track)));
             for (const clip of content.sequence.clips.filter((c) => c.trackId === track.id))
-              timeline.append(
-                element(
-                  'p',
-                  `${clip.id} [${format(clip.start)}, ${format(add(clip.start, clip.duration))}) s · source ${clip.sourceId}/${clip.streamId} · ${clip.kind === 'video' ? `[${format(clip.sourceIn)}, ${format(clip.sourceOut)}) rate ${format(clip.rate)}` : `samples [${clip.sampleIn}, ${clip.sampleOut})`} · link ${clip.linkGroupId ?? 'none'}`,
-                ),
-              );
+              timeline.append(element('p', clipLabel(clip)));
           }
           visual?.render();
-          let canOrder = true;
-          try {
-            assertVideoDemoContent(content);
-          } catch {
-            canOrder = false;
-          }
+          const canOrder = isDemoOrderable(content);
           sourceInfo.textContent = `${content.sequence.clips.length} clips · ${content.sequence.tracks.length} tracks · ${content.sequence.frameRate.value}/${content.sequence.frameRate.timescale} fps · duration ${format(content.sequence.duration)} s · decoding and media bytes are Host-owned.`;
-          for (const [name, button] of buttons)
-            button.disabled =
-              (name === 'Move earlier' || name === 'Move later') && !canOrder
-                ? true
-                : (name === 'Apply sequence duration' && inputKind === 'trim') ||
-                    (name === 'Apply independent trim' && inputKind === 'duration')
-                  ? true
-                  : name === 'Save native JSON'
-                    ? !view.canSave || view.saving
-                    : name === 'Cancel inputs'
-                      ? !dirty && composing.size === 0 && !gesturing
-                      : !view.canEdit ||
-                        (!selected && !['Undo', 'Redo', 'Apply sequence duration'].includes(name));
+          const state = {
+            canOrder,
+            inputKind,
+            canEdit: view.canEdit,
+            canSave: view.canSave && !view.saving,
+            pending: dirty || composing.size > 0 || gesturing,
+            selected: !!selected,
+          };
+          for (const [name, button] of buttons) button.disabled = buttonDisabled(name, state);
         };
         const act = (work: () => void) => {
           try {

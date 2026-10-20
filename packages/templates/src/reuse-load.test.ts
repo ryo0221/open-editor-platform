@@ -7,6 +7,53 @@ import { authorReusableComponent } from './reuse-definition';
 import { prepareComponentInsertion } from './reuse-apply';
 import { applyLocalTemplate, localTemplateSnapshot } from './apply';
 import { validateNativeReusableDefinitions } from './reuse-load';
+import {
+  createDesign,
+  makeDesignElement,
+  isDesign,
+  type DesignContent,
+} from '@editor-platform/design/model';
+
+it('loads 101 distinct linked Design components with retained native recipes and hashes', async () => {
+  const source = { ...createDesign(), elements: [makeDesignElement('rectangle')] };
+  let content = createDesign();
+  content.reuse = { schemaVersion: 1, closures: [], instances: [] };
+  for (let index = 0; index < 101; index++) {
+    const authored = await authorReusableComponent({
+      domain: 'design',
+      content: source,
+      ids: [],
+      name: `Component ${index}`,
+      definitionId: `component-${index}`,
+    });
+    // Assemble the first 100 independently through public author/insert APIs,
+    // then exercise insertion against that retained 100-closure artifact.
+    const target = index === 100 ? content : createDesign();
+    const inserted = applyLocalTemplate(
+      await prepareComponentInsertion({
+        ...authored,
+        identity: { actorId: 'A', clientId: 'a', sessionId: 'a' },
+        requestId: `insert-${index}`,
+        state: localTemplateSnapshot('design', 'design', target),
+        reuse: 'linked',
+      }),
+      target,
+    ) as DesignContent;
+    if (index === 100) content = inserted;
+    else {
+      content.elements.push(...inserted.elements);
+      content.components.push(...inserted.components);
+      content.reuse!.closures.push(...inserted.reuse!.closures);
+      content.reuse!.instances.push(...inserted.reuse!.instances);
+    }
+  }
+  const reloaded = JSON.parse(JSON.stringify(content));
+  expect(content.reuse?.closures).toHaveLength(101);
+  expect(content.reuse?.instances).toHaveLength(101);
+  expect(isDesign(reloaded)).toBe(true);
+  await validateNativeReusableDefinitions('design', reloaded);
+  expect(reloaded).toStrictEqual(content);
+}, 30000);
 
 it('checks native recipes beyond valid closure hashes while preserving edited native bodies and immutable input', async () => {
   const { valid, invalid } = await nativeLoadFixture(),

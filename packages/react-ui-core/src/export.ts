@@ -20,7 +20,19 @@ export function reactUiExpression(value: unknown): string {
     (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
   );
 }
-export const reactUiClassName = (id: string) => `rui-${reuseHash(id).slice(0, 20)}`;
+const classNames = new Map<string, string>();
+export function reactUiClassName(id: string): string {
+  const cacheable = typeof id === 'string' && id.length <= 160;
+  const known = cacheable ? classNames.get(id) : undefined;
+  if (known) return known;
+  const value = `rui-${reuseHash(id).slice(0, 20)}`;
+  // Bound both the entry count and retained key length across many documents.
+  if (cacheable) {
+    if (classNames.size >= 4000) classNames.delete(classNames.keys().next().value!);
+    classNames.set(id, value);
+  }
+  return value;
+}
 const unitless = new Set([
   'display',
   'flexDirection',
@@ -144,6 +156,9 @@ export function exportReactUi(
   const components = document.components
     .slice()
     .sort((a, b) => compare(reactComponentKey(a.ref), reactComponentKey(b.ref)));
+  const componentIndices = new Map(
+    components.map((component, index) => [reactComponentKey(component.ref), index]),
+  );
   const lines = [
     'import { Fragment, useEffect, useState } from "react";',
     `import ${reactUiExpression('./' + cssFile)};`,
@@ -224,9 +239,7 @@ export function exportReactUi(
   const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
   const render = (id: string): string => {
     const node = nodeMap.get(id)!;
-    const i = components.findIndex(
-      (c) => reactComponentKey(c.ref) === reactComponentKey(node.component),
-    );
+    const i = componentIndices.get(reactComponentKey(node.component))!;
     const component = components[i];
     const attributes = [`key={${reactUiExpression(node.id)}}`];
     for (const [key, field] of Object.entries(component.props).sort(([a], [b]) => compare(a, b))) {

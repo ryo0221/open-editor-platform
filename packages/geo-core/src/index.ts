@@ -17,3 +17,5 @@ export * from './geometry';
 export { assertGeoExtent, joinedFieldId } from './workspace-validation';
 export * from './workspace-analysis';
 export * from './scene';
+
+export * from './background';

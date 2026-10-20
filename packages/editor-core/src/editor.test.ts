@@ -38,6 +38,40 @@ describe('command history', () => {
     expect(s.undo()).toEqual(view);
     expect(s.redo().rows[0].value).toBe(5);
   });
+  it('returns the same immutable history views while legacy copies remain isolated', () => {
+    const s = new EditorSession({ rows: [{ value: 1 }] });
+    const first = s.executeView(
+      immutableCommand('first', 'First', () => ({ rows: [{ value: 2 }] })),
+    );
+    const second = s.executeView(
+      immutableCommand('second', 'Second', () => ({ rows: [{ value: 3 }] })),
+    );
+    const before = s.revision.sequence;
+    expect(s.undoView()).toBe(first);
+    expect(() => {
+      first.rows[0].value = 99;
+    }).toThrow();
+    expect(s.redoView()).toBe(second);
+    const copy = s.undo();
+    copy.rows[0].value = 99;
+    expect(s.content.rows[0].value).toBe(2);
+    expect(s.redoView()).toBe(second);
+    expect(s.revision.sequence).toBe(before + 4);
+  });
+  it('does not move history when an immutable view cannot be frozen', () => {
+    const initial: Record<string, unknown> = {};
+    initial.self = initial;
+    const s = new EditorSession(initial);
+    s.execute(command('plain', 'Plain', () => ({ value: 1 })));
+    const before = s.revision;
+    expect(() => s.undoView()).toThrow();
+    expect(s.revision).toEqual(before);
+    expect(s.canUndo).toBe(true);
+    expect(s.canRedo).toBe(false);
+    expect(s.content).toEqual({ value: 1 });
+    const restored = s.undo();
+    expect(restored.self).toBe(restored);
+  });
   it('does not commit a falsely declared pure command that mutates its input', () => {
     const s = new EditorSession({ rows: [{ value: 1 }] });
     const revision = s.revision;

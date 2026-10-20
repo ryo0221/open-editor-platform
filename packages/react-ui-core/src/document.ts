@@ -1,5 +1,16 @@
 import { canonicalJson, clone, deepFreeze } from '@editor-platform/artifact-core';
-import { array, checkData, fields, finite, id, identifier, object, reject, unique } from './data';
+import {
+  array,
+  checkData,
+  fields,
+  finite,
+  id,
+  identifier,
+  object,
+  reject,
+  unique,
+  isRetainableReactData,
+} from './data';
 import { checkFieldMap } from './schema';
 import {
   checkCallbacks,
@@ -9,6 +20,10 @@ import {
   validateReactEnvironment,
 } from './registration';
 import { reactUiLimits, reactUiStyleProperties, type ReactUiDocument } from './types';
+// Only completely admitted immutable documents can be reused as the same root.
+// External freezing alone does not certify schema, hashes or resource budgets.
+const ownedDocuments = new WeakSet<object>();
+const ownedNodes = new WeakSet<object>();
 export function isReactUiDocument(raw: unknown): raw is ReactUiDocument {
   if (
     !raw ||
@@ -42,7 +57,25 @@ function checkStyle(raw: unknown, path: string): void {
 }
 /** Shape/integrity boundary. Incomplete or unresolved references remain saved data for diagnostics. */
 export function loadReactUiDocument(raw: unknown): ReactUiDocument {
+  return admitReactUiDocument(raw, false);
+}
+/** Internal node edits retain the admitted base's other fields. Unknown nodes
+ * and roots are copied after the same descriptor/schema/resource checks. */
+export function loadReactUiNodeEdit(
+  base: ReactUiDocument,
+  nodes: ReactUiDocument['nodes'],
+  roots: ReactUiDocument['roots'],
+): ReactUiDocument {
+  return admitReactUiDocument({ ...loadReactUiDocument(base), nodes, roots }, true);
+}
+function admitReactUiDocument(raw: unknown, nodeEdit: boolean, parsed = false): ReactUiDocument {
+  if (raw && typeof raw === 'object' && ownedDocuments.has(raw)) return raw as ReactUiDocument;
   checkData(raw);
+  const input = raw;
+  // Reject Proxy inputs and own external data before schema traversal can call
+  // inherited array methods. The native clone preserves the checked JSON values
+  // and budgets; parsed JSON is already private. Node edits have an owned base.
+  if (!nodeEdit && !parsed) raw = clone(raw);
   const d = object(raw, '$');
   fields(
     d,
@@ -63,7 +96,7 @@ export function loadReactUiDocument(raw: unknown): ReactUiDocument {
   );
   if (d.schemaVersion !== 1 || d.domain !== 'react-ui')
     reject('document-schema', '$', 'Expected React UI schema version 1');
-  validateReactEnvironment(d.environment);
+  const environment = validateReactEnvironment(d.environment);
   const components = array(d.components, '$.components', reactUiLimits.components).map(
     validateReactComponent,
   );
@@ -95,6 +128,9 @@ export function loadReactUiDocument(raw: unknown): ReactUiDocument {
   unique(d.roots as string[], '$.roots');
   const nodes = array(d.nodes, '$.nodes', reactUiLimits.nodes);
   nodes.forEach((raw, i) => {
+    // Only context-free shape was certified. New roots still pay full JSON and
+    // global identity checks, then preflight checks the current catalog/graph.
+    if (raw && typeof raw === 'object' && ownedNodes.has(raw)) return;
     const path = `$.nodes.${i}`,
       n = object(raw, path);
     fields(n, ['id', 'component', 'props', 'slots', 'bindings', 'layout'], [], path);
@@ -146,14 +182,47 @@ export function loadReactUiDocument(raw: unknown): ReactUiDocument {
     nodes.map((n) => (n as { id: string }).id),
     '$.nodes',
   );
-  return deepFreeze(clone(raw as ReactUiDocument));
+  // External object inputs were cloned completely before schema validation.
+  // JSON.parse creates a private graph without external aliases. A node edit has an admitted base and
+  // owns only its new nodes/roots; retaining that base avoids cloning hundreds
+  // of immutable nodes merely to discard their copies. All new roots still pay
+  // the descriptor, shape, identity and resource checks.
+  const copy: ReactUiDocument = nodeEdit
+    ? { ...(raw as ReactUiDocument), roots: clone(d.roots as string[]), nodes: [] }
+    : (raw as ReactUiDocument);
+  // The complete clone of external object inputs rejected Proxy inputs.
+  // Only after every check can ordinary, fully frozen input nodes be retained. External freezing
+  // alone never bypasses descriptors, schema, hashes or aggregate budgets.
+  const retainInputNodes = !nodeEdit && !parsed && isRetainableReactData(input);
+  copy.nodes = (nodeEdit ? nodes : copy.nodes).map((node, index) =>
+    retainInputNodes
+      ? (input as ReactUiDocument).nodes[index]
+      : nodeEdit && ownedNodes.has(nodes[index] as object)
+        ? (nodes[index] as ReactUiDocument['nodes'][number])
+        : nodeEdit
+          ? clone(node as ReactUiDocument['nodes'][number])
+          : copy.nodes[index],
+  );
+  const owned = deepFreeze({ ...copy, environment, components });
+  // External/parsed roots kept exactly the checked JSON through native cloning
+  // and schema validation of that private graph. Edits assemble a new graph and
+  // must charge its full aggregate budget again after copying new nodes.
+  if (nodeEdit) checkData(owned);
+  owned.nodes.forEach((node) => ownedNodes.add(node));
+  ownedDocuments.add(owned);
+  return owned;
 }
 /** Canonical JSON preserves IDs/slot order/overrides; it contains no executable implementation. */
 export function serializeReactUiDocument(raw: unknown): string {
   return canonicalJson(loadReactUiDocument(raw));
 }
 export function parseReactUiDocument(source: string): ReactUiDocument {
-  if (new TextEncoder().encode(source).length > reactUiLimits.bytes)
+  if (
+    source.length > reactUiLimits.bytes ||
+    // eslint-disable-next-line no-control-regex -- ASCII has exactly one UTF-8 byte per code unit
+    (!/^[\x00-\x7f]*$/.test(source) &&
+      new TextEncoder().encode(source).length > reactUiLimits.bytes)
+  )
     reject('data-limit', '$', 'Native JSON exceeds byte budget');
   let value: unknown;
   try {
@@ -161,5 +230,5 @@ export function parseReactUiDocument(source: string): ReactUiDocument {
   } catch {
     reject('data-json', '$', 'Invalid native JSON');
   }
-  return loadReactUiDocument(value);
+  return admitReactUiDocument(value, false, true);
 }

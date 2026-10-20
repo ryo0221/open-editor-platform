@@ -230,59 +230,71 @@ function connectorEndpoints(
   b: WhiteboardNode | undefined,
 ): { x1: number; y1: number; x2: number; y2: number } | undefined {
   if ((!a && !c.fromPoint) || (!b && !c.toPoint)) return;
-  const center = (n: WhiteboardNode | undefined, fallback: Point | undefined): Point =>
-    n ? { x: n.bounds.x + n.bounds.width / 2, y: n.bounds.y + n.bounds.height / 2 } : fallback!;
-  const ac = center(a, c.fromPoint),
-    bc = center(b, c.toPoint);
-  const endpoint = (
-    n: WhiteboardNode | undefined,
-    other: Point,
-    fallback: Point | undefined,
-    port: WhiteboardConnector['fromPort'],
-  ): Point => {
-    if (!n) return fallback!;
-    const box = n.bounds,
-      cx = box.x + box.width / 2,
-      cy = box.y + box.height / 2;
-    const angle = ((n.rotation ?? 0) * Math.PI) / 180,
-      cos = Math.cos(angle),
-      sin = Math.sin(angle);
-    const world = (point: Point): Point => {
-      const x = (point.x - cx) * (n.flipX ? -1 : 1),
-        y = (point.y - cy) * (n.flipY ? -1 : 1);
-      return { x: cx + x * cos - y * sin, y: cy + x * sin + y * cos };
-    };
-    if (port && port !== 'auto') {
-      const declared = n.ports?.find((p) => p.key === port),
-        side = declared?.side ?? port,
-        offset = declared?.offset ?? 0.5;
-      return world(
-        side === 'left'
-          ? { x: box.x, y: box.y + box.height * offset }
-          : side === 'right'
-            ? { x: box.x + box.width, y: box.y + box.height * offset }
-            : side === 'top'
-              ? { x: box.x + box.width * offset, y: box.y }
-              : { x: box.x + box.width * offset, y: box.y + box.height },
-      );
-    }
-    const wx = other.x - cx,
-      wy = other.y - cy,
-      dx = (wx * cos + wy * sin) * (n.flipX ? -1 : 1),
-      dy = (-wx * sin + wy * cos) * (n.flipY ? -1 : 1);
-    if (dx === 0 && dy === 0) return { x: cx, y: cy };
-    const f =
-      n.kind === 'ellipse' || n.shape === 'ellipse'
-        ? 1 / Math.sqrt((dx / (box.width / 2)) ** 2 + (dy / (box.height / 2)) ** 2)
-        : Math.min(
-            dx ? Math.abs(box.width / 2 / dx) : Infinity,
-            dy ? Math.abs(box.height / 2 / dy) : Infinity,
-          );
-    return world({ x: cx + dx * f, y: cy + dy * f });
-  };
-  const from = endpoint(a, bc, c.fromPoint, c.fromPort),
-    to = endpoint(b, ac, c.toPoint, c.toPort);
+  const ac = a ? nodeCenter(a) : c.fromPoint!,
+    bc = b ? nodeCenter(b) : c.toPoint!;
+  const from = a ? nodeEndpoint(a, bc, c.fromPort) : c.fromPoint!,
+    to = b ? nodeEndpoint(b, ac, c.toPort) : c.toPoint!;
   return { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+}
+const nodeCenter = (n: WhiteboardNode): Point => ({
+  x: n.bounds.x + n.bounds.width / 2,
+  y: n.bounds.y + n.bounds.height / 2,
+});
+/** Maps between a node's local (unrotated, unflipped) frame and world coordinates. */
+function nodeFrame(n: WhiteboardNode) {
+  const { x: cx, y: cy } = nodeCenter(n);
+  const angle = ((n.rotation ?? 0) * Math.PI) / 180,
+    cos = Math.cos(angle),
+    sin = Math.sin(angle),
+    fx = n.flipX ? -1 : 1,
+    fy = n.flipY ? -1 : 1;
+  return {
+    cx,
+    cy,
+    world(point: Point): Point {
+      const x = (point.x - cx) * fx,
+        y = (point.y - cy) * fy;
+      return { x: cx + x * cos - y * sin, y: cy + x * sin + y * cos };
+    },
+    /** Offset of a world point from the center, in the local frame. */
+    local(point: Point): Point {
+      const wx = point.x - cx,
+        wy = point.y - cy;
+      return { x: (wx * cos + wy * sin) * fx, y: (-wx * sin + wy * cos) * fy };
+    },
+  };
+}
+function portLocalPoint(n: WhiteboardNode, port: string): Point {
+  const box = n.bounds,
+    declared = n.ports?.find((p) => p.key === port),
+    side = declared?.side ?? port,
+    offset = declared?.offset ?? 0.5;
+  if (side === 'left') return { x: box.x, y: box.y + box.height * offset };
+  if (side === 'right') return { x: box.x + box.width, y: box.y + box.height * offset };
+  if (side === 'top') return { x: box.x + box.width * offset, y: box.y };
+  return { x: box.x + box.width * offset, y: box.y + box.height };
+}
+/** Scale from the center to the outline along a local direction. */
+function outlineScale(n: WhiteboardNode, dx: number, dy: number) {
+  const box = n.bounds;
+  if (n.kind === 'ellipse' || n.shape === 'ellipse')
+    return 1 / Math.sqrt((dx / (box.width / 2)) ** 2 + (dy / (box.height / 2)) ** 2);
+  return Math.min(
+    dx ? Math.abs(box.width / 2 / dx) : Infinity,
+    dy ? Math.abs(box.height / 2 / dy) : Infinity,
+  );
+}
+function nodeEndpoint(
+  n: WhiteboardNode,
+  other: Point,
+  port: WhiteboardConnector['fromPort'],
+): Point {
+  const frame = nodeFrame(n);
+  if (port && port !== 'auto') return frame.world(portLocalPoint(n, port));
+  const { x: dx, y: dy } = frame.local(other);
+  if (dx === 0 && dy === 0) return { x: frame.cx, y: frame.cy };
+  const f = outlineScale(n, dx, dy);
+  return frame.world({ x: frame.cx + dx * f, y: frame.cy + dy * f });
 }
 export function connectorPath(
   c: WhiteboardConnector,
@@ -372,72 +384,83 @@ function validNode(node: WhiteboardNode): boolean {
   if (valid && fixedNodeData(node)) checkedNodes.add(node);
   return valid;
 }
+function validSection(s: WhiteboardSection) {
+  return (
+    s &&
+    typeof s.id === 'string' &&
+    typeof s.title === 'string' &&
+    typeof s.background === 'string' &&
+    validBounds(s.bounds)
+  );
+}
+function validConnector(c: WhiteboardConnector, nodes: Set<string>) {
+  return (
+    c &&
+    typeof c.id === 'string' &&
+    typeof c.label === 'string' &&
+    (nodes.has(c.from!) || validPoint(c.fromPoint)) &&
+    (nodes.has(c.to!) || validPoint(c.toPoint))
+  );
+}
 export function isWhiteboard(value: unknown): value is WhiteboardContent {
   if (!value || typeof value !== 'object') return false;
   const d = value as WhiteboardContent;
   if (!Array.isArray(d.nodes)) return false;
   const nodes = new Set(d.nodes.map((n) => n?.id));
   return (
-    (d.schemaVersion === 1 || d.schemaVersion === 2 || d.schemaVersion === 3) &&
+    [1, 2, 3].includes(d.schemaVersion) &&
     validReferenceItems(d.nodes) &&
     validNativeReuse(d.reuse, 'whiteboard') &&
-    (d.sections === undefined ||
-      (Array.isArray(d.sections) &&
-        d.sections.every(
-          (s) =>
-            s &&
-            typeof s.id === 'string' &&
-            typeof s.title === 'string' &&
-            typeof s.background === 'string' &&
-            validBounds(s.bounds),
-        ))) &&
+    (d.sections === undefined || (Array.isArray(d.sections) && d.sections.every(validSection))) &&
     Array.isArray(d.connectors) &&
     nodes.size === d.nodes.length &&
     d.nodes.every((n) => validNode(n) && (d.schemaVersion !== 3 || n.kind !== 'frame')) &&
-    d.connectors.every(
-      (c) =>
-        c &&
-        typeof c.id === 'string' &&
-        typeof c.label === 'string' &&
-        (nodes.has(c.from!) || validPoint(c.fromPoint)) &&
-        (nodes.has(c.to!) || validPoint(c.toPoint)),
-    ) &&
+    d.connectors.every((c) => validConnector(c, nodes)) &&
     validBoardReferences(d)
   );
 }
 function validPoint(point: Point | undefined) {
   return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
 }
+/** Section membership is root-only and Group ancestry is acyclic through containers. */
+function validNodeLinks(
+  node: WhiteboardNode,
+  nodes: Map<string, WhiteboardNode>,
+  sections: Set<string>,
+) {
+  if (node.sectionId !== undefined && (!sections.has(node.sectionId) || !!node.groupId))
+    return false;
+  const seen = new Set([node.id]);
+  let parent = node.groupId;
+  while (parent) {
+    if (seen.has(parent)) return false;
+    seen.add(parent);
+    const group = nodes.get(parent);
+    if (!group || !['group', 'frame'].includes(group.kind)) return false;
+    parent = group.groupId;
+  }
+  return true;
+}
+function validConnectorPorts(connector: WhiteboardConnector, nodes: Map<string, WhiteboardNode>) {
+  return (['from', 'to'] as const).every((side) => {
+    const port = connector[`${side}Port`];
+    return (
+      port === undefined ||
+      (typeof port === 'string' &&
+        (['auto', 'top', 'right', 'bottom', 'left'].includes(port) ||
+          !!nodes.get(connector[side])?.ports?.some((p) => p.key === port)))
+    );
+  });
+}
 function validBoardReferences(d: WhiteboardContent) {
   const all = [...d.nodes, ...d.connectors, ...(d.sections ?? [])];
   if (new Set(all.map((e) => e.id)).size !== all.length) return false;
   const nodes = new Map(d.nodes.map((n) => [n.id, n]));
   const sections = new Set((d.sections ?? []).map((s) => s.id));
-  for (const node of d.nodes) {
-    if (node.sectionId !== undefined && (!sections.has(node.sectionId) || !!node.groupId))
-      return false;
-    const seen = new Set([node.id]);
-    let parent = node.groupId;
-    while (parent) {
-      if (seen.has(parent)) return false;
-      seen.add(parent);
-      const group = nodes.get(parent);
-      if (!group || !['group', 'frame'].includes(group.kind)) return false;
-      parent = group.groupId;
-    }
-  }
-  for (const connector of d.connectors)
-    for (const side of ['from', 'to'] as const) {
-      const port = connector[`${side}Port`];
-      if (
-        port !== undefined &&
-        (typeof port !== 'string' ||
-          (!['auto', 'top', 'right', 'bottom', 'left'].includes(port) &&
-            !nodes.get(connector[side])?.ports?.some((p) => p.key === port)))
-      )
-        return false;
-    }
-  return true;
+  return (
+    d.nodes.every((node) => validNodeLinks(node, nodes, sections)) &&
+    d.connectors.every((connector) => validConnectorPorts(connector, nodes))
+  );
 }
 export function validBoardPorts(value: unknown): value is WhiteboardPort[] | undefined {
   if (value === undefined) return true;
@@ -503,10 +526,45 @@ export const alignNodes = (
     }),
     { geometry: ids },
   );
-export function copyBoard(d: WhiteboardContent, ids: string[]): WhiteboardContent {
+type IdMint = (prefix: string) => string;
+/**
+ * Commands may be applied more than once (checked before commit, replayed or
+ * rebased), so IDs created inside apply must repeat. Call the returned function
+ * at the start of each apply with the IDs already in its input; it hands out the
+ * same IDs in the same order, and rejects reapplying the command to its own result.
+ */
+function stableIds(): (taken: ReadonlySet<string>) => IdMint {
+  const minted: string[] = [];
+  return (taken) => {
+    let next = 0;
+    return (prefix) => {
+      const id = (minted[next++] ??= newId(prefix));
+      if (taken.has(id)) throw new Error('This command was already applied; its new IDs exist');
+      return id;
+    };
+  };
+}
+function boardIds(d: WhiteboardContent): Set<string> {
+  return new Set([
+    ...d.nodes.map((n) => n.id),
+    ...d.connectors.map((c) => c.id),
+    ...(d.sections ?? []).map((s) => s.id),
+  ]);
+}
+/**
+ * Copies nodes (with their group descendants) and touching connectors under new
+ * IDs, moved by `offset`. Copy uses the default offset once; cut passes 0 so a
+ * later paste restores position.
+ */
+export function copyBoard(
+  d: WhiteboardContent,
+  ids: string[],
+  offset = 20,
+  mint: IdMint = newId,
+): WhiteboardContent {
   const all = new Set(expanded(d, ids)),
     nodes = d.nodes.filter((n) => all.has(n.id)),
-    mapping = new Map(nodes.map((n) => [n.id, newId('node')]));
+    mapping = new Map(nodes.map((n) => [n.id, mint('node')]));
   return {
     schemaVersion: 2,
     nodes: nodes.map((n) => ({
@@ -514,7 +572,7 @@ export function copyBoard(d: WhiteboardContent, ids: string[]): WhiteboardConten
       id: mapping.get(n.id)!,
       groupId: n.groupId ? mapping.get(n.groupId) : undefined,
       sectionId: undefined,
-      bounds: { ...n.bounds, x: n.bounds.x + 20, y: n.bounds.y + 20 },
+      bounds: { ...n.bounds, x: n.bounds.x + offset, y: n.bounds.y + offset },
     })),
     connectors: d.connectors
       .filter((c) => all.has(c.from) || all.has(c.to))
@@ -522,19 +580,21 @@ export function copyBoard(d: WhiteboardContent, ids: string[]): WhiteboardConten
         const p = connectorGeometry(d, c)!;
         return {
           ...clone(c),
-          id: newId('connector'),
+          id: mint('connector'),
           from: mapping.get(c.from) ?? '',
           to: mapping.get(c.to) ?? '',
-          fromPoint: { x: p.x1 + 20, y: p.y1 + 20 },
-          toPoint: { x: p.x2 + 20, y: p.y2 + 20 },
+          fromPoint: { x: p.x1 + offset, y: p.y1 + offset },
+          toPoint: { x: p.x2 + offset, y: p.y2 + offset },
         };
       }),
   };
 }
+/** Pastes clipboard content as prepared by copyBoard, at its stored positions. */
 export const pasteBoard = (copied: WhiteboardContent): EditorCommand<WhiteboardContent> => {
   const next = copyBoard(
     copied,
     copied.nodes.map((n) => n.id),
+    0,
   );
   return command('whiteboard.paste', 'Paste board content', (d) => ({
     ...d,
@@ -542,118 +602,152 @@ export const pasteBoard = (copied: WhiteboardContent): EditorCommand<WhiteboardC
     connectors: [...d.connectors, ...clone(next.connectors)],
   }));
 };
+type BoardItems = ReturnType<typeof geometry>;
+interface ArrangeContext {
+  d: WhiteboardContent;
+  ids: string[];
+  items: BoardItems;
+  roots: ReturnType<typeof selectedRoots>;
+  /** Selected nodes with all their Group descendants. */
+  all: Set<string>;
+  action: string;
+  value?: number;
+  groupTemplate: WhiteboardNode;
+  /** Repeatable IDs for nodes and connectors created by this command. */
+  duplicateIds: ReturnType<typeof stableIds>;
+}
+const withNodePatches = (
+  d: WhiteboardContent,
+  patches: Map<string, Partial<WhiteboardNode>>,
+): WhiteboardContent => ({
+  ...d,
+  nodes: d.nodes.map((n) => (patches.has(n.id) ? { ...n, ...patches.get(n.id)! } : n)),
+});
+const withBounds = (d: WhiteboardContent, bounds: Map<string, Bounds>) =>
+  withNodePatches(d, new Map([...bounds].map(([id, b]) => [id, { bounds: b }])));
+function duplicateBoard({ d, ids, duplicateIds }: ArrangeContext): WhiteboardContent {
+  const copied = copyBoard(d, ids, 20, duplicateIds(boardIds(d)));
+  return {
+    ...d,
+    nodes: [...d.nodes, ...copied.nodes],
+    connectors: [...d.connectors, ...copied.connectors],
+  };
+}
+function groupBoard({ d, roots, groupTemplate }: ArrangeContext): WhiteboardContent {
+  if (roots.length < 2) throw new Error('Select two or more nodes');
+  if (new Set(roots.map((r) => d.nodes.find((n) => n.id === r.id)?.sectionId ?? '')).size > 1)
+    throw new Error('Select objects in the same Section before grouping');
+  const group = {
+    ...groupTemplate,
+    sectionId: d.nodes.find((n) => n.id === roots[0].id)?.sectionId,
+    bounds: unionBounds(roots.map((n) => n.bounds)),
+    groupId: roots[0].parentId,
+  };
+  return {
+    ...d,
+    nodes: [
+      group,
+      ...d.nodes.map((n) =>
+        roots.some((r) => r.id === n.id) ? { ...n, groupId: group.id, sectionId: undefined } : n,
+      ),
+    ],
+  };
+}
+function ungroupBoard({ d, ids }: ArrangeContext): WhiteboardContent {
+  const groups = d.nodes.filter((n) => ids.includes(n.id) && ['group', 'frame'].includes(n.kind));
+  return {
+    ...d,
+    nodes: d.nodes
+      .filter((n) => !groups.some((g) => g.id === n.id))
+      .map((n) => {
+        const g = groups.find((g) => g.id === n.groupId);
+        return g ? { ...n, groupId: g.groupId, sectionId: g.groupId ? undefined : g.sectionId } : n;
+      }),
+  };
+}
+function distributeBoard({ d, ids, items, action, value }: ArrangeContext) {
+  return withBounds(
+    d,
+    distributeGeometry(
+      items,
+      ids,
+      action.endsWith('x') ? 'x' : 'y',
+      action.startsWith('gap') ? value : undefined,
+    ),
+  );
+}
+function sameSizeBoard({ d, ids, items, action }: ArrangeContext) {
+  const mapped = new Map<string, { bounds: Bounds; rotation: number }>();
+  for (const [id, bounds] of matchingSizeBounds(items, ids, action)) {
+    const old = items.find((item) => item.id === id)!.bounds;
+    for (const [childId, patch] of transformGeometry(items, [id], {
+      dx: 0,
+      dy: 0,
+      dw: bounds.width - old.width,
+      dh: bounds.height - old.height,
+    }))
+      mapped.set(childId, patch);
+  }
+  return withNodePatches(d, mapped);
+}
+function reorderBoard({ d, ids, items, roots, action }: ArrangeContext): WhiteboardContent {
+  const order = reorderedSiblingIds(items, ids, action);
+  const byId = new Map(d.nodes.map((n) => [n.id, n]));
+  let index = 0;
+  return {
+    ...d,
+    nodes: d.nodes.map((n) => (n.groupId === roots[0]?.parentId ? byId.get(order[index++])! : n)),
+  };
+}
+/** Lock/unlock and hide/show apply to whole subtrees; other actions leave nodes unchanged. */
+function flagBoard({ d, all, action }: ArrangeContext): WhiteboardContent {
+  return {
+    ...d,
+    nodes: d.nodes.map((n) => {
+      if (!all.has(n.id)) return n;
+      if (action === 'lock' || action === 'unlock') return { ...n, locked: action === 'lock' };
+      if (action === 'hide' || action === 'show') return { ...n, hidden: action === 'hide' };
+      return n;
+    }),
+  };
+}
+const arrangeHandlers: [
+  (action: string) => boolean,
+  (context: ArrangeContext) => WhiteboardContent,
+][] = [
+  [(a) => a === 'duplicate', duplicateBoard],
+  [(a) => a === 'delete', ({ d, ids }) => deleteNodes(ids).apply(d)],
+  // 'frame' is the toolbar name for grouping; it shares this command's group ID.
+  [(a) => a === 'group' || a === 'frame', groupBoard],
+  [(a) => a === 'ungroup', ungroupBoard],
+  [(a) => a.startsWith('distribute-') || a.startsWith('gap-'), distributeBoard],
+  [
+    (a) => a === 'rotate',
+    ({ d, ids }) => transformNodes(ids, { dx: 0, dy: 0, dw: 0, dh: 0, rotation: 90 }).apply(d),
+  ],
+  [(a) => a.startsWith('same-'), sameSizeBoard],
+  [
+    (a) => a === 'flip-x' || a === 'flip-y',
+    ({ d, ids, items, action }) =>
+      withNodePatches(d, reflectGeometry(items, ids, action === 'flip-x' ? 'x' : 'y')),
+  ],
+  [(a) => ['front', 'back', 'forward', 'backward'].includes(a), reorderBoard],
+];
 export const arrangeBoard = (
   ids: string[],
   action: string,
   value?: number,
 ): EditorCommand<WhiteboardContent> => {
-  const groupTemplate = makeWhiteboardNode('group');
+  const groupTemplate = makeWhiteboardNode('group'),
+    duplicateIds = stableIds();
+  const handler = arrangeHandlers.find(([matches]) => matches(action))?.[1] ?? flagBoard;
   return withCommandReads<WhiteboardContent>(
     command('whiteboard.arrange', action, (d) => {
       const items = geometry(d),
         roots = selectedRoots(items, ids),
         all = descendantIds(items, ids);
       if (!['unlock', 'show', 'lock', 'hide'].includes(action)) assertEditable(items, ids, true);
-      if (action === 'duplicate') return pasteBoard(copyBoard(d, ids)).apply(d);
-      if (action === 'delete') return deleteNodes(ids).apply(d);
-      if (action === 'frame') return groupNodes(ids).apply(d);
-      if (action === 'group') {
-        if (roots.length < 2) throw new Error('Select two or more nodes');
-        if (new Set(roots.map((r) => d.nodes.find((n) => n.id === r.id)?.sectionId ?? '')).size > 1)
-          throw new Error('Select objects in the same Section before grouping');
-        const group = {
-          ...groupTemplate,
-          sectionId: d.nodes.find((n) => n.id === roots[0].id)?.sectionId,
-          bounds: unionBounds(roots.map((n) => n.bounds)),
-          groupId: roots[0].parentId,
-        };
-        return {
-          ...d,
-          nodes: [
-            group,
-            ...d.nodes.map((n) =>
-              roots.some((r) => r.id === n.id)
-                ? { ...n, groupId: group.id, sectionId: undefined }
-                : n,
-            ),
-          ],
-        };
-      }
-      if (action === 'ungroup') {
-        const groups = d.nodes.filter(
-          (n) => ids.includes(n.id) && ['group', 'frame'].includes(n.kind),
-        );
-        return {
-          ...d,
-          nodes: d.nodes
-            .filter((n) => !groups.some((g) => g.id === n.id))
-            .map((n) => {
-              const g = groups.find((g) => g.id === n.groupId);
-              return g
-                ? { ...n, groupId: g.groupId, sectionId: g.groupId ? undefined : g.sectionId }
-                : n;
-            }),
-        };
-      }
-      if (action.startsWith('distribute-') || action.startsWith('gap-')) {
-        const m = distributeGeometry(
-          items,
-          ids,
-          action.endsWith('x') ? 'x' : 'y',
-          action.startsWith('gap') ? value : undefined,
-        );
-        return {
-          ...d,
-          nodes: d.nodes.map((n) => (m.has(n.id) ? { ...n, bounds: m.get(n.id)! } : n)),
-        };
-      }
-      if (action === 'rotate')
-        return transformNodes(ids, { dx: 0, dy: 0, dw: 0, dh: 0, rotation: 90 }).apply(d);
-      if (action.startsWith('same-')) {
-        const targets = matchingSizeBounds(items, ids, action);
-        const mapped = new Map<string, { bounds: Bounds; rotation: number }>();
-        for (const [id, bounds] of targets) {
-          const old = items.find((item) => item.id === id)!.bounds;
-          for (const [childId, patch] of transformGeometry(items, [id], {
-            dx: 0,
-            dy: 0,
-            dw: bounds.width - old.width,
-            dh: bounds.height - old.height,
-          }))
-            mapped.set(childId, patch);
-        }
-        return {
-          ...d,
-          nodes: d.nodes.map((n) => (mapped.has(n.id) ? { ...n, ...mapped.get(n.id)! } : n)),
-        };
-      }
-      if (action === 'flip-x' || action === 'flip-y') {
-        const mapped = reflectGeometry(items, ids, action === 'flip-x' ? 'x' : 'y');
-        return {
-          ...d,
-          nodes: d.nodes.map((n) => (mapped.has(n.id) ? { ...n, ...mapped.get(n.id)! } : n)),
-        };
-      }
-      if (['front', 'back', 'forward', 'backward'].includes(action)) {
-        const order = reorderedSiblingIds(items, ids, action);
-        const byId = new Map(d.nodes.map((n) => [n.id, n]));
-        let index = 0;
-        return {
-          ...d,
-          nodes: d.nodes.map((n) =>
-            n.groupId === roots[0]?.parentId ? byId.get(order[index++])! : n,
-          ),
-        };
-      }
-      return {
-        ...d,
-        nodes: d.nodes.map((n) => {
-          if (!all.has(n.id)) return n;
-          if (action === 'lock' || action === 'unlock') return { ...n, locked: action === 'lock' };
-          if (action === 'hide' || action === 'show') return { ...n, hidden: action === 'hide' };
-          return n;
-        }),
-      };
+      return handler({ d, ids, items, roots, all, action, value, groupTemplate, duplicateIds });
     }),
     action === 'duplicate' ? { content: ids } : { geometry: ids },
   );

@@ -1,3 +1,5 @@
+import { EditorState } from 'prosemirror-state';
+import { collab, receiveTransaction, sendableSteps } from 'prosemirror-collab';
 import { Step, Transform } from 'prosemirror-transform';
 import type { Node as PMNode } from 'prosemirror-model';
 import {
@@ -17,6 +19,7 @@ import type { TextRun, TextStyle } from '@editor-platform/editor-core';
 import { slideDrawing, type SlideContent } from '@editor-platform/slide/model';
 import { designDrawings, type DesignContent } from '@editor-platform/design/model';
 import { whiteboardDrawing, type WhiteboardContent } from '@editor-platform/whiteboard/model';
+import { animationLayerLocked2, type AnimationContent2 } from '@editor-platform/animation-core/v2';
 interface TextItem {
   id: string;
   text: string;
@@ -29,6 +32,39 @@ export function canvasTextItem<T>(
   id: string,
 ): { item: TextItem; key: string; style: TextStyle } {
   const domain = codec.domain;
+  if (domain === 'animation') {
+    const native = content as AnimationContent2;
+    for (const c of native.compositions) {
+      const layer = c.layers.find((l) => l.id === id);
+      if (layer?.type === 'text')
+        return {
+          item: {
+            id: layer.id,
+            get text() {
+              return layer.text;
+            },
+            set text(value) {
+              layer.text = value;
+            },
+            get runs() {
+              return layer.runs;
+            },
+            set runs(value) {
+              layer.runs = value ?? [];
+            },
+            locked:
+              animationLayerLocked2(c, id) ||
+              c.tracks.some((t) => t.layerId === id && t.property === 'text') ||
+              native.publicInputs.some(
+                (i) => i.target.layerId === id && i.target.property === 'text',
+              ),
+          },
+          key: `entity:layers@${encodeURIComponent(c.id)}:${encodeURIComponent(id)}`,
+          style: { fontSize: layer.fontSize, lineHeight: layer.lineHeight, color: layer.fill },
+        };
+    }
+    fail('target-deleted', 'Animation text layer is missing');
+  }
   if (domain === 'slide')
     for (const page of (content as SlideContent).slides) {
       const item = page.objects.find((e) => e.id === id);
@@ -127,4 +163,55 @@ export function mapCanvasTextAnchor<T>(
     to: Math.max(from.pos, to.pos),
     orphan: from.deletedAcross && to.deletedAcross,
   };
+}
+
+/** Rebase an actor's native canvas text inverse through later steps on the same target. */
+export function rebaseCanvasTextInverse<T>(
+  codec: DomainCodec<T>,
+  event: import('@editor-platform/collaboration-core').Accepted<T>,
+  later: import('@editor-platform/collaboration-core').Accepted<T>[],
+  current: import('@editor-platform/collaboration-core').Snapshot<T>,
+): Action[] {
+  if (!event.inverse.length || event.inverse.some((a) => a.type !== 'canvas.text-steps'))
+    fail('undo-conflict', 'Mixed text/domain overlap requires review');
+  return event.inverse.map((action) => {
+    const target = action.target;
+    let state = EditorState.create({
+      doc: canvasEngineDocument(codec, event.snapshot.content, target),
+      plugins: [
+        collab({
+          version: event.snapshot.textVersions?.[target] ?? 0,
+          clientID: 'selective-inverse',
+        }),
+      ],
+    });
+    const tr = state.tr;
+    for (const json of action.payload.steps as unknown[])
+      tr.step(Step.fromJSON(canvasTextSchema, json));
+    state = state.apply(tr);
+    const steps = later
+      .flatMap((e) =>
+        e.operation.actions
+          .filter((a) => a.type === 'canvas.text-steps' && a.target === target)
+          .flatMap((a) => a.payload.steps as unknown[]),
+      )
+      .map((json) => Step.fromJSON(canvasTextSchema, json));
+    state = state.apply(
+      receiveTransaction(
+        state,
+        steps,
+        steps.map(() => 'remote'),
+      ),
+    );
+    const inverse = sendableSteps(state);
+    if (!inverse) fail('undo-conflict', 'Native inverse no longer applies');
+    return {
+      type: 'canvas.text-steps',
+      target,
+      payload: {
+        version: current.textVersions?.[target] ?? 0,
+        steps: inverse.steps.map((s) => s.toJSON()),
+      },
+    };
+  });
 }

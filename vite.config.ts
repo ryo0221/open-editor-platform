@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react';
 import { officeMermaidHtml } from './scripts/dev/office-mermaid-html.mjs';
 import { fileURLToPath } from 'node:url';
 import { privateVideoBuild } from './scripts/dev/private-video.mjs';
+import { dependencySecurity } from './scripts/dev/dependency-security.mjs';
 export default defineConfig({
   root: 'apps/playground',
-  plugins: [react(), officeMermaidHtml(), privateVideoBuild()],
-  worker: { format: 'es' },
+  plugins: [react(), officeMermaidHtml(), privateVideoBuild(), dependencySecurity()],
+  worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },
   // Resolve sanitizer/math dependencies separately so the existing public security pins
   // apply to emitted Mermaid code instead of upstream's bundled older copies.
   resolve: {
@@ -29,7 +30,7 @@ export default defineConfig({
   // a cold dev server can reload an already-open editor when discovering them.
   optimizeDeps: {
     include: [
-      'pdfjs-dist',
+      'pdfjs-dist/legacy/build/pdf.mjs',
       'prosemirror-collab',
       'prosemirror-transform',
       'saxes',

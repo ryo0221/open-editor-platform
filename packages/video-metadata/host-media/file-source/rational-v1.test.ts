@@ -12,11 +12,7 @@ import {
 } from '@editor-platform/video-core';
 import { prepareImportSetV1, type ImportSetV1 } from './import-v1';
 import { audioMappingV1, outputSpanV1, videoIntervalV1 } from './timing-v1';
-import {
-  planWindow,
-  renderPcm,
-  WindowCollector,
-} from '../../../video-core/experiments/pcm-renderer/render';
+import { planWindow, renderPcm, WindowCollector } from '../../../video-core/src/pcm/render';
 const T = time(42251, 600);
 function empty(): VideoContentV1 {
   return {

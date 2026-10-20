@@ -41,6 +41,45 @@ const built = await productBuild(deps, {
 // Every repository module in the served artifact must remain the reviewed runtime bytes.
 const runtimePin = process.env.M2_PCM_RUNTIME ?? 'bbb063ace2786447b5fd59115cffc00b55805f12';
 const runtimeInputs = [];
+// Product PCM modules left experiments/ after the pin; pins from before the move hold the old path.
+const relocated = Object.fromEntries(
+  [
+    ['video-core/src/pcm/render.ts', 'video-core/experiments/pcm-renderer/render.ts'],
+    ['video-core/src/pcm/session.ts', 'video-core/experiments/pcm-renderer/session.ts'],
+    ['video-core/src/pcm/kernel.ts', 'video-core/experiments/pcm-wasm-r0/kernel.ts'],
+    ['video-core/src/pcm/adapter.ts', 'video-core/experiments/pcm-wasm-r0/adapter.ts'],
+    ['video-core/src/pcm/prepare.ts', 'video-core/experiments/pcm-wasm-r0/prepare.ts'],
+    ['video-core/src/pcm/selection.ts', 'video-core/experiments/pcm-wasm-v1/selection.ts'],
+    [
+      'video-core/src/pcm/scheduled-audio.ts',
+      'video-core/experiments/pcm-wasm-v1/scheduled-audio.ts',
+    ],
+    ['video-core/src/pcm/owners.ts', 'video-core/experiments/pcm-wasm-m2/owners.ts'],
+    ['video-core/src/pcm/source-port.ts', 'video-core/experiments/pcm-wasm-m2/source-port.ts'],
+    ['video-core/src/pcm/codec-inputs.mjs', 'video-core/experiments/pcm-wasm-m2/codec-inputs.mjs'],
+    [
+      'video-metadata/host-media/m2/pcm-output.mjs',
+      'video-core/experiments/pcm-wasm-m2/output.mjs',
+    ],
+    [
+      'video-metadata/host-media/m2/observe-validation.mjs',
+      'video-core/experiments/pcm-wasm-m2/observe-validation.mjs',
+    ],
+  ].map(([now, before]) => ['packages/' + now, 'packages/' + before]),
+);
+function pinnedSource(relative) {
+  for (const candidate of [relative, relocated[relative]].filter(Boolean)) {
+    try {
+      return execFileSync('git', ['show', runtimePin + ':' + candidate], {
+        maxBuffer: 8 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      // Try the pre-relocation path, if any.
+    }
+  }
+  throw Error('Runtime source missing at ' + runtimePin + ': ' + relative);
+}
 for (const [file, metadata] of Object.entries(built.metafile.inputs)) {
   // Browser-disabled Node modules are zero-byte esbuild markers, not disk paths.
   if (file.startsWith('(disabled):')) {
@@ -53,9 +92,7 @@ for (const [file, metadata] of Object.entries(built.metafile.inputs)) {
   const relative = path.relative(process.cwd(), absolute);
   if (relative.startsWith('node_modules/')) continue; // External pinned dependencies are not Git source.
   const current = await readFile(absolute);
-  const expected = execFileSync('git', ['show', runtimePin + ':' + relative], {
-    maxBuffer: 8 * 1024 * 1024,
-  });
+  const expected = pinnedSource(relative);
   assert.deepEqual(current, expected, 'Runtime source changed: ' + relative);
   runtimeInputs.push({
     path: relative,

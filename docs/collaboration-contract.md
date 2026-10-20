@@ -48,7 +48,11 @@ unknown schemas, nonfinite numbers and oversized envelopes reject. UUIDs are fix
 before submission. Domain postconditions validate every transaction before commit.
 
 The authority validates identity/scopes against its trusted connection principal,
-never against the actor kind. A duplicate operation ID returns its original receipt;
+never against the actor kind. Provenance is authorized the same way: a connection
+may declare `human` or locally reviewed `proposal` origin, and `agent` only when its
+principal's `origins` grant includes it. Undo/redo, restore, `proposalId`,
+`sourceActorId`, `proposal:` operation IDs and whole-content `domain.restore` actions
+are issued only by the authority's Undo, restore and proposal APIs. A duplicate operation ID returns its original receipt;
 a changed payload under the same ID is a protocol error, including after compaction.
 Rejected operations are also remembered. A changed/rebased intention needs a new ID.
 Accepted means committed in process memory (`durable: false`), not disk durability.
@@ -139,8 +143,13 @@ A stale proposal needs Host regeneration or a new reviewed proposal, not automat
 re-query. Adoption records source actor C separately from adopter A; reference Undo
 ownership is the adopter's session.
 
+Registration requires the trusted principal to be the proposal's source actor.
 Apply is idempotent by proposal identity. Cancel before commit is terminal; cancel
-after commit reports applied. The authority protects its internal proposal commit
+after commit reports applied. The source actor may withdraw its proposal; rejecting,
+or cancelling another actor's proposal, needs an unexpired writable principal whose
+scopes cover the proposal's targets (whole-artifact scope when it no longer applies). Cancelled
+and rejected outcomes are final; a later cancel or reject reports them unchanged.
+Verification. The authority protects its internal proposal commit
 path; a raw wire `proposalId` cannot bypass preview/adoption. External read validation
 is a synchronous Host hook. Cross-system atomicity requires a Host version/lease
 agreement and is not guaranteed merely by calling that hook.

@@ -6,6 +6,11 @@ canonical development source before synchronizing them here; direct edits to gen
 files are detected and must be reconciled before a later synchronization can proceed.
 Public documentation is maintained through the same export configuration.
 
+Use the [documentation index](docs/README.md) and
+[writing policy](docs/documentation-guide.md) to select the update location.
+Keep README focused on overview/setup/navigation, status on current capabilities
+and limits, and detailed results in the corresponding verification record.
+
 Follow AGENTS.md and the verification commands in README.md. Keep product-specific
 integrations outside core packages. Preserve third-party notices and asset provenance.
 Never add credentials, personal data, generated verification output or private links.

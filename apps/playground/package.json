@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@editor-platform/animation-adapters": "*",
+    "@editor-platform/animation": "*",
+    "@editor-platform/animation-core": "*",
     "@editor-platform/react-ui": "*",
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/artifact-core": "*",
@@ -30,6 +33,17 @@
     "@editor-platform/reference-adapters": "*",
     "@editor-platform/geo-core": "*",
     "@editor-platform/geo-inspector": "*",
-    "@editor-platform/extension-contract": "*"
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/structured-data-graph": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/extension-runtime": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.6",
+    "prosemirror-transform": "1.12.2"
   }
 }

@@ -80,6 +80,11 @@ base(
     const failed = (await nativeArtifact(page)).draft.content as ReactUiDocument;
     expect(failed.nodes.find((n) => n.id === 'title')!.props.text).toBe('THROW_REFERENCE');
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(
+      page
+        .frameLocator('iframe[title="React component preview"]')
+        .getByText('Color study', { exact: true }),
+    ).toBeVisible();
     await page.getByRole('button', { name: 'Restart preview', exact: true }).click();
     const frame = page.frameLocator('iframe[title="React component preview"]');
     await expect(frame.getByText('Color study', { exact: true })).toBeVisible();

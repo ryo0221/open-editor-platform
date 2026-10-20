@@ -285,6 +285,9 @@ const CanvasObject = memo(
       <g
         role="button"
         aria-label={target.label}
+        aria-description={
+          target.text || target.textParts?.map((part) => part.text).join('\n') || undefined
+        }
         aria-pressed={selected}
         tabIndex={-1}
         data-canvas-target={target.id}

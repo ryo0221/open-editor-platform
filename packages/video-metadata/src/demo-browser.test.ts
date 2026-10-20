@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chromium, type Browser } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import { time, type VideoContent } from '@editor-platform/video-core';
 import type {} from '../test-host/demo-preview';
+import { closeServer, launchTestChromium, listenOnLoopback } from '../test-host/browser';
 let browser: Browser, bundle: string, origin: string, dir: string, content: VideoContent;
 const media = new Map<string, Buffer>();
 const server = createServer((req, res) => {
@@ -118,19 +119,12 @@ beforeAll(async () => {
       minify: true,
     })
   ).outputFiles[0].text;
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw Error('address');
-  origin = `http://127.0.0.1:${address.port}`;
-  browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    headless: true,
-    args: ['--no-sandbox'],
-  });
+  origin = await listenOnLoopback(server);
+  browser = await launchTestChromium();
 });
 afterAll(async () => {
   await browser?.close();
-  await new Promise<void>((r) => server.close(() => r()));
+  await closeServer(server);
   if (dir) rmSync(dir, { recursive: true, force: true });
 });
 for (const width of [1280, 390])
@@ -147,7 +141,10 @@ for (const width of [1280, 390])
       await page.evaluate(async (c) => {
         // Control only the browser event order: deliver an ACTUAL initial decoded
         // frame before performing the requested seek. No fabricated pixels/PTS.
-        const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime')!;
+        const descriptor = Object.getOwnPropertyDescriptor(
+          HTMLMediaElement.prototype,
+          'currentTime',
+        )!;
         Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
           ...descriptor,
           set(this: HTMLMediaElement, value: number) {
@@ -196,7 +193,9 @@ for (const width of [1280, 390])
       expect(e.pixel[1]).toBeLessThan(10);
       expect(e.shown.at(-1)!.mediaTime).toBeCloseTo(0.2, 5);
       e = await render(5, 4);
-      expect(e.pixel[1], JSON.stringify({ pixel: e.pixel, frame: e.shown.at(-1) })).toBeGreaterThan(240);
+      expect(e.pixel[1], JSON.stringify({ pixel: e.pixel, frame: e.shown.at(-1) })).toBeGreaterThan(
+        240,
+      );
       expect(e.shown.at(-1)!.mediaTime).toBeCloseTo(1.2, 5);
       expect(await page.evaluate(() => demoPreview.render(2))).toBe('gap');
       expect((await page.evaluate(() => demoPreview.evidence())).pixel[3]).toBe(0);
@@ -227,7 +226,9 @@ for (const width of [1280, 390])
         });
       });
       e = await render(5, 4);
-      expect(e.pixel[1], JSON.stringify({ pixel: e.pixel, frame: e.shown.at(-1) })).toBeGreaterThan(240);
+      expect(e.pixel[1], JSON.stringify({ pixel: e.pixel, frame: e.shown.at(-1) })).toBeGreaterThan(
+        240,
+      );
       await page.evaluate(() =>
         demoPreview.edit({
           type: 'split',

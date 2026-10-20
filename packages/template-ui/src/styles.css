@@ -220,6 +220,11 @@
   .ep-dialog:has(.tp-author) {
     padding: 12px;
   }
+  .ep-dialog:has(.tp-gallery) {
+    /* Keep Firefox's native pointer hit region aligned with the scrolled modal,
+       including controls at its lower edge with fractional viewport heights. */
+    transform: translate(0);
+  }
   .tp-native-preview iframe {
     height: 420px;
   }

@@ -21,6 +21,13 @@ import { referenceTextRevision } from '../../../apps/react-ui-reference/src/cata
 import { reactUiEditorCodec } from './react-ui';
 import { prepareEditorCommand } from './editor-transactions';
 import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 const A: Principal = {
   actorId: 'A',
   sessionId: 'A-session',
@@ -203,7 +210,9 @@ describe('React UI uses the existing authority and actor/session selective histo
           components: content.components.map((c) =>
             c === old || c.ref.componentId === 'Button' ? changed : c,
           ),
-          nodes: content.nodes.map(node => node.component.componentId === 'Button' ? { ...node, component: changed.ref } : node),
+          nodes: content.nodes.map((node) =>
+            node.component.componentId === 'Button' ? { ...node, component: changed.ref } : node,
+          ),
         })),
       ),
     ).toThrow(/immutable/);
@@ -269,7 +278,7 @@ describe('React UI uses the existing authority and actor/session selective histo
       writes: prepared.conditions,
       external: [],
     };
-    h.authority.register(proposal);
+    h.authority.register({ ...proposalHost, actorId: proposal.sourceActorId }, proposal);
     const preview = h.authority.preview(A, proposal.id);
     const peer = h.commit(prop('buy', 'label', 'Peer'), B);
     h.authority.undo(B, peer.operationId);
@@ -293,10 +302,11 @@ describe('React UI uses the existing authority and actor/session selective histo
       restore: async () => {
         throw new Error('Unused');
       },
-      registerProposal: async (p: Proposal) => h.authority.register(p),
+      registerProposal: async (p: Proposal) =>
+        h.authority.register({ ...proposalHost, actorId: p.sourceActorId }, p),
       previewProposal: async (id: string) => h.authority.preview(A, id),
       applyProposal: async (id: string, token: string) => h.authority.applyProposal(A, id, token),
-      cancelProposal: async (id: string) => h.authority.cancelProposal(id),
+      cancelProposal: async (id: string) => h.authority.cancelProposal(proposalHost, id),
     }) as EditorHostAdapter<ReactUiDocument>;
     const session = new SharedEditorSession(reactUiEditorCodec, host);
     await session.open();

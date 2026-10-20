@@ -37,6 +37,70 @@ export interface InspectorCaptureLabel {
   sequence: number;
   packageHash: string;
 }
+type GeoFeature = DeepReadonly<GeoDocument>['layers'][number]['features'][number];
+type GeoNodeFactory = <K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  text?: string,
+) => HTMLElementTagNameMap[K];
+type GeoListFactory = (items: readonly (readonly [string, string])[]) => HTMLDListElement;
+
+function featureItems(feature: GeoFeature) {
+  const geometry = feature.geometry;
+  const items: [string, string][] = [
+    ['Feature ID', feature.id],
+    ['Row ID', feature.rowId],
+    ['Geometry', geometry?.type ?? 'null — location unknown'],
+  ];
+  if (geometry?.type === 'Point')
+    items.push(
+      ['Longitude', String(geometry.coordinates[0])],
+      ['Latitude', String(geometry.coordinates[1])],
+    );
+  else if (geometry)
+    items.push(['Coordinates (longitude, latitude)', JSON.stringify(geometry.coordinates)]);
+  if (feature.sourceRef)
+    items.push(
+      ['Source ID', feature.sourceRef.sourceId],
+      ['External ID', JSON.stringify(feature.sourceRef.externalId)],
+    );
+  return items;
+}
+
+function renderProvenance(
+  node: GeoNodeFactory,
+  list: GeoListFactory,
+  content: DeepReadonly<GeoDocument>,
+) {
+  const provenance = node('section');
+  provenance.setAttribute('aria-label', 'Source provenance');
+  provenance.append(node('h3', 'Source provenance'));
+  for (const source of content.sources) {
+    const details = node('details');
+    details.append(node('summary', `Source ${source.id}`));
+    details.append(
+      list([
+        ['Source ID', source.id],
+        ['Resource reference', source.resourceId],
+        ['Source artifact', source.pin.artifactId],
+        ['Fixed source version', source.pin.versionId],
+        ['Declared source content hash', source.pin.contentHash],
+        ['Declared raw byte hash', source.bytesHash],
+        ['Format / adapter', `${source.format} / ${source.adapterVersion}`],
+        ['CRS / axis', `${source.declaredCrs} / ${source.axis}`],
+        ['Attribution', source.attribution],
+      ]),
+    );
+    provenance.append(details);
+  }
+  provenance.append(
+    node(
+      'p',
+      'Source pins are displayed as stored metadata. No source resource is fetched or independently verified.',
+    ),
+  );
+  return provenance;
+}
+
 /** Readonly local Point frame plus native inspector. Caller owns insertion and lifecycle. */
 export function createGeoInspectorSurface(
   doc: Document,
@@ -139,25 +203,7 @@ export function createGeoInspectorSurface(
       stops.push(() => button.removeEventListener('click', click));
       details.append(button);
       layerRows.set(feature.id, { details, button });
-      const geometry = feature.geometry;
-      const items: [string, string][] = [
-        ['Feature ID', feature.id],
-        ['Row ID', feature.rowId],
-        ['Geometry', geometry?.type ?? 'null — location unknown'],
-      ];
-      if (geometry?.type === 'Point')
-        items.push(
-          ['Longitude', String(geometry.coordinates[0])],
-          ['Latitude', String(geometry.coordinates[1])],
-        );
-      else if (geometry)
-        items.push(['Coordinates (longitude, latitude)', JSON.stringify(geometry.coordinates)]);
-      if (feature.sourceRef)
-        items.push(
-          ['Source ID', feature.sourceRef.sourceId],
-          ['External ID', JSON.stringify(feature.sourceRef.externalId)],
-        );
-      details.append(list(items));
+      details.append(list(featureItems(feature)));
       const attrs = node('dl');
       attrs.setAttribute('aria-label', `Attributes ${feature.id}`);
       for (const field of layer.fields)
@@ -170,34 +216,7 @@ export function createGeoInspectorSurface(
     }
     root.append(section);
   }
-  const provenance = node('section');
-  provenance.setAttribute('aria-label', 'Source provenance');
-  provenance.append(node('h3', 'Source provenance'));
-  for (const source of content.sources) {
-    const details = node('details');
-    details.append(node('summary', `Source ${source.id}`));
-    details.append(
-      list([
-        ['Source ID', source.id],
-        ['Resource reference', source.resourceId],
-        ['Source artifact', source.pin.artifactId],
-        ['Fixed source version', source.pin.versionId],
-        ['Declared source content hash', source.pin.contentHash],
-        ['Declared raw byte hash', source.bytesHash],
-        ['Format / adapter', `${source.format} / ${source.adapterVersion}`],
-        ['CRS / axis', `${source.declaredCrs} / ${source.axis}`],
-        ['Attribution', source.attribution],
-      ]),
-    );
-    provenance.append(details);
-  }
-  provenance.append(
-    node(
-      'p',
-      'Source pins are displayed as stored metadata. No source resource is fetched or independently verified.',
-    ),
-  );
-  root.append(provenance);
+  root.append(renderProvenance(node, list, content));
   return Object.freeze({
     element: root,
     dispose() {

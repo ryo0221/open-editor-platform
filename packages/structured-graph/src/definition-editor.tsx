@@ -12,6 +12,7 @@ import {
 import {
   previewGraphDefinition,
   type GraphDefinitionChange,
+  type GraphDefinitionPreview,
   type GraphSourceActions,
 } from './definition';
 import { formatGraphDiagnostic } from './diagnostics';
@@ -165,81 +166,16 @@ export function GraphDefinitionEditor({
           </select>
         </label>
         {draft.schema[field] && (
-          <>
-            <label>
-              項目の表示名
-              <input
-                aria-label="Definition field label"
-                value={draft.ui?.fields?.[field]?.label ?? field}
-                onChange={(event) =>
-                  setDraft({
-                    ...draft,
-                    ui: {
-                      ...draft.ui,
-                      fields: {
-                        ...draft.ui?.fields,
-                        [field]: { ...draft.ui?.fields?.[field], label: event.target.value },
-                      },
-                    },
-                  })
-                }
-              />
-            </label>
-            <label>
-              値の型
-              <select
-                aria-label="Definition field type"
-                value={draft.schema[field].type}
-                onChange={(event) => {
-                  const type = event.target.value as AttributeSchema['type'];
-                  const next: AttributeSchema = {
-                    type,
-                    required: draft.schema[field].required,
-                    ...(type === 'enum'
-                      ? { enum: ['value'] }
-                      : type === 'array'
-                        ? { items: { type: 'string' } }
-                        : type === 'object'
-                          ? { properties: {} }
-                          : {}),
-                  };
-                  setDraft({ ...draft, schema: { ...draft.schema, [field]: next } });
-                  setSchemaText(JSON.stringify(next, null, 2));
-                  setSchemaError('');
-                  setError('');
-                }}
-              >
-                {['string', 'number', 'boolean', 'enum', 'array', 'object'].map((type) => (
-                  <option key={type}>{type}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                aria-label="Definition required"
-                checked={!!draft.schema[field].required}
-                onChange={(event) => patchField({ required: event.target.checked })}
-              />
-              必須
-            </label>
-            <PropertyInput
-              label="Definition field schema"
-              showLabel
-              type="json"
-              value={schemaText}
-              onChange={(value) => {
-                setSchemaText(value);
-                try {
-                  setDraft({ ...draft, schema: { ...draft.schema, [field]: JSON.parse(value) } });
-                  setSchemaError('');
-                  setError('');
-                } catch {
-                  setSchemaError('有効なJSONで属性の制約を入力してください。');
-                }
-              }}
-            />
-          </>
+          <DefinitionFieldSettings
+            draft={draft}
+            field={field}
+            setDraft={setDraft}
+            schemaText={schemaText}
+            setSchemaText={setSchemaText}
+            setSchemaError={setSchemaError}
+            setError={setError}
+            patchField={patchField}
+          />
         )}
         <label>
           追加属性ID
@@ -286,6 +222,144 @@ export function GraphDefinitionEditor({
           <pre>{JSON.stringify(profile, null, 2)}</pre>
         </details>
       )}
+      <DefinitionPreviewFooter
+        preview={preview}
+        inputError={inputError}
+        previewError={previewError}
+        stale={stale}
+        editable={editable}
+        dirty={dirty}
+        onClose={onClose}
+      />
+    </form>
+  );
+}
+
+type DefinitionDraft = GraphType | GraphEdgeType;
+function defaultFieldSchema(
+  type: AttributeSchema['type'],
+  required: boolean | undefined,
+): AttributeSchema {
+  return {
+    type,
+    required,
+    ...(type === 'enum'
+      ? { enum: ['value'] }
+      : type === 'array'
+        ? { items: { type: 'string' } }
+        : type === 'object'
+          ? { properties: {} }
+          : {}),
+  };
+}
+function DefinitionFieldSettings({
+  draft,
+  field,
+  setDraft,
+  schemaText,
+  setSchemaText,
+  setSchemaError,
+  setError,
+  patchField,
+}: {
+  draft: DefinitionDraft;
+  field: string;
+  setDraft: (draft: DefinitionDraft) => void;
+  schemaText: string;
+  setSchemaText: (text: string) => void;
+  setSchemaError: (message: string) => void;
+  setError: (message: string) => void;
+  patchField: (value: Partial<AttributeSchema>) => void;
+}) {
+  return (
+    <>
+      <label>
+        項目の表示名
+        <input
+          aria-label="Definition field label"
+          value={draft.ui?.fields?.[field]?.label ?? field}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              ui: {
+                ...draft.ui,
+                fields: {
+                  ...draft.ui?.fields,
+                  [field]: { ...draft.ui?.fields?.[field], label: event.target.value },
+                },
+              },
+            })
+          }
+        />
+      </label>
+      <label>
+        値の型
+        <select
+          aria-label="Definition field type"
+          value={draft.schema[field].type}
+          onChange={(event) => {
+            const next = defaultFieldSchema(
+              event.target.value as AttributeSchema['type'],
+              draft.schema[field].required,
+            );
+            setDraft({ ...draft, schema: { ...draft.schema, [field]: next } });
+            setSchemaText(JSON.stringify(next, null, 2));
+            setSchemaError('');
+            setError('');
+          }}
+        >
+          {['string', 'number', 'boolean', 'enum', 'array', 'object'].map((type) => (
+            <option key={type}>{type}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <input
+          type="checkbox"
+          aria-label="Definition required"
+          checked={!!draft.schema[field].required}
+          onChange={(event) => patchField({ required: event.target.checked })}
+        />
+        必須
+      </label>
+      <PropertyInput
+        label="Definition field schema"
+        showLabel
+        type="json"
+        value={schemaText}
+        onChange={(value) => {
+          setSchemaText(value);
+          try {
+            setDraft({ ...draft, schema: { ...draft.schema, [field]: JSON.parse(value) } });
+            setSchemaError('');
+            setError('');
+          } catch {
+            setSchemaError('有効なJSONで属性の制約を入力してください。');
+          }
+        }}
+      />
+    </>
+  );
+}
+function DefinitionPreviewFooter({
+  preview,
+  inputError,
+  previewError,
+  stale,
+  editable,
+  dirty,
+  onClose,
+}: {
+  preview?: GraphDefinitionPreview;
+  inputError: string;
+  previewError: string;
+  stale: boolean;
+  editable: boolean;
+  dirty: boolean;
+  onClose(): void;
+}) {
+  return (
+    <>
       {preview && (
         <p role="status">
           移行プレビュー: {preview.changedIds.length}対象 · {preview.convertedValues}値を変換 ·{' '}
@@ -294,7 +368,7 @@ export function GraphDefinitionEditor({
       )}
       {preview?.diagnostics.map((diagnostic, i) => (
         <p role="alert" key={i}>
-          {formatGraphDiagnostic(diagnostic, preview!.graph, preview!.profile, 'ja')}
+          {formatGraphDiagnostic(diagnostic, preview.graph, preview.profile, 'ja')}
         </p>
       ))}
       {(inputError || previewError || stale) && (
@@ -318,6 +392,6 @@ export function GraphDefinitionEditor({
       <button type="button" onClick={onClose}>
         定義編集をキャンセル
       </button>
-    </form>
+    </>
   );
 }

@@ -13,6 +13,7 @@ import {
   reviewCodec,
   fileCodec,
   reactUiEditorCodec,
+  animationEditorCodec,
   annotationsToThreads,
   editorAssetCodec,
   type EditorConnectionCredentials,
@@ -20,9 +21,15 @@ import {
 import { practicalProposal } from './practical-agent';
 import { ReferenceRecoveryStore, downloadRecoveryEntries } from './recovery-store';
 import App, { type SharedPlaygroundConnection } from './App';
-import { type Content, type Kind, type StoredArtifact } from './model';
+import {
+  hasUnsupportedSharedAnimation,
+  type Content,
+  type Kind,
+  type StoredArtifact,
+} from './model';
 const codecs = {
   'react-ui': reactUiEditorCodec,
+  animation: animationEditorCodec,
   slide: slideEditorCodec,
   design: designEditorCodec,
   whiteboard: whiteboardEditorCodec,
@@ -52,6 +59,10 @@ async function connect(
 ) {
   if (domain === 'structured-graph' || domain === 'geo')
     throw new Error('This domain is local-only; shared editing is not supported');
+  if (initial && hasUnsupportedSharedAnimation(initial))
+    throw new Error(
+      'Legacy Animation in the draft or saved history does not support shared editing',
+    );
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {

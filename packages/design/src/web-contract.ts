@@ -169,6 +169,45 @@ export function validDesignWebElement(value: unknown): value is DesignWebElement
     (w.linkPageId === undefined || typeof w.linkPageId === 'string')
   );
 }
+/** Public prop schemas without their native targets; throws on an invalid target. */
+function publicPropSchemas(props: DesignWebComponent['props']) {
+  return Object.fromEntries(
+    Object.entries(props).map(([key, field]) => {
+      if (
+        !record(field.target) ||
+        !keys(field.target, ['elementId', 'field']) ||
+        typeof field.target.elementId !== 'string' ||
+        !identifier.test(field.target.field)
+      )
+        throw new Error('Invalid public target');
+      const { target: _target, ...schema } = field;
+      return [key, schema];
+    }),
+  );
+}
+function publicSlotSchemas(slots: NonNullable<DesignWebComponent['slots']>) {
+  return Object.fromEntries(
+    Object.entries(slots).map(([key, field]) => {
+      if (typeof field.elementId !== 'string') throw new Error('Invalid slot target');
+      const { elementId: _elementId, ...schema } = field;
+      return [key, schema];
+    }),
+  );
+}
+/** Named variants patch only text and fill of parts with string values. */
+function validVariants(variants: DesignWebComponent['variants']): boolean {
+  for (const [variant, overrides] of Object.entries(variants)) {
+    if (!identifier.test(variant) || !record(overrides)) return false;
+    for (const patch of Object.values(overrides))
+      if (
+        !record(patch) ||
+        !keys(patch, ['text', 'fill']) ||
+        Object.values(patch).some((v) => typeof v !== 'string')
+      )
+        return false;
+  }
+  return true;
+}
 export function validDesignWebComponent(value: unknown): value is DesignWebComponent {
   if (
     !validDesignWebData(value) ||
@@ -188,26 +227,8 @@ export function validDesignWebComponent(value: unknown): value is DesignWebCompo
   const w = value as unknown as DesignWebComponent;
   try {
     if (!record(w.props) || !record(w.variants)) return false;
-    const props = Object.fromEntries(
-      Object.entries(w.props).map(([key, field]) => {
-        if (
-          !record(field.target) ||
-          !keys(field.target, ['elementId', 'field']) ||
-          typeof field.target.elementId !== 'string' ||
-          !identifier.test(field.target.field)
-        )
-          throw new Error('Invalid public target');
-        const { target: _target, ...schema } = field;
-        return [key, schema];
-      }),
-    );
-    const slots = Object.fromEntries(
-      Object.entries(w.slots ?? {}).map(([key, field]) => {
-        if (typeof field.elementId !== 'string') throw new Error('Invalid slot target');
-        const { elementId: _elementId, ...schema } = field;
-        return [key, schema];
-      }),
-    );
+    const props = publicPropSchemas(w.props);
+    const slots = publicSlotSchemas(w.slots ?? {});
     const { contractHash: _contractHash, ...ref } = emptyRef;
     sealReactComponent({
       schemaVersion: 1,
@@ -222,16 +243,7 @@ export function validDesignWebComponent(value: unknown): value is DesignWebCompo
       requires: [],
       sampleProps: w.sampleProps ?? {},
     });
-    for (const [variant, overrides] of Object.entries(w.variants)) {
-      if (!identifier.test(variant) || !record(overrides)) return false;
-      for (const patch of Object.values(overrides))
-        if (
-          !record(patch) ||
-          !keys(patch, ['text', 'fill']) ||
-          Object.values(patch).some((v) => typeof v !== 'string')
-        )
-          return false;
-    }
+    if (!validVariants(w.variants)) return false;
   } catch {
     return false;
   }
@@ -242,6 +254,36 @@ export function validDesignWebComponent(value: unknown): value is DesignWebCompo
     typeof w.version === 'string' &&
     !!w.props &&
     !!w.variants
+  );
+}
+const validWebPage = (p: DesignWebSettings['pages'][number]) =>
+  record(p) &&
+  keys(p, ['frameId', 'symbol', 'path']) &&
+  typeof p.frameId === 'string' &&
+  identifier.test(p.symbol) &&
+  typeof p.path === 'string';
+/** Bounded retained publication refs; an invalid ref throws. */
+function validPublications(publications: unknown): boolean {
+  if (!Array.isArray(publications) || publications.length > 1000) return false;
+  publications.forEach((ref, i) => validateReactComponentRef(ref, `$.publications[${i}]`));
+  return true;
+}
+const stringValues = (value: unknown) =>
+  record(value) && Object.values(value).every((v) => typeof v === 'string');
+const validFileHashes = (value: unknown) =>
+  record(value) &&
+  Object.keys(value).length <= 1000 &&
+  Object.values(value).every((v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v));
+/** Accepted receipt: hashes plus legacy file bodies or bounded per-file hashes. */
+function validAcceptedReceipt(accepted: NonNullable<DesignWebSettings['accepted']>): boolean {
+  return (
+    record(accepted) &&
+    keys(accepted, ['sourceHash', 'fingerprint', 'files', 'fileHashes']) &&
+    typeof accepted.sourceHash === 'string' &&
+    typeof accepted.fingerprint === 'string' &&
+    !!(accepted.files || accepted.fileHashes) &&
+    (accepted.files === undefined || stringValues(accepted.files)) &&
+    (accepted.fileHashes === undefined || validFileHashes(accepted.fileHashes))
   );
 }
 export function validDesignWebSettings(value: unknown): value is DesignWebSettings {
@@ -277,10 +319,7 @@ export function validDesignWebSettings(value: unknown): value is DesignWebSettin
       return false;
     validateReactEnvironment(w.environment);
     w.registrations.forEach(validateReactComponent);
-    if (w.publications !== undefined) {
-      if (!Array.isArray(w.publications) || w.publications.length > 1000) return false;
-      w.publications.forEach((ref, i) => validateReactComponentRef(ref, `$.publications[${i}]`));
-    }
+    if (w.publications !== undefined && !validPublications(w.publications)) return false;
     loadReactUiDocument({
       schemaVersion: 1,
       domain: 'react-ui',
@@ -293,33 +332,10 @@ export function validDesignWebSettings(value: unknown): value is DesignWebSettin
       roots: [],
       nodes: [],
     });
-    if (
-      w.accepted &&
-      (!record(w.accepted) ||
-        !keys(w.accepted, ['sourceHash', 'fingerprint', 'files', 'fileHashes']) ||
-        typeof w.accepted.sourceHash !== 'string' ||
-        typeof w.accepted.fingerprint !== 'string' ||
-        (!w.accepted.files && !w.accepted.fileHashes) ||
-        (w.accepted.files !== undefined &&
-          (!record(w.accepted.files) ||
-            Object.values(w.accepted.files).some((v) => typeof v !== 'string'))) ||
-        (w.accepted.fileHashes !== undefined &&
-          (!record(w.accepted.fileHashes) ||
-            Object.keys(w.accepted.fileHashes).length > 1000 ||
-            Object.values(w.accepted.fileHashes).some(
-              (v) => typeof v !== 'string' || !/^[a-f0-9]{64}$/.test(v),
-            ))))
-    )
-      return false;
+    if (w.accepted && !validAcceptedReceipt(w.accepted)) return false;
     return (
-      w.pages.every(
-        (p) =>
-          record(p) &&
-          keys(p, ['frameId', 'symbol', 'path']) &&
-          typeof p.frameId === 'string' &&
-          identifier.test(p.symbol) &&
-          typeof p.path === 'string',
-      ) && w.breakpoints.every((bp) => typeof bp.id === 'string' && Number.isFinite(bp.minWidth))
+      w.pages.every(validWebPage) &&
+      w.breakpoints.every((bp) => typeof bp.id === 'string' && Number.isFinite(bp.minWidth))
     );
   } catch {
     return false;

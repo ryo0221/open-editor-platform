@@ -113,7 +113,7 @@ export function ReferenceTools({
     }
   }
   return (
-    <Menu label={label}>
+    <Menu label={label} onOpen={() => void discover()}>
       <button type="button" disabled={busy} onClick={() => void discover()}>
         参照元を再取得
       </button>

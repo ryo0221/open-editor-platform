@@ -540,7 +540,7 @@ test('PR #52 remaining: focused Dashboard widget titles are included in the pare
   await page.getByRole('button', { name: 'Save version', exact: true }).dispatchEvent('click');
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
   const saved = await nativeArtifact(page);

@@ -1,217 +1,37 @@
-# Status and limitations
+# 実装状況と制限
 
-## Geo workspace
+この文書は現在の対応範囲と、仕様・検証記録への入口をまとめます。
+実行source、環境、件数、再現手順はリンク先の記録で確認してください。
+個別Issueの経緯は[整理前の実装報告](history/status-2026-10-19.md)に保存しています。
+記載先の使い分けは[文書の記載方針](documentation-guide.md)を参照してください。
 
-The local Playground registers Geo with immutable versions and native map references.
-CSV/GeoJSON preview, atomic Point/Line/simple Polygon editing, map/table selection,
-styles/metrics/legends, named views, fixed PNG/Slide output, staged reimport,
-asset photographs and version comparisons use native commands and retained resources.
-Saved Data joins pin both inputs and require explicit refresh adoption. Slide map
-references default to fixed; following newly saved Geo versions is an explicit choice.
-See [the Geo guide](../docs/geo-guide.md) for workflows, bounded resources and renderer
-limitations. This adds no shared Geo domain, background tiles or geocoding.
+## EditorとHost
 
-## Artifact reference embeds (#264)
+| 対象                        | 現在の対応                                                                                                | 主な制限・参照先                                                                                                                                                                                         |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document                    | 意味的な文章構造、リッチテキスト、表、文書出力、Host履歴を使うショートカット                              | 形式ごとの対応は[Surface契約](surface-semantics.md)・[Office入出力](office-export-ui.md)。キーの接続は[埋め込み](embedding.md)                                                                           |
+| Structured Data             | Grid・Form・Graph・Chart・Kanban・Dashboard・Timelineなどが同じレコードを利用                             | [埋め込み・CSVの契約](embedding.md)。DataのGraph projectionと独立したGraphは対応範囲が異なる                                                                                                             |
+| Structured Graph            | 型付きProfile、ノード・関係・属性、レイアウト、native JSON、外部adapter                                   | 共同編集・注釈・テンプレート・形式別出力は非対応。[契約](structured-graph-contract.md)                                                                                                                   |
+| Review / File Viewer        | テキスト比較、画像・PDF・テキスト閲覧、注釈、元bytesの保持                                                | OCR・tagged PDF・Code実行は提供しない。[埋め込み](embedding.md)                                                                                                                                          |
+| Slide / Whiteboard / Design | native canvas編集、履歴、バージョン、対応するテンプレート・出力                                           | 各ドメインの操作と座標を維持。[Surface契約](surface-semantics.md)                                                                                                                                        |
+| Designの拡張                | React連携、prototype、再利用テキスト・vector、headless command                                            | [React契約](design-react-contract.md)・[prototype](design-prototype-contract.md)・[graphics](design-reuse-graphics.md)・[headless](design-headless-contract.md)の宣言範囲に限定                          |
+| React UI                    | Host登録コンポーネント、分離preview、props・binding編集、TSX出力                                          | 元実装とpreview/build環境はHostが提供。[組み込み](react-ui-integration.md)                                                                                                                               |
+| Animation                   | 2Dレイヤー・timeline・graph・mask・motion・nested、通常共有編集、Design変換、Slide/Web/React再生、SVG/PNG | schema 2の宣言subset。旧版は読み込みと明示移行。generic template/reuse・animated Slide/Office・video等は非対応。[能力・制限](animation/production-2d-design.md)・[検証](verification/issue-74/README.md) |
+| Geo                         | ローカルCSV/GeoJSON、地図・表編集、オフライン境界背景、Data結合とSlide参照                                | CRS84の限定renderer・容量上限。共同編集・template/reuse・背景タイル・geocodingは非対応。[操作と制限](geo-guide.md)・[背景データの範囲・権利条件](geo-background-contract.md)                             |
+| 成果物間参照                | Data/GraphをDocument・Slide・Design・Whiteboardへ、GeoをSlideへ参照                                       | 保存済み版を固定または明示的に追従。共有参照とOffice/React参照出力は非対応。[契約](artifact-references.md)                                                                                               |
+| Artifact Host               | IDごとのSession、attach/detach、保存・入出力・権限の接続                                                  | local参照Host。製品の認証・永続性はHostが担当。[組み込み契約](host-integration.md)                                                                                                                       |
 
-Data tables/charts and Profile-backed Graphs can be embedded into local Document,
-Slide, Design and Whiteboard. Creation explicitly chooses fixed or follow; only saved
-versions are published. Hosts inject permission-aware reads, notifications and source
-navigation. Runtime refresh does not mutate destination history; saves/exports capture
-one exact revision per source. Missing targets, permission loss, offline caches and stale
-responses are distinct states. Native closure/hash validation, static graphic manifests,
-and a public-only independent Host are included. Shared references and Office/React
-reference export fail closed. Existing static images/charts retain their meaning.
-See [contract](artifact-references.md) and [actual checks](verification/issue-264/README.md).
-Performance acceptance remains paused; this does not publish an updated extension.
+## 共通機能の境界
 
-## Design reusable text and graphics (#255–#257)
+- 共同編集は[対応表](editor-collaboration-coverage.md)に記載した操作を対象とします。独立Graph・Geoなどへ自動的に拡張されません。Animationはschema 2の宣言subsetに限定します。組織・Room・認証・永続サーバーはHostが担当します。
+- テンプレート・リンク再利用は[テンプレート契約](template-contract.md)と[再利用契約](reuse-contract.md)のドメイン別対応に従います。形式別の出力で保持できない情報は[Office契約](office-export-contract.md)などで確認してください。
+- ローカル保存はブラウザのIndexedDBを利用します。Undo stackや参照Hostのメモリ内状態を永続保存と同一視せず、必要な成果物はnative JSONで退避してください。
+- 既知の入力・出力・frame操作の制約と除外した条件は[監査・レビュー記録](verification/issues-53-73/pr52-review-triage.md)に保持しています。無関係な修正で解消済みと扱いません。
 
-Design reusable authoring accepts explicit overflow/minFontSize settings down to 10px;
-Document/Slide defaults remain 16px. `measureTemplateTextFit` shares insertion preflight.
-New instance-aware templates check substituted text and expand instance-owned bounds
-when requested; legacy definitions retain their prior layout behavior and hashes.
-`makeDesignVector` stores bounded SVG path geometry and source/name/version/license on
-native shapes. Existing fill/stroke token styles, mode changes, transactions and
-SVG/PNG rendering apply to these icons. SVG fallback typography uses Noto Sans CJK JP;
-explicit element/run fonts retain priority. See the [contract](design-reuse-graphics.md)
-and [verification](verification/issues-255-257/README.md) for checks and limitations.
-An icon catalog, arbitrary SVG markup import and semantic React vector conversion are
-outside this scope. Performance measurement/acceptance remains paused.
+## 検証と運用
 
-[PR #258 corrections](verification/issues-255-257/review-258.md) make resized-instance
-text expansion follow projected geometry, enforce shape-only vector overrides, keep
-foreign vector fields out of Slide/Whiteboard rendering, normalize fractional initial
-bounds and show geometry/attribution in version comparisons. Full units and the scoped
-desktop/mobile and production browser regressions are recorded separately from the
-initial acceptance.
-
-[Additional PR #258 corrections](verification/issues-255-257/additional-review-258.md)
-clip paths to their declared view box, keep geometry native-owned, preserve indexed
-placement and reject sparse path arrays. Instance-aware templates reject text still
-hidden by a fixed clipping frame after expansion; frame geometry stays unchanged.
-
-[SVG follow-up corrections](verification/issues-255-257/serialization-review-258.md)
-give each primitive occurrence its own resource ID, preserve native ancestor clipping
-when projected IDs collide and restrict path separators to SVG whitespace.
-Whiteboard Section/connector labels and Data charts use the common Noto SVG fallback.
-
-[Input/XML corrections](verification/issues-255-257/input-xml-review-258.md) reject
-XML-forbidden provenance characters, accept compact arc flags and keep empty text
-placeholders unchanged. Projected text diagnostics resolve to their bound input keys,
-including nested overrides, singleton templates and duplicate local part IDs.
-
-[Typography/layout corrections](verification/issues-255-257/typography-layout-review-258.md)
-include effective line height, rich runs and padding in instance text preflight,
-reproject component auto-layout after size overrides and reject non-record/inherited
-vector fields that would be lost in native JSON. Legacy textScope behavior stays intact.
-
-## Design frame prototypes (#246)
-
-Optional native interactions and `prototyping` metadata add click/tap navigation,
-state switching, back, overlays and named flows to Design. Ordinary Inspector commands
-use the existing local/shared execution boundaries. `DesignPrototypeSurface` owns
-private navigation/progress and reports completion or anchored-comment requests to Host.
-Schema 1/2 without these fields stays unchanged; old readers ignore the new semantics.
-The [contract](design-prototype-contract.md) and
-[verification report](verification/issue-246/README.md) record actual checks and limits.
-Performance acceptance remains paused. No product record storage or publication service
-is added.
-
-A [retained-comment retry correction](verification/issue-246/retained-retry.md)
-reconciles the original rejected operation through existing proposal ownership.
-Unrelated rejected input still blocks Save/Leave; uncertain retry acknowledgements
-reuse the same proposal. The report preserves fail-first and follow-up evidence.
-
-An optional numeric AABB tree connects through CanvasStage to Design and Whiteboard;
-their exact rotated predicate, native models and public Editor contracts remain
-unchanged. Normal Hosts use the existing TS selection path. The independent Host
-opts in and verifies fallback/selection. At tested source, 144 related units,
-8 desktop/mobile cases and 2 existing canvas cases pass; lint/build/typecheck,
-Rust build/unit/clippy and tooling pass. An earlier broad unit filter encountered
-six Office timeouts; full-repository acceptance is not claimed. See
-[design and build](spatial-wasm-design.md) and
-[functional verification](verification/issue-247/README.md) for exact pins and results.
-Performance measurement/acceptance remains held and CI stays manual-only.
-
-Graph reading adds optional Inspector visibility, initial/filtered Fit, Host node
-sizes, full label names, relation filters, adjacent emphasis and collision-aware
-edge labels with Profile line styles. Readonly surfaces show values and viewing
-controls. Display state stays outside content/history; validation still uses the
-complete graph. [Design](graph-reading-design.md), [embedding](embedding.md) and
-[verification](verification/issues-224-228/README.md) define checks and limits.
-
-The audit additions cover Document table navigation/read-only semantics/searchable
-Japanese PDF, File text-layer search and confirmed encoding-aware replacement,
-Host-resolved Review annotations, Timeline/Dashboard view operations, explicit CSV
-scopes and target-schema diagnostics, format-specific Office capabilities, Whiteboard
-endpoint overlays, native Design semantics/frame constraints and accessible chart
-aggregates. [Scope](issues-53-73-audit.md), [embedding contracts](embedding.md) and
-[verification](verification/issues-53-73/README.md) describe tested capabilities and
-limits. Tagged PDF/OCR and Code execution are not supplied by the Platform.
-The [review follow-up](verification/issues-53-73/pr52-review-followup.md) retains
-rejected Design text, inherited formatting, multi-file anchors and image metadata;
-fits row-frame children; and corrects overlapping Graph hits and private view history
-in the independent Graph Host. Its verification is reported separately.
-The next review fixes formula-target CSV mappings and retained inputs before version
-restoration. Legacy annotation lookup, File remapping with foreign anchors and PDF
-searches above 10,000 hits per page were initially deferred and later corrected.
-
-The [new review triage](verification/issues-53-73/pr52-review-triage.md) corrects six
-ordinary paths: shared Form version save, tabbed PDF text, visible Graph routes and
-Whiteboard targets, replacement re-decoding and independent definition JSON errors.
-New reference Definition edges retain canonical IDs; four older unresolved findings
-were already fixed. The latest completion initializes and validates the first-column
-Graph label, retrieves saved legacy Review sources, retains File anchors on remap
-and marks partial PDF results. Field decimals/widget titles are parent-owned inputs,
-Host CSV captures confirmed shared Data, and absolute frames disable child fitting
-while allowing fixed resizing. Actual checks and limits are in the triage report.
-
-The preceding eight ordinary-use findings are corrected: Document Markdown/HTML use
-flushed canonical/confirmed input, shared-session exit confirms Surface drafts,
-Slide add/delete retain refused edits, blurred invalid drafts survive updates,
-CSV blocks excess columns and read-only mappings, annotation navigation invalidates
-stale source requests, and the independent Host supplies keyboard history.
-Concurrent Graph route removal during endpoint dragging and explicit duplicate
-component IDs remain excluded rare cases (three unresolved threads).
-
-The preceding selected follow-up fixes collaboration-start input loss, independent Host
-Surface-switch/shared-Detach input loss, and image-first publication slot selection.
-Invalid/composing or refused input blocks transitions. Local native sessions/history
-survive Surface round trips within the Host lifetime; offline shared Detach retains
-accepted operations in the existing checkpoint for Attach recovery. Saved versions
-remain unchanged. Identical size-preset reapplication on a Hug frame stays a known
-constraint with an explicit fixed-size alternative, alongside the two previously
-excluded rare conditions. Exact scope and checks are in the triage report.
-
-The preceding ordinary follow-up aligns Document Surface MD/HTML/PDF snapshot capture,
-template/reusable authoring input checks and retained source for preview/save, and
-Graph connection selection/stamp validation during submit and Host flush. Host text/
-CSV/Office capture share the canonical reader; text export rechecks context and new
-pending input after confirmation. The separate native publication command correction
-checks primitive fields and non-image slot targets without the optional extension.
-Partial commit refusal retains accepted native edits and failed/unexecuted buffers;
-the registry does not add rollback. Existing known constraints stay unchanged.
-
-The preceding source follow-up fixes Data chart SVG/PNG capture, numeric/boolean
-Graph edge labels, PDF indexing-error notices and image-safe Design semantics at
-UI/publication/conversion boundaries.
-Slide/Whiteboard/Design graphic capture uses refreshed content/scope/settings.
-A typed Data reference adapter also fixes
-date-range template save/creation and linked view reuse while preserving literal
-values, destination records/schema and immutable retained definitions. Local
-verification and held scope are recorded in the
-[review record](verification/issues-53-73/pr52-review-triage.md).
-
-The current three-comment follow-up unifies blank/preset Slide additions at the
-input/acceptance boundary, reads legacy null Data Graph labels without rewriting
-drafts or immutable versions, and aligns inherited Canvas typography across local
-and shared engine documents, display and native serialization. Selected false
-overrides survive peer edits, checkpoints and selective Undo. The existing three
-held condition kinds remain outside this scope; current checks are in the triage report.
-Common Canvas/SVG output applies decorations per run so partial removals remain visible.
-
-The snapshot includes the native Document, Data, Review, File Viewer, Whiteboard,
-Design and Slide domains; Office export and bounded import; templates, linked reuse
-and tokens; registered React UI; the declared Design/React bridge; and local native
-Structured Graph with Data Grid/Form/Graph integration and external Adapter contracts.
-The Graph reference Host uses fictional public source data. Real Workflow integration
-is consuming-side work. Graph shared/annotation/template/reuse/format-export capabilities
-are unavailable. The [Graph verification record](verification/open-issue-3/README.md)
-separates source functional checks from unrun environments and public snapshot checks.
-[Additional review fixes](verification/open-issue-3/review-40-followup.md) cover hidden
-Definition children, asynchronous import, explicit read-only field settings, strict
-Data layout and its comparison, and row-specific shared position transactions.
-Concurrent row deletions retain the existing row-order precondition.
-[Further review fixes](verification/open-issue-3/review-40-followup-2.md) enforce
-new-row protected defaults, map arbitrary Data column IDs, seed bounded native nodes,
-align proposal diagnostics and honor whole-Profile read-only UI state.
-[Latest review fixes](verification/open-issue-3/review-40-followup-3.md) restore verified
-saved Data versions, retain native hidden attributes, deduplicate projected select
-options, gate file metadata before reading, bound derived Definition edge IDs and
-explicitly refuse unresolved references while retaining original source export.
-
-Source usability updates add endpoint gestures and obstacle-avoiding routes, owned
-Profile definition migration, pending-input save boundaries, in-place Canvas text
-with fitted line boxes, separate input/document Undo, native React publication
-settings, adjacent Slide copies and Whiteboard body search.
-[Scope and Host APIs](issues-42-51-usability.md) and the
-[source verification record](verification/issues-42-51/README.md) describe the
-tested subset. Native OS IME, other engines/real devices and consuming Host trials
-remain separate. Fixed/derived Profiles and unsupported shared publication commands
-display their owning Host and non-editable reason.
-
-The shared-editing reference stores its authority in memory. Production authentication,
-durable storage, organization policy and deployment scale are Host responsibilities.
-React implementations/build/isolated preview and runtime execution remain Host-owned.
-Office interchange reports bounded format losses and does not promise arbitrary
-roundtrip fidelity. Design/React regeneration uses declared semantics and explicit
-conflict checks, with reference-Host cross-artifact limits.
-
-The retained source performance baseline has three unmet 100 ms browser gates;
-formal acceptance remains held and further performance measurement/tuning is paused.
-Exporting this snapshot does not change that status. Historical internal issue numbers
-in technical contracts describe implementation context, not issues in this repository.
-
-Verification of a public snapshot is reported on its synchronization PR. A source
-check, public-tree check, Office rendering, full browser regression and performance
-acceptance are distinct results. No consuming-product trial is asserted here.
+- 検証結果は記載されたsource・環境・対象に適用されます。ローカル機能の成功から、別ブラウザ・native IME・実機・外部製品の対応を推定しません。
+- React UIの固定条件の受け入れは[記録](verification/issue-24/README.md)を参照してください。追加の性能測定・tuningは停止中です。
+- CI/Actionsの実行は停止中です。[CI運用](repository-assets.md)に従い必要な検証をローカルで行います。
+- 公開snapshot・配布への反映は個別に確認します。コードの実装やoverlayの更新だけで、利用中のplugin pin・配布版が更新されたとは扱いません。
+- snapshotの収録と貢献の扱いは[CONTRIBUTING](../CONTRIBUTING.md)、公開の条件は[OSS Preview gate](release/OSS-PREVIEW-GATE.md)を参照してください。

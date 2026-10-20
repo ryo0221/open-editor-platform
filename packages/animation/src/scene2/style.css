@@ -1,0 +1,208 @@
+.animation2 {
+  font: 14px system-ui;
+  color: #1e293b;
+  padding: 16px;
+  min-width: 0;
+}
+.animation2 * {
+  box-sizing: border-box;
+}
+.animation2 button,
+.animation2 input,
+.animation2 select,
+.animation2 textarea {
+  font: inherit;
+  padding: 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  color: inherit;
+  background: white;
+  max-width: 100%;
+}
+.animation2 button:disabled {
+  opacity: 0.45;
+}
+.animation2 :focus-visible {
+  outline: 3px solid #6366f1;
+  outline-offset: 2px;
+}
+.animation2 label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.animation2 button[aria-pressed='true'] {
+  background: #e0e7ff;
+}
+.a2-workspace {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(240px, 1fr) minmax(210px, 280px);
+  gap: 14px;
+}
+.a2-workspace nav,
+.a2-workspace aside {
+  min-width: 0;
+  max-height: 650px;
+  overflow: auto;
+  padding: 8px;
+  background: #f8fafc;
+}
+.a2-layer {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  margin-bottom: 5px;
+}
+.a2-layer button {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.a2-center {
+  min-width: 0;
+}
+.a2-stage {
+  position: relative;
+  height: 360px;
+  background: #e8eef4;
+  touch-action: none;
+  overflow: hidden;
+}
+.a2-stage > .animation-player2 {
+  position: absolute;
+  inset: 0;
+}
+.a2-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+  align-items: center;
+}
+.a2-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.a2-fields input {
+  width: 100%;
+  min-width: 0;
+}
+.a2-path-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+.a2-path-row label {
+  flex: 1 1 75px;
+  font-size: 11px;
+}
+.a2-path-row input {
+  width: 100%;
+}
+.a2-text-editor {
+  position: absolute;
+  z-index: 2;
+  inset: 12px;
+  padding: 12px;
+  background: white;
+  border: 2px solid #818cf8;
+  overflow: auto;
+  box-shadow: 0 3px 20px #0f172a33;
+}
+.a2-drag-preview {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: #ffffffed;
+  padding: 12px;
+  border: 2px dashed #6366f1;
+  z-index: 3;
+}
+.a2-timeline {
+  margin: 16px 0;
+}
+.a2-tracks {
+  overflow-x: auto;
+}
+.a2-track {
+  min-width: 500px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.a2-key-rail {
+  position: relative;
+  height: 58px;
+  margin: 4px 24px;
+  border-bottom: 2px solid #cbd5e1;
+}
+.a2-key-rail button {
+  position: absolute;
+  transform: translateX(-50%);
+  min-width: 30px;
+  height: 44px;
+}
+.a2-key-rail small {
+  display: block;
+  font-size: 9px;
+}
+.a2-source-controls {
+  padding: 12px;
+  background: #f8fafc;
+}
+.a2-input {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0;
+}
+.animation2 fieldset {
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  margin: 10px 0;
+  padding: 12px;
+}
+.animation2 [role='status'],
+.animation2 [role='alert'],
+.animation2 li {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1000px) {
+  .a2-workspace {
+    grid-template-columns: minmax(110px, 150px) minmax(200px, 1fr);
+  }
+  .a2-workspace aside {
+    grid-column: 1/-1;
+    max-height: none;
+  }
+  .a2-inspector > .a2-fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .animation2 {
+    padding: 8px;
+  }
+  .a2-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .a2-workspace nav {
+    max-height: 160px;
+  }
+  .a2-stage {
+    height: 250px;
+  }
+  .a2-inspector > .a2-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .animation2 input[type='range'] {
+    width: 100%;
+  }
+}

@@ -16,7 +16,7 @@ import {
   endEncoding,
 } from '../../../video-metadata/host-media/encoder-state.mjs';
 import { correctMetadata } from '../../../video-metadata/host-media/encoder-timing.mjs';
-import { Ledger } from '../pcm-wasm-r0/kernel';
+import { Ledger } from '../../src/pcm/kernel';
 registerAacEncoder();
 const need = (ok, message) => {
   if (!ok) throw Error(message);

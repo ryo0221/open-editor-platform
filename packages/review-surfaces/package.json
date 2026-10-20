@@ -11,7 +11,7 @@
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "pdfjs-dist": "5.6.205",
+    "pdfjs-dist": "6.2.108",
     "lucide-react": "1.51.0"
   },
   "peerDependencies": {

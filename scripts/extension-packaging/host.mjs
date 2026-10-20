@@ -163,6 +163,28 @@ for (const pkg of evidence.packages) {
     'sha256=' + pkg.sha256,
   );
 }
+if (evidence.profile !== 'baseline') {
+  const { defaultGeoBackgroundSettings, resolveGeoBackgrounds } = await import(
+    '@editor-platform/geo-core/backgrounds'
+  );
+  const resolved = resolveGeoBackgrounds(
+    defaultGeoBackgroundSettings().map((setting) => ({ ...setting, enabled: true })),
+  );
+  assert.deepEqual(resolved.diagnostics, []);
+  assert.deepEqual(
+    resolved.layers.map((layer) => layer.geometries.length),
+    [177, 4596, 1742],
+  );
+  const notice = await readFile(
+    new URL('./node_modules/@editor-platform/geo-core/BOUNDARY-DATA-NOTICE.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(notice, /CC BY-SA 2\.0/);
+  assert.match(notice, /OpenStreetMap, Wambacher/);
+  console.log(
+    'PASS: installed offline boundary export, all three exact datasets and retained data terms',
+  );
+}
 // Resolution fails without a packed dependency; no ancestor workspace may rescue it.
 const dependency = new URL('./node_modules/@editor-platform/editor-core', import.meta.url);
 const hidden = new URL('./node_modules/@editor-platform/editor-core.hidden', import.meta.url);

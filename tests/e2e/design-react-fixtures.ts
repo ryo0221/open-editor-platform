@@ -9,8 +9,8 @@ export async function jsonApply(page: Page, label: string, value: unknown) {
 export async function layer(page: Page, name: string) {
   await page.getByRole('button', { name: `Layer ${name}`, exact: true }).click();
 }
-export async function authorDesignReact(page: Page) {
-  await page.goto('/');
+export async function authorDesignReact(page: Page, url = '/') {
+  await page.goto(url);
   await create(page, 'design');
   await page.getByRole('button', { name: 'Enable React Web', exact: true }).click();
   await page.getByRole('button', { name: 'Add frame', exact: true }).click();

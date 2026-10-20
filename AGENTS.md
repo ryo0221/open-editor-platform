@@ -1,5 +1,10 @@
 # Open Editor Platform
 
+- Use docs/README.md to find documents and docs/documentation-guide.md to choose
+  where to write. README covers overview/setup/navigation; status summarizes current
+  scope and limits. Put issue/review history and results in topic verification records.
+  Update README only when its entrypoint information changes; do not append issue
+  progress or test counts to README or AGENTS.
 - Start with docs/developer-guide.md. New Editors and substantial capability additions
   follow docs/editor-development.md and docs/editor-acceptance.md; use their linked
   proposal and verification templates. Separate mandatory and declared-capability

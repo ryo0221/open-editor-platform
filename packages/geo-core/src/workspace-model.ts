@@ -31,6 +31,7 @@ export interface GeoAnnotation {
   position: Position;
 }
 export interface NamedGeoView {
+  backgrounds?: import('./background').GeoBackgroundSetting[];
   id: string;
   name: string;
   extent: GeoExtent;

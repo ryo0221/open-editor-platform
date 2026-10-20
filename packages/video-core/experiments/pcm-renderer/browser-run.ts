@@ -1,5 +1,5 @@
 import { time, add, multiply } from '@editor-platform/video-core';
-import { planWindow, renderPcm, sampleSpan } from './render';
+import { planWindow, renderPcm, sampleSpan } from '../../src/pcm/render';
 // Native adapter is an isolated JavaScript experiment with external fixed deps.
 // @ts-expect-error No public or product WebCodecs adapter typing is adopted here.
 import { decodeWindow } from './native-aac.mjs';

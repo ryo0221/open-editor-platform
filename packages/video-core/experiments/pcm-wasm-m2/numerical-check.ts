@@ -11,10 +11,10 @@ import {
 } from '../pcm-wasm-m2-fixture/frozen/packages/video-metadata/host-media/m2/mix-v2';
 import { PcmRenderSession } from '../pcm-wasm-m2-fixture/frozen/packages/video-core/experiments/pcm-renderer/session';
 import type { WindowPlan } from '../pcm-wasm-m2-fixture/frozen/packages/video-core/experiments/pcm-renderer/render';
-import { Ledger, prepareModule } from '../pcm-wasm-r0/kernel';
-import { PcmBackend } from '../pcm-wasm-r0/adapter';
-import { SelectedPcmSession, APPROVED_WASM_SHA } from '../pcm-wasm-v1/selection';
-import { sourcePort, type PcmLease } from './source-port';
+import { Ledger, prepareModule } from '../../src/pcm/kernel';
+import { PcmBackend } from '../../src/pcm/adapter';
+import { SelectedPcmSession, APPROVED_WASM_SHA } from '../../src/pcm/selection';
+import { sourcePort, type PcmLease } from '../../src/pcm/source-port';
 const bytes = new Uint8Array(readFileSync(process.argv[2]));
 assert.equal(createHash('sha256').update(bytes).digest('hex'), APPROVED_WASM_SHA);
 const realm = new Ledger(8 * 1024 * 1024);

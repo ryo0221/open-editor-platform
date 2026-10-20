@@ -109,6 +109,6 @@ Raw log、trace、画像、build、生成exportはGit外に保持します。報
 - 今回の判定: [未受け入れ / prototype / local機能受け入れ / 特定能力の受け入れ]
 - 受け入れるkind・能力・上限: [記入]
 - FAIL/NOT RUNが残り受け入れられない範囲: [記入]
-- 設計matrix・README・statusに反映した非対応/制限: [記入]
+- 設計matrix・機能契約・利用ガイド・statusに反映した非対応/制限: [記入。READMEは概要・起動・導線が変わる場合に更新し、記載先は文書の記載方針で確認する]
 - 別判断のperformance/release/production運用・製品trial: [記入]
 - レビューの判断と根拠: [記入]

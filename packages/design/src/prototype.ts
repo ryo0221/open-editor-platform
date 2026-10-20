@@ -13,9 +13,12 @@ import {
   appearance,
   designInstanceElements,
   designPaintOrder,
+  guardDesignCommand,
+  assertDesignInteractionTargets,
   type DesignContent,
   type DesignElement,
 } from './model';
+import { captureDesignData, rejectDesign } from './command-data';
 import {
   designPrototypeLimits,
   validDesignInteractions,
@@ -54,9 +57,36 @@ export interface DesignFlowCompletion {
   frameIds: string[];
 }
 const frame = (d: DesignContent, id: string) =>
-  d.elements.find((e) => e.id === id && e.type === 'frame' && !e.hidden);
+  designPaintOrder(d).find((e) => e.id === id && e.type === 'frame' && !e.hidden);
 export const designPrototypeFrameId = (s: DesignPrototypeState) => s.overlays.at(-1) ?? s.frameId;
 
+/** Hidden state and clipping frames inherited from an element's ancestors in one scope. */
+function ancestorScope(
+  e: DesignElement,
+  byId: Map<string, DesignElement>,
+  inheritedClips: DesignPrototypeTarget['clips'],
+) {
+  let parent = e.parentId ? byId.get(e.parentId) : undefined;
+  let hidden = !!e.hidden;
+  const clips = [...inheritedClips];
+  const seen = new Set<string>();
+  while (parent && !seen.has(parent.id)) {
+    seen.add(parent.id);
+    hidden ||= !!parent.hidden;
+    if (parent.type === 'frame' && parent.clipContent)
+      clips.push({ ...parent.bounds, rotation: parent.rotation });
+    parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+  }
+  return { hidden, clips };
+}
+const overlapsEvery = (box: DesignElement['bounds'], clips: DesignElement['bounds'][]) =>
+  clips.every(
+    (clip) =>
+      box.x < clip.x + clip.width &&
+      box.x + box.width > clip.x &&
+      box.y < clip.y + clip.height &&
+      box.y + box.height > clip.y,
+  );
 /** Stable scoped keys do not concatenate or parse user IDs. Hidden ancestor subtrees are absent. */
 export function designPrototypeTargets(d: DesignContent, frameId: string): DesignPrototypeTarget[] {
   const owner = frame(d, frameId);
@@ -73,30 +103,13 @@ export function designPrototypeTargets(d: DesignContent, frameId: string): Desig
   ) => {
     const byId = new Map(list.map((e) => [e.id, e]));
     for (const e of designPaintOrder({ ...d, elements: list })) {
-      let parent = e.parentId ? byId.get(e.parentId) : undefined;
-      let hidden = !!e.hidden;
-      const clips = [...inheritedClips];
-      const seen = new Set<string>();
-      while (parent && !seen.has(parent.id)) {
-        seen.add(parent.id);
-        hidden ||= !!parent.hidden;
-        if (parent.type === 'frame' && parent.clipContent)
-          clips.push({ ...parent.bounds, rotation: parent.rotation });
-        parent = parent.parentId ? byId.get(parent.parentId) : undefined;
-      }
+      const { hidden, clips } = ancestorScope(e, byId, inheritedClips);
       if (hidden) continue;
       const elementId = rootId ?? e.id;
       const partIds = rootId ? [...path, originalIds.get(e.id) ?? e.id] : [];
       const effective = appearance(d, e);
       const box = rotatedBounds(effective.bounds, effective.rotation);
-      const visible = [owner.bounds, ...clips.map((c) => rotatedBounds(c, c.rotation))].every(
-        (clip) =>
-          box.x < clip.x + clip.width &&
-          box.x + box.width > clip.x &&
-          box.y < clip.y + clip.height &&
-          box.y + box.height > clip.y,
-      );
-      if (visible)
+      if (overlapsEvery(box, [owner.bounds, ...clips.map((c) => rotatedBounds(c, c.rotation))]))
         result.push({
           key: JSON.stringify([elementId, ...partIds]),
           elementId,
@@ -135,7 +148,9 @@ export function designPrototypeTargets(d: DesignContent, frameId: string): Desig
 export function diagnoseDesignPrototype(d: DesignContent): DesignPrototypeDiagnostic[] {
   const diagnostics: DesignPrototypeDiagnostic[] = [];
   const frames = new Set(
-    d.elements.filter((e) => e.type === 'frame' && !e.hidden).map((e) => e.id),
+    designPaintOrder(d)
+      .filter((e) => e.type === 'frame' && !e.hidden)
+      .map((e) => e.id),
   );
   const components = new Map(d.components.map((component) => [component.id, component]));
   // Alternative navigation histories and different flows often inspect the same
@@ -242,61 +257,89 @@ export function setDesignInteractions(
   partId?: string,
   definition = false,
 ): EditorCommand<DesignContent> {
-  return withCommandReads(
-    command('design.interactions', 'Edit prototype interaction', (d: DesignContent) => {
-      if (interactions !== undefined && !validDesignInteractions(interactions))
-        throw new Error('Invalid prototype interactions');
-      const e = d.elements.find((e) => e.id === elementId);
-      if (!e) throw new Error('Element not found');
-      assertEditable(d.elements, [elementId]);
-      const c = d.components.find((c) => c.id === e.componentId);
-      if (
-        partId &&
-        (!c || !(c.elements ? c.elements.some((p) => p.id === partId) : partId === 'root'))
-      )
-        throw new Error('Component part not found');
-      const patch = { interactions: clone(interactions) };
-      if (partId && definition)
+  interactions = captureDesignData(interactions);
+  return guardDesignCommand(
+    withCommandReads(
+      command('design.interactions', 'Edit prototype interaction', (d: DesignContent) => {
+        if (interactions !== undefined && !validDesignInteractions(interactions))
+          throw new Error('Invalid prototype interactions');
+        assertDesignInteractionTargets(d, interactions);
+        const e = d.elements.find((e) => e.id === elementId);
+        if (!e) throw new Error('Element not found');
+        assertEditable(d.elements, [elementId]);
+        const c = d.components.find((c) => c.id === e.componentId);
+        if (
+          partId &&
+          (!c || !(c.elements ? c.elements.some((p) => p.id === partId) : partId === 'root'))
+        )
+          throw new Error('Component part not found');
+        const patch = { interactions: clone(interactions) };
+        if (partId && definition)
+          return {
+            ...d,
+            components: d.components.map((v) =>
+              v.id !== c!.id
+                ? v
+                : c!.elements
+                  ? {
+                      ...v,
+                      elements: v.elements!.map((p) => (p.id === partId ? { ...p, ...patch } : p)),
+                    }
+                  : { ...v, template: { ...v.template, ...patch } },
+            ),
+          };
         return {
           ...d,
-          components: d.components.map((v) =>
-            v.id !== c!.id
+          elements: d.elements.map((v) =>
+            v.id !== elementId
               ? v
-              : c!.elements
+              : partId
                 ? {
                     ...v,
-                    elements: v.elements!.map((p) => (p.id === partId ? { ...p, ...patch } : p)),
+                    overrides: { ...v.overrides, [partId]: { ...v.overrides?.[partId], ...patch } },
                   }
-                : { ...v, template: { ...v.template, ...patch } },
+                : { ...v, ...patch },
           ),
         };
-      return {
-        ...d,
-        elements: d.elements.map((v) =>
-          v.id !== elementId
-            ? v
-            : partId
-              ? {
-                  ...v,
-                  overrides: { ...v.overrides, [partId]: { ...v.overrides?.[partId], ...patch } },
-                }
-              : { ...v, ...patch },
-        ),
-      };
-    }),
-    { content: ['*'] },
+      }),
+      { content: ['*'] },
+    ),
   );
 }
 export function setDesignPrototype(
   prototype: DesignPrototype | undefined,
 ): EditorCommand<DesignContent> {
-  return withCommandReads(
-    command('design.prototype', 'Edit prototype flows', (d: DesignContent) => {
-      if (prototype !== undefined && !validDesignPrototype(prototype))
-        throw new Error('Invalid prototype flows');
-      return { ...d, prototyping: clone(prototype) };
-    }),
-    { content: ['*'] },
+  prototype = captureDesignData(prototype);
+  return guardDesignCommand(
+    withCommandReads(
+      command('design.prototype', 'Edit prototype flows', (d: DesignContent) => {
+        if (prototype !== undefined && !validDesignPrototype(prototype))
+          throw new Error('Invalid prototype flows');
+        if (
+          prototype &&
+          [prototype.startFrameId, ...prototype.flows.flatMap((f) => f.frameIds)].some(
+            (id) => id !== undefined && !d.elements.some((e) => e.id === id && e.type === 'frame'),
+          )
+        )
+          rejectDesign(
+            'design-prototype-target',
+            'Prototype targets must be existing Design frames',
+          );
+        const next = { ...d };
+        if (!prototype || (prototype.startFrameId === undefined && !prototype.flows.length))
+          delete next.prototyping;
+        else
+          next.prototyping = clone({
+            schemaVersion: prototype.schemaVersion,
+            flows: prototype.flows,
+            ...(prototype.startFrameId === undefined
+              ? {}
+              : { startFrameId: prototype.startFrameId }),
+          });
+        return next;
+      }),
+      { content: ['*'] },
+    ),
   );
 }
 export function startDesignPrototype(
@@ -311,7 +354,7 @@ export function startDesignPrototype(
     flow?.frameIds[0] ??
     options.frameId ??
     d.prototyping?.startFrameId ??
-    d.elements.find((e) => e.type === 'frame' && !e.hidden)?.id;
+    designPaintOrder(d).find((e) => e.type === 'frame' && !e.hidden)?.id;
   if (!id || !frame(d, id)) throw new Error('Choose an existing visible start frame');
   return {
     frameId: id,

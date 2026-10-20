@@ -60,11 +60,13 @@ test('a delayed immutable save keeps newer draft edits and annotations; restore 
     };
   });
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await setDocumentText(page, 'p', 'Newer draft while snapshot hashes');
   await page.locator('.ProseMirror p').first().click();
   await comments(page);
-  await page.getByLabel('Comment', { exact: true }).fill('Keep this annotation independent of content history');
+  await page
+    .getByLabel('Comment', { exact: true })
+    .fill('Keep this annotation independent of content history');
   await page.getByRole('button', { name: 'Add comment', exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('release-test-digest')));
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
@@ -124,13 +126,11 @@ test('legacy frame migration edits only the Whiteboard draft and native roundtri
     annotations: [],
   };
   await page.goto('/');
-  await page
-    .getByLabel('Import artifact', { exact: true })
-    .setInputFiles({
-      name: 'Legacy board.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(source)),
-    });
+  await page.getByLabel('Import artifact', { exact: true }).setInputFiles({
+    name: 'Legacy board.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(source)),
+  });
   await page.getByRole('button', { name: 'Go to Section Legacy Region', exact: true }).click();
   const width = page.getByLabel('Section width', { exact: true });
   await width.fill('1000');
@@ -148,13 +148,11 @@ test('legacy frame migration edits only the Whiteboard draft and native roundtri
   expect(migrated.versions[0].contentHash).toBe(source.versions[0].contentHash);
   await save(page, 2);
   const native = await nativeArtifact(page);
-  await page
-    .getByLabel('Import artifact', { exact: true })
-    .setInputFiles({
-      name: 'Roundtrip.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(native)),
-    });
+  await page.getByLabel('Import artifact', { exact: true }).setInputFiles({
+    name: 'Roundtrip.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(native)),
+  });
   const roundtrip = await nativeArtifact(page);
   expect(roundtrip.id).not.toBe(native.id);
   expect(roundtrip.draft).toEqual(native.draft);

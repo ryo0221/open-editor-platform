@@ -1,5 +1,5 @@
 import { clone, newId } from '@editor-platform/artifact-core';
-import { isDeck, migrateDeck } from '@editor-platform/slide/model';
+import { isDeck, migrateDeck, hasSlideAnimations } from '@editor-platform/slide/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { migrateWhiteboard } from '@editor-platform/whiteboard/sections';
 import { isDesign, remapDesignInteractionTargets } from '@editor-platform/design/model';
@@ -176,7 +176,7 @@ export function remapNative<T>(
 }
 export function nativeValid(domain: Domain, value: unknown): value is NativeContent {
   return domain === 'slide'
-    ? isDeck(value)
+    ? isDeck(value) && !hasSlideAnimations(value)
     : domain === 'whiteboard'
       ? isWhiteboard(value)
       : domain === 'design'

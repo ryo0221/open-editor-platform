@@ -1,10 +1,11 @@
 import { beforeAll, afterAll, expect, it } from 'vitest';
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
-import { chromium, expect as browserExpect, type Browser } from '@playwright/test';
+import { expect as browserExpect, type Browser } from '@playwright/test';
 import { time } from '@editor-platform/video-core';
 import { videoTimelineFixture } from './edit';
 import type { TestMode } from '../test-host/edit-host';
+import { closeServer, launchTestChromium, listenOnLoopback } from '../test-host/browser';
 let browser: Browser, bundle: string, origin: string;
 const server = createServer((_request, response) =>
   response.end('<!doctype html><main><p id="host">Host-owned sibling</p></main>'),
@@ -21,19 +22,12 @@ beforeAll(async () => {
       keepNames: true,
     })
   ).outputFiles[0].text;
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw Error('address');
-  origin = `http://127.0.0.1:${address.port}`;
-  browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    headless: true,
-    args: ['--no-sandbox'],
-  });
+  origin = await listenOnLoopback(server);
+  browser = await launchTestChromium();
 });
 afterAll(async () => {
   await browser?.close();
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeServer(server);
 });
 
 for (const width of [1280, 390])

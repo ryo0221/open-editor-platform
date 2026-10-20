@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { Ledger, ARENA_BYTES, MEMORY_BYTES, FRAMES } from '../pcm-wasm-r0/kernel';
+import { Ledger, ARENA_BYTES, MEMORY_BYTES, FRAMES } from '../../src/pcm/kernel';
 import { abortWait } from './consumer-ownership';
 const library = await import(
   pathToFileURL(resolve(process.argv[2], 'dist/modules/src/index.js')).href

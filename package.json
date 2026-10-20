@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.13.0 || >=24"
   },
   "scripts": {
     "spatial:build": "node scripts/build-spatial-wasm.mjs",
@@ -18,7 +18,7 @@
     "predev": "npm run fonts:check",
     "dev": "vite --host 0.0.0.0",
     "prebuild": "npm run fonts:check",
-    "build": "tsc --noEmit && vite build && vite build --config vite.react-ui.config.ts && vite build --config vite.artifact-host.config.ts",
+    "build": "tsc --noEmit && vite build && vite build --config vite.react-ui.config.ts && vite build --config vite.artifact-host.config.ts && vite build --config vite.animation-host.config.ts",
     "artifact-host:dev": "vite --config vite.artifact-host.config.ts",
     "react-ui:dev": "vite --config vite.react-ui.config.ts",
     "react-ui:preview": "vite preview --config vite.react-ui.config.ts",
@@ -44,7 +44,8 @@
     "lucide-react": "1.51.0",
     "mermaid": "11.17.2",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "5.6.205",
+    "pdfjs-dist": "6.2.108",
+    "pptxgenjs": "4.0.1",
     "prosemirror-commands": "1.7.2",
     "prosemirror-keymap": "1.2.3",
     "prosemirror-model": "1.25.12",
@@ -62,17 +63,18 @@
     "@types/react": "19.1.16",
     "@types/react-dom": "19.1.9",
     "@vitejs/plugin-react": "4.7.0",
+    "esbuild": "0.25.12",
     "eslint": "9.36.0",
     "fake-indexeddb": "6.2.4",
     "prettier": "3.6.2",
     "typescript": "5.9.2",
-    "typescript-eslint": "8.44.1",
-    "vite": "6.4.1",
-    "vitest": "3.2.4",
-    "esbuild": "0.25.12"
+    "typescript-eslint": "8.71.2",
+    "vite": "6.4.4",
+    "vitest": "4.1.11"
   },
   "overrides": {
-    "katex": "0.18.2"
+    "katex": "0.18.2",
+    "image-size": "2.0.4"
   },
   "license": "AGPL-3.0-only"
 }

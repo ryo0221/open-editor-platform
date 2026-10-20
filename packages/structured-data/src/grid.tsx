@@ -1,7 +1,8 @@
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { pinDataCommand } from './session';
 import { PropertyInput } from '@editor-platform/property-input';
-import { useState, useRef, useEffect, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, useContext, type CSSProperties } from 'react';
+import { EditorHistoryContext, isTextInput } from '@editor-platform/editor-ui';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
 import { displayCell, parseCell, type StructuredData, type DataRow, type Column } from './model';
 import {
@@ -107,6 +108,7 @@ export function DataGrid({
   onActive: (address: CellAddress) => void;
   onError: (error: string) => void;
 }) {
+  const history = useContext(EditorHistoryContext);
   const [anchor, setAnchor] = useState<CellAddress | null>(null),
     [rowAnchor, setRowAnchor] = useState<string>(),
     [editing, setEditing] = useState<{
@@ -319,7 +321,24 @@ export function DataGrid({
         setContext({ x: e.clientX, y: e.clientY });
       }}
       onKeyDown={(e) => {
-        if (editing) return;
+        if (editing || isTextInput(e.target) || e.nativeEvent.isComposing) return;
+        if (
+          history &&
+          !readOnly &&
+          (e.ctrlKey || e.metaKey) &&
+          !e.altKey &&
+          ['z', 'y'].includes(e.key.toLowerCase())
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            if (e.shiftKey || e.key.toLowerCase() === 'y') history.redo();
+            else history.undo();
+          } catch (error) {
+            onError((error as Error).message);
+          }
+          return;
+        }
         if (e.key === 'Escape') {
           setRowAnchor(undefined);
           setContext(null);

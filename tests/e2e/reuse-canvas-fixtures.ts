@@ -124,6 +124,8 @@ export async function slideComponentFlow(page: Page) {
   await reuseHistory(page, 'Undo');
   expect((await nativeArtifact(page)).draft.content).toEqual(inserted);
   await reuseHistory(page, 'Redo');
+  expect((await nativeArtifact(page)).draft.content).toEqual(adopted);
+  await expect(page.locator('.save-status')).toHaveText('Saved locally');
   await page.reload();
   expect((await nativeArtifact(page)).draft.content).toEqual(adopted);
   // The same dialog explicitly authorizes whole-page insertion as another capability.

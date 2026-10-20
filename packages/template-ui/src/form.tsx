@@ -24,6 +24,24 @@ export function TemplateInputForm({
   assets = [],
 }: TemplateFormProps) {
   const prefix = useId();
+  // Repeat diagnostics address stable item IDs, while the form addresses the
+  // current row index. Resolve against current values so reordering keeps errors
+  // on the right input without changing the public diagnostic or native IDs.
+  const fieldDiagnostics = diagnostics.map((diagnostic) => {
+    let value: unknown = values;
+    const path = diagnostic.path.split('.').map((part) => {
+      if (Array.isArray(value) && !/^(0|[1-9]\d*)$/.test(part)) {
+        const index = value.findIndex(
+          (item) => item && typeof item === 'object' && item.id === part,
+        );
+        if (index >= 0) part = String(index);
+      }
+      value =
+        value && typeof value === 'object' ? (value as Record<string, unknown>)[part] : undefined;
+      return part;
+    });
+    return { ...diagnostic, path: path.join('.') };
+  });
   return (
     <div className="tp-input-form">
       {fields.map((field) => (
@@ -37,7 +55,7 @@ export function TemplateInputForm({
             onFieldChange?.(field.key, value);
             onChange({ ...values, [field.key]: value });
           }}
-          diagnostics={diagnostics}
+          diagnostics={fieldDiagnostics}
           assets={assets}
         />
       ))}

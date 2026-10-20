@@ -1,4 +1,5 @@
 import { assertGeo, renderGeoSvg, fitGeoExtent, type GeoDocument } from '@editor-platform/geo-core';
+import { resolveGeoBackgrounds } from '@editor-platform/geo-core/backgrounds';
 import {
   ReferenceError,
   svgReferenceProjection,
@@ -219,6 +220,7 @@ export const geoReferenceAdapter: ReferenceAdapter = {
           height: 700,
           extent: view?.extent ?? fitGeoExtent(content),
           ...(view ? { view } : {}),
+          backgrounds: resolveGeoBackgrounds(view?.backgrounds ?? []),
         },
         { actions: 10, bytes: 65536, depth: 24, layers: 10, features: 200, vertices: 1000 },
       ),

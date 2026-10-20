@@ -9,6 +9,8 @@ import {
   validateRef,
   validateReusableDefinition,
   validateReuseState,
+  validateReuseStateSync,
+  reuseLimits,
   type ReusableDefinition,
 } from './index';
 
@@ -24,6 +26,59 @@ const tokens = () =>
     dependencies: [],
     payload: brandTokens,
   });
+it('separates adopted closure count from per-closure definitions and reports state limits', async () => {
+  const definitions = await Promise.all(
+    Array.from({ length: reuseLimits.closures }, (_, index) =>
+      sealReusableDefinition({
+        schemaVersion: 1,
+        libraryId: 'components',
+        definitionId: `component-${index}`,
+        version: 1,
+        kind: 'component',
+        domain: 'design',
+        name: 'Component',
+        dependencies: [],
+        payload: {},
+      }),
+    ),
+  );
+  const closures = await Promise.all(definitions.map((d) => lockClosure([definitionRef(d)], [d])));
+  for (const count of [100, 101, reuseLimits.closures]) {
+    const state = { schemaVersion: 1, closures: closures.slice(0, count), instances: [] };
+    expect(readReuseState(state)).toEqual(state);
+    expect(validateReuseStateSync(JSON.parse(JSON.stringify(state)))).toEqual(state);
+  }
+  for (const path of ['closures', 'instances'] as const) {
+    const state = { schemaVersion: 1, closures: [], instances: [], [path]: Array(2001).fill({}) };
+    for (const validate of [readReuseState, validateReuseStateSync])
+      expect(() => validate(state)).toThrowError(
+        expect.objectContaining({
+          code: 'reuse-limit',
+          diagnostics: [
+            expect.objectContaining({
+              address: { path },
+              message: expect.stringContaining('2001'),
+            }),
+          ],
+        }),
+      );
+  }
+  await expect(
+    lockClosure(definitions.slice(0, 101).map(definitionRef), definitions.slice(0, 101)),
+  ).rejects.toMatchObject({ code: 'closure-limit' });
+  expect(
+    (await lockClosure(definitions.slice(0, 100).map(definitionRef), definitions.slice(0, 100)))
+      .definitions,
+  ).toHaveLength(100);
+  const tampered = { ...closures[100], hash: '0'.repeat(64) };
+  expect(() =>
+    validateReuseStateSync({
+      schemaVersion: 1,
+      closures: [...closures.slice(0, 100), tampered],
+      instances: [],
+    }),
+  ).toThrowError(expect.objectContaining({ code: 'closure-hash' }));
+});
 it('R03/R04 pins exact immutable definitions and deterministic offline transitive closures', async () => {
   const base = await tokens();
   const style = await sealReusableDefinition({

@@ -7,12 +7,12 @@ focused foundation test fixture and does not replace the normal toolbar/canvas U
 
 ## Responsibilities at the adapter boundary
 
-| Owner | Responsibility |
-| --- | --- |
-| Editor Platform | Domain models/operations, editing merge and conflict rules, transactions, actor/session Undo/Redo, text/selection/annotation mapping, proposal content preview and precondition validation, editing state and in-document presence rendering. |
-| Collaboration Platform | Organizations, Rooms, membership, joining/leaving and invitations, authenticated identity, access policy and enforcement, Room–Artifact relationships. |
-| Trusted Collaboration/Host adapter | Authenticated sessions and permitted operation scopes, update submission/delivery, receipts/reconnect, connection and expiry notifications, presence transport, production persistence. |
-| Host Product / Runtime | Entry into shared editing, organization/Room UI, agent generation/execution/regeneration and adoption policy; organizational approval workflows remain outside Editor. |
+| Owner                              | Responsibility                                                                                                                                                                                                                                |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Editor Platform                    | Domain models/operations, editing merge and conflict rules, transactions, actor/session Undo/Redo, text/selection/annotation mapping, proposal content preview and precondition validation, editing state and in-document presence rendering. |
+| Collaboration Platform             | Organizations, Rooms, membership, joining/leaving and invitations, authenticated identity, access policy and enforcement, Room–Artifact relationships.                                                                                        |
+| Trusted Collaboration/Host adapter | Authenticated sessions and permitted operation scopes, update submission/delivery, receipts/reconnect, connection and expiry notifications, presence transport, production persistence.                                                       |
+| Host Product / Runtime             | Entry into shared editing, organization/Room UI, agent generation/execution/regeneration and adoption policy; organizational approval workflows remain outside Editor.                                                                        |
 
 The Host maps organization/Room policy to an artifact/session and allowed scopes.
 Editor consumes opaque identities and those capabilities; it does not infer roles,
@@ -23,7 +23,10 @@ including revocation/expiry. Disabling an Editor button is insufficient.
 The reference `Authority` compares operations against a Host-supplied trusted
 `Principal` at its commit boundary, in addition to checking content invariants.
 This is a generic enforcement hook, not an organization policy engine: wire actor
-claims cannot create a principal or expand scopes. A production integration must
+claims cannot create a principal, expand scopes or declare authority-only
+provenance; proposal registration, review and cancellation take the same principal.
+`createReferenceServer()` in `apps/collaboration-reference/src/server.ts` holds the
+reference Host state per instance for its unit tests; `main.ts` only listens. A production integration must
 bind and refresh authorization from Collaboration before reaching that boundary.
 Editor then handles typed rejection, pending work and session-expiry notifications.
 Demo rooms, A/B/C selectors, bearer bindings and the in-memory server belong only to
@@ -31,7 +34,7 @@ the reference Host. Do not duplicate a production Collaboration Platform in this
 
 ## Run the Lab
 
-Node 20.20.2 and the normal `npm ci` install are sufficient. No API key or external
+Node 24.19.0 and the normal `npm ci` install are sufficient. No API key or external
 service is used. Keep two task-owned processes running:
 
 ```sh

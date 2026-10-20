@@ -1,8 +1,9 @@
 import {
+  csvField,
   displayCell,
   makeRow,
   parseCell,
-  parseCsv,
+  parseCsvText,
   validateData,
   type DataRow,
   type StructuredData,
@@ -20,14 +21,12 @@ export function prepareCsvExport(data: StructuredData, scope: CsvExportScope, vi
   const columns = data.columns.filter(
     (column) => scope.columnsScope === 'all' || !view!.hidden.includes(column.id),
   );
-  const quote = (value: string) =>
-    /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
   const csv =
     [
       columns.map((column) => column.name),
       ...rows.map((row) => columns.map((column) => displayCell(data, row, column))),
     ]
-      .map((row) => row.map(quote).join(','))
+      .map((row) => row.map(csvField).join(','))
       .join('\r\n') + '\r\n';
   return {
     csv,
@@ -53,7 +52,7 @@ export function previewCsvAppend(
   targets: Record<number, string> = {},
   rowIds: string[] = [],
 ) {
-  const parsed = parseCsv(source.replace(/^\uFEFF/, ''));
+  const parsed = parseCsvText(source);
   const names = header
     ? (parsed[0] ?? [])
     : (parsed[0] ?? []).map((_, index) => `Column ${index + 1}`);

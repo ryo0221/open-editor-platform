@@ -12,3 +12,5 @@ export * from './editor-assets';
 export * from './document-editor';
 export * from './reuse';
 export * from './react-ui';
+
+export * from './animation';

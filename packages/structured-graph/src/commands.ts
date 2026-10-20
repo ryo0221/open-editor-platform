@@ -68,74 +68,75 @@ export type GraphIntent =
   | { type: 'delete-node'; id: string; cascade: boolean }
   | { type: 'delete-edge'; id: string }
   | { type: 'reconnect-edge'; id: string; from: string; to: string };
+type RawGraphIntent = Record<string, unknown>;
+function attributeIntentKeys(raw: RawGraphIntent): string[] {
+  if (
+    !['graph', 'node', 'edge'].includes(String(raw.scope)) ||
+    !Array.isArray(raw.path) ||
+    !raw.path.length ||
+    raw.path.length > 8 ||
+    !raw.path.every(validGraphId) ||
+    (raw.type === 'set-attribute' && !Object.hasOwn(raw, 'value'))
+  )
+    throw new Error('Invalid attribute intent');
+  return ['type', 'scope', 'id', 'path', ...(raw.type === 'set-attribute' ? ['value'] : [])];
+}
+/** Validates each intent's own fields and returns the exact key set it may carry. */
+const graphIntentKeys: Record<GraphIntent['type'], (raw: RawGraphIntent) => string[]> = {
+  'add-node': (raw) => {
+    if (
+      !plainRecord(raw.node) ||
+      !validGraphId(raw.node.id) ||
+      !validGraphId(raw.node.type) ||
+      !plainRecord(raw.node.attributes) ||
+      !validPosition(raw.position)
+    )
+      throw new Error('Invalid new node');
+    return ['type', 'node', 'position'];
+  },
+  'add-edge': (raw) => {
+    if (
+      !plainRecord(raw.edge) ||
+      !['id', 'type', 'from', 'to'].every((k) =>
+        validGraphId((raw.edge as Record<string, unknown>)[k]),
+      ) ||
+      !plainRecord(raw.edge.attributes)
+    )
+      throw new Error('Invalid new edge');
+    return ['type', 'edge'];
+  },
+  'set-attribute': attributeIntentKeys,
+  'remove-attribute': attributeIntentKeys,
+  'move-node': (raw) => {
+    if (!validPosition(raw.position)) throw new Error('Invalid position');
+    return ['type', 'id', 'position'];
+  },
+  'delete-node': (raw) => {
+    if (typeof raw.cascade !== 'boolean')
+      throw new Error('Deletion requires an explicit cascade choice');
+    return ['type', 'id', 'cascade'];
+  },
+  'delete-edge': () => ['type', 'id'],
+  'reconnect-edge': (raw) => {
+    if (!validGraphId(raw.from) || !validGraphId(raw.to)) throw new Error('Invalid connection');
+    return ['type', 'id', 'from', 'to'];
+  },
+};
+function assertGraphIntent(raw: unknown) {
+  if (!plainRecord(raw) || typeof raw.type !== 'string') throw new Error('Invalid Graph intent');
+  if (!Object.hasOwn(graphIntentKeys, raw.type)) throw new Error('Unsupported Graph intent');
+  const keys = graphIntentKeys[raw.type as GraphIntent['type']](raw);
+  if (
+    Object.keys(raw).some((k) => !keys.includes(k)) ||
+    keys.some((k) => !Object.hasOwn(raw, k)) ||
+    ('id' in raw && !validGraphId(raw.id))
+  )
+    throw new Error('Invalid Graph intent fields');
+}
 export function parseGraphIntents(value: unknown): GraphIntent[] {
   if (!isGraphJson(value) || !Array.isArray(value) || !value.length || value.length > 1000)
     throw new Error('Expected a bounded Graph intent batch');
-  for (const raw of value) {
-    if (!plainRecord(raw) || typeof raw.type !== 'string') throw new Error('Invalid Graph intent');
-    let keys: string[];
-    switch (raw.type) {
-      case 'add-node':
-        keys = ['type', 'node', 'position'];
-        if (
-          !plainRecord(raw.node) ||
-          !validGraphId(raw.node.id) ||
-          !validGraphId(raw.node.type) ||
-          !plainRecord(raw.node.attributes) ||
-          !validPosition(raw.position)
-        )
-          throw new Error('Invalid new node');
-        break;
-      case 'add-edge':
-        keys = ['type', 'edge'];
-        if (
-          !plainRecord(raw.edge) ||
-          !['id', 'type', 'from', 'to'].every((k) =>
-            validGraphId((raw.edge as Record<string, unknown>)[k]),
-          ) ||
-          !plainRecord(raw.edge.attributes)
-        )
-          throw new Error('Invalid new edge');
-        break;
-      case 'set-attribute':
-      case 'remove-attribute':
-        keys = ['type', 'scope', 'id', 'path', ...(raw.type === 'set-attribute' ? ['value'] : [])];
-        if (
-          !['graph', 'node', 'edge'].includes(String(raw.scope)) ||
-          !Array.isArray(raw.path) ||
-          !raw.path.length ||
-          raw.path.length > 8 ||
-          !raw.path.every(validGraphId) ||
-          (raw.type === 'set-attribute' && !Object.hasOwn(raw, 'value'))
-        )
-          throw new Error('Invalid attribute intent');
-        break;
-      case 'move-node':
-        keys = ['type', 'id', 'position'];
-        if (!validPosition(raw.position)) throw new Error('Invalid position');
-        break;
-      case 'delete-node':
-        keys = ['type', 'id', 'cascade'];
-        if (typeof raw.cascade !== 'boolean')
-          throw new Error('Deletion requires an explicit cascade choice');
-        break;
-      case 'delete-edge':
-        keys = ['type', 'id'];
-        break;
-      case 'reconnect-edge':
-        keys = ['type', 'id', 'from', 'to'];
-        if (!validGraphId(raw.from) || !validGraphId(raw.to)) throw new Error('Invalid connection');
-        break;
-      default:
-        throw new Error('Unsupported Graph intent');
-    }
-    if (
-      Object.keys(raw).some((k) => !keys.includes(k)) ||
-      keys.some((k) => !Object.hasOwn(raw, k)) ||
-      ('id' in raw && !validGraphId(raw.id))
-    )
-      throw new Error('Invalid Graph intent fields');
-  }
+  for (const raw of value) assertGraphIntent(raw);
   return clone(value as unknown as GraphIntent[]);
 }
 function updateAttribute(

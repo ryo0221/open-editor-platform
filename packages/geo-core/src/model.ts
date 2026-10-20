@@ -76,6 +76,17 @@ export interface ReadonlyKeyJoin {
   readonly resultAccess: 'readonly';
 }
 export interface OutputReceipt {
+  backgroundRequests?: import('./background').GeoBackgroundSetting[];
+  backgrounds?: {
+    id: string;
+    version: string;
+    hash: string;
+    color: string;
+    attribution: string;
+    licenseUrl: string;
+    sourceUrl: string;
+  }[];
+  backgroundDiagnostics?: { id: string; reason: string }[];
   input: Pin;
   derivedInputs?: Pin[];
   sources: SourceSnapshot[];

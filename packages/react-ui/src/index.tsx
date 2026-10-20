@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import {
   exportReactUiFromRuntime,
@@ -27,10 +27,13 @@ import { ReactUiRevisionReview } from './revision';
 import type { ReactUiRevisionCandidate } from '@editor-platform/react-ui-core';
 import { immutableCommand } from '@editor-platform/editor-core';
 import { parseReactUiDocument, serializeReactUiDocument } from '@editor-platform/react-ui-core';
+const MemoTree = memo(ReactUiTree);
+const MemoInspector = memo(ReactUiInspector);
+const MemoPageInputs = memo(ReactUiPageInputs);
 export interface ReactUiSurfaceProps {
   content: ReactUiDocument;
   readOnly: boolean;
-  execute(command: EditorCommand<ReactUiDocument>): void;
+  execute(command: EditorCommand<ReactUiDocument>): boolean | void;
   select(id: string): void;
   selectedId?: string;
   runtime: ReactRuntimeAdapter;
@@ -40,7 +43,7 @@ export interface ReactUiSurfaceProps {
   screenReferences?: ReactScreenProposal['externalReferences'];
 }
 export function ReactUiSurface({
-  content,
+  content: sourceContent,
   readOnly,
   execute,
   select,
@@ -51,6 +54,10 @@ export function ReactUiSurface({
   beforeExport,
   screenReferences = [],
 }: ReactUiSurfaceProps) {
+  // React content updates publish a new snapshot. Keep one admitted immutable
+  // snapshot for its render/preview request, including caller-owned Undo copies.
+  const inspection = useMemo(() => inspectReactUiDocument(sourceContent), [sourceContent]);
+  const content = inspection.document ?? sourceContent;
   const [mode, setMode] = useState<'edit' | 'interact'>('edit');
   const [width, setWidth] = useState(390);
   const [restart, setRestart] = useState(0);
@@ -58,6 +65,10 @@ export function ReactUiSurface({
   const [readyRequestId, setReadyRequestId] = useState('');
   const [status, setStatus] = useState('Loading preview');
   const [revisionReview, setRevisionReview] = useState<ReactUiRevisionCandidate>();
+  const [inputFocus, setInputFocus] = useState<{ name: string; request: number }>();
+  const focusInput = useCallback((name: string) => {
+    setInputFocus((previous) => ({ name, request: (previous?.request ?? 0) + 1 }));
+  }, []);
   const iframe = useRef<HTMLIFrameElement>(null);
   const loadedFrame = useRef<HTMLIFrameElement | null>(null);
   const resolvedRequest = useRef('');
@@ -180,7 +191,7 @@ export function ReactUiSurface({
     ? content.nodes.find((n) => n.id === parent.nodeId)!.slots[parent.slotId]
     : content.roots;
   const position = node ? siblings.indexOf(node.id) : -1;
-  const errors = [...inspectReactUiDocument(content).diagnostics, ...diagnostics];
+  const errors = [...inspection.diagnostics, ...diagnostics];
   async function download() {
     try {
       beforeExport?.();
@@ -356,7 +367,12 @@ export function ReactUiSurface({
           />
         </label>
       </div>
-      <ReactUiPageInputs document={content} readOnly={readOnly} execute={execute} />
+      <MemoPageInputs
+        document={content}
+        readOnly={readOnly}
+        execute={execute}
+        focusInput={inputFocus}
+      />
       <p role="status">{status}</p>
       {endpointResult.error && <p role="alert">{endpointResult.error}</p>}
       {errors.map((error, i) => (
@@ -366,7 +382,7 @@ export function ReactUiSurface({
       ))}
       <div className="react-ui-columns">
         <aside aria-label="Component tree">
-          <ReactUiTree
+          <MemoTree
             document={content}
             selectedId={selectedId}
             select={select}
@@ -467,12 +483,13 @@ export function ReactUiSurface({
               >
                 Move down
               </button>
-              <ReactUiInspector
+              <MemoInspector
                 document={content}
                 node={node}
                 registered={registered}
                 readOnly={readOnly}
                 execute={execute}
+                onEditInput={focusInput}
               />
             </>
           ) : (

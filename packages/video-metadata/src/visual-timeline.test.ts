@@ -1,10 +1,11 @@
 import { beforeAll, afterAll, it, expect } from 'vitest';
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
-import { chromium, type Browser, type Page } from '@playwright/test';
+import type { Browser, Page } from '@playwright/test';
 import { time, type VideoContent } from '@editor-platform/video-core';
 import { videoTimelineFixture } from './edit-fixture';
 import type {} from '../test-host/edit-host';
+import { closeServer, launchTestChromium, listenOnLoopback } from '../test-host/browser';
 let browser: Browser, bundle: string, origin: string;
 const server = createServer((_q, r) => {
   r.setHeader('Content-Type', 'text/html');
@@ -21,19 +22,12 @@ beforeAll(async () => {
       minify: true,
     })
   ).outputFiles[0].text;
-  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const a = server.address();
-  if (!a || typeof a === 'string') throw Error('server');
-  origin = `http://127.0.0.1:${a.port}`;
-  browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    headless: true,
-    args: ['--no-sandbox'],
-  });
+  origin = await listenOnLoopback(server);
+  browser = await launchTestChromium();
 });
 afterAll(async () => {
   await browser?.close();
-  await new Promise<void>((r) => server.close(() => r()));
+  await closeServer(server);
 });
 function single(): VideoContent {
   const v = videoTimelineFixture();

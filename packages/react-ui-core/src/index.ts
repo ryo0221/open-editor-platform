@@ -10,7 +10,12 @@ export {
   checkComponentRef as validateReactComponentRef,
   checkImport as validateReactImport,
 } from './registration';
-export * from './document';
+export {
+  isReactUiDocument,
+  loadReactUiDocument,
+  serializeReactUiDocument,
+  parseReactUiDocument,
+} from './document';
 export * from './preflight';
 export * from './adapters';
 export * from './preview';

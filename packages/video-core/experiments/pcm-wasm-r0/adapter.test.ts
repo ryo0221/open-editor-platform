@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { time } from '@editor-platform/video-core';
-import { PcmBackend } from './adapter';
-import { ARENA_BYTES, Ledger, prepareModule } from './kernel';
+import { PcmBackend } from '../../src/pcm/adapter';
+import { ARENA_BYTES, Ledger, prepareModule } from '../../src/pcm/kernel';
 const signal = () => new AbortController().signal;
 const mapping = { start: time(0), end: time(1), sourceStart: time(0), speed: time(1) };
 const edge = { mode: 'edge-hold-v0' as const, valid: { start: time(0), end: time(1) } };

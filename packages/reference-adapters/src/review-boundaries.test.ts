@@ -4,7 +4,7 @@ import { ReferenceResolver, type ReferenceSnapshot } from '@editor-platform/arti
 import { createData, isStructuredData } from '@editor-platform/structured-data/model';
 import { defaultView } from '@editor-platform/structured-data/views';
 import { createDeck, makeSlideObject } from '@editor-platform/slide/model';
-import { createDesign, makeDesignElement } from '@editor-platform/design/model';
+import { createDesign, duplicateElements, makeDesignElement } from '@editor-platform/design/model';
 import { createWhiteboard, makeWhiteboardNode } from '@editor-platform/whiteboard/model';
 import { createDocument, makeBlock, exportHtml } from '@editor-platform/document/model';
 import {
@@ -131,4 +131,17 @@ it('keeps hidden Document references out of the HTML manifest', async () => {
     src: 'data:image/png;base64,AA==',
   });
   expect(exportHtml(doc)).not.toContain('artifact-references');
+});
+
+it('reports the reference budget when a Design duplicate exceeds 64 references', async () => {
+  const { resolver, source } = await fixture();
+  const reference = await resolver.create(source, 'fixed');
+  const design = createDesign();
+  design.elements = Array.from({ length: 64 }, (_, index) => ({
+    ...makeDesignElement('image'),
+    id: `linked-${index}`,
+    reference,
+    src: 'data:image/png;base64,AA==',
+  }));
+  expect(() => duplicateElements(['linked-0']).apply(design)).toThrow('上限');
 });

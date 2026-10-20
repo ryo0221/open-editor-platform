@@ -10,7 +10,7 @@ const entry = resolve(out, 'entry.mjs');
 await writeFile(
   entry,
   `import assert from 'node:assert/strict';
-import {addOwnedAudio} from ${JSON.stringify(resolve('packages/video-core/experiments/pcm-wasm-m2/output.mjs'))};
+import {addOwnedAudio} from ${JSON.stringify(resolve('packages/video-metadata/host-media/m2/pcm-output.mjs'))};
 for (const fail of [false,true]) {
  let bytes=0, peak=0, releases=0, clone, resolveEntered;
  const entered=new Promise(r=>resolveEntered=r);

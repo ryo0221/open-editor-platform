@@ -17,7 +17,7 @@
     "@editor-platform/document": "*",
     "@editor-platform/structured-data": "*",
     "@editor-platform/review-surfaces": "*",
-    "prosemirror-transform": "1.11.0",
+    "prosemirror-transform": "1.12.2",
     "@editor-platform/reuse-core": "*",
     "@editor-platform/artifact-references": "*"
   }

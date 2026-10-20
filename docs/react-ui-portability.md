@@ -81,17 +81,28 @@ node配列・object keyの挿入順だけの変更は意味的差分にしない
 別のHost型Panelをtoolingで抽出する。classNameなし→Host明示wrapper、空のbody/actionの
 既定表示、enum callbackをReact-only出力で検証する。実物の製品コードは使わない。
 
-Vite 6.4.1／React・ReactDOM 19.1.1の固定環境では、今回tree shaking既定値でも
-参照unboundアプリのbuildが完了し、報告されたreact-dom停止は未再現だった。
-既存独立driverの `rollupOptions.treeshake:false` は固定fixtureの既存互換設定として
-保持する。すべてのHostへ必須とはしない。利用側で失敗する場合はexact lockfile、
+2026-10-18の追試ではRollup 4.64.0の引数解析の停止を再現し、上流の修正を含む
+4.64.9へlockを更新すると同じ出力がtree shaking既定値でbuildできた。
+Vite 6.4.1／React・ReactDOM 19.1.1は変更していない。通常React／Designの独立driverから
+`rollupOptions.treeshake:false`を除き、5つのReact-only appとDesignのcomponent/page/siteを
+検証した。まず更新済みlockで`npm ci`する。固定性能fixtureのdriverと測定条件は変更していない。
+利用側で失敗する場合はexact lockfileとRollup版、
 import alias、React/ReactDOMの重複・版、JSX設定、実際のerrorを保存して切り分ける。
 出力TSXへ場当たり的なreact-dom依存を追加しない。
 
 基本設定はESM、automatic JSX、React/ReactDOMのexact版、元部品aliasとProvider/CSS/
 asset解決。strict tsc、production build、実描画とcallbackは別々に検証する。
 この試験はperformance受け入れではない。計測／調整停止、生成物のGit除外、
-利用側の実資料試用、外部製品との非統合を維持する。結果は[検証記録](verification/issue-38/README.md)。
+外部製品との非統合を維持する。
+[今回の結果](verification/issues-38-261/README.md)と[以前の検証記録](verification/issue-38/README.md)を参照する。
+
+同日のユーザー指定による 利用側の実物試用では、
+別checkoutの元HomeScreen／部品／CSSを変更せず、6登録を独立Hostへ接続した。
+元の50部品の抽出結果は31候補・19診断であり、全件の無加工登録を保証しない。
+必須callbackなどは明示Host adapterで接続する。通常Library／Inspector、保存・reload・
+native import、ZIP内全ファイルの一致、strict tsc／既定ViteのReact-only出力、
+390/1024/1400pxの入力・callback・表示比較がPASS。製品の業務型や実装はEditorへ追加せず、
+製品全体の認証・backend・配備は検証範囲に含めない。
 
 CLIはtsconfigのparse診断も拒否する。明示entryを別に追加するため、glob探索に入力が
 見つからない診断18003だけは対象外とし、未知option・不正値・extends読込失敗等は

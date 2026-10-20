@@ -4,7 +4,14 @@ import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pinnedSource, digest, dependencyClosure, auditTypeImports } from './source.mjs';
+import {
+  pinnedSource,
+  digest,
+  dependencyClosure,
+  auditTypeImports,
+  scopePackage,
+} from './source.mjs';
+import { thirdPartyNames } from './third-party.mjs';
 const core = { name: '@local/core', exports: { '.': './index.js' } };
 const direct = {
   name: '@local/direct',
@@ -48,6 +55,39 @@ test('relative type imports cannot reach another package or private declaration 
     () => audit("type T = import('../node_modules/@local/core/private').Thing;"),
     /Private source escape/,
   );
+});
+test('only exact reviewed JSON assets may be imported outside package src', () => {
+  const check = (specifier) =>
+    auditTypeImports(
+      `import data from '${specifier}' with { type: 'json' };`,
+      '/fixture/src/index.ts',
+      sample,
+      manifests,
+      '/fixture/src',
+      ['/fixture/data/manifest.json'],
+    );
+  check('../data/manifest.json');
+  for (const specifier of [
+    '../data/other.json',
+    '../data/private.ts',
+    '../node_modules/private.json',
+    '../../other/data/manifest.json',
+  ])
+    assert.throws(() => check(specifier), /Private source escape/);
+});
+test('Geo-capable packaging profiles include the closed lock-pinned hash dependency', () => {
+  assert.deepEqual(thirdPartyNames('baseline'), ['@noble/hashes']);
+  assert.deepEqual(thirdPartyNames('readonly-domains'), ['@noble/hashes']);
+  assert.deepEqual(thirdPartyNames('controlled-animation'), [
+    'react',
+    'scheduler',
+    'react-dom',
+    'csstype',
+    '@types/react',
+    '@types/react-dom',
+    '@noble/hashes',
+  ]);
+  assert.throws(() => thirdPartyNames('unknown'), /Unknown packaging profile/);
 });
 test('only explicit tracked commit bytes are staged, irrespective of dirty/ignored/untracked files', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'extension-source-'));
@@ -126,4 +166,53 @@ test('self package imports use only declared public entries without a dependency
     /Private\/undeclared/,
   );
   assert.deepEqual(dependencyClosure(manifest, manifests), []);
+});
+test('a scoped package keeps only files and dependencies its listed entrypoints reach', () => {
+  const files = new Map(
+    Object.entries({
+      'pkg/src/controlled.tsx':
+        "import './controlled.css'; import { a } from './helper'; import type { C } from '@local/pkg/contract'; import { x } from '@local/core';",
+      'pkg/src/controlled.css': '.a {}',
+      'pkg/src/helper.ts': "export const a = 1; import type { T } from '@local/direct';",
+      'pkg/src/contract.ts': 'export type C = 1;',
+      'pkg/src/surface.tsx': "import { UI } from '@local/ui'; import { a } from './helper';",
+    }),
+  );
+  const source = { has: (name) => files.has(name), read: (name) => files.get(name) };
+  const manifest = {
+    name: '@local/pkg',
+    exports: {
+      './controlled': './src/controlled.tsx',
+      './contract': './src/contract.ts',
+      './v2': './src/surface.tsx',
+    },
+    dependencies: { '@local/core': '*', '@local/direct': '*', '@local/ui': '*', react: '*' },
+  };
+  const scoped = scopePackage(source, 'pkg', manifest, ['./controlled', './contract']);
+  assert.deepEqual([...scoped.files].sort(), [
+    'pkg/src/contract.ts',
+    'pkg/src/controlled.css',
+    'pkg/src/controlled.tsx',
+    'pkg/src/helper.ts',
+  ]);
+  assert.deepEqual(Object.keys(scoped.manifest.exports), ['./controlled', './contract']);
+  assert.deepEqual(Object.keys(scoped.manifest.dependencies).sort(), [
+    '@local/core',
+    '@local/direct',
+    'react',
+  ]);
+  assert.throws(
+    () => scopePackage(source, 'pkg', manifest, ['./missing']),
+    /Unknown scoped export/,
+  );
+  assert.throws(
+    () =>
+      scopePackage(
+        source,
+        'pkg',
+        { ...manifest, exports: { './controlled': './src/controlled.tsx' } },
+        ['./controlled'],
+      ),
+    /outside scope/,
+  );
 });

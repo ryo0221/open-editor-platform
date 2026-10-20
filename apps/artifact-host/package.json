@@ -7,5 +7,22 @@
     ".": "./src/HostApp.tsx",
     "./model": "./src/model.ts",
     "./preview": "./src/preview.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/design": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/design-react-core": "*",
+    "@editor-platform/office-export-ui": "*",
+    "@editor-platform/react-ui-core": "*",
+    "fflate": "0.8.3",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "typescript": "5.9.2"
   }
 }

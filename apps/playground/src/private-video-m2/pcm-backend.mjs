@@ -4,8 +4,8 @@ import {
   configureM2Pcm,
   configureM2PcmFactory,
   m2PcmDiagnostics,
-} from '../../../../packages/video-core/experiments/pcm-wasm-m2/owners';
-import '../../../../packages/video-core/experiments/pcm-wasm-m2/observe-validation.mjs';
+} from '../../../../packages/video-core/src/pcm/owners';
+import '../../../../packages/video-metadata/host-media/m2/observe-validation.mjs';
 const mode =
   typeof __EDITOR_PRIVATE_M2_PCM_MODE__ === 'undefined' ? 'js' : __EDITOR_PRIVATE_M2_PCM_MODE__;
 if (!['js', 'wasm'].includes(mode)) throw Error('Private M2 PCM build selection');

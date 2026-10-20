@@ -34,28 +34,27 @@ export function makeTheme(
     if (!a.uri) colorMap[a.local] = a.value;
   return { theme, colors, colorMap, font: 'Noto Sans CJK JP', builder };
 }
+const colorElements = ['srgbClr', 'schemeClr', 'sysClr', 'scrgbClr', 'prstClr', 'hslClr'];
+/** The six-digit base color of a color element before modifiers. */
+function baseColor(c: XmlNode, context: ThemeContext, phColor: string | undefined) {
+  if (c.local === 'srgbClr') return attribute(c, 'val');
+  if (c.local === 'sysClr') return attribute(c, 'lastClr');
+  if (c.local !== 'schemeClr') return undefined;
+  const key = attribute(c, 'val') ?? '';
+  return key === 'phClr' ? phColor : context.colors[context.colorMap[key] ?? key];
+}
 export function resolveColor(
   container: XmlNode | undefined,
   context: ThemeContext,
   address: OfficeSourceAddress,
   phColor?: string,
 ): string | undefined {
-  const c = container?.children.find(
-    (n) =>
-      n.uri === ns.a &&
-      ['srgbClr', 'schemeClr', 'sysClr', 'scrgbClr', 'prstClr', 'hslClr'].includes(n.local),
-  );
+  const c = container?.children.find((n) => n.uri === ns.a && colorElements.includes(n.local));
   if (!c) return undefined;
-  let value: string | undefined;
-  if (c.local === 'srgbClr') value = attribute(c, 'val');
-  else if (c.local === 'sysClr') value = attribute(c, 'lastClr');
-  else if (c.local === 'schemeClr') {
-    const key = attribute(c, 'val') ?? '';
-    value = key === 'phClr' ? phColor : context.colors[context.colorMap[key] ?? key];
-  }
+  const value = baseColor(c, context, phColor);
   if (!value || !/^[0-9a-f]{6}$/i.test(value))
     throw new ImportError('UNRESOLVED_COLOR', `${address.part}${c.path}: color is unavailable`);
-  let rgb = [0, 2, 4].map((i) => parseInt(value!.slice(i, i + 2), 16)),
+  let rgb = [0, 2, 4].map((i) => parseInt(value.slice(i, i + 2), 16)),
     alpha = 1;
   for (const mod of c.children) {
     const v = numeric(mod, 'val', 100000) / 100000;

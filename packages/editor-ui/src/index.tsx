@@ -97,11 +97,13 @@ export function Menu({
   icon = MoreHorizontal,
   children,
   align = 'left',
+  onOpen,
 }: {
   label: string;
   icon?: LucideIcon;
   children: ReactNode;
   align?: 'left' | 'right';
+  onOpen?(): void;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -115,6 +117,11 @@ export function Menu({
     const escape = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setOpen(false);
+      // A dialog in front of this menu (a presentation) keeps its own Escape. Otherwise
+      // Escape only closes the menu, so a focused field elsewhere keeps its draft.
+      const target = e.target as Element | null;
+      const layer = target?.closest?.('[role="dialog"],dialog');
+      if (!root.current?.contains(target) && layer && !layer.contains(root.current)) return;
       trigger.current?.focus();
       e.stopPropagation();
     };
@@ -167,7 +174,10 @@ export function Menu({
           label={label}
           aria-expanded={open}
           aria-controls={id}
-          onClick={() => setOpen(!open)}
+          onClick={() => {
+            if (!open) onOpen?.();
+            setOpen(!open);
+          }}
         />
       </span>
       {open && (
@@ -241,6 +251,8 @@ export interface EditorLayoutProps {
   status?: ReactNode;
   children: ReactNode;
   hideToolbar?: boolean;
+  /** Container width at or below which toolbar tools move to the overflow menu. Default: 1100px. */
+  compactBreakpoint?: number;
   leftLabel?: string;
   inspectorLabel?: string;
 }
@@ -262,6 +274,7 @@ export function EditorLayout({
   status,
   children,
   hideToolbar,
+  compactBreakpoint = 1100,
   leftLabel = 'Navigator',
   inspectorLabel = 'Inspector',
 }: EditorLayoutProps) {
@@ -290,16 +303,18 @@ export function EditorLayout({
     [leftOpen, rightOpen, rightWidth, tab, focus],
   );
   const root = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(window.innerWidth <= 1100);
+  const breakpoint =
+    Number.isFinite(compactBreakpoint) && compactBreakpoint >= 0 ? compactBreakpoint : 1100;
+  const [compact, setCompact] = useState(window.innerWidth <= breakpoint);
   const [narrow, setNarrow] = useState(window.innerWidth <= 800);
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
-      setCompact(entry.contentRect.width <= 1100);
+      setCompact(entry.contentRect.width <= breakpoint);
       setNarrow(entry.contentRect.width <= 800);
     });
     if (root.current) observer.observe(root.current);
     return () => observer.disconnect();
-  }, []);
+  }, [breakpoint]);
   const beforeFocus = useRef({ left: state.left, right: state.right });
   const drawerTrigger = useRef<HTMLElement | null>(null);
   const set = useCallback(

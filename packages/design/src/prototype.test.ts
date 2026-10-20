@@ -32,6 +32,34 @@ const key = (d: DesignContent, frame: string, name: string) =>
   designPrototypeTargets(d, frame).find((t) => t.name === name)!.key;
 
 describe('native Design prototypes', () => {
+  it('restores absent prototype metadata after edits and omits undefined keys on command writes', () => {
+    const original = deepFreeze({
+      ...createDesign(),
+      elements: [{ ...makeDesignElement('frame'), id: 'Home' }],
+    });
+    const session = new EditorSession(original);
+    session.execute(setDesignPrototype({ schemaVersion: 1, startFrameId: 'Home', flows: [] }));
+    expect(session.content.prototyping?.startFrameId).toBe('Home');
+    session.execute(setDesignPrototype({ schemaVersion: 1, startFrameId: undefined, flows: [] }));
+    expect(session.content).toStrictEqual(original);
+    expect(session.content).not.toHaveProperty('prototyping');
+    session.undo();
+    expect(session.content.prototyping?.startFrameId).toBe('Home');
+    session.redo();
+    expect(session.content).toStrictEqual(original);
+    session.execute(
+      setDesignPrototype({
+        schemaVersion: 1,
+        startFrameId: undefined,
+        flows: [{ id: 'f', name: 'Flow', frameIds: ['Home'] }],
+      }),
+    );
+    expect(session.content.prototyping).not.toHaveProperty('startFrameId');
+    expect(session.content.prototyping?.flows).toHaveLength(1);
+    session.execute(setDesignPrototype(undefined));
+    expect(session.content).toStrictEqual(original);
+    expect(JSON.parse(JSON.stringify(session.content))).toStrictEqual(original);
+  });
   it('roundtrips optional metadata and leaves both legacy schemas unchanged', () => {
     const d = prototypeFixture();
     expect(isDesign(JSON.parse(JSON.stringify(d)))).toBe(true);

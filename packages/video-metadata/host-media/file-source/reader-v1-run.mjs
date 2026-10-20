@@ -4,7 +4,7 @@ import { prepareImportSetV1 } from './import-v1';
 import { audioMappingV1, outputSpanV1 } from './timing-v1';
 import { createPcmFile } from '../indexed-media/pcm-file.mjs';
 import { createVideoWindow } from '../indexed-media/video-window.mjs';
-import { PcmRenderSession } from '../../../video-core/experiments/pcm-renderer/session.ts';
+import { PcmRenderSession } from '../../../video-core/src/pcm/session.ts';
 globalThis.runV1Reader = async () => {
   const original = globalThis.document.querySelector('#source').files[0],
     signal = new globalThis.AbortController().signal;

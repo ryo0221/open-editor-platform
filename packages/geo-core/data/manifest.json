@@ -1,0 +1,41 @@
+[
+  {
+    "id": "world-countries",
+    "version": "5.1.2-display.1",
+    "label": "World countries",
+    "attribution": "Natural Earth 5.1.2 · public domain",
+    "licenseUrl": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "sourceUrl": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_110m_admin_0_countries.geojson",
+    "sourceSha256": "6866c877d39cba9c357620878839b336d569f8c662d3cfab4cb1dbe2d39c977f",
+    "toleranceDegrees": 0.04,
+    "features": 177,
+    "vertices": 9924,
+    "hash": "sha256:9956c60a53278535aed6f9760d62a328124342a4b12cca67c52b36ae89e2cb6d"
+  },
+  {
+    "id": "world-regions",
+    "version": "5.1.2-display.1",
+    "label": "World states and provinces",
+    "attribution": "Natural Earth 5.1.2 · public domain",
+    "licenseUrl": "https://www.naturalearthdata.com/about/terms-of-use/",
+    "sourceUrl": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_1_states_provinces.geojson",
+    "sourceSha256": "22d0e3ad85eb3e27f17cabf8ba2d50e554fbc27a87796ff891d958185da62fb5",
+    "toleranceDegrees": 0.04,
+    "features": 4596,
+    "vertices": 149359,
+    "hash": "sha256:007703bf956d964894665b4863a60c26c7bf4c70dc5d39689454dac762572d95"
+  },
+  {
+    "id": "japan-municipalities",
+    "version": "2017-9469f09-display.1",
+    "label": "Japan municipalities and wards",
+    "attribution": "geoBoundaries JPN ADM2 (2017) · OpenStreetMap / Wambacher · CC BY-SA 2.0 · simplified",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/2.0/",
+    "sourceUrl": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/JPN/ADM2/geoBoundaries-JPN-ADM2_simplified.geojson",
+    "sourceSha256": "c1c3f4d70bf7d02ef3fd2f98410597ac714c521280520fc7e85073fdee75af46",
+    "toleranceDegrees": 0.004,
+    "features": 1742,
+    "vertices": 67031,
+    "hash": "sha256:478198b3cf2c683a2e8944de608a173f992c2540e91320618be5b89016f7e4e0"
+  }
+]

@@ -194,7 +194,7 @@ test('QA-14 / ID-Q10 renders real PDF page 3, restores a page-coordinate region 
   await page.getByRole('button', { name: 'Previous PDF page', exact: true }).click();
   await expect(page.locator('.ep-file-region').first()).toBeVisible();
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
   await page.reload();
   await expect(page.getByLabel('Rendered PDF page 1', { exact: true })).toHaveAttribute(

@@ -1,9 +1,11 @@
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
-import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
+import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { resolve, dirname, relative, isAbsolute, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 import { createHash } from 'node:crypto';
-import { unzipSync, strFromU8 } from 'fflate';
+import { strFromU8 } from 'fflate';
+import { readReactArchive } from './lib/host-react-archive.mjs';
 import { build } from 'esbuild';
 import { chromium } from '@playwright/test';
 // Compile an actual fixture export, then execute only inside an opaque browser sandbox.
@@ -11,29 +13,11 @@ const archive = process.argv[2];
 if (!archive) throw Error('Pass the react-output.zip downloaded by host-integration.spec.ts');
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(root, 'work/issue-33-36/independent-react');
-const files = unzipSync(await readFile(archive));
-const names = new Set();
-for (const name of Object.keys(files)) {
-  const path = relative(out, resolve(out, name));
-  if (
-    !/^[\w./-]+$/.test(name) ||
-    isAbsolute(name) ||
-    name.split('/').some((segment) => !segment || segment === '.' || segment === '..') ||
-    isAbsolute(path) ||
-    path.startsWith('../') ||
-    !path ||
-    names.has(name.toLowerCase())
-  )
-    throw Error('Invalid export path');
-  names.add(name.toLowerCase());
-}
+const files = await readReactArchive(archive);
 // Each archive is verified on its own; omitted files cannot survive from a prior run.
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 for (const [name, bytes] of Object.entries(files)) {
-  const text = strFromU8(bytes);
-  if (/\.(tsx|css)$/.test(name) && text.includes('@editor-platform/'))
-    throw Error('Editor runtime dependency');
   const path = resolve(out, name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, bytes);
@@ -50,7 +34,7 @@ await writeFile(
       module: 'ESNext',
       target: 'ES2022',
     },
-    include: ['**/*.tsx'],
+    include: ['**/*.ts', '**/*.tsx'],
   }),
 );
 execFileSync(
@@ -72,6 +56,22 @@ const result = await build({
   format: 'iife',
   define: { 'process.env.NODE_ENV': '"production"' },
   loader: { '.css': 'empty' },
+  plugins: [
+    {
+      name: 'fixture-dependency-boundary',
+      setup(bundler) {
+        bundler.onResolve({ filter: /.*/ }, (args) => {
+          if (!args.importer.startsWith(out + sep)) return;
+          if (/^react(?:-dom)?(?:\/|$)/.test(args.path)) return;
+          if (args.path.startsWith('.')) {
+            const path = relative(out, resolve(dirname(args.importer), args.path));
+            if (path && !isAbsolute(path) && path !== '..' && !path.startsWith('..' + sep)) return;
+          }
+          return { errors: [{ text: 'Export dependency must be React or a file inside the ZIP' }] };
+        });
+      },
+    },
+  ],
 });
 const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const hash = createHash('sha256').update(js).digest('base64');
@@ -82,7 +82,11 @@ const css = Object.entries(files)
   .replace(/<\/style/gi, '<\\/style');
 const html = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'sha256-${hash}';style-src 'unsafe-inline';connect-src 'none';form-action 'none';base-uri 'none'"><style>${css}</style><div id="root"></div><script>${js}</script>`;
 await writeFile(resolve(out, 'standalone.html'), html);
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+// Same Chromium rule as tests/playwright/chromium.ts.
+const executablePath =
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ||
+  (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const page = await browser.newPage();
   const errors = [];

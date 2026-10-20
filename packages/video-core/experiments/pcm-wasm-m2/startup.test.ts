@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
-import type { Ledger } from '../pcm-wasm-r0/kernel';
-import { configureM2PcmFactory, m2PcmDiagnostics } from './owners';
-import { selectedPcmSession } from '../pcm-wasm-v1/selection';
+import type { Ledger } from '../../src/pcm/kernel';
+import { configureM2PcmFactory, m2PcmDiagnostics } from '../../src/pcm/owners';
+import { selectedPcmSession } from '../../src/pcm/selection';
 it('normal factory admission precedes construction and failed forced preparation leaves no input held', async () => {
   const realm = (globalThis as unknown as Record<symbol, Ledger>)[
     Symbol.for('editor-platform.private-pcm-budget.v1')

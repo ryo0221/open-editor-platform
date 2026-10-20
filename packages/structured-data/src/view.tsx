@@ -38,7 +38,7 @@ import {
   parseCell,
   validateData,
   importCsv,
-  parseCsv,
+  parseCsvText,
   pruneViewFields,
   type StructuredData,
   type Column,
@@ -1977,7 +1977,7 @@ export function DataSurface({
               onChange={(e) => {
                 const header = e.target.checked;
                 setCsvHeader(header);
-                const count = parseCsv(csv.source)[0]?.length ?? 1;
+                const count = parseCsvText(csv.source)[0]?.length ?? 1;
                 setCsv({
                   ...csv,
                   data: importCsv(
@@ -2044,7 +2044,7 @@ export function DataSurface({
                           value={c.type}
                           onChange={(e) => {
                             const type = e.target.value as Column['type'];
-                            const original = parseCsv(csv.source).slice(csvHeader ? 1 : 0);
+                            const original = parseCsvText(csv.source).slice(csvHeader ? 1 : 0);
                             const columnIndex = csv.data.columns.findIndex((v) => v.id === c.id);
                             setCsv({
                               ...csv,
@@ -2082,9 +2082,9 @@ export function DataSurface({
                     {csv.data.columns.map((c) => (
                       <td key={c.id}>
                         {csvAppend
-                          ? parseCsv(csv.source)[csv.data.rows.indexOf(r) + (csvHeader ? 1 : 0)]?.[
-                              csv.data.columns.indexOf(c)
-                            ]
+                          ? parseCsvText(csv.source)[
+                              csv.data.rows.indexOf(r) + (csvHeader ? 1 : 0)
+                            ]?.[csv.data.columns.indexOf(c)]
                           : displayCell(csv.data, r, c)}
                       </td>
                     ))}

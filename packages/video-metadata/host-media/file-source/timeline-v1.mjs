@@ -7,8 +7,8 @@ import {
   multiply,
 } from '@editor-platform/video-core';
 import { audioMappingV1, outputSpanV1 } from './timing-v1';
-import { ceilTime } from '../../../video-core/experiments/pcm-renderer/render.ts';
-import { PcmRenderSession } from '../../../video-core/experiments/pcm-renderer/session.ts';
+import { ceilTime } from '../../../video-core/src/pcm/render.ts';
+import { PcmRenderSession } from '../../../video-core/src/pcm/session.ts';
 import { createPcmFile } from '../indexed-media/pcm-file.mjs';
 import { createVideoWindow } from '../indexed-media/video-window.mjs';
 const need = (ok, msg) => {

@@ -89,7 +89,8 @@ test('H3 document rich editing, IME events, stable IDs, table edits and ordinary
   await page.getByRole('button', { name: 'Link', exact: true }).click();
   await page.getByLabel('Link URL', { exact: true }).fill('https://example.com/editor-principles');
   await page.getByRole('button', { name: 'Apply link', exact: true }).click();
-  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Edit link', exact: true })).toHaveCount(0);
+  await expect(body).toBeFocused();
   await expect(body.locator('a')).toHaveAttribute('href', 'https://example.com/editor-principles');
   await insert(page, 'Table');
   await body.locator('th').first().click();
@@ -118,7 +119,7 @@ test('H3 document rich editing, IME events, stable IDs, table edits and ordinary
   await insert(page, 'Mermaid');
   await expect(body.getByRole('img', { name: 'Mermaid diagram' })).toBeVisible({ timeout: 20000 });
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
   await page.reload();
   await expect(body.locator('h2')).toHaveAttribute('data-block-id', id!);
@@ -192,7 +193,7 @@ test('ID-Q06 text reflow preserves block identity and quoted comments follow edi
   await page.getByRole('button', { name: 'Close comments', exact: true }).click();
   await page.screenshot({ path: info.outputPath('document-reflow-comment.png') });
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
   await page.reload();
   await expect(body.locator('.ep-comment-range')).toHaveText('比較対象');

@@ -531,6 +531,24 @@ export async function preparePreset(
     await prepareApplication(d, inputs, state, identity, target, requestId, 'preset'),
   );
 }
+/** One owned template application: its options, expansion and destination codec. */
+interface Application {
+  d: TemplateDefinition;
+  state: Snapshot<NativeContent>;
+  identity: Identity;
+  target: TemplateTarget;
+  id: string;
+  kind: 'fragment' | 'preset';
+  codec: DomainCodec<NativeContent>;
+  expanded: ReturnType<typeof expandTemplate>;
+}
+/** Expanded payload after id remapping or Data field mapping and canvas placement. */
+interface Placement {
+  payload?: NativeContent;
+  mapping: FieldMappingPreview[];
+  nativeMapping?: Record<string, string>;
+}
+type Adopted = NonNullable<StructuredData['reuse']>;
 async function prepareApplication(
   d: TemplateDefinition,
   input: unknown,
@@ -561,160 +579,19 @@ async function prepareApplication(
     remap: false,
     preserveEmptyAssets: target.preserveEmptyAssets,
   });
-  let payload = expanded.content;
-  const sourceMode = payload && 'reuse' in payload ? payload.reuse?.artifactMode : undefined;
-  const targetMode = 'reuse' in state.content ? state.content.reuse?.artifactMode : undefined;
-  if (
-    payload &&
-    'reuse' in payload &&
-    payload.reuse?.instances.length &&
-    sourceMode !== targetMode
-  ) {
-    const aligned = await previewArtifactMode({
-      state: localTemplateSnapshot(`composition_${id}`, d.domain, payload),
-      identity,
-      mode: targetMode ?? null,
-      requestId: `mode_${id}`,
-    });
-    if (aligned.conflicts.length)
-      problem('composition-mode', 'The destination mode needs an explicit member migration');
-    if (aligned.prepared) payload = applyLocalTemplate(aligned.prepared, payload);
-  }
-  let mapping: FieldMappingPreview[] = [];
-  let nativeMapping: Record<string, string> | undefined;
-  if (payload) {
-    if (d.domain === 'data' && isStructuredData(payload) && isStructuredData(state.content)) {
-      if (d.composition)
-        for (const rowId of dataRowReferences(payload))
-          if (!state.content.rows.some((row) => row.id === target.rowMapping?.[rowId]))
-            problem(
-              'row-mapping',
-              'Select an existing target record for each relation reference',
-              rowId,
-            );
-      const m = mapDataFragment(
-        payload,
-        state.content,
-        target.fieldMapping,
-        d.targets.includes('field-mapping'),
-        `t_${id}`,
-        target.rowMapping,
-      );
-      payload = m.content;
-      mapping = m.preview;
-      nativeMapping = Object.fromEntries(m.ids);
-      // Existing fields are externally owned schema. Keep the same explicit
-      // schema ownership marker used by individual native Data components.
-      for (const instance of payload.reuse?.instances ?? [])
-        for (const [partId, nativeId] of Object.entries(instance.parts))
-          if (mapping.some((field) => field.action === 'reuse' && field.targetId === nativeId))
-            instance.overrides[partId] = { ...instance.overrides[partId], schema: true };
-    } else {
-      const ids = new Map<string, string>();
-      if (target.slidePageId && isDeck(payload) && payload.slides.length === 1)
-        ids.set(payload.slides[0].id, target.slidePageId);
-      const remapped = remapNative(payload, ids, `t_${id}`);
-      payload = remapped.content;
-      nativeMapping = Object.fromEntries(remapped.ids);
-    }
-    if (d.domain === 'whiteboard' || d.domain === 'design')
-      offset(payload, target.position?.x ?? 0, target.position?.y ?? 0);
-    if (target.slidePageId && isDeck(payload)) {
-      const pages = new Set(payload.slides.map((page) => page.id));
-      if (
-        payload.reuse?.instances.some((instance) =>
-          Object.values(instance.parts).some((id) => pages.has(id)),
-        )
-      )
-        problem(
-          'composition-target',
-          'Insert page-layout members as pages, not as in-page objects',
-        );
-    }
-  }
+  const app: Application = { d, state, identity, target, id, kind, codec, expanded };
+  const { sourceMode, targetMode } = artifactModes(expanded.content, state.content);
+  const { payload, mapping, nativeMapping } = placePayload(
+    app,
+    await alignPayloadMode(app, sourceMode, targetMode),
+  );
   const cmd = withCommandReads(
     kind === 'fragment'
       ? fragmentCommand(d, payload!, target)
       : presetCommand(d, expanded.settings!.fields, target),
     { content: mapping.flatMap((m) => (m.targetId ? [m.targetId] : [])) },
   );
-  let handle: PreparedOperation<NativeContent> | undefined;
-  if (d.domain === 'document' && isDocument(state.content)) {
-    const before = contentToNode(state.content);
-    const tr =
-      kind === 'preset'
-        ? documentPresetTransform(state.content, expanded.settings!.fields, target)
-        : new Transform(before);
-    if (kind === 'fragment' && isDocument(payload)) {
-      let pos = before.content.size;
-      if (target.afterId) {
-        let found = false;
-        before.forEach((node, offset) => {
-          if (node.attrs.id === target.afterId) {
-            pos = offset + node.nodeSize;
-            found = true;
-          }
-        });
-        if (!found) problem('target-deleted', 'Document insertion anchor is missing');
-      }
-      tr.insert(pos, contentToNode(payload).content);
-    }
-    const result = cmd.apply(state.content) as DocumentContent;
-    const actions = [
-      ...(tr.steps.length
-        ? [
-            {
-              type: 'document.steps',
-              target: 'text',
-              payload: { version: state.engineVersion, steps: tr.steps.map((s) => s.toJSON()) },
-            },
-          ]
-        : []),
-      ...(canonicalJson(result.page) !== canonicalJson(state.content.page)
-        ? [{ type: 'document.page', target: '*', payload: { value: result.page ?? null } }]
-        : []),
-    ];
-    if (actions.length) handle = prepareOperation(codec, state, identity, actions, 'proposal');
-  } else handle = prepareEditorProjection(codec, state, identity, cmd);
-  let op = handle && clone(handle.operation);
-  const adopted = payload && 'reuse' in payload ? payload.reuse : undefined;
-  if (adopted?.instances.length) {
-    const nativeConditions = op?.conditions ?? [];
-    handle = prepareOperation(
-      codec,
-      state,
-      identity,
-      [
-        ...(op?.actions ?? []),
-        ...adopted.instances.map((instance) => ({
-          type: 'reuse.instance',
-          target: instance.id,
-          payload: {
-            value: instance,
-            closure: adopted.closures.find((c) => c.hash === instance.closureHash)!,
-          },
-        })),
-      ],
-      'proposal',
-    );
-    op = clone(handle.operation);
-    op.conditions = [
-      ...new Map(
-        [...nativeConditions, ...op.conditions, condition(codec, state, 'reuse/mode')].map((c) => [
-          c.key,
-          c,
-        ]),
-      ).values(),
-    ];
-  }
-  if (!op || !handle) problem('no-changes', 'Preset does not affect the selected scope');
-  if (d.domain === 'slide' && kind === 'fragment') {
-    for (const key of ['root/width', 'root/height'])
-      op.conditions.push(condition(codec, state, key));
-  }
-  op.operationId = `template_${id}`;
-  op.transactionId = `template_${id}`;
-  op = encodeEditorOperation(codec, op);
+  const { handle, op, adopted } = prepareApplicationOperation(app, cmd, payload);
   const proposal: Proposal = {
     schema: 1,
     id,
@@ -736,24 +613,237 @@ async function prepareApplication(
     operation: op,
     proposal,
     ...retainedApplicationContent(handle, state.content),
-    insertedIds: payload
-      ? target.slidePageId && isDeck(payload)
-        ? payload.slides.flatMap((p) => p.objects.map((o) => o.id))
-        : nativeIds(payload)
-      : [],
+    insertedIds: insertedIdsFor(payload, target),
     mapping,
     ...(nativeMapping ? { nativeMapping } : {}),
-    notices:
-      kind === 'preset'
-        ? presetNotices(d.domain, state.content, target, expanded.settings!.fields)
-        : sourceMode !== targetMode && adopted?.instances.length
-          ? ['リンク部品の外観は、本文と上書きを保って挿入先のモードへ合わせます。']
-          : [],
+    notices: applicationNotices(app, sourceMode !== targetMode && !!adopted?.instances.length),
   };
   if (adopted?.instances.length)
     prepared.command = { ...cmd, apply: (current) => applyLocalTemplate(prepared, current) };
   retainApplicationPreparation(prepared, handle);
   return prepared;
+}
+function artifactModes(payload: NativeContent | undefined, content: NativeContent) {
+  const sourceMode = payload && 'reuse' in payload ? payload.reuse?.artifactMode : undefined;
+  const targetMode = 'reuse' in content ? content.reuse?.artifactMode : undefined;
+  return { sourceMode, targetMode };
+}
+/** Moves linked members to the destination's artifact mode before they are placed. */
+async function alignPayloadMode(
+  app: Application,
+  sourceMode: string | undefined,
+  targetMode: string | undefined,
+) {
+  let payload = app.expanded.content;
+  if (
+    payload &&
+    'reuse' in payload &&
+    payload.reuse?.instances.length &&
+    sourceMode !== targetMode
+  ) {
+    const aligned = await previewArtifactMode({
+      state: localTemplateSnapshot(`composition_${app.id}`, app.d.domain, payload),
+      identity: app.identity,
+      mode: targetMode ?? null,
+      requestId: `mode_${app.id}`,
+    });
+    if (aligned.conflicts.length)
+      problem('composition-mode', 'The destination mode needs an explicit member migration');
+    if (aligned.prepared) payload = applyLocalTemplate(aligned.prepared, payload);
+  }
+  return payload;
+}
+function placePayload(app: Application, payload: NativeContent | undefined): Placement {
+  if (!payload) return { payload, mapping: [] };
+  const { d, state, target } = app;
+  const placed =
+    d.domain === 'data' && isStructuredData(payload) && isStructuredData(state.content)
+      ? placeDataPayload(app, payload, state.content)
+      : remapPayload(app, payload);
+  const next = placed.payload!;
+  if (d.domain === 'whiteboard' || d.domain === 'design')
+    offset(next, target.position?.x ?? 0, target.position?.y ?? 0);
+  if (target.slidePageId && isDeck(next)) {
+    const pages = new Set(next.slides.map((page) => page.id));
+    if (
+      next.reuse?.instances.some((instance) =>
+        Object.values(instance.parts).some((id) => pages.has(id)),
+      )
+    )
+      problem('composition-target', 'Insert page-layout members as pages, not as in-page objects');
+  }
+  return placed;
+}
+/** Maps Data fields and relation rows onto the destination's existing schema. */
+function placeDataPayload(
+  app: Application,
+  payload: StructuredData,
+  content: StructuredData,
+): Placement {
+  const { d, target, id } = app;
+  if (d.composition)
+    for (const rowId of dataRowReferences(payload))
+      if (!content.rows.some((row) => row.id === target.rowMapping?.[rowId]))
+        problem(
+          'row-mapping',
+          'Select an existing target record for each relation reference',
+          rowId,
+        );
+  const m = mapDataFragment(
+    payload,
+    content,
+    target.fieldMapping,
+    d.targets.includes('field-mapping'),
+    `t_${id}`,
+    target.rowMapping,
+  );
+  const mapping = m.preview;
+  // Existing fields are externally owned schema. Keep the same explicit
+  // schema ownership marker used by individual native Data components.
+  for (const instance of m.content.reuse?.instances ?? [])
+    for (const [partId, nativeId] of Object.entries(instance.parts))
+      if (mapping.some((field) => field.action === 'reuse' && field.targetId === nativeId))
+        instance.overrides[partId] = { ...instance.overrides[partId], schema: true };
+  return { payload: m.content, mapping, nativeMapping: Object.fromEntries(m.ids) };
+}
+function remapPayload(app: Application, payload: NativeContent): Placement {
+  const { target, id } = app;
+  const ids = new Map<string, string>();
+  if (target.slidePageId && isDeck(payload) && payload.slides.length === 1)
+    ids.set(payload.slides[0].id, target.slidePageId);
+  const remapped = remapNative(payload, ids, `t_${id}`);
+  return {
+    payload: remapped.content,
+    mapping: [],
+    nativeMapping: Object.fromEntries(remapped.ids),
+  };
+}
+/** Native operation plus linked-instance actions, with merged and finalized preconditions. */
+function prepareApplicationOperation(
+  app: Application,
+  cmd: EditorCommand<NativeContent>,
+  payload: NativeContent | undefined,
+) {
+  let handle = nativeHandle(app, cmd, payload);
+  let op = handle && clone(handle.operation);
+  const adopted = payload && 'reuse' in payload ? payload.reuse : undefined;
+  if (adopted?.instances.length) ({ handle, op } = adoptInstances(app, op, adopted));
+  if (!op || !handle) problem('no-changes', 'Preset does not affect the selected scope');
+  return { handle, op: finalizeOperation(app, op), adopted };
+}
+function nativeHandle(
+  app: Application,
+  cmd: EditorCommand<NativeContent>,
+  payload: NativeContent | undefined,
+): PreparedOperation<NativeContent> | undefined {
+  const { d, state } = app;
+  if (d.domain === 'document' && isDocument(state.content))
+    return documentHandle(app, state.content, cmd, payload);
+  return prepareEditorProjection(app.codec, state, app.identity, cmd);
+}
+/** Document changes stay native text-engine steps plus an explicit page action. */
+function documentHandle(
+  app: Application,
+  content: DocumentContent,
+  cmd: EditorCommand<NativeContent>,
+  payload: NativeContent | undefined,
+) {
+  const { kind, target, state } = app;
+  const before = contentToNode(content);
+  const tr =
+    kind === 'preset'
+      ? documentPresetTransform(content, app.expanded.settings!.fields, target)
+      : new Transform(before);
+  if (kind === 'fragment' && isDocument(payload))
+    tr.insert(documentInsertPosition(before, target.afterId), contentToNode(payload).content);
+  const result = cmd.apply(content) as DocumentContent;
+  const actions = [
+    ...(tr.steps.length
+      ? [
+          {
+            type: 'document.steps',
+            target: 'text',
+            payload: { version: state.engineVersion, steps: tr.steps.map((s) => s.toJSON()) },
+          },
+        ]
+      : []),
+    ...(canonicalJson(result.page) !== canonicalJson(content.page)
+      ? [{ type: 'document.page', target: '*', payload: { value: result.page ?? null } }]
+      : []),
+  ];
+  return actions.length
+    ? prepareOperation(app.codec, state, app.identity, actions, 'proposal')
+    : undefined;
+}
+function documentInsertPosition(before: ReturnType<typeof contentToNode>, afterId?: string) {
+  let pos = before.content.size;
+  if (afterId) {
+    let found = false;
+    before.forEach((node, offset) => {
+      if (node.attrs.id === afterId) {
+        pos = offset + node.nodeSize;
+        found = true;
+      }
+    });
+    if (!found) problem('target-deleted', 'Document insertion anchor is missing');
+  }
+  return pos;
+}
+/** Re-prepares with linked-instance actions and keeps native, instance and mode preconditions. */
+function adoptInstances(app: Application, op: Operation | undefined, adopted: Adopted) {
+  const { codec, state, identity } = app;
+  const nativeConditions = op?.conditions ?? [];
+  const handle = prepareOperation(
+    codec,
+    state,
+    identity,
+    [
+      ...(op?.actions ?? []),
+      ...adopted.instances.map((instance) => ({
+        type: 'reuse.instance',
+        target: instance.id,
+        payload: {
+          value: instance,
+          closure: adopted.closures.find((c) => c.hash === instance.closureHash)!,
+        },
+      })),
+    ],
+    'proposal',
+  );
+  const next = clone(handle.operation);
+  next.conditions = [
+    ...new Map(
+      [...nativeConditions, ...next.conditions, condition(codec, state, 'reuse/mode')].map((c) => [
+        c.key,
+        c,
+      ]),
+    ).values(),
+  ];
+  return { handle, op: next };
+}
+function finalizeOperation(app: Application, op: Operation) {
+  const { d, kind, codec, state, id } = app;
+  if (d.domain === 'slide' && kind === 'fragment') {
+    for (const key of ['root/width', 'root/height'])
+      op.conditions.push(condition(codec, state, key));
+  }
+  op.operationId = `template_${id}`;
+  op.transactionId = `template_${id}`;
+  return encodeEditorOperation(codec, op);
+}
+function insertedIdsFor(payload: NativeContent | undefined, target: TemplateTarget) {
+  return payload
+    ? target.slidePageId && isDeck(payload)
+      ? payload.slides.flatMap((p) => p.objects.map((o) => o.id))
+      : nativeIds(payload)
+    : [];
+}
+function applicationNotices(app: Application, relinked: boolean) {
+  return app.kind === 'preset'
+    ? presetNotices(app.d.domain, app.state.content, app.target, app.expanded.settings!.fields)
+    : relinked
+      ? ['リンク部品の外観は、本文と上書きを保って挿入先のモードへ合わせます。']
+      : [];
 }
 export function localTemplateSnapshot(artifactId: string, domain: Domain, content: NativeContent) {
   return initial(artifactId, templateCodec(domain), content);

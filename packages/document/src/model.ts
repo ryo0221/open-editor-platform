@@ -439,7 +439,7 @@ export function importMarkdown(text: string): DocumentContent {
       i++;
       continue;
     }
-    const fence = line.match(/^(`{3,})(.*)$/);
+    const fence = line.match(/^(`{3,})([^`]*)$/);
     if (fence) {
       const body: string[] = [];
       i++;
@@ -452,7 +452,11 @@ export function importMarkdown(text: string): DocumentContent {
     }
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      blocks.push({ ...makeBlock('heading'), level: heading[1].length, text: heading[2] });
+      blocks.push({
+        ...makeBlock('heading'),
+        level: heading[1].length,
+        text: markdownBreaks(heading[2]),
+      });
       i++;
       continue;
     }
@@ -491,26 +495,18 @@ export function importMarkdown(text: string): DocumentContent {
         items.push(m[1]);
         i++;
       }
+      const checked = items.every((item) => /^\[[ x]\] /.test(item));
+      const parsedItems = items.map((item) => ({
+        id: newId('item'),
+        ...(checked ? { checked: item.startsWith('[x]') } : {}),
+        rich: [{ text: markdownBreaks(item.replace(/^\[[ x]\] /, '')) }],
+      }));
       blocks.push({
-        ...makeBlock(
-          numbered
-            ? 'numbered-list'
-            : items.every((i) => /^\[[ x]\] /.test(i))
-              ? 'check-list'
-              : 'bulleted-list',
-        ),
-        text: items.map((t) => t.replace(/^\[[ x]\] /, '')).join('\n'),
+        ...makeBlock(numbered ? 'numbered-list' : checked ? 'check-list' : 'bulleted-list'),
+        text: parsedItems.map((item) => item.rich[0].text).join('\n'),
+        items: parsedItems,
         ...(numbered && Number(line.match(/^\d+/)![0]) !== 1
           ? { start: Number(line.match(/^\d+/)![0]) }
-          : {}),
-        ...(items.every((i) => /^\[[ x]\] /.test(i))
-          ? {
-              items: items.map((t) => ({
-                id: newId('item'),
-                checked: t.startsWith('[x]'),
-                rich: [{ text: t.slice(4) }],
-              })),
-            }
           : {}),
       });
       continue;
@@ -519,7 +515,7 @@ export function importMarkdown(text: string): DocumentContent {
     i++;
     while (i < lines.length && lines[i].trim() && !/^(#|`{3}|[-*] |\d+\. |!\[|\|)/.test(lines[i]))
       paragraph.push(lines[i++]);
-    blocks.push({ ...makeBlock('paragraph'), text: paragraph.join('\n') });
+    blocks.push({ ...makeBlock('paragraph'), text: markdownBreaks(paragraph.join('\n')) });
   }
   return { schemaVersion: 1, blocks };
 }
@@ -739,55 +735,76 @@ export function isDocument(value: unknown): value is DocumentContent {
   );
 }
 const checkedBlockLists = new WeakSet<DocumentBlock[]>();
+const textOnlyBlockTypes = ['paragraph', 'heading'];
+const knownBlockTypes = [
+  'heading',
+  'paragraph',
+  'bulleted-list',
+  'numbered-list',
+  'check-list',
+  'table',
+  'code',
+  'image',
+  'mermaid',
+  'html',
+  'react-preview',
+];
+function validTextBlockFields(b: DocumentBlock) {
+  return (
+    (b.hidden === undefined ||
+      (textOnlyBlockTypes.includes(b.type) && typeof b.hidden === 'boolean')) &&
+    (b.styleName === undefined ||
+      (textOnlyBlockTypes.includes(b.type) &&
+        typeof b.styleName === 'string' &&
+        b.styleName.length <= 160)) &&
+    (b.style === undefined ||
+      (textOnlyBlockTypes.includes(b.type) && validDocumentTextStyle(b.style)))
+  );
+}
+function validContentFields(b: DocumentBlock) {
+  return (
+    (b.rich === undefined || validSpans(b.rich)) &&
+    (b.items === undefined || validItems(b.items)) &&
+    validListStart(b.start) &&
+    (b.start === undefined || b.type === 'numbered-list') &&
+    (b.align === undefined || ['left', 'center', 'right', 'justify'].includes(b.align)) &&
+    (b.indent === undefined || (Number.isInteger(b.indent) && b.indent >= 0 && b.indent <= 20))
+  );
+}
+function validLayoutFields(b: DocumentBlock) {
+  return (
+    (b.width === undefined || (Number.isFinite(b.width) && b.width > 0)) &&
+    (b.columnWidths === undefined ||
+      (Array.isArray(b.columnWidths) &&
+        b.columnWidths.every((w) => Number.isFinite(w) && w > 0))) &&
+    (b.merges === undefined || validMerges(b)) &&
+    (b.level === undefined || (Number.isInteger(b.level) && b.level >= 1 && b.level <= 6))
+  );
+}
+function validSourceFields(b: DocumentBlock) {
+  return (
+    (b.src === undefined || (typeof b.src === 'string' && (!b.src || safeAssetUrl(b.src)))) &&
+    (b.reference === undefined || (b.type === 'image' && validEmbeddedReference(b.reference))) &&
+    knownBlockTypes.includes(b.type) &&
+    (b.type !== 'table' || validTableDetails(b))
+  );
+}
+function validBlock(b: DocumentBlock) {
+  return (
+    b &&
+    typeof b.id === 'string' &&
+    typeof b.text === 'string' &&
+    validTextBlockFields(b) &&
+    validContentFields(b) &&
+    validLayoutFields(b) &&
+    validSourceFields(b)
+  );
+}
 function validBlocks(blocks: DocumentBlock[]): boolean {
   if (checkedBlockLists.has(blocks)) return true;
   const d = { blocks };
   const valid =
-    new Set(d.blocks.map((b) => b?.id)).size === d.blocks.length &&
-    d.blocks.every(
-      (b) =>
-        b &&
-        typeof b.id === 'string' &&
-        typeof b.text === 'string' &&
-        (b.hidden === undefined ||
-          (['paragraph', 'heading'].includes(b.type) && typeof b.hidden === 'boolean')) &&
-        (b.styleName === undefined ||
-          (['paragraph', 'heading'].includes(b.type) &&
-            typeof b.styleName === 'string' &&
-            b.styleName.length <= 160)) &&
-        (b.style === undefined ||
-          (['paragraph', 'heading'].includes(b.type) && validDocumentTextStyle(b.style))) &&
-        (b.rich === undefined || validSpans(b.rich)) &&
-        (b.items === undefined || validItems(b.items)) &&
-        validListStart(b.start) &&
-        (b.start === undefined || b.type === 'numbered-list') &&
-        (b.align === undefined || ['left', 'center', 'right', 'justify'].includes(b.align)) &&
-        (b.indent === undefined ||
-          (Number.isInteger(b.indent) && b.indent >= 0 && b.indent <= 20)) &&
-        (b.width === undefined || (Number.isFinite(b.width) && b.width > 0)) &&
-        (b.columnWidths === undefined ||
-          (Array.isArray(b.columnWidths) &&
-            b.columnWidths.every((w) => Number.isFinite(w) && w > 0))) &&
-        (b.merges === undefined || validMerges(b)) &&
-        (b.level === undefined || (Number.isInteger(b.level) && b.level >= 1 && b.level <= 6)) &&
-        (b.src === undefined || (typeof b.src === 'string' && (!b.src || safeAssetUrl(b.src)))) &&
-        (b.reference === undefined ||
-          (b.type === 'image' && validEmbeddedReference(b.reference))) &&
-        [
-          'heading',
-          'paragraph',
-          'bulleted-list',
-          'numbered-list',
-          'check-list',
-          'table',
-          'code',
-          'image',
-          'mermaid',
-          'html',
-          'react-preview',
-        ].includes(b.type) &&
-        (b.type !== 'table' || validTableDetails(b)),
-    );
+    new Set(d.blocks.map((b) => b?.id)).size === d.blocks.length && d.blocks.every(validBlock);
   if (valid && isDeepFrozen(blocks)) checkedBlockLists.add(blocks);
   return valid;
 }
@@ -822,16 +839,59 @@ export function spansHtml(spans: InlineSpan[]): string {
 }
 export function spansMarkdown(spans: InlineSpan[]): string {
   return spans
-    .map((s) => {
-      let value = s.text;
-      if (s.code) value = '`' + value.replaceAll('`', '\\`') + '`';
-      if (s.bold) value = `**${value}**`;
-      if (s.italic) value = `*${value}*`;
-      if (s.strike) value = `~~${value}~~`;
-      if (s.link && safeLink(s.link)) value = `[${value}](${s.link.replaceAll(')', '%29')})`;
-      return value;
-    })
+    .map((s) =>
+      s.text
+        .split('\n')
+        .map((text) => {
+          if (!text) return '';
+          let value = s.code
+            ? text
+            : text
+                .replaceAll('\\', '\\\\')
+                .replaceAll('`', '\\`')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;');
+          if (s.code) {
+            const runs = text.match(/`+/g) ?? [];
+            const delimiter = '`'.repeat(
+              runs.reduce((length, run) => Math.max(length, run.length + 1), 1),
+            );
+            // Code spans do not interpret backslash escapes. Padding keeps edge
+            // backticks apart and preserves content with spaces at both ends.
+            const pad =
+              text.startsWith('`') ||
+              text.endsWith('`') ||
+              (text.startsWith(' ') && text.endsWith(' ') && /[^ ]/.test(text))
+                ? ' '
+                : '';
+            value = delimiter + pad + text + pad + delimiter;
+          }
+          if (s.bold) value = `**${value}**`;
+          if (s.italic) value = `*${value}*`;
+          if (s.strike) value = `~~${value}~~`;
+          if (s.link && safeLink(s.link)) value = `[${value}](${s.link.replaceAll(')', '%29')})`;
+          return value;
+        })
+        .join('<br/>'),
+    )
     .join('');
+}
+/** Inline HTML breaks keep ATX headings and list items on one Markdown line. */
+function markdownBreaks(text: string): string {
+  // Consume escaped backticks/backslashes before recognizing code spans. Decode
+  // once so literal entities never turn into generated breaks on re-import.
+  return text.replace(
+    /\\([\\`])|(`+)[^\n]*?\2|<br\s*\/?>|&(?:lt|amp);/gi,
+    (token, escaped) =>
+      escaped ??
+      (token.startsWith('`')
+        ? token
+        : token.toLowerCase() === '&lt;'
+          ? '<'
+          : token.toLowerCase() === '&amp;'
+            ? '&'
+            : '\n'),
+  );
 }
 export function migrateDocument(d: DocumentContent): DocumentContent {
   return d.schemaVersion === 2

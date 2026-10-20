@@ -52,6 +52,7 @@ export class Authority<T> {
   private histories = new Map<string, Accepted<T>>();
   private applyingProposal?: string;
   private applyingInverse?: string;
+  private applyingRestore?: string;
   // Only this authority's synchronous Undo/Redo call can populate this map.
   // No client preparation handle supplies these results; public events contain
   // an isolated operation copy.
@@ -125,6 +126,31 @@ export class Authority<T> {
     if (!principal.scopes.includes('*') && !op.targets.every((t) => principal.scopes.includes(t)))
       fail('unauthorized', 'Target is outside connection scope');
   }
+  /** Provenance is part of authorization: only the authority's own Undo, restore and
+   * proposal APIs may issue their origins, reserved IDs, source actors or restores. */
+  private checkProvenance(principal: Principal, op: Operation) {
+    const proposal = !!op.proposalId && this.applyingProposal === op.proposalId;
+    if (op.operationId.startsWith('proposal:') && !proposal)
+      fail('protocol-error', 'Proposal operation IDs are reserved for the authority');
+    if (proposal) {
+      if (
+        op.origin !== 'proposal' ||
+        op.sourceActorId !== this.proposals.get(op.proposalId!)?.proposal.sourceActorId
+      )
+        fail('protocol-error', 'Proposal provenance changed');
+      return;
+    }
+    if (op.sourceActorId !== undefined)
+      fail('unauthorized', 'Source actor may only be issued by the proposal API');
+    if (op.origin === 'restore' && this.applyingRestore !== op.operationId)
+      fail('protocol-error', 'Restore may only be issued by the authority restore API');
+    // Undo/redo links are checked separately; their inverses may restore whole content.
+    if (['undo', 'redo', 'restore'].includes(op.origin)) return;
+    if (!(principal.origins ?? ['human', 'proposal']).includes(op.origin))
+      fail('unauthorized', `Connection may not declare ${op.origin} origin`);
+    if (op.actions.some((action) => action.type === 'domain.restore'))
+      fail('unauthorized', 'Whole-content restore requires the authority restore API');
+  }
   submit(principal: Principal, input: unknown): Receipt {
     let id = '';
     let signature = '';
@@ -133,6 +159,7 @@ export class Authority<T> {
       const op = copy(input);
       id = op.operationId;
       this.authorize(principal, op);
+      this.checkProvenance(principal, op);
       signature = canonical(op);
       const old = this.receipts.get(id);
       if (old) {
@@ -318,7 +345,7 @@ export class Authority<T> {
       return rejected(`undo:${id}`, error);
     }
   }
-  register(proposal: Proposal): ProposalState {
+  register(principal: Principal, proposal: Proposal): ProposalState {
     if (
       !serializable(proposal) ||
       proposal.schema !== 1 ||
@@ -353,6 +380,11 @@ export class Authority<T> {
       )
     )
       fail('schema-mismatch', 'Invalid external dependencies');
+    if (
+      proposal.sourceActorId !== principal.actorId ||
+      (principal.expiresAt !== undefined && principal.expiresAt <= this.now())
+    )
+      fail('unauthorized', 'Proposal source is not the authenticated actor');
     const old = this.proposals.get(proposal.id);
     if (old) {
       if (canonical(old.proposal) !== canonical(proposal))
@@ -427,9 +459,30 @@ export class Authority<T> {
       return receipt;
     }
   }
-  cancelProposal(id: string, reject = false) {
+  /** The source actor may withdraw its proposal; rejecting or cancelling another
+   * actor's proposal needs write access to every target it would change. */
+  cancelProposal(principal: Principal, id: string, reject = false) {
     const p = this.proposals.get(id);
-    if (p && p.state !== 'applied') p.state = reject ? 'rejected' : 'cancelled';
+    if (!p) return undefined;
+    // Terminal outcomes are final: a late cancel reports applied, and a withdrawal
+    // never rewrites a reviewer's rejection (nor a rejection a withdrawal).
+    if (['applied', 'cancelled', 'rejected'].includes(p.state)) return copy(p);
+    if (principal.expiresAt !== undefined && principal.expiresAt <= this.now())
+      fail('unauthorized', 'Session expired');
+    if (reject || p.proposal.sourceActorId !== principal.actorId) {
+      let targets = ['*'];
+      try {
+        targets = this.evaluate(this.state, p.proposal.actions, p.proposal.sourceActorId).targets;
+      } catch {
+        /* An inapplicable proposal falls back to whole-artifact scope. */
+      }
+      if (
+        !principal.writable ||
+        (!principal.scopes.includes('*') && !targets.every((t) => principal.scopes.includes(t)))
+      )
+        fail('unauthorized', 'Proposal review requires write access to its targets');
+    }
+    p.state = reject ? 'rejected' : 'cancelled';
     return copy(p);
   }
   private resolvePresenceAnchor(anchor: Anchor, basis: number): Anchor {
@@ -517,7 +570,12 @@ export class Authority<T> {
       [{ type: 'domain.restore', target: '*', payload: { content } }],
       'restore',
     );
-    return this.commit(principal, op);
+    this.applyingRestore = op.operationId;
+    try {
+      return this.commit(principal, op);
+    } finally {
+      this.applyingRestore = undefined;
+    }
   }
   backup() {
     return copy({
@@ -531,7 +589,12 @@ export class Authority<T> {
       proposals: [...this.proposals],
     });
   }
-  static fromBackup<T>(codec: DomainCodec<T>, value: ReturnType<Authority<T>['backup']>) {
+  static fromBackup<T>(
+    codec: DomainCodec<T>,
+    value: ReturnType<Authority<T>['backup']>,
+    now?: () => number,
+    externalCheck?: (reference: string, version: string) => boolean,
+  ) {
     if (
       !serializable(value) ||
       value.format !== 'editor-collaboration' ||
@@ -556,7 +619,7 @@ export class Authority<T> {
       if (event.revision !== event.snapshot.revision || event.revision > value.state.revision)
         fail('schema-mismatch', 'Invalid history revision');
     }
-    const a = new Authority(codec, value.state);
+    const a = new Authority(codec, value.state, now, externalCheck);
     a.floor = value.floor;
     a.log = copy(value.log);
     a.receipts = new Map(copy(value.receipts));

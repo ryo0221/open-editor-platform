@@ -1,6 +1,14 @@
 import { expect, it } from 'vitest';
-import { MemoryStorage } from '@editor-platform/artifact-core';
-import { ArtifactEditor } from '@editor-platform/editor-host';
+import {
+  MemoryStorage,
+  createArtifact,
+  commitVersion,
+  contentHash,
+  updateDraft,
+} from '@editor-platform/artifact-core';
+import { ArtifactEditor, loadHostArtifact } from '@editor-platform/editor-host';
+import { createDeck, addSlide, placeSlideAnimation } from '@editor-platform/slide/model';
+import { createRectangleAnimation, createAnimationEmbed } from '@editor-platform/animation-core';
 import { isDesign } from '@editor-platform/design/model';
 import { exportDesignReact, convertDesignToReact } from '@editor-platform/design-react-core';
 import { setCell, isStructuredData } from '@editor-platform/structured-data/model';
@@ -68,4 +76,47 @@ it('Code compilation rejects external/dynamic imports, malformed syntax and miss
   ])
     expect(() => compileProject({ 'Code.tsx': source }, 'Code.tsx')).toThrow();
   expect(() => compileProject({}, 'Code.tsx')).toThrow(/Missing TSX entry/);
+});
+
+it('refuses Animation in current or retained Slide pages in the SVG-only Host', async () => {
+  const source = createRectangleAnimation();
+  const embed = createAnimationEmbed(
+    {
+      artifactId: 'motion',
+      versionId: 'v1',
+      compositionId: 'root',
+      contentHash: await contentHash(source),
+    },
+    source,
+    'Motion',
+  );
+  for (const laterPage of [false, true]) {
+    let deck = createDeck();
+    if (laterPage) deck = addSlide().apply(deck);
+    deck = placeSlideAnimation(deck.slides.at(-1)!.id, embed, 'motion-object').apply(deck);
+    const saved = await commitVersion(
+      createArtifact('slide', 'Motion deck', deck),
+      'host-test',
+      'Saved',
+    );
+    expect(hostAdapters.slide.validate(saved.draft.content)).toBe(false);
+    await expect(loadHostArtifact(JSON.stringify(saved), hostAdapters.slide)).rejects.toThrow();
+    await expect(
+      hostAdapters.slide.export!('svg', deck, new AbortController().signal),
+    ).rejects.toThrow(/Animation/);
+    const historical = updateDraft(saved, createDeck());
+    await expect(
+      loadHostArtifact(JSON.stringify(historical), hostAdapters.slide),
+    ).rejects.toThrow();
+  }
+  const staticDeck = createDeck();
+  const saved = await commitVersion(
+    createArtifact('slide', 'Static deck', staticDeck),
+    'host-test',
+    'Saved',
+  );
+  expect((await loadHostArtifact(JSON.stringify(saved), hostAdapters.slide)).id).toBe(saved.id);
+  expect(await hostAdapters.slide.export!('svg', staticDeck, new AbortController().signal)).toEqual(
+    [expect.objectContaining({ text: expect.stringContaining('<svg') })],
+  );
 });

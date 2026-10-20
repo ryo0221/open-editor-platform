@@ -48,11 +48,25 @@ for (const kind of ['slide', 'design', 'whiteboard', 'document', 'data', 'review
       for (let i = 1; i <= 50; i++)
         pdf.addPage([612, 792]).drawText(`Production scale PDF / ${i}`, { x: 50, y: 700 });
       await page.getByRole('button', { name: 'New File Viewer', exact: true }).click();
-      await page.getByLabel('Open file', { exact: true }).setInputFiles({
+      // Set up the unchanged 50-page workload through the current source
+      // replacement/consent UI. This stays outside the navigation timing loop.
+      await page.getByRole('button', { name: 'Replace source', exact: true }).click();
+      const replacement = page.getByRole('dialog', { name: 'Replace source', exact: true });
+      const chooser = page.waitForEvent('filechooser');
+      await replacement
+        .getByRole('button', { name: 'Choose replacement file', exact: true })
+        .click();
+      await (
+        await chooser
+      ).setFiles({
         name: 'fifty-pages.pdf',
         mimeType: 'application/pdf',
         buffer: Buffer.from(await pdf.save()),
       });
+      await replacement
+        .getByRole('button', { name: 'Confirm source replacement', exact: true })
+        .click();
+      await expect(replacement).toHaveCount(0);
       await expect(page.getByLabel('Rendered PDF page 1', { exact: true })).toHaveAttribute(
         'data-rendered',
         'true',

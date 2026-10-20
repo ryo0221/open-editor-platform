@@ -1,5 +1,10 @@
 # #38 generic React UI portability / #35 output contract
 
+The later 2026-10-18 consuming frontend trial completes the
+authorized consuming-source check. The [Rollup follow-up](../issues-38-261/README.md)
+records the default-build correction. PR #284 completes #38's remaining checks
+within that scope; results below remain historical.
+
 2026-10-09 UTC, latest-main base `a5492dedd2c2c53dc07c59835ee388a190a41ebe`.
 This extends the existing React UI domain; it does not certify a new Editor or
 production Host. See the [design](../../react-ui-portability-design.md),

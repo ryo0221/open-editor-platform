@@ -145,7 +145,7 @@ npm run lint
 npm run typecheck
 ./node_modules/.bin/vitest run packages/geo-core/src packages/geo-inspector/src packages/extension-runtime/src/draft2
 ./node_modules/.bin/vite build --config packages/geo-inspector/vite.config.ts
-./node_modules/.bin/playwright test --config packages/geo-inspector/playwright.config.ts
+E2E_SUITE=geo-inspector ./node_modules/.bin/playwright test
 ```
 
 Playwright uses `/usr/bin/chromium`, production-build preview, desktop 1280×900 and narrow

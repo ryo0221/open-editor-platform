@@ -8,8 +8,9 @@ import {
   dependencyClosure,
   auditTypeImports,
   checkPublicImport,
+  scopePackage,
 } from './source.mjs';
-import { cp, mkdir, readFile, readdir, writeFile, realpath } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, writeFile, realpath } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
@@ -36,6 +37,7 @@ if (!['baseline', 'readonly-domains', 'controlled-animation'].includes(profile))
 const names = [
   'artifact-core',
   'editor-core',
+  'reuse-core',
   'extension-contract',
   'extension-runtime',
   'animation-core',
@@ -44,10 +46,23 @@ const names = [
   ...(profile !== 'baseline' ? ['video-core', 'video-metadata', 'geo-core', 'geo-inspector'] : []),
 ];
 if (profile === 'controlled-animation') names.push('animation', 'extension-animation-adapter');
+// The controlled Animation profile packages only the entrypoints the controlled
+// adapter loads. The Animation editor surfaces (v2/host) need canvas and editor UI
+// packages that this profile does not review, so they stay out of the kit.
+const scopes =
+  profile === 'controlled-animation'
+    ? { animation: ['./controlled-contract', './controlled', './controlled.css', './playback'] }
+    : {};
+const scopedFiles = {};
 const manifests = new Map(
   await Promise.all(
     names.map(async (name) => {
-      const manifest = JSON.parse(source.read(`packages/${name}/package.json`).toString());
+      let manifest = JSON.parse(source.read(`packages/${name}/package.json`).toString());
+      if (scopes[name]) {
+        const scoped = scopePackage(source, `packages/${name}`, manifest, scopes[name]);
+        manifest = scoped.manifest;
+        scopedFiles[name] = scoped.files;
+      }
       return [manifest.name, manifest];
     }),
   ),
@@ -76,8 +91,7 @@ const evidence = {
   notice,
 };
 await mkdir(path.join(output, 'tarballs'));
-const thirdParty =
-  profile === 'controlled-animation' ? await packThirdParty(repo, output, source) : [];
+const thirdParty = await packThirdParty(repo, output, source, profile);
 for (const item of thirdParty) {
   manifests.set(item.name, {
     ...item.manifest,
@@ -107,6 +121,19 @@ for (const name of names) {
   await writeFile(path.join(stage, 'package.json'), JSON.stringify(manifest));
   await mkdir(pkg);
   const sourceFiles = await source.stage(`packages/${name}/src`, path.join(stage, 'src'));
+  if (scopedFiles[name])
+    for (const file of Object.keys(sourceFiles))
+      if (!scopedFiles[name].has(file)) {
+        await rm(path.join(stage, file.slice(`packages/${name}/`.length)));
+        delete sourceFiles[file];
+      }
+  const assets =
+    name === 'geo-core'
+      ? await source.stage('packages/geo-core/data', path.join(stage, 'data'))
+      : {};
+  if (Object.keys(assets).some((file) => !file.endsWith('.json')))
+    throw new Error('Non-reviewed Geo data asset');
+  Object.assign(sourceFiles, assets);
   sourceFiles[`packages/${name}/package.json`] = sha256(
     source.read(`packages/${name}/package.json`),
   );
@@ -117,6 +144,7 @@ for (const name of names) {
       manifest,
       manifests,
       `packages/${name}/src`,
+      Object.keys(assets),
     );
   }
   const dependencies = {};
@@ -168,6 +196,7 @@ for (const name of names) {
     strict: true,
     jsx: ts.JsxEmit.ReactJSX,
     esModuleInterop: true,
+    resolveJsonModule: true,
     skipLibCheck: false,
     declaration: true,
     emitDeclarationOnly: true,
@@ -213,7 +242,10 @@ for (const name of names) {
   });
   for (const input of Object.keys(result.metafile.inputs)) {
     const resolved = path.resolve(stage, input);
-    if (!resolved.startsWith(path.join(stage, 'src') + path.sep))
+    const assetPaths = Object.keys(assets).map((file) =>
+      path.resolve(stage, file.slice(`packages/${name}/`.length)),
+    );
+    if (!resolved.startsWith(path.join(stage, 'src') + path.sep) && !assetPaths.includes(resolved))
       throw new Error('Source crossed package boundary: ' + input);
   }
   await writeFile(
@@ -225,7 +257,13 @@ for (const name of names) {
         private: true,
         type: 'module',
         exports: exported,
-        files: ['dist', 'types', 'NOTICE.txt', 'EDITOR-EXTENSION-INTERFACE-SCOPE.md'],
+        files: [
+          'dist',
+          'types',
+          'NOTICE.txt',
+          'EDITOR-EXTENSION-INTERFACE-SCOPE.md',
+          ...(name === 'geo-core' ? ['BOUNDARY-DATA-NOTICE.md', 'data/manifest.json'] : []),
+        ],
         dependencies,
       },
       null,
@@ -233,6 +271,16 @@ for (const name of names) {
     ) + '\n',
   );
   await writeFile(path.join(pkg, 'NOTICE.txt'), notice);
+  if (name === 'geo-core') {
+    const dataNotice = 'docs/third-party/geo-boundaries.md';
+    sourceFiles[dataNotice] = sha256(source.read(dataNotice));
+    await writeFile(path.join(pkg, 'BOUNDARY-DATA-NOTICE.md'), source.read(dataNotice));
+    await mkdir(path.join(pkg, 'data'));
+    await writeFile(
+      path.join(pkg, 'data/manifest.json'),
+      source.read('packages/geo-core/data/manifest.json'),
+    );
+  }
   await writeFile(
     path.join(pkg, 'EDITOR-EXTENSION-INTERFACE-SCOPE.md'),
     source.read('EDITOR-EXTENSION-INTERFACE-SCOPE.md'),

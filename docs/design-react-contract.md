@@ -148,6 +148,26 @@ publication bytes require Host recovery even when native JSON remains readable.
 Resolving generated components under a different retained source environment is rejected
 before preview success; an environment change requires explicit reviewed regeneration.
 
+For the dependency acceptance fixture, open Playground with `/?design-dependencies=1`
+before enabling React Web settings in ordinary Design. This opts into a separate immutable
+Host environment. Library's `DependencyBadge` is a default export whose original source
+imports the named `Card`, a PNG and scoped CSS through fixed aliases. It requires the
+existing theme Provider and exposes `label`, `onPress` and the named `footer` slot.
+The original default environment and registration hashes remain unchanged. Saved native
+content retains this new environment and can resolve it after reloading without the query.
+The fixture resolves trusted local source; it does not install or evaluate arbitrary npm
+packages or uploaded TSX.
+
+`node scripts/design-react-export-host.mjs <downloaded.zip> [site|page|component]`
+checks the ordinary fixture's output in an independent React app. The default is `site`;
+`page` uses the first declared page and `component` uses its native `ProductCard`.
+It now uses default tree-shaking with the corrected Rollup 4.64.9 lock. The earlier
+dependency-fixture attempt with Rollup 4.64.0 stalled and was stopped; its raw failure
+remains in the [original evidence](verification/issues-29-260-278/README.md).
+The [new follow-up](verification/issues-38-261/README.md) records the patch and independent
+component/page/site checks. Each compiler/build invocation has a 60-second diagnostic
+deadline; this is not a performance acceptance budget or a requirement for other Hosts.
+
 The reference registry currently accepts one complete native publication per composition.
 Publishing changed native definitions requires a new explicit native component version.
 Every retained reference-Host reviewed Card edition is checked against the Host's original

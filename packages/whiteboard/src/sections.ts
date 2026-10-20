@@ -161,6 +161,13 @@ export function encloseInSection(d: WhiteboardContent, ids: string[], title = 'S
     ids,
   );
 }
+/** The Section to edit; locked Sections accept only an unlock. */
+function requireSection(d: WhiteboardContent, id: string, unlocking = false) {
+  const s = d.sections?.find((s) => s.id === id);
+  if (!s) throw new Error('Section is missing');
+  if (s.locked && !unlocking) throw new Error('Unlock the Section first');
+  return s;
+}
 export function updateSection(
   id: string,
   patch: Partial<Pick<WhiteboardSection, 'title' | 'background' | 'locked'>>,
@@ -168,9 +175,7 @@ export function updateSection(
   const fixed = clone(patch);
   return command<WhiteboardContent>('whiteboard.section.update', 'Edit Section', (source) => {
     const d = migrateWhiteboard(source),
-      s = d.sections?.find((s) => s.id === id);
-    if (!s) throw new Error('Section is missing');
-    if (s.locked && fixed.locked !== false) throw new Error('Unlock the Section first');
+      s = requireSection(d, id, fixed.locked === false);
     const next = { ...s, ...fixed, id };
     if (!validBounds(next.bounds)) throw new Error('Section needs valid bounds');
     return { ...d, sections: d.sections!.map((s) => (s.id === id ? next : s)) };
@@ -181,10 +186,8 @@ export function dissolveSection(id: string, deleteContents = false) {
     'whiteboard.section.remove',
     deleteContents ? 'Delete Section and contents' : 'Dissolve Section',
     (source) => {
-      const d = migrateWhiteboard(source),
-        s = d.sections?.find((s) => s.id === id);
-      if (!s) throw new Error('Section is missing');
-      if (s.locked) throw new Error('Unlock the Section first');
+      const d = migrateWhiteboard(source);
+      requireSection(d, id);
       const removed = new Set(deleteContents ? sectionMembers(d, id).map((n) => n.id) : []);
       return {
         ...d,
@@ -214,6 +217,29 @@ export function assignSection(ids: string[], sectionId?: string) {
     };
   });
 }
+function assertSectionTransform(
+  sections: WhiteboardSection[],
+  nodeIds: string[],
+  delta: TransformDelta,
+) {
+  if (sections.some((s) => s.locked)) throw new Error('Unlock the Section first');
+  if (sections.length && (delta.rotation ?? 0) !== 0) throw new Error('Sections do not rotate');
+  if (sections.length > 1 && (delta.dw || delta.dh))
+    throw new Error('Resize one Section at a time');
+  if (sections.length && nodeIds.length && (delta.dw || delta.dh))
+    throw new Error('Resize Sections separately from objects');
+}
+const transformedSection = (s: WhiteboardSection, delta: TransformDelta): WhiteboardSection => ({
+  ...s,
+  bounds: {
+    x: s.bounds.x + delta.dx,
+    y: s.bounds.y + delta.dy,
+    width: Math.max(40, s.bounds.width + delta.dw),
+    height: Math.max(40, s.bounds.height + delta.dh),
+  },
+});
+const isPureMove = (delta: TransformDelta) =>
+  !!(delta.dx || delta.dy) && !delta.dw && !delta.dh && !delta.rotation;
 export function transformBoard(
   source: WhiteboardContent,
   ids: string[],
@@ -223,44 +249,23 @@ export function transformBoard(
     sections = (d.sections ?? []).filter((s) => ids.includes(s.id)),
     scoped = new Set(sections.flatMap((s) => sectionMembers(d, s.id).map((n) => n.id))),
     nodeIds = ids.filter((id) => d.nodes.some((n) => n.id === id) && !scoped.has(id));
-  if (sections.some((s) => s.locked)) throw new Error('Unlock the Section first');
-  if (sections.length && (delta.rotation ?? 0) !== 0) throw new Error('Sections do not rotate');
-  if (sections.length > 1 && (delta.dw || delta.dh))
-    throw new Error('Resize one Section at a time');
-  if (sections.length && nodeIds.length && (delta.dw || delta.dh))
-    throw new Error('Resize Sections separately from objects');
+  assertSectionTransform(sections, nodeIds, delta);
   const next = nodeIds.length ? transformNodes(nodeIds, delta).apply(d) : clone(d);
   next.sections = (d.sections ?? []).map((s) =>
-    !sections.some((v) => v.id === s.id)
-      ? s
-      : {
-          ...s,
-          bounds: {
-            x: s.bounds.x + delta.dx,
-            y: s.bounds.y + delta.dy,
-            width: Math.max(40, s.bounds.width + delta.dw),
-            height: Math.max(40, s.bounds.height + delta.dh),
-          },
-        },
+    sections.some((v) => v.id === s.id) ? transformedSection(s, delta) : s,
   );
+  const hierarchy = () => d.nodes.map((n) => ({ ...n, parentId: n.groupId }));
   // A resize handle may change region x/y, but members remain fixed. Only a move translates them.
-  const moveMembers = sections.length && !delta.dw && !delta.dh;
-  if (moveMembers) {
-    assertEditable(
-      d.nodes.map((n) => ({ ...n, parentId: n.groupId })),
-      [...scoped],
-    );
+  if (sections.length && !delta.dw && !delta.dh) {
+    assertEditable(hierarchy(), [...scoped]);
     next.nodes = next.nodes.map((n) =>
       scoped.has(n.id)
         ? { ...n, bounds: { ...n.bounds, x: n.bounds.x + delta.dx, y: n.bounds.y + delta.dy } }
         : n,
     );
   }
-  if (nodeIds.length && (delta.dx || delta.dy) && !delta.dw && !delta.dh && !delta.rotation) {
-    const roots = selectedRoots(
-      d.nodes.map((n) => ({ ...n, parentId: n.groupId })),
-      nodeIds,
-    );
+  if (nodeIds.length && isPureMove(delta)) {
+    const roots = selectedRoots(hierarchy(), nodeIds);
     next.nodes = next.nodes.map((n) =>
       roots.some((r) => r.id === n.id) && !n.groupId
         ? { ...n, sectionId: sectionAt(next, n.bounds)?.id }

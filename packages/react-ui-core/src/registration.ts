@@ -33,6 +33,13 @@ import {
 export const reactComponentKey = (
   ref: Pick<ReactComponentRef, 'registryId' | 'componentId' | 'version'>,
 ): string => JSON.stringify([ref.registryId, ref.componentId, ref.version]);
+const ownedComponents = new WeakSet<object>();
+const ownedEnvironments = new WeakSet<object>();
+function ownChecked<T extends object>(value: T, owners: WeakSet<object>): T {
+  const owned = deepFreeze(value);
+  owners.add(owned);
+  return owned;
+}
 export function checkComponentRef(raw: unknown, path: string): asserts raw is ReactComponentRef {
   const r = object(raw, path);
   fields(
@@ -231,6 +238,8 @@ function checkComponent(raw: unknown): asserts raw is RegisteredReactComponent {
       );
 }
 export function validateReactComponent(raw: unknown): RegisteredReactComponent {
+  if (raw && typeof raw === 'object' && ownedComponents.has(raw))
+    return raw as RegisteredReactComponent;
   checkData(raw);
   checkComponent(raw);
   if (raw.ref.contractHash !== componentDigest(raw))
@@ -239,7 +248,7 @@ export function validateReactComponent(raw: unknown): RegisteredReactComponent {
       '$.component.ref.contractHash',
       'Registration hash disagrees with its immutable content',
     );
-  return deepFreeze(clone(raw));
+  return ownChecked(clone(raw), ownedComponents);
 }
 export function sealReactComponent(
   raw: Omit<RegisteredReactComponent, 'ref'> & { ref: Omit<ReactComponentRef, 'contractHash'> },
@@ -256,7 +265,7 @@ export function sealReactComponent(
   };
   checkComponent(candidate);
   candidate.ref.contractHash = componentDigest(candidate);
-  return deepFreeze(candidate);
+  return ownChecked(candidate, ownedComponents);
 }
 const environmentDigest = (value: ReactEnvironment): string => {
   const { hash: _hash, ...ref } = value.ref;
@@ -415,6 +424,7 @@ function checkEnvironment(raw: unknown): asserts raw is ReactEnvironment {
     );
 }
 export function validateReactEnvironment(raw: unknown): ReactEnvironment {
+  if (raw && typeof raw === 'object' && ownedEnvironments.has(raw)) return raw as ReactEnvironment;
   checkData(raw);
   checkEnvironment(raw);
   if (raw.ref.hash !== environmentDigest(raw))
@@ -423,7 +433,7 @@ export function validateReactEnvironment(raw: unknown): ReactEnvironment {
       '$.environment.ref.hash',
       'Environment hash disagrees with its immutable content',
     );
-  return deepFreeze(clone(raw));
+  return ownChecked(clone(raw), ownedEnvironments);
 }
 export function sealReactEnvironment(
   raw: Omit<ReactEnvironment, 'ref'> & { ref: Omit<ReactEnvironmentRef, 'hash'> },
@@ -439,5 +449,5 @@ export function sealReactEnvironment(
   };
   checkEnvironment(candidate);
   candidate.ref.hash = environmentDigest(candidate);
-  return deepFreeze(candidate);
+  return ownChecked(candidate, ownedEnvironments);
 }

@@ -9,7 +9,22 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { assertComponentProperties, checkedComponentContract } from './properties';
 import { validateRetainedStyles } from './retained-styles';
-export const reuseHash = (value: unknown): string => bytesToHex(sha256(canonicalJson(value)));
+// Immutable strings are keyed by their complete value, so changed source bytes
+// cannot reuse a stale digest. Objects always take the full canonical hash path.
+const stringHashes = new Map<string, string>();
+export const reuseHash = (value: unknown): string => {
+  const cacheable = typeof value === 'string' && value.length <= 8192;
+  if (cacheable) {
+    const cached = stringHashes.get(value);
+    if (cached !== undefined) return cached;
+  }
+  const digest = bytesToHex(sha256(canonicalJson(value)));
+  if (cacheable) {
+    if (stringHashes.size >= 64) stringHashes.delete(stringHashes.keys().next().value!);
+    stringHashes.set(value, digest);
+  }
+  return digest;
+};
 
 export const reuseDomains = [
   'design',
@@ -67,6 +82,7 @@ export function rejectReuse(code: string, message: string, address: ReuseAddress
 }
 export const reuseLimits = Object.freeze({
   definitions: 100,
+  closures: 2000,
   dependencyDepth: 16,
   tokens: 2048,
   modes: 16,
@@ -430,11 +446,18 @@ function checkReuseState(raw: unknown): ReuseState | undefined {
     raw.schemaVersion !== 1 ||
     (raw.artifactMode !== undefined && !stableId(raw.artifactMode)) ||
     !Array.isArray(raw.closures) ||
-    !Array.isArray(raw.instances) ||
-    raw.closures.length > reuseLimits.definitions ||
-    raw.instances.length > reuseLimits.instances
+    !Array.isArray(raw.instances)
   )
     rejectReuse('instance-schema', 'Unsupported reusable instance state');
+  const counts = { closures: raw.closures.length, instances: raw.instances.length };
+  for (const path of ['closures', 'instances'] as const) {
+    if (counts[path] > reuseLimits[path])
+      rejectReuse(
+        'reuse-limit',
+        `Reusable state ${path} count ${counts[path]} exceeds the limit ${reuseLimits[path]}`,
+        { path },
+      );
+  }
   const ids = new Set<string>();
   for (const item of raw.instances) {
     if (

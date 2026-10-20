@@ -2,6 +2,8 @@
 
 この文書は、Editor Platformへの参加、既存Editorの拡張、新しいEditorの追加の入口です。新しいEditorの設計・実装手順は[Editor開発ガイド](editor-development.md)、レビュー時の判断基準は[受け入れ条件](editor-acceptance.md)を参照してください。
 
+目的別の文書は[ドキュメント案内](README.md)、変更時の記載先は[文書の記載方針](documentation-guide.md)で確認してください。READMEは概要・起動・主要な導線が変わる場合に更新し、個別Issueの検証・レビュー経緯は対象topicの検証記録へまとめます。
+
 ## 最初に理解すること
 
 Editorは単独で埋め込める編集機能です。Playgroundは複数のEditorを組み合わせた参照Hostであり、特定製品のアプリケーションではありません。認証、組織・Roomの管理、ワークフロー、AIの実行、製品固有の参照、運用基盤は利用側のHostが担当します。
@@ -33,7 +35,7 @@ Editorは単独で埋め込める編集機能です。Playgroundは複数のEdit
 
 ## ローカル環境
 
-Node.js 20.20.2、npm、Python 3.10以上を推奨します。Nodeの最低要件は`package.json`も確認してください。
+Node.js 24.19.0、npm、Python 3.10以上を推奨します。Nodeの最低要件は`package.json`も確認してください。
 
 ```sh
 npm ci
@@ -101,9 +103,33 @@ npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.s
 
 最後の行は既存の埋め込み・mobile検証の例です。新Editorのspecと必要な関連回帰を加え、desktop/mobile双方の対象を実行してください。production buildの確認とdev serverの確認は区別して記録します。全回帰を実施したと記載するには、実際の全対象・project・設定を報告します。
 
+### Playwrightのスイート
+
+Playwrightの設定は[`playwright.config.ts`](../playwright.config.ts)の1つだけです。対象spec・project・server・出力先の組み合わせは[`tests/playwright/suites.ts`](../tests/playwright/suites.ts)に名前付きスイートとして定義し、環境変数`E2E_SUITE`で選びます。未指定時は`default`（dev serverでの全desktop/mobile E2E）です。
+
+```sh
+npm run build
+E2E_SUITE=design-react.production npx playwright test
+E2E_SUITE=production npx playwright test tests/e2e/collaboration.spec.ts
+```
+
+過去の検証記録にある設定名は次の規則で読み替えます。存在しない名前を指定すると、選べるスイートの一覧を示して失敗します。
+
+| 過去の設定                                                 | 現在のスイート                               |
+| ---------------------------------------------------------- | -------------------------------------------- |
+| `playwright.config.ts`                                     | `default`（`E2E_SUITE`なし）                 |
+| `playwright.<name>.config.ts`                              | `E2E_SUITE=<name>`（例: `scale.production`） |
+| `packages/animation/playwright.config.ts`                  | `E2E_SUITE=animation`                        |
+| `packages/animation/tests/controlled/playwright.config.ts` | `E2E_SUITE=animation-controlled`             |
+| `packages/animation-player/playwright.config.ts`           | `E2E_SUITE=animation-player`                 |
+| `packages/geo-inspector/playwright.config.ts`              | `E2E_SUITE=geo-inspector`                    |
+| `apps/extension-reference/playwright.config.ts`            | `E2E_SUITE=extension-reference`              |
+
+新しいspecを特定のスイートに含めるときは`suites.ts`の対象を更新し、`E2E_SUITE=<name> npx playwright test --list`で検出数を確認します。新しい設定ファイルは追加しません。
+
 文書だけの変更では、記載したAPI・コマンド・リンク、format、公開snapshotへの収録と残留チェックを確認します。実施していないunit/browser検証を文書変更の結果として再掲しません。PRを作成したことや自動CIが存在することも検証の実施を意味しません。
 
-現状、追加のperformance測定・tuningは停止しており、既存の正式performance受け入れは保留です。[状況](status.md)と[測定契約](reuse-performance-budgets.md)を確認してください。新しいEditorのworkloadとbudgetは測定前に設計しますが、停止中に追加測定を実施したり、未測定を合格と書いたりしません。
+追加のperformance測定・tuningは停止中です。各checkpointの正式な受け入れ状況は、[React UIの固定条件の記録](verification/issue-24/README.md)など、実行sourceを明記した記録を確認してください。[状況](status.md)と[測定契約](reuse-performance-budgets.md)を確認してください。新しいEditorのworkloadとbudgetは測定前に設計しますが、停止中に追加測定を実施したり、未測定を合格と書いたりしません。
 
 ## PRに必要な説明
 
@@ -116,9 +142,9 @@ TypeScript toolingはHost/build時の任意packageで、通常Editor runtimeの�
 - 変更したschema/public APIと、既存Artifact・旧version・既存Hostへの影響。
 - 必須条件と条件付き条件の結果、適用外の理由、未実施・未対応・既知の制限。
 - 実際に実施したcommand、commit、環境、対象、結果、関連する失敗・回帰の記録。
-- 該当する契約・README・statusの更新。生成画像、ログ、build、font、exportはGit外に置く。
+- 該当する契約・利用ガイドと、対応範囲が変わる場合のstatus更新。概要・起動・導線が変わる場合はREADMEも更新する。生成画像、ログ、build、font、exportはGit外に置く。
 
-公開用文書もcanonicalな開発元で保守し、レビュー済みsnapshotへ含めます。公開側だけを変更すると次の同期で衝突するため、maintainerが開発元へ反映してから同期します。[README](../README.md)の更新・貢献方針も参照してください。
+公開用文書もcanonicalな開発元で保守し、レビュー済みsnapshotへ含めます。公開側だけを変更すると次の同期で衝突するため、maintainerが開発元へ反映してから同期します。[文書の記載方針](documentation-guide.md)も参照してください。
 
 ## 開発時によくある誤り
 

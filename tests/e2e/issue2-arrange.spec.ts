@@ -155,6 +155,9 @@ test('QA-06 nested groups transform, duplicate, cut/paste and ungroup with stabl
   const duplicated = await snapshot(page),
     copies = duplicated.slides[0].objects.slice(5);
   expect(copies).toHaveLength(5);
+  expect(copies.map((o) => o.bounds)).toEqual(
+    objects.map((o) => ({ ...o.bounds, x: o.bounds.x + 20, y: o.bounds.y + 20 })),
+  );
   const ids = new Set(copies.map((o) => o.id));
   for (const copy of copies) {
     expect(objects.some((o) => o.id === copy.id)).toBe(false);
@@ -182,6 +185,7 @@ test('QA-06 nested groups transform, duplicate, cut/paste and ungroup with stabl
   await page.keyboard.press('Escape');
   const pasted = (await snapshot(page)).slides[0].objects;
   expect(pasted).toHaveLength(5);
+  expect(pasted.map((o) => o.bounds)).toEqual(objects.map((o) => o.bounds));
   const pastedIds = new Set(pasted.map((o) => o.id));
   expect(pasted.filter((o) => o.groupId).every((o) => pastedIds.has(o.groupId!))).toBe(true);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();

@@ -14,7 +14,7 @@ Generate fresh output after `npm ci` and `npm run fonts:fetch`:
 ```sh
 node scripts/office/run-pptx-corpus.mjs test-results-office
 node scripts/office/run-docx-corpus.mjs test-results-office-docx
-npx playwright test -c playwright.production.config.ts tests/e2e/office-pptx-corpus.spec.ts tests/e2e/office-docx-corpus.spec.ts
+E2E_SUITE=production npx playwright test tests/e2e/office-pptx-corpus.spec.ts tests/e2e/office-docx-corpus.spec.ts
 ```
 
 The checked-in fixtures are sufficient for ordinary tests.

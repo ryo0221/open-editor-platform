@@ -27,6 +27,13 @@ import {
   designFixture,
   boardFixture,
 } from './fixtures';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 const A = person('A'),
   B = person('B'),
   C = person('C');
@@ -118,7 +125,7 @@ describe('ordered collaboration contract — CO-Q01–17', () => {
         ['shape2/fill'],
         'Agent color',
       );
-    authority.register(p);
+    authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
     submit(A, [setField('shape1', 'fill', '#ff0000')]);
     const preview = authority.preview(A, p.id),
       before = authority.snapshot();
@@ -142,7 +149,7 @@ describe('ordered collaboration contract — CO-Q01–17', () => {
         ['shape1/fill'],
         'Read shape 1',
       );
-    authority.register(p);
+    authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
     const preview = authority.preview(A, p.id);
     submit(B, [setField('shape1', 'fill', '#ff0000')]);
     submit(B, [setField('shape1', 'fill', slideFixture().slides[0].objects[0].fill)]);
@@ -152,12 +159,12 @@ describe('ordered collaboration contract — CO-Q01–17', () => {
   it('unknown reads conservatively require unchanged artifact and external reads require Host validation', () => {
     const { authority, submit } = setup(slideCodec, slideFixture()),
       p = proposal(authority, 'C', [setField('shape2', 'fill', '#aabbcc')], null, 'Unknown');
-    authority.register(p);
+    authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
     submit(A, [setField('shape1', 'fill', '#ff0000')]);
     expect(() => authority.preview(A, p.id)).toThrow('Unknown read scope');
     const external = proposal(authority, 'C', [move('shape2', 1, 0)], [], 'External');
     external.external = [{ reference: 'source:1', version: 'v1' }];
-    authority.register(external);
+    authority.register({ ...proposalHost, actorId: external.sourceActorId }, external);
     expect(() => authority.preview(A, external.id)).toThrow('External read');
   });
   it('CO-Q09 receipts survive lost acknowledgements, retries, compaction and backup', async () => {
@@ -221,12 +228,12 @@ describe('ordered collaboration contract — CO-Q01–17', () => {
     const { authority } = setup(slideCodec, slideFixture());
     for (const first of ['cancel', 'commit']) {
       const p = proposal(authority, 'C', [move('shape1', 1, 0)], [], 'Move');
-      authority.register(p);
+      authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
       const preview = authority.preview(A, p.id);
-      if (first === 'cancel') authority.cancelProposal(p.id);
+      if (first === 'cancel') authority.cancelProposal(proposalHost, p.id);
       const result = authority.applyProposal(A, p.id, preview.token);
       expect(code(result)).toBe(first === 'cancel' ? 'cancelled' : 'accepted');
-      authority.cancelProposal(p.id);
+      authority.cancelProposal(proposalHost, p.id);
       expect(authority.proposal(p.id)?.state).toBe(first === 'cancel' ? 'cancelled' : 'applied');
       if (first === 'commit')
         expect(authority.applyProposal(A, p.id, preview.token)).toEqual(result);
@@ -552,8 +559,10 @@ it('proposal cannot omit write dependencies or bypass the preview commit path', 
     p = proposal(authority, 'C', [setField('shape1', 'fill', '#ff0000')], [], 'Color');
   const missing = copy(p);
   missing.writes = [];
-  expect(() => authority.register(missing)).toThrow('omits');
-  authority.register(p);
+  expect(() =>
+    authority.register({ ...proposalHost, actorId: missing.sourceActorId }, missing),
+  ).toThrow('omits');
+  authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
   authority.preview(A, p.id);
   const forged = operation(slideCodec, authority.snapshot(), A, p.actions, 'proposal');
   forged.proposalId = p.id;

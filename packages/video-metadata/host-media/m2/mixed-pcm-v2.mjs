@@ -3,12 +3,9 @@ import { assertVideoContentV2 } from '@editor-platform/video-core';
 import { prepareMixV2 } from './mix-v2';
 import { verifyOriginal } from './verify-original-v2.mjs';
 import { createPcmFile } from '../indexed-media/pcm-file.mjs';
-import { selectedPcmSession } from '../../../video-core/experiments/pcm-wasm-v1/selection';
-import { sourcePort } from '../../../video-core/experiments/pcm-wasm-m2/source-port';
-import {
-  ConsumerOwner,
-  m2PcmDiagnostics,
-} from '../../../video-core/experiments/pcm-wasm-m2/owners';
+import { selectedPcmSession } from '../../../video-core/src/pcm/selection';
+import { sourcePort } from '../../../video-core/src/pcm/source-port';
+import { ConsumerOwner, m2PcmDiagnostics } from '../../../video-core/src/pcm/owners';
 const need = (ok, msg) => {
   if (!ok) throw Error(msg);
 };

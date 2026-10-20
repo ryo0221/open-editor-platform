@@ -3,8 +3,285 @@ import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { Dialog, useEditorInput } from '@editor-platform/editor-ui';
 import { publicationParts, publishDesignComponent } from './component-publication';
-import { type DesignContent } from './model';
+import { type DesignContent, type DesignElement } from './model';
 import { designWebTagsFor, type DesignWebComponent, type DesignWebTag } from './web-contract';
+type Problem = { code: string; path: string; message: string };
+type Tags = Record<string, DesignWebTag>;
+type SlotRef = { registryId: string; componentId: string };
+const nativeParts = (parts: DesignElement[]) =>
+  parts.filter((part) => part.type !== 'react' && part.type !== 'instance');
+/** Explicit roles, or the default role each native part type renders as. */
+function initialTags(parts: DesignElement[]): Tags {
+  return Object.fromEntries(
+    nativeParts(parts).map((part) => [
+      part.id,
+      part.web?.tag ?? (part.type === 'text' ? 'p' : part.type === 'image' ? 'img' : 'div'),
+    ]),
+  );
+}
+/** The publication command for the current settings and Host diagnostics of its result. */
+function reviewPublication(
+  content: DesignContent,
+  id: string,
+  web: DesignWebComponent,
+  tags: Tags,
+  diagnostics: ((candidate: DesignContent, componentId: string) => Problem[]) | undefined,
+) {
+  let edit: EditorCommand<DesignContent> | undefined;
+  let problems: Problem[] = [];
+  let invalid = '';
+  try {
+    edit = publishDesignComponent(content, id, web, tags);
+    const candidate = edit.apply(content);
+    problems = diagnostics?.(candidate, id) ?? [];
+  } catch (error) {
+    invalid = String(error instanceof Error ? error.message : error);
+  }
+  return { edit, problems, invalid };
+}
+/** Host registrations and other published native components a slot may accept. */
+function slotChoices(content: DesignContent, id: string): [string, SlotRef][] {
+  const available = [
+    ...(content.web?.registrations ?? []).map((registration) => ({
+      registryId: registration.ref.registryId,
+      componentId: registration.ref.componentId,
+    })),
+    ...content.components
+      .filter((component) => component.web && component.id !== id)
+      .map((component) => ({ registryId: 'native-design', componentId: component.id })),
+  ];
+  return [
+    ...new Map(available.map((ref) => [`${ref.registryId}/${ref.componentId}`, ref])).entries(),
+  ];
+}
+function PartSemantics({
+  parts,
+  tags,
+  setTags,
+}: {
+  parts: DesignElement[];
+  tags: Tags;
+  setTags: (tags: Tags) => void;
+}) {
+  return nativeParts(parts).map((part) => (
+    <label key={part.id}>
+      {part.name}
+      <select
+        aria-label={`HTML meaning ${part.name}`}
+        value={tags[part.id] ?? ''}
+        onChange={(event) => setTags({ ...tags, [part.id]: event.target.value as DesignWebTag })}
+      >
+        <option value="">意味を選択</option>
+        {designWebTagsFor(part.type).map((tag) => (
+          <option key={tag}>{tag}</option>
+        ))}
+      </select>
+    </label>
+  ));
+}
+interface WebSetter {
+  web: DesignWebComponent;
+  setWeb: (web: DesignWebComponent) => void;
+}
+/** Published props and the draft for adding one; the draft lives only while the dialog is open. */
+function PublicPropsEditor({ parts, web, setWeb }: WebSetter & { parts: DesignElement[] }) {
+  const [propName, setPropName] = useState('text');
+  const [propPart, setPropPart] = useState(parts[0]?.id ?? '');
+  const [propField, setPropField] = useState('text');
+  return (
+    <>
+      {Object.entries(web.props).map(([key, prop]) => (
+        <p key={key}>
+          {key} → {parts.find((part) => part.id === prop.target.elementId)?.name} /{' '}
+          {prop.target.field}
+          <button
+            onClick={() => {
+              const props = { ...web.props };
+              delete props[key];
+              setWeb({ ...web, props });
+            }}
+          >
+            Remove prop {key}
+          </button>
+        </p>
+      ))}
+      <label>
+        prop名
+        <input
+          aria-label="Public prop name"
+          value={propName}
+          onChange={(event) => setPropName(event.target.value)}
+        />
+      </label>
+      <label>
+        対象部品
+        <select
+          aria-label="Public prop part"
+          value={propPart}
+          onChange={(event) => setPropPart(event.target.value)}
+        >
+          {parts.map((part) => (
+            <option key={part.id} value={part.id}>
+              {part.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        値
+        <select
+          aria-label="Public prop field"
+          value={propField}
+          onChange={(event) => setPropField(event.target.value)}
+        >
+          {['text', 'fill', 'src', 'alt'].map((field) => (
+            <option key={field}>{field}</option>
+          ))}
+        </select>
+      </label>
+      <button
+        disabled={!propName.trim() || Object.hasOwn(web.props, propName)}
+        onClick={() => {
+          const part = parts.find((part) => part.id === propPart)!;
+          setWeb({
+            ...web,
+            props: {
+              ...web.props,
+              [propName]: {
+                schema: { type: 'string' },
+                required: false,
+                default: String(part[propField as 'text'] ?? ''),
+                target: { elementId: propPart, field: propField },
+              },
+            },
+          });
+        }}
+      >
+        Add public prop
+      </button>
+    </>
+  );
+}
+function SlotComponentChoices({
+  content,
+  choices,
+  allowed,
+  setAllowed,
+}: {
+  content: DesignContent;
+  choices: [string, SlotRef][];
+  allowed: string[];
+  setAllowed: (allowed: string[]) => void;
+}) {
+  return (
+    <>
+      {choices.length === 0 && (
+        <p>slotの許可先がありません。Hostへ部品を登録してからslotを追加してください。</p>
+      )}
+      {choices.map(([key, ref]) => (
+        <label key={key}>
+          <input
+            type="checkbox"
+            aria-label={`Allow slot component ${key}`}
+            checked={allowed.includes(key)}
+            onChange={(event) =>
+              setAllowed(
+                event.target.checked ? [...allowed, key] : allowed.filter((value) => value !== key),
+              )
+            }
+          />
+          {content.web?.registrations.find(
+            (registration) =>
+              registration.ref.registryId === ref.registryId &&
+              registration.ref.componentId === ref.componentId,
+          )?.name ??
+            content.components.find((component) => component.id === ref.componentId)?.name ??
+            ref.componentId}
+        </label>
+      ))}
+    </>
+  );
+}
+/** Published slots and the draft for adding one; only non-image native parts can hold a slot. */
+function PublicSlotsEditor({
+  parts,
+  tags,
+  web,
+  setWeb,
+  accepts,
+}: WebSetter & { parts: DesignElement[]; tags: Tags; accepts: SlotRef[] }) {
+  const [slotName, setSlotName] = useState('body');
+  const slotParts = parts.filter((part) => tags[part.id] && tags[part.id] !== 'img');
+  const [slotPart, setSlotPart] = useState(slotParts[0]?.id ?? '');
+  const currentSlotPart = slotParts.find((part) => part.id === slotPart) ?? slotParts[0];
+  if (slotPart !== (currentSlotPart?.id ?? '')) setSlotPart(currentSlotPart?.id ?? '');
+  return (
+    <>
+      {Object.entries(web.slots ?? {}).map(([key, slot]) => (
+        <p key={key}>
+          {key} → {parts.find((part) => part.id === slot.elementId)?.name}
+          <button
+            onClick={() => {
+              const slots = { ...web.slots };
+              delete slots[key];
+              setWeb({ ...web, slots });
+            }}
+          >
+            Remove slot {key}
+          </button>
+        </p>
+      ))}
+      <label>
+        slot名
+        <input
+          aria-label="Public slot name"
+          value={slotName}
+          onChange={(event) => setSlotName(event.target.value)}
+        />
+      </label>
+      <label>
+        対象部品
+        <select
+          aria-label="Public slot part"
+          value={slotPart}
+          onChange={(event) => setSlotPart(event.target.value)}
+        >
+          {slotParts.map((part) => (
+            <option key={part.id} value={part.id}>
+              {part.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        disabled={
+          !slotName.trim() ||
+          accepts.length === 0 ||
+          Object.hasOwn(web.slots ?? {}, slotName) ||
+          !tags[slotPart] ||
+          tags[slotPart] === 'img'
+        }
+        onClick={() =>
+          setWeb({
+            ...web,
+            slots: {
+              ...web.slots,
+              [slotName]: {
+                elementId: slotPart,
+                prop: slotName === 'body' ? 'children' : slotName,
+                minimum: 0,
+                maximum: 100,
+                accepts,
+              },
+            },
+          })
+        }
+      >
+        Add public slot
+      </button>
+    </>
+  );
+}
 export function ComponentPublicationDialog({
   content,
   id,
@@ -19,10 +296,7 @@ export function ComponentPublicationDialog({
   readOnly: boolean;
   readOnlyReason?: string;
   apply(command: EditorCommand<DesignContent>): boolean;
-  diagnostics?: (
-    candidate: DesignContent,
-    componentId: string,
-  ) => { code: string; path: string; message: string }[];
+  diagnostics?: (candidate: DesignContent, componentId: string) => Problem[];
   onClose(): void;
 }) {
   const component = content.components.find((component) => component.id === id)!;
@@ -38,24 +312,7 @@ export function ComponentPublicationDialog({
       },
     ),
   );
-  const [tags, setTags] = useState<Record<string, DesignWebTag>>(() =>
-    Object.fromEntries(
-      parts
-        .filter((part) => part.type !== 'react' && part.type !== 'instance')
-        .map((part) => [
-          part.id,
-          part.web?.tag ?? (part.type === 'text' ? 'p' : part.type === 'image' ? 'img' : 'div'),
-        ]),
-    ),
-  );
-  const [propName, setPropName] = useState('text');
-  const [propPart, setPropPart] = useState(parts[0]?.id ?? '');
-  const [propField, setPropField] = useState('text');
-  const [slotName, setSlotName] = useState('body');
-  const slotParts = parts.filter((part) => tags[part.id] && tags[part.id] !== 'img');
-  const [slotPart, setSlotPart] = useState(slotParts[0]?.id ?? '');
-  const currentSlotPart = slotParts.find((part) => part.id === slotPart) ?? slotParts[0];
-  if (slotPart !== (currentSlotPart?.id ?? '')) setSlotPart(currentSlotPart?.id ?? '');
+  const [tags, setTags] = useState(() => initialTags(parts));
   const [error, setError] = useState('');
   const root = useRef<HTMLDivElement>(null);
   const initial = useRef(canonicalJson({ web, tags }));
@@ -63,16 +320,7 @@ export function ComponentPublicationDialog({
   const [composition, setComposition] = useState(false);
   const committed = useRef(false);
   const base = useRef(canonicalJson(component));
-  let edit: EditorCommand<DesignContent> | undefined;
-  let problems: { code: string; path: string; message: string }[] = [];
-  let invalid = '';
-  try {
-    edit = publishDesignComponent(content, id, web, tags);
-    const candidate = edit.apply(content);
-    problems = diagnostics?.(candidate, id) ?? [];
-  } catch (error) {
-    invalid = String(error instanceof Error ? error.message : error);
-  }
+  const { edit, problems, invalid } = reviewPublication(content, id, web, tags, diagnostics);
   function prepare() {
     if (readOnly || base.current !== canonicalJson(component))
       throw new Error('部品が変更済み、または編集できません。設定を開き直してください。');
@@ -94,18 +342,7 @@ export function ComponentPublicationDialog({
     prepare,
     focus: () => root.current?.querySelector<HTMLInputElement>('input')?.focus(),
   });
-  const available = [
-    ...(content.web?.registrations ?? []).map((registration) => ({
-      registryId: registration.ref.registryId,
-      componentId: registration.ref.componentId,
-    })),
-    ...content.components
-      .filter((component) => component.web && component.id !== id)
-      .map((component) => ({ registryId: 'native-design', componentId: component.id })),
-  ];
-  const choices = [
-    ...new Map(available.map((ref) => [`${ref.registryId}/${ref.componentId}`, ref])).entries(),
-  ];
+  const choices = slotChoices(content, id);
   const [allowed, setAllowed] = useState(() => choices.map(([key]) => key));
   const accepts = choices.filter(([key]) => allowed.includes(key)).map(([, ref]) => ref);
   return (
@@ -145,185 +382,24 @@ export function ComponentPublicationDialog({
             />
           </label>
           <h4>HTML意味</h4>
-          {parts
-            .filter((part) => part.type !== 'react' && part.type !== 'instance')
-            .map((part) => (
-              <label key={part.id}>
-                {part.name}
-                <select
-                  aria-label={`HTML meaning ${part.name}`}
-                  value={tags[part.id] ?? ''}
-                  onChange={(event) =>
-                    setTags({ ...tags, [part.id]: event.target.value as DesignWebTag })
-                  }
-                >
-                  <option value="">意味を選択</option>
-                  {designWebTagsFor(part.type).map((tag) => (
-                    <option key={tag}>{tag}</option>
-                  ))}
-                </select>
-              </label>
-            ))}
+          <PartSemantics parts={parts} tags={tags} setTags={setTags} />
           <h4>公開props</h4>
-          {Object.entries(web.props).map(([key, prop]) => (
-            <p key={key}>
-              {key} → {parts.find((part) => part.id === prop.target.elementId)?.name} /{' '}
-              {prop.target.field}
-              <button
-                onClick={() => {
-                  const props = { ...web.props };
-                  delete props[key];
-                  setWeb({ ...web, props });
-                }}
-              >
-                Remove prop {key}
-              </button>
-            </p>
-          ))}
-          <label>
-            prop名
-            <input
-              aria-label="Public prop name"
-              value={propName}
-              onChange={(event) => setPropName(event.target.value)}
-            />
-          </label>
-          <label>
-            対象部品
-            <select
-              aria-label="Public prop part"
-              value={propPart}
-              onChange={(event) => setPropPart(event.target.value)}
-            >
-              {parts.map((part) => (
-                <option key={part.id} value={part.id}>
-                  {part.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            値
-            <select
-              aria-label="Public prop field"
-              value={propField}
-              onChange={(event) => setPropField(event.target.value)}
-            >
-              {['text', 'fill', 'src', 'alt'].map((field) => (
-                <option key={field}>{field}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            disabled={!propName.trim() || Object.hasOwn(web.props, propName)}
-            onClick={() => {
-              const part = parts.find((part) => part.id === propPart)!;
-              setWeb({
-                ...web,
-                props: {
-                  ...web.props,
-                  [propName]: {
-                    schema: { type: 'string' },
-                    required: false,
-                    default: String(part[propField as 'text'] ?? ''),
-                    target: { elementId: propPart, field: propField },
-                  },
-                },
-              });
-            }}
-          >
-            Add public prop
-          </button>
+          <PublicPropsEditor parts={parts} web={web} setWeb={setWeb} />
           <h4>公開slots</h4>
           <p>既存の本文を残す任意slotです。許可先はこのHostの登録部品です。</p>
-          {choices.length === 0 && (
-            <p>slotの許可先がありません。Hostへ部品を登録してからslotを追加してください。</p>
-          )}
-          {choices.map(([key, ref]) => (
-            <label key={key}>
-              <input
-                type="checkbox"
-                aria-label={`Allow slot component ${key}`}
-                checked={allowed.includes(key)}
-                onChange={(event) =>
-                  setAllowed(
-                    event.target.checked
-                      ? [...allowed, key]
-                      : allowed.filter((value) => value !== key),
-                  )
-                }
-              />
-              {content.web?.registrations.find(
-                (registration) =>
-                  registration.ref.registryId === ref.registryId &&
-                  registration.ref.componentId === ref.componentId,
-              )?.name ??
-                content.components.find((component) => component.id === ref.componentId)?.name ??
-                ref.componentId}
-            </label>
-          ))}
-          {Object.entries(web.slots ?? {}).map(([key, slot]) => (
-            <p key={key}>
-              {key} → {parts.find((part) => part.id === slot.elementId)?.name}
-              <button
-                onClick={() => {
-                  const slots = { ...web.slots };
-                  delete slots[key];
-                  setWeb({ ...web, slots });
-                }}
-              >
-                Remove slot {key}
-              </button>
-            </p>
-          ))}
-          <label>
-            slot名
-            <input
-              aria-label="Public slot name"
-              value={slotName}
-              onChange={(event) => setSlotName(event.target.value)}
-            />
-          </label>
-          <label>
-            対象部品
-            <select
-              aria-label="Public slot part"
-              value={slotPart}
-              onChange={(event) => setSlotPart(event.target.value)}
-            >
-              {slotParts.map((part) => (
-                <option key={part.id} value={part.id}>
-                  {part.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            disabled={
-              !slotName.trim() ||
-              accepts.length === 0 ||
-              Object.hasOwn(web.slots ?? {}, slotName) ||
-              !tags[slotPart] ||
-              tags[slotPart] === 'img'
-            }
-            onClick={() =>
-              setWeb({
-                ...web,
-                slots: {
-                  ...web.slots,
-                  [slotName]: {
-                    elementId: slotPart,
-                    prop: slotName === 'body' ? 'children' : slotName,
-                    minimum: 0,
-                    maximum: 100,
-                    accepts,
-                  },
-                },
-              })
-            }
-          >
-            Add public slot
-          </button>
+          <SlotComponentChoices
+            content={content}
+            choices={choices}
+            allowed={allowed}
+            setAllowed={setAllowed}
+          />
+          <PublicSlotsEditor
+            parts={parts}
+            tags={tags}
+            web={web}
+            setWeb={setWeb}
+            accepts={accepts}
+          />
         </fieldset>
         <p role="status">
           公開条件:{' '}

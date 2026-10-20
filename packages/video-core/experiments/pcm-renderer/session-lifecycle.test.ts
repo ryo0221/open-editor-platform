@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { time } from '@editor-platform/video-core';
-import { PcmRenderSession } from './session';
-import { planWindow, type PcmWindow, type WindowPlan } from './render';
+import { PcmRenderSession } from '../../src/pcm/session';
+import { planWindow, type PcmWindow, type WindowPlan } from '../../src/pcm/render';
 const mapping = { start: time(0), end: time(1, 10), sourceStart: time(1, 4), speed: time(1) },
   valid = { start: time(0), end: time(1) };
 const pcm = (plan: WindowPlan): PcmWindow => ({

@@ -44,6 +44,36 @@ export function configureDesignWeb(settings: DesignWebSettings): EditorCommand<D
     },
   }));
 }
+/** Rejects insertion into a React parent unless its exact registration publishes an accepting slot. */
+function assertReactSlotAccepts(
+  d: DesignContent & { web: DesignWebSettings },
+  parent: DesignElement | undefined,
+  registration: RegisteredReactComponent,
+  slotId: string | undefined,
+) {
+  if (!parent?.react) {
+    if (slotId) throw new Error('Target is not a registered React slot');
+    return;
+  }
+  const owner = d.web.registrations.find(
+    (c) => reactComponentKey(c.ref) === reactComponentKey(parent.react!.component),
+  );
+  if (!owner || reuseHash(owner.ref) !== reuseHash(parent.react.component))
+    throw new Error('Exact parent registration is unavailable');
+  const slot = slotId && owner.slots[slotId];
+  if (!slot) throw new Error('Choose a published slot');
+  const count = (parent.react.slots[slotId!] ?? []).length + 1;
+  if (count > slot.maximum || count < slot.minimum)
+    throw new Error(`Slot cardinality outside limits: ${parent.id}/${slotId}`);
+  if (
+    !slot.accepts.some(
+      (ref) =>
+        ref.registryId === registration.ref.registryId &&
+        ref.componentId === registration.ref.componentId,
+    )
+  )
+    throw new Error(`Component is not accepted by slot: ${parent.id}/${slotId}`);
+}
 export function insertDesignReact(
   registration: RegisteredReactComponent,
   id: string,
@@ -63,26 +93,7 @@ export function insertDesignReact(
         throw new Error('Retained registration does not match');
       const problem = reactUiInsertionProblem(registration);
       if (problem) throw new Error(problem);
-      if (parent?.react) {
-        const owner = d.web.registrations.find(
-          (c) => reactComponentKey(c.ref) === reactComponentKey(parent.react!.component),
-        );
-        if (!owner || reuseHash(owner.ref) !== reuseHash(parent.react.component))
-          throw new Error('Exact parent registration is unavailable');
-        const slot = slotId && owner.slots[slotId];
-        if (!slot) throw new Error('Choose a published slot');
-        const count = (parent.react.slots[slotId!] ?? []).length + 1;
-        if (count > slot.maximum || count < slot.minimum)
-          throw new Error(`Slot cardinality outside limits: ${parent.id}/${slotId}`);
-        if (
-          !slot.accepts.some(
-            (ref) =>
-              ref.registryId === registration.ref.registryId &&
-              ref.componentId === registration.ref.componentId,
-          )
-        )
-          throw new Error(`Component is not accepted by slot: ${parent.id}/${slotId}`);
-      } else if (slotId) throw new Error('Target is not a registered React slot');
+      assertReactSlotAccepts({ ...d, web: d.web }, parent, registration, slotId);
       const element: DesignElement = {
         ...makeDesignElement('react'),
         id,

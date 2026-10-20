@@ -10,6 +10,13 @@ import {
 import type { DocumentContent } from '@editor-platform/document/model';
 import { documentEditorCodec } from './document-editor';
 import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const actor: Principal = {
   actorId: 'A',
@@ -84,11 +91,12 @@ it.each(['receipt-first', 'event-first'] as const)(
           versions.find((v) => v.version.versionId === id)!.version.content,
           revision,
         ),
-      registerProposal: async (p) => authority.register(p),
+      registerProposal: async (p) =>
+        authority.register({ ...proposalHost, actorId: p.sourceActorId }, p),
       previewProposal: async (id) => authority.preview(actor, id),
       applyProposal: async (id, token) => authority.applyProposal(actor, id, token),
       cancelProposal: async (id, reject) => {
-        const proposal = authority.cancelProposal(id, reject);
+        const proposal = authority.cancelProposal(proposalHost, id, reject);
         if (!proposal) throw Error('Unknown proposal');
         return proposal;
       },

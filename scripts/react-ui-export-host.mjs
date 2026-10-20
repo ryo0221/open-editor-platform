@@ -308,7 +308,7 @@ await writeFile(
 );
 await writeFile(
   path.join(target, 'vite.config.mjs'),
-  `export default { base: './', root: ${JSON.stringify(target)}, esbuild: { jsx: 'automatic' }, resolve: { alias: { '@reference/ui-revision': ${JSON.stringify(path.join(target, 'ui-v2.tsx'))}, '@reference/ui': ${JSON.stringify(path.join(target, 'ui.tsx'))}, '@portable/ui': ${JSON.stringify(path.join(target, 'ui.tsx'))} } }, build: { rollupOptions: { treeshake: false }, outDir: 'dist', emptyOutDir: true } };`,
+  `export default { base: './', root: ${JSON.stringify(target)}, esbuild: { jsx: 'automatic' }, resolve: { alias: { '@reference/ui-revision': ${JSON.stringify(path.join(target, 'ui-v2.tsx'))}, '@reference/ui': ${JSON.stringify(path.join(target, 'ui.tsx'))}, '@portable/ui': ${JSON.stringify(path.join(target, 'ui.tsx'))} } }, build: { outDir: 'dist', emptyOutDir: true } };`,
 );
 for (const args of [
   ['tsc', '-p', path.join(target, 'tsconfig.json')],
@@ -318,7 +318,13 @@ for (const args of [
     cwd: target,
     stdio: 'inherit',
     env: process.env,
+    timeout: 60_000,
+    killSignal: 'SIGKILL',
   });
+  if (run.error)
+    throw Error(
+      `Independent ${screen} ${args[0]} failed: ${run.error.code}; signal=${run.signal ?? 'none'}`,
+    );
   if (run.status !== 0) process.exit(run.status ?? 1);
 }
 console.log(`Independent ${screen} host built at ${target}; fingerprint ${bundle.fingerprint}`);

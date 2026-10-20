@@ -10,6 +10,13 @@ import {
 import { setCell, type StructuredData } from '@editor-platform/structured-data';
 import { dataEditorCodec } from './editor-transactions';
 import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const actor: Principal = {
   actorId: 'A',
@@ -44,11 +51,12 @@ async function fixture() {
         revision,
       ),
     undo: async (id, redo) => authority.undo(actor, id, redo),
-    registerProposal: async (p) => authority.register(p),
+    registerProposal: async (p) =>
+      authority.register({ ...proposalHost, actorId: p.sourceActorId }, p),
     previewProposal: async (id) => authority.preview(actor, id),
     applyProposal: async (id, token) => authority.applyProposal(actor, id, token),
     cancelProposal: async (id, reject) => {
-      const proposal = authority.cancelProposal(id, reject);
+      const proposal = authority.cancelProposal(proposalHost, id, reject);
       if (!proposal) throw new Error('Unknown proposal');
       return proposal;
     },

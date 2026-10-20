@@ -201,6 +201,8 @@ it('regeneration reports incompatible root orders as an explicit conflict', () =
   expect(reviewDesignReactDocumentRegeneration(basis, edited, next).conflicts).toContain('roots');
 });
 it('large embedded images accept only bounded hashes and remain native-importable', () => {
+  // 256 KiB of image data (~350 KB base64) is well above the 100 KB receipt bound asserted below
+  // while keeping repeated content hashing fast enough under coverage instrumentation.
   const d = designReactFixture();
   d.elements.push({
     ...makeDesignElement('image'),
@@ -208,10 +210,9 @@ it('large embedded images accept only bounded hashes and remain native-importabl
     parentId: 'home',
     src:
       'data:image/png;base64,' +
-      Buffer.concat([
-        Buffer.from(png.split(',')[1], 'base64'),
-        Buffer.alloc(2 * 1024 * 1024),
-      ]).toString('base64'),
+      Buffer.concat([Buffer.from(png.split(',')[1], 'base64'), Buffer.alloc(256 * 1024)]).toString(
+        'base64',
+      ),
     alt: 'Large PNG',
     web: { tag: 'img' },
   });

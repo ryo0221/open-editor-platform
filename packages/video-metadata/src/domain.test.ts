@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { build } from 'esbuild';
-import { chromium, type Browser } from '@playwright/test';
+import type { Browser } from '@playwright/test';
 import { videoMetadataExtension } from './index';
 import { time, type VideoContent } from '@editor-platform/video-core';
+import { launchTestChromium } from '../test-host/browser';
 
 const fixture: VideoContent = {
   schema: 'video-core-prototype-v0',
@@ -79,11 +80,7 @@ beforeAll(async () => {
     minify: true,
   });
   bundle = result.outputFiles[0].text;
-  browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
-    headless: true,
-    args: ['--no-sandbox'],
-  });
+  browser = await launchTestChromium();
 });
 afterAll(async () => {
   await browser?.close();

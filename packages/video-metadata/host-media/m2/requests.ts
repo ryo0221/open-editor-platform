@@ -8,7 +8,7 @@ import {
   type VideoContentV1,
 } from '@editor-platform/video-core';
 import { audioMappingV1, outputSpanV1 } from '../file-source/timing-v1';
-import { sampleSpan } from '../../../video-core/experiments/pcm-renderer/render';
+import { sampleSpan } from '../../../video-core/src/pcm/render';
 export function prepareSourceRequests(content: VideoContentV1) {
   assertVideoContentV1(content);
   const owned = structuredClone(content),

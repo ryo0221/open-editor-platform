@@ -165,7 +165,7 @@ for (const domain of ['slide', 'document'] as const) {
     await a.getByRole('button', { name: 'Save version', exact: true }).click();
     await a
       .getByRole('dialog', { name: 'Save immutable version', exact: true })
-      .getByRole('button', { name: 'Save version', exact: true })
+      .getByRole('button', { name: 'この版を保存', exact: true })
       .click();
     await expect(a.locator('.save-status')).toContainText('Shared · confirmed');
     const saved = await nativeArtifact(a);

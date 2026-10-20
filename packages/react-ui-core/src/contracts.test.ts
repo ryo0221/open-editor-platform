@@ -11,6 +11,7 @@ import {
   loadReactUiDocument,
   parseReactUiDocument,
   prepareReactUiExport,
+  prepareReactUiComposition,
   ReactUiError,
   schemaAssignable,
   sealReactComponent,
@@ -336,7 +337,16 @@ describe('native lifecycle / export preflight / hostile inputs', () => {
   it('requires exact runtime environment, component and CSS/Provider/asset resolution', () => {
     for (const mutate of [
       (r: ReactRuntimeResolution) => {
+        r.environment.id += '-other';
+      },
+      (r: ReactRuntimeResolution) => {
+        r.environment.version += '-other';
+      },
+      (r: ReactRuntimeResolution) => {
         r.environment.hash = 'f'.repeat(64);
+      },
+      (r: ReactRuntimeResolution) => {
+        r.components[0].contractHash = 'f'.repeat(64);
       },
       (r: ReactRuntimeResolution) => {
         r.components[0].implementationHash = 'f'.repeat(64);
@@ -354,8 +364,22 @@ describe('native lifecycle / export preflight / hostile inputs', () => {
       const r = clone(resolution);
       mutate(r);
       expect(() => prepareReactUiExport(base, r)).toThrow(ReactUiError);
+      expect(() => prepareReactUiComposition(base, r)).toThrow(ReactUiError);
     }
     expect(() => prepareReactUiExport(base, undefined)).toThrow(ReactUiError);
+  });
+  it('owns render data while retaining current runtime and output-path rejection', () => {
+    const input = clone(base);
+    const document = prepareReactUiComposition(input, resolution);
+    const originalId = document.nodes[0].id;
+    input.nodes[0].id = 'changed-outside';
+    expect(document.nodes[0].id).toBe(originalId);
+    expect(Object.isFrozen(document.nodes[0])).toBe(true);
+    const wrong = clone(resolution);
+    wrong.components[0].implementationHash = 'f'.repeat(64);
+    expect(() => prepareReactUiComposition(document, wrong)).toThrow(ReactUiError);
+    const css = document.environment.dependencies.find((dependency) => dependency.kind === 'css')!;
+    expect(() => prepareReactUiComposition(document, resolution, [css.path])).toThrow(/collides/);
   });
   it('rejects non-JSON code, cycles, sparse arrays, reserved keys and unsupported schema fields', () => {
     const mutations: ((doc: Record<string, unknown>) => void)[] = [

@@ -5,8 +5,9 @@ import { assertGeo } from './validation';
 import { assertGeoExtent } from './workspace-validation';
 import { geoMetricValue, geoValue } from './workspace-analysis';
 import { geometryPositions, unwrapLongitude } from './geometry';
+import type { GeoBackgroundResolution } from './background';
 
-export const GEO_RENDERER_VERSION = 'geo-svg-equirectangular@1';
+export const GEO_RENDERER_VERSION = 'geo-svg-equirectangular@2';
 export function fitGeoExtent(content: GeoDocument): GeoExtent {
   const positions = content.layers.flatMap((l) =>
     l.features.flatMap((f) => geometryPositions(f.geometry)),
@@ -103,6 +104,8 @@ export function renderGeoSvg(
     includeLegend?: boolean;
     interactive?: boolean;
     selected?: { layerId: string; featureId: string } | null;
+    /** Verified catalog resolution, separate from native limits and hit-testing. */
+    backgrounds?: GeoBackgroundResolution;
   },
   budgets: Budgets,
 ): string {
@@ -117,40 +120,101 @@ export function renderGeoSvg(
     mapWidth = width - legendWidth;
   const styles = options.view?.styles ?? content.workspace?.styles ?? [];
   const annotations = options.view?.annotations ?? content.workspace?.annotations ?? [];
-  const credits = [...new Set(content.sources.map((s) => s.attribution))].flatMap(
+  const sourceCredits = [...new Set(content.sources.map((s) => s.attribution))].flatMap(
     (s) => s.match(/.{1,90}/gs) ?? [],
   );
-  if (credits.length > 16) throw Error('Attribution exceeds image budget');
-  const footerHeight = (credits.length + 1) * 13 + 6;
+  if (sourceCredits.length > 16) throw Error('Attribution exceeds image budget');
+  const credits = [
+    ...new Set([
+      ...content.sources.map((s) => s.attribution),
+      ...(options.backgrounds?.layers ?? []).flatMap((layer) => [
+        layer.attribution,
+        layer.licenseUrl,
+      ]),
+      ...(options.backgrounds?.diagnostics ?? []).map((d) => `Background unavailable: ${d.id}`),
+    ]),
+  ].flatMap((s) => s.match(/.{1,90}/gs) ?? []);
+  // Optional background credits never consume the existing native attribution budget.
+  // Compact the footer at small output heights while retaining every credit and a map.
+  const creditLineHeight = Math.min(13, (height - 30) / (credits.length + 1));
+  const footerHeight = (credits.length + 1) * creditLineHeight + 6;
   const mapHeight = height - footerHeight;
   const project = ([x, y]: Position): Position => [
     ((x - extent[0]) / (extent[2] - extent[0])) * mapWidth,
     ((extent[3] - y) / (extent[3] - extent[1])) * mapHeight,
   ];
   const number = (n: number) => String(Math.round(n * 1000) / 1000);
-  const line = (points: Position[], offset: number, ring = false) => {
+  const line = (points: Position[], offset: number, ring = false, background = false) => {
     let previous = center;
+    let previousProjected = '';
     return (
       points
-        .map((p, i) => {
+        .map((p) => {
           const x = unwrapLongitude(p[0], previous);
           previous = x;
           const [px, py] = project([x + offset, p[1]]);
-          return `${i ? 'L' : 'M'}${number(px)},${number(py)}`;
+          const format = background ? (n: number) => String(Math.round(n)) : number;
+          const coordinate = `${format(px)},${format(py)}`;
+          if (background && coordinate === previousProjected) return '';
+          const result = `${previousProjected ? 'L' : 'M'}${coordinate}`;
+          previousProjected = coordinate;
+          return result;
         })
+        .filter(Boolean)
         .join(' ') + (ring ? ' Z' : '')
     );
   };
-  const paths = (g: Geometry, offset: number): string[] => {
+  const paths = (g: Geometry, offset: number, background = false): string[] => {
     if (g.type === 'LineString') return [line(g.coordinates, offset)];
     if (g.type === 'MultiLineString') return g.coordinates.map((p) => line(p, offset));
-    if (g.type === 'Polygon') return [g.coordinates.map((p) => line(p, offset, true)).join(' ')];
+    if (g.type === 'Polygon')
+      return [g.coordinates.map((p) => line(p, offset, true, background)).join(' ')];
     if (g.type === 'MultiPolygon')
-      return g.coordinates.map((p) => p.map((r) => line(r, offset, true)).join(' '));
+      return g.coordinates.map((p) => p.map((r) => line(r, offset, true, background)).join(' '));
     return [];
   };
   const shapes: string[] = [],
     legend: string[] = [];
+  const backgroundFills: string[] = [],
+    backgrounds: string[] = [];
+  for (const layer of options.backgrounds?.layers ?? []) {
+    const geometry: string[] = [];
+    for (const g of layer.geometries) {
+      let west = Infinity,
+        east = -Infinity,
+        south = Infinity,
+        north = -Infinity;
+      const rings =
+        g.type === 'MultiPolygon'
+          ? g.coordinates.flat()
+          : g.type === 'Polygon'
+            ? g.coordinates
+            : [geometryPositions(g)];
+      for (const ring of rings) {
+        let previous = center;
+        for (const p of ring) {
+          const x = unwrapLongitude(p[0], previous);
+          previous = x;
+          west = Math.min(west, x);
+          east = Math.max(east, x);
+          south = Math.min(south, p[1]);
+          north = Math.max(north, p[1]);
+        }
+      }
+      if (north < extent[1] || south > extent[3]) continue;
+      for (const offset of [-360, 0, 360])
+        if (east + offset >= extent[0] && west + offset <= extent[2])
+          geometry.push(...paths(g, offset, true));
+    }
+    const d = geometry.join(' ');
+    if (layer.setting.id === 'world-countries')
+      backgroundFills.push(
+        `<g data-background-fill="world-countries" aria-hidden="true" pointer-events="none"><path d="${d}" fill="#e1e8e4" fill-rule="evenodd"/></g>`,
+      );
+    backgrounds.push(
+      `<g data-background-id="${xml(layer.setting.id)}" aria-hidden="true" pointer-events="none"><path d="${d}" fill="none" stroke="${xml(layer.setting.color)}" stroke-width="0.8"/></g>`,
+    );
+  }
   let legendY = 24;
   for (const layer of content.layers) {
     const style = styles.find((s) => s.layerId === layer.id) ?? defaultGeoStyle(layer.id);
@@ -237,8 +301,8 @@ export function renderGeoSvg(
     [...credits, 'CRS84 · equirectangular · explanatory map; not distance/area measurement']
       .map(
         (t, i) =>
-          `<text x="8" y="${height - footerHeight + 13 + i * 13}" font-size="10" fill="#333333">${xml(t)}</text>`,
+          `<text x="8" y="${height - footerHeight + (i + 1) * creditLineHeight}" font-size="${(10 * creditLineHeight) / 13}" fill="#333333">${xml(t)}</text>`,
       )
       .join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="${options.interactive ? 'group' : 'img'}" aria-label="Geographic map, longitude latitude equirectangular display; distances and areas are not measurements"><defs><clipPath id="geo-map-clip"><rect width="${mapWidth}" height="${mapHeight}"/></clipPath></defs><rect width="${width}" height="${height}" fill="#ffffff"/><rect width="${mapWidth}" height="${mapHeight}" fill="#f1f5f7"/><g clip-path="url(#geo-map-clip)">${shapes.join('')}</g>${legendWidth ? `<g fill="#142b3d" font-family="sans-serif">${legend.join('')}</g>` : ''}${footer}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="${options.interactive ? 'group' : 'img'}" aria-label="Geographic map, longitude latitude equirectangular display; distances and areas are not measurements"><defs><clipPath id="geo-map-clip"><rect width="${mapWidth}" height="${mapHeight}"/></clipPath></defs><rect width="${width}" height="${height}" fill="#ffffff"/><rect width="${mapWidth}" height="${mapHeight}" fill="#f1f5f7"/><g clip-path="url(#geo-map-clip)">${backgroundFills.join('')}${backgrounds.join('')}${shapes.join('')}</g>${legendWidth ? `<g fill="#142b3d" font-family="sans-serif">${legend.join('')}</g>` : ''}${footer}</svg>`;
 }

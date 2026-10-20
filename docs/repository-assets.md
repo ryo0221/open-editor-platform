@@ -7,7 +7,7 @@ access to private repositories or historical evidence archives.
 
 ## Fonts
 
-Run `npm ci` followed by `npm run fonts:fetch`. Node >=20.19 and Python >=3.10
+Run `npm ci` followed by `npm run fonts:fetch`. Node >=22.13 and Python >=3.10
 are required; no pip install is needed. The official Noto CJK Sans2.004 archive and
 FontTools wheel are pinned by URL, size and SHA-256 in scripts/office/fonts-source.json.
 All four output font hashes are checked at startup, test, build and preview.

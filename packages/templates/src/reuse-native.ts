@@ -193,6 +193,29 @@ export function nativePropertyPatch(
 ): Record<string, unknown> {
   return nativePropertyPatchFor(createReusableNativeEditor(content), address, field, type, value);
 }
+type PropertyPatch = Record<string, unknown> | undefined;
+const dataProjections = [
+  'Grid',
+  'Form',
+  'Chart',
+  'Kanban',
+  'Dashboard',
+  'Timeline',
+  'Roadmap',
+  'Summary',
+];
+const dataFormats = ['decimal', 'currency', 'percent', 'iso-date'];
+const documentStyleKeys = [
+  'color',
+  'highlight',
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'lineHeight',
+  'spaceBefore',
+  'spaceAfter',
+];
+const isHexColor = (value: JsonValue) => /^#[a-f0-9]{6}$/i.test(String(value));
 function nativePropertyPatchFor(
   editor: ReusableNativeEditor,
   address: string,
@@ -205,167 +228,235 @@ function nativePropertyPatchFor(
     rejectReuse('part-missing', 'Public property targets a missing native part', {
       nativeId: address,
     });
-  if (editor.domain === 'data') {
-    const view = 'projection' in part;
-    if (view && field === 'name' && type === 'text' && String(value).trim()) return { name: value };
-    if (view && field === 'accent' && type === 'text' && /^#[a-f0-9]{6}$/i.test(String(value)))
-      return { accent: value };
-    if (
-      view &&
-      field === 'projection' &&
-      type === 'enum' &&
-      ['Grid', 'Form', 'Chart', 'Kanban', 'Dashboard', 'Timeline', 'Roadmap', 'Summary'].includes(
-        String(value),
-      )
-    )
-      return { projection: value };
-    if (
-      !view &&
-      field === 'decimals' &&
-      type === 'number' &&
-      Number.isInteger(value) &&
-      Number(value) >= 0 &&
-      Number(value) <= 8
-    )
-      return { decimals: value };
-    if (
-      !view &&
-      field === 'format' &&
-      type === 'enum' &&
-      ['decimal', 'currency', 'percent', 'iso-date'].includes(String(value))
-    )
-      return { format: value };
-    rejectReuse(
-      'property-target',
-      'Data schema, formulas and relations require migration, not style properties',
-      { nativeId: address, path: field },
-    );
-  }
-  if (editor.domain === 'whiteboard' && !part.kind) {
-    if (
-      ((field === 'label' && 'from' in part) || (field === 'title' && 'title' in part)) &&
-      type === 'text'
-    )
-      return { [field]: value ?? '' };
-    if (
-      field === 'background' &&
-      'title' in part &&
-      type === 'text' &&
-      /^#[a-f0-9]{6}$/i.test(String(value))
-    )
-      return { background: value };
-    if (
-      'from' in part &&
-      field === 'stroke' &&
-      type === 'text' &&
-      /^#[a-f0-9]{6}$/i.test(String(value))
-    )
-      return { stroke: value };
-    if (
-      'from' in part &&
-      field === 'routing' &&
-      type === 'enum' &&
-      ['straight', 'elbow', 'curve'].includes(String(value))
-    )
-      return { routing: value };
-    rejectReuse('property-target', 'Unsupported connector or Section property', {
-      nativeId: address,
-      path: field,
-    });
-  }
-  if (field === 'visible' && type === 'boolean') return { hidden: !value };
-  if (field === 'hidden' && type === 'boolean') return { hidden: value };
-  if (field === 'text' && type === 'text')
-    return reusablePartText(part) === (value ?? '')
-      ? { text: value ?? '' }
-      : editor.domain === 'document'
-        ? { text: value ?? '', rich: [{ text: value ?? '' }] }
-        : { text: value ?? '', runs: [{ text: value ?? '' }] };
-  if (field === 'rich' && type === 'rich-text') {
-    const spans = (value ?? []) as { text: string; [key: string]: JsonValue }[];
-    const limitation = richLimitation(editor.domain === 'document', part);
-    if (limitation) rejectReuse('rich-format', limitation, { nativeId: address, path: field });
-    if (
-      !(editor.domain === 'document') &&
-      spans.some((span) =>
-        Object.keys(span).some((key) => key !== 'text' && !canvasRichMarks.includes(key)),
-      )
-    )
-      rejectReuse(
-        'rich-format',
-        'This canvas supports bold, italic, underline, strike and color in public rich input',
-        { nativeId: address, path: field },
-      );
-    return editor.domain === 'document'
-      ? { rich: clone(spans), text: spans.map((s) => s.text).join('') }
-      : {
-          runs: spans.map(({ text, ...style }) => ({ text, style })),
-          text: spans.map((s) => s.text).join(''),
-        };
-  }
-  if (field === 'src' && type === 'asset' && (part.type === 'image' || part.kind === 'image'))
-    return { src: value ?? (editor.domain === 'design' ? '' : undefined) };
-  if (editor.domain === 'document') {
-    if (!['paragraph', 'heading'].includes(String(part.type)))
-      rejectReuse('property-target', 'Document attributes target paragraphs/headings only', {
-        nativeId: address,
-        path: field,
-      });
-    if (field === 'align' && type === 'enum') return { align: value };
-    if (field === 'indent' && type === 'number') return { indent: value };
-    if (field.startsWith('style.') && ['number', 'enum', 'text'].includes(type)) {
-      const key = field.slice(6);
-      if (
-        ![
-          'color',
-          'highlight',
-          'fontFamily',
-          'fontSize',
-          'fontWeight',
-          'lineHeight',
-          'spaceBefore',
-          'spaceAfter',
-        ].includes(key)
-      )
-        rejectReuse('property-target', 'Unsupported Document style target', { path: field });
-      return { style: { ...((part.style as object) ?? {}), [key]: value } };
-    }
-  } else {
-    if (
-      editor.domain === 'slide' &&
-      field === 'background' &&
-      !part.type &&
-      type === 'text' &&
-      /^#[a-f0-9]{6}$/i.test(String(value))
-    )
-      return { background: value };
-    if (
-      ['fill', 'stroke', 'color'].includes(field) &&
-      ['text', 'enum'].includes(type) &&
-      /^#[a-f0-9]{6}$/i.test(String(value))
-    )
-      return editor.domain === 'whiteboard' && part.kind === 'text' && field === 'color'
-        ? { color: value, typography: { ...(part.typography as object), color: value } }
-        : { [field]: value };
-    if (['opacity', 'strokeWidth', 'radius'].includes(field) && type === 'number')
-      return { [field]: value };
-    if (field === 'typography.fontSize' && type === 'number')
-      return { typography: { fontSize: value } };
-    if (field === 'typography.align' && type === 'enum') return { typography: { align: value } };
-    if (
-      field === 'layout.gap' &&
-      type === 'number' &&
-      editor.domain === 'design' &&
-      part.type === 'frame' &&
-      part.layout
-    )
-      return { layout: { gap: value } };
-  }
+  if (editor.domain === 'data') return dataPropertyPatch(part, address, field, type, value);
+  if (editor.domain === 'whiteboard' && !part.kind)
+    return boardContainerPropertyPatch(part, address, field, type, value);
+  const patch =
+    sharedPropertyPatch(editor.domain, part, address, field, type, value) ??
+    (editor.domain === 'document'
+      ? documentPropertyPatch(part, address, field, type, value)
+      : canvasPropertyPatch(editor.domain, part, field, type, value));
+  if (patch) return patch;
   rejectReuse('property-target', 'Unsupported typed native property target', {
     nativeId: address,
     path: field,
   });
 }
+/** Data views expose name/accent/projection; columns expose display decimals/format. */
+function dataPropertyPatch(
+  part: Part,
+  address: string,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): Record<string, unknown> {
+  const patch =
+    'projection' in part
+      ? dataViewPropertyPatch(field, type, value)
+      : dataColumnPropertyPatch(field, type, value);
+  if (patch) return patch;
+  rejectReuse(
+    'property-target',
+    'Data schema, formulas and relations require migration, not style properties',
+    { nativeId: address, path: field },
+  );
+}
+function dataViewPropertyPatch(field: string, type: PublicProperty['type'], value: JsonValue) {
+  if (field === 'name' && type === 'text' && String(value).trim()) return { name: value };
+  if (field === 'accent' && type === 'text' && isHexColor(value)) return { accent: value };
+  if (field === 'projection' && type === 'enum' && dataProjections.includes(String(value)))
+    return { projection: value };
+  return undefined;
+}
+function dataColumnPropertyPatch(field: string, type: PublicProperty['type'], value: JsonValue) {
+  if (
+    field === 'decimals' &&
+    type === 'number' &&
+    Number.isInteger(value) &&
+    Number(value) >= 0 &&
+    Number(value) <= 8
+  )
+    return { decimals: value };
+  if (field === 'format' && type === 'enum' && dataFormats.includes(String(value)))
+    return { format: value };
+  return undefined;
+}
+/** Whiteboard connectors and Sections accept only their own label, color and routing fields. */
+function boardContainerPropertyPatch(
+  part: Part,
+  address: string,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): Record<string, unknown> {
+  const patch =
+    boardConnectorPropertyPatch(part, field, type, value) ??
+    boardSectionPropertyPatch(part, field, type, value);
+  if (patch) return patch;
+  rejectReuse('property-target', 'Unsupported connector or Section property', {
+    nativeId: address,
+    path: field,
+  });
+}
+function boardConnectorPropertyPatch(
+  part: Part,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (!('from' in part)) return undefined;
+  if (field === 'label' && type === 'text') return { [field]: value ?? '' };
+  if (field === 'stroke' && type === 'text' && isHexColor(value)) return { stroke: value };
+  if (
+    field === 'routing' &&
+    type === 'enum' &&
+    ['straight', 'elbow', 'curve'].includes(String(value))
+  )
+    return { routing: value };
+  return undefined;
+}
+function boardSectionPropertyPatch(
+  part: Part,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (!('title' in part)) return undefined;
+  if (field === 'title' && type === 'text') return { [field]: value ?? '' };
+  if (field === 'background' && type === 'text' && isHexColor(value)) return { background: value };
+  return undefined;
+}
+/** Visibility, text, rich text and image source targets common to every rendered domain. */
+function sharedPropertyPatch(
+  domain: ReusableNativeEditor['domain'],
+  part: Part,
+  address: string,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (field === 'visible' && type === 'boolean') return { hidden: !value };
+  if (field === 'hidden' && type === 'boolean') return { hidden: value };
+  if (field === 'text' && type === 'text') return textPropertyPatch(domain, part, value);
+  if (field === 'rich' && type === 'rich-text')
+    return richPropertyPatch(domain, part, address, field, value);
+  if (field === 'src' && type === 'asset' && (part.type === 'image' || part.kind === 'image'))
+    return { src: value ?? (domain === 'design' ? '' : undefined) };
+  return undefined;
+}
+function textPropertyPatch(domain: ReusableNativeEditor['domain'], part: Part, value: JsonValue) {
+  return reusablePartText(part) === (value ?? '')
+    ? { text: value ?? '' }
+    : domain === 'document'
+      ? { text: value ?? '', rich: [{ text: value ?? '' }] }
+      : { text: value ?? '', runs: [{ text: value ?? '' }] };
+}
+function richPropertyPatch(
+  domain: ReusableNativeEditor['domain'],
+  part: Part,
+  address: string,
+  field: string,
+  value: JsonValue,
+) {
+  const spans = (value ?? []) as { text: string; [key: string]: JsonValue }[];
+  const limitation = richLimitation(domain === 'document', part);
+  if (limitation) rejectReuse('rich-format', limitation, { nativeId: address, path: field });
+  if (
+    !(domain === 'document') &&
+    spans.some((span) =>
+      Object.keys(span).some((key) => key !== 'text' && !canvasRichMarks.includes(key)),
+    )
+  )
+    rejectReuse(
+      'rich-format',
+      'This canvas supports bold, italic, underline, strike and color in public rich input',
+      { nativeId: address, path: field },
+    );
+  return domain === 'document'
+    ? { rich: clone(spans), text: spans.map((s) => s.text).join('') }
+    : {
+        runs: spans.map(({ text, ...style }) => ({ text, style })),
+        text: spans.map((s) => s.text).join(''),
+      };
+}
+/** Document paragraph/heading alignment, indent and inline style targets. */
+function documentPropertyPatch(
+  part: Part,
+  address: string,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (!['paragraph', 'heading'].includes(String(part.type)))
+    rejectReuse('property-target', 'Document attributes target paragraphs/headings only', {
+      nativeId: address,
+      path: field,
+    });
+  if (field === 'align' && type === 'enum') return { align: value };
+  if (field === 'indent' && type === 'number') return { indent: value };
+  if (field.startsWith('style.') && ['number', 'enum', 'text'].includes(type)) {
+    const key = field.slice(6);
+    if (!documentStyleKeys.includes(key))
+      rejectReuse('property-target', 'Unsupported Document style target', { path: field });
+    return { style: { ...((part.style as object) ?? {}), [key]: value } };
+  }
+  return undefined;
+}
+/** Canvas page background and color targets; geometry and typography follow. */
+function canvasPropertyPatch(
+  domain: ReusableNativeEditor['domain'],
+  part: Part,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (
+    domain === 'slide' &&
+    field === 'background' &&
+    !part.type &&
+    type === 'text' &&
+    isHexColor(value)
+  )
+    return { background: value };
+  if (
+    ['fill', 'stroke', 'color'].includes(field) &&
+    ['text', 'enum'].includes(type) &&
+    isHexColor(value)
+  )
+    return domain === 'whiteboard' && part.kind === 'text' && field === 'color'
+      ? { color: value, typography: { ...(part.typography as object), color: value } }
+      : { [field]: value };
+  return canvasShapePropertyPatch(domain, part, field, type, value);
+}
+function canvasShapePropertyPatch(
+  domain: ReusableNativeEditor['domain'],
+  part: Part,
+  field: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+): PropertyPatch {
+  if (['opacity', 'strokeWidth', 'radius'].includes(field) && type === 'number')
+    return { [field]: value };
+  if (field === 'typography.fontSize' && type === 'number')
+    return { typography: { fontSize: value } };
+  if (field === 'typography.align' && type === 'enum') return { typography: { align: value } };
+  if (
+    field === 'layout.gap' &&
+    type === 'number' &&
+    domain === 'design' &&
+    part.type === 'frame' &&
+    part.layout
+  )
+    return { layout: { gap: value } };
+  return undefined;
+}
+type AddSuggestion = (
+  field: string,
+  label: string,
+  type: PublicProperty['type'],
+  value: JsonValue,
+  extra?: Partial<PublicProperty>,
+) => void;
 /** Human authoring choices use the same finite native targets as headless properties. */
 export function publicPropertySuggestions(
   content: NativeContent,
@@ -374,77 +465,94 @@ export function publicPropertySuggestions(
   const native = reusableParts(content).get(part.nativeId);
   if (!native) return [];
   const options: Omit<PublicProperty, 'id'>[] = [];
-  const add = (
-    field: string,
-    label: string,
-    type: PublicProperty['type'],
-    value: JsonValue,
-    extra: Partial<PublicProperty> = {},
-  ) =>
+  const add: AddSuggestion = (field, label, type, value, extra = {}) =>
     options.push({ label, type, default: value, ...extra, targets: [{ partId: part.id, field }] });
   if (isStructuredData(content)) {
-    if ('projection' in native) {
-      add('name', 'ビュー名', 'text', native.name as JsonValue);
-      add('accent', 'グラフの色', 'text', (native.accent as JsonValue) ?? '#5269c8');
-      add('projection', '表示形式', 'enum', native.projection as JsonValue, {
-        options: ['Grid', 'Form', 'Chart', 'Kanban', 'Dashboard', 'Timeline', 'Roadmap', 'Summary'],
-      });
-    } else if (['number', 'formula', 'date'].includes(String(native.type))) {
-      add('decimals', '小数桁', 'number', (native.decimals as JsonValue) ?? 0, { min: 0, max: 8 });
-      add('format', '数値・日付の表示', 'enum', (native.format as JsonValue) || 'decimal', {
-        options: ['decimal', 'currency', 'percent', 'iso-date'],
-      });
-    }
+    addDataSuggestions(native, add);
     return options;
   }
   if (isWhiteboard(content) && !native.kind) {
-    if ('from' in native) {
-      add('label', '接続のラベル', 'text', native.label as JsonValue);
-      add('stroke', '線の色', 'text', (native.stroke as JsonValue) ?? '#5b7161');
-      add('routing', '線の経路', 'enum', (native.routing as JsonValue) ?? 'straight', {
-        options: ['straight', 'elbow', 'curve'],
-      });
-    } else {
-      add('title', 'Section名', 'text', native.title as JsonValue);
-      add('background', 'Section背景', 'text', native.background as JsonValue);
-    }
+    addBoardContainerSuggestions(native, add);
     return options;
   }
-  const text = isDocument(content)
+  const text = isTextPart(content, native);
+  if (text) addTextSuggestions(content, native, add);
+  addVisibilitySuggestions(content, native, text, add);
+  addSurfaceSuggestions(content, native, add);
+  return options;
+}
+function addDataSuggestions(native: Part, add: AddSuggestion) {
+  if ('projection' in native) {
+    add('name', 'ビュー名', 'text', native.name as JsonValue);
+    add('accent', 'グラフの色', 'text', (native.accent as JsonValue) ?? '#5269c8');
+    add('projection', '表示形式', 'enum', native.projection as JsonValue, {
+      options: [...dataProjections],
+    });
+  } else if (['number', 'formula', 'date'].includes(String(native.type))) {
+    add('decimals', '小数桁', 'number', (native.decimals as JsonValue) ?? 0, { min: 0, max: 8 });
+    add('format', '数値・日付の表示', 'enum', (native.format as JsonValue) || 'decimal', {
+      options: [...dataFormats],
+    });
+  }
+}
+function addBoardContainerSuggestions(native: Part, add: AddSuggestion) {
+  if ('from' in native) {
+    add('label', '接続のラベル', 'text', native.label as JsonValue);
+    add('stroke', '線の色', 'text', (native.stroke as JsonValue) ?? '#5b7161');
+    add('routing', '線の経路', 'enum', (native.routing as JsonValue) ?? 'straight', {
+      options: ['straight', 'elbow', 'curve'],
+    });
+  } else {
+    add('title', 'Section名', 'text', native.title as JsonValue);
+    add('background', 'Section背景', 'text', native.background as JsonValue);
+  }
+}
+function isTextPart(content: NativeContent, native: Part) {
+  return isDocument(content)
     ? ['paragraph', 'heading'].includes(String(native.type))
     : isWhiteboard(content)
       ? !!native.kind && !['group', 'freehand'].includes(String(native.kind))
       : native.type === 'text';
-  if (text) {
-    add('text', '文字', 'text', reusablePartText(native));
-    if (!reusableRichLimitation(content, native))
-      add('rich', '装飾付き文字', 'rich-text', reusablePartRich(native));
-    const style = (isDocument(content) ? native.style : native.typography) as
-      | Record<string, JsonValue>
-      | undefined;
-    add(
-      isDocument(content) ? 'style.fontSize' : 'typography.fontSize',
-      isDocument(content) ? '文字サイズ (pt)' : '文字サイズ (px)',
-      'number',
-      style?.fontSize ??
-        (isDocument(content)
-          ? 12
-          : isWhiteboard(content)
-            ? native.kind === 'sticky'
-              ? 22
-              : 18
-            : 28),
-      { min: 1, max: isDocument(content) ? 384 : 512 },
-    );
-    add(
-      isDocument(content) ? 'align' : 'typography.align',
-      '文字揃え',
-      'enum',
-      ((isDocument(content) ? native.align : style?.align) as JsonValue) ?? 'left',
-      { options: ['left', 'center', 'right'] },
-    );
-    if (isDocument(content)) add('style.color', '文字色', 'text', style?.color ?? '#202d28');
-  }
+}
+function defaultFontSize(content: NativeContent, native: Part) {
+  return isDocument(content)
+    ? 12
+    : isWhiteboard(content)
+      ? native.kind === 'sticky'
+        ? 22
+        : 18
+      : 28;
+}
+function addTextSuggestions(content: NativeContent, native: Part, add: AddSuggestion) {
+  const document = isDocument(content);
+  add('text', '文字', 'text', reusablePartText(native));
+  if (!reusableRichLimitation(content, native))
+    add('rich', '装飾付き文字', 'rich-text', reusablePartRich(native));
+  const style = (document ? native.style : native.typography) as
+    | Record<string, JsonValue>
+    | undefined;
+  add(
+    document ? 'style.fontSize' : 'typography.fontSize',
+    document ? '文字サイズ (pt)' : '文字サイズ (px)',
+    'number',
+    style?.fontSize ?? defaultFontSize(content, native),
+    { min: 1, max: document ? 384 : 512 },
+  );
+  add(
+    document ? 'align' : 'typography.align',
+    '文字揃え',
+    'enum',
+    ((document ? native.align : style?.align) as JsonValue) ?? 'left',
+    { options: ['left', 'center', 'right'] },
+  );
+  if (document) add('style.color', '文字色', 'text', style?.color ?? '#202d28');
+}
+function addVisibilitySuggestions(
+  content: NativeContent,
+  native: Part,
+  text: boolean,
+  add: AddSuggestion,
+) {
   if (
     text ||
     isDesign(content) ||
@@ -454,6 +562,8 @@ export function publicPropertySuggestions(
     add('visible', '表示', 'boolean', !native.hidden);
   if (native.type === 'image' || native.kind === 'image')
     add('src', '画像', 'asset', (native.src as JsonValue) || null);
+}
+function addSurfaceSuggestions(content: NativeContent, native: Part, add: AddSuggestion) {
   if (!isDocument(content) && !(isDeck(content) && !native.type)) {
     add(
       isWhiteboard(content) ? 'color' : 'fill',
@@ -470,7 +580,6 @@ export function publicPropertySuggestions(
       min: 0,
       max: 10000,
     });
-  return options;
 }
 export function materializePartStyle(
   content: NativeContent,

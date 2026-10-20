@@ -5,5 +5,6 @@ entry exposes the reviewed timeline definition/commands/fixture over the exact t
 schema-edit experiment and a Host-injected controller. Both use public package dependencies.
 
 See [domain handoff](EDIT-HANDOFF.md) and installed Host/native save checkpoint.
+Shared v0/v1/v2 internals and their equivalence checks: 2026-10-20 refactor record.
 This edits/saves metadata JSON only; no acquired media bytes, playback, decoding, thumbnails,
 waveforms, export or portable media. Independent review and full Video/M4 acceptance remain open.

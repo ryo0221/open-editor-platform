@@ -1,11 +1,15 @@
 # React UIの導入・独立Host・出力組込
 
 [公開契約](react-ui-contract.md) / ADR010 /
-W1–W5受入台帳。性能調整・追加測定は停止中。
+W1–W5受入台帳 / [固定条件の最終受入](verification/issue-24/README.md)。関係外の性能調整・追加測定は停止中。
 
 React UIはDesign Editorとは別の画面・データモデルである。Designは図形/テキスト/フレームを
 編集してSVG/PNGを出力し、React UIは元React部品のprops/slot/binding/layoutを編集してTSXを出力する。
 Artifact保存・版管理・Undo・共同編集・token契約は共通基盤を使う。
+
+local Hostは`EditorSession.executeView` / `undoView` / `redoView`の不変snapshotを
+Surfaceへ渡せる。3メソッドは同じ正本・履歴・検証を使い、既存の`content` / `execute` /
+`undo` / `redo`は引き続き呼出側が変更できる独立copyを返す。共有時は既存のauthority経路を使う。
 
 ## 起動して通常UIで使う
 
@@ -31,6 +35,8 @@ preview幅は390/1024/1400px。Save version、History、native JSONは既存Arti
 pureは`@editor-platform/react-ui-core`、通常Viewは`@editor-platform/react-ui`、
 別originでのHost rendererは`@editor-platform/react-ui-preview`の公開entrypointを使う。
 ReactUiSurfaceへcontent/readOnly/execute/select/runtimeを渡し、既存EditorSessionのcommand経路へ接続する。
+contentはReactのstate snapshotとして更新ごとに新しい参照を渡す。Surfaceはその公開snapshotを
+検査・所有して表示とpreview requestに使い、状態表示だけの変更では構成を作り直さない。
 元部品関数をEditorのmain frameへ渡さない。
 
 実行できる例は`apps/react-ui-reference`にある。`components.tsx`のCard/Button/Text/Image/Inputと
@@ -144,7 +150,7 @@ PNG/画面案JSONをtest outputへ保存する。TSXと画面案は別成果で�
 
 機能fixtureはReact/ReactDOM 19.1.1、元5部品とText新版、5 node、深さ2、2 breakpoint、
 Provider/独自CSS/既存PNG、product/form/revisedである。Host tokens例も通常UIで検証する。
-browserの正確な版と結果はW5記録を参照する。500node/21部品の性能は未測定・保留。
+browserの正確な版・source・結果は[最終記録](verification/issue-24/README.md)を参照する。500node/21部品の固定95 Hard条件と7 native回帰を通過し、努力目標差・未検証範囲を記録した。
 
 対応は公開契約のJSON値、静的object path、void callback、ReactNode slot、layout subset。
 任意アプリ逆変換、部品内部DOM編集、JS式/非voidイベント/非直列化props、SSR/RSC全面対応、

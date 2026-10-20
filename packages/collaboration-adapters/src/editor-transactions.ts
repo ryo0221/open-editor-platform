@@ -29,6 +29,7 @@ import { slideCodec, designCodec, whiteboardCodec } from './canvas';
 import { editorAssetCodec } from './editor-assets';
 import { withNativeReuse } from './reuse';
 import { reactUiPatchAction } from './react-ui';
+import { prepareAnimationEditorActions } from './animation-command';
 import type { ReactUiDocument } from '@editor-platform/react-ui-core';
 import { dataCodec } from './data';
 import {
@@ -38,6 +39,7 @@ import {
   mapCanvasTextAnchor,
 } from './canvas-text';
 import { canvasTextReplacement } from '@editor-platform/canvas-ui/text-engine';
+import { designCommandReads } from './design-command-reads';
 import { EditorState } from 'prosemirror-state';
 import type { TextRun } from '@editor-platform/editor-core';
 
@@ -79,6 +81,7 @@ const objectFields = [
   'fill',
   'src',
   'chart',
+  'animation',
   'table',
   'groupId',
   ...visual,
@@ -386,6 +389,7 @@ function contentReads<T>(schema: Schema<T>, content: T, ids: readonly string[]) 
           ]),
         ]),
     ];
+  if (schema.base.domain === 'design') return designCommandReads(content as DesignContent, ids);
   const { byId, children } = geometryIndex(schema, content),
     selected = new Set(ids),
     pending = [...ids];
@@ -545,6 +549,7 @@ function editorCommandActions<T>(
   state: Snapshot<T>,
   command: EditorCommand<T>,
 ): { actions: Action[]; origin: Origin; transactionId?: string } | undefined {
+  if (codec.domain === 'animation') return prepareAnimationEditorActions(codec, state, command);
   if (codec.domain === 'react-ui') {
     const after = command.apply(command.readonlyInput ? state.content : copy(state.content));
     const action = reactUiPatchAction(
@@ -1127,6 +1132,21 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
       const geometryIds = changes.flatMap((change) =>
         change.kind === 'field' && layoutFields.has(change.field) ? [change.id] : [],
       );
+      if (base.domain === 'design') {
+        const overrideIds = changes.flatMap((change) =>
+          change.kind === 'field' &&
+          change.collection === 'elements' &&
+          change.field === 'overrides'
+            ? [change.id]
+            : [],
+        );
+        // Derive these at the trusted boundary as well, including newly referenced definitions.
+        for (const key of [
+          ...designCommandReads(before as DesignContent, overrideIds),
+          ...designCommandReads(content as DesignContent, overrideIds),
+        ])
+          required.add(key);
+      }
       const beforeGeometry = base.domain === 'data' ? undefined : geometryIndex(schema, before),
         afterGeometry = base.domain === 'data' ? undefined : geometryIndex(schema, content);
       for (const key of [

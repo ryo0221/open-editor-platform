@@ -150,8 +150,9 @@ Office対応では[export契約](office-export-contract.md)と[bounded import](o
 3. Desktopと狭いcontainer/mobile viewportで操作し、keyboard/focus、clipboard、IME、scrollを対応範囲で確認する。
 4. 宣言したshared/template/reuse/format等の条件を検証する。
 5. [受け入れ条件](editor-acceptance.md)のIDごとに[検証報告](editor-verification-template.md)へ結果と証拠をまとめる。
+6. [文書の記載方針](documentation-guide.md)に従って契約・利用ガイド・statusを更新する。READMEは概要・起動・主要な導線が変わる場合に更新する。
 
-Playwright specは[共通fixture](../tests/e2e/fixtures.ts)を使い、console/page errorで失敗させます。[Playwright設定](../playwright.config.ts)ではmobile projectが`*-mobile.spec.ts`を対象にしています。Specを追加しただけでproduction/CI/cross-browserの別設定にも含まれるとは限らないため、実際の検出・実行対象を確認します。
+Playwright specは[共通fixture](../tests/e2e/fixtures.ts)を使い、console/page errorで失敗させます。[Playwright設定](../playwright.config.ts)ではmobile projectが`*-mobile.spec.ts`を対象にしています。Specを追加しただけでproduction/CI/cross-browserの[名前付きスイート](../tests/playwright/suites.ts)にも含まれるとは限らないため、`E2E_SUITE=<name> npx playwright test --list`で実際の検出・実行対象を確認します。
 
 Screenshotを保存するだけでなく、panel、focus、overflow、表示内容を確認します。合成composition eventはOSのnative IMEの証拠ではなく、mobile viewportは物理端末の証拠ではありません。何を実施したかを正確に書いてください。
 

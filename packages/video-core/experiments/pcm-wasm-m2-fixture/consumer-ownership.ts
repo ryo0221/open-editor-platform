@@ -1,6 +1,6 @@
 /** Isolated ownership fixtures, never imported by real M2 or Host consumers. */
-import { Ledger } from '../pcm-wasm-r0/kernel';
-import { ScheduledAudio } from '../pcm-wasm-v1/scheduled-audio';
+import { Ledger } from '../../src/pcm/kernel';
+import { ScheduledAudio } from '../../src/pcm/scheduled-audio';
 import type { PcmLease } from './port';
 
 /** Local cumulative ceiling inside the injected shared realm; close never resets live leases. */

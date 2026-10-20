@@ -10,6 +10,17 @@
 
 ## Native と互換性
 
+2026-10-19 の #294/#295 では、新たな `setDesignInteractions` /
+`setDesignPrototype` および patch の書き込み時に、指定された遷移・開始・flow の
+frame が実在することを検証する。frame の削除後や既存 JSON の参照切れは従来どおり
+保持・診断し、無関係な編集で黙って書き換えない。JSON intent の API は
+[headless 契約](design-headless-contract.md)を参照。
+
+`setDesignPrototype` は設定を書く際に、未指定の `startFrameId` キーを省く。
+開始 frame が未指定かつ flows が空なら `prototyping` 自体を削除するため、
+設定の追加と取り消しで従来の未指定状態へ戻る。開くだけでは書き換えない。
+既存の明示的な空設定や保存版を読み込み時に正規化することはない。
+
 Design の schemaVersion 1/2 を保持し、要素と component template に任意の `interactions`、content に任意の `prototyping` を追加する。interaction の trigger は click/tap、action は navigate/switch/back/open-overlay/close-overlay。参照は frame の安定 ID。空の interactions は継承を明示的に無効化し、未指定は既存部品の定義を継承する。instance の部品は既存の overrides を使う。
 
 prototyping は独自 schemaVersion 1、任意の startFrameId、ID・名前・frameIds の順序を持つ flows。上限は要素あたり 2 triggers、flow 100 本、各 flow 256 frames、文字列 256 文字。実行履歴は 256、overlay は 8、instance 展開は 16 段。flow 診断は各段の異なる履歴候補 64 を上限とし、超過は route-limit 診断を返す。既存の hierarchy/geometry validator は維持する。

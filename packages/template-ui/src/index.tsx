@@ -7,5 +7,6 @@ export * from './reuse-view';
 export * from './reuse-annotation';
 export * from './reuse-style';
 export * from './reuse-batch';
+export { TokenSetForm, type TokenSetFormProps } from './reuse-token-form';
 import './styles.css';
 export * from './structure';

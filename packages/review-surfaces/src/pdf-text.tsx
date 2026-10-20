@@ -96,7 +96,7 @@ export function PdfTextLayer({
     container.replaceChildren();
     container.style.setProperty('--total-scale-factor', String(viewport.scale));
     void (async () => {
-      const engine = await import('pdfjs-dist');
+      const engine = await import('pdfjs-dist/legacy/build/pdf.mjs');
       const source = await pdf.getPage(page);
       const text = await source.getTextContent();
       if (cancelled) return;

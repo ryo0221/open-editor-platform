@@ -310,6 +310,83 @@ function components(adjacency: Map<string, string[]>, reverse: Map<string, strin
   }
   return { group, sizes };
 }
+interface EdgeTypeCounts {
+  incoming: Map<string, number>;
+  outgoing: Map<string, number>;
+  pairs: Map<string, number>;
+  cyclic: Set<string>;
+}
+type GraphEdgeList = GraphDocument['edges'];
+function countEdgeType(edges: GraphEdgeList, type: GraphEdgeType | undefined): EdgeTypeCounts {
+  const incoming = new Map<string, number>(),
+    outgoing = new Map<string, number>(),
+    pairs = new Map<string, number>(),
+    adjacency = new Map<string, string[]>(),
+    reverse = new Map<string, string[]>(),
+    cyclic = new Set<string>();
+  for (const edge of edges) {
+    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
+    outgoing.set(edge.from, (outgoing.get(edge.from) ?? 0) + 1);
+    const key = canonicalJson([edge.from, edge.to]);
+    pairs.set(key, (pairs.get(key) ?? 0) + 1);
+    for (const id of [edge.from, edge.to]) {
+      if (!adjacency.has(id)) adjacency.set(id, []);
+      if (!reverse.has(id)) reverse.set(id, []);
+    }
+    adjacency.get(edge.from)!.push(edge.to);
+    reverse.get(edge.to)!.push(edge.from);
+  }
+  if (type?.connection?.allowCycles === false) {
+    const { group, sizes } = components(adjacency, reverse);
+    for (const edge of edges)
+      if (
+        group.get(edge.from) === group.get(edge.to) &&
+        (edge.from === edge.to || sizes.get(group.get(edge.from)!)! > 1)
+      )
+        cyclic.add(edge.id);
+  }
+  return { incoming, outgoing, pairs, cyclic };
+}
+function countEdgesByType(graph: GraphDocument, profile: GraphProfile) {
+  const byType = new Map<string, GraphEdgeList>();
+  for (const edge of graph.edges) {
+    const list = byType.get(edge.type) ?? [];
+    list.push(edge);
+    byType.set(edge.type, list);
+  }
+  const counts = new Map<string, EdgeTypeCounts>();
+  for (const [type, edges] of byType) counts.set(type, countEdgeType(edges, profile.edges[type]));
+  return counts;
+}
+type AddGraphDiagnostic = (
+  id: string,
+  code: string,
+  message: string,
+  scope: 'node' | 'edge',
+) => void;
+function checkConnectionRules(
+  e: GraphEdgeList[number],
+  c: NonNullable<GraphEdgeType['connection']>,
+  nodes: Map<string, GraphDocument['nodes'][number]>,
+  count: EdgeTypeCounts,
+  add: AddGraphDiagnostic,
+) {
+  if (
+    (c.from && !c.from.includes(nodes.get(e.from)!.type)) ||
+    (c.to && !c.to.includes(nodes.get(e.to)!.type))
+  )
+    add(e.id, 'connection-type', 'This connection is outside the declared node types', 'edge');
+  if (c.allowSelf === false && e.from === e.to)
+    add(e.id, 'self', 'Self connections are prohibited', 'edge');
+  if (c.allowParallel === false && count.pairs.get(canonicalJson([e.from, e.to]))! > 1)
+    add(e.id, 'parallel', 'Parallel connections are prohibited', 'edge');
+  if (
+    (c.maxIncoming !== undefined && count.incoming.get(e.to)! > c.maxIncoming) ||
+    (c.maxOutgoing !== undefined && count.outgoing.get(e.from)! > c.maxOutgoing)
+  )
+    add(e.id, 'degree', 'Connection count exceeds the declared limit', 'edge');
+  if (count.cyclic.has(e.id)) add(e.id, 'cycle', 'Cycles are prohibited', 'edge');
+}
 export function validateGraph(graph: GraphDocument, profile: GraphProfile): GraphDiagnostic[] {
   assertGraphDocument(graph);
   assertGraphProfile(profile);
@@ -319,7 +396,7 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
     scope: 'graph',
     elementId: graph.id,
   });
-  const add = (id: string, code: string, message: string, scope: 'node' | 'edge') =>
+  const add: AddGraphDiagnostic = (id, code, message, scope) =>
     result.push({
       scope,
       elementId: id,
@@ -339,51 +416,7 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
       );
   }
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
-  const byType = new Map<string, typeof graph.edges>();
-  for (const edge of graph.edges) {
-    const list = byType.get(edge.type) ?? [];
-    list.push(edge);
-    byType.set(edge.type, list);
-  }
-  const counts = new Map<
-    string,
-    {
-      incoming: Map<string, number>;
-      outgoing: Map<string, number>;
-      pairs: Map<string, number>;
-      cyclic: Set<string>;
-    }
-  >();
-  for (const [type, edges] of byType) {
-    const incoming = new Map<string, number>(),
-      outgoing = new Map<string, number>(),
-      pairs = new Map<string, number>(),
-      adjacency = new Map<string, string[]>(),
-      reverse = new Map<string, string[]>(),
-      cyclic = new Set<string>();
-    for (const edge of edges) {
-      incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
-      outgoing.set(edge.from, (outgoing.get(edge.from) ?? 0) + 1);
-      const key = canonicalJson([edge.from, edge.to]);
-      pairs.set(key, (pairs.get(key) ?? 0) + 1);
-      for (const id of [edge.from, edge.to]) {
-        if (!adjacency.has(id)) adjacency.set(id, []);
-        if (!reverse.has(id)) reverse.set(id, []);
-      }
-      adjacency.get(edge.from)!.push(edge.to);
-      reverse.get(edge.to)!.push(edge.from);
-    }
-    if (profile.edges[type]?.connection?.allowCycles === false) {
-      const { group, sizes } = components(adjacency, reverse);
-      for (const edge of edges)
-        if (
-          group.get(edge.from) === group.get(edge.to) &&
-          (edge.from === edge.to || sizes.get(group.get(edge.from)!)! > 1)
-        )
-          cyclic.add(edge.id);
-    }
-    counts.set(type, { incoming, outgoing, pairs, cyclic });
-  }
+  const counts = countEdgesByType(graph, profile);
   for (const e of graph.edges) {
     const t = profile.edges[e.type];
     if (!t) {
@@ -393,22 +426,7 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
     result.push(...validateAttributes(e.attributes, t.schema, { scope: 'edge', elementId: e.id }));
     const c = t.connection;
     if (!c) continue;
-    if (
-      (c.from && !c.from.includes(nodes.get(e.from)!.type)) ||
-      (c.to && !c.to.includes(nodes.get(e.to)!.type))
-    )
-      add(e.id, 'connection-type', 'This connection is outside the declared node types', 'edge');
-    if (c.allowSelf === false && e.from === e.to)
-      add(e.id, 'self', 'Self connections are prohibited', 'edge');
-    const count = counts.get(e.type)!;
-    if (c.allowParallel === false && count.pairs.get(canonicalJson([e.from, e.to]))! > 1)
-      add(e.id, 'parallel', 'Parallel connections are prohibited', 'edge');
-    if (
-      (c.maxIncoming !== undefined && count.incoming.get(e.to)! > c.maxIncoming) ||
-      (c.maxOutgoing !== undefined && count.outgoing.get(e.from)! > c.maxOutgoing)
-    )
-      add(e.id, 'degree', 'Connection count exceeds the declared limit', 'edge');
-    if (count.cyclic.has(e.id)) add(e.id, 'cycle', 'Cycles are prohibited', 'edge');
+    checkConnectionRules(e, c, nodes, counts.get(e.type)!, add);
   }
   return result;
 }

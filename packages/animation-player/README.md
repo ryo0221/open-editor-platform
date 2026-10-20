@@ -13,7 +13,9 @@ Autoplay is opt-in, reduced-motion/hidden suppress it; explicit controls remain 
 `@editor-platform/animation-player/resources` is a separate PNG readiness spike, with
 exact bytes/hash, predecode pixel bounds and cancellation/release. It does not enable
 native image layers. Asset-bearing sources are rejected by the rectangle preview.
-No font, mask, path, text, JPEG decode, media export or Slide/Video integration claim.
+No font, mask, path, text, JPEG decode or media export is supported. The later
+[rectangle v1 Slide consumer](../../docs/animation/playground-slide-integration.md)
+uses the exact v1 Player below; Video integration remains separate.
 
 Milestone, pending decisions and #76 handoff.
 The preview/resources subpaths remain experimental. The separate v1 subpath below
@@ -24,7 +26,7 @@ Local fixture commands from repository root (existing dependencies required):
 
 ```sh
 npx vite build --config packages/animation-player/vite.config.ts
-npx playwright test --config packages/animation-player/playwright.config.ts
+E2E_SUITE=animation-player npx playwright test
 ```
 
 Production output is `/tmp/animation-player-fixture-dist`. The fixture is a private local

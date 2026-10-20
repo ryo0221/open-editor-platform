@@ -27,6 +27,13 @@ import {
   whiteboardEditorCodec,
   prepareEditorCommand,
 } from './editor-transactions';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const identity: Identity = { actorId: 'A', clientId: 'A', sessionId: 'A' };
 const delta = { dx: 12, dy: 3, dw: 0, dh: 0 };
@@ -140,18 +147,21 @@ it('authority owns immutable native state while snapshots, events and selective 
     identity,
     setCell(row, field, 14),
   )!;
-  authority.register({
-    schema: 1,
-    id: 'isolated-preview',
-    artifactId: next.artifactId,
-    sourceActorId: identity.actorId,
-    baseRevision: next.baseRevision,
-    summary: 'Change quantity',
-    actions: next.actions,
-    reads: next.conditions,
-    writes: next.conditions,
-    external: [],
-  });
+  authority.register(
+    { ...proposalHost, actorId: identity.actorId },
+    {
+      schema: 1,
+      id: 'isolated-preview',
+      artifactId: next.artifactId,
+      sourceActorId: identity.actorId,
+      baseRevision: next.baseRevision,
+      summary: 'Change quantity',
+      actions: next.actions,
+      reads: next.conditions,
+      writes: next.conditions,
+      external: [],
+    },
+  );
   const preview = authority.preview(principal, 'isolated-preview');
   preview.before.rows[0].values[field] = 555;
   preview.after.rows[1].values[field] = 444;

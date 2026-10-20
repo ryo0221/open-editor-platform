@@ -112,6 +112,11 @@ M2_PCM_MODE=wasm M2_PCM_KERNEL=<kernel> M2_PCM_RUNTIME=bbb063ace2786447b5fd59115
 # Repeat archive-check with M2_PCM_MODE=js and a separate fresh directory.
 ```
 
+The product PCM modules later moved to `video-core/src/pcm/` and
+`video-metadata/host-media/m2/`. `archive-check.mjs` looks up a moved module under
+its pre-move path when the pin lacks the new one, so the closure is still compared
+byte for byte; to verify a later tree, set `M2_PCM_RUNTIME` to that commit.
+
 Raw files, builds, notices, screenshots, native declarations, all assertions/oracle
 results, media outputs and retained failures are outside Git in
 `/workspace/m2-digest-evidence/` (summary.json, actual-js/wasm, archive-js/wasm,

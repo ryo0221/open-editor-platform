@@ -21,7 +21,7 @@ const bundle = await build({
     resolveDir: root,
     contents: `
 import {timelinePcmV1} from ${JSON.stringify(timeline)};
-import {prepareModule,Ledger} from './kernel';
+import {prepareModule,Ledger} from '../../src/pcm/kernel';
 export async function run(bytes,sha) {
  const realm=new Ledger(8*1024*1024),pin=await prepareModule(bytes,sha,realm), results=[];
  for(const mode of ['js','wasm']) for(const amplitude of [0.25,2,Infinity]) {
@@ -55,7 +55,7 @@ export async function run(bytes,sha) {
     {
       name: 'private-codec-fixtures',
       setup(b) {
-        b.onResolve({ filter: /pcm-renderer\/session\.ts$/ }, () => ({
+        b.onResolve({ filter: /src\/pcm\/session\.ts$/ }, () => ({
           path: 'session',
           namespace: 'fixture',
         }));
@@ -76,7 +76,7 @@ export async function run(bytes,sha) {
           contents:
             a.path === 'session'
               ? `
-import {PcmBackend} from './adapter';import {Tile,WasmKernel,jsKernel} from './kernel';
+import {PcmBackend} from '../../src/pcm/adapter';import {Tile,WasmKernel,jsKernel} from '../../src/pcm/kernel';
 export class PcmRenderSession {
  constructor(){const f=globalThis.r0Fixture;this.b=new PcmBackend({mode:f.mode,pin:f.pin,realm:f.realm,yieldTask:async()=>{}});f.backends.push(this.b);}
  async render(m,first,end,rate,_sr,valid,_ch,signal){const f=globalThis.r0Fixture;

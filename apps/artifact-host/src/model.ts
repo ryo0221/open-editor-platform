@@ -8,6 +8,7 @@ import {
 import {
   createDeck,
   isDeck,
+  hasSlideAnimations,
   exportSlideSvg,
   type SlideContent,
 } from '@editor-platform/slide/model';
@@ -126,10 +127,13 @@ export function productDesign(title = 'Your product'): DesignContent {
     },
   };
 }
+/** This reference Host provides static SVG export and saved-page previews. */
+export const isStaticSlide = (value: unknown): value is SlideContent =>
+  isDeck(value) && !hasSlideAnimations(value);
 export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
   slide: {
     kind: 'slide',
-    validate: isDeck,
+    validate: isStaticSlide,
     capabilities: {
       undo: true,
       nativeJson: true,
@@ -138,7 +142,7 @@ export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
       shared: false,
     },
     async export(_format, c) {
-      if (!isDeck(c)) throw Error('Not Slide');
+      if (!isStaticSlide(c)) throw Error('このHostは Animation を含む Slide に対応していません。');
       return c.slides.map((s) => ({ filename: s.id + '.svg', text: exportSlideSvg(c, s) }));
     },
   },

@@ -3,6 +3,18 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { readFile } from 'node:fs/promises';
 import { nativeArtifact, save } from './fixtures';
 import { parseReactScreenProposal } from '@editor-platform/react-ui-core';
+import type { Page } from '@playwright/test';
+
+async function applyBindings(page: Page) {
+  const button = page.getByRole('button', { name: 'Apply bindings', exact: true });
+  // Headless Firefox can miss native input at a nested scroll region's lower
+  // edge. Use an ordinary scroll and native click, retaining the same action
+  // and assertions without dispatching events or forcing the click.
+  await button.evaluate((element) =>
+    element.scrollIntoView({ block: 'center', inline: 'nearest' }),
+  );
+  await button.click();
+}
 test('W2 original React preview, props edit and deterministic TSX bundle', async ({
   page,
 }, info) => {
@@ -14,9 +26,16 @@ test('W2 original React preview, props edit and deterministic TSX bundle', async
     'data-theme',
     'light',
   );
+  await frame.getByRole('region', { name: 'Reference card' }).evaluate((element) => {
+    element.setAttribute('data-retained-preview', 'same-dom');
+  });
   await page.getByRole('button', { name: 'title · Text', exact: true }).click();
   await page.getByLabel('Prop text', { exact: true }).fill('A <literal> {value} & "quote"');
   await expect(frame.getByText('A <literal> {value} & "quote"', { exact: true })).toBeVisible();
+  await expect(frame.getByRole('region', { name: 'Reference card' })).toHaveAttribute(
+    'data-retained-preview',
+    'same-dom',
+  );
   await page.getByRole('button', { name: 'Move up', exact: true }).click();
   const body = frame.getByRole('region', { name: 'Reference card' });
   await expect(body.locator('p').first()).toHaveText('A <literal> {value} & "quote"');
@@ -37,7 +56,7 @@ test('W2 original React preview, props edit and deterministic TSX bundle', async
   await page
     .getByLabel('Callback binding onPress', { exact: true })
     .selectOption({ label: 'onBuy' });
-  await page.getByRole('button', { name: 'Apply bindings', exact: true }).click();
+  await applyBindings(page);
   await frame.getByRole('button', { name: 'Add to cart', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Callback onPress' })).toBeVisible();
   const downloadPromise = page.waitForEvent('download');
@@ -89,13 +108,17 @@ test('W3 typed bindings, controlled input, callbacks, save/reload and native rou
   await page.getByRole('button', { name: 'input · Input', exact: true }).click();
   await page.getByLabel('Data binding value', { exact: true }).selectOption('');
   await page.getByLabel('Callback binding onChange', { exact: true }).selectOption('');
-  await page.getByRole('button', { name: 'Apply bindings', exact: true }).click();
+  await page.getByLabel('Prop label', { exact: true }).fill('Your name');
+  await expect(page.getByLabel('Data binding value', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Callback binding onChange', { exact: true })).toHaveValue('');
+  await applyBindings(page);
   await expect(page.getByLabel('Prop value', { exact: true })).toBeEnabled();
+  await page.getByLabel('Prop label', { exact: true }).fill('Name');
   await page.getByLabel('Data binding value', { exact: true }).selectOption({ label: 'name' });
   await page
     .getByLabel('Callback binding onChange', { exact: true })
     .selectOption({ label: 'onNameChange' });
-  await page.getByRole('button', { name: 'Apply bindings', exact: true }).click();
+  await applyBindings(page);
   await expect(page.getByLabel('Prop value', { exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Interact', exact: true }).click();
   await expect(page.locator('iframe[title="React component preview"]')).toHaveAttribute(

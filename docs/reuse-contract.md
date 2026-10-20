@@ -45,12 +45,21 @@ trusted authority, independent of the captured operation identity.
   Existing template definitions, built-in hashes, native drafts and immutable
   versions are not migrated into linked instances or rewritten by this package.
 
-The schema-1 bounds are 100 definitions per closure, dependency depth 16, 2,048
+The schema-1 bounds are 100 definitions per closure, **2,000 retained closures per
+Artifact**, dependency depth 16, 2,048
 tokens, 16 modes, alias depth 32, 2,000 instances, 10,000 parts per definition and
 20,000 expanded parts. Generic JSON processing allows 200,000 values, depth 64 and
 32 MiB UTF-8 JSON. Native/template/image limits can be lower and still apply.
 Nonfinite numbers, cyclic objects, reserved keys, executable values and sparse
 arrays reject before cloning/hashing. Limits are public through `reuseLimits`.
+`reuseLimits.closures` is independent of `reuseLimits.definitions`: adding the
+101st independent component does not enlarge any single dependency closure.
+The value/depth/byte and native limits still apply to the complete state; 2,000
+closures is a count ceiling, not a guarantee that arbitrary payloads fit.
+`readReuseState` and `validateReuseStateSync` throw `ReuseError` with code
+`reuse-limit`, `address.path` set to `closures` or `instances`, and actual/maximum
+counts when a state count exceeds its limit. Boolean native predicates such as
+`isDesign` still return false; use the reuse validator to obtain diagnostics.
 
 ## Public properties and slots
 

@@ -2,6 +2,8 @@ import implementation from './components.tsx?raw';
 import revisionImplementation from './components-v2.tsx?raw';
 import css from '../public/styles/tokens.css?raw';
 import image from '../../../tests/fixtures/office/images/quadrants.png?inline';
+import dependencyImplementation from './dependency-badge.tsx?raw';
+import dependencyCss from '../public/styles/dependency-fixture.css?raw';
 import {
   reuseHash,
   validateReusableDefinitionSync,
@@ -174,13 +176,65 @@ export const referenceTextRevision = sealReactComponent({
   requires: ['ui-revision', 'theme-css'],
   sampleProps: { content: 'New text' },
 });
+export const referenceDependencyComponent = sealReactComponent({
+  ...referenceComponents.find((component) => component.name === 'Button')!,
+  name: 'DependencyBadge',
+  ref: {
+    registryId: 'reference-dependencies',
+    componentId: 'DependencyBadge',
+    version: '1.0.0',
+    implementationHash: reuseHash(dependencyImplementation),
+  },
+  import: { source: '@reference/dependency-ui', export: 'default' },
+  props: { label: { schema: string, required: true } },
+  slots: {
+    footer: {
+      prop: 'footer',
+      minimum: 0,
+      maximum: 1,
+      accepts: [{ registryId: 'reference', componentId: 'Text' }],
+    },
+  },
+  requires: [
+    'ui-package',
+    'dependency-package',
+    'theme-css',
+    'dependency-css',
+    'product-image',
+    'theme-provider',
+  ],
+  sampleProps: { label: 'Pinned default component' },
+});
+export const referenceDependencyEnvironment = sealReactEnvironment({
+  ...referenceEnvironment,
+  ref: { id: 'reference-design-dependencies', version: '1.0.0' },
+  dependencies: [
+    ...referenceEnvironment.dependencies,
+    {
+      id: 'dependency-package',
+      kind: 'package',
+      name: '@reference/dependency-ui',
+      version: '1.0.0',
+      hash: reuseHash(dependencyImplementation),
+    },
+    {
+      id: 'dependency-css',
+      kind: 'css',
+      path: 'styles/dependency-fixture.css',
+      hash: reuseHash(dependencyCss),
+    },
+  ],
+});
 export const referenceResolution: ReactRuntimeResolution = {
   environment: referenceEnvironment.ref,
-  components: [...referenceComponents, referenceTextRevision].map((c) => c.ref),
+  components: [...referenceComponents, referenceTextRevision, referenceDependencyComponent].map(
+    (c) => c.ref,
+  ),
   dependencies: referenceEnvironment.dependencies.map(({ id, hash }) => ({ id, hash })),
 };
 export function createReferenceDocument(
   screen: 'product' | 'form' | 'unbound' | 'tokens' = 'unbound',
+  language: 'en' | 'ja' = 'en',
 ): ReactUiDocument {
   const node = (
     id: string,
@@ -267,6 +321,17 @@ export function createReferenceDocument(
     root.layout.base.gap = { kind: 'token', tokenId: 'space.gap' };
     title.layout.base.color = { kind: 'token', tokenId: 'brand.color' };
   }
+  if (language === 'ja') {
+    const text = screen === 'form' ? 'お問い合わせ' : '色からはじまる、新しい体験';
+    if (screen === 'unbound') title.props.text = text;
+    else document.fixture.title = text;
+    button.props.label = screen === 'form' ? '送信する' : 'カートに追加';
+    input.props.label = 'お名前';
+    document.nodes.find((node) => node.id === 'footer')!.props.text =
+      'React 部品を組み合わせたサンプル';
+    const image = document.nodes.find((node) => node.id === 'image');
+    if (image) image.props.alt = 'カラーパレット';
+  }
   return loadReactUiDocument(document);
 }
 export function referenceResolutionFor(
@@ -276,8 +341,15 @@ export function referenceResolutionFor(
     referenceEnvironment,
     referenceTokenEnvironment,
     referenceEnvironmentRevision,
+    referenceDependencyEnvironment,
   ].find((candidate) => reuseHash(candidate.ref) === reuseHash(environment));
-  return supported ? { ...referenceResolution, environment: supported.ref } : undefined;
+  return supported
+    ? {
+        ...referenceResolution,
+        environment: supported.ref,
+        dependencies: supported.dependencies.map(({ id, hash }) => ({ id, hash })),
+      }
+    : undefined;
 }
 export const referenceRuntimeAdapter: ReactRuntimeAdapter = {
   async exportDependencies({ environment, signal }) {
@@ -287,6 +359,16 @@ export const referenceRuntimeAdapter: ReactRuntimeAdapter = {
     return {
       diagnostics: [],
       files: [
+        ...(environment.id === referenceDependencyEnvironment.ref.id
+          ? [
+              {
+                dependencyId: 'dependency-css',
+                path: 'styles/dependency-fixture.css',
+                hash: reuseHash(dependencyCss),
+                bytes: new TextEncoder().encode(dependencyCss),
+              },
+            ]
+          : []),
         {
           dependencyId: 'theme-css',
           path: 'styles/tokens.css',

@@ -199,12 +199,14 @@ export function ReactUiInspector({
   registered,
   readOnly,
   execute,
+  onEditInput,
 }: {
   document: ReactUiDocument;
   node: ReactUiNode;
   registered: RegisteredReactComponent;
   readOnly: boolean;
   execute(command: EditorCommand<ReactUiDocument>): void;
+  onEditInput?(input: string): void;
 }) {
   const [breakpoint, setBreakpoint] = useState('base');
   const [layoutText, setLayoutText] = useState('');
@@ -230,17 +232,13 @@ export function ReactUiInspector({
     ]),
   );
   const [draftBindings, setDraftBindings] = useState<Record<string, string>>(bindings);
+  const bindingsKey = JSON.stringify(bindings);
   useEffect(
-    () =>
-      setDraftBindings(
-        Object.fromEntries(
-          [...Object.keys(registered.props), ...Object.keys(registered.events)].map((key) => [
-            key,
-            node.bindings[key] ? JSON.stringify(node.bindings[key]) : '',
-          ]),
-        ),
-      ),
-    [node.id, node.bindings, registered],
+    // Autosave/admission and unrelated prop edits may publish new objects with
+    // identical bindings. Preserve pending choices until their committed basis,
+    // selected node or published contract actually changes.
+    () => setDraftBindings(JSON.parse(bindingsKey) as Record<string, string>),
+    [node.id, bindingsKey, registered.ref.contractHash],
   );
   const setStyle = (property: ReactUiStyleProperty, raw: string) => {
     const value = raw.startsWith('token:')
@@ -294,6 +292,24 @@ export function ReactUiInspector({
               )
             }
           />
+          {node.bindings[key]?.kind === 'data' && (
+            <p>
+              データ「{node.bindings[key].input}
+              {node.bindings[key].path.length ? '.' + node.bindings[key].path.join('.') : ''}
+              」から表示しています。 文字を変えるにはプレビュー入力を編集してください。
+              {onEditInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const binding = node.bindings[key];
+                    if (binding?.kind === 'data') onEditInput(binding.input);
+                  }}
+                >
+                  プレビュー入力を編集: {node.bindings[key].input}
+                </button>
+              )}
+            </p>
+          )}
           <button
             disabled={readOnly || (field.required && !Object.hasOwn(field, 'default'))}
             onClick={() =>

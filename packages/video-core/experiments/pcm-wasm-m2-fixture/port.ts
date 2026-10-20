@@ -1,6 +1,6 @@
 /** Fixture-only proposed Video-owned seam. No real M2 consumer imports this. */
-import type { SelectedPcmSession } from '../pcm-wasm-v1/selection';
-import type { Mapping, PcmWindow } from '../pcm-renderer/render';
+import type { SelectedPcmSession } from '../../src/pcm/selection';
+import type { Mapping, PcmWindow } from '../../src/pcm/render';
 import type { Time } from './frozen/core';
 export interface SourceRequest {
   sourceId: string;

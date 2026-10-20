@@ -187,7 +187,7 @@ export async function saveShared(page: Page, count: number) {
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
   await page
     .getByRole('dialog', { name: 'Save immutable version', exact: true })
-    .getByRole('button', { name: 'Save version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
     .click();
   await expect.poll(async () => (await nativeArtifact(page)).versions.length).toBe(count);
 }

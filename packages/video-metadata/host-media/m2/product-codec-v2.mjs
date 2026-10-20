@@ -1,9 +1,6 @@
-import { observeCodecInputs } from '../../../video-core/experiments/pcm-wasm-m2/codec-inputs.mjs';
-import {
-  ConsumerOwner,
-  m2PcmDiagnostics,
-} from '../../../video-core/experiments/pcm-wasm-m2/owners';
-import { addOwnedAudio } from '../../../video-core/experiments/pcm-wasm-m2/output.mjs';
+import { observeCodecInputs } from '../../../video-core/src/pcm/codec-inputs.mjs';
+import { ConsumerOwner, m2PcmDiagnostics } from '../../../video-core/src/pcm/owners';
+import { addOwnedAudio } from './pcm-output.mjs';
 import {
   Output,
   Mp4OutputFormat,

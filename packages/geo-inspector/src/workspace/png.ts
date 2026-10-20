@@ -1,4 +1,5 @@
 import { contentHash } from '@editor-platform/artifact-core';
+import { resolveGeoBackgrounds } from '@editor-platform/geo-core/backgrounds';
 import {
   assertGeo,
   GEO_RENDERER_VERSION,
@@ -38,9 +39,10 @@ export async function createGeoPng(
   if ('sha256:' + (await contentHash(owned.content)) !== owned.pin.contentHash)
     throw Error('PNG native hash mismatch');
   current();
+  const backgrounds = resolveGeoBackgrounds(view.backgrounds ?? []);
   const svg = renderGeoSvg(
     owned.content,
-    { extent: view.extent, view, width: size[0], height: size[1] },
+    { extent: view.extent, view, width: size[0], height: size[1], backgrounds },
     budgets,
   );
   const image = doc.createElement('img'),
@@ -72,11 +74,19 @@ export async function createGeoPng(
       ).join('');
     current();
     const styleHash =
-      'sha256:' + (await contentHash({ styles: view.styles, annotations: view.annotations }));
+      'sha256:' +
+      (await contentHash({
+        styles: view.styles,
+        annotations: view.annotations,
+        ...(view.backgrounds ? { backgrounds: view.backgrounds } : {}),
+      }));
     current();
+    const chunks: string[] = [];
+    for (let offset = 0; offset < bytes.length; offset += 32768)
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32768)));
     return {
       bytes,
-      dataUrl: canvas.toDataURL('image/png'),
+      dataUrl: 'data:image/png;base64,' + btoa(chunks.join('')),
       receipt: {
         input: owned.pin,
         derivedInputs: (owned.content.workspace?.joins ?? []).flatMap((j) => [
@@ -92,7 +102,27 @@ export async function createGeoPng(
         displayProjection:
           'longitude-latitude equirectangular; geographic coordinates, no distance/area measurement',
         pixels: size,
-        attribution: owned.content.sources.map((s) => s.attribution),
+        attribution: [
+          ...new Set([
+            ...owned.content.sources.map((s) => s.attribution),
+            ...backgrounds.layers.map((l) => l.attribution),
+          ]),
+        ],
+        ...(view.backgrounds
+          ? {
+              backgroundRequests: structuredClone(view.backgrounds),
+              backgrounds: backgrounds.layers.map((l) => ({
+                id: l.setting.id,
+                version: l.setting.version,
+                hash: l.setting.hash,
+                color: l.setting.color,
+                attribution: l.attribution,
+                licenseUrl: l.licenseUrl,
+                sourceUrl: l.sourceUrl,
+              })),
+              backgroundDiagnostics: [...backgrounds.diagnostics],
+            }
+          : {}),
         outputBytesHash,
       },
     };

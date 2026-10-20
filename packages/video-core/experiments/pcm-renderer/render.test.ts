@@ -11,8 +11,8 @@ import {
   LIMITS,
   type Mapping,
   type PcmWindow,
-} from './render';
-import { PcmRenderSession } from './session';
+} from '../../src/pcm/render';
+import { PcmRenderSession } from '../../src/pcm/session';
 const signal = () => new AbortController().signal;
 const cut = time(1001, 30000);
 const mapping = (end = time(1, 10)): Mapping => ({

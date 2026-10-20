@@ -30,6 +30,13 @@ import { MemoryCatalog, TemplateCatalog, exportTemplatePack, importTemplatePack 
 import { remapNative } from './native';
 import type { NativeContent } from './types';
 import { prepareAgentTemplate } from '../../../apps/playground/src/template-agent';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const identity = { actorId: 'A', clientId: 'a', sessionId: 'a' },
   principal = { ...identity, writable: true, scopes: ['*'] };
@@ -257,7 +264,10 @@ it('holds stale positional insertion, then inserts a linked pattern in the desti
     'pattern',
   );
   expect(prepared.notices).toHaveLength(1);
-  authority.register(prepared.proposal);
+  authority.register(
+    { ...proposalHost, actorId: prepared.proposal.sourceActorId },
+    prepared.proposal,
+  );
   const token = authority.preview(principal, prepared.id).token;
   const peer = { actorId: 'B', clientId: 'b', sessionId: 'b', writable: true, scopes: ['*'] };
   const state = authority.snapshot(),
@@ -288,7 +298,7 @@ it('holds stale positional insertion, then inserts a linked pattern in the desti
     {},
     'pattern_retry',
   );
-  authority.register(fresh.proposal);
+  authority.register({ ...proposalHost, actorId: fresh.proposal.sourceActorId }, fresh.proposal);
   expect(
     authority.applyProposal(principal, fresh.id, authority.preview(principal, fresh.id).token)
       .status,

@@ -165,3 +165,5 @@ characters per image, 16 MiB total manifest assets, 24 MiB UTF-8 JSON per defini
 limits can therefore be refused at template saving. See the [template contract](template-contract.md)
 and T01–T06 evidence for human/Host parity, immutable
 versions, catalog independence, shared failures and actual external editing.
+
+The PPTX importer is split into an import session, page conversion and drawing conversion; complexity verification records the metrics and output equivalence.

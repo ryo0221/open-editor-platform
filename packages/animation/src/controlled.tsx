@@ -25,9 +25,14 @@ import {
 } from './controlled-buffer';
 import { KeyTimeline } from './controlled-timeline';
 import { ControlledEasing } from './controlled-easing';
+import { ControlledLayerActions } from './controlled-layer-actions';
 import './controlled.css';
 type OpenView = Extract<ControlledSurfaceSnapshot<AnimationContent>, { state: 'open' }>;
-export function AnimationControlledSurface({ editor, playback }: AnimationControlledSurfaceProps) {
+export function AnimationControlledSurface({
+  editor,
+  playback,
+  hostActions,
+}: AnimationControlledSurfaceProps) {
   const view = useSyncExternalStore(
     useCallback((listener) => editor.subscribe(listener), [editor]),
     useCallback(() => editor.getSnapshot(), [editor]),
@@ -54,6 +59,7 @@ export function AnimationControlledSurface({ editor, playback }: AnimationContro
       editor={editor}
       playback={playback}
       view={view}
+      hostActions={hostActions}
     />
   );
 }
@@ -61,6 +67,7 @@ function OpenSurface({
   editor,
   playback,
   view,
+  hostActions = 'surface',
 }: AnimationControlledSurfaceProps & { view: OpenView }) {
   const native = readAnimationV1(view.snapshot.content),
     player = useSyncExternalStore(
@@ -78,6 +85,9 @@ function OpenSurface({
     draft = useRef<AnimationInputDraft | null>(null),
     registration = useRef<ReturnType<typeof editor.bindInputs> | null>(null),
     stage = useRef<HTMLDivElement>(null),
+    layerNavigation = useRef<HTMLElement>(null),
+    addRectangleButton = useRef<HTMLButtonElement>(null),
+    focusAfterLayerAction = useRef(false),
     form = useRef<HTMLDivElement>(null),
     alive = useRef(true);
   const composition =
@@ -91,6 +101,14 @@ function OpenSurface({
   const pending = hasDraft(draft.current),
     moving = !!draft.current?.composing.has('timeline'),
     canEdit = view.canEdit && !view.saving;
+  useEffect(() => {
+    if (!focusAfterLayerAction.current) return;
+    focusAfterLayerAction.current = false;
+    (
+      layerNavigation.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]') ??
+      addRectangleButton.current
+    )?.focus();
+  }, [layer?.id]);
   const notify = () => {
     registration.current?.changed();
     render((n) => n + 1);
@@ -385,21 +403,29 @@ function OpenSurface({
     <section className="animation-controlled">
       <header>
         <h2>Animation</h2>
-        <p>Host-controlled native schema 1 · rectangles and groups</p>
+        <p>
+          {hostActions === 'external'
+            ? '矩形・グループのアニメーションを編集'
+            : 'Host-controlled native schema 1 · rectangles and groups'}
+        </p>
       </header>
       <div className="ac-actions">
-        <button disabled={!canEdit || pending} onClick={addRectangle}>
+        <button ref={addRectangleButton} disabled={!canEdit || pending} onClick={addRectangle}>
           Add rectangle
         </button>
-        <button disabled={!canEdit || pending} onClick={() => report(editor.undo())}>
-          Undo
-        </button>
-        <button disabled={!canEdit || pending} onClick={() => report(editor.redo())}>
-          Redo
-        </button>
-        <button disabled={!view.canSave || view.saving} onClick={() => void save()}>
-          Save through Host
-        </button>
+        {hostActions === 'surface' && (
+          <>
+            <button disabled={!canEdit || pending} onClick={() => report(editor.undo())}>
+              Undo
+            </button>
+            <button disabled={!canEdit || pending} onClick={() => report(editor.redo())}>
+              Redo
+            </button>
+            <button disabled={!view.canSave || view.saving} onClick={() => void save()}>
+              Save through Host
+            </button>
+          </>
+        )}
       </div>
       <label>
         Composition
@@ -420,7 +446,7 @@ function OpenSurface({
           ))}
         </select>
       </label>
-      <nav aria-label="Layers">
+      <nav aria-label="Layers" ref={layerNavigation}>
         {composition.layers.map((l) => (
           <button
             key={l.id}
@@ -437,6 +463,20 @@ function OpenSurface({
           </button>
         ))}
       </nav>
+      <ControlledLayerActions
+        key={`${composition.id}/${layer?.id ?? ''}`}
+        editor={editor}
+        view={view}
+        compositionId={composition.id}
+        layerId={layer?.id}
+        pending={pending}
+        selectLayer={(id) => {
+          focusAfterLayerAction.current = true;
+          setLayerId(id);
+          setKeyId(null);
+        }}
+        report={setMessage}
+      />
       <div className="ac-presentation" ref={stage} />
       <div className="ac-actions">
         <button
@@ -610,8 +650,9 @@ function OpenSurface({
         {pending
           ? 'Pending inputs: Apply or Cancel before unrelated operations.'
           : 'No pending inputs.'}{' '}
-        Save asks the Host to flush inputs and report its exact outcome. No JSON download or local
-        storage is used here.
+        {hostActions === 'external'
+          ? '上のツールバーから Undo・Redo・版の保存を行えます。'
+          : 'Save asks the Host to flush inputs and report its exact outcome. No JSON download or local storage is used here.'}
       </p>
     </section>
   );

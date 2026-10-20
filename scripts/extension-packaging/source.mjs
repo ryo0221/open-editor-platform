@@ -30,6 +30,7 @@ export function pinnedSource(repo, commit) {
   };
   return {
     read,
+    has: (name) => files.has(name),
     async stage(prefix, destination) {
       const hashes = {};
       for (const name of [...files.keys()].sort()) {
@@ -72,12 +73,19 @@ export function checkPublicImport(specifier, manifest, manifests) {
   )
     throw new Error('Private/undeclared import: ' + specifier);
 }
-export function auditTypeImports(text, file, manifest, manifests, sourceRoot) {
+export function auditTypeImports(text, file, manifest, manifests, sourceRoot, assets = []) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const checkName = (specifier) => {
     if (specifier.startsWith('.')) {
       if (
-        !path.resolve(path.dirname(file), specifier).startsWith(path.resolve(sourceRoot) + path.sep)
+        !path
+          .resolve(path.dirname(file), specifier)
+          .startsWith(path.resolve(sourceRoot) + path.sep) &&
+        !assets.some(
+          (asset) =>
+            asset.endsWith('.json') &&
+            path.resolve(asset) === path.resolve(path.dirname(file), specifier),
+        )
       )
         throw new Error('Private source escape: ' + specifier);
     } else checkPublicImport(specifier, manifest, manifests);
@@ -98,4 +106,51 @@ export function auditTypeImports(text, file, manifest, manifests, sourceRoot) {
     ts.forEachChild(node, visit);
   }
   visit(source);
+}
+/**
+ * Narrow a package to the listed export keys: keep only the src files those
+ * entrypoints reach (value and type imports, CSS included) and only the declared
+ * dependencies they import. The rest of the package is not packaged or reviewed.
+ */
+export function scopePackage(source, dir, manifest, keys) {
+  const exports = Object.fromEntries(keys.map((key) => [key, manifest.exports?.[key]]));
+  if (Object.values(exports).some((value) => !value)) throw new Error('Unknown scoped export');
+  const files = new Set(),
+    imported = new Set();
+  const resolve = (from, specifier) => {
+    const base = path.posix.join(path.posix.dirname(from), specifier);
+    const found = [
+      base,
+      ...['.ts', '.tsx', '/index.ts', '/index.tsx'].map((ext) => base + ext),
+    ].find((candidate) => /\.(?:tsx?|css|json)$/.test(candidate) && source.has(candidate));
+    if (!found) throw new Error('Unresolved scoped import: ' + specifier + ' from ' + from);
+    return found;
+  };
+  const visit = (file) => {
+    if (files.has(file)) return;
+    files.add(file);
+    if (!/\.tsx?$/.test(file)) return;
+    if (file.endsWith('.tsx')) imported.add('react');
+    for (const { fileName } of ts.preProcessFile(source.read(file).toString(), true, true)
+      .importedFiles) {
+      if (fileName.startsWith('.')) visit(resolve(file, fileName));
+      else {
+        const dependency = fileName.startsWith('@')
+          ? fileName.split('/').slice(0, 2).join('/')
+          : fileName.split('/')[0];
+        if (dependency !== manifest.name) imported.add(dependency);
+        else {
+          const key = fileName === dependency ? '.' : './' + fileName.slice(dependency.length + 1);
+          if (!Object.hasOwn(exports, key))
+            throw new Error('Scoped self import outside scope: ' + fileName);
+          visit(path.posix.join(dir, exports[key]));
+        }
+      }
+    }
+  };
+  for (const value of Object.values(exports)) visit(path.posix.join(dir, value));
+  const dependencies = Object.fromEntries(
+    Object.entries(manifest.dependencies ?? {}).filter(([dependency]) => imported.has(dependency)),
+  );
+  return { manifest: { ...manifest, exports, dependencies }, files };
 }

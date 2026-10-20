@@ -27,6 +27,13 @@ import { prepareEditorCommand } from '@editor-platform/collaboration-adapters';
 import { createDeck } from '@editor-platform/slide/model';
 import { command } from '@editor-platform/editor-core';
 import { createData } from '@editor-platform/structured-data/model';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 const get = (id: string) => builtinTemplates.find((d) => d.templateId === id)!;
 const actor: Principal = {
   actorId: 'author',
@@ -121,7 +128,7 @@ describe('Template lifecycle boundaries', () => {
       authority.snapshot(),
       actor,
     );
-    authority.register(p.proposal);
+    authority.register({ ...proposalHost, actorId: p.proposal.sourceActorId }, p.proposal);
     const preview = authority.preview(actor, p.id);
     const op = prepareEditorCommand(
       codec,
@@ -141,7 +148,7 @@ describe('Template lifecycle boundaries', () => {
     const p = await prepareInsertion(d, {}, state, actor, {
       fieldMapping: { label: data.columns[0].id, amount: data.columns[2].id },
     });
-    authority.register(p.proposal);
+    authority.register({ ...proposalHost, actorId: p.proposal.sourceActorId }, p.proposal);
     const preview = authority.preview(actor, p.id);
     const op = prepareEditorCommand(
       codec,

@@ -12,6 +12,13 @@ import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
 import { slideEditorCodec, prepareEditorCommand } from './editor-transactions';
 import { editorAssetCodec, EditorAssetCache } from './editor-assets';
 import { command } from '@editor-platform/editor-core';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 const principal: Principal = {
   actorId: 'A',
   clientId: 'A',
@@ -39,10 +46,11 @@ function fixture() {
     restore: async () => {
       throw new Error('No archive in this fixture');
     },
-    registerProposal: async (proposal) => authority.register(proposal),
+    registerProposal: async (proposal) =>
+      authority.register({ ...proposalHost, actorId: proposal.sourceActorId }, proposal),
     previewProposal: async (id) => authority.preview(access, id),
     applyProposal: async (id, token) => authority.applyProposal(access, id, token),
-    cancelProposal: async (id, reject) => authority.cancelProposal(id, reject),
+    cancelProposal: async (id, reject) => authority.cancelProposal(proposalHost, id, reject),
   } as EditorHostAdapter<typeof d>;
   return { d, codec, authority, adapter, base };
 }

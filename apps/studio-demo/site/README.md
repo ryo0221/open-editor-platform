@@ -67,7 +67,7 @@ Site/project ID and access policy remain unchanged.
 Node 20+, React 19.1.1: `npm run build`, `npm test`.
 `REQUIRE_PINNED_SOURCE=1 npm test` requires final commit provenance.
 Desktop/mobile production workflows are run from the platform checkout with
-`HOST_STUDIO_URL=http://127.0.0.1:8877 npx playwright test --config playwright.host.config.ts`.
+`HOST_STUDIO_URL=http://127.0.0.1:8877 E2E_SUITE=host npx playwright test`.
 See VERIFICATION.md and the platform's `docs/verification/issue-33-36/README.md`.
 Generated dist/JSON/ZIP/screenshots/logs are ignored. Actions remain manual-only;
 performance acceptance #22 and additional measurement/tuning remain paused.

@@ -1,0 +1,35 @@
+body {
+  margin: 0;
+  font: 14px system-ui;
+  color: #17202b;
+  background: #f6f7f9;
+}
+header {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #cbd5e1;
+  background: white;
+}
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  width: 100%;
+}
+button,
+input {
+  font: inherit;
+  max-width: 100%;
+}
+header label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+[role='alert'] {
+  color: #9f1239;
+  padding: 8px;
+}

@@ -1,8 +1,8 @@
 /** Actual ownedHash, controlled digest delay/failure; never relaxes reservation admission. */
 import assert from 'node:assert/strict';
 import console from 'node:console';
-import { ConsumerOwner, m2PcmDiagnostics } from './owners';
-import { ownedHash, addOwnedAudio } from './output.mjs';
+import { ConsumerOwner, m2PcmDiagnostics } from '../../src/pcm/owners';
+import { ownedHash, addOwnedAudio } from '../../../video-metadata/host-media/m2/pcm-output.mjs';
 function owner(limit) {
   const actual = new ConsumerOwner('digest-fixture', limit);
   return {

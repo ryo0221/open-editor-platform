@@ -280,23 +280,79 @@ function expression(source: string, resolve: (name: string) => number): number {
   if (i !== tokens.length || !Number.isFinite(value)) throw new Error('Invalid numeric result');
   return value;
 }
-export function cellValue(
+type Evaluated = { value: Cell } | { error: Error };
+// Formula results depend only on the row and the column definitions. Each
+// evaluation memoizes per column, and immutable inputs share results across
+// calls, so references are evaluated once instead of once per path.
+const evaluatedByColumns = new WeakMap<Column[], WeakMap<DataRow, Map<string, Evaluated>>>();
+const columnLookups = new WeakMap<Column[], Map<string, Column>>();
+function columnLookup(columns: Column[]): Map<string, Column> {
+  let lookup = columnLookups.get(columns);
+  if (lookup) return lookup;
+  lookup = new Map();
+  // Same precedence as columns.find((c) => c.name === name || c.id === name).
+  for (const c of columns) {
+    if (!lookup.has(c.name)) lookup.set(c.name, c);
+    if (!lookup.has(c.id)) lookup.set(c.id, c);
+  }
+  if (isDeepFrozen(columns)) columnLookups.set(columns, lookup);
+  return lookup;
+}
+function evaluatedCells(data: StructuredData, row: DataRow): Map<string, Evaluated> {
+  if (!isDeepFrozen(data.columns) || !isDeepFrozen(row)) return new Map();
+  let rows = evaluatedByColumns.get(data.columns);
+  if (!rows) evaluatedByColumns.set(data.columns, (rows = new WeakMap()));
+  let cells = rows.get(row);
+  if (!cells) rows.set(row, (cells = new Map()));
+  return cells;
+}
+function evaluate(
   data: StructuredData,
   row: DataRow,
   column: Column,
-  visited = new Set<string>(),
+  lookup: Map<string, Column>,
+  memo: Map<string, Evaluated>,
+  visiting: Set<string>,
 ): Cell {
   if (column.type !== 'formula') return row.values[column.id] ?? null;
-  if (visited.has(column.id)) throw new Error('Circular formula');
-  const next = new Set(visited).add(column.id);
-  return expression(column.formula ?? '', (name) => {
-    const ref = data.columns.find((c) => c.name === name || c.id === name);
-    if (!ref) throw new Error(`Unknown column: ${name}`);
-    const value = cellValue(data, row, ref, next);
-    if (value === null) return 0;
-    if (typeof value !== 'number') throw new Error(`${name} is not numeric`);
-    return value;
-  });
+  const known = memo.get(column.id);
+  if (known) {
+    if ('error' in known) throw known.error;
+    return known.value;
+  }
+  if (visiting.has(column.id)) throw new Error('Circular formula');
+  visiting.add(column.id);
+  let result: Evaluated;
+  try {
+    result = {
+      value: expression(column.formula ?? '', (name) => {
+        const ref = lookup.get(name);
+        if (!ref) throw new Error(`Unknown column: ${name}`);
+        const value = evaluate(data, row, ref, lookup, memo, visiting);
+        if (value === null) return 0;
+        if (typeof value !== 'number') throw new Error(`${name} is not numeric`);
+        return value;
+      }),
+    };
+  } catch (e) {
+    result = { error: e as Error };
+  } finally {
+    visiting.delete(column.id);
+  }
+  memo.set(column.id, result);
+  if ('error' in result) throw result.error;
+  return result.value;
+}
+export function cellValue(data: StructuredData, row: DataRow, column: Column): Cell {
+  if (column.type !== 'formula') return row.values[column.id] ?? null;
+  return evaluate(
+    data,
+    row,
+    column,
+    columnLookup(data.columns),
+    evaluatedCells(data, row),
+    new Set(),
+  );
 }
 export function displayCell(data: StructuredData, row: DataRow, column: Column): string {
   try {
@@ -408,14 +464,40 @@ export function aggregate(
   const sum = values.reduce((a, b) => a + b, 0);
   return { count: rows.length, sum, average: values.length ? sum / values.length : 0 };
 }
+/**
+ * True for text a spreadsheet would read as a formula (leading =, +, -, @, tab or
+ * CR, after any BOM, which readers take as the encoding mark), or for text that
+ * already starts with apostrophes before such a prefix. Plain numbers such as -5
+ * are not guarded.
+ */
+function needsCsvGuard(value: string): boolean {
+  return (
+    /^'*\uFEFF*[=+\-@\t\r]/.test(value) && !/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(value)
+  );
+}
+/**
+ * Encode one exported CSV field. Guarded text is prefixed with one apostrophe so
+ * spreadsheets keep it as text; csvText removes exactly that apostrophe on import.
+ */
+export function csvField(value: string): string {
+  const safe = needsCsvGuard(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+}
+/** Decode one parsed CSV field written by csvField, so exports round-trip. */
+export function csvText(field: string): string {
+  return field.startsWith("'") && needsCsvGuard(field.slice(1)) ? field.slice(1) : field;
+}
+/** Parse CSV for import: drop a leading BOM and undo csvField's formula guard. */
+export function parseCsvText(source: string): string[][] {
+  return parseCsv(source.replace(/^\uFEFF/, '')).map((row) => row.map(csvText));
+}
 export function exportCsv(data: StructuredData): string {
-  const quote = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s);
   return (
     [
       data.columns.map((c) => c.name),
       ...data.rows.map((r) => data.columns.map((c) => displayCell(data, r, c))),
     ]
-      .map((r) => r.map(quote).join(','))
+      .map((r) => r.map(csvField).join(','))
       .join('\r\n') + '\r\n'
   );
 }
@@ -450,7 +532,7 @@ export function parseCsv(source: string): string[][] {
   return rows;
 }
 export function importCsv(source: string): StructuredData {
-  const [header, ...rows] = parseCsv(source.replace(/^\uFEFF/, ''));
+  const [header, ...rows] = parseCsvText(source);
   if (!header?.length) throw new Error('CSV requires a header');
   const names = new Set<string>();
   const columns: Column[] = header.map((raw, index) => {

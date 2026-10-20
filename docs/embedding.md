@@ -1,5 +1,14 @@
 # Embedding a surface
 
+`layout.compactBreakpoint` sets the container width (px, inclusive) at which
+toolbar tools move into **More editor tools**. For example, a Host with a 240px
+sidebar can pass `layout={{ compactBreakpoint: 800 }}` to `DesignSurface` so
+**Open prototype** remains visible in a 1,040px editor. The default is 1,100px.
+Mounted changes and container resizes both update the toolbar. Nonnegative finite
+values are accepted; invalid values use the default. Zero keeps tools inline for
+positive container widths. Panel drawers still use their separate 800px threshold.
+This is Host view configuration and is not saved in native content or panel state.
+
 `apps/playground/embed.html` is a separate build entrypoint. Its `src/embed.tsx` imports only public package APIs and its own container CSS; it does not import Playground App, persistence, product types or stylesheet. The example mounts all seven domain surfaces, receives selection/command callbacks and controls panel state. It is also included in the production build.
 
 Give a surface a container with a definite height and `min-height: 0` when inside flex layouts. The surface imports its own CSS. `layout.panels` and `layout.onPanelsChange` make navigation, inspector width and focus mode controlled; omit them for local view preferences. Compact controls and overlay panels respond to the container width, including a narrow embed in a wide browser.
@@ -37,8 +46,33 @@ QA-18 is exercised in `tests/e2e/issue2-embedding.spec.ts`: no Playground CSS re
 Import `EditorInputs` from `@editor-platform/editor-core` and
 `EditorInputsContext` / `EditorHistoryContext` from `@editor-platform/editor-ui`.
 Give each mounted artifact one registry and supply the existing Host Undo/Redo functions.
-Canvas and Graph shortcuts use those functions; native inputs and ProseMirror keep
-input Undo while focused. Shared Hosts supply their selective history functions.
+Canvas, Graph, Document body and the non-editing Data grid route Ctrl/⌘+Z,
+Ctrl/⌘+Shift+Z and Ctrl/⌘+Y to the existing history owner. Document gives an
+injected `textEngine` priority over the context, so shared Hosts retain selective
+history. Native input fields keep browser input Undo. Canvas text editing without
+a bridge keeps its existing private ProseMirror history until Done/blur commits
+one domain command; it does not undo unrelated canvas operations while typing.
+IME composition and read-only surfaces do not invoke these editing shortcuts.
+
+Document also supports Ctrl/⌘+K for its link dialog, Ctrl/⌘+Shift+X for
+strikethrough, Ctrl+backtick for inline code (Control+Shift+C on Apple platforms), and Shift+Enter for an in-block
+line break (a newline inside code blocks). These use existing marks/nodes and
+commands, without a second Document history stack or content schema change.
+Mark bindings also check the view's editability when a Host invokes a key handler
+directly; the Surface rejects content and stored-mark transactions while read-only.
+Apply link replaces the URL on selected text or the contiguous link under a caret;
+stored-only links before typing reopen with their pending URL and can be updated
+or removed without changing adjacent text.
+The modal finishes closing before the editor restores its caret and pending marks.
+Remove link is a separate action. Markdown exports use inline `<br/>` for hard
+breaks so headings and list items retain their structure when imported again.
+Ordinary backticks and backslashes are escaped separately from actual code spans;
+literal HTML/entity text stays literal instead of becoming an in-block break.
+Code spans use a delimiter longer than any backtick run in their content, with
+padding where required, so a generated hard break stays outside the code span.
+Keep the latest Host callbacks in mounted Surfaces. Keyboard history uses the
+same entrypoint as toolbar history; it must not unconditionally flush unrelated
+buffers or bypass the Host's private-input history and permission checks.
 
 ```tsx
 const inputs = useMemo(() => new EditorInputs(), [artifactId]);

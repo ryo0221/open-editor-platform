@@ -1,7 +1,7 @@
 // Private adapter for the reviewed fixed 1.61.3 experiment. No package dependency adoption.
 import { Input, BufferSource, ALL_FORMATS, EncodedPacketSink } from 'mediabunny';
 import { savedTiming } from '../local-codec/browser-aac.mjs';
-import { WindowCollector, prefixEnd } from './render.ts';
+import { WindowCollector, prefixEnd } from '../../src/pcm/render.ts';
 const need = (ok, message) => {
   if (!ok) throw Error(message);
 };

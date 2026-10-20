@@ -37,6 +37,13 @@ import {
   prepareEditorCommand,
 } from './editor-transactions';
 import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const actor = (actorId: string): Principal => ({
   actorId,
@@ -54,8 +61,8 @@ async function fixture<T>(codec: DomainCodec<T>, content: T) {
   const adapter = Object.assign(faults, {
     versions: async () => [],
     undo: async (id: string, redo?: boolean) => authority.undo(A, id, redo),
-    registerProposal: async (value: Parameters<typeof authority.register>[0]) =>
-      authority.register(value),
+    registerProposal: async (value: Parameters<typeof authority.register>[1]) =>
+      authority.register(A, value),
     previewProposal: async (id: string) => authority.preview(A, id),
     applyProposal: async (id: string, token: string) => authority.applyProposal(A, id, token),
   }) as unknown as EditorHostAdapter<T>;
@@ -187,7 +194,7 @@ describe('R5-01: own inverse history without erasing foreign writers or ABA stam
       [`entity:objects@${page}:${id}`],
       'read whole element',
     );
-    authority.register(p);
+    authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
     const preview = authority.preview(A, p.id);
     session.execute(updateObject(page, id, { fill: '#ff0000' }));
     await session.flush();

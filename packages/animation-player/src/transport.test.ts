@@ -1,5 +1,40 @@
 import { expect, it } from 'vitest';
 import { createPreviewTransport } from './transport';
+it('starts at a validated initial tick without drawing zero and anchors subsequent playback there', () => {
+  let now = 0,
+    callback = () => {};
+  const ticks: number[] = [],
+    clock = {
+      now: () => now,
+      request: (cb: () => void) => {
+        callback = cb;
+        return 1;
+      },
+      cancel: () => {},
+    };
+  const transport = createPreviewTransport(
+    240000,
+    240000,
+    clock,
+    (tick) => ticks.push(tick),
+    false,
+    undefined,
+    120000,
+  );
+  expect(transport.tick).toBe(120000);
+  expect(ticks).toEqual([]);
+  transport.play();
+  now = 100;
+  callback();
+  expect(ticks).toEqual([144000]);
+  transport.seek(0);
+  expect(ticks.at(-1)).toBe(0);
+  transport.dispose();
+  for (const invalid of [-1, 0.5, Infinity, 240001])
+    expect(() =>
+      createPreviewTransport(240000, 240000, clock, () => {}, false, undefined, invalid),
+    ).toThrow('Invalid initial tick');
+});
 function fixture(loop = false) {
   let time = 0,
     id = 0;
@@ -144,4 +179,39 @@ it('preserves looping playback when setRate samples a delayed wrap', () => {
   expect(f.callbacks.size).toBe(1);
   f.advance(1500);
   expect(f.transport.tick).toBe(180000);
+});
+it('keeps work area playback private, supports dropped frames and permits an explicit seek outside it', () => {
+  let time = 0;
+  let frame: (() => void) | undefined;
+  const transport = createPreviewTransport(
+    240000,
+    240000,
+    {
+      now: () => time,
+      request: (callback) => {
+        frame = callback;
+        return 1;
+      },
+      cancel: () => {
+        frame = undefined;
+      },
+    },
+    () => {},
+    true,
+    { start: 60000, end: 120000 },
+  );
+  transport.play();
+  time = 750;
+  frame?.();
+  expect(transport.tick).toBe(60000);
+  transport.seek(0);
+  expect(transport.playing).toBe(false);
+  expect(transport.tick).toBe(0);
+  transport.play();
+  expect(transport.tick).toBe(60000);
+  time = 875;
+  frame?.();
+  expect(transport.tick).toBe(90000);
+  transport.dispose();
+  expect(frame).toBeUndefined();
 });

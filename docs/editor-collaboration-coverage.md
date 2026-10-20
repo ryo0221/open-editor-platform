@@ -60,6 +60,22 @@ existing #2 scope. Their stored page/object changes use the same prepared transa
 presentation navigation stays private. No new full chart engine or office-format
 fidelity is implied. #4 template application is implemented; see the template contract and the #6 checkpoint.
 
+## Animation schema 2
+
+The ordinary Animation Surface uses `animationEditorCodec`, existing command
+preparation and native canvas ProseMirror text steps. Stable-ID field changes,
+explicit structural conditions and authority validation support selective Undo;
+whole existing entity replacements cannot bypass native text preparation.
+`animationEditorCodec.apply` and `applyReadonly` return deep-frozen content, and
+`readFrozenAnimation2` returns an admitted frozen input itself. Callers copy such
+content with `readAnimation2` before mutating it.
+Root resource edits require the global grant. Playback and preview inputs remain
+private. Shared export requires settled confirmed content. Legacy Animation in a
+draft or saved history refuses shared admission; it does not fall back to local
+editing. The reference service is not production authentication or durable storage.
+See [capabilities and limits](animation/production-2d-design.md) and
+[normal peer/authority evidence](verification/issue-74/README.md).
+
 ## Explicit boundaries
 
 - Review comparison-source replacement and File source replacement are local creation/

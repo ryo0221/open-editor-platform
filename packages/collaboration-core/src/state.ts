@@ -104,7 +104,7 @@ export function mapAnchor<T>(
   action: Action,
   after: T,
 ): Anchor {
-  const mapped = codec.mapAnchor?.(anchor, before, action) ?? anchor;
+  const mapped = codec.mapAnchor?.(anchor, before, action, after) ?? anchor;
   return action.type === 'domain.restore' && !mapped.orphan && !codec.validateAnchor(after, mapped)
     ? { ...mapped, orphan: true }
     : mapped;

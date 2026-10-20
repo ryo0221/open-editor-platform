@@ -2,7 +2,7 @@ import { trapBatches } from './faults';
 /** Manual forced-execution suite, shared verbatim by Node and Chromium. */
 import { time } from '@editor-platform/video-core';
 import { renderPcm as oracle } from './frozen/render';
-import { PcmBackend } from './adapter';
+import { PcmBackend } from '../../src/pcm/adapter';
 import {
   Tile,
   ROWS,
@@ -15,8 +15,8 @@ import {
   jsKernel,
   prepareModule,
   need,
-} from './kernel';
-import { prepare, type Mapping, type PcmWindow, type SourceBoundary } from './prepare';
+} from '../../src/pcm/kernel';
+import { prepare, type Mapping, type PcmWindow, type SourceBoundary } from '../../src/pcm/prepare';
 const signal = () => new AbortController().signal;
 const bits = (a: Float32Array) => new Uint32Array(a.buffer, a.byteOffset, a.length);
 function same(a: Float32Array, b: Float32Array) {

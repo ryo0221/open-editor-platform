@@ -95,7 +95,7 @@ npm ci
 npm run spatial:build
 npm run spatial:test
 npm run build
-npx playwright test --config playwright.spatial.production.config.ts
+E2E_SUITE=spatial.production npx playwright test
 ```
 
 Both root-command Cargo invocations explicitly select `cargo +1.90.0`, independently

@@ -10,6 +10,8 @@ export function createPreviewTransport(
   clock: PreviewClock,
   render: (tick: number) => void,
   loop = false,
+  range = { start: 0, end: duration },
+  initialTick = 0,
 ) {
   if (
     !Number.isSafeInteger(duration) ||
@@ -18,10 +20,20 @@ export function createPreviewTransport(
     ticksPerSecond <= 0
   )
     throw new Error('Invalid transport time');
+  if (
+    !Number.isSafeInteger(range.start) ||
+    !Number.isSafeInteger(range.end) ||
+    range.start < 0 ||
+    range.start >= range.end ||
+    range.end > duration
+  )
+    throw new Error('Invalid playback work area');
+  if (!Number.isSafeInteger(initialTick) || initialTick < 0 || initialTick > duration)
+    throw new Error('Invalid initial tick');
   let disposed = false,
     playing = false,
-    tick = 0,
-    anchorTick = 0,
+    tick = initialTick,
+    anchorTick = initialTick,
     anchorTime = 0,
     rate = 1;
   let pending: number | null = null;
@@ -38,7 +50,9 @@ export function createPreviewTransport(
     const absolute =
       anchorTick + Math.floor((Math.max(0, now() - anchorTime) / 1000) * ticksPerSecond * rate);
     if (!Number.isSafeInteger(absolute)) throw new Error('Clock tick overflow');
-    return loop ? absolute % duration : Math.min(duration, absolute);
+    return loop
+      ? range.start + ((absolute - range.start) % (range.end - range.start))
+      : Math.min(range.end, absolute);
   };
   const cancel = () => {
     generation++;
@@ -55,7 +69,7 @@ export function createPreviewTransport(
     try {
       tick = sample();
       render(tick);
-      if (!loop && tick === duration) stop();
+      if (!loop && tick === range.end) stop();
       if (playing && !disposed) schedule();
     } catch (error) {
       stop();
@@ -78,7 +92,7 @@ export function createPreviewTransport(
     play() {
       check();
       if (playing) return;
-      if (tick === duration) tick = 0;
+      if (tick < range.start || tick >= range.end) tick = range.start;
       anchorTime = now();
       anchorTick = tick;
       playing = true;
@@ -104,6 +118,7 @@ export function createPreviewTransport(
       if (!Number.isSafeInteger(value) || value < 0 || value > duration)
         throw new Error('Invalid seek tick');
       const time = now();
+      if (playing && (value < range.start || value >= range.end)) stop();
       render(value);
       tick = value;
       anchorTick = value;
@@ -117,7 +132,7 @@ export function createPreviewTransport(
       this.pause();
       rate = value;
       // pause samples the current absolute clock; it may have reached the terminal pose.
-      if (resume && (loop || tick < duration)) this.play();
+      if (resume && (loop || tick < range.end)) this.play();
     },
     dispose() {
       if (disposed) return;

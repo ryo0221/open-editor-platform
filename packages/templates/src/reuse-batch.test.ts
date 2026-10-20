@@ -9,6 +9,13 @@ import { createReusableVersion } from './reuse-catalog';
 import { prepareComponentInsertion } from './reuse-apply';
 import { applyLocalTemplate, localTemplateSnapshot, templateCodec } from './apply';
 import { prepareComponentBatch, applyComponentBatch } from './reuse-batch';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const identity = { actorId: 'A', clientId: 'a', sessionId: 'a' };
 const principal = { ...identity, writable: true, scopes: ['*'] };
@@ -72,7 +79,10 @@ it('reports partial failures independently, retries the same receipt, and preser
   const tokens = new Map<string, string>();
   for (const [index, result] of batch.results.entries())
     if (result.prepared) {
-      authorities[index].register(result.prepared.proposal);
+      authorities[index].register(
+        { ...proposalHost, actorId: result.prepared.proposal.sourceActorId },
+        result.prepared.proposal,
+      );
       tokens.set(
         result.artifactId,
         authorities[index].preview(principal, result.prepared.id).token,

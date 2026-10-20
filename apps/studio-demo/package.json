@@ -5,6 +5,13 @@
   "type": "module",
   "dependencies": {
     "@babel/standalone": "7.26.10",
-    "jszip": "3.10.1"
+    "jszip": "3.10.1",
+    "@editor-platform/reference-artifact-host": "*",
+    "@editor-platform/slide": "*",
+    "@editor-platform/whiteboard": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/structured-data": "*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
   }
 }

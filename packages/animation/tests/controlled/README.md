@@ -46,7 +46,7 @@ acceptance remain #76 integration work. Save outcome tests verify Surface displa
 of explicit stub results, not real persistence guarantees. Physical iOS not tested.
 
 Build: `npx vite build --config packages/animation/tests/controlled/vite.config.ts`
-Browser: `npx playwright test --config packages/animation/tests/controlled/playwright.config.ts`
+Browser: `E2E_SUITE=animation-controlled npx playwright test`
 Unit: `npx vitest run packages/animation/src/controlled-buffer.test.ts`
 
 The dedicated `.controlled.ts` test suffix avoids the existing standalone suite's

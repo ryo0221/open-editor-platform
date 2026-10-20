@@ -472,13 +472,11 @@ test('M2 assets: unknown location preserved, local photo retained/reloaded, miss
     c.getContext('2d')!.fillRect(0, 0, 2, 2);
     return c.toDataURL('image/png').split(',')[1];
   });
-  await page
-    .getByLabel('Local inspection photo', { exact: true })
-    .setInputFiles({
-      name: 'inspection.png',
-      mimeType: 'image/png',
-      buffer: Buffer.from(base64, 'base64'),
-    });
+  await page.getByLabel('Local inspection photo', { exact: true }).setInputFiles({
+    name: 'inspection.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(base64, 'base64'),
+  });
   await button(page, 'Attach selected local photo').click();
   await expect
     .poll(async () => (await state(page)).content.workspace!.assets[0].photos.length)
@@ -574,4 +572,33 @@ test('AC12 PNG digest cannot revive output after dirty input is cancelled', asyn
     'Changed',
   );
   await expect(page.getByRole('link', { name: 'Download fixed PNG', exact: true })).toHaveCount(0);
+});
+
+test('#280 independent production Host uses offline boundaries without content, history or selection changes', async ({
+  page,
+}, info) => {
+  const before = await state(page);
+  await page.context().setOffline(true);
+  await page.getByLabel('Show World countries', { exact: true }).check();
+  await page.getByLabel('Show World states and provinces', { exact: true }).check();
+  const after = await state(page);
+  expect(after.content).toEqual(before.content);
+  expect(after.hash).toBe(before.hash);
+  expect(after.revision).toEqual(before.revision);
+  expect([after.canUndo, after.canRedo]).toEqual([before.canUndo, before.canRedo]);
+  expect(after.inputs).toEqual(before.inputs);
+  await expect(page.locator('[data-background-id]')).toHaveCount(2);
+  await expect(page.locator('[data-background-id] [role="button"]')).toHaveCount(0);
+  await page.getByLabel('World countries boundary color', { exact: true }).fill('#557755');
+  await page.getByLabel('World countries boundary color', { exact: true }).press('Tab');
+  await expect(page.locator('[data-background-id="world-countries"] path')).toHaveAttribute(
+    'stroke',
+    '#557755',
+  );
+  const map = page.getByRole('region', { name: 'Map', exact: true });
+  if (!(await map.isVisible())) await button(page, 'Map').click();
+  await map.screenshot({ path: info.outputPath('independent-boundaries.png') });
+  await page.getByLabel('Show World countries', { exact: true }).uncheck();
+  await page.getByLabel('Show World states and provinces', { exact: true }).uncheck();
+  expect((await state(page)).content).toEqual(before.content);
 });

@@ -179,27 +179,40 @@ export class EditorSession<T> {
   }
   /** Optional synchronous pre-commit validation; throws leave all history state untouched. */
   undo(validateCandidate?: (candidate: T) => void) {
-    this.assertMutationAvailable();
-    if (this.canUndo) this.validateHistory(this.past[this.past.length - 1], validateCandidate);
-    this.breakHistoryGroup();
-    if (this.canUndo) {
-      this.future.push(this.value);
-      this.value = this.past.pop()!;
-      this.sequence++;
-    }
-    return clone(this.value);
+    return this.history('undo', false, validateCandidate);
   }
   /** Same validation semantics as undo; omitted callback preserves existing behavior. */
   redo(validateCandidate?: (candidate: T) => void) {
+    return this.history('redo', false, validateCandidate);
+  }
+  /** Immutable rendering snapshot from the same canonical history as undo. */
+  undoView(validateCandidate?: (candidate: T) => void) {
+    return this.history('undo', true, validateCandidate);
+  }
+  /** Immutable rendering snapshot from the same canonical history as redo. */
+  redoView(validateCandidate?: (candidate: T) => void) {
+    return this.history('redo', true, validateCandidate);
+  }
+  private history(
+    direction: 'undo' | 'redo',
+    immutableView: boolean,
+    validateCandidate?: (candidate: T) => void,
+  ) {
     this.assertMutationAvailable();
-    if (this.canRedo) this.validateHistory(this.future[this.future.length - 1], validateCandidate);
+    const source = direction === 'undo' ? this.past : this.future;
+    const destination = direction === 'undo' ? this.future : this.past;
+    const candidate = source.length ? source[source.length - 1] : this.value;
+    if (source.length) this.validateHistory(candidate, validateCandidate);
+    // Own/freeze the result before changing history. Callers of the legacy
+    // methods still receive independent mutable copies.
+    const result = immutableView ? deepFreeze(candidate) : clone(candidate);
     this.breakHistoryGroup();
-    if (this.canRedo) {
-      this.past.push(this.value);
-      this.value = this.future.pop()!;
+    if (source.length) {
+      destination.push(this.value);
+      this.value = source.pop()!;
       this.sequence++;
     }
-    return clone(this.value);
+    return result;
   }
 }
 export interface EditorEvents {

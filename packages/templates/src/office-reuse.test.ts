@@ -330,8 +330,8 @@ for (const domain of ['slide', 'document'] as const) {
           },
           versions: async () => [],
           undo: async (op: string, redo?: boolean) => authority.undo(who, op, redo),
-          registerProposal: async (p: Parameters<typeof authority.register>[0]) =>
-            authority.register(p),
+          registerProposal: async (p: Parameters<typeof authority.register>[1]) =>
+            authority.register(who, p),
           previewProposal: async (p: string) => authority.preview(who, p),
           applyProposal: async (p: string, token: string) => {
             const result = authority.applyProposal(who, p, token);

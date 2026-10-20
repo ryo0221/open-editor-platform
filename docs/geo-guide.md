@@ -28,6 +28,23 @@ retain its camera, classes and annotations, then save an immutable native versio
 The equirectangular CRS84 renderer wraps short dateline paths and retains poles.
 It is not a distance, area, navigation or travel-time calculation.
 
+## Offline boundary backgrounds
+
+In the Map panel, **Read-only boundary backgrounds** offers world countries,
+world states/provinces and Japanese municipalities/wards (2017). Turn them on and
+choose line colors without changing native content or Undo. Background boundaries
+cannot be selected or edited. They use bundled, simplified data with no network
+requests. These are historical explanatory boundaries, not an authoritative
+current border register.
+
+**Save named view**, then save a version, to retain only dataset ID/version/hash
+and visibility/color settings. This explicit view-save is a normal native edit.
+Choose that saved view for PNG and Slide map references. PNG credits and its receipt
+retain attribution and exact pins; Slide's fixed PNG transfer also retains the
+receipt in notes. A missing or mismatched dataset produces a visible diagnostic
+and is omitted, preserving user features. CSV/GeoJSON exclude background data.
+[Data versions, licenses and public API](geo-background-contract.md).
+
 ## Data → Geo → Slide
 
 1. Create/import a Data table and save a version. CSV identifiers with leading

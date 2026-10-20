@@ -1,9 +1,6 @@
-import {
-  ConsumerOwner,
-  m2PcmDiagnostics,
-} from '../../../video-core/experiments/pcm-wasm-m2/owners';
-import { ownedHash } from '../../../video-core/experiments/pcm-wasm-m2/output.mjs';
-import { ScheduledAudio } from '../../../video-core/experiments/pcm-wasm-v1/scheduled-audio';
+import { ConsumerOwner, m2PcmDiagnostics } from '../../../video-core/src/pcm/owners';
+import { ownedHash } from './pcm-output.mjs';
+import { ScheduledAudio } from '../../../video-core/src/pcm/scheduled-audio';
 import { time, sampleIndex } from '@editor-platform/video-core';
 import {
   timelinePlanV2 as timelinePlan,

@@ -1,0 +1,30 @@
+:root {
+  font-family: Arial, sans-serif;
+  color: #172b4d;
+  background: #fff;
+}
+body {
+  margin: 0;
+}
+main {
+  padding: 8px;
+}
+article {
+  border: 1px solid #ccd6e0;
+  margin: 4px;
+  padding: 8px;
+}
+p,
+h2,
+blockquote {
+  margin: 4px 0;
+}
+button,
+input {
+  font: inherit;
+}
+[data-kind='badge'],
+mark {
+  background: #e8eef8;
+  padding: 2px 4px;
+}

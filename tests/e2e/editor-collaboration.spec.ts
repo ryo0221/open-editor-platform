@@ -95,7 +95,7 @@ test('EI-Q02/Q09/Q12 normal Slide: shape picker, independent peers, proposal, Un
     )
     .toBe('#335577');
   await a.getByRole('button', { name: 'Save version', exact: true }).click();
-  await a.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await a.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect.poll(async () => (await nativeArtifact(a)).versions.length).toBe(1);
   const saved = await nativeArtifact(a),
     content = saved.draft.content as SlideContent;
@@ -910,7 +910,7 @@ test('EI-Q04/Q10 Document shares headings, lists, table, paste, image and mapped
   await expect(y.getByRole('img', { name: 'dot.png' })).toBeVisible();
   await equalContent(a, b);
   await a.getByRole('button', { name: 'Save version', exact: true }).click();
-  await a.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await a.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect.poll(async () => (await nativeArtifact(b)).versions.length).toBe(1);
   await value(a, 'Page margin', '110');
   await confirmed(a);

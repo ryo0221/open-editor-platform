@@ -2,7 +2,7 @@ import { ownReuseOptions } from './reuse-owned';
 import { clone, canonicalJson } from '@editor-platform/artifact-core';
 import { reuseInstanceKey } from '@editor-platform/collaboration-adapters';
 import type { Action, Identity, Snapshot } from '@editor-platform/collaboration-core';
-import { isDocument } from '@editor-platform/document/model';
+import { isDocument, type DocumentContent } from '@editor-platform/document/model';
 import { contentToNode } from '@editor-platform/document/engine';
 import { isStructuredData, removeColumn } from '@editor-platform/structured-data/model';
 import { Transform } from 'prosemirror-transform';
@@ -104,31 +104,157 @@ function documentActions(state: Snapshot<NativeContent>, next: NativeContent): A
       ]
     : [];
 }
+type Current = ReturnType<typeof readStructure>;
+type Structure = NonNullable<TemplateDefinition['structure']>;
+type Parts = ReturnType<typeof reusableParts>;
+type Point = { x: number; y: number } | undefined;
+type StructureRecord = {
+  id: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+};
+
+/** One staged structure change: the mapped candidate and the private next native graph. */
+interface StructurePlan {
+  options: StructureChange;
+  content: NativeContent;
+  current: Current;
+  d: TemplateDefinition;
+  s: Structure;
+  candidate: Current;
+  mapped: NativeContent;
+  next: NativeContent;
+  parts: Parts;
+  freshParts: Parts;
+  removed: Current['items'];
+  removedIds: Set<string>;
+  documentExtras: Map<string, string[]>;
+}
+
 export async function prepareStructureChange(options: StructureChange) {
   options = ownReuseOptions(options);
   const { state, identity, instanceId } = options,
     content = state.content,
     current = readStructure(content, instanceId);
-  const d = await validateDefinition(options.definition ?? current.definition),
-    s = d.structure;
-  const oldS = current.definition.structure!;
+  const d = await validateDefinition(options.definition ?? current.definition);
+  const s = assertStructureRoles(options, current, d);
+  validateStructureItems(options, current, d, s);
+  const mapped = mapStructure(options, current, d, s);
+  const candidate = readStructure(mapped, instanceId),
+    next = clone(content);
+  if ('components' in mapped && 'components' in next)
+    next.components.push(
+      ...clone(mapped.components.filter((c) => !next.components.some((old) => old.id === c.id))),
+    );
+  const parts = reusableParts(next),
+    freshParts = reusableParts(mapped);
+  const desired = new Set(options.items.map((item) => item.id));
+  const removed = current.items.filter((item) => !desired.has(item.id)),
+    removedIds = new Set(removed.flatMap((item) => item.nativeIds));
+  const oldOwned = new Set(Object.values(current.instance.parts));
+  const documentExtras = collectDocumentExtras(content, current, oldOwned);
+  removeDocumentExtras(content, instanceId, removed, documentExtras, removedIds);
+  assertRemovedUnreferenced(current, parts, removedIds, oldOwned);
+  removeDataColumns(current, next, removedIds);
+  const plan: StructurePlan = {
+    options,
+    content,
+    current,
+    d,
+    s,
+    candidate,
+    mapped,
+    next,
+    parts,
+    freshParts,
+    removed,
+    removedIds,
+    documentExtras,
+  };
+  const { changed, existingRecords } = placeStructureRecords(plan);
+  const connectionNotices = mergeStructureConnectors(plan, changed, existingRecords);
+  fillDataDefaults(next);
+  const { instance, closure } = commitStructureInstance(plan);
+  applyStructureAppearance(plan, desired);
+  assertNative(d.domain, next);
+  const diagnostics = layoutDiagnostics(d, next);
+  if (diagnostics.some((d) => d.severity === 'error'))
+    throw new TemplateError(
+      'overflow',
+      '収まりません。縦・自動配置や別ページへの分割を選び、個別調整を確認してください。',
+      diagnostics,
+    );
+  const actions = isDocument(content)
+    ? documentActions(state, next)
+    : reusableNativeActions(
+        state,
+        identity,
+        ('reuse' in content ? { ...next, reuse: content.reuse } : next) as NativeContent,
+      );
+  actions.push({
+    type: 'reuse.instance',
+    target: instanceId,
+    payload: { value: instance, closure },
+  });
+  return prepareNativeApplication({
+    state,
+    identity,
+    id: options.requestId ?? crypto.randomUUID(),
+    definition: d,
+    summary: `${d.name}の構成を変更`,
+    actions,
+    reads: [reuseInstanceKey(instanceId), ...(documentReordered(plan) ? ['text'] : [])],
+    insertedIds: changed.filter((r) => !existingRecords.has(r.id)).map((r) => r.id),
+    notices: structureNotices(plan, connectionNotices),
+  });
+}
+
+/** Gives retained Data rows a value for every non-formula column. */
+function fillDataDefaults(next: NativeContent) {
+  if (isStructuredData(next))
+    for (const row of next.rows)
+      for (const field of next.columns)
+        if (field.type !== 'formula' && !(field.id in row.values))
+          row.values[field.id] = field.defaultValue ?? null;
+}
+
+/** Stores the updated instance and its closure in the staged reuse state. */
+function commitStructureInstance(plan: StructurePlan) {
+  const { options, current, candidate, next } = plan;
+  const instanceId = options.instanceId;
+  const instance = clone(candidate.instance);
+  instance.inputs.relationship = options.relationship ?? current.relationship;
+  // Geometry baselines are relative; native schema ownership and other explicit overrides survive.
+  for (const key of Object.keys(instance.parts))
+    instance.overrides[key] = { ...current.instance.overrides[key], ...instance.overrides[key] };
+  const closure = candidate.closure;
+  if ('reuse' in next && next.reuse) {
+    next.reuse.instances = next.reuse.instances.map((i) => (i.id === instanceId ? instance : i));
+    if (!next.reuse.closures.some((c) => c.hash === closure.hash))
+      next.reuse.closures.push(clone(closure));
+    next.reuse.closures = next.reuse.closures.filter((c) =>
+      next.reuse!.instances.some((i) => i.closureHash === c.hash),
+    );
+  }
+  return { instance, closure };
+}
+
+/** Rejects a definition whose structural roles differ from the inserted structure. */
+function assertStructureRoles(
+  options: StructureChange,
+  current: Current,
+  d: TemplateDefinition,
+): Structure {
+  const s = d.structure,
+    oldS = current.definition.structure!,
+    instanceId = options.instanceId;
   if (
     !s ||
-    d.domain !== state.domain ||
+    d.domain !== options.state.domain ||
     d.templateId !== current.definition.templateId ||
     (options.definition &&
       (current.relationship !== 'linked' ||
         d.templateVersion <= current.definition.templateVersion)) ||
-    canonicalJson(d.repeats[s.repeat].prototype.map((p) => (p as { id: string }).id)) !==
-      canonicalJson(
-        current.definition.repeats[oldS.repeat].prototype.map((p) => (p as { id: string }).id),
-      ) ||
-    canonicalJson(d.repeats[s.repeat].path) !==
-      canonicalJson(current.definition.repeats[oldS.repeat].path) ||
-    s.anchor !== oldS.anchor ||
-    s.itemId !== oldS.itemId ||
-    s.flowRole !== oldS.flowRole ||
-    canonicalJson(s.appearance ?? null) !== canonicalJson(oldS.appearance ?? null)
+    structureRolesDiffer(d, s, current.definition, oldS)
   )
     problem(
       'structure-update',
@@ -137,6 +263,34 @@ export async function prepareStructureChange(options: StructureChange) {
     );
   if (options.relationship && !['copy', 'linked'].includes(options.relationship))
     problem('structure-update', 'コピーまたはリンクを選んでください。', instanceId);
+  return s;
+}
+
+/** Whether repeat prototypes, path, anchor, item ID, flow or appearance roles changed. */
+function structureRolesDiffer(
+  d: TemplateDefinition,
+  s: Structure,
+  old: TemplateDefinition,
+  oldS: Structure,
+) {
+  return (
+    canonicalJson(d.repeats[s.repeat].prototype.map((p) => (p as { id: string }).id)) !==
+      canonicalJson(old.repeats[oldS.repeat].prototype.map((p) => (p as { id: string }).id)) ||
+    canonicalJson(d.repeats[s.repeat].path) !== canonicalJson(old.repeats[oldS.repeat].path) ||
+    s.anchor !== oldS.anchor ||
+    s.itemId !== oldS.itemId ||
+    s.flowRole !== oldS.flowRole ||
+    canonicalJson(s.appearance ?? null) !== canonicalJson(oldS.appearance ?? null)
+  );
+}
+
+/** Existing items pass only their IDs; new items pass only the recipe's item inputs. */
+function validateStructureItems(
+  options: StructureChange,
+  current: Current,
+  d: TemplateDefinition,
+  s: Structure,
+) {
   for (const item of options.items)
     if (current.items.some((old) => old.id === item.id)) {
       const key = Object.keys(item).find((key) => key !== 'id');
@@ -158,6 +312,15 @@ export async function prepareStructureChange(options: StructureChange) {
           `items.${item.id}.${unknown}`,
         );
     }
+}
+
+/** Expands the recipe with placeholder inputs for retained items and remaps onto existing IDs. */
+function mapStructure(
+  options: StructureChange,
+  current: Current,
+  d: TemplateDefinition,
+  s: Structure,
+) {
   const temporaryNames = new Set([
     ...(d.content && 'columns' in d.content ? d.content.columns.map((c) => c.name) : []),
     ...options.items.map((item) => String(item.title ?? '')),
@@ -189,7 +352,7 @@ export async function prepareStructureChange(options: StructureChange) {
   const fresh = expandTemplate(d, values, { remap: false }).content!;
   const generated = readStructure(fresh, 'structure'),
     ids = new Map<string, string>(Object.entries(current.instance.nativeIds ?? {}));
-  ids.set('structure', instanceId);
+  ids.set('structure', options.instanceId);
   for (const [key, id] of Object.entries(generated.instance.parts))
     if (current.instance.parts[key]) ids.set(id, current.instance.parts[key]);
   if (
@@ -205,76 +368,97 @@ export async function prepareStructureChange(options: StructureChange) {
     // Child IDs stay stable within each component scope, preserving old overrides/addresses.
     for (const component of fresh.components) ids.delete(component.id);
   }
-  const mapped = remapNative(
-    fresh,
-    ids,
-    `structure_${options.requestId ?? crypto.randomUUID()}`,
-  ).content;
-  const candidate = readStructure(mapped, instanceId),
-    next = clone(content);
-  if ('components' in mapped && 'components' in next)
-    next.components.push(
-      ...clone(mapped.components.filter((c) => !next.components.some((old) => old.id === c.id))),
+  return remapNative(fresh, ids, `structure_${options.requestId ?? crypto.randomUUID()}`).content;
+}
+
+/** Item heading labels, when every item heading shares one level. */
+function itemHeadings(content: DocumentContent, current: Current) {
+  const labelRole = current.definition.structure!.labelRole;
+  const labels = new Map(
+    current.items.map((i) => [current.instance.parts[itemPart(i.id, labelRole)], i.id]),
+  );
+  const headings = content.blocks.filter((b) => labels.has(b.id));
+  if (!headings.every((b) => b.type === 'heading' && b.level === headings[0].level)) return;
+  return { labels, headings };
+}
+
+/** Rejects an item's native block that now sits under another item heading. */
+function assertBlockOwner(current: Current, blockId: string, owner: string | undefined) {
+  const owned = current.items.find((i) => i.nativeIds.includes(blockId));
+  if (owned && owned.id !== owner)
+    problem(
+      'structure-reference',
+      '見出しと本文の対応が変わっています。native本文を確認してください。',
+      blockId,
     );
-  const parts = reusableParts(next),
-    freshParts = reusableParts(mapped);
-  const desired = new Set(options.items.map((item) => item.id));
-  const removed = current.items.filter((item) => !desired.has(item.id)),
-    removedIds = new Set(removed.flatMap((item) => item.nativeIds));
-  const oldOwned = new Set(Object.values(current.instance.parts));
+}
+
+/** Document blocks under each item heading that the instance does not own yet. */
+function collectDocumentExtras(content: NativeContent, current: Current, oldOwned: Set<string>) {
   const documentExtras = new Map<string, string[]>();
-  if (isDocument(content)) {
-    const labels = new Map(
-      current.items.map((i) => [current.instance.parts[itemPart(i.id, oldS.labelRole)], i.id]),
-    );
-    const headings = content.blocks.filter((b) => labels.has(b.id));
-    if (headings.every((b) => b.type === 'heading' && b.level === headings[0].level)) {
-      let owner: string | undefined;
-      const first = content.blocks.findIndex((b) => labels.has(b.id));
-      let last = first;
-      content.blocks.forEach((block, index) => {
-        if (labels.has(block.id)) last = index;
-      });
-      for (const [index, block] of content.blocks.entries()) {
-        if (labels.has(block.id)) owner = labels.get(block.id);
-        else if (block.type === 'heading' && (block.level ?? 1) <= (headings[0].level ?? 1)) {
-          if (index > first && index < last)
-            problem(
-              'structure-reference',
-              '項目の間に別の見出しがあります。本文構造を整えるか、構成の管理を解除してください。',
-              block.id,
-            );
-          owner = undefined;
-        }
-        const owned = current.items.find((i) => i.nativeIds.includes(block.id));
-        if (owned && owned.id !== owner)
-          problem(
-            'structure-reference',
-            '見出しと本文の対応が変わっています。native本文を確認してください。',
-            block.id,
-          );
-        if (owner && !oldOwned.has(block.id)) {
-          const ids = documentExtras.get(owner) ?? [];
-          ids.push(block.id);
-          documentExtras.set(owner, ids);
-        }
-      }
-      for (const item of removed)
-        for (const id of documentExtras.get(item.id) ?? []) {
-          if (
-            content.reuse?.instances.some(
-              (i) => i.id !== instanceId && Object.values(i.parts).includes(id),
-            )
-          )
-            problem(
-              'structure-reference',
-              '別の再利用部品が管理する本文です。先に参照を変更してください。',
-              id,
-            );
-          removedIds.add(id);
-        }
+  if (!isDocument(content)) return documentExtras;
+  const headed = itemHeadings(content, current);
+  if (!headed) return documentExtras;
+  const { labels, headings } = headed;
+  let owner: string | undefined;
+  const first = content.blocks.findIndex((b) => labels.has(b.id));
+  let last = first;
+  content.blocks.forEach((block, index) => {
+    if (labels.has(block.id)) last = index;
+  });
+  for (const [index, block] of content.blocks.entries()) {
+    if (labels.has(block.id)) owner = labels.get(block.id);
+    else if (block.type === 'heading' && (block.level ?? 1) <= (headings[0].level ?? 1)) {
+      if (index > first && index < last)
+        problem(
+          'structure-reference',
+          '項目の間に別の見出しがあります。本文構造を整えるか、構成の管理を解除してください。',
+          block.id,
+        );
+      owner = undefined;
+    }
+    assertBlockOwner(current, block.id, owner);
+    if (owner && !oldOwned.has(block.id)) {
+      const ids = documentExtras.get(owner) ?? [];
+      ids.push(block.id);
+      documentExtras.set(owner, ids);
     }
   }
+  return documentExtras;
+}
+
+/** Removes extra Document blocks with their item unless another instance manages them. */
+function removeDocumentExtras(
+  content: NativeContent,
+  instanceId: string,
+  removed: Current['items'],
+  documentExtras: Map<string, string[]>,
+  removedIds: Set<string>,
+) {
+  if (!isDocument(content)) return;
+  for (const item of removed)
+    for (const id of documentExtras.get(item.id) ?? []) {
+      if (
+        content.reuse?.instances.some(
+          (i) => i.id !== instanceId && Object.values(i.parts).includes(id),
+        )
+      )
+        problem(
+          'structure-reference',
+          '別の再利用部品が管理する本文です。先に参照を変更してください。',
+          id,
+        );
+      removedIds.add(id);
+    }
+}
+
+/** Rejects surviving parts that still point at removed native entities. */
+function assertRemovedUnreferenced(
+  current: Current,
+  parts: Parts,
+  removedIds: Set<string>,
+  oldOwned: Set<string>,
+) {
   for (const [id, part] of parts)
     if (
       !removedIds.has(id) &&
@@ -292,41 +476,80 @@ export async function prepareStructureChange(options: StructureChange) {
             `${id}: 削除対象を参照しています。先に接続・所属を変更してください。`,
             id,
           );
-  if (isStructuredData(next)) {
-    for (const id of removedIds) {
-      const key = Object.keys(current.instance.parts).find(
-        (key) => current.instance.parts[key] === id,
-      )!;
-      if (current.instance.overrides[key]?.schema)
-        problem(
-          'structure-reference',
-          '対応付けた既存列は削除できません。構成をコピーして別列へ挿入してください。',
-          id,
-        );
-      if (next.views?.some((view) => JSON.stringify(view).includes(JSON.stringify(id))))
-        problem(
-          'structure-reference',
-          '保存済みビューが参照する列です。先にビューの対応を変更してください。',
-          id,
-        );
-      try {
-        Object.assign(next, removeColumn(id).apply(next));
-      } catch (e) {
-        problem('structure-reference', (e as Error).message, id);
-      }
+}
+
+/** Removes Data columns of removed items through the native column command. */
+function removeDataColumns(current: Current, next: NativeContent, removedIds: Set<string>) {
+  if (!isStructuredData(next)) return;
+  for (const id of removedIds) {
+    const key = Object.keys(current.instance.parts).find(
+      (key) => current.instance.parts[key] === id,
+    )!;
+    if (current.instance.overrides[key]?.schema)
+      problem(
+        'structure-reference',
+        '対応付けた既存列は削除できません。構成をコピーして別列へ挿入してください。',
+        id,
+      );
+    if (next.views?.some((view) => JSON.stringify(view).includes(JSON.stringify(id))))
+      problem(
+        'structure-reference',
+        '保存済みビューが参照する列です。先にビューの対応を変更してください。',
+        id,
+      );
+    try {
+      Object.assign(next, removeColumn(id).apply(next));
+    } catch (e) {
+      problem('structure-reference', (e as Error).message, id);
     }
   }
+}
+
+/** Places a generated item record relative to the anchor, keeping manual geometry deltas. */
+function placeStructureRecord(
+  plan: StructurePlan,
+  existingRecords: Map<string, StructureRecord>,
+  origin: Point,
+  freshOrigin: Point,
+  newRecord: StructureRecord,
+) {
+  const { current, candidate } = plan;
+  const key = Object.keys(candidate.instance.parts).find(
+    (key) => candidate.instance.parts[key] === newRecord.id,
+  )!;
+  const old = existingRecords.get(newRecord.id),
+    result = old ? clone(old) : clone(newRecord);
+  if (result.bounds && newRecord.bounds) {
+    const baseline = current.instance.overrides[key]?.automaticBounds;
+    const b = record(baseline) ? baseline : undefined;
+    const bounds = newRecord.bounds;
+    const shift = (axis: 'x' | 'y') =>
+      bounds[axis] -
+      (freshOrigin?.[axis] ?? 0) +
+      (origin?.[axis] ?? 0) +
+      (old && b ? old.bounds![axis] - (origin?.[axis] ?? 0) - Number(b[axis]) : 0);
+    const grow = (size: 'width' | 'height') =>
+      bounds[size] + (old && b ? old.bounds![size] - Number(b[size]) : 0);
+    result.bounds = {
+      ...bounds,
+      x: shift('x'),
+      y: shift('y'),
+      width: grow('width'),
+      height: grow('height'),
+    };
+  }
+  return result;
+}
+
+/** Orders item records into the structure path and grows the anchor container to fit. */
+function placeStructureRecords(plan: StructurePlan) {
+  const { current, d, s, candidate, mapped, next, parts, freshParts, documentExtras } = plan;
   const originId = s.anchor && current.instance.parts[`anchor.${s.anchor}`];
-  const origin = (originId && parts.get(originId)?.bounds) as { x: number; y: number } | undefined;
+  const origin = (originId && parts.get(originId)?.bounds) as Point;
   const freshOrigin = (s.anchor &&
-    freshParts.get(candidate.instance.parts[`anchor.${s.anchor}`])?.bounds) as
-    | { x: number; y: number }
-    | undefined;
+    freshParts.get(candidate.instance.parts[`anchor.${s.anchor}`])?.bounds) as Point;
   const path = structurePath(next, current.instance, current.definition),
-    records = at(next, path) as {
-      id: string;
-      bounds?: { x: number; y: number; width: number; height: number };
-    }[];
+    records = at(next, path) as StructureRecord[];
   const wanted = at(mapped, structurePath(mapped, candidate.instance, d)) as typeof records;
   const itemOwned = new Set(
     Object.entries(current.instance.parts)
@@ -340,50 +563,11 @@ export async function prepareStructureChange(options: StructureChange) {
         ([key, id]) => key.startsWith('item.') && r.id === id,
       ),
     )
-    .map((newRecord) => {
-      const key = Object.keys(candidate.instance.parts).find(
-        (key) => candidate.instance.parts[key] === newRecord.id,
-      )!;
-      const old = existingRecords.get(newRecord.id),
-        result = old ? clone(old) : clone(newRecord);
-      if (result.bounds && newRecord.bounds) {
-        const baseline = current.instance.overrides[key]?.automaticBounds;
-        const b = record(baseline) ? baseline : undefined;
-        result.bounds = {
-          ...newRecord.bounds,
-          x:
-            newRecord.bounds.x -
-            (freshOrigin?.x ?? 0) +
-            (origin?.x ?? 0) +
-            (old && b ? old.bounds!.x - (origin?.x ?? 0) - Number(b.x) : 0),
-          y:
-            newRecord.bounds.y -
-            (freshOrigin?.y ?? 0) +
-            (origin?.y ?? 0) +
-            (old && b ? old.bounds!.y - (origin?.y ?? 0) - Number(b.y) : 0),
-          width: newRecord.bounds.width + (old && b ? old.bounds!.width - Number(b.width) : 0),
-          height: newRecord.bounds.height + (old && b ? old.bounds!.height - Number(b.height) : 0),
-        };
-      }
-      return result;
-    });
+    .map((newRecord) =>
+      placeStructureRecord(plan, existingRecords, origin, freshOrigin, newRecord),
+    );
   for (const ids of documentExtras.values()) for (const id of ids) itemOwned.add(id);
-  const grouped =
-    isDocument(content) && documentExtras.size
-      ? options.items.flatMap((item) => {
-          const old = current.items.find((i) => i.id === item.id);
-          if (!old)
-            return changed.filter((r) =>
-              Object.entries(candidate.instance.parts).some(
-                ([key, id]) => key.startsWith(`item.${item.id}.`) && id === r.id,
-              ),
-            );
-          const ids = new Set([...old.nativeIds, ...(documentExtras.get(item.id) ?? [])]);
-          return records
-            .filter((r) => ids.has(r.id))
-            .map((r) => changed.find((c) => c.id === r.id) ?? r);
-        })
-      : changed;
+  const grouped = groupDocumentRecords(plan, records, changed);
   const first = records.findIndex((r) => itemOwned.has(r.id)),
     untouched = records.filter((r) => !itemOwned.has(r.id)),
     insertion =
@@ -391,7 +575,37 @@ export async function prepareStructureChange(options: StructureChange) {
         ? untouched.length
         : records.slice(0, first).filter((r) => !itemOwned.has(r.id)).length;
   setAt(next, path, [...untouched.slice(0, insertion), ...grouped, ...untouched.slice(insertion)]);
-  // Container extents grow with content; preserve an explicitly enlarged container.
+  growAnchorContainer(plan, originId, origin);
+  return { changed, existingRecords };
+}
+
+/** Keeps extra Document blocks together with their item, in the requested order. */
+function groupDocumentRecords(
+  plan: StructurePlan,
+  records: StructureRecord[],
+  changed: StructureRecord[],
+) {
+  const { options, content, current, candidate, documentExtras } = plan;
+  return isDocument(content) && documentExtras.size
+    ? options.items.flatMap((item) => {
+        const old = current.items.find((i) => i.id === item.id);
+        if (!old)
+          return changed.filter((r) =>
+            Object.entries(candidate.instance.parts).some(
+              ([key, id]) => key.startsWith(`item.${item.id}.`) && id === r.id,
+            ),
+          );
+        const ids = new Set([...old.nativeIds, ...(documentExtras.get(item.id) ?? [])]);
+        return records
+          .filter((r) => ids.has(r.id))
+          .map((r) => changed.find((c) => c.id === r.id) ?? r);
+      })
+    : changed;
+}
+
+/** Container extents grow with content; preserve an explicitly enlarged container. */
+function growAnchorContainer(plan: StructurePlan, originId: string | undefined, origin: Point) {
+  const { s, candidate, parts, freshParts } = plan;
   if (originId && origin && 'bounds' in parts.get(originId)!) {
     const root = parts.get(originId)!,
       freshRoot = freshParts.get(candidate.instance.parts[`anchor.${s.anchor}`])!;
@@ -399,147 +613,118 @@ export async function prepareStructureChange(options: StructureChange) {
       for (const key of ['width', 'height'])
         root.bounds[key] = Math.max(Number(root.bounds[key]), Number(freshRoot.bounds[key]));
   }
+}
+
+/** Keeps existing connectors, drops those of removed items and adds generated ones. */
+function mergeStructureConnectors(
+  plan: StructurePlan,
+  changed: StructureRecord[],
+  existingRecords: Map<string, StructureRecord>,
+) {
+  const { current, candidate, mapped, next, removed, removedIds } = plan;
   const connectionNotices: string[] = [];
-  if ('connectors' in next && 'connectors' in mapped) {
-    const oldEdges = new Set(
-      Object.entries(current.instance.parts)
-        .filter(([key]) => key.startsWith('edge.'))
-        .map(([, id]) => id),
-    );
-    const surviving = next.connectors.filter((edge) => {
-      const remove =
-        oldEdges.has(edge.id) && (removedIds.has(edge.from) || removedIds.has(edge.to));
-      if (remove) connectionNotices.push(`削除する接続: ${edge.label || edge.id} (${edge.id})`);
-      return !remove;
-    });
-    const newNative = new Set(changed.filter((r) => !existingRecords.has(r.id)).map((r) => r.id));
-    const additions = mapped.connectors.filter(
-      (edge) =>
-        !surviving.some((old) => old.from === edge.from && old.to === edge.to) &&
-        (newNative.has(edge.from) || newNative.has(edge.to) || removed.length > 0),
-    );
-    next.connectors = [...surviving, ...additions];
-    // A visual reorder preserves the actual graph, labels, ports and connector IDs.
-    for (const key of Object.keys(candidate.instance.parts).filter((key) =>
-      key.startsWith('edge.'),
-    )) {
-      if (!next.connectors.some((edge) => edge.id === candidate.instance.parts[key]))
-        delete candidate.instance.parts[key];
-    }
-    for (const [key, id] of Object.entries(current.instance.parts))
-      if (key.startsWith('edge.') && next.connectors.some((edge) => edge.id === id))
-        candidate.instance.parts[key] = id;
-    connectionNotices.push(
-      '既存の接続・ラベル・ポートは保持します。並べ替えは配置に適用し、接続先はWhiteboard上で編集できます。',
-    );
+  if (!('connectors' in next && 'connectors' in mapped)) return connectionNotices;
+  const oldEdges = new Set(
+    Object.entries(current.instance.parts)
+      .filter(([key]) => key.startsWith('edge.'))
+      .map(([, id]) => id),
+  );
+  const surviving = next.connectors.filter((edge) => {
+    const remove = oldEdges.has(edge.id) && (removedIds.has(edge.from) || removedIds.has(edge.to));
+    if (remove) connectionNotices.push(`削除する接続: ${edge.label || edge.id} (${edge.id})`);
+    return !remove;
+  });
+  const newNative = new Set(changed.filter((r) => !existingRecords.has(r.id)).map((r) => r.id));
+  const additions = mapped.connectors.filter(
+    (edge) =>
+      !surviving.some((old) => old.from === edge.from && old.to === edge.to) &&
+      (newNative.has(edge.from) || newNative.has(edge.to) || removed.length > 0),
+  );
+  next.connectors = [...surviving, ...additions];
+  // A visual reorder preserves the actual graph, labels, ports and connector IDs.
+  for (const key of Object.keys(candidate.instance.parts).filter((key) =>
+    key.startsWith('edge.'),
+  )) {
+    if (!next.connectors.some((edge) => edge.id === candidate.instance.parts[key]))
+      delete candidate.instance.parts[key];
   }
-  if (isStructuredData(next))
-    for (const row of next.rows)
-      for (const field of next.columns)
-        if (field.type !== 'formula' && !(field.id in row.values))
-          row.values[field.id] = field.defaultValue ?? null;
-  const instance = clone(candidate.instance);
-  instance.inputs.relationship = options.relationship ?? current.relationship;
-  // Geometry baselines are relative; native schema ownership and other explicit overrides survive.
-  for (const key of Object.keys(instance.parts))
-    instance.overrides[key] = { ...current.instance.overrides[key], ...instance.overrides[key] };
-  const closure = candidate.closure;
-  if ('reuse' in next && next.reuse) {
-    next.reuse.instances = next.reuse.instances.map((i) => (i.id === instanceId ? instance : i));
-    if (!next.reuse.closures.some((c) => c.hash === closure.hash))
-      next.reuse.closures.push(clone(closure));
-    next.reuse.closures = next.reuse.closures.filter((c) =>
-      next.reuse!.instances.some((i) => i.closureHash === c.hash),
-    );
-  }
-  if (options.appearance?.length) {
-    const targets = s.appearance;
+  for (const [key, id] of Object.entries(current.instance.parts))
+    if (key.startsWith('edge.') && next.connectors.some((edge) => edge.id === id))
+      candidate.instance.parts[key] = id;
+  connectionNotices.push(
+    '既存の接続・ラベル・ポートは保持します。並べ替えは配置に適用し、接続先はWhiteboard上で編集できます。',
+  );
+  return connectionNotices;
+}
+
+/** Applies explicit emphasis and visibility commands to the staged native parts. */
+function applyStructureAppearance(plan: StructurePlan, desired: Set<string>) {
+  const { options, s, next } = plan;
+  if (!options.appearance?.length) return;
+  const targets = s.appearance;
+  if (
+    !targets ||
+    options.appearance.length > s.max ||
+    new Set(options.appearance.map((a) => a.id)).size !== options.appearance.length
+  )
+    problem('structure-appearance', 'この構成の表示対象を指定してください。', options.instanceId);
+  const actual = readStructure(next, options.instanceId);
+  for (const item of options.appearance) {
     if (
-      !targets ||
-      options.appearance.length > s.max ||
-      new Set(options.appearance.map((a) => a.id)).size !== options.appearance.length
-    )
-      problem('structure-appearance', 'この構成の表示対象を指定してください。', instanceId);
-    const actual = readStructure(next, instanceId);
-    for (const item of options.appearance) {
-      if (
-        !desired.has(item.id) ||
-        Object.entries(item).some(
-          ([key, value]) =>
-            key !== 'id' &&
-            (!['emphasized', 'descriptionVisible', 'imageVisible'].includes(key) ||
-              typeof value !== 'boolean'),
-        )
+      !desired.has(item.id) ||
+      Object.entries(item).some(
+        ([key, value]) =>
+          key !== 'id' &&
+          (!['emphasized', 'descriptionVisible', 'imageVisible'].includes(key) ||
+            typeof value !== 'boolean'),
       )
-        problem('structure-appearance', '表示対象・設定値が無効です。', `appearance.${item.id}`);
-      if (item.emphasized !== undefined)
-        patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.emphasis), {
-          typography: { bold: item.emphasized },
-        });
-      if (item.descriptionVisible !== undefined)
-        patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.description), {
-          hidden: !item.descriptionVisible,
-        });
-      if (item.imageVisible !== undefined)
-        patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.image), {
-          hidden: !item.imageVisible,
-        });
-    }
+    )
+      problem('structure-appearance', '表示対象・設定値が無効です。', `appearance.${item.id}`);
+    if (item.emphasized !== undefined)
+      patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.emphasis), {
+        typography: { bold: item.emphasized },
+      });
+    if (item.descriptionVisible !== undefined)
+      patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.description), {
+        hidden: !item.descriptionVisible,
+      });
+    if (item.imageVisible !== undefined)
+      patchReusablePart(next, structureAppearanceAddress(actual, item.id, targets.image), {
+        hidden: !item.imageVisible,
+      });
   }
-  assertNative(d.domain, next);
-  const diagnostics = layoutDiagnostics(d, next);
-  if (diagnostics.some((d) => d.severity === 'error'))
-    throw new TemplateError(
-      'overflow',
-      '収まりません。縦・自動配置や別ページへの分割を選び、個別調整を確認してください。',
-      diagnostics,
-    );
-  const actions = isDocument(content)
-    ? documentActions(state, next)
-    : reusableNativeActions(
-        state,
-        identity,
-        ('reuse' in content ? { ...next, reuse: content.reuse } : next) as NativeContent,
-      );
-  actions.push({
-    type: 'reuse.instance',
-    target: instanceId,
-    payload: { value: instance, closure },
-  });
-  return prepareNativeApplication({
-    state,
-    identity,
-    id: options.requestId ?? crypto.randomUUID(),
-    definition: d,
-    summary: `${d.name}の構成を変更`,
-    actions,
-    reads: [
-      reuseInstanceKey(instanceId),
-      ...(isDocument(content) &&
-      (removed.length ||
-        canonicalJson(current.items.map((i) => i.id)) !==
-          canonicalJson(
-            options.items
-              .filter((i) => current.items.some((old) => old.id === i.id))
-              .map((i) => i.id),
-          ))
-        ? ['text']
-        : []),
-    ],
-    insertedIds: changed.filter((r) => !existingRecords.has(r.id)).map((r) => r.id),
-    notices: [
-      ...connectionNotices,
-      ...(options.definition
-        ? [
-            `原本 v${current.definition.templateVersion} → v${d.templateVersion}。既存の本文・画像・書式を保持し、配置と今後の追加項目に反映します。`,
-          ]
-        : []),
-      ...removed.map((item) => `削除: ${item.label} (${item.id}) / ${item.nativeIds.join(', ')}`),
-      ...removed.flatMap((item) =>
-        (documentExtras.get(item.id) ?? []).map((id) => `削除する見出し内の追加本文・画像: ${id}`),
-      ),
-    ],
-  });
+}
+
+/** Whether a Document change removes or reorders retained items, requiring the text read. */
+function documentReordered(plan: StructurePlan) {
+  const { options, content, current, removed } = plan;
+  return (
+    isDocument(content) &&
+    (!!removed.length ||
+      canonicalJson(current.items.map((i) => i.id)) !==
+        canonicalJson(
+          options.items
+            .filter((i) => current.items.some((old) => old.id === i.id))
+            .map((i) => i.id),
+        ))
+  );
+}
+
+/** Review notices for removed items, connectors and a linked version update. */
+function structureNotices(plan: StructurePlan, connectionNotices: string[]) {
+  const { options, current, d, removed, documentExtras } = plan;
+  return [
+    ...connectionNotices,
+    ...(options.definition
+      ? [
+          `原本 v${current.definition.templateVersion} → v${d.templateVersion}。既存の本文・画像・書式を保持し、配置と今後の追加項目に反映します。`,
+        ]
+      : []),
+    ...removed.map((item) => `削除: ${item.label} (${item.id}) / ${item.nativeIds.join(', ')}`),
+    ...removed.flatMap((item) =>
+      (documentExtras.get(item.id) ?? []).map((id) => `削除する見出し内の追加本文・画像: ${id}`),
+    ),
+  ];
 }
 /** A new immutable catalog version. Storage remains the existing CatalogAdapter.put boundary. */
 export async function createStructureVersion(

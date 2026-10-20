@@ -1,7 +1,13 @@
 import PptxGenJS from 'pptxgenjs';
 import { strFromU8, strToU8, unzipSync, zip } from 'fflate';
 import { canonicalJson, clone, deepFreeze } from '@editor-platform/artifact-core';
-import { shapePath, type Bounds, type Drawing, type TextRun } from '@editor-platform/editor-core';
+import {
+  shapePath,
+  type Bounds,
+  type Drawing,
+  type ShapeKind,
+  type TextRun,
+} from '@editor-platform/editor-core';
 import { checkExportAbort, exportColor, hashExportBytes } from '@editor-platform/export-core';
 import { transformDrawingBox } from './geometry';
 import type { OwnedPptxPlan, PptxElement, SlidePptxReport, SlidePptxResult } from './types';
@@ -49,16 +55,42 @@ function points(path: string): NonNullable<PptxGenJS.ShapeProps['points']> {
   return result;
 }
 
+const lineKinds: readonly string[] = ['line', 'arrow', 'double-arrow'];
+/** Native M/L/Z outline of a non-rectangular shape, including drawn arrowheads. */
+function shapeOutline(d: Drawing, kind: ShapeKind) {
+  const b = d.bounds;
+  let path = lineKinds.includes(kind)
+    ? `M0 ${b.height / 2} L${b.width} ${b.height / 2}`
+    : shapePath(kind, b.width, b.height);
+  if (
+    kind === 'arrow' ||
+    kind === 'double-arrow' ||
+    d.arrowhead === 'end' ||
+    d.arrowhead === 'both'
+  )
+    path += ` M${b.width - 10} ${b.height / 2 - 6} L${b.width} ${b.height / 2} L${b.width - 10} ${b.height / 2 + 6}`;
+  if (kind === 'double-arrow' || d.arrowhead === 'both')
+    path += ` M10 ${b.height / 2 - 6} L0 ${b.height / 2} L10 ${b.height / 2 + 6}`;
+  return path;
+}
+/** Office custom dash XML for a CSS dash list, or undefined when nothing is dashed. */
+function customDash(d: Drawing) {
+  if (!d.dash || (d.strokeWidth ?? 1) <= 0) return undefined;
+  let pattern = d.dash.trim().split(/[ ,]+/).map(Number);
+  if (pattern.length % 2) pattern = [...pattern, ...pattern];
+  if (!pattern.some((n) => n > 0)) return undefined;
+  const factor = 100000 / (d.strokeWidth ?? 1);
+  return `<a:custDash>${Array.from({ length: pattern.length / 2 }, (_, i) => `<a:ds d="${Math.round(pattern[i * 2] * factor)}" sp="${Math.round(pattern[i * 2 + 1] * factor)}"/>`).join('')}</a:custDash>`;
+}
 function addShape(slide: PptxGenJS.Slide, e: PptxElement, name: string, patches: Patches) {
   const d = e.drawing,
     b = d.bounds,
     kind = d.shape ?? 'rectangle';
-  const line = ['line', 'arrow', 'double-arrow'].includes(kind);
   const options: PptxGenJS.ShapeProps = {
     ...box(b),
     ...transform(d),
     objectName: name,
-    fill: color(line ? 'none' : d.fill, d.opacity),
+    fill: color(lineKinds.includes(kind) ? 'none' : d.fill, d.opacity),
     line: {
       ...color(d.stroke ?? '#5b6472', d.opacity),
       width: pt(d.strokeWidth ?? 1),
@@ -71,31 +103,15 @@ function addShape(slide: PptxGenJS.Slide, e: PptxElement, name: string, patches:
   else if (kind === 'rectangle' || kind === 'rounded-rectangle') {
     const radius = Math.min(d.radius ?? (kind === 'rectangle' ? 0 : 16), b.width / 2, b.height / 2);
     slide.addShape(radius > 0 ? 'roundRect' : 'rect', { ...options, rectRadius: inch(radius) });
-  } else {
-    let path = line
-      ? `M0 ${b.height / 2} L${b.width} ${b.height / 2}`
-      : shapePath(kind, b.width, b.height);
-    if (
-      kind === 'arrow' ||
-      kind === 'double-arrow' ||
-      d.arrowhead === 'end' ||
-      d.arrowhead === 'both'
-    )
-      path += ` M${b.width - 10} ${b.height / 2 - 6} L${b.width} ${b.height / 2} L${b.width - 10} ${b.height / 2 + 6}`;
-    if (kind === 'double-arrow' || d.arrowhead === 'both')
-      path += ` M10 ${b.height / 2 - 6} L0 ${b.height / 2} L10 ${b.height / 2 + 6}`;
-    // 4.0.1 implements custGeom + points but omits this enum member from its declarations.
-    slide.addShape('custGeom' as PptxGenJS.ShapeType, { ...options, points: points(path) });
   }
-  if (d.dash && (d.strokeWidth ?? 1) > 0) {
-    let pattern = d.dash.trim().split(/[ ,]+/).map(Number);
-    if (pattern.length % 2) pattern = [...pattern, ...pattern];
-    if (pattern.some((n) => n > 0)) {
-      const factor = 100000 / (d.strokeWidth ?? 1);
-      const dash = `<a:custDash>${Array.from({ length: pattern.length / 2 }, (_, i) => `<a:ds d="${Math.round(pattern[i * 2] * factor)}" sp="${Math.round(pattern[i * 2 + 1] * factor)}"/>`).join('')}</a:custDash>`;
-      patches.set(name, (xml) => once(xml, /<a:prstDash[^>]*\/>/, dash));
-    }
-  }
+  // 4.0.1 implements custGeom + points but omits this enum member from its declarations.
+  else
+    slide.addShape('custGeom' as PptxGenJS.ShapeType, {
+      ...options,
+      points: points(shapeOutline(d, kind)),
+    });
+  const dash = customDash(d);
+  if (dash) patches.set(name, (xml) => once(xml, /<a:prstDash[^>]*\/>/, dash));
 }
 
 function textRuns(
@@ -255,86 +271,70 @@ function addTable(
   });
 }
 
-export async function encodeOwnedPptx(
+/** Adds one planned picture with its exact crop; reuses each image's data URI by hash. */
+function addPicture(
+  slide: PptxGenJS.Slide,
+  e: PptxElement,
+  name: string,
   plan: OwnedPptxPlan,
-  signal?: AbortSignal,
-): Promise<SlidePptxResult> {
-  if (!plan.font) throw new Error('Missing font plan');
-  const pptx = new PptxGenJS();
-  pptx.defineLayout({ name: 'Editor', width: inch(plan.width), height: inch(plan.height) });
-  pptx.layout = 'Editor';
-  pptx.author = '';
-  pptx.company = '';
-  pptx.subject = '';
-  pptx.title = '';
-  pptx.theme = { headFontFace: plan.font.family, bodyFontFace: plan.font.family };
-  const report = clone(plan.report) as SlidePptxReport;
-  const byAddress = new Map(report.elements.map((e) => [canonicalJson(e.address), e]));
-  const patches: Patches[] = [];
-  const encodedImages = new Map<string, string>();
-  let processed = 0;
-  for (const [pageIndex, page] of plan.pages.entries()) {
-    checkExportAbort(signal);
-    const slide = pptx.addSlide(),
-      patch: Patches = new Map();
-    patches.push(patch);
-    slide.background = color(page.background);
-    if (page.notes) slide.addNotes(page.notes);
-    for (const [elementIndex, e] of page.elements.entries()) {
-      checkExportAbort(signal);
-      if (++processed % 20 === 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        checkExportAbort(signal);
-      }
-      if (e.representation === 'omitted' || e.drawing.kind === 'group') continue;
-      const name = `e${elementIndex + 1}`,
-        d = e.drawing;
-      let names: string[] = [];
-      if (e.representation === 'png' || d.kind === 'image') {
-        const asset = e.imageKey && plan.assets.get(e.imageKey),
-          placement = e.imagePlacement;
-        if (!asset || !placement) throw new Error('Missing owned image plan');
-        if (!encodedImages.has(asset.hash)) encodedImages.set(asset.hash, dataUri(asset));
-        slide.addImage({
-          ...box(transformDrawingBox(placement.bounds, d)),
-          ...transform(d),
-          objectName: name,
-          data: encodedImages.get(asset.hash)!,
-          altText: d.alt ?? '',
-          transparency: (1 - (d.opacity ?? 1)) * 100,
-        });
-        const c = placement.crop;
-        patch.set(name, (xml) =>
-          once(
-            xml,
-            /<a:stretch>/,
-            `<a:srcRect l="${Math.round(c.left * 100000)}" r="${Math.round(c.right * 100000)}" t="${Math.round(c.top * 100000)}" b="${Math.round(c.bottom * 100000)}"/><a:stretch>`,
-          ),
-        );
-        names = [name];
-      } else if (d.kind === 'table') {
-        addTable(slide, e, name, plan.font.family, patch);
-        names = [name];
-      } else if (d.kind === 'text' || d.kind === 'shape') {
-        if (d.kind === 'shape') {
-          addShape(slide, e, name, patch);
-          names.push(name);
-        }
-        names.push(...addText(slide, e, name, plan.font.family));
-      } else throw new Error('Element has no planned encoding');
-      byAddress.get(canonicalJson(e.address))!.outputPartNames = names.map(
-        (n) => `ppt/slides/slide${pageIndex + 1}.xml#${n}`,
-      );
-    }
+  encodedImages: Map<string, string>,
+  patch: Patches,
+) {
+  const d = e.drawing;
+  const asset = e.imageKey && plan.assets.get(e.imageKey),
+    placement = e.imagePlacement;
+  if (!asset || !placement) throw new Error('Missing owned image plan');
+  if (!encodedImages.has(asset.hash)) encodedImages.set(asset.hash, dataUri(asset));
+  slide.addImage({
+    ...box(transformDrawingBox(placement.bounds, d)),
+    ...transform(d),
+    objectName: name,
+    data: encodedImages.get(asset.hash)!,
+    altText: d.alt ?? '',
+    transparency: (1 - (d.opacity ?? 1)) * 100,
+  });
+  const c = placement.crop;
+  patch.set(name, (xml) =>
+    once(
+      xml,
+      /<a:stretch>/,
+      `<a:srcRect l="${Math.round(c.left * 100000)}" r="${Math.round(c.right * 100000)}" t="${Math.round(c.top * 100000)}" b="${Math.round(c.bottom * 100000)}"/><a:stretch>`,
+    ),
+  );
+}
+/** Adds one planned element; returns the Office object names it produced. */
+function addElement(
+  slide: PptxGenJS.Slide,
+  e: PptxElement,
+  name: string,
+  plan: OwnedPptxPlan,
+  family: string,
+  encodedImages: Map<string, string>,
+  patch: Patches,
+): string[] {
+  const d = e.drawing;
+  if (e.representation === 'png' || d.kind === 'image') {
+    addPicture(slide, e, name, plan, encodedImages, patch);
+    return [name];
   }
-  checkExportAbort(signal);
-  // Patching requires unpacking anyway. Compress only the final, deduplicated package.
-  const raw = await pptx.write({ outputType: 'uint8array', compression: false });
-  checkExportAbort(signal);
-  if (!(raw instanceof Uint8Array)) throw new Error('Unexpected Office bytes');
-  const files = unzipSync(raw);
-  // PptxGenJS repeats data-URI media across slides. Keep each distinct image once,
-  // preserving every picture's independent placement/crop/alt text and relationship.
+  if (d.kind === 'table') {
+    addTable(slide, e, name, family, patch);
+    return [name];
+  }
+  if (d.kind !== 'text' && d.kind !== 'shape') throw new Error('Element has no planned encoding');
+  const names: string[] = [];
+  if (d.kind === 'shape') {
+    addShape(slide, e, name, patch);
+    names.push(name);
+  }
+  names.push(...addText(slide, e, name, family));
+  return names;
+}
+/**
+ * PptxGenJS repeats data-URI media across slides. Keep each distinct image once,
+ * preserving every picture's independent placement/crop/alt text and relationship.
+ */
+async function deduplicateMedia(files: Record<string, Uint8Array>, signal?: AbortSignal) {
   const mediaByHash = new Map<string, string>();
   const mediaTargets = new Map<string, string>();
   for (const path of Object.keys(files).filter((p) =>
@@ -363,11 +363,9 @@ export async function encodeOwnedPptx(
         return replacement ? `Target="../${replacement}"` : whole;
       }),
     );
-  if (
-    Object.keys(files).filter((p) => /^ppt\/slides\/slide\d+\.xml$/.test(p)).length !==
-    plan.pages.length
-  )
-    throw new Error('Encoder added or removed pages');
+}
+/** Applies each page's per-object XML patches and renumbers drawing ids. */
+function patchSlides(files: Record<string, Uint8Array>, patches: Patches[]) {
   for (const [pageIndex, patch] of patches.entries()) {
     const path = `ppt/slides/slide${pageIndex + 1}.xml`;
     let xml = strFromU8(files[path]);
@@ -389,6 +387,71 @@ export async function encodeOwnedPptx(
     );
     files[path] = strToU8(xml);
   }
+}
+function createPresentation(plan: OwnedPptxPlan, family: string) {
+  const pptx = new PptxGenJS();
+  pptx.defineLayout({ name: 'Editor', width: inch(plan.width), height: inch(plan.height) });
+  pptx.layout = 'Editor';
+  pptx.author = '';
+  pptx.company = '';
+  pptx.subject = '';
+  pptx.title = '';
+  pptx.theme = { headFontFace: family, bodyFontFace: family };
+  return pptx;
+}
+export async function encodeOwnedPptx(
+  plan: OwnedPptxPlan,
+  signal?: AbortSignal,
+): Promise<SlidePptxResult> {
+  if (!plan.font) throw new Error('Missing font plan');
+  const family = plan.font.family;
+  const pptx = createPresentation(plan, family);
+  const report = clone(plan.report) as SlidePptxReport;
+  const byAddress = new Map(report.elements.map((e) => [canonicalJson(e.address), e]));
+  const patches: Patches[] = [];
+  const encodedImages = new Map<string, string>();
+  let processed = 0;
+  for (const [pageIndex, page] of plan.pages.entries()) {
+    checkExportAbort(signal);
+    const slide = pptx.addSlide(),
+      patch: Patches = new Map();
+    patches.push(patch);
+    slide.background = color(page.background);
+    if (page.notes) slide.addNotes(page.notes);
+    for (const [elementIndex, e] of page.elements.entries()) {
+      checkExportAbort(signal);
+      if (++processed % 20 === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        checkExportAbort(signal);
+      }
+      if (e.representation === 'omitted' || e.drawing.kind === 'group') continue;
+      const names = addElement(
+        slide,
+        e,
+        `e${elementIndex + 1}`,
+        plan,
+        family,
+        encodedImages,
+        patch,
+      );
+      byAddress.get(canonicalJson(e.address))!.outputPartNames = names.map(
+        (n) => `ppt/slides/slide${pageIndex + 1}.xml#${n}`,
+      );
+    }
+  }
+  checkExportAbort(signal);
+  // Patching requires unpacking anyway. Compress only the final, deduplicated package.
+  const raw = await pptx.write({ outputType: 'uint8array', compression: false });
+  checkExportAbort(signal);
+  if (!(raw instanceof Uint8Array)) throw new Error('Unexpected Office bytes');
+  const files = unzipSync(raw);
+  await deduplicateMedia(files, signal);
+  if (
+    Object.keys(files).filter((p) => /^ppt\/slides\/slide\d+\.xml$/.test(p)).length !==
+    plan.pages.length
+  )
+    throw new Error('Encoder added or removed pages');
+  patchSlides(files, patches);
   checkExportAbort(signal);
   const bytes = await new Promise<Uint8Array>((resolve, reject) =>
     zip(files, { level: 6 }, (err, result) => (err ? reject(err) : resolve(result))),

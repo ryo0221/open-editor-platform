@@ -1,4 +1,4 @@
-// Closed, already-installed lock-pinned React/type dependencies. No download or publication.
+// Closed, already-installed lock-pinned dependencies. No download or publication.
 import { readFile, mkdir, readdir, lstat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -13,7 +13,12 @@ export const THIRD_PARTY_NAMES = [
   '@types/react',
   '@types/react-dom',
 ];
-export async function packThirdParty(repo, output, source) {
+export function thirdPartyNames(profile) {
+  if (!['baseline', 'readonly-domains', 'controlled-animation'].includes(profile))
+    throw Error('Unknown packaging profile');
+  return [...(profile === 'controlled-animation' ? THIRD_PARTY_NAMES : []), '@noble/hashes'];
+}
+export async function packThirdParty(repo, output, source, profile) {
   const lock = JSON.parse(source.read('package-lock.json')),
     results = [];
   const env = {
@@ -33,11 +38,13 @@ export async function packThirdParty(repo, output, source) {
     }
     return files;
   }
-  for (const name of THIRD_PARTY_NAMES) {
+  for (const name of thirdPartyNames(profile)) {
     const installed = path.join(repo, 'node_modules', name),
       manifest = JSON.parse(await readFile(path.join(installed, 'package.json'))),
       pin = lock.packages['node_modules/' + name];
-    assert.equal(manifest.version, pin.version, 'lock-pinned installed dependency');
+    assert.equal(manifest.name, name, 'reviewed installed dependency');
+    assert.equal(manifest.version, pin?.version, 'lock-pinned installed dependency');
+    assert.match(pin.integrity, /^sha512-[A-Za-z0-9+/=]+$/, 'retained lock integrity');
     const packed = JSON.parse(
       execFileSync(
         'npm',

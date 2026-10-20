@@ -1,0 +1,21 @@
+{
+  "name": "@editor-platform/animation-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./design-ui": "./src/design-ui.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/animation": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/design": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

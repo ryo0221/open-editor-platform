@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer';
 import { build } from 'esbuild';
 const result = await build({
-  entryPoints: ['apps/collaboration-reference/src/server.ts'],
+  entryPoints: ['apps/collaboration-reference/src/main.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',

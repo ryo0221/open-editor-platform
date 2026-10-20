@@ -12,6 +12,13 @@ import {
 import { slideCodec, setField, move } from './canvas';
 import { dataCodec, cell } from './data';
 import { person, slideFixture, dataFixture } from './fixtures';
+const proposalHost = {
+  actorId: 'host',
+  clientId: 'host',
+  sessionId: 'host',
+  writable: true,
+  scopes: ['*'],
+};
 
 const A = person('A'),
   B = person('B');
@@ -128,7 +135,7 @@ it('R3-03 whole-element reads detect change then Undo without blocking independe
       [read],
       'Checked read',
     );
-    authority.register(p);
+    authority.register({ ...proposalHost, actorId: p.sourceActorId }, p);
     const preview = authority.preview(A, p.id);
     const edit = authority.commit(
       B,

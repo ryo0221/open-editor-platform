@@ -4,3 +4,9 @@ test-results
 playwright-report
 coverage
 package-lock.json
+
+# Reproducible compact boundary display data (scripts/geo-backgrounds/generate.py).
+packages/geo-core/data/*.json
+
+# The workflow tool rewrites workflow.json with its own indentation on each acceptance.
+workflow.json

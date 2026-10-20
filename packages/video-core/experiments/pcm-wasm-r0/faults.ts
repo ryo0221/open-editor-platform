@@ -1,5 +1,5 @@
 /** Test-only module mutation: insert an actual WASM trap for batches > 1 after self-test. */
-import { need } from './kernel';
+import { need } from '../../src/pcm/kernel';
 export function trapBatches(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   const leb = (n: number) => {
     const out: number[] = [];

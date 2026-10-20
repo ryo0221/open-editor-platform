@@ -1,6 +1,6 @@
 /** Private render-job settings; no new native schema fields or persistence semantics. */
 import { assertVideoContentV2, compare, multiply, time } from '@editor-platform/video-core';
-import { ceilTime } from '../../../video-core/experiments/pcm-renderer/render.ts';
+import { ceilTime } from '../../../video-core/src/pcm/render.ts';
 import { outputSpanV1 } from '../file-source/timing-v1';
 import { createMixedPcmV2 } from './mixed-pcm-v2.mjs';
 import { createVisualV2 } from './visual-v2.mjs';

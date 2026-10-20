@@ -12,19 +12,20 @@ const state = (s: EditorSession<{ n: number }>) => ({
   canUndo: s.canUndo,
   canRedo: s.canRedo,
 });
-function setup(direction: 'undo' | 'redo') {
+const historyMethods = ['undo', 'redo', 'undoView', 'redoView'] as const;
+function setup(direction: (typeof historyMethods)[number]) {
   const s = new EditorSession({ n: 0 });
   s.execute(edit(1, 'a'));
   s.execute(edit(2, 'b'));
-  if (direction === 'redo') s.undo();
+  if (direction.startsWith('redo')) s.undo();
   return s;
 }
-it.each(['undo', 'redo'] as const)(
+it.each(historyMethods)(
   '%s validates private copy synchronously and commits original candidate',
   (direction) => {
     const s = setup(direction),
       before = s.revision.sequence;
-    const expected = direction === 'undo' ? 1 : 2;
+    const expected = direction.startsWith('undo') ? 1 : 2;
     let candidate: { n: number } | undefined;
     s[direction]((v) => {
       expect(v.n).toBe(expected);
@@ -35,11 +36,11 @@ it.each(['undo', 'redo'] as const)(
     expect(s.revision.sequence).toBe(before + 1);
     candidate!.n = 123;
     expect(s.content.n).toBe(expected);
-    s[direction === 'undo' ? 'redo' : 'undo']();
-    expect(s.content.n).toBe(direction === 'undo' ? 2 : 1);
+    s[direction.startsWith('undo') ? 'redo' : 'undo']();
+    expect(s.content.n).toBe(direction.startsWith('undo') ? 2 : 1);
   },
 );
-it.each(['undo', 'redo'] as const)(
+it.each(historyMethods)(
   '%s rejection preserves both history directions and revision',
   (direction) => {
     const s = setup(direction),
@@ -50,7 +51,7 @@ it.each(['undo', 'redo'] as const)(
       }),
     ).toThrow('RejectNative');
     expect(state(s)).toEqual(before);
-    if (direction === 'undo') {
+    if (direction.startsWith('undo')) {
       expect(s.undo().n).toBe(1);
       expect(s.undo().n).toBe(0);
       expect(s.redo().n).toBe(1);
@@ -74,7 +75,15 @@ it('rejected undo retains the typing merge key', () => {
   expect(s.undo()).toEqual({ n: 0 });
 });
 for (const direction of ['undo', 'redo'] as const) {
-  for (const mutation of ['execute', 'executeView', 'undo', 'redo', 'breakHistoryGroup'] as const) {
+  for (const mutation of [
+    'execute',
+    'executeView',
+    'undo',
+    'redo',
+    'undoView',
+    'redoView',
+    'breakHistoryGroup',
+  ] as const) {
     it(`${direction} validator refuses reentrant ${mutation} without changing any state`, () => {
       const s = setup(direction),
         before = state(s);
@@ -86,21 +95,16 @@ for (const direction of ['undo', 'redo'] as const) {
       ).toThrow('HistoryValidationReentrancy');
       expect(state(s)).toEqual(before);
       s[direction]();
-      expect(s.content.n).toBe(direction === 'undo' ? 1 : 2);
+      expect(s.content.n).toBe(direction.startsWith('undo') ? 1 : 2);
     });
   }
 }
-it.each(['undo', 'redo'] as const)(
-  '%s rejects asynchronous validation before commit',
-  (direction) => {
-    const s = setup(direction),
-      before = state(s);
-    expect(() => s[direction](() => Promise.resolve())).toThrow(
-      'HistoryValidationMustBeSynchronous',
-    );
-    expect(state(s)).toEqual(before);
-  },
-);
+it.each(historyMethods)('%s rejects asynchronous validation before commit', (direction) => {
+  const s = setup(direction),
+    before = state(s);
+  expect(() => s[direction](() => Promise.resolve())).toThrow('HistoryValidationMustBeSynchronous');
+  expect(state(s)).toEqual(before);
+});
 it('empty history skips validation and preserves legacy return behavior', () => {
   const s = new EditorSession({ n: 0 });
   const reject = () => {

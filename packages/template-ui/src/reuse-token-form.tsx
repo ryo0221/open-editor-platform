@@ -159,20 +159,36 @@ function TokenValueField(props: {
     </div>
   );
 }
-export function TokenSetForm(props: { value: TokenSet; onChange(value: TokenSet): void }) {
+export interface TokenSetFormProps {
+  value: TokenSet;
+  onChange(value: TokenSet): void;
+}
+export function TokenSetForm(props: TokenSetFormProps) {
   const { value, onChange } = props;
   const [id, setId] = useState(''),
     [type, setType] = useState<TokenType>('color'),
-    [mode, setMode] = useState(''),
-    [modeNames, setModeNames] = useState(value.modes.join(' '));
+    [selectedMode, setMode] = useState('');
+  // Clean fields derive from the current Host value. Only an actual edit owns
+  // a private draft, so replacement props cannot be overwritten by a clean blur.
+  const [modeNames, setModeNames] = useState<string>();
+  const canonicalModeNames = value.modes.join(' ');
+  const mode = value.modes.includes(selectedMode) ? selectedMode : '';
   return (
     <section aria-label="トークンの定義">
       <label>
         モード名（空白で区切る）
         <input
-          value={modeNames}
-          onChange={(e) => setModeNames(e.target.value)}
-          onBlur={() => onChange({ ...value, modes: modeNames.split(/\s+/).filter(Boolean) })}
+          value={modeNames ?? canonicalModeNames}
+          onChange={(e) =>
+            setModeNames(e.target.value === canonicalModeNames ? undefined : e.target.value)
+          }
+          onBlur={() => {
+            if (modeNames === undefined) return;
+            const modes = modeNames.split(/\s+/).filter(Boolean);
+            if (modes.length !== value.modes.length || modes.some((m, i) => m !== value.modes[i]))
+              onChange({ ...value, modes });
+            setModeNames(undefined);
+          }}
         />
       </label>
       <label>
@@ -257,6 +273,7 @@ export function TokenSetForm(props: { value: TokenSet; onChange(value: TokenSet)
               />
             </label>
             <button
+              type="button"
               onClick={() =>
                 onChange({
                   ...value,
@@ -289,6 +306,7 @@ export function TokenSetForm(props: { value: TokenSet; onChange(value: TokenSet)
           </select>
         </label>
         <button
+          type="button"
           disabled={
             !id || Object.hasOwn(value.tokens, id) || Object.keys(value.tokens).length >= 2048
           }

@@ -1,4 +1,10 @@
-import { canonicalJson, clone, contentHash, type Artifact } from '@editor-platform/artifact-core';
+import {
+  canonicalJson,
+  clone,
+  contentHash,
+  isDeepFrozen,
+  type Artifact,
+} from '@editor-platform/artifact-core';
 import { EditorSession, command, type EditorCommand } from '@editor-platform/editor-core';
 import { isStructuredData, makeRow, type StructuredData } from './model';
 import { columnSchemaIntent, columnSchemaCommand } from './schema-command';
@@ -65,9 +71,11 @@ export function assertDataReadable(data: unknown): asserts data is StructuredDat
 }
 function unresolvedReferences(data: StructuredData) {
   const result = new Map<string, string>();
+  const relations = data.columns.filter((c) => c.type === 'relation');
+  if (!relations.length) return result;
   const ids = new Set(data.rows.map((r) => r.id));
   for (const row of data.rows)
-    for (const c of data.columns) {
+    for (const c of relations) {
       const value = row.values[c.id];
       if (
         c.type === 'relation' &&
@@ -93,13 +101,15 @@ export function guardDataCommand(
   const restoration = versionRestores.get(cmd);
   const guarded: EditorCommand<StructuredData> = {
     ...cmd,
-    readonlyInput: undefined,
+    readonlyInput: cmd.readonlyInput,
     apply(current) {
       if (!writable()) throw new Error('Data is read only');
       assertDataReadable(current);
       restoration?.(current);
       const retained = unresolvedReferences(current);
-      const next = cmd.apply(clone(current));
+      // Reuse only an already certified immutable input for a command that
+      // declares the existing read-only contract. Mutable callers stay isolated.
+      const next = cmd.apply(cmd.readonlyInput && isDeepFrozen(current) ? current : clone(current));
       assertDataReadable(next);
       if (restoration) {
         restoration(current, next);

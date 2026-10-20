@@ -7,12 +7,22 @@
     ".": "./src/index.tsx",
     "./controlled-contract": "./src/controlled-contract.ts",
     "./controlled": "./src/controlled.tsx",
-    "./controlled.css": "./src/controlled.css"
+    "./controlled.css": "./src/controlled.css",
+    "./local": "./src/local.tsx",
+    "./playback": "./src/playback.ts",
+    "./viewer": "./src/viewer.tsx",
+    "./v2": "./src/scene2/surface.tsx",
+    "./host": "./src/scene2/host.tsx",
+    "./player-v2": "./src/scene2/viewer.tsx"
   },
   "dependencies": {
     "@editor-platform/animation-core": "*",
     "@editor-platform/animation-player": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/canvas-ui": "*",
     "react": "19.1.1",
     "@editor-platform/extension-contract": "*"
   },

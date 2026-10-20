@@ -361,11 +361,13 @@ export function VisualInspector({
   onPatch,
   onGeometry,
   onReplace,
+  imageEditing = true,
 }: {
   items: Drawing[];
   onPatch: (patch: Partial<VisualStyle> & { text?: string; fill?: string; src?: string }) => void;
   onGeometry: (patch: Partial<Bounds>) => void;
   onReplace?: (file: File) => void;
+  imageEditing?: boolean;
 }) {
   const [ratio, setRatio] = useState(false);
   const textBridge = useContext(CanvasTextContext);
@@ -628,7 +630,7 @@ export function VisualInspector({
           </p>
         </Section>
       )}
-      {items.every((i) => i.kind === 'image') && (
+      {imageEditing && items.every((i) => i.kind === 'image') && (
         <Section title="Image">
           <CommitInput
             label="Image alt text"

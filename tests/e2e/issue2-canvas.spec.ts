@@ -14,7 +14,7 @@ async function shape(page: import('@playwright/test').Page, name: string) {
 }
 async function save(page: import('@playwright/test').Page) {
   await page.getByRole('button', { name: 'Save version', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'この版を保存', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
 }
 async function native(page: import('@playwright/test').Page) {

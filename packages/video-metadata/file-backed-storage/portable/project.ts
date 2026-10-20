@@ -115,18 +115,29 @@ export function createProfileProject<C extends ArchiveContent, P>(
         p.plans.length <= 100,
       'Project bounds',
     );
-    fields(p.capture, ['scope', 'revision', 'contentHash']);
-    fields(p.capture.scope, ['artifactId', 'sessionId', 'generation']);
-    fields(p.capture.revision, ['kind', 'sessionId', 'sequence']);
+    validateCapture(p.capture);
+    const ids = await validateVersions(p);
+    const selected = ids.get(p.selectedVersionId);
+    need(selected && selected.contentHash === p.capture.contentHash, 'Selected capture');
+    for (const v of p.versions) validateLineage(v, ids);
+    const plans = validatePlans(p.plans);
+    validateClosure(p, plans);
+  }
+  function validateCapture(capture: Project<C, P>['capture']) {
+    fields(capture, ['scope', 'revision', 'contentHash']);
+    fields(capture.scope, ['artifactId', 'sessionId', 'generation']);
+    fields(capture.revision, ['kind', 'sessionId', 'sequence']);
     need(
-      Object.values(p.capture.scope).every(text) &&
-        p.capture.revision.kind === 'local-draft' &&
-        text(p.capture.revision.sessionId) &&
-        p.capture.revision.sessionId === p.capture.scope.sessionId &&
-        Number.isSafeInteger(p.capture.revision.sequence) &&
-        p.capture.revision.sequence >= 0,
+      Object.values(capture.scope).every(text) &&
+        capture.revision.kind === 'local-draft' &&
+        text(capture.revision.sessionId) &&
+        capture.revision.sessionId === capture.scope.sessionId &&
+        Number.isSafeInteger(capture.revision.sequence) &&
+        capture.revision.sequence >= 0,
       'Capture',
     );
+  }
+  async function validateVersions(p: Project<C, P>) {
     const ids = new Map<string, ArtifactVersion<C>>();
     for (const v of p.versions) {
       jsonBytes(v);
@@ -156,24 +167,28 @@ export function createProfileProject<C extends ArchiveContent, P>(
       );
       ids.set(v.versionId, v);
     }
-    const selected = ids.get(p.selectedVersionId);
-    need(selected && selected.contentHash === p.capture.contentHash, 'Selected capture');
-    for (const v of p.versions) {
-      const seen = new Set<string>();
-      let at: string | null = v.versionId;
-      while (at !== null) {
-        need(!seen.has(at) && ids.has(at), 'Retained parent/cycle');
-        seen.add(at);
-        at = ids.get(at)!.parentVersionId;
-      }
+    return ids;
+  }
+  function validateLineage(v: ArtifactVersion<C>, ids: Map<string, ArtifactVersion<C>>) {
+    const seen = new Set<string>();
+    let at: string | null = v.versionId;
+    while (at !== null) {
+      need(!seen.has(at) && ids.has(at), 'Retained parent/cycle');
+      seen.add(at);
+      at = ids.get(at)!.parentVersionId;
     }
+  }
+  function validatePlans(list: Project<C, P>['plans']) {
     const plans = new Map<string, P>();
-    for (const x of p.plans) {
+    for (const x of list) {
       fields(x, ['sourceId', 'plan']);
       need(text(x.sourceId) && !plans.has(x.sourceId), 'Interpretation identity');
       profile.validatePlan(x.plan);
       plans.set(x.sourceId, x.plan);
     }
+    return plans;
+  }
+  function validateClosure(p: Project<C, P>, plans: Map<string, P>) {
     const sources = new Set<string>(),
       originals = new Set<string>();
     let total = 0n;

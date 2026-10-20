@@ -7,7 +7,7 @@ import {
   type DomainCodec,
   type Effect,
 } from '@editor-platform/collaboration-core';
-import { isDeck, type SlideContent } from '@editor-platform/slide/model';
+import { isDeck, hasLegacySlideAnimations, type SlideContent } from '@editor-platform/slide/model';
 import { isDesign, type DesignContent } from '@editor-platform/design/model';
 import { isWhiteboard, type WhiteboardContent } from '@editor-platform/whiteboard/model';
 // These are transient accessors over existing, distinct schemas, not a stored node model.
@@ -274,6 +274,7 @@ export const slideCodec = canvas<SlideContent>(
   'slide',
   (v): v is SlideContent =>
     isDeck(v) &&
+    !hasLegacySlideAnimations(v) &&
     new Set(v.slides.flatMap((s) => s.objects.map((o) => o.id))).size ===
       v.slides.reduce((n, s) => n + s.objects.length, 0) &&
     v.slides.every((s) => {

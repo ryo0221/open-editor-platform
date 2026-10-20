@@ -10,19 +10,29 @@ Document will use a separate package and flow plan under #12.
 
 ```ts
 import {
-  captureSlideExportSnapshot, prepareSlidePptx,
+  captureSlideExportSnapshot,
+  prepareSlidePptx,
   type SlidePptxEncoder,
 } from '@editor-platform/slide-export';
 
 // The Host first checks its trusted export permission and ordinary editor guard.
 const snapshot = await captureSlideExportSnapshot(session.confirmed.content, {
-  kind: 'confirmed', artifactId: session.confirmed.artifactId,
+  kind: 'confirmed',
+  artifactId: session.confirmed.artifactId,
   revision: session.confirmed.revision,
 });
-const plan = await prepareSlidePptx(snapshot, {
-  pageIds: 'all', includeHiddenSlides: false, includeNotes: false,
-  fontProfileId: 'host-verified-profile', fallback: 'reject',
-}, hostAdapters, abortController.signal);
+const plan = await prepareSlidePptx(
+  snapshot,
+  {
+    pageIds: 'all',
+    includeHiddenSlides: false,
+    includeNotes: false,
+    fontProfileId: 'host-verified-profile',
+    fallback: 'reject',
+  },
+  hostAdapters,
+  abortController.signal,
+);
 ```
 
 Capture clones/freezes both content and basis synchronously before hashing. It accepts
@@ -71,6 +81,17 @@ checks alone are not an image decoder. Raster adapters receive isolated inputs a
 must render the requested element faithfully; the product browser/Node adapters
 and golden raster evidence are subsequent implementation work. Missing/failed image
 resolution cannot be bypassed by a fallback setting.
+
+The Node adapter isolates native image decoding in a child process. Its public
+`OfficeImageDecodeError.diagnostics` distinguishes input rejection, conversion failure,
+startup failure, external termination, the unchanged 10-second deadline and output
+overflow. It includes input SHA-256/size/MIME/dimensions, operation, actual exit code
+and signal, elapsed diagnostic time, output size and at most 4,096 stderr characters.
+It never includes image bytes. Deadline/abort/overflow termination waits for child
+close and removes timers/listeners before rejecting. Abort remains AbortError.
+These observations identify new failures; they do not establish the cause of earlier
+I07 failures without their original exit/input evidence. See the
+[diagnostic verification](verification/issues-38-261/README.md).
 
 Font profiles provide a fixed family/version/license, Regular/Bold SHA-256s and
 verified glyph coverage; a profile is referenced, not embedded. Missing glyphs block,

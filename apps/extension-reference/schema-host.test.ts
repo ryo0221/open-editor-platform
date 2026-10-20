@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { chromium } from '@playwright/test';
 import { expect, it } from 'vitest';
+import { chromiumExecutablePath } from '../../tests/playwright/chromium';
 
 it('real Video admission mounts, reports invalid native input at Host boundary and revokes fixed source', async () => {
   const built = await build({
@@ -40,7 +41,7 @@ it('real Video admission mounts, reports invalid native input at Host boundary a
     write: false,
   });
   const browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
+    executablePath: chromiumExecutablePath(),
     args: ['--no-sandbox'],
   });
   try {

@@ -29,3 +29,12 @@ Opt-in rational audio v1 now has separate `VideoContentV1`, `videoCommandV1`,
 Audio source validity is rational and independent of integer decoded addresses.
 See [the boundary ADR](../video-metadata/host-media/file-source/RATIONAL-BOUNDARY-ADR.md)
 and [checkpoint evidence/remaining Host and codec gates](../video-metadata/host-media/file-source/RATIONAL-CORE-VERIFICATION.md).
+
+## Layout
+
+`src/pcm/` holds the private PCM renderer, WASM kernel adapter and M2 ownership
+modules that product code uses (moved from `experiments/` on 2026-10-20). The
+mediabunny output and validation-build hooks live in `video-metadata/host-media/m2/`.
+`experiments/` keeps only checks, fixtures, the Rust kernel source and the
+frozen numerical oracles; manifests there record paths at their pinned commits.
+See the 2026-10-20 refactor verification record.

@@ -1,5 +1,11 @@
 import { time, add, multiply, compare } from '@editor-platform/video-core';
-import { planWindow, renderPcm, sampleSpan, type Mapping, type BoundaryMode } from './render';
+import {
+  planWindow,
+  renderPcm,
+  sampleSpan,
+  type Mapping,
+  type BoundaryMode,
+} from '../../src/pcm/render';
 // @ts-expect-error Isolated fixed-dependency experiment, not a public adapter.
 import { decodeWindow } from './native-aac.mjs';
 // @ts-expect-error Reviewed saved timing experiment, not a package API.

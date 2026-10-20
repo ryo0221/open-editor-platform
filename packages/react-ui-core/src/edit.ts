@@ -1,7 +1,7 @@
 import { clone, newId } from '@editor-platform/artifact-core';
 import { immutableCommand, type EditorCommand } from '@editor-platform/editor-core';
 import { ReactUiError, diagnostic, same, checkData } from './data';
-import { loadReactUiDocument } from './document';
+import { loadReactUiDocument, loadReactUiNodeEdit } from './document';
 import { inspectReactUiDocument } from './preflight';
 import { reactComponentKey } from './registration';
 import type { ReactUiEdit } from './adapters';
@@ -40,12 +40,23 @@ export function applyReactUiEdits(
   edits: readonly ReactUiEdit[],
 ): ReactUiDocument {
   checkData(edits);
-  const next = clone(loadReactUiDocument(document));
+  const owned = loadReactUiDocument(document);
+  // Every supported edit writes nodes/roots. Other fields are validated owned
+  // metadata; keep them immutable rather than cloning their complete catalogs.
+  const next = { ...owned, nodes: [...owned.nodes], roots: [...owned.roots] };
+  const copied = new Set<string>();
   const reject = (message: string): never => {
     throw new ReactUiError([diagnostic('edit-invalid', '$.edit', message)]);
   };
-  const get = (id: string) =>
-    next.nodes.find((n) => n.id === id) ?? reject(`Node ${id} is missing`);
+  const get = (id: string) => {
+    const index = next.nodes.findIndex((node) => node.id === id);
+    if (index < 0) return reject(`Node ${id} is missing`);
+    if (!copied.has(id)) {
+      next.nodes[index] = clone(next.nodes[index]);
+      copied.add(id);
+    }
+    return next.nodes[index];
+  };
   const children = (parent: { nodeId: string; slotId: string } | null): string[] => {
     if (!parent) return next.roots;
     const node = get(parent.nodeId),
@@ -150,7 +161,7 @@ export function applyReactUiEdits(
         reject('Unsupported React edit intent');
     }
   }
-  const result = inspectReactUiDocument(next);
+  const result = inspectReactUiDocument(loadReactUiNodeEdit(owned, next.nodes, next.roots));
   if (!result.document || result.diagnostics.length) throw new ReactUiError(result.diagnostics);
   return result.document;
 }

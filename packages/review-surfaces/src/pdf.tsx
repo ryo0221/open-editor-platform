@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PDFDocumentProxy, PageViewport } from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// The legacy build polyfills APIs the modern build assumes (e.g. Map.getOrInsertComputed,
+// absent in Chromium 141), so PDFs still render in browsers without them.
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { originalBytes, type FileContent } from './model';
 export function usePdf(content: FileContent) {
   const [pdf, setPdf] = useState<PDFDocumentProxy>(),
@@ -11,13 +13,12 @@ export function usePdf(content: FileContent) {
     if (content.mime !== 'application/pdf') return;
     let cancelled = false,
       destroy: (() => Promise<void>) | undefined;
-    void import('pdfjs-dist')
+    void import('pdfjs-dist/legacy/build/pdf.mjs')
       .then(async (engine) => {
         if (cancelled) return;
         engine.GlobalWorkerOptions.workerSrc = workerUrl;
         const task = engine.getDocument({
           data: originalBytes(content),
-          isEvalSupported: false,
           useSystemFonts: true,
         });
         destroy = () => task.destroy();

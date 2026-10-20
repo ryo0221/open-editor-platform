@@ -32,7 +32,7 @@ export async function consumerBuild(deps, options) {
   const entry = resolve(out, 'entry.mjs');
   await writeFile(
     entry,
-    `import {configureM2Pcm,m2PcmDiagnostics} from ${JSON.stringify(resolve('packages/video-core/experiments/pcm-wasm-m2/owners.ts'))};\nimport ${JSON.stringify(resolve(options.entryPoint))};\nimport ${JSON.stringify(resolve('packages/video-core/experiments/pcm-wasm-m2/observe-validation.mjs'))};\nconfigureM2Pcm(${JSON.stringify(mode)},${mode === 'wasm' ? `new Uint8Array(${JSON.stringify([...kernel])})` : 'undefined'});\nglobalThis.privatePcmDiagnostics=m2PcmDiagnostics;`,
+    `import {configureM2Pcm,m2PcmDiagnostics} from ${JSON.stringify(resolve('packages/video-core/src/pcm/owners.ts'))};\nimport ${JSON.stringify(resolve(options.entryPoint))};\nimport ${JSON.stringify(resolve('packages/video-metadata/host-media/m2/observe-validation.mjs'))};\nconfigureM2Pcm(${JSON.stringify(mode)},${mode === 'wasm' ? `new Uint8Array(${JSON.stringify([...kernel])})` : 'undefined'});\nglobalThis.privatePcmDiagnostics=m2PcmDiagnostics;`,
   );
   const built = await productBuild(deps, { ...options, entryPoint: entry, metafile: true });
   await writeFile(resolve(out, 'runtime.js'), built.outputFiles[0].contents);

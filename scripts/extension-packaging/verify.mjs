@@ -19,6 +19,7 @@ assert.ok(['baseline', 'readonly-domains', 'controlled-animation'].includes(expe
 const names = [
   'artifact-core',
   'editor-core',
+  'reuse-core',
   'extension-contract',
   'extension-runtime',
   'animation-core',
@@ -31,10 +32,12 @@ const names = [
     ? ['animation', 'extension-animation-adapter']
     : []),
 ].map((n) => '@editor-platform/' + n);
-const externalNames =
-  expectedProfile === 'controlled-animation'
+const externalNames = [
+  ...(expectedProfile === 'controlled-animation'
     ? ['react', 'scheduler', 'react-dom', 'csstype', '@types/react', '@types/react-dom']
-    : [];
+    : []),
+  '@noble/hashes',
+];
 const allPackages = [...evidence.packages, ...(evidence.thirdParty ?? [])];
 function validate(metadata) {
   assert.deepEqual(
@@ -146,10 +149,14 @@ assert.deepEqual(
   [
     '.package-lock.json',
     '@editor-platform',
-    ...(externalNames.length ? ['@types', 'csstype', 'react', 'react-dom', 'scheduler'] : []),
+    '@noble',
+    ...(expectedProfile === 'controlled-animation'
+      ? ['@types', 'csstype', 'react', 'react-dom', 'scheduler']
+      : []),
   ].sort(),
 );
-if (externalNames.length)
+assert.deepEqual(await readdir(path.join(host, 'node_modules/@noble')), ['hashes']);
+if (expectedProfile === 'controlled-animation')
   assert.deepEqual((await readdir(path.join(host, 'node_modules/@types'))).sort(), [
     'react',
     'react-dom',

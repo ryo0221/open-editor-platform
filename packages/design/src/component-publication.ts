@@ -20,6 +20,53 @@ export function publicationParts(component: DesignComponent): DesignElement[] {
         },
       ];
 }
+/** Every native part declares an HTML role; images keep a role that can hold them. */
+function assertPartSemantics(parts: DesignElement[]) {
+  if (parts.some((part) => part.type !== 'react' && part.type !== 'instance' && !part.web?.tag))
+    throw new Error('各native部品のHTML意味を設定してください。');
+  if (
+    parts.some(
+      (part) => part.type === 'image' && !designWebTagsFor(part.type).includes(part.web!.tag!),
+    )
+  )
+    throw new Error(
+      '画像部品のHTML意味はimgにしてください。画像を保持できない設定は公開できません。',
+    );
+}
+/** Public props and slots point at parts that render the published field. */
+function assertPublicTargets(parts: DesignElement[], web: DesignWebComponent) {
+  const partIds = new Set(parts.map((part) => part.id));
+  if (
+    Object.values(web.props).some((prop) => !partIds.has(prop.target.elementId)) ||
+    Object.values(web.slots ?? {}).some((slot) => !partIds.has(slot.elementId))
+  )
+    throw new Error('公開propsまたはslotsの参照先がありません。部品を選び直してください。');
+  for (const [name, prop] of Object.entries(web.props)) {
+    const part = parts.find((part) => part.id === prop.target.elementId)!;
+    if (
+      part.type !== 'react' &&
+      part.type !== 'instance' &&
+      !(part.web?.tag === 'img' ? ['src', 'alt'] : ['text', 'fill']).includes(prop.target.field)
+    )
+      throw new Error(`公開prop ${name}: ${part.web?.tag}.${prop.target.field} は表示されません。`);
+  }
+  for (const [name, slot] of Object.entries(web.slots ?? {})) {
+    const part = parts.find((part) => part.id === slot.elementId)!;
+    if (
+      part.type === 'react' ||
+      part.type === 'instance' ||
+      !part.web?.tag ||
+      part.web.tag === 'img'
+    )
+      throw new Error(`公開slot ${name}: 画像以外のnative HTML部品を選択してください。`);
+  }
+}
+/** The component version is already an immutable native publication. */
+const published = (content: DesignContent, id: string, version: string) =>
+  !!content.web?.publications?.some(
+    (ref) =>
+      ref.registryId === 'native-design' && ref.componentId === id && ref.version === version,
+  );
 export function publishDesignComponent(
   content: DesignContent,
   id: string,
@@ -38,66 +85,15 @@ export function publishDesignComponent(
       ...(semantics[part.id] ? { web: { ...part.web, tag: semantics[part.id] } } : {}),
     })),
   };
-  if (
-    next.elements.some(
-      (part) => part.type !== 'react' && part.type !== 'instance' && !part.web?.tag,
-    )
-  )
-    throw new Error('各native部品のHTML意味を設定してください。');
-  if (
-    next.elements.some(
-      (part) => part.type === 'image' && !designWebTagsFor(part.type).includes(part.web!.tag!),
-    )
-  )
-    throw new Error(
-      '画像部品のHTML意味はimgにしてください。画像を保持できない設定は公開できません。',
-    );
-  if (
-    content.web?.publications?.some(
-      (ref) =>
-        ref.registryId === 'native-design' && ref.componentId === id && ref.version === web.version,
-    ) &&
-    canonicalJson(next) !== base
-  )
+  assertPartSemantics(next.elements);
+  if (published(content, id, web.version) && canonicalJson(next) !== base)
     throw new Error('この公開版は変更できません。versionを新しい番号にして保存してください。');
-  const partIds = new Set(next.elements.map((part) => part.id));
-  if (
-    Object.values(web.props).some((prop) => !partIds.has(prop.target.elementId)) ||
-    Object.values(web.slots ?? {}).some((slot) => !partIds.has(slot.elementId))
-  )
-    throw new Error('公開propsまたはslotsの参照先がありません。部品を選び直してください。');
-  for (const [name, prop] of Object.entries(web.props)) {
-    const part = next.elements.find((part) => part.id === prop.target.elementId)!;
-    if (
-      part.type !== 'react' &&
-      part.type !== 'instance' &&
-      !(part.web?.tag === 'img' ? ['src', 'alt'] : ['text', 'fill']).includes(prop.target.field)
-    )
-      throw new Error(`公開prop ${name}: ${part.web?.tag}.${prop.target.field} は表示されません。`);
-  }
-  for (const [name, slot] of Object.entries(web.slots ?? {})) {
-    const part = next.elements.find((part) => part.id === slot.elementId)!;
-    if (
-      part.type === 'react' ||
-      part.type === 'instance' ||
-      !part.web?.tag ||
-      part.web.tag === 'img'
-    )
-      throw new Error(`公開slot ${name}: 画像以外のnative HTML部品を選択してください。`);
-  }
+  assertPublicTargets(next.elements, web);
   return withCommandReads(
     command('design.web.component', 'Publish native React contract', (current) => {
       if (canonicalJson(current.components.find((component) => component.id === id)) !== base)
         throw new Error('部品定義が変更されました。設定を開き直してください。');
-      if (
-        canonicalJson(next) !== base &&
-        current.web?.publications?.some(
-          (ref) =>
-            ref.registryId === 'native-design' &&
-            ref.componentId === id &&
-            ref.version === web.version,
-        )
-      )
+      if (canonicalJson(next) !== base && published(current, id, web.version))
         throw new Error('この公開版は変更できません。versionを新しい番号にして保存してください。');
       const updated = {
         ...current,

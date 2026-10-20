@@ -1,5 +1,6 @@
 import { JsonBudget } from './json-budget';
 import { contentHash, deepFreeze } from '@editor-platform/artifact-core';
+import { reuseHash } from '@editor-platform/reuse-core';
 import {
   EVALUATOR,
   EVALUATOR_V1,
@@ -10,7 +11,7 @@ import {
   type SourceRef,
   type Layer,
 } from './model';
-import { ownJson, sourceRef, validateWithBudget } from './validate';
+import { ownJson, sourceRef, validateWithBudget, validateAnimation } from './validate';
 
 export interface PreparedAnimation {
   readonly evaluatorVersion: typeof EVALUATOR | typeof EVALUATOR_V1;
@@ -21,6 +22,15 @@ interface State {
   sources: Map<string, AnimationContent>;
 }
 const states = new WeakMap<PreparedAnimation, State>();
+/** Synchronous, asset-free v1 admission for deterministic native poster projection.
+ * Uses the same canonical SHA-256 and validator as asynchronous preparation. */
+export function prepareRectangleAnimationV1Sync(input: unknown): PreparedAnimation {
+  const root = validateAnimation(input);
+  check(root.schemaVersion === 1, 'expected-v1', 'schemaVersion');
+  const prepared = Object.freeze({ evaluatorVersion: EVALUATOR_V1, contentHash: reuseHash(root) });
+  states.set(prepared, { root: deepFreeze(root), sources: new Map() });
+  return prepared;
+}
 export const sourceKey = (ref: SourceRef) =>
   JSON.stringify([ref.artifactId, ref.versionId, ref.contentHash]);
 export function preparedState(prepared: PreparedAnimation): State {

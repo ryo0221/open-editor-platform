@@ -11,7 +11,7 @@ import {
   type Time,
   type VideoContentV1,
 } from '@editor-platform/video-core';
-import { ceilTime, type Mapping } from '../../../video-core/experiments/pcm-renderer/render';
+import { ceilTime, type Mapping } from '../../../video-core/src/pcm/render';
 export function audioMappingV1(
   content: VideoContentV1,
   clipId: string,

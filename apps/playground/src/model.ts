@@ -47,10 +47,28 @@ import {
   type WhiteboardContent,
 } from '@editor-platform/whiteboard';
 import { createDesign, isDesign, type DesignContent } from '@editor-platform/design';
-import { createDeck, isDeck, type SlideContent } from '@editor-platform/slide';
+import {
+  createDeck,
+  isDeck,
+  hasLegacySlideAnimations,
+  type SlideContent,
+} from '@editor-platform/slide';
 import { isReactUiDocument, type ReactUiDocument } from '@editor-platform/react-ui-core';
 import { createReferenceDocument } from '../../react-ui-reference/src/catalog';
+import {
+  readAnimationV1,
+  SCHEMA_V1,
+  TICKS_PER_SECOND_V1,
+  type AnimationContentV1,
+} from '@editor-platform/animation-core';
+import {
+  createAnimation2,
+  readAnimation2,
+  type AnimationContent2,
+} from '@editor-platform/animation-core/v2';
 export type Content =
+  | AnimationContentV1
+  | AnimationContent2
   | GeoDocument
   | GraphDocument
   | ReactUiDocument
@@ -62,6 +80,7 @@ export type Content =
   | DesignContent
   | SlideContent;
 export type Kind =
+  | 'animation'
   | 'geo'
   | 'structured-graph'
   | 'document'
@@ -79,7 +98,25 @@ export interface StoredArtifact extends Artifact<Content> {
   /** Reference Host conversion receipt: an immutable baseline for explicit three-way review. */
   designReactConversion?: { sourceArtifactId: string; sourceHash: string; basis: ReactUiDocument };
 }
+/** Shared admission includes immutable history, even when the current draft is static. */
+export function hasUnsupportedSharedAnimation(artifact: Artifact<Content>): boolean {
+  return (
+    (artifact.kind === 'animation' &&
+      [artifact.draft.content, ...artifact.versions.map((v) => v.content)].some(
+        (content) => !validContent('animation', content) || content.schemaVersion !== 2,
+      )) ||
+    (artifact.kind === 'slide' &&
+      [artifact.draft.content, ...artifact.versions.map((v) => v.content)].some(
+        (content) => isDeck(content) && hasLegacySlideAnimations(content),
+      ))
+  );
+}
 export const kinds: Record<Kind, { label: string; icon: string; description: string }> = {
+  animation: {
+    label: 'Animation',
+    icon: '▶',
+    description: 'Create and reuse 2D animation with a timeline',
+  },
   geo: { label: 'Geo', icon: '◎', description: 'Map geographic features and pinned Data values' },
   'structured-graph': {
     label: 'Structured Graph',
@@ -101,31 +138,63 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
 };
 export function makeArtifact(kind: Kind, count: number): StoredArtifact {
   const content: Content =
-    kind === 'geo'
-      ? emptyGeo()
-      : kind === 'structured-graph'
-        ? createRelationGraph()
-        : kind === 'react-ui'
-          ? createReferenceDocument()
-          : kind === 'document'
-            ? createDocument()
-            : kind === 'data'
-              ? createData()
-              : kind === 'review'
-                ? createReview()
-                : kind === 'whiteboard'
-                  ? createWhiteboard()
-                  : kind === 'design'
-                    ? createDesign()
-                    : kind === 'slide'
-                      ? createDeck()
-                      : createFile();
+    kind === 'animation'
+      ? createAnimation2()
+      : kind === 'geo'
+        ? emptyGeo()
+        : kind === 'structured-graph'
+          ? createRelationGraph()
+          : kind === 'react-ui'
+            ? createReferenceDocument()
+            : kind === 'document'
+              ? createDocument()
+              : kind === 'data'
+                ? createData()
+                : kind === 'review'
+                  ? createReview()
+                  : kind === 'whiteboard'
+                    ? createWhiteboard()
+                    : kind === 'design'
+                      ? createDesign()
+                      : kind === 'slide'
+                        ? createDeck()
+                        : createFile();
   return {
     ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
     annotations: [],
   };
 }
 export function validContent(kind: string, content: unknown): content is Content {
+  if (kind === 'animation') {
+    if (
+      content &&
+      typeof content === 'object' &&
+      (content as { schemaVersion?: unknown }).schemaVersion === 2 &&
+      (content as { ticksPerSecond?: unknown }).ticksPerSecond === TICKS_PER_SECOND_V1
+    ) {
+      try {
+        readAnimation2(content);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    // Other native domains must not enter the owning/deep Animation reader during render.
+    const candidate = content as Partial<AnimationContentV1> | null;
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      candidate.schemaVersion !== SCHEMA_V1 ||
+      candidate.ticksPerSecond !== TICKS_PER_SECOND_V1
+    )
+      return false;
+    try {
+      readAnimationV1(content);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   if (kind === 'geo') {
     try {
       assertGeo(content, {
@@ -267,6 +336,9 @@ export function anchorState(
 
 /** Common local apply boundary, including headless/template/proposal paths. */
 export function createLocalSession(content: Content): EditorSession<Content> {
+  const data = isStructuredData(content);
+  const animation = validContent('animation', content);
+  if (data) assertDataReadable(content);
   if (validContent('geo', content))
     assertGeo(content, {
       actions: 10,
@@ -276,19 +348,16 @@ export function createLocalSession(content: Content): EditorSession<Content> {
       features: 200,
       vertices: 1000,
     });
-  if (isStructuredData(content)) assertDataReadable(content);
   if (isGraphDocument(content)) assertGraph(content, relationProfile);
   class LocalSession extends EditorSession<Content> {
     override executeView(cmd: EditorCommand<Content>) {
+      // Data commands retain the native model and validate both sides at the
+      // guarded boundary. Do not clone every cell just to rediscover its domain.
+      if (data)
+        return super.executeView(
+          guardDataCommand(cmd as EditorCommand<StructuredData>) as EditorCommand<Content>,
+        );
       const current = this.content;
-      if (isStructuredData(current))
-        return super.executeView({
-          ...cmd,
-          apply: (value) => {
-            if (!isStructuredData(value)) throw new Error('Expected Data');
-            return guardDataCommand(cmd as EditorCommand<StructuredData>).apply(value);
-          },
-        });
       if (isGraphDocument(current))
         return super.executeView({
           ...cmd,
@@ -316,15 +385,17 @@ export function createLocalSession(content: Content): EditorSession<Content> {
             return next;
           },
         });
-      const validate = isDeck(current)
-        ? isDeck
-        : isDocument(current)
-          ? isDocument
-          : isDesign(current)
-            ? isDesign
-            : isWhiteboard(current)
-              ? isWhiteboard
-              : undefined;
+      const validate = animation
+        ? (value: unknown) => validContent('animation', value)
+        : isDeck(current)
+          ? isDeck
+          : isDocument(current)
+            ? isDocument
+            : isDesign(current)
+              ? isDesign
+              : isWhiteboard(current)
+                ? isWhiteboard
+                : undefined;
       return super.executeView({
         ...cmd,
         apply(value) {

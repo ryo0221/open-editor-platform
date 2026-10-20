@@ -24,7 +24,7 @@ import {
   type HostAccessAdapter,
 } from '@editor-platform/editor-host';
 import { SlideSurface } from '@editor-platform/slide';
-import { exportSlideSvg, isDeck } from '@editor-platform/slide/model';
+import { exportSlideSvg } from '@editor-platform/slide/model';
 import type { Region } from '@editor-platform/editor-core';
 import { WhiteboardSurface } from '@editor-platform/whiteboard';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
@@ -44,6 +44,7 @@ import {
   isCode,
   codeSource,
   nativeResolution,
+  isStaticSlide,
   type HostContent,
 } from './model';
 import { compileProject } from './compiler';
@@ -111,7 +112,7 @@ function EditorView({
     },
     defaultPanels: { left: true, right: window.innerWidth > 1050 },
   };
-  if (host.artifact.kind === 'slide' && isDeck(content))
+  if (host.artifact.kind === 'slide' && isStaticSlide(content))
     return (
       <OfficeExportHost
         formats={{ pptx: false, reason: 'Office出力はこのHostの対象外です。SVGをご利用ください。' }}
@@ -122,7 +123,7 @@ function EditorView({
         <SlideSurface
           content={content}
           readOnly={readOnly}
-          execute={domainExecute(host, isDeck)}
+          execute={domainExecute(host, isStaticSlide)}
           select={(ids, region) => select(Array.isArray(ids) ? ids : [ids], region)}
           layout={layout}
         />
@@ -601,7 +602,7 @@ export function HostApp({
                   </p>
                   {a.kind === 'slide' &&
                     a.versions.length > 0 &&
-                    isDeck(a.draft.content) &&
+                    isStaticSlide(a.draft.content) &&
                     a.draft.content.slides.length > 0 && (
                       <figure className="host-saved-slide">
                         <img
