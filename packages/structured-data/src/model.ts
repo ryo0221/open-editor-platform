@@ -766,6 +766,7 @@ function validView(v: DataView): boolean {
       'Dashboard',
       'Timeline',
       'Roadmap',
+      'Calendar',
       'Summary',
       'Graph',
     ].includes(v.projection) &&

@@ -105,8 +105,10 @@ function TimelineInspector({
 }: ViewProps & { dates: Column[]; readOnly: boolean; apply: Apply }) {
   const timeline = (next: Partial<DataView['timeline']>) =>
     patch({ timeline: { ...view.timeline, ...next } });
+  // Calendar reads the same date fields; grouping, scale and range belong to Timeline.
+  const calendar = view.projection === 'Calendar';
   return (
-    <Section title="Timeline">
+    <Section title={calendar ? 'Calendar' : 'Timeline'}>
       {dates.length < 2 && (
         <>
           <p>
@@ -123,7 +125,7 @@ function TimelineInspector({
           </button>
         </>
       )}
-      {view.timeline.start && view.timeline.end && (
+      {!calendar && view.timeline.start && view.timeline.end && (
         <p>
           バー横のレコード名から開始日・終了日を入力できます。同じ列はGrid/Formにも表示されます。
         </p>
@@ -140,36 +142,40 @@ function TimelineInspector({
         value={view.timeline.end}
         onChange={(end) => timeline({ end })}
       />
-      <Pick
-        label="Timeline group"
-        columns={data.columns}
-        value={view.timeline.group}
-        onChange={(group) => timeline({ group })}
-      />
-      <label className="ep-field">
-        Time scale
-        <select
-          aria-label="Time scale"
-          value={view.timeline.scale}
-          onChange={(e) => timeline({ scale: e.target.value as 'day' | 'week' | 'month' })}
-        >
-          {['day', 'week', 'month'].map((t) => (
-            <option key={t}>{t}</option>
-          ))}
-        </select>
-      </label>
-      <CommitInput
-        label="Range start"
-        type="date"
-        value={view.timeline.from}
-        onCommit={(from) => timeline({ from })}
-      />
-      <CommitInput
-        label="Range end"
-        type="date"
-        value={view.timeline.to}
-        onCommit={(to) => timeline({ to })}
-      />
+      {!calendar && (
+        <>
+          <Pick
+            label="Timeline group"
+            columns={data.columns}
+            value={view.timeline.group}
+            onChange={(group) => timeline({ group })}
+          />
+          <label className="ep-field">
+            Time scale
+            <select
+              aria-label="Time scale"
+              value={view.timeline.scale}
+              onChange={(e) => timeline({ scale: e.target.value as 'day' | 'week' | 'month' })}
+            >
+              {['day', 'week', 'month'].map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </label>
+          <CommitInput
+            label="Range start"
+            type="date"
+            value={view.timeline.from}
+            onCommit={(from) => timeline({ from })}
+          />
+          <CommitInput
+            label="Range end"
+            type="date"
+            value={view.timeline.to}
+            onCommit={(to) => timeline({ to })}
+          />
+        </>
+      )}
     </Section>
   );
 }
@@ -293,7 +299,9 @@ export function DataInspector(props: DataInspectorProps) {
         </Section>
       )}
       {view.projection === 'Dashboard' && <DashboardInspector {...props} />}
-      {['Timeline', 'Roadmap'].includes(view.projection) && <TimelineInspector {...props} />}
+      {['Timeline', 'Roadmap', 'Calendar'].includes(view.projection) && (
+        <TimelineInspector {...props} />
+      )}
       {view.projection === 'Summary' && (
         <SummaryInspector view={view} patch={patch} numeric={numeric} />
       )}

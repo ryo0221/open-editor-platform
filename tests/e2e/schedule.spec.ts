@@ -395,15 +395,29 @@ test('folds a long related-work list, finds records across lanes and lists linke
   await addLane(page, 'Pin this version');
   await newEvent(page, 'Portfolio review');
   const panel = details(page);
-  // 15 records: the lane is folded and search is offered.
+  // 17 records in one lane: search is offered, but a single lane stays open.
   const search = panel.getByLabel('Find related work', { exact: true });
   await expect(search).toBeVisible();
-  await expect(panel.locator('details.ep-schedule-related')).not.toHaveAttribute('open', '');
-  await expect(panel.getByRole('checkbox', { name: /^API design review/ })).toBeHidden();
+  await expect(panel.locator('details.ep-schedule-related')).toHaveAttribute('open', '');
+  await expect(panel.getByRole('checkbox', { name: /^API design review/ })).toBeVisible();
+
+  // A second lane folds both.
+  await page.getByRole('button', { name: 'Add lane', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add lane', exact: true });
+  await dialog.getByLabel('Data view', { exact: true }).selectOption({
+    label: 'Release plan data · Release plan · Timeline',
+  });
+  await dialog.getByRole('button', { name: 'Add lane', exact: true }).click();
+  await expect(page.getByLabel('Lane Release plan', { exact: true })).toHaveCount(2);
+  await expect(panel.locator('details.ep-schedule-related[open]')).toHaveCount(0);
+  await expect(panel.getByRole('checkbox', { name: /^API design review/ })).toHaveCount(0);
 
   await search.fill('workstream task 1');
-  await expect(panel.getByRole('checkbox', { name: /^Workstream task 1/ })).toHaveCount(4);
-  await panel.getByRole('checkbox', { name: /^Workstream task 12/ }).check();
+  await expect(panel.getByRole('checkbox', { name: /^Workstream task 1/ })).toHaveCount(8);
+  await panel
+    .getByRole('checkbox', { name: /^Workstream task 12/ })
+    .first()
+    .check();
   await expect(page.getByRole('button', { name: /^Portfolio review,/ })).toContainText(
     '→ 1 related',
   );
@@ -411,12 +425,63 @@ test('folds a long related-work list, finds records across lanes and lists linke
   const linkedWork = panel.getByLabel('Linked work', { exact: true });
   await expect(linkedWork.getByRole('checkbox', { name: /^Workstream task 12/ })).toBeChecked();
   await expect(linkedWork).toContainText('Release plan');
-  await expect(panel.getByRole('checkbox', { name: /^Workstream task 1/ })).toHaveCount(4);
+  await expect(panel.getByRole('checkbox', { name: /^Workstream task 1/ })).toHaveCount(8);
 
-  // Without a query the folded lane still holds every unlinked record.
+  // Without a query the folded lanes still hold every unlinked record.
   await search.fill('');
-  await panel.locator('details.ep-schedule-related summary').click();
+  await panel.locator('details.ep-schedule-related summary').first().click();
   await expect(panel.getByRole('checkbox', { name: /^API design review/ })).toBeVisible();
+});
+
+test('marks lane bars that run past the shown week with their dates (ST-24)', async ({ page }) => {
+  await page.goto(host);
+  await addLane(page, 'Pin this version');
+  const lane = page.getByLabel('Lane Release plan', { exact: true });
+  const bar = (name: string) => lane.locator('.ep-schedule-bar', { hasText: name });
+  // Starts before and ends after the week: both edges are marked and the dates are shown.
+  await expect(bar('Platform design')).toHaveText(
+    '◂ Platform design 09-01 – 11-30 Continues before this week Continues after this week ▸',
+  );
+  await expect(bar('Platform design')).toHaveClass(/ep-schedule-bar-before/);
+  await expect(bar('Platform design')).toHaveClass(/ep-schedule-bar-after/);
+  // Ends after the week only; the year changes nothing when both dates share it.
+  await expect(bar('Launch campaign')).toHaveText(
+    'Launch campaign 10-29 – 12-04 Continues after this week ▸',
+  );
+  await expect(bar('Launch campaign')).not.toHaveClass(/ep-schedule-bar-before/);
+  // Work inside the week keeps its plain name.
+  await expect(bar('API design review')).toHaveText('API design review');
+});
+
+test('opens the Add lane window under its button without moving the week (ST-24)', async ({
+  page,
+}) => {
+  for (const size of [
+    { width: 1600, height: 1000 },
+    { width: 900, height: 700 },
+  ]) {
+    await page.setViewportSize(size);
+    await page.goto(host);
+    const week = page.getByRole('grid', { name: 'Week' });
+    const before = (await week.boundingBox())!;
+    const button = page.getByRole('button', { name: 'Add lane', exact: true });
+    await button.click();
+    const dialog = page.getByRole('dialog', { name: 'Add lane', exact: true });
+    await expect(dialog.getByLabel('Data view', { exact: true })).toBeFocused();
+    const trigger = page.locator('[data-add-lane-trigger]');
+    const at = (await trigger.boundingBox())!;
+    const box = (await dialog.boundingBox())!;
+    const schedule = (await page.locator('.ep-schedule').boundingBox())!;
+    // Just below the button, inside the Schedule, and the week stays where it was.
+    expect(box.y).toBeGreaterThanOrEqual(at.y + at.height);
+    expect(box.y - (at.y + at.height)).toBeLessThan(16);
+    expect(box.x).toBeGreaterThanOrEqual(schedule.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(schedule.x + schedule.width);
+    expect(box.x).toBeLessThanOrEqual(at.x + at.width);
+    expect((await week.boundingBox())!.y).toBe(before.y);
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+  }
 });
 
 test('shows private calendars as private overlay and sends only a prepared plan (ST-25, ST-26)', async ({

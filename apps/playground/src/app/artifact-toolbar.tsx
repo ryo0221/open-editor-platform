@@ -301,6 +301,7 @@ export function MoreActionsMenu({
     !hasUnsupportedSharedAnimation(active) &&
     active.kind !== 'structured-graph' &&
     active.kind !== 'geo' &&
+    active.kind !== 'schedule' &&
     active.kind !== 'cad';
   return (
     <Menu label="More artifact actions" icon={MoreHorizontal} align="right">

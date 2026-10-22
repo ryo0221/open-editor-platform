@@ -202,6 +202,7 @@ const dataProjections = [
   'Dashboard',
   'Timeline',
   'Roadmap',
+  'Calendar',
   'Summary',
 ];
 const dataFormats = ['decimal', 'currency', 'percent', 'iso-date'];

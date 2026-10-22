@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { type StructuredData, type DataRow, displayCell } from './model';
-import { axisTicks, rangeLength } from '@editor-platform/time-axis';
+import { axisTicks, monthRange, rangeLength } from '@editor-platform/time-axis';
 import { utcDay, dayString, moveDates, type TimelineConfig } from './views';
 export function Timeline({
   data,
@@ -37,13 +37,28 @@ export function Timeline({
       end: utcDay(String(row.values[config.end] ?? '')),
     })),
     valid = entries.filter((e) => e.start !== null && e.end !== null && e.end >= e.start),
-    start =
-      utcDay(config.from) ??
-      (valid.length ? Math.min(...valid.map((e) => e.start!)) - 2 : utcDay('2026-01-01')!),
-    end =
-      utcDay(config.to) ?? (valid.length ? Math.max(...valid.map((e) => e.end!)) + 2 : start + 30),
+    from = utcDay(config.from),
+    to = utcDay(config.to),
+    // Day and week scales pad the records by two days; a month scale pads to whole months instead.
+    pad = config.scale === 'month' ? 0 : 2,
+    first =
+      from ??
+      (valid.length ? Math.min(...valid.map((e) => e.start!)) - pad : utcDay('2026-01-01')!),
+    last = to ?? (valid.length ? Math.max(...valid.map((e) => e.end!)) + pad : first + 30),
+    // A month scale without a chosen range starts on the 1st and ends on the last day of a month.
+    whole = config.scale === 'month' ? monthRange({ start: first, end: last }) : null,
+    start = from ?? whole?.start ?? first,
+    end = to ?? whole?.end ?? last,
     axis = { start, end },
     range = rangeLength(axis),
+    ticks = axisTicks(axis, config.scale),
+    // One grid line under each tick, so month lines fall on the 1st like the labels.
+    grid = {
+      backgroundImage: ticks.map(() => 'linear-gradient(#edf1f6, #edf1f6)').join(', '),
+      backgroundSize: '1px 100%',
+      backgroundRepeat: 'no-repeat',
+      backgroundPosition: ticks.map((tick) => `${tick.offset * 100}% 0`).join(', '),
+    },
     group = data.columns.find((c) => c.id === config.group),
     groups = [
       ...new Set(
@@ -98,7 +113,7 @@ export function Timeline({
       </div>
       <div className="ep-timeline-axis">
         <div />
-        {axisTicks(axis, config.scale).map((tick) => (
+        {ticks.map((tick) => (
           <span key={tick.day} style={{ left: `calc(180px + (100% - 180px) * ${tick.offset})` }}>
             {tick.label}
           </span>
@@ -131,7 +146,7 @@ export function Timeline({
                   >
                     {String(entry.row.values[data.columns[0]?.id] ?? 'Record')}
                   </button>
-                  <div className="ep-timeline-track">
+                  <div className="ep-timeline-track" style={grid}>
                     {valid ? (
                       <div
                         role="button"

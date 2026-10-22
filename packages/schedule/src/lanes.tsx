@@ -34,6 +34,14 @@ export function packRows(items: ScheduleLaneItem[]) {
     });
 }
 
+export const continuesBeforeText = 'Continues before this week';
+export const continuesAfterText = 'Continues after this week';
+/** Inclusive dates of a span, without the year when both share one. */
+export const spanDates = (start: string, end: string) =>
+  start.slice(0, 4) === end.slice(0, 4)
+    ? `${start.slice(5)} – ${end.slice(5)}`
+    : `${start} – ${end}`;
+
 export const laneOfflineText = 'Offline: showing the last verified version';
 const unavailable: ScheduleLaneState = { status: 'loading', items: [], hidden: 0 };
 
@@ -161,15 +169,16 @@ export function LaneRows({
             ) : (
               <div className="ep-schedule-lane-track" style={{ height: `${rows * 24 + 4}px` }}>
                 {visible.map(({ item, row }) => {
-                  const place = spanPlacement(
-                    range,
-                    utcDay(item.startDate)!,
-                    utcDay(item.endDate)!,
-                  );
+                  const start = utcDay(item.startDate)!,
+                    end = utcDay(item.endDate)!;
+                  const place = spanPlacement(range, start, end);
+                  // A bar cut at the week's edge says so and carries its own dates.
+                  const before = start < range.start,
+                    after = end > range.end;
                   return (
                     <span
                       key={item.rowId}
-                      className={`ep-schedule-bar${item.milestone ? ' ep-schedule-milestone' : ''}${linkedRows.has(linkKey(lane.id, item.rowId)) ? ' ep-schedule-linked' : ''}`}
+                      className={`ep-schedule-bar${item.milestone ? ' ep-schedule-milestone' : ''}${before ? ' ep-schedule-bar-before' : ''}${after ? ' ep-schedule-bar-after' : ''}${linkedRows.has(linkKey(lane.id, item.rowId)) ? ' ep-schedule-linked' : ''}`}
                       style={{
                         left: `${place.offset * 100}%`,
                         width: `${place.width * 100}%`,
@@ -177,8 +186,23 @@ export function LaneRows({
                       }}
                       title={`${item.label}: ${item.startDate} – ${item.endDate}`}
                     >
+                      {before && <span aria-hidden="true">◂ </span>}
                       {item.milestone ? '◆ ' : ''}
                       {item.label}
+                      {(before || after) && (
+                        <span className="ep-schedule-bar-dates">
+                          {' '}
+                          {spanDates(item.startDate, item.endDate)}
+                        </span>
+                      )}
+                      {before && <span className="ep-schedule-sr"> {continuesBeforeText}</span>}
+                      {after && <span className="ep-schedule-sr"> {continuesAfterText}</span>}
+                      {after && (
+                        <span aria-hidden="true" className="ep-schedule-bar-next">
+                          {' '}
+                          ▸
+                        </span>
+                      )}
                     </span>
                   );
                 })}
@@ -197,13 +221,29 @@ export function LaneRows({
   );
 }
 
+export const laneDialogWidth = 360;
+/** Below the trigger, kept inside the Schedule (which scrolls) so the window never sits off to one side. */
+export function laneDialogPlace(root: HTMLElement, trigger: HTMLElement) {
+  const box = root.getBoundingClientRect(),
+    at = trigger.getBoundingClientRect();
+  const width = Math.min(laneDialogWidth, root.clientWidth - 24);
+  return {
+    top: at.bottom - box.top + root.scrollTop + 4,
+    left:
+      Math.max(12, Math.min(at.left - box.left, root.clientWidth - width - 12)) + root.scrollLeft,
+  };
+}
+
 export function AddLaneDialog({
   host,
   execute,
+  place,
   onClose,
 }: {
   host: ScheduleLaneHost;
   execute: (cmd: EditorCommand<ScheduleDocument>) => boolean;
+  /** Position inside the Schedule, from laneDialogPlace. */
+  place: { top: number; left: number };
   onClose: () => void;
 }) {
   const [options, setOptions] = useState<{ label: string; source: ReferenceSource }[]>();
@@ -236,7 +276,8 @@ export function AddLaneDialog({
     <div
       ref={dialog}
       tabIndex={-1}
-      className="ep-schedule-apply"
+      className="ep-schedule-apply ep-schedule-lane-dialog"
+      style={place}
       role="dialog"
       aria-label="Add lane"
       onKeyDown={(e) => {

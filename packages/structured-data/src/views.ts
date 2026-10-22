@@ -21,6 +21,7 @@ export type DataProjection =
   | 'Dashboard'
   | 'Timeline'
   | 'Roadmap'
+  | 'Calendar'
   | 'Summary'
   | 'Graph';
 export type AggregateFunction = 'count' | 'sum' | 'average' | 'min' | 'max';

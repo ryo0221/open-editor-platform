@@ -64,6 +64,9 @@ function plan(version: 1 | 2): StructuredData {
     row('row-api', 'API design review', '2026-10-26', '2026-10-28'),
     row('row-ui', 'Schedule editing UI', '2026-10-27', '2026-10-30'),
     row('row-beta', 'Beta deadline', '2026-10-30', '2026-10-30'),
+    // Work that runs past the shown week on one or both sides.
+    row('row-platform', 'Platform design', '2026-09-01', '2026-11-30'),
+    row('row-launch', 'Launch campaign', '2026-10-29', '2026-12-04'),
     ...Array.from({ length: extraTasks }, (_, i) =>
       row(`row-extra-${i + 1}`, `Workstream task ${i + 1}`, '2026-10-26', '2026-10-29'),
     ),

@@ -32,6 +32,7 @@ export const projections: DataProjection[] = [
   'Dashboard',
   'Timeline',
   'Roadmap',
+  'Calendar',
   'Summary',
 ];
 export const aggregates: AggregateFunction[] = ['sum', 'average', 'count', 'min', 'max'];

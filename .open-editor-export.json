@@ -438,7 +438,7 @@
     },
     {
       "path": "apps/playground/src/app/artifact-toolbar.tsx",
-      "sha256": "df0cd4639cf6d76a125542ffec299e9dbfdadf6dc40ba44ee93979984c9d7d4d",
+      "sha256": "e5e01d81067e52fa54bd58a03dec2ba3a2283a87cbd55f5be0d17dc1909ef44e",
       "mode": "100644"
     },
     {
@@ -733,7 +733,7 @@
     },
     {
       "path": "apps/playground/src/schedule-host.tsx",
-      "sha256": "b662720160b62c54c8c5cee349aa6bfd9219e7467e26a1cae401a6d0e9344ecc",
+      "sha256": "46b7496d11112f095ea2b5cb0aca2bcc8af558d8732c0adbc74f3d94967251c7",
       "mode": "100644"
     },
     {
@@ -5238,7 +5238,7 @@
     },
     {
       "path": "packages/schedule/src/details.tsx",
-      "sha256": "5b5e2f8e987ae5bf71457f6dcd7b02ce7c6d5e110de52e7841cb6f50b139c55b",
+      "sha256": "eabc100b578a055fb1790d59f3b39db5a7141b1b73b2ee332a1ba74136b76d58",
       "mode": "100644"
     },
     {
@@ -5263,7 +5263,7 @@
     },
     {
       "path": "packages/schedule/src/lanes.tsx",
-      "sha256": "688dd5062de403d7ea8a6831b2a396606d082b783a60216c9cd14f43a09b9a93",
+      "sha256": "791dd2844c2e9894befe9da60c2075c33bd871b1e852525b1e7736ef0ad7825f",
       "mode": "100644"
     },
     {
@@ -5293,7 +5293,7 @@
     },
     {
       "path": "packages/schedule/src/styles.css",
-      "sha256": "82ce2d5d04718d117828b0e0459a351ac3f0ebe9df83a5a63caef4578813927a",
+      "sha256": "58f35c8809a9b21e56f3f39a749d58a5b00c12b062020d1cb2dd1a8aab69ced5",
       "mode": "100644"
     },
     {
@@ -5308,7 +5308,7 @@
     },
     {
       "path": "packages/schedule/src/view.tsx",
-      "sha256": "edf796fac7be3a783377f4cddcd8f8203c90299ba342aa90004fcbfc596bf031",
+      "sha256": "fc29dd934ce3aee12f15699167f166ed8532fde0adac672c11bb1d48f6f9ae63",
       "mode": "100644"
     },
     {
@@ -5642,6 +5642,11 @@
       "mode": "100644"
     },
     {
+      "path": "packages/structured-data/src/calendar.tsx",
+      "sha256": "4fade9e57ecc029205ec6599659d1d271a343abd758126f28f8d44e310027d91",
+      "mode": "100644"
+    },
+    {
       "path": "packages/structured-data/src/chart-view.tsx",
       "sha256": "379f3363da8b4f168b074dafb3971e9e760b257061b68a5ec450bd75c91a016c",
       "mode": "100644"
@@ -5743,7 +5748,7 @@
     },
     {
       "path": "packages/structured-data/src/model.ts",
-      "sha256": "00e0c542b616d250e4fa70fba7154966bb4ec9ba0b1eea45892667116d0ef6e8",
+      "sha256": "96dbf8981d593e87f71ae0d108d2aa2ff5305d761793f6f5c05aa3cafb54634f",
       "mode": "100644"
     },
     {
@@ -5783,7 +5788,7 @@
     },
     {
       "path": "packages/structured-data/src/styles.css",
-      "sha256": "790e92544cfdc8ec93fbeec9bab22c281a766848a74998852701f97f50632900",
+      "sha256": "d582fe77a31b84b82cdd97338d44ffdd4c0920a07a32bebd7458232abd2c3015",
       "mode": "100644"
     },
     {
@@ -5793,7 +5798,7 @@
     },
     {
       "path": "packages/structured-data/src/timeline.tsx",
-      "sha256": "8c096b0a3d3d976b0804b5c944778a25779251ab9e691ec28eb6cfbacc111c06",
+      "sha256": "5162bb196b3f28868aebadea1861a9a8bde63a2422e748822d102a4b4e6889f9",
       "mode": "100644"
     },
     {
@@ -5818,12 +5823,12 @@
     },
     {
       "path": "packages/structured-data/src/view-inspector.tsx",
-      "sha256": "69a0c0208ee63c23957c6198711f3ee0402a34635d0f545864d8f5a3463370db",
+      "sha256": "27378888b2d3302efcf7fec1ae1e61c9eb511c2abecb409289c83abc6396dc35",
       "mode": "100644"
     },
     {
       "path": "packages/structured-data/src/view-model.ts",
-      "sha256": "e605f52b49236b1ae7d41e9617f45d15c0a404bf25b766aa57c659afb4051ea7",
+      "sha256": "17f4853510b13e9664e18c9f19a8b30071d0fedd5c8240c0eea9a4e0a368f201",
       "mode": "100644"
     },
     {
@@ -5833,7 +5838,7 @@
     },
     {
       "path": "packages/structured-data/src/view-projections.tsx",
-      "sha256": "88c1f525af902c0921fefff78f7ee1b121e7a7427ec5d257e33a457288910e4f",
+      "sha256": "619f3df7977df89e75ca6c85db753696544e116ee18537d28ace4e03c6af8302",
       "mode": "100644"
     },
     {
@@ -5853,7 +5858,7 @@
     },
     {
       "path": "packages/structured-data/src/views.ts",
-      "sha256": "08143f5d9cbf6e4c6fa341543f0d642c1274ba262ffa92bbc0a625a7192edf20",
+      "sha256": "2456c17ac41c9d3d93cc7ea740ee52d0bc7a4fe4fde13d93ce215efaca8e5059",
       "mode": "100644"
     },
     {
@@ -6388,7 +6393,7 @@
     },
     {
       "path": "packages/templates/src/reuse-native.ts",
-      "sha256": "36190d5e4e5865f44db0df01e947383943030b6c7c47bf86e8575a03423e9864",
+      "sha256": "bf11b84301606cb49a88495b2d74832dcf85fd34bca17dd9f6cd350ab9192d67",
       "mode": "100644"
     },
     {
@@ -6518,12 +6523,12 @@
     },
     {
       "path": "packages/time-axis/src/index.ts",
-      "sha256": "45f356a2dd8b1fed81fcff76f68ff3b853784b98af608d1af3303abc0ff53b5b",
+      "sha256": "a1201141cee2e40da4b0eb15847ecfffad696ff682bc8d901f5b04e0808bf125",
       "mode": "100644"
     },
     {
       "path": "packages/time-axis/src/time-axis.test.ts",
-      "sha256": "2b07678e6ef042aba4d9cb67e3f947a0953199f24ba9364cf0ace286c8ea81d6",
+      "sha256": "a93eb70f89123c930e08017cac95a4f9ce44a17fd09b9f88957813ad3d01e1ce",
       "mode": "100644"
     },
     {
@@ -9727,8 +9732,18 @@
       "mode": "100644"
     },
     {
+      "path": "tests/e2e/data-calendar.spec.ts",
+      "sha256": "ce095171c00e90f1d17cf52fd6c93695554d7dfaf9cec24db914de411875cb58",
+      "mode": "100644"
+    },
+    {
       "path": "tests/e2e/data-grid-column-ids.spec.ts",
       "sha256": "aaf8e97e6d11f616e22e2f1f92e22886a7e1410a42d6027ff3f3ce616cd2d51b",
+      "mode": "100644"
+    },
+    {
+      "path": "tests/e2e/data-month-kanban.spec.ts",
+      "sha256": "97215f60830fa3d63272d526eedf8a31ecb8fd776c5ddc14f23e7ebf908dd766",
       "mode": "100644"
     },
     {
@@ -10412,8 +10427,13 @@
       "mode": "100644"
     },
     {
+      "path": "tests/e2e/schedule-sharing.spec.ts",
+      "sha256": "d54ac8d017f3247d66fe0fc1ef813770a2a3fa40ef66b65be9df63aa7a7d1265",
+      "mode": "100644"
+    },
+    {
       "path": "tests/e2e/schedule.spec.ts",
-      "sha256": "723e6fea0c03cd190663978603bd2d3e431eb621f129a03f065f5d8b945efe02",
+      "sha256": "9ba14721ecb747bf43e2ffa5ddbee3eb4f386547bbfb819e1778cfd362434cd7",
       "mode": "100644"
     },
     {

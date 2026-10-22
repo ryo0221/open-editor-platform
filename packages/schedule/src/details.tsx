@@ -223,7 +223,7 @@ function NotesInput({
   );
 }
 
-/** Lanes with more records than this start folded; search or open a lane to find the rest. */
+/** With more records than this, search is offered and lanes start folded (unless only one). */
 const openLaneLimit = 12;
 export function RelatedWork({
   event,
@@ -328,7 +328,8 @@ export function RelatedWork({
             <details
               key={lane.id}
               className="ep-schedule-related"
-              open={total <= openLaneLimit || undefined}
+              // A single lane has nothing to fold against, so it opens even when long.
+              open={total <= openLaneLimit || lanes.length === 1 || undefined}
             >
               <summary>
                 {laneName(lane.id)}

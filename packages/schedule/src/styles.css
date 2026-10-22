@@ -195,6 +195,27 @@
   text-overflow: ellipsis;
   box-sizing: border-box;
 }
+.ep-schedule-bar-before {
+  border-left: 3px dashed var(--ep-muted, #666e79);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.ep-schedule-bar-after {
+  border-right: 3px dashed var(--ep-muted, #666e79);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.ep-schedule-bar-after {
+  padding-right: 16px;
+}
+/* The arrow sits on the cut edge, however short the name. */
+.ep-schedule-bar-next {
+  position: absolute;
+  right: 4px;
+}
+.ep-schedule-bar-dates {
+  color: var(--ep-muted, #666e79);
+}
 .ep-schedule-milestone {
   background: var(--ep-schedule-milestone);
 }
@@ -228,6 +249,9 @@
 .ep-schedule-list .ep-schedule-bar {
   position: static;
   width: auto !important;
+}
+.ep-schedule-list .ep-schedule-bar-next {
+  position: static;
 }
 .ep-schedule-empty {
   color: var(--ep-muted, #666e79);
@@ -320,6 +344,13 @@
   display: grid;
   gap: 8px;
   max-width: 560px;
+}
+.ep-schedule-lane-dialog {
+  position: absolute;
+  z-index: 5;
+  width: min(360px, calc(100% - 24px));
+  box-sizing: border-box;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 16%);
 }
 .ep-schedule-plan dl {
   display: grid;

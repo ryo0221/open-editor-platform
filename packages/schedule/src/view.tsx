@@ -65,7 +65,7 @@ import {
   wallDate,
 } from './view-model';
 import { useOverlay } from './overlay';
-import { AddLaneDialog, LaneRows, useLaneStates } from './lanes';
+import { AddLaneDialog, LaneRows, laneDialogPlace, useLaneStates } from './lanes';
 import { EventDetails } from './details';
 import { ApplyDialog } from './apply';
 import { applyTransition, idleApply, type ApplyAction, type ApplyState } from './apply-state';
@@ -270,7 +270,8 @@ export function ScheduleSurface({
     applyChanged();
     return next;
   };
-  const [addingLane, setAddingLane] = useState(false);
+  // Where the Add lane window opens: under its button, inside the Schedule's own box.
+  const [addingLane, setAddingLane] = useState<{ top: number; left: number } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [error, setError] = useState('');
   const range = useMemo(() => weekRange(anchor), [anchor]);
@@ -489,7 +490,7 @@ export function ScheduleSurface({
             icon={Rows3}
             label="Add lane"
             data-add-lane-trigger=""
-            onClick={() => setAddingLane(true)}
+            onClick={(e) => setAddingLane(laneDialogPlace(root.current!, e.currentTarget))}
           />
         )}
         {read && (
@@ -693,8 +694,9 @@ export function ScheduleSurface({
         <AddLaneDialog
           host={laneHost}
           execute={run}
+          place={addingLane}
           onClose={() => {
-            setAddingLane(false);
+            setAddingLane(null);
             requestAnimationFrame(() =>
               root.current?.querySelector<HTMLElement>('[data-add-lane-trigger]')?.focus(),
             );

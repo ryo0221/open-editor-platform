@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
 import { IconButton } from '@editor-platform/editor-ui';
@@ -15,6 +15,7 @@ import {
 import { DataGrid, type CellAddress } from './grid';
 import { RecordForm, type RecordDraft } from './record';
 import { Timeline } from './timeline';
+import { Calendar } from './calendar';
 import { DataChart } from './chart-view';
 import { groupValue, swapWidget, type DataGroups } from './view-model';
 import type { DataSurfaceProps } from './view';
@@ -126,12 +127,49 @@ function KanbanCard({
   );
 }
 
+/** Scrolls the columns sideways and shades the edge that has more columns past it. */
+function KanbanBoard({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null),
+    [more, setMore] = useState({ left: false, right: false });
+  useEffect(() => {
+    const board = ref.current;
+    if (!board) return;
+    const measure = () => {
+      const left = board.scrollLeft > 1,
+        right = board.scrollLeft + board.clientWidth < board.scrollWidth - 1;
+      setMore((m) => (m.left === left && m.right === right ? m : { left, right }));
+    };
+    measure();
+    board.addEventListener('scroll', measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(board);
+    for (const column of board.children) observer.observe(column);
+    return () => {
+      board.removeEventListener('scroll', measure);
+      observer.disconnect();
+    };
+  });
+  return (
+    <div
+      className="ep-kanban-frame"
+      data-more-left={more.left || undefined}
+      data-more-right={more.right || undefined}
+    >
+      <div className="ep-kanban" ref={ref}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function KanbanColumn({ p, name }: { p: DataProjectionProps; name: string }) {
   const { data, readOnly, apply, groups } = p;
   const { groupColumn, groupRows } = groups;
+  // The (empty) column stays as a drop target, but steps back while no card is in it.
+  const quiet = groupColumn && groupValue(name) === null && groupRows(name).length === 0;
   return (
     <section
-      className="ep-kanban-column"
+      className={quiet ? 'ep-kanban-column ep-kanban-column-quiet' : 'ep-kanban-column'}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -426,17 +464,30 @@ export function dataProjection(p: DataProjectionProps): ReactNode {
       );
     case 'Kanban':
       return (
-        <div className="ep-kanban">
+        <KanbanBoard>
           {p.groups.groupNames.map((name) => (
             <KanbanColumn key={name} p={p} name={name} />
           ))}
-        </div>
+        </KanbanBoard>
       );
     case 'Timeline':
     case 'Roadmap':
       return (
         <div className="ep-data-scroll">
           <Timeline
+            data={data}
+            rows={rows}
+            config={view.timeline}
+            apply={p.apply}
+            readOnly={p.readOnly}
+            onSelect={p.focusRow}
+          />
+        </div>
+      );
+    case 'Calendar':
+      return (
+        <div className="ep-data-scroll">
+          <Calendar
             data={data}
             rows={rows}
             config={view.timeline}

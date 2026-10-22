@@ -283,9 +283,47 @@
   background: #f6f8fb;
   box-sizing: border-box;
 }
+.ep-kanban-frame {
+  position: relative;
+  height: 100%;
+}
+.ep-kanban-frame::before,
+.ep-kanban-frame::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+.ep-kanban-frame::before {
+  left: 0;
+  background: linear-gradient(to right, #19355a2e, transparent);
+}
+.ep-kanban-frame::after {
+  right: 0;
+  background: linear-gradient(to left, #19355a2e, transparent);
+}
+.ep-kanban-frame[data-more-left]::before,
+.ep-kanban-frame[data-more-right]::after {
+  opacity: 1;
+}
 .ep-kanban-column {
-  flex: 0 0 260px;
+  flex: 1 1 220px;
+  min-width: 190px;
+  max-width: 320px;
+}
+.ep-kanban-column-quiet {
+  flex: 0 0 120px;
   min-width: 0;
+  opacity: 0.7;
+}
+.ep-kanban-column-quiet h3 {
+  color: #7a879a;
+  font-weight: 500;
 }
 .ep-kanban-column h3 {
   display: flex;
@@ -473,8 +511,78 @@
   flex: 1;
   position: relative;
   height: 30px;
-  background: linear-gradient(90deg, #edf1f6 1px, transparent 1px);
-  background-size: 7.14% 100%;
+}
+.ep-calendar {
+  min-width: 560px;
+}
+.ep-calendar-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font: 13px system-ui;
+}
+.ep-calendar-heading strong {
+  min-width: 90px;
+  text-align: center;
+  font-size: 15px;
+}
+.ep-calendar-zone {
+  color: #718095;
+  margin-left: 8px;
+}
+.ep-calendar-weekdays,
+.ep-calendar-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.ep-calendar-weekdays span {
+  padding: 6px 8px;
+  font: 600 11px system-ui;
+  color: #718095;
+}
+.ep-calendar-week {
+  grid-auto-rows: minmax(22px, auto);
+  align-content: start;
+  min-height: 96px;
+  row-gap: 3px;
+  padding-bottom: 6px;
+  border-top: 1px solid #dde4ef;
+  background: linear-gradient(90deg, #edf1f6 1px, transparent 1px) 0 0 / calc(100% / 7) 100%;
+}
+.ep-calendar-day {
+  grid-row: 1;
+  padding: 4px 8px;
+  font: 12px system-ui;
+  color: #35425a;
+}
+.ep-calendar-day.outside {
+  color: #b3bdcb;
+}
+.ep-calendar-bar {
+  margin: 0 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font: 12px system-ui;
+  color: white;
+  background: #647ace;
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ep-calendar-bar.before {
+  margin-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.ep-calendar-bar.after {
+  margin-right: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .ep-timeline-bar {
   position: absolute;
@@ -540,6 +648,9 @@
   }
   .ep-kanban-column {
     flex-basis: 250px;
+  }
+  .ep-kanban-column-quiet {
+    flex-basis: 120px;
   }
   .ep-timeline-edit {
     position: fixed;
