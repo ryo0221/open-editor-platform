@@ -633,12 +633,13 @@ function duplicateBoard({ d, ids, duplicateIds }: ArrangeContext): WhiteboardCon
     connectors: [...d.connectors, ...copied.connectors],
   };
 }
-function groupBoard({ d, roots, groupTemplate }: ArrangeContext): WhiteboardContent {
+function groupBoard({ d, roots, groupTemplate, duplicateIds }: ArrangeContext): WhiteboardContent {
   if (roots.length < 2) throw new Error('Select two or more nodes');
   if (new Set(roots.map((r) => d.nodes.find((n) => n.id === r.id)?.sectionId ?? '')).size > 1)
     throw new Error('Select objects in the same Section before grouping');
   const group = {
     ...groupTemplate,
+    id: duplicateIds(boardIds(d))('group'),
     sectionId: d.nodes.find((n) => n.id === roots[0].id)?.sectionId,
     bounds: unionBounds(roots.map((n) => n.bounds)),
     groupId: roots[0].parentId,

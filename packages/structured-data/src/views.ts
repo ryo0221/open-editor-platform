@@ -1,4 +1,5 @@
 import { newId, clone, canonicalJson } from '@editor-platform/artifact-core';
+import { dayString } from '@editor-platform/time-axis';
 import { command, immutableCommand, type EditorCommand } from '@editor-platform/editor-core';
 import { columnSchemaCommand } from './schema-command';
 import {
@@ -518,15 +519,8 @@ export function saveView(view: DataView) {
     views: [...(d.views ?? []).filter((v) => v.id !== fixed.id), fixed],
   }));
 }
-export function utcDay(value: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const n = Date.parse(`${value}T00:00:00Z`);
-  return Number.isFinite(n) && new Date(n).toISOString().slice(0, 10) === value
-    ? Math.floor(n / 86400000)
-    : null;
-}
-export const dayString = (day: number) =>
-  new Date(Math.round(day) * 86400000).toISOString().slice(0, 10);
+// The calendar-day axis is shared with Schedule (packages/time-axis).
+export { utcDay, dayString } from '@editor-platform/time-axis';
 export function moveDates(
   data: StructuredData,
   rowId: string,

@@ -364,6 +364,28 @@ export function displayCell(data: StructuredData, row: DataRow, column: Column):
 // Row values/formulas depend on their row and column definitions. Relations also
 // depend on the complete row set, so they always take the full validation path.
 const validRowsByColumns = new WeakMap<Column[], WeakSet<DataRow>>();
+const invalidDate = (value: Cell) =>
+  !/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ||
+  Number.isNaN(Date.parse(String(value))) ||
+  new Date(String(value)).toISOString().slice(0, 10) !== value;
+function valueMessage(data: StructuredData, c: Column, value: Cell) {
+  let message = '';
+  if (c.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value)))
+    message = 'Enter a number';
+  if (c.type === 'boolean' && typeof value !== 'boolean') message = 'Enter true or false';
+  if (c.type === 'date' && invalidDate(value)) message = 'Enter a valid date (YYYY-MM-DD)';
+  if (c.type === 'select' && !c.options?.includes(String(value)))
+    message = 'Choose a listed option';
+  if (c.type === 'relation' && !data.rows.some((r) => r.id === value))
+    message = 'Choose an existing record';
+  if (c.type === 'text' && typeof value !== 'string') message = 'Enter text';
+  return message;
+}
+function cellMessage(data: StructuredData, c: Column, value: Cell) {
+  const empty = value === null || value === '';
+  if (empty && c.required) return 'Required field';
+  return empty ? '' : valueMessage(data, c, value);
+}
 export function validateData(data: StructuredData, rows: DataRow[] = data.rows): ValidationError[] {
   const errors: ValidationError[] = [];
   let validRows: WeakSet<DataRow> | undefined;
@@ -382,26 +404,7 @@ export function validateData(data: StructuredData, rows: DataRow[] = data.rows):
         errors.push({ rowId: row.id, columnId: c.id, message: (e as Error).message });
         continue;
       }
-      const empty = value === null || value === '';
-      let message = '';
-      if (empty && c.required) message = 'Required field';
-      else if (!empty) {
-        if (c.type === 'number' && (typeof value !== 'number' || !Number.isFinite(value)))
-          message = 'Enter a number';
-        if (c.type === 'boolean' && typeof value !== 'boolean') message = 'Enter true or false';
-        if (
-          c.type === 'date' &&
-          (!/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ||
-            Number.isNaN(Date.parse(String(value))) ||
-            new Date(String(value)).toISOString().slice(0, 10) !== value)
-        )
-          message = 'Enter a valid date (YYYY-MM-DD)';
-        if (c.type === 'select' && !c.options?.includes(String(value)))
-          message = 'Choose a listed option';
-        if (c.type === 'relation' && !data.rows.some((r) => r.id === value))
-          message = 'Choose an existing record';
-        if (c.type === 'text' && typeof value !== 'string') message = 'Enter text';
-      }
+      const message = cellMessage(data, c, value);
       if (message) errors.push({ rowId: row.id, columnId: c.id, message });
     }
     if (validRows && errors.length === before && isDeepFrozen(row)) validRows.add(row);
@@ -477,7 +480,7 @@ function needsCsvGuard(value: string): boolean {
 }
 /**
  * Encode one exported CSV field. Guarded text is prefixed with one apostrophe so
- * spreadsheets keep it as text; csvText removes exactly that apostrophe on import.
+ * spreadsheets keep it as text. Decoding requires explicit import opt-in.
  */
 export function csvField(value: string): string {
   const safe = needsCsvGuard(value) ? `'${value}` : value;
@@ -487,9 +490,14 @@ export function csvField(value: string): string {
 export function csvText(field: string): string {
   return field.startsWith("'") && needsCsvGuard(field.slice(1)) ? field.slice(1) : field;
 }
-/** Parse CSV for import: drop a leading BOM and undo csvField's formula guard. */
-export function parseCsvText(source: string): string[][] {
-  return parseCsv(source.replace(/^\uFEFF/, '')).map((row) => row.map(csvText));
+export interface CsvImportOptions {
+  /** Only opt in for unchanged CSV produced by this editor's guarded exporter. */
+  decodeFormulaGuard?: boolean;
+}
+/** Generic CSV preserves literal apostrophes. A BOM is only an encoding mark. */
+export function parseCsvText(source: string, options: CsvImportOptions = {}): string[][] {
+  const rows = parseCsv(source.replace(/^\uFEFF/, ''));
+  return options.decodeFormulaGuard ? rows.map((row) => row.map(csvText)) : rows;
 }
 export function exportCsv(data: StructuredData): string {
   return (
@@ -531,8 +539,8 @@ export function parseCsv(source: string): string[][] {
   }
   return rows;
 }
-export function importCsv(source: string): StructuredData {
-  const [header, ...rows] = parseCsvText(source);
+export function importCsv(source: string, options: CsvImportOptions = {}): StructuredData {
+  const [header, ...rows] = parseCsvText(source, options);
   if (!header?.length) throw new Error('CSV requires a header');
   const names = new Set<string>();
   const columns: Column[] = header.map((raw, index) => {
@@ -558,14 +566,7 @@ export function importCsv(source: string): StructuredData {
     })),
   };
 }
-export function dataDiff(a: StructuredData, b: StructuredData): CompareResult {
-  const changes: Change[] = describeChanges(
-    a.columns,
-    b.columns,
-    (c) => `Field: ${c.name}`,
-    (c) =>
-      `${c.name} (${c.type})\n${c.required ? 'Required' : 'Optional'}\n${c.formula ? `Formula: ${c.formula}` : ''}${c.options ? `Options: ${c.options.join(', ')}` : ''}`,
-  );
+function rowDiff(a: StructuredData, b: StructuredData, changes: Change[]) {
   const describeRow = (data: StructuredData, row: DataRow) =>
     data.columns.map((c) => `${c.name}: ${displayCell(data, row, c)}`).join('\n');
   for (const old of a.rows) {
@@ -599,18 +600,12 @@ export function dataDiff(a: StructuredData, b: StructuredData): CompareResult {
         kind: 'added',
         after: describeRow(b, row),
       });
-  changes.push(
-    ...describeChanges(
-      a.views ?? [],
-      b.views ?? [],
-      (view) => `Named view: ${view.name}`,
-      (view, side) => {
-        const data = side === 'before' ? a : b;
-        const field = (id: string) => data.columns.find((c) => c.id === id)?.name ?? (id || 'none');
-        return `${view.name} / ${view.projection}\nSearch: ${view.search}\nGroup: ${field(view.groupBy)}\nSort: ${view.sorts.map((s) => `${field(s.columnId)} ${s.descending ? 'descending' : 'ascending'}`).join(', ')}\nFilters (${view.filterMode}): ${view.filters.map((f) => `${field(f.columnId)} ${f.operator} ${f.value}`).join('; ')}\nChart: ${view.chart.type}, ${field(view.chart.x)} / ${field(view.chart.y)}, ${view.chart.aggregate}\nTimeline: ${field(view.timeline.start)} – ${field(view.timeline.end)}\nSummary: ${view.summary.aggregate} ${field(view.summary.columnId)}\nWidgets: ${view.widgets.map((w) => `${w.type}: ${w.title}`).join(', ')}`;
-      },
-    ),
-  );
+}
+function describeView(data: StructuredData, view: NonNullable<StructuredData['views']>[number]) {
+  const field = (id: string) => data.columns.find((c) => c.id === id)?.name ?? (id || 'none');
+  return `${view.name} / ${view.projection}\nSearch: ${view.search}\nGroup: ${field(view.groupBy)}\nSort: ${view.sorts.map((s) => `${field(s.columnId)} ${s.descending ? 'descending' : 'ascending'}`).join(', ')}\nFilters (${view.filterMode}): ${view.filters.map((f) => `${field(f.columnId)} ${f.operator} ${f.value}`).join('; ')}\nChart: ${view.chart.type}, ${field(view.chart.x)} / ${field(view.chart.y)}, ${view.chart.aggregate}\nTimeline: ${field(view.timeline.start)} – ${field(view.timeline.end)}\nSummary: ${view.summary.aggregate} ${field(view.summary.columnId)}\nWidgets: ${view.widgets.map((w) => `${w.type}: ${w.title}`).join(', ')}`;
+}
+function graphViewDiff(a: StructuredData, b: StructuredData, changes: Change[]) {
   const oldGraph = a.graphView,
     nextGraph = b.graphView;
   if (!!oldGraph !== !!nextGraph)
@@ -630,6 +625,13 @@ export function dataDiff(a: StructuredData, b: StructuredData): CompareResult {
       before: fieldName(a, oldGraph?.labelColumnId),
       after: fieldName(b, nextGraph?.labelColumnId),
     });
+  graphPositionDiff(oldGraph, nextGraph, changes);
+}
+function graphPositionDiff(
+  oldGraph: StructuredData['graphView'],
+  nextGraph: StructuredData['graphView'],
+  changes: Change[],
+) {
   const beforePositions = oldGraph?.positions ?? {},
     afterPositions = nextGraph?.positions ?? {};
   for (const id of new Set([...Object.keys(beforePositions), ...Object.keys(afterPositions)])) {
@@ -644,6 +646,25 @@ export function dataDiff(a: StructuredData, b: StructuredData): CompareResult {
       ...(after ? { after: `x: ${after.x}, y: ${after.y}` } : {}),
     });
   }
+}
+export function dataDiff(a: StructuredData, b: StructuredData): CompareResult {
+  const changes: Change[] = describeChanges(
+    a.columns,
+    b.columns,
+    (c) => `Field: ${c.name}`,
+    (c) =>
+      `${c.name} (${c.type})\n${c.required ? 'Required' : 'Optional'}\n${c.formula ? `Formula: ${c.formula}` : ''}${c.options ? `Options: ${c.options.join(', ')}` : ''}`,
+  );
+  rowDiff(a, b, changes);
+  changes.push(
+    ...describeChanges(
+      a.views ?? [],
+      b.views ?? [],
+      (view) => `Named view: ${view.name}`,
+      (view, side) => describeView(side === 'before' ? a : b, view),
+    ),
+  );
+  graphViewDiff(a, b, changes);
   return { changes };
 }
 const validRowStructures = new WeakSet<object>();

@@ -30,6 +30,12 @@ import {
   exportCsv,
   type StructuredData,
 } from '@editor-platform/structured-data/model';
+import {
+  f02Plate,
+  isCadDocument,
+  type CadDocument,
+  type CadKernelProfile,
+} from '@editor-platform/cad-core';
 import { sealReactEnvironment, type ReactRuntimeResolution } from '@editor-platform/react-ui-core';
 import { exportDesignReact } from '@editor-platform/design-react-core';
 export interface CodeContent {
@@ -44,7 +50,8 @@ export type HostContent =
   | WhiteboardContent
   | DesignContent
   | StructuredData
-  | CodeContent;
+  | CodeContent
+  | CadDocument;
 export const isCode = (v: unknown): v is CodeContent => {
   if (!v || typeof v !== 'object') return false;
   const c = v as Partial<CodeContent>;
@@ -191,6 +198,18 @@ export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
       return c.source;
     },
   },
+  cad: {
+    kind: 'cad',
+    validate: isCadDocument,
+    // PNG comes from the Surface viewport (exact evaluated shape); no headless renderer here.
+    capabilities: {
+      undo: true,
+      nativeJson: true,
+      formats: [],
+      preview: 'none',
+      shared: false,
+    },
+  },
   data: {
     kind: 'data',
     validate: isData,
@@ -244,6 +263,19 @@ export function referenceArtifacts(): Artifact<HostContent>[] {
     ...createArtifact(kind, name, content),
     id: 'reference-' + kind,
   }));
+}
+/** A parametric plate sample, offered only when the Host supplies a kernel build. */
+export function cadSample(
+  kernel: Pick<CadKernelProfile, 'id' | 'buildHash'>,
+): Artifact<HostContent> {
+  const plate = f02Plate();
+  return {
+    ...createArtifact('cad', '3D part', {
+      ...plate,
+      kernelProfile: { ...plate.kernelProfile, ...kernel },
+    }),
+    id: 'reference-cad',
+  };
 }
 /** Explicit browser-local adapter. It neither infers access nor promises server durability. */
 export class BrowserArtifactStorage implements StorageAdapter<Artifact<HostContent>> {

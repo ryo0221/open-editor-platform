@@ -296,54 +296,65 @@ function checkEnvironment(raw: unknown): asserts raw is ReactEnvironment {
     '$.environment.dependencies',
     reactUiLimits.dependencies,
   );
-  for (const [index, raw] of dependencies.entries()) {
-    const path = `$.environment.dependencies.${index}`,
-      d = object(raw, path);
-    id(d.id, path);
-    hash(d.hash, path);
-    switch (d.kind) {
-      case 'package':
-        fields(d, ['id', 'hash', 'kind', 'name', 'version'], [], path);
-        if (
-          typeof d.name !== 'string' ||
-          !/^(?:@[a-z0-9_-]+\/)?[a-z0-9][a-z0-9_.-]{0,100}$/.test(d.name)
-        )
-          reject('dependency', path, 'Invalid package name');
-        version(d.version, path, true);
-        break;
-      case 'css':
-      case 'asset':
-        fields(d, ['id', 'hash', 'kind', 'path'], d.kind === 'asset' ? ['mediaType'] : [], path);
-        if (
-          typeof d.path !== 'string' ||
-          d.path.length > 240 ||
-          !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(d.path) ||
-          d.path.split('/').some((part) => !part || part === '.' || part === '..')
-        )
-          reject('dependency-path', path, 'Expected a safe relative dependency path');
-        if (
-          d.kind === 'asset' &&
-          !['image/png', 'image/jpeg', 'image/webp'].includes(String(d.mediaType))
-        )
-          reject('dependency', path, 'Unsupported image media type');
-        break;
-      case 'provider':
-        fields(d, ['id', 'hash', 'kind', 'import', 'props'], [], path);
-        checkImport(d.import, `${path}.import`);
-        {
-          const props = object(d.props, `${path}.props`);
-          if (
-            Object.keys(props).some((k) =>
-              ['children', 'key', 'ref', 'dangerouslySetInnerHTML'].includes(k),
-            )
-          )
-            reject('provider', path, 'Provider children/runtime props are Host-owned');
-        }
-        break;
-      default:
-        reject('dependency', path, 'Unsupported runtime dependency');
-    }
+  for (const [index, raw] of dependencies.entries())
+    checkDependency(raw, `$.environment.dependencies.${index}`);
+  checkUniqueDependencies(dependencies);
+  checkProviderOrder(e, dependencies);
+  const vars = checkTokenVariables(e);
+  checkEnvironmentTokens(e, vars);
+}
+function checkDependency(raw: unknown, path: string) {
+  const d = object(raw, path);
+  id(d.id, path);
+  hash(d.hash, path);
+  switch (d.kind) {
+    case 'package':
+      fields(d, ['id', 'hash', 'kind', 'name', 'version'], [], path);
+      if (
+        typeof d.name !== 'string' ||
+        !/^(?:@[a-z0-9_-]+\/)?[a-z0-9][a-z0-9_.-]{0,100}$/.test(d.name)
+      )
+        reject('dependency', path, 'Invalid package name');
+      version(d.version, path, true);
+      break;
+    case 'css':
+    case 'asset':
+      checkFileDependency(d, path);
+      break;
+    case 'provider':
+      checkProviderDependency(d, path);
+      break;
+    default:
+      reject('dependency', path, 'Unsupported runtime dependency');
   }
+}
+function checkFileDependency(d: Record<string, unknown>, path: string) {
+  fields(d, ['id', 'hash', 'kind', 'path'], d.kind === 'asset' ? ['mediaType'] : [], path);
+  if (
+    typeof d.path !== 'string' ||
+    d.path.length > 240 ||
+    !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(d.path) ||
+    d.path.split('/').some((part) => !part || part === '.' || part === '..')
+  )
+    reject('dependency-path', path, 'Expected a safe relative dependency path');
+  if (
+    d.kind === 'asset' &&
+    !['image/png', 'image/jpeg', 'image/webp'].includes(String(d.mediaType))
+  )
+    reject('dependency', path, 'Unsupported image media type');
+}
+function checkProviderDependency(d: Record<string, unknown>, path: string) {
+  fields(d, ['id', 'hash', 'kind', 'import', 'props'], [], path);
+  checkImport(d.import, `${path}.import`);
+  const props = object(d.props, `${path}.props`);
+  if (
+    Object.keys(props).some((k) =>
+      ['children', 'key', 'ref', 'dangerouslySetInnerHTML'].includes(k),
+    )
+  )
+    reject('provider', path, 'Provider children/runtime props are Host-owned');
+}
+function checkUniqueDependencies(dependencies: unknown[]) {
   unique(
     dependencies.map((d) => (d as { id: string }).id),
     '$.environment.dependencies',
@@ -360,6 +371,8 @@ function checkEnvironment(raw: unknown): asserts raw is ReactEnvironment {
       .map((d) => (d as { name: string }).name),
     '$.environment.dependencies',
   );
+}
+function checkProviderOrder(e: Record<string, unknown>, dependencies: unknown[]) {
   const providers = array(
     e.providerOrder,
     '$.environment.providerOrder',
@@ -376,6 +389,8 @@ function checkEnvironment(raw: unknown): asserts raw is ReactEnvironment {
       '$.environment.providerOrder',
       'Every Provider needs one explicit ordered position',
     );
+}
+function checkTokenVariables(e: Record<string, unknown>) {
   const vars = object(e.tokenVariables, '$.environment.tokenVariables');
   if (Object.keys(vars).length > 2048)
     reject('schema-limit', '$.environment.tokenVariables', 'Too many token variables');
@@ -391,6 +406,9 @@ function checkEnvironment(raw: unknown): asserts raw is ReactEnvironment {
         'Invalid token/CSS variable mapping',
       );
   unique(Object.values(vars), '$.environment.tokenVariables');
+  return vars;
+}
+function checkEnvironmentTokens(e: Record<string, unknown>, vars: Record<string, unknown>) {
   if (e.tokens !== undefined) {
     try {
       const tokens = validateReusableDefinitionSync(e.tokens);

@@ -1,4 +1,7 @@
-"""Deterministic colored, transparent and lossy image fixtures (Pillow 12.3.0)."""
+"""Generate image fixtures; approved bytes were created with Pillow 12.3.0.
+
+Current tooling uses Pillow 13.0.0. Generate into scratch and compare approved
+hashes before proposing any fixture change; do not overwrite approved fixtures."""
 from pathlib import Path
 from PIL import Image, ImageDraw
 

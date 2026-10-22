@@ -57,3 +57,15 @@ it('rejects reapplying duplicate to its own result instead of duplicating IDs', 
     command = arrangeBoard(['a', 'b'], 'duplicate');
   expect(() => command.apply(command.apply(clone(board)))).toThrow(/already applied/);
 });
+
+it.each(['group', 'frame'])('rejects replaying %s without changing its input', (action) => {
+  const board = boardWithConnectedNodes();
+  const command = arrangeBoard(['a', 'b'], action);
+  const first = deepFreeze(command.apply(board));
+  const snapshot = clone(first);
+  expect(() => command.apply(first)).toThrow(/already applied/);
+  expect(first).toEqual(snapshot);
+  expect(new Set(first.nodes.map((node) => node.id)).size).toBe(first.nodes.length);
+  expect(first.nodes.every((node) => node.groupId !== node.id)).toBe(true);
+  expect(command.apply(board)).toEqual(first);
+});

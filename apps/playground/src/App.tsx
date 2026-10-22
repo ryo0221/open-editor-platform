@@ -6,6 +6,8 @@ import { artifactReferenceItems, captureArtifactReferences } from './artifact-re
 import type { PrivateVideoEntry } from './private-video/catalog';
 import { relationProfile, isGraphDocument, validateGraph } from '@editor-platform/structured-graph';
 import { flushSync } from 'react-dom';
+import type { ScheduleDocument } from '@editor-platform/schedule/model';
+import { stepScheduleHistory } from '@editor-platform/schedule/history';
 import { OfficeExportHost } from '@editor-platform/office-export-ui/host';
 import {
   applyLocalTemplate,
@@ -668,10 +670,22 @@ export default function App({
       return;
     }
     const local = session as EditorSession<Content>;
-    const content =
-      active.kind === 'react-ui'
-        ? local[direction === 'undo' ? 'undoView' : 'redoView']()
-        : local[direction]();
+    let content: Content;
+    if (active.kind === 'schedule') {
+      // Removing a Schedule event while details hold refused text could lose it: refused.
+      const step = stepScheduleHistory(
+        local as unknown as EditorSession<ScheduleDocument>,
+        direction,
+        local.content as unknown as ScheduleDocument,
+        pending,
+      );
+      if ('refused' in step) return setError(step.refused);
+      content = step.content as unknown as Content;
+    } else
+      content =
+        active.kind === 'react-ui'
+          ? local[direction === 'undo' ? 'undoView' : 'redoView']()
+          : local[direction]();
     persist({
       ...editedDraft(active, content),
       annotations: active.annotations,
@@ -1320,7 +1334,12 @@ export default function App({
                         }
                         onToggleInspector={() => setInspector(!inspector)}
                         onReadOnlyChange={(checked) => {
-                          if (active.kind === 'animation' && !flushInputs()) return;
+                          // Switching to read-only replaces text inputs: commit or keep them first.
+                          if (
+                            (active.kind === 'animation' || active.kind === 'schedule') &&
+                            !flushInputs()
+                          )
+                            return;
                           setReadOnly(checked);
                         }}
                         setPreview={setSharedPreview}
@@ -1465,7 +1484,8 @@ export default function App({
                         {inspector &&
                           active.kind !== 'animation' &&
                           active.kind !== 'structured-graph' &&
-                          active.kind !== 'geo' && (
+                          active.kind !== 'geo' &&
+                          active.kind !== 'cad' && (
                             <CommentsInspector
                               active={active}
                               content={content}

@@ -266,108 +266,23 @@ export function importDtcgResolver(input: unknown): DtcgResult {
   try {
     const raw = parse(input);
     assertReuseJson(raw);
-    if (
-      !record(raw) ||
-      raw.version !== '2025.10' ||
-      !Array.isArray(raw.resolutionOrder) ||
-      !raw.resolutionOrder.length
-    )
-      rejectReuse('dtcg-resolver-schema', 'Expected DTCG 2025.10 resolutionOrder');
-    if (
-      Object.keys(raw).some(
-        (key) =>
-          ![
-            'version',
-            'name',
-            'description',
-            '$schema',
-            'sets',
-            'modifiers',
-            'resolutionOrder',
-          ].includes(key),
-      ) ||
-      (raw.modifiers !== undefined && (!record(raw.modifiers) || Object.keys(raw.modifiers).length))
-    )
-      rejectReuse(
-        'dtcg-resolver-unsupported',
-        'Resolver modifiers and unknown root properties are outside the exchange subset',
-      );
-    if (
-      raw.resolutionOrder.length > reuseLimits.definitions ||
-      (raw.sets !== undefined && !record(raw.sets))
-    )
-      rejectReuse('dtcg-resolver-limit', 'Invalid or excessive resolver sets');
+    checkResolverRoot(raw);
     const merged: TokenSet['tokens'] = Object.create(null),
       diagnostics: ReuseDiagnostic[] = [];
     // Merge format trees before resolving aliases, including aliases into a later source.
-    const flat = new Map<string, { value: Record<string, unknown>; inherited: unknown }>();
-    const collect = (node: Record<string, unknown>, path: string[], inherited: unknown) => {
-      const type = node.$type ?? inherited;
-      if ('$value' in node)
-        flat.set(path.join('.'), {
-          value: { ...node, ...(type !== undefined ? { $type: type } : {}) },
-          inherited: type,
-        });
-      else
-        for (const [key, value] of Object.entries(node)) {
-          if (['$type', '$description'].includes(key)) continue;
-          if (key.startsWith('$') || !record(value))
-            rejectReuse('dtcg-resolver-unsupported', 'Unsupported inline set group', {
-              path: path.concat(key).join('.'),
-            });
-          collect(value, [...path, key], type);
-        }
-    };
+    const flat: ResolverTokens = new Map();
     for (const entry of raw.resolutionOrder) {
-      if (!record(entry))
-        rejectReuse('dtcg-resolver-schema', 'Expected an inline set or local set reference');
-      let set = entry;
-      if ('$ref' in entry) {
-        const match =
-          typeof entry.$ref === 'string' && /^#\/sets\/([A-Za-z0-9_-]+)$/.exec(entry.$ref);
-        if (
-          !match ||
-          Object.keys(entry).length !== 1 ||
-          !record(raw.sets) ||
-          !record(raw.sets[match[1]])
-        )
-          rejectReuse(
-            'dtcg-resolver-reference',
-            'Only declared local set references are supported',
-          );
-        set = raw.sets[match[1]] as Record<string, unknown>;
-      }
-      if (
-        !Array.isArray(set.sources) ||
-        set.sources.length > reuseLimits.definitions ||
-        Object.keys(set).some((key) => !['sources', 'description'].includes(key))
-      )
-        rejectReuse('dtcg-resolver-set', 'Unsupported resolver set');
+      const set = resolverSet(raw, entry);
       for (const source of set.sources) {
         if (!record(source) || '$ref' in source)
           rejectReuse(
             'dtcg-resolver-source',
             'External/ref sources are not fetched; supply inline tokens',
           );
-        collect(source, [], undefined);
+        collectResolverTokens(flat, source, [], undefined);
       }
     }
-    const document: Record<string, unknown> = {};
-    for (const [id, item] of flat) {
-      const parts = id.split('.');
-      let parent = document;
-      for (const key of parts.slice(0, -1)) {
-        if (!tokenId(key) || (parent[key] && (!record(parent[key]) || '$value' in parent[key])))
-          rejectReuse('dtcg-resolver-path', 'Conflicting or unsupported token path');
-        parent[key] ??= {};
-        parent = parent[key] as Record<string, unknown>;
-      }
-      const key = parts.at(-1)!;
-      if (!tokenId(key) || parent[key])
-        rejectReuse('dtcg-resolver-path', 'Conflicting or unsupported token path');
-      parent[key] = item.value;
-    }
-    const result = importDtcg(document);
+    const result = importDtcg(resolverDocument(flat));
     diagnostics.push(...result.diagnostics);
     if (!result.tokens) return { diagnostics };
     Object.assign(merged, result.tokens.tokens);
@@ -376,4 +291,101 @@ export function importDtcgResolver(input: unknown): DtcgResult {
     if (!(error instanceof ReuseError)) throw error;
     return { diagnostics: error.diagnostics };
   }
+}
+type ResolverInput = Record<string, unknown> & { resolutionOrder: unknown[] };
+type ResolverTokens = Map<string, { value: Record<string, unknown>; inherited: unknown }>;
+const resolverRootKeys = [
+  'version',
+  'name',
+  'description',
+  '$schema',
+  'sets',
+  'modifiers',
+  'resolutionOrder',
+];
+function checkResolverRoot(raw: unknown): asserts raw is ResolverInput {
+  if (
+    !record(raw) ||
+    raw.version !== '2025.10' ||
+    !Array.isArray(raw.resolutionOrder) ||
+    !raw.resolutionOrder.length
+  )
+    rejectReuse('dtcg-resolver-schema', 'Expected DTCG 2025.10 resolutionOrder');
+  if (
+    Object.keys(raw).some((key) => !resolverRootKeys.includes(key)) ||
+    (raw.modifiers !== undefined && (!record(raw.modifiers) || Object.keys(raw.modifiers).length))
+  )
+    rejectReuse(
+      'dtcg-resolver-unsupported',
+      'Resolver modifiers and unknown root properties are outside the exchange subset',
+    );
+  if (
+    raw.resolutionOrder.length > reuseLimits.definitions ||
+    (raw.sets !== undefined && !record(raw.sets))
+  )
+    rejectReuse('dtcg-resolver-limit', 'Invalid or excessive resolver sets');
+}
+/** An inline set or the declared local set it references, checked to the supported subset. */
+function resolverSet(raw: ResolverInput, entry: unknown) {
+  if (!record(entry))
+    rejectReuse('dtcg-resolver-schema', 'Expected an inline set or local set reference');
+  let set = entry;
+  if ('$ref' in entry) {
+    const match = typeof entry.$ref === 'string' && /^#\/sets\/([A-Za-z0-9_-]+)$/.exec(entry.$ref);
+    if (
+      !match ||
+      Object.keys(entry).length !== 1 ||
+      !record(raw.sets) ||
+      !record(raw.sets[match[1]])
+    )
+      rejectReuse('dtcg-resolver-reference', 'Only declared local set references are supported');
+    set = raw.sets[match[1]] as Record<string, unknown>;
+  }
+  if (
+    !Array.isArray(set.sources) ||
+    set.sources.length > reuseLimits.definitions ||
+    Object.keys(set).some((key) => !['sources', 'description'].includes(key))
+  )
+    rejectReuse('dtcg-resolver-set', 'Unsupported resolver set');
+  return set as Record<string, unknown> & { sources: unknown[] };
+}
+function collectResolverTokens(
+  flat: ResolverTokens,
+  node: Record<string, unknown>,
+  path: string[],
+  inherited: unknown,
+): void {
+  const type = node.$type ?? inherited;
+  if ('$value' in node)
+    flat.set(path.join('.'), {
+      value: { ...node, ...(type !== undefined ? { $type: type } : {}) },
+      inherited: type,
+    });
+  else
+    for (const [key, value] of Object.entries(node)) {
+      if (['$type', '$description'].includes(key)) continue;
+      if (key.startsWith('$') || !record(value))
+        rejectReuse('dtcg-resolver-unsupported', 'Unsupported inline set group', {
+          path: path.concat(key).join('.'),
+        });
+      collectResolverTokens(flat, value, [...path, key], type);
+    }
+}
+function resolverDocument(flat: ResolverTokens) {
+  const document: Record<string, unknown> = {};
+  for (const [id, item] of flat) {
+    const parts = id.split('.');
+    let parent = document;
+    for (const key of parts.slice(0, -1)) {
+      if (!tokenId(key) || (parent[key] && (!record(parent[key]) || '$value' in parent[key])))
+        rejectReuse('dtcg-resolver-path', 'Conflicting or unsupported token path');
+      parent[key] ??= {};
+      parent = parent[key] as Record<string, unknown>;
+    }
+    const key = parts.at(-1)!;
+    if (!tokenId(key) || parent[key])
+      rejectReuse('dtcg-resolver-path', 'Conflicting or unsupported token path');
+    parent[key] = item.value;
+  }
+  return document;
 }

@@ -11,6 +11,8 @@
     "@editor-platform/editor-core": "*",
     "@editor-platform/structured-data": "*",
     "@editor-platform/structured-graph": "*",
-    "@editor-platform/geo-core": "*"
+    "@editor-platform/geo-core": "*",
+    "@editor-platform/schedule": "*",
+    "@editor-platform/time-axis": "*"
   }
 }

@@ -4,6 +4,7 @@ import { isDeck } from '@editor-platform/slide/model';
 import { isDocument } from '@editor-platform/document/model';
 import { isDesign } from '@editor-platform/design/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
+import { assertSchedule, isSchedule } from '@editor-platform/schedule/model';
 import type { Content, StoredArtifact } from './model';
 
 /** Check a retained history in one identity scope, without resolving live sources. */
@@ -22,6 +23,7 @@ export function artifactReferenceItems(content: Content): ReferenceItem[] {
   if (isDocument(content)) return content.blocks;
   if (isDesign(content)) return content.elements;
   if (isWhiteboard(content)) return content.nodes;
+  if (isSchedule(content)) return content.lanes;
   return [];
 }
 /** A Host composes each native model with the common capture API; no universal content schema. */
@@ -43,5 +45,11 @@ export async function captureArtifactReferences(
   } else if (isDocument(result)) result.blocks = captured as typeof result.blocks;
   else if (isDesign(result)) result.elements = captured as typeof result.elements;
   else if (isWhiteboard(result)) result.nodes = captured as typeof result.nodes;
+  // Lanes keep only their reference; the projection image is not Schedule content.
+  else if (isSchedule(result)) {
+    result.lanes = captured.map((item) => ({ id: item.id, reference: item.reference! }));
+    // Newer captured snapshots can grow past Schedule's own limits: refuse here, not on reopen.
+    assertSchedule(result);
+  }
   return result;
 }

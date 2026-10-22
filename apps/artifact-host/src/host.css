@@ -68,16 +68,16 @@
 .host-artifacts button {
   margin-right: 8px;
 }
-.host-editor nav {
+.host-editor > nav {
   display: flex;
   gap: 8px;
   overflow: auto;
   padding: 12px 20px;
 }
-.host-editor nav button {
+.host-editor > nav button {
   flex-shrink: 0;
 }
-.host-editor nav button[aria-pressed='true'] {
+.host-editor > nav button[aria-pressed='true'] {
   background: #153b35;
   color: white;
 }

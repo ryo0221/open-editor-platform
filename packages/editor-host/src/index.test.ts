@@ -78,6 +78,10 @@ describe('Artifact Host lifecycle using existing EditorSession', () => {
       release();
     }
     expect(host.snapshot.revision).toEqual(before);
+    // Direct accessors match the snapshot without building it.
+    expect(host.revision).toEqual(before);
+    expect(host.content).toEqual(host.snapshot.content);
+    expect([host.canUndo, host.canRedo]).toEqual([false, true]);
     host.redo();
     expect(host.snapshot.content.text).toBe('edited');
     const result = await host.save({ commitVersion: true, author: 'fixture' });

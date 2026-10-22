@@ -17,7 +17,8 @@
     "@editor-platform/editor-ui": "*",
     "@editor-platform/canvas-ui": "*",
     "lucide-react": "1.51.0",
-    "@editor-platform/property-input": "*"
+    "@editor-platform/property-input": "*",
+    "@editor-platform/time-axis": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1"

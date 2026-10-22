@@ -131,45 +131,43 @@ export function captureKeyJoinSnapshot(
   return snapshot;
 }
 
-/** Deterministic synchronous projection. No commands, source updates, fetch or history. */
-export function runReadonlyKeyJoin(
+const contractKeys = [
+  'left',
+  'right',
+  'leftFieldId',
+  'rightFieldId',
+  'keyType',
+  'cardinality',
+  'normalization',
+  'nullPolicy',
+  'duplicatePolicy',
+  'resultAccess',
+];
+const validContract = (contract: unknown): contract is ReadonlyKeyJoin =>
+  record(contract) &&
+  Object.keys(contract).length === contractKeys.length &&
+  contractKeys.every((k) => Object.hasOwn(contract, k)) &&
+  validPin(contract.left) &&
+  validPin(contract.right) &&
+  id(contract.leftFieldId) &&
+  id(contract.rightFieldId) &&
+  ['string', 'number'].includes(contract.keyType as string) &&
+  ['one-to-one', 'many-to-one'].includes(contract.cardinality as string) &&
+  contract.normalization === 'none' &&
+  contract.nullPolicy === 'unmatched' &&
+  contract.duplicatePolicy === 'reject' &&
+  contract.resultAccess === 'readonly';
+function assertJoinInputs(
   contract: ReadonlyKeyJoin,
   left: KeyJoinSnapshot,
   right: KeyJoinSnapshot,
   limits: KeyJoinLimits,
-): ReadonlyJoinResult {
-  validateLimits(limits);
+) {
   if (!issued.has(left) || !issued.has(right)) throw new Error('join-unissued-snapshot');
   if (left.layer.features.length + right.layer.features.length > limits.inputRows)
     throw new Error('join-input-row-limit');
   checkedJson({ contract, left, right }, limits.native);
-  if (
-    !record(contract) ||
-    Object.keys(contract).length !== 10 ||
-    ![
-      'left',
-      'right',
-      'leftFieldId',
-      'rightFieldId',
-      'keyType',
-      'cardinality',
-      'normalization',
-      'nullPolicy',
-      'duplicatePolicy',
-      'resultAccess',
-    ].every((k) => Object.hasOwn(contract, k)) ||
-    !validPin(contract.left) ||
-    !validPin(contract.right) ||
-    !id(contract.leftFieldId) ||
-    !id(contract.rightFieldId) ||
-    !['string', 'number'].includes(contract.keyType) ||
-    !['one-to-one', 'many-to-one'].includes(contract.cardinality) ||
-    contract.normalization !== 'none' ||
-    contract.nullPolicy !== 'unmatched' ||
-    contract.duplicatePolicy !== 'reject' ||
-    contract.resultAccess !== 'readonly'
-  )
-    throw new Error('join-contract');
+  if (!validContract(contract)) throw new Error('join-contract');
   if (!samePin(contract.left, left.pin) || !samePin(contract.right, right.pin))
     throw new Error('join-pin-mismatch');
   // The same declared immutable artifact version cannot have two hash values; the same
@@ -182,32 +180,33 @@ export function runReadonlyKeyJoin(
     )
       throw new Error('join-snapshot-conflict');
   }
-  const counts: JoinCounts = {
-    leftRows: left.layer.features.length,
-    rightRows: right.layer.features.length,
-    matchedLeftRows: 0,
-    unmatchedLeftRows: 0,
-    unusedRightRows: 0,
-    nullKeys: { left: 0, right: 0 },
-    missingKeyRows: { left: 0, right: 0 },
-    typeMismatchRows: { left: 0, right: 0 },
-    duplicateKeyRows: { left: 0, right: 0 },
-  };
-  const diagnostics: KeyJoinDiagnostic[] = [];
-  let diagnosticBytes = 0;
-  const encodedBytes = (value: unknown, remaining: number) => {
-    if (remaining <= 0) throw new Error('join-output-byte-limit');
-    const encoded = checkedJson(value, { ...limits.native, bytes: remaining });
-    return new TextEncoder().encode(encoded).length;
-  };
-  const diagnose = (
+}
+type Side = 'left' | 'right';
+type Row = DeepReadonly<VectorLayer['features'][number]>;
+type Index = Map<string | number, Row[]>;
+const emptyCounts = (left: KeyJoinSnapshot, right: KeyJoinSnapshot): JoinCounts => ({
+  leftRows: left.layer.features.length,
+  rightRows: right.layer.features.length,
+  matchedLeftRows: 0,
+  unmatchedLeftRows: 0,
+  unusedRightRows: 0,
+  nullKeys: { left: 0, right: 0 },
+  missingKeyRows: { left: 0, right: 0 },
+  typeMismatchRows: { left: 0, right: 0 },
+  duplicateKeyRows: { left: 0, right: 0 },
+});
+/** Diagnostics are bounded by count and by their share of the output byte budget. */
+function createDiagnostics(limits: KeyJoinLimits) {
+  const items: KeyJoinDiagnostic[] = [];
+  let bytes = 0;
+  const report = (
     code: string,
-    side: 'left' | 'right',
+    side: Side,
     fieldId: string,
     severity: Diagnostic['severity'],
-    feature?: DeepReadonly<VectorLayer['features'][number]>,
+    feature?: Row,
   ) => {
-    if (diagnostics.length >= limits.diagnostics) throw new Error('join-diagnostic-limit');
+    if (items.length >= limits.diagnostics) throw new Error('join-diagnostic-limit');
     const item: KeyJoinDiagnostic = {
       code,
       side,
@@ -216,73 +215,118 @@ export function runReadonlyKeyJoin(
       path: `${side}.${fieldId}`,
       ...(feature ? { featureId: feature.id, rowId: feature.rowId } : {}),
     };
-    const separator = diagnostics.length ? 1 : 0;
-    diagnosticBytes +=
-      separator + encodedBytes(item, limits.outputBytes - diagnosticBytes - separator);
-    diagnostics.push(item);
+    const separator = items.length ? 1 : 0;
+    bytes += separator + encodedBytes(item, limits.outputBytes - bytes - separator, limits);
+    items.push(item);
   };
-  type Row = DeepReadonly<VectorLayer['features'][number]>;
-  type Index = Map<string | number, Row[]>;
-  function index(snapshot: KeyJoinSnapshot, side: 'left' | 'right', fieldId: string): Index {
-    const result: Index = new Map();
-    const field = snapshot.layer.fields.find((f) => f.id === fieldId);
-    if (!field) {
-      counts.missingKeyRows[side] = snapshot.layer.features.length;
-      diagnose('missing-key-field', side, fieldId, 'error');
-      return result;
-    }
-    if (field.type !== contract.keyType) diagnose('key-type-mismatch', side, fieldId, 'error');
-    for (const row of snapshot.layer.features) {
-      const value = row.values[fieldId];
-      if (value === null) {
-        counts.nullKeys[side]++;
-        diagnose('null-key', side, fieldId, 'warning', row);
-        continue;
-      }
-      if (typeof value !== contract.keyType) {
-        counts.typeMismatchRows[side]++;
-        diagnose('key-type-mismatch', side, fieldId, 'error', row);
-        continue;
-      }
-      const key = value as string | number;
-      const rows = result.get(key) ?? [];
-      rows.push(row);
-      result.set(key, rows);
-    }
-    // Input iteration order and first occurrence order are preserved; no sorting/coercion.
-    for (const rows of result.values())
-      if (rows.length > 1) {
-        counts.duplicateKeyRows[side] += rows.length;
-        const allowed = side === 'left' && contract.cardinality === 'many-to-one';
-        for (const row of rows)
-          diagnose(
-            allowed ? 'repeated-left-key' : 'duplicate-key',
-            side,
-            fieldId,
-            allowed ? 'warning' : 'error',
-            row,
-          );
-      }
+  return { items, report };
+}
+type Diagnose = ReturnType<typeof createDiagnostics>['report'];
+function encodedBytes(value: unknown, remaining: number, limits: KeyJoinLimits) {
+  if (remaining <= 0) throw new Error('join-output-byte-limit');
+  const encoded = checkedJson(value, { ...limits.native, bytes: remaining });
+  return new TextEncoder().encode(encoded).length;
+}
+function indexSide(
+  snapshot: KeyJoinSnapshot,
+  side: Side,
+  fieldId: string,
+  contract: ReadonlyKeyJoin,
+  counts: JoinCounts,
+  diagnose: Diagnose,
+): Index {
+  const result: Index = new Map();
+  const field = snapshot.layer.fields.find((f) => f.id === fieldId);
+  if (!field) {
+    counts.missingKeyRows[side] = snapshot.layer.features.length;
+    diagnose('missing-key-field', side, fieldId, 'error');
     return result;
   }
-  const leftIndex = index(left, 'left', contract.leftFieldId),
-    rightIndex = index(right, 'right', contract.rightFieldId);
+  if (field.type !== contract.keyType) diagnose('key-type-mismatch', side, fieldId, 'error');
+  for (const row of snapshot.layer.features) {
+    const value = row.values[fieldId];
+    if (value === null) {
+      counts.nullKeys[side]++;
+      diagnose('null-key', side, fieldId, 'warning', row);
+      continue;
+    }
+    if (typeof value !== contract.keyType) {
+      counts.typeMismatchRows[side]++;
+      diagnose('key-type-mismatch', side, fieldId, 'error', row);
+      continue;
+    }
+    const key = value as string | number;
+    const rows = result.get(key) ?? [];
+    rows.push(row);
+    result.set(key, rows);
+  }
+  // Input iteration order and first occurrence order are preserved; no sorting/coercion.
+  const allowed = side === 'left' && contract.cardinality === 'many-to-one';
+  for (const rows of result.values())
+    if (rows.length > 1) {
+      counts.duplicateKeyRows[side] += rows.length;
+      for (const row of rows)
+        diagnose(
+          allowed ? 'repeated-left-key' : 'duplicate-key',
+          side,
+          fieldId,
+          allowed ? 'warning' : 'error',
+          row,
+        );
+    }
+  return result;
+}
+/** Rows whose key has no partner on the other side; returns how many were reported. */
+function reportUnpaired(index: Index, other: Index, report: (row: Row) => void) {
+  let count = 0;
+  for (const [key, rows] of index)
+    if (!other.has(key)) {
+      count += rows.length;
+      for (const row of rows) report(row);
+    }
+  return count;
+}
+function joinedRow(row: Row, leftFieldId: string, rightIndex: Index): JoinedRow {
+  const key = row.values[leftFieldId];
+  const matches = key === null ? undefined : rightIndex.get(key as string | number);
+  if (matches && matches.length !== 1) throw new Error('join-duplicate-invariant');
+  const match = matches?.[0]; // Explicit uniqueness invariant above; never an arbitrary first match.
+  return {
+    featureId: row.id,
+    rowId: row.rowId,
+    key,
+    status: key === null ? 'null-key' : match ? 'matched' : 'unmatched',
+    leftValues: row.values,
+    right: match ? { featureId: match.id, rowId: match.rowId, values: match.values } : null,
+  };
+}
+
+/** Deterministic synchronous projection. No commands, source updates, fetch or history. */
+export function runReadonlyKeyJoin(
+  contract: ReadonlyKeyJoin,
+  left: KeyJoinSnapshot,
+  right: KeyJoinSnapshot,
+  limits: KeyJoinLimits,
+): ReadonlyJoinResult {
+  validateLimits(limits);
+  assertJoinInputs(contract, left, right, limits);
+  const counts = emptyCounts(left, right);
+  const diagnostics = createDiagnostics(limits);
+  const diagnose = diagnostics.report;
+  const leftIndex = indexSide(left, 'left', contract.leftFieldId, contract, counts, diagnose),
+    rightIndex = indexSide(right, 'right', contract.rightFieldId, contract, counts, diagnose);
   const compatibleFields =
     left.layer.fields.find((f) => f.id === contract.leftFieldId)?.type === contract.keyType &&
     right.layer.fields.find((f) => f.id === contract.rightFieldId)?.type === contract.keyType;
-  for (const [key, rows] of leftIndex)
-    if (compatibleFields && !rightIndex.has(key)) {
-      counts.unmatchedLeftRows += rows.length;
-      for (const row of rows)
-        diagnose('unmatched-key', 'left', contract.leftFieldId, 'warning', row);
-    }
-  for (const [key, rows] of rightIndex)
-    if (compatibleFields && !leftIndex.has(key)) {
-      counts.unusedRightRows += rows.length;
-      for (const row of rows)
-        diagnose('unused-right-key', 'right', contract.rightFieldId, 'warning', row);
-    }
-  const blocked = diagnostics.some((d) => d.severity === 'error');
+  if (compatibleFields) {
+    counts.unmatchedLeftRows += reportUnpaired(leftIndex, rightIndex, (row) =>
+      diagnose('unmatched-key', 'left', contract.leftFieldId, 'warning', row),
+    );
+    counts.unusedRightRows += reportUnpaired(rightIndex, leftIndex, (row) =>
+      diagnose('unused-right-key', 'right', contract.rightFieldId, 'warning', row),
+    );
+  }
+  const blocked = diagnostics.items.some((d) => d.severity === 'error');
   if (!blocked)
     for (const [key, rows] of leftIndex)
       if (rightIndex.has(key)) counts.matchedLeftRows += rows.length;
@@ -303,27 +347,17 @@ export function runReadonlyKeyJoin(
     fields: { left: left.layer.fields as Field[], right: right.layer.fields as Field[] },
     counts,
     rows: [],
-    diagnostics,
+    diagnostics: diagnostics.items,
   };
   // Reserve complete metadata and diagnostics first, then charge every row before adding it.
   // A many-to-one result references frozen values, rather than cloning a large right row N times.
-  let outputBytes = encodedBytes(result, limits.outputBytes);
+  let outputBytes = encodedBytes(result, limits.outputBytes, limits);
   if (!blocked)
     for (const row of left.layer.features) {
-      const key = row.values[contract.leftFieldId];
-      const matches = key === null ? undefined : rightIndex.get(key as string | number);
-      if (matches && matches.length !== 1) throw new Error('join-duplicate-invariant');
-      const match = matches?.[0]; // Explicit uniqueness invariant above; never an arbitrary first match.
-      const joined: JoinedRow = {
-        featureId: row.id,
-        rowId: row.rowId,
-        key,
-        status: key === null ? 'null-key' : match ? 'matched' : 'unmatched',
-        leftValues: row.values,
-        right: match ? { featureId: match.id, rowId: match.rowId, values: match.values } : null,
-      };
+      const joined = joinedRow(row, contract.leftFieldId, rightIndex);
       const separator = result.rows.length ? 1 : 0;
-      outputBytes += separator + encodedBytes(joined, limits.outputBytes - outputBytes - separator);
+      outputBytes +=
+        separator + encodedBytes(joined, limits.outputBytes - outputBytes - separator, limits);
       result.rows.push(joined);
     }
   return freeze(result);

@@ -218,6 +218,8 @@ export function Dialog({
       aria-label={title}
       ref={ref}
       onCancel={(e) => {
+        // A file input's cancel event bubbles; only the dialog's own cancel (Escape) closes it.
+        if (e.target !== e.currentTarget) return;
         e.preventDefault();
         onClose();
       }}

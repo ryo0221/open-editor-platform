@@ -304,8 +304,21 @@ export const suites: Record<string, () => Suite> = {
   ci: () =>
     production(
       '/tmp/editor-platform-production-results',
-      /(?:issue2-embedding|office-pptx-ui|office-docx-ui|practical-history-review|reuse-recovery|react-ui|react-ui-shared|react-ui-acceptance|react-ui-failures)\.spec\.ts/,
-      /(?:issue2-mobile|office-pptx-mobile|office-docx-mobile|react-ui-mobile)\.spec\.ts/,
+      /(?:issue2-embedding|office-pptx-ui|office-docx-ui|practical-history-review|reuse-recovery|react-ui|react-ui-shared|react-ui-acceptance|react-ui-failures|schedule)\.spec\.ts/,
+      /(?:issue2-mobile|office-pptx-mobile|office-docx-mobile|react-ui-mobile|schedule-mobile)\.spec\.ts/,
+    ),
+  // Schedule (IN-17): the independent reference Host and the Playground kind.
+  schedule: () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/(^|\/)schedule\.spec\.ts$/, /(^|\/)schedule-mobile\.spec\.ts$/),
+    webServer: [server.dev],
+  }),
+  'schedule.production': () =>
+    production(
+      '/tmp/editor-platform-schedule-results',
+      /(^|\/)schedule\.spec\.ts$/,
+      /(^|\/)schedule-mobile\.spec\.ts$/,
+      { webServer: [server.preview] },
     ),
   'design-host.production': () =>
     production(
@@ -616,6 +629,81 @@ export const suites: Record<string, () => Suite> = {
         command: 'npx vite preview --config packages/geo-inspector/vite.config.ts',
         url: 'http://127.0.0.1:4199',
         reuseExistingServer: false,
+      },
+    ],
+  }),
+  // CAD Surface standalone host. Kernel-backed specs need CAD_OCCT_DIST (development kernel).
+  cad: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/cad/tests',
+    workers: 1,
+    timeout: 120_000,
+    expect: { timeout: 60_000 },
+    outputDir: '/tmp/cad-surface-results',
+    use: {
+      baseURL: 'http://127.0.0.1:4201',
+      // Software WebGL so the viewport renders on machines without a GPU.
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/cad/vite.config.ts',
+        url: 'http://127.0.0.1:4201',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // CAD in the ordinary Playground (development kernel from CAD_OCCT_DIST).
+  'cad.playground': () => ({
+    timeout: 180_000,
+    workers: 1,
+    outputDir: '/tmp/cad-playground-results',
+    testMatch: /cad-playground.spec.ts$/,
+    use: {
+      baseURL: 'http://127.0.0.1:4202',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4202 --strictPort',
+        url: 'http://127.0.0.1:4202',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // CAD in the reference artifact Host (dev, port 4203) and the independent CAD entry (4202).
+  'cad.hosts': () => ({
+    timeout: 180_000,
+    workers: 1,
+    outputDir: '/tmp/cad-hosts-results',
+    testMatch: /cad-hosts.spec.ts$/,
+    use: {
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4202 --strictPort',
+        url: 'http://127.0.0.1:4202',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+      {
+        command:
+          'npx vite --config vite.artifact-host.config.ts --host 127.0.0.1 --port 4203 --strictPort',
+        url: 'http://127.0.0.1:4203',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
       },
     ],
   }),

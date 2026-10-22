@@ -363,6 +363,15 @@ native and Host CSV UI. `all`/`filtered` rows and `all`/`visible` columns are ex
 filtered/visible require the current view. Preview exposes row/column counts and
 stable IDs. Values, relations and formulas are evaluated against the full source
 before hiding fields. Output uses native column order, UTF-8 and CRLF with CSV quotes.
+Exports prefix formula-like text with an apostrophe for spreadsheet safety. Generic
+`parseCsvText(source)` / `importCsv(source)` and append imports preserve literal
+apostrophes. CSV alone cannot identify whether an apostrophe was added by this editor.
+For an unchanged own export, explicitly pass `{decodeFormulaGuard: true}` as the
+second argument to those parsers, or the sixth argument to `previewCsvAppend`.
+The import preview offers “Restore formula-like text from this editor’s CSV export”,
+off for every new file; it applies consistently to headers, preview, replace and
+append. Keep it off for other files. Host-level file import uses the generic default;
+use the Data import preview when restoring own exports. Guarded export is unchanged.
 Shared Host capture reads `sharedSession.confirmed.content` after input flush and
 the pending/rejection guard; a local library record is not advanced by shared edits.
 `previewCsvAppend` accepts an explicit CSV-index-to-native-column-ID mapping and

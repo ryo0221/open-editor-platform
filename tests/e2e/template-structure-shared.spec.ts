@@ -7,7 +7,9 @@ function nativeContent(content: Content): NativeContent {
     isReactUiDocument(content) ||
     isGraphDocument(content) ||
     'layers' in content ||
-    'rootCompositionId' in content
+    'rootCompositionId' in content ||
+    'lanes' in content ||
+    'kernelProfile' in content
   )
     throw new Error('Expected native content');
   return content;

@@ -130,90 +130,111 @@ interface JsonBudget {
 // Certified immutable subtrees cannot acquire a cycle, new key, or changed bytes.
 // Include their full costs on every occurrence; sharing never discounts a budget.
 const jsonBudgets = new WeakMap<object, JsonBudget>();
+/** Running value, retained-byte and exact JSON-byte costs plus the active ancestor set. */
+interface JsonWalk {
+  count: number;
+  bytes: number;
+  jsonBytes: number;
+  maxBytes: number;
+  active: Set<object>;
+}
 export function assertReuseJson(value: unknown, maxBytes: number = reuseLimits.bytes): void {
-  let count = 0,
-    bytes = 0,
-    jsonBytes = 0;
-  const active = new Set<object>();
-  const check = (depth: number) => {
-    if (count > reuseLimits.values || depth > reuseLimits.jsonDepth)
-      rejectReuse('reuse-limit', 'Reusable data exceeds the value/depth budget');
-    if (bytes > maxBytes) rejectReuse('reuse-limit', 'Reusable data exceeds the byte budget');
-  };
-  const walk = (v: unknown, depth: number): number => {
-    const cached = v && typeof v === 'object' ? jsonBudgets.get(v) : undefined;
-    if (cached) {
-      count += cached.count;
-      bytes += cached.bytes;
-      jsonBytes += cached.jsonBytes;
-      check(depth + cached.depth);
-      return cached.depth;
-    }
-    const beforeCount = count,
-      beforeBytes = bytes,
-      beforeJsonBytes = jsonBytes;
-    count++;
-    check(depth);
-    let nestedDepth = 0;
-    if (typeof v === 'string') {
-      bytes += utf8Length(v);
-      jsonBytes += jsonStringBytes(v);
-    } else if (v === null || typeof v === 'boolean') {
-      bytes += 5;
-      jsonBytes += v === false ? 5 : 4;
-    } else if (typeof v === 'number' && Number.isFinite(v)) {
-      bytes += 24;
-      jsonBytes += JSON.stringify(v).length;
-    } else if (v && typeof v === 'object') {
-      if (active.has(v))
-        rejectReuse('reuse-cycle', 'Cyclic JavaScript data is not a portable definition');
-      const array = Array.isArray(v);
-      if (!array && !record(v)) rejectReuse('reuse-schema', 'Expected plain JSON data');
-      // Portable data must not change its serialized representation by running
-      // an own or inherited hook, including non-enumerable methods/accessors.
-      if ('toJSON' in v) {
-        let owner: object | null = v;
-        while (owner && !Object.hasOwn(owner, 'toJSON')) owner = Object.getPrototypeOf(owner);
-        const descriptor = owner && Object.getOwnPropertyDescriptor(owner, 'toJSON');
-        if (descriptor && (!('value' in descriptor) || typeof descriptor.value === 'function'))
-          rejectReuse('reuse-schema', 'Executable JSON serialization is not portable');
-      }
-      const entries = Object.entries(v);
-      if (
-        array &&
-        (entries.length !== v.length || entries.some(([key], index) => key !== String(index)))
-      )
-        rejectReuse('reuse-schema', 'Sparse arrays and named array properties are not portable');
-      active.add(v);
-      jsonBytes += 2 + (array ? Math.max(0, entries.length - 1) : 0);
-      let properties = 0;
-      for (const [key, child] of entries) {
-        if (['__proto__', 'prototype', 'constructor'].includes(key))
-          rejectReuse('reuse-key', 'Reserved property key', { path: key });
-        bytes += utf8Length(key) + 4;
-        check(depth);
-        if (child !== undefined || array) {
-          if (!array) jsonBytes += jsonStringBytes(key) + 1 + (properties++ ? 1 : 0);
-          nestedDepth = Math.max(nestedDepth, walk(child, depth + 1) + 1);
-        }
-      }
-      active.delete(v);
-    } else rejectReuse('reuse-schema', 'Non-JSON value in reusable data');
-    check(depth);
-    if (v && typeof v === 'object' && isDeepFrozen(v))
-      jsonBudgets.set(v, {
-        count: count - beforeCount,
-        bytes: bytes - beforeBytes,
-        depth: nestedDepth,
-        jsonBytes: jsonBytes - beforeJsonBytes,
-      });
-    return nestedDepth;
-  };
-  walk(value, 0);
+  const state: JsonWalk = { count: 0, bytes: 0, jsonBytes: 0, maxBytes, active: new Set() };
+  walkJson(state, value, 0);
   // Exact JSON punctuation, escaping and UTF-8 costs are accumulated during the
   // same validation. Cached trees still pay their full serialized size on every
   // occurrence, without allocating their entire JSON again for every instance.
-  if (jsonBytes > maxBytes) rejectReuse('reuse-limit', 'Reusable JSON exceeds the byte budget');
+  if (state.jsonBytes > maxBytes)
+    rejectReuse('reuse-limit', 'Reusable JSON exceeds the byte budget');
+}
+function checkJsonBudget(state: JsonWalk, depth: number) {
+  if (state.count > reuseLimits.values || depth > reuseLimits.jsonDepth)
+    rejectReuse('reuse-limit', 'Reusable data exceeds the value/depth budget');
+  if (state.bytes > state.maxBytes)
+    rejectReuse('reuse-limit', 'Reusable data exceeds the byte budget');
+}
+function walkJson(state: JsonWalk, v: unknown, depth: number): number {
+  const cached = v && typeof v === 'object' ? jsonBudgets.get(v) : undefined;
+  if (cached) {
+    state.count += cached.count;
+    state.bytes += cached.bytes;
+    state.jsonBytes += cached.jsonBytes;
+    checkJsonBudget(state, depth + cached.depth);
+    return cached.depth;
+  }
+  const beforeCount = state.count,
+    beforeBytes = state.bytes,
+    beforeJsonBytes = state.jsonBytes;
+  state.count++;
+  checkJsonBudget(state, depth);
+  let nestedDepth = 0;
+  if (!addScalarJsonCost(state, v)) {
+    if (v && typeof v === 'object') nestedDepth = walkJsonObject(state, v, depth);
+    else rejectReuse('reuse-schema', 'Non-JSON value in reusable data');
+  }
+  checkJsonBudget(state, depth);
+  if (v && typeof v === 'object' && isDeepFrozen(v))
+    jsonBudgets.set(v, {
+      count: state.count - beforeCount,
+      bytes: state.bytes - beforeBytes,
+      depth: nestedDepth,
+      jsonBytes: state.jsonBytes - beforeJsonBytes,
+    });
+  return nestedDepth;
+}
+/** Adds a JSON scalar's costs; false for any other value. */
+function addScalarJsonCost(state: JsonWalk, v: unknown): boolean {
+  if (typeof v === 'string') {
+    state.bytes += utf8Length(v);
+    state.jsonBytes += jsonStringBytes(v);
+  } else if (v === null || typeof v === 'boolean') {
+    state.bytes += 5;
+    state.jsonBytes += v === false ? 5 : 4;
+  } else if (typeof v === 'number' && Number.isFinite(v)) {
+    state.bytes += 24;
+    state.jsonBytes += JSON.stringify(v).length;
+  } else return false;
+  return true;
+}
+// Portable data must not change its serialized representation by running
+// an own or inherited hook, including non-enumerable methods/accessors.
+function rejectSerializationHook(v: object) {
+  if (!('toJSON' in v)) return;
+  let owner: object | null = v;
+  while (owner && !Object.hasOwn(owner, 'toJSON')) owner = Object.getPrototypeOf(owner);
+  const descriptor = owner && Object.getOwnPropertyDescriptor(owner, 'toJSON');
+  if (descriptor && (!('value' in descriptor) || typeof descriptor.value === 'function'))
+    rejectReuse('reuse-schema', 'Executable JSON serialization is not portable');
+}
+function walkJsonObject(state: JsonWalk, v: object, depth: number): number {
+  if (state.active.has(v))
+    rejectReuse('reuse-cycle', 'Cyclic JavaScript data is not a portable definition');
+  const array = Array.isArray(v);
+  if (!array && !record(v)) rejectReuse('reuse-schema', 'Expected plain JSON data');
+  rejectSerializationHook(v);
+  const entries = Object.entries(v);
+  if (
+    array &&
+    (entries.length !== (v as unknown[]).length ||
+      entries.some(([key], index) => key !== String(index)))
+  )
+    rejectReuse('reuse-schema', 'Sparse arrays and named array properties are not portable');
+  state.active.add(v);
+  state.jsonBytes += 2 + (array ? Math.max(0, entries.length - 1) : 0);
+  let nestedDepth = 0,
+    properties = 0;
+  for (const [key, child] of entries) {
+    if (['__proto__', 'prototype', 'constructor'].includes(key))
+      rejectReuse('reuse-key', 'Reserved property key', { path: key });
+    state.bytes += utf8Length(key) + 4;
+    checkJsonBudget(state, depth);
+    if (child !== undefined || array) {
+      if (!array) state.jsonBytes += jsonStringBytes(key) + 1 + (properties++ ? 1 : 0);
+      nestedDepth = Math.max(nestedDepth, walkJson(state, child, depth + 1) + 1);
+    }
+  }
+  state.active.delete(v);
+  return nestedDepth;
 }
 export interface DefinitionRef {
   libraryId: string;
@@ -438,6 +459,12 @@ export function readReuseState(raw: unknown): ReuseState | undefined {
   return state && clone(state);
 }
 const checkedInstanceShapes = new WeakSet<object>();
+type InstanceInput = Record<string, unknown> & {
+  id: string;
+  overrides: Record<string, unknown>;
+  parts: Record<string, unknown>;
+  slots: Record<string, unknown>;
+};
 function checkReuseState(raw: unknown): ReuseState | undefined {
   if (raw === undefined) return undefined;
   assertReuseJson(raw);
@@ -460,57 +487,63 @@ function checkReuseState(raw: unknown): ReuseState | undefined {
   }
   const ids = new Set<string>();
   for (const item of raw.instances) {
-    if (
-      !record(item) ||
-      !stableId(item.id) ||
-      ids.has(item.id) ||
-      typeof item.closureHash !== 'string' ||
-      !/^[a-f0-9]{64}$/.test(item.closureHash) ||
-      !record(item.inputs) ||
-      !record(item.overrides) ||
-      !record(item.parts) ||
-      !record(item.slots)
-    )
-      rejectReuse('instance-schema', 'Invalid reusable instance');
+    checkInstanceIdentity(item, ids);
     ids.add(item.id);
     if (checkedInstanceShapes.has(item)) continue;
-    validateRef(item.ref);
-    if (
-      (item.mode !== undefined && !stableId(item.mode)) ||
-      (item.variant !== undefined && !stableId(item.variant))
-    )
-      rejectReuse('instance-schema', 'Invalid instance mode/variant identity');
-    const partMap = item.parts;
-    if (
-      item.nativeIds !== undefined &&
-      (!record(item.nativeIds) ||
-        Object.entries(item.nativeIds).some(([id, native]) => !stableId(id) || !stableId(native)))
-    )
-      rejectReuse('native-map', 'Invalid retained native reference mapping');
-    if (
-      Object.entries(item.overrides).some(
-        ([part, fields]) => !Object.hasOwn(partMap, part) || !record(fields),
-      )
-    )
-      rejectReuse('override-schema', 'Explicit override must address an existing stable part');
-    if (
-      Object.keys(item.parts).length > reuseLimits.parts ||
-      Object.entries(item.parts).some(
-        ([part, native]) => !stableId(part) || !nativeAddress(native),
-      ) ||
-      new Set(Object.values(item.parts)).size !== Object.keys(item.parts).length
-    )
-      rejectReuse('part-map', 'Invalid or aliased native part mapping');
-    if (
-      Object.entries(item.slots).some(
-        ([slot, native]) =>
-          !stableId(slot) || !Array.isArray(native) || native.some((id) => !nativeAddress(id)),
-      )
-    )
-      rejectReuse('slot-map', 'Invalid native slot mapping');
+    checkInstanceShape(item);
     if (isDeepFrozen(item)) checkedInstanceShapes.add(item);
   }
   return raw as unknown as ReuseState;
+}
+function checkInstanceIdentity(item: unknown, ids: Set<string>): asserts item is InstanceInput {
+  if (
+    !record(item) ||
+    !stableId(item.id) ||
+    ids.has(item.id) ||
+    typeof item.closureHash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(item.closureHash) ||
+    !record(item.inputs) ||
+    !record(item.overrides) ||
+    !record(item.parts) ||
+    !record(item.slots)
+  )
+    rejectReuse('instance-schema', 'Invalid reusable instance');
+}
+function checkInstanceShape(item: InstanceInput) {
+  validateRef(item.ref);
+  if (
+    (item.mode !== undefined && !stableId(item.mode)) ||
+    (item.variant !== undefined && !stableId(item.variant))
+  )
+    rejectReuse('instance-schema', 'Invalid instance mode/variant identity');
+  const partMap = item.parts;
+  if (
+    item.nativeIds !== undefined &&
+    (!record(item.nativeIds) ||
+      Object.entries(item.nativeIds).some(([id, native]) => !stableId(id) || !stableId(native)))
+  )
+    rejectReuse('native-map', 'Invalid retained native reference mapping');
+  if (
+    Object.entries(item.overrides).some(
+      ([part, fields]) => !Object.hasOwn(partMap, part) || !record(fields),
+    )
+  )
+    rejectReuse('override-schema', 'Explicit override must address an existing stable part');
+  if (
+    Object.keys(item.parts).length > reuseLimits.parts ||
+    Object.entries(item.parts).some(
+      ([part, native]) => !stableId(part) || !nativeAddress(native),
+    ) ||
+    new Set(Object.values(item.parts)).size !== Object.keys(item.parts).length
+  )
+    rejectReuse('part-map', 'Invalid or aliased native part mapping');
+  if (
+    Object.entries(item.slots).some(
+      ([slot, native]) =>
+        !stableId(slot) || !Array.isArray(native) || native.some((id) => !nativeAddress(id)),
+    )
+  )
+    rejectReuse('slot-map', 'Invalid native slot mapping');
 }
 export async function validateReuseState(raw: unknown): Promise<ReuseState | undefined> {
   return validateReuseStateSync(raw);
@@ -528,55 +561,14 @@ export function validateReuseStateSync(raw: unknown): ReuseState | undefined {
     closures.map((closure) => [closure.hash, validateRetainedStyles(closure)]),
   );
   for (const instance of state.instances) {
-    const closure = closures.find((c) => c.hash === instance.closureHash);
-    const definition = closure?.definitions.find((d) => refKey(d) === refKey(instance.ref));
-    if (
-      !definition ||
-      definition.hash !== instance.ref.hash ||
-      definition.domain !== instance.ref.domain ||
-      definition.kind !== instance.ref.kind
-    )
-      rejectReuse(
-        'instance-dependency',
-        'Instance does not resolve to its retained exact definition',
-        { instanceId: instance.id },
-      );
-    const modes = supportedModes.get(instance.closureHash)!.get(refKey(definition));
-    const selectedMode = instance.mode ?? state.artifactMode;
-    if (
-      (instance.mode !== undefined && !modes) ||
-      (modes && selectedMode !== undefined && !modes.includes(selectedMode))
-    )
-      rejectReuse('token-mode', 'The adopted component mode does not exist', {
-        instanceId: instance.id,
-        path: selectedMode,
-      });
-    if (record(definition.payload) && definition.payload.contract !== undefined) {
-      const contract = checkedComponentContract(definition.payload.contract);
-      assertComponentProperties(contract, instance.inputs, instance.variant);
-      const partIds = new Set(contract.parts.map((part) => part.id));
-      if (
-        contract.parts.some((p) => !Object.hasOwn(instance.parts, p.id)) ||
-        Object.keys(instance.parts).some((p) => !partIds.has(p))
-      )
-        rejectReuse('instance-parts', 'Instance mappings must match declared stable parts', {
-          instanceId: instance.id,
-        });
-      for (const [id, values] of Object.entries(instance.slots)) {
-        const slot = contract.slots.find((s) => s.id === id);
-        if (!slot || values.length > slot.max || values.length < slot.min)
-          rejectReuse('slot-count', 'Adopted slot is not declared or exceeds its count', {
-            instanceId: instance.id,
-            slotId: id,
-          });
-      }
-      for (const slot of contract.slots)
-        if ((instance.slots[slot.id]?.length ?? 0) < slot.min)
-          rejectReuse('slot-required', 'Required slot has no adopted content', {
-            instanceId: instance.id,
-            slotId: slot.id,
-          });
-    }
+    const definition = instanceDefinition(closures, instance);
+    checkInstanceMode(
+      state,
+      instance,
+      supportedModes.get(instance.closureHash)!.get(refKey(definition)),
+    );
+    if (record(definition.payload) && definition.payload.contract !== undefined)
+      checkInstanceContract(instance, definition.payload.contract);
   }
   // Charge every occurrence, including cached instances with no slot edges.
   const expanded = state.instances.reduce(
@@ -589,46 +581,8 @@ export function validateReuseStateSync(raw: unknown): ReuseState | undefined {
   // for the common independent-instance case; linked slots still check the graph.
   if (
     state.instances.some((item) => Object.values(item.slots).some((addresses) => addresses.length))
-  ) {
-    const owners = new Map<string, Set<string>>();
-    for (const instance of state.instances)
-      for (const address of Object.values(instance.parts)) {
-        const segments = instance.ref.domain === 'design' ? address.split('/') : [address];
-        for (let count = 1; count <= segments.length; count++) {
-          const prefix = segments.slice(0, count).join('/'),
-            ids = owners.get(prefix) ?? new Set<string>();
-          ids.add(instance.id);
-          owners.set(prefix, ids);
-        }
-      }
-    const children = new Map(
-      state.instances.map((instance) => [
-        instance.id,
-        new Set(
-          Object.values(instance.slots)
-            .flat()
-            .flatMap((address) => [...(owners.get(address) ?? [])]),
-        ),
-      ]),
-    );
-    const active = new Set<string>(),
-      heights = new Map<string, number>();
-    const height = (id: string): number => {
-      if (active.has(id))
-        rejectReuse('slot-cycle', 'Adopted instance slots form a cycle', { instanceId: id });
-      if (heights.has(id)) return heights.get(id)!;
-      if (active.size >= reuseLimits.dependencyDepth)
-        rejectReuse('slot-depth', 'Adopted instance slots exceed their depth', { instanceId: id });
-      active.add(id);
-      const value = 1 + Math.max(0, ...[...(children.get(id) ?? [])].map(height));
-      active.delete(id);
-      if (value > reuseLimits.dependencyDepth)
-        rejectReuse('slot-depth', 'Adopted instance slots exceed their depth', { instanceId: id });
-      heights.set(id, value);
-      return value;
-    };
-    state.instances.forEach((instance) => height(instance.id));
-  }
+  )
+    checkInstanceSlotGraph(state.instances);
   const result = deepFreeze({
     ...state,
     closures,
@@ -639,6 +593,107 @@ export function validateReuseStateSync(raw: unknown): ReuseState | undefined {
   if (raw && typeof raw === 'object' && isDeepFrozen(raw)) validatedStates.set(raw, result);
   validatedStates.set(result, result);
   return result;
+}
+type ValidatedClosure = ReturnType<typeof validateClosureSync>;
+function instanceDefinition(closures: ValidatedClosure[], instance: ReuseInstance) {
+  const closure = closures.find((c) => c.hash === instance.closureHash);
+  const definition = closure?.definitions.find((d) => refKey(d) === refKey(instance.ref));
+  if (
+    !definition ||
+    definition.hash !== instance.ref.hash ||
+    definition.domain !== instance.ref.domain ||
+    definition.kind !== instance.ref.kind
+  )
+    rejectReuse(
+      'instance-dependency',
+      'Instance does not resolve to its retained exact definition',
+      { instanceId: instance.id },
+    );
+  return definition;
+}
+function checkInstanceMode(
+  state: ReuseState,
+  instance: ReuseInstance,
+  modes: readonly string[] | undefined,
+) {
+  const selectedMode = instance.mode ?? state.artifactMode;
+  if (
+    (instance.mode !== undefined && !modes) ||
+    (modes && selectedMode !== undefined && !modes.includes(selectedMode))
+  )
+    rejectReuse('token-mode', 'The adopted component mode does not exist', {
+      instanceId: instance.id,
+      path: selectedMode,
+    });
+}
+function checkInstanceContract(instance: ReuseInstance, raw: unknown) {
+  const contract = checkedComponentContract(raw);
+  assertComponentProperties(contract, instance.inputs, instance.variant);
+  const partIds = new Set(contract.parts.map((part) => part.id));
+  if (
+    contract.parts.some((p) => !Object.hasOwn(instance.parts, p.id)) ||
+    Object.keys(instance.parts).some((p) => !partIds.has(p))
+  )
+    rejectReuse('instance-parts', 'Instance mappings must match declared stable parts', {
+      instanceId: instance.id,
+    });
+  for (const [id, values] of Object.entries(instance.slots)) {
+    const slot = contract.slots.find((s) => s.id === id);
+    if (!slot || values.length > slot.max || values.length < slot.min)
+      rejectReuse('slot-count', 'Adopted slot is not declared or exceeds its count', {
+        instanceId: instance.id,
+        slotId: id,
+      });
+  }
+  for (const slot of contract.slots)
+    if ((instance.slots[slot.id]?.length ?? 0) < slot.min)
+      rejectReuse('slot-required', 'Required slot has no adopted content', {
+        instanceId: instance.id,
+        slotId: slot.id,
+      });
+}
+function instanceSlotChildren(instances: ReuseInstance[]) {
+  const owners = new Map<string, Set<string>>();
+  for (const instance of instances)
+    for (const address of Object.values(instance.parts)) {
+      const segments = instance.ref.domain === 'design' ? address.split('/') : [address];
+      for (let count = 1; count <= segments.length; count++) {
+        const prefix = segments.slice(0, count).join('/'),
+          ids = owners.get(prefix) ?? new Set<string>();
+        ids.add(instance.id);
+        owners.set(prefix, ids);
+      }
+    }
+  return new Map(
+    instances.map((instance) => [
+      instance.id,
+      new Set(
+        Object.values(instance.slots)
+          .flat()
+          .flatMap((address) => [...(owners.get(address) ?? [])]),
+      ),
+    ]),
+  );
+}
+function checkInstanceSlotGraph(instances: ReuseInstance[]) {
+  const children = instanceSlotChildren(instances);
+  const active = new Set<string>(),
+    heights = new Map<string, number>();
+  const height = (id: string): number => {
+    if (active.has(id))
+      rejectReuse('slot-cycle', 'Adopted instance slots form a cycle', { instanceId: id });
+    if (heights.has(id)) return heights.get(id)!;
+    if (active.size >= reuseLimits.dependencyDepth)
+      rejectReuse('slot-depth', 'Adopted instance slots exceed their depth', { instanceId: id });
+    active.add(id);
+    const value = 1 + Math.max(0, ...[...(children.get(id) ?? [])].map(height));
+    active.delete(id);
+    if (value > reuseLimits.dependencyDepth)
+      rejectReuse('slot-depth', 'Adopted instance slots exceed their depth', { instanceId: id });
+    heights.set(id, value);
+    return value;
+  };
+  instances.forEach((instance) => height(instance.id));
 }
 export function validNativeReuse(raw: unknown, domain: ReuseDomain): boolean {
   try {

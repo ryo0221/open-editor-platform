@@ -6,7 +6,12 @@ import {
   type Artifact,
 } from '@editor-platform/artifact-core';
 import { EditorSession, command, type EditorCommand } from '@editor-platform/editor-core';
-import { isStructuredData, makeRow, type StructuredData } from './model';
+import { isStructuredData, type StructuredData } from './model';
+import {
+  assertAddedRowDefaults,
+  assertColumnChanges,
+  assertRequiredRelations,
+} from './session-guards';
 import { columnSchemaIntent, columnSchemaCommand } from './schema-command';
 export interface DataVersionSource {
   artifact: Artifact<StructuredData>;
@@ -118,80 +123,9 @@ export function guardDataCommand(
       for (const [address, value] of unresolvedReferences(next))
         if (retained.get(address) !== value)
           throw new Error('Choose an existing record in this dataset');
-      const existingIds = new Set(current.rows.map((r) => r.id)),
-        added = next.rows.filter((r) => !existingIds.has(r.id));
-      if (added.length) {
-        const previous = new Map(current.columns.map((c) => [c.id, c])),
-          protectedColumns = next.columns.map((column) => {
-            const original = previous.get(column.id);
-            return original?.readOnly || original?.type === 'formula' ? original : column;
-          }),
-          defaults = makeRow({ ...next, columns: protectedColumns }, 'defaults').values;
-        for (const column of protectedColumns.filter((c) => c.readOnly || c.type === 'formula'))
-          for (const row of added)
-            if (
-              Object.hasOwn(row.values, column.id) !== Object.hasOwn(defaults, column.id) ||
-              canonicalJson(row.values[column.id]) !== canonicalJson(defaults[column.id])
-            )
-              throw new Error(
-                `${column.name}: New records must retain read-only defaults and omit formula values`,
-              );
-      }
-      for (const column of current.columns) {
-        const updated = next.columns.find((c) => c.id === column.id);
-        if (
-          column.readOnly &&
-          canonicalJson(updated) !== canonicalJson(column) &&
-          !(
-            schemaIntent?.columnId === column.id &&
-            schemaIntent.kind === (updated ? 'update' : 'remove')
-          )
-        )
-          throw new Error(`${column.name} is read only`);
-        if (
-          column.type === 'relation' &&
-          (!updated || updated.type !== 'relation') &&
-          current.rows.some(
-            (r) =>
-              r.values[column.id] !== undefined &&
-              r.values[column.id] !== null &&
-              r.values[column.id] !== '',
-          )
-        )
-          throw new Error('Disconnect relations before changing or deleting their field');
-        if (column.readOnly || column.type === 'formula')
-          for (const row of current.rows) {
-            const target = next.rows.find((r) => r.id === row.id);
-            if (
-              target &&
-              (Object.hasOwn(target.values, column.id) !== Object.hasOwn(row.values, column.id) ||
-                canonicalJson(target.values[column.id]) !== canonicalJson(row.values[column.id])) &&
-              !(
-                schemaIntent?.columnId === column.id &&
-                schemaIntent.kind === 'remove' &&
-                !updated &&
-                !Object.hasOwn(target.values, column.id)
-              ) &&
-              !(
-                schemaIntent?.columnId === column.id &&
-                schemaIntent.kind === 'update' &&
-                column.type === 'formula' &&
-                !column.readOnly &&
-                updated &&
-                updated.type !== 'formula' &&
-                !updated.readOnly
-              )
-            )
-              throw new Error(`${column.name} is read only`);
-          }
-      }
-      // A required relation cannot silently become empty during cascade deletion.
-      for (const column of next.columns.filter((c) => c.type === 'relation' && c.required))
-        for (const row of next.rows) {
-          const original = current.rows.find((r) => r.id === row.id)?.values[column.id];
-          if (original && !row.values[column.id])
-            throw new Error(`${column.name}: Required relation cannot be removed`);
-        }
+      assertAddedRowDefaults(current, next);
+      assertColumnChanges(current, next, schemaIntent);
+      assertRequiredRelations(current, next);
       return next;
     },
   };

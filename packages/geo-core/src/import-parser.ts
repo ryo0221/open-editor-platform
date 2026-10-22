@@ -94,65 +94,61 @@ export function parseGeoJson(text: string, limits: ParserLimits): unknown {
     }
     return fail();
   }
-  function value(depth: number, key = '', inCoordinates = false): unknown {
-    if (depth > limits.depth) throw new Error('depth-limit');
+  /** Consumes `,` or the closing bracket after a member; true when the container ends. */
+  function closes(bracket: ']' | '}'): boolean {
     space();
-    const c = text[cursor];
-    if (c === '"') return string();
-    if (c === '[') {
+    if (text[cursor] === bracket) {
       cursor++;
-      space();
-      const coordinates = inCoordinates || key === 'coordinates';
-      if (coordinates && text[cursor] !== '[' && text[cursor] !== ']') {
-        vertices++;
-        if (vertices > limits.vertices) throw new Error('vertex-limit');
-      }
-      const result: unknown[] = [];
-      if (text[cursor] === ']') {
-        cursor++;
-        return result;
-      }
-      while (cursor < text.length) {
-        if (key === 'features' && result.length >= limits.rows) throw new Error('row-limit');
-        result.push(value(depth + 1, '', coordinates));
-        space();
-        if (text[cursor] === ']') {
-          cursor++;
-          return result;
-        }
-        if (text[cursor++] !== ',') return fail();
-      }
-      return fail();
+      return true;
     }
-    if (c === '{') {
+    if (text[cursor++] !== ',') return fail();
+    return false;
+  }
+  function array(depth: number, key: string, inCoordinates: boolean): unknown[] {
+    cursor++;
+    space();
+    const coordinates = inCoordinates || key === 'coordinates';
+    if (coordinates && text[cursor] !== '[' && text[cursor] !== ']') {
+      vertices++;
+      if (vertices > limits.vertices) throw new Error('vertex-limit');
+    }
+    const result: unknown[] = [];
+    if (text[cursor] === ']') {
       cursor++;
-      space();
-      const result: Record<string, unknown> = {};
-      if (text[cursor] === '}') {
-        cursor++;
-        return result;
-      }
-      let count = 0;
-      while (cursor < text.length) {
-        if (++count > limits.columns) throw new Error('column-limit');
-        space();
-        if (text[cursor] !== '"') return fail();
-        const name = string();
-        if (['__proto__', 'constructor', 'prototype', 'toJSON'].includes(name))
-          throw new Error('reserved-json-key');
-        if (Object.hasOwn(result, name)) throw new Error('duplicate-json-key');
-        space();
-        if (text[cursor++] !== ':') return fail();
-        result[name] = value(depth + 1, name);
-        space();
-        if (text[cursor] === '}') {
-          cursor++;
-          return result;
-        }
-        if (text[cursor++] !== ',') return fail();
-      }
-      return fail();
+      return result;
     }
+    while (cursor < text.length) {
+      if (key === 'features' && result.length >= limits.rows) throw new Error('row-limit');
+      result.push(value(depth + 1, '', coordinates));
+      if (closes(']')) return result;
+    }
+    return fail();
+  }
+  function object(depth: number): Record<string, unknown> {
+    cursor++;
+    space();
+    const result: Record<string, unknown> = {};
+    if (text[cursor] === '}') {
+      cursor++;
+      return result;
+    }
+    let count = 0;
+    while (cursor < text.length) {
+      if (++count > limits.columns) throw new Error('column-limit');
+      space();
+      if (text[cursor] !== '"') return fail();
+      const name = string();
+      if (['__proto__', 'constructor', 'prototype', 'toJSON'].includes(name))
+        throw new Error('reserved-json-key');
+      if (Object.hasOwn(result, name)) throw new Error('duplicate-json-key');
+      space();
+      if (text[cursor++] !== ':') return fail();
+      result[name] = value(depth + 1, name);
+      if (closes('}')) return result;
+    }
+    return fail();
+  }
+  function literal(): unknown {
     for (const [word, result] of [
       ['true', true],
       ['false', false],
@@ -169,6 +165,15 @@ export function parseGeoJson(text: string, limits: ParserLimits): unknown {
     if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(token)) return fail();
     // Overflow remains a row diagnostic; it is never emitted into accepted native content.
     return Number(token);
+  }
+  function value(depth: number, key = '', inCoordinates = false): unknown {
+    if (depth > limits.depth) throw new Error('depth-limit');
+    space();
+    const c = text[cursor];
+    if (c === '"') return string();
+    if (c === '[') return array(depth, key, inCoordinates);
+    if (c === '{') return object(depth);
+    return literal();
   }
   const result = value(0);
   space();

@@ -1,4 +1,4 @@
-import { memo, useMemo, type ComponentProps, type MutableRefObject } from 'react';
+import { lazy, memo, Suspense, useMemo, type ComponentProps, type MutableRefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
@@ -19,6 +19,7 @@ import {
   type AnimationHostContent,
 } from '@editor-platform/animation-core/v2';
 import { NativeGraphSurface, relationProfile } from '@editor-platform/structured-graph';
+import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
 import {
@@ -71,6 +72,9 @@ import { isGraphDocument } from '@editor-platform/structured-graph';
 import { DocumentSurface, isDocument } from '@editor-platform/document';
 import { WhiteboardSurface, isWhiteboard } from '@editor-platform/whiteboard';
 import { SlideSurface, isDeck } from '@editor-platform/slide';
+import { isSchedule, type ScheduleDocument } from '@editor-platform/schedule/model';
+import { ScheduleSurface } from '@editor-platform/schedule/view';
+import { dataTimelineOptions, scheduleLaneHost } from '@editor-platform/reference-adapters';
 import type { savedAnimationCatalog } from '../animation-library';
 import type { Preview } from '@editor-platform/collaboration-core';
 import {
@@ -115,6 +119,8 @@ const MemoDesignSurface = memo(function ReferenceDesignSurface(
   );
 });
 const MemoWhiteboardSurface = memo(WhiteboardSurface);
+// Three.js and the kernel adapter load only when a CAD artifact opens.
+const CadHost = lazy(() => import('../cad/host'));
 
 export function checkedContent(content: unknown) {
   return {
@@ -129,6 +135,8 @@ export function checkedContent(content: unknown) {
     whiteboard: isWhiteboard(content) ? content : undefined,
     design: isDesign(content) ? content : undefined,
     slide: isDeck(content) ? content : undefined,
+    schedule: isSchedule(content) ? content : undefined,
+    cad: validContent('cad', content) ? (content as CadDocument) : undefined,
   };
 }
 export type RenderedContent = ReturnType<typeof checkedContent>;
@@ -312,6 +320,37 @@ function DataHost({ host, content }: { host: SurfaceHost; content: StructuredDat
       readOnly={host.readOnly}
       execute={host.execute}
       select={host.select}
+    />
+  );
+}
+
+function ScheduleHost({ host, content }: { host: SurfaceHost; content: ScheduleDocument }) {
+  const { references, savedRecords } = host;
+  // Lanes read saved Data versions only; drafts are never referenced.
+  const lanes = useMemo(
+    () =>
+      scheduleLaneHost(references, async () =>
+        dataTimelineOptions(
+          [...savedRecords.current.values()]
+            .filter((record) => record.kind === 'data' && record.versions.length)
+            .map((record) => ({
+              id: record.id,
+              name: record.name,
+              content: record.versions.at(-1)!.content,
+            })),
+        ),
+      ),
+    [references, savedRecords],
+  );
+  return (
+    <ScheduleSurface
+      content={content}
+      execute={host.execute}
+      readOnly={host.readOnly}
+      select={host.select}
+      selectedId={host.selection.addresses[0]?.elementId}
+      focusAddress={host.revealAddress}
+      lanes={host.shared ? undefined : lanes}
     />
   );
 }
@@ -672,6 +711,21 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
       )}
       {rendered.reactUi && <ReactUiHost key={active.id} host={host} content={rendered.reactUi} />}
       {rendered.geo && !sharedSession && session && <GeoHost key={active.id} host={host} />}
+      {rendered.cad && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading 3D CAD…</p>}>
+          <CadHost
+            key={active.id}
+            artifact={active}
+            session={host.sessions.current.get(active.id) as unknown as EditorSession<CadDocument>}
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+          />
+        </Suspense>
+      )}
       {rendered.animation && (sharedSession || session) && (
         <AnimationHost key={active.id} host={host} content={rendered.animation} />
       )}
@@ -695,6 +749,9 @@ function CanvasSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Rende
     <>
       {' '}
       {rendered.data && <DataHost key={active.id} host={host} content={rendered.data} />}{' '}
+      {rendered.schedule && (
+        <ScheduleHost key={active.id} host={host} content={rendered.schedule} />
+      )}{' '}
       {rendered.review && <ReviewHost key={active.id} host={host} content={rendered.review} />}{' '}
       {rendered.file && <FileHost key={active.id} host={host} content={rendered.file} />}{' '}
       {rendered.whiteboard && (

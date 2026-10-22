@@ -4,6 +4,8 @@ import {
   videoCommandV2,
   time,
   subtract,
+  add,
+  multiply,
   type VideoContentV1,
 } from '@editor-platform/video-core';
 import { prepareMixV2, type ResamplePortV2 } from './mix-v2';
@@ -55,6 +57,111 @@ const values =
     };
   };
 describe('shared v2 audio block mix', () => {
+  it('preserves PCM across a linked A/V split between sample points and irregular render windows', async () => {
+    let v = fixture(1);
+    v.sources[0].streams.push({
+      id: 'v',
+      kind: 'video',
+      timebase: time(1, 600),
+      startPts: 0,
+      endPts: 600,
+      presentationOrigin: time(0),
+    });
+    v.sequence.tracks.push({ id: 'visual', kind: 'visual', enabled: true, locked: false });
+    v.sequence.clips[0].linkGroupId = 'av';
+    v.sequence.clips.push({
+      id: 'picture',
+      kind: 'video',
+      sourceId: 's0',
+      streamId: 'v',
+      trackId: 'visual',
+      start: time(0),
+      duration: time(1),
+      sourceIn: time(0),
+      sourceOut: time(1),
+      rate: time(1),
+      linkGroupId: 'av',
+    });
+    v = videoCommandV2({ type: 'gain', clipId: 'c0', gain: 0.5 }).apply(v);
+    v = videoCommandV2({
+      type: 'fade',
+      clipId: 'c0',
+      fadeIn: time(1, 2),
+      fadeOut: time(1, 2),
+    }).apply(v);
+    const before = structuredClone(v);
+    const split = videoCommandV2({
+      type: 'split',
+      clipId: 'picture',
+      at: time(50001, 100000),
+      rightIds: { c0: 'audio-right', picture: 'picture-right' },
+      rightLinkGroupId: 'right',
+    }).apply(v);
+    const signal = new AbortController().signal;
+    // A synthetic source ramp, evaluated from the request's exact rational mapping.
+    // It is deliberately not keyed only by the output index: a wrong source window
+    // must change PCM. This tests mapping/effects composition, not a codec/resampler.
+    const sourceRamp: ResamplePortV2 = async (request) => ({
+      first: request.first,
+      rate: 48000,
+      planes: [
+        Float32Array.from({ length: request.end - request.first }, (_, i) => {
+          const source = add(
+            request.mapping.sourceStart,
+            multiply(
+              subtract(time(request.first + i, 48000), request.mapping.start),
+              request.mapping.speed,
+            ),
+          );
+          return source.value / source.timescale;
+        }),
+      ],
+    });
+    const original = await prepareMixV2(v, sourceRamp).render(22000, 26000, signal);
+    const mix = prepareMixV2(split, sourceRamp);
+    const whole = await mix.render(22000, 26000, signal);
+    // Independent triangular envelope at k/48000: gain .5 and half-second ramps.
+    const expected = Float32Array.from({ length: 4000 }, (_, i) => {
+      const k = 22000 + i;
+      // The original source starts at zero at unit speed. Round the source
+      // sample to Float32 before applying the independently derived envelope.
+      return Math.fround(k / 48000) * (Math.min(k, 48000 - k) / 48000);
+    });
+    expect(whole.planes[0]).toEqual(expected);
+    expect(whole.planes[0]).toEqual(original.planes[0]);
+    const cuts = [22000, 22017, 24000, 24001, 25599, 26000],
+      parts: number[] = [];
+    for (let i = 0; i < cuts.length - 1; i++)
+      parts.push(...(await mix.render(cuts[i], cuts[i + 1], signal)).planes[0]);
+    expect(parts).toEqual([...expected]);
+    expect(v).toEqual(before);
+
+    // Sensitivity check: neutralize fades so only source mapping can detect the
+    // deliberate one-output-sample phase discontinuity. Keep native input valid
+    // by shifting both source endpoints, preserving the right clip's duration.
+    const shifted = structuredClone(split);
+    for (const clip of shifted.sequence.clips) {
+      if (clip.kind === 'audio') {
+        clip.fade.in = time(0);
+        clip.fade.out = time(0);
+      }
+    }
+    const neutralExpected = Float32Array.from(
+      { length: 4000 },
+      (_, i) => Math.fround((22000 + i) / 48000) * 0.5,
+    );
+    const neutral = await prepareMixV2(shifted, sourceRamp).render(22000, 26000, signal);
+    expect(neutral.planes[0]).toEqual(neutralExpected);
+    const right = shifted.sequence.clips.find((c) => c.id === 'audio-right')!;
+    if (right.kind !== 'audio') throw Error();
+    right.sourceIn = subtract(right.sourceIn, time(1, 48000));
+    right.sourceOut = subtract(right.sourceOut, time(1, 48000));
+    const discontinuous = await prepareMixV2(shifted, sourceRamp).render(22000, 26000, signal);
+    expect(discontinuous.planes[0].slice(0, 2001)).toEqual(neutralExpected.slice(0, 2001));
+    expect(discontinuous.planes[0][2001]).not.toBe(neutralExpected[2001]);
+    expect(discontinuous.planes[0]).not.toEqual(neutralExpected);
+  });
+
   it('renders high-denominator fade anchors with exact global chunk invariance', async () => {
     const v = fixture(1),
       c = v.sequence.clips[0];

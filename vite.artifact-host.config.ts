@@ -4,6 +4,7 @@ import { buildSync } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dependencySecurity } from './scripts/dev/dependency-security.mjs';
+import { cadDevelopmentKernel } from './scripts/dev/cad-kernel.mjs';
 const js = buildSync({
   entryPoints: ['apps/artifact-host/src/preview.tsx'],
   bundle: true,
@@ -18,7 +19,7 @@ const digest = createHash('sha256').update(js).digest('base64');
 const preview = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-${digest}' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"></head><body><div id="root"></div><script>${js}</script></body></html>`;
 export default defineConfig({
   root: 'apps/artifact-host',
-  plugins: [react(), dependencySecurity()],
+  plugins: [react(), dependencySecurity(), cadDevelopmentKernel()],
   worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },
   resolve: {
     alias: [

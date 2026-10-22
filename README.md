@@ -7,7 +7,7 @@ The local editor needs no backend, authentication, API key or AI service.
 
 ## Run
 
-Use Node.js **24.19.0** (minimum 22.13), npm and Python **3.10+**.
+Use Node.js **24.19.0** (minimum 22.13), npm and Python **3.11+**.
 The first font download requires network access.
 
 ```sh

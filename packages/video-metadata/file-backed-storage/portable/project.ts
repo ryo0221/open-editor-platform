@@ -105,6 +105,9 @@ export function createProfileProject<C extends ArchiveContent, P>(
     return value;
   }
   async function validateProject(p: Project<C, P>) {
+    // A writer must not report success after dropping unsupported metadata (e.g. migration provenance).
+    // Keep the same closed record boundary as the on-disk manifest; new metadata needs an explicit profile.
+    fields(p, ['operationId', 'capture', 'selectedVersionId', 'versions', 'plans', 'originals']);
     need(
       text(p.operationId) &&
         text(p.selectedVersionId) &&

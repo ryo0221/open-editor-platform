@@ -1,0 +1,163 @@
+.cad-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cad-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.cad-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: hidden;
+  background: #f4f6f8;
+}
+.cad-canvas-host,
+.cad-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.cad-viewport-note {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 88%);
+  color: #33414f;
+  font-size: 13px;
+  pointer-events: none;
+}
+.cad-fit {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+.cad-navigator ul,
+.cad-navigator ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cad-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cad-item small {
+  color: #607080;
+  white-space: nowrap;
+}
+.cad-item[aria-pressed='true'] {
+  border-color: #2563eb;
+  background: #e8efff;
+}
+.cad-item:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+.cad-inspector-scope {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cad-inspector {
+  display: grid;
+  gap: 10px;
+}
+.cad-readonly-field {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.cad-readonly-field output {
+  color: #33414f;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.cad-metrics {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 13px;
+}
+.cad-metrics dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.cad-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cad-row button,
+.cad-danger {
+  padding: 6px 10px;
+  border: 1px solid #c4ced8;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cad-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cad-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  color: #b42318;
+}
+.cad-muted {
+  margin: 0;
+  color: #607080;
+  font-size: 13px;
+}
+.cad-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 13px;
+}
+.cad-diagnostic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #b42318;
+  overflow-wrap: anywhere;
+}
+.cad-diagnostic button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

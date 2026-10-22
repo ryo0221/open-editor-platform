@@ -10,6 +10,7 @@ import type {
 import { assertGeo, id, record } from './validation';
 import { checkedJson } from './json-boundary';
 import { assertEditableGeometry } from './geometry';
+import { exactKeys, validRevision } from './schema';
 import type { GeoWorkspace } from './workspace-model';
 export type GeoAction =
   | { type: 'addFeature'; layerId: string; feature: Feature }
@@ -36,92 +37,58 @@ export interface ExecutionContext {
   canEdit: boolean;
   budgets: Budgets;
 }
+const nullableRecord = (v: unknown) => v === null || record(v);
+/** Exact keys and payload checks per action type; payload bodies are validated on apply. */
+const actionSchemas: Record<
+  GeoAction['type'],
+  { keys: string[]; valid: (action: Record<string, unknown>) => boolean }
+> = {
+  deleteLayer: { keys: ['type', 'layerId'], valid: (a) => id(a.layerId) },
+  setWorkspace: { keys: ['type', 'workspace'], valid: (a) => record(a.workspace) },
+  createLayer: { keys: ['type', 'layer'], valid: (a) => record(a.layer) },
+  refreshLayer: { keys: ['type', 'layer'], valid: (a) => record(a.layer) },
+  retainSource: { keys: ['type', 'source'], valid: (a) => record(a.source) },
+  importLayer: {
+    keys: ['type', 'layer', 'source'],
+    valid: (a) => record(a.layer) && record(a.source),
+  },
+  addFeature: {
+    keys: ['type', 'layerId', 'feature'],
+    valid: (a) => id(a.layerId) && record(a.feature) && nullableRecord(a.feature.geometry),
+  },
+  replaceGeometry: {
+    keys: ['type', 'layerId', 'featureId', 'geometry'],
+    valid: (a) => id(a.layerId) && id(a.featureId) && nullableRecord(a.geometry),
+  },
+  deleteFeature: {
+    keys: ['type', 'layerId', 'featureId'],
+    valid: (a) => id(a.layerId) && id(a.featureId),
+  },
+  setAttribute: {
+    keys: ['type', 'layerId', 'featureId', 'fieldId', 'value'],
+    valid: (a) =>
+      id(a.layerId) &&
+      id(a.featureId) &&
+      id(a.fieldId) &&
+      (a.value === null || ['string', 'number', 'boolean'].includes(typeof a.value)),
+  },
+};
 /** Runs before any payload property read, branch or clone at every command entrypoint. */
 function assertCommand(command: unknown, budgets: Budgets): asserts command is GeoCommand {
   checkedJson(command, budgets, true);
-  const keys = (value: Record<string, unknown>, required: string[]) =>
-    Object.keys(value).length === required.length && required.every((k) => Object.hasOwn(value, k));
-  const bad = () => {
-    throw new Error('command-schema');
-  };
   if (
     !record(command) ||
-    !keys(command, ['expectedRevision', 'actions']) ||
-    !record(command.expectedRevision) ||
-    (!keys(command.expectedRevision, ['sessionId', 'sequence']) &&
-      !(
-        keys(command.expectedRevision, ['kind', 'sessionId', 'sequence']) &&
-        command.expectedRevision.kind === 'local-draft'
-      )) ||
-    !id(command.expectedRevision.sessionId) ||
-    !Number.isSafeInteger(command.expectedRevision.sequence) ||
-    (command.expectedRevision.sequence as number) < 0 ||
+    !exactKeys(command, ['expectedRevision', 'actions']) ||
+    !validRevision(command.expectedRevision) ||
     !Array.isArray(command.actions)
   )
-    return bad();
+    throw new Error('command-schema');
   for (const action of command.actions) {
-    if (!record(action)) return bad();
-    switch (action.type) {
-      case 'deleteLayer':
-        if (!keys(action, ['type', 'layerId']) || !id(action.layerId)) return bad();
-        break;
-      case 'setWorkspace':
-        if (!keys(action, ['type', 'workspace']) || !record(action.workspace)) return bad();
-        break;
-      case 'createLayer':
-      case 'refreshLayer':
-        if (!keys(action, ['type', 'layer']) || !record(action.layer)) return bad();
-        break;
-      case 'retainSource':
-        if (!keys(action, ['type', 'source']) || !record(action.source)) return bad();
-        break;
-      case 'importLayer':
-        if (
-          !keys(action, ['type', 'layer', 'source']) ||
-          !record(action.layer) ||
-          !record(action.source)
-        )
-          return bad();
-        break;
-      case 'addFeature':
-        if (
-          !keys(action, ['type', 'layerId', 'feature']) ||
-          !id(action.layerId) ||
-          !record(action.feature) ||
-          !(action.feature.geometry === null || record(action.feature.geometry))
-        )
-          return bad();
-        break;
-      case 'replaceGeometry':
-        if (
-          !keys(action, ['type', 'layerId', 'featureId', 'geometry']) ||
-          !id(action.layerId) ||
-          !id(action.featureId) ||
-          !(action.geometry === null || record(action.geometry))
-        )
-          return bad();
-        break;
-      case 'deleteFeature':
-        if (
-          !keys(action, ['type', 'layerId', 'featureId']) ||
-          !id(action.layerId) ||
-          !id(action.featureId)
-        )
-          return bad();
-        break;
-      case 'setAttribute':
-        if (
-          !keys(action, ['type', 'layerId', 'featureId', 'fieldId', 'value']) ||
-          !id(action.layerId) ||
-          !id(action.featureId) ||
-          !id(action.fieldId) ||
-          !(action.value === null || ['string', 'number', 'boolean'].includes(typeof action.value))
-        )
-          return bad();
-        break;
-      default:
-        throw new Error('unsupported-command');
-    }
+    if (!record(action)) throw new Error('command-schema');
+    if (typeof action.type !== 'string' || !Object.hasOwn(actionSchemas, action.type))
+      throw new Error('unsupported-command');
+    const schema = actionSchemas[action.type as GeoAction['type']];
+    if (!exactKeys(action, schema.keys) || !schema.valid(action)) throw new Error('command-schema');
   }
 }
 /** Pure application. Caller supplies fresh trusted authority/revision, never payload authority. */

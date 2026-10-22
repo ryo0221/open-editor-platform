@@ -8,6 +8,7 @@ import {
   exportCsv,
   importCsv,
   parseCsv,
+  parseCsvText,
   validateData,
   type Column,
   type StructuredData,
@@ -125,9 +126,67 @@ it("round-trips guarded values through this editor's own CSV import", () => {
     rows: [{ id: 'row', values: { notes: '- todo', state: '- none -', n: -4 } }],
   };
   const csv = exportCsv(data);
-  expect(importCsv(csv).columns.map((column) => column.name)).toEqual(['-Notes', 'State', 'N']);
-  expect(Object.values(importCsv(csv).rows[0].values)).toEqual(['- todo', '- none -', -4]);
-  const appended = previewCsvAppend(data, csv, true, {}, ['copy']);
+  const options = { decodeFormulaGuard: true };
+  expect(importCsv(csv, options).columns.map((column) => column.name)).toEqual([
+    '-Notes',
+    'State',
+    'N',
+  ]);
+  expect(Object.values(importCsv(csv, options).rows[0].values)).toEqual(['- todo', '- none -', -4]);
+  const appended = previewCsvAppend(data, csv, true, {}, ['copy'], options);
   expect(appended.diagnostics).toEqual([]);
   expect(appended.rows[0].values).toEqual(data.rows[0].values);
+});
+
+it('preserves external literal apostrophes in parsing, replace and append imports', () => {
+  const values = ["'=pending", "'- none -", "''-x", "'@x", "'+cmd", "'\tvalue", "'plain"];
+  const source = "'Header,Text\r\n" + values.map((v) => `plain,${v}`).join('\r\n');
+  expect(parseCsvText('\uFEFF' + source)).toEqual([
+    ["'Header", 'Text'],
+    ...values.map((v) => ['plain', v]),
+  ]);
+  const imported = importCsv(source);
+  expect(imported.columns.map((c) => c.name)).toEqual(["'Header", 'Text']);
+  expect(imported.rows.map((r) => r.values[imported.columns[1].id])).toEqual(values);
+  const append = previewCsvAppend({ ...imported, rows: [] }, source);
+  expect(append.diagnostics).toEqual([]);
+  expect(append.rows.map((r) => r.values[imported.columns[1].id])).toEqual(values);
+});
+
+it('round-trips guarded headers and values only with explicit decoding, without weakening exports', () => {
+  const values = [
+    '=1+1',
+    '+cmd',
+    '- todo',
+    '@SUM(A1)',
+    '\tvalue',
+    '\rvalue',
+    "'=pending",
+    "''-x",
+    "'plain",
+    'a,b',
+    'line\nbreak',
+    '"quoted"',
+  ];
+  const data: StructuredData = {
+    schemaVersion: 2,
+    columns: [{ id: 'text', name: "'=Header", type: 'text' }],
+    rows: values.map((value, i) => ({ id: String(i), values: { text: value } })),
+  };
+  for (const source of [
+    exportCsv(data),
+    prepareCsvExport(data, { rowsScope: 'all', columnsScope: 'all' }).csv,
+  ]) {
+    const options = { decodeFormulaGuard: true };
+    expect(parseCsvText(source, options)).toEqual([["'=Header"], ...values.map((v) => [v])]);
+    expect(parseCsvText(source)).toEqual(parseCsv(source));
+    const replaced = importCsv(source, options);
+    expect(replaced.columns[0].name).toBe("'=Header");
+    expect(replaced.rows.map((r) => r.values[replaced.columns[0].id])).toEqual(values);
+    const appended = previewCsvAppend(data, source, true, {}, [], options);
+    expect(appended.diagnostics).toEqual([]);
+    expect(appended.rows.map((r) => r.values.text)).toEqual(values);
+    expect(parseCsv(source)[1][0]).toBe("'=1+1");
+    expect(exportCsv(replaced)).toBe(source);
+  }
 });

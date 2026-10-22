@@ -234,3 +234,68 @@ it('V2-05 valid high-denominator fade anchors survive archive and exact correcte
   expect(audioGainAtV2(restored, time(0))).toBe(Number(8n) / Number(10000001000000021n));
   expect(Number.isFinite(audioGainAtV2(restored, time(1, 48000)))).toBe(true);
 });
+
+it.each(['v0', 'v1', 'v2'] as const)(
+  'rejects unsupported provenance at the %s writer before scanning or returning save entries',
+  async (kind) => {
+    const provenance = {
+      source: 'imported',
+      migration: {
+        converter: 'video-v1-to-v2-1',
+        sourceArtifactId: 'original-document',
+        sourceBaseVersionId: 'original-version',
+        sourceContentHash: 'a'.repeat(64),
+        targetContentHash: 'b'.repeat(64),
+        sourceSchema: 'video-core-prototype-v1',
+        targetSchema: 'video-core-prototype-v2',
+      },
+    };
+    let scans = 0;
+    const all = createPortableProjects(async (...args) => {
+      scans++;
+      return scan(...args);
+    });
+    const prepare = async () => {
+      if (kind === 'v0')
+        return all.v0.prepareProject(
+          Object.assign(await v0EmptyFixture(), { provenance }),
+          signal(),
+        );
+      if (kind === 'v1')
+        return all.v1.prepareProject(
+          Object.assign(await v1Fixture(scan, true), { provenance }),
+          signal(),
+        );
+      return all.v2.prepareProject(
+        Object.assign(await v2Fixture(scan, true), { provenance }),
+        signal(),
+      );
+    };
+    await expect(prepare()).rejects.toThrow('Record fields');
+    expect(scans).toBe(0);
+  },
+);
+it('refuses provenance smuggled into an old manifest even with rebuilt ZIP checksums', async () => {
+  const entries = await createPortableProjects(scan).v2.prepareProject(
+    await v2Fixture(scan, true),
+    signal(),
+  );
+  const wire = await archive(
+    await manifest(entries, (m) => {
+      m.provenance = { source: 'imported' };
+    }),
+  );
+  await expect(createPortableProjects(scan).open(wire, signal())).rejects.toThrow('Record fields');
+});
+it.each([1, 22, 98])(
+  'refuses a v2 archive whose final %s bytes were not saved',
+  async (missing) => {
+    const entries = await createPortableProjects(scan).v2.prepareProject(
+      await v2Fixture(scan, true),
+      signal(),
+    );
+    const wire = await archive(entries);
+    const partial = memory(await wire.read(0n, Number(wire.size) - missing, signal()));
+    await expect(createPortableProjects(scan).open(partial, signal())).rejects.toThrow();
+  },
+);

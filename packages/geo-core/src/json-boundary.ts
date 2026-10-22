@@ -1,5 +1,14 @@
 import type { Budgets } from './model';
 
+const reservedKeys = ['__proto__', 'constructor', 'prototype', 'toJSON'];
+const coordinateRanks: Record<string, number> = {
+  Point: 1,
+  LineString: 2,
+  MultiPoint: 2,
+  Polygon: 3,
+  MultiLineString: 3,
+  MultiPolygon: 4,
+};
 /** In-process data boundary, not a sandbox for Proxy traps or modified JS intrinsics. */
 export function checkedJson(value: unknown, limits: Budgets, commandPayload = false): string {
   if (
@@ -48,104 +57,81 @@ export function checkedJson(value: unknown, limits: Budgets, commandPayload = fa
     if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) return fail();
     return descriptor.value;
   }
-  function visit(v: unknown, depth: number, key = '', coordinateRank = 0) {
-    if (depth > limits.depth) return fail();
-    if (v === null) {
-      emit('null');
-      return;
-    }
-    if (typeof v === 'string') {
-      string(v);
-      return;
-    }
-    if (typeof v === 'boolean') {
-      emit(String(v));
-      return;
-    }
-    if (typeof v === 'number') {
+  function scalar(v: unknown): boolean {
+    if (v === null || typeof v === 'boolean') emit(String(v));
+    else if (typeof v === 'string') string(v);
+    else if (typeof v === 'number') {
       if (!Number.isFinite(v)) return fail();
       emit(Object.is(v, -0) ? '0' : String(v));
-      return;
-    }
-    if (typeof v !== 'object' || seen.has(v)) return fail();
-    const array = Array.isArray(v);
-    if (Object.getPrototypeOf(v) !== (array ? Array.prototype : Object.prototype)) return fail();
-    seen.add(v);
-    if (array) {
-      // Length budgets precede enumeration, element descriptors, and cloning.
-      const length = Object.getOwnPropertyDescriptor(v, 'length')!.value as number;
-      if (key === 'actions' && length > limits.actions) throw new Error('action-limit');
-      if (key === 'layers') {
-        layers += length;
-        if (layers > limits.layers) throw new Error('layer-limit');
-      }
-      if (key === 'features' || key === 'candidates') {
-        features += length;
-        if (features > limits.features) throw new Error('feature-limit');
-      }
-      if (coordinateRank === 1) {
-        vertices++;
-        if (vertices > limits.vertices) throw new Error('vertex-limit');
-      }
-      if (coordinateRank === 2 && length > limits.vertices - vertices)
-        throw new Error('vertex-limit');
-      if (length > Math.floor((limits.bytes - bytes - 1) / 2)) throw new Error('byte-limit');
-      const keys = Reflect.ownKeys(v);
-      if (
-        keys.length !== length + 1 ||
-        keys.some(
-          (k) =>
-            k !== 'length' &&
-            (typeof k !== 'string' || !/^(0|[1-9][0-9]*)$/.test(k) || Number(k) >= length),
-        )
+    } else return false;
+    return true;
+  }
+  /** Length budgets precede enumeration, element descriptors, and cloning. */
+  function chargeArray(length: number, key: string, coordinateRank: number) {
+    if (key === 'actions' && length > limits.actions) throw new Error('action-limit');
+    if (key === 'layers' && (layers += length) > limits.layers) throw new Error('layer-limit');
+    if ((key === 'features' || key === 'candidates') && (features += length) > limits.features)
+      throw new Error('feature-limit');
+    if (coordinateRank === 1 && ++vertices > limits.vertices) throw new Error('vertex-limit');
+    if (coordinateRank === 2 && length > limits.vertices - vertices)
+      throw new Error('vertex-limit');
+    if (length > Math.floor((limits.bytes - bytes - 1) / 2)) throw new Error('byte-limit');
+  }
+  function array(v: unknown[], depth: number, key: string, coordinateRank: number) {
+    const length = Object.getOwnPropertyDescriptor(v, 'length')!.value as number;
+    chargeArray(length, key, coordinateRank);
+    const keys = Reflect.ownKeys(v);
+    if (
+      keys.length !== length + 1 ||
+      keys.some(
+        (k) =>
+          k !== 'length' &&
+          (typeof k !== 'string' || !/^(0|[1-9][0-9]*)$/.test(k) || Number(k) >= length),
       )
-        return fail();
-      emit('[');
-      for (let i = 0; i < length; i++) {
-        if (i) emit(',');
-        visit(data(v, String(i)), depth + 1, '', Math.max(0, coordinateRank - 1));
-      }
-      emit(']');
-    } else {
-      // Command payloads can contain many singular addFeature/importLayer actions.
-      // Native/import candidate envelopes count their arrays instead.
-      if (commandPayload && key === 'feature' && ++features > limits.features)
-        throw new Error('feature-limit');
-      if (commandPayload && key === 'layer' && ++layers > limits.layers)
-        throw new Error('layer-limit');
-      emit('{');
-      let first = true;
-      for (const k of Reflect.ownKeys(v)) {
-        if (
-          typeof k !== 'string' ||
-          ['__proto__', 'constructor', 'prototype', 'toJSON'].includes(k)
-        )
-          return fail();
-        const child = data(v, k);
-        if (!first) emit(',');
-        first = false;
-        string(k);
-        emit(':');
-        let rank = 0;
-        if (k === 'coordinates') {
-          const type = Object.getOwnPropertyDescriptor(v, 'type');
-          if (type && 'value' in type && typeof type.value === 'string')
-            rank =
-              (
-                {
-                  Point: 1,
-                  LineString: 2,
-                  MultiPoint: 2,
-                  Polygon: 3,
-                  MultiLineString: 3,
-                  MultiPolygon: 4,
-                } as Record<string, number>
-              )[type.value] ?? 0;
-        }
-        visit(child, depth + 1, k, rank);
-      }
-      emit('}');
+    )
+      return fail();
+    emit('[');
+    for (let i = 0; i < length; i++) {
+      if (i) emit(',');
+      visit(data(v, String(i)), depth + 1, '', Math.max(0, coordinateRank - 1));
     }
+    emit(']');
+  }
+  /** Nesting rank of a GeoJSON-shaped `coordinates` member, from its sibling `type`. */
+  function coordinatesRank(object: object): number {
+    const type = Object.getOwnPropertyDescriptor(object, 'type');
+    if (!type || !('value' in type) || typeof type.value !== 'string') return 0;
+    return Object.hasOwn(coordinateRanks, type.value) ? coordinateRanks[type.value] : 0;
+  }
+  function object(v: object, depth: number, key: string) {
+    // Command payloads can contain many singular addFeature/importLayer actions.
+    // Native/import candidate envelopes count their arrays instead.
+    if (commandPayload && key === 'feature' && ++features > limits.features)
+      throw new Error('feature-limit');
+    if (commandPayload && key === 'layer' && ++layers > limits.layers)
+      throw new Error('layer-limit');
+    emit('{');
+    let first = true;
+    for (const k of Reflect.ownKeys(v)) {
+      if (typeof k !== 'string' || reservedKeys.includes(k)) return fail();
+      const child = data(v, k);
+      if (!first) emit(',');
+      first = false;
+      string(k);
+      emit(':');
+      visit(child, depth + 1, k, k === 'coordinates' ? coordinatesRank(v) : 0);
+    }
+    emit('}');
+  }
+  function visit(v: unknown, depth: number, key = '', coordinateRank = 0) {
+    if (depth > limits.depth) return fail();
+    if (scalar(v)) return;
+    if (typeof v !== 'object' || v === null || seen.has(v)) return fail();
+    const isArray = Array.isArray(v);
+    if (Object.getPrototypeOf(v) !== (isArray ? Array.prototype : Object.prototype)) return fail();
+    seen.add(v);
+    if (isArray) array(v, depth, key, coordinateRank);
+    else object(v, depth, key);
     seen.delete(v);
   }
   visit(value, 0);

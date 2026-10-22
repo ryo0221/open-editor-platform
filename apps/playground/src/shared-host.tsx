@@ -57,7 +57,12 @@ async function connect(
   actor: 'A' | 'B' | 'C',
   initial?: StoredArtifact,
 ) {
-  if (domain === 'structured-graph' || domain === 'geo')
+  if (
+    domain === 'structured-graph' ||
+    domain === 'geo' ||
+    domain === 'schedule' ||
+    domain === 'cad'
+  )
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))
     throw new Error(

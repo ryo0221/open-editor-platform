@@ -26,6 +26,14 @@ import {
   type GraphProfile,
 } from '@editor-platform/structured-graph/model';
 
+import { dataTimelineLanes } from './schedule-lanes';
+export {
+  dataTimelineLanes,
+  dataTimelineOptions,
+  scheduleLaneHost,
+  timelineView,
+} from './schedule-lanes';
+
 function missing(message: string): never {
   throw new ReferenceError('missing-target', message);
 }
@@ -50,6 +58,34 @@ export const dataReferenceAdapter: ReferenceAdapter = {
   },
   project(snapshot, target) {
     const data = snapshot.content as StructuredData;
+    if (target.kind === 'timeline') {
+      const lane = dataTimelineLanes(snapshot, target);
+      const width = 640,
+        height = Math.max(64, (lane.items.length + 1) * 40);
+      return svgReferenceProjection(
+        drawingSvg(
+          [
+            {
+              id: 'reference-timeline',
+              kind: 'table',
+              bounds: { x: 0, y: 0, width, height },
+              text: '',
+              fill: '#253044',
+              table: {
+                header: true,
+                rows: [
+                  ['Record', 'Start', 'End'],
+                  ...lane.items.map((i) => [i.label, i.startDate, i.endDate]),
+                ],
+              },
+            },
+          ],
+          { x: 0, y: 0, width, height },
+          '#fff',
+        ),
+        lane.label + ' · Timeline',
+      );
+    }
     if (!['table', 'chart'].includes(target.kind) || target.nodeIds)
       throw new ReferenceError('unsupported', 'Dataは表／グラフの参照に対応しています。');
     const view =

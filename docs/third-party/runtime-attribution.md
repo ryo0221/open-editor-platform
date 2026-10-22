@@ -46,3 +46,12 @@ MPL license files. Their licenses remain separate from original editor code.
 
 Security dispositions are recorded in `security-dispositions.md`; an unused
 dependency is not a claim that the entire installed package is vulnerability-free.
+
+## CAD renderer source dependency
+
+`three@0.186.1` is the CAD Surface renderer dependency. Its complete MIT license
+is retained in `RUNTIME-NOTICES.txt`. The type-only `@types/three` dependency graph
+also installs development helpers (including Rapier, tween.js and meshoptimizer);
+these are not imports of the CAD renderer source. Installed packages retain their
+own licenses. OCCT/OpenCascade.js is not an npm dependency or included kernel
+binary, and its unfinished distribution gate remains separate.

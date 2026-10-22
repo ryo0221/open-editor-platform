@@ -315,6 +315,131 @@ export function TokenStyleLibrary(props: LibraryProps) {
   );
 }
 
+function resolveDefinitionPreview(preview: LockedClosure<unknown> | undefined, mode: string) {
+  const previewRoot = preview && preview.definitions.find((d) => d.hash === preview.roots[0].hash)!;
+  const previewTokens =
+    previewRoot &&
+    (previewRoot.kind === 'tokens'
+      ? (previewRoot.payload as TokenSet)
+      : closureDefinition<TokenSet>(preview!, (previewRoot.payload as ReusableStylePayload).tokens)
+          .payload);
+  let resolved: Record<string, unknown> = {};
+  try {
+    if (previewRoot && previewTokens)
+      resolved =
+        previewRoot.kind === 'tokens'
+          ? Object.fromEntries(
+              Object.entries(
+                resolveTokens(previewTokens, { instanceMode: mode || undefined }).tokens,
+              ).map(([id, t]) => [id, t.value]),
+            )
+          : resolveStyle((previewRoot.payload as ReusableStylePayload).style, previewTokens, {
+              instanceMode: mode || undefined,
+            }).properties;
+  } catch (error) {
+    resolved = { 診断: (error as Error).message };
+  }
+  return { previewTokens, resolved };
+}
+
+function draftBase(draft: ReusableDraft | undefined, old: ReusableDefinition<unknown> | undefined) {
+  return draft?.base ? { base: draft.base } : old && !draft ? { base: definitionRef(old) } : {};
+}
+
+function StyleBindingFields(props: {
+  domain: Domain;
+  style: DomainStyle;
+  tokenOptions: ReusableDefinition<TokenSet>[];
+  tokenRefKey: string;
+  chosen?: ReusableDefinition<TokenSet>;
+  onTokenRef(key: string): void;
+  onStyle(style: DomainStyle): void;
+}) {
+  const { style } = props;
+  return (
+    <>
+      <label>
+        参照するトークンの版
+        <select value={props.tokenRefKey} onChange={(e) => props.onTokenRef(e.target.value)}>
+          <option value="">選択</option>
+          {props.tokenOptions.map((d) => (
+            <option key={refKey(d)} value={refKey(d)}>
+              {d.name} v{d.version}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p>
+        {props.domain}
+        の属性へ、型が一致するトークンを割り当てます。px/ptは媒体の単位へ変換します。
+      </p>
+      {Object.entries(styleCapabilities[style.domain]).map(([target, rule]) => (
+        <label key={target}>
+          {target}
+          <select
+            aria-label={`スタイル属性: ${target}`}
+            value={style.bindings[target]?.token ?? ''}
+            onChange={(e) => {
+              const bindings = { ...style.bindings };
+              if (e.target.value) bindings[target] = { token: e.target.value };
+              else delete bindings[target];
+              props.onStyle({ ...style, bindings });
+            }}
+          >
+            <option value="">指定しない</option>
+            {Object.entries(props.chosen?.payload.tokens ?? {})
+              .filter(([, t]) => t.type === rule.type)
+              .map(([id]) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+          </select>
+        </label>
+      ))}
+    </>
+  );
+}
+
+function DefinitionPreview(props: {
+  tokens: TokenSet;
+  resolved: Record<string, unknown>;
+  mode: string;
+  onMode(mode: string): void;
+}) {
+  return (
+    <section aria-label="定義のプレビュー">
+      <label>
+        確認するモード
+        <select value={props.mode} onChange={(e) => props.onMode(e.target.value)}>
+          <option value="">既定（{props.tokens.defaultMode}）</option>
+          {props.tokens.modes.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      </label>
+      <table>
+        <thead>
+          <tr>
+            <th>属性</th>
+            <th>解決した値</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(props.resolved).map(([key, value]) => (
+            <tr key={key}>
+              <td>{key}</td>
+              <td>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function StyleDefinitionEditor(
   props: LibraryProps & Editing & { writeCatalog: CatalogAdapter; onSaved(): void },
 ) {
@@ -405,29 +530,7 @@ function StyleDefinitionEditor(
     });
   };
   const chosen = tokenOptions.find((d) => refKey(d) === tokenRefKey);
-  const previewRoot = preview && preview.definitions.find((d) => d.hash === preview.roots[0].hash)!;
-  const previewTokens =
-    previewRoot &&
-    (previewRoot.kind === 'tokens'
-      ? (previewRoot.payload as TokenSet)
-      : closureDefinition<TokenSet>(preview!, (previewRoot.payload as ReusableStylePayload).tokens)
-          .payload);
-  let resolved: Record<string, unknown> = {};
-  try {
-    if (previewRoot && previewTokens)
-      resolved =
-        previewRoot.kind === 'tokens'
-          ? Object.fromEntries(
-              Object.entries(
-                resolveTokens(previewTokens, { instanceMode: mode || undefined }).tokens,
-              ).map(([id, t]) => [id, t.value]),
-            )
-          : resolveStyle((previewRoot.payload as ReusableStylePayload).style, previewTokens, {
-              instanceMode: mode || undefined,
-            }).properties;
-  } catch (error) {
-    resolved = { 診断: (error as Error).message };
-  }
+  const { previewTokens, resolved } = resolveDefinitionPreview(preview, mode);
   return (
     <Dialog title="トークン・スタイルの下書き" onClose={props.onClose}>
       <div className="tp-author">
@@ -453,61 +556,27 @@ function StyleDefinitionEditor(
               }}
             />
           ) : (
-            <>
-              <label>
-                参照するトークンの版
-                <select
-                  value={tokenRefKey}
-                  onChange={(e) => {
-                    const key = e.target.value;
-                    setTokenRefKey(key);
-                    setTokenClosure(undefined);
-                    changed();
-                    const selected = tokenOptions.find((d) => refKey(d) === key);
-                    if (selected)
-                      void run(async () =>
-                        setTokenClosure(await props.catalog.closure(definitionRef(selected))),
-                      );
-                  }}
-                >
-                  <option value="">選択</option>
-                  {tokenOptions.map((d) => (
-                    <option key={refKey(d)} value={refKey(d)}>
-                      {d.name} v{d.version}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>
-                {props.domain}
-                の属性へ、型が一致するトークンを割り当てます。px/ptは媒体の単位へ変換します。
-              </p>
-              {Object.entries(styleCapabilities[style.domain]).map(([target, rule]) => (
-                <label key={target}>
-                  {target}
-                  <select
-                    aria-label={`スタイル属性: ${target}`}
-                    value={style.bindings[target]?.token ?? ''}
-                    onChange={(e) => {
-                      const bindings = { ...style.bindings };
-                      if (e.target.value) bindings[target] = { token: e.target.value };
-                      else delete bindings[target];
-                      setStyle({ ...style, bindings });
-                      changed();
-                    }}
-                  >
-                    <option value="">指定しない</option>
-                    {Object.entries(chosen?.payload.tokens ?? {})
-                      .filter(([, t]) => t.type === rule.type)
-                      .map(([id]) => (
-                        <option key={id} value={id}>
-                          {id}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              ))}
-            </>
+            <StyleBindingFields
+              domain={props.domain}
+              style={style}
+              tokenOptions={tokenOptions}
+              tokenRefKey={tokenRefKey}
+              chosen={chosen}
+              onTokenRef={(key) => {
+                setTokenRefKey(key);
+                setTokenClosure(undefined);
+                changed();
+                const selected = tokenOptions.find((d) => refKey(d) === key);
+                if (selected)
+                  void run(async () =>
+                    setTokenClosure(await props.catalog.closure(definitionRef(selected))),
+                  );
+              }}
+              onStyle={(value) => {
+                setStyle(value);
+                changed();
+              }}
+            />
           )}
         </fieldset>
         <button
@@ -523,35 +592,12 @@ function StyleDefinitionEditor(
           定義をプレビュー
         </button>
         {previewTokens && (
-          <section aria-label="定義のプレビュー">
-            <label>
-              確認するモード
-              <select value={mode} onChange={(e) => setMode(e.target.value)}>
-                <option value="">既定（{previewTokens.defaultMode}）</option>
-                {previewTokens.modes.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <table>
-              <thead>
-                <tr>
-                  <th>属性</th>
-                  <th>解決した値</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(resolved).map(([key, value]) => (
-                  <tr key={key}>
-                    <td>{key}</td>
-                    <td>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <DefinitionPreview
+            tokens={previewTokens}
+            resolved={resolved}
+            mode={mode}
+            onMode={setMode}
+          />
         )}
         <button
           disabled={busy || props.readOnly || !props.writeCatalog.saveReusableDraft}
@@ -561,11 +607,7 @@ function StyleDefinitionEditor(
               const draft: ReusableDraft = {
                 id,
                 revision: (saved?.revision ?? 0) + 1,
-                ...(props.draft?.base
-                  ? { base: props.draft.base }
-                  : old && !props.draft
-                    ? { base: definitionRef(old) }
-                    : {}),
+                ...draftBase(props.draft, old),
                 ref: definitionRef(value.definition),
                 closure: value.closure,
               };

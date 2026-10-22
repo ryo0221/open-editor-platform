@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/cad-kernel-occt",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts"
+  },
+  "dependencies": {
+    "@editor-platform/cad-core": "*",
+    "@noble/hashes": "1.8.0"
+  }
+}

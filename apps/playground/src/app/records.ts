@@ -17,7 +17,7 @@ export async function openStoredRecord(record: StoredArtifact, references: Refer
   if (!validContent(record.kind, record.draft.content)) throw new Error('Invalid stored content');
   if (record.versions.some((v) => !validContent(record.kind, v.content)))
     throw new Error('Invalid stored version');
-  if (record.kind === 'structured-graph' || record.kind === 'animation') {
+  if (record.kind === 'structured-graph' || record.kind === 'animation' || record.kind === 'cad') {
     for (const v of record.versions)
       if ((await contentHash(v.content)) !== v.contentHash)
         throw new Error('Stored version hash mismatch');

@@ -1,0 +1,31 @@
+/* This Host only sizes its own containers. Surface styling ships with the package. */
+body {
+  margin: 0;
+  background: #e9edf2;
+  font-family: system-ui, sans-serif;
+}
+.cad-host {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.cad-host-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  font-size: 12px;
+}
+.cad-host-controls output {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 360px;
+}
+.cad-host-boundary {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  background: #fff;
+}

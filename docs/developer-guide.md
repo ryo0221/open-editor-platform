@@ -35,7 +35,7 @@ Editorは単独で埋め込める編集機能です。Playgroundは複数のEdit
 
 ## ローカル環境
 
-Node.js 24.19.0、npm、Python 3.10以上を推奨します。Nodeの最低要件は`package.json`も確認してください。
+Node.js 24.19.0、npm、Python 3.11以上を推奨します。Nodeの最低要件は`package.json`も確認してください。
 
 ```sh
 npm ci

@@ -1,22 +1,31 @@
 import type { Artifact } from '@editor-platform/artifact-core';
+import type { CadDocument } from '@editor-platform/cad-core';
 import type { AnimationHostContent } from '@editor-platform/animation-core/v2';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type { GeoDocument } from '@editor-platform/geo-core';
 import type { ReactUiDocument } from '@editor-platform/react-ui-core';
 import { isGraphDocument, type GraphDocument } from '@editor-platform/structured-graph';
+import { isSchedule, type ScheduleDocument } from '@editor-platform/schedule/model';
 import { TemplateCatalog, builtinCatalog, LocalCatalog } from '@editor-platform/templates';
 import { validContent, type Content, type StoredArtifact } from '../model';
 
 /** Content kinds that templates and native reusable definitions can adapt. */
 export type NativeContent = Exclude<
   Content,
-  ReactUiDocument | GraphDocument | GeoDocument | AnimationHostContent
+  | ReactUiDocument
+  | GraphDocument
+  | GeoDocument
+  | AnimationHostContent
+  | ScheduleDocument
+  | CadDocument
 >;
 export function nativeContent(content: Content): NativeContent {
   if (validContent('animation', content))
     throw new Error('Animation has no template/reuse adapter');
   if (validContent('geo', content)) throw new Error('Geo has no template/reuse adapter');
   if (isGraphDocument(content)) throw new Error('Graph has no template/reuse adapter');
+  if (isSchedule(content)) throw new Error('Schedule has no template/reuse adapter');
+  if (validContent('cad', content)) throw new Error('3D CAD has no template/reuse adapter');
   if (validContent('react-ui', content))
     throw new Error('React UI uses its Host registrations, not native reusable definitions');
   return content as NativeContent;

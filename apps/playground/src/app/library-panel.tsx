@@ -2,7 +2,7 @@ import { X } from 'lucide-react';
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
 import type { PrivateVideoEntry } from '../private-video/catalog';
-import { downloadText, kinds, type Kind, type StoredArtifact } from '../model';
+import { creatableKinds, downloadText, kinds, type Kind, type StoredArtifact } from '../model';
 
 const reusableLibraryKinds = ['design', 'document', 'slide', 'whiteboard', 'data'];
 
@@ -110,9 +110,9 @@ export function LibraryPanel({
           value={kind}
           onChange={(e) => onKindChange(e.target.value as Kind)}
         >
-          {Object.entries(kinds).map(([k, v]) => (
+          {creatableKinds.map((k) => (
             <option key={k} value={k}>
-              {v.label}
+              {kinds[k].label}
             </option>
           ))}
         </select>
@@ -239,11 +239,11 @@ export function WelcomePanel({
             <small>Private local validation</small>
           </button>
         )}
-        {Object.entries(kinds).map(([k, v]) => (
-          <button key={k} aria-label={`New ${v.label}`} onClick={() => onCreate(k as Kind)}>
-            <span>{v.icon}</span>
-            <strong>New {v.label}</strong>
-            <small>{v.description}</small>
+        {creatableKinds.map((k) => (
+          <button key={k} aria-label={`New ${kinds[k].label}`} onClick={() => onCreate(k)}>
+            <span>{kinds[k].icon}</span>
+            <strong>New {kinds[k].label}</strong>
+            <small>{kinds[k].description}</small>
           </button>
         ))}
       </div>

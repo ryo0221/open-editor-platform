@@ -11,7 +11,8 @@
   "dependencies": {
     "@editor-platform/extension-contract": "*",
     "@editor-platform/video-core": "*",
-    "@editor-platform/artifact-core": "*"
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/animation-core": "*"
   },
   "devDependencies": {
     "@noble/hashes": "1.8.0"

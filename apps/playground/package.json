@@ -44,6 +44,10 @@
     "react-dom": "19.1.1",
     "prosemirror-state": "1.4.4",
     "prosemirror-view": "1.42.6",
-    "prosemirror-transform": "1.12.2"
+    "prosemirror-transform": "1.12.2",
+    "@editor-platform/cad": "*",
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/cad-kernel-occt": "*",
+    "@editor-platform/schedule": "*"
   }
 }

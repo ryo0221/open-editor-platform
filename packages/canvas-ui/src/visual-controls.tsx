@@ -356,6 +356,426 @@ export function ColorField({
     </div>
   );
 }
+type InspectorPatch = Partial<VisualStyle> & { text?: string; fill?: string; src?: string };
+type InspectorTypography = NonNullable<Drawing['typography']>;
+type ImageCrop = { x: number; y: number; scale: number };
+function mixedValue(items: Drawing[], key: keyof Drawing) {
+  return items.some((i) => JSON.stringify(i[key]) !== JSON.stringify(items[0][key]));
+}
+function mixedTypography(items: Drawing[], key: keyof InspectorTypography) {
+  const style = items[0].typography ?? {};
+  return items.some((item) => item.typography?.[key] !== style[key]);
+}
+function GeometrySection(props: {
+  items: Drawing[];
+  ratio: boolean;
+  onRatio(value: boolean): void;
+  onPatch(patch: InspectorPatch): void;
+  onGeometry(patch: Partial<Bounds>): void;
+}) {
+  const { items, ratio } = props;
+  const first = items[0];
+  return (
+    <Section title={`${items.length} selected · Geometry`}>
+      <div className="ep-fields">
+        {(['x', 'y', 'width', 'height'] as const).map((k) => (
+          <CommitInput
+            key={k}
+            label={`Element ${k}`}
+            type="number"
+            min={k === 'width' || k === 'height' ? 1 : undefined}
+            value={
+              items.some((i) => i.bounds[k] !== first.bounds[k])
+                ? ''
+                : Math.round(first.bounds[k] * 100) / 100
+            }
+            placeholder="Mixed"
+            onCommit={(v) => {
+              const patch: Partial<Bounds> = { [k]: Number(v) };
+              if (ratio && k === 'width')
+                patch.height = (first.bounds.height * Number(v)) / first.bounds.width;
+              if (ratio && k === 'height')
+                patch.width = (first.bounds.width * Number(v)) / first.bounds.height;
+              props.onGeometry(patch);
+            }}
+          />
+        ))}
+      </div>
+      <label>
+        <input type="checkbox" checked={ratio} onChange={(e) => props.onRatio(e.target.checked)} />{' '}
+        Lock aspect ratio
+      </label>
+      <CommitInput
+        label="Rotation (°)"
+        type="number"
+        value={mixedValue(items, 'rotation') ? '' : (first.rotation ?? 0)}
+        placeholder="Mixed"
+        onCommit={(v) => props.onPatch({ rotation: Number(v) % 360 })}
+      />
+      <p className="hint">
+        Coordinates and dimensions in px. Positive sizes; negative positions allowed. Blank or
+        invalid numbers are cancelled.
+      </p>
+    </Section>
+  );
+}
+function AppearanceSection({
+  items,
+  onPatch,
+}: {
+  items: Drawing[];
+  onPatch(patch: InspectorPatch): void;
+}) {
+  const first = items[0],
+    mixed = (key: keyof Drawing) => mixedValue(items, key);
+  return (
+    <Section title="Appearance">
+      <ColorField
+        label="Fill"
+        value={mixed('fill') ? 'Mixed' : first.fill}
+        onChange={(fill) => onPatch({ fill })}
+      />
+      <ColorField
+        label="Stroke"
+        value={mixed('stroke') ? 'Mixed' : (first.stroke ?? '#5b6472')}
+        onChange={(stroke) => onPatch({ stroke })}
+      />
+      <div className="ep-fields">
+        <CommitInput
+          label="Stroke width (px)"
+          type="number"
+          min={0}
+          value={mixed('strokeWidth') ? '' : (first.strokeWidth ?? 1)}
+          placeholder="Mixed"
+          onCommit={(v) => onPatch({ strokeWidth: Number(v) })}
+        />
+        <CommitInput
+          label="Opacity (%)"
+          type="number"
+          min={0}
+          max={100}
+          value={mixed('opacity') ? '' : Math.round((first.opacity ?? 1) * 100)}
+          onCommit={(v) => onPatch({ opacity: Number(v) / 100 })}
+        />
+        <CommitInput
+          label="Corner radius (px)"
+          type="number"
+          min={0}
+          value={mixed('radius') ? '' : (first.radius ?? 0)}
+          placeholder="Mixed"
+          onCommit={(v) => onPatch({ radius: Number(v) })}
+        />
+        <label className="ep-field">
+          Dash
+          <select
+            aria-label="Stroke dash"
+            value={mixed('dash') ? 'mixed' : (first.dash ?? '')}
+            onChange={(e) => onPatch({ dash: e.target.value })}
+          >
+            {mixed('dash') && (
+              <option value="mixed" disabled>
+                Mixed
+              </option>
+            )}
+            <option value="">Solid</option>
+            <option value="8 4">Dashed</option>
+            <option value="2 3">Dotted</option>
+          </select>
+        </label>
+      </div>
+    </Section>
+  );
+}
+function TypographyMetrics({
+  items,
+  typography,
+}: {
+  items: Drawing[];
+  typography(patch: Partial<InspectorTypography>): void;
+}) {
+  const style = items[0].typography ?? {},
+    mixedStyle = (key: keyof InspectorTypography) => mixedTypography(items, key);
+  return (
+    <div className="ep-fields">
+      <CommitInput
+        label="Font size (px)"
+        type="number"
+        min={8}
+        max={300}
+        value={mixedStyle('fontSize') ? '' : (style.fontSize ?? 28)}
+        placeholder="Mixed"
+        onCommit={(v) => typography({ fontSize: Number(v) })}
+      />
+      <CommitInput
+        label="Line height"
+        type="number"
+        min={0.5}
+        max={4}
+        step={0.1}
+        value={mixedStyle('lineHeight') ? '' : (style.lineHeight ?? 1.3)}
+        placeholder="Mixed"
+        onCommit={(v) => typography({ lineHeight: Number(v) })}
+      />
+      <CommitInput
+        label="Letter spacing (px)"
+        type="number"
+        value={mixedStyle('letterSpacing') ? '' : (style.letterSpacing ?? 0)}
+        placeholder="Mixed"
+        onCommit={(v) => typography({ letterSpacing: Number(v) })}
+      />
+      <CommitInput
+        label="Padding (px)"
+        type="number"
+        min={0}
+        value={mixedStyle('padding') ? '' : (style.padding ?? 4)}
+        placeholder="Mixed"
+        onCommit={(v) => typography({ padding: Number(v) })}
+      />
+    </div>
+  );
+}
+function TextLayoutFields({
+  items,
+  typography,
+}: {
+  items: Drawing[];
+  typography(patch: Partial<InspectorTypography>): void;
+}) {
+  const style = items[0].typography ?? {},
+    mixedStyle = (key: keyof InspectorTypography) => mixedTypography(items, key);
+  return (
+    <>
+      <label className="ep-field">
+        Text alignment
+        <select
+          aria-label="Text alignment"
+          value={mixedStyle('align') ? '' : (style.align ?? 'left')}
+          onChange={(e) => typography({ align: e.target.value as 'left' | 'center' | 'right' })}
+        >
+          {mixedStyle('align') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          {['left', 'center', 'right'].map((k) => (
+            <option key={k}>{k}</option>
+          ))}
+        </select>
+      </label>
+      <label className="ep-field">
+        Vertical alignment
+        <select
+          aria-label="Vertical alignment"
+          value={mixedStyle('verticalAlign') ? '' : (style.verticalAlign ?? 'top')}
+          onChange={(e) =>
+            typography({ verticalAlign: e.target.value as 'top' | 'middle' | 'bottom' })
+          }
+        >
+          {mixedStyle('verticalAlign') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          {['top', 'middle', 'bottom'].map((k) => (
+            <option key={k}>{k}</option>
+          ))}
+        </select>
+      </label>
+      <label className="ep-field">
+        Text overflow
+        <select
+          aria-label="Text overflow"
+          value={mixedStyle('overflow') ? '' : (style.overflow ?? 'clip')}
+          onChange={(e) => typography({ overflow: e.target.value as 'clip' | 'expand' | 'fit' })}
+        >
+          {mixedStyle('overflow') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          {['clip', 'expand', 'fit'].map((k) => (
+            <option key={k}>{k}</option>
+          ))}
+        </select>
+      </label>
+      <p className="hint">
+        Clip keeps the box; expand draws beyond it; fit reduces font size to 8 px minimum. All
+        outputs share these rules.
+      </p>
+    </>
+  );
+}
+function TypographySection(props: {
+  items: Drawing[];
+  textBridge: React.ContextType<typeof CanvasTextContext>;
+  onPatch(patch: InspectorPatch): void;
+}) {
+  const { items, textBridge, onPatch } = props;
+  const first = items[0];
+  const style = first.typography ?? {};
+  const mixedStyle = (key: keyof typeof style) => mixedTypography(items, key);
+  const typography = (patch: Partial<typeof style>) => onPatch({ typography: patch });
+  return (
+    <Section title="Typography">
+      <CommitInput
+        label="Text"
+        value={mixedValue(items, 'text') ? '' : first.text}
+        placeholder="Mixed"
+        onCommit={(text) => {
+          if (!textBridge) onPatch({ text, runs: undefined });
+          else
+            for (const item of items) {
+              const engine = textBridge(item.id);
+              engine.dispatch(
+                canvasTextReplacement(engine.state, text, undefined, item.typography),
+              );
+            }
+        }}
+      />
+      <label className="ep-field">
+        Font family
+        <select
+          aria-label="Font family"
+          value={mixedStyle('fontFamily') ? '' : (style.fontFamily ?? 'Arial, sans-serif')}
+          onChange={(e) => typography({ fontFamily: e.target.value })}
+        >
+          {mixedStyle('fontFamily') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          <option>Arial, sans-serif</option>
+          <option>Georgia, serif</option>
+          <option>monospace</option>
+        </select>
+      </label>
+      <TypographyMetrics items={items} typography={typography} />
+      <div className="inline-actions">
+        {(['bold', 'italic', 'underline', 'list'] as const).map((k) => (
+          <button
+            key={k}
+            aria-pressed={mixedStyle(k) ? 'mixed' : (style[k] ?? false)}
+            onClick={() => typography({ [k]: mixedStyle(k) || !style[k] })}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
+      <ColorField
+        label="Text color"
+        value={mixedStyle('color') ? 'Mixed' : (style.color ?? '#253044')}
+        onChange={(color) => typography({ color })}
+      />
+      <TextLayoutFields items={items} typography={typography} />
+    </Section>
+  );
+}
+function ImageCropEditor(props: {
+  first: Drawing;
+  crop: ImageCrop;
+  onCrop(crop: ImageCrop | undefined): void;
+  onPatch(patch: InspectorPatch): void;
+}) {
+  const { first, crop } = props;
+  return (
+    <div>
+      <p>Crop adjustment — apply to commit</p>
+      <img
+        alt="Crop preview"
+        style={{
+          width: '100%',
+          maxHeight: 180,
+          objectFit: 'contain',
+          background: '#e8edf5',
+        }}
+        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawingSvg([{ ...first, crop, rotation: 0 }], first.bounds))}`}
+      />
+      {(['x', 'y', 'scale'] as const).map((k) => (
+        <CommitInput
+          key={k}
+          label={`Crop ${k}`}
+          type="number"
+          min={k === 'scale' ? 0.1 : undefined}
+          step={k === 'scale' ? 0.1 : 1}
+          value={crop[k]}
+          onCommit={(v) => props.onCrop({ ...crop, [k]: Number(v) })}
+        />
+      ))}
+      <button
+        onClick={() => {
+          props.onPatch({ crop });
+          props.onCrop(undefined);
+        }}
+      >
+        Apply crop
+      </button>
+      <button onClick={() => props.onCrop(undefined)}>Cancel crop</button>
+    </div>
+  );
+}
+function ImageSection(props: {
+  items: Drawing[];
+  crop?: ImageCrop;
+  onCrop(crop: ImageCrop | undefined): void;
+  onPatch(patch: InspectorPatch): void;
+  onReplace?: (file: File) => void;
+}) {
+  const { items, crop, onCrop, onPatch } = props;
+  const first = items[0],
+    mixed = (key: keyof Drawing) => mixedValue(items, key);
+  return (
+    <Section title="Image">
+      <CommitInput
+        label="Image alt text"
+        value={mixed('alt') ? '' : (first.alt ?? '')}
+        placeholder="Mixed"
+        onCommit={(alt) => onPatch({ alt })}
+      />
+      <label className="ep-field">
+        Image fit
+        <select
+          aria-label="Image fit"
+          value={mixed('imageFit') ? '' : (first.imageFit ?? 'fill')}
+          onChange={(e) => onPatch({ imageFit: e.target.value as 'fit' | 'fill' })}
+        >
+          {mixed('imageFit') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          <option value="fit">Fit entire image</option>
+          <option value="fill">Fill and crop</option>
+        </select>
+      </label>
+      <label className="ep-field">
+        Replace image
+        <input
+          type="file"
+          aria-label="Replace image file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) props.onReplace?.(f);
+          }}
+        />
+      </label>
+      <button onClick={() => onCrop(first.crop ?? { x: 0, y: 0, scale: 1 })}>Crop image</button>
+      {crop && <ImageCropEditor first={first} crop={crop} onCrop={onCrop} onPatch={onPatch} />}
+      <button
+        onClick={() =>
+          onPatch({
+            crop: { x: 0, y: 0, scale: 1 },
+            flipX: false,
+            flipY: false,
+            imageFit: 'fit',
+          })
+        }
+      >
+        Reset image
+      </button>
+    </Section>
+  );
+}
 export function VisualInspector({
   items,
   onPatch,
@@ -371,352 +791,34 @@ export function VisualInspector({
 }) {
   const [ratio, setRatio] = useState(false);
   const textBridge = useContext(CanvasTextContext);
-  const [crop, setCrop] = useState<{ x: number; y: number; scale: number }>();
+  const [crop, setCrop] = useState<ImageCrop>();
   if (!items.length)
     return (
       <p className="hint">
         Select an object to edit its appearance. Double-click text to edit on the canvas.
       </p>
     );
-  const first = items[0],
-    mixed = (key: keyof Drawing) =>
-      items.some((i) => JSON.stringify(i[key]) !== JSON.stringify(first[key]));
-  const style = first.typography ?? {};
-  const mixedStyle = (key: keyof typeof style) =>
-    items.some((item) => item.typography?.[key] !== style[key]);
-  const typography = (patch: Partial<typeof style>) => onPatch({ typography: patch });
   return (
     <>
-      <Section title={`${items.length} selected · Geometry`}>
-        <div className="ep-fields">
-          {(['x', 'y', 'width', 'height'] as const).map((k) => (
-            <CommitInput
-              key={k}
-              label={`Element ${k}`}
-              type="number"
-              min={k === 'width' || k === 'height' ? 1 : undefined}
-              value={
-                items.some((i) => i.bounds[k] !== first.bounds[k])
-                  ? ''
-                  : Math.round(first.bounds[k] * 100) / 100
-              }
-              placeholder="Mixed"
-              onCommit={(v) => {
-                const patch: Partial<Bounds> = { [k]: Number(v) };
-                if (ratio && k === 'width')
-                  patch.height = (first.bounds.height * Number(v)) / first.bounds.width;
-                if (ratio && k === 'height')
-                  patch.width = (first.bounds.width * Number(v)) / first.bounds.height;
-                onGeometry(patch);
-              }}
-            />
-          ))}
-        </div>
-        <label>
-          <input type="checkbox" checked={ratio} onChange={(e) => setRatio(e.target.checked)} />{' '}
-          Lock aspect ratio
-        </label>
-        <CommitInput
-          label="Rotation (°)"
-          type="number"
-          value={mixed('rotation') ? '' : (first.rotation ?? 0)}
-          placeholder="Mixed"
-          onCommit={(v) => onPatch({ rotation: Number(v) % 360 })}
-        />
-        <p className="hint">
-          Coordinates and dimensions in px. Positive sizes; negative positions allowed. Blank or
-          invalid numbers are cancelled.
-        </p>
-      </Section>
-      <Section title="Appearance">
-        <ColorField
-          label="Fill"
-          value={mixed('fill') ? 'Mixed' : first.fill}
-          onChange={(fill) => onPatch({ fill })}
-        />
-        <ColorField
-          label="Stroke"
-          value={mixed('stroke') ? 'Mixed' : (first.stroke ?? '#5b6472')}
-          onChange={(stroke) => onPatch({ stroke })}
-        />
-        <div className="ep-fields">
-          <CommitInput
-            label="Stroke width (px)"
-            type="number"
-            min={0}
-            value={mixed('strokeWidth') ? '' : (first.strokeWidth ?? 1)}
-            placeholder="Mixed"
-            onCommit={(v) => onPatch({ strokeWidth: Number(v) })}
-          />
-          <CommitInput
-            label="Opacity (%)"
-            type="number"
-            min={0}
-            max={100}
-            value={mixed('opacity') ? '' : Math.round((first.opacity ?? 1) * 100)}
-            onCommit={(v) => onPatch({ opacity: Number(v) / 100 })}
-          />
-          <CommitInput
-            label="Corner radius (px)"
-            type="number"
-            min={0}
-            value={mixed('radius') ? '' : (first.radius ?? 0)}
-            placeholder="Mixed"
-            onCommit={(v) => onPatch({ radius: Number(v) })}
-          />
-          <label className="ep-field">
-            Dash
-            <select
-              aria-label="Stroke dash"
-              value={mixed('dash') ? 'mixed' : (first.dash ?? '')}
-              onChange={(e) => onPatch({ dash: e.target.value })}
-            >
-              {mixed('dash') && (
-                <option value="mixed" disabled>
-                  Mixed
-                </option>
-              )}
-              <option value="">Solid</option>
-              <option value="8 4">Dashed</option>
-              <option value="2 3">Dotted</option>
-            </select>
-          </label>
-        </div>
-      </Section>
+      <GeometrySection
+        items={items}
+        ratio={ratio}
+        onRatio={setRatio}
+        onPatch={onPatch}
+        onGeometry={onGeometry}
+      />
+      <AppearanceSection items={items} onPatch={onPatch} />
       {items.every((i) => i.kind !== 'image' && i.kind !== 'chart' && i.kind !== 'table') && (
-        <Section title="Typography">
-          <CommitInput
-            label="Text"
-            value={mixed('text') ? '' : first.text}
-            placeholder="Mixed"
-            onCommit={(text) => {
-              if (!textBridge) onPatch({ text, runs: undefined });
-              else
-                for (const item of items) {
-                  const engine = textBridge(item.id);
-                  engine.dispatch(
-                    canvasTextReplacement(engine.state, text, undefined, item.typography),
-                  );
-                }
-            }}
-          />
-          <label className="ep-field">
-            Font family
-            <select
-              aria-label="Font family"
-              value={mixedStyle('fontFamily') ? '' : (style.fontFamily ?? 'Arial, sans-serif')}
-              onChange={(e) => typography({ fontFamily: e.target.value })}
-            >
-              {mixedStyle('fontFamily') && (
-                <option value="" disabled>
-                  Mixed
-                </option>
-              )}
-              <option>Arial, sans-serif</option>
-              <option>Georgia, serif</option>
-              <option>monospace</option>
-            </select>
-          </label>
-          <div className="ep-fields">
-            <CommitInput
-              label="Font size (px)"
-              type="number"
-              min={8}
-              max={300}
-              value={mixedStyle('fontSize') ? '' : (style.fontSize ?? 28)}
-              placeholder="Mixed"
-              onCommit={(v) => typography({ fontSize: Number(v) })}
-            />
-            <CommitInput
-              label="Line height"
-              type="number"
-              min={0.5}
-              max={4}
-              step={0.1}
-              value={mixedStyle('lineHeight') ? '' : (style.lineHeight ?? 1.3)}
-              placeholder="Mixed"
-              onCommit={(v) => typography({ lineHeight: Number(v) })}
-            />
-            <CommitInput
-              label="Letter spacing (px)"
-              type="number"
-              value={mixedStyle('letterSpacing') ? '' : (style.letterSpacing ?? 0)}
-              placeholder="Mixed"
-              onCommit={(v) => typography({ letterSpacing: Number(v) })}
-            />
-            <CommitInput
-              label="Padding (px)"
-              type="number"
-              min={0}
-              value={mixedStyle('padding') ? '' : (style.padding ?? 4)}
-              placeholder="Mixed"
-              onCommit={(v) => typography({ padding: Number(v) })}
-            />
-          </div>
-          <div className="inline-actions">
-            {(['bold', 'italic', 'underline', 'list'] as const).map((k) => (
-              <button
-                key={k}
-                aria-pressed={mixedStyle(k) ? 'mixed' : (style[k] ?? false)}
-                onClick={() => typography({ [k]: mixedStyle(k) || !style[k] })}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-          <ColorField
-            label="Text color"
-            value={mixedStyle('color') ? 'Mixed' : (style.color ?? '#253044')}
-            onChange={(color) => typography({ color })}
-          />
-          <label className="ep-field">
-            Text alignment
-            <select
-              aria-label="Text alignment"
-              value={mixedStyle('align') ? '' : (style.align ?? 'left')}
-              onChange={(e) => typography({ align: e.target.value as 'left' | 'center' | 'right' })}
-            >
-              {mixedStyle('align') && (
-                <option value="" disabled>
-                  Mixed
-                </option>
-              )}
-              {['left', 'center', 'right'].map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </select>
-          </label>
-          <label className="ep-field">
-            Vertical alignment
-            <select
-              aria-label="Vertical alignment"
-              value={mixedStyle('verticalAlign') ? '' : (style.verticalAlign ?? 'top')}
-              onChange={(e) =>
-                typography({ verticalAlign: e.target.value as 'top' | 'middle' | 'bottom' })
-              }
-            >
-              {mixedStyle('verticalAlign') && (
-                <option value="" disabled>
-                  Mixed
-                </option>
-              )}
-              {['top', 'middle', 'bottom'].map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </select>
-          </label>
-          <label className="ep-field">
-            Text overflow
-            <select
-              aria-label="Text overflow"
-              value={mixedStyle('overflow') ? '' : (style.overflow ?? 'clip')}
-              onChange={(e) =>
-                typography({ overflow: e.target.value as 'clip' | 'expand' | 'fit' })
-              }
-            >
-              {mixedStyle('overflow') && (
-                <option value="" disabled>
-                  Mixed
-                </option>
-              )}
-              {['clip', 'expand', 'fit'].map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </select>
-          </label>
-          <p className="hint">
-            Clip keeps the box; expand draws beyond it; fit reduces font size to 8 px minimum. All
-            outputs share these rules.
-          </p>
-        </Section>
+        <TypographySection items={items} textBridge={textBridge} onPatch={onPatch} />
       )}
       {imageEditing && items.every((i) => i.kind === 'image') && (
-        <Section title="Image">
-          <CommitInput
-            label="Image alt text"
-            value={mixed('alt') ? '' : (first.alt ?? '')}
-            placeholder="Mixed"
-            onCommit={(alt) => onPatch({ alt })}
-          />
-          <label className="ep-field">
-            Image fit
-            <select
-              aria-label="Image fit"
-              value={mixed('imageFit') ? '' : (first.imageFit ?? 'fill')}
-              onChange={(e) => onPatch({ imageFit: e.target.value as 'fit' | 'fill' })}
-            >
-              {mixed('imageFit') && (
-                <option value="" disabled>
-                  Mixed
-                </option>
-              )}
-              <option value="fit">Fit entire image</option>
-              <option value="fill">Fill and crop</option>
-            </select>
-          </label>
-          <label className="ep-field">
-            Replace image
-            <input
-              type="file"
-              aria-label="Replace image file"
-              accept="image/png,image/jpeg,image/webp"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onReplace?.(f);
-              }}
-            />
-          </label>
-          <button onClick={() => setCrop(first.crop ?? { x: 0, y: 0, scale: 1 })}>
-            Crop image
-          </button>
-          {crop && (
-            <div>
-              <p>Crop adjustment — apply to commit</p>
-              <img
-                alt="Crop preview"
-                style={{
-                  width: '100%',
-                  maxHeight: 180,
-                  objectFit: 'contain',
-                  background: '#e8edf5',
-                }}
-                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawingSvg([{ ...first, crop, rotation: 0 }], first.bounds))}`}
-              />
-              {(['x', 'y', 'scale'] as const).map((k) => (
-                <CommitInput
-                  key={k}
-                  label={`Crop ${k}`}
-                  type="number"
-                  min={k === 'scale' ? 0.1 : undefined}
-                  step={k === 'scale' ? 0.1 : 1}
-                  value={crop[k]}
-                  onCommit={(v) => setCrop({ ...crop, [k]: Number(v) })}
-                />
-              ))}
-              <button
-                onClick={() => {
-                  onPatch({ crop });
-                  setCrop(undefined);
-                }}
-              >
-                Apply crop
-              </button>
-              <button onClick={() => setCrop(undefined)}>Cancel crop</button>
-            </div>
-          )}
-          <button
-            onClick={() =>
-              onPatch({
-                crop: { x: 0, y: 0, scale: 1 },
-                flipX: false,
-                flipY: false,
-                imageFit: 'fit',
-              })
-            }
-          >
-            Reset image
-          </button>
-        </Section>
+        <ImageSection
+          items={items}
+          crop={crop}
+          onCrop={setCrop}
+          onPatch={onPatch}
+          onReplace={onReplace}
+        />
       )}
     </>
   );

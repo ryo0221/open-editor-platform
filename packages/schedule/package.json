@@ -1,0 +1,26 @@
+{
+  "name": "@editor-platform/schedule",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./model": "./src/model.ts",
+    "./history": "./src/history.ts",
+    "./host": "./src/host.ts",
+    "./mock-host": "./src/mock-host.ts",
+    "./view": "./src/view.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/time-axis": "*",
+    "lucide-react": "1.51.0"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

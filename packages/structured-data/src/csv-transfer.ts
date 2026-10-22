@@ -5,6 +5,7 @@ import {
   parseCell,
   parseCsvText,
   validateData,
+  type CsvImportOptions,
   type DataRow,
   type StructuredData,
 } from './model';
@@ -51,8 +52,9 @@ export function previewCsvAppend(
   header = true,
   targets: Record<number, string> = {},
   rowIds: string[] = [],
+  options: CsvImportOptions = {},
 ) {
-  const parsed = parseCsvText(source);
+  const parsed = parseCsvText(source, options);
   const names = header
     ? (parsed[0] ?? [])
     : (parsed[0] ?? []).map((_, index) => `Column ${index + 1}`);

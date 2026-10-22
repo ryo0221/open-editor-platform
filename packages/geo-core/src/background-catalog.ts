@@ -75,49 +75,129 @@ const budget = {
   features: 10000,
   vertices: 500000,
 };
+const text = (v: unknown, max: number): v is string =>
+  typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+const url = (v: unknown) => {
+  if (!text(v, 512)) return false;
+  try {
+    const parsed = new URL(v);
+    return ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password;
+  } catch {
+    return false;
+  }
+};
+const validDescriptor = (value: unknown): value is GeoBackgroundCatalogEntry =>
+  record(value) &&
+  id(value.id) &&
+  id(value.version) &&
+  hash(value.hash) &&
+  text(value.label, 128) &&
+  text(value.attribution, 180) &&
+  url(value.sourceUrl) &&
+  url(value.licenseUrl) &&
+  Object.hasOwn(value, 'data');
+interface OwnedEntry {
+  id: unknown;
+  version: unknown;
+  hash: unknown;
+  value: GeoBackgroundCatalogEntry | null;
+}
+function ownEntry(entry: unknown): OwnedEntry {
+  // Read only plain own pin values so even a rejected descriptor can be diagnosed
+  // without invoking metadata accessors. The complete accepted entry is then owned.
+  const own = (key: string): unknown =>
+    entry && typeof entry === 'object'
+      ? Object.getOwnPropertyDescriptor(entry, key)?.value
+      : undefined;
+  const pin = { id: own('id'), version: own('version'), hash: own('hash') };
+  try {
+    const value: unknown = JSON.parse(checkedJson(entry, budget));
+    if (!validDescriptor(value)) throw Error('Invalid boundary catalog descriptor');
+    return { ...pin, value };
+  } catch {
+    return { ...pin, value: null };
+  }
+}
+interface BoundaryPack {
+  schemaVersion: number;
+  id: string;
+  version: string;
+  scale: number;
+  features: number[][][][];
+}
+/** Delta-encoded integer ring to absolute longitude/latitude positions. */
+function decodeRing(deltas: unknown, scale: number): Position[] {
+  if (!Array.isArray(deltas) || deltas.length % 2 || deltas.length > budget.vertices * 2)
+    throw Error('Invalid boundary ring');
+  let x = 0,
+    y = 0;
+  const points: Position[] = [];
+  for (let i = 0; i < deltas.length; i += 2) {
+    if (!Number.isSafeInteger(deltas[i]) || !Number.isSafeInteger(deltas[i + 1]))
+      throw Error('Invalid boundary delta');
+    x += deltas[i];
+    y += deltas[i + 1];
+    points.push([x / scale, y / scale]);
+  }
+  return points;
+}
+/** Verifies the pinned hash, decodes every polygon and checks it as a native layer. */
+function decodeEntry(entry: GeoBackgroundCatalogEntry): readonly Geometry[] {
+  checkedJson(entry.data, budget);
+  if ('sha256:' + bytesToHex(sha256(canonicalJson(entry.data))) !== entry.hash)
+    throw Error('Boundary dataset hash mismatch');
+  const pack = entry.data as BoundaryPack;
+  if (
+    pack.schemaVersion !== 1 ||
+    pack.id !== entry.id ||
+    pack.version !== entry.version ||
+    pack.scale !== 1000000 ||
+    !Array.isArray(pack.features) ||
+    pack.features.length > budget.features
+  )
+    throw Error('Invalid boundary dataset');
+  const geometries = pack.features.map(
+    (polygons): Geometry => ({
+      type: 'MultiPolygon',
+      coordinates: polygons.map((rings) => rings.map((deltas) => decodeRing(deltas, pack.scale))),
+    }),
+  );
+  assertGeo(
+    {
+      schemaVersion: 1,
+      sources: [],
+      layers: [
+        {
+          id: 'background',
+          name: entry.label,
+          crs: 'OGC:CRS84',
+          axis: 'longitude-latitude',
+          fields: [],
+          features: geometries.map((geometry, i) => ({
+            id: 'boundary-' + i,
+            rowId: 'boundary-' + i,
+            values: {},
+            geometry,
+          })),
+        },
+      ],
+    },
+    budget,
+  );
+  return deepFreeze(geometries);
+}
 /** Trusted bundled code only, no fetch or dynamic code. An exact missing/corrupt pin never follows latest. */
 export function createGeoBackgroundCatalog(entries: readonly GeoBackgroundCatalogEntry[]) {
-  const owned = entries.map((entry) => {
-    // Read only plain own pin values so even a rejected descriptor can be diagnosed
-    // without invoking metadata accessors. The complete accepted entry is then owned.
-    const own = (key: string): unknown =>
-      entry && typeof entry === 'object'
-        ? Object.getOwnPropertyDescriptor(entry, key)?.value
-        : undefined;
-    const pin = { id: own('id'), version: own('version'), hash: own('hash') };
-    try {
-      const value: unknown = JSON.parse(checkedJson(entry, budget));
-      const text = (v: unknown, max: number): v is string =>
-        typeof v === 'string' && v.trim().length > 0 && v.length <= max;
-      const url = (v: unknown) => {
-        if (!text(v, 512)) return false;
-        try {
-          const parsed = new URL(v);
-          return (
-            ['http:', 'https:'].includes(parsed.protocol) && !parsed.username && !parsed.password
-          );
-        } catch {
-          return false;
-        }
-      };
-      if (
-        !record(value) ||
-        !id(value.id) ||
-        !id(value.version) ||
-        !hash(value.hash) ||
-        !text(value.label, 128) ||
-        !text(value.attribution, 180) ||
-        !url(value.sourceUrl) ||
-        !url(value.licenseUrl) ||
-        !Object.hasOwn(value, 'data')
-      )
-        throw Error('Invalid boundary catalog descriptor');
-      return { ...pin, value: value as unknown as GeoBackgroundCatalogEntry };
-    } catch {
-      return { ...pin, value: null };
-    }
-  });
+  const owned = entries.map(ownEntry);
   const cache = new Map<GeoBackgroundCatalogEntry, readonly Geometry[]>();
+  const geometriesOf = (entry: GeoBackgroundCatalogEntry) => {
+    let geometries = cache.get(entry);
+    if (!geometries) {
+      geometries = decodeEntry(entry);
+      cache.set(entry, geometries);
+    }
+    return geometries;
+  };
   return (settings: readonly GeoBackgroundSetting[]): GeoBackgroundResolution => {
     assertGeoBackgroundSettings(settings);
     const layers: GeoBackgroundResolution['layers'][number][] = [],
@@ -136,84 +216,12 @@ export function createGeoBackgroundCatalog(entries: readonly GeoBackgroundCatalo
       try {
         const entry = candidate.value;
         if (!entry) throw Error('Invalid boundary catalog descriptor');
-        let geometries = cache.get(entry);
-        if (!geometries) {
-          checkedJson(entry.data, budget);
-          if ('sha256:' + bytesToHex(sha256(canonicalJson(entry.data))) !== entry.hash)
-            throw Error('Boundary dataset hash mismatch');
-          const pack = entry.data as {
-            schemaVersion: number;
-            id: string;
-            version: string;
-            scale: number;
-            features: number[][][][];
-          };
-          if (
-            pack.schemaVersion !== 1 ||
-            pack.id !== entry.id ||
-            pack.version !== entry.version ||
-            pack.scale !== 1000000 ||
-            !Array.isArray(pack.features) ||
-            pack.features.length > budget.features
-          )
-            throw Error('Invalid boundary dataset');
-          geometries = pack.features.map(
-            (polygons): Geometry => ({
-              type: 'MultiPolygon',
-              coordinates: polygons.map((rings) =>
-                rings.map((deltas) => {
-                  if (
-                    !Array.isArray(deltas) ||
-                    deltas.length % 2 ||
-                    deltas.length > budget.vertices * 2
-                  )
-                    throw Error('Invalid boundary ring');
-                  let x = 0,
-                    y = 0;
-                  const points: Position[] = [];
-                  for (let i = 0; i < deltas.length; i += 2) {
-                    if (!Number.isSafeInteger(deltas[i]) || !Number.isSafeInteger(deltas[i + 1]))
-                      throw Error('Invalid boundary delta');
-                    x += deltas[i];
-                    y += deltas[i + 1];
-                    points.push([x / pack.scale, y / pack.scale]);
-                  }
-                  return points;
-                }),
-              ),
-            }),
-          );
-          assertGeo(
-            {
-              schemaVersion: 1,
-              sources: [],
-              layers: [
-                {
-                  id: 'background',
-                  name: entry.label,
-                  crs: 'OGC:CRS84',
-                  axis: 'longitude-latitude',
-                  fields: [],
-                  features: geometries.map((geometry, i) => ({
-                    id: 'boundary-' + i,
-                    rowId: 'boundary-' + i,
-                    values: {},
-                    geometry,
-                  })),
-                },
-              ],
-            },
-            budget,
-          );
-          deepFreeze(geometries);
-          cache.set(entry, geometries);
-        }
         layers.push({
           setting: { ...setting },
           attribution: entry.attribution,
           licenseUrl: entry.licenseUrl,
           sourceUrl: entry.sourceUrl,
-          geometries,
+          geometries: geometriesOf(entry),
         });
       } catch (error) {
         diagnostics.push({

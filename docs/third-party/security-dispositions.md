@@ -90,3 +90,13 @@ These statements do not certify third-party freedom from all vulnerabilities,
 patents or license obligations. Browser cases and emitted dependency inventory
 are part of the candidate's recorded verification, not presumed completed by
 this document.
+
+## 2026-10-22 tooling updates
+
+Vitest and its existing dependency family are pinned to 4.1.12 for
+GHSA-qxg6-89mg-rqv8 and GHSA-xp26-3454-mjgp. These are test/development
+dependencies; the public security gate includes them. Office verification tooling
+uses Pillow 13.0.0 and Python >=3.11 for the 12.3.0 advisories fixed by that release.
+Pillow is used by image-fixture and rendered-Office audit scripts, not browser
+runtime code. Existing approved image/Office bytes and third-party notices are
+preserved. This does not certify untrusted input processing or other software.

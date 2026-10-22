@@ -72,6 +72,8 @@ function hasReusableAdapter(kind: string, content: Content) {
     kind !== 'structured-graph' &&
     kind !== 'geo' &&
     kind !== 'animation' &&
+    kind !== 'schedule' &&
+    kind !== 'cad' &&
     !(isDeck(content) && hasSlideAnimations(content))
   );
 }

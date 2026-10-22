@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { type StructuredData, type DataRow, displayCell } from './model';
+import { axisTicks, rangeLength } from '@editor-platform/time-axis';
 import { utcDay, dayString, moveDates, type TimelineConfig } from './views';
 export function Timeline({
   data,
@@ -41,11 +42,8 @@ export function Timeline({
       (valid.length ? Math.min(...valid.map((e) => e.start!)) - 2 : utcDay('2026-01-01')!),
     end =
       utcDay(config.to) ?? (valid.length ? Math.max(...valid.map((e) => e.end!)) + 2 : start + 30),
-    range = Math.max(1, end - start + 1),
-    step = Math.max(
-      config.scale === 'day' ? 1 : config.scale === 'week' ? 7 : 30,
-      Math.ceil(range / 18),
-    ),
+    axis = { start, end },
+    range = rangeLength(axis),
     group = data.columns.find((c) => c.id === config.group),
     groups = [
       ...new Set(
@@ -100,9 +98,9 @@ export function Timeline({
       </div>
       <div className="ep-timeline-axis">
         <div />
-        {Array.from({ length: Math.ceil(range / step) }, (_, i) => (
-          <span key={i} style={{ left: `calc(180px + (100% - 180px) * ${(i * step) / range})` }}>
-            {dayString(start + i * step).slice(5)}
+        {axisTicks(axis, config.scale).map((tick) => (
+          <span key={tick.day} style={{ left: `calc(180px + (100% - 180px) * ${tick.offset})` }}>
+            {tick.label}
           </span>
         ))}
       </div>

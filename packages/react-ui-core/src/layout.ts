@@ -34,29 +34,39 @@ export function styleProblem(
       /^(?:1fr(?: 1fr){0,11}|repeat\((?:[1-9]|1[0-2]), minmax\(0, 1fr\)\))$/.test(value.value)
       ? undefined
       : 'Only bounded equal fractional grid tracks are supported';
-  if (value.kind === 'token') {
-    if (!environment.tokens || !Object.hasOwn(environment.tokenVariables, value.tokenId))
-      return 'Token or its Host CSS variable is missing';
-    const token = resolveTokens(environment.tokens.payload, { artifactMode: environment.tokenMode })
-      .tokens[value.tokenId];
-    if (!token || token.type !== tokenType(property))
-      return 'Token type does not match CSS property';
-    // Native dimension tokens may be negative. Size/gap/padding/radius cannot be negative.
-    if (
-      token.type === 'dimension' &&
-      typeof token.value === 'object' &&
-      !Array.isArray(token.value) &&
-      'value' in token.value &&
-      typeof token.value.value === 'number' &&
-      token.value.value < 0 &&
-      !['margin', 'top', 'left'].includes(property)
-    )
-      return 'Negative token dimension is unsupported for this property';
-    return;
-  }
+  if (value.kind === 'token') return tokenProblem(environment, property, value.tokenId);
   if (environment.stylePolicy === 'tokens-only')
     return 'Host requires a design token for this visual value';
-  const literal = value.value;
+  return literalProblem(property, value.value);
+}
+const signedProperties = ['margin', 'top', 'left'];
+function tokenProblem(
+  environment: ReactEnvironment,
+  property: ReactUiStyleProperty,
+  tokenId: string,
+): string | undefined {
+  if (!environment.tokens || !Object.hasOwn(environment.tokenVariables, tokenId))
+    return 'Token or its Host CSS variable is missing';
+  const token = resolveTokens(environment.tokens.payload, { artifactMode: environment.tokenMode })
+    .tokens[tokenId];
+  if (!token || token.type !== tokenType(property)) return 'Token type does not match CSS property';
+  // Native dimension tokens may be negative. Size/gap/padding/radius cannot be negative.
+  if (
+    token.type === 'dimension' &&
+    typeof token.value === 'object' &&
+    !Array.isArray(token.value) &&
+    'value' in token.value &&
+    typeof token.value.value === 'number' &&
+    token.value.value < 0 &&
+    !signedProperties.includes(property)
+  )
+    return 'Negative token dimension is unsupported for this property';
+  return;
+}
+function literalProblem(
+  property: ReactUiStyleProperty,
+  literal: string | number,
+): string | undefined {
   if (property === 'color' || property === 'backgroundColor')
     return typeof literal === 'string' && /^#[a-fA-F0-9]{6}(?:[a-fA-F0-9]{2})?$/.test(literal)
       ? undefined
@@ -75,9 +85,12 @@ export function styleProblem(
   if (typeof literal === 'number')
     return Number.isFinite(literal) &&
       Math.abs(literal) <= 10000 &&
-      (literal >= 0 || ['margin', 'top', 'left'].includes(property))
+      (literal >= 0 || signedProperties.includes(property))
       ? undefined
       : 'Unsupported dimension literal';
+  return dimensionProblem(property, literal);
+}
+function dimensionProblem(property: ReactUiStyleProperty, literal: string): string | undefined {
   if (
     ['width', 'height', 'minWidth', 'maxWidth', 'margin', 'top', 'left'].includes(property) &&
     literal === 'auto'
@@ -85,9 +98,6 @@ export function styleProblem(
     return;
   if (!/^-?(?:\d+(?:\.\d+)?)(?:px|rem|em|%)$/.test(literal)) return 'Unsupported dimension syntax';
   const dimension = Number.parseFloat(literal);
-  if (
-    Math.abs(dimension) > 10000 ||
-    (dimension < 0 && !['margin', 'top', 'left'].includes(property))
-  )
+  if (Math.abs(dimension) > 10000 || (dimension < 0 && !signedProperties.includes(property)))
     return 'Dimension is outside the supported range';
 }

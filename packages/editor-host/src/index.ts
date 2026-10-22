@@ -207,6 +207,22 @@ export class ArtifactEditor<T> {
   get artifact() {
     return clone(this.persisted);
   }
+  /** Current draft content, revision and history without building a snapshot (hot paths). */
+  get content(): T {
+    return this.session.content;
+  }
+  get revision(): LocalDraftRevision {
+    return this.session.revision;
+  }
+  get readOnly() {
+    return !this.mayEdit();
+  }
+  get canUndo() {
+    return this.capabilities.undo && this.session.canUndo;
+  }
+  get canRedo() {
+    return this.capabilities.undo && this.session.canRedo;
+  }
   get snapshot(): HostSnapshot<T> {
     const content = this.session.content;
     return {
@@ -217,9 +233,9 @@ export class ArtifactEditor<T> {
       savedRevision: this.savedRevision,
       dirty: canonicalJson(content) !== canonicalJson(this.persisted.draft.content),
       saving: this.saving,
-      readOnly: !this.mayEdit(),
-      canUndo: this.capabilities.undo && this.session.canUndo,
-      canRedo: this.capabilities.undo && this.session.canRedo,
+      readOnly: this.readOnly,
+      canUndo: this.canUndo,
+      canRedo: this.canRedo,
       selection: clone(this.selection),
     };
   }

@@ -113,63 +113,81 @@ export interface ReactRegistrationDifference {
   before?: RegisteredReactComponent;
   after?: RegisteredReactComponent;
 }
+type CandidateSnapshot = ReturnType<typeof readReactRegistrationCandidates>;
+function candidateMap(input: CandidateSnapshot) {
+  const result = new Map<string, RegisteredReactComponent>();
+  for (const c of input.candidates) {
+    const key = JSON.stringify([c.proposed.ref.registryId, c.proposed.ref.componentId]);
+    if (result.has(key))
+      throw Error('Select one exact version per component identity before comparison');
+    result.set(key, c.proposed);
+  }
+  return result;
+}
+function propChangeReasons(
+  old: RegisteredReactComponent,
+  next: RegisteredReactComponent,
+  reasons: string[],
+) {
+  for (const prop of keys(old.props, next.props)) {
+    const x = old.props[prop],
+      y = next.props[prop];
+    if (x && !y) reasons.push('prop-removed:' + prop);
+    else if (y && (!x || !x.required) && y.required && !Object.hasOwn(y, 'default'))
+      reasons.push('prop-required:' + prop);
+    if (x && y && !schemaAssignable(x.schema, y.schema)) reasons.push('prop-narrowed:' + prop);
+    if (x && y && !equal(x.default, y.default)) reasons.push('default-changed:' + prop);
+  }
+}
+function changedRegistrationReasons(
+  old: RegisteredReactComponent,
+  next: RegisteredReactComponent,
+  reasons: string[],
+) {
+  if (old.ref.version === next.ref.version) reasons.push('immutable-version-rewritten');
+  if (old.ref.implementationHash !== next.ref.implementationHash)
+    reasons.push('implementation-changed:review-required');
+  if (!equal(old.import, next.import)) reasons.push('import-changed');
+  if (old.layout !== next.layout) reasons.push('layout-changed');
+  if (!equal(old.requires, next.requires)) reasons.push('dependencies-changed');
+  if (!equal(old.controlledInputs, next.controlledInputs)) reasons.push('controlled-input-changed');
+  propChangeReasons(old, next, reasons);
+  for (const event of keys(old.events, next.events))
+    if (!equal(old.events[event], next.events[event])) reasons.push('event-changed:' + event);
+  for (const slot of keys(old.slots, next.slots))
+    if (!equal(old.slots[slot], next.slots[slot])) reasons.push('slot-changed:' + slot);
+}
+function registrationDifference(
+  old: RegisteredReactComponent | undefined,
+  next: RegisteredReactComponent | undefined,
+): ReactRegistrationDifference {
+  const reasons: string[] = [];
+  if (!next) reasons.push('component-removed');
+  if (old && next) changedRegistrationReasons(old, next, reasons);
+  const identity = (next ?? old)!.ref;
+  return {
+    identity: { registryId: identity.registryId, componentId: identity.componentId },
+    kind: !old ? 'added' : !next ? 'removed' : 'changed',
+    breaking: reasons.length > 0,
+    reasons,
+    ...(old ? { before: old } : {}),
+    ...(next ? { after: next } : {}),
+  };
+}
 /** One explicitly selected version per identity in each snapshot; never guesses latest. */
 export function diffReactRegistrationCandidates(before: unknown, after: unknown) {
   const a = readReactRegistrationCandidates(before),
     b = readReactRegistrationCandidates(after);
   if (a.diagnostics.length || b.diagnostics.length)
     throw Error('Resolve registration candidate diagnostics before comparison');
-  const map = (input: typeof a) => {
-    const result = new Map<string, RegisteredReactComponent>();
-    for (const c of input.candidates) {
-      const key = JSON.stringify([c.proposed.ref.registryId, c.proposed.ref.componentId]);
-      if (result.has(key))
-        throw Error('Select one exact version per component identity before comparison');
-      result.set(key, c.proposed);
-    }
-    return result;
-  };
-  const am = map(a),
-    bm = map(b),
+  const am = candidateMap(a),
+    bm = candidateMap(b),
     changes: ReactRegistrationDifference[] = [];
   for (const key of [...new Set([...am.keys(), ...bm.keys()])].sort()) {
     const old = am.get(key),
       next = bm.get(key);
     if (equal(old, next)) continue;
-    const reasons: string[] = [];
-    if (!next) reasons.push('component-removed');
-    if (old && next) {
-      if (old.ref.version === next.ref.version) reasons.push('immutable-version-rewritten');
-      if (old.ref.implementationHash !== next.ref.implementationHash)
-        reasons.push('implementation-changed:review-required');
-      if (!equal(old.import, next.import)) reasons.push('import-changed');
-      if (old.layout !== next.layout) reasons.push('layout-changed');
-      if (!equal(old.requires, next.requires)) reasons.push('dependencies-changed');
-      if (!equal(old.controlledInputs, next.controlledInputs))
-        reasons.push('controlled-input-changed');
-      for (const prop of keys(old.props, next.props)) {
-        const x = old.props[prop],
-          y = next.props[prop];
-        if (x && !y) reasons.push('prop-removed:' + prop);
-        else if (y && (!x || !x.required) && y.required && !Object.hasOwn(y, 'default'))
-          reasons.push('prop-required:' + prop);
-        if (x && y && !schemaAssignable(x.schema, y.schema)) reasons.push('prop-narrowed:' + prop);
-        if (x && y && !equal(x.default, y.default)) reasons.push('default-changed:' + prop);
-      }
-      for (const event of keys(old.events, next.events))
-        if (!equal(old.events[event], next.events[event])) reasons.push('event-changed:' + event);
-      for (const slot of keys(old.slots, next.slots))
-        if (!equal(old.slots[slot], next.slots[slot])) reasons.push('slot-changed:' + slot);
-    }
-    const identity = (next ?? old)!.ref;
-    changes.push({
-      identity: { registryId: identity.registryId, componentId: identity.componentId },
-      kind: !old ? 'added' : !next ? 'removed' : 'changed',
-      breaking: reasons.length > 0,
-      reasons,
-      ...(old ? { before: old } : {}),
-      ...(next ? { after: next } : {}),
-    });
+    changes.push(registrationDifference(old, next));
   }
   return deepFreeze({
     beforeSourceRevision: a.sourceRevision,

@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -47,9 +49,14 @@ import {
   isStaticSlide,
   type HostContent,
 } from './model';
+import { isCadDocument } from '@editor-platform/cad-core';
+import type { CadKernelBuild } from '@editor-platform/cad-kernel-occt';
 import { compileProject } from './compiler';
 import { PreviewFrame } from './PreviewFrame';
 import './host.css';
+
+// Three.js and the kernel adapter load only when a CAD artifact opens.
+const CadArtifactView = lazy(() => import('./cad'));
 
 function compileDesignPreview(content: DesignContent, files: Record<string, string>) {
   const pages = content.web?.pages;
@@ -71,6 +78,7 @@ const labels: Record<string, string> = {
   design: 'React / Design',
   code: 'Code (Host拡張)',
   data: 'Data / Kanban',
+  cad: '3D CAD',
 };
 export interface HostAppProps {
   samples: Artifact<HostContent>[];
@@ -79,15 +87,21 @@ export interface HostAppProps {
   accessAdapter?: HostAccessAdapter;
   codeSurface?(host: ArtifactEditor<HostContent>): ReactNode;
   header?: ReactNode;
+  /** Verified CAD kernel build; without it CAD artifacts stay readable but cannot evaluate. */
+  cadKernel?: CadKernelBuild | null;
 }
 function EditorView({
   host,
   previewDocument,
   codeSurface,
+  cadKernel,
+  onError,
 }: {
   host: ArtifactEditor<HostContent>;
   previewDocument: string;
   codeSurface?: HostAppProps['codeSurface'];
+  cadKernel?: CadKernelBuild | null;
+  onError(error: unknown): void;
 }) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   useEffect(() => host.attach(refresh), [host]);
@@ -164,6 +178,12 @@ function EditorView({
       codeSurface(host)
     ) : (
       <CodeView host={host} previewDocument={previewDocument} />
+    );
+  if (host.artifact.kind === 'cad' && isCadDocument(content))
+    return (
+      <Suspense fallback={<p>3D CADを読み込んでいます…</p>}>
+        <CadArtifactView host={host} kernel={cadKernel ?? null} onError={onError} />
+      </Suspense>
     );
   return <p role="alert">このnative contentを表示できません。</p>;
 }
@@ -297,6 +317,7 @@ export function HostApp({
   accessAdapter,
   codeSurface,
   header,
+  cadKernel,
 }: HostAppProps) {
   const [artifacts, setArtifactState] = useState(samples),
     [active, setActive] = useState<string>(),
@@ -829,6 +850,8 @@ export function HostApp({
                   host={host}
                   previewDocument={previewDocument}
                   codeSurface={codeSurface}
+                  cadKernel={cadKernel}
+                  onError={fail}
                 />
               </EditorExportGuardContext.Provider>
             </EditorUncommittedInputContext.Provider>

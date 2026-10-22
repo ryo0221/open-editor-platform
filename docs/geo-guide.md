@@ -100,3 +100,6 @@ versions/4MiB without automatic deletion. Playground Data captures retain at mos
 hash conflicts refuse opening/saving/export without deleting the stored artifact.
 Back up native JSON before updates; restoring the matching application revision
 and importing that JSON preserves its original IDs and retained versions.
+
+Behavior-preserving refactor measurements and differential checks are recorded in
+the Geo refactor verification record.

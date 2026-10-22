@@ -61,6 +61,55 @@ function freeze<T>(value: T): T {
   return value;
 }
 
+function ownDecision(decision: unknown, limits: ImportLimits): ImportDecision {
+  checkedJson(decision, limits.native);
+  const keys = record(decision) ? Object.keys(decision).length : 0;
+  const valid =
+    record(decision) &&
+    (decision.mode === 'all'
+      ? keys === 1
+      : decision.mode === 'partial' &&
+        keys === 2 &&
+        Array.isArray(decision.excludedRows) &&
+        decision.excludedRows.every((n) => Number.isSafeInteger(n) && n > 0));
+  if (!valid) throw new Error('import-decision');
+  return structuredClone(decision as ImportDecision);
+}
+const samePin = (pin: unknown, expected: Pin) =>
+  record(pin) &&
+  Object.keys(pin).length === 3 &&
+  ['artifactId', 'versionId', 'contentHash'].every((k) => Object.hasOwn(pin, k)) &&
+  pin.artifactId === expected.artifactId &&
+  pin.versionId === expected.versionId &&
+  pin.contentHash === expected.contentHash;
+/**
+ * Binary bytes use intrinsic typed-array access; the material object itself must
+ * contain exactly two enumerable own data properties, never getter accessors.
+ */
+function materialBytes(material: unknown, expectedPin: Pin, limits: ImportLimits): unknown {
+  if (!record(material) || Reflect.ownKeys(material).length !== 2)
+    throw new Error('source-material');
+  const bytes = Object.getOwnPropertyDescriptor(material, 'bytes');
+  const pin = Object.getOwnPropertyDescriptor(material, 'pin');
+  if (!bytes?.enumerable || !('value' in bytes) || !pin?.enumerable || !('value' in pin))
+    throw new Error('source-material');
+  checkedJson(pin.value, limits.native);
+  if (!samePin(pin.value, expectedPin)) throw new Error('source-pin-changed');
+  return bytes.value;
+}
+/** A partial import must exclude exactly the rows that carry error diagnostics, in order. */
+function assertPartialSelection(choice: ImportDecision, plan: ImportPreview['plan']) {
+  if (choice.mode !== 'partial') return;
+  const excluded = plan.candidates
+    .filter((c) => c.diagnostics.some((d) => d.severity === 'error'))
+    .map((c) => c.inputRow);
+  if (
+    choice.excludedRows.length !== excluded.length ||
+    choice.excludedRows.some((n, i) => n !== excluded[i])
+  )
+    throw new Error('partial-selection-mismatch');
+}
+
 /** Ephemeral, bounded preparation registry. No durable storage/resource closure claim. */
 export function createGeoImporter(options: ImportLimits) {
   checkedJson(options.native, options.native);
@@ -142,44 +191,9 @@ export function createGeoImporter(options: ImportLimits) {
       const stored = plans.get(preview.request.planId);
       if (!stored || typeof stored === 'symbol' || stored.sealed !== encoded)
         throw new Error('preview-changed-or-unknown');
-      checkedJson(decision, limits.native);
-      if (
-        !record(decision) ||
-        !['all', 'partial'].includes(decision.mode as string) ||
-        (decision.mode === 'all'
-          ? Object.keys(decision).length !== 1
-          : Object.keys(decision).length !== 2 ||
-            !Array.isArray(decision.excludedRows) ||
-            !decision.excludedRows.every((n) => Number.isSafeInteger(n) && n > 0))
-      )
-        throw new Error('import-decision');
-      const choice = structuredClone(decision);
-      // Binary bytes use intrinsic typed-array access; the material object itself must
-      // contain exactly two enumerable own data properties, never getter accessors.
-      if (!record(material) || Reflect.ownKeys(material).length !== 2)
-        throw new Error('source-material');
-      const bytesDescriptor = Object.getOwnPropertyDescriptor(material, 'bytes');
-      const pinDescriptor = Object.getOwnPropertyDescriptor(material, 'pin');
-      if (
-        !bytesDescriptor?.enumerable ||
-        !('value' in bytesDescriptor) ||
-        !pinDescriptor?.enumerable ||
-        !('value' in pinDescriptor)
-      )
-        throw new Error('source-material');
-      checkedJson(pinDescriptor.value, limits.native);
-      const pin = pinDescriptor.value as unknown;
-      const expectedPin = stored.preview.request.source.pin;
-      if (
-        !record(pin) ||
-        Object.keys(pin).length !== 3 ||
-        !['artifactId', 'versionId', 'contentHash'].every((k) => Object.hasOwn(pin, k)) ||
-        pin.artifactId !== expectedPin.artifactId ||
-        pin.versionId !== expectedPin.versionId ||
-        pin.contentHash !== expectedPin.contentHash
-      )
-        throw new Error('source-pin-changed');
-      const bytes = copyBytes(bytesDescriptor.value, limits.sourceBytes);
+      const choice = ownDecision(decision, limits);
+      const sourceBytes = materialBytes(material, stored.preview.request.source.pin, limits);
+      const bytes = copyBytes(sourceBytes, limits.sourceBytes);
       const sourceHash = await digest(bytes);
       live();
       if (plans.get(stored.preview.request.planId) !== stored) throw new Error('preview-released');
@@ -193,15 +207,7 @@ export function createGeoImporter(options: ImportLimits) {
         expected.sequence !== ctx.revision.sequence
       )
         throw new Error('stale-preview');
-      const excluded = stored.preview.plan.candidates
-        .filter((c) => c.diagnostics.some((d) => d.severity === 'error'))
-        .map((c) => c.inputRow);
-      if (
-        choice.mode === 'partial' &&
-        (choice.excludedRows.length !== excluded.length ||
-          choice.excludedRows.some((n, i) => n !== excluded[i]))
-      )
-        throw new Error('partial-selection-mismatch');
+      assertPartialSelection(choice, stored.preview.plan);
       const confirmed = confirmImport(
         stored.preview.plan,
         expected,

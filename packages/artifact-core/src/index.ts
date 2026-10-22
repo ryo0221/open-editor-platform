@@ -22,6 +22,19 @@ export interface ArtifactDraft<T> {
   updatedAt: string;
 }
 export interface Provenance {
+  /** A copied draft starts a new Artifact lineage; this is not a version parent edge. */
+  migration?: {
+    converter: string;
+    sourceArtifactId: ArtifactId;
+    sourceBaseVersionId: VersionId | null;
+    sourceContentHash: string;
+    targetContentHash: string;
+    sourceSchema: string;
+    targetSchema: string;
+    sourceReaderPin?: string;
+    targetReaderPin?: string;
+    converterPin?: string;
+  };
   template?: { id: string; version: number; hash: string; requestId: string; fingerprint: string };
   source: 'created' | 'imported';
   officeImport?: {

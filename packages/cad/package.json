@@ -1,0 +1,25 @@
+{
+  "name": "@editor-platform/cad",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./controller": "./src/controller.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/cad-kernel-occt": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "react-dom": "19.1.1"
+  }
+}

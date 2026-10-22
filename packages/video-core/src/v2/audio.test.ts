@@ -47,7 +47,146 @@ function audioFixtureV1(): VideoContentV1 {
     },
   };
 }
+function linkedFixtureV2() {
+  const old = audioFixtureV1();
+  old.sources[0].streams.push({
+    id: 'video',
+    kind: 'video',
+    timebase: time(1, 600),
+    startPts: 0,
+    endPts: 6000,
+    presentationOrigin: time(3),
+  });
+  old.sequence.tracks.push({ id: 'visual', kind: 'visual', enabled: true, locked: false });
+  old.sequence.clips[0].linkGroupId = 'linked';
+  old.sequence.clips.push({
+    id: 'picture',
+    kind: 'video',
+    sourceId: 'source',
+    streamId: 'video',
+    trackId: 'visual',
+    start: time(1),
+    duration: time(4),
+    sourceIn: time(4),
+    sourceOut: time(8),
+    rate: time(1),
+    linkGroupId: 'linked',
+  });
+  old.sequence.tracks.push({ id: 'other-track', kind: 'audio', enabled: true, locked: false });
+  old.sequence.clips.push({
+    ...old.sequence.clips[0],
+    id: 'other',
+    trackId: 'other-track',
+  });
+  delete old.sequence.clips[2].linkGroupId;
+  let v = adoptVideoContentV2(old);
+  v = videoCommandV2({ type: 'gain', clipId: 'clip', gain: 0.8 }).apply(v);
+  v = videoCommandV2({ type: 'fade', clipId: 'clip', fadeIn: time(2), fadeOut: time(2) }).apply(v);
+  return videoCommandV2({ type: 'gain', clipId: 'other', gain: 0.25 }).apply(v);
+}
 describe('explicit native v2 audio effects', () => {
+  it('keeps linked split effects, unrelated identity and independent trim through Undo/Redo', () => {
+    const input = linkedFixtureV2(),
+      before = structuredClone(input),
+      session = new EditorSession(input);
+    session.execute(
+      videoCommandV2({
+        type: 'split',
+        clipId: 'picture',
+        at: time(25001, 10000),
+        rightIds: { picture: 'picture-right', clip: 'audio-right' },
+        rightLinkGroupId: 'right',
+      }),
+    );
+    const split = structuredClone(session.content);
+    expect(split.sequence.clips.map((c) => c.id)).toEqual([
+      'clip',
+      'picture',
+      'other',
+      'audio-right',
+      'picture-right',
+    ]);
+    for (const id of ['clip', 'audio-right']) {
+      const clip = split.sequence.clips.find((c) => c.id === id)!;
+      expect(clip).toMatchObject({
+        gain: 0.8,
+        fade: before.sequence.clips[0].kind === 'audio' ? before.sequence.clips[0].fade : undefined,
+      });
+      expect(clip.linkGroupId).toBe(id === 'clip' ? 'linked' : 'right');
+      if (clip.kind !== 'audio') throw Error();
+      // Source time is sequence time + 3; these independent values straddle the split.
+      expect(audioGainAtV2(clip, id === 'clip' ? time(2) : time(4))).toBe(0.4);
+    }
+    session.execute(
+      videoCommandV2({
+        type: 'trim',
+        clipId: 'audio-right',
+        start: time(3),
+        end: time(9, 2),
+        independent: true,
+      }),
+    );
+    const trimmed = structuredClone(session.content);
+    expect(trimmed.sequence.clips.find((c) => c.id === 'picture-right')).toEqual(
+      split.sequence.clips.find((c) => c.id === 'picture-right'),
+    );
+    expect(trimmed.sequence.clips.find((c) => c.id === 'other')).toEqual(
+      before.sequence.clips.find((c) => c.id === 'other'),
+    );
+    const audio = trimmed.sequence.clips.find((c) => c.id === 'audio-right')!;
+    if (audio.kind !== 'audio') throw Error();
+    expect(audio).toMatchObject({
+      start: time(3),
+      duration: time(3, 2),
+      sourceIn: time(6),
+      sourceOut: time(15, 2),
+    });
+    expect(audioGainAtV2(audio, time(4))).toBe(0.4);
+    session.undo();
+    expect(session.content).toEqual(split);
+    session.undo();
+    expect(session.content).toEqual(before);
+    session.redo();
+    expect(session.content).toEqual(split);
+    session.redo();
+    expect(session.content).toEqual(trimmed);
+    expect(input).toEqual(before);
+  });
+  it.each(['locked-peer', 'colliding-id', 'missing-id'])(
+    'rejects linked split %s without changing pending Redo',
+    (fault) => {
+      const input = linkedFixtureV2();
+      if (fault === 'locked-peer')
+        input.sequence.tracks.find((t) => t.id === 'visual')!.locked = true;
+      const session = new EditorSession(input);
+      session.execute(videoCommandV2({ type: 'gain', clipId: 'other', gain: 0.5 }));
+      const future = structuredClone(session.content);
+      session.undo();
+      const before = structuredClone(session.content),
+        revision = session.revision;
+      const rightIds: Record<string, string> = { clip: 'audio-right', picture: 'picture-right' };
+      if (fault === 'colliding-id') rightIds.clip = 'other';
+      if (fault === 'missing-id') delete rightIds.picture;
+      expect(() =>
+        session.execute(
+          videoCommandV2({
+            type: 'split',
+            clipId: 'clip',
+            at: time(25001, 10000),
+            rightIds,
+            rightLinkGroupId: 'right',
+          }),
+        ),
+      ).toThrow();
+      expect(session.content).toEqual(before);
+      expect(session.revision).toEqual(revision);
+      session.redo();
+      expect(session.content).toEqual(future);
+      session.undo();
+      expect(session.content).toEqual(before);
+    },
+  );
+
   it('adopts explicitly without changing old bytes and refuses cross-version readers', () => {
     const old = audioFixtureV1(),
       bytes = JSON.stringify(old),

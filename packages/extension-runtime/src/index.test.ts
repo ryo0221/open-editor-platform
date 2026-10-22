@@ -243,6 +243,145 @@ describe('draft extension boundary', () => {
     replacement.uninstall();
     expect(() => replacement.open(host)).toThrow('revoked');
   });
+  it('explicitly restores an older package pin without rewriting content or history', () => {
+    const { registry, definition, registration, handle, host, session } = fixture();
+    handle.api.execute(setCounter(4));
+    handle.api.execute(setCounter(7));
+    handle.api.undo();
+    const before = {
+      content: structuredClone(session.content),
+      revision: session.revision,
+      undo: session.canUndo,
+      redo: session.canRedo,
+    };
+    const cleanup = vi.fn();
+    const nextHash = `sha256:${'2'.repeat(64)}`;
+    const next = registry.install(
+      {
+        ...definition,
+        manifest: { ...definition.manifest, version: '0.0.2', packageHash: nextHash },
+        mount: () => cleanup,
+      },
+      { ...admission, verifiedPackageHash: nextHash, replace: true },
+    );
+    const nextHandle = next.open(host);
+    nextHandle.mount({} as HTMLElement);
+    expect(handle.api.read).toThrow('revoked');
+    const restored = registry.install(definition, { ...admission, replace: true });
+    expect(restored.manifest.version).toBe('0.0.1');
+    expect(restored.manifest.packageHash).toBe(hash);
+    expect(nextHandle.api.read).toThrow('revoked');
+    expect(cleanup).toHaveBeenCalledOnce();
+    registration.uninstall();
+    next.uninstall();
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(() => registry.install(definition, admission)).toThrow('Already installed');
+    const reopened = restored.open(host);
+    expect(reopened.api.read()).toEqual(before.content);
+    expect({
+      content: session.content,
+      revision: session.revision,
+      undo: session.canUndo,
+      redo: session.canRedo,
+    }).toEqual(before);
+    reopened.api.redo();
+    expect(session.content.value).toBe(7);
+    reopened.api.undo();
+    expect(session.content).toEqual(before.content);
+    restored.uninstall();
+    expect(reopened.api.read).toThrow('revoked');
+    expect(() => restored.open(host)).toThrow('revoked');
+    const fresh = registry.install(definition, admission);
+    expect(fresh.open(host).api.read()).toEqual(before.content);
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+  it('rejects a mismatched schema after replacement and reopens the original schema after pin restore', () => {
+    const { registry, definition, registration, handle, host, session } = fixture();
+    handle.api.execute(setCounter(4));
+    const before = structuredClone(session.content);
+    const revision = session.revision;
+    const nextHash = `sha256:${'2'.repeat(64)}`;
+    const next = registry.install(
+      {
+        ...definition,
+        manifest: {
+          ...definition.manifest,
+          version: '0.0.2',
+          packageHash: nextHash,
+          schemaVersion: 2,
+        },
+      },
+      { ...admission, verifiedPackageHash: nextHash, replace: true },
+    );
+    expect(handle.api.read).toThrow('revoked');
+    expect(() => next.open(host)).toThrow('kind/schema');
+    expect(session.content).toEqual(before);
+    expect(session.revision).toEqual(revision);
+    const restored = registry.install(definition, { ...admission, replace: true });
+    registration.uninstall();
+    next.uninstall();
+    expect(restored.open(host).api.read()).toEqual(before);
+    expect(session.revision).toEqual(revision);
+    expect(session.canUndo).toBe(true);
+  });
+  it.each([
+    ['packageHash', `sha256:${'2'.repeat(64)}`, 'Package hash mismatch', hash],
+    [
+      'packageHash',
+      `sha256:${'2'.repeat(64)}`,
+      'Immutable package version hash conflict',
+      `sha256:${'2'.repeat(64)}`,
+    ],
+    ['artifactKind', 'different.counter', 'Artifact kind cannot change', hash],
+    ['contractVersion', '1.0.0', 'Unsupported contract version', hash],
+  ] as const)(
+    'failed replacement with changed %s=%s (%s) preserves mounted handles and history',
+    (field, value, error, verifiedPackageHash) => {
+      const { registry, definition, host, session } = fixture();
+      const cleanup = vi.fn();
+      const current = registry.install(
+        { ...definition, mount: () => cleanup },
+        { ...admission, replace: true },
+      );
+      const handle = current.open(host);
+      handle.mount({} as HTMLElement);
+      handle.api.execute(setCounter(4));
+      handle.api.execute(setCounter(7));
+      handle.api.undo();
+      const before = {
+        content: structuredClone(session.content),
+        revision: session.revision,
+        undo: session.canUndo,
+        redo: session.canRedo,
+      };
+      expect(() =>
+        registry.install(
+          { ...definition, manifest: { ...definition.manifest, [field]: value } },
+          { ...admission, verifiedPackageHash, replace: true },
+        ),
+      ).toThrow(error);
+      expect(cleanup).not.toHaveBeenCalled();
+      expect(handle.api.read()).toEqual(before.content);
+      expect(current.open(host).api.read()).toEqual(before.content);
+      expect({
+        content: session.content,
+        revision: session.revision,
+        undo: session.canUndo,
+        redo: session.canRedo,
+      }).toEqual(before);
+      // Retained closures alone cannot prove the registry still owns this entry.
+      expect(() => registry.install(definition, admission)).toThrow('Already installed');
+      expect(cleanup).not.toHaveBeenCalled();
+      handle.api.redo();
+      expect(session.content.value).toBe(7);
+      current.uninstall();
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(handle.api.read).toThrow('revoked');
+      expect(() => current.open(host)).toThrow('revoked');
+      const fresh = registry.install(definition, admission);
+      expect(fresh.open(host).api.read().value).toBe(7);
+    },
+  );
   it('checks kind, schema and content before opening', () => {
     const { registration, host } = fixture();
     expect(() => registration.open({ ...host, artifactKind: 'video' })).toThrow('kind/schema');

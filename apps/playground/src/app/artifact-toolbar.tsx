@@ -30,8 +30,10 @@ const templateExcludedKinds = [
   'structured-graph',
   'geo',
   'animation',
+  'schedule',
+  'cad',
 ];
-const nonNativeKinds = ['react-ui', 'structured-graph', 'geo', 'animation'];
+const nonNativeKinds = ['react-ui', 'structured-graph', 'geo', 'animation', 'schedule', 'cad'];
 
 export interface HistoryControls {
   undoDisabled: boolean;
@@ -298,7 +300,8 @@ export function MoreActionsMenu({
     onStartShared &&
     !hasUnsupportedSharedAnimation(active) &&
     active.kind !== 'structured-graph' &&
-    active.kind !== 'geo';
+    active.kind !== 'geo' &&
+    active.kind !== 'cad';
   return (
     <Menu label="More artifact actions" icon={MoreHorizontal} align="right">
       <div className="mobile-history-actions">
@@ -329,7 +332,7 @@ export function MoreActionsMenu({
 
       {active.kind !== 'animation' && (
         <button
-          disabled={active.kind === 'structured-graph'}
+          disabled={active.kind === 'structured-graph' || active.kind === 'cad'}
           aria-expanded={inspector}
           onClick={onToggleInspector}
         >

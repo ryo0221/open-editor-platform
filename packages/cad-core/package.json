@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/cad-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@noble/hashes": "1.8.0"
+  }
+}

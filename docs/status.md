@@ -35,3 +35,19 @@
 - CI/Actionsの実行は停止中です。[CI運用](repository-assets.md)に従い必要な検証をローカルで行います。
 - 公開snapshot・配布への反映は個別に確認します。コードの実装やoverlayの更新だけで、利用中のplugin pin・配布版が更新されたとは扱いません。
 - snapshotの収録と貢献の扱いは[CONTRIBUTING](../CONTRIBUTING.md)、公開の条件は[OSS Preview gate](release/OSS-PREVIEW-GATE.md)を参照してください。
+
+## 試験的な実装と未受入の範囲
+
+- CAD の model・Surface・参照Host source を収録していますが、D0 kernel配布条件と
+  D1の製品受け入れは未達です。OCCT/OpenCascade.js の binary は同梱せず、通常の
+  buildではkernelは利用できません。`CAD_OCCT_DIST` は開発用の明示的な外部入力です。
+  再現build・512 MiB上限・第三者noticeと対応sourceの提供条件が揃うまで、kernel配布や
+  CADの動作保証を行いません。
+- Video の WebM/Opus 実験は機能gateが FAIL/BLOCKED（16/16）のままです。codec採用・
+  通常Hostへの配布・別環境での受け入れを意味しません。private build入力を指定しない
+  通常buildでは追加Video runtimeは無効で、実験用の外部依存・生成runtimeは同梱しません。
+- Extension の Counter loader はHostが組み立てた信頼済みの固定graphだけを扱います。
+  pin検証は未信頼コードの隔離を保証せず、任意pluginの実行を許可する仕組みではありません。
+  独立Editorへの追加ライセンス許諾はdraftのままで、有効な例外ではありません。
+- Schedule の source も収録されていますが、公開側での製品受け入れ・外部サービス接続を
+  保証しません。参照Hostとドメインごとの明示的な対応範囲を区別してください。

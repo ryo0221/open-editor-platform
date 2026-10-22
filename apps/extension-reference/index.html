@@ -13,6 +13,9 @@
       padding: 16px;
       color: #173047;
     }
+    #pin {
+      overflow-wrap: anywhere;
+    }
     button {
       margin: 4px;
     }
@@ -21,6 +24,29 @@
     <h1>Extension prototype</h1>
     <label><input id="readonly" type="checkbox" />Read-only</label
     ><button id="reload">Reload saved draft</button><button id="uninstall">Uninstall</button>
+    <p>
+      Switch bundled fixture packages while keeping this draft and its history. The Host verifies
+      the bundled code against its build-time hashes before loading it. These are local fixture
+      packages, not third-party downloads. Switching does not migrate or restore document versions.
+    </p>
+    <p id="pin" aria-label="Installed fixture"></p>
+    <button id="install-v2">Install fixture 0.0.2</button>
+    <button id="restore-v1">Restore fixture 0.0.1</button>
+    <fieldset>
+      <legend>Document versions</legend>
+      <button id="save-document-version">Save document version</button>
+      <button id="load-document-versions">Load document versions</button>
+      <label
+        >Saved version
+        <select id="document-version"></select
+      ></label>
+      <button id="restore-document-version">Restore as new draft</button>
+      <p>
+        Restoring a document starts a new local edit history. It keeps saved versions and the
+        installed fixture unchanged. Use Save to save the draft, or Save document version to create
+        another version.
+      </p>
+    </fieldset>
     <main id="surface"></main>
     <p id="status" role="status"></p>
     <script type="module" src="/src/main.ts"></script>

@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/cad": "*",
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/cad-kernel-occt": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-host": "*",
     "@editor-platform/editor-ui": "*",

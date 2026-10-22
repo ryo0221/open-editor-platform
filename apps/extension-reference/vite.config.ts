@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
+import { bundledCounterPlugin } from './bundled-counter-build';
 import { fileURLToPath } from 'node:url';
 export default defineConfig({
+  plugins: [bundledCounterPlugin()],
   root: fileURLToPath(new URL('.', import.meta.url)),
   build: {
     outDir: '../../work/extension-reference',

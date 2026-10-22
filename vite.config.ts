@@ -4,9 +4,16 @@ import { officeMermaidHtml } from './scripts/dev/office-mermaid-html.mjs';
 import { fileURLToPath } from 'node:url';
 import { privateVideoBuild } from './scripts/dev/private-video.mjs';
 import { dependencySecurity } from './scripts/dev/dependency-security.mjs';
+import { cadDevelopmentKernel } from './scripts/dev/cad-kernel.mjs';
 export default defineConfig({
   root: 'apps/playground',
-  plugins: [react(), officeMermaidHtml(), privateVideoBuild(), dependencySecurity()],
+  plugins: [
+    react(),
+    officeMermaidHtml(),
+    privateVideoBuild(),
+    dependencySecurity(),
+    cadDevelopmentKernel(),
+  ],
   worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },
   // Resolve sanitizer/math dependencies separately so the existing public security pins
   // apply to emitted Mermaid code instead of upstream's bundled older copies.
@@ -53,6 +60,10 @@ export default defineConfig({
         ),
         graphHost: fileURLToPath(new URL('./apps/playground/graph-host.html', import.meta.url)),
         embed: fileURLToPath(new URL('./apps/playground/embed.html', import.meta.url)),
+        cadHost: fileURLToPath(new URL('./apps/playground/cad-host.html', import.meta.url)),
+        scheduleHost: fileURLToPath(
+          new URL('./apps/playground/schedule-host.html', import.meta.url),
+        ),
         officeMermaid: fileURLToPath(
           new URL('./apps/playground/office-mermaid.html', import.meta.url),
         ),

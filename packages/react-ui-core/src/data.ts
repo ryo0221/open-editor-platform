@@ -30,74 +30,96 @@ export function isRetainableReactData(raw: unknown): boolean {
     !!raw && typeof raw === 'object' && isDeepFrozen(raw) && dataBudgets.get(raw)?.plain === true
   );
 }
+/** Running value/exotic-array counts, the active ancestor set and the addressed key path. */
+interface DataWalk {
+  count: number;
+  exoticArrays: number;
+  active: Set<object>;
+  parts: string[];
+}
+const dataAddress = (state: DataWalk) =>
+  '$' + (state.parts.length ? '.' + state.parts.join('.') : '');
 export function checkData(raw: unknown): void {
-  let count = 0;
-  let exoticArrays = 0;
-  const active = new Set<object>();
-  const parts: string[] = [];
-  const address = () => '$' + (parts.length ? '.' + parts.join('.') : '');
-  const walk = (value: unknown, depth: number): number => {
-    const cached = value && typeof value === 'object' ? dataBudgets.get(value) : undefined;
-    if (cached) {
-      if (!cached.plain) exoticArrays++;
-      count += cached.count;
-      if (count > reactUiLimits.values || depth + cached.depth > reactUiLimits.jsonDepth)
-        reject('data-limit', address(), 'JSON value/depth limit exceeded');
-      return cached.depth;
-    }
-    const beforeCount = count;
-    const beforeExotic = exoticArrays;
-    if (++count > reactUiLimits.values || depth > reactUiLimits.jsonDepth)
-      reject('data-limit', address(), 'JSON value/depth limit exceeded');
-    if (value === null || typeof value === 'string' || typeof value === 'boolean') return 0;
-    if (typeof value === 'number' && Number.isFinite(value)) return 0;
-    if (!value || typeof value !== 'object' || (!Array.isArray(value) && !record(value)))
-      reject('data-json', address(), 'Only plain, finite JSON data is supported');
-    if (active.has(value)) reject('data-cycle', address(), 'Cyclic data is not serializable');
-    active.add(value);
-    if (Array.isArray(value) && Object.getPrototypeOf(value) !== Array.prototype) exoticArrays++;
-    let nestedDepth = 0;
-    const keys = Reflect.ownKeys(value);
-    if (Array.isArray(value) && keys.length !== value.length + 1)
-      reject('data-json', address(), 'Sparse arrays and named array properties are unsupported');
-    for (const key of keys) {
-      if (Array.isArray(value) && key === 'length') continue;
-      if (
-        typeof key !== 'string' ||
-        ['__proto__', 'prototype', 'constructor', 'toJSON'].includes(key)
-      )
-        reject('data-key', address(), 'Reserved or symbol property');
-      const desc = Object.getOwnPropertyDescriptor(value, key)!;
-      if (!('value' in desc) || !desc.enumerable)
-        reject(
-          'data-json',
-          `${address()}.${key}`,
-          'Accessors and hidden properties are unsupported',
-        );
-      if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key))
-        reject('data-json', address(), 'Named array properties are unsupported');
-      parts.push(key);
-      nestedDepth = Math.max(nestedDepth, walk(desc.value, depth + 1) + 1);
-      parts.pop();
-    }
-    active.delete(value);
-    // Certification follows descriptor validation and applies only to trees
-    // recursively frozen by artifact-core. Each occurrence still pays its full
-    // value/depth cost; the independent JSON byte checks below remain mandatory.
-    if (isDeepFrozen(value))
-      dataBudgets.set(value, {
-        count: count - beforeCount,
-        depth: nestedDepth,
-        plain: exoticArrays === beforeExotic,
-      });
-    return nestedDepth;
-  };
-  walk(raw, 0);
+  const state: DataWalk = { count: 0, exoticArrays: 0, active: new Set<object>(), parts: [] };
+  walkData(state, raw, 0);
   try {
     assertReuseJson(raw, reactUiLimits.bytes);
   } catch {
     reject('data-limit', '$', 'JSON byte/value budget exceeded');
   }
+}
+function walkCertifiedData(
+  state: DataWalk,
+  cached: { count: number; depth: number; plain: boolean },
+  depth: number,
+): number {
+  if (!cached.plain) state.exoticArrays++;
+  state.count += cached.count;
+  if (state.count > reactUiLimits.values || depth + cached.depth > reactUiLimits.jsonDepth)
+    reject('data-limit', dataAddress(state), 'JSON value/depth limit exceeded');
+  return cached.depth;
+}
+function walkData(state: DataWalk, value: unknown, depth: number): number {
+  const cached = value && typeof value === 'object' ? dataBudgets.get(value) : undefined;
+  if (cached) return walkCertifiedData(state, cached, depth);
+  const beforeCount = state.count;
+  const beforeExotic = state.exoticArrays;
+  if (++state.count > reactUiLimits.values || depth > reactUiLimits.jsonDepth)
+    reject('data-limit', dataAddress(state), 'JSON value/depth limit exceeded');
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return 0;
+  if (typeof value === 'number' && Number.isFinite(value)) return 0;
+  if (!value || typeof value !== 'object' || (!Array.isArray(value) && !record(value)))
+    reject('data-json', dataAddress(state), 'Only plain, finite JSON data is supported');
+  if (state.active.has(value))
+    reject('data-cycle', dataAddress(state), 'Cyclic data is not serializable');
+  state.active.add(value);
+  if (Array.isArray(value) && Object.getPrototypeOf(value) !== Array.prototype)
+    state.exoticArrays++;
+  const nestedDepth = walkDataChildren(state, value, depth);
+  state.active.delete(value);
+  // Certification follows descriptor validation and applies only to trees
+  // recursively frozen by artifact-core. Each occurrence still pays its full
+  // value/depth cost; the independent JSON byte checks below remain mandatory.
+  if (isDeepFrozen(value))
+    dataBudgets.set(value, {
+      count: state.count - beforeCount,
+      depth: nestedDepth,
+      plain: state.exoticArrays === beforeExotic,
+    });
+  return nestedDepth;
+}
+function walkDataChildren(state: DataWalk, value: object, depth: number): number {
+  let nestedDepth = 0;
+  const keys = Reflect.ownKeys(value);
+  if (Array.isArray(value) && keys.length !== value.length + 1)
+    reject(
+      'data-json',
+      dataAddress(state),
+      'Sparse arrays and named array properties are unsupported',
+    );
+  for (const key of keys) {
+    if (Array.isArray(value) && key === 'length') continue;
+    const field = checkedDataField(state, value, key);
+    state.parts.push(field.key);
+    nestedDepth = Math.max(nestedDepth, walkData(state, field.value, depth + 1) + 1);
+    state.parts.pop();
+  }
+  return nestedDepth;
+}
+/** Checks a key and its descriptor before the value is read. */
+function checkedDataField(state: DataWalk, value: object, key: string | symbol) {
+  if (typeof key !== 'string' || ['__proto__', 'prototype', 'constructor', 'toJSON'].includes(key))
+    reject('data-key', dataAddress(state), 'Reserved or symbol property');
+  const desc = Object.getOwnPropertyDescriptor(value, key)!;
+  if (!('value' in desc) || !desc.enumerable)
+    reject(
+      'data-json',
+      `${dataAddress(state)}.${key}`,
+      'Accessors and hidden properties are unsupported',
+    );
+  if (Array.isArray(value) && !/^(0|[1-9][0-9]*)$/.test(key))
+    reject('data-json', dataAddress(state), 'Named array properties are unsupported');
+  return { key, value: desc.value as unknown };
 }
 export function object(raw: unknown, path: string): Record<string, unknown> {
   if (!record(raw)) reject('schema', path, 'Expected a plain object');

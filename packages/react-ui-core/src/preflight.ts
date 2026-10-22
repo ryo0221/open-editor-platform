@@ -25,18 +25,46 @@ import {
   type ReactUiStyleProperty,
   type ReactValueSchema,
   type ReactRuntimeResolution,
+  type ReactUiBinding,
+  type ReactUiNode,
+  type RegisteredReactComponent,
 } from './types';
 
 const documentDiagnostics = new WeakMap<ReactUiDocument, readonly ReactUiDiagnostic[]>();
 const documentFingerprints = new WeakMap<ReactUiDocument, string>();
 
-function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
+/** Lookups and the ordered diagnostic list shared by every composition check. */
+function createInspection(document: ReactUiDocument) {
   const diagnostics: ReactUiDiagnostic[] = [];
   const add = (code: string, path: string, message: string) =>
     diagnostics.push(diagnostic(code, path, message));
-  const components = new Map(document.components.map((c) => [reactComponentKey(c.ref), c]));
-  const nodes = new Map(document.nodes.map((n) => [n.id, n]));
-  const dependencies = new Map(document.environment.dependencies.map((d) => [d.id, d]));
+  return {
+    document,
+    diagnostics,
+    add,
+    components: new Map(document.components.map((c) => [reactComponentKey(c.ref), c])),
+    nodes: new Map(document.nodes.map((n) => [n.id, n])),
+    dependencies: new Map(document.environment.dependencies.map((d) => [d.id, d])),
+    ownership: new Map<string, string>(),
+  };
+}
+type Inspection = ReturnType<typeof createInspection>;
+
+function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
+  const inspection = createInspection(document);
+  checkImportConflicts(inspection);
+  checkFixtures(inspection);
+  checkComponentDependencies(inspection);
+  document.roots.forEach((child, i) => own(inspection, child, `$.roots.${i}`));
+  for (const [index, node] of document.nodes.entries()) inspectNode(inspection, node, index);
+  for (const [index, node] of document.nodes.entries())
+    if (!inspection.ownership.has(node.id))
+      inspection.add('node-orphan', `$.nodes.${index}`, 'Node is not rooted or assigned to a slot');
+  checkSlotGraph(inspection);
+  return inspection.diagnostics;
+}
+
+function checkImportConflicts({ document, add }: Inspection) {
   const imports = new Map<string, string>();
   document.components.forEach((component, index) => {
     const key = reuseHash(component.import),
@@ -49,210 +77,274 @@ function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
       );
     else imports.set(key, component.ref.implementationHash);
   });
-  const assetCheck = (schema: ReactValueSchema, value: JsonValue, path: string) => {
-    if (value === null) return;
-    if (schema.type === 'asset' && dependencies.get(String(value))?.kind !== 'asset')
-      add('asset-missing', path, 'Image asset is not declared in the pinned environment');
-    if (schema.type === 'object' && value && typeof value === 'object' && !Array.isArray(value))
-      for (const [key, v] of Object.entries(value))
-        if (Object.hasOwn(schema.fields, key))
-          assetCheck(schema.fields[key].schema, v, `${path}.${key}`);
-    if (schema.type === 'array' && Array.isArray(value))
-      value.forEach((v, i) => assetCheck(schema.items, v, `${path}.${i}`));
-  };
+}
+
+function assetCheck(
+  inspection: Inspection,
+  schema: ReactValueSchema,
+  value: JsonValue,
+  path: string,
+): void {
+  if (value === null) return;
+  if (schema.type === 'asset' && inspection.dependencies.get(String(value))?.kind !== 'asset')
+    inspection.add('asset-missing', path, 'Image asset is not declared in the pinned environment');
+  if (schema.type === 'object' && value && typeof value === 'object' && !Array.isArray(value))
+    for (const [key, v] of Object.entries(value))
+      if (Object.hasOwn(schema.fields, key))
+        assetCheck(inspection, schema.fields[key].schema, v, `${path}.${key}`);
+  if (schema.type === 'array' && Array.isArray(value))
+    value.forEach((v, i) => assetCheck(inspection, schema.items, v, `${path}.${i}`));
+}
+
+function checkFixtures(inspection: Inspection) {
+  const { document, add } = inspection;
   for (const [key, value] of Object.entries(document.fixture))
     if (!Object.hasOwn(document.inputs, key))
       add('fixture-input', `$.fixture.${key}`, 'Fixture addresses an unknown page input');
     else if (!valueMatches(document.inputs[key].schema, value))
       add('fixture-type', `$.fixture.${key}`, 'Fixture does not match its declared input type');
-    else assetCheck(document.inputs[key].schema, value, `$.fixture.${key}`);
+    else assetCheck(inspection, document.inputs[key].schema, value, `$.fixture.${key}`);
   for (const [key, field] of Object.entries(document.inputs)) {
     if (field.required && !Object.hasOwn(field, 'default') && !Object.hasOwn(document.fixture, key))
       add('fixture-required', `$.fixture.${key}`, 'Required page input needs a preview fixture');
     if (Object.hasOwn(field, 'default'))
-      assetCheck(field.schema, field.default!, `$.inputs.${key}.default`);
+      assetCheck(inspection, field.schema, field.default!, `$.inputs.${key}.default`);
   }
-  for (const [i, component] of document.components.entries()) {
+}
+
+function checkComponentDependencies(inspection: Inspection) {
+  for (const [i, component] of inspection.document.components.entries()) {
     for (const dependency of component.requires)
-      if (!dependencies.has(dependency))
-        add(
+      if (!inspection.dependencies.has(dependency))
+        inspection.add(
           'dependency-missing',
           `$.components.${i}.requires`,
           `Runtime dependency ${dependency} is undeclared`,
         );
     for (const [key, field] of Object.entries(component.props)) {
       if (Object.hasOwn(field, 'default'))
-        assetCheck(field.schema, field.default!, `$.components.${i}.props.${key}.default`);
+        assetCheck(
+          inspection,
+          field.schema,
+          field.default!,
+          `$.components.${i}.props.${key}.default`,
+        );
       if (Object.hasOwn(component.sampleProps, key))
         assetCheck(
+          inspection,
           field.schema,
           component.sampleProps[key],
           `$.components.${i}.sampleProps.${key}`,
         );
     }
   }
-  const ownership = new Map<string, string>();
-  const own = (child: string, path: string) => {
-    if (!nodes.has(child)) add('node-missing', path, `Referenced node ${child} is missing`);
-    if (ownership.has(child))
-      add('node-parent', path, `Node ${child} already belongs to ${ownership.get(child)}`);
-    else ownership.set(child, path);
-  };
-  document.roots.forEach((child, i) => own(child, `$.roots.${i}`));
-  for (const [index, node] of document.nodes.entries()) {
-    const path = `$.nodes.${index}`,
-      component = components.get(reactComponentKey(node.component));
-    for (const [slot, children] of Object.entries(node.slots))
-      children.forEach((child, i) => own(child, `${path}.slots.${slot}.${i}`));
-    if (!component)
-      add(
-        'component-missing',
-        `${path}.component`,
-        'Exact component registration is missing; retain the reference and obtain it from Host',
-      );
-    // The map key already matches registry/component/version, and load checked
-    // all five reference fields. Compare both exact pins without hashing each
-    // reference again for every node in the composition.
-    else if (
-      component.ref.contractHash !== node.component.contractHash ||
-      component.ref.implementationHash !== node.component.implementationHash
+}
+
+function own({ add, nodes, ownership }: Inspection, child: string, path: string) {
+  if (!nodes.has(child)) add('node-missing', path, `Referenced node ${child} is missing`);
+  if (ownership.has(child))
+    add('node-parent', path, `Node ${child} already belongs to ${ownership.get(child)}`);
+  else ownership.set(child, path);
+}
+
+function inspectNode(inspection: Inspection, node: ReactUiNode, index: number) {
+  const path = `$.nodes.${index}`,
+    component = inspection.components.get(reactComponentKey(node.component));
+  for (const [slot, children] of Object.entries(node.slots))
+    children.forEach((child, i) => own(inspection, child, `${path}.slots.${slot}.${i}`));
+  if (!component)
+    inspection.add(
+      'component-missing',
+      `${path}.component`,
+      'Exact component registration is missing; retain the reference and obtain it from Host',
+    );
+  // The map key already matches registry/component/version, and load checked
+  // all five reference fields. Compare both exact pins without hashing each
+  // reference again for every node in the composition.
+  else if (
+    component.ref.contractHash !== node.component.contractHash ||
+    component.ref.implementationHash !== node.component.implementationHash
+  )
+    inspection.add(
+      'component-mismatch',
+      `${path}.component`,
+      'Component contract/implementation hash does not match the pinned registration',
+    );
+  if (component) {
+    checkNodeProps(inspection, node, component, path);
+    checkNodeBindings(inspection, node, component, path);
+    checkNodeSlots(inspection, node, component, path);
+    checkLayoutCapability(inspection, node, component, path);
+  }
+  checkNodeLayout(inspection, node, path);
+}
+
+function checkNodeProps(
+  inspection: Inspection,
+  node: ReactUiNode,
+  component: RegisteredReactComponent,
+  path: string,
+) {
+  const { add } = inspection;
+  for (const [key, value] of Object.entries(node.props)) {
+    const field = component.props[key];
+    if (!field)
+      add('prop-unknown', `${path}.props.${key}`, 'Prop is not published by this registration');
+    else if (!valueMatches(field.schema, value))
+      add('prop-type', `${path}.props.${key}`, 'Prop does not match its declared type');
+    else assetCheck(inspection, field.schema, value, `${path}.props.${key}`);
+  }
+  for (const [key, field] of Object.entries(component.props))
+    if (
+      field.required &&
+      !Object.hasOwn(field, 'default') &&
+      !Object.hasOwn(node.props, key) &&
+      !Object.hasOwn(node.bindings, key)
     )
       add(
-        'component-mismatch',
-        `${path}.component`,
-        'Component contract/implementation hash does not match the pinned registration',
+        'prop-required',
+        `${path}.props.${key}`,
+        'Required prop is missing; preview samples are not production defaults',
       );
-    if (component) {
-      for (const [key, value] of Object.entries(node.props)) {
-        const field = component.props[key];
-        if (!field)
-          add('prop-unknown', `${path}.props.${key}`, 'Prop is not published by this registration');
-        else if (!valueMatches(field.schema, value))
-          add('prop-type', `${path}.props.${key}`, 'Prop does not match its declared type');
-        else assetCheck(field.schema, value, `${path}.props.${key}`);
-      }
-      for (const [key, field] of Object.entries(component.props))
-        if (
-          field.required &&
-          !Object.hasOwn(field, 'default') &&
-          !Object.hasOwn(node.props, key) &&
-          !Object.hasOwn(node.bindings, key)
-        )
-          add(
-            'prop-required',
-            `${path}.props.${key}`,
-            'Required prop is missing; preview samples are not production defaults',
-          );
-      for (const [key, binding] of Object.entries(node.bindings)) {
-        if (Object.hasOwn(node.props, key))
-          add(
-            'binding-ownership',
-            `${path}.bindings.${key}`,
-            'A prop cannot have both a literal and a binding',
-          );
-        if (binding.kind === 'data') {
-          const input = document.inputs[binding.input],
-            prop = component.props[key];
-          const source =
-            input && (input.required || Object.hasOwn(input, 'default'))
-              ? schemaAtPath(input.schema, binding.path)
-              : undefined;
-          if (!source || !prop || !schemaAssignable(source, prop.schema))
-            add(
-              'binding-type',
-              `${path}.bindings.${key}`,
-              'Data path is missing, optional/nullable, or not assignable to this prop',
-            );
-        } else {
-          const callback = document.callbacks[binding.callback],
-            event = component.events[key];
-          if (
-            !callback ||
-            !event ||
-            event.parameters.length !== callback.parameters.length ||
-            event.parameters.some(
-              (parameter, i) => !schemaAssignable(parameter, callback.parameters[i]),
-            )
-          )
-            add(
-              'callback-type',
-              `${path}.bindings.${key}`,
-              'Emitted event arguments are not assignable to this public callback',
-            );
-        }
-      }
-      for (const pair of component.controlledInputs)
-        if (node.bindings[pair.valueProp] || node.bindings[pair.eventProp])
-          if (
-            node.bindings[pair.valueProp]?.kind !== 'data' ||
-            node.bindings[pair.eventProp]?.kind !== 'callback'
-          )
-            add(
-              'controlled-binding',
-              `${path}.bindings`,
-              'A controlled value binding requires its paired callback binding',
-            );
-      for (const slot of Object.keys(node.slots))
-        if (!Object.hasOwn(component.slots, slot))
-          add(
-            'slot-unknown',
-            `${path}.slots.${slot}`,
-            'Slot is not published by this registration',
-          );
-      for (const [key, slot] of Object.entries(component.slots)) {
-        const children = node.slots[key] ?? [];
-        if (children.length < slot.minimum || children.length > slot.maximum)
-          add(
-            'slot-count',
-            `${path}.slots.${key}`,
-            'Slot cardinality is outside its declared range',
-          );
-        for (const child of children) {
-          const target = nodes.get(child);
-          if (
-            target &&
-            !slot.accepts.some(
-              (ref) =>
-                ref.registryId === target.component.registryId &&
-                ref.componentId === target.component.componentId,
-            )
-          )
-            add(
-              'slot-component',
-              `${path}.slots.${key}`,
-              'Child component is not allowed in this slot',
-            );
-        }
-      }
+}
+
+function checkNodeBindings(
+  inspection: Inspection,
+  node: ReactUiNode,
+  component: RegisteredReactComponent,
+  path: string,
+) {
+  const { add } = inspection;
+  for (const [key, binding] of Object.entries(node.bindings)) {
+    if (Object.hasOwn(node.props, key))
+      add(
+        'binding-ownership',
+        `${path}.bindings.${key}`,
+        'A prop cannot have both a literal and a binding',
+      );
+    if (binding.kind === 'data') {
+      if (!dataBindingAssignable(inspection.document, binding, component.props[key]))
+        add(
+          'binding-type',
+          `${path}.bindings.${key}`,
+          'Data path is missing, optional/nullable, or not assignable to this prop',
+        );
+    } else if (!callbackBindingAssignable(inspection.document, binding, component.events[key]))
+      add(
+        'callback-type',
+        `${path}.bindings.${key}`,
+        'Emitted event arguments are not assignable to this public callback',
+      );
+  }
+  for (const pair of component.controlledInputs)
+    if (node.bindings[pair.valueProp] || node.bindings[pair.eventProp])
       if (
-        component.layout === 'none' &&
-        (Object.keys(node.layout.base).length ||
-          Object.values(node.layout.breakpoints).some((style) => Object.keys(style).length))
+        node.bindings[pair.valueProp]?.kind !== 'data' ||
+        node.bindings[pair.eventProp]?.kind !== 'callback'
       )
         add(
-          'layout-capability',
-          `${path}.layout`,
-          'Component does not support layout props or a registered wrapper',
+          'controlled-binding',
+          `${path}.bindings`,
+          'A controlled value binding requires its paired callback binding',
+        );
+}
+
+function dataBindingAssignable(
+  document: ReactUiDocument,
+  binding: Extract<ReactUiBinding, { kind: 'data' }>,
+  prop: RegisteredReactComponent['props'][string] | undefined,
+) {
+  const input = document.inputs[binding.input];
+  const source =
+    input && (input.required || Object.hasOwn(input, 'default'))
+      ? schemaAtPath(input.schema, binding.path)
+      : undefined;
+  return !!source && !!prop && schemaAssignable(source, prop.schema);
+}
+
+function callbackBindingAssignable(
+  document: ReactUiDocument,
+  binding: Extract<ReactUiBinding, { kind: 'callback' }>,
+  event: RegisteredReactComponent['events'][string] | undefined,
+) {
+  const callback = document.callbacks[binding.callback];
+  return (
+    !!callback &&
+    !!event &&
+    event.parameters.length === callback.parameters.length &&
+    !event.parameters.some((parameter, i) => !schemaAssignable(parameter, callback.parameters[i]))
+  );
+}
+
+function checkNodeSlots(
+  inspection: Inspection,
+  node: ReactUiNode,
+  component: RegisteredReactComponent,
+  path: string,
+) {
+  const { add, nodes } = inspection;
+  for (const slot of Object.keys(node.slots))
+    if (!Object.hasOwn(component.slots, slot))
+      add('slot-unknown', `${path}.slots.${slot}`, 'Slot is not published by this registration');
+  for (const [key, slot] of Object.entries(component.slots)) {
+    const children = node.slots[key] ?? [];
+    if (children.length < slot.minimum || children.length > slot.maximum)
+      add('slot-count', `${path}.slots.${key}`, 'Slot cardinality is outside its declared range');
+    for (const child of children) {
+      const target = nodes.get(child);
+      if (
+        target &&
+        !slot.accepts.some(
+          (ref) =>
+            ref.registryId === target.component.registryId &&
+            ref.componentId === target.component.componentId,
+        )
+      )
+        add(
+          'slot-component',
+          `${path}.slots.${key}`,
+          'Child component is not allowed in this slot',
         );
     }
-    for (const key of Object.keys(node.layout.breakpoints))
-      if (!document.breakpoints.some((bp) => bp.id === key))
-        add('layout-breakpoint', `${path}.layout.breakpoints.${key}`, 'Breakpoint is undeclared');
-    for (const [prefix, style] of [
-      ['base', node.layout.base],
-      ...Object.entries(node.layout.breakpoints).map(
-        ([key, value]) => [`breakpoints.${key}`, value] as const,
-      ),
-    ] as const)
-      for (const [key, value] of Object.entries(style)) {
-        const problem = styleProblem(document.environment, key as ReactUiStyleProperty, value);
-        if (problem) add('style-value', `${path}.layout.${prefix}.${key}`, problem);
-      }
   }
-  for (const [index, node] of document.nodes.entries())
-    if (!ownership.has(node.id))
-      add('node-orphan', `$.nodes.${index}`, 'Node is not rooted or assigned to a slot');
-  // Include disconnected subgraphs; a non-root cycle must not escape validation.
+}
+
+function checkLayoutCapability(
+  inspection: Inspection,
+  node: ReactUiNode,
+  component: RegisteredReactComponent,
+  path: string,
+) {
+  if (
+    component.layout === 'none' &&
+    (Object.keys(node.layout.base).length ||
+      Object.values(node.layout.breakpoints).some((style) => Object.keys(style).length))
+  )
+    inspection.add(
+      'layout-capability',
+      `${path}.layout`,
+      'Component does not support layout props or a registered wrapper',
+    );
+}
+
+function checkNodeLayout({ document, add }: Inspection, node: ReactUiNode, path: string) {
+  for (const key of Object.keys(node.layout.breakpoints))
+    if (!document.breakpoints.some((bp) => bp.id === key))
+      add('layout-breakpoint', `${path}.layout.breakpoints.${key}`, 'Breakpoint is undeclared');
+  for (const [prefix, style] of [
+    ['base', node.layout.base],
+    ...Object.entries(node.layout.breakpoints).map(
+      ([key, value]) => [`breakpoints.${key}`, value] as const,
+    ),
+  ] as const)
+    for (const [key, value] of Object.entries(style)) {
+      const problem = styleProblem(document.environment, key as ReactUiStyleProperty, value);
+      if (problem) add('style-value', `${path}.layout.${prefix}.${key}`, problem);
+    }
+}
+
+/** Includes disconnected subgraphs; a non-root cycle must not escape validation. */
+function checkSlotGraph({ document, add, nodes }: Inspection) {
   const active = new Set<string>(),
     visited = new Set<string>(),
     heights = new Map<string, number>();
@@ -278,7 +370,6 @@ function inspect(document: ReactUiDocument): ReactUiDiagnostic[] {
     return height;
   };
   document.nodes.forEach((node) => visit(node.id));
-  return diagnostics;
 }
 export function inspectReactUiDocument(raw: unknown): ReactUiInspection {
   try {

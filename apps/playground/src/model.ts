@@ -47,6 +47,9 @@ import {
   type WhiteboardContent,
 } from '@editor-platform/whiteboard';
 import { createDesign, isDesign, type DesignContent } from '@editor-platform/design';
+import { emptyCad, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
+export { isCadDocument };
+import cadKernelBuild from 'virtual:cad-kernel-build';
 import {
   createDeck,
   isDeck,
@@ -54,6 +57,13 @@ import {
   type SlideContent,
 } from '@editor-platform/slide';
 import { isReactUiDocument, type ReactUiDocument } from '@editor-platform/react-ui-core';
+import {
+  assertSchedule,
+  createSchedule,
+  isSchedule,
+  looksLikeSchedule,
+  type ScheduleDocument,
+} from '@editor-platform/schedule/model';
 import { createReferenceDocument } from '../../react-ui-reference/src/catalog';
 import {
   readAnimationV1,
@@ -78,7 +88,9 @@ export type Content =
   | FileContent
   | WhiteboardContent
   | DesignContent
-  | SlideContent;
+  | SlideContent
+  | ScheduleDocument
+  | CadDocument;
 export type Kind =
   | 'animation'
   | 'geo'
@@ -90,7 +102,9 @@ export type Kind =
   | 'whiteboard'
   | 'design'
   | 'slide'
-  | 'react-ui';
+  | 'react-ui'
+  | 'schedule'
+  | 'cad';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
@@ -135,7 +149,25 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
   whiteboard: { label: 'Whiteboard', icon: '◇', description: 'Connect ideas on a canvas' },
   design: { label: 'Design', icon: '▱', description: 'Compose frames and components' },
   slide: { label: 'Slide Deck', icon: '▰', description: 'Tell a visual story' },
+  schedule: {
+    label: 'Schedule',
+    icon: '◷',
+    description: 'Plan events next to the work they belong to',
+  },
+  cad: { label: '3D CAD', icon: '⬢', description: 'Model parametric solids in millimetres' },
 };
+/**
+ * The Host-supplied CAD kernel build (development OpenCascade.js while D0 is open). New CAD
+ * artifacts are offered only when one is configured; documents always name the build they need.
+ */
+export const cadKernel = cadKernelBuild;
+export const cadKernelProfile = {
+  id: 'opencascade.js-2.0.0-beta.b5ff984',
+  buildHash: cadKernelBuild?.buildHash ?? `sha256:${'0'.repeat(64)}`,
+};
+export const creatableKinds = (Object.keys(kinds) as Kind[]).filter(
+  (k) => k !== 'cad' || !!cadKernel,
+);
 export function makeArtifact(kind: Kind, count: number): StoredArtifact {
   const content: Content =
     kind === 'animation'
@@ -158,7 +190,13 @@ export function makeArtifact(kind: Kind, count: number): StoredArtifact {
                       ? createDesign()
                       : kind === 'slide'
                         ? createDeck()
-                        : createFile();
+                        : kind === 'schedule'
+                          ? createSchedule(
+                              Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                            )
+                          : kind === 'cad'
+                            ? emptyCad(cadKernelProfile)
+                            : createFile();
   return {
     ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
     annotations: [],
@@ -230,6 +268,8 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'react-ui') {
     return isReactUiDocument(content);
   }
+  if (kind === 'schedule') return isSchedule(content);
+  if (kind === 'cad') return isCadDocument(content);
   return kind === 'document'
     ? isDocument(content)
     : kind === 'data'
@@ -330,7 +370,9 @@ export function anchorState(
       ? content.elements.map((e) => e.id)
       : isWhiteboard(content)
         ? [...content.nodes, ...content.connectors, ...(content.sections ?? [])].map((e) => e.id)
-        : [];
+        : isSchedule(content)
+          ? content.events.map((e) => e.id)
+          : [];
   return ids.includes(address.elementId) ? 'Current' : 'Orphan';
 }
 
@@ -382,6 +424,15 @@ export function createLocalSession(content: Content): EditorSession<Content> {
           apply(value) {
             const next = cmd.apply(value);
             if (!validContent('geo', next)) throw Error('Invalid Geo command');
+            return next;
+          },
+        });
+      if (looksLikeSchedule(current))
+        return super.executeView({
+          ...cmd,
+          apply(value) {
+            const next = cmd.apply(value);
+            assertSchedule(next);
             return next;
           },
         });
