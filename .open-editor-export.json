@@ -12107,11 +12107,6 @@
       "mode": "100644"
     },
     {
-      "path": "scripts/tests/workflow-tables.test.mjs",
-      "sha256": "cae1dbb1576dccee3580a202b1eff3616e4faa021d04311a25b9c6d40fcbdf99",
-      "mode": "100644"
-    },
-    {
       "path": "scripts/verify-host-react-output.mjs",
       "sha256": "75009b180f139347de182411645fb74d55659cfa2421d8a7a5a5cf14168df72c",
       "mode": "100644"
