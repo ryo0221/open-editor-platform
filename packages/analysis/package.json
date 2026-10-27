@@ -1,0 +1,25 @@
+{
+  "name": "@editor-platform/analysis",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./src/host.ts",
+    "./sources": "./src/sources.ts",
+    "./references": "./src/references.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "dependencies": {
+    "@editor-platform/analysis-core": "*",
+    "@editor-platform/calculation-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/structured-data": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

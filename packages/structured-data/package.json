@@ -8,7 +8,10 @@
     "./model": "./src/model.ts",
     "./views": "./src/views.ts",
     "./session": "./src/session.ts",
-    "./charts": "./src/charts.ts"
+    "./charts": "./src/charts.ts",
+    "./proposal-diff": "./src/proposal-diff.ts",
+    "./host": "./src/host.ts",
+    "./mock-host": "./src/mock-host.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

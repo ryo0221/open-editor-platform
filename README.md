@@ -36,6 +36,11 @@ for supported domains. Editing a draft and saving an immutable version are separ
 operations. Formats, shared editing and reuse support vary by Editor.
 See [status and limits](docs/status.md) and [Surface contracts](docs/surface-semantics.md).
 
+Structured Graph is **Preview / Experimental (pre-1.0)**. Its schema and API may change
+without notice, and older formats are refused rather than migrated. Export the Graphs you
+want to keep as native JSON before updating. Changes are recorded in
+the Structured Graph change record.
+
 Import workspace packages through public `@editor-platform/*` entrypoints.
 Packages expose TypeScript source for a bundler-aware Host.
 See [embedding](docs/embedding.md), [Host integration](docs/host-integration.md)

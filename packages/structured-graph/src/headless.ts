@@ -6,6 +6,8 @@ export * from './adapter';
 export * from './reference';
 export * from './persistence';
 export * from './routing';
+export * from './shape';
+export * from './arrange';
 export {
   graphNodeSize,
   fitGraphView,

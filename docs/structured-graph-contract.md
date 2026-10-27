@@ -6,39 +6,39 @@
 
 型付きノード、関係、属性、参照整合性がnativeな意味になるため、Whiteboardの図形拡張ではなく `structured-graph` kindを追加する。同じDataレコードを見る用途はData projectionのままにする。
 
-| 部品                    | 正本・責務                                                                      | 依存境界                                                                              |
-| ----------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `structured-graph`      | schema/model/Profile検証、pure intent/command、local session、提案、Surface/CSS | artifact/editor core、neutral property inputsのみ。Data/Workflow/製品型をimportしない |
-| `structured-data`       | レコード・列・単一relation、全表示に共通の変更検証                              | Graphをimportしない                                                                   |
-| `structured-data-graph` | row/column IDからGraphへの投影とData commandへの逆変換、Data Graph view         | 両packageのpublic entrypointに依存する境界。Graph Artifactを作らない                  |
-| `property-input`        | controlled string buffer、型・選択肢・readOnly・診断の中立UI                    | 行/ノード/保存/Sessionを知らない                                                      |
-| reference Host/adapter  | 公開可能な架空Definition fixture、領域validatorへの接続、保存・layout sidecar   | Graph本体がimportしない。実Workflow Framework Adapterは利用側で作る                   |
-| Host                    | 権限、StorageAdapter、版確定/公開/採用、外部実行/AI、overlay                    | Editorは業務状態を決めない                                                            |
+| 部品                    | 正本・責務                                                                          | 依存境界                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `structured-graph`      | schema/model/Profile検証、pure intent/command、local session、提案、Surface/CSS     | artifact/editor core、neutral property inputsのみ。Data/Workflow/製品型をimportしない |
+| `structured-data`       | レコード・列・単一relation、全表示に共通の変更検証                                  | Graphをimportしない                                                                   |
+| `structured-data-graph` | row/column IDからGraphへの投影とData commandへの逆変換、Data Graph view             | 両packageのpublic entrypointに依存する境界。Graph Artifactを作らない                  |
+| `property-input`        | controlled string buffer、型・選択肢・readOnly・診断の中立UI                        | 行/ノード/保存/Sessionを知らない                                                      |
+| reference Host/adapter  | 公開可能な架空Definition fixture、領域validatorへの接続、保存・presentation sidecar | Graph本体がimportしない。実Workflow Framework Adapterは利用側で作る                   |
+| Host                    | 権限、StorageAdapter、版確定/公開/採用、外部実行/AI、overlay                        | Editorは業務状態を決めない                                                            |
 
 ## 能力matrix
 
-| 能力                                              | 初期宣言                                                                           | 未対応入口                                              |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| local / Viewer                                    | native Graph、typed属性、接続/付替え/削除、明示layout、Undo/Redo                   | readOnlyはHost適用境界でも拒否                          |
-| selection                                         | graph/node/edgeの安定ID、Host通知                                                  | annotationなし（既存Hostで入口を隠す）                  |
-| headless / proposal                               | serializable intent batch、preview/apply、revision/profile/adapterの再検証         | AI/runtimeはHost所有                                    |
-| native JSON                                       | draft・全version・hash検証、restore、schema 1のみ                                  | 未知schema/profileを拒否、旧versionを書き換えない       |
-| external adapter                                  | canonical Session一つ、損失のない対象field編集、導出edgeはreadOnly、layout sidecar | 保存不能な操作を理由付き拒否                            |
-| Data projection                                   | 同一DataのGrid/Form/Graph、single nullable row ID relation                         | 多値/入れ子/自由なedge属性を文字列へ埋め込まない        |
-| Shared / template / reuse / Office / React export | 非対応                                                                             | Graphには入口を表示しない。既存domain unionへ追加しない |
-| text                                              | controlled input buffer、submit一編集、Cancel/Escape、composition中shortcut抑制    | native OS IMEは別途NOT RUNを記録                        |
-| browser                                           | Chromium desktop/mobile viewport、独立Host/通常Host                                | 実機、他engine、assistive technologyは実施範囲を別記    |
+| 能力                                              | 初期宣言                                                                                 | 未対応入口                                                                  |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| local / Viewer                                    | native Graph、typed属性、接続/付替え/削除、明示配置、ノードの形と塗り、Undo/Redo         | readOnlyはHost適用境界でも拒否                                              |
+| selection                                         | graph/node/edgeの安定ID、Host通知                                                        | annotationなし（既存Hostで入口を隠す）                                      |
+| headless / proposal                               | serializable intent batch、preview/apply、revision/profile/adapterの再検証               | AI/runtimeはHost所有                                                        |
+| native JSON                                       | draft・全version・hash検証、restore、schema 2のみ（Preview）                             | schema 1は理由付きで拒否。未知schema/profileを拒否、旧versionを書き換えない |
+| external adapter                                  | canonical Session一つ、損失のない対象field編集、導出edgeはreadOnly、presentation sidecar | 保存不能な操作を理由付き拒否                                                |
+| Data projection                                   | 同一DataのGrid/Form/Graph、single nullable row ID relation                               | 多値/入れ子/自由なedge属性を文字列へ埋め込まない                            |
+| Shared / template / reuse / Office / React export | 非対応                                                                                   | Graphには入口を表示しない。既存domain unionへ追加しない                     |
+| text                                              | controlled input buffer、submit一編集、Cancel/Escape、composition中shortcut抑制          | native OS IMEは別途NOT RUNを記録                                            |
+| browser                                           | Chromium desktop/mobile viewport、独立Host/通常Host                                      | 実機、他engine、assistive technologyは実施範囲を別記                        |
 
 ## Native model / Profile
 
-`GraphDocument { schemaVersion: 1, id, profile: {id,version}, attributes, nodes, edges, layout }`。
-Nodeは `{id,type,attributes}`、Edgeは `{id,type,from,to,attributes}`。graph/node/edge IDは文書内一意、配列順・表示名と独立。Native importと並替えで保持する。別Artifactへimportしてもelement IDはそのまま（Artifact IDだけHostが再割当）。
+`GraphDocument { schemaVersion: 2, id, profile: {id,version}, attributes, nodes, edges, sections, presentation }`。
+Nodeは `{id,type,attributes,sectionId?}`、Edgeは `{id,type,from,to,attributes}`。graph/node/edge IDは文書内一意、配列順・表示名と独立。Native importと並替えで保持する。別Artifactへimportしてもelement IDはそのまま（Artifact IDだけHostが再割当）。
 
-Layoutはnode ID→`{x,y}`、CSS pixel相当の論理単位、各軸±100,000、finite。Positionの未知fieldは拒否し、移動で黙って落とさない。camera/zoom/panel/selection/drag preview/overlayはprivate view stateでcontentへ入れない。空Graphを許可する。Node削除は関連edge一覧をpreviewし、明示cascadeで一transaction。cascade指定なしは接続がある場合拒否。
+`presentation.nodes` はnode ID→`{x,y,shape?,style?}`、位置はCSS pixel相当の論理単位、各軸±100,000、finite。未知fieldは拒否し、移動・形・塗りの変更で他のfieldを黙って落とさない。存在しないnode IDの値は拒否する。`presentation.sections` はSection ID→`{x,y,width,height,style?}` で、Sectionごとに必須（[Section](#section-396-phase-2-preview)）。camera/zoom/panel/selection/drag preview/overlayはprivate view stateでcontentへ入れない。空Graphを許可する。Node削除は関連edge一覧をpreviewし、明示cascadeで一transaction。cascade指定なしは接続がある場合拒否。
 
 上限は1,000 nodes、4,000 edges、属性単位64 KiB、文書全体2 MiB UTF-8、JSON depth 12、string 16,384文字、collection 4,096 entries。ID/type/Profile IDは1〜512文字。Graph/Node/Edgeの未知structural fieldは拒否し、private camera等をnativeに保存させない。JSONはplain object/array/finite primitiveのみ、accessor/function/cycle/prototype pollution keyを拒否する。assetや認証情報の専用保存欄は設けない。文字列はテキストとして描画し、コード/URL解決/外部通信を実行しない。
 
-Profile schema 1はdata schemaとUI schemaを分離する。data schemaはboundedなstring/number/boolean/enum/array/object、required/readOnly、数値範囲、string length。UI schemaはlabel/description/order/labelField。scalarは型付きinput、array/objectはschema検証付きJSON textareaを使う初期範囲。JSON Schemaの完全実装、recursive form builder、`$ref`/remote resolution、code/HTML rendererではない。未知属性はJSONとして保持しフォームでは変更しない。Profile登録はHostの信頼境界。Profile ID/versionとcontent schema/Artifact envelope/外部Definitionの公開版を混同しない。
+Profile schema 2はdata schemaとUI schemaを分離する（`sections` はSectionの型のmap）。data schemaはboundedなstring/number/boolean/enum/array/object、required/readOnly、数値範囲、string length。UI schemaはlabel/description/order/labelField、node typeの既定の形 `shape` と塗り `style`。scalarは型付きinput、array/objectはschema検証付きJSON textareaを使う初期範囲。JSON Schemaの完全実装、recursive form builder、`$ref`/remote resolution、code/HTML rendererではない。未知属性はJSONとして保持しフォームでは変更しない。Profile登録はHostの信頼境界。Profile ID/versionとcontent schema/Artifact envelope/外部Definitionの公開版を混同しない。
 
 required欠落は未完成draftのdiagnostics（公開/版保存はHostが判断）。存在する値の型不正、未知type、接続先欠落、上限違反はcommit拒否。edge typeごとにfrom/to型、self/parallel/cycle、max incoming/outgoingを宣言する。接続数と隣接表はtypeごとに一度集計し、cycleは反復DFSの強連結成分から該当edgeだけを診断する。未宣言の禁止は固定しない。readOnly field/typeはUI以外でも差分検証で拒否する。診断はscope/element ID/field path/code/severityを持ち、投影stampと一緒に返す。
 
@@ -59,8 +59,68 @@ Host独自パネルは既存の選択通知で接続する。ノードの実寸�
 ラベルはノードと既配置ラベルを避け、空きがないものは線のhover/focus/selectionで表示する。
 Edge Profileの `ui.edgeStyle` は3/6桁hex色と最大8個の正のfinite dash長（各64以下）だけを許す。
 未知field、任意CSS/URL、辺以外へのedgeStyleは拒否する。
-既存のProfile schema 1は追加指定なしで有効。Profileの変更は既存のHost版管理に従う。
+edgeStyleはProfile schema 2でも追加指定なしで有効（schema 1のProfileは理由付きで拒否する）。Profileの変更は既存のHost版管理に従う。
 Graph content、確定version、hash、編集履歴には表示設定を保存しない。
+
+## ノードの形と塗り (#396 Phase 1, Preview)
+
+形は `rectangle`・`rounded-rectangle`・`ellipse`・`diamond`・`cylinder`・`hexagon`・`cloud` の7種。
+塗りは `style {fill?, stroke?, strokeWidth?: 1|2|3, dash?}`（色は3/6桁hex、dashは最大8個の正のfinite値で各64以下、空配列は実線）。
+決め方はnodeごとの保存値 → Profileのnode type既定（`ui.shape`／`ui.style`）→ `rectangle`。styleはfieldごとに上書きする。
+変更はintent `set-node-shape {id, shape|null}` と `set-node-style {id, style|null}` で、nullと空のstyleは保存値を消して既定へ戻す。
+意味のデータ（type・属性・接続）を変えず、それぞれ一編集でUndoする。`move-node` は形と塗りを保持する。readOnlyのnode typeは変更を拒否する。
+
+輪郭は平坦化した多角形の純粋な幾何（`graphShapePolygon` ほか、headlessからも使える）で、Surfaceの描画・選択の当たり範囲（輪郭で切り抜く）・線の端点・参照のSVGで共有する。線の端点は `separateGraphRoutes` が辺の上に分けた接続点から内向きに進み、最初に輪郭と交わる点で止める。
+形ごとに接続点を並べる範囲を辺の中央寄りに狭め、平行な関係も別の端点を持つ。自動の高さはラベルが形の内側に収まる高さ（最小70px）。
+ラベルの色は塗りに対して対比の高い黒か白（どの色でも4.5:1以上）。寸法はこのPhaseでは保存しない。
+
+## Section (#396 Phase 2, Preview)
+
+Sectionは意味を持つまとまりで、`GraphSection {id, type, attributes, parentId?}` を `sections` に、所属を `node.sectionId` に置く。
+所属は位置ではなく明示の値で決まり、ノードは0か1個のSectionに入る。親子は `parentId` で、深さ8段・500個まで、枠は各辺40〜200,000。
+構造の検証（`isGraphDocument`）は重複ID・存在しない `sectionId`/`parentId`・循環・深さと上限の超過・`presentation.sections` の欠けと余りを拒否する。
+
+Profileの `sections` はSectionの型ごとに `{schema, ui?, readOnly?, contains?}`。`ui` はlabel・labelField・order・fieldsと既定の `style`（`shape` は拒否）。
+`contains {nodes?, sections?}` は省略で全ての型、`[]` で無し、型の一覧でその型だけを許し、未知の型と重複を拒否する。
+`validateGraph` は未知のSection型と `contains` に反する所属・親子を `blocking` の診断（`section-type`・`section-contains`）にし、
+範囲の外に描かれた所属ノードは `outside-section` の `warning`（`blocking: false`）にとどめて自動で直さない。
+
+intentは `add-section {section, bounds}`・`set-node-section {id, sectionId|null}`・`set-section-parent {id, parentId|null}`・
+`move-section {id, position}`・`resize-section {id, bounds}`・`set-section-style {id, style|null}`・`delete-section {id}`、
+属性は既存の `set-attribute`/`remove-attribute` の `scope: 'section'`。それぞれ一編集でUndoする。
+`move-section` は子孫のSectionの枠と所属ノード（既定位置のものも）を同じだけ動かし、`resize-section` は所属を変えない。
+`delete-section` は中身（ノードと子のSection）を親へ、親が無ければ最上位へ移し、ノードと関係を残す。
+自分の子孫を親にする操作は「A section cannot be placed inside itself」、深さの超過は「Sections can nest at most 8 levels」で拒否する。
+readOnlyの型のSectionは、新規作成・属性・枠・親・存在・中身（ノードと子のSection）の変更をbatch全体で拒否する。
+
+折りたたみはprivate view stateで、contentとhashとUndoに入れず、再読込で開いた状態に戻る。たたんだSectionの中のノードは隠し、
+外との関係は（相手・向き・種類）ごとに1本の線へまとめ「種類名 ×件数」を出す。まとめた線は編集できない。
+参照のSVGはSectionの枠と名前を外側から順にノードの下に描き、ノードを絞った参照では所属の祖先だけを描く。
+
+Sectionを保存できるのは `presentationMode: 'source'` で `sections: true` を宣言したadapterだけ。それ以外のadapter・DataのGraph・
+参照Definitionは、Sectionのintentを含むbatchを「This source cannot represent Graph sections」で拒否し、`GraphSurface` に
+`sectionEditing={false}` を渡して道具を出さない。
+
+Sectionを編集できるSurfaceでノードをドラッグして離すと、ノードの中心がある枠のうち最も内側の
+（同じ深さなら後に描く）Sectionへ、`move-node` と `set-node-section` を一つのbatch（一つのUndo）で入れる（#448）。
+たたんだ枠と隠れた枠は対象にしない。どの枠にも無いときは所属を外し、`GraphSurface` の
+`sectionDropOutside: 'keep'` で所属を残す（既定 `'clear'`）。`contains` や readOnly の型のSectionが断る所属は変えずに
+移動だけを入れ、理由を示す。Inspectorの `Node section` と `set-node-section` はそのまま使える。
+
+## 図の作成支援 (#396 Phase 3, Preview)
+
+`arrangeGraph(graph, {nodeSize?, origin?})` はpureで決定的な自動配置で、`GraphIntent[]` を返す。
+最上位と各Sectionをそれぞれ一つの入れ物として、直下のノードと子Sectionを、入れ物の中の関係の向きで左から右の列（最長経路の段）に並べる。
+子Sectionの中のノードの関係は、それを含む直下の項目どうしの関係として数え、入れ物の外のノードとの関係は数えない。循環は項目の順に関係を前へ辿り、前の項目へ戻る関係を外して切る（フローチャートの戻りの線で手順の順が崩れない）。
+Sectionの枠は中身に余白（横30・上56・下30、最小200×120）を足した大きさに広げる。所属・ノード・関係・属性・形・塗りは変えず、
+動いたものだけの `move-node`・`resize-section` を一つのbatch（一つのUndo）で出す。高さ12,000を超える列は次の列へ、幅24,000を超える図は下の段へ折り返し、座標の上限に収める。`nodeSize` はSurfaceが測った大きさ（filterやたたんだSectionで隠れたノードも含む）を渡し、既定は200×70。
+Surfaceの `Arrange diagram` はこれを適用して図全体をFitし、読むだけのときは出さない。
+
+Profileのnode typeの `ui.group`（1〜40文字）は用途の名前で、どれかの型に書くとSurfaceが `Palette` を出す。
+`Node palette` は用途ごとに型を既定の形と塗りで並べ（用途の無い型は `Other`、readOnlyの型は出さない）、選んだ型のノードを一つ足す。
+Sectionを選んでいてSectionを編集できるときは「Adds inside “名前”」と示し、`add-node` と `set-node-section` を一つのbatchにする。
+Sectionの `Section settings` の `Fit section` はその枠（たたんでいれば畳んだ箱）を表示の中央に収める。どれも語彙を持たず、
+構成図・フローチャートの型とテンプレートはHost（Playground）のProfileにだけ置く。
 
 ## Session / command / external adapter
 
@@ -72,9 +132,9 @@ batch全体を原子的に拒否する。新規node/edgeの初期metadataや削�
 
 Nativeは `GraphSession` が既存 `EditorSession<GraphDocument>` を所有する。通常Hostは既存Artifact Sessionへ同じ検証済みGraph commandを流す。trusted arbitrary commandも最終content・readonly差分のguardを通す。Intent batchは入力をcloneしpureに評価、成功時だけ一編集。move gestureはprivate preview→pointerupで一batch、Escape/cancelは無変更。
 
-外部は `GraphAdapter<Source>` と `GraphBinding<Source>`。Hostが `read()`（content/revision/readOnly）とcanonical `execute(command)` を渡す。AdapterがProfile/project/prepare/domain diagnosticsを提供する。GraphBindingはsource Session/Undoを持たず、毎回再投影する。stampはsource revision・canonical fingerprint・adapter ID/version・Profile全体・layout sidecarをpinし、apply時に最新readとcommand inputで照合。外部更新/対象削除/版変更/権限剥奪/layout更新は古いpreviewのapplyを拒否する。proposal previewは正本と履歴を変えず、採用は一command。semantic previewも現sidecar配置を渡し、提案sourceからProfile・domain diagnosticsを再計算する。変更bufferのstaleも同じ境界で拒否する。
+外部は `GraphAdapter<Source>` と `GraphBinding<Source>`。Hostが `read()`（content/revision/readOnly）とcanonical `execute(command)` を渡す。AdapterがProfile/project/prepare/domain diagnosticsを提供する。GraphBindingはsource Session/Undoを持たず、毎回再投影する。stampはsource revision・canonical fingerprint・adapter ID/version・Profile全体・presentation sidecarをpinし、apply時に最新readとcommand inputで照合。外部更新/対象削除/版変更/権限剥奪/presentation更新は古いpreviewのapplyを拒否する。proposal previewは正本と履歴を変えず、採用は一command。semantic previewも現sidecar配置を渡し、提案sourceからProfile・domain diagnosticsを再計算する。変更bufferのstaleも同じ境界で拒否する。
 
-外部layout sidecarはHost所有、schema 1/source ID/adapter・Profile pins/source revision/node ID位置を保存する。欠落IDは無視して決定的初期位置を使い、未知schema/pinは拒否する。配置専用batchだけsidecarへ適用し、semantic batchとの混在は原子性を保証できないため拒否。Definitionの値/順序/版/semantic Undoには入れない。sidecarに別のデータ編集Undoは作らない。runtime overlayはpropsのみ。
+Adapterは `presentationMode` で見た目の保存先を宣言する。`sidecar` はHost所有の `PresentationSidecar`（schema 2/source ID/adapter・Profile pins/source revision/`presentation.nodes`）に配置・形・塗りを保存する。欠落IDは無視して決定的初期位置を使い、消えたnodeの値は保存時に落とし、未知schema/pinは拒否する。`source` は配置を正本側（Dataのview設定など）に置き、形・塗りの保存先が無い場合はadapterが理由付きで拒否する。`none` は形・塗りのintentを拒否する。`sections: true` は `source` とだけ組み合わせられる。見た目だけのbatchだけsidecarへ適用し、semantic batchとの混在は原子性を保証できないため拒否。Definitionの値/順序/版/semantic Undoには入れない。sidecarに別のデータ編集Undoは作らない。runtime overlayはpropsのみ。
 
 参照Definition Adapterは `apps/graph-reference` に置く。実Framework型ではなく架空の公開fixture（phases/shapes/gates/components/global settings + 未表示field）を使用。object編集は宣言した子だけをmergeし、未宣言の子を保持する。未宣言データを失うnull化・属性削除・array置換はbatch全体を理由付き拒否し、正本と履歴を変えない。未宣言データを含まない属性のclear/removeは可能。phasesの配列順を示すedgeは導出readOnly、順序変更は明示操作。ProfileとAdapterの差替え、domain診断mapping、immutable原本とdraftの分離を検証する。実 `parseDefinition` は利用側注入validatorの例であり、このrepoに業務検証を転載しない。
 

@@ -1,19 +1,31 @@
 import { canonicalEqual, canonicalJson, type Change } from '@editor-platform/artifact-core';
 import type { CadDocument } from './model';
 
-const collections = ['parameters', 'profiles', 'features', 'bodies', 'namedViews'] as const;
+const collections = [
+  'parameters',
+  'profiles',
+  'sketches',
+  'features',
+  'bodies',
+  'namedViews',
+  'parts',
+  'components',
+  'joints',
+] as const;
 
-/** Semantic parameter/profile/feature/body/view differences by stable ID. No geometry comparison. */
+/** Semantic parameter/profile/sketch/feature/body/view differences by stable ID. No geometry comparison. */
 export function compareCad(before: CadDocument, after: CadDocument): Change[] {
   const changes: Change[] = [];
-  if (!canonicalEqual(before.kernelProfile, after.kernelProfile))
-    changes.push({
-      elementId: 'kernelProfile',
-      path: 'kernelProfile',
-      kind: 'changed',
-      before: canonicalJson(before.kernelProfile),
-      after: canonicalJson(after.kernelProfile),
-    });
+  // Document-level values: the kernel build and the assembly's own BOM values (R2b).
+  for (const key of ['kernelProfile', 'partProperties'] as const)
+    if (!canonicalEqual(before[key], after[key]))
+      changes.push({
+        elementId: key,
+        path: key,
+        kind: 'changed',
+        before: canonicalJson(before[key]),
+        after: canonicalJson(after[key]),
+      });
   for (const key of collections) {
     const a = new Map<string, object>(before[key].map((x) => [x.id, x]));
     const b = new Map<string, object>(after[key].map((x) => [x.id, x]));

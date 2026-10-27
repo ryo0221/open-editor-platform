@@ -1,0 +1,30 @@
+{
+  "name": "@editor-platform/estimate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./src/host.ts",
+    "./sources": "./src/sources.ts",
+    "./styles.css": "./src/styles.css",
+    "./cad-source": "./src/cad-source.ts",
+    "./outputs": "./src/outputs.ts",
+    "./bim-source": "./src/bim-source.ts",
+    "./references": "./src/references.ts"
+  },
+  "dependencies": {
+    "@editor-platform/estimate-core": "*",
+    "@editor-platform/calculation-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/structured-data": "*",
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/bim-core": "*",
+    "@editor-platform/artifact-references": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

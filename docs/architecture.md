@@ -52,7 +52,7 @@ Native JSON retains schema versions, stable IDs, versions and annotations. The i
 
 Surfaces accept content, a command executor and selection callbacks. `EditorEventBus` exposes selection, artifact, version, command and annotation events. The playground host accepts toolbar/context-menu actions, an optional inspector slot and an opaque external-reference callback. No product-specific data is required or inserted into ordinary exports.
 
-`ExternalOperationRequest` exports artifact/version/selection references and opaque input. `ProposedCommands` supplies a summary, optional source and commands. `previewProposedCommands` works on a copy. The playground rejects proposals when draft content has changed; apply uses one normal transaction and remains undoable/versionable.
+`ExternalOperationRequest` exports artifact/version/selection references and opaque input. `ProposedCommands` supplies a summary, optional source and commands. `previewProposedCommands` works on a copy. The playground rejects proposals when draft content has changed; apply uses one normal transaction and remains undoable/versionable. A proposal may also carry `reads`, the exact committed versions of its target and of the Artifacts it was generated from; Hosts recheck them at preview and apply with `checkProposalReads` or the `editor-host` helpers ([Host integration](host-integration.md#proposal-freshness)).
 
 The deterministic uppercase demo lives in the playground host. Platform packages do not create prompts, select models/providers, run agents/tools, generate output, orchestrate retries/cancellation or own permissions/cost/audit. Command objects are trusted host application code. Imported JSON is data, not executable commands.
 

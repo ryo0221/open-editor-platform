@@ -1,5 +1,11 @@
 import { defaultGeoBackgroundSettings } from '@editor-platform/geo-core/backgrounds';
-import { emptyGeoWorkspace, type GeoAction, type GeoDocument } from '@editor-platform/geo-core';
+import {
+  assertGeoExtent,
+  emptyGeoWorkspace,
+  fitGeoExtent,
+  type GeoAction,
+  type GeoDocument,
+} from '@editor-platform/geo-core';
 import type { ControlledSurfaceController } from '@editor-platform/extension-contract/controlled-surface';
 import type { GeoWorkspaceHost } from './port';
 import { buildGeoInputActions } from './surface-actions';
@@ -25,9 +31,12 @@ import {
 
 function buildBackgroundPanel(kit: GeoDomKit, mapPanel: HTMLElement) {
   const { node } = kit;
-  const backgroundPanel = node('fieldset'),
+  // Below the map so the map stays in the first screen; open, so every setting stays reachable.
+  const backgroundDetails = node('details'),
+    backgroundPanel = node('fieldset'),
     backgroundControls = node('div'),
     backgroundStatus = node('p');
+  backgroundDetails.open = true;
   backgroundPanel.append(
     node('legend', 'Read-only boundary backgrounds'),
     backgroundControls,
@@ -39,7 +48,8 @@ function buildBackgroundPanel(kit: GeoDomKit, mapPanel: HTMLElement) {
   );
   backgroundStatus.setAttribute('role', 'status');
   backgroundStatus.setAttribute('aria-label', 'Boundary background status');
-  mapPanel.prepend(backgroundPanel);
+  backgroundDetails.append(node('summary', 'Boundary backgrounds'), backgroundPanel);
+  mapPanel.append(backgroundDetails);
   return { backgroundControls, backgroundStatus };
 }
 
@@ -108,8 +118,12 @@ const initialState = (): GeoSurfaceState => ({
   styleLayer: '',
   extent: [-180, -90, 180, 90],
   activeView: '',
-  backgroundSettings: defaultGeoBackgroundSettings(),
-  backgroundTouched: false,
+  // World countries are on from the start so a map has context, not just bare lines.
+  // A named view saved from here keeps what is shown.
+  backgroundSettings: defaultGeoBackgroundSettings().map((b) =>
+    b.id === 'world-countries' ? { ...b, enabled: true } : b,
+  ),
+  backgroundTouched: true,
   png: undefined,
   outputGeneration: 0,
 });
@@ -312,6 +326,7 @@ function buildActionButtons(ctx: GeoSurfaceContext): GeoSurfaceContext['actionBu
 
 function buildPanelTabs(ctx: GeoSurfaceContext) {
   const { tabs, mapPanel, tablePanel, inspector, sourcePanel } = ctx.el;
+  const layout = mapPanel.parentElement!;
   const panelButtons: HTMLButtonElement[] = [];
   for (const [label, panel] of [
     ['Map', mapPanel],
@@ -321,14 +336,17 @@ function buildPanelTabs(ctx: GeoSurfaceContext) {
     panelButtons.push(
       ctx.button(tabs, label, () => {
         // Panels stay mounted so mobile switching preserves input, composition and selection.
-        for (const p of [mapPanel, tablePanel, inspector]) p.hidden = p !== panel;
-        sourcePanel.hidden = panel !== mapPanel;
+        // The chosen panel alone takes the full width.
+        for (const p of [sourcePanel, mapPanel, tablePanel, inspector]) p.hidden = p !== panel;
+        layout.dataset.panel = label.toLowerCase();
         for (const b of panelButtons)
           b.setAttribute('aria-pressed', String(b.textContent === label));
       }),
     );
   ctx.button(tabs, 'Show all panels', () => {
     for (const p of [sourcePanel, mapPanel, tablePanel, inspector]) p.hidden = false;
+    delete layout.dataset.panel;
+    for (const b of panelButtons) b.setAttribute('aria-pressed', 'false');
   });
 }
 
@@ -403,6 +421,17 @@ function createRefresh(ctx: GeoSurfaceContext, t: GeoRefreshTargets) {
   };
 }
 
+/** Opens on the features' extent; content without a valid fit keeps the whole world. */
+function fitInitialExtent(ctx: GeoSurfaceContext) {
+  try {
+    const extent = fitGeoExtent(ctx.open().snapshot.content);
+    assertGeoExtent(extent);
+    ctx.state.extent = extent;
+  } catch {
+    // A closed scope or an unrenderable fit leaves the world extent.
+  }
+}
+
 /** One controller/input group, one native history; camera, panels and selection stay private. */
 export function createGeoWorkspaceSurface(
   doc: Document,
@@ -438,6 +467,7 @@ export function createGeoWorkspaceSurface(
     el.root.replaceChildren(ctx.kit.node('p', 'Scope closed.'));
   };
   host.signal.addEventListener('abort', dispose, { once: true });
+  fitInitialExtent(ctx);
   ctx.renderBackgroundControls();
   refresh();
   return { element: el.root, retire: ctx.retire, dispose };

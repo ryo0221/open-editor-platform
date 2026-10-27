@@ -45,6 +45,17 @@ receipt in notes. A missing or mismatched dataset produces a visible diagnostic
 and is omitted, preserving user features. CSV/GeoJSON exclude background data.
 [Data versions, licenses and public API](geo-background-contract.md).
 
+## External features (reference Host)
+
+Geo defines a read-only Host port for external vector features
+(`@editor-platform/geo-core/host`, `GeoFeatureReadPort`) and a deterministic mock
+Host (`createMockGeoFeatureHost`). Open `/external-sources-host.html` to read the
+synthetic features in an area and to see incomplete reads, features the Host left
+out, failures and account switches. The page makes no network requests; real
+providers are connected in a real Host. Imports into Geo still use the local import
+above. Contract ·
+ADR 016.
+
 ## Data → Geo → Slide
 
 1. Create/import a Data table and save a version. CSV identifiers with leading

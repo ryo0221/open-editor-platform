@@ -1,15 +1,15 @@
+import { emptyV3 } from '../../../../packages/video-metadata/host-animation/host-v3';
+import { createAdmittedPersistenceV3 } from '../../../../packages/video-metadata/host-animation/storage-admission-v3.mjs';
+import { v3Profile } from '../../../../packages/video-metadata/file-backed-storage/portable/v3';
 // Host-private glue over the reviewed ports. No public export or parallel native history.
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { contentHash } from '@editor-platform/artifact-core';
-import { emptyV2 } from '../../../../packages/video-metadata/host-media/m2/host-v2';
-import { createAdmittedPersistenceV2 } from '../../../../packages/video-metadata/host-media/m2/storage-admission-v2.mjs';
 import { validationLimits } from '../../../../packages/video-metadata/host-media/m2/capacity-validation-policy.mjs';
 import { openPortableFile } from '../../../../packages/video-metadata/file-backed-storage/browser-verifier/external-file';
 import { createProfileBrowserVerifier } from '../../../../packages/video-metadata/file-backed-storage/browser-verifier/adapter';
 import { BrowserJournal } from '../../../../packages/video-metadata/file-backed-storage/browser/journal';
-import { v2Profile } from '../../../../packages/video-metadata/file-backed-storage/portable/v2';
-import { publishM2LocatorLocked } from './catalog';
+import { publishM2LocatorLocked, requireCurrentVideoLocator } from './catalog';
 export const digest = () => {
   const h = sha256.create();
   return {
@@ -50,13 +50,14 @@ export async function acquireProject(id) {
   };
 }
 export async function committedProject(entry, signal) {
+  requireCurrentVideoLocator(entry);
   // Refuse missing data before BrowserJournal.open can create an empty namespace.
   const root = await globalThis.navigator.storage.getDirectory();
   await root.getDirectoryHandle(entry.namespace, { create: false });
   const journal = await BrowserJournal.open(
     entry.namespace,
     budget.journalBytes,
-    createProfileBrowserVerifier(digest, v2Profile).verify,
+    createProfileBrowserVerifier(digest, v3Profile).verify,
     () => true,
   );
   let lease;
@@ -78,9 +79,11 @@ export async function committedProject(entry, signal) {
   }
 }
 export function normalPersistence(entry, notify, capacity) {
+  requireCurrentVideoLocator(entry);
   if (!capacity) throw Error('M2 validation requires coordinated capacity');
   const id = entry?.id ?? globalThis.crypto.randomUUID();
-  let expectedNamespace = entry?.namespace;
+  let expectedNamespace = entry?.namespace,
+    currentLocator = entry;
   const namespace = 'normal-video-m2-' + globalThis.crypto.randomUUID();
   let persistence,
     savedHash,
@@ -93,12 +96,12 @@ export function normalPersistence(entry, notify, capacity) {
     committed = false,
     indexPending = 0,
     publication = Promise.resolve();
-  const factory = createAdmittedPersistenceV2({
+  const factory = createAdmittedPersistenceV3({
     digest,
     capacity,
     namespace: () => namespace,
     newArtifactId: () => globalThis.crypto.randomUUID(),
-    empty: emptyV2,
+    empty: emptyV3,
     now: () => new Date().toISOString(),
     ...budget,
     authorize: () => true,
@@ -108,7 +111,8 @@ export function normalPersistence(entry, notify, capacity) {
       savedLocator = {
         id,
         namespace,
-        name: entry?.name ?? 'Video M2 project ' + id.slice(0, 8),
+        nativeSchema: 'v3',
+        name: entry?.name ?? 'Video ' + id.slice(0, 8),
         updatedAt: new Date().toISOString(),
       };
     const locator = savedLocator;
@@ -122,6 +126,7 @@ export function normalPersistence(entry, notify, capacity) {
       try {
         await publishM2LocatorLocked(locator, expectedNamespace);
         expectedNamespace = namespace;
+        currentLocator = globalThis.structuredClone(locator);
         indexError = undefined;
         notify({ locator });
       } catch (error) {
@@ -135,6 +140,9 @@ export function normalPersistence(entry, notify, capacity) {
   };
   return {
     id,
+    get locator() {
+      return currentLocator && globalThis.structuredClone(currentLocator);
+    },
     get savedHash() {
       return savedHash;
     },
@@ -154,8 +162,10 @@ export function normalPersistence(entry, notify, capacity) {
           budget.externalBytes,
         );
         try {
-          if (opened.kind !== 'v2')
-            throw Error('Non-v2 project requires matching Host; no migration');
+          if (opened.kind !== 'v3')
+            throw Error(
+              'Unsupported legacy Video archive. Current v3 format required; original bytes are unchanged.',
+            );
           initialHistory = {
             selectedVersionId: opened.project.selectedVersionId,
             versions: globalThis.structuredClone(opened.project.versions),

@@ -16,7 +16,7 @@ export function describeVector(vector: NonNullable<Drawing['vector']>): string {
 export function describeDrawing(d: Drawing): string {
   const b = d.bounds,
     lines = [
-      `${d.kind}${d.kind === 'shape' && (d.vector || d.shape) ? `: ${d.vector ? 'vector' : d.shape}` : ''}`,
+      `${d.kind}${d.kind === 'shape' && (d.path || d.vector || d.shape) ? `: ${d.path ? 'path' : d.vector ? 'vector' : d.shape}` : ''}`,
       `Position: ${b.x}, ${b.y} px · Size: ${b.width} × ${b.height} px · Rotation: ${d.rotation ?? 0}°`,
       `Fill: ${d.fill} · Stroke: ${d.stroke ?? 'default'} / ${d.strokeWidth ?? 1} px · Opacity: ${Math.round((d.opacity ?? 1) * 100)}%`,
       `Visibility: ${d.hidden ? 'hidden' : 'visible'} · ${d.locked ? 'locked' : 'unlocked'}`,
@@ -43,6 +43,10 @@ export function describeDrawing(d: Drawing): string {
   if (d.src)
     lines.push(
       `Image: ${d.alt ?? 'untitled'} · content ${displayFingerprint(d.src)} · ${d.imageFit ?? 'fit'}`,
+    );
+  if (d.path)
+    lines.push(
+      `Structured path (${d.path.fillRule}) · geometry ${displayFingerprint(JSON.stringify(d.path))}`,
     );
   if (d.vector) lines.push(describeVector(d.vector));
   if (d.crop) lines.push(`Crop: ${d.crop.x}, ${d.crop.y}; scale ${d.crop.scale}`);

@@ -4,7 +4,7 @@ import { mergeGraphAttribute, validateAttributes, type AttributeSchema } from '.
 import { type GraphIntent } from './commands';
 export interface GraphAttributeDraft {
   id: string;
-  scope: 'graph' | 'node' | 'edge';
+  scope: 'graph' | 'node' | 'edge' | 'section';
   original: Attributes;
   schema: Record<string, AttributeSchema>;
   values: Record<string, string>;

@@ -98,12 +98,16 @@ export function Menu({
   children,
   align = 'left',
   onOpen,
+  closeOnSelect = false,
 }: {
   label: string;
   icon?: LucideIcon;
   children: ReactNode;
   align?: 'left' | 'right';
   onOpen?(): void;
+  /** Close after a button or link inside is chosen, so what it opens is not covered.
+   *  Items inside `[data-menu-keep-open]` (repeatable steps such as Undo) keep it open. */
+  closeOnSelect?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -187,6 +191,22 @@ export function Menu({
           data-editor-menu
           role="dialog"
           aria-label={label}
+          onClick={
+            closeOnSelect
+              ? (e) => {
+                  const item = (e.target as Element).closest('button,a[href]');
+                  if (!item || item.closest('[data-menu-keep-open]')) return;
+                  setOpen(false);
+                  // The chosen item unmounts; keep keyboard focus on the trigger unless the
+                  // item moved it into what it opened.
+                  requestAnimationFrame(() => {
+                    const active = document.activeElement;
+                    if (!active || active === document.body || !active.isConnected)
+                      trigger.current?.focus();
+                  });
+                }
+              : undefined
+          }
         >
           {children}
         </div>
@@ -631,7 +651,13 @@ export function CommitInput({
   );
 }
 
-/** Host may require confirmed content before a surface starts an ordinary export. */
-export const EditorExportGuardContext = createContext<(() => void) | undefined>(undefined);
+/**
+ * Host may require confirmed content before a surface starts an ordinary export. `keepEditor`:
+ * the export captures the confirmed content and leaves the editor open, so settling work (a CAD
+ * evaluation) may finish after it; a Host that does not support it may ignore the option.
+ */
+export const EditorExportGuardContext = createContext<
+  ((options?: { keepEditor?: boolean }) => void) | undefined
+>(undefined);
 /** Private text editors register until their buffer is committed or explicitly cancelled. */
 export const EditorUncommittedInputContext = createContext<Set<object> | undefined>(undefined);

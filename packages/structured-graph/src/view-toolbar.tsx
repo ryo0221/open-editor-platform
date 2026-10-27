@@ -1,7 +1,15 @@
 import { type ContextType, type Dispatch, type SetStateAction } from 'react';
 import { EditorInputsContext, Menu } from '@editor-platform/editor-ui';
 import { type GraphSourceActions } from './definition';
-import { type GraphEdge, type GraphNode, type Position } from './model';
+import {
+  type GraphEdge,
+  type GraphNode,
+  type GraphNodeShape,
+  type GraphSection,
+  type Position,
+} from './model';
+import { GraphShapeSelect } from './view-appearance';
+import { GraphNodePalette } from './view-palette';
 import { type GraphProfile } from './profile';
 import {
   errorMessage,
@@ -16,6 +24,7 @@ interface GraphSourceMenuProps {
   sourceActions?: GraphSourceActions;
   node?: GraphNode;
   edge?: GraphEdge;
+  section?: GraphSection;
   id: string;
   scope: GraphScope;
   inputs: ContextType<typeof EditorInputsContext>;
@@ -29,6 +38,7 @@ function GraphSourceMenu({
   sourceActions,
   node,
   edge,
+  section,
   id,
   scope,
   inputs,
@@ -56,7 +66,7 @@ function GraphSourceMenu({
           throw new Error('属性・接続を適用するか、キャンセルしてから定義を開いてください。');
         setDefinitionTarget({
           scope,
-          ...(node || edge ? { type: node?.type ?? edge?.type } : {}),
+          ...(node || edge || section ? { type: node?.type ?? edge?.type ?? section?.type } : {}),
         });
       } catch (error) {
         setError(errorMessage(error));
@@ -67,7 +77,7 @@ function GraphSourceMenu({
     <Menu label="Graph source and definitions">
       <p>
         所有元: {sourceActions?.owner ?? `Host Profile ${profile.id}`} ·{' '}
-        {node?.type ?? edge?.type ?? profile.id}
+        {node?.type ?? edge?.type ?? section?.type ?? profile.id}
       </p>
       <button onClick={openSource}>元データを開く</button>
       <button onClick={openDefinition}>データ定義</button>
@@ -80,9 +90,20 @@ export interface GraphToolbarProps extends GraphSourceMenuProps {
   selectionReadOnly: boolean;
   nodeType: string;
   setNodeType: (type: string) => void;
+  /** Absent when the source cannot save shapes; new nodes then use the type default. */
+  nodeShape?: GraphNodeShape | '';
+  setNodeShape?: (shape: GraphNodeShape | '') => void;
   onAddNode: () => void;
+  /** Absent when the Profile has no Section types or the source cannot hold Sections. */
+  sectionType?: string;
+  setSectionType?: (type: string) => void;
+  onAddSection?: () => void;
   onGraphProperties: () => void;
   onDelete: () => void;
+  /** Adds one node of a type from the palette, inside `paletteInto` when it is set. */
+  onPaletteAdd?: (type: string) => void;
+  paletteInto?: string;
+  onArrange?: () => void;
   zoom: number;
   setZoom: Dispatch<SetStateAction<number>>;
   setPan: Dispatch<SetStateAction<Position>>;
@@ -95,6 +116,13 @@ export function GraphToolbar(props: GraphToolbarProps) {
       {!readOnly && (
         <>
           <GraphSourceMenu {...props} />
+          {props.onPaletteAdd && (
+            <GraphNodePalette
+              profile={profile}
+              into={props.paletteInto}
+              onAdd={props.onPaletteAdd}
+            />
+          )}
           <label>
             Node type
             <select
@@ -110,12 +138,48 @@ export function GraphToolbar(props: GraphToolbarProps) {
               ))}
             </select>
           </label>
+          {props.setNodeShape && (
+            <label>
+              Shape
+              <GraphShapeSelect
+                label="New node shape"
+                value={props.nodeShape ?? ''}
+                typeDefault={profile.nodes[nodeType]?.ui?.shape ?? 'rectangle'}
+                onChange={props.setNodeShape}
+              />
+            </label>
+          )}
           <button
             disabled={readOnly || !nodeType || !!profile.nodes[nodeType]?.readOnly}
             onClick={props.onAddNode}
           >
             Add node
           </button>
+          {props.onAddSection && props.setSectionType && (
+            <>
+              <label>
+                Section type
+                <select
+                  aria-label="Section type"
+                  value={props.sectionType}
+                  onChange={(e) => props.setSectionType!(e.target.value)}
+                >
+                  {Object.entries(profile.sections).map(([key, t]) => (
+                    <option key={key} value={key}>
+                      {t.ui?.label ?? key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                disabled={!props.sectionType || !!profile.sections[props.sectionType]?.readOnly}
+                onClick={props.onAddSection}
+              >
+                {node ? 'Add section around node' : 'Add section'}
+              </button>
+            </>
+          )}
+          {props.onArrange && <button onClick={props.onArrange}>Arrange diagram</button>}
           <button onClick={props.onGraphProperties}>Graph properties</button>
           <button
             disabled={readOnly || (!node && !edge) || props.selectionReadOnly}

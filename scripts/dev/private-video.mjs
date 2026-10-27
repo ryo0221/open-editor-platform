@@ -6,8 +6,6 @@ import process from 'node:process';
 import { validatePcmManifest } from '../extension-hosts/private-video-pcm-build.mjs';
 /** Explicit private build only. No remote executable URLs or public schema additions. */
 export function privateVideoBuild() {
-  if (process.env.EDITOR_PRIVATE_VIDEO_M2_BUILD && !process.env.EDITOR_PRIVATE_VIDEO_BUILD)
-    throw Error('M2 validation requires the coordinated v1 build');
   return [configured(false), configured(true)];
 }
 function configured(m2) {

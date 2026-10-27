@@ -1,0 +1,21 @@
+diff --git a/libavcodec/decode.c b/libavcodec/decode.c
+index 0ab0f4b..5509572 100644
+--- a/libavcodec/decode.c
++++ b/libavcodec/decode.c
+@@ -326,9 +326,14 @@ static int discard_samples(AVCodecContext *avctx, AVFrame *frame, int64_t *disca
+ 
+     side = av_frame_get_side_data(frame, AV_FRAME_DATA_SKIP_SAMPLES);
+     if (side && side->size >= 10) {
+-        avci->skip_samples = AV_RL32(side->data);
+-        avci->skip_samples = FFMAX(0, avci->skip_samples);
++        uint32_t packet_skip = AV_RL32(side->data);
+         discard_padding = AV_RL32(side->data + 4);
++        /* Diagnostic only: final Opus discard metadata must not erase pending
++         * codec pre-skip on the same first/last packet. */
++        if (!(avctx->codec_id == AV_CODEC_ID_OPUS && !packet_skip &&
++              discard_padding && avci->skip_samples > 0))
++            avci->skip_samples = packet_skip;
++        avci->skip_samples = FFMAX(0, avci->skip_samples);
+         av_log(avctx, AV_LOG_DEBUG, "skip %d / discard %d samples due to side data\n",
+                avci->skip_samples, (int)discard_padding);
+         skip_reason = AV_RL8(side->data + 8);

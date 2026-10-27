@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/bim-ifc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/bim-core": "*",
+    "@editor-platform/geometry-core": "*",
+    "@noble/hashes": "1.8.0"
+  }
+}

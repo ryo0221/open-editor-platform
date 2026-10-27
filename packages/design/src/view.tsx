@@ -1,3 +1,9 @@
+import { DesignPagePanel } from './page-panel';
+import { designExportPaintBounds } from './paint-bounds';
+import { designPathPoint } from './path';
+import { useDesignPathEditor } from './path-editor';
+import { insertDesignPath, presetDesignPath } from './path-commands';
+import { guardDesignCommand } from './model';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import { assertReferenceItems } from '@editor-platform/artifact-references';
 import {
@@ -55,10 +61,9 @@ import {
   alignElements,
   arrangeDesign,
   createComponent,
-  createDesign,
   designPreview,
   designPaintOrder,
-  duplicateElements,
+  remapDesignElements,
   layoutDesign,
   makeDesignElement,
   overrideInstance,
@@ -149,6 +154,9 @@ function DesignSurfaceEditor({
   prototype,
   renderContent,
 }: DesignSurfaceProps & { renderContent: DesignContent }) {
+  // Structured paths allow projected coordinates up to 1e12, beyond the
+  // ordinary infinite canvas range. Keep camera controls and fitting consistent.
+  const minZoom = content.schemaVersion === 3 ? 1e-12 : 0.001;
   const prototypeControl = useRef<{ open(): void }>(null);
   const projectedElements = useReferenceItems(content.elements, references);
   const projectedById = new Map(projectedElements.map((e) => [e.id, e]));
@@ -163,6 +171,14 @@ function DesignSurfaceEditor({
     () => designRenderSnapshot(renderContent, renderCache),
     [renderContent, renderCache],
   );
+  const projectPointEdit = useMemo(() => {
+    const visible = new Set(
+      designPaintOrder(renderContent)
+        .filter((e) => !e.hidden)
+        .map((e) => e.id),
+    );
+    return (e: DesignElement) => (visible.has(e.id) ? project(e) : []);
+  }, [renderContent, project]);
   const elements = new Map(content.elements.map((e) => [e.id, e]));
   const scopedTexts = useMemo(() => collectScopedTexts(content, project), [content, project]);
   const [selected, setSelected] = useState<string[]>([]),
@@ -181,16 +197,23 @@ function DesignSurfaceEditor({
     chosen = content.elements.filter((e) => ids.includes(e.id)),
     element = chosen.length === 1 ? chosen[0] : undefined;
   useEffect(() => {
-    if (focusReferenceId) setSelected([focusReferenceId]);
+    if (focusReferenceId) choose([focusReferenceId]);
   }, [focusReferenceId]);
   const exportState = useRef({ content, ids, padding, transparent, scale, extension, references });
   exportState.current = { content, ids, padding, transparent, scale, extension, references };
+  const writableRef = useRef(!readOnly);
+  writableRef.current = !readOnly;
+  const pointBusy = useRef<() => boolean>(() => false);
   const apply = (cmd: EditorCommand<DesignContent>) => {
     if (readOnly) return false;
+    if (pointBusy.current()) {
+      setError('Finish or cancel the path gesture first');
+      return false;
+    }
     const checked: EditorCommand<DesignContent> = {
       ...cmd,
       apply(current) {
-        const next = cmd.apply(current);
+        const next = guardDesignCommand(cmd, () => writableRef.current).apply(current);
         assertReferenceItems(next.elements);
         return next;
       },
@@ -205,16 +228,65 @@ function DesignSurfaceEditor({
       return false;
     }
   };
+  const pathEditor = useDesignPathEditor({
+    content: renderContent,
+    element: element && renderContent.elements.find((e) => e.id === element.id),
+    readOnly,
+    zoom: view.zoom,
+    project: projectPointEdit,
+    apply,
+    error: setError,
+    fit: () => {
+      if (!element?.path) return false;
+      const drawing = projectPointEdit(element)[0],
+        rect = viewport.current?.getBoundingClientRect();
+      if (!drawing) {
+        setError('Show the path and its parent frames before editing points.');
+        return false;
+      }
+      if (!rect) return false;
+      const points = element.path.subpaths
+        .flatMap((s) => [
+          ...s.anchors,
+          ...s.segments.flatMap((e) => (e.type === 'cubic' ? [e.c1, e.c2] : [])),
+        ])
+        .map((p) => designPathPoint(element.path!, drawing, p));
+      const box = unionBounds(points.map((p) => ({ ...p, width: 1, height: 1 })));
+      const zoom = Math.max(
+        minZoom,
+        Math.min(
+          8,
+          (rect.width - 80) / Math.max(1, box.width),
+          (rect.height - 80) / Math.max(1, box.height),
+        ),
+      );
+      setView((v) => ({
+        ...v,
+        fit: false,
+        zoom,
+        pan: {
+          x: rect.width / 2 - (box.x + box.width / 2) * zoom,
+          y: rect.height / 2 - (box.y + box.height / 2) * zoom,
+        },
+      }));
+      return true;
+    },
+  });
+  pointBusy.current = pathEditor.busy;
   const choose = (ids: string[]) => {
+    if (
+      pathEditor.editing &&
+      (ids.length !== selected.length || ids.some((id, i) => id !== selected[i])) &&
+      !pathEditor.settle()
+    )
+      return;
     setSelected(ids);
     select(ids);
     setDefinition(false);
   };
   useEffect(() => {
     if (focusRequest && content.elements.some((element) => element.id === focusRequest.id)) {
-      setSelected([focusRequest.id]);
-      select([focusRequest.id]);
-      setDefinition(false);
+      choose([focusRequest.id]);
     }
   }, [focusRequest, select]);
   function add(type: DesignElementType, patch: Partial<DesignElement> = {}) {
@@ -247,10 +319,31 @@ function DesignSurfaceEditor({
     }
   }
   function action(a: string, value?: number) {
+    if (content.pagination && ['copy', 'cut', 'paste'].includes(a)) {
+      setError(
+        'Element copy/cut/paste is not supported for paginated Design. Use Duplicate to preserve page reading order and image sources.',
+      );
+      return;
+    }
     if (a === 'copy' || a === 'cut') {
       const all = descendantIds(content.elements, ids);
       clipboard.current = clone(content.elements.filter((e) => all.has(e.id)));
-      if (a === 'cut') apply(arrangeDesign(ids, 'delete'));
+      if (a === 'cut') {
+        try {
+          // Prove that a valid remapped replacement fits before deleting the source.
+          const removed = arrangeDesign(ids, 'delete').apply(content);
+          const restored = {
+            ...removed,
+            elements: [...removed.elements, ...remapDesignElements(clipboard.current)],
+          };
+          guardDesignCommand(
+            command('design.clipboard.preflight', 'Clipboard preflight', () => restored),
+          ).apply(content);
+          apply(arrangeDesign(ids, 'delete'));
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      }
       return;
     }
     if (a === 'paste') {
@@ -258,13 +351,11 @@ function DesignSurfaceEditor({
         setError('Copy elements in this editor first');
         return;
       }
-      const temporary = { ...createDesign(), elements: clipboard.current };
-      const duplicates = duplicateElements(clipboard.current.map((e) => e.id))
-        .apply(temporary)
-        .elements.slice(clipboard.current.length);
+      const duplicates = remapDesignElements(clipboard.current);
       apply(
         command('design.paste', 'Paste elements', (d) => ({
           ...d,
+          schemaVersion: duplicates.some((e) => e.path) ? 3 : d.schemaVersion,
           elements: [...d.elements, ...duplicates],
         })),
       );
@@ -294,7 +385,11 @@ function DesignSurfaceEditor({
       ? descendantIds(visibleElements, roots)
       : new Set(visibleElements.map((e) => e.id));
     const box = unionBounds(
-      visibleElements.filter((e) => all.has(e.id) && !e.hidden).map((e) => e.bounds),
+      visibleElements
+        .filter((e) => all.has(e.id) && !e.hidden)
+        .map((e) =>
+          e.path ? designExportPaintBounds(project(e), e.bounds, e.rotation) : e.bounds,
+        ),
     );
     const rect = viewport.current?.getBoundingClientRect();
     if (!rect) return;
@@ -302,7 +397,7 @@ function DesignSurfaceEditor({
     setView({
       ...view,
       fit: !nextIds?.length,
-      zoom: Math.max(0.001, Math.min(8, zoom)),
+      zoom: Math.max(minZoom, Math.min(8, zoom)),
       pan: {
         x: (rect.width - box.width * zoom) / 2 - box.x * zoom,
         y: (rect.height - box.height * zoom) / 2 - box.y * zoom,
@@ -322,22 +417,25 @@ function DesignSurfaceEditor({
   const canvasOwners = new Map(content.elements.map((e) => [e.id, extension?.canvasOwner?.(e)]));
   const canvasSelection = [...new Set(ids.map((id) => canvasOwners.get(id) ?? id))];
   const inspector = (
-    <DesignInspector
-      references={references}
-      content={content}
-      element={element}
-      chosen={chosen}
-      ids={ids}
-      readOnly={readOnly}
-      apply={apply}
-      geometry={geometry}
-      setError={setError}
-      extension={extension}
-      extensionContext={extensionContext}
-      setPreset={setPreset}
-      definition={definition}
-      setDefinition={setDefinition}
-    />
+    <>
+      <div>{pathEditor.controls}</div>
+      <DesignInspector
+        references={references}
+        content={content}
+        element={element}
+        chosen={chosen}
+        ids={ids}
+        readOnly={readOnly}
+        apply={apply}
+        geometry={geometry}
+        setError={setError}
+        extension={extension}
+        extensionContext={extensionContext}
+        setPreset={setPreset}
+        definition={definition}
+        setDefinition={setDefinition}
+      />
+    </>
   );
   const toolbar = (
     <>
@@ -355,6 +453,44 @@ function DesignSurfaceEditor({
           })
         }
       />
+      {(['line', 'cubic'] as const).map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          disabled={readOnly}
+          onClick={() => {
+            const rect = viewport.current?.getBoundingClientRect();
+            const path = presetDesignPath(kind);
+            const parent = element?.type === 'frame' ? element : undefined;
+            const insetX = parent ? Math.min(24, parent.bounds.width / 4) : 0;
+            const insetY = parent ? Math.min(24, parent.bounds.height / 4) : 0;
+            const width = parent
+              ? Math.min(path.frame.width, parent.bounds.width - 2 * insetX)
+              : path.frame.width;
+            const height = parent
+              ? Math.min(path.frame.height, parent.bounds.height - 2 * insetY)
+              : path.frame.height;
+            const insert = insertDesignPath(
+              path,
+              {
+                x: parent
+                  ? parent.bounds.x + insetX
+                  : ((rect?.width ?? 800) / 2 - view.pan.x) / view.zoom - width / 2,
+                y: parent
+                  ? parent.bounds.y + insetY
+                  : ((rect?.height ?? 600) / 2 - view.pan.y) / view.zoom - height / 2,
+                width,
+                height,
+              },
+              parent?.id,
+              () => writableRef.current,
+            );
+            if (apply(insert)) choose([insert.elementId]);
+          }}
+        >
+          Add {kind} path
+        </button>
+      ))}
       <InsertTools
         onShape={(shape: ShapeKind) => add('shape', { shape, text: '' })}
         onText={() => add('text')}
@@ -441,6 +577,7 @@ function DesignSurfaceEditor({
         }
         left={
           <>
+            <DesignPagePanel content={content} apply={apply} choose={choose} readOnly={readOnly} />
             {left}
             {extension?.library?.(extensionContext)}
           </>
@@ -463,7 +600,7 @@ function DesignSurfaceEditor({
               onChange={setView}
               onFit={() => fit()}
               fitLabel="Fit design"
-              minZoom={0.001}
+              minZoom={minZoom}
             />
           </>
         }
@@ -478,8 +615,12 @@ function DesignSurfaceEditor({
           )}
           <CanvasStage
             virtualize
+            inputOwner={pathEditor.editing ? 'point' : 'object'}
+            onPointKeyDown={pathEditor.keyDown}
+            overlay={pathEditor.overlay}
             label="Design canvas"
             space="infinite"
+            minZoom={minZoom}
             previewTransform={(ids, delta) => designPreview(content, ids, delta)}
             hideControls
             view={view}
@@ -513,7 +654,12 @@ function DesignSurfaceEditor({
               if (external) return external;
               return (
                 <DesignDrawings
-                  drawings={targetDrawings(raw, target, project, projectedById.get(raw.id)?.src)}
+                  drawings={targetDrawings(
+                    raw,
+                    target,
+                    project,
+                    projectedById.get(raw.id)?.src,
+                  ).map(pathEditor.project)}
                   textParts={target.textParts}
                 />
               );

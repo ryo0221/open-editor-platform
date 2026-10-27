@@ -50,7 +50,16 @@ const OfficeImportDialog = lazy(() =>
 );
 
 /** Kinds without template/reuse adapters; see `nativeContent`. */
-const nonNativeKinds = ['react-ui', 'structured-graph', 'geo', 'animation', 'schedule', 'cad'];
+const nonNativeKinds = [
+  'estimate',
+  'react-ui',
+  'structured-graph',
+  'geo',
+  'animation',
+  'schedule',
+  'cad',
+  'bim',
+];
 
 export interface TemplateAuthoring {
   artifactId: string;
@@ -166,6 +175,7 @@ async function createFromTemplate(
             r.kind !== 'structured-graph' &&
             r.kind !== 'geo' &&
             r.kind !== 'cad' &&
+            r.kind !== 'bim' &&
             r.kind !== 'animation',
         )
         .map(nativeRecord),
@@ -175,7 +185,8 @@ async function createFromTemplate(
         record.kind !== 'react-ui' &&
         record.kind !== 'structured-graph' &&
         record.kind !== 'geo' &&
-        record.kind !== 'cad'
+        record.kind !== 'cad' &&
+        record.kind !== 'bim'
         ? nativeRecord(record)
         : undefined;
     },
@@ -292,7 +303,8 @@ function ReuseBatchHost({ host, onClose }: { host: DialogHost; onClose(): void }
     active.kind !== 'react-ui' &&
     active.kind !== 'structured-graph' &&
     active.kind !== 'geo' &&
-    active.kind !== 'cad'
+    active.kind !== 'cad' &&
+    active.kind !== 'bim'
       ? [active]
       : [];
   return (
@@ -426,6 +438,7 @@ function ReuseDialogs({
     active.kind !== 'structured-graph' &&
     active.kind !== 'geo' &&
     active.kind !== 'cad' &&
+    active.kind !== 'bim' &&
     active.kind !== 'animation'
       ? active
       : undefined;

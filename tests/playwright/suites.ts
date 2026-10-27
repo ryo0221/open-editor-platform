@@ -280,6 +280,40 @@ function packagePreview(
 
 /** Suites by name. Functions run only for the selected suite. */
 export const suites: Record<string, () => Suite> = {
+  'estimate.production': () => ({
+    ...defaults,
+    ...playwrightTimeouts,
+    testMatch: /estimate-(editor|references|construction).spec.ts$/,
+    outputDir: '/tmp/estimate-e2e',
+    use: { ...defaults.use, baseURL: 'http://127.0.0.1:4173' },
+    projects: editorProjects(
+      /estimate-(editor|references|construction).spec.ts$/,
+      /estimate-(editor|references|construction).spec.ts$/,
+      true,
+    ),
+    webServer: [server.preview, server.artifactHost],
+  }),
+  'analysis.production': () => ({
+    ...defaults,
+    ...playwrightTimeouts,
+    testMatch: /analysis-(notebook|usability|exploration).spec.ts$/,
+    outputDir: '/tmp/analysis-e2e',
+    use: { ...defaults.use, baseURL: 'http://127.0.0.1:4173' },
+    projects: editorProjects(
+      /analysis-(notebook|usability|exploration).spec.ts$/,
+      /analysis-(notebook|usability|exploration).spec.ts$/,
+      true,
+    ),
+    webServer: [server.preview, server.artifactHost],
+  }),
+  'design-path.production': () => ({
+    use: { baseURL: 'http://127.0.0.1:4173' },
+    projects: [{ name: 'desktop', testMatch: 'design-path.spec.ts', use: desktopUse }],
+    workers: 1,
+    timeout: 60000,
+    outputDir: '/tmp/editor-design-path-results',
+    webServer: [server.preview, server.artifactHost],
+  }),
   // Development servers; the full desktop/mobile suite (`npm run test:e2e`).
   default: () => ({
     reporter: [['list'], ['html', { open: 'never' }]],
@@ -292,6 +326,12 @@ export const suites: Record<string, () => Suite> = {
       server.dev,
       server.collaboration,
     ],
+  }),
+
+  'import-batch': () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/import-batch.spec.ts/, /import-batch.spec.ts/, true),
+    webServer: [server.dev],
   }),
 
   // Production preview: the full suite and focused subsets. Run `npm run build` first.
@@ -311,6 +351,12 @@ export const suites: Record<string, () => Suite> = {
   schedule: () => ({
     use: { baseURL: 'http://127.0.0.1:5173' },
     projects: editorProjects(/(^|\/)schedule\.spec\.ts$/, /(^|\/)schedule-mobile\.spec\.ts$/),
+    webServer: [server.dev],
+  }),
+  // External read ports (ADR 016): the reference Host with mock Geo, Data and work item ports.
+  'external-sources': () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/(^|\/)external-sources\.spec\.ts$/, undefined, true),
     webServer: [server.dev],
   }),
   'schedule.production': () =>
@@ -541,6 +587,26 @@ export const suites: Record<string, () => Suite> = {
   priority: () => references('/tmp/editor-priority-results', 'priority-import-reference.spec.ts'),
 
   // Artifact Host reference (or an external studio with HOST_STUDIO_URL).
+  'authoring.production': () => ({
+    expect: playwrightTimeouts.expect,
+    workers: 2,
+    timeout: 90_000,
+    outputDir: '/tmp/editor-platform-authoring-results',
+    projects: [
+      ...editorProjects(/authoring\.spec\.ts/, undefined, true).map((p) => ({
+        ...p,
+        name: 'host-' + p.name,
+        use: { ...p.use, baseURL: 'http://127.0.0.1:4177' },
+      })),
+      ...editorProjects(/authoring-normal\.spec\.ts/, undefined, true).map((p) => ({
+        ...p,
+        name: 'normal-' + p.name,
+        use: { ...p.use, baseURL: 'http://127.0.0.1:4173' },
+      })),
+    ],
+    webServer: [server.preview, server.artifactHost],
+  }),
+
   host: () => ({
     expect: playwrightTimeouts.expect,
     workers: 2,
@@ -549,7 +615,7 @@ export const suites: Record<string, () => Suite> = {
       ? 'work/issue-33-36/studio-results'
       : 'work/issue-33-36/reference-results',
     use: { baseURL: process.env.HOST_STUDIO_URL ?? 'http://127.0.0.1:4177' },
-    projects: editorProjects('host-integration.spec.ts', undefined, true),
+    projects: editorProjects(/(?:host-(?:integration|api)|authoring)\.spec\.ts/, undefined, true),
     webServer: process.env.HOST_STUDIO_URL ? [] : [server.artifactHost],
   }),
 
@@ -657,6 +723,52 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // Building Surface standalone host (R2c-3c). Needs CAD_OCCT_DIST (development kernel).
+  bim: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/bim/tests',
+    workers: 1,
+    timeout: 120_000,
+    expect: { timeout: 60_000 },
+    outputDir: '/tmp/bim-surface-results',
+    use: {
+      baseURL: 'http://127.0.0.1:4204',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/bim/vite.config.ts',
+        url: 'http://127.0.0.1:4204',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The building Surface in the ordinary Playground (development kernel from CAD_OCCT_DIST).
+  'bim.playground': () => ({
+    timeout: 180_000,
+    workers: 1,
+    outputDir: '/tmp/bim-playground-results',
+    testMatch: /bim-playground.spec.ts$/,
+    use: {
+      baseURL: 'http://127.0.0.1:4202',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4202 --strictPort',
+        url: 'http://127.0.0.1:4202',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // CAD in the ordinary Playground (development kernel from CAD_OCCT_DIST).
   'cad.playground': () => ({
     timeout: 180_000,
@@ -698,6 +810,28 @@ export const suites: Record<string, () => Suite> = {
         reuseExistingServer: !ci,
         timeout: 60_000,
       },
+      {
+        command:
+          'npx vite --config vite.artifact-host.config.ts --host 127.0.0.1 --port 4203 --strictPort',
+        url: 'http://127.0.0.1:4203',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The building Surface in the reference artifact Host (dev, port 4203).
+  'bim.hosts': () => ({
+    timeout: 180_000,
+    workers: 1,
+    outputDir: '/tmp/bim-hosts-results',
+    testMatch: /bim-hosts.spec.ts$/,
+    use: {
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
       {
         command:
           'npx vite --config vite.artifact-host.config.ts --host 127.0.0.1 --port 4203 --strictPort',

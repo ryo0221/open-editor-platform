@@ -38,7 +38,12 @@ import {
   isDocument,
   type DocumentContent,
 } from '@editor-platform/document';
-import { DesignSurface, createDesign, isDesign, type DesignContent } from '@editor-platform/design';
+import {
+  DesignSurface,
+  createDesign,
+  isDesignWithPaths,
+  type DesignContent,
+} from '@editor-platform/design';
 import {
   WhiteboardSurface,
   createWhiteboard,
@@ -58,7 +63,7 @@ const factories = {
 const validators = {
   slide: isDeck,
   document: isDocument,
-  design: isDesign,
+  design: isDesignWithPaths,
   whiteboard: isWhiteboard,
 };
 const items = (d: Native): ReferenceItem[] =>
@@ -66,7 +71,7 @@ const items = (d: Native): ReferenceItem[] =>
     ? d.slides.flatMap((p) => p.objects)
     : isDocument(d)
       ? d.blocks
-      : isDesign(d)
+      : isDesignWithPaths(d)
         ? d.elements
         : d.nodes;
 async function capture(d: Native, resolver: ReferenceResolver, live = true): Promise<Native> {
@@ -83,7 +88,7 @@ async function capture(d: Native, resolver: ReferenceResolver, live = true): Pro
     };
   }
   if (isDocument(d)) return { ...d, blocks: captured as typeof d.blocks };
-  if (isDesign(d)) return { ...d, elements: captured as typeof d.elements };
+  if (isDesignWithPaths(d)) return { ...d, elements: captured as typeof d.elements };
   return { ...d, nodes: captured as typeof d.nodes };
 }
 function hours(): StructuredData {
@@ -522,7 +527,7 @@ function Host() {
               focusAddress={focus}
             />
           )}
-          {!editing && isDesign(content) && (
+          {!editing && isDesignWithPaths(content) && (
             <DesignSurface
               references={resolver}
               content={content}

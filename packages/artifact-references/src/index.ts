@@ -64,6 +64,8 @@ export interface ReferenceProjection {
 }
 export interface ReferenceAdapter {
   domain: string;
+  /** Async verification preflight for retained and live snapshots; project remains synchronous. */
+  prepare?(snapshot: ReferenceSnapshot): Promise<void>;
   validate(snapshot: ReferenceSnapshot): void;
   project(snapshot: ReferenceSnapshot, target: ReferenceTarget): ReferenceProjection;
 }
@@ -345,6 +347,7 @@ export class ReferenceResolver {
     for (const d of owned.dependencies)
       if ((await contentHash(d.content)) !== d.contentHash)
         throw new ReferenceError('error', '参照依存のhashが一致しません。');
+    await this.adapter(source.domain).prepare?.(owned);
     this.adapter(source.domain).validate(owned);
     this.adapter(source.domain).project(owned, source.target);
     return owned;

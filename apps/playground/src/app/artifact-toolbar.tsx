@@ -26,14 +26,27 @@ const reusableKinds = ['design', 'document', 'slide', 'whiteboard', 'data'];
 const templateExcludedKinds = [
   'review',
   'file',
+  'analysis',
+  'estimate',
   'react-ui',
   'structured-graph',
   'geo',
   'animation',
   'schedule',
   'cad',
+  'bim',
 ];
-const nonNativeKinds = ['react-ui', 'structured-graph', 'geo', 'animation', 'schedule', 'cad'];
+const nonNativeKinds = [
+  'analysis',
+  'estimate',
+  'react-ui',
+  'structured-graph',
+  'geo',
+  'animation',
+  'schedule',
+  'cad',
+  'bim',
+];
 
 export interface HistoryControls {
   undoDisabled: boolean;
@@ -81,7 +94,7 @@ export function ExportMenu({
   onDownloadFile?(): void;
 }) {
   return (
-    <Menu label="Export artifact" icon={Download} align="right">
+    <Menu label="Export artifact" icon={Download} align="right" closeOnSelect>
       <button onClick={onJson}>Export JSON</button>
       {documentText && (
         <>
@@ -300,12 +313,15 @@ export function MoreActionsMenu({
     onStartShared &&
     !hasUnsupportedSharedAnimation(active) &&
     active.kind !== 'structured-graph' &&
+    active.kind !== 'analysis' &&
+    active.kind !== 'estimate' &&
     active.kind !== 'geo' &&
     active.kind !== 'schedule' &&
-    active.kind !== 'cad';
+    active.kind !== 'cad' &&
+    active.kind !== 'bim';
   return (
-    <Menu label="More artifact actions" icon={MoreHorizontal} align="right">
-      <div className="mobile-history-actions">
+    <Menu label="More artifact actions" icon={MoreHorizontal} align="right" closeOnSelect>
+      <div className="mobile-history-actions" data-menu-keep-open>
         <button aria-label="Undo" disabled={history.undoDisabled} onClick={history.undo}>
           Undo
         </button>
@@ -333,7 +349,9 @@ export function MoreActionsMenu({
 
       {active.kind !== 'animation' && (
         <button
-          disabled={active.kind === 'structured-graph' || active.kind === 'cad'}
+          disabled={
+            active.kind === 'structured-graph' || active.kind === 'cad' || active.kind === 'bim'
+          }
           aria-expanded={inspector}
           onClick={onToggleInspector}
         >

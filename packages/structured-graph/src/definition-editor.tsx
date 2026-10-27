@@ -27,14 +27,16 @@ export function GraphDefinitionEditor({
 }: {
   graph: GraphDocument;
   profile: GraphProfile;
-  scope: 'graph' | 'node' | 'edge';
+  scope: 'graph' | 'node' | 'edge' | 'section';
   type?: string;
   host?: GraphSourceActions;
   readOnly: boolean;
   onClose(): void;
 }) {
   const definition =
-    scope === 'graph' ? profile.graph : profile[scope === 'node' ? 'nodes' : 'edges'][type!];
+    scope === 'graph'
+      ? profile.graph
+      : profile[scope === 'node' ? 'nodes' : scope === 'edge' ? 'edges' : 'sections'][type!];
   const [draft, setDraft] = useState<GraphType | GraphEdgeType>(() => clone(definition));
   const [field, setField] = useState(Object.keys(definition.schema)[0] ?? '');
   const [newField, setNewField] = useState('');

@@ -58,11 +58,20 @@ export default defineConfig({
         referenceHost: fileURLToPath(
           new URL('./apps/playground/reference-host.html', import.meta.url),
         ),
+        estimateHost: fileURLToPath(
+          new URL('./apps/playground/estimate-host.html', import.meta.url),
+        ),
+        analysisHost: fileURLToPath(
+          new URL('./apps/playground/analysis-host.html', import.meta.url),
+        ),
         graphHost: fileURLToPath(new URL('./apps/playground/graph-host.html', import.meta.url)),
         embed: fileURLToPath(new URL('./apps/playground/embed.html', import.meta.url)),
         cadHost: fileURLToPath(new URL('./apps/playground/cad-host.html', import.meta.url)),
         scheduleHost: fileURLToPath(
           new URL('./apps/playground/schedule-host.html', import.meta.url),
+        ),
+        externalSourcesHost: fileURLToPath(
+          new URL('./apps/playground/external-sources-host.html', import.meta.url),
         ),
         officeMermaid: fileURLToPath(
           new URL('./apps/playground/office-mermaid.html', import.meta.url),

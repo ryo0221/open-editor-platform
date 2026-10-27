@@ -25,6 +25,22 @@ const advance = (char: string, style: TextStyle) =>
     (style.bold ? 1.03 : 1) +
   (style.letterSpacing ?? 0);
 
+// Japanese line breaking (kinsoku): these never start a line…
+const noLineStart =
+  /[、。，．・：；？！ー～…‥）〕］｝〉》」』】〙〗〟’”｠゛゜ゝゞヽヾ々〻ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰ-ㇿ]/u;
+// …and these never end one.
+const noLineEnd = /[（〔［｛〈《「『【〘〖〝‘“｟]/u;
+/** How many trailing characters move to the next line so neither line breaks a kinsoku rule.
+ * Gives up (0) after a few characters, or when the line would empty, and overflows instead. */
+function kinsokuCarry(line: { text: string }[], next: string): number {
+  for (let carry = 0; carry < Math.min(line.length, 4); carry++) {
+    const start = carry ? line[line.length - carry].text : next;
+    if (!noLineStart.test(start) && !noLineEnd.test(line[line.length - carry - 1].text))
+      return carry;
+  }
+  return 0;
+}
+
 /** Deterministic line layout is shared by screen SVG and every ordinary canvas export. */
 export function layoutTextRuns(
   text: string,
@@ -45,7 +61,9 @@ export function layoutTextRuns(
   const lines: TextLine[] = [];
   let current: typeof chars = [],
     used = 0;
-  const flush = () => {
+  const flush = (next?: string) => {
+    const carried =
+      next === undefined ? [] : current.splice(current.length - kinsokuCarry(current, next));
     const font = base.fontSize ?? 24;
     lines.push({
       runs: normalizedRuns(current.map((c) => c.text).join(''), current),
@@ -55,8 +73,8 @@ export function layoutTextRuns(
       ),
       ascent: Math.max(font, ...current.map((c) => c.style.fontSize ?? font)),
     });
-    current = [];
-    used = 0;
+    current = carried;
+    used = carried.reduce((n, c) => n + advance(c.text, c.style), 0);
   };
   for (const token of tokens) {
     if (token[0].text === '\n') {
@@ -64,10 +82,10 @@ export function layoutTextRuns(
       continue;
     }
     const size = token.reduce((n, c) => n + advance(c.text, c.style), 0);
-    if (used + size > width && current.length) flush();
+    if (used + size > width && current.length) flush(token[0].text);
     for (const char of token) {
       const size = advance(char.text, char.style);
-      if (used + size > width && current.length) flush();
+      if (used + size > width && current.length) flush(char.text);
       current.push(char);
       used += size;
     }

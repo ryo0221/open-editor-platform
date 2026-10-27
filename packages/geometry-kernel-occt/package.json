@@ -1,0 +1,12 @@
+{
+  "name": "@editor-platform/geometry-kernel-occt",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/geometry-core": "*"
+  }
+}

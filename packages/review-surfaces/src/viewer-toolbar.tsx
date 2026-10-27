@@ -9,11 +9,21 @@ import {
   Hand,
   Search,
 } from 'lucide-react';
+import type { KeyboardEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
 import { IconButton, Menu, CommitInput } from '@editor-platform/editor-ui';
 import { createFile, type FileContent } from './model';
 import type { FileTool } from './viewer-utils';
+
+/** Enter in a search box moves to the next match, like the next-match button. */
+function nextOnEnter(enabled: boolean, onNext: () => void) {
+  return (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing || !enabled) return;
+    e.preventDefault();
+    onNext();
+  };
+}
 
 export function PdfToolbarControls({
   query,
@@ -43,6 +53,7 @@ export function PdfToolbarControls({
         placeholder="PDF内の文字を検索"
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={nextOnEnter(matchCount > 0, onNextMatch)}
       />
       <button disabled={!matchCount} onClick={onNextMatch}>
         Next PDF text match
@@ -150,6 +161,8 @@ export function TextToolbarControls({
   onNextMatch,
   wrap,
   onWrapChange,
+  csvLayout,
+  onCsvLayoutChange,
 }: {
   query: string;
   onQueryChange(query: string): void;
@@ -157,6 +170,9 @@ export function TextToolbarControls({
   onNextMatch(): void;
   wrap: boolean;
   onWrapChange(wrap: boolean): void;
+  /** Shown only for CSV files. */
+  csvLayout?: 'table' | 'text';
+  onCsvLayoutChange(layout: 'table' | 'text'): void;
 }) {
   return (
     <>
@@ -165,6 +181,7 @@ export function TextToolbarControls({
         placeholder="Search text"
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={nextOnEnter(hasMatches, onNextMatch)}
       />
       <IconButton
         icon={Search}
@@ -172,10 +189,22 @@ export function TextToolbarControls({
         disabled={!hasMatches}
         onClick={onNextMatch}
       />
-      <label className="ep-toolbar-check">
-        <input type="checkbox" checked={wrap} onChange={(e) => onWrapChange(e.target.checked)} />{' '}
-        Wrap lines
-      </label>
+      {csvLayout !== 'table' && (
+        <label className="ep-toolbar-check">
+          <input type="checkbox" checked={wrap} onChange={(e) => onWrapChange(e.target.checked)} />{' '}
+          Wrap lines
+        </label>
+      )}
+      {csvLayout && (
+        <select
+          aria-label="CSV layout"
+          value={csvLayout}
+          onChange={(e) => onCsvLayoutChange(e.target.value === 'text' ? 'text' : 'table')}
+        >
+          <option value="table">Table</option>
+          <option value="text">Text</option>
+        </select>
+      )}
     </>
   );
 }

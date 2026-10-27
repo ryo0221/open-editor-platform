@@ -219,3 +219,5 @@ Claude等の拡張Hostはこのportへの接続が別途必要で、本体の追
 自動的に更新されるわけではない。自動CI停止とperformance測定保留は維持する。
 独立Hostの非同期保存／JSON出力は開始時のkind・resolver・履歴配列を保持し、接続や
 埋め込み先が切り替われば完了を拒否する。別domainの履歴を混ぜて保存・出力しない。
+
+Analysisの保存結果は任意の`ReferenceAdapter.prepare(snapshot)`非同期preflightを通します。resolverはliveと保持版の両方でこのhookをawaitしてから、既存の同期validate/projectへ渡します。[Analysisの接続](analysis-notebook/guide.md)を参照してください。

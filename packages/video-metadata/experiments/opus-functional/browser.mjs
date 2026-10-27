@@ -13,12 +13,13 @@ import {
   AudioSampleSink,
 } from 'mediabunny';
 import { signal } from './signal.mjs';
-window.runFixture = async (n, origin, av = false, sampleRate = 48000) => {
+window.runFixture = async (n, origin, av = false, sampleRate = 48000, resample48 = false) => {
   const target = new BufferTarget(),
     output = new Output({ format: new WebMOutputFormat(), target });
   const packets = [];
   const audio = new AudioSampleSource({
     codec: 'opus',
+    ...(resample48 && sampleRate !== 48000 ? { transform: { sampleRate: 48000 } } : {}),
     bitrate: 128000,
     onEncodedPacket: (p) => packets.push({ timestamp: p.timestamp, duration: p.duration }),
   });

@@ -8,7 +8,7 @@ import KernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import { EditorSession } from '@editor-platform/editor-core';
 import { EditorExportGuardContext, EditorInputsContext } from '@editor-platform/editor-ui';
 import '@editor-platform/editor-ui/styles.css';
-import kernelBuild from 'virtual:cad-kernel-build';
+import kernelBuild, { kernels } from 'virtual:cad-kernel-build';
 import './cad-host.css';
 
 // This Host owns storage, permission and the kernel build; the Surface owns editing and history.
@@ -19,7 +19,7 @@ function initialDocument(): CadDocument {
     ...plate,
     kernelProfile: {
       ...plate.kernelProfile,
-      id: 'opencascade.js-2.0.0-beta.b5ff984',
+      id: kernelBuild?.id ?? 'unavailable',
       buildHash: kernelBuild?.buildHash ?? `sha256:${'0'.repeat(64)}`,
     },
   };
@@ -40,7 +40,7 @@ function AttachedSurface({
 }: {
   session: EditorSession<CadDocument>;
   readOnly: boolean;
-  guard: { current: (() => void) | undefined };
+  guard: { current: ((options?: { keepEditor?: boolean }) => void) | undefined };
   onEvent(message: string): void;
 }) {
   const access = useRef({ readOnly, generation: 0 });
@@ -51,6 +51,7 @@ function AttachedSurface({
       createCadBinding({
         session,
         build: kernelBuild,
+        kernels,
         spawnWorker: () => new KernelWorker() as never,
         canEdit: () => !access.current.readOnly,
         permissionGeneration: () => access.current.generation,
@@ -69,7 +70,7 @@ function AttachedSurface({
   return (
     <EditorInputsContext.Provider value={binding.inputs}>
       <EditorExportGuardContext.Provider value={binding.flushInputs}>
-        <CadSurface controller={binding.controller} name="cad-host" />
+        <CadSurface controller={binding.controller} assembly={binding.assembly} name="cad-host" />
       </EditorExportGuardContext.Provider>
     </EditorInputsContext.Provider>
   );
@@ -81,14 +82,14 @@ function CadHost() {
   const [attached, setAttached] = useState(true);
   const [event, setEvent] = useState('');
   const [error, setError] = useState('');
-  const guard = useRef<() => void>(undefined);
+  const guard = useRef<(options?: { keepEditor?: boolean }) => void>(undefined);
   /**
    * Save/export/detach boundary: field drafts commit first; an invalid or evaluating input, or a
    * failing action (e.g. full storage), is reported instead of a stale success message.
    */
-  function boundary(action: () => void) {
+  function boundary(action: () => void, options: { keepEditor?: boolean } = {}) {
     try {
-      guard.current?.();
+      guard.current?.(options);
       action();
       setError('');
     } catch (e) {
@@ -110,10 +111,14 @@ function CadHost() {
         <button
           disabled={readOnly}
           onClick={() =>
-            boundary(() => {
-              localStorage.setItem(draftKey, JSON.stringify(session.content));
-              setEvent(`Saved revision ${session.revision.sequence}`);
-            })
+            // Saving the draft keeps the editor open: an evaluating edit is saved once it applies.
+            boundary(
+              () => {
+                localStorage.setItem(draftKey, JSON.stringify(session.content));
+                setEvent(`Saved revision ${session.revision.sequence}`);
+              },
+              { keepEditor: true },
+            )
           }
         >
           Save draft

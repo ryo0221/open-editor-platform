@@ -74,6 +74,9 @@ export function DataGraphSurface({
     <>
       <GraphSurface
         content={projection.graph}
+        // Data has nowhere to save node shapes; records use the Profile type default.
+        shapeEditing={false}
+        sectionEditing={false}
         profile={projection.profile}
         stamp={projection.stamp}
         previewEdit={(intents) => {

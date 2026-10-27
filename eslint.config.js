@@ -64,4 +64,25 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // ADR 017: the building domain and the shared geometry never depend on CAD.
+    files: [
+      'packages/bim/**/*.{ts,tsx}',
+      'packages/bim-*/**/*.{ts,tsx}',
+      'packages/geometry-*/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@editor-platform/cad', '@editor-platform/cad-*', '@editor-platform/cad/*'],
+              message: 'bim and geometry packages do not import CAD packages (ADR 017).',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

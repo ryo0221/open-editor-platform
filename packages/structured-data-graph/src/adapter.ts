@@ -82,10 +82,11 @@ function field(column: Column, data: StructuredData): AttributeSchema {
 }
 export function dataGraphProfile(data: StructuredData): GraphProfile {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'structured-data',
     version: 1,
     graph: { schema: {}, readOnly: false, ui: { label: 'Dataset' } },
+    sections: {},
     nodes: {
       record: {
         schema: Object.fromEntries(data.columns.map((c) => [dataFieldId(c.id), field(c, data)])),
@@ -181,7 +182,7 @@ export function projectDataGraph(data: StructuredData): GraphDocument {
         attributes: {},
       })),
   );
-  graph.layout = Object.fromEntries(
+  graph.presentation.nodes = Object.fromEntries(
     data.rows.map((r, i) => [
       dataNodeId(r.id),
       clone(
@@ -210,6 +211,19 @@ export function prepareDataGraph(data: StructuredData, intents: GraphIntent[]) {
       let next = clone(current);
       for (const intent of fixed) {
         switch (intent.type) {
+          case 'set-node-shape':
+          case 'set-node-style':
+            throw new Error(
+              'Data cannot save node shapes or styles; the record type default is used',
+            );
+          case 'add-section':
+          case 'set-node-section':
+          case 'set-section-parent':
+          case 'move-section':
+          case 'resize-section':
+          case 'set-section-style':
+          case 'delete-section':
+            throw new Error('This source cannot represent Graph sections');
           case 'set-attribute':
           case 'remove-attribute': {
             if (intent.scope !== 'node' || intent.path.length !== 1)
@@ -340,7 +354,7 @@ export function prepareDataGraph(data: StructuredData, intents: GraphIntent[]) {
 export const dataGraphAdapter: GraphAdapter<StructuredData> = {
   id: 'structured-data-single-relation',
   version: 1,
-  layoutMode: 'source',
+  presentationMode: 'source',
   profile: dataGraphProfile,
   project: projectDataGraph,
   prepare: prepareDataGraph,

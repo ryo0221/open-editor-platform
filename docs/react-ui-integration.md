@@ -25,6 +25,8 @@ treeのdrag/drop、Move up/down/target slot、Duplicate subtree、Delete subtree
 Page inputsで入力/コールバックschemaとfixtureを宣言する。controlled inputのdata/eventは組で接続する。
 「Product page」「Contact form」「Host tokens」はHostが供給する構成例である。
 Edit compositionは選択、Interactは元部品の入力/クリックとHostの一時状態を使う。
+dataに結んでいないcontrolled inputは、Interactでpreviewの中だけの値を持って入力でき、構成・fixture・TSXには書かない。
+previewのHostが準備完了を返さないときは、待ち続けずにそのoriginとRestart previewの案内をstatusに出す。
 preview幅は390/1024/1400px。Save version、History、native JSONは既存Artifact lifecycleを使う。
 
 ## 元部品を登録するHost

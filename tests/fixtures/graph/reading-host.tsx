@@ -15,7 +15,8 @@ import {
 
 const colors = ['#b91c1c', '#1d4ed8', '#15803d', '#7e22ce', '#a16207', '#0e7490', '#be185d'];
 const profile: GraphProfile = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  sections: {},
   id: 'reading-fixture',
   version: 1,
   graph: { schema: { name: { type: 'string' } } },
@@ -53,7 +54,7 @@ graph.nodes = Array.from(
           },
   }),
 );
-graph.layout = Object.fromEntries(
+graph.presentation.nodes = Object.fromEntries(
   graph.nodes.map((node, i) => [
     node.id,
     { x: i % 2 ? 1100 : -100, y: 50 + Math.floor(i / 2) * 230 },
@@ -87,7 +88,7 @@ function Host() {
         Array.from({ length: 10 }, (_, i) => `Line ${i + 1}: explicit line break`).join('\n'),
       ];
       content.nodes = names.map((name, i) => ({ id: `n${i}`, type: 'item', attributes: { name } }));
-      content.layout = {
+      content.presentation.nodes = {
         n0: { x: 0, y: 0 },
         n1: { x: 600, y: 0 },
         n2: { x: 0, y: 1200 },
@@ -98,18 +99,18 @@ function Host() {
         { id: 'labels23', type: 'relation1', from: 'n2', to: 'n3', attributes: {} },
       ];
     }
-    if (query.has('default-overlap')) content.layout.n1 = { x: 0, y: 200 };
-    if (query.has('switch-camera')) content.layout.n12 = { x: 2400, y: 3000 };
+    if (query.has('default-overlap')) content.presentation.nodes.n1 = { x: 0, y: 200 };
+    if (query.has('switch-camera')) content.presentation.nodes.n12 = { x: 2400, y: 3000 };
     if (query.has('loop-fit')) {
       content.nodes = content.nodes.slice(0, 1);
-      content.layout = { n0: { x: 0, y: 0 } };
+      content.presentation.nodes = { n0: { x: 0, y: 0 } };
       content.edges = query.has('fresh')
         ? [{ id: 'loop', type: 'relation0', from: 'n0', to: 'n0', attributes: {} }]
         : [];
     }
     if (query.has('fit-unmeasurable')) {
       content.nodes = content.nodes.slice(0, 3);
-      content.layout = {
+      content.presentation.nodes = {
         n0: { x: 0, y: 0 },
         n1: { x: query.get('fit-unmeasurable') === 'refused' ? 0 : 800, y: 0 },
         n2: { x: 3000, y: 1200 },
@@ -118,7 +119,7 @@ function Host() {
     }
     if (query.has('wide-label')) {
       content.nodes = content.nodes.slice(0, 2);
-      content.layout = { n0: { x: 0, y: 0 }, n1: { x: 800, y: 0 } };
+      content.presentation.nodes = { n0: { x: 0, y: 0 }, n1: { x: 800, y: 0 } };
       content.edges = [{ id: 'wide', type: 'relation0', from: 'n0', to: 'n1', attributes: {} }];
     }
     return new EditorSession(content);
@@ -161,6 +162,18 @@ function Host() {
                         ? ''
                         : 'W'.repeat(60),
               },
+            },
+          },
+        }
+      : {}),
+    ...(query.has('connection-label')
+      ? {
+          edges: {
+            ...profile.edges,
+            relation0: {
+              ...profile.edges.relation0,
+              schema: { label: { type: 'string' as const } },
+              ui: { ...profile.edges.relation0.ui, labelField: 'label' },
             },
           },
         }

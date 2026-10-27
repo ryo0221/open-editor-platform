@@ -1,0 +1,136 @@
+.ep-analysis {
+  font:
+    14px/1.5 system-ui,
+    sans-serif;
+  color: #233044;
+  background: #f7f8fc;
+  padding: 20px;
+  overflow: auto;
+  height: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.ep-analysis * {
+  box-sizing: border-box;
+}
+.ep-analysis h2,
+.ep-analysis h3 {
+  margin: 0 0 12px;
+}
+.analysis-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.ep-analysis fieldset,
+.ep-analysis article,
+.ep-analysis section {
+  background: white;
+  border: 1px solid #dce1eb;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.ep-analysis label {
+  display: block;
+  margin: 8px 0;
+}
+.ep-analysis input:not([type='checkbox']),
+.ep-analysis select,
+.ep-analysis textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #aeb9cc;
+  border-radius: 4px;
+  font: inherit;
+}
+.ep-analysis textarea {
+  min-height: 90px;
+}
+.ep-analysis button {
+  padding: 8px 12px;
+  margin: 4px;
+  border: 1px solid #8394b6;
+  border-radius: 5px;
+  background: #fff;
+  color: #20365c;
+  cursor: pointer;
+}
+.ep-analysis button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ep-analysis small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ep-analysis pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.analysis-table {
+  overflow: auto;
+  max-height: 440px;
+}
+.ep-analysis table {
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+.ep-analysis th,
+.ep-analysis td {
+  border: 1px solid #dce1eb;
+  padding: 8px;
+}
+.ep-analysis [role='alert'] {
+  color: #9a1730;
+}
+.ep-analysis img {
+  max-width: 100%;
+}
+.analysis-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .ep-analysis {
+    padding: 10px;
+  }
+  .analysis-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.analysis-expression {
+  border-left: 3px solid #96aed1 !important;
+  padding: 8px !important;
+}
+.analysis-operands {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.analysis-expression .analysis-operands {
+  grid-template-columns: 1fr;
+}
+.ep-analysis .analysis-diff {
+  white-space: pre-wrap;
+  min-width: 560px;
+  width: 100%;
+}
+.analysis-diff td {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.ep-analysis .analysis-table thead {
+  position: sticky;
+  top: 0;
+  background: #f0f3fa;
+}
+.ep-analysis details {
+  overflow-wrap: anywhere;
+}
+.ep-analysis td {
+  font-variant-numeric: tabular-nums;
+}

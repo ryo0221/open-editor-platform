@@ -34,8 +34,8 @@ export async function chunkHash(chunk) {
   ).join('');
 }
 /** Private provisional player. Output timestamp drives picture; currentTime schedules audio only. */
-export async function playTimeline(snapshot, at, canvas, caller, report = () => {}) {
-  const plan = timelinePlan(snapshot),
+export async function playTimeline(snapshot, at, canvas, caller, report = () => {}, ports) {
+  const plan = (ports?.plan ?? timelinePlan)(snapshot),
     start = sampleIndex(at, rate);
   try {
     sampleIndex(plan.duration, rate);
@@ -92,8 +92,8 @@ export async function playTimeline(snapshot, at, canvas, caller, report = () => 
   try {
     await context.resume();
     signal.throwIfAborted();
-    video = await timelineVideo(plan, signal);
-    pcm = await timelinePcm(plan, signal);
+    video = await (ports?.video ?? timelineVideo)(plan, signal);
+    pcm = await (ports?.pcm ?? timelinePcm)(plan, signal);
     signal.throwIfAborted();
 
     // Present the requested initial picture before audio is scheduled; this is
@@ -101,7 +101,7 @@ export async function playTimeline(snapshot, at, canvas, caller, report = () => 
     const initial = await video.frameAt(at, signal);
     try {
       signal.throwIfAborted();
-      drawContainedV2(canvas, initial, plan.output, true);
+      (ports?.draw ?? drawContainedV2)(canvas, initial, plan.output, true);
       evidence.initialFrame = {
         frame: start / quantum,
         sourceId: initial?.sourceId,
@@ -123,7 +123,7 @@ export async function playTimeline(snapshot, at, canvas, caller, report = () => 
             const outputContextTime = outputClock(),
               drawn = position(outputContextTime);
             if (!stopping && Math.floor(drawn / quantum) === frame) {
-              const geometry = drawContainedV2(canvas, row, plan.output, true);
+              const geometry = (ports?.draw ?? drawContainedV2)(canvas, row, plan.output, true);
               lastDraw = frame;
               evidence.frames.push({
                 frame,

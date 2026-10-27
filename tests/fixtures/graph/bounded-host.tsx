@@ -10,7 +10,8 @@ import {
   type GraphProfile,
 } from '@editor-platform/structured-graph';
 const base: GraphProfile = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  sections: {},
   id: 'bounded-ui',
   version: 1,
   graph: { schema: {} },

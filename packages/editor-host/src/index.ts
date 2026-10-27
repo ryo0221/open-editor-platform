@@ -1,6 +1,7 @@
 import {
   canonicalJson,
   clone,
+  newId,
   commitVersion,
   deserializeArtifact,
   contentHash,
@@ -12,8 +13,13 @@ import {
 import {
   command,
   EditorSession,
+  previewProposedCommands,
+  sameLocalRevision,
+  transaction,
   type EditorCommand,
   type LocalDraftRevision,
+  type ProposalPreview,
+  type ProposedCommands,
   type Selection,
 } from '@editor-platform/editor-core';
 export * from './access';
@@ -27,7 +33,11 @@ export type HostErrorCode =
   | 'save-busy'
   | 'save-failed'
   | 'unsaved'
-  | 'input-pending';
+  | 'input-pending'
+  | 'version-missing'
+  | 'proposal-missing'
+  | 'proposal-stale'
+  | 'proposal-invalid';
 export class EditorHostError extends Error {
   constructor(
     readonly code: HostErrorCode,
@@ -44,12 +54,34 @@ export interface EditorHostCapabilities {
   formats: readonly string[];
   preview: 'none' | 'host-isolated';
   shared: false;
+  /** Host-submitted native command proposals with draft preview and review. Absent = false. */
+  proposals?: boolean;
+}
+/** Plain text for external tools. Offsets index `text`; segments carry stable element IDs. */
+export interface HostTextSegment {
+  /** Stable ID of the text-bearing element (for a list item, its paragraph). */
+  id: string;
+  /** Top-level native element that contains it. */
+  blockId: string;
+  start: number;
+  end: number;
+}
+export interface HostText {
+  text: string;
+  segments: HostTextSegment[];
+}
+export interface HostTextAccess<T> {
+  read(content: T): HostText;
 }
 export interface EditorHostAdapter<T> {
   kind: string;
   validate(value: unknown): value is T;
+  /** Optional async domain verification over draft and every retained immutable version. */
+  preflight?(artifact: Artifact<T>): Promise<void>;
   capabilities: EditorHostCapabilities;
   export?(format: string, content: T, signal: AbortSignal): Promise<unknown>;
+  /** Optional plain text read; Editors without it reject readText with `unsupported`. */
+  text?: HostTextAccess<T>;
 }
 export interface HostSnapshot<T> {
   artifactId: string;
@@ -69,6 +101,47 @@ export interface HostSaveResult<T> {
   kind: string;
   revision: LocalDraftRevision;
   artifact: Artifact<T>;
+  dirty: boolean;
+}
+/** Sent only after StorageAdapter.put succeeds; never for a requested or failed save. */
+export interface HostSavedEvent {
+  artifactId: string;
+  kind: string;
+  /** Version the persisted draft is based on; the new one when the save committed a version. */
+  versionId: string | null;
+  committed: boolean;
+  /** Draft revision captured when the save started. */
+  revision: LocalDraftRevision;
+  /** Current Session revision and dirty state when the event is sent. */
+  currentRevision: LocalDraftRevision;
+  dirty: boolean;
+}
+export interface HostSavedContent<T> {
+  artifactId: string;
+  kind: string;
+  /** The persisted draft's base version, or the requested immutable version. */
+  versionId: string | null;
+  source: 'saved-draft' | 'version';
+  content: T;
+  /** Present for an immutable version. */
+  contentHash?: string;
+}
+export interface HostPendingProposal<T> {
+  id: string;
+  summary: string;
+  source?: string;
+  /** Session revision the preview was computed from. */
+  baseRevision: LocalDraftRevision;
+  preview: ProposalPreview<T>;
+  /** True after any later draft change; accepting it is refused. */
+  stale: boolean;
+}
+export interface HostProposalResult {
+  artifactId: string;
+  proposalId: string;
+  outcome: 'accepted' | 'rejected' | 'stale' | 'withdrawn';
+  revision: LocalDraftRevision;
+  /** Accepted content is an unsaved draft change until the Host saves it. */
   dirty: boolean;
 }
 /** Envelope validation is separate from a domain's native validator. */
@@ -157,7 +230,7 @@ function assertNativeSize(json: string, artifactId: string) {
       'Native JSON exceeds the 16 MiB boundary',
     );
 }
-function boundedNativeJson<T>(artifact: Artifact<T>) {
+export function serializeHostNativeArtifact<T>(artifact: Artifact<T>) {
   const json = serializeArtifact(artifact);
   assertNativeSize(json, artifact.id);
   return json;
@@ -172,6 +245,7 @@ export async function loadHostArtifact<T>(
   for (const version of artifact.versions)
     if (version.contentHash !== (await contentHash(version.content)))
       throw new EditorHostError('invalid-artifact', artifact.id, 'Retained version hash mismatch');
+  await adapter.preflight?.(artifact);
   return clone(artifact);
 }
 
@@ -183,6 +257,17 @@ export class ArtifactEditor<T> {
   private saving = false;
   private closed = false;
   private listeners = new Set<() => void>();
+  private savedListeners = new Set<(event: HostSavedEvent) => void>();
+  private proposalListeners = new Set<(result: HostProposalResult) => void>();
+  private pending = new Map<
+    string,
+    {
+      proposal: ProposedCommands<T>;
+      revision: LocalDraftRevision;
+      preview: ProposalPreview<T>;
+      reviewed: string;
+    }
+  >();
   private buffers = new Set<() => void>();
   private selection: Selection = { addresses: [] };
   /** Private camera/panel/selection state; never part of Artifact content or Undo. */
@@ -248,9 +333,13 @@ export class ArtifactEditor<T> {
       throw new EditorHostError('read-only', this.id, 'Host permission is read-only');
   }
   private notify() {
-    for (const listener of [...this.listeners]) {
+    this.emit(this.listeners, undefined);
+  }
+  private emit<E>(listeners: Set<(event: E) => void>, event: E) {
+    for (const listener of [...listeners]) {
+      if (!listeners.has(listener)) continue;
       try {
-        listener();
+        listener(clone(event));
       } catch (error) {
         try {
           this.onObserverError(error);
@@ -267,6 +356,181 @@ export class ArtifactEditor<T> {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+  /** Persisted-save notifications. The returned function releases this listener only. */
+  onSaved(listener: (event: HostSavedEvent) => void): () => void {
+    this.requireOpen();
+    this.savedListeners.add(listener);
+    return () => {
+      this.savedListeners.delete(listener);
+    };
+  }
+  /** Proposal review outcomes (accepted, rejected, stale, withdrawn on close). */
+  onProposalResolved(listener: (result: HostProposalResult) => void): () => void {
+    this.requireOpen();
+    this.proposalListeners.add(listener);
+    return () => {
+      this.proposalListeners.delete(listener);
+    };
+  }
+  /** Persisted content only: the saved draft, or an immutable retained version by ID. */
+  readSaved(versionId?: string): HostSavedContent<T> {
+    this.requireOpen();
+    const base = { artifactId: this.id, kind: this.adapter.kind };
+    if (versionId === undefined)
+      return {
+        ...base,
+        versionId: this.persisted.draft.baseVersionId,
+        source: 'saved-draft',
+        content: clone(this.persisted.draft.content),
+      };
+    const version = this.persisted.versions.find((v) => v.versionId === versionId);
+    if (!version)
+      throw new EditorHostError('version-missing', this.id, 'Unknown saved version: ' + versionId);
+    return {
+      ...base,
+      versionId,
+      source: 'version',
+      content: clone(version.content),
+      contentHash: version.contentHash,
+    };
+  }
+  /** Plain text of the current draft or of persisted content, from the Editor's own reader. */
+  readText(from: 'draft' | 'saved' = 'saved', versionId?: string): HostText {
+    this.requireOpen();
+    if (!this.adapter.text)
+      throw new EditorHostError('unsupported', this.id, 'Text access is unsupported');
+    const content = from === 'draft' ? this.session.content : this.readSaved(versionId).content;
+    return clone(this.adapter.text.read(content));
+  }
+  private requireProposals() {
+    if (!this.capabilities.proposals)
+      throw new EditorHostError('unsupported', this.id, 'Proposals are unsupported');
+  }
+  private review(id: string): HostPendingProposal<T> {
+    const entry = this.pending.get(id)!;
+    return {
+      id,
+      summary: entry.proposal.summary,
+      source: entry.proposal.source,
+      baseRevision: clone(entry.revision),
+      // Commands are functions; the frozen owned proposal is shared, contents are copies.
+      preview: {
+        baseContent: clone(entry.preview.baseContent),
+        content: clone(entry.preview.content),
+        proposal: entry.proposal,
+      },
+      stale: !sameLocalRevision(entry.revision, this.session.revision),
+    };
+  }
+  /** Register native commands and compute their preview on a copy of the current draft. */
+  propose(proposal: ProposedCommands<T>): HostPendingProposal<T> {
+    this.requireEdit();
+    this.requireProposals();
+    const revision = this.session.revision;
+    if (!proposal.id || this.pending.has(proposal.id))
+      throw new EditorHostError('proposal-invalid', this.id, 'Proposal ID is missing or in use');
+    if (proposal.baseLocalRevision && !sameLocalRevision(proposal.baseLocalRevision, revision))
+      throw new EditorHostError(
+        'proposal-stale',
+        this.id,
+        'The draft changed after this proposal was prepared',
+      );
+    // Own the reviewed commands: later changes to the caller's object cannot reach accept.
+    const owned: ProposedCommands<T> = Object.freeze({
+      ...proposal,
+      baseLocalRevision: proposal.baseLocalRevision && clone(proposal.baseLocalRevision),
+      commands: Object.freeze(
+        [...proposal.commands].map((c) =>
+          Object.freeze({ ...c, context: c.context && Object.freeze({ ...c.context }) }),
+        ),
+      ) as EditorCommand<T>[],
+    });
+    let preview: ProposalPreview<T>;
+    try {
+      preview = previewProposedCommands(this.session.content, owned);
+    } catch (error) {
+      throw new EditorHostError(
+        'proposal-invalid',
+        this.id,
+        error instanceof Error ? error.message : 'Proposal commands failed',
+      );
+    }
+    if (!this.adapter.validate(preview.content))
+      throw new EditorHostError(
+        'proposal-invalid',
+        this.id,
+        'Proposal produced invalid native content',
+      );
+    this.pending.set(proposal.id, {
+      proposal: owned,
+      revision,
+      preview,
+      reviewed: canonicalJson(preview.content),
+    });
+    this.notify();
+    return this.review(proposal.id);
+  }
+  get proposals(): HostPendingProposal<T>[] {
+    return [...this.pending.keys()].map((id) => this.review(id));
+  }
+  private resolve(id: string, outcome: HostProposalResult['outcome']) {
+    this.pending.delete(id);
+    const result: HostProposalResult = {
+      artifactId: this.id,
+      proposalId: id,
+      outcome,
+      revision: this.session.revision,
+      dirty: this.snapshot.dirty,
+    };
+    this.emit(this.proposalListeners, result);
+    this.notify();
+    return result;
+  }
+  private pendingProposal(id: string) {
+    const entry = this.pending.get(id);
+    if (!entry) throw new EditorHostError('proposal-missing', this.id, 'Unknown proposal: ' + id);
+    return entry;
+  }
+  /** The single accept path for ordinary review UI and headless callers. */
+  acceptProposal(id: string): HostProposalResult {
+    this.requireEdit();
+    const entry = this.pendingProposal(id);
+    // Input must be confirmed first; a pending input keeps the proposal for later review.
+    this.flushInputs();
+    if (!sameLocalRevision(entry.revision, this.session.revision)) {
+      this.resolve(id, 'stale');
+      throw new EditorHostError(
+        'proposal-stale',
+        this.id,
+        'The draft changed after the preview. Request a new proposal.',
+      );
+    }
+    const applied = transaction(entry.proposal.summary, entry.proposal.commands, {
+      origin: 'proposal',
+      transactionId: newId('transaction'),
+      proposalId: id,
+    });
+    this.execute({
+      ...applied,
+      // Commit only the content the person reviewed.
+      apply: (content) => {
+        const result = applied.apply(content);
+        if (canonicalJson(result) !== entry.reviewed)
+          throw new EditorHostError(
+            'proposal-invalid',
+            this.id,
+            'The proposal no longer produces the reviewed preview',
+          );
+        return result;
+      },
+    });
+    return this.resolve(id, 'accepted');
+  }
+  rejectProposal(id: string): HostProposalResult {
+    this.requireOpen();
+    this.pendingProposal(id);
+    return this.resolve(id, 'rejected');
   }
   registerInputBoundary(flushOrThrow: () => void): () => void {
     this.requireOpen();
@@ -365,11 +629,21 @@ export class ArtifactEditor<T> {
     try {
       if (options.commitVersion)
         captured = await commitVersion(captured, options.author ?? null, 'Host save');
-      boundedNativeJson(captured);
+      serializeHostNativeArtifact(captured);
+      await this.adapter.preflight?.(captured);
       this.requireEdit();
       await this.storage.put(clone(captured));
       this.persisted = clone(captured);
       this.savedRevision = revision;
+      this.emit(this.savedListeners, {
+        artifactId: this.id,
+        kind: this.adapter.kind,
+        versionId: captured.draft.baseVersionId,
+        committed: !!options.commitVersion,
+        revision,
+        currentRevision: this.session.revision,
+        dirty: this.snapshot.dirty,
+      });
       return {
         artifactId: this.id,
         kind: this.adapter.kind,
@@ -392,8 +666,16 @@ export class ArtifactEditor<T> {
   async export(format: string, signal: AbortSignal = new AbortController().signal) {
     this.requireOpen();
     this.flushInputs();
-    if (format === 'native-json' && this.capabilities.nativeJson)
-      return boundedNativeJson(updateDraft(this.persisted, this.session.content));
+    if (format === 'native-json' && this.capabilities.nativeJson) {
+      const captured = updateDraft(this.persisted, this.session.content);
+      const revision = this.session.revision;
+      await this.adapter.preflight?.(captured);
+      this.requireOpen();
+      this.flushInputs();
+      if (!sameLocalRevision(revision, this.session.revision))
+        throw new EditorHostError('input-pending', this.id, 'Content changed during export');
+      return serializeHostNativeArtifact(captured);
+    }
     if (!this.capabilities.formats.includes(format) || !this.adapter.export)
       throw new EditorHostError('unsupported', this.id, 'Unsupported export format: ' + format);
     return this.adapter.export(format, this.session.content, signal);
@@ -410,11 +692,15 @@ export class ArtifactEditor<T> {
         this.id,
         'Save, retain, or explicitly discard the draft',
       );
+    for (const id of [...this.pending.keys()]) this.resolve(id, 'withdrawn');
     this.closed = true;
     this.listeners.clear();
+    this.savedListeners.clear();
+    this.proposalListeners.clear();
     this.buffers.clear();
     this.viewState.clear();
     this.selection = { addresses: [] };
     this.session = new EditorSession(this.persisted.draft.content);
   }
 }
+export * from './proposal';

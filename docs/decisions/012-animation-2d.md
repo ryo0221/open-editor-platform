@@ -26,8 +26,11 @@ the child. This schema 2 terminal rule does not change old prototype semantics.
 Pure preparation owns, validates, hashes and freezes a snapshot. Evaluation has no
 clock or mutation. One SVG renderer and absolute-clock transport serve Surface,
 Slide, Web, registered React UI and static frames. Portable PNG/JPEG/font assets
-carry hashes and notices. Browser preparation decodes images/fonts before use;
-non-ASCII text requires a pinned font. No implicit network asset resolution.
+carry hashes and notices. Browser preparation decodes images/fonts before use.
+Text without a pinned font renders with the viewer's system sans-serif as a
+provisional display: drafts, versions, playback and Slide placement accept it and
+the Editor says so, but a static frame export refuses non-ASCII text without a
+pinned font (amended for Issue #377). No implicit network asset resolution.
 
 Exact references retain their own complete, independently valid closure. Validate
 hashes, cycles, depth, expansion and resource limits before admission. Rejection

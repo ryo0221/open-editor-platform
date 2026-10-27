@@ -3,9 +3,13 @@ import { contentHash } from '@editor-platform/artifact-core';
 import { describe, expect, it } from 'vitest';
 import {
   applyCadOperation,
+  assertCad,
   assertCadOperation,
   cadContentHash,
   cadEditorCommand,
+  cadTolerance,
+  cadToleranceSetOf,
+  cadToleranceSets,
   compareCad,
   evaluationOrder,
   f01Empty,
@@ -81,6 +85,34 @@ describe('cad-core fixtures and validation', () => {
     expect(f02Volume(100)).toBeCloseTo(25000 - 125 * Math.PI, 9);
   });
 
+  it('takes one named tolerance set, changed only by its own edit (K2, CM-6)', () => {
+    const plate = f02Plate();
+    expect(cadToleranceSetOf(plate.kernelProfile)).toBe('standard');
+    const large = applyCadOperation(plate, { type: 'setToleranceSet', set: 'large' });
+    expect(large.kernelProfile).toMatchObject(cadToleranceSets.large);
+    expect(cadToleranceSetOf(large.kernelProfile)).toBe('large');
+    expect(validateCad(large)).toEqual([]);
+    // The recipe is untouched: only the profile's tolerances change.
+    expect({ ...large, kernelProfile: plate.kernelProfile }).toEqual(plate);
+    expect(applyCadOperation(large, { type: 'setToleranceSet', set: 'standard' })).toEqual(plate);
+    expect(() => applyCadOperation(large, { type: 'setToleranceSet', set: 'large' })).toThrow(
+      'tolerance-set-unchanged',
+    );
+    expect(() =>
+      applyCadOperation(plate, { type: 'setToleranceSet', set: 'huge' as never }),
+    ).toThrow('tolerance-set-unknown');
+    // A mixture of the two sets is no set: refused like any other value.
+    const mixed = mutate(
+      plate,
+      (d) =>
+        (d.kernelProfile.maxResultLinearToleranceMm =
+          cadToleranceSets.large.maxResultLinearToleranceMm),
+    );
+    expect(cadToleranceSetOf(mixed.kernelProfile)).toBeUndefined();
+    expect(codes(mixed)).toContain('kernel-tolerance');
+    expect(cadToleranceSets.standard).toBe(cadTolerance);
+  });
+
   it('rejects malformed input from unknown (F04, CAD01)', () => {
     const plate = f02Plate();
     const poly = (vertices: [number, number][]) =>
@@ -91,7 +123,7 @@ describe('cad-core fixtures and validation', () => {
         };
       });
     const cases: [unknown, string][] = [
-      [{ ...f01Empty(), schemaVersion: 2 }, 'unsupported-schema'],
+      [{ ...f01Empty(), schemaVersion: 3 }, 'unsupported-schema'],
       [mutate(plate, (d) => (d.extra = 1)), 'unknown-field'],
       [mutate(plate, (d) => (d.parameters[0].value = Number.NaN)), 'number'],
       [mutate(plate, (d) => (d.parameters[0].value = 0)), 'dimension-range'],
@@ -99,9 +131,8 @@ describe('cad-core fixtures and validation', () => {
       [mutate(plate, (d) => (d.features[0].args.profileId = 'nope')), 'profile-missing'],
       [mutate(plate, (d) => (d.features[2].inputFeatureIds = ['missing'])), 'feature-missing'],
       [mutate(plate, (d) => (d.parameters[1].id = 'W')), 'duplicate-id'],
-      [mutate(plate, (d) => (d.features[0].type = 'imported')), 'feature-unsupported'],
-      [mutate(plate, (d) => (d.features[0].type = 'loft')), 'feature-type'],
-      [mutate(plate, (d) => d.assets.push({})), 'assets-unsupported'],
+      [mutate(plate, (d) => (d.features[0].type = 'helix')), 'feature-type'],
+      [mutate(plate, (d) => d.assets.push({})), 'asset-kind'],
       [mutate(plate, (d) => (d.kernelProfile.linearToleranceMm = 0.001)), 'kernel-tolerance'],
       [mutate(plate, (d) => (d.parameters[0].type = 'angle')), 'parameter-type'],
       [
@@ -164,6 +195,20 @@ describe('cad-core fixtures and validation', () => {
     expect(codes(getter)).toEqual(['json-value']);
   });
 
+  it('names both places of a duplicate ID across element kinds (ST-28#7)', () => {
+    const doc = mutate(f02Plate(), (d) => (d.bodies[1].id = 'plate-profile'));
+    expect(validateCad(doc)).toContainEqual({
+      code: 'duplicate-id',
+      path: '$.bodies[1].id',
+      severity: 'error',
+      id: 'plate-profile',
+      firstPath: '$.profiles[0].id',
+    });
+    expect(() => assertCad(doc)).toThrow(
+      'cad-invalid:duplicate-id@$.bodies[1].id (ID "plate-profile" is already used at $.profiles[0].id)',
+    );
+  });
+
   it('checks quaternion norm, revolve axis side and Boolean inputs', () => {
     const ring = f03Revolve();
     const q = (n: number) => mutate(ring, (d) => (d.profiles[0].plane.orientation = [0, 0, 0, n]));
@@ -190,6 +235,54 @@ describe('cad-core fixtures and validation', () => {
         ),
       ),
     ).toContain('boolean-same-input');
+  });
+
+  it('counts 64 active bodies; consumed tools count only toward 1,024 in all (CM-U3)', () => {
+    const boxes = (from: number, n: number) => {
+      const ids = Array.from({ length: n }, (_, i) => `b${from + i}`);
+      return {
+        type: 'insertFeatures' as const,
+        features: ids.map((id, i) => ({
+          id: `${id}-box`,
+          name: id,
+          type: 'box' as const,
+          inputFeatureIds: [] as [],
+          args: {
+            size: position(1, 1, 1),
+            origin: position((from + i) * 2, 0, 0),
+            orientation: identityQuaternion(),
+          },
+        })),
+        bodies: ids.map((id) => ({
+          id,
+          name: id,
+          sourceFeatureId: `${id}-box`,
+          placementFeatureId: `${id}-placement`,
+          appearance: { color: '#9aa4b1', opacity: 1 },
+        })),
+      };
+    };
+    let doc = applyCadOperation(f01Empty(), boxes(0, 40));
+    doc = applyCadOperation(doc, {
+      type: 'booleanBodies',
+      targetId: 'b0',
+      toolIds: Array.from({ length: 20 }, (_, i) => `b${i + 1}`),
+      mode: 'union',
+      booleanFeatureId: 'join',
+      placementFeatureId: 'join-placement',
+    });
+    // 20 consumed, 20 active: 44 more reach 64 active (84 bodies in all).
+    doc = applyCadOperation(doc, boxes(40, 44));
+    expect(doc.bodies).toHaveLength(84);
+    expect(codes(doc)).toEqual([]);
+    expect(() => applyCadOperation(doc, boxes(84, 1))).toThrow('limit-active-bodies');
+    // The whole list, consumed included, stops at 1,024.
+    const all = mutate(doc, (d) => {
+      const consumed = d.bodies[1];
+      for (let i = 0; i < 941; i++) d.bodies.push({ ...consumed, id: `c${i}` });
+    });
+    expect(codes(all)).toContain('limit-bodies');
+    expect(codes(all)).not.toContain('limit-active-bodies');
   });
 
   it('enforces entity, DAG depth and active-overlap limits', () => {
@@ -453,5 +546,119 @@ describe('cad-core commands', () => {
     expect(() =>
       assertCadOperation({ type: 'rename', targetId: 'W', name: 'Width ✓' }),
     ).not.toThrow();
+  });
+});
+
+describe('D2 imported bodies (CAD13 content side)', () => {
+  const hash = (c: string) => `sha256:${c.repeat(64)}`;
+  const assets = [
+    {
+      id: 'a-step',
+      kind: 'source-step' as const,
+      sha256: hash('a'),
+      byteLength: 1200,
+      mediaType: 'model/step',
+    },
+    {
+      id: 'a-brep',
+      kind: 'normalized-brep' as const,
+      sha256: hash('b'),
+      byteLength: 3400,
+      mediaType: 'model/x-occt-brep',
+    },
+  ];
+  const insert = (prefix = ''): CadOperation => ({
+    type: 'insertImportedBody',
+    assets,
+    feature: {
+      id: `${prefix}imp`,
+      name: 'bracket.step',
+      type: 'imported',
+      inputFeatureIds: [],
+      args: {
+        kind: 'solid',
+        sourceAssetId: 'a-step',
+        brepAssetId: 'a-brep',
+        importer: { id: 'occt-dev', buildHash: hash('c') },
+        sourceUnit: 'in',
+        scaleToMm: 25.4,
+      },
+    },
+    body: {
+      id: `${prefix}body`,
+      name: 'bracket',
+      sourceFeatureId: `${prefix}imp`,
+      placementFeatureId: `${prefix}imp-placement`,
+      appearance: { color: '#8899aa', opacity: 1 },
+    },
+  });
+  const imported = () => applyCadOperation(f01Empty(), insert());
+
+  it('adds the asset refs, the feature, its placement and an active body in one edit', () => {
+    const doc = imported();
+    expect(doc.assets).toEqual(assets);
+    expect(doc.features.map((f) => f.type)).toEqual(['imported', 'transform']);
+    expect(doc.bodies).toMatchObject([{ id: 'body', resultFeatureId: 'imp-placement' }]);
+    expect(codes(doc)).toEqual([]);
+    // A second import of the same file reuses equal refs; a different ref under the same ID is refused.
+    expect(applyCadOperation(doc, insert('2-')).assets).toHaveLength(2);
+    const conflict = structuredClone(insert('3-')) as Loose;
+    conflict.assets[0].byteLength = 1;
+    expect(() => applyCadOperation(doc, conflict)).toThrow('asset-conflict');
+  });
+
+  it('validates refs, kinds, sizes, units and an exact closure', () => {
+    const doc = imported();
+    const cases: [unknown, string][] = [
+      [mutate(doc, (d) => (d.assets[0].sha256 = 'abc')), 'asset-hash'],
+      [mutate(doc, (d) => (d.assets[0].mediaType = 'text/plain')), 'asset-media-type'],
+      [mutate(doc, (d) => (d.assets[0].byteLength = 16 * 1024 * 1024 + 1)), 'asset-size'],
+      [mutate(doc, (d) => (d.assets[1].byteLength = 0.5)), 'asset-size'],
+      [mutate(doc, (d) => (d.features[0].args.brepAssetId = 'a-step')), 'asset-missing'],
+      [mutate(doc, (d) => (d.features[0].args.sourceUnit = 'yard')), 'source-unit'],
+      [mutate(doc, (d) => (d.features[0].args.scaleToMm = 25)), 'source-scale'],
+      [mutate(doc, (d) => (d.features[0].args.importer.buildHash = 'x')), 'kernel-build-hash'],
+      [mutate(doc, (d) => (d.features[0].inputFeatureIds = ['imp-placement'])), 'feature-arity'],
+      [mutate(doc, (d) => d.assets.push({ ...d.assets[0], id: 'a-extra' })), 'asset-duplicate'],
+      [
+        mutate(doc, (d) => d.assets.push({ ...d.assets[0], id: 'a-extra', sha256: hash('d') })),
+        'asset-unreferenced',
+      ],
+      [mutate(doc, (d) => (d.assets[0].id = 'imp')), 'duplicate-id'],
+    ];
+    for (const [value, code] of cases) expect(codes(value), code).toContain(code);
+  });
+
+  it('drops refs with their last reader; duplicates share them; Undo restores them', () => {
+    const doc = imported();
+    const copy = applyCadOperation(doc, {
+      type: 'duplicateClosure',
+      bodyIds: ['body'],
+      idMap: { imp: 'imp-2', 'imp-placement': 'imp-placement-2', body: 'body-2' },
+    });
+    expect(copy.assets).toHaveLength(2);
+    expect(copy.features.filter((f) => f.type === 'imported')).toHaveLength(2);
+    const one = applyCadOperation(copy, { type: 'deleteClosure', ids: ['imp'], cascade: true });
+    expect(one.assets).toHaveLength(2);
+    const none = applyCadOperation(one, { type: 'deleteClosure', ids: ['imp-2'], cascade: true });
+    expect(none.assets).toEqual([]);
+    expect(codes(none)).toEqual([]);
+    const s = session(doc);
+    s.execute(
+      cadEditorCommand(
+        { type: 'deleteClosure', ids: ['imp'], cascade: true },
+        { expectedHash: cadContentHash(doc), canEdit: () => true },
+      ),
+    );
+    expect(s.content.assets).toEqual([]);
+    s.undo();
+    expect(s.content.assets).toEqual(assets);
+  });
+
+  it('rejects operation data that is not one imported feature with its body', () => {
+    const op = insert() as Loose;
+    op.feature.type = 'box';
+    expect(() => applyCadOperation(f01Empty(), op)).toThrow('imported-feature');
+    expect(() => assertCadOperation({ ...insert(), assets: {} })).toThrow('operation-schema');
   });
 });

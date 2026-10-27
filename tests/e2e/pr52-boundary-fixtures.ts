@@ -319,7 +319,7 @@ export async function sharedTextExportWait(page: Page) {
   await expect(alt).toHaveValue('Additional input while waiting');
   await confirmed(page);
   await page.unroute('**/collaboration-api/submit**');
-  await page.keyboard.press('Escape');
+  // Export HTML closed the menu, so no Escape here: in the Alt text field it would discard the input.
   const pending = page.waitForEvent('download');
   await exportHtml();
   expect(await readFile((await (await pending).path())!, 'utf8')).toContain(

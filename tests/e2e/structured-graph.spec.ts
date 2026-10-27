@@ -6,6 +6,7 @@ import {
   importRelationData,
   downloadJson,
   mountBoundedGraphHost,
+  mountReadingGraphHost,
   storeIndependentDefinition,
 } from './structured-graph-fixtures';
 import { createRelationGraph, type GraphDocument } from '@editor-platform/structured-graph/model';
@@ -14,6 +15,7 @@ import { createDataGraphFixture, dataFieldId } from '@editor-platform/structured
 import { createArtifact, commitVersion } from '@editor-platform/artifact-core';
 import { createDocument } from '@editor-platform/document/model';
 import { artifactMenu } from './template-fixtures';
+import { graphSourceAction } from './usability-fixtures';
 import { confirmed, monitor } from './practical-fixtures';
 import type { ReferenceDefinition } from '../../apps/graph-reference/src/definition';
 test('independent native: typed properties, one drag edit, cancel, Undo, versions, reload and readonly', async ({
@@ -36,9 +38,11 @@ test('independent native: typed properties, one drag edit, cancel, Undo, version
   await page.mouse.move(box.x + 48, box.y + 28, { steps: 5 });
   await page.mouse.up();
   const moved = await independentSource(page);
-  expect(moved.layout['resource-a']).not.toEqual(initial.layout['resource-a']);
+  expect(moved.presentation.nodes['resource-a']).not.toEqual(
+    initial.presentation.nodes['resource-a'],
+  );
   await page.getByRole('button', { name: 'Host Undo', exact: true }).click();
-  expect((await independentSource(page)).layout).toEqual(initial.layout);
+  expect((await independentSource(page)).presentation.nodes).toEqual(initial.presentation.nodes);
   expect((await independentSource(page)).nodes[0].attributes.name).toBe('Independent Research');
   await page.getByRole('button', { name: 'Commit version', exact: true }).click();
   await expect(page.getByRole('status').first()).toHaveText('Saved locally');
@@ -138,6 +142,11 @@ test('ordinary Data: Grid→Graph→Form common Undo and persisted layout, unkno
   await expect(
     page.getByRole('button', { name: 'Select node Grid Research', exact: true }),
   ).toBeVisible();
+  // Data has nowhere to save node shapes, so its Graph offers no shape choice.
+  await expect(page.getByLabel('New node shape', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Select node Grid Research', exact: true }).click();
+  await expect(page.getByLabel('Node shape', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('(this source keeps the type default)')).toBeVisible();
   await page.getByLabel('Relation type', { exact: true }).selectOption('related');
   await page.getByLabel('Connection from', { exact: true }).selectOption({ label: 'Planning' });
   await page.getByLabel('Connection to', { exact: true }).selectOption({ label: 'Delivery' });
@@ -862,7 +871,7 @@ test('bounded public Profile: valid Add draft, correction, Undo and effective re
   await page.getByLabel('Profile read only', { exact: true }).uncheck();
   await page.getByRole('button', { name: 'Select node New', exact: true }).click();
   await page.keyboard.press('ArrowRight');
-  expect((await source()).layout).not.toEqual(added.layout);
+  expect((await source()).presentation.nodes).not.toEqual(added.presentation.nodes);
   await page.getByRole('button', { name: 'Host Undo', exact: true }).click();
   expect(await source()).toEqual(added);
 });
@@ -1108,4 +1117,393 @@ test('Definition projection bounds derived identities and explicitly rejects unr
   await expect(page.getByRole('button', { name: 'Host Undo', exact: true })).toBeDisabled();
   await expect(page.getByLabel('Structured Graph Editor', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('definition-refusal-retained-source.png') });
+});
+test('#378 party node types, name-only connection labels, typed connection names and a visible Fit', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await create(page, 'structured-graph');
+  const labels = page.locator('.ep-graph-edge-label text');
+  await expect(labels).toHaveText(['supports']);
+  await page.getByLabel('Node type', { exact: true }).selectOption({ label: 'Bank or financier' });
+  await page.getByRole('button', { name: 'Add node', exact: true }).click();
+  const added = ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.at(-1)!;
+  expect(added.type).toBe('financier');
+  await expect(page.locator(`[data-node-id="${added.id}"]`)).toContainText('Bank or financier');
+  await page.getByRole('button', { name: 'Graph properties', exact: true }).click();
+  // Read before typing: exporting flushes a pending connection input.
+  const before = (await nativeArtifact(page)).draft.content as GraphDocument;
+  await page.getByLabel('Connection from', { exact: true }).selectOption('resource-a');
+  await page.getByLabel('Connection to', { exact: true }).selectOption('resource-b');
+  const name = page.getByLabel('Connection label', { exact: true });
+  await name.fill('融資');
+  // An unfinished IME composition keeps the connection pending.
+  await name.dispatchEvent('compositionstart', { data: '' });
+  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await expect(page.locator('.ep-graph-edge-label text')).toHaveText(['supports']);
+  await name.dispatchEvent('compositionend', { data: '' });
+  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  const after = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(after.edges.at(-1)).toMatchObject({
+    type: 'related',
+    from: 'resource-a',
+    to: 'resource-b',
+    attributes: { label: '融資' },
+  });
+  await expect
+    .poll(async () => (await labels.allTextContents()).sort())
+    .toEqual(['supports', '融資']);
+  // The two parallel connections keep their own lines.
+  const paths = await page
+    .locator('.ep-graph-edge > path:first-child')
+    .evaluateAll((p) => p.map((e) => e.getAttribute('d')));
+  expect(new Set(paths).size).toBe(2);
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  // Fit enlarges the small drawing and centres it, without changing content.
+  const zoom = page.getByLabel('Graph zoom', { exact: true });
+  await expect(zoom).toHaveText('100%');
+  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await expect(zoom).not.toHaveText('100%');
+  const canvas = (await page
+    .getByRole('group', { name: 'Graph canvas', exact: true })
+    .boundingBox())!;
+  const nodes = await page.locator('.ep-graph-node').evaluateAll((all) =>
+    all.map((n) => {
+      const r = n.getBoundingClientRect();
+      return [r.left, r.top, r.right, r.bottom];
+    }),
+  );
+  const left = Math.min(...nodes.map((n) => n[0])),
+    right = Math.max(...nodes.map((n) => n[2]));
+  expect(Math.abs(left - canvas.x - (canvas.x + canvas.width - right))).toBeLessThan(80);
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+});
+
+test('#378 a connection name typed during composition survives a read-only Host and saves after', async ({
+  page,
+}) => {
+  await mountReadingGraphHost(page, '?inputs&connection-label');
+  await page.getByLabel('Host read only', { exact: true }).uncheck();
+  const source = () => page.getByTestId('reading-source').textContent();
+  const before = await source();
+  await page.getByLabel('Connection from', { exact: true }).selectOption('n0');
+  await page.getByLabel('Connection to', { exact: true }).selectOption('n1');
+  const name = page.getByLabel('Connection label', { exact: true });
+  await name.dispatchEvent('compositionstart', { data: '' });
+  await name.fill('出資');
+  await page.getByRole('button', { name: 'Save boundary', exact: true }).click();
+  await expect(page.getByTestId('flush-result')).not.toHaveText('saved');
+  expect(await source()).toBe(before);
+  // The form leaves without compositionend; returning to edit must not stay blocked.
+  await page
+    .getByLabel('Host read only', { exact: true })
+    .evaluate((el) => (el as HTMLInputElement).click());
+  await expect(name).toHaveCount(0);
+  await page.getByLabel('Host read only', { exact: true }).uncheck();
+  await expect(name).toHaveValue('出資');
+  await page.getByRole('button', { name: 'Save boundary', exact: true }).click();
+  await expect(page.getByTestId('flush-result')).toHaveText('saved');
+  const saved = JSON.parse((await source())!) as GraphDocument;
+  expect(saved.edges.at(-1)).toMatchObject({ from: 'n0', to: 'n1', attributes: { label: '出資' } });
+});
+
+test('#396 node shapes and paint: Inspector and new-node shape, outline endpoints, one Undo each, reload and schema 1 refusal', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  await create(page, 'structured-graph');
+  const node = page.locator('[data-node-id="resource-a"]'),
+    edge = page.locator('.ep-graph-edge > path:first-child').first();
+  await expect(node).toHaveAttribute('data-shape', 'rectangle');
+  const straight = await edge.getAttribute('d');
+  await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
+  const appearance = page.getByRole('group', { name: 'Node appearance', exact: true });
+  await expect(appearance.getByLabel('Node shape', { exact: true })).toHaveValue('');
+  await appearance.getByLabel('Node shape', { exact: true }).selectOption('ellipse');
+  await expect(node).toHaveAttribute('data-shape', 'ellipse');
+  await expect(node.locator('.ep-graph-node-shape')).toBeVisible();
+  // The label paints above the drawn outline: with the outline made hit-testable, the label is
+  // still the topmost element at its own position.
+  expect(
+    await node.evaluate((n) => {
+      const outline = n.querySelector<SVGElement>('.ep-graph-node-shape')!,
+        label = n.querySelector('.ep-graph-node-content')!,
+        r = label.getBoundingClientRect();
+      outline.style.pointerEvents = 'auto';
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + 4);
+      outline.style.pointerEvents = '';
+      return label.contains(top);
+    }),
+  ).toBe(true);
+  // The connection now ends on the ellipse outline, not on the bounding box.
+  await expect.poll(() => edge.getAttribute('d')).not.toBe(straight);
+  await appearance.getByLabel('Node fill', { exact: true }).selectOption({ label: 'Dark' });
+  await appearance.getByLabel('Node outline', { exact: true }).selectOption('dashed');
+  // Labels on a dark fill switch to white text.
+  await expect
+    .poll(() => node.evaluate((n) => getComputedStyle(n).color))
+    .toBe('rgb(255, 255, 255)');
+  let graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.presentation.nodes['resource-a']).toMatchObject({
+    shape: 'ellipse',
+    style: { fill: '#334155', dash: [6, 4] },
+  });
+  expect(graph.nodes.find((n) => n.id === 'resource-a')!.attributes.name).toBe('Research');
+  // Each choice is one edit: Undo removes only the outline.
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.presentation.nodes['resource-a'].style).toEqual({ fill: '#334155' });
+  // A stationary click on the styled node is not a move: it keeps Redo available.
+  const redo = page.getByRole('button', { name: 'Redo', exact: true }).first();
+  await expect(redo).toBeEnabled();
+  await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
+  await expect(redo).toBeEnabled();
+  // A new node takes the chosen shape in the same edit as its creation.
+  await page.getByLabel('New node shape', { exact: true }).selectOption('diamond');
+  await page.getByRole('button', { name: 'Add node', exact: true }).click();
+  const added = ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.at(-1)!;
+  await expect(page.locator(`[data-node-id="${added.id}"]`)).toHaveAttribute(
+    'data-shape',
+    'diamond',
+  );
+  await page.screenshot({ path: info.outputPath('node-shapes-desktop.png') });
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await expect(page.locator(`[data-node-id="${added.id}"]`)).toHaveCount(0);
+  await save(page, 1);
+  await page.reload();
+  await expect(node).toHaveAttribute('data-shape', 'ellipse');
+  // A schema 1 Graph from the earlier preview is refused with its own reason, not read.
+  const record = await nativeArtifact(page),
+    old = {
+      ...record,
+      versions: [],
+      draft: {
+        ...record.draft,
+        content: { ...(record.draft.content as GraphDocument), schemaVersion: 1 },
+      },
+    };
+  await page.getByLabel('Import artifact', { exact: true }).setInputFiles({
+    name: 'schema-1.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(old)),
+  });
+  await expect(page.getByRole('alert')).toContainText('Graph schema 1 is not supported');
+  expect((await nativeArtifact(page)).draft.content).toEqual(record.draft.content);
+});
+
+test('#396 Definition sidecar: shapes for existing nodes only, source unchanged', async ({
+  page,
+}) => {
+  await page.goto('/graph-host.html');
+  await page.getByLabel('Graph source', { exact: true }).selectOption('definition');
+  await expect(page.getByRole('status').first()).toHaveText('Ready');
+  const initial = await independentSource(page);
+  // The sidecar cannot share a transaction with node creation, so no new-node shape is offered.
+  await expect(page.getByLabel('New node shape', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
+  await page.getByLabel('Node shape', { exact: true }).selectOption('hexagon');
+  await expect(page.locator('[data-shape="hexagon"]')).toHaveCount(1);
+  expect(await independentSource(page)).toEqual(initial);
+});
+
+test('#396 Sections: create around a node, rename, move with members, resize, collapse, delete and reload', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  await create(page, 'structured-graph');
+  const before = (await nativeArtifact(page)).draft.content as GraphDocument;
+  await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
+  await expect(page.getByLabel('Section type', { exact: true })).toHaveValue('group');
+  await page.getByRole('button', { name: 'Add section around node', exact: true }).click();
+  let graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  const sectionId = graph.sections[0].id;
+  expect(graph.nodes.find((n) => n.id === 'resource-a')!.sectionId).toBe(sectionId);
+  const frame = page.locator(`[data-section-id="${sectionId}"]`);
+  await expect(frame).toBeVisible();
+  // The new Section and the node's membership are one edit.
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+  await expect(frame).toBeVisible();
+  // The name is a semantic attribute.
+  await page.getByRole('button', { name: 'Select section New section', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Backend');
+  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Select section Backend', exact: true }),
+  ).toBeVisible();
+  // The Section's type definition opens from the source menu like node and edge types.
+  await graphSourceAction(page, 'データ定義');
+  await expect(
+    page.getByRole('heading', { name: 'データ定義 · section group', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: '定義編集をキャンセル', exact: true }).click();
+  // Moving the frame takes its member along; resizing never changes membership.
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  // Escape during a drag started from an attribute input cancels the drag, not the input.
+  const framed = graph.presentation.sections[sectionId];
+  await page.getByLabel('Notes', { exact: true }).fill('kept');
+  const grip = (await page
+    .getByRole('button', { name: 'Move section Backend', exact: true })
+    .boundingBox())!;
+  await page.mouse.move(grip.x + 5, grip.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + 65, grip.y + 45, { steps: 3 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  // Starting the drag applies the typed input first, as for nodes; the frame stays put.
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.presentation.sections[sectionId]).toEqual(framed);
+  expect(graph.sections[0].attributes.notes).toBe('kept');
+  const handle = (await page
+    .getByRole('button', { name: 'Move section Backend', exact: true })
+    .boundingBox())!;
+  await page.mouse.move(handle.x + 5, handle.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + 85, handle.y + 45, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(moved.presentation.sections[sectionId].x).toBe(
+    graph.presentation.sections[sectionId].x + 80,
+  );
+  expect(moved.presentation.nodes['resource-a'].x).toBe(
+    graph.presentation.nodes['resource-a'].x + 80,
+  );
+  expect(moved.presentation.nodes['resource-b']).toEqual(graph.presentation.nodes['resource-b']);
+  const corner = (await page
+    .getByRole('button', { name: 'Resize section Backend', exact: true })
+    .boundingBox())!;
+  await page.mouse.move(corner.x + 8, corner.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(corner.x - 30, corner.y - 20, { steps: 5 });
+  await page.mouse.up();
+  const resized = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(resized.presentation.sections[sectionId].width).toBeLessThan(
+    moved.presentation.sections[sectionId].width,
+  );
+  expect(resized.nodes.find((n) => n.id === 'resource-a')!.sectionId).toBe(sectionId);
+  expect(resized.presentation.nodes).toEqual(moved.presentation.nodes);
+  await page.screenshot({ path: info.outputPath('sections-desktop.png') });
+  // Collapsing is a private view: the member hides, its connection is summarised, content stays.
+  await page.getByRole('button', { name: 'Collapse section Backend', exact: true }).click();
+  await expect(page.locator('[data-node-id="resource-a"]')).toHaveCount(0);
+  await expect(page.locator('.ep-graph-edge-label text')).toHaveText(['Related ×1']);
+  await page.screenshot({ path: info.outputPath('sections-collapsed-desktop.png') });
+  expect((await nativeArtifact(page)).draft.content).toEqual(resized);
+  await page.getByRole('button', { name: 'Expand section Backend', exact: true }).click();
+  await expect(page.locator('[data-node-id="resource-a"]')).toBeVisible();
+  await expect(page.locator('.ep-graph-edge-label text')).toHaveText(['supports']);
+  await save(page, 1);
+  await page.reload();
+  await expect(page.locator(`[data-section-id="${sectionId}"]`)).toBeVisible();
+  // Deleting lists what moves up; the node and its connection stay.
+  await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete section', exact: true }).click();
+  const confirm = page.getByRole('group', { name: 'Confirm section deletion', exact: true });
+  await expect(confirm).toContainText('moves 1 node and 0 sections to the top level');
+  await expect(confirm.getByRole('listitem')).toHaveText(['Research']);
+  await confirm.getByRole('button', { name: 'Delete and move contents up', exact: true }).click();
+  const deleted = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(deleted.sections).toEqual([]);
+  expect(deleted.nodes.find((n) => n.id === 'resource-a')).not.toHaveProperty('sectionId');
+  expect(deleted.edges).toEqual(resized.edges);
+});
+
+test('#396 diagrams: architecture template, palette into a Section, Arrange diagram, Fit section and reload', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('structured-graph');
+  await page.getByLabel('Graph template', { exact: true }).selectOption('architecture');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  await expect(page.getByLabel('Artifact name')).toBeVisible();
+  let graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.profile).toEqual({ id: 'diagrams', version: 1 });
+  expect(graph.sections.map((s) => s.attributes.name)).toEqual([
+    'Production',
+    'Frontend',
+    'Backend',
+  ]);
+  for (const name of ['Production', 'Frontend', 'Backend'])
+    await expect(
+      page.getByRole('button', { name: `Select section ${name}`, exact: true }),
+    ).toBeVisible();
+  await expect(page.locator('[data-node-id="db"]')).toHaveAttribute('data-shape', 'cylinder');
+  await expect(page.locator('[data-node-id="cloud"]')).toHaveAttribute('data-shape', 'cloud');
+  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.screenshot({ path: info.outputPath('architecture-template-desktop.png') });
+  // The palette adds a typed node inside the selected Section in one edit.
+  await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
+  await page.locator('.ep-graph-palette > summary').click();
+  const palette = page.getByRole('group', { name: 'Node palette', exact: true });
+  await expect(palette).toContainText('Adds inside “Backend”');
+  await expect(palette.getByRole('region')).toHaveCount(3);
+  await palette.getByRole('button', { name: 'Add Queue', exact: true }).click();
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  const queue = graph.nodes.at(-1)!;
+  expect(queue).toMatchObject({ type: 'queue', sectionId: 'backend' });
+  // Arrange diagram lays out by Section in one edit and keeps membership.
+  const before = graph;
+  await page.getByRole('button', { name: 'Arrange diagram', exact: true }).click();
+  const arranged = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(arranged.nodes).toEqual(before.nodes);
+  expect(arranged.presentation).not.toEqual(before.presentation);
+  const backend = arranged.presentation.sections.backend,
+    q = arranged.presentation.nodes[queue.id];
+  expect(q.x).toBeGreaterThanOrEqual(backend.x);
+  expect(q.y).toBeGreaterThanOrEqual(backend.y);
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+  await page.screenshot({ path: info.outputPath('architecture-arranged-desktop.png') });
+  // Fit section is a view change only.
+  await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
+  await page.getByRole('button', { name: 'Fit section', exact: true }).click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(arranged);
+  await page.screenshot({ path: info.outputPath('architecture-fit-section-desktop.png') });
+  await save(page, 1);
+  await page.reload();
+  await expect(page.locator(`[data-node-id="${queue.id}"]`)).toBeVisible();
+});
+
+test('#448 dropping a node into a Section frame changes its membership in the same Undo', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('structured-graph');
+  await page.getByLabel('Graph template', { exact: true }).selectOption('architecture');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  await expect(page.getByLabel('Artifact name')).toBeVisible();
+  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  const before = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(before.nodes.find((n) => n.id === 'api')!.sectionId).toBe('backend');
+  // Drag API server so that its centre ends inside the Frontend frame.
+  const frame = (await page.locator('[data-section-id="frontend"]').boundingBox())!,
+    node = (await page.locator('[data-node-id="api"]').boundingBox())!,
+    mover = (await page
+      .getByRole('button', { name: 'Move node API server', exact: true })
+      .boundingBox())!;
+  const dx = frame.x + frame.width / 2 - (node.x + node.width / 2),
+    dy = frame.y + frame.height - node.height / 2 - 4 - (node.y + node.height / 2);
+  await page.mouse.move(mover.x + 5, mover.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(mover.x + 5 + dx, mover.y + 5 + dy, { steps: 8 });
+  await page.mouse.up();
+  const dropped = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(dropped.nodes.find((n) => n.id === 'api')!.sectionId).toBe('frontend');
+  expect(dropped.presentation.nodes.api).not.toEqual(before.presentation.nodes.api);
+  await page.screenshot({ path: info.outputPath('section-drop-desktop.png') });
+  // The move and the membership are one edit.
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(dropped);
+  // The inspector field stays.
+  await page.getByRole('button', { name: 'Select node API server', exact: true }).click();
+  await expect(page.getByLabel('Node section', { exact: true })).toBeVisible();
 });

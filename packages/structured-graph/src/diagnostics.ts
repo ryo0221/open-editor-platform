@@ -46,6 +46,18 @@ const messages: Record<string, [string, string]> = {
     'ノードの種類が未定義です。所有元のデータ定義を確認してください。',
     'The node type is unknown. Check its owner’s definition.',
   ],
+  'section-type': [
+    'まとまりの種類が未定義です。所有元のデータ定義を確認してください。',
+    'The section type is unknown. Check its owner’s definition.',
+  ],
+  'section-contains': [
+    'この種類はこのまとまりに入れられません。許可された種類のまとまりへ移してください。',
+    'This type is not allowed in this section. Move it to a section that allows it.',
+  ],
+  'outside-section': [
+    'ノードが所属するまとまりの範囲の外にあります。ノードを移すか範囲を広げてください。',
+    'This node is drawn outside its section. Move the node or enlarge the section.',
+  ],
   'edge-type': [
     '接続の種類が未定義です。所有元のデータ定義を確認してください。',
     'The connection type is unknown. Check its owner’s definition.',
@@ -59,6 +71,12 @@ export function graphElementLabel(graph: GraphDocument, profile: GraphProfile, i
         profile.nodes[node.type]?.ui?.label ??
         id,
     );
+  const section = graph.sections.find((section) => section.id === id);
+  if (section) {
+    const ui = profile.sections[section.type]?.ui,
+      value = section.attributes[ui?.labelField ?? 'name'];
+    return typeof value === 'string' && value.trim() ? value : (ui?.label ?? id);
+  }
   const edge = graph.edges.find((edge) => edge.id === id);
   if (edge)
     return `${graphElementLabel(graph, profile, edge.from)} → ${graphElementLabel(graph, profile, edge.to)}`;
@@ -72,7 +90,14 @@ export function formatGraphDiagnostic(
 ): string {
   const node = graph.nodes.find((node) => node.id === diagnostic.elementId);
   const edge = graph.edges.find((edge) => edge.id === diagnostic.elementId);
-  const type = node ? profile.nodes[node.type] : edge ? profile.edges[edge.type] : profile.graph;
+  const section = graph.sections.find((section) => section.id === diagnostic.elementId);
+  const type = node
+    ? profile.nodes[node.type]
+    : edge
+      ? profile.edges[edge.type]
+      : section
+        ? profile.sections[section.type]
+        : profile.graph;
   const field =
     diagnostic.path[0] &&
     (type?.ui?.fields?.[diagnostic.path[0]]?.label ?? diagnostic.path.join('.'));

@@ -7,8 +7,9 @@ import {
 } from '@editor-platform/artifact-references';
 import { addDays, utcDay } from '@editor-platform/time-axis';
 import {
+  canonicalZone,
   formatLocal,
-  isCanonicalZone,
+  isKnownZone,
   localMillis,
   resolveLocal,
   type Fold,
@@ -91,8 +92,9 @@ export class ScheduleError extends Error {
 }
 
 export function createSchedule(timeZone = 'UTC'): ScheduleDocument {
-  if (!isCanonicalZone(timeZone)) throw new ScheduleError('zone', `Unknown time zone ${timeZone}`);
-  return { schemaVersion: SCHEDULE_SCHEMA, timeZone, events: [], lanes: [] };
+  const name = canonicalZone(timeZone);
+  if (!name) throw new ScheduleError('zone', `Unknown time zone ${timeZone}`);
+  return { schemaVersion: SCHEDULE_SCHEMA, timeZone: name, events: [], lanes: [] };
 }
 
 const plain = (v: unknown): v is Record<string, unknown> =>
@@ -116,7 +118,7 @@ const unsafeText = (s: string) => /[\u0000-\u0008\u000b-\u001f\u007f]/.test(s);
 
 /** Resolved instants of a timed event; throws the reason when the wall times cannot be used. */
 export function timedInstants(time: TimedTime): { start: number; end: number } {
-  if (!isCanonicalZone(time.timeZone))
+  if (!isKnownZone(time.timeZone))
     throw new ScheduleError('zone', `Unknown time zone ${time.timeZone}`);
   const pick = (local: LocalDateTime, fold: Fold | undefined, which: 'start' | 'end') => {
     const r = resolveLocal(local, time.timeZone);
@@ -228,7 +230,7 @@ export function assertSchedule(value: unknown): asserts value is ScheduleDocumen
     !Array.isArray(value.lanes)
   )
     throw new ScheduleError('invalid', 'Unsupported Schedule content');
-  if (!isCanonicalZone(value.timeZone))
+  if (!isKnownZone(value.timeZone))
     throw new ScheduleError('zone', `Unknown time zone ${value.timeZone}`);
   if (value.events.length > scheduleLimits.events || value.lanes.length > scheduleLimits.lanes)
     throw new ScheduleError('limit', 'Too many events or lanes');
@@ -316,11 +318,18 @@ function replaceEvent(
   const index = find(content, id);
   const events = content.events.slice();
   events[index] = update(content.events[index]);
-  const next = { ...content, events };
-  assertSchedule(next);
-  return next;
+  return checked({ ...content, events });
+}
+/** Every written time records IANA's current zone name; older names are read but not written.
+ * Edits that leave the time alone keep it as stored, so they never reset a time being typed. */
+function currentZone(time: EventTime): EventTime {
+  if (time.kind !== 'timed') return time;
+  const name = canonicalZone(time.timeZone);
+  return name && name !== time.timeZone ? { ...time, timeZone: name } : time;
 }
 function checked(next: ScheduleDocument) {
+  const name = canonicalZone(next.timeZone);
+  if (name && name !== next.timeZone) next = { ...next, timeZone: name };
   assertSchedule(next);
   return next;
 }
@@ -345,7 +354,7 @@ export function createEvent(input: NewEvent): EditorCommand<ScheduleDocument> {
           id,
           title: input.title ?? 'New event',
           notes: input.notes ?? '',
-          time: input.time,
+          time: currentZone(input.time),
           conference: input.conference ?? 'none',
           links: [],
         },
@@ -358,12 +367,15 @@ export function duplicateEvent(id: string, newEventId = newId('event')) {
     const source = c.events[find(c, id)];
     if (c.events.some((e) => e.id === newEventId))
       throw new ScheduleError('invalid', 'The event ID already exists');
-    return checked({ ...c, events: [...c.events, { ...source, id: newEventId }] });
+    return checked({
+      ...c,
+      events: [...c.events, { ...source, id: newEventId, time: currentZone(source.time) }],
+    });
   });
 }
 export const setEventTime = (id: string, time: EventTime) =>
   immutableCommand<ScheduleDocument>('schedule.setEventTime', 'Change event time', (c) =>
-    replaceEvent(c, id, (e) => ({ ...e, time })),
+    replaceEvent(c, id, (e) => ({ ...e, time: currentZone(time) })),
   );
 export const updateEventText = (
   id: string,

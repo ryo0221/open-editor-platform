@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./backgrounds": "./src/background-catalog.ts"
+    "./backgrounds": "./src/background-catalog.ts",
+    "./host": "./src/host.ts",
+    "./mock-host": "./src/mock-host.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

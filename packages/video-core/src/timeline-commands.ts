@@ -38,6 +38,8 @@ export interface TimelineSchema<V extends TimelineContent<C>, C extends Timeline
   /** Version named in unsupported-edit messages, e.g. `v0`. */
   version: string;
   assert(value: unknown): asserts value is V;
+  /** Domain-owned dependent metadata updated atomically before final validation. */
+  afterEdit?(content: V, edit: TimelineEdit<C>): void;
   /** Re-window `clip` to `[start, end)` in its source coordinates. */
   slice(content: V, clip: C, start: Time, end: Time): C;
 }
@@ -216,6 +218,7 @@ export function timelineCommand<V extends TimelineContent<C>, C extends Timeline
       schema.assert(input);
       const v = structuredClone(input);
       new TimelineEditor(schema, v).apply(owned);
+      schema.afterEdit?.(v, owned);
       schema.assert(v);
       // Do not expose captured edit objects through the returned snapshot.
       return structuredClone(v);

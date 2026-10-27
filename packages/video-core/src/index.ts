@@ -17,3 +17,11 @@ export * from './v2/model';
 export { assertVideoContentV2, adoptVideoContentV2 } from './v2/validation';
 export * from './v2/commands';
 export * from './v2/gain';
+
+/** Private native Animation timeline opt-in; no implicit v2 conversion or public adoption. */
+export * from './v3/model';
+export { assertVideoContentV3, mediaContentV3 } from './v3/validation';
+export * from './v3/commands';
+export { visualOpacityV3 } from './v3/visual-fade';
+
+export { evaluateVisualV3, dissolveWindow } from './v3/dissolve';

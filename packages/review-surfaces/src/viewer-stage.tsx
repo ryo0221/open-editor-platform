@@ -220,15 +220,33 @@ export function ImagePageView({
   );
 }
 
+/** Marks each case-insensitive match of the search in the shown text. */
+export function SearchMarks({ text, query }: { text: string; query: string }) {
+  const lower = text.toLocaleLowerCase(),
+    needle = query.toLocaleLowerCase();
+  // Case folding that changes length would misplace marks, so such text stays unmarked.
+  if (!needle || lower.length !== text.length || !lower.includes(needle)) return <>{text}</>;
+  const parts: ReactNode[] = [];
+  let from = 0;
+  for (let at = lower.indexOf(needle); at >= 0; at = lower.indexOf(needle, from)) {
+    parts.push(text.slice(from, at), <mark key={at}>{text.slice(at, at + needle.length)}</mark>);
+    from = at + needle.length;
+  }
+  parts.push(text.slice(from));
+  return <>{parts}</>;
+}
+
 export function TextFileView({
   lines,
   wrap,
+  query,
   targetLine,
   region,
   onChoose,
 }: {
   lines: FileLine[];
   wrap: boolean;
+  query: string;
   targetLine: number | undefined;
   region: Region | undefined;
   onChoose(region: Region): void;
@@ -247,7 +265,7 @@ export function TextFileView({
             onClick={(e) => onChoose(lineSelection(region, line.index + 1, e.shiftKey))}
           >
             <span className="ep-line-number">{line.index + 1}</span>
-            <code>{line.text || ' '}</code>
+            <code>{line.text ? <SearchMarks text={line.text} query={query} /> : ' '}</code>
           </button>
         )}
       />

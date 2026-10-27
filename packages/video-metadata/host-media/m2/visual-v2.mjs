@@ -3,7 +3,7 @@ import { assertVideoContentV2 } from '@editor-platform/video-core';
 import { prepareSourceRequests } from './requests';
 import { verifyOriginal } from './verify-original-v2.mjs';
 import { createVideoWindow } from '../indexed-media/video-window.mjs';
-export async function createVisualV2(content, originals, caller) {
+export async function createVisualV2(content, originals, caller, selectRequests) {
   assertVideoContentV2(content);
   caller.throwIfAborted();
   const owned = globalThis.structuredClone(content),
@@ -48,6 +48,15 @@ export async function createVisualV2(content, originals, caller) {
       if (errors.length) throw new AggregateError(errors, 'V2 visual cleanup failed');
     })());
   };
+  const videoAt = selectRequests ?? requests.videoAt;
+  function releaseInactive(at) {
+    if (closed || pending.size) throw Error('V2 visual request admission');
+    const active = videoAt(at);
+    for (const [sourceId, owner] of owners)
+      owner.releaseCachedFrames(
+        active.filter((row) => row.sourceId === sourceId).map((row) => row.rawTime),
+      );
+  }
   try {
     for (const source of owned.sources.filter((s) => needed.has(s.id))) {
       const bytes = files.get(source.asset.sha256);
@@ -58,32 +67,41 @@ export async function createVisualV2(content, originals, caller) {
     }
     signal.throwIfAborted();
     return {
-      frameAt(at, call) {
+      releaseInactive,
+      framesAt(at, call, single = false) {
         if (closed || pending.size) return Promise.reject(Error('V2 visual request admission'));
         const combined = globalThis.AbortSignal.any([signal, call]);
         const job = (async () => {
           combined.throwIfAborted();
-          const rows = requests.videoAt(at);
-          if (rows.length > 1) throw Error('V2 visual overlap unsupported');
-          if (!rows.length) return null;
-          const request = rows[0],
-            owner = owners.get(request.sourceId);
-          if (!owner) throw Error('V2 visual owner missing');
-          const row = await owner.frameAt(request.rawTime, combined);
+          const rows = videoAt(at);
+          releaseInactive(at);
+          if (single && rows.length > 1) throw Error('V2 visual overlap unsupported');
+          const result = [];
           try {
-            combined.throwIfAborted();
-            return {
-              ...row,
-              sourceId: request.sourceId,
-              clipId: request.clipId,
-              sourceTime: request.sourceTime,
-              rawTime: request.rawTime,
-              rotation: owner.rotation,
-              scale: owner.clock.scale,
-            };
-          } catch (e) {
-            row.release();
-            throw e;
+            for (const request of rows) {
+              const owner = owners.get(request.sourceId);
+              if (!owner) throw Error('V2 visual owner missing');
+              const row = await owner.frameAt(request.rawTime, combined);
+              try {
+                combined.throwIfAborted();
+                result.push({
+                  ...row,
+                  sourceId: request.sourceId,
+                  clipId: request.clipId,
+                  sourceTime: request.sourceTime,
+                  rawTime: request.rawTime,
+                  rotation: owner.rotation,
+                  scale: owner.clock.scale,
+                });
+              } catch (e) {
+                row.release();
+                throw e;
+              }
+            }
+            return result;
+          } catch (error) {
+            for (const row of result) row.release();
+            throw error;
           }
         })();
         pending.add(job);
@@ -92,6 +110,10 @@ export async function createVisualV2(content, originals, caller) {
           () => pending.delete(job),
         );
         return job;
+      },
+      async frameAt(at, call) {
+        const rows = await this.framesAt(at, call, true);
+        return rows[0] ?? null;
       },
       dispose,
     };

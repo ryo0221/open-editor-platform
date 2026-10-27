@@ -3,7 +3,7 @@ import { documentDiff, isDocument } from '@editor-platform/document';
 import { dataDiff, isStructuredData } from '@editor-platform/structured-data';
 import { isFile, isReview, reviewDiff } from '@editor-platform/review-surfaces';
 import { isWhiteboard, whiteboardDiff } from '@editor-platform/whiteboard';
-import { isDesign, designDiff } from '@editor-platform/design';
+import { isDesignWithPaths, designDiff } from '@editor-platform/design';
 import { isDeck, slideDiff } from '@editor-platform/slide';
 import type { StoredArtifact } from '../model';
 
@@ -27,7 +27,7 @@ const domainDiffs = [
   domainDiff(isStructuredData, dataDiff),
   domainDiff(isReview, reviewDiff),
   domainDiff(isWhiteboard, whiteboardDiff),
-  domainDiff(isDesign, designDiff),
+  domainDiff(isDesignWithPaths, designDiff),
   domainDiff(isDeck, slideDiff),
 ];
 

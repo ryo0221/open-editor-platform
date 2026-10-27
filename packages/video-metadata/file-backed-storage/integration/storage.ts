@@ -21,11 +21,13 @@ import {
   type ProjectProfile,
 } from '../portable/project';
 import { createZip } from '../portable/zip64';
+import type { MigrationReference } from '../portable/migration-reference';
 import { TotalCapacity } from './capacity';
 import { ScratchLedger, type ScratchRecord, type ScratchHooks, type ScratchPhase } from './scratch';
 export interface History<C extends ArchiveContent = VideoContent, P = ImportSet> {
   /** Head corresponding to these native versions, never sampled later during dispatch. */
   journalHead: number;
+  provenance?: MigrationReference;
   versions: ArtifactVersion<C>[];
   selectedVersionId: string | null;
   originals: Map<string, Blob>;
@@ -123,6 +125,7 @@ export class ProfileJournalVideoStorage<C extends ArchiveContent, P> implements 
       'History head',
     );
     this.captures.set(id, {
+      ...(this.history.provenance ? { provenance: structuredClone(this.history.provenance) } : {}),
       journalHead: this.history.journalHead,
       versions,
       selectedVersionId: this.history.selectedVersionId,
@@ -298,6 +301,7 @@ export class ProfileJournalVideoStorage<C extends ArchiveContent, P> implements 
         reason: 'Captured private journal save',
       };
       const project: Project<C, P> = {
+        ...(retained.provenance ? { provenance: structuredClone(retained.provenance) } : {}),
         operationId: request.operationId,
         capture: structuredClone(request.capture),
         selectedVersionId: version.versionId,
@@ -438,6 +442,8 @@ export class ProfileJournalVideoStorage<C extends ArchiveContent, P> implements 
   }
   private adopt(project: Project<C, P>, retained: History<C, P>) {
     this.history.journalHead = retained.journalHead + 1;
+    if (project.provenance) this.history.provenance = structuredClone(project.provenance);
+    else delete this.history.provenance;
     this.history.versions = structuredClone(project.versions);
     this.history.selectedVersionId = project.selectedVersionId;
     this.history.originals = new Map(retained.originals);
@@ -492,6 +498,9 @@ export class ProfileJournalVideoStorage<C extends ArchiveContent, P> implements 
         project: opened.project,
         file,
         history: {
+          ...(opened.project.provenance
+            ? { provenance: structuredClone(opened.project.provenance) }
+            : {}),
           journalHead: operation.parent + 1,
           versions: structuredClone(opened.project.versions),
           selectedVersionId: opened.project.selectedVersionId,

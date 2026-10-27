@@ -13,6 +13,7 @@
   "scripts": {
     "spatial:build": "node scripts/build-spatial-wasm.mjs",
     "spatial:test": "node scripts/build-spatial-wasm.mjs --test",
+    "cad:kernel": "sh scripts/cad-kernel/build.sh work/cad-kernel",
     "fonts:fetch": "node scripts/fetch-office-fonts.mjs",
     "fonts:check": "node scripts/check-office-fonts.mjs",
     "predev": "npm run fonts:check",
@@ -20,6 +21,7 @@
     "prebuild": "npm run fonts:check",
     "build": "tsc --noEmit && vite build && vite build --config vite.react-ui.config.ts && vite build --config vite.artifact-host.config.ts && vite build --config vite.animation-host.config.ts",
     "artifact-host:dev": "vite --config vite.artifact-host.config.ts",
+    "demo:design-path": "node scripts/record-design-path-demo.mjs",
     "react-ui:dev": "vite --config vite.react-ui.config.ts",
     "react-ui:preview": "vite preview --config vite.react-ui.config.ts",
     "react-ui:export-host": "node scripts/react-ui-export-host.mjs",
@@ -39,7 +41,7 @@
     "collaboration:server": "node scripts/collaboration-server.mjs"
   },
   "dependencies": {
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "fflate": "0.8.3",
     "lucide-react": "1.51.0",
     "mermaid": "11.17.2",

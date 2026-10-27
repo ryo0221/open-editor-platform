@@ -5,16 +5,22 @@ import type { SaveCapture } from '@editor-platform/extension-contract/draft2';
 import { prepareImportSet, type ImportSet } from '../../host-media/import';
 import { MAX_ORIGINALS, memory, need, read, type Scanner, type Reader } from './io';
 import { createZip, type Entry } from './zip64';
+import type { MigrationReference } from './migration-reference';
 export interface ArchiveContent {
   sources: { id: string; asset: { assetId: string; sha256: string; byteLength: number } }[];
 }
 export interface ProjectProfile<C extends ArchiveContent, P> {
   readonly format: string;
+  /** Only an explicitly new profile may admit origin metadata. Legacy records stay closed. */
+  validateProvenance?(reference: MigrationReference, project: Project<C, P>): void;
   assertContent(value: unknown): asserts value is C;
+  /** Optional cross-version domain identity check; does not alter serialized bytes. */
+  validateHistory?(contents: readonly C[]): void;
   validatePlan(plan: P): void;
   validateSource(source: C['sources'][number], plan: P): void;
 }
 export interface Project<C extends ArchiveContent = VideoContent, P = ImportSet> {
+  provenance?: MigrationReference;
   operationId: string;
   capture: SaveCapture;
   selectedVersionId: string;
@@ -107,7 +113,15 @@ export function createProfileProject<C extends ArchiveContent, P>(
   async function validateProject(p: Project<C, P>) {
     // A writer must not report success after dropping unsupported metadata (e.g. migration provenance).
     // Keep the same closed record boundary as the on-disk manifest; new metadata needs an explicit profile.
-    fields(p, ['operationId', 'capture', 'selectedVersionId', 'versions', 'plans', 'originals']);
+    fields(p, [
+      'operationId',
+      'capture',
+      'selectedVersionId',
+      'versions',
+      'plans',
+      'originals',
+      ...(profile.validateProvenance ? ['provenance'] : []),
+    ]);
     need(
       text(p.operationId) &&
         text(p.selectedVersionId) &&
@@ -125,6 +139,7 @@ export function createProfileProject<C extends ArchiveContent, P>(
     for (const v of p.versions) validateLineage(v, ids);
     const plans = validatePlans(p.plans);
     validateClosure(p, plans);
+    if (profile.validateProvenance) profile.validateProvenance(p.provenance!, p);
   }
   function validateCapture(capture: Project<C, P>['capture']) {
     fields(capture, ['scope', 'revision', 'contentHash']);
@@ -170,6 +185,7 @@ export function createProfileProject<C extends ArchiveContent, P>(
       );
       ids.set(v.versionId, v);
     }
+    profile.validateHistory?.(p.versions.map((v) => v.content));
     return ids;
   }
   function validateLineage(v: ArtifactVersion<C>, ids: Map<string, ArtifactVersion<C>>) {
@@ -235,6 +251,7 @@ export function createProfileProject<C extends ArchiveContent, P>(
     }
     const manifest: Manifest<C, P> = {
       format: profile.format,
+      ...(profile.validateProvenance ? { provenance: p.provenance! } : {}),
       operationId: p.operationId,
       capture: p.capture,
       selectedVersionId: p.selectedVersionId,
@@ -266,7 +283,15 @@ export function createProfileProject<C extends ArchiveContent, P>(
       'Metadata byte budget',
     );
     const raw = await json(entries[0].reader, signal);
-    fields(raw, ['format', 'operationId', 'capture', 'selectedVersionId', 'versions', 'plans']);
+    fields(raw, [
+      'format',
+      'operationId',
+      'capture',
+      'selectedVersionId',
+      'versions',
+      'plans',
+      ...(profile.validateProvenance ? ['provenance'] : []),
+    ]);
     need(
       raw.format === profile.format &&
         Array.isArray(raw.versions) &&
@@ -298,6 +323,7 @@ export function createProfileProject<C extends ArchiveContent, P>(
       if (e.name.startsWith('originals/')) originals.set(e.name.slice(10, -4), e.reader);
     need(entries.length === 1 + versions.length + originals.size, 'Unexpected native entry');
     const p: Project<C, P> = {
+      ...(profile.validateProvenance ? { provenance: m.provenance! } : {}),
       operationId: m.operationId,
       capture: m.capture,
       selectedVersionId: m.selectedVersionId,

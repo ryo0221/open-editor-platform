@@ -5,8 +5,9 @@ function measureNodeHeight(content: HTMLElement, node: HTMLElement) {
   const button = content.parentElement!;
   const buttonStyle = getComputedStyle(button),
     nodeStyle = getComputedStyle(node);
+  // The label's own height; the scene raises it to the 70px minimum and the shape's needs.
   return Math.max(
-    70,
+    0,
     Math.ceil(
       content.offsetHeight +
         parseFloat(buttonStyle.paddingTop) +

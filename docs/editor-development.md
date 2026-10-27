@@ -90,7 +90,7 @@ Surfaceには型付けしたcontent、command executor、selection通知、readO
 
 Annotation対応を宣言するなら、座標単位、text範囲、source version、削除や移動後のanchor mappingを定めます。File/Reviewの固定sourceのanchorを、mutable draftの座標として扱いません。Anchorが消えた場合はorphan/outdatedを表示し、別の要素へ黙って結び直しません。
 
-外部操作の実行はHostが担当します。`ExternalOperationRequest`にArtifact/version、selection、入力を渡し、Editorは`ProposedCommands`をpreview/apply/rejectします。Previewでlive contentを書き換えず、apply前にbase revision・対象・権限を再検証し、一つの通常transactionで採用します。`previewProposedCommands`だけでstale判定まで実装済みになるわけではありません。Shared proposalはshared authorityの経路を使います。
+外部操作の実行はHostが担当します。`ExternalOperationRequest`にArtifact/version、selection、入力を渡し、Editorは`ProposedCommands`をpreview/apply/rejectします。Previewでlive contentを書き換えず、apply前にbase revision・対象・権限を再検証し、一つの通常transactionで採用します。`previewProposedCommands`だけでstale判定まで実装済みになるわけではありません。参照したArtifactがあるなら、提案の`reads`に対象と参照元のexact Version IDを記録し、preview開始時とapply直前に`checkProposalReads`（Host Sessionでは`previewHostProposal`／`applyHostProposal`）で再検証します。Shared proposalはshared authorityの経路を使います。
 
 外部入力はデータです。Importしたfunctionや文字列をそのままcommandとして実行しません。UIとheadlessで同じvalidation/command経路を使い、どちらにも利用できる代表操作と失敗結果を検証します。
 

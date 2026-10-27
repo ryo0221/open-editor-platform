@@ -1,52 +1,154 @@
+/* Same tokens, borders and control sizes as the editor-ui toolbar and panels. */
 .animation2 {
-  font: 14px system-ui;
-  color: #1e293b;
-  padding: 16px;
+  --ep-line: #dfe2e6;
+  --ep-muted: #666e79;
+  --ep-accent: #3267c8;
+  --ep-bg: #f1f2f4;
+  --ep-panel: #fff;
+  --ep-text: #242a32;
+  font:
+    13px/1.45 Inter,
+    Arial,
+    'Noto Sans',
+    sans-serif;
+  color: var(--ep-text);
+  background: var(--ep-bg);
   min-width: 0;
+  padding-bottom: 12px;
 }
 .animation2 * {
   box-sizing: border-box;
+}
+.animation2 h2,
+.animation2 h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
 }
 .animation2 button,
 .animation2 input,
 .animation2 select,
 .animation2 textarea {
   font: inherit;
-  padding: 7px;
-  border: 1px solid #cbd5e1;
-  border-radius: 5px;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #cdd3dc;
+  border-radius: 3px;
   color: inherit;
   background: white;
   max-width: 100%;
 }
+.animation2 input[type='checkbox'],
+.animation2 input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--ep-accent);
+}
+.animation2 button {
+  cursor: pointer;
+}
+.animation2 button:not(:disabled):hover,
+.animation2 button[aria-pressed='true'] {
+  background: #e9eef8;
+  border-color: #d4dfee;
+  color: var(--ep-accent);
+}
 .animation2 button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
+  cursor: default;
 }
 .animation2 :focus-visible {
-  outline: 3px solid #6366f1;
-  outline-offset: 2px;
+  outline: 2px solid var(--ep-accent);
+  outline-offset: 1px;
 }
 .animation2 label {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  font-size: 11px;
+  color: var(--ep-muted);
 }
-.animation2 button[aria-pressed='true'] {
-  background: #e0e7ff;
+.animation2 label > :is(input, select, textarea) {
+  color: var(--ep-text);
+}
+.a2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 4px 12px;
+  background: var(--ep-panel);
+  border-bottom: 1px solid var(--ep-line);
+}
+.a2-toolbar h2 {
+  white-space: nowrap;
+}
+.a2-toolbar .a2-actions,
+.a2-timing {
+  margin: 0;
+}
+.a2-toolbar label,
+.a2-timing label {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.a2-timing {
+  padding: 6px 12px;
+  background: var(--ep-panel);
+  border-bottom: 1px solid var(--ep-line);
+}
+.a2-timing input {
+  width: 80px;
+}
+.animation2 .a2-timing fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.a2-timing .ep-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
 }
 .a2-workspace {
   display: grid;
-  grid-template-columns: minmax(140px, 180px) minmax(240px, 1fr) minmax(210px, 280px);
-  gap: 14px;
+  grid-template-columns: minmax(150px, 200px) minmax(240px, 1fr) minmax(220px, 300px);
+  gap: 0;
+  background: var(--ep-panel);
+  border-bottom: 1px solid var(--ep-line);
 }
 .a2-workspace nav,
 .a2-workspace aside {
   min-width: 0;
   max-height: 650px;
   overflow: auto;
-  padding: 8px;
-  background: #f8fafc;
+  padding: 10px;
+  background: var(--ep-panel);
+}
+.a2-workspace nav {
+  border-right: 1px solid var(--ep-line);
+}
+.a2-workspace aside {
+  border-left: 1px solid var(--ep-line);
+}
+.a2-workspace nav > h3 {
+  margin: -10px -10px 8px;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--ep-line);
+}
+.a2-note {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #7a4b00;
+  background: #fff7e6;
+  border: 1px solid #f0d49b;
+  border-radius: 3px;
 }
 .a2-layer {
   display: flex !important;
@@ -59,14 +161,19 @@
   flex: 1;
   overflow-wrap: anywhere;
   text-align: left;
+  border-color: transparent;
+  color: var(--ep-text);
 }
 .a2-center {
   min-width: 0;
+  padding: 12px;
+  background: var(--ep-bg);
 }
 .a2-stage {
   position: relative;
   height: 360px;
-  background: #e8eef4;
+  background: #e4e7eb;
+  border: 1px solid var(--ep-line);
   touch-action: none;
   overflow: hidden;
 }
@@ -78,8 +185,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 12px 0;
+  margin: 10px 0;
   align-items: center;
+}
+.animation2 > .a2-actions:not(.a2-timing),
+.animation2 > fieldset,
+.animation2 > [role='status'] {
+  margin: 10px 12px;
 }
 .a2-fields {
   display: grid;
@@ -110,7 +222,7 @@
   inset: 12px;
   padding: 12px;
   background: white;
-  border: 2px solid #818cf8;
+  border: 2px solid var(--ep-accent);
   overflow: auto;
   box-shadow: 0 3px 20px #0f172a33;
 }
@@ -120,11 +232,15 @@
   left: 6px;
   background: #ffffffed;
   padding: 12px;
-  border: 2px dashed #6366f1;
+  border: 2px dashed var(--ep-accent);
   z-index: 3;
 }
 .a2-timeline {
-  margin: 16px 0;
+  margin: 12px;
+  padding: 10px 12px;
+  background: var(--ep-panel);
+  border: 1px solid var(--ep-line);
+  border-radius: 3px;
 }
 .a2-tracks {
   overflow-x: auto;
@@ -132,13 +248,13 @@
 .a2-track {
   min-width: 500px;
   padding: 8px 16px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--ep-line);
 }
 .a2-key-rail {
   position: relative;
   height: 58px;
   margin: 4px 24px;
-  border-bottom: 2px solid #cbd5e1;
+  border-bottom: 2px solid #cdd3dc;
 }
 .a2-key-rail button {
   position: absolute;
@@ -151,8 +267,11 @@
   font-size: 9px;
 }
 .a2-source-controls {
-  padding: 12px;
-  background: #f8fafc;
+  margin: 12px;
+  padding: 10px 12px;
+  background: var(--ep-panel);
+  border: 1px solid var(--ep-line);
+  border-radius: 3px;
 }
 .a2-input {
   display: flex;
@@ -163,10 +282,16 @@
 }
 .animation2 fieldset {
   min-width: 0;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border: 1px solid var(--ep-line);
+  border-radius: 3px;
   margin: 10px 0;
-  padding: 12px;
+  padding: 10px;
+  background: var(--ep-panel);
+}
+.animation2 legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 600;
 }
 .animation2 [role='status'],
 .animation2 [role='alert'],
@@ -180,14 +305,16 @@
   .a2-workspace aside {
     grid-column: 1/-1;
     max-height: none;
+    border-left: 0;
+    border-top: 1px solid var(--ep-line);
   }
   .a2-inspector > .a2-fields {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (max-width: 600px) {
-  .animation2 {
-    padding: 8px;
+  .a2-toolbar {
+    flex-wrap: wrap;
   }
   .a2-workspace {
     display: flex;

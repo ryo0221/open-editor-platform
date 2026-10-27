@@ -5,26 +5,31 @@
 
 ## 利用・組み込み
 
-| 目的                               | 文書                                                                                                                                                                               |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 操作の意味とEditorごとの違いを知る | [Surface契約](surface-semantics.md)                                                                                                                                                |
-| アプリケーションへ埋め込む         | [埋め込みAPI](embedding.md)・[Host組み込み](host-integration.md)                                                                                                                   |
-| 共同編集を接続する                 | [接続手順](editor-collaboration-integration.md)・[対応範囲](editor-collaboration-coverage.md)・[Hostの責任](collaboration-host.md)                                                 |
-| テンプレート・再利用を使う         | [テンプレート操作](template-authoring.md)・[カタログ](template-catalog.md)・[再利用の構成](reuse-composition.md)                                                                   |
-| 成果物間の参照・ファイル出力を使う | [参照契約](artifact-references.md)・[出力契約](artifact-output-contract.md)                                                                                                        |
-| Officeファイルを扱う               | [出力UIと対応形式](office-export-ui.md)・[取り込み](office-import.md)                                                                                                              |
-| React UI・DesignのReact出力を使う  | [React UI組み込み](react-ui-integration.md)・[移植手順](react-ui-portability.md)・[Design連携](design-react-contract.md)                                                           |
-| Graph・Designの機能を組み込む      | [Graph契約](structured-graph-contract.md)・[Graph表示設計](graph-reading-design.md)・[Design headless操作](design-headless-contract.md)・[prototype](design-prototype-contract.md) |
-| Animation・Geoを使う               | [Animation 2D](animation/production-2d-design.md)・[Geoガイド](geo-guide.md)                                                                                                       |
+| 目的                                    | 文書                                                                                                                                                                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 操作の意味とEditorごとの違いを知る      | [Surface契約](surface-semantics.md)                                                                                                                                                |
+| アプリケーションへ埋め込む              | [埋め込みAPI](embedding.md)・[Host組み込み](host-integration.md)                                                                                                                   |
+| 共同編集を接続する                      | [接続手順](editor-collaboration-integration.md)・[対応範囲](editor-collaboration-coverage.md)・[Hostの責任](collaboration-host.md)                                                 |
+| テンプレート・再利用を使う              | [テンプレート操作](template-authoring.md)・[カタログ](template-catalog.md)・[再利用の構成](reuse-composition.md)                                                                   |
+| 成果物間の参照・ファイル出力を使う      | [参照契約](artifact-references.md)・[出力契約](artifact-output-contract.md)                                                                                                        |
+| Officeファイルを扱う                    | [出力UIと対応形式](office-export-ui.md)・[取り込み](office-import.md)                                                                                                              |
+| React UI・DesignのReact出力を使う       | [React UI組み込み](react-ui-integration.md)・[移植手順](react-ui-portability.md)・[Design連携](design-react-contract.md)                                                           |
+| 外部の参照元を読む（Geo・Data・GitHub） | 読取契約・ADR 016                                                              |
+| 外部の提案をdomainの差分で確かめる      | [提案のdomain別の差分](proposal-review.md)                                                                                                                                         |
+| Graph・Designの機能を組み込む           | [Graph契約](structured-graph-contract.md)・[Graph表示設計](graph-reading-design.md)・[Design headless操作](design-headless-contract.md)・[prototype](design-prototype-contract.md) |
+| Animation・Geoを使う                    | [Animation 2D](animation/production-2d-design.md)・[Geoガイド](geo-guide.md)                                                                                                       |
 
 ## 開発・設計
 
-| 目的                   | 文書                                                                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 開発に参加する         | [開発者ガイド](developer-guide.md)・[作業ルール](../AGENTS.md)                                                                                         |
-| 全体の構成を理解する   | [アーキテクチャ](architecture.md)                                                                                                                      |
-| Editorを追加・拡張する | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)                                                                        |
-| 設計・検証を記録する   | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md) |
+計算領域の設計：[共通計算](calculation/design.md)・[分析ノート](analysis-notebook/design.md)・[見積・積算・工程](design-estimation/design.md)。初期設計の検証記録と現在の実装記録は区別します。
+
+| 目的                            | 文書                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 開発に参加する                  | [開発者ガイド](developer-guide.md)・[作業ルール](../AGENTS.md)                                                                                         |
+| 全体の構成を理解する            | [アーキテクチャ](architecture.md)                                                                                                                      |
+| Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)                                                                        |
+| Designのパス編集・曲線APIを使う | [操作ガイド](vector-authoring/guide.md)・[設計と受け入れ条件](vector-authoring/design.md)・[実装計画](vector-authoring/implementation-plan.md)         |
+| 設計・検証を記録する            | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md) |
 
 ## 検証・運用・履歴
 
@@ -34,3 +39,11 @@
 - [実装報告の履歴](history/status-2026-10-19.md)：文書整理前の記録。現在の対応範囲はstatusで確認してください。
 
 公開版では、公開用のREADME・statusなどが適用されます。公開範囲に応じて文書とリンクを確認します。
+
+- 見積・積算・工程の利用とHost接続（実装中）
+- [計算・分析ノートの利用とHost接続](analysis-notebook/guide.md)
+- [計算・分析ノートの検証記録](verification/analysis-notebook/README.md)
+
+長編Document・Designの複数ページ: [Host契約](authoring-contract.md) / [設計](novel-comic-design.md) / [検証](verification/novel-comic/README.md)。
+
+後続の制作能力: [Designページ線画・吹き出し](design-page-artwork.md) / [Document出版出力の段階設計](document-publishing-design.md) / [水平EPUBの検証](verification/document-epub/README.md)。

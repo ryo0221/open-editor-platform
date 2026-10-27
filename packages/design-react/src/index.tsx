@@ -3,7 +3,7 @@ import { clone, newId } from '@editor-platform/artifact-core';
 import { command } from '@editor-platform/editor-core';
 import {
   DesignSurface,
-  isDesign,
+  isDesignWithPaths,
   type DesignSurfaceProps,
   type DesignExtensionContext,
 } from '@editor-platform/design';
@@ -94,7 +94,7 @@ export function DesignReactSurface({
       ...cmd,
       apply: (d) => {
         const next = cmd.apply(d);
-        if (!isDesign(next))
+        if (!isDesignWithPaths(next))
           throw new Error('Invalid native Web metadata; correct JSON before applying');
         return next;
       },
@@ -322,7 +322,11 @@ export function DesignReactSurface({
         {...surface}
         execute={checkedExecute}
         content={content}
-        extension={extension}
+        extension={
+          content.schemaVersion === 3
+            ? { beforeGraphicExport: extension.beforeGraphicExport }
+            : extension
+        }
         publicationRequest={publicationTarget}
         focusRequest={diagnosticTarget}
         onPublicationClosed={() => setPublicationTarget(undefined)}

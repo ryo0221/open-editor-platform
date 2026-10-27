@@ -104,6 +104,8 @@ export interface Drawing extends VisualStyle {
     paths: string[];
     provenance: { source: string; name: string; version: string; license: string };
   };
+  /** Rendering-only structured path projection, with world paint extent. */
+  path?: { d: string; fillRule: 'nonzero' | 'evenodd'; paintBounds: Bounds };
   points?: Array<{ x: number; y: number }>;
   table?: {
     rows: string[][];
@@ -689,7 +691,20 @@ export function drawingPrimitives(
   else if (d.kind === 'group') nodes = [];
   else if (d.kind === 'text') nodes = textPrimitives(d, options);
   else {
-    if (d.vector) {
+    if (d.path) {
+      nodes = [
+        p('path', {
+          d: d.path.d,
+          'fill-rule': d.path.fillRule,
+          fill: d.fill,
+          stroke: d.stroke ?? 'none',
+          'stroke-width': d.strokeWidth ?? 2,
+          'stroke-dasharray': d.dash ?? '',
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+        }),
+      ];
+    } else if (d.vector) {
       const v = d.vector.viewBox;
       const scale = Math.min(b.width / v.width, b.height / v.height);
       nodes = [

@@ -5,12 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./plan": "./src/plan-api.ts"
+    "./plan": "./src/plan-api.ts",
+    "./epub": "./src/epub.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
     "@editor-platform/export-core": "*",
     "@editor-platform/document": "*",
-    "docx": "9.6.1"
+    "docx": "9.6.1",
+    "fflate": "0.8.3"
   }
 }

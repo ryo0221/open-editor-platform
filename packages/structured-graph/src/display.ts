@@ -15,6 +15,7 @@ export function graphNodeSize(size?: GraphNodeSize): GraphNodeSize {
     ? size
     : { width: 200, height: 70 };
 }
+/** Shows the whole drawing as large as it fits, up to 2×, centred in the viewport. */
 export function fitGraphView(boxes: Bounds[], viewport: GraphNodeSize): GraphCamera {
   if (!boxes.length) return { x: 0, y: 0, zoom: 1 };
   const minX = Math.min(...boxes.map((box) => box.x)),
@@ -24,12 +25,16 @@ export function fitGraphView(boxes: Bounds[], viewport: GraphNodeSize): GraphCam
   const zoom = Math.max(
     0.001,
     Math.min(
-      1,
+      2,
       Math.max(1, viewport.width - 40) / (maxX - minX),
       Math.max(1, viewport.height - 40) / (maxY - minY),
     ),
   );
-  return { x: 20 - minX * zoom, y: 20 - minY * zoom, zoom };
+  return {
+    x: Math.max(20, (viewport.width - (maxX - minX) * zoom) / 2) - minX * zoom,
+    y: Math.max(20, (viewport.height - (maxY - minY) * zoom) / 2) - minY * zoom,
+    zoom,
+  };
 }
 export const graphBoxesOverlap = (a: Bounds, b: Bounds) =>
   a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;

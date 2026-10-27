@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { newId } from '@editor-platform/artifact-core';
+import { useMemo, useState } from 'react';
+import { isDeepFrozen, newId } from '@editor-platform/artifact-core';
 import { Section, CommitInput } from '@editor-platform/editor-ui';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type {
@@ -127,7 +127,13 @@ export function DesignPrototypeSettings({
   const frames = content.elements.filter((e) => e.type === 'frame');
   const prototype = content.prototyping ?? { schemaVersion: 1 as const, flows: [] };
   const flow = prototype.flows.find((f) => f.id === flowId) ?? prototype.flows[0];
-  const diagnostics = diagnoseDesignPrototype(content);
+  // Owned snapshots are diagnosed once; mutable Host content is read on every render.
+  const owned = isDeepFrozen(content);
+  const ownedDiagnostics = useMemo(
+    () => (owned ? diagnoseDesignPrototype(content) : undefined),
+    [content, owned],
+  );
+  const diagnostics = ownedDiagnostics ?? diagnoseDesignPrototype(content);
   return (
     <Section title="Prototype settings">
       {element && (

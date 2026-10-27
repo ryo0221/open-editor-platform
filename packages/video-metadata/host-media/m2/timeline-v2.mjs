@@ -41,7 +41,8 @@ export function timelinePlanV2(snapshot) {
     frames: ceilTime(multiply(duration, time(25))),
   };
 }
-export const timelineVideoV2 = (plan, signal) => createVisualV2(plan.content, plan.files, signal);
+export const timelineVideoV2 = (plan, signal, selectRequests) =>
+  createVisualV2(plan.content, plan.files, signal, selectRequests);
 export async function timelinePcmV2(plan, signal) {
   const owner = await createMixedPcmV2(plan.content, plan.files, signal);
   return {
@@ -59,15 +60,19 @@ export function drawContainedV2(canvas, row, output, preview = false) {
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = output.background;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return drawLayerContainedV2(ctx, row, canvas.width, canvas.height);
+}
+/** Draw one layer without resetting the canvas or filling its background. */
+export function drawLayerContainedV2(ctx, row, canvasWidth, canvasHeight) {
   if (!row) return null;
   if (![0, 90].includes(row.rotation)) throw Error('V2 orientation profile');
-  const rawWidth = row.frame.displayWidth,
-    rawHeight = row.frame.displayHeight,
+  const rawWidth = row.frame.displayWidth ?? row.frame.width,
+    rawHeight = row.frame.displayHeight ?? row.frame.height,
     width = row.rotation === 90 ? rawHeight : rawWidth,
     height = row.rotation === 90 ? rawWidth : rawHeight,
-    fit = Math.min(canvas.width / width, canvas.height / height),
-    x = (canvas.width - width * fit) / 2,
-    y = (canvas.height - height * fit) / 2;
+    fit = Math.min(canvasWidth / width, canvasHeight / height),
+    x = (canvasWidth - width * fit) / 2,
+    y = (canvasHeight - height * fit) / 2;
   ctx.save();
   try {
     ctx.translate(x, y);

@@ -5,7 +5,7 @@ import { type GraphDocument } from './model';
 import { type GraphProfile } from './profile';
 import { graphCommand, type GraphIntent } from './commands';
 import { type GraphConnectionInput } from './view-connection';
-import { graphDraftType, hasComposingDraft, type GraphApply } from './view-model';
+import { graphDraftTarget, hasComposingDraft, type GraphApply } from './view-model';
 
 export interface GraphEditorInputContext {
   readOnly: boolean;
@@ -26,17 +26,10 @@ function graphDraftIntents({ drafts, invalidInput, graph, profile }: GraphEditor
   const intents: GraphIntent[] = [];
   for (const [id, draft] of drafts.current) {
     invalidInput.current = id;
-    const node = graph.nodes.find((node) => node.id === id);
-    const edge = graph.edges.find((edge) => edge.id === id);
-    const type = graphDraftType(draft, id, graph, profile, node, edge);
-    if (!type || type.readOnly) throw new Error('対象が削除済み、または編集できない定義です。');
-    intents.push(
-      ...prepareGraphAttributeDraft(
-        draft,
-        node?.attributes ?? edge?.attributes ?? graph.attributes,
-        type.schema,
-      ),
-    );
+    const target = graphDraftTarget(draft, id, graph, profile);
+    if (!target || target.type.readOnly)
+      throw new Error('対象が削除済み、または編集できない定義です。');
+    intents.push(...prepareGraphAttributeDraft(draft, target.attributes, target.type.schema));
   }
   return intents;
 }
@@ -76,7 +69,7 @@ export function useGraphEditorInput(context: GraphEditorInputContext) {
     label: 'Graph',
     read: () => ({
       dirty: context.drafts.current.size > 0 || context.connection.dirty,
-      composing: hasComposingDraft(context.drafts.current),
+      composing: hasComposingDraft(context.drafts.current) || !!context.connection.composing,
     }),
     prepare: () => prepareGraphInput(context),
     focus: () => focusGraphInput(context),

@@ -59,9 +59,12 @@ async function connect(
 ) {
   if (
     domain === 'structured-graph' ||
+    domain === 'analysis' ||
+    domain === 'estimate' ||
     domain === 'geo' ||
     domain === 'schedule' ||
-    domain === 'cad'
+    domain === 'cad' ||
+    domain === 'bim'
   )
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))
@@ -85,6 +88,8 @@ async function connect(
     }
   }
   if (!credentials) {
+    const unavailable =
+      'Collaboration could not start: the shared server did not respond. Your artifact is unchanged.';
     const response = await fetch('/collaboration-api/editor/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,10 +108,16 @@ async function connect(
             }
           : {}),
       }),
+    }).catch(() => {
+      throw new Error(unavailable);
     });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error);
-    credentials = result as EditorConnectionCredentials;
+    // Without the reference server the dev server answers with an empty or HTML body.
+    const result = (await response.json().catch(() => undefined)) as
+      | (EditorConnectionCredentials & { error?: string })
+      | undefined;
+    if (!result) throw new Error(unavailable);
+    if (!response.ok) throw new Error(result.error ?? unavailable);
+    credentials = result;
     sessionStorage.setItem(storageKey, JSON.stringify(credentials));
   }
   const adapter = new ReferenceEditorAdapter(

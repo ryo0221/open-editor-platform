@@ -6,7 +6,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
-    "./engine": "./src/engine.ts"
+    "./engine": "./src/engine.ts",
+    "./proposal-diff": "./src/proposal-diff.ts",
+    "./text": "./src/text-access.ts",
+    "./sequence": "./src/sequence.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
@@ -16,7 +19,7 @@
     "@editor-platform/office-export-ui": "*",
     "@editor-platform/reuse-core": "*",
     "@pdf-lib/fontkit": "1.1.1",
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "lucide-react": "1.51.0",
     "mermaid": "11.17.2",
     "pdf-lib": "1.17.1",

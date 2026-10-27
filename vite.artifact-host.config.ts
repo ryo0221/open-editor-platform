@@ -19,6 +19,7 @@ const digest = createHash('sha256').update(js).digest('base64');
 const preview = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-${digest}' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"></head><body><div id="root"></div><script>${js}</script></body></html>`;
 export default defineConfig({
   root: 'apps/artifact-host',
+  publicDir: '../playground/public',
   plugins: [react(), dependencySecurity(), cadDevelopmentKernel()],
   worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },
   resolve: {
@@ -40,9 +41,11 @@ export default defineConfig({
     rollupOptions: {
       treeshake: false,
       input: {
+        authoring: fileURLToPath(new URL('./apps/artifact-host/authoring.html', import.meta.url)),
         index: fileURLToPath(new URL('./apps/artifact-host/index.html', import.meta.url)),
         access: fileURLToPath(new URL('./apps/artifact-host/access.html', import.meta.url)),
         lifecycle: fileURLToPath(new URL('./apps/artifact-host/lifecycle.html', import.meta.url)),
+        'host-api': fileURLToPath(new URL('./apps/artifact-host/host-api.html', import.meta.url)),
       },
     },
   },

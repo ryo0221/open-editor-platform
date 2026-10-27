@@ -28,7 +28,7 @@ export function GraphAttributes({
   attributes: Attributes;
   schema: Record<string, AttributeSchema>;
   ui?: AttributeUi;
-  scope: 'graph' | 'node' | 'edge';
+  scope: 'graph' | 'node' | 'edge' | 'section';
   id: string;
   stamp: string;
   readOnly: boolean;

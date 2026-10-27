@@ -63,7 +63,7 @@ test('emitted graph checks actual package bytes rather than only the lock', () =
       ),
     /Unsafe emitted dependency/,
   );
-  const versions = { mermaid: '11.17.2', katex: '0.18.2', dompurify: '3.4.16' };
+  const versions = { mermaid: '11.17.2', katex: '0.18.2', dompurify: '3.4.17' };
   const report = inspectDependencyModules(
     Object.keys(versions).map(
       (name) =>

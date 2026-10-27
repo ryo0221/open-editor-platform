@@ -73,4 +73,30 @@ describe('canvas rich text and common export layout', () => {
     copy[0].style!.bold = false;
     expect(runs[0].style.bold).toBe(true);
   });
+  it('keeps Japanese punctuation off the start of a line and opening brackets off the end', () => {
+    const lineTexts = (text: string, width: number, fontSize = 10) =>
+      layoutTextRuns(text, undefined, width, { fontSize }).map((l) =>
+        l.runs.map((r) => r.text).join(''),
+      );
+    // Three full-width characters fit; the comma pulls the previous character with it.
+    expect(lineTexts('あいう、えお', 30)).toEqual(['あい', 'う、え', 'お']);
+    expect(lineTexts('あい「うえ」', 30)).toEqual(['あい', '「う', 'え」']);
+    // A line never empties: an unbreakable run of punctuation overflows instead.
+    expect(lineTexts('、、、、、、', 20)).toEqual(['、、', '、、', '、、']);
+    // The demo copy: 212px wide at 15px, as a Design text element lays it out.
+    const copy = '前後 eアクスルが路面を読み、雨の日も雪道も安定した走りを実現。';
+    const lines = lineTexts(copy, 212 - 8, 15);
+    expect(lines.join('')).toBe(copy);
+    for (const line of lines.slice(1)) expect(line).not.toMatch(/^[、。）」』]/);
+    for (const line of lines.slice(0, -1)) expect(line).not.toMatch(/[（「『]$/);
+    const drawing: Drawing = {
+      id: 'copy',
+      kind: 'text',
+      text: copy,
+      fill: '#000000',
+      bounds: { x: 0, y: 0, width: 212, height: 120 },
+      typography: { fontSize: 15 },
+    };
+    expect(drawingSvg([drawing], drawing.bounds)).not.toMatch(/>[、。]/);
+  });
 });

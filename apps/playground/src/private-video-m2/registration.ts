@@ -1,9 +1,9 @@
 /** Host-private validation metadata. Not an Extension public registration. */
 export const privateVideoM2 = Object.freeze({
   id: 'video-v2-review',
-  label: 'Video（複数素材・音声編集）',
+  label: 'Video',
   contract: 'normal-video-m2-host@0-private',
-  schema: 'video-core-prototype-v2',
+  schema: 'video-core-prototype-v3',
   dependency: '87c7aef1d47aefdf37cff5591be59f4ca8df77bb',
   capabilities: Object.freeze(['create', 'local-edit', 'save', 'portable', 'history-view']),
 });
@@ -20,7 +20,8 @@ export function privateVideoM2Route(search: string) {
     params.getAll('privateEditor').length !== 1 ||
     params.get('privateEditor') !== privateVideoM2.id ||
     params.has('shared') ||
-    params.getAll('project').length > 1
+    params.getAll('project').length > 1 ||
+    params.has('nativeSchema')
   )
     throw new Error('Unsupported private M2 Editor or shared context');
   const entryId = params.get('project') ?? undefined;

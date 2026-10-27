@@ -1,4 +1,5 @@
 /** Private v2 ordinary workflow. One real scoped controller/SaveCoordinator; Host owns file lifetimes. */
+import type { AtomicSurfaceInputs } from '@editor-platform/extension-contract/controlled-surface';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { contentHash } from '@editor-platform/artifact-core';
@@ -27,7 +28,10 @@ import {
   time,
   videoCommandV2,
   type VideoContentV2,
+  type VideoContentV3,
+  type VideoEditV2,
   type Time,
+  type MediaAssetRef,
 } from '@editor-platform/video-core';
 import { validateHostV2 } from './capacity-v2';
 import {
@@ -36,41 +40,47 @@ import {
   type MediaImportSetV2 as ImportSetV2,
 } from './media-profile-v2';
 import { prepareAudioImportV2 } from './audio-import-v2';
-export interface LiveV2 {
+import type { VisualImportSetV3, ImageInterpretationV3 } from '../../host-visual/image-source';
+type ImportFor<C> = C extends VideoContentV3 ? VisualImportSetV3 : ImportSetV2;
+export interface LiveV2<C extends NativeVideo = VideoContentV2> {
   originals: Map<string, Blob>;
-  plans: Map<string, ImportSetV2>;
+  plans: Map<string, ImportFor<C>>;
 }
-export interface PersistenceV2 {
-  storage: Storage<VideoContentV2>;
-  content: VideoContentV2;
+type NativeVideo = VideoContentV2 | VideoContentV3;
+export interface PersistenceV2<C extends NativeVideo = VideoContentV2> {
+  storage: Storage<C>;
+  content: C;
   portable(signal: AbortSignal): Promise<{ bytes: Blob; release(): void }>;
   close(): Promise<void>;
   /** Trusted adapter evidence; reconciled only into this Host's existing coordinator. */
   reconcile?(operationId: string, signal: AbortSignal): Promise<WriteEvidence>;
 }
-export type PersistenceFactoryV2 = (live: LiveV2, file?: Blob) => Promise<PersistenceV2>;
-interface SnapshotV2 {
+export type PersistenceFactoryV2<C extends NativeVideo = VideoContentV2> = (
+  live: LiveV2<C>,
+  file?: Blob,
+) => Promise<PersistenceV2<C>>;
+export interface SnapshotV2<C extends NativeVideo = VideoContentV2> {
   output: { width: number; height: number; background: string };
-  native: { content: VideoContentV2; revision: unknown };
-  originals: { sourceId: string; bytes: Blob; plan: ImportSetV2 }[];
+  native: { content: C; revision: unknown };
+  originals: { sourceId: string; bytes: Blob; plan: ImportFor<C> }[];
   hash: string;
 }
-export interface CodecV2 {
+export interface CodecV2<C extends NativeVideo = VideoContentV2> {
   preview(
-    snapshot: SnapshotV2,
+    snapshot: SnapshotV2<C>,
     at: Time,
     canvas: HTMLCanvasElement,
     signal: AbortSignal,
   ): Promise<unknown>;
   play?(
-    snapshot: SnapshotV2,
+    snapshot: SnapshotV2<C>,
     at: Time,
     canvas: HTMLCanvasElement,
     signal: AbortSignal,
     report: (value: unknown) => void,
   ): Promise<unknown>;
-  encode?(snapshot: SnapshotV2, signal: AbortSignal): Promise<Blob>;
-  verify?(bytes: Blob, snapshot: SnapshotV2, signal: AbortSignal): Promise<void>;
+  encode?(snapshot: SnapshotV2<C>, signal: AbortSignal): Promise<Blob>;
+  verify?(bytes: Blob, snapshot: SnapshotV2<C>, signal: AbortSignal): Promise<void>;
 }
 export const emptyV2 = (): VideoContentV2 => ({
   schema: 'video-core-prototype-v2',
@@ -92,31 +102,87 @@ const parse = (text: string) => {
   if (!m) throw Error('Use rational seconds');
   return time(Number(m[1]), Number(m[2] ?? 1));
 };
-export async function mountV2Host(
+export interface NativeHostOptions {
+  externalSwitching?: boolean;
+  allowed?(permission: string): boolean;
+  subscribePermissions?(listener: () => void): () => void;
+}
+export interface HostExtension<C extends NativeVideo> {
+  root: HTMLElement;
+  read(): { content: C; revision: unknown };
+  token(): string;
+  subscribe(listener: () => void): () => void;
+  bindInputs(group: AtomicSurfaceInputs<C>): { changed(): void; unregister(): void };
+  applyInputs(): void;
+  original(sourceId: string): { bytes: Blob; plan: ImportFor<C> };
+  adoptOriginal(
+    original: Blob,
+    plan: ImportFor<C>,
+    prepare: (content: C, asset: MediaAssetRef, sourceId: string) => C,
+    signal: AbortSignal,
+  ): Promise<string>;
+  executeAt(token: string, command: EditorCommand<C>): void;
+  button(label: string, action: () => void | Promise<void>): void;
+  work(label: string, action: (signal: AbortSignal) => Promise<void>): Promise<void>;
+}
+export interface NativeHostVariant<C extends NativeVideo> {
+  schema: C['schema'];
+  empty(): C;
+  validate(value: unknown): value is C;
+  command(edit: VideoEditV2): EditorCommand<C>;
+  visualFade?(clipId: string, fadeIn: Time, fadeOut: Time): EditorCommand<C>;
+  media(content: C): VideoContentV2;
+  withMedia(content: C, media: VideoContentV2): C;
+  imageImport?: {
+    inspect(file: Blob, signal: AbortSignal): Promise<{ plan: ImageInterpretationV3 }>;
+    prepare(content: C, plan: ImageInterpretationV3, asset: MediaAssetRef, id: string): C;
+  };
+  extend?(host: HostExtension<C>): (() => void) | void;
+}
+const variantV2: NativeHostVariant<VideoContentV2> = {
+  schema: 'video-core-prototype-v2',
+  empty: emptyV2,
+  validate: validateHostV2,
+  command: videoCommandV2,
+  media: (content) => content,
+  withMedia: (_content, media) => media,
+};
+export function mountV2Host(
   root: HTMLElement,
   factory: PersistenceFactoryV2 | undefined,
   codec: CodecV2,
   file?: Blob,
-  options: { externalSwitching?: boolean } = {},
+  options: NativeHostOptions = {},
+) {
+  return mountNativeVideoHost(root, factory, codec, variantV2, file, options);
+}
+/** Private schema adapter: keeps the existing ordinary toolbar, coordinator and mutation guards. */
+export async function mountNativeVideoHost<C extends NativeVideo>(
+  root: HTMLElement,
+  factory: PersistenceFactoryV2<C> | undefined,
+  codec: CodecV2<C>,
+  variant: NativeHostVariant<C>,
+  file?: Blob,
+  options: NativeHostOptions = {},
 ) {
   if (file && !factory) throw Error('Portable opener unavailable');
-  const live: LiveV2 = { originals: new Map(), plans: new Map() };
-  const persistence: Pick<PersistenceV2, 'content' | 'close'> &
-    Partial<Pick<PersistenceV2, 'storage' | 'portable' | 'reconcile'>> = factory
+  const live: LiveV2<C> = { originals: new Map(), plans: new Map() };
+  const persistence: Pick<PersistenceV2<C>, 'content' | 'close'> &
+    Partial<Pick<PersistenceV2<C>, 'storage' | 'portable' | 'reconcile'>> = factory
     ? await factory(live, file)
-    : { content: emptyV2(), close: async () => {} };
+    : { content: variant.empty(), close: async () => {} };
   if (persistence.storage && persistence.storage.key.length > 256) {
     await persistence.close();
     throw Error('VideoHostScopeCapacity');
   }
   const owner = new ReferenceRegistry(new ManualClock()),
-    schemaIdentity = { kind: 'literal', value: 'video-core-prototype-v2' } as const;
+    schemaIdentity = { kind: 'literal', value: variant.schema } as const;
   const registry = new SchemaEditExperimentRegistry(owner, [
     { artifactKind: 'video', schemaIdentity },
   ]);
-  const definition: SchemaEditDefinition<VideoContentV2> = {
+  const definition: SchemaEditDefinition<C> = {
     manifest: {
-      id: 'video-native-v2',
+      id: variant.schema === 'video-core-prototype-v2' ? 'video-native-v2' : 'video-native-v3',
       version: '0.0.0-experiment.1',
       packageHash: 'a'.repeat(64),
       contractVersion: SCHEMA_EDIT_EXPERIMENT_VERSION,
@@ -132,7 +198,7 @@ export async function mountV2Host(
       },
       licenseNotices: ['Repository license applies; no additional license grant.'],
     },
-    validate: validateHostV2,
+    validate: variant.validate,
     schemaOf: (content) => ({ kind: 'literal', value: content.schema }),
   };
   const installed = registry.install(definition, {
@@ -143,7 +209,7 @@ export async function mountV2Host(
       packageHash: definition.manifest.packageHash,
     },
   });
-  if (!validateHostV2(persistence.content)) {
+  if (!variant.validate(persistence.content)) {
     await persistence.close();
     throw Error('VideoHostControlledCapacityOrSchema');
   }
@@ -154,8 +220,10 @@ export async function mountV2Host(
     session: new EditorSession(persistence.content),
     inputs: new EditorInputs(),
     ...(persistence.storage ? { storage: persistence.storage } : {}),
-    allowed: (permission) => permission !== 'artifact:save' || !!persistence.storage,
-    subscribePermissions: () => () => {},
+    allowed: (permission) =>
+      (options.allowed?.(permission) ?? true) &&
+      (permission !== 'artifact:save' || !!persistence.storage),
+    subscribePermissions: options.subscribePermissions ?? (() => () => {}),
     recovery: {
       codecs: [],
       perBoundaryBytes: 2048,
@@ -178,7 +246,10 @@ export async function mountV2Host(
     }),
     life = handle.context.addons.lifecycle.api;
   root.innerHTML =
-    '<h1>Video — exact timeline</h1><p>Private v2 editing review · source audio and independent music · unsaved until storage is connected.</p><label>Import kind <select id="import-kind"><option value="av-sdr-v2">Video + source audio</option><option value="aac-mono-v2">Independent mono AAC/M4A</option></select></label><label>Audio placement (seconds) <input id="audio-start" value="0"></label><label>Import original <input id="import" type="file"></label><label>Open portable project <input id="open" type="file"></label><p id="mode"></p><div id="actions"></div><p id="status" role="status">Ready</p><canvas id="preview" width="270" height="480"></canvas><p id="playback"></p><details><summary>Playback diagnostics</summary><pre id="playback-debug"></pre></details><label>Sequence output <select id="output-canvas"><option value="portrait">1080 × 1920 portrait · contain</option><option value="landscape">1920 × 1080 landscape · contain</option></select></label><label>Sequence background <input id="output-background" type="color" value="#000000"></label><label>Preview frame <input id="preview-frame" value="0" inputmode="numeric"></label><label>Selected clip <select id="selected"></select></label><label>Split / move time (seconds) <input id="at" value="1/1000"></label><label>Trim start (sequence seconds) <input id="trim-start" value="0"></label><label>Trim end (sequence seconds) <input id="trim-end" value="1"></label><label>Sequence duration (seconds) <input id="duration" value="0"></label><label>Volume (%) <input id="gain" type="number" min="0" max="100" step="any" value="100"></label><label>Fade in (seconds) <input id="fade-in" value="0"></label><label>Fade out (seconds) <input id="fade-out" value="0"></label><ol id="timeline"></ol><details><summary>Native content</summary><pre id="native"></pre></details>';
+    '<h1>Video — exact timeline</h1><p>Local editing · source audio and independent music · unsaved until storage is connected.</p><label>Import kind <select id="import-kind"><option value="av-sdr-v2">Video + source audio</option><option value="aac-mono-v2">Independent mono AAC/M4A</option></select></label><label>Audio placement (seconds) <input id="audio-start" value="0"></label><label>Import original <input id="import" type="file"></label><label>Open portable project <input id="open" type="file"></label><p id="mode"></p><div id="actions"></div><p id="status" role="status">Ready</p><canvas id="preview" width="270" height="480"></canvas><p id="playback"></p><details><summary>Playback diagnostics</summary><pre id="playback-debug"></pre></details><label>Sequence output <select id="output-canvas"><option value="portrait">1080 × 1920 portrait · contain</option><option value="landscape">1920 × 1080 landscape · contain</option></select></label><label>Sequence background <input id="output-background" type="color" value="#000000"></label><label>Preview frame <input id="preview-frame" value="0" inputmode="numeric"></label><label>Selected clip <select id="selected"></select></label><label>Split / move time (seconds) <input id="at" value="1/1000"></label><label>Trim start (sequence seconds) <input id="trim-start" value="0"></label><label>Trim end (sequence seconds) <input id="trim-end" value="1"></label><label>Sequence duration (seconds) <input id="duration" value="0"></label><label>Volume (%) <input id="gain" type="number" min="0" max="100" step="any" value="100"></label><label>Fade in (seconds) <input id="fade-in" value="0"></label><label>Fade out (seconds) <input id="fade-out" value="0"></label><ol id="timeline"></ol><details><summary>Native content</summary><pre id="native"></pre></details>';
+  if (variant.schema === 'video-core-prototype-v3')
+    root.querySelector('p')!.textContent =
+      'Video, audio and exact saved Animation versions. Save to retain your edits.';
   const find = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!,
     status = find('#status'),
     canvas = find<HTMLCanvasElement>('#preview');
@@ -196,12 +267,14 @@ export async function mountV2Host(
   let pendingOpen: Promise<void> | undefined,
     disposal: Promise<void> | undefined,
     closing: Promise<void> | undefined;
+  let boundInputs: AtomicSurfaceInputs<C> | undefined;
   const editor: typeof rawEditor = {
     ...rawEditor,
     save: () => saveWithHost(false),
     bindInputs(group) {
       inputGeneration++;
       const binding = rawEditor.bindInputs(group);
+      boundInputs = group;
       return {
         changed() {
           inputGeneration++;
@@ -210,6 +283,7 @@ export async function mountV2Host(
         unregister() {
           inputGeneration++;
           binding.unregister();
+          if (boundInputs === group) boundInputs = undefined;
         },
       };
     },
@@ -233,7 +307,7 @@ export async function mountV2Host(
     find<HTMLInputElement>('#open').disabled =
       !!options.externalSwitching || terminal || busy || unresolvedSave || !factory;
     for (const input of root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
-      'input:not([type=file]), select',
+      'input:not([type=file]), select, textarea',
     ))
       input.disabled = terminal || busy || unresolvedSave;
   }
@@ -276,13 +350,17 @@ export async function mountV2Host(
   const unsubscribe = editor.subscribe(() => {
     if (closed) return;
     const revision = JSON.stringify(handle.context.basic.read().revision);
-    if (revision !== renderedRevision && ['Preview', 'Playback', 'Export'].includes(activeLabel))
+    if (
+      !internalMutation &&
+      revision !== renderedRevision &&
+      ['Preview', 'Playback', 'Export'].includes(activeLabel)
+    )
       stop();
     renderedRevision = revision;
     render();
   });
   render();
-  function execute(edit: EditorCommand<VideoContentV2>) {
+  function execute(edit: EditorCommand<C>) {
     current();
     const result = editor.execute({
       baseRevision: handle.context.basic.read().revision,
@@ -292,7 +370,19 @@ export async function mountV2Host(
   }
   const selected = () => find<HTMLSelectElement>('#selected').value;
   const at = () => parse(find<HTMLInputElement>('#at').value);
-  async function snapshot(): Promise<SnapshotV2> {
+  function applyInputs() {
+    current();
+    internalMutation = true;
+    try {
+      const result = rawEditor.applyInputs();
+      if (result.state === 'refused') throw Error(JSON.stringify(result));
+    } finally {
+      internalMutation = false;
+    }
+  }
+  async function snapshot(): Promise<SnapshotV2<C>> {
+    const inputState = boundInputs?.read();
+    if (inputState?.dirty || inputState?.composing) applyInputs();
     const native = structuredClone(handle.context.basic.read()),
       originals = native.content.sources.map((s) => {
         const bytes = live.originals.get(s.asset.sha256),
@@ -369,10 +459,15 @@ export async function mountV2Host(
       clip = c.find((c) => c.id === selected());
     if (!clip) throw Error('Select clip');
     const members = c.filter(
-      (c) => c.id === clip.id || (clip.linkGroupId && c.linkGroupId === clip.linkGroupId),
+      (c) =>
+        c.id === clip.id ||
+        ('linkGroupId' in clip &&
+          clip.linkGroupId &&
+          'linkGroupId' in c &&
+          c.linkGroupId === clip.linkGroupId),
     );
     execute(
-      videoCommandV2({
+      variant.command({
         type: 'split',
         clipId: clip.id,
         at: at(),
@@ -383,7 +478,7 @@ export async function mountV2Host(
   });
   button('Trim selected clip', () =>
     execute(
-      videoCommandV2({
+      variant.command({
         type: 'trim',
         clipId: selected(),
         start: parse(find<HTMLInputElement>('#trim-start').value),
@@ -393,11 +488,46 @@ export async function mountV2Host(
     ),
   );
   button('Move linked clips', () =>
-    execute(videoCommandV2({ type: 'move', clipId: selected(), delta: at() })),
+    execute(variant.command({ type: 'move', clipId: selected(), delta: at() })),
+  );
+  button('Delete linked clips', () =>
+    execute(variant.command({ type: 'delete', clipId: selected() })),
+  );
+  button('Unlink selected group', () =>
+    execute(variant.command({ type: 'unlink', clipId: selected() })),
+  );
+  // Explicit whole-sequence cohort. Core rejects locked tracks, crossing clips,
+  // and edits that separate linked members; no partial UI-side mutation.
+  const ripple = document.createElement('label');
+  ripple.textContent = 'Ripple gap duration (seconds) ';
+  const gap = document.createElement('input');
+  gap.id = 'ripple-gap';
+  gap.value = '1';
+  ripple.append(gap);
+  find('#actions').append(ripple);
+  button('Insert gap on all tracks at split / move time', () =>
+    execute(
+      variant.command({
+        type: 'ripple-insert-gap',
+        trackIds: handle.context.basic.read().content.sequence.tracks.map((t) => t.id),
+        at: at(),
+        duration: parse(gap.value),
+      }),
+    ),
+  );
+  button('Ripple delete trim range on all tracks', () =>
+    execute(
+      variant.command({
+        type: 'ripple-delete',
+        trackIds: handle.context.basic.read().content.sequence.tracks.map((t) => t.id),
+        start: parse(find<HTMLInputElement>('#trim-start').value),
+        end: parse(find<HTMLInputElement>('#trim-end').value),
+      }),
+    ),
   );
   button('Resize sequence', () => {
     execute(
-      videoCommandV2({
+      variant.command({
         type: 'resize',
         duration: parse(durationInput.value),
       }),
@@ -414,11 +544,11 @@ export async function mountV2Host(
     const input = find<HTMLInputElement>('#gain');
     if (!input.value.trim() || !input.validity.valid || !Number.isFinite(input.valueAsNumber))
       throw Error('Enter a valid volume from 0 to 100');
-    execute(videoCommandV2({ type: 'gain', clipId: selected(), gain: input.valueAsNumber / 100 }));
+    execute(variant.command({ type: 'gain', clipId: selected(), gain: input.valueAsNumber / 100 }));
   });
   button('Set fades', () =>
     execute(
-      videoCommandV2({
+      variant.command({
         type: 'fade',
         clipId: selected(),
         fadeIn: parse(find<HTMLInputElement>('#fade-in').value),
@@ -426,6 +556,16 @@ export async function mountV2Host(
       }),
     ),
   );
+  if (variant.visualFade)
+    button('Set visual fades', () =>
+      execute(
+        variant.visualFade!(
+          selected(),
+          parse(find<HTMLInputElement>('#fade-in').value),
+          parse(find<HTMLInputElement>('#fade-out').value),
+        ),
+      ),
+    );
   button('Undo', () => {
     const r = editor.undo();
     status.textContent = JSON.stringify(r);
@@ -494,7 +634,10 @@ export async function mountV2Host(
         if (!persistence.portable) throw Error('Portable storage unavailable');
         const portable = await persistence.portable(signal);
         try {
-          download(portable.bytes, 'video-v2.zip');
+          download(
+            portable.bytes,
+            variant.schema === 'video-core-prototype-v2' ? 'video-v2.zip' : 'video-v3.zip',
+          );
         } finally {
           portable.release();
         }
@@ -533,70 +676,101 @@ export async function mountV2Host(
         download(bytes, 'video-v2.mp4');
       }),
     );
+  if (variant.imageImport) {
+    const option = document.createElement('option');
+    option.value = 'image-v3';
+    option.textContent = 'Still PNG/JPEG image';
+    find<HTMLSelectElement>('#import-kind').append(option);
+  }
+  async function adoptOriginal(
+    original: Blob,
+    plan: ImportFor<C>,
+    prepare: (content: C, asset: MediaAssetRef, id: string) => C,
+    signal: AbortSignal,
+  ) {
+    current();
+    signal.throwIfAborted();
+    if (original.size > 256 * 1024 * 1024) throw Error('Original quota');
+    const before = handle.context.basic.read(),
+      h = sha256.create();
+    try {
+      for (let at = 0; at < original.size; at += 65536) {
+        signal.throwIfAborted();
+        h.update(new Uint8Array(await original.slice(at, at + 65536).arrayBuffer()));
+      }
+      const hash = bytesToHex(h.digest()),
+        id = 'source:' + crypto.randomUUID();
+      const asset = { assetId: 'sha256:' + hash, sha256: hash, byteLength: original.size };
+      const native = prepare(before.content, asset, id);
+      const had = live.originals.has(hash);
+      if (
+        !had &&
+        [...live.originals.values()].reduce((n, b) => n + b.size, original.size) > 512 * 1024 * 1024
+      )
+        throw Error('Live original/Undo quota');
+      signal.throwIfAborted();
+      let committed = false;
+      try {
+        live.originals.set(hash, original);
+        live.plans.set(id, structuredClone(plan) as ImportFor<C>);
+        internalMutation = true;
+        let result;
+        try {
+          result = editor.execute({
+            baseRevision: before.revision,
+            command: command('video.native.import', 'Import exact original', () => native),
+          });
+        } finally {
+          internalMutation = false;
+        }
+        if (result.state !== 'applied') throw Error(JSON.stringify(result));
+        committed = true;
+      } finally {
+        if (!committed) {
+          live.plans.delete(id);
+          if (!had) live.originals.delete(hash);
+        }
+      }
+
+      return id;
+    } finally {
+      h.destroy();
+    }
+  }
   find<HTMLInputElement>('#import').onchange = () => {
     const original = find<HTMLInputElement>('#import').files?.[0];
     if (!original) return;
     void work('Import', async (signal) => {
       if (original.size > 256 * 1024 * 1024) throw Error('Original quota');
-      const before = handle.context.basic.read(),
-        { plan } = await inspectMediaOriginalV2(
-          original,
-          find<HTMLSelectElement>('#import-kind').value as ImportSetV2['profile'],
-          signal,
-        ),
-        h = sha256.create();
-      try {
-        for (let at = 0; at < original.size; at += 65536) {
-          signal.throwIfAborted();
-          h.update(new Uint8Array(await original.slice(at, at + 65536).arrayBuffer()));
-        }
-        if (plan.profile === 'aac-mono-v2') plan.streams[0].destination = 'music';
-        const hash = bytesToHex(h.digest()),
-          id = 'source:' + crypto.randomUUID(),
-          asset = { assetId: 'sha256:' + hash, sha256: hash, byteLength: original.size },
-          native =
-            plan.profile === 'av-sdr-v2'
-              ? prepareAvImportV2(before.content, plan, asset, id)
-              : prepareAudioImportV2(
-                  before.content,
-                  plan,
-                  asset,
-                  id,
-                  parse(find<HTMLInputElement>('#audio-start').value),
-                );
-        const had = live.originals.has(hash);
-        if (
-          !had &&
-          [...live.originals.values()].reduce((n, b) => n + b.size, original.size) >
-            512 * 1024 * 1024
-        )
-          throw Error('Live original/Undo quota');
-        signal.throwIfAborted();
-        let committed = false;
-        try {
-          live.originals.set(hash, original);
-          live.plans.set(id, structuredClone(plan));
-          internalMutation = true;
-          let result;
-          try {
-            result = editor.execute({
-              baseRevision: before.revision,
-              command: command('video.v2.import', 'Import exact original', () => native),
-            });
-          } finally {
-            internalMutation = false;
-          }
-          if (result.state !== 'applied') throw Error(JSON.stringify(result));
-          committed = true;
-        } finally {
-          if (!committed) {
-            live.plans.delete(id);
-            if (!had) live.originals.delete(hash);
-          }
-        }
-      } finally {
-        h.destroy();
-      }
+      const { plan } =
+        find<HTMLSelectElement>('#import-kind').value === 'image-v3' && variant.imageImport
+          ? await variant.imageImport.inspect(original, signal)
+          : await inspectMediaOriginalV2(
+              original,
+              find<HTMLSelectElement>('#import-kind').value as ImportSetV2['profile'],
+              signal,
+            );
+      if (plan.profile === 'aac-mono-v2') plan.streams[0].destination = 'music';
+      await adoptOriginal(
+        original,
+        plan as ImportFor<C>,
+        (content, asset, id) =>
+          plan.profile === 'image-v3'
+            ? variant.imageImport!.prepare(content, plan, asset, id)
+            : variant.withMedia(
+                content,
+                plan.profile === 'av-sdr-v2'
+                  ? prepareAvImportV2(variant.media(content), plan, asset, id)
+                  : prepareAudioImportV2(
+                      variant.media(content),
+                      plan,
+                      asset,
+                      id,
+                      parse(find<HTMLInputElement>('#audio-start').value),
+                    ),
+              ),
+        signal,
+      );
     }).catch(() => {});
   };
   find<HTMLInputElement>('#open').onchange = () => {
@@ -614,7 +788,7 @@ export async function mountV2Host(
     updateBusy();
     const candidate = document.createElement('section');
     pendingOpen = (async () => {
-      const next = await mountV2Host(candidate, factory, codec, file);
+      const next = await mountNativeVideoHost(candidate, factory, codec, variant, file, options);
       let activated = false;
       try {
         if (terminal || ticket !== openGeneration || unresolvedSave || token !== openToken())
@@ -637,6 +811,39 @@ export async function mountV2Host(
         if (!closed && !terminal) updateBusy();
       });
   };
+  const disposeExtension = variant.extend?.({
+    root,
+    read: () => handle.context.basic.read(),
+    token: openToken,
+    subscribe: (listener) => editor.subscribe(listener),
+    bindInputs: (group) => editor.bindInputs(group),
+    applyInputs,
+    adoptOriginal,
+    original(sourceId) {
+      current();
+      if (options.allowed && !options.allowed('artifact:read')) throw Error('Original read denied');
+      const source = handle.context.basic.read().content.sources.find((s) => s.id === sourceId);
+      const bytes = source && live.originals.get(source.asset.sha256),
+        plan = live.plans.get(sourceId);
+      if (!bytes || !plan) throw Error('Original closure unavailable');
+      return { bytes, plan };
+    },
+    button,
+    work,
+    executeAt(token, edit) {
+      if (busy || terminal || unresolvedSave) throw Error('HostBusyOrUnresolved');
+      if (token !== openToken()) throw Error('Stale Animation preview');
+      internalMutation = true;
+      try {
+        execute(edit);
+      } finally {
+        internalMutation = false;
+      }
+    },
+  });
+  life.registerDisposable('video-native-extension', async () => {
+    disposeExtension?.();
+  });
   if (options.externalSwitching) {
     const label = find('#open').closest('label')!;
     label.hidden = true;
@@ -651,6 +858,7 @@ export async function mountV2Host(
     if (disposal) return disposal;
     closed = true;
     unsubscribe();
+    disposeExtension?.();
     handle.revoke('host-close');
     disposal = (async () => {
       await persistence.close();

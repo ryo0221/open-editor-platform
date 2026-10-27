@@ -1,3 +1,5 @@
+import { ArtifactEstimate } from './estimate';
+import { ArtifactAnalysis } from './analysis';
 import {
   lazy,
   Suspense,
@@ -31,7 +33,12 @@ import type { Region } from '@editor-platform/editor-core';
 import { WhiteboardSurface } from '@editor-platform/whiteboard';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { DesignSurface } from '@editor-platform/design';
-import { isDesign, updateElement, type DesignContent } from '@editor-platform/design/model';
+import {
+  isDesign,
+  isDesignWithPaths,
+  updateElement,
+  type DesignContent,
+} from '@editor-platform/design/model';
 import { DataSurface } from '@editor-platform/structured-data';
 import { isStructuredData } from '@editor-platform/structured-data/model';
 import { exportDesignReact, acceptDesignConversion } from '@editor-platform/design-react-core';
@@ -49,14 +56,20 @@ import {
   isStaticSlide,
   type HostContent,
 } from './model';
+import { isBimDocument } from '@editor-platform/bim-core';
+import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
 import { isCadDocument } from '@editor-platform/cad-core';
-import type { CadKernelBuild } from '@editor-platform/cad-kernel-occt';
+import type { CadCatalogBuild, CadKernelCatalog } from '@editor-platform/cad-kernel-occt';
 import { compileProject } from './compiler';
 import { PreviewFrame } from './PreviewFrame';
 import './host.css';
 
 // Three.js and the kernel adapter load only when a CAD artifact opens.
 const CadArtifactView = lazy(() => import('./cad'));
+const BimArtifactView = lazy(() => import('./bim'));
+const BimIfcLossDialog = lazy(() =>
+  import('@editor-platform/bim/ifc-import').then((m) => ({ default: m.BimIfcLossDialog })),
+);
 
 function compileDesignPreview(content: DesignContent, files: Record<string, string>) {
   const pages = content.web?.pages;
@@ -73,12 +86,15 @@ export function download(name: string, text: string, type = 'application/json') 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 const labels: Record<string, string> = {
+  estimate: '見積・積算',
+  analysis: '計算・分析ノート',
   slide: 'Slide',
   whiteboard: 'Whiteboard',
   design: 'React / Design',
   code: 'Code (Host拡張)',
   data: 'Data / Kanban',
   cad: '3D CAD',
+  bim: 'Building',
 };
 export interface HostAppProps {
   samples: Artifact<HostContent>[];
@@ -88,20 +104,30 @@ export interface HostAppProps {
   codeSurface?(host: ArtifactEditor<HostContent>): ReactNode;
   header?: ReactNode;
   /** Verified CAD kernel build; without it CAD artifacts stay readable but cannot evaluate. */
-  cadKernel?: CadKernelBuild | null;
+  cadKernel?: CadCatalogBuild | null;
+  /** Older CAD kernel builds this Host serves and approved reference substitutions. */
+  cadKernels?: Omit<CadKernelCatalog, 'current'>;
 }
 function EditorView({
   host,
   previewDocument,
   codeSurface,
   cadKernel,
+  cadKernels,
   onError,
+  artifacts,
+  storage,
+  onCreated,
 }: {
   host: ArtifactEditor<HostContent>;
   previewDocument: string;
   codeSurface?: HostAppProps['codeSurface'];
-  cadKernel?: CadKernelBuild | null;
+  cadKernel?: CadCatalogBuild | null;
+  cadKernels?: HostAppProps['cadKernels'];
   onError(error: unknown): void;
+  artifacts: Artifact<HostContent>[];
+  storage: StorageAdapter<Artifact<HostContent>>;
+  onCreated(a: Artifact<HostContent>): void;
 }) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   useEffect(() => host.attach(refresh), [host]);
@@ -126,6 +152,14 @@ function EditorView({
     },
     defaultPanels: { left: true, right: window.innerWidth > 1050 },
   };
+  if (host.artifact.kind === 'estimate')
+    return (
+      <ArtifactEstimate host={host} artifacts={artifacts} storage={storage} onCreated={onCreated} />
+    );
+  if (host.artifact.kind === 'analysis')
+    return (
+      <ArtifactAnalysis host={host} artifacts={artifacts} storage={storage} onCreated={onCreated} />
+    );
   if (host.artifact.kind === 'slide' && isStaticSlide(content))
     return (
       <OfficeExportHost
@@ -163,12 +197,12 @@ function EditorView({
         layout={layout}
       />
     );
-  if (host.artifact.kind === 'design' && isDesign(content))
+  if (host.artifact.kind === 'design' && isDesignWithPaths(content))
     return (
       <DesignSurface
         content={content}
         readOnly={readOnly}
-        execute={domainExecute(host, isDesign)}
+        execute={domainExecute(host, isDesignWithPaths)}
         select={select}
         layout={layout}
       />
@@ -182,7 +216,18 @@ function EditorView({
   if (host.artifact.kind === 'cad' && isCadDocument(content))
     return (
       <Suspense fallback={<p>3D CADを読み込んでいます…</p>}>
-        <CadArtifactView host={host} kernel={cadKernel ?? null} onError={onError} />
+        <CadArtifactView
+          host={host}
+          kernel={cadKernel ?? null}
+          kernels={cadKernels}
+          onError={onError}
+        />
+      </Suspense>
+    );
+  if (host.artifact.kind === 'bim' && isBimDocument(content))
+    return (
+      <Suspense fallback={<p>建物を読み込んでいます…</p>}>
+        <BimArtifactView host={host} kernel={cadKernel ?? null} onError={onError} />
       </Suspense>
     );
   return <p role="alert">このnative contentを表示できません。</p>;
@@ -275,7 +320,10 @@ function DesignTools({
             value={title.text}
             readOnly={readOnly}
             onChange={(e) =>
-              domainExecute(host, isDesign)(updateElement(title.id, { text: e.target.value }))
+              domainExecute(
+                host,
+                isDesignWithPaths,
+              )(updateElement(title.id, { text: e.target.value }))
             }
           />
         </label>
@@ -289,7 +337,7 @@ function DesignTools({
             if (!isDesign(current)) throw Error('Not native Design');
             const bundle = exportDesignReact(current, nativeResolution);
             const compiled = compileDesignPreview(current, bundle.files);
-            domainExecute(host, isDesign)(acceptDesignConversion(bundle));
+            domainExecute(host, isDesignWithPaths)(acceptDesignConversion(bundle));
             setProject(compiled);
           } catch (e) {
             onError(e);
@@ -318,6 +366,7 @@ export function HostApp({
   codeSurface,
   header,
   cadKernel,
+  cadKernels,
 }: HostAppProps) {
   const [artifacts, setArtifactState] = useState(samples),
     [active, setActive] = useState<string>(),
@@ -336,6 +385,8 @@ export function HostApp({
     [discard, setDiscard] = useState(false);
   const discardDialog = useRef<HTMLDialogElement>(null);
   const unpersistedIds = useRef(new Set<string>());
+  /** An IFC import waiting for the user to see what it loses. */
+  const [ifcLoss, setIfcLoss] = useState<{ file: File; report: BimIfcImportReport }>();
   const [reused, setReused] = useState<{
     id: string;
     project: ReturnType<typeof compileProject>;
@@ -542,8 +593,32 @@ export function HostApp({
     unpersistedIds.current.add(copy.id);
     setArtifacts((values) => [...values, copy]);
   }
+  /**
+   * An IFC file as a new building (R2c-6). This Host offers no CAD versions, so a part the file
+   * names is listed as lost; a lossy file waits for the user's confirmation.
+   */
+  async function importIfc(selected: File, acceptLoss = false) {
+    setIfcLoss(undefined);
+    try {
+      const { readBimIfcFile } = await import('@editor-platform/bim/ifc-import');
+      const result = await readBimIfcFile(selected, { acceptLoss });
+      if (result.status === 'needs-confirmation')
+        return setIfcLoss({ file: selected, report: result.report });
+      const created = createArtifact(
+        'bim',
+        selected.name.replace(/\.ifc$/i, '') || 'Building',
+        result.document as HostContent,
+      );
+      unpersistedIds.current.add(created.id);
+      setArtifacts((values) => [...values, created]);
+      setError('');
+    } catch (e) {
+      fail(e);
+    }
+  }
   async function importArtifact(selected: File | undefined) {
     if (!ready || !selected) return;
+    if (/\.ifc$/i.test(selected.name)) return importIfc(selected);
     try {
       if (selected.size > 16 * 1024 * 1024) throw Error('JSONは16 MiB以内です');
       const text = await selected.text(),
@@ -851,7 +926,13 @@ export function HostApp({
                   previewDocument={previewDocument}
                   codeSurface={codeSurface}
                   cadKernel={cadKernel}
+                  cadKernels={cadKernels}
                   onError={fail}
+                  artifacts={artifacts}
+                  storage={storage}
+                  onCreated={(a) =>
+                    setArtifacts((values) => [...values.filter((v) => v.id !== a.id), a])
+                  }
                 />
               </EditorExportGuardContext.Provider>
             </EditorUncommittedInputContext.Provider>
@@ -904,12 +985,22 @@ export function HostApp({
         hidden
         ref={file}
         type="file"
-        accept=".json"
+        accept=".json,.ifc"
         onChange={(e) => {
           void importArtifact(e.target.files?.[0]);
           e.target.value = '';
         }}
       />
+      {ifcLoss && (
+        <Suspense fallback={null}>
+          <BimIfcLossDialog
+            fileName={ifcLoss.file.name}
+            report={ifcLoss.report}
+            onImport={() => void importIfc(ifcLoss.file, true)}
+            onCancel={() => setIfcLoss(undefined)}
+          />
+        </Suspense>
+      )}
     </main>
   );
 }

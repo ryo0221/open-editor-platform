@@ -3,7 +3,7 @@ import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import { EditorSession } from '@editor-platform/editor-core';
 import {
   GraphBinding,
-  type LayoutSidecar,
+  type PresentationSidecar,
   type GraphIntent,
   assertGraph,
 } from '@editor-platform/structured-graph/model';
@@ -20,7 +20,7 @@ import {
 function host(validator?: Parameters<typeof createDefinitionAdapter>[0]) {
   const session = new EditorSession(clone(publishedDefinition)),
     adapter = createDefinitionAdapter(validator);
-  let layout: LayoutSidecar | undefined,
+  let layout: PresentationSidecar | undefined,
     readOnly = false;
   const binding = new GraphBinding({
     adapter,
@@ -29,8 +29,8 @@ function host(validator?: Parameters<typeof createDefinitionAdapter>[0]) {
     execute: (cmd) => {
       session.execute(cmd);
     },
-    getLayout: () => layout,
-    setLayout: (value) => {
+    getPresentation: () => layout,
+    setPresentation: (value) => {
       layout = value;
     },
   });
@@ -189,8 +189,11 @@ describe('independent fictional Definition adapter', () => {
     expect(h.session.content).toEqual(before);
     expect(h.session.revision).toEqual(revision);
     expect(h.session.canUndo).toBe(false);
-    expect(h.layout?.positions['phase-research']).toEqual({ x: 22, y: 33 });
-    expect(h.binding.project().graph.layout['phase-research']).toEqual({ x: 22, y: 33 });
+    expect(h.layout?.presentation.nodes['phase-research']).toEqual({ x: 22, y: 33 });
+    expect(h.binding.project().graph.presentation.nodes['phase-research']).toEqual({
+      x: 22,
+      y: 33,
+    });
   });
   it('refuses mixed sidecar and semantic batch without either partial result', () => {
     const h = host(),
@@ -310,8 +313,12 @@ describe('independent fictional Definition adapter', () => {
     );
     const next = clone(h.session.content);
     next.shapes.push({ id: 'new-shape', name: 'New shape' });
-    expect(projectDefinition(next, h.layout?.positions).layout['new-shape']).toBeDefined();
-    expect(projectDefinition(next, { removed: { x: 1, y: 2 } }).layout.removed).toBeUndefined();
+    expect(
+      projectDefinition(next, h.layout?.presentation.nodes).presentation.nodes['new-shape'],
+    ).toBeDefined();
+    expect(
+      projectDefinition(next, { removed: { x: 1, y: 2 } }).presentation.nodes.removed,
+    ).toBeUndefined();
   });
   it('does not require framework/product code for another profile/adapter', () => {
     const source: ReferenceDefinition = clone(publishedDefinition);
@@ -330,7 +337,7 @@ it('pins sidecar revisions and rejects an older layout preview without changing 
       old,
     ),
   ).toThrow('Stale');
-  expect(h.layout?.positions['phase-research']).toEqual({ x: 20, y: 30 });
+  expect(h.layout?.presentation.nodes['phase-research']).toEqual({ x: 20, y: 30 });
   expect(h.session.content).toEqual(before);
 });
 
@@ -355,22 +362,22 @@ it('semantic proposal previews retain the pinned layout and recompute domain dia
     h.binding.project().stamp,
   );
   const before = h.session.content,
-    layout = h.binding.project().graph.layout;
+    layout = h.binding.project().graph.presentation.nodes;
   const preview = h.binding.preview([{ ...edit, value: 'Incomplete' }]);
   expect(preview.proposal.base).toBe(h.binding.project().stamp);
   expect(preview.projection.stamp).not.toBe(preview.proposal.base);
   expect(() => h.binding.apply(preview.proposal.intents, preview.projection.stamp)).toThrow(
     'Stale',
   );
-  expect(preview.projection.graph.layout).toEqual(layout);
+  expect(preview.projection.graph.presentation.nodes).toEqual(layout);
   expect(preview.projection.diagnostics.map((d) => d.code)).toEqual(['domain']);
   expect(h.session.content).toEqual(before);
   h.binding.applyProposal(preview.proposal);
   const fixed = h.binding.preview([edit]);
-  expect(fixed.projection.graph.layout).toEqual(layout);
+  expect(fixed.projection.graph.presentation.nodes).toEqual(layout);
   expect(fixed.projection.diagnostics).toEqual([]);
   expect(h.binding.project().diagnostics).toHaveLength(1);
-  expect(h.layout?.positions['phase-research']).toEqual({ x: 123, y: 234 });
+  expect(h.layout?.presentation.nodes['phase-research']).toEqual({ x: 123, y: 234 });
 });
 it('bounds long derived Definition identities and retains native IDs through retargeting and Undo', () => {
   const initial = clone(publishedDefinition),

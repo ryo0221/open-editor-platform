@@ -5,7 +5,10 @@ import { bytesToHex } from '@noble/hashes/utils';
 import { command } from '@editor-platform/editor-core';
 import {
   createGraph,
+  defaultGraphPosition,
   isGraphJson,
+  isGraphSectionIntent,
+  isGraphSectionStructureIntent,
   plainRecord,
   validGraphId,
   type JsonValue,
@@ -15,7 +18,7 @@ import {
   type GraphProfile,
   type GraphDiagnostic,
   type GraphIntent,
-  type GraphLayout,
+  type GraphNodePresentations,
   type AttributeSchema,
 } from '@editor-platform/structured-graph/model';
 export interface ReferenceItem extends Attributes {
@@ -111,7 +114,8 @@ export function isReferenceDefinition(value: unknown): value is ReferenceDefinit
   );
 }
 export const definitionProfile: GraphProfile = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  sections: {},
   id: 'fictional-definition',
   version: 1,
   graph: {
@@ -194,7 +198,7 @@ export function referenceEdgeId(type: string, sourceId: string, reserved: Readon
 }
 export function projectDefinition(
   source: ReferenceDefinition,
-  layout?: GraphLayout,
+  presentation?: GraphNodePresentations,
 ): GraphDocument {
   if (!isReferenceDefinition(source))
     throw new Error('Unsupported reference Definition; no conversion was performed');
@@ -260,11 +264,8 @@ export function projectDefinition(
       attributes: {},
     }),
   );
-  graph.layout = Object.fromEntries(
-    graph.nodes.map((n, i) => [
-      n.id,
-      clone(layout?.[n.id] ?? { x: 40 + (i % 3) * 260, y: 40 + Math.floor(i / 3) * 160 }),
-    ]),
+  graph.presentation.nodes = Object.fromEntries(
+    graph.nodes.map((n, i) => [n.id, clone(presentation?.[n.id] ?? defaultGraphPosition(i))]),
   );
   return graph;
 }
@@ -336,7 +337,7 @@ export function createDefinitionAdapter(
   return {
     id: 'fictional-definition-adapter',
     version: 1,
-    layoutMode: 'sidecar',
+    presentationMode: 'sidecar',
     profile: () => definitionProfile,
     project: projectDefinition,
     diagnostics: validate,
@@ -348,8 +349,14 @@ export function createDefinitionAdapter(
           throw new Error('Stale or invalid Definition source');
         const next = clone(current);
         for (const intent of fixed) {
-          if (intent.type === 'move-node')
-            throw new Error('Definition layout belongs to the Host sidecar');
+          if (
+            intent.type === 'move-node' ||
+            intent.type === 'set-node-shape' ||
+            intent.type === 'set-node-style'
+          )
+            throw new Error('Definition presentation belongs to the Host sidecar');
+          if (isGraphSectionStructureIntent(intent) || isGraphSectionIntent(intent))
+            throw new Error('This source cannot represent Graph sections');
           if (intent.type === 'set-attribute' || intent.type === 'remove-attribute') {
             if (intent.path.length !== 1 || intent.scope === 'edge')
               throw new Error('This field has no safe inverse mapping');

@@ -87,4 +87,25 @@ for (const kind of ['memory', 'indexeddb'])
       expect(await adapter.list()).toEqual([]);
       if (adapter instanceof IndexedDBStorage) await adapter.close();
     });
+    it('stores several values together, or none when one cannot be stored', async () => {
+      const adapter: StorageAdapter<{ id: string; items: unknown[] }> =
+        kind === 'memory'
+          ? new MemoryStorage()
+          : new IndexedDBStorage(`test-${crypto.randomUUID()}`);
+      await adapter.putAll!([
+        { id: 'one', items: ['a'] },
+        { id: 'two', items: ['b'] },
+      ]);
+      expect((await adapter.list()).map((v) => v.id).sort()).toEqual(['one', 'two']);
+      // A function cannot be cloned, so the whole batch is refused.
+      await expect(
+        adapter.putAll!([
+          { id: 'one', items: ['changed'] },
+          { id: 'three', items: [() => {}] },
+        ]),
+      ).rejects.toThrow();
+      expect((await adapter.get('one'))?.items).toEqual(['a']);
+      expect(await adapter.get('three')).toBeUndefined();
+      if (adapter instanceof IndexedDBStorage) await adapter.close();
+    });
   });

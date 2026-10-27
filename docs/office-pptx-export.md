@@ -3,17 +3,35 @@
 The Slide-specific encoder accepts the immutable plan from #9 and returns bytes plus a loss report. It does not download, save a version, edit an Artifact, resolve a new asset or submit an operation. The [ordinary dialog and shared-session boundary](office-export-ui.md) are implemented and verified in #11, including full regression and three-repeat performance checks.
 
 ```ts
-import { captureSlideExportSnapshot, prepareSlidePptx, encodeSlidePptx } from '@editor-platform/slide-export';
+import {
+  captureSlideExportSnapshot,
+  prepareSlidePptx,
+  encodeSlidePptx,
+} from '@editor-platform/slide-export';
 
 const snapshot = await captureSlideExportSnapshot(content, {
-  kind: 'confirmed', artifactId, revision,
+  kind: 'confirmed',
+  artifactId,
+  revision,
 });
-const plan = await prepareSlidePptx(snapshot, {
-  pageIds: 'all', includeHiddenSlides: false, includeNotes: false,
-  fontProfileId: 'noto-cjk-jp-2.004', fallback: 'element-png',
-}, adapters, signal);
+const plan = await prepareSlidePptx(
+  snapshot,
+  {
+    pageIds: 'all',
+    includeHiddenSlides: false,
+    includeNotes: false,
+    fontProfileId: 'noto-cjk-jp-2.004',
+    fallback: 'element-png',
+  },
+  adapters,
+  signal,
+);
 // Present every diagnostic and obtain the caller's policy decision for this exact plan.
-const result = await encodeSlidePptx(plan, { planHash: plan.report.planHash, acceptedDiagnosticIds }, signal);
+const result = await encodeSlidePptx(
+  plan,
+  { planHash: plan.report.planHash, acceptedDiagnosticIds },
+  signal,
+);
 if (result.status === 'ok') host.download(result.bytes, result.mime);
 ```
 
@@ -23,18 +41,18 @@ For consumers that only preflight, `@editor-platform/slide-export/plan` excludes
 
 ## Verified mapping and explicit limits
 
-| Source | Representation |
-| --- | --- |
-| Japanese/Latin text and rich runs | Native text; shared fit size, line breaks, run order and padding. Separate line boxes are reported. No Office autofit. The first baseline excludes extra paragraph leading already applied by the shared line layout. |
-| 13 declared shapes | Native preset or custom vector paths. Shape approximations are reported; custom dash lengths, rotation, flips and opacity are retained. |
-| Other 12 shapes, chart | A separately consented PNG for that element. Cubic extrema and stroke outset are included; cloud edges are not cut off. |
-| PNG/JPEG | Original embedded binary with native `srcRect` crop. Fit letterboxing, crop placement and transforms apply once. |
-| GIF/WebP | Decoded static PNG; animation/crop editing losses are diagnosed. No invisible replacement for a failed image. |
-| Unmerged, axis-aligned, opaque Slide table | Native table with fixed cell dimensions and insets, no automatic extra slides. Header/body fills and cell text are retained. |
-| Merged, rotated, mirrored or translucent Slide table | Element PNG or a blocking diagnostic. The fixed LibreOffice renderer rotates native table borders without correctly rotating cell text/fills, including inside a native group. It also ignores native table border alpha. Failed probes were retained. |
-| Mirrored text, visibly clipped text | Element PNG or a blocking diagnostic; Office keeps native text readable instead of mirroring its glyphs. |
-| Italic text requiring the reference PNG adapter | Blocking `RASTER_TEXT_STYLE_UNSUPPORTED`. The pinned Regular/Bold SVG renderer cannot synthesize italic, so it must not silently remove the slant. Native italic text is supported and rendered in Chromium/LibreOffice. Hosts can supply a verified alternative raster adapter. |
-| Groups/hidden objects/pages/notes | World-coordinate children in paint order; group loss and exclusions reported. Notes are opt-in; hidden-page inclusion loses the hidden flag with a warning. |
+| Source                                               | Representation                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Japanese/Latin text and rich runs                    | Native text; shared fit size, line breaks, run order and padding. Separate line boxes are reported. No Office autofit. The first baseline excludes extra paragraph leading already applied by the shared line layout.                                                            |
+| 13 declared shapes                                   | Native preset or custom vector paths. Shape approximations are reported; custom dash lengths, rotation, flips and opacity are retained.                                                                                                                                          |
+| Other 12 shapes, chart                               | A separately consented PNG for that element. Cubic extrema and stroke outset are included; cloud edges are not cut off.                                                                                                                                                          |
+| PNG/JPEG                                             | Original embedded binary with native `srcRect` crop. Fit letterboxing, crop placement and transforms apply once.                                                                                                                                                                 |
+| GIF/WebP                                             | Decoded static PNG; animation/crop editing losses are diagnosed. No invisible replacement for a failed image.                                                                                                                                                                    |
+| Unmerged, axis-aligned, opaque Slide table           | Native table with fixed cell dimensions and insets, no automatic extra slides. Header/body fills and cell text are retained.                                                                                                                                                     |
+| Merged, rotated, mirrored or translucent Slide table | Element PNG or a blocking diagnostic. The fixed LibreOffice renderer rotates native table borders without correctly rotating cell text/fills, including inside a native group. It also ignores native table border alpha. Failed probes were retained.                           |
+| Mirrored text, visibly clipped text                  | Element PNG or a blocking diagnostic; Office keeps native text readable instead of mirroring its glyphs.                                                                                                                                                                         |
+| Italic text requiring the reference PNG adapter      | Blocking `RASTER_TEXT_STYLE_UNSUPPORTED`. The pinned Regular/Bold SVG renderer cannot synthesize italic, so it must not silently remove the slant. Native italic text is supported and rendered in Chromium/LibreOffice. Hosts can supply a verified alternative raster adapter. |
+| Groups/hidden objects/pages/notes                    | World-coordinate children in paint order; group loss and exclusions reported. Notes are opt-in; hidden-page inclusion loses the hidden flag with a warning.                                                                                                                      |
 
 `slidePptxCapabilities` declares 100 slides, 10,000 objects, page sides 100–3840 CSS px, the 13 shapes and the table/text transform limits above. Image limits are 16 MiB each, 32 million decoded pixels and 64 MiB of resolved assets in total. Decoder failures remain errors even below those upper bounds. Unknown colors, glyphs, invalid geometry/selection and fixed-row text overflow stop export. Page geometry is 96 CSS px/in, 0.75 pt/px and 9525 EMU/px.
 

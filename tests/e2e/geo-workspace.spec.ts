@@ -190,3 +190,98 @@ test('additional request: Japanese CSV → saved Data join → proportional map 
     path: `/tmp/issue97-playground-evidence/${info.project.name}/slide.png`,
   });
 });
+test('#378 the map opens first, fitted, on World countries; Map shows it alone; labels come from a layer field', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/');
+  await create(page, 'geo');
+  const work = page.getByRole('region', { name: 'Import geographic data', exact: true });
+  await work.getByLabel('Local file', { exact: true }).setInputFiles({
+    name: 'sites.geojson',
+    mimeType: 'application/geo+json',
+    buffer: Buffer.from(
+      JSON.stringify({
+        type: 'FeatureCollection',
+        features: [
+          ['akita', 'Akita', [139.75, 39.95]],
+          ['jeju', 'Jeju', [126.25, 33.55]],
+          ['luzon', 'Luzon', [120.3, 18.6]],
+        ].map(([id, name, coordinates]) => ({
+          type: 'Feature',
+          id,
+          geometry: { type: 'Point', coordinates },
+          properties: { name },
+        })),
+      }),
+    ),
+  });
+  await work.getByLabel('Format', { exact: true }).selectOption('geojson');
+  await work.getByLabel('Layer name', { exact: true }).fill('Sites');
+  await work.getByRole('button', { name: 'Add field', exact: true }).click();
+  await work.getByLabel('Input column/property 1', { exact: true }).fill('name');
+  await work.getByLabel('Display name 1', { exact: true }).fill('Name');
+  await work.getByRole('button', { name: 'Preview import', exact: true }).click();
+  await work.getByRole('button', { name: 'Import previewed data', exact: true }).click();
+  await expect(page.getByRole('table', { name: 'Sites attributes' }).getByRole('row')).toHaveCount(
+    4,
+  );
+  const before = await nativeArtifact(page);
+  // Reopen as a stored map: it opens on the features, with World countries, map first.
+  await page.reload();
+  const map = page.getByRole('region', { name: 'Map', exact: true }),
+    svg = map.locator('svg').first();
+  await expect(page.getByLabel('Show World countries', { exact: true })).toBeChecked();
+  await expect(map.locator('[data-background-id="world-countries"]')).toHaveCount(1);
+  const mapBox = (await svg.boundingBox())!,
+    settings = (await page
+      .getByRole('group', { name: 'Read-only boundary backgrounds' })
+      .boundingBox())!;
+  expect(mapBox.y).toBeLessThan(500);
+  expect(settings.y).toBeGreaterThan(mapBox.y + mapBox.height);
+  // Every site is inside the drawn map with room for its symbol and label.
+  const inside = async () => {
+    const sites = await svg.evaluate((el) => {
+      const clip = el.querySelector('#geo-map-clip rect')!,
+        width = Number(clip.getAttribute('width')),
+        height = Number(clip.getAttribute('height'));
+      return [...el.querySelectorAll('[data-feature-id] circle')]
+        .map((c) => [Number(c.getAttribute('cx')), Number(c.getAttribute('cy'))])
+        .filter(([x]) => x >= 0 && x <= width)
+        .map(([x, y]) => x > 20 && x < width - 20 && y > 20 && y < height - 20);
+    });
+    expect(sites).toEqual([true, true, true]);
+  };
+  await inside();
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await page.getByRole('button', { name: 'Fit map', exact: true }).click();
+  await inside();
+  // Map shows the map alone, across the editor.
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await expect(page.getByRole('complementary', { name: 'Layers and sources' })).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Feature and presentation' })).toBeHidden();
+  const wide = (await map.boundingBox())!,
+    editor = (await page
+      .getByRole('region', { name: 'Geographic editor', exact: true })
+      .boundingBox())!;
+  expect(wide.width).toBeGreaterThan(editor.width * 0.9);
+  await page.getByRole('button', { name: 'Show all panels', exact: true }).click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(before.draft.content);
+  // A layer's label field is one native style change and one Undo step.
+  await page.getByLabel('Map labels for Sites', { exact: true }).selectOption({ label: 'Name' });
+  await expect(map.locator('svg text', { hasText: 'Akita' })).toHaveCount(1);
+  const labelled = (await nativeArtifact(page)).draft.content as GeoDocument;
+  expect(labelled.workspace!.styles[0].labelFieldId).toBe(labelled.layers[0].fields[0].id);
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await map.screenshot({ path: info.outputPath('issue-378-map.png') });
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await expect(map.locator('svg text', { hasText: 'Akita' })).toHaveCount(0);
+  expect((await nativeArtifact(page)).draft.content).toEqual(before.draft.content);
+  // A saved view draws its own styles, so choosing labels leaves it and shows them.
+  await page.getByRole('button', { name: 'Show all panels', exact: true }).click();
+  await page.getByLabel('View name', { exact: true }).fill('Plain view');
+  await page.getByRole('button', { name: 'Save named view', exact: true }).click();
+  await page.getByRole('button', { name: 'Use saved view', exact: true }).click();
+  await page.getByLabel('Map labels for Sites', { exact: true }).selectOption({ label: 'Name' });
+  await expect(map.locator('svg text', { hasText: 'Akita' })).toHaveCount(1);
+});

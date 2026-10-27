@@ -4,7 +4,8 @@ import { createGraphNode } from './commands';
 import { GraphSession } from './session';
 import { validateGraph, type GraphProfile } from './profile';
 const profile: GraphProfile = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  sections: {},
   id: 'bounded',
   version: 1,
   graph: { schema: {} },

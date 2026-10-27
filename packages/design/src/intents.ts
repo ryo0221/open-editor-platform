@@ -12,6 +12,7 @@ import {
 import { record, reuseHash } from '@editor-platform/reuse-core';
 import {
   assertDesignContent,
+  isDesign,
   guardDesignCommand,
   insertElement,
   insertInstance,
@@ -181,6 +182,8 @@ function assertIntentTargets(raw: RawIntent) {
       rejectDesign('design-intent', 'Expected unique Design target IDs');
     raw.ids.forEach((id) => designId(id));
   }
+  if ('patch' in raw && record(raw.patch) && raw.patch.path !== undefined)
+    rejectDesign('design-path-unsupported', 'Structured path proposals are not supported');
   if ('patch' in raw && !record(raw.patch))
     rejectDesign('design-patch', 'Expected a Design patch object');
 }
@@ -253,7 +256,18 @@ function compiledCommand(intents: DesignIntent[], summary: string): EditorComman
       },
     };
   });
-  return withCommandReads(guardDesignCommand(transaction(summary, commands)), { content: ['*'] });
+  const native = guardDesignCommand(transaction(summary, commands));
+  return withCommandReads(
+    {
+      ...native,
+      apply(d) {
+        if (!isDesign(d))
+          rejectDesign('design-path-unsupported', 'Schema3 proposals are not supported');
+        return native.apply(d);
+      },
+    },
+    { content: ['*'] },
+  );
 }
 export function designIntentCommand(
   value: unknown,
@@ -282,6 +296,8 @@ export function previewDesignIntents(
 ): DesignIntentPreview {
   const base = captureDesignData(content);
   assertDesignContent(base);
+  if (!isDesign(base))
+    rejectDesign('design-path-unsupported', 'Schema3 proposals are not supported');
   const intents = parseDesignIntents(value);
   const summary = options.summary ?? 'Apply Design intents';
   const proposalId = newId('design-proposal');

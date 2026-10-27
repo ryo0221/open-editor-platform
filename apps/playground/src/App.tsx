@@ -1,5 +1,20 @@
+import { createEstimateReferenceAdapter } from '@editor-platform/estimate/references';
+import { playgroundEstimateQuantities } from './app/estimate-bim';
+import { createAnalysisReferenceAdapter } from '@editor-platform/analysis/references';
+import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './app/estimate-bim';
+import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
+import { serializeHostNativeArtifact } from '@editor-platform/editor-host';
 import { savedAnimationCatalog } from './animation-library';
 import { validateGeoRecord } from './geo/resources';
+import {
+  assertCadNativeFits,
+  mergeCadResources,
+  portableCadRecord,
+  validateCadRecord,
+} from './cad/resources';
+import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
+import { assertCadContentFits } from './cad/native-size';
+import { mergeCadParts } from './cad/parts';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { artifactReferenceItems, captureArtifactReferences } from './artifact-references';
@@ -7,6 +22,7 @@ import type { PrivateVideoEntry } from './private-video/catalog';
 import { relationProfile, isGraphDocument, validateGraph } from '@editor-platform/structured-graph';
 import { flushSync } from 'react-dom';
 import type { ScheduleDocument } from '@editor-platform/schedule/model';
+import type { CadDocument } from '@editor-platform/cad-core';
 import { stepScheduleHistory } from '@editor-platform/schedule/history';
 import { OfficeExportHost } from '@editor-platform/office-export-ui/host';
 import {
@@ -35,6 +51,8 @@ import {
 } from '@editor-platform/editor-ui';
 import { Library } from 'lucide-react';
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -52,7 +70,7 @@ import {
 } from '@editor-platform/artifact-core';
 import {
   command,
-  previewProposedCommands,
+  reviewProposedCommands,
   EditorEventBus,
   EditorSession,
   EditorInputs,
@@ -60,7 +78,6 @@ import {
   sameLocalRevision,
   type EditorCommand,
   type EditorExtensions,
-  type ProposedCommands,
   type Region,
   type Selection,
   type ElementAddress,
@@ -84,7 +101,6 @@ import {
   downloadText,
   makeArtifact,
   createLocalSession,
-  mockExternalRuntime,
   type Content,
   type Kind,
   type StoredArtifact,
@@ -105,11 +121,13 @@ import {
   WelcomePanel,
   type PrivateVideoLaunchers,
 } from './app/library-panel';
-import { ProposalDialog, SharedProposalInspector } from './app/proposal-views';
+import { ProposalDialog, SharedProposalInspector, type LocalProposal } from './app/proposal-views';
+import { mockProposal, proposalAdapter, proposalSupported } from './app/proposal-runtime';
 import { CompareView, HistoryView, compareVersions } from './app/version-views';
 import { editedDraft, openStoredRecord, storage } from './app/records';
 import { deliverComment as deliverCommentTo, type CommentAttempt } from './app/comment-delivery';
-import { readImportFile } from './app/import-artifact';
+import { readIfcImport, readImportFiles } from './app/import-artifact';
+import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
 import { savedRecordReferences } from './app/reference-source';
 import {
   ArtifactDialogs,
@@ -121,6 +139,7 @@ import {
 import { nativeContent, nativeShared } from './app/native';
 import { EditorSurfaces, checkedContent, type SurfaceHost } from './app/editor-surfaces';
 import type { SharedPlaygroundConnection } from './app/types';
+import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
 export const editorEvents = new EditorEventBus();
 export type { SharedPlaygroundConnection };
 export interface PlaygroundProps {
@@ -133,6 +152,10 @@ export interface PlaygroundProps {
   shared?: SharedPlaygroundConnection;
   onStartShared?(record: StoredArtifact): Promise<void>;
 }
+const BimIfcLossDialog = lazy(() =>
+  import('@editor-platform/bim/ifc-import').then((m) => ({ default: m.BimIfcLossDialog })),
+);
+
 export default function App({
   privateEntries = [],
   privateM2Entries = [],
@@ -207,7 +230,11 @@ export default function App({
           notifications: referenceNotifications,
           navigation: referenceNavigation,
         }),
-        nativeReferenceAdapters,
+        [
+          ...nativeReferenceAdapters,
+          createAnalysisReferenceAdapter(),
+          createEstimateReferenceAdapter({ verification: playgroundEstimateQuantities }),
+        ],
         activeId,
       ),
     [activeId],
@@ -217,6 +244,7 @@ export default function App({
   const inputStatus = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot);
   const [loaded, setLoaded] = useState(false);
   const [kind, setKind] = useState<Kind>('document');
+  const [graphTemplate, setGraphTemplate] = useState<GraphTemplateId>('relations');
   const [navOpen, setNavOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [localReadOnly, setReadOnly] = useState(false);
@@ -291,11 +319,9 @@ export default function App({
   const [reason, setReason] = useState('');
   const [beforeId, setBeforeId] = useState('');
   const [afterId, setAfterId] = useState('');
-  const [proposal, setProposal] = useState<{
-    value: ProposedCommands<Content>;
-    base: string;
-    preview: Content;
-  } | null>(null);
+  const [proposal, setProposal] = useState<LocalProposal | null>(null);
+  /** An IFC import waiting for the user to see what it loses. */
+  const [ifcLoss, setIfcLoss] = useState<{ file: File; report: BimIfcImportReport }>();
   const [contextMenu, setContextMenu] = useState(false);
   const sessions = useRef(new Map<string, EditorSession<Content>>());
   const writeQueue = useRef(Promise.resolve());
@@ -389,7 +415,8 @@ export default function App({
       mounted = false;
     };
   }, []);
-  function persist(record: StoredArtifact) {
+  /** `stored` is for a record already written, e.g. as part of an atomic import. */
+  function persist(record: StoredArtifact, stored = false) {
     const next = recordsRef.current.some((a) => a.id === record.id)
       ? recordsRef.current.map((a) => (a.id === record.id ? record : a))
       : [...recordsRef.current, record];
@@ -398,7 +425,10 @@ export default function App({
     setStatus('Saving locally…');
     const generation = ++saveGeneration.current;
     const completion = writeQueue.current
-      .then(() => storage.put(record))
+      .then(() => {
+        serializeHostNativeArtifact(record);
+        return stored ? undefined : storage.put(record);
+      })
       .then(() => {
         const priorSource = referenceSavedRecords.current.get(record.id);
         referenceSavedRecords.current.set(record.id, record);
@@ -556,6 +586,9 @@ export default function App({
       setError('Leave the shared session before switching artifacts.');
       return;
     }
+    // A notice about the previous artifact does not follow; a failed local save keeps its retry.
+    if (id !== activeId)
+      setError((message) => (message.startsWith('Local save failed:') ? message : ''));
     setActiveId(id);
     try {
       localStorage.setItem('ep-active-artifact', id);
@@ -622,7 +655,11 @@ export default function App({
       setError('Leave the shared session before creating another artifact.');
       return;
     }
-    const a = makeArtifact(nextKind, records.filter((r) => r.kind === nextKind).length + 1);
+    const a = makeArtifact(
+      nextKind,
+      records.filter((r) => r.kind === nextKind).length + 1,
+      nextKind === 'structured-graph' ? graphTemplate : undefined,
+    );
     sessions.current.set(a.id, createLocalSession(a.draft.content));
     persist(a);
     activate(a.id);
@@ -681,6 +718,22 @@ export default function App({
       );
       if ('refused' in step) return setError(step.refused);
       content = step.content as unknown as Content;
+    } else if (active.kind === 'cad') {
+      // CAD Undo/Redo is admitted like an edit: the native file must still import (CAD23).
+      // The history entry itself is checked, so content counted before is not encoded again.
+      const record = recordsRef.current.find((r) => r.id === active.id) ?? active;
+      try {
+        const candidate = local.peekHistory(direction);
+        if (candidate !== undefined)
+          assertCadContentFits(
+            record,
+            candidate as unknown as CadDocument,
+            direction === 'undo' ? 'Undoする' : 'Redoする',
+          );
+        content = local[direction]();
+      } catch (e) {
+        return setError((e as Error).message);
+      }
     } else
       content =
         active.kind === 'react-ui'
@@ -709,7 +762,7 @@ export default function App({
   }
   async function saveVersion() {
     if (!active || savingVersion.current || readOnly) return;
-    if (!flushInputs()) return;
+    if (!flushInputs({ keepEditor: true })) return;
     const saved = sharedSession
       ? active
       : recordsRef.current.find((record) => record.id === active.id)!;
@@ -729,7 +782,11 @@ export default function App({
     }
     if (
       isGraphDocument(saved.draft.content) &&
-      validateGraph(saved.draft.content, relationProfile).length
+      // Warnings such as a node drawn outside its Section do not block a version.
+      validateGraph(
+        saved.draft.content,
+        graphProfileFor(saved.draft.content) ?? relationProfile,
+      ).some((d) => d.severity !== 'warning')
     ) {
       setError('Fix Graph diagnostics before saving a version. Your draft is retained.');
       return;
@@ -741,7 +798,13 @@ export default function App({
     setBusy(true);
     savingVersion.current = true;
     try {
+      await verifyEstimateArtifact(saved);
+      await verifyAnalysisArtifact(saved);
       if (saved.kind === 'geo') await validateGeoRecord(saved);
+      // A version may only name CAD assets the record keeps.
+      if (saved.kind === 'cad') await validateCadRecord(portableCadRecord(saved));
+      // A building's version may only place CAD versions the record keeps.
+      if (saved.kind === 'bim') validateBimParts(portableBimRecord(saved));
       const captured = await captureArtifactReferences(saved.draft.content, references);
       // Plain native versions can commit their owned capture while later native edits remain
       // in the draft. References and Geo resource admission retain strict identity checks.
@@ -760,10 +823,18 @@ export default function App({
         ...committed,
         name: latest.name,
         annotations: latest.annotations,
+        // CAD assets staged while the version was saved stay: the record only gains them.
+        ...mergeCadResources(saved, latest),
+        ...mergeCadParts(saved, latest),
         draft: { ...latest.draft, baseVersionId: committed.draft.baseVersionId },
       };
+      // A rejected capacity candidate must not enter local immutable history.
+      serializeHostNativeArtifact(result);
+      assertCadNativeFits(result, 'version');
+      assertBimNativeFits(result, 'version');
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
+      setError('');
       setReason('');
       editorEvents.emit('version', {
         artifactId: result.id,
@@ -771,6 +842,7 @@ export default function App({
       });
     } catch (e) {
       setError((e as Error).message);
+      setStatus('Not saved');
     } finally {
       savingVersion.current = false;
       setBusy(false);
@@ -821,26 +893,56 @@ export default function App({
       body,
     );
   }
-  async function importFile(file: File) {
+  async function importFiles(files: File[]) {
+    if (files.some((f) => /\.ifc$/i.test(f.name))) return importIfc(files);
     if (!flushInputs()) return;
     try {
-      const record = await readImportFile(file, {
+      const imported = await readImportFiles(files, {
         exists: (id) => recordsRef.current.some((r) => r.id === id),
         references,
       });
       if (!flushInputs()) return;
-      sessions.current.set(record.id, createLocalSession(record.draft.content));
-      persist(record);
-      activate(record.id);
-      setError('');
+      await adoptImported(imported);
     } catch (e) {
       setNavOpen(false);
       setError(`Import failed: ${(e as Error).message}`);
     }
   }
-  function flushInputs() {
+  /** An IFC file becomes a new building; a lossy one waits for the user's confirmation. */
+  async function importIfc(files: File[], acceptLoss = false) {
+    setIfcLoss(undefined);
+    if (!flushInputs()) return;
     try {
-      flushSync(() => inputs.flush());
+      if (files.length !== 1) throw new Error('Import an IFC file on its own');
+      const result = await readIfcImport(files[0]!, {
+        records: () => recordsRef.current,
+        acceptLoss,
+      });
+      if (result.status === 'needs-confirmation')
+        return setIfcLoss({ file: files[0]!, report: result.report });
+      if (!flushInputs()) return;
+      await adoptImported([result.record]);
+    } catch (e) {
+      setNavOpen(false);
+      setError(`Import failed: ${(e as Error).message}`);
+    }
+  }
+  async function adoptImported(imported: StoredArtifact[]) {
+    // One transaction for the whole import: a failed write keeps none of its records.
+    const write = writeQueue.current.then(() => storage.putAll(imported));
+    writeQueue.current = write.catch(() => {});
+    await write;
+    for (const record of imported) {
+      sessions.current.set(record.id, createLocalSession(record.draft.content));
+      persist(record, true);
+    }
+    activate(imported[0].id);
+    setError('');
+  }
+  /** `keepEditor`: a save that leaves the editor open; settling work (a CAD evaluation) may finish after it. */
+  function flushInputs(options: { keepEditor?: boolean } = {}) {
+    try {
+      flushSync(() => inputs.flush(options));
       return true;
     } catch (error) {
       setError(String(error instanceof Error ? error.message : error));
@@ -955,9 +1057,12 @@ export default function App({
       try {
         const captured = await captureArtifactReferences(current.draft.content, references);
         assertReferenceCaptureCurrent(current.id, current.draft.content);
+        const exported = { ...current, draft: { ...current.draft, content: captured } };
+        assertCadNativeFits(exported, 'export');
+        assertBimNativeFits(exported, 'export');
         downloadText(
           `${current.name}.artifact.json`,
-          serializeArtifact({ ...current, draft: { ...current.draft, content: captured } }),
+          serializeArtifact(portableBimRecord(portableCadRecord(exported))),
           'application/json',
         );
       } catch (e) {
@@ -970,18 +1075,30 @@ export default function App({
     try {
       if (!active.draft.baseVersionId)
         throw new Error('Save a version before requesting an external proposal');
-      const value = mockExternalRuntime(
+      const liveRevision = sessions.current.get(active.id)!.revision;
+      const value = mockProposal(
         {
           artifact: { artifactId: active.id, versionId: active.draft.baseVersionId },
-          liveRevision: sessions.current.get(active.id)!.revision,
+          liveRevision,
           selection,
-          operation: 'uppercase',
+          operation: 'external-demo',
           input: null,
         },
         active.draft.content,
       );
-      const preview = previewProposedCommands(active.draft.content, value).content;
-      setProposal({ value, base: canonicalJson(active.draft.content), preview });
+      const review = reviewProposedCommands(
+        {
+          content: active.draft.content,
+          base: {
+            artifactId: active.id,
+            versionId: active.draft.baseVersionId,
+            revision: liveRevision,
+          },
+        },
+        value,
+        proposalAdapter(active.draft.content),
+      );
+      setProposal({ value, base: canonicalJson(active.draft.content), review });
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -1007,20 +1124,23 @@ export default function App({
         proposalId: proposal.value.id,
       }),
     );
+    // Select what changed so the Surface highlights it.
+    if (proposal.review.status === 'ready' && proposal.review.elementIds.length)
+      select(proposal.review.elementIds);
     setProposal(null);
   }
   const content = sharedPreview?.preview.after ?? active?.draft.content;
   const exportContent = sharedSession?.confirmed.content ?? content;
   // Storage/connection status changes do not change the native content. Keep
   // validation and the heavy surfaces tied to their actual content/permission inputs.
-  const rendered = useMemo(() => checkedContent(content), [content]);
+  const rendered = useMemo(() => checkedContent(content, active?.kind), [content, active?.kind]);
   const nativeReuseSupported =
     !rendered.animation && !(rendered.slide && hasSlideAnimations(rendered.slide));
   const animationHistoryPending =
     active?.kind === 'animation' && !!(inputStatus.dirty || inputStatus.composing);
   const exported = useMemo(
-    () => (exportContent === content ? rendered : checkedContent(exportContent)),
-    [exportContent, content, rendered],
+    () => (exportContent === content ? rendered : checkedContent(exportContent, active?.kind)),
+    [exportContent, content, rendered, active?.kind],
   );
   const currentActions = useRef({ execute, select });
   useLayoutEffect(() => {
@@ -1316,7 +1436,7 @@ export default function App({
                         selection={selection}
                         toolbar={extensions.toolbar}
                         externalProposal={
-                          !shared && isDocument(content) ? requestProposal : undefined
+                          !shared && proposalSupported(content) ? requestProposal : undefined
                         }
                         flushInputs={flushInputs}
                         onAction={menuAction}
@@ -1328,7 +1448,9 @@ export default function App({
                                   (record) => record.id === active.id,
                                 );
                                 if (current)
-                                  void onStartShared(current).catch((e) => setError(String(e)));
+                                  void onStartShared(current).catch((e) =>
+                                    setError(e instanceof Error ? e.message : String(e)),
+                                  );
                               }
                             : undefined
                         }
@@ -1380,12 +1502,14 @@ export default function App({
                   privateVideo={privateVideo}
                   onClose={() => setNavOpen(false)}
                   onKindChange={setKind}
+                  graphTemplate={graphTemplate}
+                  onGraphTemplateChange={setGraphTemplate}
                   onCreate={create}
                   onCreateFromTemplate={() => setTemplateKind('whole')}
                   onOpenReusableLibrary={() => setReusableOpen('library')}
                   onOfficeImport={() => setOfficeImportOpen(true)}
                   onActivate={activate}
-                  onImportFile={(file) => void importFile(file)}
+                  onImportFiles={(files) => void importFiles(files)}
                 />
                 <main className="workspace">
                   <LoadErrorBanners records={records} loadErrors={loadErrors} />
@@ -1439,7 +1563,11 @@ export default function App({
                             </div>
                           )}
                           {view === 'Editor' && content && (
-                            <EditorSurfaces host={surfaceHost!} rendered={rendered} />
+                            <EditorSurfaces
+                              key={active.id}
+                              host={surfaceHost!}
+                              rendered={rendered}
+                            />
                           )}
                           {view === 'History' && (
                             <HistoryView
@@ -1453,9 +1581,16 @@ export default function App({
                                   return;
                                 }
                                 execute(
-                                  command('artifact.restore', 'Restore version to draft', () =>
-                                    clone(v.content),
-                                  ),
+                                  command('artifact.restore', 'Restore version to draft', () => {
+                                    if (active.kind === 'cad')
+                                      assertCadContentFits(
+                                        recordsRef.current.find((r) => r.id === active.id) ??
+                                          active,
+                                        v.content as unknown as CadDocument,
+                                        'この版に戻す',
+                                      );
+                                    return clone(v.content);
+                                  }),
                                 );
                                 setView('Editor');
                               }}
@@ -1484,8 +1619,11 @@ export default function App({
                         {inspector &&
                           active.kind !== 'animation' &&
                           active.kind !== 'structured-graph' &&
+                          active.kind !== 'analysis' &&
+                          active.kind !== 'estimate' &&
                           active.kind !== 'geo' &&
-                          active.kind !== 'cad' && (
+                          active.kind !== 'cad' &&
+                          active.kind !== 'bim' && (
                             <CommentsInspector
                               active={active}
                               content={content}
@@ -1519,6 +1657,16 @@ export default function App({
                     </>
                   )}
                 </main>
+                {ifcLoss && (
+                  <Suspense fallback={null}>
+                    <BimIfcLossDialog
+                      fileName={ifcLoss.file.name}
+                      report={ifcLoss.report}
+                      onImport={() => void importIfc([ifcLoss.file], true)}
+                      onCancel={() => setIfcLoss(undefined)}
+                    />
+                  </Suspense>
+                )}
                 {proposal && (
                   <ProposalDialog
                     proposal={proposal}

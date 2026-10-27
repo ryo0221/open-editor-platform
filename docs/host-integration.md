@@ -74,6 +74,67 @@ own CSS/models, without Playground state/CSS or SORA schema. Run
 policy configuration. `apps/studio-demo` supplies the separate SORA Host sources,
 voice execution adapter and original-storage migrations for the actual existing Site.
 
+## External tools: saved notification, saved read and proposal review
+
+Issue #400 adds the part of the boundary an external tool needs (AI, MCP or any
+Host automation) so a product Host no longer reaches into Playground state or injects
+source at build time. The tool, its triggers, duplicate suppression, authentication
+and approval policy stay in the Host; the Editor adds no agent runtime and no second
+save or Undo path. `apps/artifact-host/host-api.html` is an independent fixture Host
+that uses only these public entrypoints for Document and Structured Data.
+
+| Playground internal connection (not public)                            | Public API                                                                                                      |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| App save flow and `recordsRef` after a save                            | `ArtifactEditor.onSaved(listener)` — only after `StorageAdapter.put` succeeds                                   |
+| Stored record / version list read from App state                       | `readSaved()` (persisted draft) and `readSaved(versionId)` (immutable version with its hash)                    |
+| ProseMirror `textContent` of the visible editor                        | `readText('saved' \| 'draft')` with the adapter's `text` reader; Document: `@editor-platform/document/text`     |
+| `requestProposal` → `previewProposedCommands` → `ProposalDialog` state | `propose(proposal)` returns a review with the native preview; `proposals` lists pending reviews                 |
+| `applyProposal` (canonical base and local revision checks)             | `acceptProposal(id)` / `rejectProposal(id)`; `onProposalResolved(listener)` returns the outcome and dirty state |
+
+The existing `ArtifactEditor`, input boundaries, permission callback,
+`previewProposedCommands` and `transaction` are reused; domain models stay separate.
+
+- **Saved notification.** `HostSavedEvent` carries artifact ID, kind, `versionId`
+  (the draft's base version, the new one when `commitVersion` was requested),
+  `committed`, the `revision` captured when the save started, and the
+  `currentRevision`/`dirty` at the time it is sent. A failed or oversized save sends
+  nothing. A slow save never overwrites newer edits; its event says `dirty: true`.
+- **Saved read.** The tool reads persisted content only. An unknown version returns
+  `version-missing`.
+- **Proposals.** An adapter opts in with `capabilities.proposals: true`. `propose`
+  requires edit permission, a unique ID and, when given, a `baseLocalRevision` equal to
+  the Session revision (`proposal-stale`). Commands that throw or produce invalid native
+  content return `proposal-invalid` and nothing is registered. The review's `preview`
+  is computed on a copy; the draft is unchanged. A later draft change marks the review
+  `stale`. `acceptProposal` is the single path for ordinary review UI and headless
+  callers: it checks permission (`read-only`), flushes input boundaries (a pending input
+  throws and keeps the proposal), refuses a stale revision (`proposal-stale`, outcome
+  `stale`) and applies one `origin: 'proposal'` transaction, one Undo unit. `propose` keeps a frozen
+  copy of the submitted commands, so later changes to the caller's object never reach
+  accept, and accept commits only when the result equals the reviewed preview
+  (`proposal-invalid` otherwise, the proposal stays pending). The
+  accepted result is an unsaved draft change (`dirty: true`) until the Host saves.
+  Rejecting changes neither content nor history. Closing the Session withdraws open
+  proposals.
+- **Document text.** `documentText(content)` returns text with each native hard_break
+  as `\n`, segments joined by a blank line, and stable segment IDs (paragraph, heading,
+  code block, list paragraph, table-cell paragraph). Every character is one engine
+  position. `findDocumentText` finds a unique range inside one segment,
+  `locateDocumentText` converts a whole-text range, and `documentTextEditCommand`
+  applies replacements through engine steps, keeping the first replaced character's
+  marks and refusing changed (`expected`), overlapping or cross-segment ranges.
+  Embedded blocks have no text segment. ProseMirror `textContent` has no character for
+  hard_break and must not be used to address native text.
+- **Listeners.** `attach`, `onSaved` and `onProposalResolved` each return their own
+  release function; releasing twice is harmless and `close` clears all. Listener
+  failures go to the observer error callback and events are copies.
+
+Declared scope: Document supports text read and range proposals; Structured Data
+supports native command proposals (for example `setCell`) and declares no text reader
+(`readText` returns `unsupported`). Schedule was not connected through this API in
+#400 (NOT RUN); its external apply plan remains the separate Schedule Editor–Host
+contract.
+
 ## Session, input, save and close
 
 The Host retains one controller per artifact ID. Attach/detach removes Surface
@@ -110,6 +171,47 @@ as browser-unsaved even before a Session is opened or while its native draft is 
 The unload guard retains that state across failed saves and clears it only after
 StorageAdapter.put succeeds. Seed samples alone do not trigger this guard. Browser storage is local, quota-limited
 and not cloud durability; tab close/reload cannot retain unsaved in-memory history.
+
+## Proposal freshness
+
+A proposal generated from other Artifacts records what it read. `ProposedCommands.reads`
+holds the target Artifact with the committed version its draft was based on, and each
+referenced Artifact with one exact immutable version ID. These are the existing
+`ArtifactVersionRef` IDs; there is no second version scheme. The Host or Runtime that
+builds the proposal records them. The Editor never discovers references itself.
+
+```ts
+import { applyHostProposal, previewHostProposal } from '@editor-platform/editor-host';
+import type { CurrentRead } from '@editor-platform/artifact-core';
+
+// The Host answers for each referenced Artifact under the reviewer's current access.
+const read = (artifactId: string): CurrentRead | undefined =>
+  !canRead(artifactId)
+    ? { status: 'forbidden' }
+    : exists(artifactId)
+      ? { status: 'available', versionId: currentVersion(artifactId) }
+      : { status: 'missing' };
+const review = previewHostProposal(host, proposal, read); // check + whole result, or check only
+const check = applyHostProposal(host, proposal, read); // rechecks, then one Undo transaction
+if (!check.fresh) showStale(check.stale); // keep the proposal for discard or regeneration
+```
+
+`checkProposalReads` in `@editor-platform/artifact-core` is the pure check. It returns
+the stale reads with their reasons: `version-changed`, `missing`, `forbidden`, or
+`unverified` for an Artifact the Host did not answer for (`draft-changed` comes from
+the Host helpers). The Host helpers take the
+target's state from the Session itself. A new committed version, a draft changed since
+`baseLocalRevision`, or a read-only permission makes the target stale. The check covers
+the whole proposal, so a partial change over several rows is adopted completely or not
+at all. A stale proposal changes neither content nor versions.
+
+Regeneration, grouping save notifications and reasoning about business dependencies
+belong to the Host. A local check is not an atomic guarantee: a reference can change
+after `applyHostProposal` returns, and the final consistency and access enforcement
+stay with the trusted Host or authority. Shared proposals carry the same IDs in
+`Proposal.external` and are checked at the authority commit point
+([collaboration contract](collaboration-contract.md#proposals-and-intent)).
+Verification.
 
 ## Outputs, execution and access
 
@@ -162,3 +264,8 @@ flush distinguishes them from unresolved editing dialogs. Native import reads cu
 Session/list state after asynchronous validation and retains newly saved versions.
 Declared Design root pages determine the preview entry and saved reuse symbol.
 PPTX is explicitly unavailable in this reference Host.
+
+Analysis uses the optional `EditorHostAdapter.preflight(artifact)` hook for async domain verification at load, save and native export. See the [Analysis Host guide](analysis-notebook/guide.md). The hook verifies every retained version without rewriting it.
+
+Estimate also registers `verifyEstimateArtifact` as its async preflight and reprojects retained CAD/BIM quantities before admitting results. The Host supplies `EstimateBimEvaluator` for kernel quantities, honors its AbortSignal, and owns Data publication permissions, receipts, persistence and retry through `WorkPublicationHost`.
+Its pure calculation model remains separate from Data and CAD/BIM; see the Estimate Host guide.

@@ -20,7 +20,9 @@ export interface StageEditing {
   id: string;
   text: string;
   runs?: TextRun[];
-  caret: Point;
+  caret?: Point;
+  /** Select the whole text so typing replaces it (a just-inserted object). */
+  selectAll?: boolean;
   expanded?: boolean;
 }
 export interface StageDrag {
@@ -52,9 +54,10 @@ export function fitCanvasView(
   box: Size,
   bounds: Bounds,
   space: Space,
+  minZoom = minimumZoom(space),
 ): CanvasView {
   const z = Math.max(
-    minimumZoom(space),
+    minZoom,
     Math.min(8, (box.width - 48) / bounds.width, (box.height - 48) / bounds.height),
   );
   return {
@@ -73,9 +76,10 @@ export function wheelCanvasView(
   e: Pick<WheelEvent, 'ctrlKey' | 'metaKey' | 'deltaX' | 'deltaY' | 'clientX' | 'clientY'>,
   rect: { x: number; y: number },
   space: Space,
+  minZoom = minimumZoom(space),
 ): CanvasView {
   if (e.ctrlKey || e.metaKey) {
-    const zoom = Math.min(8, Math.max(minimumZoom(space), v.zoom * Math.exp(-e.deltaY * 0.005))),
+    const zoom = Math.min(8, Math.max(minZoom, v.zoom * Math.exp(-e.deltaY * 0.005))),
       world = screenToWorld(
         { x: e.clientX, y: e.clientY },
         { x: rect.x, y: rect.y },
@@ -102,7 +106,7 @@ export function stageBoundsToFit(
   return (
     fitBounds ??
     (space === 'infinite'
-      ? unionBounds(targets.filter((t) => !t.hidden).map((t) => t.bounds))
+      ? unionBounds(targets.filter((t) => !t.hidden).map((t) => t.hitBounds ?? t.bounds))
       : { x: 0, y: 0, width, height })
   );
 }

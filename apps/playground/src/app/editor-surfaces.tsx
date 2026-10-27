@@ -1,3 +1,7 @@
+import { isEstimate } from '@editor-platform/estimate-core';
+import { PlaygroundEstimate } from './estimate-host';
+import { isAnalysis } from '@editor-platform/analysis-core';
+import { PlaygroundAnalysis } from './analysis-host';
 import { lazy, memo, Suspense, useMemo, type ComponentProps, type MutableRefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
@@ -19,6 +23,7 @@ import {
   type AnimationHostContent,
 } from '@editor-platform/animation-core/v2';
 import { NativeGraphSurface, relationProfile } from '@editor-platform/structured-graph';
+import type { BimDocument } from '@editor-platform/bim-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
@@ -45,7 +50,7 @@ import {
   remapFileAnnotation,
   type ReviewVisibleSource,
 } from '@editor-platform/review-surfaces';
-import { isDesign } from '@editor-platform/design';
+import { isDesign, isDesignWithPaths } from '@editor-platform/design';
 import { ReactUiSurface } from '@editor-platform/react-ui';
 import type { ReactUiDocument } from '@editor-platform/react-ui-core';
 import { reuseHash } from '@editor-platform/reuse-core';
@@ -91,6 +96,7 @@ import {
   slideAnimationSources,
   slideDataSnapshots,
 } from './surface-sources';
+import { graphProfileFor } from './graph-templates';
 
 const referenceReactExamples = [
   { name: 'Product page', document: createReferenceDocument('product') },
@@ -121,22 +127,33 @@ const MemoDesignSurface = memo(function ReferenceDesignSurface(
 const MemoWhiteboardSurface = memo(WhiteboardSurface);
 // Three.js and the kernel adapter load only when a CAD artifact opens.
 const CadHost = lazy(() => import('../cad/host'));
+// The building Surface and its kernel Worker load only when a building opens.
+const BimHost = lazy(() => import('../bim/host'));
 
-export function checkedContent(content: unknown) {
+export function checkedContent(content: unknown, kind: string | undefined) {
   return {
-    animation: validContent('animation', content) ? (content as AnimationHostContent) : undefined,
-    geo: validContent('geo', content) ? (content as GeoDocument) : undefined,
-    graph: isGraphDocument(content) ? content : undefined,
-    reactUi: validContent('react-ui', content) ? (content as ReactUiDocument) : undefined,
-    document: isDocument(content) ? content : undefined,
-    data: isStructuredData(content) ? content : undefined,
-    review: isReview(content) ? content : undefined,
-    file: isFile(content) ? content : undefined,
-    whiteboard: isWhiteboard(content) ? content : undefined,
-    design: isDesign(content) ? content : undefined,
-    slide: isDeck(content) ? content : undefined,
-    schedule: isSchedule(content) ? content : undefined,
-    cad: validContent('cad', content) ? (content as CadDocument) : undefined,
+    estimate: kind === 'estimate' && isEstimate(content) ? content : undefined,
+    analysis: kind === 'analysis' && isAnalysis(content) ? content : undefined,
+    animation:
+      kind === 'animation' && validContent('animation', content)
+        ? (content as AnimationHostContent)
+        : undefined,
+    geo: kind === 'geo' && validContent('geo', content) ? (content as GeoDocument) : undefined,
+    graph: kind === 'structured-graph' && isGraphDocument(content) ? content : undefined,
+    reactUi:
+      kind === 'react-ui' && validContent('react-ui', content)
+        ? (content as ReactUiDocument)
+        : undefined,
+    document: kind === 'document' && isDocument(content) ? content : undefined,
+    data: kind === 'data' && isStructuredData(content) ? content : undefined,
+    review: kind === 'review' && isReview(content) ? content : undefined,
+    file: kind === 'file' && isFile(content) ? content : undefined,
+    whiteboard: kind === 'whiteboard' && isWhiteboard(content) ? content : undefined,
+    design: kind === 'design' && isDesignWithPaths(content) ? content : undefined,
+    slide: kind === 'slide' && isDeck(content) ? content : undefined,
+    schedule: kind === 'schedule' && isSchedule(content) ? content : undefined,
+    cad: kind === 'cad' && validContent('cad', content) ? (content as CadDocument) : undefined,
+    bim: kind === 'bim' && validContent('bim', content) ? (content as BimDocument) : undefined,
   };
 }
 export type RenderedContent = ReturnType<typeof checkedContent>;
@@ -398,6 +415,8 @@ function ReviewHost({
         }
       }}
       readOnly={readOnly || !!host.sharedSession}
+      canComment={!readOnly}
+      onAddComment={(body) => host.addComment(host.selection, body)}
       execute={host.execute}
       select={host.select}
       annotations={active.annotations}
@@ -697,11 +716,17 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
   const selectedId = host.selection.addresses[0]?.elementId;
   return (
     <>
+      {rendered.estimate && !sharedSession && session && (
+        <PlaygroundEstimate key={active.id} host={host} />
+      )}
+      {rendered.analysis && !sharedSession && session && (
+        <PlaygroundAnalysis key={active.id} host={host} />
+      )}
       {rendered.graph && (
         <NativeGraphSurface
           key={active.id}
           content={rendered.graph}
-          profile={relationProfile}
+          profile={graphProfileFor(rendered.graph) ?? relationProfile}
           sourceRevision={canonicalJson((session as EditorSession<Content>).revision)}
           execute={host.execute}
           select={host.select}
@@ -723,6 +748,28 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
               const latest = latestRecord(host);
               if (latest) host.persist(editedDraft(latest, content));
             }}
+            record={() => latestRecord(host)}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
+            records={() => host.recordsRef.current}
+            openArtifact={(id) => host.activate(id)}
+          />
+        </Suspense>
+      )}
+      {rendered.bim && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Building…</p>}>
+          <BimHost
+            key={active.id}
+            artifact={active}
+            session={host.sessions.current.get(active.id) as unknown as EditorSession<BimDocument>}
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            record={() => latestRecord(host)}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
+            records={() => host.recordsRef.current}
           />
         </Suspense>
       )}

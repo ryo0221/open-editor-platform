@@ -49,8 +49,14 @@ export function ReviewSurface({
   onVisibleSourceChange,
   resolveAnnotationSource,
   onRemapAnnotation,
+  canComment = !readOnly,
+  onAddComment,
 }: {
   content: ReviewContent;
+  /** Comments are annotations, so a Host may allow them while content edits are read-only. */
+  canComment?: boolean;
+  /** Adds a comment on the current line selection; resolves true once the Host stored it. */
+  onAddComment?(body: string): Promise<boolean | undefined> | boolean | undefined;
   onSelectionClear?(): void;
   onVisibleSourceChange?(source: ReviewVisibleSource): void;
   resolveAnnotationSource?(address: ElementAddress): Promise<ReviewResolvedSource | undefined>;
@@ -205,6 +211,8 @@ export function ReviewSurface({
           annotations={annotations}
           readOnly={readOnly}
           range={range}
+          canComment={canComment}
+          onAddComment={onAddComment}
           onOpenAnnotation={(address, current) =>
             retained.open(address, current, () => focusLines(address.region))
           }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EditorSession } from '@editor-platform/editor-core';
 import { canonicalJson, deepFreeze } from '@editor-platform/artifact-core';
 import {
@@ -20,7 +20,7 @@ import {
   type ScheduleError,
   type TimedTime,
 } from './model';
-import { canonicalZone, resolveLocal, wallTime } from './zone';
+import { canonicalZone, knownZones, resolveLocal, wallTime } from './zone';
 import { syntheticLane } from './test-fixtures';
 import { placeEvents } from './view-model';
 import { historyDropsDetails, historyDropsDetailsText, stepScheduleHistory } from './history';
@@ -88,6 +88,86 @@ describe('Schedule model', () => {
       createEvent({ time: timed('2026-10-26T10:00', '2026-10-26T11:00', 'Mars/Base') }).apply(base),
     ).toThrow(/Unknown time zone/);
     expect(canonicalZone('Mars/Base')).toBeNull();
+  });
+
+  it('accepts current and older IANA names and records the current one on every engine', () => {
+    // ICU answers the older CLDR name (Asia/Saigon) even when asked for the current one.
+    for (const [current, older] of [
+      ['Asia/Ho_Chi_Minh', 'Asia/Saigon'],
+      ['Asia/Kolkata', 'Asia/Calcutta'],
+      ['Europe/Kyiv', 'Europe/Kiev'],
+    ]) {
+      expect(canonicalZone(current)).toBe(current);
+      expect(canonicalZone(older)).toBe(current);
+      expect(canonicalZone(current.toLowerCase())).toBe(current);
+      expect(createSchedule(older).timeZone).toBe(current);
+      const created = createEvent({
+        id: 'e1',
+        time: timed('2026-10-26T10:00', '2026-10-26T11:00', older),
+      }).apply(createSchedule(current));
+      expect(created.events[0].time).toMatchObject({ timeZone: current });
+      const moved = setEventTime(
+        'e1',
+        timed('2026-10-27T10:00', '2026-10-27T11:00', current),
+      ).apply(created);
+      expect(moved.events[0].time).toMatchObject({ timeZone: current });
+      // Both names are the same instants.
+      expect(timedInstants(timed('2026-10-26T10:00', '2026-10-26T11:00', older))).toEqual(
+        timedInstants(timed('2026-10-26T10:00', '2026-10-26T11:00', current)),
+      );
+    }
+    expect(canonicalZone('Etc/UTC')).toBe('UTC');
+    // Content saved with an older name still opens. A text edit leaves the event time as stored
+    // (a time being typed in the details is not reset); writing a time records the current name.
+    const saved = {
+      ...createSchedule('UTC'),
+      timeZone: 'Asia/Saigon',
+      events: [
+        {
+          id: 'e1',
+          title: 'Site visit',
+          notes: '',
+          time: timed('2026-10-26T10:00', '2026-10-26T11:00', 'Asia/Saigon'),
+          conference: 'none' as const,
+          links: [],
+        },
+      ],
+    };
+    expect(isSchedule(saved)).toBe(true);
+    const renamed = updateEventText('e1', { title: 'Plant visit' }).apply(saved);
+    expect(renamed.timeZone).toBe('Asia/Ho_Chi_Minh');
+    expect(renamed.events[0].time).toBe(saved.events[0].time);
+    expect(setEventTime('e1', saved.events[0].time).apply(saved).events[0].time).toMatchObject({
+      timeZone: 'Asia/Ho_Chi_Minh',
+    });
+    expect(duplicateEvent('e1', 'e2').apply(saved).events[1].time).toMatchObject({
+      timeZone: 'Asia/Ho_Chi_Minh',
+    });
+    // An engine that knows a renamed zone only by its older name still reads the current name,
+    // in any casing.
+    const Real = Intl.DateTimeFormat;
+    const older = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
+      locale?: string,
+      options?: Intl.DateTimeFormatOptions,
+    ) {
+      if (/kyiv/i.test(options?.timeZone ?? '')) throw new RangeError('Invalid time zone');
+      return new Real(locale, options);
+    } as unknown as typeof Intl.DateTimeFormat);
+    try {
+      expect(canonicalZone('EUROPE/KYIV')).toBe('Europe/Kyiv');
+      expect(wallTime(Date.UTC(2026, 9, 27, 3, 30), 'EUROPE/KYIV')).toEqual({
+        date: '2026-10-27',
+        minutes: 5 * 60 + 30,
+      });
+    } finally {
+      older.mockRestore();
+    }
+    // Pickers list each zone once, by its current name.
+    const zones = knownZones();
+    expect(zones[0]).toBe('UTC');
+    expect(zones).toContain('Asia/Ho_Chi_Minh');
+    expect(zones).not.toContain('Asia/Saigon');
+    expect(new Set(zones).size).toBe(zones.length);
   });
 
   it('keeps all-day dates and event times independent of the display zone', () => {

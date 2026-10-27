@@ -92,11 +92,58 @@
   min-height: 0;
   height: 70px;
   display: flex;
-  background: white;
-  border: 1px solid #94a3b8;
+  background: var(--ep-graph-node-fill, white);
+  border: 1px var(--ep-graph-node-border-style, solid) var(--ep-graph-node-stroke, #94a3b8);
+  border-width: var(--ep-graph-node-stroke-width, 1px);
   box-shadow: 0 3px 8px #0f172a12;
-  border-radius: 8px;
+  border-radius: 3px;
 }
+/* Outlined shapes draw their own fill and stroke; the box only keeps its size and states. */
+.ep-graph-node:not([data-shape='rectangle']) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+/* Scoped to the plane so the edge layer's `.ep-graph-plane svg` placement and z-index do not apply. */
+.ep-graph-plane .ep-graph-node-shape {
+  position: absolute;
+  inset: -1px;
+  z-index: auto;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 4px #0f172a14);
+}
+.ep-graph-node-shape path {
+  fill: var(--ep-graph-node-fill, white);
+  stroke: var(--ep-graph-node-stroke, #94a3b8);
+  stroke-width: var(--ep-graph-node-stroke-width, 1px);
+}
+.ep-graph-node.connected .ep-graph-node-shape path {
+  stroke: #60a5fa;
+  stroke-width: 3px;
+}
+/* Positioned so the label paints above the absolutely positioned outline. */
+.ep-graph-node:not([data-shape='rectangle']) .ep-graph-node-select {
+  position: relative;
+  text-align: center;
+}
+.ep-graph-node:not([data-shape='rectangle']) .ep-graph-drag {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 28px;
+  /* The corner may straddle the outline, so the handle keeps its own light ground. */
+  background: #ffffffe6;
+  border-radius: 4px;
+  color: #0f172a;
+}
+.ep-graph-node:has(.ep-graph-node-select:focus-visible) {
+  outline: 3px solid #3b82f6;
+}
+.ep-graph-node.dark .ep-graph-node-select small {
+  color: #e2e8f0;
+}
+
 .ep-graph-node.selected {
   outline: 3px solid #3b82f6;
 }
@@ -133,6 +180,9 @@
 }
 .ep-graph-node.connected {
   border: 3px solid #60a5fa;
+}
+.ep-graph-node.connected:not([data-shape='rectangle']) {
+  border-color: transparent;
 }
 .ep-graph-node.valid-target {
   outline: 3px solid #16a34a;
@@ -291,4 +341,130 @@
   .ep-graph {
     min-height: 420px;
   }
+}
+
+/* Sections: frames under nodes and connections. Only the header and handles take pointers, so
+   nodes inside stay reachable. */
+.ep-graph-section {
+  position: absolute;
+  z-index: 0;
+  box-sizing: border-box;
+  background: var(--ep-graph-section-fill, #f8fafc);
+  border: 2px var(--ep-graph-section-border-style, dashed) var(--ep-graph-section-stroke, #94a3b8);
+  border-radius: 8px;
+  pointer-events: none;
+}
+.ep-graph-section.selected {
+  outline: 3px solid #3b82f6;
+}
+.ep-graph-section.collapsed {
+  border-style: solid;
+  box-shadow: 0 3px 8px #0f172a12;
+}
+.ep-graph-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  pointer-events: auto;
+}
+.ep-graph-section-header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.ep-graph-section-select {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  text-align: left;
+  touch-action: none;
+  cursor: grab;
+}
+.ep-graph-section-select small {
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.ep-graph-section-toggle {
+  min-width: 28px;
+}
+.ep-graph-section .ep-graph-drag {
+  margin-left: auto;
+}
+.ep-graph-section-resize {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-right: 3px solid #64748b;
+  border-bottom: 3px solid #64748b;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+  pointer-events: auto;
+}
+.ep-graph-membership {
+  display: grid;
+  gap: 4px;
+}
+/* Node palette (#396 Phase 3): a dropdown in the toolbar, grouped by the Profile's ui.group. */
+.ep-graph-palette {
+  position: relative;
+}
+.ep-graph-palette > summary {
+  cursor: pointer;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: white;
+  list-style: none;
+}
+.ep-graph-palette[open] > [role='group'] {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: min(320px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+  box-shadow: 0 6px 18px rgb(15 23 42 / 0.15);
+}
+.ep-graph-palette section {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.ep-graph-palette h4 {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #475569;
+}
+.ep-graph-palette button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  text-align: left;
+}
+.ep-graph-palette button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-graph-palette-target {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #475569;
 }

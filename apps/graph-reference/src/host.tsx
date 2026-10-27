@@ -44,7 +44,7 @@ import {
   type GraphDefinitionSource,
   type GraphDocument,
   type GraphProjection,
-  type LayoutSidecar,
+  type PresentationSidecar,
   type AdapterProposal,
 } from '@editor-platform/structured-graph';
 import {
@@ -59,7 +59,7 @@ import './host.css';
 type Source = GraphDocument | StructuredData | ReferenceDefinition | GraphDefinitionSource;
 type Mode = 'native' | 'data' | 'definition' | 'profile';
 interface SavedHost extends Artifact<Source> {
-  layout?: LayoutSidecar;
+  layout?: PresentationSidecar;
 }
 const storage = new IndexedDBStorage<SavedHost>('independent-graph-host');
 const sourceKind = (mode: Mode) =>
@@ -111,7 +111,7 @@ function HostEditor({ mode, inputs }: { mode: Mode; inputs: EditorInputs }) {
     [proposalView, setProposalView] = useState<GraphProjection>();
   const [proposedPurpose, setProposedPurpose] = useState('Proposal purpose');
   const [render, setRender] = useState(0),
-    [layout, setLayout] = useState<LayoutSidecar>();
+    [layout, setLayout] = useState<PresentationSidecar>();
   const pending = useRef(record),
     readonlyRef = useRef(readOnly),
     failNext = useRef(false),
@@ -222,8 +222,8 @@ function HostEditor({ mode, inputs }: { mode: Mode; inputs: EditorInputs }) {
           readOnly: readonlyRef.current || !latest.current.ready,
         }),
         execute: (cmd) => latest.current.execute(cmd),
-        getLayout: () => latest.current.layout,
-        setLayout: (sidecar) => {
+        getPresentation: () => latest.current.layout,
+        setPresentation: (sidecar) => {
           if (readonlyRef.current) throw new Error('Host is read only');
           setLayout(sidecar);
           const next = { ...pending.current, layout: sidecar };
@@ -633,6 +633,9 @@ function HostEditor({ mode, inputs }: { mode: Mode; inputs: EditorInputs }) {
                   )
                 }
                 readOnly={readOnly || !!proposal}
+                // The sidecar takes presentation edits in their own transactions.
+                shapeOnCreate={false}
+                sectionEditing={false}
                 onEdit={(intents, base) => binding.apply(intents, base)}
               />
             )}

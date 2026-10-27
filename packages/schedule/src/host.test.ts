@@ -6,6 +6,7 @@ import {
   plainExternalText,
   summarizeOperation,
   type OperationStep,
+  type OverlayRead,
 } from './host';
 import { createMockScheduleHost } from './mock-host';
 import { finishedOperation } from './apply-state';
@@ -135,6 +136,23 @@ describe('Schedule Host contract', () => {
     );
     for (const p of placed)
       if (p.item.sourceHandle.startsWith('mock-team')) expect(p.busyOnly).toBe(true);
+  });
+
+  it('treats a never-read copy (fetchedAt null) as unknown for the whole range, not free', () => {
+    const week = weekRange(utcDay('2026-10-26')!);
+    const range = { from: week.start * 86_400_000, to: (week.end + 1) * 86_400_000 };
+    const read: OverlayRead = {
+      sourceHandle: 'src',
+      generation: 'g1',
+      range,
+      complete: false,
+      missing: [range],
+      fetchedAt: null,
+      events: [],
+    };
+    expect(unknownDays([read], week, 'UTC').size).toBe(week.end - week.start + 1);
+    const sources = new Map([['src', { label: 'Mine', access: 'details' as const }]]);
+    expect(placeOverlay([read], sources, 'UTC')).toEqual([]);
   });
 
   it('places an overlay event on every day it occupies, not on an exclusive midnight end', () => {

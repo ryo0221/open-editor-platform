@@ -11,6 +11,7 @@ import {
 } from './model';
 import {
   resolveLocal,
+  sameZone,
   timeLabel,
   wallTime,
   type Fold,
@@ -61,8 +62,9 @@ export function timeText(time: EventTime, displayZone: string) {
   return timedText(time, wallTime(start, displayZone), wallTime(end, displayZone), displayZone);
 }
 function timedText(time: TimedTime, s: WallTime, e: WallTime, displayZone: string) {
-  const zone =
-    displayZone === time.timeZone ? '' : ` (${time.startLocal.slice(11)} ${time.timeZone})`;
+  const zone = sameZone(displayZone, time.timeZone)
+    ? ''
+    : ` (${time.startLocal.slice(11)} ${time.timeZone})`;
   return s.date === e.date
     ? `${s.date} ${timeLabel(s.minutes)}–${timeLabel(e.minutes)}${zone}`
     : `${s.date} ${timeLabel(s.minutes)} – ${e.date} ${timeLabel(e.minutes)}${zone}`;

@@ -3,7 +3,7 @@ import { Plus, Download } from 'lucide-react';
 import { referenceExportManifest } from '@editor-platform/artifact-references';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import type { ReferenceSurfaceProps } from '@editor-platform/artifact-references/react';
-import { descendantIds, unionBounds, type EditorCommand } from '@editor-platform/editor-core';
+import { descendantIds, type EditorCommand } from '@editor-platform/editor-core';
 import { CommitInput, Dialog, Menu, Section } from '@editor-platform/editor-ui';
 import { LayerNavigator, exportPages, type CanvasTarget } from '@editor-platform/canvas-ui';
 import {
@@ -11,6 +11,7 @@ import {
   applyFramePreset,
   arrangeDesign,
   designPaintOrder,
+  designExportBounds,
   exportDesignSvg,
   insertInstance,
   patchDesign,
@@ -20,7 +21,7 @@ import {
   type DesignElement,
 } from './model';
 import type { DesignSurfaceExtension } from './view';
-import { designPaintBounds } from './paint-bounds';
+import { designPaintBounds, designExportPaintBounds } from './paint-bounds';
 import type { designRenderSnapshot } from './render-cache';
 import type { FramePresetRequest } from './view-inspector';
 
@@ -43,6 +44,7 @@ export function collectScopedTexts(
   project: (element: DesignElement) => DesignDrawing[],
 ): Map<string, ScopedText> {
   const map = new Map<string, ScopedText>();
+  const native = new Set(content.elements.map((e) => e.id));
   for (const root of content.elements.filter((e) => e.type === 'instance')) {
     const drawings = project(root);
     for (const drawing of drawings)
@@ -50,7 +52,7 @@ export function collectScopedTexts(
         const part = drawing.instanceText;
         const key = instanceTextKey(drawing)!;
         let id = `instance-text:${key}`;
-        while (content.elements.some((e) => e.id === id)) id = `:${id}`;
+        while (native.has(id)) id = `:${id}`;
         map.set(id, {
           rootId: root.id,
           partIds: part.partIds,
@@ -137,12 +139,7 @@ export async function exportDesignGraphics(
     ({ exported, content } = await captureReferences(content, exported, state, references, inputs));
   const pages = groups.map((group) => {
     extension?.beforeGraphicExport?.(group);
-    const all = descendantIds(content.elements, group),
-      box = unionBounds(
-        designPaintOrder(content)
-          .filter((e) => all.has(e.id) && !e.hidden)
-          .map((e) => e.bounds),
-      );
+    const box = designExportBounds(content, group);
     return {
       name: group.length === 1 ? content.elements.find((e) => e.id === group[0])!.name : 'design',
       svg: exportDesignSvg(content, group, {
@@ -343,6 +340,12 @@ export function designCanvasTargets(
     .map((e) => ({
       ...e,
       label: `Design object ${e.name}`,
+      ...(e.path
+        ? {
+            hitBounds: designExportPaintBounds(project(e), e.bounds, e.rotation),
+            hitClipBounds: project(e)[0]?.clipBounds,
+          }
+        : {}),
       paintBounds: extension?.render
         ? undefined
         : designPaintBounds(project(e), e.bounds, e.rotation),

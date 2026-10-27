@@ -491,7 +491,7 @@ test('PR #52 Graph endpoint targets the frontmost overlapping node with matching
     id: 'front',
     attributes: { ...back.attributes, name: 'Front node' },
   });
-  graph.layout.front = clone(graph.layout[back.id]);
+  graph.presentation.nodes.front = clone(graph.presentation.nodes[back.id]);
   await page.goto('/');
   await importUsability(page, 'structured-graph', graph);
   await selectConnection(page, 'Select connection Related: Research to Planning');

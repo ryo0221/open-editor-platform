@@ -9,7 +9,8 @@
     "./history": "./src/history.ts",
     "./host": "./src/host.ts",
     "./mock-host": "./src/mock-host.ts",
-    "./view": "./src/view.tsx"
+    "./view": "./src/view.tsx",
+    "./proposal-diff": "./src/proposal-diff.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

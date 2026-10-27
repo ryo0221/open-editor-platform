@@ -392,6 +392,7 @@ const unsupportedPrimitiveVisuals: ((e: DesignElement) => unknown)[] = [
   (e) => e.typography?.align && e.typography.align !== 'left',
   (e) => e.runs?.length,
   (e) => e.vector,
+  (e) => e.path,
   (e) => e.strokeWidth,
   (e) => e.rotation,
   (e) => e.opacity !== undefined && e.opacity !== 1,

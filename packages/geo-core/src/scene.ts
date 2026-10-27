@@ -24,13 +24,15 @@ export function fitGeoExtent(content: GeoDocument): GeoExtent {
     }
   }
   const west = start >= 180 ? start - 360 : start;
+  // Room for the edge symbols and their labels on every side.
   const span = Math.max(1, 360 - gap),
-    margin = Math.min(4, span * 0.05);
+    margin = Math.max(0.5, span * 0.08);
   const left = Math.max(-180, west - margin),
     right = Math.min(left + 360, west + span + margin);
-  const ys = positions.map((p) => p[1]);
-  const bottom = Math.max(-90, Math.min(...ys) - 0.5),
-    top = Math.min(90, Math.max(...ys) + 0.5);
+  const ys = positions.map((p) => p[1]),
+    yMargin = Math.max(0.5, (Math.max(...ys) - Math.min(...ys)) * 0.08);
+  const bottom = Math.max(-90, Math.min(...ys) - yMargin),
+    top = Math.min(90, Math.max(...ys) + yMargin);
   return [left, bottom, right, top];
 }
 export function geoLegend(style: GeoLayerStyle) {
@@ -95,6 +97,7 @@ const xml = (value: unknown) =>
   );
 interface Projector {
   center: number;
+  width: number;
   project(position: Position): Position;
   number(n: number): string;
   paths(g: Geometry, offset: number, background?: boolean): string[];
@@ -135,7 +138,7 @@ function createProjector(extent: GeoExtent, mapWidth: number, mapHeight: number)
       return g.coordinates.map((p) => p.map((r) => line(r, offset, true, background)).join(' '));
     return [];
   };
-  return { center, project, number, paths };
+  return { center, width: mapWidth, project, number, paths };
 }
 const wrapCredits = (credits: readonly string[]) =>
   [...new Set(credits)].flatMap((s) => s.match(/.{1,90}/gs) ?? []);
@@ -220,6 +223,46 @@ function metricCaptions(metric: NonNullable<GeoLayerStyle['metric']>) {
       : 'Count (no normalization)',
   ];
 }
+/** Lines are labelled half way along, areas at the middle of their unwrapped outer ring's box. */
+function labelAnchor(geometry: Geometry): Position | undefined {
+  const raw =
+    geometry.type === 'LineString'
+      ? geometry.coordinates
+      : geometry.type === 'MultiLineString'
+        ? geometry.coordinates[0]
+        : undefined;
+  // Unwrapped like the drawn path, so a line across the antimeridian is labelled on itself.
+  const line: Position[] = [];
+  for (const p of raw ?? [])
+    line.push([line.length ? unwrapLongitude(p[0], line[line.length - 1][0]) : p[0], p[1]]);
+  if (line.length > 1) {
+    const lengths = line.slice(1).map((p, i) => Math.hypot(p[0] - line[i][0], p[1] - line[i][1]));
+    let rest = lengths.reduce((a, b) => a + b, 0) / 2;
+    for (let i = 0; i < lengths.length; i++) {
+      if (rest <= lengths[i] && lengths[i] > 0) {
+        const t = rest / lengths[i];
+        return [
+          line[i][0] + (line[i + 1][0] - line[i][0]) * t,
+          line[i][1] + (line[i + 1][1] - line[i][1]) * t,
+        ];
+      }
+      rest -= lengths[i];
+    }
+  }
+  const outer =
+    geometry.type === 'Polygon'
+      ? geometry.coordinates[0]
+      : geometry.type === 'MultiPolygon'
+        ? geometry.coordinates[0]?.[0]
+        : undefined;
+  const ring = (outer ?? []).map(([x, y]): Position => [unwrapLongitude(x, outer![0][0]), y]);
+  if (ring.length) {
+    const xs = ring.map((p) => p[0]),
+      ys = ring.map((p) => p[1]);
+    return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+  }
+  return geometryPositions(geometry)[0];
+}
 function featureMarkup(
   geometry: Geometry,
   appearance: { color: string; radius: number },
@@ -244,11 +287,13 @@ function featureMarkup(
           `<path d="${d}" fill="${fills ? color : 'none'}" fill-rule="evenodd" stroke="${selected ? '#111111' : color}" stroke-width="${selected ? 4 : 2}"/>`,
         );
   }
-  const anchor = geometryPositions(geometry)[0];
+  const anchor = labelAnchor(geometry);
   if (label !== null && anchor) {
     const [x, y] = project([unwrapLongitude(anchor[0], center), anchor[1]]);
+    // Labels in the right quarter run leftwards so they stay inside the map.
+    const end = x > projector.width * 0.75;
     markup.push(
-      `<text x="${number(x + 8)}" y="${number(y - 8)}" font-size="13" fill="#142b3d" stroke="#ffffff" stroke-width="3" paint-order="stroke">${xml(label)}</text>`,
+      `<text x="${number(end ? x - 8 : x + 8)}" y="${number(y - 8)}"${end ? ' text-anchor="end"' : ''} font-size="13" fill="#142b3d" stroke="#ffffff" stroke-width="3" paint-order="stroke">${xml(label)}</text>`,
     );
   }
   return markup.join('');

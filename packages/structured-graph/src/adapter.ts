@@ -2,23 +2,35 @@ import { canonicalJson, clone, newId } from '@editor-platform/artifact-core';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
 import {
   isGraphJson,
-  validGraphLayout,
+  validNodePresentations,
   type GraphDiagnostic,
   type GraphDocument,
-  type GraphLayout,
+  type GraphNodePresentations,
 } from './model';
 import { assertGraph, type GraphProfile } from './profile';
-import { graphCommand, parseGraphIntents, type GraphIntent } from './commands';
+import {
+  graphCommand,
+  isGraphSectionIntent,
+  parseGraphIntents,
+  type GraphIntent,
+} from './commands';
 export interface GraphAdapter<S> {
   id: string;
   version: number;
   profile(source: S): GraphProfile;
-  project(source: S, layout?: GraphLayout): GraphDocument;
+  /** `presentation` is the Host sidecar's node presentation when the mode is `sidecar`. */
+  project(source: S, presentation?: GraphNodePresentations): GraphDocument;
   /** Pure. Must preserve unsupported source fields and use the source's own validation boundary. */
   prepare(source: S, intents: GraphIntent[]): EditorCommand<S>;
   diagnostics?(source: S): GraphDiagnostic[];
-  /** Sidecar layout is separate from semantic content; otherwise prepare owns move intents. */
-  layoutMode?: 'sidecar' | 'source';
+  /**
+   * Where node presentation (position, shape, style) is saved. `sidecar` keeps it in a
+   * Host-owned sidecar apart from semantic content; `source` lets prepare accept or refuse
+   * presentation intents; `none` refuses them and draws Profile defaults. Default `source`.
+   */
+  presentationMode?: 'sidecar' | 'source' | 'none';
+  /** Sections need `presentationMode: 'source'`. Section editing is not implemented yet. */
+  sections?: boolean;
 }
 export interface GraphSource<S> {
   content: S;
@@ -36,14 +48,20 @@ export interface AdapterProposal {
   base: string;
   intents: GraphIntent[];
 }
-export interface LayoutSidecar {
-  schemaVersion: 1;
+export interface PresentationSidecar {
+  schemaVersion: 2;
   sourceId: string;
   sourceRevision: string;
   adapter: { id: string; version: number };
   profile: { id: string; version: number };
-  positions: GraphLayout;
+  /** Sidecar adapters cannot hold Sections, so only node presentation is stored. */
+  presentation: { nodes: GraphNodePresentations };
 }
+const presentationIntents = new Set<GraphIntent['type']>([
+  'move-node',
+  'set-node-shape',
+  'set-node-style',
+]);
 /** A binding has no source copy or Undo stack. The Host supplies the sole executor. */
 export class GraphBinding<S> {
   constructor(
@@ -52,41 +70,53 @@ export class GraphBinding<S> {
       read: () => GraphSource<S>;
       execute: (command: EditorCommand<S>) => void;
       sourceId: string;
-      getLayout?: () => LayoutSidecar | undefined;
-      setLayout?: (sidecar: LayoutSidecar) => void;
+      getPresentation?: () => PresentationSidecar | undefined;
+      setPresentation?: (sidecar: PresentationSidecar) => void;
     },
-  ) {}
+  ) {
+    const { adapter } = options;
+    if (adapter.sections && (adapter.presentationMode ?? 'source') !== 'source')
+      throw new Error('Graph sections need an adapter that saves presentation in its source');
+  }
+  private get mode() {
+    return this.options.adapter.presentationMode ?? 'source';
+  }
   private stamp(source: GraphSource<S>) {
     return canonicalJson({
       revision: source.revision,
       fingerprint: canonicalJson(source.content),
       adapter: { id: this.options.adapter.id, version: this.options.adapter.version },
       profile: this.options.adapter.profile(source.content),
-      layout:
-        this.options.adapter.layoutMode === 'sidecar' ? (this.options.getLayout?.() ?? null) : null,
+      presentation: this.mode === 'sidecar' ? (this.options.getPresentation?.() ?? null) : null,
     });
   }
   project(): GraphProjection {
     const source = this.options.read(),
       adapter = this.options.adapter,
       profile = adapter.profile(source.content),
-      sidecar = this.options.getLayout?.();
-    let layout: GraphLayout | undefined;
+      sidecar = this.mode === 'sidecar' ? this.options.getPresentation?.() : undefined;
+    let presentation: GraphNodePresentations | undefined;
     if (sidecar) {
       if (
         !isGraphJson(sidecar) ||
-        sidecar.schemaVersion !== 1 ||
+        sidecar.schemaVersion !== 2 ||
         sidecar.sourceId !== this.options.sourceId ||
         sidecar.adapter.id !== adapter.id ||
         sidecar.adapter.version !== adapter.version ||
         sidecar.profile.id !== profile.id ||
         sidecar.profile.version !== profile.version ||
-        !validGraphLayout(sidecar.positions)
+        Object.keys(sidecar).length !== 6 ||
+        Object.keys(sidecar.presentation ?? {}).join() !== 'nodes' ||
+        !validNodePresentations(sidecar.presentation.nodes)
       )
-        throw new Error('Unknown or incompatible Graph layout sidecar');
-      layout = clone(sidecar.positions);
+        throw new Error('Unknown or incompatible Graph presentation sidecar');
+      // Values for nodes the source no longer has are ignored and dropped on the next write.
+      const ids = new Set(adapter.project(clone(source.content)).nodes.map((n) => n.id));
+      presentation = Object.fromEntries(
+        Object.entries(clone(sidecar.presentation.nodes)).filter(([id]) => ids.has(id)),
+      );
     }
-    const graph = adapter.project(clone(source.content), layout);
+    const graph = adapter.project(clone(source.content), presentation);
     assertGraph(graph, profile);
     return {
       graph,
@@ -101,14 +131,22 @@ export class GraphBinding<S> {
     if (source.readOnly) throw new Error('Source is read only');
     if (this.stamp(source) !== base)
       throw new Error('Stale Graph projection; source, adapter or Profile changed');
+    if (!this.options.adapter.sections && intents.some(isGraphSectionIntent))
+      throw new Error('This source cannot represent Graph sections');
     const projected = this.project();
     graphCommand(projected.profile, intents).apply(projected.graph);
-    const moves = intents.filter((i) => i.type === 'move-node');
-    if (this.options.adapter.layoutMode === 'sidecar' && moves.length) {
-      if (moves.length !== intents.length)
-        throw new Error('Sidecar layout and semantic edits require separate transactions');
-      if (!this.options.setLayout) throw new Error('Host has no writable layout sidecar');
-      return { intents, source, projected, moves };
+    const looks = intents.filter((i) => presentationIntents.has(i.type));
+    if (
+      this.mode === 'none' &&
+      intents.some((i) => i.type === 'set-node-shape' || i.type === 'set-node-style')
+    )
+      throw new Error('This source cannot save node shapes or styles');
+    if (this.mode === 'sidecar' && looks.length) {
+      if (looks.length !== intents.length)
+        throw new Error('Sidecar presentation and semantic edits require separate transactions');
+      if (!this.options.setPresentation)
+        throw new Error('Host has no writable presentation sidecar');
+      return { intents, source, projected, presentation: true };
     }
     const prepared = this.options.adapter.prepare(clone(source.content), intents);
     const guarded = command<S>('graph.adapter-edit', prepared.label, (current) => {
@@ -133,9 +171,7 @@ export class GraphBinding<S> {
     const graph = prepared.guarded
       ? this.options.adapter.project(
           clone(source),
-          this.options.adapter.layoutMode === 'sidecar'
-            ? clone(prepared.projected.graph.layout)
-            : undefined,
+          this.mode === 'sidecar' ? clone(prepared.projected.graph.presentation.nodes) : undefined,
         )
       : graphCommand(prepared.projected.profile, prepared.intents).apply(prepared.projected.graph);
     assertGraph(graph, profile);
@@ -159,16 +195,17 @@ export class GraphBinding<S> {
       this.options.execute(prepared.guarded);
       return;
     }
-    const positions = { ...prepared.projected.graph.layout };
-    for (const move of prepared.moves)
-      if (move.type === 'move-node') positions[move.id] = clone(move.position);
-    this.options.setLayout!({
-      schemaVersion: 1,
+    // The validated projection already applies every presentation intent of the batch.
+    const next = graphCommand(prepared.projected.profile, prepared.intents).apply(
+      prepared.projected.graph,
+    );
+    this.options.setPresentation!({
+      schemaVersion: 2,
       sourceId: this.options.sourceId,
       sourceRevision: prepared.source.revision,
       adapter: { id: this.options.adapter.id, version: this.options.adapter.version },
       profile: { id: prepared.projected.profile.id, version: prepared.projected.profile.version },
-      positions,
+      presentation: { nodes: next.presentation.nodes },
     });
   }
   applyProposal(proposal: AdapterProposal) {

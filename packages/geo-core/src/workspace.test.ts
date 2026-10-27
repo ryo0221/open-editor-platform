@@ -504,3 +504,107 @@ it('does not present old joined values after the current native key changes', ()
   style.fieldId = field;
   expect(geoMetricValue(content, layer.id, feature, style).status).toBe('stale-key');
 });
+
+it('#378 Fit leaves room for edge symbols and labels; lines are labelled half way along', () => {
+  const content: GeoDocument = {
+    schemaVersion: 1,
+    sources: [],
+    layers: [
+      {
+        id: 'sites',
+        name: 'Sites',
+        crs: 'OGC:CRS84',
+        axis: 'longitude-latitude',
+        fields: [{ id: 'name', name: 'Name', type: 'string' }],
+        features: [
+          {
+            id: 'north',
+            rowId: 'north-row',
+            geometry: { type: 'Point', coordinates: [140, 40] },
+            values: { name: 'North site' },
+          },
+          {
+            id: 'route',
+            rowId: 'route-row',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [100, 10],
+                [120, 10],
+                [120, 30],
+              ],
+            },
+            values: { name: 'Route' },
+          },
+          {
+            id: 'area',
+            rowId: 'area-row',
+            geometry: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [179, 40],
+                  [-179, 40],
+                  [-179, 44],
+                  [179, 44],
+                  [179, 40],
+                ],
+              ],
+            },
+            values: { name: 'Area' },
+          },
+          {
+            id: 'wrap',
+            rowId: 'wrap-row',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [170, 20],
+                [-170, 20],
+              ],
+            },
+            values: { name: 'Wrap' },
+          },
+        ],
+      },
+    ],
+  };
+  const sites = {
+    ...content,
+    layers: [{ ...content.layers[0], features: content.layers[0].features.slice(0, 2) }],
+  };
+  const [west, south, east, north] = fitGeoExtent(sites);
+  // 40° by 30° of features: 8% of each span on every side.
+  expect([west, east]).toEqual([100 - 3.2, 140 + 3.2]);
+  expect(south).toBeCloseTo(10 - 2.4);
+  expect(north).toBeCloseTo(40 + 2.4);
+  const style = defaultGeoStyle('sites');
+  style.labelFieldId = 'name';
+  content.workspace = { ...emptyGeoWorkspace(), styles: [style] };
+  const svg = renderGeoSvg(
+    content,
+    { extent: [90, 0, 190, 50], width: 1000, height: 520, includeLegend: false },
+    budgets,
+  );
+  const label = (text: string) => {
+    const match = new RegExp(
+      `<text x="([\\d.]+)" y="([\\d.]+)"( text-anchor="end")?[^>]*>${text}<`,
+    ).exec(svg)!;
+    return { x: Number(match[1]), y: Number(match[2]), end: !!match[3] };
+  };
+  const { x: px, y: py } = (() => {
+    const m = /<circle cx="([\d.]+)" cy="([\d.]+)"/.exec(svg)!;
+    return { x: Number(m[1]), y: Number(m[2]) };
+  })();
+  // Half way along the 40° route is its corner at 120°E 10°N.
+  const route = label('Route');
+  expect(route.x).toBeCloseTo(300 + 8);
+  expect(route.end).toBe(false);
+  // The antimeridian line is labelled on itself, at 180°, not at 0°.
+  expect(label('Wrap').x).toBeCloseTo(900 - 8);
+  expect(label('Wrap').end).toBe(true);
+  // An area across the antimeridian is labelled on itself too.
+  expect(label('Area').x).toBeCloseTo(900 - 8);
+  // A label left of the right quarter runs rightwards from its point.
+  expect(label('North site')).toEqual({ x: px + 8, y: py - 8, end: false });
+});

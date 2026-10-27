@@ -1,4 +1,11 @@
-import { Component, createElement, Fragment, type ComponentType, type ReactNode } from 'react';
+import {
+  Component,
+  createElement,
+  Fragment,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from 'react';
 import {
   prepareReactUiComposition,
   reactComponentKey,
@@ -91,6 +98,15 @@ export function ReactComposition({
   mode?: 'edit' | 'interact';
   select?(nodeId: string): void;
 }) {
+  // A controlled input without a data binding keeps a preview-only value in
+  // Interact mode. It never reaches the composition, fixture or export, and a
+  // new document (mode switch, edit) starts again from the composition value.
+  const [local, setLocal] = useState<{ source: ReactUiDocument; values: Map<string, JsonValue> }>({
+    source: document,
+    values: new Map(),
+  });
+  const localValues = local.source === document ? local.values : new Map<string, JsonValue>();
+  const source = document;
   document = prepareReactUiComposition(document, runtime.resolution);
   const nodeMap = new Map(document.nodes.map((node) => [node.id, node]));
   const componentMap = new Map(
@@ -118,6 +134,29 @@ export function ReactComposition({
           runtime,
         );
     }
+    if (mode === 'interact')
+      for (const pair of registered.controlledInputs) {
+        if (node.bindings[pair.valueProp] || node.bindings[pair.eventProp]) continue;
+        const key = `${node.id}\u0000${pair.valueProp}`;
+        const field = registered.props[pair.valueProp];
+        if (localValues.has(key))
+          props[pair.valueProp] = assetValue(field.schema, localValues.get(key)!, runtime);
+        const contract = registered.events[pair.eventProp];
+        props[pair.eventProp] = (...args: unknown[]) => {
+          if (
+            args.length !== contract.parameters.length ||
+            !args.every((v, i) => valueMatches(contract.parameters[i], v))
+          )
+            throw new Error(`Invalid Host event arguments: ${pair.eventProp}`);
+          const value = args[pair.argumentIndex] as JsonValue;
+          if (!valueMatches(field.schema, value)) return;
+          setLocal((current) => {
+            const values = new Map(current.source === source ? current.values : []);
+            values.set(key, value);
+            return { source, values };
+          });
+        };
+      }
     for (const [event, contract] of Object.entries(registered.events))
       if (node.bindings[event]?.kind === 'callback')
         props[event] = (...args: unknown[]) => {

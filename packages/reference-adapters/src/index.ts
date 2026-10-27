@@ -22,6 +22,13 @@ import {
   validateGraph,
   graphElementLabel,
   routeGraphEdge,
+  defaultGraphPosition,
+  fitGraphRoutesToShapes,
+  graphLabelColor,
+  graphShapePath,
+  resolveGraphNodeLook,
+  resolveGraphSectionStyle,
+  graphSectionAncestors,
   type GraphDocument,
   type GraphProfile,
 } from '@editor-platform/structured-graph/model';
@@ -180,7 +187,8 @@ export const graphReferenceAdapter: ReferenceAdapter = {
       nodes.map((n, i) => [
         n.id,
         {
-          ...(graph.layout[n.id] ?? { x: 40 + (i % 3) * 260, y: 40 + Math.floor(i / 3) * 160 }),
+          x: (graph.presentation.nodes[n.id] ?? defaultGraphPosition(i)).x,
+          y: (graph.presentation.nodes[n.id] ?? defaultGraphPosition(i)).y,
           width: 200,
           height: 70,
         },
@@ -193,13 +201,45 @@ export const graphReferenceAdapter: ReferenceAdapter = {
       allBounds: Bounds[] = [...boxes.values()];
     let body =
       '<defs><marker id="reference-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#697386"/></marker></defs>';
+    // Section frames of the shown nodes and their ancestors, outermost first, under everything.
+    const shownSections = new Set(
+      target.nodeIds
+        ? nodes.flatMap((n) =>
+            n.sectionId
+              ? [n.sectionId, ...(graphSectionAncestors(graph.sections, n.sectionId) ?? [])]
+              : [],
+          )
+        : graph.sections.map((s) => s.id),
+    );
+    const frames = graph.sections
+      .filter((s) => shownSections.has(s.id))
+      .map((s) => ({ s, depth: graphSectionAncestors(graph.sections, s.id)?.length ?? 0 }))
+      .sort((a, b) => a.depth - b.depth);
+    for (const { s } of frames) {
+      const b = graph.presentation.sections[s.id],
+        style = resolveGraphSectionStyle(graph, profile, s),
+        color = style.fill ? ` fill="${graphLabelColor(style.fill)}"` : '';
+      allBounds.push(b);
+      body += `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="6" fill="${e(style.fill ?? '#f8fafc')}" stroke="${e(style.stroke ?? '#94a3b8')}" stroke-dasharray="${style.dash?.length ? style.dash.join(' ') : '6 4'}"/><text x="${b.x + 12}" y="${b.y + 24}" font-size="15" font-weight="600"${color}>${e(graphElementLabel(graph, profile, s.id))}</text>`;
+    }
+    const looks = new Map(nodes.map((n) => [n.id, resolveGraphNodeLook(graph, profile, n)]));
     for (const edge of edges) {
-      const route = routeGraphEdge(
-        boxes.get(edge.from)!,
-        boxes.get(edge.to)!,
-        [...boxes.values()],
-        edge.from === edge.to,
-      );
+      const ends = {
+        source: boxes.get(edge.from)!,
+        target: boxes.get(edge.to)!,
+        sourceShape: looks.get(edge.from)!.shape,
+        targetShape: looks.get(edge.to)!.shape,
+      };
+      // The same outline endpoints as the Surface: arrows meet the node shapes.
+      const route = fitGraphRoutesToShapes(
+        new Map([
+          [
+            edge.id,
+            routeGraphEdge(ends.source, ends.target, [...boxes.values()], edge.from === edge.to),
+          ],
+        ]),
+        new Map([[edge.id, ends]]),
+      ).get(edge.id)!;
       if (!route.path)
         throw new ReferenceError(
           'error',
@@ -216,8 +256,15 @@ export const graphReferenceAdapter: ReferenceAdapter = {
       body += `<path d="${e(route.path)}" fill="none" stroke="#697386" stroke-width="2" marker-end="url(#reference-arrow)"/><text x="${route.label.x}" y="${route.label.y - 8}" text-anchor="middle" font-size="14">${e(label)}</text>`;
     }
     for (const node of nodes) {
-      const b = boxes.get(node.id)!;
-      body += `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="8" fill="#eef2ff" stroke="#5269c8"/><text x="${b.x + 12}" y="${b.y + 39}" font-size="18">${e(graphElementLabel(graph, profile, node.id))}</text>`;
+      const b = boxes.get(node.id)!,
+        { shape, style } = looks.get(node.id)!,
+        paint = `fill="${e(style.fill ?? '#eef2ff')}" stroke="${e(style.stroke ?? '#5269c8')}"${style.strokeWidth ? ` stroke-width="${style.strokeWidth}"` : ''}${style.dash?.length ? ` stroke-dasharray="${style.dash.join(' ')}"` : ''}`,
+        text = e(graphElementLabel(graph, profile, node.id)),
+        color = style.fill ? ` fill="${graphLabelColor(style.fill)}"` : '';
+      body +=
+        shape === 'rectangle'
+          ? `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="3" ${paint}/><text x="${b.x + 12}" y="${b.y + 39}" font-size="18"${color}>${text}</text>`
+          : `<path d="${e(graphShapePath(shape, b))}" ${paint}/><text x="${b.x + b.width / 2}" y="${b.y + b.height / 2 + 6}" text-anchor="middle" font-size="18"${color}>${text}</text>`;
     }
     const bounds = allBounds.length
       ? unionBounds(allBounds)

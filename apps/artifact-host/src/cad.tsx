@@ -3,7 +3,7 @@ import { canonicalJson } from '@editor-platform/artifact-core';
 import { CadSurface, createCadBinding } from '@editor-platform/cad';
 import '@editor-platform/cad/style.css';
 import type { CadDocument, CadSession } from '@editor-platform/cad-core';
-import type { CadKernelBuild } from '@editor-platform/cad-kernel-occt';
+import type { CadCatalogBuild, CadKernelCatalog } from '@editor-platform/cad-kernel-occt';
 import KernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type { ArtifactEditor } from '@editor-platform/editor-host';
@@ -19,10 +19,12 @@ import type { HostContent } from './model';
 export default function CadArtifactView({
   host,
   kernel,
+  kernels,
   onError,
 }: {
   host: ArtifactEditor<HostContent>;
-  kernel: CadKernelBuild | null;
+  kernel: CadCatalogBuild | null;
+  kernels?: Omit<CadKernelCatalog, 'current'>;
   onError(error: unknown): void;
 }) {
   const binding = useMemo(() => {
@@ -49,6 +51,7 @@ export default function CadArtifactView({
     const binding = createCadBinding({
       session,
       build: kernel,
+      kernels,
       spawnWorker: () => new KernelWorker() as never,
       canEdit: () => !host.readOnly,
       permissionGeneration: () => generation,
@@ -69,7 +72,7 @@ export default function CadArtifactView({
       }
     };
     return { ...binding, observe };
-  }, [host, kernel]);
+  }, [host, kernel, kernels]);
   useEffect(() => {
     const detach = host.attach(binding.observe);
     // Save, export, close and Host Undo flush inputs first: field drafts commit or refuse, and
@@ -101,11 +104,11 @@ export default function CadArtifactView({
           controller={binding.controller}
           hostHistory
           name={name}
-          onExportPng={(png) => {
+          onExportPng={(png, { background }) => {
             const url = URL.createObjectURL(png);
             const link = Object.assign(document.createElement('a'), {
               href: url,
-              download: `${name}.png`,
+              download: background ? `${name}.png` : `${name}-transparent.png`,
             });
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);

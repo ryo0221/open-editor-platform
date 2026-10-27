@@ -279,6 +279,12 @@ describe('native persistence size boundary', () => {
     await expect(loadHostArtifact(serializeArtifact(persisted!), adapter)).resolves.toEqual(
       first.artifact,
     );
+    // Correct only the draft; keep all saved versions and the existing Undo stack.
+    host.execute(edit('corrected'));
+    const retry = await host.save({ commitVersion: true });
+    expect(retry.artifact.versions.slice(0, 1)).toEqual(first.artifact.versions);
+    expect(host.snapshot.dirty).toBe(false);
+    expect(host.canUndo).toBe(true);
   });
   it('rejects an oversized draft at save and native export without marking it saved', async () => {
     const storage = new MemoryStorage<Artifact<Content>>();

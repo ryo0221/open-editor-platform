@@ -118,8 +118,10 @@ export function transformGeometry(
       roots.map((i) => i.id),
     ),
     box = unionBounds(roots.map((i) => i.bounds));
-  const sx = Math.max(1, box.width + delta.dw) / box.width,
-    sy = Math.max(1, box.height + delta.dh) / box.height;
+  const width = Math.max(1, box.width + delta.dw),
+    height = Math.max(1, box.height + delta.dh),
+    sx = width / box.width,
+    sy = height / box.height;
   const rootAngle = roots.length === 1 ? ((roots[0].rotation ?? 0) * Math.PI) / 180 : 0;
   const angle = ((delta.rotation ?? 0) * Math.PI) / 180,
     cx = box.x + box.width / 2,
@@ -131,8 +133,10 @@ export function transformGeometry(
         let b = {
           x: box.x + (i.bounds.x - box.x) * sx + delta.dx,
           y: box.y + (i.bounds.y - box.y) * sy + delta.dy,
-          width: Math.max(1, i.bounds.width * sx),
-          height: Math.max(1, i.bounds.height * sy),
+          // An item as wide as the selection takes the typed size exactly, not
+          // width × (new / old), which drifts by a float step (807 → 499.99…).
+          width: i.bounds.width === box.width ? width : Math.max(1, i.bounds.width * sx),
+          height: i.bounds.height === box.height ? height : Math.max(1, i.bounds.height * sy),
         };
         if (rootAngle && (delta.dw || delta.dh)) {
           // Resize in a rotated selection's own axes, keeping children in those axes.

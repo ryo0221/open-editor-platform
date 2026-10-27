@@ -33,12 +33,12 @@ simultaneous build/unit/browser jobs. Vitest defaults: two workers, ordinary tim
 5 seconds, existing I07 explicit timeout 60 seconds. Browser defaults: 45-second test,
 10-second expectation, two configured workers (one effective worker for the QA-17 file).
 
-| Check | Original base | Original PR head | Interpretation |
-| --- | --- | --- | --- |
-| I07, exact test-name selection | PASS, 1 selected / 7 not selected | PASS, 1 selected / 7 not selected | Earlier timeout did not reproduce here; this does not erase it or certify full base suite |
-| Full `npm test`, unmodified defaults | PASS, 130 files / 1168 tests | PASS, 133 files / 1180 tests | I07 also passes in each full suite; original reported timeout remains historical, cause not established |
-| Production build | PASS | PASS | Includes typecheck and both Vite builds |
-| QA-17, 390px and 768px | FAIL, 2/2 | FAIL, 2/2 | Both wait for hidden `Next PDF page` at line 64 after toolbar closes |
+| Check                                | Original base                     | Original PR head                  | Interpretation                                                                                          |
+| ------------------------------------ | --------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| I07, exact test-name selection       | PASS, 1 selected / 7 not selected | PASS, 1 selected / 7 not selected | Earlier timeout did not reproduce here; this does not erase it or certify full base suite               |
+| Full `npm test`, unmodified defaults | PASS, 130 files / 1168 tests      | PASS, 133 files / 1180 tests      | I07 also passes in each full suite; original reported timeout remains historical, cause not established |
+| Production build                     | PASS                              | PASS                              | Includes typecheck and both Vite builds                                                                 |
+| QA-17, 390px and 768px               | FAIL, 2/2                         | FAIL, 2/2                         | Both wait for hidden `Next PDF page` at line 64 after toolbar closes                                    |
 
 Commands (same on both checkouts):
 
@@ -79,17 +79,17 @@ not replaced with a claim that the first run passed.
 Tested source: `e45d5d63595f85860ccb7efed9941768e83bd888`. Later changes only record
 verification evidence. The production build uses the exact runtime files at this pin.
 
-| Check | Result |
-| --- | --- |
-| `npm run lint` | PASS |
-| `npm run build` | PASS, typecheck + Playground and React reference builds |
-| `npm run test:tooling` | PASS, 25 tests |
-| `npm run check:files` | PASS, 1110 tracked files, no failures |
-| `npm run public:export -- --ref e45d5d63595f85860ccb7efed9941768e83bd888 --out /tmp/pr250-runtime-public` and `npm run public:check -- /tmp/pr250-runtime-public` | PASS, 828 exported files / 829 including manifest; local only |
-| `npm test` (unmodified defaults, no selection/exclusion) | PASS, 133 files / 1180 tests, including I07 |
-| `npx playwright test --config=playwright.design-prototype.production.config.ts` | PASS, desktop 9 + mobile 2 = 11; native history, local failure/revised-draft retry, delayed rejection/regrant, lost acknowledgement reconciliation |
-| `npx playwright test --config=playwright.production.config.ts --project=mobile --grep 'QA-17'` | PASS, 390px / 768px, all seven surfaces |
-| `npx playwright test --config=playwright.production.config.ts --project=desktop tests/e2e/issue2-persistence.spec.ts` | PASS, 3; failed writes, delayed immutable save with newer draft/annotation, migration/roundtrip |
+| Check                                                                                                                                                             | Result                                                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run lint`                                                                                                                                                    | PASS                                                                                                                                               |
+| `npm run build`                                                                                                                                                   | PASS, typecheck + Playground and React reference builds                                                                                            |
+| `npm run test:tooling`                                                                                                                                            | PASS, 25 tests                                                                                                                                     |
+| `npm run check:files`                                                                                                                                             | PASS, 1110 tracked files, no failures                                                                                                              |
+| `npm run public:export -- --ref e45d5d63595f85860ccb7efed9941768e83bd888 --out /tmp/pr250-runtime-public` and `npm run public:check -- /tmp/pr250-runtime-public` | PASS, 828 exported files / 829 including manifest; local only                                                                                      |
+| `npm test` (unmodified defaults, no selection/exclusion)                                                                                                          | PASS, 133 files / 1180 tests, including I07                                                                                                        |
+| `npx playwright test --config=playwright.design-prototype.production.config.ts`                                                                                   | PASS, desktop 9 + mobile 2 = 11; native history, local failure/revised-draft retry, delayed rejection/regrant, lost acknowledgement reconciliation |
+| `npx playwright test --config=playwright.production.config.ts --project=mobile --grep 'QA-17'`                                                                    | PASS, 390px / 768px, all seven surfaces                                                                                                            |
+| `npx playwright test --config=playwright.production.config.ts --project=desktop tests/e2e/issue2-persistence.spec.ts`                                             | PASS, 3; failed writes, delayed immutable save with newer draft/annotation, migration/roundtrip                                                    |
 
 The same one-line QA-17 test correction was applied temporarily to comparison base
 `ac0252c7fbf6e3d51cfafc0be15e3c2b4624957f` without changing its runtime: both widths PASS

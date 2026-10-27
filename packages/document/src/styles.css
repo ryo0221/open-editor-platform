@@ -295,3 +295,21 @@
   height: auto;
   box-shadow: 0 2px 8px #0002;
 }
+
+.ep-diagram-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 12px;
+}
+.ep-diagram-tools button[aria-pressed='true'] {
+  font-weight: 600;
+}
+.ep-diagram-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.ep-diagram-scroll:focus-visible {
+  outline: 2px solid #4b6bfb;
+  outline-offset: 2px;
+}

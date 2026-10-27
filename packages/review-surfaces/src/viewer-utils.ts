@@ -189,7 +189,11 @@ const SUPPORTED_MIME = /^(image\/(png|jpeg|webp|gif|svg\+xml)$|text\/|applicatio
 
 export function acceptedFileMime(file: File): { mime: string } | { error: string } {
   if (file.size > MAX_FILE_BYTES) return { error: 'Use a file smaller than 32 MB' };
-  const mime = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : 'text/plain');
+  // Some systems report CSV as a spreadsheet type; the viewer reads it as text.
+  const mime =
+    /\.csv$/i.test(file.name) && !file.type.startsWith('text/')
+      ? 'text/csv'
+      : file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : 'text/plain');
   if (!SUPPORTED_MIME.test(mime)) return { error: `Unsupported format: ${mime}` };
   return { mime };
 }

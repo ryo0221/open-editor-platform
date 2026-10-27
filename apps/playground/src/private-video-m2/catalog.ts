@@ -5,6 +5,8 @@ export interface PrivateVideoM2Entry {
   namespace: string;
   name: string;
   updatedAt: string;
+  nativeSchema?: 'v3';
+  origin?: { namespace: string; operationId: string; archiveHash: string };
 }
 export const locatorPrefix = 'ep-private-video-m2-locator@0:';
 type Reader = Pick<Storage, 'getItem' | 'key' | 'length'>;
@@ -16,7 +18,19 @@ function parse(text: string): PrivateVideoM2Entry {
     throw new Error('Private Video M2 locator schema');
   const row = value as Record<string, unknown>;
   if (
-    Object.keys(row).sort().join(',') !== 'id,name,namespace,updatedAt' ||
+    Object.keys(row).sort().join(',') !==
+      [
+        'id',
+        'name',
+        'namespace',
+        'updatedAt',
+        ...(row.origin === undefined ? [] : ['origin']),
+        ...(row.nativeSchema === undefined ? [] : ['nativeSchema']),
+      ]
+        .sort()
+        .join(',') ||
+    (row.nativeSchema !== undefined && row.nativeSchema !== 'v3') ||
+    (row.nativeSchema === 'v3' && row.origin !== undefined) ||
     typeof row.id !== 'string' ||
     !projectIdPattern.test(row.id) ||
     typeof row.namespace !== 'string' ||
@@ -29,6 +43,22 @@ function parse(text: string): PrivateVideoM2Entry {
     !Number.isFinite(Date.parse(row.updatedAt))
   )
     throw new Error('Private Video M2 locator schema');
+  if (row.origin !== undefined) {
+    const origin = row.origin as Record<string, unknown>;
+    if (
+      !origin ||
+      typeof origin !== 'object' ||
+      Array.isArray(origin) ||
+      Object.keys(origin).sort().join(',') !== 'archiveHash,namespace,operationId' ||
+      typeof origin.namespace !== 'string' ||
+      !/^normal-video-[a-f0-9-]{36}$/.test(origin.namespace) ||
+      typeof origin.operationId !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(origin.operationId) ||
+      typeof origin.archiveHash !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(origin.archiveHash)
+    )
+      throw new Error('Private Video M2 origin locator schema');
+  }
   return value as PrivateVideoM2Entry;
 }
 export function readM2Catalog(storage: Reader = localStorage): PrivateVideoM2Entry[] {
@@ -67,4 +97,12 @@ export async function publishM2LocatorLocked(
   await locks.request('normal-video-m2-catalog@0', () => {
     publishM2Locator(entry, expectedNamespace, storage);
   });
+}
+
+/** Reject before opening a journal or allocating a replacement; never rewrite old locators. */
+export function requireCurrentVideoLocator(entry: PrivateVideoM2Entry | undefined) {
+  if (entry && (entry.nativeSchema !== 'v3' || entry.origin))
+    throw new Error(
+      'Unsupported legacy Video project. Current v3 format required; stored data is unchanged.',
+    );
 }

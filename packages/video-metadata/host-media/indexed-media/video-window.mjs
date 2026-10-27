@@ -116,15 +116,18 @@ async function openVideoWindow(original, signal, sourceProfile, budget) {
     const rotation = await track.getRotation();
     need(v1 ? [0, 90].includes(rotation) : rotation === 0, 'Video orientation profile');
     const sink = new EncodedPacketSink(track);
-    async function frameAt(raw, caller) {
-      caller.throwIfAborted();
-      need(!disposed, 'Video index disposed');
-      const target = clock.samples.findIndex(
+    function sampleIndex(raw) {
+      return clock.samples.findIndex(
         (s) =>
           BigInt(s.pts) * BigInt(raw.timescale) <= BigInt(raw.value) * BigInt(clock.scale) &&
           BigInt(s.pts + s.duration) * BigInt(raw.timescale) >
             BigInt(raw.value) * BigInt(clock.scale),
       );
+    }
+    async function frameAt(raw, caller) {
+      caller.throwIfAborted();
+      need(!disposed, 'Video index disposed');
+      const target = sampleIndex(raw);
       need(target >= 0, 'Missing source frame interval');
       if (target >= keyIndex && target < nextKeyIndex) {
         const found = cache.find((r) => r.index === target);
@@ -321,6 +324,20 @@ async function openVideoWindow(original, signal, sourceProfile, budget) {
           },
         );
         return result;
+      },
+      releaseCachedFrames(neededTimes = []) {
+        need(!disposed && queued === 0 && leases === 0, 'Video cache is busy or disposed');
+        if (
+          neededTimes.length &&
+          neededTimes.every((raw) => {
+            const target = sampleIndex(raw);
+            return target >= 0 && target >= keyIndex && target < nextKeyIndex;
+          })
+        )
+          return;
+        clear();
+        keyIndex = -1;
+        nextKeyIndex = -1;
       },
       async dispose() {
         if (!disposed) {

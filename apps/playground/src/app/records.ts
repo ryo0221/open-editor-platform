@@ -1,4 +1,7 @@
+import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './estimate-bim';
+import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { contentHash, deepFreeze, IndexedDBStorage } from '@editor-platform/artifact-core';
+import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import { validateArtifactReferenceHistory } from '../artifact-references';
 import { validateGeoRecord } from '../geo/resources';
@@ -14,15 +17,30 @@ export function editedDraft(record: StoredArtifact, content: Content): StoredArt
 
 /** Validates a stored record (freezing its versions) and opens its local draft session. */
 export async function openStoredRecord(record: StoredArtifact, references: ReferenceResolver) {
-  if (!validContent(record.kind, record.draft.content)) throw new Error('Invalid stored content');
+  if (!validContent(record.kind, record.draft.content))
+    throw new Error(
+      // An older preview format gets its own reason; the record stays exportable.
+      record.kind === 'structured-graph'
+        ? graphSchemaMessage(record.draft.content)
+        : 'Invalid stored content',
+    );
   if (record.versions.some((v) => !validContent(record.kind, v.content)))
     throw new Error('Invalid stored version');
-  if (record.kind === 'structured-graph' || record.kind === 'animation' || record.kind === 'cad') {
+  if (
+    record.kind === 'estimate' ||
+    record.kind === 'analysis' ||
+    record.kind === 'structured-graph' ||
+    record.kind === 'animation' ||
+    record.kind === 'cad' ||
+    record.kind === 'bim'
+  ) {
     for (const v of record.versions)
       if ((await contentHash(v.content)) !== v.contentHash)
         throw new Error('Stored version hash mismatch');
   }
   if (record.kind === 'geo') await validateGeoRecord(record);
+  await verifyAnalysisArtifact(record);
+  await verifyEstimateArtifact(record);
   record.versions.forEach(deepFreeze);
   await validateArtifactReferenceHistory(record, references);
   return createLocalSession(record.draft.content);

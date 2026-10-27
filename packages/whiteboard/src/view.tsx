@@ -53,6 +53,7 @@ import { BoardNavigator } from './board-navigator';
 import { BoardInspector } from './board-inspector';
 import { BoardToolbar } from './board-toolbar';
 import { BoardConnectorLayer, useEndpointDrag } from './board-connectors';
+import { freeBounds } from './placement';
 export interface WhiteboardSurfaceProps extends ReferenceSurfaceProps {
   content: WhiteboardContent;
   execute: (command: EditorCommand<WhiteboardContent>) => void | boolean;
@@ -68,7 +69,7 @@ function sectionAction(apply: Apply, section: WhiteboardSection, a: string) {
     return apply(updateSection(section.id, { locked: a === 'lock' }));
   throw new Error('Use Section actions for this region; grouping and scaling apply to objects.');
 }
-/** Centers a new node in the viewport unless the caller placed it. */
+/** Centers a new node in the viewport, clear of other nodes, unless the caller placed it. */
 function placedNode(
   content: WhiteboardContent,
   kind: WhiteboardNodeKind,
@@ -80,7 +81,11 @@ function placedNode(
   if (!patch.bounds) {
     const x = rect ? (rect.width / 2 - view.pan.x) / view.zoom : 500,
       y = rect ? (rect.height / 2 - view.pan.y) / view.zoom : 310;
-    node.bounds = { ...node.bounds, x: x - node.bounds.width / 2, y: y - node.bounds.height / 2 };
+    node.bounds = freeBounds(content, {
+      ...node.bounds,
+      x: x - node.bounds.width / 2,
+      y: y - node.bounds.height / 2,
+    });
   }
   node.sectionId = sectionAt(content, node.bounds)?.id;
   return node;
@@ -256,7 +261,8 @@ export function WhiteboardSurface({
   const [view, setView] = useSavedView(layout?.viewKey),
     [pen, setPen] = useState(false),
     [error, setError] = useState(''),
-    [reference, setReference] = useState('selection');
+    [reference, setReference] = useState('selection'),
+    [editText, setEditText] = useState<{ id: string }>();
   const drag = useEndpointDrag();
   const clipboard = useRef<WhiteboardContent | undefined>(undefined),
     viewport = useRef<HTMLDivElement>(null);
@@ -286,6 +292,8 @@ export function WhiteboardSurface({
       command('whiteboard.insert', `Insert ${kind}`, (d) => ({ ...d, nodes: [...d.nodes, node] })),
     );
     choose([node.id]);
+    // A new sticky opens for typing right away; Escape keeps its first text.
+    if (kind === 'sticky') setEditText({ id: node.id });
   }
   async function image(file: File, position?: Point) {
     try {
@@ -374,6 +382,7 @@ export function WhiteboardSurface({
             applySection(createSection(bounds, `Section ${(content.sections?.length ?? 0) + 1}`));
             setSectionTool(false);
           }}
+          editText={editText}
           freehand={pen}
           onFreehand={(points) => {
             add('freehand', freehandNode(points));

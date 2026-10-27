@@ -113,10 +113,18 @@ test('reading Host: custom node dimensions align with ports and switch back to a
   const original = await readingSnapshot(page);
   await expect(page.locator('[data-node-id="n0"]')).toHaveCSS('width', '320px');
   await expect(page.locator('[data-node-id="n0"]')).toHaveCSS('height', '140px');
-  await expect(page.locator('[data-edge-id="e0-1-0"] > path').first()).toHaveAttribute(
-    'd',
-    /^M220,120 /,
-  );
+  // Parallel connections spread their ports along the node side, 6px clear of its corners.
+  const port = async () => {
+    const d = await page.locator('[data-edge-id="e0-1-0"] > path').first().getAttribute('d');
+    const [, x, y] = /^M([\d.]+),([\d.]+) /.exec(d ?? '') ?? [];
+    return { x: Number(x), y: Number(y) };
+  };
+  await expect
+    .poll(async () => {
+      const { x, y } = await port();
+      return x === 220 && y >= 56 && y <= 184;
+    })
+    .toBe(true);
   await page.getByLabel('Custom node sizes', { exact: true }).uncheck();
   await expect(page.locator('[data-node-id="n0"]')).toHaveCSS('width', '200px');
   await expect
@@ -124,8 +132,8 @@ test('reading Host: custom node dimensions align with ports and switch back to a
       const height = await page
         .locator('[data-node-id="n0"]')
         .evaluate((el) => parseFloat((el as HTMLElement).style.height));
-      const path = await page.locator('[data-edge-id="e0-1-0"] > path').first().getAttribute('d');
-      return height >= 70 && path?.startsWith(`M100,${50 + height / 2} `);
+      const { x, y } = await port();
+      return height >= 70 && x === 100 && y >= 56 && y <= 50 + height - 6;
     })
     .toBe(true);
   expect(await readingSnapshot(page)).toEqual(original);

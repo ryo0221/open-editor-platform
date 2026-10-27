@@ -77,7 +77,6 @@ CI passes 408 units / 165 browser cases / 19 Office pages, and all three perform
 repetitions meet the original standard-fixture goals. Raw evidence is tracked in the
 #11 verification record.
 
-
 ## Document DOCX
 
 Document's existing **Export document → Export DOCX** menu opens the same style of

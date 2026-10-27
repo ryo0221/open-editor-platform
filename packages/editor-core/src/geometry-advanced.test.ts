@@ -16,6 +16,13 @@ const objects: GeometryItem[] = [
   { id: 'c', bounds: { x: 180, y: 160, width: 30, height: 40 } },
 ];
 describe('visual geometry contract', () => {
+  it('gives a single item the typed width and height exactly', () => {
+    const item = { id: 'a', bounds: { x: 77, y: 43, width: 807, height: 454 } };
+    const b = transformGeometry([item], ['a'], { dx: 0, dy: 0, dw: 500 - 807, dh: 300 - 454 }).get(
+      'a',
+    )!.bounds;
+    expect(b).toEqual({ x: 77, y: 43, width: 500, height: 300 });
+  });
   it('uses oriented geometry for marquee hit testing', () => {
     const box = { x: 100, y: 100, width: 200, height: 20 };
     expect(intersectsRotated({ x: 190, y: 20, width: 20, height: 10 }, box, 90)).toBe(true);

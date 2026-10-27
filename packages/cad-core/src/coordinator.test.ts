@@ -363,3 +363,154 @@ describe('CadCoordinator geometry state and recovery', () => {
     expect(coordinator.cachedContentHashes().length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('kernel update: reference display and explicit migration (CAD17)', () => {
+  const newer = `sha256:${'b'.repeat(64)}`;
+  it('shows a declared reference evaluation but never prepares an edit from one', async () => {
+    const { session, kernel, coordinator, widen } = setup();
+    const hash = cadContentHash(session.content);
+    const shown = coordinator.refresh();
+    await kernel.finish(0, { buildHash: newer, reference: true });
+    expect(await shown).toBe('ready');
+    expect(coordinator.reference).toBe(true);
+    expect(coordinator.evaluation).toMatchObject({ buildHash: newer, reference: true });
+    // An undeclared result from another build is still refused.
+    const other = new CadCoordinator({
+      session: new EditorSession(f02Plate()),
+      kernel: kernel.port,
+      canEdit: () => true,
+      permissionGeneration: () => 1,
+    });
+    const refused = other.refresh();
+    await kernel.finish(1, { buildHash: newer });
+    expect(await refused).toBe('geometry-error');
+    expect(other.evaluation).toMatchObject({ code: 'kernel-build-mismatch' });
+
+    const pending = widen(90);
+    await kernel.finish(2, { buildHash: newer, reference: true });
+    expect(await pending).toEqual({ status: 'rejected', code: 'kernel-reference-only' });
+    expect(cadContentHash(session.content)).toBe(hash);
+  });
+
+  it('migrates with one undoable edit evaluated exactly by the new build', async () => {
+    const { session, kernel, coordinator } = setup();
+    const before = structuredClone(session.content);
+    const pending = coordinator.prepare({
+      type: 'setKernelBuild',
+      kernelId: 'newer-kernel',
+      buildHash: newer,
+    });
+    expect(kernel.jobs[0].request.document.kernelProfile).toMatchObject({
+      id: 'newer-kernel',
+      buildHash: newer,
+    });
+    await kernel.finish(0, { buildHash: newer });
+    const prepared = await pending;
+    if (prepared.status !== 'ready') throw new Error(prepared.status);
+    expect(coordinator.apply(prepared.ticket).status).toBe('applied');
+    expect(session.content.kernelProfile.buildHash).toBe(newer);
+    expect(session.canUndo).toBe(true);
+    void coordinator.undo();
+    expect(session.content).toEqual(before);
+  });
+
+  it('refuses a migration to the same build or to a malformed hash', async () => {
+    const { coordinator } = setup();
+    const same = await coordinator.prepare({
+      type: 'setKernelBuild',
+      kernelId: 'k',
+      buildHash: fixtureKernel.buildHash,
+    });
+    expect(same).toEqual({ status: 'rejected', code: 'kernel-build-unchanged' });
+    const bad = await coordinator.prepare({
+      type: 'setKernelBuild',
+      kernelId: 'k',
+      buildHash: 'https://example.com/kernel.wasm',
+    });
+    expect(bad.status).toBe('rejected');
+  });
+});
+
+describe('CadCoordinator stored-size admission (CAD23)', () => {
+  function admitted(
+    admit: (receipt: unknown) => string | undefined,
+    count?: () => Promise<unknown>,
+  ) {
+    const session = new EditorSession(f02Plate());
+    const kernel = fakeKernel();
+    const calls: string[] = [];
+    const coordinator = new CadCoordinator({
+      session,
+      kernel: {
+        evaluate: (request) => {
+          calls.push('evaluate');
+          return kernel.port.evaluate(request);
+        },
+        cancel: kernel.port.cancel,
+      },
+      canEdit: () => true,
+      permissionGeneration: () => 1,
+      admission: {
+        prepare: (candidate, hash) => {
+          calls.push('count');
+          expect(hash).toBe(cadContentHash(candidate));
+          return count ? count() : Promise.resolve({ hash });
+        },
+        admit: (receipt, candidate) => {
+          calls.push('admit');
+          expect(receipt).toEqual({ hash: cadContentHash(candidate) });
+          return admit(receipt);
+        },
+      },
+    });
+    const prepare = async () => {
+      const pending = coordinator.prepare({ type: 'setParameter', parameterId: 'W', value: 100 });
+      await kernel.finish();
+      return pending;
+    };
+    return { session, coordinator, calls, prepare };
+  }
+
+  it('counts while the kernel evaluates and admits again directly before applying', async () => {
+    const { coordinator, calls, prepare } = admitted(() => undefined);
+    const prepared = await prepare();
+    expect(calls).toEqual(['evaluate', 'count']);
+    if (prepared.status !== 'ready') throw new Error(prepared.status);
+    expect(coordinator.apply(prepared.ticket).status).toBe('applied');
+    expect(calls).toEqual(['evaluate', 'count', 'admit']);
+    expect(width(coordinator)).toBe(100);
+  });
+
+  it('admits the candidate it counted, whatever the caller does to the returned preview', async () => {
+    const { coordinator, prepare } = admitted(() => undefined);
+    const prepared = await prepare();
+    if (prepared.status !== 'ready') throw new Error(prepared.status);
+    // The admit callback checks the receipt against the candidate it is given.
+    prepared.candidate.parameters[0]!.value = 1;
+    prepared.candidate.assets = [];
+    expect(coordinator.apply(prepared.ticket).status).toBe('applied');
+    expect(width(coordinator)).toBe(100);
+  });
+
+  it('a refused size leaves content and history unchanged', async () => {
+    const { session, coordinator, prepare } = admitted(() => 'native-too-large');
+    const before = cadContentHash(session.content);
+    const prepared = await prepare();
+    if (prepared.status !== 'ready') throw new Error(prepared.status);
+    expect(coordinator.apply(prepared.ticket)).toEqual({
+      status: 'rejected',
+      code: 'native-too-large',
+    });
+    expect(cadContentHash(session.content)).toBe(before);
+    expect(session.canUndo).toBe(false);
+  });
+
+  it('a count that fails refuses the edit instead of passing it', async () => {
+    const { session, prepare } = admitted(
+      () => undefined,
+      () => Promise.reject(new Error('out of memory')),
+    );
+    expect(await prepare()).toEqual({ status: 'rejected', code: 'native-size-unavailable' });
+    expect(session.canUndo).toBe(false);
+  });
+});

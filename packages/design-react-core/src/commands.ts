@@ -1,6 +1,6 @@
 import { clone } from '@editor-platform/artifact-core';
 import {
-  command,
+  command as nativeCommand,
   immutableCommand,
   withCommandReads,
   type EditorCommand,
@@ -34,6 +34,19 @@ import {
   type DesignReactBundle,
 } from './convert';
 import { reuseHash } from '@editor-platform/reuse-core';
+function command(
+  type: string,
+  label: string,
+  apply: (d: DesignContent) => DesignContent,
+): EditorCommand<DesignContent> {
+  return nativeCommand(type, label, (d) => {
+    if (!isDesign(d))
+      throw new Error('Structured paths/schema3 are not supported by React commands');
+    const next = apply(d);
+    if (!isDesign(next)) throw new Error('React command produced unsupported native Design');
+    return next;
+  });
+}
 export function configureDesignWeb(settings: DesignWebSettings): EditorCommand<DesignContent> {
   return command('design.web.configure', 'Configure React Web export', (d) => ({
     ...d,
@@ -378,6 +391,8 @@ export function mapDesignElementToReact(
   registration: RegisteredReactComponent,
 ): EditorCommand<DesignContent> {
   return command('design.react.map', 'Map selected native element to registered React', (d) => {
+    if (!isDesign(d))
+      throw new Error('Structured paths/schema3 are not supported by React commands');
     const existing = d.elements.find((e) => e.id === id);
     if (!d.web || !existing || existing.type === 'instance')
       throw new Error('Choose an ordinary native element');

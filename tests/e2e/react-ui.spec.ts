@@ -201,3 +201,48 @@ test('W3 nested Library edits, slot movement, duplicate/delete and responsive to
   await expect(frame.getByRole('region', { name: 'Reference card' })).toHaveCSS('display', 'flex');
   await page.screenshot({ path: info.outputPath('react-ui-w3-tokens-desktop.png') });
 });
+test('W3 an unbound input types into a preview-only value that never reaches the composition', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New React UI', exact: true }).click();
+  await page.getByLabel('Target slot', { exact: true }).selectOption({ label: 'card / body' });
+  await page.getByRole('button', { name: 'Insert Input', exact: true }).click();
+  await expect(page.getByLabel('Prop value', { exact: true })).toHaveValue('');
+  const frame = page.frameLocator('iframe[title="React component preview"]');
+  const textbox = frame.getByRole('textbox', { name: 'Name', exact: true });
+  await expect(textbox).toBeVisible();
+  const before = (await nativeArtifact(page)).draft.content;
+  await page.getByRole('button', { name: 'Interact', exact: true }).click();
+  await expect(page.locator('iframe[title="React component preview"]')).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
+  await textbox.fill('Aki');
+  await expect(textbox).toHaveValue('Aki');
+  await textbox.press('End');
+  await textbox.pressSequentially(' Mori');
+  await expect(textbox).toHaveValue('Aki Mori');
+  expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  await page.getByRole('button', { name: 'Edit composition', exact: true }).click();
+  await expect(textbox).toHaveValue('');
+  await expect(page.getByLabel('Prop value', { exact: true })).toHaveValue('');
+  await page.getByRole('button', { name: 'Interact', exact: true }).click();
+  await expect(textbox).toHaveValue('');
+});
+test('W3 a preview host that never answers is named instead of loading forever', async ({
+  page,
+}) => {
+  await page.route('http://127.0.0.1:5174/**', (route) => route.abort());
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New React UI', exact: true }).click();
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Preview host not responding' }),
+  ).toContainText('http://127.0.0.1:5174', { timeout: 15_000 });
+  await expect(page.getByRole('status').filter({ hasText: 'Restart preview' })).toBeVisible();
+  await page.unroute('http://127.0.0.1:5174/**');
+  await page.getByRole('button', { name: 'Restart preview', exact: true }).click();
+  const frame = page.frameLocator('iframe[title="React component preview"]');
+  await expect(frame.getByText('Color study', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Preview ready' })).toBeVisible();
+});

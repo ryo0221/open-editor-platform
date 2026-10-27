@@ -2,7 +2,7 @@ import { clone } from '@editor-platform/artifact-core';
 import { type ReferenceItem, type ReferenceResolver } from '@editor-platform/artifact-references';
 import { isDeck } from '@editor-platform/slide/model';
 import { isDocument } from '@editor-platform/document/model';
-import { isDesign } from '@editor-platform/design/model';
+import { isDesignWithPaths } from '@editor-platform/design/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { assertSchedule, isSchedule } from '@editor-platform/schedule/model';
 import type { Content, StoredArtifact } from './model';
@@ -21,7 +21,7 @@ export async function validateArtifactReferenceHistory(
 export function artifactReferenceItems(content: Content): ReferenceItem[] {
   if (isDeck(content)) return content.slides.flatMap((s) => s.objects);
   if (isDocument(content)) return content.blocks;
-  if (isDesign(content)) return content.elements;
+  if (isDesignWithPaths(content)) return content.elements;
   if (isWhiteboard(content)) return content.nodes;
   if (isSchedule(content)) return content.lanes;
   return [];
@@ -43,7 +43,7 @@ export async function captureArtifactReferences(
       offset += page.objects.length;
     }
   } else if (isDocument(result)) result.blocks = captured as typeof result.blocks;
-  else if (isDesign(result)) result.elements = captured as typeof result.elements;
+  else if (isDesignWithPaths(result)) result.elements = captured as typeof result.elements;
   else if (isWhiteboard(result)) result.nodes = captured as typeof result.nodes;
   // Lanes keep only their reference; the projection image is not Schedule content.
   else if (isSchedule(result)) {

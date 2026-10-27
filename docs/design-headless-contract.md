@@ -8,17 +8,23 @@ Public entrypoint: `@editor-platform/design/model` (Node-safe, without React/CSS
 
 ```ts
 const add = insertElement('text', {
-  id: 'heading', parentId: 'frame', index: 1,
+  id: 'heading',
+  parentId: 'frame',
+  index: 1,
   bounds: { x: 40, y: 50, width: 240, height: 80 },
 });
 session.execute(add); // add.elementId is stable even when id was omitted
-const preview = previewDesignIntents(session.content, [
-  { type: 'update', id: add.elementId, patch: { text: 'New heading' } },
-], { baseLocalRevision: session.revision });
-session.execute(prepareDesignIntentApplication(preview.intentProposal, {
-  readRevision: () => session.revision,
-  writable: () => hostCanEdit(),
-}));
+const preview = previewDesignIntents(
+  session.content,
+  [{ type: 'update', id: add.elementId, patch: { text: 'New heading' } }],
+  { baseLocalRevision: session.revision },
+);
+session.execute(
+  prepareDesignIntentApplication(preview.intentProposal, {
+    readRevision: () => session.revision,
+    writable: () => hostCanEdit(),
+  }),
+);
 ```
 
 The example assumes an existing frame and a Host-owned `EditorSession`. A Host
@@ -112,20 +118,20 @@ frame references; unrelated edits do not rewrite retained broken links.
 
 ## Capability and acceptance matrix
 
-| Capability | Scope / acceptance evidence |
-| --- | --- |
-| N01–N05 model, validation, versions, commands/history | Node tests for stable IDs, exact placement/order, ownership of inputs, invalid patches and atomic batches |
-| N06/N07 independent and ordinary Host | Public-only independent Host and existing ordinary Design editing in production Chromium |
-| N08/N11 selection, keyboard, mobile | Existing Surface behavior, exposed inserted ID and desktop/mobile inspection; no new gestures/IME engine |
-| N09/N12 permissions and untrusted data | Bounded JSON parser; commit-time access/revision/target checks and unchanged failure histories |
-| N10 native persistence | Existing schema 1/2; save/reload/JSON roundtrip, preserved prior native data |
-| N13/N14 reproducibility/docs | Lint/typecheck/unit/build, focused desktop/mobile regressions and verification report |
-| C03 headless/proposals | Typed JSON, pure preview, stale/ABA/revocation and one-step Undo/Redo |
-| C04 shared | Commands continue through existing trusted native transaction/proposal adapters; no separate shared intent runtime |
-| C01/C02 text/annotation | Existing native text/anchor behavior; no new text engine or annotation feature |
-| C05/C06/C08 template/reuse/React | Preserve native contracts and existing regression coverage; no new authoring/bridge capability |
-| C07/C09 formats/large assets | No new formats, asset fetching or storage/durability promise |
-| C10/performance/release | Physical devices, native IME, other browsers and new performance acceptance remain NOT RUN; no Actions dispatch, product trial, public sync or deployment |
+| Capability                                            | Scope / acceptance evidence                                                                                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N01–N05 model, validation, versions, commands/history | Node tests for stable IDs, exact placement/order, ownership of inputs, invalid patches and atomic batches                                                 |
+| N06/N07 independent and ordinary Host                 | Public-only independent Host and existing ordinary Design editing in production Chromium                                                                  |
+| N08/N11 selection, keyboard, mobile                   | Existing Surface behavior, exposed inserted ID and desktop/mobile inspection; no new gestures/IME engine                                                  |
+| N09/N12 permissions and untrusted data                | Bounded JSON parser; commit-time access/revision/target checks and unchanged failure histories                                                            |
+| N10 native persistence                                | Existing schema 1/2; save/reload/JSON roundtrip, preserved prior native data                                                                              |
+| N13/N14 reproducibility/docs                          | Lint/typecheck/unit/build, focused desktop/mobile regressions and verification report                                                                     |
+| C03 headless/proposals                                | Typed JSON, pure preview, stale/ABA/revocation and one-step Undo/Redo                                                                                     |
+| C04 shared                                            | Commands continue through existing trusted native transaction/proposal adapters; no separate shared intent runtime                                        |
+| C01/C02 text/annotation                               | Existing native text/anchor behavior; no new text engine or annotation feature                                                                            |
+| C05/C06/C08 template/reuse/React                      | Preserve native contracts and existing regression coverage; no new authoring/bridge capability                                                            |
+| C07/C09 formats/large assets                          | No new formats, asset fetching or storage/durability promise                                                                                              |
+| C10/performance/release                               | Physical devices, native IME, other browsers and new performance acceptance remain NOT RUN; no Actions dispatch, product trial, public sync or deployment |
 
 Actual PASS/FAIL/NOT RUN/N/A outcomes and reproducible commands are recorded in
 [the verification report](verification/issues-294-295/README.md).

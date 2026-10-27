@@ -71,10 +71,20 @@ test.describe('reference artifact Host', () => {
     await parameters(page).getByRole('button', { name: /Width/ }).click();
     await page.locator('.cad-inspector').getByLabel('Value (mm)').fill('');
     await page.getByRole('button', { name: '保存してアプリに戻る', exact: true }).click();
-    await expect(page.locator('.host-error')).toContainText('有効な');
+    await expect(page.locator('.host-error')).toContainText('数か式を入力してください');
     await expect(list).toHaveCount(0);
     await setWidth(page, '120');
     await ready(page);
+
+    // The export dialog is an export scope: the Host's input guard lets it prepare the file.
+    await (await tool(page, 'Export STEP, STL or GLB')).click();
+    const dialog = page.getByRole('dialog', { name: 'Export 3D file' });
+    await dialog.getByLabel(/^GLB/).check();
+    await dialog.getByRole('button', { name: 'Prepare file' }).click();
+    await expect(dialog.getByLabel('Export report')).toContainText('Y-up');
+    const download = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Save GLB' }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.glb$/);
 
     const viewOnly = page.getByLabel('閲覧モード', { exact: true });
     await viewOnly.check();
@@ -144,7 +154,7 @@ test('independent Host reports invalid input and storage failures', async ({ pag
   await parameters(page).getByRole('button', { name: /Width/ }).click();
   await page.locator('.cad-inspector').getByLabel('Value (mm)').fill('');
   await save.click();
-  await expect(hostAlert(page)).toContainText('有効な');
+  await expect(hostAlert(page)).toContainText('数か式を入力してください');
   await expect(page.getByLabel('Host event')).toHaveText('');
   await setWidth(page, '90');
   await ready(page);

@@ -14,7 +14,7 @@ export interface GraphDefinitionSource {
   profile: GraphProfile;
 }
 export interface GraphDefinitionChange {
-  scope: 'graph' | 'node' | 'edge';
+  scope: 'graph' | 'node' | 'edge' | 'section';
   type?: string;
   definition: GraphType | GraphProfile['edges'][string];
 }
@@ -36,6 +36,9 @@ export interface GraphSourceActions {
   onOpenDefinition?: (elementId: string) => void;
   onEditDefinition?: (request: GraphDefinitionRequest) => void | boolean;
 }
+/** The Profile map that holds the types of a non-graph scope. */
+const typeMap = (scope: 'node' | 'edge' | 'section') =>
+  scope === 'node' ? 'nodes' : scope === 'edge' ? 'edges' : 'sections';
 function convert(value: JsonValue, field: AttributeSchema): JsonValue {
   if (value === null) return null;
   if (field.type === 'string' && ['number', 'boolean'].includes(typeof value)) return String(value);
@@ -62,19 +65,15 @@ export function previewGraphDefinition(
   const profile = clone(source.profile);
   if (
     change.scope !== 'graph' &&
-    (!change.type ||
-      !Object.hasOwn(profile[change.scope === 'node' ? 'nodes' : 'edges'], change.type))
+    (!change.type || !Object.hasOwn(profile[typeMap(change.scope)], change.type))
   )
     throw new Error('Choose an existing Graph type');
   const original =
-    change.scope === 'graph'
-      ? profile.graph
-      : profile[change.scope === 'node' ? 'nodes' : 'edges'][change.type!];
+    change.scope === 'graph' ? profile.graph : profile[typeMap(change.scope)][change.type!];
   if (Object.keys(original.schema).some((field) => !Object.hasOwn(change.definition.schema, field)))
     throw new Error('既存の属性は削除できません。値と参照を保持したまま定義を変更してください。');
   if (change.scope === 'graph') profile.graph = clone(change.definition);
-  else
-    profile[change.scope === 'node' ? 'nodes' : 'edges'][change.type!] = clone(change.definition);
+  else profile[typeMap(change.scope)][change.type!] = clone(change.definition);
   profile.version++;
   assertGraphProfile(profile);
   const graph = clone(source.graph);
@@ -84,9 +83,12 @@ export function previewGraphDefinition(
   const targets =
     change.scope === 'graph'
       ? [graph]
-      : (change.scope === 'node' ? graph.nodes : graph.edges).filter(
-          (element) => element.type === change.type,
-        );
+      : (change.scope === 'node'
+          ? graph.nodes
+          : change.scope === 'edge'
+            ? graph.edges
+            : graph.sections
+        ).filter((element) => element.type === change.type);
   for (const target of targets) {
     changedIds.push(target.id);
     for (const [key, field] of Object.entries(change.definition.schema)) {

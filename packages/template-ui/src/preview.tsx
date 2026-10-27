@@ -124,6 +124,8 @@ export function TemplatePreview({
   const [scope, setScope] = useState('');
   const [zoom, setZoom] = useState(100);
   if (!content) return settingsPreview(settings);
+  if (domain === 'design' && !isDesign(content))
+    return <p role="status">Structured paths/schema3 are not supported by templates.</p>;
   const choices = scopeChoices(domain, content);
   const selected = choices.some((c) => c.id === scope) ? scope : '';
   const source = previewSource(domain, content, compact, page, selected);

@@ -1,0 +1,73 @@
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: #f7f8f6;
+  color: #17221d;
+}
+* {
+  box-sizing: border-box;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  min-height: 36px;
+}
+.authoring-host {
+  max-width: 1500px;
+  margin: auto;
+  padding: 16px;
+}
+.authoring-host nav,
+.authoring-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.authoring-host pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+.authoring-editor {
+  height: 760px;
+  min-height: 0;
+  border: 1px solid #bbb;
+}
+.authoring-host output {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.authoring-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.authoring-pages figure {
+  margin: 0;
+  width: min(280px, 100%);
+}
+.authoring-pages img {
+  width: 100%;
+  border: 1px solid #bbb;
+}
+.authoring-host [aria-label='Derived chapter output'] > .ep-layout {
+  height: 650px;
+}
+@media (max-width: 600px) {
+  .authoring-host {
+    padding: 8px;
+  }
+  .authoring-editor {
+    height: 650px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+}

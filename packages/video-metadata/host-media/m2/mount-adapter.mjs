@@ -1,7 +1,13 @@
 /** Private Video-owned bridge. Registration, locators and publication remain caller-owned. */
 import { mountV2Host } from './host-v2';
 
-export async function prepareV2Workspace({ factory, codec, file, assertCanLeave }) {
+export async function prepareV2Workspace({
+  factory,
+  codec,
+  file,
+  assertCanLeave,
+  mountHost = mountV2Host,
+}) {
   if (typeof assertCanLeave !== 'function') throw Error('Host leave guard required');
   const target = globalThis.document.createElement('section');
   let epoch = 0;
@@ -13,7 +19,7 @@ export async function prepareV2Workspace({ factory, codec, file, assertCanLeave 
       },
       true,
     );
-  const host = await mountV2Host(target, factory, codec, file, { externalSwitching: true });
+  const host = await mountHost(target, factory, codec, file, { externalSwitching: true });
   let disposed = false;
   try {
     const initialHash = (await host.snapshot()).hash;

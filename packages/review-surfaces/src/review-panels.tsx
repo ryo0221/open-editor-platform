@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronUp, ChevronDown, Settings2, Search, Plus } from 'lucide-react';
 import type { Annotation, ElementAddress, Region } from '@editor-platform/editor-core';
 import { IconButton } from '@editor-platform/editor-ui';
@@ -96,6 +96,44 @@ function ReviewAnnotationItem({
   );
 }
 
+/** Comments on the selected lines without leaving the inspector; the Host anchors and stores them. */
+function ReviewCommentForm({
+  canComment,
+  onAddComment,
+}: {
+  canComment: boolean;
+  onAddComment(body: string): Promise<boolean | undefined> | boolean | undefined;
+}) {
+  const [body, setBody] = useState(''),
+    [sending, setSending] = useState(false);
+  return (
+    <form
+      className="ep-review-comment"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const text = body.trim();
+        if (!canComment || !text || sending) return;
+        setSending(true);
+        try {
+          if (await onAddComment(text)) setBody((current) => (current === body ? '' : current));
+        } finally {
+          setSending(false);
+        }
+      }}
+    >
+      <textarea
+        aria-label="Comment on selected lines"
+        placeholder="Comment on selected lines"
+        rows={2}
+        value={body}
+        disabled={!canComment}
+        onChange={(e) => setBody(e.target.value)}
+      />
+      <button disabled={!canComment || !body.trim() || sending}>Add line comment</button>
+    </form>
+  );
+}
+
 export function ReviewInspector({
   content,
   file,
@@ -105,6 +143,8 @@ export function ReviewInspector({
   annotations,
   readOnly,
   range,
+  canComment,
+  onAddComment,
   onOpenAnnotation,
   onRemapAnnotation,
 }: {
@@ -116,6 +156,8 @@ export function ReviewInspector({
   annotations: Annotation[];
   readOnly: boolean;
   range: ReviewRange | undefined;
+  canComment: boolean;
+  onAddComment?(body: string): Promise<boolean | undefined> | boolean | undefined;
   onOpenAnnotation(address: ElementAddress, current: boolean): Promise<void>;
   onRemapAnnotation?(annotationId: string, region: Region, fileId: string): void;
 }) {
@@ -128,6 +170,9 @@ export function ReviewInspector({
       </p>
       <p>Click a line; Shift-click to select a range on the same side.</p>
       <h3>Anchored comments</h3>
+      {onAddComment && (
+        <ReviewCommentForm canComment={canComment && !!range} onAddComment={onAddComment} />
+      )}
       {notice && <p role="status">{notice}</p>}
       {sourceDialog}
       {annotations

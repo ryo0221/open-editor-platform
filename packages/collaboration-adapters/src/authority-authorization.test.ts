@@ -4,16 +4,18 @@ import {
   initial,
   operation,
   proposal,
+  type ExternalCheck,
   type Principal,
   type Receipt,
 } from '@editor-platform/collaboration-core';
+import type { CurrentRead } from '@editor-platform/artifact-core';
 import { setField, slideCodec } from './canvas';
 import { person, slideFixture } from './fixtures';
 
 const A = person('A'),
   B = person('B'),
   C = person('C');
-function setup(now = () => 1000, externalCheck?: (reference: string, version: string) => boolean) {
+function setup(now = () => 1000, externalCheck?: ExternalCheck) {
   return new Authority(
     slideCodec,
     initial('authz', slideCodec, slideFixture()),
@@ -207,5 +209,66 @@ describe('backup restoration', () => {
     expect(restored.preview(A, p.id).token).toBeTruthy();
     external = false;
     expect(() => restored.preview(A, p.id)).toThrow('External read dependency changed');
+  });
+});
+
+describe('external read versions (Issue #402)', () => {
+  it('keeps the reason and the changed reference on a stale proposal, and changes nothing', () => {
+    // Host-attested current versions, asked synchronously at each preview and apply.
+    const current = new Map<string, CurrentRead>([
+      ['calendar', { status: 'available', versionId: 'cal-v1' }],
+      ['data', { status: 'available', versionId: 'data-v1' }],
+    ]);
+    const authority = setup(
+        () => 1000,
+        (reference) => current.get(reference) ?? { status: 'missing' },
+      ),
+      p = proposal(authority, 'C', [setField('shape2', 'fill', '#aabbcc')], null, 'Agent fill');
+    authority.register(C, {
+      ...p,
+      external: [
+        { reference: 'calendar', version: 'cal-v1' },
+        { reference: 'data', version: 'data-v1' },
+      ],
+    });
+    const before = fill(authority, 'shape2');
+    const preview = authority.preview(A, p.id);
+    // Another person changes the referenced Calendar between review and apply.
+    current.set('calendar', { status: 'available', versionId: 'cal-v2' });
+    current.set('data', { status: 'forbidden' });
+    const receipt = authority.applyProposal(A, p.id, preview.token);
+    expect(receipt).toMatchObject({
+      status: 'rejected',
+      code: 'stale-precondition',
+      keys: ['external:calendar', 'external:data'],
+    });
+    const state = authority.proposal(p.id)!;
+    expect(state.state).toBe('conflicted');
+    expect(state.stale).toEqual([
+      {
+        artifactId: 'calendar',
+        role: 'reference',
+        expectedVersionId: 'cal-v1',
+        reason: 'version-changed',
+        currentVersionId: 'cal-v2',
+      },
+      { artifactId: 'data', role: 'reference', expectedVersionId: 'data-v1', reason: 'forbidden' },
+    ]);
+    expect(fill(authority, 'shape2')).toBe(before);
+    expect(authority.snapshot().revision).toBe(0);
+    current.delete('data');
+    expect(() => authority.preview(A, p.id)).toThrow('data missing');
+  });
+  it('applies once every reference is current again', () => {
+    const authority = setup(
+        () => 1000,
+        (_reference, version) => ({ status: 'available', versionId: version }),
+      ),
+      p = proposal(authority, 'C', [setField('shape2', 'fill', '#aabbcc')], null, 'Agent fill');
+    authority.register(C, { ...p, external: [{ reference: 'calendar', version: 'cal-v1' }] });
+    const preview = authority.preview(A, p.id);
+    expect(authority.applyProposal(A, p.id, preview.token).status).toBe('accepted');
+    expect(authority.proposal(p.id)).not.toHaveProperty('stale');
+    expect(fill(authority, 'shape2')).toBe('#aabbcc');
   });
 });

@@ -28,6 +28,7 @@ import type { ReactUiRevisionCandidate } from '@editor-platform/react-ui-core';
 import { immutableCommand } from '@editor-platform/editor-core';
 import { parseReactUiDocument, serializeReactUiDocument } from '@editor-platform/react-ui-core';
 const MemoTree = memo(ReactUiTree);
+const previewHostTimeoutMs = 6000;
 const MemoInspector = memo(ReactUiInspector);
 const MemoPageInputs = memo(ReactUiPageInputs);
 export interface ReactUiSurfaceProps {
@@ -115,6 +116,7 @@ export function ReactUiSurface({
   useEffect(() => {
     if (!endpoint) return;
     const controller = new AbortController();
+    let silentHost: ReturnType<typeof setTimeout> | undefined;
     resolvedRequest.current = '';
     setStatus('Loading preview');
     setDiagnostics([]);
@@ -132,12 +134,24 @@ export function ReactUiSurface({
         } else {
           resolvedRequest.current = request.requestId;
           post();
+          // A preview host that never announces itself would leave the
+          // loading status forever; name its origin and how to recover.
+          if (loadedFrame.current !== iframe.current)
+            silentHost = setTimeout(() => {
+              if (!controller.signal.aborted && loadedFrame.current !== iframe.current)
+                setStatus(
+                  `Preview host not responding at ${endpoint.origin}. Start the preview host, then choose Restart preview.`,
+                );
+            }, previewHostTimeoutMs);
         }
       })
       .catch((error) => {
         if (!controller.signal.aborted) setStatus(String(error));
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      clearTimeout(silentHost);
+    };
   }, [request, endpoint, runtime, content]);
   useLayoutEffect(() => {
     if (!endpoint) return;

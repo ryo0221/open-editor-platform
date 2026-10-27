@@ -386,7 +386,7 @@ export function AnimationSourceControls2(props: Props) {
                 );
               }}
             >
-              <option value="">System sans-serif (ASCII)</option>
+              <option value="">System sans-serif (preview)</option>
               {props.content.assets
                 .filter((a) => a.mediaType.startsWith('font/'))
                 .map((a) => (

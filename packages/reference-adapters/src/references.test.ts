@@ -320,7 +320,7 @@ describe('committed artifact references', () => {
     const next = clone(graph);
     next.nodes[0].attributes.name = '自動化';
     next.edges[0].attributes.label = '連動';
-    next.layout['resource-a'] = { x: 100, y: 200 };
+    next.presentation.nodes['resource-a'] = { x: 100, y: 200 };
     current = {
       ...current,
       content: next,
@@ -331,6 +331,47 @@ describe('committed artifact references', () => {
     const rendered = await h.resolver.refresh(ref);
     expect(svg(rendered.projection!.src)).toContain('自動化');
     expect(svg(rendered.projection!.src)).toContain('連動');
+    // Saved shapes and paint are drawn too, with a label colour that stays legible on the fill.
+    const painted = clone(next);
+    painted.presentation.nodes['resource-a'] = {
+      x: 100,
+      y: 200,
+      shape: 'ellipse',
+      style: { fill: '#334155' },
+    };
+    const shaped = svg(
+      h.resolver.project({ ...current, content: painted }, graphSource.target).src,
+    );
+    expect(shaped).toMatch(/<path d="M[^"]+ Z"[^>]*fill="#334155"/);
+    expect(shaped).toContain('fill="#ffffff"');
+    // Section frames and names are drawn under the nodes; a node subset keeps only its ancestors.
+    const grouped = clone(next);
+    grouped.sections = [
+      { id: 'outer', type: 'group', attributes: { name: 'Platform' } },
+      { id: 'inner', type: 'group', attributes: { name: 'Backend' }, parentId: 'outer' },
+      { id: 'other', type: 'group', attributes: { name: 'Unrelated' } },
+    ];
+    grouped.presentation.sections = {
+      outer: { x: 60, y: 140, width: 400, height: 200, style: { fill: '#334155' } },
+      inner: { x: 80, y: 170, width: 260, height: 140 },
+      other: { x: 600, y: 600, width: 200, height: 100 },
+    };
+    grouped.nodes[0].sectionId = 'inner';
+    const framed = svg(
+      h.resolver.project({ ...current, content: grouped }, graphSource.target).src,
+    );
+    expect(framed.indexOf('>Platform<')).toBeLessThan(framed.indexOf('>Backend<'));
+    expect(framed.indexOf('>Backend<')).toBeLessThan(framed.indexOf('自動化'));
+    expect(framed).toMatch(/<rect x="60" y="140" width="400" height="200"[^>]*fill="#334155"/);
+    expect(framed).toContain('Unrelated');
+    const subset = svg(
+      h.resolver.project(
+        { ...current, content: grouped },
+        { ...graphSource.target, nodeIds: ['resource-a'] },
+      ).src,
+    );
+    expect(subset).toContain('Platform');
+    expect(subset).not.toContain('Unrelated');
     expect(rendered.snapshot!.content).toEqual(next);
     expect(rendered.snapshot!.dependencies).toEqual([dependency]);
     await expect(

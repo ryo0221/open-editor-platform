@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import type { EditorInputs } from '@editor-platform/editor-core';
 import {
+  animationLayerSystemFont2,
   animationCommand2,
   animationLayerLocked2,
   frameStep2,
@@ -289,6 +290,11 @@ export function AnimationInspector2(props: Props) {
           <button disabled={disabled} onClick={props.editText}>
             Edit text on canvas
           </button>
+          {animationLayerSystemFont2(projection, props.compositionId, layer.id) && (
+            <p role="note" className="a2-note">
+              System font preview: pin a font asset to fix how this text looks.
+            </p>
+          )}
         </>
       )}
       {layer.type === 'path' && pathFields(layer.path, 'path')}

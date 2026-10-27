@@ -160,6 +160,8 @@ test('native Whiteboard edits/save/reopen use the same public command/history bo
   const before = await native(page);
   if (!('nodes' in before.draft.content)) throw Error('Not board');
   await tool(page, 'Add sticky');
+  // A new sticky opens for typing (ST-09#7); Escape keeps its first text so the Host can export.
+  await page.keyboard.press('Escape');
   const edited = await native(page);
   if (!('nodes' in edited.draft.content)) throw Error('Not board');
   expect(edited.draft.content.nodes.length).toBe(before.draft.content.nodes.length + 1);

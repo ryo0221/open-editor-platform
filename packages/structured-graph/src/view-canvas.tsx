@@ -1,11 +1,21 @@
 import { type RefObject } from 'react';
 import { type GraphEdgeLabel } from './display';
-import { type GraphEdge, type GraphNode, type Position } from './model';
+import { type GraphDocument, type GraphEdge, type GraphNode, type Position } from './model';
 import { type GraphProfile } from './profile';
 import { type GraphRoute } from './routing';
+import { graphShapeLabels } from './view-appearance';
+import {
+  graphLabelColor,
+  graphShapeMetrics,
+  graphShapePath,
+  graphShapePolygon,
+  type GraphNodeLook,
+} from './shape';
 import { type EndpointHandlers, type NodeDragHandlers } from './view-gestures';
+import { GraphSectionFrames, type SectionDragHandlers } from './view-sections';
 import {
   graphNodeClassName,
+  graphSummaryTarget,
   isGraphEdgeDimmed,
   type GraphBox,
   type GraphEndpointGesture,
@@ -145,6 +155,7 @@ function GraphEndpointPreview({
 interface GraphNodeViewProps {
   node: GraphNode;
   box: GraphBox;
+  look: GraphNodeLook;
   className: string;
   text: string;
   typeLabel: string;
@@ -156,9 +167,38 @@ interface GraphNodeViewProps {
   nodeDrag: NodeDragHandlers;
 }
 
+/** Inline paint for a node: CSS variables so selection and target states can still override. */
+function nodePaint(look: GraphNodeLook, box: GraphBox) {
+  const { style, shape } = look,
+    outline = shape !== 'rectangle';
+  const local = { x: 0, y: 0, width: box.width, height: box.height };
+  return {
+    style: {
+      ...(style.fill
+        ? { '--ep-graph-node-fill': style.fill, color: graphLabelColor(style.fill) }
+        : {}),
+      ...(style.stroke ? { '--ep-graph-node-stroke': style.stroke } : {}),
+      ...(style.strokeWidth ? { '--ep-graph-node-stroke-width': `${style.strokeWidth}px` } : {}),
+      ...(style.dash?.length ? { '--ep-graph-node-border-style': 'dashed' } : {}),
+    } as Record<string, string>,
+    // The select button is clipped to the outline so the bounding box corners do not hit.
+    clip: outline
+      ? `polygon(${graphShapePolygon(shape, local)
+          .map(
+            (p) =>
+              `${((p.x / box.width) * 100).toFixed(2)}% ${((p.y / box.height) * 100).toFixed(2)}%`,
+          )
+          .join(',')})`
+      : undefined,
+    inset: outline ? `${(graphShapeMetrics(shape).insetX * box.width).toFixed(1)}px` : undefined,
+    path: outline ? graphShapePath(shape, local) : undefined,
+  };
+}
+
 function GraphNodeView({
   node: n,
   box,
+  look,
   className,
   text,
   typeLabel,
@@ -169,22 +209,42 @@ function GraphNodeView({
   choose,
   nodeDrag,
 }: GraphNodeViewProps) {
+  const paint = nodePaint(look, box);
   return (
     <div
-      className={className}
+      className={`${className} ${paint.style.color === '#ffffff' ? 'dark' : ''}`}
       style={{
         left: box.x,
         top: box.y,
         width: box.width,
         height: box.height,
+        ...paint.style,
       }}
       data-node-id={n.id}
       data-auto-size-key={autoSizeKey}
+      data-shape={look.shape}
     >
+      {paint.path && (
+        <svg
+          className="ep-graph-node-shape"
+          aria-hidden="true"
+          width={box.width}
+          height={box.height}
+        >
+          <path d={paint.path} strokeDasharray={look.style.dash?.join(' ')} />
+        </svg>
+      )}
       <button
         className="ep-graph-node-select"
         aria-label={`Select node ${text}`}
+        aria-description={look.shape === 'rectangle' ? undefined : graphShapeLabels[look.shape]}
         title={text}
+        style={{
+          color: paint.style.color,
+          ...(paint.clip
+            ? { clipPath: paint.clip, paddingLeft: paint.inset, paddingRight: paint.inset }
+            : {}),
+        }}
         onClick={() => choose(n.id)}
         onPointerDown={(event) => nodeDrag.start(event, n)}
         onPointerMove={(event) => nodeDrag.move(event)}
@@ -235,6 +295,12 @@ export interface GraphCanvasProps {
   choose: (id: string) => boolean;
   nodeDrag: NodeDragHandlers;
   endpointHandlers: EndpointHandlers;
+  graph: GraphDocument;
+  collapsed: ReadonlySet<string>;
+  toggleSection: (id: string) => void;
+  sectionHandlers: SectionDragHandlers;
+  /** True when Sections cannot be edited here; they still draw and collapse. */
+  sectionsReadOnly: boolean;
 }
 
 function GraphEdges(props: GraphCanvasProps) {
@@ -244,7 +310,9 @@ function GraphEdges(props: GraphCanvasProps) {
       // Keep selected handles above other connections' hit strokes.
       .sort((a, b) => Number(a.id === selected) - Number(b.id === selected))
       .map((edge) => {
-        const edgeType = profile.edges[edge.type];
+        const edgeType = profile.edges[edge.type],
+          // A summary line selects its collapsed Section, whichever end it is, not a connection.
+          summary = scene.sections.summaries.has(edge.id);
         return (
           <GraphEdgeView
             key={edge.id}
@@ -255,10 +323,14 @@ function GraphEdges(props: GraphCanvasProps) {
             displayText={scene.edgeText(edge)}
             selected={selected === edge.id}
             dimmed={isGraphEdgeDimmed(edge, node, highlightAdjacent)}
-            editable={!readOnly && !edgeType?.readOnly}
+            editable={!readOnly && !edgeType?.readOnly && !summary}
             marker={props.marker}
             label={scene.label}
-            choose={props.choose}
+            choose={
+              summary
+                ? () => props.choose(graphSummaryTarget(edge, scene.sections.collapsedBoxes))
+                : props.choose
+            }
             endpointHandlers={props.endpointHandlers}
             style={edgeType?.ui?.edgeStyle}
           />
@@ -274,6 +346,7 @@ function GraphNodes(props: GraphCanvasProps) {
       key={n.id}
       node={n}
       box={scene.boxes[n.id]}
+      look={scene.looks[n.id]}
       className={graphNodeClassName(n.id, props)}
       text={scene.label(n.id)}
       typeLabel={profile.nodes[n.type].ui?.label ?? n.type}
@@ -310,6 +383,17 @@ export function GraphCanvas(props: GraphCanvasProps) {
             transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})`,
           }}
         >
+          <GraphSectionFrames
+            graph={props.graph}
+            profile={props.profile}
+            scene={scene}
+            selected={props.selected}
+            readOnly={props.readOnly || props.sectionsReadOnly}
+            collapsed={props.collapsed}
+            toggle={props.toggleSection}
+            choose={props.choose}
+            handlers={props.sectionHandlers}
+          />
           <svg width={worldWidth} height={worldHeight} aria-label="Graph connections">
             <defs>
               <marker
@@ -339,7 +423,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
             : (endpoint.reason ?? '接続先のノードへ端点を移動してください。')}
         </p>
       )}
-      {!scene.visible.length && (
+      {!scene.visible.length && !scene.sections.order.length && (
         <p className="ep-graph-empty">No visible nodes. Add a node or clear the view filter.</p>
       )}
     </div>

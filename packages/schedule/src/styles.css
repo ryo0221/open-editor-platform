@@ -37,6 +37,10 @@
   gap: 6px;
   color: var(--ep-muted, #666e79);
 }
+.ep-schedule-zone input {
+  width: 15em;
+  max-width: 100%;
+}
 .ep-schedule-heading {
   display: flex;
   align-items: baseline;

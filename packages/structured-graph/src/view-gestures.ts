@@ -38,9 +38,17 @@ export function createNodeDragHandlers(context: {
   stamp: string;
   zoom: number;
   apply: GraphApply;
+  /**
+   * The edit a drop makes, such as the move with a Section membership, and a notice shown once it
+   * is applied. Defaults to the move alone.
+   */
+  drop?: (id: string, position: Position) => { intents: GraphIntent[]; notice?: string };
+  setError?: (message: string) => void;
 }): NodeDragHandlers {
   const { drag, setDrag, readOnly, profile, endpoint, choose, positions, stamp, zoom, apply } =
     context;
+  const drop: NonNullable<typeof context.drop> =
+    context.drop ?? ((id, position) => ({ intents: [{ type: 'move-node', id, position }] }));
   return {
     start(event, node) {
       if (event.button !== 0 || readOnly || profile.nodes[node.type]?.readOnly || endpoint) return;
@@ -65,8 +73,10 @@ export function createNodeDragHandlers(context: {
         y: drag.initial.y + (event.clientY - drag.start.y) / zoom,
       };
       if (commit) {
-        if (canonicalJson(position) !== canonicalJson(drag.initial))
-          apply([{ type: 'move-node', id: drag.id, position }], drag.base);
+        if (canonicalJson(position) !== canonicalJson(drag.initial)) {
+          const { intents, notice } = drop(drag.id, position);
+          if (apply(intents, drag.base) && notice) context.setError?.(notice);
+        }
         setDrag(undefined);
       } else setDrag({ ...drag, position });
     },

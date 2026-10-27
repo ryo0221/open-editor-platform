@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
-    "./sections": "./src/sections.ts"
+    "./sections": "./src/sections.ts",
+    "./proposal-diff": "./src/proposal-diff.ts"
   },
   "dependencies": {
     "@editor-platform/reuse-core": "*",

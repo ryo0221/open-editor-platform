@@ -112,8 +112,6 @@ function sceneSvgParts2(
     else if (l.type === 'path')
       svg = `<path ${common} d="${pathData(l.path)}" fill="${l.fill}" stroke="${l.stroke}" stroke-width="${l.strokeWidth}"/>`;
     else if (l.type === 'text') {
-      if (!item.asset && Array.from(l.text).some((character) => character.charCodeAt(0) > 127))
-        throw Error('A pinned font asset is required for non-ASCII text');
       const family = item.asset ? 'animation-font-' + item.asset.contentHash : 'sans-serif';
       if (embedFonts && item.asset && !fonts.has(family)) {
         fonts.add(family);
@@ -528,6 +526,16 @@ export function planAnimationFrame2(
 ): AnimationFramePlan2 {
   const values = deepFreeze(structuredClone(inputs)),
     scene = evaluateAnimation2(source, compositionId, tick, values);
+  // A static frame is a fixed output: the system-font display stays in live playback.
+  if (
+    scene.items.some(
+      (item) =>
+        item.layer.type === 'text' &&
+        !item.asset &&
+        Array.from(item.layer.text).some((character) => character.codePointAt(0)! > 127),
+    )
+  )
+    throw Error('Pin a font asset for non-ASCII text before exporting a static frame');
   const unsigned = {
     sourceHash: source.contentHash,
     compositionId,

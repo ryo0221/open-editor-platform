@@ -49,7 +49,8 @@ import {
   type ScheduleLaneHost,
   type ScheduleReadPort,
 } from './host';
-import { knownZones, timeLabel } from './zone';
+import { canonicalZone, timeLabel } from './zone';
+import { ZoneInput } from './zone-input';
 import {
   dayLabel,
   displayedTime,
@@ -254,7 +255,10 @@ export function ScheduleSurface({
     () => utcDay(initialDate ?? '') ?? utcDay(todayIso(displayTimeZone ?? content.timeZone))!,
   );
   const [mode, setMode] = useState<'week' | 'list'>('week');
-  const [zone, setZone] = useState(displayTimeZone ?? content.timeZone);
+  const [zone, setZone] = useState(() => {
+    const given = displayTimeZone ?? content.timeZone;
+    return canonicalZone(given) ?? given;
+  });
   const [selected, setSelected] = useState<string | undefined>(selectedId);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -280,10 +284,6 @@ export function ScheduleSurface({
   const laneStates = useLaneStates(laneHost, content.lanes);
   const placed = useMemo(() => placeEvents(content, zone), [content, zone]);
   const event = content.events.find((e) => e.id === selected);
-  const zones = useMemo(
-    () => [...new Set([zone, content.timeZone, ...knownZones()])],
-    [zone, content.timeZone],
-  );
   // A Host-driven selection (for example a comment jump) also leaves the details: when their
   // text cannot be committed, keep the current event and hand its selection back to the Host.
   useEffect(() => {
@@ -473,17 +473,7 @@ export function ScheduleSurface({
         )}
         <label className="ep-schedule-zone">
           <span>Display time zone</span>
-          <select
-            aria-label="Display time zone"
-            value={zone}
-            onChange={(e) => setZone(e.target.value)}
-          >
-            {zones.map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </select>
+          <ZoneInput label="Display time zone" value={zone} onChange={setZone} />
         </label>
         {laneHost && !readOnly && (
           <IconButton

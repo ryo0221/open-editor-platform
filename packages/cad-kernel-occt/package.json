@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@editor-platform/cad-core": "*",
+    "@editor-platform/geometry-core": "*",
+    "@editor-platform/geometry-kernel-occt": "*",
     "@noble/hashes": "1.8.0"
   }
 }

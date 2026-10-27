@@ -41,13 +41,13 @@ test('creates, times and undoes events, keeping the event zone separate from the
   await expect(event).toBeVisible();
 
   // Display in UTC: the same instant at 06:00, the stored wall time is unchanged.
-  await page.getByLabel('Display time zone', { exact: true }).selectOption('UTC');
+  await page.getByLabel('Display time zone', { exact: true }).fill('UTC');
   await expect(
     page.getByRole('button', {
       name: /^Design review, 2026-10-27 06:00–07:00 \(15:00 Asia\/Tokyo\)/,
     }),
   ).toBeVisible();
-  await page.getByLabel('Display time zone', { exact: true }).selectOption('Asia/Tokyo');
+  await page.getByLabel('Display time zone', { exact: true }).fill('Asia/Tokyo');
 
   // End before start is refused without changing the event.
   await setTime(page, '2026-10-27T17:00', '2026-10-27T16:00');
@@ -71,12 +71,12 @@ test('creates, times and undoes events, keeping the event zone separate from the
   await page.getByRole('button', { name: 'Previous week', exact: true }).click();
 
   // A new event lands at 10:00 on the shown day in the display zone, not the Schedule zone.
-  await page.getByLabel('Display time zone', { exact: true }).selectOption('America/Los_Angeles');
+  await page.getByLabel('Display time zone', { exact: true }).fill('America/Los_Angeles');
   await newEvent(page, 'West coast sync');
   await expect(
     page.getByRole('button', { name: /^West coast sync, 2026-10-26 10:00–11:00/ }),
   ).toBeVisible();
-  await page.getByLabel('Display time zone', { exact: true }).selectOption('Asia/Tokyo');
+  await page.getByLabel('Display time zone', { exact: true }).fill('Asia/Tokyo');
 
   // An all-day event shows its last day inclusively.
   await newEvent(page, 'Offsite');
@@ -86,6 +86,41 @@ test('creates, times and undoes events, keeping the event zone separate from the
   await details(page).getByRole('button', { name: 'Apply time', exact: true }).click();
   await expect(
     page.getByRole('button', { name: 'Offsite, 2026-10-29 – 2026-10-30 · All day', exact: true }),
+  ).toBeVisible();
+});
+
+test('takes current and older IANA zone names typed in the zone fields and records the current one (ST-24)', async ({
+  page,
+}) => {
+  await page.goto('/schedule-host.html?date=2026-10-26&zone=Asia/Saigon');
+  const display = page.getByLabel('Display time zone', { exact: true });
+  await expect(display).toHaveValue('Asia/Ho_Chi_Minh');
+  // The suggestions list each zone once, by its current name.
+  await expect(page.locator('datalist option[value="Asia/Ho_Chi_Minh"]')).toHaveCount(1);
+  await expect(page.locator('datalist option[value="Asia/Saigon"]')).toHaveCount(0);
+
+  await newEvent(page, 'Site visit');
+  const zone = details(page).getByLabel('Event time zone', { exact: true });
+  // An older name in other casing resolves to the current name on Enter.
+  await zone.fill('asia/calcutta');
+  await zone.press('Enter');
+  await expect(zone).toHaveValue('Asia/Kolkata');
+  await setTime(page, '2026-10-27T09:00', '2026-10-27T10:00');
+  await expect(
+    page.getByRole('button', {
+      name: /^Site visit, 2026-10-27 10:30–11:30 \(09:00 Asia\/Kolkata\)/,
+    }),
+  ).toBeVisible();
+
+  // Text that names no zone goes back to the zone in use.
+  await display.fill('Kyiv');
+  await display.blur();
+  await expect(display).toHaveValue('Asia/Ho_Chi_Minh');
+  await display.fill('Europe/Kyiv');
+  await expect(
+    page.getByRole('button', {
+      name: /^Site visit, 2026-10-27 05:30–06:30 \(09:00 Asia\/Kolkata\)/,
+    }),
   ).toBeVisible();
 });
 
@@ -119,9 +154,7 @@ test('forgets a DST fold once the time changes and saves text still being typed 
 }) => {
   await page.goto(host);
   await newEvent(page, 'Night shift');
-  await details(page)
-    .getByLabel('Event time zone', { exact: true })
-    .selectOption('America/New_York');
+  await details(page).getByLabel('Event time zone', { exact: true }).fill('America/New_York');
   await setTime(page, '2026-11-01T01:30', '2026-11-01T03:00');
   await details(page).getByLabel('Earlier (before the clock change)', { exact: true }).check();
   await details(page).getByRole('button', { name: 'Apply time', exact: true }).click();

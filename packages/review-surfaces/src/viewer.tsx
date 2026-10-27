@@ -10,6 +10,8 @@ import type {
 } from '@editor-platform/editor-core';
 import { EditorLayout, IconButton, type EditorLayoutProps } from '@editor-platform/editor-ui';
 import type { FileContent } from './model';
+import { csvMatches, isCsv, parseCsv } from './csv';
+import { CsvTableView } from './viewer-csv';
 import { usePdfTextIndex } from './pdf-text';
 import { usePdf } from './pdf';
 import {
@@ -89,6 +91,7 @@ export function FileSurface({
   const [region, setRegion] = useState<Region>(),
     [drag, setDrag] = useState<Bounds>(),
     [wrap, setWrap] = useState(false),
+    [csvLayout, setCsvLayout] = useState<'table' | 'text'>('table'),
     [targetLine, setTargetLine] = useState<number>();
   const replace = useSourceReplacement({ content, readOnly, execute, onOpenAsNew, setError });
   useSelectionReset(content, () => {
@@ -103,13 +106,22 @@ export function FileSurface({
     upload = useRef<HTMLInputElement>(null),
     imageGroup = useRef<SVGGElement>(null);
   const isPdf = content.mime === 'application/pdf',
-    isImage = content.mime.startsWith('image/');
+    isImage = content.mime.startsWith('image/'),
+    csv = !isPdf && !isImage && isCsv(content.mime, content.name);
   const { pdf, error: pdfError } = usePdf(content);
   const textIndex = usePdfTextIndex(pdf);
   const search = usePdfSearch(textIndex.pages);
   const { query, setQuery, pdfSearch } = search;
   const lines = useMemo(() => fileLines(content, isPdf, isImage), [content.data, isPdf, isImage]);
-  const matches = useMemo(() => lineMatches(lines, query), [lines, query]);
+  const table = useMemo(
+    () => (csv && csvLayout === 'table' ? parseCsv(content.data) : undefined),
+    [csv, csvLayout, content.data],
+  );
+  // The table searches the decoded cells it shows; the text view searches the source lines.
+  const matches = useMemo(
+    () => (table ? csvMatches(table.records, query) : lineMatches(lines, query)),
+    [table, lines, query],
+  );
   const shownSize = shownFileSize(isPdf, natural, imageSize, rotation);
   useContentReset(
     content,
@@ -251,6 +263,8 @@ export function FileSurface({
               }
               wrap={wrap}
               onWrapChange={setWrap}
+              csvLayout={csv ? csvLayout : undefined}
+              onCsvLayoutChange={setCsvLayout}
             />
           )}
           <span className="ep-spacer" />
@@ -270,7 +284,7 @@ export function FileSurface({
           hidden
           type="file"
           aria-label="Open file"
-          accept="image/*,text/*,.log,.md,.pdf"
+          accept="image/*,text/*,.log,.md,.csv,.pdf"
           disabled={readOnly}
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -338,10 +352,20 @@ export function FileSurface({
               />
             )}
           </AssetScroller>
+        ) : table ? (
+          <CsvTableView
+            records={table.records}
+            columns={table.columns}
+            query={query}
+            targetLine={targetLine}
+            region={region}
+            onChoose={choose}
+          />
         ) : (
           <TextFileView
             lines={lines}
             wrap={wrap}
+            query={query}
             targetLine={targetLine}
             region={region}
             onChoose={choose}

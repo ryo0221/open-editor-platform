@@ -11,6 +11,7 @@
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
     "@editor-platform/document": "*",
     "@editor-platform/structured-data": "*",
     "@editor-platform/review-surfaces": "*",
@@ -45,9 +46,16 @@
     "prosemirror-state": "1.4.4",
     "prosemirror-view": "1.42.6",
     "prosemirror-transform": "1.12.2",
+    "@editor-platform/bim": "*",
+    "@editor-platform/bim-core": "*",
     "@editor-platform/cad": "*",
     "@editor-platform/cad-core": "*",
     "@editor-platform/cad-kernel-occt": "*",
-    "@editor-platform/schedule": "*"
+    "@editor-platform/schedule": "*",
+    "@editor-platform/analysis": "*",
+    "@editor-platform/analysis-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/estimate": "*",
+    "@editor-platform/estimate-core": "*"
   }
 }

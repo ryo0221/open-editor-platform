@@ -1,3 +1,4 @@
+import { sampleBezier3Coordinate } from '@editor-platform/geometry-core/bezier';
 import { deepFreeze } from '@editor-platform/artifact-core';
 import { reuseHash } from '@editor-platform/reuse-core';
 import { requireAnimation as check, type Easing, type Transform } from '../model';
@@ -204,11 +205,7 @@ export function pointOnAnimationPath2(path: VectorPath2, progress: number) {
         value: (1 - t) ** 2 * a + 2 * (1 - t) * t * b + t * t * c,
         delta: 2 * (1 - t) * (b - a) + 2 * t * (c - b),
       };
-    const d = p[axis + 4];
-    return {
-      value: (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d,
-      delta: 3 * (1 - t) ** 2 * (b - a) + 6 * (1 - t) * t * (c - b) + 3 * t * t * (d - c),
-    };
+    return sampleBezier3Coordinate([a, b, c, p[axis + 4]], t);
   };
   const x = coordinate(0, t),
     y = coordinate(1, t);

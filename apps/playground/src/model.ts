@@ -1,11 +1,13 @@
+import { createEstimate, isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
+import { createAnalysis, isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
 import { emptyGeo, assertGeo, type GeoDocument } from '@editor-platform/geo-core';
 import type { SourceClosure } from './geo/geo-source-envelope';
 import type { ReferenceSnapshot } from '@editor-platform/artifact-references';
 import { containsEmbeddedReference } from '@editor-platform/artifact-references';
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { guardDataCommand, assertDataReadable } from '@editor-platform/structured-data/session';
+import { graphProfileFor, graphTemplates, type GraphTemplateId } from './app/graph-templates';
 import {
-  createRelationGraph,
   isGraphDocument,
   relationProfile,
   assertGraph,
@@ -46,10 +48,13 @@ import {
   isWhiteboard,
   type WhiteboardContent,
 } from '@editor-platform/whiteboard';
-import { createDesign, isDesign, type DesignContent } from '@editor-platform/design';
+import { createDesign, isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { emptyCad, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
+import { bimStarter, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
+import type { CadResource } from './cad/resources';
+import type { CadPartRecord } from './cad/parts';
 export { isCadDocument };
-import cadKernelBuild from 'virtual:cad-kernel-build';
+import cadKernelBuild, { kernels as cadKernelCatalog } from 'virtual:cad-kernel-build';
 import {
   createDeck,
   isDeck,
@@ -77,6 +82,8 @@ import {
   type AnimationContent2,
 } from '@editor-platform/animation-core/v2';
 export type Content =
+  | EstimateDocument
+  | AnalysisDocument
   | AnimationContentV1
   | AnimationContent2
   | GeoDocument
@@ -90,8 +97,11 @@ export type Content =
   | DesignContent
   | SlideContent
   | ScheduleDocument
-  | CadDocument;
+  | CadDocument
+  | BimDocument;
 export type Kind =
+  | 'estimate'
+  | 'analysis'
   | 'animation'
   | 'geo'
   | 'structured-graph'
@@ -104,10 +114,15 @@ export type Kind =
   | 'slide'
   | 'react-ui'
   | 'schedule'
-  | 'cad';
+  | 'cad'
+  | 'bim';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
+  /** CAD D2 asset bytes (STEP originals, normalized BRep) named by the draft and versions. */
+  cadResources?: CadResource[];
+  /** R2b part versions (content by hash) placed by the draft and versions, nested ones included. */
+  cadParts?: CadPartRecord[];
   geoDataInputs?: ReferenceSnapshot[];
   /** Reference Host conversion receipt: an immutable baseline for explicit three-way review. */
   designReactConversion?: { sourceArtifactId: string; sourceHash: string; basis: ReactUiDocument };
@@ -126,6 +141,8 @@ export function hasUnsupportedSharedAnimation(artifact: Artifact<Content>): bool
   );
 }
 export const kinds: Record<Kind, { label: string; icon: string; description: string }> = {
+  estimate: { label: '見積・積算', icon: '¥', description: '数量・単価・配賦と条件別見積' },
+  analysis: { label: '計算・分析ノート', icon: '∑', description: '保存Dataの計算・条件別比較' },
   animation: {
     label: 'Animation',
     icon: '▶',
@@ -155,54 +172,82 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     description: 'Plan events next to the work they belong to',
   },
   cad: { label: '3D CAD', icon: '⬢', description: 'Model parametric solids in millimetres' },
+  bim: {
+    label: 'Building',
+    icon: '⌂',
+    description: 'Model a building by levels, elements and types',
+  },
 };
 /**
- * The Host-supplied CAD kernel build (development OpenCascade.js while D0 is open). New CAD
- * artifacts are offered only when one is configured; documents always name the build they need.
+ * The Host-supplied CAD kernel build (the custom development OpenCascade.js while D0 is open).
+ * New CAD artifacts are offered only when one is configured; documents always name the build
+ * they need.
  */
 export const cadKernel = cadKernelBuild;
+/** Older kernel builds and approved reference substitutions (scripts/cad-kernel/build.mjs). */
+export const cadKernels = cadKernelCatalog;
 export const cadKernelProfile = {
-  id: 'opencascade.js-2.0.0-beta.b5ff984',
+  id: cadKernelBuild?.id ?? 'unavailable',
   buildHash: cadKernelBuild?.buildHash ?? `sha256:${'0'.repeat(64)}`,
 };
 export const creatableKinds = (Object.keys(kinds) as Kind[]).filter(
-  (k) => k !== 'cad' || !!cadKernel,
+  // Both 3D domains evaluate with the Host's kernel build.
+  (k) => (k !== 'cad' && k !== 'bim') || !!cadKernel,
 );
-export function makeArtifact(kind: Kind, count: number): StoredArtifact {
+export function makeArtifact(
+  kind: Kind,
+  count: number,
+  graphTemplate: GraphTemplateId = 'relations',
+): StoredArtifact {
   const content: Content =
-    kind === 'animation'
-      ? createAnimation2()
-      : kind === 'geo'
-        ? emptyGeo()
-        : kind === 'structured-graph'
-          ? createRelationGraph()
-          : kind === 'react-ui'
-            ? createReferenceDocument()
-            : kind === 'document'
-              ? createDocument()
-              : kind === 'data'
-                ? createData()
-                : kind === 'review'
-                  ? createReview()
-                  : kind === 'whiteboard'
-                    ? createWhiteboard()
-                    : kind === 'design'
-                      ? createDesign()
-                      : kind === 'slide'
-                        ? createDeck()
-                        : kind === 'schedule'
-                          ? createSchedule(
-                              Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-                            )
-                          : kind === 'cad'
-                            ? emptyCad(cadKernelProfile)
-                            : createFile();
+    kind === 'estimate'
+      ? createEstimate()
+      : kind === 'analysis'
+        ? createAnalysis()
+        : kind === 'animation'
+          ? createAnimation2()
+          : kind === 'geo'
+            ? emptyGeo()
+            : kind === 'structured-graph'
+              ? graphTemplates.find((t) => t.id === graphTemplate)!.create()
+              : kind === 'react-ui'
+                ? createReferenceDocument()
+                : kind === 'document'
+                  ? createDocument()
+                  : kind === 'data'
+                    ? createData()
+                    : kind === 'review'
+                      ? createReview()
+                      : kind === 'whiteboard'
+                        ? createWhiteboard()
+                        : kind === 'design'
+                          ? createDesign()
+                          : kind === 'slide'
+                            ? createDeck()
+                            : kind === 'schedule'
+                              ? createSchedule(
+                                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                                )
+                              : kind === 'cad'
+                                ? emptyCad(cadKernelProfile)
+                                : kind === 'bim'
+                                  ? bimStarter()
+                                  : createFile();
   return {
     ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
     annotations: [],
   };
 }
 export function validContent(kind: string, content: unknown): content is Content {
+  if (kind === 'estimate') return isEstimate(content);
+  if (kind === 'analysis') return isAnalysis(content);
+  if (
+    content &&
+    typeof content === 'object' &&
+    'domain' in content &&
+    (content.domain === 'analysis' || content.domain === 'estimate')
+  )
+    return false;
   if (kind === 'animation') {
     if (
       content &&
@@ -251,7 +296,9 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'structured-graph') {
     try {
       if (!isGraphDocument(content)) return false;
-      assertGraph(content, relationProfile);
+      const profile = graphProfileFor(content);
+      if (!profile) return false;
+      assertGraph(content, profile);
       return true;
     } catch {
       return false;
@@ -270,6 +317,7 @@ export function validContent(kind: string, content: unknown): content is Content
   }
   if (kind === 'schedule') return isSchedule(content);
   if (kind === 'cad') return isCadDocument(content);
+  if (kind === 'bim') return isBimDocument(content);
   return kind === 'document'
     ? isDocument(content)
     : kind === 'data'
@@ -281,7 +329,7 @@ export function validContent(kind: string, content: unknown): content is Content
           : kind === 'whiteboard'
             ? isWhiteboard(content)
             : kind === 'design'
-              ? isDesign(content)
+              ? isDesignWithPaths(content)
               : kind === 'slide'
                 ? isDeck(content)
                 : false;
@@ -291,7 +339,8 @@ export function mockExternalRuntime(
   request: ExternalOperationRequest,
   content: Content,
 ): ProposedCommands<Content> {
-  if (!isDocument(content)) throw new Error('The host demo currently transforms document text');
+  if (isAnalysis(content) || !isDocument(content))
+    throw new Error('The host demo currently transforms document text');
   const ids = request.selection?.addresses.map((a) => a.elementId) ?? [];
   if (!ids.length) throw new Error('Select a document block first');
   return {
@@ -301,7 +350,8 @@ export function mockExternalRuntime(
     summary: 'Convert selected block text to uppercase.',
     commands: [
       command('external.uppercase', 'Uppercase selected text', (current) => {
-        if (!isDocument(current)) throw new Error('Expected document content');
+        if (isAnalysis(current) || !isDocument(current))
+          throw new Error('Expected document content');
         return {
           ...current,
           blocks: current.blocks.map((b) => {
@@ -354,6 +404,14 @@ export function anchorState(
   address: ElementAddress,
 ): 'Current' | 'Outdated' | 'Orphan' {
   if (!content) return 'Orphan';
+  if (isAnalysis(content))
+    return content.runs.some((run) =>
+      Object.values(run.results).some((table) =>
+        table.rows.some((row) => row.id === address.elementId),
+      ),
+    )
+      ? 'Current'
+      : 'Orphan';
   if (isReview(content)) return reviewAnchorState(content, address);
   if (isFile(content)) return content.id === address.elementId ? 'Current' : 'Orphan';
   if (isDocument(content)) return resolveDocumentAddress(content, address).state;
@@ -366,7 +424,7 @@ export function anchorState(
   }
   const ids = isDeck(content)
     ? content.slides.flatMap((s) => [s.id, ...s.objects.map((o) => o.id)])
-    : isDesign(content)
+    : isDesignWithPaths(content)
       ? content.elements.map((e) => e.id)
       : isWhiteboard(content)
         ? [...content.nodes, ...content.connectors, ...(content.sections ?? [])].map((e) => e.id)
@@ -390,7 +448,11 @@ export function createLocalSession(content: Content): EditorSession<Content> {
       features: 200,
       vertices: 1000,
     });
-  if (isGraphDocument(content)) assertGraph(content, relationProfile);
+  if (isGraphDocument(content)) {
+    const profile = graphProfileFor(content);
+    if (!profile) throw new Error('This Graph uses a Profile this Playground does not register');
+    assertGraph(content, profile);
+  }
   class LocalSession extends EditorSession<Content> {
     override executeView(cmd: EditorCommand<Content>) {
       // Data commands retain the native model and validate both sides at the
@@ -414,7 +476,7 @@ export function createLocalSession(content: Content): EditorSession<Content> {
                   return next;
                 },
               },
-              relationProfile,
+              graphProfileFor(value) ?? relationProfile,
             ).apply(value);
           },
         });
@@ -436,21 +498,35 @@ export function createLocalSession(content: Content): EditorSession<Content> {
             return next;
           },
         });
-      const validate = animation
-        ? (value: unknown) => validContent('animation', value)
-        : isDeck(current)
-          ? isDeck
-          : isDocument(current)
-            ? isDocument
-            : isDesign(current)
-              ? isDesign
-              : isWhiteboard(current)
-                ? isWhiteboard
-                : undefined;
+      const validate = isAnalysis(current)
+        ? isAnalysis
+        : animation
+          ? (value: unknown) => validContent('animation', value)
+          : isDeck(current)
+            ? isDeck
+            : isDocument(current)
+              ? isDocument
+              : isDesignWithPaths(current)
+                ? isDesignWithPaths
+                : isWhiteboard(current)
+                  ? isWhiteboard
+                  : undefined;
       return super.executeView({
         ...cmd,
         apply(value) {
+          if (
+            isDesignWithPaths(value) &&
+            value.schemaVersion === 3 &&
+            cmd.context?.origin === 'proposal'
+          )
+            throw new Error('Structured paths/schema3 proposals are not supported');
           const next = cmd.apply(value);
+          if (
+            isDesignWithPaths(next) &&
+            next.schemaVersion === 3 &&
+            cmd.context?.origin === 'proposal'
+          )
+            throw new Error('Structured paths/schema3 proposals are not supported');
           if (validate ? !validate(next) : containsEmbeddedReference(next))
             throw new Error('参照埋め込みの形式または資源上限が不正です。');
           return next;

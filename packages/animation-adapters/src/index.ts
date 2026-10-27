@@ -110,6 +110,8 @@ export function captureDesignAnimation(
 ): AnimationConversionPlan {
   const owned = clone(input),
     sourceRef = clone(source);
+  if (owned.schemaVersion === 3 || owned.elements?.some((e) => e.path))
+    throw Error('Structured paths/schema3 cannot be converted to Animation');
   if (!isDesign(owned) || reuseHash(owned) !== sourceRef.contentHash)
     throw Error('Design source snapshot/hash mismatch');
   if (!selection.length || selection.some((key) => !owned.elements.some((e) => e.id === key)))
@@ -209,7 +211,7 @@ export function captureDesignAnimation(
           (d.kind === 'shape' && !!d.text)
         )
           throw Error('This shape or embedded shape label requires an explicit conversion');
-        if (d.crop || d.radius || d.dash || d.vector)
+        if (d.crop || d.radius || d.dash || d.vector || d.path)
           throw Error(
             'Vector libraries, crop, rounded corners and dashed effects need explicit conversion',
           );

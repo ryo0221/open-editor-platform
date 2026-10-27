@@ -16,6 +16,12 @@ export interface GraphLatest {
 }
 
 /** Validates and submits intents against the latest rendered projection. */
+/** An edit refusal in the Surface's words: a blocking diagnostic is formatted for the locale. */
+export const graphEditErrorMessage = (e: unknown, profile: GraphProfile, locale: GraphLocale) =>
+  e instanceof GraphValidationError
+    ? formatGraphDiagnostic(e.diagnostic, e.graph, profile, locale)
+    : (e as Error).message;
+
 export function useGraphApply(
   current: GraphLatest & {
     locale: GraphLocale;
@@ -36,10 +42,7 @@ export function useGraphApply(
       setError('');
       return true;
     } catch (e) {
-      const message =
-        e instanceof GraphValidationError
-          ? formatGraphDiagnostic(e.diagnostic, e.graph, profile, locale)
-          : (e as Error).message;
+      const message = graphEditErrorMessage(e, profile, locale);
       setError(message);
       onError?.(message);
       return false;
@@ -64,12 +67,13 @@ export function useSelectionFallback(
     if (
       selected !== graph.id &&
       !graph.nodes.some((n) => n.id === selected) &&
-      !graph.edges.some((e) => e.id === selected)
+      !graph.edges.some((e) => e.id === selected) &&
+      !graph.sections.some((s) => s.id === selected)
     ) {
       setLocalSelection(graph.id);
       select(graph.id);
     }
-  }, [graph.id, graph.nodes, graph.edges, selected, select]);
+  }, [graph.id, graph.nodes, graph.edges, graph.sections, selected, select]);
 }
 
 export function useGraphNodeType(profile: GraphProfile) {
@@ -78,6 +82,16 @@ export function useGraphNodeType(profile: GraphProfile) {
     if (!Object.hasOwn(profile.nodes, nodeType)) setNodeType(Object.keys(profile.nodes)[0] ?? '');
   }, [profile, nodeType]);
   return [nodeType, setNodeType] as const;
+}
+
+/** The type chosen for Add section, kept to a type the current Profile still declares. */
+export function useGraphSectionType(profile: GraphProfile) {
+  const [sectionType, setSectionType] = useState(Object.keys(profile.sections)[0] ?? '');
+  useEffect(() => {
+    if (!Object.hasOwn(profile.sections, sectionType))
+      setSectionType(Object.keys(profile.sections)[0] ?? '');
+  }, [profile, sectionType]);
+  return [sectionType, setSectionType] as const;
 }
 
 export interface GraphCameraInput {
@@ -123,8 +137,9 @@ export function useGraphCamera(input: GraphCameraInput) {
       canvas.current.scrollTop = 0;
     }
   };
-  function fit() {
-    show(fitGraphView(drawingBounds, viewport));
+  /** The whole drawing, or only the given boxes (such as one Section's frame). */
+  function fit(boxes: Bounds[] = drawingBounds) {
+    show(fitGraphView(boxes, viewport));
   }
   useEffect(() => {
     if (!viewport.width || !viewport.height) return;

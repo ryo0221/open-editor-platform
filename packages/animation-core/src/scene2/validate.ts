@@ -127,14 +127,9 @@ export function propertyKind2(layer: Layer2, property: Property2): 'number' | 'c
 export function validateProperty2(layer: Layer2, property: Property2, value: unknown) {
   const kind = propertyKind2(layer, property);
   if (kind === 'text') {
+    // Text without a pinned font is a provisional system-font display (ADR 012);
+    // only static frame export asks for the pinned font.
     text(value, 20000, layer.id);
-    check(
-      layer.type === 'text' &&
-        (layer.fontAssetId !== null ||
-          !Array.from(value).some((char) => char.codePointAt(0)! > 127)),
-      'font-required',
-      layer.id,
-    );
   } else if (kind === 'color') check(color2(value), 'color', layer.id);
   else
     number(
@@ -683,6 +678,48 @@ export function createAnimation2(): AnimationContent2 {
     publicInputs: [],
     provenance: [],
   };
+}
+const nonAscii = (value: unknown) =>
+  typeof value === 'string' && Array.from(value).some((char) => char.codePointAt(0)! > 127);
+/** True when this text layer has no pinned font and its own text, a text key, its
+ * declared input default or a supplied consumer input has non-ASCII characters, so the
+ * viewer's system font shows it as a provisional display. */
+export function animationLayerSystemFont2(
+  content: AnimationContent2,
+  compositionId: string,
+  layerId: string,
+  inputs: readonly { inputId: string; value: number | string }[] = [],
+): boolean {
+  const c = content.compositions.find((c) => c.id === compositionId),
+    layer = c?.layers.find((l) => l.id === layerId);
+  if (!c || layer?.type !== 'text' || layer.fontAssetId !== null) return false;
+  return (
+    nonAscii(layer.text) ||
+    c.tracks.some(
+      (t) =>
+        t.layerId === layerId && t.property === 'text' && t.keys.some((k) => nonAscii(k.value)),
+    ) ||
+    content.publicInputs.some(
+      (input) =>
+        input.kind === 'text' &&
+        input.target.compositionId === compositionId &&
+        input.target.layerId === layerId &&
+        (nonAscii(input.default) ||
+          inputs.some((v) => v.inputId === input.id && nonAscii(v.value))),
+    )
+  );
+}
+/** Some text anywhere in the content, retained exact sources included, shows in the
+ * system font (see animationLayerSystemFont2). */
+export function animationSystemFontText2(
+  content: AnimationContent2,
+  inputs: readonly { inputId: string; value: number | string }[] = [],
+): boolean {
+  return (
+    content.compositions.some((c) =>
+      c.layers.some((l) => animationLayerSystemFont2(content, c.id, l.id, inputs)),
+    ) || content.sources.some((source) => animationSystemFontText2(source.content))
+  );
 }
 export function frameStep2(c: Composition2) {
   return frameTick(1, 240000, c.frameRate);

@@ -12,7 +12,7 @@ normal diagram, math and Office rendering regression coverage.
 The playground build uses Mermaid's core ESM entry. Its prebundled minified
 entry embeds older KaTeX and DOMPurify implementations, so a lockfile override
 alone does not patch that emitted code. Verify the actual module graph contains
-`katex@0.18.2` and `dompurify@3.4.16`, and exercise a math label through the
+`katex@0.18.2` and `dompurify@3.4.17`, and exercise a math label through the
 ordinary Document editor after any entrypoint change.
 
 The 2026-10-18 follow-up found that the previous lock still installed nested

@@ -1,4 +1,4 @@
-import { clone } from '@editor-platform/artifact-core';
+import { clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import {
   assertEditable,
   command,
@@ -56,8 +56,18 @@ export interface DesignFlowCompletion {
   flowId: string;
   frameIds: string[];
 }
-const frame = (d: DesignContent, id: string) =>
-  designPaintOrder(d).find((e) => e.id === id && e.type === 'frame' && !e.hidden);
+const visibleFrameIndexes = new WeakMap<DesignContent, Map<string, DesignElement>>();
+/** Visible frames by ID, remembered only for deep-frozen content. */
+function visibleFrames(d: DesignContent) {
+  const known = visibleFrameIndexes.get(d);
+  if (known) return known;
+  const frames = new Map<string, DesignElement>();
+  for (const e of designPaintOrder(d))
+    if (e.type === 'frame' && !e.hidden && !frames.has(e.id)) frames.set(e.id, e);
+  if (isDeepFrozen(d)) visibleFrameIndexes.set(d, frames);
+  return frames;
+}
+const frame = (d: DesignContent, id: string) => visibleFrames(d).get(id);
 export const designPrototypeFrameId = (s: DesignPrototypeState) => s.overlays.at(-1) ?? s.frameId;
 
 /** Hidden state and clipping frames inherited from an element's ancestors in one scope. */
@@ -145,7 +155,10 @@ export function designPrototypeTargets(d: DesignContent, frameId: string): Desig
   return result;
 }
 
-export function diagnoseDesignPrototype(d: DesignContent): DesignPrototypeDiagnostic[] {
+export function diagnoseDesignPrototype(input: DesignContent): DesignPrototypeDiagnostic[] {
+  // Every simulated action looks frames up; one owned snapshot lets those
+  // lookups share an index even when a Host passes mutable content.
+  const d = isDeepFrozen(input) ? input : deepFreeze(clone(input));
   const diagnostics: DesignPrototypeDiagnostic[] = [];
   const frames = new Set(
     designPaintOrder(d)

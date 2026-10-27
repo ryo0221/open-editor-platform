@@ -65,7 +65,13 @@ it('blocks composing clean buffers and retains rejected commits', () => {
     prepare: () => commit,
     focus,
   });
-  expect(inputs.getSnapshot()).toEqual({ dirty: 0, composing: 1, canUndo: false, canRedo: false });
+  expect(inputs.getSnapshot()).toEqual({
+    dirty: 0,
+    composing: 1,
+    settling: 0,
+    canUndo: false,
+    canRedo: false,
+  });
   expect(() => inputs.flush()).toThrow('入力変換');
   expect(commit).not.toHaveBeenCalled();
   remove();
@@ -118,6 +124,45 @@ it('retains rejected input and reports failure before a Host save can proceed', 
   expect(focus).toHaveBeenCalledOnce();
   expect(inputs.getSnapshot().dirty).toBe(1);
 });
+it('a save that keeps the editor open passes settling work; leaving still waits for it', () => {
+  const inputs = new EditorInputs();
+  let pending = true;
+  let composing = false;
+  inputs.register({
+    label: 'Kernel',
+    read: () => ({ dirty: pending, settles: true, composing }),
+    prepare: () => {
+      throw new Error('still evaluating');
+    },
+    focus: vi.fn(),
+  });
+  // Settling work is not an uncommitted input.
+  expect(inputs.getSnapshot()).toMatchObject({ dirty: 0, settling: 1 });
+  expect(() => inputs.flush()).toThrow('still evaluating');
+  expect(() => inputs.flush({ keepEditor: true })).not.toThrow();
+  composing = true;
+  expect(() => inputs.flush({ keepEditor: true })).toThrow('入力変換');
+  composing = false;
+  // Work that this flush's own commit starts is the latest input: even this save waits for it.
+  pending = false;
+  let typed = true;
+  inputs.register({
+    label: 'Field',
+    read: () => ({ dirty: typed }),
+    prepare: () => () => {
+      typed = false;
+      pending = true;
+    },
+    focus: vi.fn(),
+  });
+  expect(() => inputs.flush({ keepEditor: true })).toThrow('Kernel: still evaluating');
+  expect(typed).toBe(false);
+  pending = false;
+  inputs.changed();
+  expect(inputs.getSnapshot()).toMatchObject({ dirty: 0, settling: 0 });
+  expect(() => inputs.flush()).not.toThrow();
+});
+
 it('routes private view draft Undo before native history and keeps Redo available after undoing to clean', () => {
   const inputs = new EditorInputs();
   let dirty = true,

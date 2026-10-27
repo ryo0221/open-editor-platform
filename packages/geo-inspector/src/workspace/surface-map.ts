@@ -1,6 +1,7 @@
 import { resolveGeoBackgrounds } from '@editor-platform/geo-core/backgrounds';
 import {
   defaultGeoStyle,
+  emptyGeoWorkspace,
   geoFields,
   geoLegend,
   geoMetricValue,
@@ -79,13 +80,55 @@ function renderMapSvg(ctx: GeoSurfaceContext, content: GeoDocument, view: GeoVie
   }
 }
 
-function renderLayerSource(ctx: GeoSurfaceContext, l: GeoLayer) {
+function renderLabelChoice(
+  ctx: GeoSurfaceContext,
+  content: GeoDocument,
+  l: GeoLayer,
+  parent: HTMLElement,
+) {
+  const style = content.workspace?.styles.find((s) => s.layerId === l.id) ?? defaultGeoStyle(l.id);
+  const labels = ctx.kit.select(
+    parent,
+    `Map labels for ${l.name}`,
+    [
+      { value: '', label: '(none)' },
+      ...geoFields(content, l).map((f) => ({ value: f.id, label: f.name })),
+    ],
+    style.labelFieldId ?? '',
+  );
+  const v = ctx.editor.getSnapshot();
+  labels.disabled = v.state !== 'open' || !v.canEdit;
+  // One choice is one native style change and one Undo step, like Layer presentation's Apply.
+  labels.addEventListener('change', () => {
+    void ctx
+      .run(() => {
+        ctx.requireClean();
+        const current = ctx.open().snapshot.content,
+          w = structuredClone(current.workspace ?? emptyGeoWorkspace()),
+          s = w.styles.find((s) => s.layerId === l.id) ?? defaultGeoStyle(l.id);
+        w.styles = [
+          ...w.styles.filter((s) => s.layerId !== l.id),
+          { ...s, labelFieldId: labels.value || null },
+        ];
+        const result = ctx.mutate([{ type: 'setWorkspace', workspace: w }]);
+        // A saved view draws its own styles; leave it so the edited labels show.
+        ctx.state.activeView = '';
+        return result;
+      })
+      .then(() => {
+        if (!ctx.state.closed) ctx.renderMapTable();
+      });
+  });
+}
+
+function renderLayerSource(ctx: GeoSurfaceContext, content: GeoDocument, l: GeoLayer) {
   const { node } = ctx.kit;
   const section = node('section');
   section.append(
     node('strong', l.name),
     node('p', `${l.features.length} features · ${l.fields.length} scalar fields · ${l.crs}`),
   );
+  renderLabelChoice(ctx, content, l, section);
   ctx.button(section, `Inspect layer ${l.name}`, () => {
     ctx.requireClean();
     ctx.state.styleLayer = l.id;
@@ -225,7 +268,7 @@ export function renderGeoMapTable(ctx: GeoSurfaceContext) {
     view = content.workspace?.views.find((v) => v.id === state.activeView);
   renderMapSvg(ctx, content, view);
   el.sourcePanel.replaceChildren(ctx.kit.node('h3', 'Layers and sources'));
-  for (const l of content.layers) renderLayerSource(ctx, l);
+  for (const l of content.layers) renderLayerSource(ctx, content, l);
   for (const source of content.sources) renderDataSource(ctx, source);
   el.legend.replaceChildren();
   el.table.replaceChildren();

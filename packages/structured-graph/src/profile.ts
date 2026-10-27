@@ -1,12 +1,18 @@
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import {
   assertGraphDocument,
+  defaultGraphPosition,
   isGraphJson,
+  isGraphNodeShape,
   plainRecord,
+  validGraphDash,
   validGraphId,
+  validGraphStyle,
   type Attributes,
   type GraphDocument,
   type GraphDiagnostic,
+  type GraphNodeShape,
+  type GraphNodeStyle,
   type JsonValue,
   type ProfileRef,
 } from './model';
@@ -35,6 +41,19 @@ export interface GraphType {
   ui?: AttributeUi;
   readOnly?: boolean;
 }
+export interface GraphNodeType extends GraphType {
+  ui?: AttributeUi & {
+    /** Type default shape; a node's saved presentation may override it. */
+    shape?: GraphNodeShape;
+    /** Type default paint, resolved per field under a node's own style. */
+    style?: GraphNodeStyle;
+    /**
+     * Palette heading for this type (1–40 characters), such as a use or a layer. The palette
+     * lists types by group in Profile order; types without one go under "Other".
+     */
+    group?: string;
+  };
+}
 export interface GraphEdgeType extends GraphType {
   ui?: AttributeUi & {
     /** Declarative SVG line style. Color is a hex literal; dash lengths are logical pixels. */
@@ -50,11 +69,23 @@ export interface GraphEdgeType extends GraphType {
     maxOutgoing?: number;
   };
 }
+export interface GraphSectionType extends GraphType {
+  ui?: AttributeUi & {
+    /** Type default paint for the Section frame; a Section's saved style may override it. */
+    style?: GraphNodeStyle;
+  };
+  /**
+   * What may be placed directly inside. Each list is independent: omitted means any type, `[]`
+   * means none, and a non-empty list names the only allowed types.
+   */
+  contains?: { nodes?: string[]; sections?: string[] };
+}
 export interface GraphProfile extends ProfileRef {
-  schemaVersion: 1;
+  schemaVersion: 2;
   graph: GraphType;
-  nodes: Record<string, GraphType>;
+  nodes: Record<string, GraphNodeType>;
   edges: Record<string, GraphEdgeType>;
+  sections: Record<string, GraphSectionType>;
 }
 function schemaValid(s: unknown, depth = 0): s is AttributeSchema {
   if (
@@ -114,23 +145,26 @@ function schemaValid(s: unknown, depth = 0): s is AttributeSchema {
     return false;
   return true;
 }
-function uiValid(ui: unknown, depth = 0, edge = false): boolean {
+type UiScope = 'graph' | 'node' | 'edge' | 'section';
+function uiValid(ui: unknown, depth = 0, scope?: UiScope): boolean {
   return (
     depth <= 8 &&
     plainRecord(ui) &&
     Object.entries(ui).every(([key, v]) => {
-      if (key === 'edgeStyle' && edge && depth === 0)
+      if (key === 'edgeStyle' && scope === 'edge' && depth === 0)
         return (
           plainRecord(v) &&
           Object.entries(v).every(([key, value]) =>
             key === 'color'
               ? typeof value === 'string' && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value)
-              : key === 'dash' &&
-                Array.isArray(value) &&
-                value.length <= 8 &&
-                value.every((n) => typeof n === 'number' && Number.isFinite(n) && n > 0 && n <= 64),
+              : key === 'dash' && validGraphDash(value),
           )
         );
+      if (key === 'shape' && scope === 'node' && depth === 0) return isGraphNodeShape(v);
+      if (key === 'group' && scope === 'node' && depth === 0)
+        return typeof v === 'string' && v.trim().length > 0 && v.length <= 40;
+      if (key === 'style' && (scope === 'node' || scope === 'section') && depth === 0)
+        return validGraphStyle(v);
       if (['label', 'description', 'labelField'].includes(key)) return typeof v === 'string';
       if (key === 'order')
         return Array.isArray(v) && v.every(validGraphId) && new Set(v).size === v.length;
@@ -157,23 +191,43 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
   if (!isGraphJson(value) || !plainRecord(value)) return false;
   if (
     Object.keys(value).some(
-      (k) => !['schemaVersion', 'id', 'version', 'graph', 'nodes', 'edges'].includes(k),
+      (k) => !['schemaVersion', 'id', 'version', 'graph', 'nodes', 'edges', 'sections'].includes(k),
     )
   )
     return false;
   const p = value as unknown as GraphProfile;
-  const type = (t: unknown, edge = false): boolean => {
+  const typeList = (v: unknown, known: unknown) =>
+    Array.isArray(v) &&
+    plainRecord(known) &&
+    v.every((id) => typeof id === 'string' && Object.hasOwn(known, id)) &&
+    new Set(v).size === v.length;
+  const containsValid = (c: unknown) =>
+    plainRecord(c) &&
+    Object.entries(c).every(([k, v]) =>
+      k === 'nodes' ? typeList(v, p.nodes) : k === 'sections' && typeList(v, p.sections),
+    );
+  const type = (t: unknown, scope: UiScope): boolean => {
+    const edge = scope === 'edge',
+      section = scope === 'section';
     if (
       !plainRecord(t) ||
       !plainRecord(t.schema) ||
       Object.keys(t).some(
-        (k) => !['schema', 'ui', 'readOnly', ...(edge ? ['connection'] : [])].includes(k),
+        (k) =>
+          ![
+            'schema',
+            'ui',
+            'readOnly',
+            ...(edge ? ['connection'] : []),
+            ...(section ? ['contains'] : []),
+          ].includes(k),
       ) ||
       !Object.entries(t.schema).every(([k, s]) => validGraphId(k) && schemaValid(s)) ||
-      (t.ui !== undefined && !uiValid(t.ui, 0, edge)) ||
+      (t.ui !== undefined && !uiValid(t.ui, 0, scope)) ||
       (t.readOnly !== undefined && typeof t.readOnly !== 'boolean')
     )
       return false;
+    if (section) return t.contains === undefined || containsValid(t.contains);
     if (!edge || t.connection === undefined) return true;
     const c = t.connection;
     return (
@@ -195,20 +249,27 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
     );
   };
   return (
-    p.schemaVersion === 1 &&
+    p.schemaVersion === 2 &&
     validGraphId(p.id) &&
     Number.isSafeInteger(p.version) &&
     p.version > 0 &&
     plainRecord(p.nodes) &&
     Object.keys(p.nodes).length > 0 &&
     plainRecord(p.edges) &&
-    type(p.graph) &&
-    Object.entries(p.nodes).every(([k, t]) => validGraphId(k) && type(t)) &&
-    Object.entries(p.edges).every(([k, t]) => validGraphId(k) && type(t, true))
+    plainRecord(p.sections) &&
+    type(p.graph, 'graph') &&
+    Object.entries(p.sections).every(([k, t]) => validGraphId(k) && type(t, 'section')) &&
+    Object.entries(p.nodes).every(([k, t]) => validGraphId(k) && type(t, 'node')) &&
+    Object.entries(p.edges).every(([k, t]) => validGraphId(k) && type(t, 'edge'))
   );
 }
 export function assertGraphProfile(value: unknown): asserts value is GraphProfile {
-  if (!isGraphProfile(value)) throw new Error('Invalid or unsupported declarative Graph Profile');
+  if (!isGraphProfile(value))
+    throw new Error(
+      plainRecord(value) && value.schemaVersion === 1
+        ? 'Graph Profile schema 1 is not supported by this preview; update the Profile to schema 2'
+        : 'Invalid or unsupported declarative Graph Profile',
+    );
 }
 export function validateAttributes(
   attributes: Attributes,
@@ -362,7 +423,7 @@ type AddGraphDiagnostic = (
   id: string,
   code: string,
   message: string,
-  scope: 'node' | 'edge',
+  scope: 'node' | 'edge' | 'section',
 ) => void;
 function checkConnectionRules(
   e: GraphEdgeList[number],
@@ -428,7 +489,49 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
     if (!c) continue;
     checkConnectionRules(e, c, nodes, counts.get(e.type)!, add);
   }
+  checkSections(graph, profile, add, result);
   return result;
+}
+/** Section types and `contains` are blocking; a member drawn outside its Section only warns. */
+function checkSections(
+  graph: GraphDocument,
+  profile: GraphProfile,
+  add: AddGraphDiagnostic,
+  result: GraphDiagnostic[],
+) {
+  const sections = new Map(graph.sections.map((s) => [s.id, s]));
+  const allowed = (sectionId: string, kind: 'nodes' | 'sections', type: string) => {
+    const list = profile.sections[sections.get(sectionId)!.type]?.contains?.[kind];
+    return !list || list.includes(type);
+  };
+  for (const s of graph.sections) {
+    const t = profile.sections[s.type];
+    if (!t) add(s.id, 'section-type', 'Unknown section type', 'section');
+    else
+      result.push(
+        ...validateAttributes(s.attributes, t.schema, { scope: 'section', elementId: s.id }),
+      );
+    if (s.parentId !== undefined && !allowed(s.parentId, 'sections', s.type))
+      add(s.id, 'section-contains', 'This section type is not allowed in its parent', 'section');
+  }
+  graph.nodes.forEach((n, index) => {
+    if (n.sectionId === undefined) return;
+    if (!allowed(n.sectionId, 'nodes', n.type))
+      add(n.id, 'section-contains', 'This node type is not allowed in its section', 'node');
+    const b = graph.presentation.sections[n.sectionId],
+      p = graph.presentation.nodes[n.id] ?? defaultGraphPosition(index);
+    if (p.x < b.x || p.y < b.y || p.x > b.x + b.width || p.y > b.y + b.height)
+      result.push({
+        scope: 'node',
+        elementId: n.id,
+        path: [],
+        code: 'outside-section',
+        message: 'This node is drawn outside its section',
+        args: { elementId: n.id, sectionId: n.sectionId },
+        severity: 'warning',
+        blocking: false,
+      });
+  });
 }
 export class GraphValidationError extends Error {
   constructor(

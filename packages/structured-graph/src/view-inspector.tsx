@@ -1,8 +1,10 @@
-import { type ContextType } from 'react';
+import { type ContextType, useEffect, useRef } from 'react';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import { type GraphAttributeDraft } from './attribute-draft';
 import { GraphAttributes } from './attributes';
 import { GraphDefinitionEditor } from './definition-editor';
+import { GraphNodeAppearance } from './view-appearance';
+import { GraphNodeSectionField, GraphSectionPanel } from './view-sections';
 import { type GraphSourceActions } from './definition';
 import { formatGraphDiagnostic, type GraphLocale } from './diagnostics';
 import {
@@ -11,9 +13,14 @@ import {
   type GraphDocument,
   type GraphEdge,
   type GraphNode,
+  type GraphSection,
 } from './model';
 import { type GraphProfile, type GraphType } from './profile';
-import { type GraphConnectionInput, type GraphConnectionPatch } from './view-connection';
+import {
+  graphConnectionLabelField,
+  type GraphConnectionInput,
+  type GraphConnectionPatch,
+} from './view-connection';
 import {
   graphInspectorTitle,
   retainedDeletedDrafts,
@@ -46,6 +53,21 @@ function graphNodeOptions({ graph, label }: Pick<GraphConnectionFormProps, 'grap
 function GraphConnectionForm(props: GraphConnectionFormProps) {
   const { profile, edge, readOnly, connection, editConnection, resetConnection } = props;
   const { from, to, type: edgeType } = connection;
+  const labelField = edge ? undefined : graphConnectionLabelField(profile, edgeType);
+  // A disabled or removed input may never deliver compositionend.
+  const labelGone = readOnly || !labelField;
+  useEffect(() => {
+    if (connection.composing && labelGone) editConnection({ composing: false });
+  }, [connection.composing, labelGone]);
+  // The form unmounts when the Host turns read-only; release the flag but keep the text.
+  const latest = useRef({ composing: connection.composing, editConnection });
+  latest.current = { composing: connection.composing, editConnection };
+  useEffect(
+    () => () => {
+      if (latest.current.composing) latest.current.editConnection({ composing: false });
+    },
+    [],
+  );
   return (
     <form
       aria-label="Connection editor"
@@ -96,6 +118,22 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
           {graphNodeOptions(props)}
         </select>
       </label>
+      {labelField && (
+        <label>
+          Connection label
+          <input
+            aria-label="Connection label"
+            value={connection.label}
+            disabled={readOnly}
+            maxLength={profile.edges[edgeType].schema[labelField].maxLength}
+            onChange={(e) => editConnection({ label: e.target.value })}
+            onCompositionStart={() => editConnection({ composing: true })}
+            onCompositionEnd={(e) =>
+              editConnection({ composing: false, label: e.currentTarget.value })
+            }
+          />
+        </label>
+      )}
       {edge && (
         <button
           type="button"
@@ -228,6 +266,11 @@ export interface GraphInspectorProps extends GraphConnectionFormProps, GraphOver
   inputs: ContextType<typeof EditorInputsContext>;
   setError: (message: string) => void;
   error: string;
+  /** False when the source cannot save node shapes and styles. */
+  shapeEditing: boolean;
+  section?: GraphSection;
+  sectionEditing: boolean;
+  onFitSection?: () => void;
 }
 
 function GraphSelectionPanels(props: GraphInspectorProps) {
@@ -253,6 +296,40 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
           }))}
         drafts={props.drafts}
       />
+      {props.node && (
+        <GraphNodeAppearance
+          key={`appearance:${props.node.id}`}
+          graph={graph}
+          profile={profile}
+          node={props.node}
+          readOnly={readOnly}
+          editable={props.shapeEditing}
+          apply={props.apply}
+        />
+      )}
+      {props.node && (
+        <GraphNodeSectionField
+          graph={graph}
+          profile={profile}
+          node={props.node}
+          readOnly={readOnly || !props.sectionEditing}
+          label={props.label}
+          apply={props.apply}
+        />
+      )}
+      {props.section && (
+        <GraphSectionPanel
+          key={`section:${props.section.id}`}
+          graph={graph}
+          profile={profile}
+          section={props.section}
+          readOnly={readOnly || !props.sectionEditing}
+          label={props.label}
+          apply={props.apply}
+          choose={props.choose}
+          onFit={props.onFitSection}
+        />
+      )}
       {!readOnly && <GraphConnectionForm {...props} />}
       {!readOnly && <GraphRetainedDrafts {...props} />}
       <GraphOverview {...props} />
@@ -268,10 +345,10 @@ export function GraphInspector(props: GraphInspectorProps) {
       aria-label="Graph Inspector"
       hidden={!props.showInspector}
     >
-      <h2>{graphInspectorTitle(profile, label, node, edge)}</h2>
+      <h2>{graphInspectorTitle(profile, label, node, edge, props.section)}</h2>
       <p className="ep-graph-source-owner">
         所有元: {sourceActions?.owner ?? `Host Profile ${profile.id}`} · 種類:{' '}
-        {node?.type ?? edge?.type ?? 'graph'}
+        {node?.type ?? edge?.type ?? props.section?.type ?? 'graph'}
       </p>
       {definitionTarget && (
         <div hidden={readOnly}>

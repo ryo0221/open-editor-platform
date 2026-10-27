@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/bim": "*",
+    "@editor-platform/bim-core": "*",
     "@editor-platform/cad": "*",
     "@editor-platform/cad-core": "*",
     "@editor-platform/cad-kernel-occt": "*",
@@ -19,6 +21,7 @@
     "@editor-platform/slide": "*",
     "@editor-platform/whiteboard": "*",
     "@editor-platform/design": "*",
+    "@editor-platform/document": "*",
     "@editor-platform/structured-data": "*",
     "@editor-platform/design-react-core": "*",
     "@editor-platform/office-export-ui": "*",
@@ -26,6 +29,12 @@
     "fflate": "0.8.3",
     "react": "19.1.1",
     "react-dom": "19.1.1",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "@editor-platform/analysis": "*",
+    "@editor-platform/analysis-core": "*",
+    "@editor-platform/estimate": "*",
+    "@editor-platform/estimate-core": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/document-export": "*"
   }
 }

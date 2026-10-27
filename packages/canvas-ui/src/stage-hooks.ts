@@ -11,18 +11,19 @@ export function useCanvasFit(options: {
   viewRef: RefObject<CanvasView>;
   setter: ViewSetter;
   space: 'page' | 'infinite';
+  minZoom?: number;
   fit: boolean;
   width: number;
   height: number;
   bounds: Bounds;
   onSize(size: { width: number; height: number }): void;
 }) {
-  const { svg, viewRef, setter, space, width, height, bounds, onSize } = options;
+  const { svg, viewRef, setter, space, minZoom, width, height, bounds, onSize } = options;
   const fit = () => {
     const current = viewRef.current,
       box = svg.current?.getBoundingClientRect();
     if (!box) return;
-    setter.current(fitCanvasView(current, box, bounds, space));
+    setter.current(fitCanvasView(current, box, bounds, space, minZoom));
   };
   const fitRef = useRef(fit);
   fitRef.current = fit;
@@ -38,7 +39,7 @@ export function useCanvasFit(options: {
   }, [width, height]);
   useEffect(() => {
     if (options.fit) fit();
-  }, [options.fit, width, height, bounds.x, bounds.y, bounds.width, bounds.height]);
+  }, [options.fit, minZoom, width, height, bounds.x, bounds.y, bounds.width, bounds.height]);
   return fit;
 }
 
@@ -48,15 +49,16 @@ export function useCanvasWheel(
   viewRef: RefObject<CanvasView>,
   setter: ViewSetter,
   space: 'page' | 'infinite',
+  minZoom?: number,
 ) {
   useEffect(() => {
     const element = svg.current!;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = element.getBoundingClientRect();
-      setter.current(wheelCanvasView(viewRef.current, e, rect, space));
+      setter.current(wheelCanvasView(viewRef.current, e, rect, space, minZoom));
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
-  }, []);
+  }, [space, minZoom]);
 }

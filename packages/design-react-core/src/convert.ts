@@ -182,6 +182,10 @@ export function convertDesignToReact(
   content: DesignContent,
   rootIds?: string[],
 ): DesignReactConversion {
+  if (content.schemaVersion === 3 || content.elements?.some((e) => e.path))
+    throw new ReactUiError([
+      err('path-unsupported', '$', 'Structured paths/schema3 cannot be converted to React'),
+    ]);
   if (!isDesign(content) || !content.web)
     throw new ReactUiError([
       err('native-settings', '$', 'Valid native Design and explicit Web settings are required'),

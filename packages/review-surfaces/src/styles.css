@@ -322,3 +322,60 @@
   overflow: auto;
   white-space: pre;
 }
+.ep-review-comment {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+.ep-review-comment textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+}
+.ep-review-info .ep-review-comment button {
+  width: auto;
+  justify-self: start;
+}
+.ep-file-line mark,
+.ep-csv-cell mark {
+  background: #ffe58a;
+  color: inherit;
+  border-radius: 2px;
+}
+.ep-csv-row {
+  display: grid;
+  grid-template-columns: var(--ep-csv-columns);
+  min-width: 100%;
+  width: max-content;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #e6eaf0;
+  border-radius: 0;
+  background: white;
+  color: inherit;
+  text-align: left;
+  font:
+    13px/22px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.ep-csv-row.header {
+  font-weight: 600;
+  background: #f5f7fa;
+}
+.ep-csv-row.selected {
+  background: #dee6ff;
+  box-shadow: inset 3px 0 #526bda;
+}
+.ep-csv-row .ep-line-number {
+  padding: 4px 10px 4px 0;
+}
+.ep-csv-cell {
+  padding: 4px 8px;
+  border-left: 1px solid #e6eaf0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

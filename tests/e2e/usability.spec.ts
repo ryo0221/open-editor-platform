@@ -141,7 +141,7 @@ test('#42 #48 native Graph moves the body, retargets both ends, cancels and avoi
 }, info) => {
   const graph = createRelationGraph();
   graph.nodes.push({ id: 'third', type: 'entity', attributes: { name: 'Delivery' } });
-  graph.layout = {
+  graph.presentation.nodes = {
     'resource-a': { x: 40, y: 120 },
     'resource-b': { x: 370, y: 120 },
     third: { x: 700, y: 120 },
@@ -179,8 +179,8 @@ test('#42 #48 native Graph moves the body, retargets both ends, cancels and avoi
   await page.mouse.move(box.x + 75, box.y + 60, { steps: 5 });
   await page.mouse.up();
   expect(
-    ((await nativeArtifact(page)).draft.content as GraphDocument).layout['resource-a'],
-  ).not.toEqual(graph.layout['resource-a']);
+    ((await nativeArtifact(page)).draft.content as GraphDocument).presentation.nodes['resource-a'],
+  ).not.toEqual(graph.presentation.nodes['resource-a']);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   const before = (await nativeArtifact(page)).draft.content;
   const mover = page.getByRole('button', { name: 'Select node Research', exact: true }),

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { readCatalog, publishLocator, locatorPrefix as v1Prefix } from '../private-video/catalog';
 import { privateVideo, privateVideoRoute, privateVideoUrl } from '../private-video/registration';
-import { readM2Catalog, publishM2Locator, publishM2LocatorLocked, locatorPrefix } from './catalog';
+import {
+  readM2Catalog,
+  publishM2Locator,
+  publishM2LocatorLocked,
+  locatorPrefix,
+  requireCurrentVideoLocator,
+} from './catalog';
 import {
   privateVideoM2,
   privateVideoM2Route,
@@ -37,7 +43,7 @@ const row = (id = a) => ({
 });
 describe('private M2 preparation without runtime registration', () => {
   it('keeps v1 defaults and fails closed across distinct private routes', () => {
-    expect(privateVideoM2.label).toBe('Video（複数素材・音声編集）');
+    expect(privateVideoM2.label).toBe('Video');
     expect(privateVideo.id).toBe('video-v1-review');
     expect(privateVideoRoute(privateVideoUrl(a).slice(1))).toEqual({ entryId: a });
     expect(privateVideoM2Route(privateVideoM2Url(a).slice(1))).toEqual({ entryId: a });
@@ -104,4 +110,61 @@ describe('private M2 preparation without runtime registration', () => {
     expect(requests).toEqual(['normal-video-m2-catalog@0', 'normal-video-m2-catalog@0']);
     expect(readM2Catalog(storage)).toEqual([row()]);
   });
+});
+
+it('retains a Host-only exact source locator while refusing untrusted fields', () => {
+  const storage = memory();
+  const origin = {
+    namespace: `normal-video-${b}`,
+    operationId: 'retained-source',
+    archiveHash: 'a'.repeat(64),
+  };
+  publishM2Locator({ ...row(), origin }, undefined, storage);
+  expect(readM2Catalog(storage)[0].origin).toEqual(origin);
+  for (const invalid of [
+    { ...origin, namespace: 'https://elsewhere' },
+    { ...origin, archiveHash: 'bad' },
+    { ...origin, permission: 'admin' },
+    { ...origin, operationId: '../escape' },
+  ])
+    expect(() =>
+      publishM2Locator({ ...row(), origin: invalid }, row().namespace, storage),
+    ).toThrow();
+  expect(readM2Catalog(storage)[0].origin).toEqual(origin);
+});
+
+it('keeps explicit v3 locators separate from unchanged v2 and migration locators', () => {
+  const storage = memory();
+  publishM2Locator(row(), undefined, storage);
+  publishM2Locator({ ...row(b), nativeSchema: 'v3' }, undefined, storage);
+  expect(readM2Catalog(storage)).toEqual([row(), { ...row(b), nativeSchema: 'v3' }]);
+  expect(privateVideoM2Route(privateVideoM2Url().slice(1))).toEqual({ entryId: undefined });
+  expect(privateVideoM2.schema).toBe('video-core-prototype-v3');
+  for (const query of [
+    '&nativeSchema=v4',
+    '&nativeSchema=v3&nativeSchema=v3',
+    '&nativeSchema=v3&project=' + a,
+  ])
+    expect(() => privateVideoM2Route('?privateEditor=video-v2-review' + query)).toThrow();
+  expect(() =>
+    publishM2Locator(
+      {
+        ...row(b),
+        nativeSchema: 'v3',
+        origin: { namespace: 'normal-video-' + a, operationId: 'old', archiveHash: 'a'.repeat(64) },
+      },
+      row(b).namespace,
+      storage,
+    ),
+  ).toThrow();
+  expect(readM2Catalog(storage)[1].nativeSchema).toBe('v3');
+});
+
+it('rejects legacy locators before opening storage without rewriting them', () => {
+  const entry = row();
+  const before = JSON.stringify(entry);
+  expect(() => requireCurrentVideoLocator(entry)).toThrow('stored data is unchanged');
+  expect(JSON.stringify(entry)).toBe(before);
+  expect(() => requireCurrentVideoLocator({ ...entry, nativeSchema: 'v3' })).not.toThrow();
+  expect(() => requireCurrentVideoLocator(undefined)).not.toThrow();
 });

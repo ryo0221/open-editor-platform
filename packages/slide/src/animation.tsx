@@ -5,6 +5,7 @@ import {
   adoptPlayableAnimationEmbed,
   inspectPlayableAnimationEmbed,
   animationCompositionInputs2,
+  animationSystemFontText2,
   type PlayableAnimationEmbed,
 } from '@editor-platform/animation-core/v2';
 import { AnimationViewer } from '@editor-platform/animation/viewer';
@@ -15,6 +16,8 @@ export interface SlideAnimationProps {
   animationSources?: readonly SlideAnimationSource[];
   openAnimation?(source: SourceRef, objectId: string, pageId: string): void;
 }
+const systemFontNote =
+  '端末のフォントで仮表示しています。見た目を固定するには、元の Animation で text にフォントを指定してください。';
 const sourceChoiceKey = (source: SlideAnimationSource) =>
   JSON.stringify([
     source.source.artifactId,
@@ -183,6 +186,9 @@ export function AnimationObjectInspector({
         </button>
       )}
       {error && <p role="alert">{error}</p>}
+      {a.format === 'animation-embed-2' && animationSystemFontText2(a.snapshot, a.inputs) && (
+        <p role="note">{systemFontNote}</p>
+      )}
       <p>PPTXへのアニメーション出力は未対応です。</p>
       <fieldset disabled={readOnly}>
         {choose && <button onClick={choose}>保存した別の版を選ぶ</button>}

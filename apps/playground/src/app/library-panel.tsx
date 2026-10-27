@@ -2,7 +2,15 @@ import { X } from 'lucide-react';
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
 import type { PrivateVideoEntry } from '../private-video/catalog';
-import { creatableKinds, downloadText, kinds, type Kind, type StoredArtifact } from '../model';
+import { graphTemplates, type GraphTemplateId } from './graph-templates';
+import {
+  cadKernel,
+  creatableKinds,
+  downloadText,
+  kinds,
+  type Kind,
+  type StoredArtifact,
+} from '../model';
 
 const reusableLibraryKinds = ['design', 'document', 'slide', 'whiteboard', 'data'];
 
@@ -67,12 +75,14 @@ export function LibraryPanel({
   privateVideo,
   onClose,
   onKindChange,
+  graphTemplate,
+  onGraphTemplateChange,
   onCreate,
   onCreateFromTemplate,
   onOpenReusableLibrary,
   onOfficeImport,
   onActivate,
-  onImportFile,
+  onImportFiles,
 }: {
   open: boolean;
   records: StoredArtifact[];
@@ -87,12 +97,14 @@ export function LibraryPanel({
   privateVideo: PrivateVideoLaunchers;
   onClose(): void;
   onKindChange(kind: Kind): void;
+  graphTemplate: GraphTemplateId;
+  onGraphTemplateChange(template: GraphTemplateId): void;
   onCreate(kind: Kind): void;
   onCreateFromTemplate(): void;
   onOpenReusableLibrary(): void;
   onOfficeImport(): void;
   onActivate(id: string): void;
-  onImportFile(file: File): void;
+  onImportFiles(files: File[]): void;
 }) {
   const openPrivate = privateVideo.openEditor;
   const privateDisabled = !loaded || busy;
@@ -117,6 +129,38 @@ export function LibraryPanel({
           ))}
         </select>
       </label>
+      <details className="playground-setup">
+        <summary>{cadKernel ? 'Playground setup' : '3D CAD / BIM unavailable — setup'}</summary>
+        {!cadKernel && (
+          <p>
+            3D CAD and BIM creation require a development kernel. Set <code>CAD_OCCT_DIST</code> to
+            a prepared kernel directory before starting the server. If already set, check that its
+            JavaScript and Wasm files are present. See <code>scripts/cad-kernel/README.md</code> in
+            the repository, then restart the server.
+          </p>
+        )}
+        <p>
+          Before <code>npm run dev</code>, run <code>npm run fonts:fetch</code> once to prepare the
+          required fonts (network required). See <code>docs/developer-guide.md</code> in the
+          repository.
+        </p>
+      </details>
+      {kind === 'structured-graph' && (
+        <label className="create-type">
+          Graph template
+          <select
+            aria-label="Graph template"
+            value={graphTemplate}
+            onChange={(e) => onGraphTemplateChange(e.target.value as GraphTemplateId)}
+          >
+            {graphTemplates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <button className="primary new-artifact" onClick={() => onCreate(kind)} disabled={!loaded}>
         ＋ New artifact
       </button>
@@ -142,7 +186,7 @@ export function LibraryPanel({
       {privateVideo.showM2 && (
         <PrivateVideoSection
           label="Private Video M2 projects"
-          launchLabel="Video（複数素材・音声編集）"
+          launchLabel="Video"
           entries={privateVideo.m2Entries}
           dataAttribute="data-private-m2-project"
           disabled={privateDisabled}
@@ -171,10 +215,11 @@ export function LibraryPanel({
         <input
           type="file"
           aria-label="Import artifact"
-          accept=".md,.csv,.json"
+          accept=".md,.csv,.json,.ifc"
+          multiple
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) onImportFile(file);
+            const files = [...(e.target.files ?? [])];
+            if (files.length) onImportFiles(files);
             e.target.value = '';
           }}
         />
@@ -232,10 +277,10 @@ export function WelcomePanel({
         {privateVideo.showM2 && (
           <button
             disabled={!loaded || busy}
-            aria-label="Video（複数素材・音声編集）"
+            aria-label="Video"
             onClick={() => openPrivate(undefined, true)}
           >
-            <strong>Video（複数素材・音声編集）</strong>
+            <strong>Video</strong>
             <small>Private local validation</small>
           </button>
         )}

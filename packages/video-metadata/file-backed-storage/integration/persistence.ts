@@ -4,12 +4,15 @@ import type { WriteRequest } from '@editor-platform/extension-runtime/draft2';
 import { BrowserJournal, type Pin } from '../browser/journal';
 import { createProfileBrowserVerifier } from '../browser-verifier/adapter';
 import { openPortableFile } from '../browser-verifier/external-file';
-import { need, type DigestFactory } from '../portable/io';
+import { need, createScanner, type DigestFactory } from '../portable/io';
+import { retainMigrationSource, type ResolveMigrationSource } from '../portable/migration';
 import type { ArchiveContent, Project, ProjectProfile } from '../portable/project';
 import type { TotalCapacity } from './capacity';
 import { ProfileJournalVideoStorage, type History } from './storage';
 export interface PersistenceOptions<C> {
   digest: DigestFactory;
+  /** Required for a migration profile. The Host retains and authorizes the original archive. */
+  resolveMigrationSource?: ResolveMigrationSource;
   /** Explicit opt-in; Host owns this origin-wide policy/ledger, including its lifetime. */
   capacity?: TotalCapacity;
   /** Must allocate a fresh private namespace for each candidate Host, never overwrite an existing one. */
@@ -26,6 +29,7 @@ export interface PersistenceOptions<C> {
 }
 class ScopedStorage<C extends ArchiveContent, P> extends ProfileJournalVideoStorage<C, P> {
   readonly lifetime = new AbortController();
+  assertReadable: () => void = () => {};
   private jobs = new Set<Promise<unknown>>();
   private track<T>(job: Promise<T>): Promise<T> {
     this.jobs.add(job);
@@ -34,6 +38,7 @@ class ScopedStorage<C extends ArchiveContent, P> extends ProfileJournalVideoStor
   }
   override retainCapture(snapshot: LocalReadSnapshot<C>) {
     this.lifetime.signal.throwIfAborted();
+    this.assertReadable();
     return super.retainCapture(snapshot);
   }
   override write(request: WriteRequest<C>, signal: AbortSignal) {
@@ -45,6 +50,20 @@ class ScopedStorage<C extends ArchiveContent, P> extends ProfileJournalVideoStor
     return this.track(
       super.reconcile(operationId, AbortSignal.any([signal, this.lifetime.signal])),
     );
+  }
+  override async restore(operationId: string, signal: AbortSignal) {
+    const combined = AbortSignal.any([signal, this.lifetime.signal]);
+    combined.throwIfAborted();
+    this.assertReadable();
+    const restored = await super.restore(operationId, combined);
+    try {
+      combined.throwIfAborted();
+      this.assertReadable();
+      return restored;
+    } catch (error) {
+      restored.release();
+      throw error;
+    }
   }
   async drain() {
     this.lifetime.abort();
@@ -70,12 +89,25 @@ export function createProfilePersistenceFactory<
     need(live.originals.size === 0 && live.plans.size === 0, 'Fresh live catalog required');
     let external: External | undefined;
     let journal: BrowserJournal | undefined;
+    let origin: Awaited<ReturnType<typeof retainMigrationSource>> | undefined;
     try {
       if (file) {
         external = await openPortableFile(file, options.digest, setup, options.externalBytes);
         need(
           external.kind === kind,
           `Non-${kind} project requires matching Host; no silent migration`,
+        );
+      }
+      if (kind === 'migration-v1') {
+        need(
+          external?.kind === 'migration-v1' && options.resolveMigrationSource,
+          'Retained migration source required',
+        );
+        origin = await retainMigrationSource(
+          external.project,
+          createScanner(options.digest),
+          options.resolveMigrationSource,
+          setup,
         );
       }
       const artifactId = external?.project.capture.scope.artifactId ?? options.newArtifactId();
@@ -90,6 +122,7 @@ export function createProfilePersistenceFactory<
       if (external?.kind === kind) {
         // The version tag selects exactly this schema's project shape.
         const project = external.project as unknown as Project<C, P>;
+        if (project.provenance) history.provenance = structuredClone(project.provenance);
         history.versions = structuredClone(project.versions);
         history.selectedVersionId = project.selectedVersionId;
         for (const [id, lease] of external.originals) history.originals.set(id, lease.blob());
@@ -104,7 +137,14 @@ export function createProfilePersistenceFactory<
         namespace,
         options.journalBytes,
         createProfileBrowserVerifier(options.digest, profile).verify,
-        options.authorize,
+        (pin) => {
+          try {
+            origin?.assertReadable();
+            return options.authorize(pin);
+          } catch {
+            return false;
+          }
+        },
       );
       const state = await journal.snapshot();
       need(state.head === 0 && state.operations.length === 0, 'Fresh target journal required');
@@ -121,7 +161,9 @@ export function createProfilePersistenceFactory<
         {},
         options.capacity,
       );
+      storage.assertReadable = () => origin?.assertReadable();
       setup.throwIfAborted();
+      origin?.assertReadable();
       // Stage all closure checks before modifying the candidate Host's live catalog.
       const selected = content.sources.map((source) => {
         const original = history.originals.get(source.asset.sha256),
@@ -145,6 +187,7 @@ export function createProfilePersistenceFactory<
           storage.reconcile(operationId, signal),
         async portable(signal: AbortSignal) {
           need(!closed, 'Persistence closed');
+          origin?.assertReadable();
           const combined = AbortSignal.any([signal, storage.lifetime.signal]);
           combined.throwIfAborted();
           const current = (await ownedJournal.snapshot()).current;
@@ -154,6 +197,12 @@ export function createProfilePersistenceFactory<
             lease.release();
             combined.throwIfAborted();
             throw Error('Persistence closed');
+          }
+          try {
+            origin?.assertReadable();
+          } catch (error) {
+            lease.release();
+            throw error;
           }
           const release = () => {
             leases.delete(release);
@@ -170,6 +219,8 @@ export function createProfilePersistenceFactory<
             for (const release of leases) release();
             external?.release();
             external = undefined;
+            origin?.release();
+            origin = undefined;
             history.originals.clear();
             history.plans.clear();
             // Live/Undo resources belong to the Host, which releases them after its consumers drain.
@@ -181,6 +232,7 @@ export function createProfilePersistenceFactory<
     } catch (e) {
       journal?.close();
       external?.release();
+      origin?.release();
       throw e;
     }
   };

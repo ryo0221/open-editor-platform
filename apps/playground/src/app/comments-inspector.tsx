@@ -118,17 +118,22 @@ function CommentThread({
       className={`comment-thread ${a.resolved ? 'resolved' : ''}`}
       style={a.color ? { borderLeft: `4px solid ${a.color}`, paddingLeft: 8 } : undefined}
     >
-      <small>
-        {address.region?.type ?? 'element'} · {a.resolved ? 'Resolved' : 'Open'} · {state}
-      </small>
-      <button disabled={state !== 'Current'} onClick={() => onJump(a)}>
-        Jump to annotation
-      </button>
-      {address.region?.type === 'lines' && (
-        <small>
-          {address.region.side ?? 'text'} · lines {address.region.start}–{address.region.end}
-        </small>
-      )}
+      {/* The meta text wraps beside the jump button instead of flowing under it. */}
+      <div className="comment-thread-meta">
+        <div>
+          <small>
+            {address.region?.type ?? 'element'} · {a.resolved ? 'Resolved' : 'Open'} · {state}
+          </small>
+          {address.region?.type === 'lines' && (
+            <small>
+              {address.region.side ?? 'text'} · lines {address.region.start}–{address.region.end}
+            </small>
+          )}
+        </div>
+        <button disabled={state !== 'Current'} onClick={() => onJump(a)}>
+          Jump to annotation
+        </button>
+      </div>
       {a.comments.map((c) => (
         <div key={c.id}>
           <strong>{c.author}</strong>

@@ -246,6 +246,8 @@ export interface StorageAdapter<T extends { id: string }> {
   put(value: T): Promise<void>;
   /** Atomically create or return the existing record without overwriting it. */
   putIfAbsent?(value: T): Promise<T>;
+  /** Atomically store several records: either all are written or none is. */
+  putAll?(values: T[]): Promise<void>;
   remove(id: string): Promise<void>;
 }
 export class MemoryStorage<T extends { id: string }> implements StorageAdapter<T> {
@@ -262,6 +264,10 @@ export class MemoryStorage<T extends { id: string }> implements StorageAdapter<T
   async putIfAbsent(value: T) {
     if (!this.records.has(value.id)) this.records.set(value.id, clone(value));
     return clone(this.records.get(value.id)!);
+  }
+  async putAll(values: T[]) {
+    const copies = values.map((value) => clone(value));
+    for (const copy of copies) this.records.set(copy.id, copy);
   }
   async remove(id: string) {
     this.records.delete(id);
@@ -317,6 +323,26 @@ export class IndexedDBStorage<T extends { id: string }> implements StorageAdapte
       tx.oncomplete = () => resolve(clone(result));
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted'));
+    });
+  }
+  async putAll(values: T[]): Promise<void> {
+    const db = await this.db;
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('artifacts', 'readwrite'),
+        store = tx.objectStore('artifacts');
+      let failure: unknown;
+      // Aborting also fails the queued puts, whose error events carry no transaction error.
+      const fail = () => reject(failure ?? tx.error ?? new Error('Storage transaction aborted'));
+      tx.oncomplete = () => resolve();
+      tx.onerror = fail;
+      tx.onabort = fail;
+      try {
+        for (const value of values) store.put(value);
+      } catch (error) {
+        // A record that cannot be cloned or stored throws here; abort so nothing is kept.
+        failure = error;
+        tx.abort();
+      }
     });
   }
   async remove(id: string) {
@@ -399,3 +425,4 @@ export async function createArtifactIfAbsent<T extends { id: string }>(
     fail('request-conflict', 'Creation request was already used for different input');
   return clone(stored);
 }
+export * from './proposal-reads';

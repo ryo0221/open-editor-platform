@@ -20,7 +20,7 @@ function formatter(zone: string) {
   let value = formatters.get(zone);
   if (!value) {
     value = new Intl.DateTimeFormat('en-US', {
-      timeZone: zone,
+      timeZone: resolved(zone)?.engine ?? zone,
       hourCycle: 'h23',
       year: 'numeric',
       month: '2-digit',
@@ -34,25 +34,73 @@ function formatter(zone: string) {
   return value;
 }
 
-const canonical = new Map<string, string | null>();
-/** The platform's canonical name for a zone, or null when the zone is unknown. */
-export function canonicalZone(zone: string): string | null {
+/** ICU keeps CLDR's older names as canonical (Chromium and Node answer Asia/Saigon for
+ * Asia/Ho_Chi_Minh); IANA's current name for each, so every engine stores the same text. */
+const currentNames: Record<string, string> = {
+  'Africa/Asmera': 'Africa/Asmara',
+  'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+  'America/Catamarca': 'America/Argentina/Catamarca',
+  'America/Coral_Harbour': 'America/Atikokan',
+  'America/Cordoba': 'America/Argentina/Cordoba',
+  'America/Godthab': 'America/Nuuk',
+  'America/Indianapolis': 'America/Indiana/Indianapolis',
+  'America/Jujuy': 'America/Argentina/Jujuy',
+  'America/Louisville': 'America/Kentucky/Louisville',
+  'America/Mendoza': 'America/Argentina/Mendoza',
+  'Asia/Calcutta': 'Asia/Kolkata',
+  'Asia/Katmandu': 'Asia/Kathmandu',
+  'Asia/Rangoon': 'Asia/Yangon',
+  'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Atlantic/Faeroe': 'Atlantic/Faroe',
+  'Europe/Kiev': 'Europe/Kyiv',
+  'Pacific/Enderbury': 'Pacific/Kanton',
+  'Pacific/Ponape': 'Pacific/Pohnpei',
+  'Pacific/Truk': 'Pacific/Chuuk',
+};
+// Keyed in lower case: engines take zone names in any casing.
+const olderNames = Object.fromEntries(
+  Object.entries(currentNames).map(([older, current]) => [current.toLowerCase(), older]),
+);
+
+function engineName(zone: string): string | null {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone;
+  } catch {
+    return null;
+  }
+}
+
+/** The stored name and the name this engine accepts for it. */
+interface Resolved {
+  name: string;
+  engine: string;
+}
+const canonical = new Map<string, Resolved | null>();
+function resolved(zone: string): Resolved | null {
   if (typeof zone !== 'string' || !zone || zone.length > 64) return null;
   // Building a formatter is the costliest step of every time check; the answer never changes.
   let value = canonical.get(zone);
   if (value === undefined) {
-    try {
-      value = new Intl.DateTimeFormat('en-US', { timeZone: zone }).resolvedOptions().timeZone;
-    } catch {
-      value = null;
-    }
+    // An engine with older zone data may know a renamed zone only by its older name.
+    const older = olderNames[zone.toLowerCase()];
+    const engine = engineName(zone) ?? (older ? engineName(older) : null);
+    value = engine ? { name: currentNames[engine] ?? engine, engine } : null;
     // Imported names are arbitrary text; keep the memo bounded.
     if (canonical.size >= 512) canonical.clear();
     canonical.set(zone, value);
   }
   return value;
 }
+/** IANA's current name for a zone (current, older or differently cased), or null when unknown. */
+export const canonicalZone = (zone: string): string | null => resolved(zone)?.name ?? null;
+/** Whether the zone is the name content stores: what new and changed events are written with. */
 export const isCanonicalZone = (zone: string) => canonicalZone(zone) === zone;
+/** Whether the zone can be read: imports and saved versions with an older name still open. */
+export const isKnownZone = (zone: string) => canonicalZone(zone) !== null;
+/** The older name ICU knows a renamed zone by, so pickers find it by either name. */
+export const olderZoneName = (zone: string): string | undefined => olderNames[zone.toLowerCase()];
+/** The same zone under either name. */
+export const sameZone = (a: string, b: string) => a === b || canonicalZone(a) === canonicalZone(b);
 
 /** Milliseconds since the epoch of the wall time, read as if it were UTC. */
 export function localMillis(local: LocalDateTime): number | null {
@@ -87,7 +135,7 @@ export const zoneOffset = (instant: number, zone: string) =>
 /** Every instant whose wall time in the zone is the given local time. */
 export function resolveLocal(local: LocalDateTime, zone: string): LocalResolution {
   const wall = localMillis(local);
-  if (wall === null || !isCanonicalZone(zone)) return { kind: 'missing' };
+  if (wall === null || !isKnownZone(zone)) return { kind: 'missing' };
   const offsets = new Set([wall - DAY_MS, wall, wall + DAY_MS].map((t) => zoneOffset(t, zone)));
   const instants = [...offsets]
     .map((offset) => wall - offset)
@@ -110,9 +158,15 @@ export function wallTime(instant: number, zone: string): WallTime {
 export const timeLabel = (minutes: number) =>
   `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
-/** The zones this platform knows, for pickers. Falls back to a short list on older engines. */
+let zoneList: string[] | undefined;
+/** The zones this platform knows by their current names, sorted, for pickers. Falls back to UTC
+ * on older engines. */
 export function knownZones(): string[] {
-  const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
-  const zones = supported ? supported('timeZone') : [];
-  return [...new Set(['UTC', ...zones])].filter(isCanonicalZone);
+  if (!zoneList) {
+    const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+    const names = ['UTC', ...(supported ? supported('timeZone') : [])].map(canonicalZone);
+    const rest = new Set(names.filter((z): z is string => !!z && z !== 'UTC'));
+    zoneList = ['UTC', ...[...rest].sort()];
+  }
+  return zoneList;
 }

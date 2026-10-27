@@ -181,7 +181,7 @@ describe('Structured Graph pure model and commands', () => {
     session.execute([{ type: 'delete-node', id: 'resource-a', cascade: true }]);
     expect(session.content.nodes).toHaveLength(1);
     expect(session.content.edges).toHaveLength(0);
-    expect(session.content.layout['resource-a']).toBeUndefined();
+    expect(session.content.presentation.nodes['resource-a']).toBeUndefined();
     expect(session.undo()).toEqual(g);
   });
   it('treats missing required values as diagnostics but refuses present invalid typed values', () => {
@@ -213,7 +213,7 @@ describe('Structured Graph pure model and commands', () => {
     const g = createRelationGraph(),
       session = new GraphSession(g, relationProfile);
     session.execute([{ type: 'move-node', id: 'resource-a', position: { x: -10, y: 100 } }]);
-    expect({ ...session.content, layout: g.layout }).toEqual(g);
+    expect({ ...session.content, presentation: g.presentation }).toEqual(g);
     expect(session.undo()).toEqual(g);
     expect(session.canUndo).toBe(false);
   });
@@ -319,19 +319,19 @@ describe('untrusted Graph input and schema budgets', () => {
     [
       'NaN',
       (g) => {
-        g.layout['resource-a'].x = NaN;
+        g.presentation.nodes['resource-a'].x = NaN;
       },
     ],
     [
       'coordinate bound',
       (g) => {
-        g.layout['resource-a'].x = graphLimits.coordinate + 1;
+        g.presentation.nodes['resource-a'].x = graphLimits.coordinate + 1;
       },
     ],
     [
       'orphan layout',
       (g) => {
-        g.layout.unknown = { x: 1, y: 2 };
+        g.presentation.nodes.unknown = { x: 1, y: 2 };
       },
     ],
     [
@@ -355,7 +355,7 @@ describe('untrusted Graph input and schema budgets', () => {
           attributes: {},
         }));
         g.edges = [];
-        g.layout = {};
+        g.presentation.nodes = {};
       },
     ],
     [
@@ -374,8 +374,10 @@ describe('untrusted Graph input and schema budgets', () => {
   });
   it('accepts coordinate boundary and refuses unknown Profile ID/version', () => {
     const g = createRelationGraph();
-    g.layout['resource-a'] = { x: graphLimits.coordinate, y: -graphLimits.coordinate };
-    expect(new GraphSession(g, relationProfile).content.layout).toEqual(g.layout);
+    g.presentation.nodes['resource-a'] = { x: graphLimits.coordinate, y: -graphLimits.coordinate };
+    expect(new GraphSession(g, relationProfile).content.presentation.nodes).toEqual(
+      g.presentation.nodes,
+    );
     g.profile.version = 2;
     expect(() => new GraphSession(g, relationProfile)).toThrow('Profile');
   });
@@ -491,7 +493,7 @@ it('checks exact cycle components at the declared node/edge bounds without per-e
     attributes: { name: `Node ${i}` },
   }));
   graph.edges = [];
-  graph.layout = {};
+  graph.presentation.nodes = {};
   for (let jump = 1; jump <= 5 && graph.edges.length < 4000; jump++)
     for (let i = 0; i + jump < 1000 && graph.edges.length < 4000; i++)
       graph.edges.push({
@@ -522,7 +524,7 @@ it('checks exact cycle components at the declared node/edge bounds without per-e
 it('rejects undeclared layout position fields before native import or proposal adoption', async () => {
   const graph = createRelationGraph();
   const artifact = createArtifact('structured-graph', 'Untrusted position', graph);
-  Object.assign(artifact.draft.content.layout['resource-a'], {
+  Object.assign(artifact.draft.content.presentation.nodes['resource-a'], {
     metadata: 'Must not silently disappear',
   });
   expect(isGraphDocument(artifact.draft.content)).toBe(false);

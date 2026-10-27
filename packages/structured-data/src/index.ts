@@ -4,3 +4,4 @@ export * from './views';
 export * from './session';
 export * from './csv-transfer';
 export * from './csv-export-ui';
+export * from './proposal-diff';

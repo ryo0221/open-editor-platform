@@ -54,4 +54,6 @@ is retained in `RUNTIME-NOTICES.txt`. The type-only `@types/three` dependency gr
 also installs development helpers (including Rapier, tween.js and meshoptimizer);
 these are not imports of the CAD renderer source. Installed packages retain their
 own licenses. OCCT/OpenCascade.js is not an npm dependency or included kernel
-binary, and its unfinished distribution gate remains separate.
+binary. The kernel is built separately; its notice, license texts and
+corresponding source are described in [cad-kernel](cad-kernel/README.md) and
+travel with the kernel files, not with this supplement.

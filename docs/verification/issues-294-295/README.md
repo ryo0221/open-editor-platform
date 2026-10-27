@@ -38,14 +38,14 @@ Production Chromium 151.0.7922.173, desktop 1440×900 and mobile 390×844
 New independent Host uses public packages and its own markup, with a production
 ESM bundle; ordinary Playground remains a separate regression target.
 
-| Check | Current result |
-| --- | --- |
-| New headless model + native shared adapter | 33 PASS across two files, including all override patch entrypoints |
-| Full unit suite | 2,695 PASS / nine existing optional skips across 260 files (2,687 + isolated eight-case Slide import corpus) |
-| Typecheck/lint | PASS |
-| Three production builds | PASS: Playground, React UI and Artifact Host |
-| File policy / tooling | 2,317 files checked / 90 tooling cases PASS |
-| Production desktop/mobile | 32 PASS: eight new / 24 existing regressions; zero browser errors |
+| Check                                      | Current result                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| New headless model + native shared adapter | 33 PASS across two files, including all override patch entrypoints                                           |
+| Full unit suite                            | 2,695 PASS / nine existing optional skips across 260 files (2,687 + isolated eight-case Slide import corpus) |
+| Typecheck/lint                             | PASS                                                                                                         |
+| Three production builds                    | PASS: Playground, React UI and Artifact Host                                                                 |
+| File policy / tooling                      | 2,317 files checked / 90 tooling cases PASS                                                                  |
+| Production desktop/mobile                  | 32 PASS: eight new / 24 existing regressions; zero browser errors                                            |
 
 New unit cases cover explicit/generated IDs, ordering, bounds/parent failures,
 input ownership, every intent family, invalid target/value/type patches, atomic
@@ -87,22 +87,22 @@ is claimed.
 
 ## Acceptance conditions
 
-| Conditions | Result / scope |
-| --- | --- |
-| N01 purpose/native model | PASS for this extension: existing Design kind/schema, public Node entrypoint and Host ownership documented |
-| N02/N04 validation/atomic commands | PASS: stable IDs, pure ownership, typed/invalid patches and atomic failure in unit/production browser checks |
-| N03/N05 private view/history | PASS for proposal/history changes: pure preview/cancel, one-step Undo/Redo, stale/ABA retained branches. Existing immutable version lifecycle is unchanged |
-| N06/N07 independent/ordinary Host | PASS: independent public Host edit/save/reload and existing ordinary Design/React integration regressions |
-| N08/N11 IDs/selection/keyboard/mobile | PASS: stable-ID selection, Inspector keyboard commit and responsive production flows, inspected screenshots |
-| N09/N12 authority/untrusted data | Parser, stale, ABA, read-only and native authority unit PASS |
-| N10 persistence | PASS for this extension: native JSON/portable proposal roundtrip, independent save/reload and existing normal Host import/save/reload. Immutable Artifact lifecycle remains existing Host behavior |
-| N13/N14 reproducibility/documentation | PASS: all listed functional gates, pinned source, contracts/README/status and retained initial failures |
-| C03 proposals/headless | PASS: bounded typed JSON, matching preview/apply, stale/ABA/revocation, cancel/failure unchanged and one Undo |
-| C04 shared | Bounded native command adapter regression PASS; no independent shared intent session or new shared capability acceptance |
-| C01/C02 text/annotations | PASS for existing unit/rich-canvas/prototype comment regressions only. Native OS IME is NOT RUN |
-| C05/C06/C08 templates/reuse/React | PASS for existing full-unit and ordinary Design/React browser regressions only; no new authoring/bridge capability |
-| C07/C09 new formats/large storage | N/A: no new format, fetching or durable-storage feature |
-| C10/performance/release | NOT RUN: physical devices, other engines, new performance acceptance. Actions dispatch, trials, public sync and deployment remain paused |
+| Conditions                            | Result / scope                                                                                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| N01 purpose/native model              | PASS for this extension: existing Design kind/schema, public Node entrypoint and Host ownership documented                                                                                         |
+| N02/N04 validation/atomic commands    | PASS: stable IDs, pure ownership, typed/invalid patches and atomic failure in unit/production browser checks                                                                                       |
+| N03/N05 private view/history          | PASS for proposal/history changes: pure preview/cancel, one-step Undo/Redo, stale/ABA retained branches. Existing immutable version lifecycle is unchanged                                         |
+| N06/N07 independent/ordinary Host     | PASS: independent public Host edit/save/reload and existing ordinary Design/React integration regressions                                                                                          |
+| N08/N11 IDs/selection/keyboard/mobile | PASS: stable-ID selection, Inspector keyboard commit and responsive production flows, inspected screenshots                                                                                        |
+| N09/N12 authority/untrusted data      | Parser, stale, ABA, read-only and native authority unit PASS                                                                                                                                       |
+| N10 persistence                       | PASS for this extension: native JSON/portable proposal roundtrip, independent save/reload and existing normal Host import/save/reload. Immutable Artifact lifecycle remains existing Host behavior |
+| N13/N14 reproducibility/documentation | PASS: all listed functional gates, pinned source, contracts/README/status and retained initial failures                                                                                            |
+| C03 proposals/headless                | PASS: bounded typed JSON, matching preview/apply, stale/ABA/revocation, cancel/failure unchanged and one Undo                                                                                      |
+| C04 shared                            | Bounded native command adapter regression PASS; no independent shared intent session or new shared capability acceptance                                                                           |
+| C01/C02 text/annotations              | PASS for existing unit/rich-canvas/prototype comment regressions only. Native OS IME is NOT RUN                                                                                                    |
+| C05/C06/C08 templates/reuse/React     | PASS for existing full-unit and ordinary Design/React browser regressions only; no new authoring/bridge capability                                                                                 |
+| C07/C09 new formats/large storage     | N/A: no new format, fetching or durable-storage feature                                                                                                                                            |
+| C10/performance/release               | NOT RUN: physical devices, other engines, new performance acceptance. Actions dispatch, trials, public sync and deployment remain paused                                                           |
 
 ## Earlier attempts and evidence limits
 
@@ -201,13 +201,13 @@ independent output builds remain selected regressions.
 Review code/tests: `c3c60d220751023a2e68ba2bbaea8f8ec6d3e0d1`.
 The following documentation commit records this source pin and outcomes.
 
-| Review gate | Result |
-| --- | --- |
-| New model/native authority tests | 40 PASS (38 model / two authority), seven new unit cases |
-| Full units | 2,702 PASS / nine existing optional skips across 260 files |
-| Lint / typecheck / three production builds | PASS |
-| File policy / tooling | 2,317 files PASS / 90 tests PASS |
-| Production desktop/mobile | 34 PASS (ten headless / 24 regressions), zero browser errors |
+| Review gate                                | Result                                                       |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| New model/native authority tests           | 40 PASS (38 model / two authority), seven new unit cases     |
+| Full units                                 | 2,702 PASS / nine existing optional skips across 260 files   |
+| Lint / typecheck / three production builds | PASS                                                         |
+| File policy / tooling                      | 2,317 files PASS / 90 tests PASS                             |
+| Production desktop/mobile                  | 34 PASS (ten headless / 24 regressions), zero browser errors |
 
 Both final preview screenshots were visually inspected at desktop/mobile widths;
 the proposal remains separate from unchanged native content/history and controls
@@ -245,13 +245,13 @@ The main lockfile was installed with `npm ci --cache
 failed with ENOENT for `/home/agent/.npm/_cacache`; the retry with a writable cache
 passed. The lockfile was not edited beyond the incoming main version.
 
-| Integration gate | Result |
-| --- | --- |
-| Full units | 2,733 PASS / nine existing optional skips across 265 files (2,725 + eight-case Office corpus) |
-| Lint / typecheck / production builds | PASS, all four entries including the incoming Animation Host |
-| File policy / tooling | 2,339 files PASS / 91 tests PASS |
-| Design production desktop/mobile | 34 PASS, zero browser errors; both preview screenshots inspected |
-| Selected Animation production desktop/mobile | Four PASS, zero browser errors |
+| Integration gate                             | Result                                                                                        |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Full units                                   | 2,733 PASS / nine existing optional skips across 265 files (2,725 + eight-case Office corpus) |
+| Lint / typecheck / production builds         | PASS, all four entries including the incoming Animation Host                                  |
+| File policy / tooling                        | 2,339 files PASS / 91 tests PASS                                                              |
+| Design production desktop/mobile             | 34 PASS, zero browser errors; both preview screenshots inspected                              |
+| Selected Animation production desktop/mobile | Four PASS, zero browser errors                                                                |
 
 Both Design preview screenshots, the desktop independent Animation Player and
 mobile Slide presentation were visually inspected. The controls and retained

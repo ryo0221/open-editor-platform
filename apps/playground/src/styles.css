@@ -241,6 +241,14 @@ small,
   width: 100%;
   border: 0;
 }
+.playground-setup {
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.playground-setup summary {
+  cursor: pointer;
+}
 .library-note {
   font-size: 11px;
   color: #737d8d;
@@ -305,6 +313,24 @@ small,
   margin-top: 14px;
   padding: 12px 0;
 }
+.comment-thread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px 8px;
+}
+.comment-thread-meta > div {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 120px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.comment-thread-meta > button {
+  flex: none;
+  white-space: nowrap;
+}
 .comment-thread.resolved {
   opacity: 0.65;
 }
@@ -348,6 +374,40 @@ small,
 }
 .proposal-dialog::backdrop {
   background: #18202a66;
+}
+.proposal-changes {
+  display: grid;
+  gap: 8px;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.proposal-text {
+  white-space: pre-wrap;
+}
+.proposal-text del {
+  background: #fbe3e1;
+}
+.proposal-text ins {
+  background: #dff1dc;
+  text-decoration: none;
+}
+.proposal-move {
+  display: block;
+  width: min(240px, 100%);
+  height: 120px;
+  margin-top: 6px;
+  background: #f7f8fa;
+}
+.proposal-move rect {
+  fill: none;
+  stroke-width: 2;
+}
+.proposal-move .before {
+  stroke: #8a94a6;
+  stroke-dasharray: 5 4;
+}
+.proposal-move .after {
+  stroke: #2f6fd6;
 }
 .proposal-dialog footer {
   display: flex;

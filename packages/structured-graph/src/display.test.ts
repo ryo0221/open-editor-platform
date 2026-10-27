@@ -2,9 +2,11 @@ import { expect, it } from 'vitest';
 import { placeMeasuredGraphEdgeLabels } from './display';
 import { clone } from '@editor-platform/artifact-core';
 import { fitGraphView, graphNodeSize, graphBoxesOverlap, placeGraphEdgeLabels } from './display';
-import { routeGraphEdge, routeIntersects } from './routing';
-import { isGraphProfile } from './profile';
-import { relationProfile } from './reference';
+import { routeGraphEdge, routeIntersects, separateGraphRoutes } from './routing';
+import { isGraphProfile, validateGraph } from './profile';
+import { createRelationGraph, relationProfile } from './reference';
+import { graphEdgeText } from './view-model';
+import { graphConnectionLabelField, prepareGraphConnection } from './view-connection';
 
 it('fits negative coordinates and actual custom dimensions at desktop and mobile widths', () => {
   const boxes = [
@@ -122,4 +124,147 @@ it('uses measured wide/tall glyph bounds and defers a label that cannot fit the 
   expect(wide.deferred).toBe(true);
   expect(wide.bounds.width).toBe(686);
   expect(wide.bounds.height).toBe(34);
+});
+
+it('#378 Fit centres the whole drawing and enlarges it up to 2×', () => {
+  const boxes = [
+    { x: 100, y: 100, width: 200, height: 70 },
+    { x: 500, y: 300, width: 200, height: 70 },
+  ];
+  const view = fitGraphView(boxes, { width: 1300, height: 860 });
+  expect(view.zoom).toBe(2);
+  // 600×270 drawn at 2× is 1200×540, centred in 1300×860.
+  expect(view.x + 100 * view.zoom).toBe(50);
+  expect(view.y + 100 * view.zoom).toBe(160);
+});
+
+it('#378 connections sharing a line into one node side get their own ports and lines', () => {
+  const hub = { x: 500, y: 400, width: 200, height: 70 },
+    left = { x: 300, y: 100, width: 200, height: 70 },
+    right = { x: 700, y: 100, width: 200, height: 70 },
+    nodes = [hub, left, right];
+  const raw = new Map([
+    ['l', routeGraphEdge(left, hub, nodes)],
+    ['r', routeGraphEdge(right, hub, nodes)],
+  ]);
+  // Both routes end on the same trunk into the middle of the hub's top side.
+  expect(raw.get('l')!.target).toEqual(raw.get('r')!.target);
+  const routes = separateGraphRoutes(
+    raw,
+    new Map([
+      ['l', { source: left, target: hub }],
+      ['r', { source: right, target: hub }],
+    ]),
+    nodes,
+  );
+  const l = routes.get('l')!,
+    r = routes.get('r')!;
+  expect(l.target.y).toBe(hub.y);
+  expect(r.target.y).toBe(hub.y);
+  expect(l.target.x).toBeLessThan(r.target.x);
+  for (const target of [l.target, r.target]) {
+    expect(target.x).toBeGreaterThanOrEqual(hub.x + 6);
+    expect(target.x).toBeLessThanOrEqual(hub.x + hub.width - 6);
+  }
+  for (const route of [l, r])
+    expect(
+      route.points.some(
+        (p, i) => i > 0 && nodes.some((n) => routeIntersects(route.points[i - 1], p, n)),
+      ),
+    ).toBe(false);
+  const labels = placeGraphEdgeLabels(
+    [
+      { id: 'l', route: l, text: '出資' },
+      { id: 'r', route: r, text: '出資' },
+    ],
+    nodes,
+  );
+  expect(graphBoxesOverlap(labels.get('l')!.bounds, labels.get('r')!.bounds)).toBe(false);
+  // Same input, same drawing.
+  expect(
+    separateGraphRoutes(
+      raw,
+      new Map([
+        ['l', { source: left, target: hub }],
+        ['r', { source: right, target: hub }],
+      ]),
+      nodes,
+    ),
+  ).toEqual(routes);
+});
+
+it('#378 a named connection shows its name alone and Connect nodes stores the typed name', () => {
+  const profile = clone(relationProfile),
+    edge = { id: 'e', type: 'related', from: 'a', to: 'b', attributes: { label: '出資' } };
+  expect(graphEdgeText(profile, edge)).toBe('出資');
+  expect(graphEdgeText(profile, { ...edge, attributes: {} })).toBe('Related');
+  expect(graphConnectionLabelField(profile, 'related')).toBe('label');
+  const graph = createRelationGraph();
+  const intent = prepareGraphConnection({
+    readOnly: false,
+    connection: {
+      base: 's',
+      target: graph.id,
+      dirty: true,
+      type: 'related',
+      from: 'resource-a',
+      to: 'resource-b',
+      label: ' 融資 ',
+    },
+    stamp: 's',
+    id: graph.id,
+    graph,
+    profile,
+    edgeId: () => 'new-edge',
+  });
+  expect(intent).toEqual({
+    type: 'add-edge',
+    edge: {
+      id: 'new-edge',
+      type: 'related',
+      from: 'resource-a',
+      to: 'resource-b',
+      attributes: { label: '融資' },
+    },
+  });
+  // An open IME composition in the name blocks both the form and a Host flush.
+  expect(() =>
+    prepareGraphConnection({
+      readOnly: false,
+      connection: {
+        base: 's',
+        target: graph.id,
+        dirty: true,
+        type: 'related',
+        from: 'resource-a',
+        to: 'resource-b',
+        label: '融',
+        composing: true,
+      },
+      stamp: 's',
+      id: graph.id,
+      graph,
+      profile,
+    }),
+  ).toThrow('入力変換');
+  // A type without a text label field has no name input.
+  profile.edges.related.schema.label = { type: 'number' };
+  expect(graphConnectionLabelField(profile, 'related')).toBeUndefined();
+});
+
+it('#378 the Playground relation Profile tells organisations, companies, financiers, authorities and people apart', () => {
+  expect(isGraphProfile(relationProfile)).toBe(true);
+  expect(
+    Object.fromEntries(Object.entries(relationProfile.nodes).map(([k, t]) => [k, t.ui?.label])),
+  ).toEqual({
+    entity: 'Entity',
+    organization: 'Organization',
+    company: 'Company',
+    financier: 'Bank or financier',
+    authority: 'Government or regulator',
+    person: 'Person',
+  });
+  const graph = createRelationGraph();
+  graph.nodes.push({ id: 'bank', type: 'financier', attributes: { name: '国際協力銀行' } });
+  expect(validateGraph(graph, relationProfile)).toEqual([]);
 });

@@ -67,6 +67,21 @@ function refuse(session: DataSession, action: () => unknown) {
   expect(session.canUndo).toBe(undo);
 }
 describe('one canonical Data session across Grid/Form/Graph', () => {
+  it('refuses node shapes and styles: Data has nowhere to save them', () => {
+    const { session, binding } = bind(),
+      before = session.content,
+      { stamp } = binding.project();
+    for (const intent of [
+      { type: 'set-node-shape', id: dataNodeId('research'), shape: 'ellipse' },
+      { type: 'set-node-style', id: dataNodeId('research'), style: { fill: '#dbeafe' } },
+    ] as GraphIntent[])
+      expect(() => binding.apply([intent], stamp)).toThrow(/cannot save node shapes/);
+    expect(session.content).toEqual(before);
+    expect(session.canUndo).toBe(false);
+    expect(binding.project().graph.presentation.nodes[dataNodeId('research')]).not.toHaveProperty(
+      'shape',
+    );
+  });
   it('retargets either endpoint as one source transaction and refuses an occupied source', () => {
     const { session, binding } = bind(),
       original = session.content;
@@ -254,7 +269,7 @@ describe('one canonical Data session across Grid/Form/Graph', () => {
     assertDataIntegrity(roundtrip.draft.content);
     const reloaded = new DataSession(roundtrip.draft.content);
     expect(reloaded.content).toEqual(session.content);
-    expect(projectDataGraph(reloaded.content).layout[dataNodeId('research')]).toEqual({
+    expect(projectDataGraph(reloaded.content).presentation.nodes[dataNodeId('research')]).toEqual({
       x: 11,
       y: 22,
     });

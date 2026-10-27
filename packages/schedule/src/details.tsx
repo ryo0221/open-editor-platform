@@ -19,7 +19,8 @@ import {
   type ScheduleEvent,
   type ScheduleLane,
 } from './model';
-import { knownZones, type Fold } from './zone';
+import { canonicalZone, type Fold } from './zone';
+import { ZoneInput } from './zone-input';
 import { laneShown, type ScheduleLaneState } from './host';
 
 export const conferenceLabel: Record<ConferencePreference, string> = {
@@ -46,7 +47,11 @@ function TimeForm({
   const initial =
     time.kind === 'allDay'
       ? { start: time.startDate, end: addDays(time.endDateExclusive, -1), zone: '' }
-      : { start: time.startLocal, end: time.endLocal, zone: time.timeZone };
+      : {
+          start: time.startLocal,
+          end: time.endLocal,
+          zone: canonicalZone(time.timeZone) ?? time.timeZone,
+        };
   const [start, setStart] = useState(initial.start);
   const [end, setEnd] = useState(initial.end);
   const [zone, setZone] = useState(initial.zone);
@@ -154,21 +159,15 @@ function TimeForm({
       {time.kind === 'timed' && (
         <label>
           Time zone
-          <select
-            aria-label="Event time zone"
+          <ZoneInput
+            label="Event time zone"
             value={zone}
             disabled={readOnly}
-            onChange={(e) => {
-              setZone(e.target.value);
+            onChange={(z) => {
+              setZone(z);
               setFolds({});
             }}
-          >
-            {[...new Set([zone, ...knownZones()])].map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </select>
+          />
         </label>
       )}
       <button disabled={readOnly}>Apply time</button>

@@ -50,7 +50,7 @@ export function AnimationSurfaceHeader2({
   onExport(): void;
 }) {
   return (
-    <header>
+    <header className="a2-toolbar">
       <h2>Animation 2D</h2>
       <div className="a2-actions">
         {layerTypes.map((type) => (
@@ -130,7 +130,7 @@ export function AnimationTimingControls2({
   onWorkArea(workArea: AnimationWorkArea2 | undefined): void;
 }) {
   return (
-    <div className="a2-actions">
+    <div className="a2-actions a2-timing">
       <AnimationDurationInput2
         content={content}
         compositionId={compositionId}

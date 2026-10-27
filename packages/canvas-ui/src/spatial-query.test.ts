@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { intersectsRotated, type GeometryItem } from '@editor-platform/editor-core';
 import {
@@ -7,10 +7,80 @@ import {
   useTypeScriptSpatialBackend,
 } from '@editor-platform/spatial-index/experimental';
 import { CanvasSpatialQuery } from './spatial-query';
+import { createTypeScriptSpatialIndex } from '@editor-platform/spatial-index';
+import * as spatialRuntime from '@editor-platform/spatial-index/experimental';
 const asset = new URL('../../../work/spatial-wasm/spatial.wasm', import.meta.url);
 if (process.env.SPATIAL_WASM_REQUIRED && !existsSync(asset))
   throw new Error('Build the real Rust Wasm before Canvas fallback verification.');
-afterEach(useTypeScriptSpatialBackend);
+afterEach(() => {
+  vi.restoreAllMocks();
+  useTypeScriptSpatialBackend();
+});
+
+for (const indexed of [false, true])
+  it(`${indexed ? 'indexed candidates' : 'normal scan'} constrain expanded path hits by all ancestor clips`, () => {
+    // Exercise the indexed query branch with a real TS candidate index; this is
+    // not a claim that the optional Rust Wasm artifact has been built or run.
+    const factory = vi.fn((snapshot: Float64Array) =>
+      createTypeScriptSpatialIndex(
+        Array.from({ length: snapshot.length / 4 }, (_, i) => ({
+          x: snapshot[i * 4],
+          y: snapshot[i * 4 + 1],
+          width: snapshot[i * 4 + 2] - snapshot[i * 4],
+          height: snapshot[i * 4 + 3] - snapshot[i * 4 + 1],
+        })),
+      ),
+    );
+    if (indexed) vi.spyOn(spatialRuntime, 'getWasmFactory').mockReturnValue(factory);
+    const q = new CanvasSpatialQuery();
+    const target = {
+      id: 'path',
+      bounds: { x: 0, y: 0, width: 10, height: 10 },
+      hitBounds: { x: 0, y: 0, width: 100, height: 10 },
+      hitClipBounds: [{ x: 0, y: 0, width: 20, height: 20 }],
+    };
+    expect(q.query([target], { x: 50, y: 0, width: 10, height: 10 })).toEqual([]);
+    expect(q.query([target], { x: 15, y: 2, width: 4, height: 4 })).toEqual([target]);
+    expect(q.query([target], { x: 20, y: 5, width: 0, height: 0 })).toEqual([target]);
+    expect(q.query([target], { x: 20.01, y: 5, width: 0, height: 0 })).toEqual([]);
+
+    const nested = {
+      ...target,
+      hitClipBounds: [
+        { x: 0, y: 0, width: 80, height: 20 },
+        { x: 40, y: 0, width: 60, height: 20 },
+      ],
+    };
+    expect(q.query([nested], { x: 10, y: 0, width: 10, height: 10 })).toEqual([]);
+    expect(q.query([nested], { x: 50, y: 0, width: 10, height: 10 })).toEqual([nested]);
+    const disjoint = {
+      ...target,
+      hitClipBounds: [
+        { x: 0, y: 0, width: 20, height: 20 },
+        { x: 60, y: 0, width: 20, height: 20 },
+      ],
+    };
+    expect(q.query([disjoint], { x: 0, y: 0, width: 100, height: 20 })).toEqual([]);
+
+    const rotated = {
+      ...target,
+      hitBounds: { x: -5, y: -5, width: 20, height: 20 },
+      hitClipBounds: [{ x: 0, y: 0, width: 10, height: 10, rotation: 45 }],
+    };
+    expect(q.query([rotated], { x: -1, y: -1, width: 1, height: 1 })).toEqual([]);
+    expect(q.query([rotated], { x: 4, y: 4, width: 2, height: 2 })).toEqual([rotated]);
+    expect(q.query([rotated], { x: 5 - Math.sqrt(50), y: 5, width: 0, height: 0 })).toEqual([
+      rotated,
+    ]);
+    const outsidePaint = {
+      ...target,
+      hitBounds: { x: 0, y: 0, width: 10, height: 10 },
+      hitClipBounds: [{ x: 20, y: 0, width: 10, height: 10 }],
+    };
+    expect(q.query([outsidePaint], { x: 0, y: 0, width: 40, height: 10 })).toEqual([]);
+    if (indexed) expect(factory).toHaveBeenCalled();
+    q.dispose();
+  });
 for (const backend of ['typescript', 'wasm'] as const)
   it.skipIf(backend === 'wasm' && !existsSync(asset))(
     `${backend} preserves rotated marquee/point hits, visibility, order and geometry replacement`,

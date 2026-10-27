@@ -35,7 +35,7 @@ import {
 } from 'react';
 import { Hand, Minus, Plus, Scan, MousePointer2, Grid3X3 } from 'lucide-react';
 import { IconButton, isTextInput, EditorHistoryContext } from '@editor-platform/editor-ui';
-import { isDeepFrozen, canonicalJson } from '@editor-platform/artifact-core';
+import { isDeepFrozen, canonicalJson, clone } from '@editor-platform/artifact-core';
 import {
   drawingPrimitives,
   screenToWorld,
@@ -59,6 +59,10 @@ export interface CanvasTarget extends GeometryItem {
   label: string;
   /** Conservative world paint extent. Omit for unbounded/custom rendering. */
   paintBounds?: Bounds;
+  /** Optional world-space selection hull; native transform frame remains bounds. */
+  hitBounds?: Bounds;
+  /** Ancestor world clips also constrain transparent pointer-hit geometry. */
+  hitClipBounds?: Drawing['clipBounds'];
   text?: string;
   typography?: TextStyle;
   runs?: TextRun[];
@@ -157,6 +161,9 @@ const DrawingContents = memo(
 );
 export const DrawingView = memo(
   function DrawingView({ drawing }: { drawing: Drawing }) {
+    // Structured paths already contain projected world coordinates. Keep their
+    // geometry and rotation/flip origin together instead of translating twice.
+    if (drawing.path) return <DrawingContents drawing={drawing} />;
     const { x, y } = drawing.bounds;
     // A move changes this translation, not every text span/path/image coordinate.
     // Frame clips use world coordinates too and must share the same local origin.
@@ -214,7 +221,12 @@ export function CanvasControls({
         value={String(view.zoom)}
         onChange={(e) => onChange({ ...view, fit: false, zoom: Number(e.target.value) })}
       >
-        <option value={view.zoom}>{Number((view.zoom * 100).toFixed(1))}%</option>
+        <option value={view.zoom}>
+          {Number(
+            view.zoom < 0.001 ? (view.zoom * 100).toPrecision(3) : (view.zoom * 100).toFixed(1),
+          )}
+          %
+        </option>
         {[0.25, 0.5, 1, 2, 4]
           .filter((z) => z !== view.zoom)
           .map((z) => (
@@ -254,11 +266,16 @@ export interface CanvasStageProps {
   underlay?: ReactNode | ((targets: CanvasTarget[]) => ReactNode);
   /** Domain interaction controls above painted objects, in the same world coordinates. */
   overlay?: ReactNode | ((targets: CanvasTarget[]) => ReactNode);
+  /** Explicit input ownership; point mode leaves camera/history/text input guards intact. */
+  inputOwner?: 'object' | 'point';
+  onPointKeyDown?: (event: import('react').KeyboardEvent<SVGSVGElement>) => void;
   readOnly?: boolean;
   width?: number;
   height?: number;
   background?: string;
   space?: 'page' | 'infinite';
+  /** Positive lower zoom for fit/wheel. Defaults retain page/infinite behavior. */
+  minZoom?: number;
   fitBounds?: Bounds;
   view?: CanvasView;
   onViewChange?: (view: CanvasView) => void;
@@ -279,6 +296,8 @@ export interface CanvasStageProps {
   insertion?: boolean;
   onFreehand?: (points: Point[]) => void;
   freehand?: boolean;
+  /** Opens text editing on this target, text selected, once it is rendered; each new object asks again. */
+  editText?: { id: string };
 }
 const CanvasObject = memo(
   function CanvasObject({
@@ -306,6 +325,29 @@ const CanvasObject = memo(
         tabIndex={-1}
         data-canvas-target={target.id}
       >
+        {target.hitBounds && !preview && (
+          <DrawingView
+            drawing={{
+              id: `${target.id}-hit`,
+              kind: 'shape',
+              text: '',
+              fill: 'transparent',
+              stroke: 'none',
+              bounds: target.hitBounds,
+              clipBounds: target.hitClipBounds,
+            }}
+          />
+        )}
+        {selected && target.hitBounds && !preview && (
+          <rect
+            {...target.hitBounds}
+            fill="none"
+            stroke="#3267c8"
+            strokeDasharray="4 3"
+            vectorEffect="non-scaling-stroke"
+            pointerEvents="none"
+          />
+        )}
         {target.hitBox && <rect {...projected.bounds} fill="transparent" />}
         <g visibility={editing ? 'hidden' : undefined}>{render(projected)}</g>
       </g>
@@ -369,6 +411,7 @@ function CanvasTextEditing(props: {
             style={original.typography}
             drawing={drawing}
             caret={editing.caret}
+            selectAll={editing.selectAll}
             toolsContainer={props.toolsContainer}
             toolsPosition={editing.expanded ? { x: 16, y: 16 } : anchor}
             expanded={editing.expanded}
@@ -399,6 +442,23 @@ function CanvasTextEditing(props: {
     </g>
   );
 }
+/** Starts a requested text edit when its target is editable and present, at most once per request. */
+function useEditTextRequest(
+  request: CanvasStageProps['editText'],
+  targets: CanvasTarget[],
+  readOnly: boolean,
+  setEditing: (editing: StageEditing) => void,
+) {
+  const handled = useRef<CanvasStageProps['editText']>(undefined);
+  useEffect(() => {
+    if (!request || handled.current === request) return;
+    const t = targets.find((t) => t.id === request.id);
+    if (!t) return;
+    handled.current = request;
+    if (t.editableText && !readOnly && !t.locked)
+      setEditing({ id: t.id, text: t.text ?? '', runs: clone(t.runs), selectAll: true });
+  }, [request, targets, readOnly]);
+}
 export function CanvasStage({
   label,
   targets,
@@ -410,11 +470,14 @@ export function CanvasStage({
   render,
   underlay,
   overlay,
+  inputOwner = 'object',
+  onPointKeyDown,
   readOnly = false,
   width = 1000,
   height = 620,
   background = '#fff',
   space = 'page',
+  minZoom,
   fitBounds,
   view: externalView,
   onViewChange,
@@ -429,6 +492,7 @@ export function CanvasStage({
   insertion,
   onFreehand,
   freehand,
+  editText,
 }: CanvasStageProps) {
   const spatial = useRef<CanvasSpatialQuery | undefined>(undefined);
   spatial.current ??= new CanvasSpatialQuery();
@@ -455,6 +519,7 @@ export function CanvasStage({
   const [guides, setGuides] = useState<SnapGuide[]>([]);
   const [path, setPath] = useState<Point[]>([]);
   const [editing, setEditing] = useState<StageEditing>();
+  useEditTextRequest(editText, targets, readOnly, setEditing);
   const spaceHeld = useRef(false);
   const drag = useRef<StageDrag | null>(null);
   const fit = useCanvasFit({
@@ -462,13 +527,14 @@ export function CanvasStage({
     viewRef,
     setter,
     space,
+    minZoom,
     fit: view.fit,
     width,
     height,
     bounds: stageBoundsToFit(fitBounds, space, targets, width, height),
     onSize: setSize,
   });
-  useCanvasWheel(ref, viewRef, setter, space);
+  useCanvasWheel(ref, viewRef, setter, space, minZoom);
   const world = (e: { clientX: number; clientY: number }) => {
     const rect = ref.current!.getBoundingClientRect();
     return screenToWorld(
@@ -550,6 +616,7 @@ export function CanvasStage({
           }
         }}
         onDoubleClick={(e) =>
+          inputOwner !== 'point' &&
           stageDoubleClick(e, {
             hit: eventTarget(e.target),
             point: () => world(e),
@@ -562,9 +629,33 @@ export function CanvasStage({
             onAction,
           })
         }
+        onPointerDownCapture={(e) => {
+          if (
+            inputOwner !== 'point' ||
+            isTextInput(e.target) ||
+            !(view.panMode || spaceHeld.current || e.button === 1)
+          )
+            return;
+          e.stopPropagation();
+          ref.current?.focus({ preventScroll: true });
+          stagePointerDown(e, {
+            hit: eventTarget(e.target),
+            targets,
+            selected,
+            groupScope,
+            readOnly,
+            panning: true,
+            insertion,
+            freehand,
+            onSelect,
+            begin,
+          });
+        }}
         onPointerDown={(e) => {
           // Scrolling the canvas into view here would move the second click of a double-click.
           if (!isTextInput(e.target)) ref.current?.focus({ preventScroll: true });
+          if (inputOwner === 'point' && !view.panMode && !spaceHeld.current && e.button !== 1)
+            return;
           stagePointerDown(e, {
             hit: eventTarget(e.target),
             targets,
@@ -584,10 +675,41 @@ export function CanvasStage({
         onKeyUp={(e) => {
           if (e.key === ' ') spaceHeld.current = false;
         }}
-        onBlur={() => {
-          spaceHeld.current = false;
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) spaceHeld.current = false;
         }}
-        onKeyDown={(e) =>
+        onKeyDown={(e) => {
+          if (
+            inputOwner === 'point' &&
+            !isTextInput(e.target) &&
+            !e.nativeEvent.isComposing &&
+            e.key === 'Escape' &&
+            drag.current
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            cancel();
+            return;
+          }
+          if (
+            inputOwner === 'point' &&
+            !isTextInput(e.target) &&
+            !e.nativeEvent.isComposing &&
+            [
+              'Escape',
+              'Delete',
+              'Backspace',
+              'ArrowLeft',
+              'ArrowRight',
+              'ArrowUp',
+              'ArrowDown',
+            ].includes(e.key)
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            onPointKeyDown?.(e);
+            return;
+          }
           stageKeyDown(e, {
             history,
             readOnly,
@@ -605,8 +727,8 @@ export function CanvasStage({
             onAction,
             onDelete,
             onTransform,
-          })
-        }
+          });
+        }}
       >
         <g transform={`translate(${view.pan.x} ${view.pan.y}) scale(${view.zoom})`}>
           <rect {...backgroundBounds} fill={background} data-space={space} />
@@ -628,7 +750,7 @@ export function CanvasStage({
           ))}
           {typeof overlay === 'function' ? overlay(projected()) : overlay}
           <PresenceMarkers presences={presences} targets={targets} zoom={view.zoom} />
-          {selected.length > 0 && !readOnly && !editing && (
+          {selected.length > 0 && !readOnly && !editing && inputOwner !== 'point' && (
             <SelectionOverlay
               box={box}
               rotation={selectionRotation}

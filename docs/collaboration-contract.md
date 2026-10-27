@@ -153,6 +153,10 @@ Verification. The authority protects its internal proposal commit
 path; a raw wire `proposalId` cannot bypass preview/adoption. External read validation
 is a synchronous Host hook. Cross-system atomicity requires a Host version/lease
 agreement and is not guaranteed merely by calling that hook.
+An external reference is an Artifact ID and its exact version ID. The hook may answer
+`true`/`false` or a `CurrentRead` (`available` with a version, `changed`, `missing`,
+`forbidden`); a stale proposal is rejected with `stale-precondition`, keys
+`external:<artifactId>`, and the reasons kept on the proposal state as `stale`.
 
 ## Recovery, presence and persistence
 

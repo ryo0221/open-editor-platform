@@ -182,14 +182,21 @@ camera controls remain usable. The trusted Host must also reject content edits.
 
 Graph reading Hosts can configure these public props (also accepted by `NativeGraphSurface`):
 
-| Prop                | Default                                  | Behavior                                                                                                                                               |
-| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `showInspector`     | `true`                                   | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.                                            |
-| `initialView`       | `'origin'`                               | `'fit'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable.                                                             |
-| `fitOnFilterChange` | `false`                                  | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera.                                         |
-| `nodeSize`          | 200px width, automatic height (min 70px) | Optional fixed `{width,height}` or `(node) => ({width,height})`, 40–4000 logical px per axis. Supplied invalid sizes retain the fixed 200×70 fallback. |
-| `visibleEdgeTypes`  | all                                      | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                                                                |
-| `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                      |
+| Prop                | Default                                  | Behavior                                                                                                                                                                                                             |
+| ------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `showInspector`     | `true`                                   | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.                                                                                                          |
+| `initialView`       | `'origin'`                               | `'fit'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable.                                                                                                                           |
+| `fitOnFilterChange` | `false`                                  | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera.                                                                                                       |
+| `nodeSize`          | 200px width, automatic height (min 70px) | Optional fixed `{width,height}` or `(node) => ({width,height})`, 40–4000 logical px per axis. Supplied invalid sizes retain the fixed 200×70 fallback.                                                               |
+| `visibleEdgeTypes`  | all                                      | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                                                                                                                              |
+| `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                                                                                    |
+| `shapeEditing`      | `true`                                   | Offer the toolbar `New node shape` and the Inspector `Appearance` choices. Pass `false` when the source has nowhere to save node shapes and styles.                                                                  |
+| `shapeOnCreate`     | `true`                                   | Offer a shape for new nodes, applied in the same edit as the node. Pass `false` for a presentation sidecar, which refuses mixed presentation and semantic batches.                                                   |
+| `sectionEditing`    | `true`                                   | Offer `Section type`/`Add section`, Section frames with move, resize and collapse, and the Inspector `Node section`/`Section settings`. Pass `false` for sources that cannot save Sections (Data, sidecar adapters). |
+
+The toolbar also offers `Arrange diagram` (headless: `arrangeGraph`, one Undo of `move-node`/`resize-section`)
+unless the Surface is read-only, and a `Palette` of node types when the Profile names a use with
+`ui.group` on any node type. Section settings offer `Fit section`.
 
 Camera, sizes, filters and emphasis do not change content, native versions or Undo.
 Validation, diagnostics and selection notifications continue to use the complete graph,
@@ -210,6 +217,16 @@ keyboard focus or selection. Profile `edges[type].ui.edgeStyle` may declare
 `{color: '#1d4ed8', dash: [6,4]}` to distinguish relation types. Only 3/6-digit hex
 colors and up to eight positive finite dash lengths (each ≤64) are accepted; `[]`
 means solid. Retain/increment Profile versions through the existing Host contract.
+Node shapes (Preview, schema 2): `rectangle`, `rounded-rectangle`, `ellipse`, `diamond`,
+`cylinder`, `hexagon` and `cloud`. A node's saved `presentation.nodes[id].shape`/`style`
+overrides the Profile `nodes[type].ui.shape`/`ui.style` default, which overrides a plain
+rectangle; style merges per field. Edit them with the `set-node-shape` and
+`set-node-style` intents (`null` returns to the default); each is one Undo step and leaves
+type, attributes and connections unchanged. Connections end where they meet the outline.
+Automatic height fits the label inside the shape (min 70px), and label text is black or
+white, whichever contrasts more with the fill. The outline geometry
+(`graphShapePolygon`, `graphShapeEndpoint`, `fitGraphRoutesToShapes`) is exported from the
+headless entry for Hosts that draw their own SVG.
 Explicit camera x/y are CSS pixel translation; zoom is clamped to 0.001–2.
 Nonfinite coordinates or nonpositive zoom fall back to the origin. Zoom out also
 reduces fitted views below 25% (halving down to the 0.001 minimum).
@@ -240,9 +257,15 @@ const [content, setContent] = useState(session.content);
 For external JSON inject `GraphAdapter<Source>` into `GraphBinding<Source>` with
 `read()` and the source's canonical `execute(command)`. It owns no history/source
 copy. Always supply a source revision and enforce access at execute; proposal apply
-also rechecks source bytes, Profile/Adapter pins and sidecar layout. Use the trusted
-Adapter's `diagnostics` to connect the domain validator. Definition layout uses Host
-`getLayout`/`setLayout`, while overlay/camera/selection remain private view state.
+also rechecks source bytes, Profile/Adapter pins and the presentation sidecar. Use the
+trusted Adapter's `diagnostics` to connect the domain validator. The Adapter declares
+`presentationMode`: `'sidecar'` keeps positions, shapes and styles in a Host-owned
+`PresentationSidecar` (schema 2) read and written through `getPresentation`/`setPresentation`;
+`'source'` keeps them in the source itself (refuse what it cannot save, as Data does for
+shapes); `'none'` refuses shape and style intents. `sections: true` requires `'source'`;
+without it every batch with a Section intent is refused with
+`This source cannot represent Graph sections`. Presentation-only batches cannot be mixed with semantic edits. Overlay/camera/selection
+remain private view state.
 
 For Data use `DataSession` (or `guardDataCommand` at every canonical apply boundary)
 and register `DataSurface.renderGraph` with `DataGraphSurface` from
@@ -437,6 +460,10 @@ proposals, unsupported content or a stale source.
 `CanvasStage.overlay` renders world-coordinate content above painted native nodes.
 Whiteboard uses it for selected connector endpoints with an enlarged hit target,
 candidate feedback and cancellation; it never changes sticky geometry.
+Hosts may set a positive `CanvasStage.minZoom` for fit and wheel navigation and
+use the same value in `CanvasControls.minZoom`. Defaults remain 0.05 for pages and
+0.001 for infinite canvases. `canvas-ui/path-handles` uses the supplied positive
+finite zoom to keep points and control lines sized in CSS pixels at smaller scales.
 `applyFramePreset` chooses fixed native frame dimensions explicitly, optionally
 fitting direct children for row/column layouts. Absolute/no-layout fitting is refused;
 the fixed-size option retains child geometry. Native Design elements expose their

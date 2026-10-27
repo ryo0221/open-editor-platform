@@ -121,6 +121,34 @@ export const hasSlideReuse = (content: SlideContent) =>
     content.reuse?.closures.length ||
     content.reuse?.artifactMode
   );
+/** Largest frame with the composition's aspect ratio that fits inside the slide's
+ * margins, centred on the slide. */
+export function slideAnimationBounds(
+  deck: Pick<SlideContent, 'width' | 'height'>,
+  animation: PlayableAnimationEmbed,
+): Bounds {
+  const composition = animation.snapshot.compositions.find(
+      (c) => c.id === animation.source.compositionId,
+    ),
+    source =
+      composition && composition.width > 0 && composition.height > 0
+        ? composition
+        : { width: 16, height: 9 },
+    margin = Math.round(Math.min(deck.width, deck.height) * 0.08),
+    scale = Math.min(
+      (deck.width - margin * 2) / source.width,
+      (deck.height - margin * 2) / source.height,
+    ),
+    // Very narrow compositions keep the 1 px minimum that valid bounds require.
+    width = Math.max(1, Math.round(source.width * scale)),
+    height = Math.max(1, Math.round(source.height * scale));
+  return {
+    x: Math.round((deck.width - width) / 2),
+    y: Math.round((deck.height - height) / 2),
+    width,
+    height,
+  };
+}
 export function placeSlideAnimation(
   pageId: string,
   animation: PlayableAnimationEmbed,
@@ -146,7 +174,7 @@ export function placeSlideAnimation(
                   ...baseSlideObject('animation', page.objects.length),
                   id,
                   animation: owned,
-                  bounds: { x: 100, y: 120, width: 640, height: 360 },
+                  bounds: slideAnimationBounds(content, owned),
                 },
               ],
             }

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.tsx",
+    "./path-handles": "./src/path-handles.tsx",
     "./text-engine": "./src/text-engine.ts",
     "./text-editor": "./src/text-editor.tsx"
   },

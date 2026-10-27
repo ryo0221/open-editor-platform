@@ -1,4 +1,10 @@
-import { clone, deepFreeze, newId, type ArtifactVersionRef } from '@editor-platform/artifact-core';
+import {
+  clone,
+  deepFreeze,
+  newId,
+  type ArtifactVersionRef,
+  type ProposalReads,
+} from '@editor-platform/artifact-core';
 export * from './text';
 export * from './validation';
 export * from './describe';
@@ -92,12 +98,19 @@ export function command<T>(
 export function immutableCommand<T>(...args: Parameters<typeof command<T>>): EditorCommand<T> {
   return { ...command(...args), readonlyInput: true };
 }
+const transactionChildren = new WeakMap<object, readonly EditorCommand<unknown>[]>();
+/** The commands a `transaction` runs in order, or undefined for any other command. */
+export function transactionCommands<T>(
+  c: EditorCommand<T>,
+): readonly EditorCommand<T>[] | undefined {
+  return transactionChildren.get(c) as readonly EditorCommand<T>[] | undefined;
+}
 export function transaction<T>(
   label: string,
   commands: EditorCommand<T>[],
   context?: LocalCommandContext,
 ): EditorCommand<T> {
-  return withCommandReads(
+  const result = withCommandReads<T>(
     command(
       'transaction',
       label,
@@ -109,6 +122,8 @@ export function transaction<T>(
       content: commands.flatMap((c) => c.reads?.content ?? []),
     },
   );
+  transactionChildren.set(result, [...commands] as EditorCommand<unknown>[]);
+  return result;
 }
 /** Local-only snapshot history. Never ingest remote edits through this session. */
 export class EditorSession<T> {
@@ -176,6 +191,13 @@ export class EditorSession<T> {
     this.future = [];
     this.sequence++;
     return this.value;
+  }
+  /** The content Undo or Redo would restore, as the frozen history entry itself, or undefined
+   * when there is none. The same entry comes back each time, so a caller can recognise content
+   * it has already checked. */
+  peekHistory(direction: 'undo' | 'redo'): T | undefined {
+    const source = direction === 'undo' ? this.past : this.future;
+    return source.length ? deepFreeze(source[source.length - 1]) : undefined;
   }
   /** Optional synchronous pre-commit validation; throws leave all history state untouched. */
   undo(validateCandidate?: (candidate: T) => void) {
@@ -259,6 +281,8 @@ export interface ProposedCommands<T> {
   summary: string;
   source?: string;
   baseLocalRevision?: LocalDraftRevision;
+  /** Exact versions the proposal was generated from; the Host rechecks them at preview and apply. */
+  reads?: ProposalReads;
   commands: EditorCommand<T>[];
 }
 export interface EmbeddedPreview {
@@ -314,3 +338,4 @@ export function isAnnotation(value: unknown): value is Annotation {
 }
 export * from './geometry';
 export * from './drawing';
+export * from './proposal-review';

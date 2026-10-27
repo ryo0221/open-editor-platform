@@ -7,20 +7,37 @@ an operation, downloads a file or adds history. The normal UI is the following #
 checkpoint.
 
 ```ts
-import { captureDocumentExportSnapshot, prepareDocumentDocx, encodeDocumentDocx }
-  from '@editor-platform/document-export';
+import {
+  captureDocumentExportSnapshot,
+  prepareDocumentDocx,
+  encodeDocumentDocx,
+} from '@editor-platform/document-export';
 
 const snapshot = await captureDocumentExportSnapshot(content, {
-  kind: 'confirmed', artifactId, revision,
+  kind: 'confirmed',
+  artifactId,
+  revision,
 });
-const plan = await prepareDocumentDocx(snapshot, {
-  fontProfileId: 'noto-cjk-jp-2.004', styleProfileId: 'document-ja-1',
-  mermaid: 'source', previewBlocks: 'source',
-}, adapters, signal);
+const plan = await prepareDocumentDocx(
+  snapshot,
+  {
+    fontProfileId: 'noto-cjk-jp-2.004',
+    styleProfileId: 'document-ja-1',
+    mermaid: 'source',
+    previewBlocks: 'source',
+  },
+  adapters,
+  signal,
+);
 // Display the report and obtain acceptance of its exact required diagnostic IDs.
-const result = await encodeDocumentDocx(plan, {
-  planHash: plan.report.planHash, acceptedDiagnosticIds,
-}, signal);
+const result = await encodeDocumentDocx(
+  plan,
+  {
+    planHash: plan.report.planHash,
+    acceptedDiagnosticIds,
+  },
+  signal,
+);
 ```
 
 `./plan` excludes the encoder graph. The root imports pinned `docx` **9.6.1** lazily.
@@ -30,16 +47,16 @@ assets are owned for the plan. Encoding performs no fetch or new fallback. Plans
 opaque process-local handles; forged plans fail. Errors cannot be waived, and unknown
 or stale warning consent is rejected. Cancellation returns no partial bytes.
 
-| Native input | DOCX behavior |
-| --- | --- |
-| Heading 1–6, paragraphs | Native flowing paragraphs, alignment/indent and exact explicit whitespace. Fixed `document-ja-1` styles; keep-next headings and widow control. |
-| Rich runs and links | Bold/italic/underline/strike, opaque portable colors, highlight, code font; HTTP(S)/mailto hyperlinks. Internal anchors become text with consent. Invalid native links/colors are blocked. |
-| Lists | Native bullet/numbered levels 0–8, distinct numbering instances at list boundaries. `childLists`/legacy `children` and inherited checklist meaning follow the native engine. Checkboxes become explicit static `[x]`/`[ ]` text with consent. |
-| Tables | Native columns, horizontal/vertical/rectangular merges; `cellParagraphs` (including empty arrays) > `cellRich` > `cells`. Covered text is omitted once. Only explicit contiguous full header rows repeat; rows may split across pages without fixed heights. Adjacent tables have an empty separator so Office keeps two tables. |
-| Pictures | Owned PNG/JPEG embedded with aspect, width, alt and caption. GIF/WebP become static PNG with consent. Body overflow is proportionally reduced with a diagnostic. Every drawing has a unique ID. |
-| Code | Escaped native text with original spaces/tabs/newlines and language label, Noto Sans Mono CJK JP 2.004. No execution. |
-| Mermaid / previews | Explicit Mermaid element-PNG adapter or source policy. HTML/React preview is escaped source with consent. Missing/failed renderers and invalid image-mode Mermaid block output. No whole-page rasterization. |
-| Page | A4/Letter, portrait/landscape and margin (96 CSS px/in → 15 twips/px). Office controls flow and pagination. |
+| Native input            | DOCX behavior                                                                                                                                                                                                                                                                                                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Heading 1–6, paragraphs | Native flowing paragraphs, alignment/indent and exact explicit whitespace. Fixed `document-ja-1` styles; keep-next headings and widow control.                                                                                                                                                                                   |
+| Rich runs and links     | Bold/italic/underline/strike, opaque portable colors, highlight, code font; HTTP(S)/mailto hyperlinks. Internal anchors become text with consent. Invalid native links/colors are blocked.                                                                                                                                       |
+| Lists                   | Native bullet/numbered levels 0–8, distinct numbering instances at list boundaries. `childLists`/legacy `children` and inherited checklist meaning follow the native engine. Checkboxes become explicit static `[x]`/`[ ]` text with consent.                                                                                    |
+| Tables                  | Native columns, horizontal/vertical/rectangular merges; `cellParagraphs` (including empty arrays) > `cellRich` > `cells`. Covered text is omitted once. Only explicit contiguous full header rows repeat; rows may split across pages without fixed heights. Adjacent tables have an empty separator so Office keeps two tables. |
+| Pictures                | Owned PNG/JPEG embedded with aspect, width, alt and caption. GIF/WebP become static PNG with consent. Body overflow is proportionally reduced with a diagnostic. Every drawing has a unique ID.                                                                                                                                  |
+| Code                    | Escaped native text with original spaces/tabs/newlines and language label, Noto Sans Mono CJK JP 2.004. No execution.                                                                                                                                                                                                            |
+| Mermaid / previews      | Explicit Mermaid element-PNG adapter or source policy. HTML/React preview is escaped source with consent. Missing/failed renderers and invalid image-mode Mermaid block output. No whole-page rasterization.                                                                                                                     |
+| Page                    | A4/Letter, portrait/landscape and margin (96 CSS px/in → 15 twips/px). Office controls flow and pagination.                                                                                                                                                                                                                      |
 
 Document limits are 2,000 top-level blocks, 1,000,000 UTF-16 text units, 50,000 logical
 table cells and list levels 0–8. Shared image limits are 16 MiB / 32 million decoded

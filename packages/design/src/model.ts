@@ -1,4 +1,20 @@
 import {
+  validDesignPagination,
+  duplicateDesignPagination,
+  type DesignPagination,
+} from './pagination-contract';
+import { remapEditablePath } from './path-commands';
+import {
+  validDesignPath,
+  projectableDesignPath,
+  projectDesignPath,
+  designPathLimits,
+  type DesignEditablePath,
+} from './path';
+import { designExportPaintBounds } from './paint-bounds';
+export * from './path';
+export * from './path-commands';
+import {
   validEmbeddedReference,
   validReferenceItems,
   referenceLimitMessage,
@@ -20,6 +36,7 @@ import {
 import {
   clone,
   canonicalJson,
+  deepFreeze,
   describeChanges,
   isDeepFrozen,
   newId,
@@ -84,6 +101,7 @@ export interface DesignElement extends VisualStyle {
   reference?: EmbeddedReference;
   /** Colorable path geometry belongs to native Design shapes. */
   vector?: DesignVector;
+  path?: DesignEditablePath;
   interactions?: DesignInteraction[];
   react?: DesignReactReference;
   web?: DesignWebElement;
@@ -144,9 +162,11 @@ export interface DesignComponent {
   height: number;
 }
 export interface DesignContent {
+  /** Optional local/native page reading order. Legacy shared/template adapters reject it. */
+  pagination?: DesignPagination;
   prototyping?: DesignPrototype;
   web?: DesignWebSettings;
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   reuse?: ReuseState;
   styles?: { id: string; name: string; appearance: Partial<VisualStyle> & { fill?: string } }[];
   elements: DesignElement[];
@@ -218,10 +238,32 @@ function command(
   apply: (content: DesignContent) => DesignContent,
 ): EditorCommand<DesignContent> {
   return nativeCommand(type, label, (current) => {
-    const next = apply(current);
+    const next = invalidateChangedImageSources(current, apply(current));
     assertDesignContent(next);
     return next;
   });
+}
+/** Native source replacement invalidates attribution; explicit provenance commands may register it again. */
+function invalidateChangedImageSources(before: DesignContent, next: DesignContent): DesignContent {
+  if (!next.pagination?.images.length) return next;
+  const old = new Map(
+    before.elements.filter((e) => e.type === 'image').map((e) => [e.id, appearance(before, e)]),
+  );
+  const current = new Map(
+    next.elements.filter((e) => e.type === 'image').map((e) => [e.id, appearance(next, e)]),
+  );
+  const images = next.pagination.images.filter((image) => {
+    const a = old.get(image.elementId),
+      b = current.get(image.elementId);
+    return (
+      !a ||
+      !b ||
+      (a.src === b.src && canonicalJson(a.reference ?? null) === canonicalJson(b.reference ?? null))
+    );
+  });
+  return images.length === next.pagination.images.length
+    ? next
+    : { ...next, pagination: { ...next.pagination, images } };
 }
 /** Trusted Hosts may guard arbitrary commands and current access at execution. */
 export function guardDesignCommand(
@@ -239,12 +281,17 @@ export function guardDesignCommand(
   };
 }
 export function assertDesignContent(value: unknown): asserts value is DesignContent {
-  if (!isDesign(value)) {
+  if (!isDesignWithPaths(value)) {
     // isDesign also refuses an over-budget reference closure; report that limit first.
     const elements = (value as { elements?: unknown } | null)?.elements;
     if (Array.isArray(elements) && !validReferenceItems(elements))
       rejectDesign('design-content', referenceLimitMessage);
-    rejectDesign('design-content', 'Command produced invalid Design content');
+    const problem = designContentProblem(value) ?? '$';
+    rejectDesign(
+      'design-content',
+      `Command produced invalid Design content at ${problem}`,
+      problem,
+    );
   }
   if (new Set(value.components.map((c) => c.id)).size !== value.components.length)
     rejectDesign('design-content', 'Duplicate Design component ID');
@@ -276,6 +323,7 @@ const elementFields = new Set([
   'constraints',
   'reference',
   'vector',
+  'path',
   'interactions',
   'react',
   'web',
@@ -351,6 +399,8 @@ function assertPatchStructures(patch: Record<string, unknown>, path: string) {
       if (r.style !== undefined) patchFields(r.style, textStyleFields, `${path}.runs.${i}.style`);
     });
   }
+  if (patch.path !== undefined && !validDesignPath(patch.path))
+    rejectDesign('design-path', 'Invalid structured path', path);
   if (patch.vector !== undefined) {
     const vector = patchFields(patch.vector, ['viewBox', 'paths', 'provenance'], `${path}.vector`);
     patchFields(vector.viewBox, structures.bounds, `${path}.vector.viewBox`);
@@ -763,10 +813,45 @@ export const deleteElements = (ids: string[]): EditorCommand<DesignContent> =>
             ...(e.webSlots ? { webSlots: clean(e.webSlots) } : {}),
           };
         });
-      return { ...d, elements };
+      return {
+        ...d,
+        elements,
+        ...(d.pagination
+          ? {
+              pagination: {
+                ...d.pagination,
+                pages: d.pagination.pages
+                  .filter((p) => !all.has(p.frameId))
+                  .map((p) => ({ ...p, panelIds: p.panelIds.filter((id) => !all.has(id)) })),
+                images: d.pagination.images.filter((i) => !all.has(i.elementId)),
+              },
+            }
+          : {}),
+      };
     }),
     { content: ['*'] },
   );
+/** Clipboard preparation owns values and remaps one complete selected subtree atomically. */
+export function remapDesignElements(copies: DesignElement[]): DesignElement[] {
+  const mapping = new Map(copies.map((e) => [e.id, newId('design')]));
+  return copies.map((source) => {
+    const e = remapDesignInteractionTargets(clone(source), mapping);
+    const slots = (value: Record<string, string[]>) =>
+      Object.fromEntries(
+        Object.entries(value).map(([key, ids]) => [key, ids.map((id) => mapping.get(id) ?? id)]),
+      );
+    return {
+      ...e,
+      id: mapping.get(e.id)!,
+      name: `${e.name} copy`,
+      parentId: e.parentId ? (mapping.get(e.parentId) ?? e.parentId) : undefined,
+      ...(e.path ? { path: remapEditablePath(e.path) } : {}),
+      ...(e.react ? { react: { ...e.react, slots: slots(e.react.slots) } } : {}),
+      ...(e.webSlots ? { webSlots: slots(e.webSlots) } : {}),
+      bounds: { ...e.bounds, x: e.bounds.x + 30, y: e.bounds.y + 30 },
+    };
+  });
+}
 export const duplicateElements = (ids: string[]): EditorCommand<DesignContent> =>
   withCommandReads<DesignContent>(
     command('design.duplicate', 'Duplicate elements', (d) => {
@@ -804,10 +889,12 @@ export const duplicateElements = (ids: string[]): EditorCommand<DesignContent> =
       });
       return {
         ...d,
+        ...(d.pagination ? { pagination: duplicateDesignPagination(d.pagination, mapping) } : {}),
         elements: [
           ...owners,
           ...copies.map((e) => ({
             ...remapDesignInteractionTargets(clone(e), mapping),
+            ...(e.path ? { path: remapEditablePath(e.path) } : {}),
             id: mapping.get(e.id)!,
             name: `${e.name} copy`,
             parentId: e.parentId ? (mapping.get(e.parentId) ?? e.parentId) : undefined,
@@ -903,6 +990,8 @@ export const createComponent = (
       const all = descendantIds(d.elements, ids),
         parts = d.elements.filter((e) => all.has(e.id)),
         box = unionBounds(roots.map((e) => e.bounds));
+      if (parts.some((e) => e.path))
+        throw new Error('Structured paths are not supported in components');
       if (parts.some((e) => e.reference))
         throw new Error(
           '参照埋め込みのcomponent authoringは未対応です。参照を明示的に解除してください。',
@@ -1050,9 +1139,23 @@ export const updateComponent = (
     };
   });
 };
+type ById<T> = (id: string | undefined) => T | undefined;
+// Lookups are remembered only for deep-frozen lists and private projection
+// lists, so mutable Host definitions are read again on every call.
+const definitionIndexes = new WeakMap<readonly { id: string }[], ById<{ id: string }>>();
+/** First record per ID, like Array.find, built once per immutable definition list. */
+function byId<T extends { id: string }>(list: readonly T[]): ById<T> {
+  const known = definitionIndexes.get(list);
+  if (known) return known as ById<T>;
+  const map = new Map<string, T>();
+  for (const item of list) if (!map.has(item.id)) map.set(item.id, item);
+  const lookup: ById<T> = (id) => (id === undefined ? undefined : map.get(id));
+  if (isDeepFrozen(list)) definitionIndexes.set(list, lookup);
+  return lookup;
+}
 export function appearance(d: DesignContent, e: DesignElement): DesignElement {
-  const c = e.type === 'instance' ? d.components.find((c) => c.id === e.componentId) : undefined,
-    shared = d.styles?.find((s) => s.id === e.styleId)?.appearance ?? {};
+  const c = e.type === 'instance' ? byId(d.components)(e.componentId) : undefined,
+    shared = (d.styles && byId(d.styles)(e.styleId))?.appearance ?? {};
   return c && !c.elements
     ? applyDesignOverride(
         {
@@ -1081,7 +1184,8 @@ export function applyDesignOverride(
     ...(override?.layout ? { layout: { ...part.layout!, ...override.layout } } : {}),
   };
 }
-function frameClips(index: ReadonlyMap<string, DesignElement>, e: DesignElement) {
+type ElementLookup = Pick<ReadonlyMap<string, DesignElement>, 'get' | 'has'>;
+function frameClips(index: ElementLookup, e: DesignElement) {
   const clips: (Bounds & { rotation?: number })[] = [];
   let parent = e.parentId ? index.get(e.parentId) : undefined;
   const seen = new Set<string>();
@@ -1133,7 +1237,7 @@ function designPartAppearance(
 ): DesignElement {
   const nested =
     part.type === 'instance'
-      ? d.components.find((c) => c.id === (override?.componentId ?? part.componentId))
+      ? byId(d.components)(override?.componentId ?? part.componentId)
       : undefined;
   const primitive = nested && !nested.elements;
   const styled = appearance(d, {
@@ -1157,7 +1261,7 @@ export function designInstanceElements(
   raw: DesignElement,
   idFor: (id: string) => string = (id) => id,
 ): DesignElement[] {
-  const c = d.components.find((c) => c.id === raw.componentId);
+  const c = byId(d.components)(raw.componentId);
   if (!c?.elements) return [];
   const effective = c.elements.map((part) =>
     designPartAppearance(d, part, raw.overrides?.[part.id]),
@@ -1185,14 +1289,14 @@ export function designDrawings(d: DesignContent, raw: DesignElement): DesignDraw
   return designDrawingProjector(d)(raw);
 }
 /** Private drawing-hierarchy IDs for instance parts that cannot alias native records. */
-function allocatePartIds(d: DesignContent, instanceId: string, c: DesignComponent) {
-  const occupied = new Set(d.elements.map((e) => e.id));
+function allocatePartIds(index: ElementLookup, instanceId: string, c: DesignComponent) {
+  const occupied = new Set<string>();
   const partIds = new Map<string, string>();
   for (const part of c.elements ?? []) {
     const base = `${instanceId}-${part.id}`;
     let id = base,
       suffix = 0;
-    while (occupied.has(id)) id = `${base}-${suffix++}`;
+    while (index.has(id) || occupied.has(id)) id = `${base}-${suffix++}`;
     occupied.add(id);
     partIds.set(part.id, id);
   }
@@ -1221,28 +1325,41 @@ function projectInstanceParts(
   raw: DesignElement,
   e: DesignElement,
   c: DesignComponent & { elements: DesignElement[] },
+  index: ElementLookup,
   drawingId: string,
   sources: DesignDrawingSources,
   locked: boolean,
   overrideOwner: DesignSourcePath | undefined,
 ): DesignDrawing[] {
-  const partIds = allocatePartIds(d, raw.id, c);
+  const partIds = allocatePartIds(index, raw.id, c);
   const parts = designInstanceElements(d, e, (id) => partIds.get(id)!);
-  const virtual = {
-    ...d,
-    elements: [...d.elements.filter((e) => e.id !== raw.id), e, ...parts],
-    components: d.components.filter((x) => x.id !== c.id),
+  const components = d.components.filter((x) => x.id !== c.id);
+  const sharedComponents = byId(d.components);
+  // The private projection list hides the expanded component like the filter does.
+  definitionIndexes.set(components, (id) => (id === c.id ? undefined : sharedComponents(id)));
+  const partIndex = new Map(parts.map((part) => [part.id, part]));
+  // Parts sit on top of the document without copying it: part IDs never alias
+  // native records, and the instance root is read through its effective record.
+  const virtualIndex: ElementLookup = {
+    get: (id) => partIndex.get(id) ?? (id === raw.id ? e : index.get(id)),
+    has: (id) => partIndex.has(id) || index.has(id),
   };
+  // The full element list is built only if a reader asks for it. It is not
+  // enumerable, so a nested instance's projection does not copy it either.
+  let elements: DesignElement[] | undefined;
+  const rest = Object.entries(d).filter(([key]) => key !== 'elements');
+  const virtual = Object.defineProperty({ ...Object.fromEntries(rest), components }, 'elements', {
+    get: () => (elements ??= [...d.elements.filter((x) => x.id !== raw.id), e, ...parts]),
+  }) as DesignContent;
   const addresses = new Map(
     c.elements.map((part, partIndex) => [
       partIds.get(part.id)!,
       { drawingId: `${drawingId}-${part.id}`, part, partIndex },
     ]),
   );
-  const virtualIndex = new Map(virtual.elements.map((e) => [e.id, e]));
   // Private hierarchy IDs cannot alias native records. Keep existing public
   // drawing addresses while preserving ancestor clipping and hidden state.
-  return designPaintOrder(virtual)
+  return instancePartPaintOrder(virtual, virtualIndex, e, parts)
     .filter((e) => addresses.has(e.id))
     .flatMap((e) => {
       const address = addresses.get(e.id)!;
@@ -1270,20 +1387,44 @@ function projectInstanceParts(
       });
     });
 }
+/** Parts in the order and hidden state a paint traversal of the whole projection gives them. */
+function instancePartPaintOrder(
+  virtual: DesignContent,
+  index: ElementLookup,
+  root: DesignElement,
+  parts: DesignElement[],
+): DesignElement[] {
+  const hidden = (x: DesignElement) => !!x.hidden || !!appearance(virtual, x).hidden;
+  const seen = new Set<string>([root.id]);
+  let above = hidden(root);
+  let parent = root.parentId ? index.get(root.parentId) : undefined;
+  while (parent) {
+    // A parent cycle is never reached from the top level, so nothing in it paints.
+    if (seen.has(parent.id)) return [];
+    seen.add(parent.id);
+    above ||= hidden(parent);
+    parent = parent.parentId ? index.get(parent.parentId) : undefined;
+  }
+  return hierarchyPaintOrder(
+    [above ? { ...root, hidden: true } : root, ...parts].map((x) =>
+      !x.hidden && hidden(x) ? { ...x, hidden: true } : x,
+    ),
+    (x) => x.parentId,
+  );
+}
 const drawingKind = (type: DesignElement['type']): DesignDrawing['kind'] =>
   type === 'text' ? 'text' : type === 'image' ? 'image' : type === 'group' ? 'group' : 'shape';
 function projectDesignDrawing(
   d: DesignContent,
   raw: DesignElement,
-  index: ReadonlyMap<string, DesignElement>,
+  index: ElementLookup,
   drawingId: string,
   sources: DesignDrawingSources,
 ): DesignDrawing[] {
   const e = appearance(d, raw);
   if (raw.hidden || e.hidden) return [];
   const locked = sources.locked || !!raw.locked || !!e.locked;
-  const c =
-    raw.type === 'instance' ? d.components.find((c) => c.id === raw.componentId) : undefined;
+  const c = raw.type === 'instance' ? byId(d.components)(raw.componentId) : undefined;
   const overrideOwner = sources.owners.find(
     (path) => designValueAt(sources.content, path)?.overrides !== undefined,
   );
@@ -1293,6 +1434,7 @@ function projectDesignDrawing(
       raw,
       e,
       { ...c, elements: c.elements },
+      index,
       drawingId,
       sources,
       locked,
@@ -1319,7 +1461,7 @@ function projectDesignDrawing(
 /** A primitive (template-only) instance edits its template text through the instance root. */
 const unlockedVisibleText = (
   d: DesignContent,
-  index: ReadonlyMap<string, DesignElement>,
+  index: ElementLookup,
   raw: DesignElement,
   e: DesignElement,
 ) =>
@@ -1355,7 +1497,7 @@ function leafDrawing(
   e: DesignElement,
   raw: DesignElement,
   drawingId: string,
-  index: ReadonlyMap<string, DesignElement>,
+  index: ElementLookup,
   textOwner: DesignSourcePath | undefined,
   instanceText: DesignDrawing['instanceText'],
 ): DesignDrawing {
@@ -1365,6 +1507,7 @@ function leafDrawing(
     imageFit: raw.reference ? (raw.reference.fit === 'cover' ? 'fill' : 'fit') : e.imageFit,
     textSourcePath: textOwner ? [...textOwner, 'text'] : undefined,
     instanceText,
+    path: e.path ? projectDesignPath(e.path, e) : undefined,
     vector: e.type === 'shape' && validDesignVector(e.vector) ? e.vector : undefined,
     clipBounds: frameClips(index, raw),
     kind: drawingKind(e.type),
@@ -1373,11 +1516,7 @@ function leafDrawing(
     text: e.type === 'frame' ? '' : e.text,
   };
 }
-function lockedAncestor(
-  d: DesignContent,
-  index: ReadonlyMap<string, DesignElement>,
-  e: DesignElement,
-): boolean {
+function lockedAncestor(d: DesignContent, index: ElementLookup, e: DesignElement): boolean {
   const seen = new Set<string>();
   let parent = e.parentId ? index.get(e.parentId) : undefined;
   while (parent && !seen.has(parent.id)) {
@@ -1474,6 +1613,16 @@ export function designDiff(a: DesignContent, b: DesignContent): CompareResult {
     ],
   };
 }
+/** Shared SVG/PNG extent. Ordinary shapes retain their legacy export bounds. */
+export function designExportBounds(d: DesignContent, ids?: string[]): Bounds {
+  const included = ids?.length ? descendantIds(d.elements, ids) : undefined;
+  const project = designDrawingProjector(d);
+  return unionBounds(
+    designPaintOrder(d)
+      .filter((e) => !e.hidden && (!included || included.has(e.id)))
+      .map((e) => (e.path ? designExportPaintBounds(project(e), e.bounds, e.rotation) : e.bounds)),
+  );
+}
 export function exportDesignSvg(
   d: DesignContent,
   ids?: string[],
@@ -1481,7 +1630,7 @@ export function exportDesignSvg(
 ): string {
   const included = ids?.length ? descendantIds(d.elements, ids) : undefined;
   const chosen = designPaintOrder(d).filter((e) => !included || included.has(e.id));
-  const box = unionBounds(chosen.filter((e) => !e.hidden).map((e) => e.bounds)),
+  const box = designExportBounds(d, ids),
     pad = options.padding ?? 20;
   return drawingSvg(
     chosen.flatMap(designDrawingProjector(d)),
@@ -1489,12 +1638,19 @@ export function exportDesignSvg(
     options.background,
   );
 }
-/** Native paint order with effective visibility, including hidden ancestor subtrees. */
+const paintOrders = new WeakMap<DesignContent, DesignElement[]>();
+/** Native paint order with effective visibility, including hidden ancestor subtrees.
+ * Deep-frozen content shares one frozen result; mutable Host content is read again. */
 export function designPaintOrder(d: DesignContent): DesignElement[] {
-  return hierarchyPaintOrder(
+  const known = paintOrders.get(d);
+  if (known) return known;
+  const order = hierarchyPaintOrder(
     d.elements.map((e) => (!e.hidden && appearance(d, e).hidden ? { ...e, hidden: true } : e)),
     (e) => e.parentId,
   );
+  if (!isDeepFrozen(d)) return order;
+  paintOrders.set(d, deepFreeze(order));
+  return order;
 }
 const checkedElements = new WeakSet<DesignElement>();
 const checkedElementLists = new WeakSet<DesignElement[]>();
@@ -1530,43 +1686,60 @@ const validImageSource = (src: string) =>
   src === '' ||
   (typeof src === 'string' && /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,/.test(src));
 const optionalStringKeys = ['parentId', 'componentId', 'styleId', 'alt', 'dash'] as const;
-/** Per-record element checks, in evaluation order. Relationships are checked on the list. */
-const elementChecks: ((e: DesignElement) => boolean)[] = [
-  (e) =>
-    typeof e.id === 'string' &&
-    typeof e.name === 'string' &&
-    typeof e.text === 'string' &&
-    typeof e.fill === 'string',
-  (e) => optional(e.interactions, validDesignInteractions),
-  (e) => optional(e.overrides, (o) => validDesignOverrides(o)),
-  (e) => validVisualStyle(e),
-  (e) => optional(e.reference, (r) => e.type === 'image' && validEmbeddedReference(r)),
-  (e) => optional(e.vector, (v) => e.type === 'shape' && validDesignVector(v)),
-  (e) =>
-    ['frame', 'rectangle', 'text', 'image', 'group', 'instance', 'shape', 'react'].includes(e.type),
-  (e) => optional(e.react, validDesignReactReference),
-  (e) => optional(e.webProps, validDesignWebData),
-  (e) => optional(e.webSlots, validWebSlots),
-  (e) => e.type !== 'react' || !!e.react,
-  (e) => optional(e.web, validDesignWebElement),
-  (e) => validBounds(e.bounds),
-  (e) => optional(e.layout, validLayout),
-  (e) => optional(e.sizing, oneOf(['fixed', 'hug', 'fill'])),
-  (e) => optional(e.clipContent, (v) => typeof v === 'boolean'),
-  (e) => optional(e.shape, oneOf(shapeNames)),
-  (e) => optional(e.imageFit, oneOf(['fit', 'fill'])),
-  (e) => optional(e.arrowhead, oneOf(['none', 'end', 'both'])),
-  (e) => optional(e.strokeWidth, (v) => v >= 0),
-  (e) => optional(e.radius, (v) => v >= 0),
-  (e) => optional(e.crop, validCrop),
-  (e) =>
-    optionalStringKeys.every((key) => optional(e[key] as unknown, (v) => typeof v === 'string')),
-  (e) => optional(e.constraints, validConstraints),
-  (e) => optional(e.src, validImageSource),
+/** Per-record element checks, in evaluation order, by the field they read.
+ * Relationships are checked on the list. */
+const elementChecks: [field: string, check: (e: DesignElement) => boolean][] = [
+  ['id', (e) => typeof e.id === 'string'],
+  ['name', (e) => typeof e.name === 'string'],
+  ['text', (e) => typeof e.text === 'string'],
+  ['fill', (e) => typeof e.fill === 'string'],
+  ['interactions', (e) => optional(e.interactions, validDesignInteractions)],
+  ['overrides', (e) => optional(e.overrides, (o) => validDesignOverrides(o))],
+  ['style', (e) => validVisualStyle(e)],
+  [
+    'reference',
+    (e) => optional(e.reference, (r) => e.type === 'image' && validEmbeddedReference(r)),
+  ],
+  [
+    'vector',
+    (e) => optional(e.vector, (v) => e.type === 'shape' && !e.path && validDesignVector(v)),
+  ],
+  ['path', (e) => optional(e.path, (p) => e.type === 'shape' && !e.vector && validDesignPath(p))],
+  [
+    'type',
+    (e) =>
+      ['frame', 'rectangle', 'text', 'image', 'group', 'instance', 'shape', 'react'].includes(
+        e.type,
+      ),
+  ],
+  ['react', (e) => optional(e.react, validDesignReactReference)],
+  ['webProps', (e) => optional(e.webProps, validDesignWebData)],
+  ['webSlots', (e) => optional(e.webSlots, validWebSlots)],
+  ['react', (e) => e.type !== 'react' || !!e.react],
+  ['web', (e) => optional(e.web, validDesignWebElement)],
+  ['bounds', (e) => validBounds(e.bounds)],
+  ['layout', (e) => optional(e.layout, validLayout)],
+  ['sizing', (e) => optional(e.sizing, oneOf(['fixed', 'hug', 'fill']))],
+  ['clipContent', (e) => optional(e.clipContent, (v) => typeof v === 'boolean')],
+  ['shape', (e) => optional(e.shape, oneOf(shapeNames))],
+  ['imageFit', (e) => optional(e.imageFit, oneOf(['fit', 'fill']))],
+  ['arrowhead', (e) => optional(e.arrowhead, oneOf(['none', 'end', 'both']))],
+  ['strokeWidth', (e) => optional(e.strokeWidth, (v) => v >= 0)],
+  ['radius', (e) => optional(e.radius, (v) => v >= 0)],
+  ['crop', (e) => optional(e.crop, validCrop)],
+  ...optionalStringKeys.map(
+    (key) =>
+      [key, (e: DesignElement) => optional(e[key] as unknown, (v) => typeof v === 'string')] as [
+        string,
+        (e: DesignElement) => boolean,
+      ],
+  ),
+  ['constraints', (e) => optional(e.constraints, validConstraints)],
+  ['src', (e) => optional(e.src, validImageSource)],
 ];
 function validElement(e: DesignElement): boolean {
   if (checkedElements.has(e)) return true;
-  const valid = !!e && elementChecks.every((check) => check(e));
+  const valid = !!e && elementChecks.every(([, check]) => check(e));
   if (valid && isDeepFrozen(e)) checkedElements.add(e);
   return valid;
 }
@@ -1583,6 +1756,7 @@ function validElements(elements: DesignElement[]): boolean {
 const validComponentTemplate = (t: DesignComponent['template']) =>
   !!t &&
   (t as Partial<DesignElement>).reference === undefined &&
+  (t as Partial<DesignElement>).path === undefined &&
   ['text', 'rectangle', 'image', 'shape', 'group', 'frame', 'instance'].includes(t.type) &&
   typeof t.text === 'string' &&
   typeof t.fill === 'string' &&
@@ -1606,25 +1780,181 @@ function validComponent(c: DesignComponent): boolean {
   if (valid && isDeepFrozen(c)) checkedComponents.add(c);
   return valid;
 }
+/** The first field that keeps `value` from being Design content, as a path such as
+ * `elements[3].src (element "hero")`; undefined when it is valid Design content. */
+export function designContentProblem(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return '$';
+  const d = value as DesignContent;
+  if (d.schemaVersion !== 1 && d.schemaVersion !== 2 && d.schemaVersion !== 3)
+    return 'schemaVersion';
+  if (!Array.isArray(d.elements)) return 'elements';
+  if (!validReferenceItems(d.elements)) return 'elements (references)';
+  if (!Array.isArray(d.components)) return 'components';
+  if (d.pagination !== undefined && !validDesignPagination(d.pagination, d.elements))
+    return 'pagination';
+  if (!validNativeReuse(d.reuse, 'design')) return 'reuse';
+  if (d.prototyping !== undefined && !validDesignPrototype(d.prototyping)) return 'prototyping';
+  if (d.web !== undefined && !validDesignWebSettings(d.web)) return 'web';
+  const elements = elementListProblem(d.elements, 'elements');
+  if (elements) return elements;
+  for (const [i, c] of d.components.entries()) {
+    const component = componentProblem(c, `components[${i}]`);
+    if (component) return component;
+  }
+  if (!validPathStorage(d, d.schemaVersion === 3)) return 'path storage/limits';
+  return referencedVectorOverrideProblem(d);
+}
+const named = (path: string, kind: string, id: unknown) =>
+  typeof id === 'string' ? `${path} (${kind} "${id}")` : path;
+function elementListProblem(elements: DesignElement[], path: string): string | undefined {
+  const ids = new Set<unknown>();
+  for (const [i, e] of elements.entries()) {
+    const at = `${path}[${i}]`;
+    if (!e) return at;
+    if (ids.has(e.id)) return named(`${at}.id`, 'duplicate element', e.id);
+    ids.add(e.id);
+    const failed = elementChecks.find(([, check]) => !check(e))?.[0];
+    if (failed === 'style') {
+      // Visual style fields are independent, so the first one that fails alone is the cause.
+      const key = Object.keys(e).find(
+        (k) => !validVisualStyle({ [k]: e[k as keyof DesignElement] }),
+      );
+      return named(`${at}.${key ?? 'style'}`, 'element', e.id);
+    }
+    if (failed) return named(`${at}.${failed}`, 'element', e.id);
+  }
+  if (!validHierarchy(elements)) {
+    const byId = new Map(elements.map((e) => [e.id, e]));
+    const i = elements.findIndex((e) => {
+      const visited = new Set([e.id]);
+      for (let id = e.parentId; id; id = byId.get(id)!.parentId) {
+        if (visited.has(id) || !byId.has(id)) return true;
+        visited.add(id);
+      }
+      return false;
+    });
+    return named(`${path}[${Math.max(i, 0)}].parentId`, 'element', elements[i]?.id);
+  }
+}
+function componentProblem(c: DesignComponent, path: string): string | undefined {
+  if (validComponent(c)) return;
+  if (!c || typeof c !== 'object') return path;
+  const at = (field: string) => named(`${path}.${field}`, 'component', c.id);
+  if (containsEmbeddedReference(c)) return at('reference');
+  if (typeof c.id !== 'string') return at('id');
+  if (typeof c.name !== 'string') return at('name');
+  if (!validComponentSize(c)) return at('width/height');
+  if (c.web !== undefined && !validDesignWebComponent(c.web)) return at('web');
+  if (!validComponentTemplate(c.template)) return at('template');
+  if (!Array.isArray(c.elements)) return at('elements');
+  return elementListProblem(c.elements, `${path}.elements`) ?? at('elements');
+}
+/** Legacy admission remains schema1/2 only. Unknown paths in native scopes fail closed. */
 export function isDesign(value: unknown): value is DesignContent {
+  const d = value as DesignContent | null;
+  return (
+    !!d &&
+    (d.schemaVersion === 1 || d.schemaVersion === 2) &&
+    d.pagination === undefined &&
+    validDesignBody(d) &&
+    validPathStorage(d, false)
+  );
+}
+/** Explicit local/native opt-in. Does not grant template/shared/React/Animation support. */
+export function isDesignWithPaths(value: unknown): value is DesignContent {
+  const d = value as DesignContent | null;
+  return !!d && validDesignBody(d) && validPathStorage(d, d.schemaVersion === 3);
+}
+function validPathStorage(d: DesignContent, allow: boolean): boolean {
+  if (
+    d.styles !== undefined &&
+    (!Array.isArray(d.styles) ||
+      d.styles.some(
+        (s) => !record(s) || !record(s.appearance) || Object.hasOwn(s.appearance, 'path'),
+      ))
+  )
+    return false;
+  for (const closure of d.reuse?.closures ?? [])
+    for (const definition of closure.definitions) {
+      const payload = definition.payload as {
+        template?: { domain?: string; content?: unknown };
+      } | null;
+      const template = payload && typeof payload === 'object' ? payload.template : undefined;
+      if (template?.domain === 'design' && record(template.content)) {
+        const native = template.content as unknown as DesignContent;
+        if (native.schemaVersion === 3) return false;
+        // Retained templates may use unresolved asset placeholders, so validate only
+        // native path storage here; template expansion owns its other validation.
+        if (
+          Array.isArray(native.elements) &&
+          Array.isArray(native.components) &&
+          !validPathStorage(native, false)
+        )
+          return false;
+      }
+    }
+  if (d.reuse?.instances.some((i) => Object.values(i.overrides).some((p) => p.path !== undefined)))
+    return false;
+  let anchors = 0,
+    segments = 0,
+    bytes = 0;
+  const forbidden = (e: Partial<DesignElement>, depth = 0): boolean =>
+    depth > 16 ||
+    e.path !== undefined ||
+    Object.values(e.overrides ?? {}).some((v) => forbidden(v, depth + 1));
+  if (d.components.some((c) => forbidden(c.template) || c.elements?.some((e) => forbidden(e))))
+    return false;
+  for (const e of d.elements) {
+    if (Object.values(e.overrides ?? {}).some((v) => forbidden(v))) return false;
+    if (e.path !== undefined) {
+      if (
+        !allow ||
+        e.type !== 'shape' ||
+        e.vector !== undefined ||
+        e.react ||
+        e.componentId ||
+        e.reference ||
+        e.web ||
+        d.reuse ||
+        !validDesignPath(e.path) ||
+        !projectableDesignPath(e.path, appearance(d, e))
+      )
+        return false;
+      for (const sub of e.path.subpaths) {
+        anchors += sub.anchors.length;
+        segments += sub.segments.length;
+      }
+      bytes += new TextEncoder().encode(JSON.stringify(e.path)).length;
+    }
+  }
+  return (
+    anchors <= designPathLimits.totalAnchors &&
+    segments <= designPathLimits.totalSegments &&
+    bytes <= designPathLimits.bytes
+  );
+}
+function validDesignBody(value: unknown): value is DesignContent {
   if (!value || typeof value !== 'object') return false;
   const d = value as DesignContent;
   return (
-    (d.schemaVersion === 1 || d.schemaVersion === 2) &&
+    (d.schemaVersion === 1 || d.schemaVersion === 2 || d.schemaVersion === 3) &&
     Array.isArray(d.elements) &&
     validReferenceItems(d.elements) &&
     Array.isArray(d.components) &&
     validNativeReuse(d.reuse, 'design') &&
     (d.prototyping === undefined || validDesignPrototype(d.prototyping)) &&
     (d.web === undefined || validDesignWebSettings(d.web)) &&
+    (d.pagination === undefined || validDesignPagination(d.pagination, d.elements)) &&
     validElements(d.elements) &&
     d.components.every(validComponent) &&
     validReferencedVectorOverrides(d)
   );
 }
 
+const validReferencedVectorOverrides = (content: DesignContent) =>
+  referencedVectorOverrideProblem(content) === undefined;
 /** Structural override checks need the referenced native scope to establish the effective type. */
-function validReferencedVectorOverrides(content: DesignContent): boolean {
+function referencedVectorOverrideProblem(content: DesignContent): string | undefined {
   const components = new Map(content.components.map((c) => [c.id, c]));
   const containsVector = (patch: Partial<DesignElement>): boolean =>
     patch.vector !== undefined || Object.values(patch.overrides ?? {}).some(containsVector);
@@ -1645,10 +1975,12 @@ function validReferencedVectorOverrides(content: DesignContent): boolean {
       return visit({ ...target, ...patch, vector: patch.vector ?? target.vector }, depth + 1);
     });
   };
-  return (
-    content.elements.every((e) => visit(e)) &&
-    content.components.every((c) => (c.elements ?? []).every((e) => visit(e)))
-  );
+  const element = content.elements.findIndex((e) => !visit(e));
+  if (element >= 0) return `elements[${element}].overrides`;
+  for (const [i, c] of content.components.entries()) {
+    const part = (c.elements ?? []).findIndex((e) => !visit(e));
+    if (part >= 0) return `components[${i}].elements[${part}].overrides`;
+  }
 }
 
 /** Override layouts are partial: each present field must still be valid. */
@@ -1678,6 +2010,7 @@ function validDesignOverride(raw: unknown, depth: number): boolean {
   const p = raw as Partial<DesignElement>;
   return (
     p.reference === undefined &&
+    p.path === undefined &&
     optional(p.vector, validDesignVector) &&
     optional(p.interactions, validDesignInteractions) &&
     optional(p.bounds, validBounds) &&

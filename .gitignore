@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .npm-cache/
 __pycache__/
 *.pyc
@@ -63,3 +63,6 @@ test-results-office/
 
 # Local dependency cache is generated, never source.
 .npm-cache/
+
+# Workflow tables rendered for reading (node docs/workflow/tables.mjs render).
+/docs/workflow/views/

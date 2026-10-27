@@ -114,3 +114,27 @@ it('empty history skips validation and preserves legacy return behavior', () => 
   expect(s.redo(reject)).toEqual({ n: 0 });
   expect(s.revision.sequence).toBe(0);
 });
+it('peekHistory returns the frozen entry Undo or Redo would restore, the same object each time', () => {
+  const s = new EditorSession({ n: 0 });
+  expect(s.peekHistory('undo')).toBeUndefined();
+  s.execute(edit(1, 'a'));
+  s.execute(edit(2, 'b'));
+  const before = state(s);
+  const back = s.peekHistory('undo')!;
+  expect(back).toEqual({ n: 1 });
+  expect(Object.isFrozen(back)).toBe(true);
+  expect(s.peekHistory('undo')).toBe(back);
+  expect(s.peekHistory('redo')).toBeUndefined();
+  expect(state(s)).toEqual(before);
+  s.undo();
+  s.undo();
+  const ahead = s.peekHistory('redo')!;
+  expect(ahead).toEqual({ n: 1 });
+  s.redo();
+  // The constructor's content, now in the past, is frozen when it is peeked, too.
+  const first = s.peekHistory('undo')!;
+  expect(first).toEqual({ n: 0 });
+  expect(Object.isFrozen(first)).toBe(true);
+  s.undo();
+  expect(s.peekHistory('redo')).toBe(ahead);
+});

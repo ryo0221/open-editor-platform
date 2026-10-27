@@ -1,11 +1,17 @@
 import { useMemo, useRef, useState } from 'react';
 import {
+  frameStep2,
   prepareAnimation2,
   type AnimationContent2,
   type AnimationInputValues2,
   type AnimationEmbed2,
 } from '@editor-platform/animation-core/v2';
 import { useAnimationPlayer2 } from './use-player';
+const seconds = (tick: number) => (tick / 240000).toFixed(2) + ' s';
+/** Playback position for people: seconds of the whole and the frame on the composition grid. */
+export function animationPositionLabel2(tick: number, duration: number, step: number) {
+  return `${seconds(tick)} / ${seconds(duration)} · Frame ${Math.floor(tick / step)}`;
+}
 export interface AnimationReactPlayerProps2 {
   content: AnimationContent2;
   compositionId?: string;
@@ -23,7 +29,8 @@ export function AnimationReactPlayer2(props: AnimationReactPlayerProps2) {
     [state, setState] = useState({ tick: props.posterTick ?? 0, playing: false, ready: false }),
     [error, setError] = useState('');
   const id = props.compositionId ?? props.content.rootCompositionId,
-    c = props.content.compositions.find((c) => c.id === id)!;
+    c = props.content.compositions.find((c) => c.id === id)!,
+    position = animationPositionLabel2(state.tick, c.duration, frameStep2(c));
   const player = useAnimationPlayer2(stage, {
     source,
     compositionId: id,
@@ -84,6 +91,7 @@ export function AnimationReactPlayer2(props: AnimationReactPlayerProps2) {
             min={0}
             max={c.duration}
             value={state.tick}
+            aria-valuetext={position}
             disabled={!state.ready}
             style={{ minWidth: 0, flex: 1 }}
             onKeyDown={(e) => {
@@ -101,7 +109,9 @@ export function AnimationReactPlayer2(props: AnimationReactPlayerProps2) {
               }
             }}
           />
-          <output>{state.tick}</output>
+          <output style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+            {position}
+          </output>
         </div>
       )}
     </section>

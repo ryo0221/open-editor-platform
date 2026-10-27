@@ -43,6 +43,7 @@ export function CanvasTextEditor({
   onCancel,
   drawing,
   caret,
+  selectAll,
   toolsContainer,
   toolsPosition,
   expanded,
@@ -58,6 +59,8 @@ export function CanvasTextEditor({
   onCancel: () => void;
   drawing?: Drawing;
   caret?: { x: number; y: number };
+  /** Selects the whole text, so typing replaces it. */
+  selectAll?: boolean;
   toolsContainer?: HTMLElement | null;
   toolsPosition?: { x: number; y: number };
   expanded?: boolean;
@@ -274,13 +277,16 @@ export function CanvasTextEditor({
     });
     view.current = editor;
     originalDoc.current = editor.state.doc;
-    if (caret) {
-      const position = editor.posAtCoords({ left: caret.x, top: caret.y });
-      if (position)
-        editor.dispatch(
-          editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(position.pos))),
-        );
-    }
+    const { doc } = editor.state;
+    const position = caret && editor.posAtCoords({ left: caret.x, top: caret.y });
+    if (position)
+      editor.dispatch(editor.state.tr.setSelection(TextSelection.near(doc.resolve(position.pos))));
+    else if (selectAll)
+      editor.dispatch(
+        editor.state.tr.setSelection(
+          TextSelection.between(doc.resolve(0), doc.resolve(doc.content.size)),
+        ),
+      );
     editor.focus();
     refresh((revision) => revision + 1);
     const stop = bridge?.subscribe(() => {

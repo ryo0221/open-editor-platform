@@ -11,24 +11,17 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { signal } from './signal.mjs';
 import { parse } from './metadata.mjs';
+import { pins } from './candidate-pins.mjs';
 const require = createRequire(import.meta.url);
 const { build } = require('esbuild'),
   { chromium } = require('playwright');
 const root = process.argv[2];
 const deps = process.argv[3];
+const mode = process.argv[4] ?? 'baseline';
+if (!['baseline', 'resample48'].includes(mode)) throw Error('Unknown finite mode');
 if (!root || !deps) throw Error('Provide fresh output directory and isolated dependency directory');
 // Refuse source drift; this experiment never patches or adopts the candidate.
-const pins = {
-  'package-lock.json': '36a13b1a10cd181f246dc3e5340799a1af3a7d992b06961d0034bb41dae28d42',
-  'node_modules/mediabunny/dist/modules/src/media-source.js':
-    '1c60a60034eff049d8ee1a973de7ef665bb8e648ee14854227150556e25f9088',
-  'node_modules/mediabunny/dist/modules/src/output.js':
-    '699dae1192ee789c32577a0cf2e9980d41845af4e66b8ba626e6ba87f9b511b3',
-  'node_modules/mediabunny/dist/modules/src/matroska/matroska-muxer.js':
-    '531ea55a6e46bb78ac6b9b52be76c95a57e21626d8422af3d6b427e21fcec049',
-  'node_modules/mediabunny/dist/modules/src/matroska/matroska-demuxer.js':
-    'bdbae8a5706fb5d2bc891ee58f8b016647436c0cb4f4a6b7d720e938296da2a4',
-};
+
 for (const [file, hash] of Object.entries(pins)) {
   if (
     createHash('sha256')
@@ -96,8 +89,9 @@ try {
         av = n === 48000;
       try {
         const result = await page.evaluate(
-          async ({ n, origin, av, rate }) => await window.runFixture(n, origin, av, rate),
-          { n, origin, av, rate },
+          async ({ n, origin, av, rate, mode }) =>
+            await window.runFixture(n, origin, av, rate, mode === 'resample48'),
+          { n, origin, av, rate, mode },
         );
         const bytes = Buffer.from(result.bytes),
           file = `${root}/results/${name}.webm`;
@@ -221,6 +215,7 @@ try {
 }
 const report = {
   pins,
+  mode,
   browser: execFileSync('/usr/bin/chromium', ['--version'], { encoding: 'utf8' }).trim(),
   mediabunny: '1.61.3',
   ffmpeg: execFileSync('/usr/bin/ffmpeg', ['-version'], { encoding: 'utf8' }).split('\n')[0],

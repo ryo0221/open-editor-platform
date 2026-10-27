@@ -112,34 +112,34 @@ review submissionの現在の本文と過去返信を確認した。未返信・
 固定／更新連動の作成時選択、保存成功したimmutable versionだけの伝搬、destination Undoの分離、
 公開Host APIのsignatureは維持した。mainへのmerge、upstream同期、CI再開、性能測定は行っていない。
 
-| 指摘（review comment ID） | 修正と回帰検証 |
-| --- | --- |
-| 4290441504 出力範囲 | Design selection/frames、Whiteboard selection/section、Slide current/selectedの描画対象だけをcapture/manifestへ渡す。非表示・範囲外sourceを取得不可にしてもSVG ZIPが成功し、manifest/read履歴にはincluded sourceだけが残る6シナリオ。native content不変も確認 |
-| 4290441510 Design prototype | Canvasと同じ解決済みprojectionをprototypeへ渡す。開いたままsource保存95→80を反映し、native contentは不変 |
-| 4290441514 Document resolver差替え | node viewのrender callbackを再実行して新resolverへ購読を切替。旧購読0、新購読1、権限失効後はimage srcを除去。ProseMirror DOMを再構築せず、native content不変 |
-| 4290441520 optional undefined | objectのundefined fieldをcanonicalJsonと同じ省略規則で受け入れる。native view prune→commit→structuredClone→create/refresh/captureを検証。array undefinedとaccessorは拒否 |
-| 4290441527 immutable revision矛盾 | 検証済みsource/domain/revisionごとにversion ID、content hash、依存id/hashを照合。保持閉包をread cacheで省略せず個別検証。fixed live captureとhistorical/import captureの双方で3種の矛盾を拒否。新しいlive版を読んだ後の古いfixed版は保持bytesのまま許可 |
-| 4290441535 非active Slide | deck全pageの参照を購読。初期非active page、往復後のthumbnail、presentationの更新95→80を確認 |
-| 4290441540 Document入力競合 | async capture後にdirty/composingを確認。HTML出力中の未確定captionと、印刷previewのfocus trap後に届くqueued IMEイベントを拒否し、入力bufferを保持。後者はbrowserの合成composition/inputイベントであり実機IME検証ではない |
-| 4290441546 fit | 3 domainのnative drawingがreference.fitを読む。元のimageFitがfitでもcoverのSVGを生成。通常Inspectorの参照変更・解除時にもnative imageFitを同期し、3 Surfaceの解除後fillを検証 |
+| 指摘（review comment ID）          | 修正と回帰検証                                                                                                                                                                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4290441504 出力範囲                | Design selection/frames、Whiteboard selection/section、Slide current/selectedの描画対象だけをcapture/manifestへ渡す。非表示・範囲外sourceを取得不可にしてもSVG ZIPが成功し、manifest/read履歴にはincluded sourceだけが残る6シナリオ。native content不変も確認 |
+| 4290441510 Design prototype        | Canvasと同じ解決済みprojectionをprototypeへ渡す。開いたままsource保存95→80を反映し、native contentは不変                                                                                                                                                      |
+| 4290441514 Document resolver差替え | node viewのrender callbackを再実行して新resolverへ購読を切替。旧購読0、新購読1、権限失効後はimage srcを除去。ProseMirror DOMを再構築せず、native content不変                                                                                                  |
+| 4290441520 optional undefined      | objectのundefined fieldをcanonicalJsonと同じ省略規則で受け入れる。native view prune→commit→structuredClone→create/refresh/captureを検証。array undefinedとaccessorは拒否                                                                                      |
+| 4290441527 immutable revision矛盾  | 検証済みsource/domain/revisionごとにversion ID、content hash、依存id/hashを照合。保持閉包をread cacheで省略せず個別検証。fixed live captureとhistorical/import captureの双方で3種の矛盾を拒否。新しいlive版を読んだ後の古いfixed版は保持bytesのまま許可       |
+| 4290441535 非active Slide          | deck全pageの参照を購読。初期非active page、往復後のthumbnail、presentationの更新95→80を確認                                                                                                                                                                   |
+| 4290441540 Document入力競合        | async capture後にdirty/composingを確認。HTML出力中の未確定captionと、印刷previewのfocus trap後に届くqueued IMEイベントを拒否し、入力bufferを保持。後者はbrowserの合成composition/inputイベントであり実機IME検証ではない                                       |
+| 4290441546 fit                     | 3 domainのnative drawingがreference.fitを読む。元のimageFitがfitでもcoverのSVGを生成。通常Inspectorの参照変更・解除時にもnative imageFitを同期し、3 Surfaceの解除後fillを検証                                                                                 |
 
 ### 実施結果
 
 Linux、Node 24.19.0、npm 11.9.0、Chromium 153.0.8010.0。
 desktop 1440×1000、mobile/touch emulation 390×844。既存mobile回帰は390/768px。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint（`npm run lint -- --quiet`）／typecheck／変更TS/TSXのPrettier／diff whitespace | PASS |
-| `npm run check:files`／`npm run test:tooling` | PASS／52 passed |
-| `npm test` | 227 files、2375 passed、9 skipped（既存optional Spatial WASM） |
-| 参照固有unit | 18 passed（既存9＋追加9、全unit内に含む） |
-| `npm run build` | PASS、通常Host・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 40 passed＝既存6＋追加14シナリオ×desktop/mobile |
-| reference Playwright production設定 | 40 passed。既存12ケースは配布build、追加28ケースはpublic APIをproduction modeでbundleした独立テストHost |
-| 追加fixtureのviewport修正後 | dev/production設定のmobile各14ケースを再実行PASS（上記件数へ重複加算しない） |
-| 既存`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts` | 3 passed |
-| ローカル公開snapshot export／manifest／residual検査 | PASS、1632 source files＋manifest（公開先への同期は未実施） |
+| 検査                                                                                | 結果                                                                                                    |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| lint（`npm run lint -- --quiet`）／typecheck／変更TS/TSXのPrettier／diff whitespace | PASS                                                                                                    |
+| `npm run check:files`／`npm run test:tooling`                                       | PASS／52 passed                                                                                         |
+| `npm test`                                                                          | 227 files、2375 passed、9 skipped（既存optional Spatial WASM）                                          |
+| 参照固有unit                                                                        | 18 passed（既存9＋追加9、全unit内に含む）                                                               |
+| `npm run build`                                                                     | PASS、通常Host・独立reference Host・React preview。既存chunk-size warning継続                           |
+| reference Playwright dev                                                            | 40 passed＝既存6＋追加14シナリオ×desktop/mobile                                                         |
+| reference Playwright production設定                                                 | 40 passed。既存12ケースは配布build、追加28ケースはpublic APIをproduction modeでbundleした独立テストHost |
+| 追加fixtureのviewport修正後                                                         | dev/production設定のmobile各14ケースを再実行PASS（上記件数へ重複加算しない）                            |
+| 既存`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`                             | 3 passed                                                                                                |
+| ローカル公開snapshot export／manifest／residual検査                                 | PASS、1632 source files＋manifest（公開先への同期は未実施）                                             |
 
 `playwright.references.config.ts`に追加specを収録した。実行環境では通常のbrowser downloadが
 失敗したため既存のChromiumを使用し、ViteのnetworkInterfaces制約に対して127.0.0.1へbindする
@@ -162,30 +162,30 @@ mobile viewport metaを修正して再実行した。既存回帰の一時設定
 照合し、03:49 UTCの追加レビュー6件だけを修正した。固定／連動、保存済み版だけの伝搬、
 exact hash／依存閉包、destination Undoと公開Host契約は維持する。
 
-| 指摘（review comment ID） | 修正・回帰の対象 |
-| --- | --- |
-| 4290738819 Design component内参照 | native validatorがcomponent template／elementsと再帰instance overrides内の参照を拒否。通常top-level参照は許可。JSON parseを通したimport形状で検証 |
-| 4290738826 page間object ID重複 | 古いdeckのIDを変更せず、描画projectionをpage ID＋object IDで対応付け、captureをpageごとの順序で戻す。同IDの異なるsourceとgeometryをCanvas／全page SVG ZIPで検証 |
-| 4290738833 resolver差替えと発見 | scopeに属するoption・選択・error・busyを分離し、差替え時に旧表示を破棄。旧listの遅延完了は無視。発見済み名とin-flight応答の両方をbrowserで検証 |
-| 4290738838 画像置換 | Slide／Design／WhiteboardのReplace imageがsrcと参照解除を同一commandで適用。PNG表示、元source更新後も置換画像を保持、1回のUndoで元contentへ戻ることを検証 |
-| 4290738839 read-only時の参照操作 | 4 SurfaceのReferenceInspectorをdisabled fieldsetの外へ移し、sourceを開く／再取得／発見はHost権限に委ねる。配置／mode／fit／固定／解除は無効のまま。native content不変も検証 |
-| 4290738845 native JSON property名 | own JSON keyを参照IDの予約語制約から分離。`constructor`／`prototype`／`__proto__`／日本語のData列をcommit→structuredClone→create／refresh／captureし、保持hash不変を検証 |
+| 指摘（review comment ID）         | 修正・回帰の対象                                                                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4290738819 Design component内参照 | native validatorがcomponent template／elementsと再帰instance overrides内の参照を拒否。通常top-level参照は許可。JSON parseを通したimport形状で検証                           |
+| 4290738826 page間object ID重複    | 古いdeckのIDを変更せず、描画projectionをpage ID＋object IDで対応付け、captureをpageごとの順序で戻す。同IDの異なるsourceとgeometryをCanvas／全page SVG ZIPで検証             |
+| 4290738833 resolver差替えと発見   | scopeに属するoption・選択・error・busyを分離し、差替え時に旧表示を破棄。旧listの遅延完了は無視。発見済み名とin-flight応答の両方をbrowserで検証                              |
+| 4290738838 画像置換               | Slide／Design／WhiteboardのReplace imageがsrcと参照解除を同一commandで適用。PNG表示、元source更新後も置換画像を保持、1回のUndoで元contentへ戻ることを検証                   |
+| 4290738839 read-only時の参照操作  | 4 SurfaceのReferenceInspectorをdisabled fieldsetの外へ移し、sourceを開く／再取得／発見はHost権限に委ねる。配置／mode／fit／固定／解除は無効のまま。native content不変も検証 |
+| 4290738845 native JSON property名 | own JSON keyを参照IDの予約語制約から分離。`constructor`／`prototype`／`__proto__`／日本語のData列をcommit→structuredClone→create／refresh／captureし、保持hash不変を検証    |
 
 ### 追加修正の実施結果
 
 Linux、Node 24.19.0、npm 11.9.0、Chromium 151.0.7922.173。
 desktop 1440×1000／mobile touch emulation 390×844。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | PASS／52 passed |
-| `npm test` | 227 files、2377 passed、9 skipped（既存optional Spatial WASM） |
-| 参照固有unit | 20 passed（前回18＋追加2、全unit内に含む） |
-| `npm run build` | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続 |
-| reference Playwright dev | 56 passed＋SVG文字列assertion修正後の該当desktop/mobile 2 cases再実行PASS。合計58ケースを確認 |
-| `EDITOR_REFERENCE_PRODUCTION=1 npx playwright test --config playwright.references.config.ts` | 58 passed。配布buildの既存12＋production modeでbundleした独立テストHostの46 cases |
-| 既存独立Host／read-only／390px・768px mobile | `issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS |
+| 検査                                                                                         | 結果                                                                                          |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace                                      | PASS                                                                                          |
+| file policy／tooling                                                                         | PASS／52 passed                                                                               |
+| `npm test`                                                                                   | 227 files、2377 passed、9 skipped（既存optional Spatial WASM）                                |
+| 参照固有unit                                                                                 | 20 passed（前回18＋追加2、全unit内に含む）                                                    |
+| `npm run build`                                                                              | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続                     |
+| reference Playwright dev                                                                     | 56 passed＋SVG文字列assertion修正後の該当desktop/mobile 2 cases再実行PASS。合計58ケースを確認 |
+| `EDITOR_REFERENCE_PRODUCTION=1 npx playwright test --config playwright.references.config.ts` | 58 passed。配布buildの既存12＋production modeでbundleした独立テストHostの46 cases             |
+| 既存独立Host／read-only／390px・768px mobile                                                 | `issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS                             |
 
 追加browser回帰は9シナリオ×desktop/mobileで18 cases。既存40 casesを合わせた58であり、
 再実行を追加件数へ含めない。browser-error fixtureもPASS。重複IDのあるdeckについて、
@@ -212,12 +212,12 @@ CI再開、merge、公開upstream同期は行っていない。
 確認headは`74c3351a114fbf68916af32a7d74670590d5cbc3`。04:35 UTCの新規4件を照合した。
 前回14件の修正・返信を再実行せず、新しい操作経路と追加の不変条件を修正した。
 
-| 指摘（review comment ID） | 修正と回帰の対象 |
-| --- | --- |
-| 4290964460 通常Image fit | Slide／Design／Whiteboardの既存property commandが各参照のfitをnative imageFitと一緒に更新。複数参照＋通常画像の選択でsource／modeを維持。通常Inspectorからfill／fitを操作し、Canvas・SVG ZIP／manifest・Undoを検証 |
-| 4290964464 version IDの再利用 | source/domain/version IDごとにrevision・content hash・依存id/hashを記録し、revisionが異なっても矛盾を拒否。create／refresh／live capture／historical importでGraphのrevision単独変更とProfile変更を検証。拒否後の正当な新versionと古いfixed版は受け入れる |
+| 指摘（review comment ID）       | 修正と回帰の対象                                                                                                                                                                                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 4290964460 通常Image fit        | Slide／Design／Whiteboardの既存property commandが各参照のfitをnative imageFitと一緒に更新。複数参照＋通常画像の選択でsource／modeを維持。通常Inspectorからfill／fitを操作し、Canvas・SVG ZIP／manifest・Undoを検証                                                       |
+| 4290964464 version IDの再利用   | source/domain/version IDごとにrevision・content hash・依存id/hashを記録し、revisionが異なっても矛盾を拒否。create／refresh／live capture／historical importでGraphのrevision単独変更とProfile変更を検証。拒否後の正当な新versionと古いfixed版は受け入れる                |
 | 4290964466 resolver切替中の出力 | 4 Surfaceのcapture完了後に現在のresolverを照合。Document印刷previewはpage描画後にも照合。テストHostはresolverだけ変えたときcontent identityを維持し、内容変更guardで代用できない状態で検証。3 canvas SVGとDocument HTML／印刷の5シナリオでdownloadなし・native不変を確認 |
-| 4290964468 Graphの余分な依存 | 必須Profile一件だけを許可。無関係なhash-valid依存を足したHost応答に対しcreate／refresh／capture／historical import／projectionを拒否し、余分なcontentを保持しない |
+| 4290964468 Graphの余分な依存    | 必須Profile一件だけを許可。無関係なhash-valid依存を足したHost応答に対しcreate／refresh／capture／historical import／projectionを拒否し、余分なcontentを保持しない                                                                                                        |
 
 ### SVG fitの描画確認で追加した修正
 
@@ -236,15 +236,15 @@ SVG描画用URI・日本語・元bytes保持のunitを2件追加した。描画�
 Linux、Node 24.19.0、npm 11.9.0、Chromium 151.0.7922.173。
 desktop 1440×1000、mobile touch emulation 390×844。既存mobile回帰は390px／768px。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | PASS／52 passed |
-| 参照固有unit／SVG fit unit | 24 passed／2 passed |
-| `npm run build` | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続 |
-| reference Playwright dev | 最終74 passed（描画修正後）。既存58＋今回8シナリオ×desktop/mobile |
-| reference Playwright production設定 | 最終74 passed（描画修正後）。配布buildの既存12＋public APIをproduction modeでbundleした独立テストHost 62 |
-| 既存独立Host／read-only／mobile | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS |
+| 検査                                                    | 結果                                                                                                     |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                                     |
+| file policy／tooling                                    | PASS／52 passed                                                                                          |
+| 参照固有unit／SVG fit unit                              | 24 passed／2 passed                                                                                      |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続                                |
+| reference Playwright dev                                | 最終74 passed（描画修正後）。既存58＋今回8シナリオ×desktop/mobile                                        |
+| reference Playwright production設定                     | 最終74 passed（描画修正後）。配布buildの既存12＋public APIをproduction modeでbundleした独立テストHost 62 |
+| 既存独立Host／read-only／mobile                         | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS                     |
 
 全browser-error fixtureもPASS。desktopのSlideとDesign、mobileのWhiteboardの画像を目視確認し、
 画像element PNG比較で3 Surfaceのfit／fillの描画差も確認した。再実行の件数を重複加算しない。
@@ -272,12 +272,12 @@ export／manifest／residual検査PASS。1633 source files＋manifest、snapshot
 確認headは`846e568813ff876b60f345ce464c6f4fce9dd6b9`。05:11 UTCのレビュー、通常コメント、
 inline thread、編集時刻と過去の返信を照合し、前回までの18件とは別の未対応4件を修正した。
 
-| 指摘（review comment ID） | 修正と回帰の対象 |
-| --- | --- |
+| 指摘（review comment ID）             | 修正と回帰の対象                                                                                                                                                                                                                                                |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 4291136570 履歴importのidentity scope | Artifactごとに一つのdestination resolverを作り、draftと全immutable versionを順に検証。保存データの再読込も同じhelperを使用。draft対version／version対versionそれぞれで同revision・同version IDの矛盾をUI importから拒否し、正当な古い履歴のimport／reloadは許可 |
-| 4291136578 疎なJSON配列 | descriptor walkの前に各indexがown propertyであることを確認。dependencies・target IDs・native contentの穴、部分的な穴、prototypeのindexを同期validatorで拒否。resolverはTypeErrorではなく検証errorを返す。通常のdense JSON配列は維持 |
-| 4291136582 通常reference property | capability検出はschemaVersion/source/snapshotを持つ埋め込みenvelopeを識別し、通常のwebProps.referenceを許可。Designのnative／shared codec／template保存・展開を検証。実際の参照はsharedで拒否し、component templateのnative reference fieldも引き続き拒否 |
-| 4291136587 権限再確認中のcache | loadingへの遷移でprojectionを即時破棄。snapshotはoffline確認後の再検証にだけ使う。fixed／followとforbidden／offlineの非同期unit、4 Surfaceの通知→待機→拒否／復旧・offline fallbackをdesktop/mobileで検証。native contentは変更しない |
+| 4291136578 疎なJSON配列               | descriptor walkの前に各indexがown propertyであることを確認。dependencies・target IDs・native contentの穴、部分的な穴、prototypeのindexを同期validatorで拒否。resolverはTypeErrorではなく検証errorを返す。通常のdense JSON配列は維持                             |
+| 4291136582 通常reference property     | capability検出はschemaVersion/source/snapshotを持つ埋め込みenvelopeを識別し、通常のwebProps.referenceを許可。Designのnative／shared codec／template保存・展開を検証。実際の参照はsharedで拒否し、component templateのnative reference fieldも引き続き拒否       |
+| 4291136587 権限再確認中のcache        | loadingへの遷移でprojectionを即時破棄。snapshotはoffline確認後の再検証にだけ使う。fixed／followとforbidden／offlineの非同期unit、4 Surfaceの通知→待機→拒否／復旧・offline fallbackをdesktop/mobileで検証。native contentは変更しない                            |
 
 ### 今回の検証条件と実施結果
 
@@ -287,16 +287,16 @@ desktop 1440×1000、mobile touch emulation 390×844。
 最初のlintでは意図的な疎配列literalが`no-sparse-arrays`で拒否されたため、同じ不正入力を
 index削除で作るfixtureに修正した。本体の検証規則やlint設定は緩和していない。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | PASS／52 passed |
-| 参照固有unit | 30 passed（既存24＋今回6） |
-| `npm test` | 229 files、2389 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に全unitを実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続 |
-| reference Playwright dev | 94 passed（既存74＋今回20） |
-| reference Playwright production設定 | 94 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 70 |
-| 既存独立Host／read-only／mobile | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS |
+| 検査                                                    | 結果                                                                                              |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                              |
+| file policy／tooling                                    | PASS／52 passed                                                                                   |
+| 参照固有unit                                            | 30 passed（既存24＋今回6）                                                                        |
+| `npm test`                                              | 229 files、2389 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に全unitを実行 |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続                         |
+| reference Playwright dev                                | 94 passed（既存74＋今回20）                                                                       |
+| reference Playwright production設定                     | 94 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 70                |
+| 既存独立Host／read-only／mobile                         | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS              |
 
 browser-error fixtureも全対象でPASS。desktop Slideとmobile Documentの待機中の画像を目視確認し、
 取得中の表示に切り替わり、以前の参照画像が表示されていないことを確認した。
@@ -316,10 +316,10 @@ export／manifest／residual検査PASS。1634 source files＋manifest、snapshot
 確認headは`f91266a7305e7e2e34fe8a38fcc6e17e2fc2bd31`。通常コメント、inline thread、
 review submissionと編集時刻を前回の22件・各返信・commitと照合し、05:38 UTCの新規2件を修正した。
 
-| 指摘（review comment ID） | 修正と回帰の対象 |
-| --- | --- |
-| 4291276061 resolver未接続の出力 | 4 Surfaceの出力対象に参照があれば接続を必須にする。Slide SVG／PNG／PDF、Design・Whiteboard SVG／PNG、Document MD／HTML／PDF／印刷previewを診断付きで拒否し、downloadなし・native不変を確認。参照を持たない同じ画像はresolverなしのSVG／HTML出力とDocument印刷に成功する |
-| 4291276069 Groupの継承状態 | Slide／WhiteboardのCanvas targetをpaint-order objectから作り、runtime側からsrcだけを重ねる。srcが同じならそのobject identityも保持。nested Groupの参照画像と通常要素がhide時に描画／hit targetから消え、sourceの保存版更新中も表示されず、再表示と2回のUndoで元のnative contentへ戻ることを検証 |
+| 指摘（review comment ID）       | 修正と回帰の対象                                                                                                                                                                                                                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4291276061 resolver未接続の出力 | 4 Surfaceの出力対象に参照があれば接続を必須にする。Slide SVG／PNG／PDF、Design・Whiteboard SVG／PNG、Document MD／HTML／PDF／印刷previewを診断付きで拒否し、downloadなし・native不変を確認。参照を持たない同じ画像はresolverなしのSVG／HTML出力とDocument印刷に成功する                         |
+| 4291276069 Groupの継承状態      | Slide／WhiteboardのCanvas targetをpaint-order objectから作り、runtime側からsrcだけを重ねる。srcが同じならそのobject identityも保持。nested Groupの参照画像と通常要素がhide時に描画／hit targetから消え、sourceの保存版更新中も表示されず、再表示と2回のUndoで元のnative contentへ戻ることを検証 |
 
 ### 今回の検証条件
 
@@ -329,15 +329,15 @@ desktop 1440×1000、mobile touch emulation 390×844。
 初回typecheckはSlide fixtureのfactoryにindex引数が不足して失敗したため、既存signatureへ合わせた。
 lint／typecheckの設定や本体validatorは緩和していない。最終結果は以下へ記録する。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | PASS／52 passed |
-| `npm run build` | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続 |
-| reference Playwright dev | 106 passed（既存94＋今回12） |
-| `npm test` | 229 files、2389 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に全unitを実行 |
-| reference Playwright production設定 | 106 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 82 |
-| 既存独立Host／read-only／mobile | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
+| 検査                                                    | 結果                                                                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                                       |
+| file policy／tooling                                    | PASS／52 passed                                                                                            |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview、既存chunk-size warning継続                                  |
+| reference Playwright dev                                | 106 passed（既存94＋今回12）                                                                               |
+| `npm test`                                              | 229 files、2389 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に全unitを実行          |
+| reference Playwright production設定                     | 106 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 82                        |
+| 既存独立Host／read-only／mobile                         | 配布build previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
 
 browser-error fixtureは全対象でPASS。desktop Slideのhidden Group、mobile Whiteboardの
 復帰画像80、mobile Documentの未接続診断を目視確認した。Canvasの子のhit targetもDOMから
@@ -353,19 +353,18 @@ export／manifest／residual検査PASS。1634 source files＋manifest、snapshot
 `ea51e7c25e8a5172232b7c27fa3741d06d8e13b71d9b7be8ffbe7bca5b364d32`。
 公開先への同期は行っていない。
 
-
 ## PR #265 出力範囲・確定境界のレビュー4件（2026-10-16）
 
 確認headは`5bfc4294f11f3934bf2144b703263f9bb76900ca`。通常コメント、inline thread、
 review submissionを照合し、07:05 UTCの新規4件のみを検証した。いずれも宣言済みの
 機能で不正な保存や誤った出力へ到達するため対応し、過去の返信済み指摘は重複修正していない。
 
-| 指摘（review comment ID） | 判断・変更・検証 |
-| --- | --- |
-| 4291801559 Documentのhidden参照 | HTML／PDF／印刷はhiddenを出力しないのに全blockを取得していた。可視blockだけ取得して元位置へ戻し、HTML／PDF manifestも可視範囲だけにする。hidden sourceを取得不能にしても出力成功、HTML内容とPDF添付manifestにincluded一件だけ、印刷preview一枚、native不変を確認。Markdownは既存のhiddenを含む仕様を維持し、同条件では取得不能を報告する |
-| 4291801569 追加・複製時の上限 | 4 Surfaceのcommandを確定時のcontent全体で検証し、DocumentはPM state採用前にも検証する。64件からの追加、保持情報合計4 MiB超過、3 canvasの複製で拒否・native不変・Undoなしを確認。Documentは拒否後のPM画像数も元のまま。Host独自headless command向けにassertReferenceItemsを公開する |
-| 4291801580 Dataのview ID衝突 | nativeに有効な重複／default IDが参照では別viewを指した。Data参照adapterの保存版検証で拒否し、通常Dataの読み込み仕様は変えない。重複／予約ID拒否、一意なnamed view成功、native validator受け入れをunitで確認 |
-| 4291801589 テンプレートauthoring | 保存済み参照のIDをremapする経路は宣言上未対応。共通authoring選択境界で拒否する。4 domainのwhole／fragment／linked component拒否、無関係なfragment成功、元content不変をunitで確認。既存の普通のwebProps.referenceを許す回帰も維持 |
+| 指摘（review comment ID）        | 判断・変更・検証                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4291801559 Documentのhidden参照  | HTML／PDF／印刷はhiddenを出力しないのに全blockを取得していた。可視blockだけ取得して元位置へ戻し、HTML／PDF manifestも可視範囲だけにする。hidden sourceを取得不能にしても出力成功、HTML内容とPDF添付manifestにincluded一件だけ、印刷preview一枚、native不変を確認。Markdownは既存のhiddenを含む仕様を維持し、同条件では取得不能を報告する |
+| 4291801569 追加・複製時の上限    | 4 Surfaceのcommandを確定時のcontent全体で検証し、DocumentはPM state採用前にも検証する。64件からの追加、保持情報合計4 MiB超過、3 canvasの複製で拒否・native不変・Undoなしを確認。Documentは拒否後のPM画像数も元のまま。Host独自headless command向けにassertReferenceItemsを公開する                                                       |
+| 4291801580 Dataのview ID衝突     | nativeに有効な重複／default IDが参照では別viewを指した。Data参照adapterの保存版検証で拒否し、通常Dataの読み込み仕様は変えない。重複／予約ID拒否、一意なnamed view成功、native validator受け入れをunitで確認                                                                                                                              |
+| 4291801589 テンプレートauthoring | 保存済み参照のIDをremapする経路は宣言上未対応。共通authoring選択境界で拒否する。4 domainのwhole／fragment／linked component拒否、無関係なfragment成功、元content不変をunitで確認。既存の普通のwebProps.referenceを許す回帰も維持                                                                                                         |
 
 新規pure regression 7件は有効なfixtureで修正前実装に対して7件FAIL、修正後7件PASS。
 初回fixtureのpurpose不足によるtemplate errorを修正してから、この前後比較を実施した。
@@ -378,15 +377,15 @@ desktop 1440×1000、mobile touch emulation 390×844。既存のChromium実行�
 日本語fontconfigを使用し、Viteの起動hostはこの環境で利用できる127.0.0.1を指定した。
 最終検証結果は後記する。ログ・生成出力・画像はGitへ追加しない。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSX・JSONのPrettier／diff whitespace | PASS |
-| file policy／tooling | 2073 files PASS／52 passed |
-| `npm test` | 230 files、2396 passed、9 skipped（既存optional Spatial WASM） |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 132 passed（既存106＋今回26） |
-| reference Playwright production設定 | 132 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 108 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
+| 検査                                                          | 結果                                                                                                        |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSX・JSONのPrettier／diff whitespace | PASS                                                                                                        |
+| file policy／tooling                                          | 2073 files PASS／52 passed                                                                                  |
+| `npm test`                                                    | 230 files、2396 passed、9 skipped（既存optional Spatial WASM）                                              |
+| `npm run build`                                               | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                                   |
+| reference Playwright dev                                      | 132 passed（既存106＋今回26）                                                                               |
+| reference Playwright production設定                           | 132 passed。配布buildの24＋public APIをproduction modeでbundleした独立テストHost 108                        |
+| 既存独立Host／read-only／mobile                               | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
 
 browser-error fixtureは全対象でPASS。Documentのdesktop／390pxの拒否診断と、
 可視blockだけの印刷previewを目視確認した。先行26ケースは最終132へ重複加算しない。
@@ -401,13 +400,13 @@ PDFの全描画品質、参照付きPNG実ファイル、全E2E、実機mobile�
 既存commitを照合し、21a390bで修正・返信済みの07:05 UTCの4件を重複対応せず、
 07:50 UTCの未対応5件を修正した。
 
-| 指摘（review comment ID） | 修正と検証 |
-| --- | --- |
-| 4292135134 親Groupに隠された参照 | 3 canvasのpaint orderから実効可視IDを取り、captureとmanifestを描画範囲へ揃える。Slideはpageごとに元の配列順へcaptureを戻す。hidden=falseの子を隠したnested Groupと取得不能sourceでSVG出力成功、manifestはincludedだけ、source read一件、native不変を検証。可視画像が参照なしならresolver未接続でも成功 |
-| 4292135144 Host HTML | Surface内のvisible-block captureを公開captureDocumentReferencesへ抽出し、PlaygroundのdocumentTextExportも同じhelperを使う。MarkdownはincludeHidden=trueを維持。helper unitでhidden source未取得・元位置保持・native不変を確認し、通常Host UIでもHTML本文／manifestとIndexedDB record不変を確認 |
-| 4292135155 resolver key | revisionと依存id/hashの組をkeyへ含め、observeのdedupが異なる保持closureを共有しないようにする。Graphのrevision／依存IDだけ異なる参照を両順序でobserveし、ready projectionの共有を拒否。正当な参照だけreadyになる |
-| 4292135166 JSON内のreference属性 | schemaVersion/mode/fit/source/snapshotのenvelope discriminatorをJSON検証とcapability検出で共用。正当なGraph Profileの普通のobject属性をcreate／refresh／captureで受け入れ、hash・native bytesを保持。実際の参照envelopeは再帰参照として拒否 |
-| 4292135174 非同期保存のdestination切替 | 独立Hostで開始時のkind・resolver・history配列を照合し、切替後のsave／native exportを拒否。実Hostでhash取得を遅延させてSlide→Documentへ切替え、両domainの履歴・draftをbyte比較、保存数とreload、downloadなしを検証 |
+| 指摘（review comment ID）              | 修正と検証                                                                                                                                                                                                                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 4292135134 親Groupに隠された参照       | 3 canvasのpaint orderから実効可視IDを取り、captureとmanifestを描画範囲へ揃える。Slideはpageごとに元の配列順へcaptureを戻す。hidden=falseの子を隠したnested Groupと取得不能sourceでSVG出力成功、manifestはincludedだけ、source read一件、native不変を検証。可視画像が参照なしならresolver未接続でも成功 |
+| 4292135144 Host HTML                   | Surface内のvisible-block captureを公開captureDocumentReferencesへ抽出し、PlaygroundのdocumentTextExportも同じhelperを使う。MarkdownはincludeHidden=trueを維持。helper unitでhidden source未取得・元位置保持・native不変を確認し、通常Host UIでもHTML本文／manifestとIndexedDB record不変を確認         |
+| 4292135155 resolver key                | revisionと依存id/hashの組をkeyへ含め、observeのdedupが異なる保持closureを共有しないようにする。Graphのrevision／依存IDだけ異なる参照を両順序でobserveし、ready projectionの共有を拒否。正当な参照だけreadyになる                                                                                       |
+| 4292135166 JSON内のreference属性       | schemaVersion/mode/fit/source/snapshotのenvelope discriminatorをJSON検証とcapability検出で共用。正当なGraph Profileの普通のobject属性をcreate／refresh／captureで受け入れ、hash・native bytesを保持。実際の参照envelopeは再帰参照として拒否                                                            |
+| 4292135174 非同期保存のdestination切替 | 独立Hostで開始時のkind・resolver・history配列を照合し、切替後のsave／native exportを拒否。実Hostでhash取得を遅延させてSlide→Documentへ切替え、両domainの履歴・draftをbyte比較、保存数とreload、downloadなしを検証                                                                                      |
 
 追加unitは7件、追加browserは6シナリオ×desktop/mobileの12ケース。
 新規unitを含む参照44件は先行実行PASS。最初のbrowser先行実行は10 passed／2 failedで、
@@ -419,16 +418,16 @@ Host HTMLのimport fixtureに現行native validatorが認めないhidden画像�
 検証環境: Linux、Node 24.19.0、npm 11.9.0、Chromium 151.0.7922.173。
 desktop 1440×1000、mobile touch emulation 390×844。最終結果は以下へ記録する。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | 2075 files PASS／52 passed |
-| 参照固有unit（4 files） | 44 passed。今回のidentity・Graph属性・Document captureの7件を含む |
-| `npm test` | 231 files、2403 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 144 passed（既存132＋今回12） |
-| reference Playwright production設定 | 144 passed。配布buildの30＋public APIをproduction modeでbundleした独立テストHost 114 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
+| 検査                                                    | 結果                                                                                                        |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                                        |
+| file policy／tooling                                    | 2075 files PASS／52 passed                                                                                  |
+| 参照固有unit（4 files）                                 | 44 passed。今回のidentity・Graph属性・Document captureの7件を含む                                           |
+| `npm test`                                              | 231 files、2403 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行               |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                                   |
+| reference Playwright dev                                | 144 passed（既存132＋今回12）                                                                               |
+| reference Playwright production設定                     | 144 passed。配布buildの30＋public APIをproduction modeでbundleした独立テストHost 114                        |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
 
 browser-error fixtureは全対象でPASS。Slide desktopとDesign／Whiteboard 390pxで、可視のincluded表だけが
 描画され、hidden Group配下の画像が出ない画面を目視確認した。新規12ケースの先行実行とHost修正後の
@@ -453,11 +452,11 @@ snapshot SHA-256は`7b0fcb7943ec1e2979195d9ee4bf5714895465ffb44b56156dff959c5a89
 一致した。通常コメント・inline thread・review submissionと編集時刻、過去の返信・commitを照合し、
 08:47 UTCの新規3件だけを対応した。
 
-| 指摘（review comment ID） | 修正と検証 |
-| --- | --- |
+| 指摘（review comment ID）             | 修正と検証                                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 4292636463 拒否応答によるidentity汚染 | private verifyで閉包だけを検証し、権限・refresh世代・保持版逆行とwatermarkを通過後にrevision／version ID／依存identityを同期的にまとめて記録。create／refresh／captureのrollbackと取得後権限失効、破棄したrefresh応答の後に正当な過去固定版の描画・captureと次の保存版取得が成功することを確認 |
-| 4292636472 依存版の不変性 | source domain＋依存IDのhashをGraph Artifact／revision／version IDと独立に保持。同じProfile ID/versionの内容変更はcreate／refresh／capture／公開validate／履歴captureでstaleにする。正当な旧Profile保持、新Profile versionの採用、同一Profileを使う別Graphも検証 |
-| 4292636480 importの自己参照 | 元Artifact IDを保持し、draftと全versionの参照履歴をそのID scopeで検証。Slideのdraft／保存履歴×fixed／follow×desktop／mobileの8ケースでimportを拒否し、既存Artifact名・IndexedDB全recordのbyte一致・reload後の不変を確認 |
+| 4292636472 依存版の不変性             | source domain＋依存IDのhashをGraph Artifact／revision／version IDと独立に保持。同じProfile ID/versionの内容変更はcreate／refresh／capture／公開validate／履歴captureでstaleにする。正当な旧Profile保持、新Profile versionの採用、同一Profileを使う別Graphも検証                                |
+| 4292636480 importの自己参照           | 元Artifact IDを保持し、draftと全versionの参照履歴をそのID scopeで検証。Slideのdraft／保存履歴×fixed／follow×desktop／mobileの8ケースでimportを拒否し、既存Artifact名・IndexedDB全recordのbyte一致・reload後の不変を確認                                                                        |
 
 追加unitは13件。初回はfixtureの空Data rowとランダムGraph IDで失敗したため、明示したrowと
 固定view IDへ修正した。製品validatorや期待する拒否条件は緩和していない。修正済みfixtureを
@@ -472,16 +471,16 @@ snapshot SHA-256は`7b0fcb7943ec1e2979195d9ee4bf5714895465ffb44b56156dff959c5a89
 検証環境: Linux、Node 24.19.0、npm 11.9.0、Chromium 151.0.7922.173。
 desktop 1440×1000、mobile touch emulation 390×844。既存回帰は390px／768pxを確認した。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | 2076 files PASS／52 passed |
-| 参照固有unit（5 files） | 57 passed。新規13件を含む |
-| `npm test` | 232 files、2416 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 152 passed（既存144＋今回8） |
-| reference Playwright production設定 | 152 passed。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 114 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS |
+| 検査                                                    | 結果                                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                          |
+| file policy／tooling                                    | 2076 files PASS／52 passed                                                                    |
+| 参照固有unit（5 files）                                 | 57 passed。新規13件を含む                                                                     |
+| `npm test`                                              | 232 files、2416 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                     |
+| reference Playwright dev                                | 152 passed（既存144＋今回8）                                                                  |
+| reference Playwright production設定                     | 152 passed。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 114          |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS         |
 
 browser-error fixtureは全対象でPASS。productionでも自己参照import拒否のdesktop画面を目視確認した。
 先行8ケースは最終152へ重複加算しない。log・download・画面は`/tmp/issue265-r8-*`、変更前coreと
@@ -505,12 +504,12 @@ snapshot SHA-256は`6df9c70f62016568698eae8887171b9e3e962d65a93c0581494aa3c159ec
 確認した。通常コメント・inline thread・review submissionと編集時刻、既存commit・返信を照合し、
 10:22 UTCの未対応4件だけを対象とした。
 
-| 指摘（review comment ID） | 判断・修正と検証 |
-| --- | --- |
-| 4293542400 差替えた保持閉包の未検証 | keyに宣言hashだけでなく保持snapshot・依存の実データを含め、異なる閉包で以前のready projectionを共有しない。followのrefresh／captureも最初に保持閉包を検証し、正常なlive sourceで不正な保持データを無言で置換しない。Graph content／Profile bytes改変×fixed／follow×両observe順の8 unitと、4 Surface×両mode×desktop／mobileの16 UIケースを検証 |
-| 4293542408 非同期配置callback | Design通常参照挿入は明示boundsを渡すため、frame移動だけで旧frame座標から計算するという具体例はコードと一致しない。共通ReferenceToolsが待機前のinsert callbackを使う点は修正し、既存のscope／identity／入力guardを維持して最新callbackを呼ぶ。通常Designの明示座標を確認する対照ケースと、frame位置を計算するpublic Hostをfixed／follow×desktop／mobileで検証（計8）。移動後の配置・既存要素不変・二回のlocal Undoを確認 |
-| 4293542420 継承参照の上限回避 | aggregate validatorでown referenceがないのにprototypeに存在するitemを拒否する。4 domainの65 inherited itemsとnative validator拒否、正常なown参照、accessorを評価しないことをunitで検証 |
-| 4293542424 native target ID | target IDを一般のnative文字列として長さ・型・一意性で検証する。3種のObject-prototype名をview／row／column IDに使うDataを両modeでcreate／refresh／captureし、default viewへの範囲指定も含めnative閉包とhashを保持。空・過大・非文字列・重複・疎配列の拒否を維持 |
+| 指摘（review comment ID）           | 判断・修正と検証                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4293542400 差替えた保持閉包の未検証 | keyに宣言hashだけでなく保持snapshot・依存の実データを含め、異なる閉包で以前のready projectionを共有しない。followのrefresh／captureも最初に保持閉包を検証し、正常なlive sourceで不正な保持データを無言で置換しない。Graph content／Profile bytes改変×fixed／follow×両observe順の8 unitと、4 Surface×両mode×desktop／mobileの16 UIケースを検証                                                                           |
+| 4293542408 非同期配置callback       | Design通常参照挿入は明示boundsを渡すため、frame移動だけで旧frame座標から計算するという具体例はコードと一致しない。共通ReferenceToolsが待機前のinsert callbackを使う点は修正し、既存のscope／identity／入力guardを維持して最新callbackを呼ぶ。通常Designの明示座標を確認する対照ケースと、frame位置を計算するpublic Hostをfixed／follow×desktop／mobileで検証（計8）。移動後の配置・既存要素不変・二回のlocal Undoを確認 |
+| 4293542420 継承参照の上限回避       | aggregate validatorでown referenceがないのにprototypeに存在するitemを拒否する。4 domainの65 inherited itemsとnative validator拒否、正常なown参照、accessorを評価しないことをunitで検証                                                                                                                                                                                                                                  |
+| 4293542424 native target ID         | target IDを一般のnative文字列として長さ・型・一意性で検証する。3種のObject-prototype名をview／row／column IDに使うDataを両modeでcreate／refresh／captureし、default viewへの範囲指定も含めnative閉包とhashを保持。空・過大・非文字列・重複・疎配列の拒否を維持                                                                                                                                                          |
 
 新規unitは20件。変更前coreへのalias実行では**19 failed／1 passed**で問題を再現した
 （元から拒否する不正IDの対照1件だけPASS）。修正後の参照unitは**6 files、77 passed**。
@@ -530,16 +529,16 @@ Reactへ配置状態が届く前にsourceをreleaseするfixtureの競合だっ�
 検証環境: Linux、Node 24.19.0、npm 11.9.0、Chromium 151.0.7922.173。
 desktop 1440×1000、mobile touch emulation 390×844。既存回帰は390px／768pxを確認した。
 
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。最終fixture・既存unitの変更も対象lintで確認 |
-| file policy／tooling | 2077 files PASS／52 passed |
-| 参照固有unit（6 files） | 77 passed。新規20件を含む |
-| `npm test` | 233 files、2436 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 176 passed（既存152＋今回24） |
-| reference Playwright production設定 | 176 passed。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 138 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS |
+| 検査                                                    | 結果                                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。最終fixture・既存unitの変更も対象lintで確認                                             |
+| file policy／tooling                                    | 2077 files PASS／52 passed                                                                    |
+| 参照固有unit（6 files）                                 | 77 passed。新規20件を含む                                                                     |
+| `npm test`                                              | 233 files、2436 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                     |
+| reference Playwright dev                                | 176 passed（既存152＋今回24）                                                                 |
+| reference Playwright production設定                     | 176 passed。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 138          |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS         |
 
 browser-error fixtureは全対象でPASS。先行UI画像でDocument 390pxの改変拒否診断と旧画像の非表示、
 独立Host desktopで移動後のframe内へ配置した画像を目視確認した。log・download・画面は
@@ -555,19 +554,18 @@ snapshot SHA-256は`bfd5fa283344411ce4617ceb673c82260025a06d5f6071c1d691cd58dce7
 出力先は`/tmp/issue265-r9-public`。公開先への同期・pushは実行していない。
 この検査はlocal snapshotの収録・整合性・残留検査であり、別checkoutの全runtime再検証を意味しない。
 
-
 ## PR #265 初回保持identity・同時保存・IME・ページ復帰のレビュー4件（2026-10-16）
 
 確認headは`8a7bc28ce656a089fe767921469c086e2d0d93df`。既存checkoutはcleanで、fetch後も一致した。
 通常コメント・inline thread・review submissionの本文と編集時刻、過去の返信・commitを照合し、
 20:29 JSTの新規4件だけを対象とした。
 
-| 指摘（review comment ID） | 修正と検証 |
-| --- | --- |
-| 4294175921 fresh resolverの保持identity | followのrefresh／captureで検証した保持閉包を保持し、権限・世代・逆行の検査を通過した後、live応答より先にimmutable identityとして記録・照合する。保持版はlive watermarkを進めない。fresh resolverの同revision／version ID／依存ID矛盾を両経路で拒否し、元閉包のbyte不変・拒否後の正当版への回復・新Profile版の受理を確認 |
-| 4294175925 参照元の同時保存 | 独立Hostで呼出し時のcontentをcloneし、revisionの割当からhash・永続化・公開までをqueueで直列化。95→80→65の保存がrevision 1→2→3と一意のversion ID／正しいhashを持つこと、80の永続化失敗時は公開せず次の65をrevision 2として保存することを実UIで検証。固定95・連動65の描画、native capture、destination bytes不変、local Undoが最後の配置を戻すことも確認 |
-| 4294175932 IME変換開始中のnative出力 | 独立HostのJSON出力完了guardへcomposingを追加。Document captionの値を変更せずcompositionstartだけを送るケースで保存とJSON出力を拒否し、downloadなし・保存履歴とdraft不変を確認。compositionend後の再実行成功も検証 |
-| 4294175938 Slideの復帰page scope | ReferenceHost.openの既存二引数を保ち、optionalな第三引数にpage IDを渡す。ElementAddressにもoptional pageIdを追加し、通常Hostと独立Hostの復帰点・Slide focusで保持する。同じobject IDを持つ二pageの第二pageから元へ移動して戻り、第二pageの参照が選択されることを両Host・両modeで検証 |
+| 指摘（review comment ID）               | 修正と検証                                                                                                                                                                                                                                                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 4294175921 fresh resolverの保持identity | followのrefresh／captureで検証した保持閉包を保持し、権限・世代・逆行の検査を通過した後、live応答より先にimmutable identityとして記録・照合する。保持版はlive watermarkを進めない。fresh resolverの同revision／version ID／依存ID矛盾を両経路で拒否し、元閉包のbyte不変・拒否後の正当版への回復・新Profile版の受理を確認                                |
+| 4294175925 参照元の同時保存             | 独立Hostで呼出し時のcontentをcloneし、revisionの割当からhash・永続化・公開までをqueueで直列化。95→80→65の保存がrevision 1→2→3と一意のversion ID／正しいhashを持つこと、80の永続化失敗時は公開せず次の65をrevision 2として保存することを実UIで検証。固定95・連動65の描画、native capture、destination bytes不変、local Undoが最後の配置を戻すことも確認 |
+| 4294175932 IME変換開始中のnative出力    | 独立HostのJSON出力完了guardへcomposingを追加。Document captionの値を変更せずcompositionstartだけを送るケースで保存とJSON出力を拒否し、downloadなし・保存履歴とdraft不変を確認。compositionend後の再実行成功も検証                                                                                                                                      |
+| 4294175938 Slideの復帰page scope        | ReferenceHost.openの既存二引数を保ち、optionalな第三引数にpage IDを渡す。ElementAddressにもoptional pageIdを追加し、通常Hostと独立Hostの復帰点・Slide focusで保持する。同じobject IDを持つ二pageの第二pageから元へ移動して戻り、第二pageの参照が選択されることを両Host・両modeで検証                                                                   |
 
 新規unitは8件。変更前coreへのalias実行は**6 failed／2 passed**で、矛盾を拒否する6件が期待した
 挙動差を示し、正当な新版を受け入れる対照2件は元からPASS。修正後の参照unitは**85 passed**。
@@ -588,17 +586,16 @@ listen EPERMのunhandled error 3件。画像decodeやbrowser bootstrapの失敗�
 テスト・期待値は変更せず、ローカルserver／child processを実行できる追加network権限付きの
 既存検証環境で再実行した。**233 files、2444 passed、9 skipped**（既存optional Spatial WASM）でPASS。初回失敗をPASS扱いにしない。
 
-
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。最終のbrowser fixtureも対象lintで確認 |
-| file policy／tooling | 2077 files PASS／52 passed |
-| 参照固有unit（6 files） | 85 passed。新規8件を含む |
-| `npm test`（追加network権限付き） | 233 files、2444 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 192 passed（既存176＋今回16） |
-| reference Playwright production設定 | 192 passed。配布buildの54＋public APIをproduction modeでbundleした独立テストHost 138 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
+| 検査                                                    | 結果                                                                                                        |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。最終のbrowser fixtureも対象lintで確認                                                                 |
+| file policy／tooling                                    | 2077 files PASS／52 passed                                                                                  |
+| 参照固有unit（6 files）                                 | 85 passed。新規8件を含む                                                                                    |
+| `npm test`（追加network権限付き）                       | 233 files、2444 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行               |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                                   |
+| reference Playwright dev                                | 192 passed（既存176＋今回16）                                                                               |
+| reference Playwright production設定                     | 192 passed。配布buildの54＋public APIをproduction modeでbundleした独立テストHost 138                        |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
 
 browser-error fixtureは全対象でPASS。追加16ケースの先行確認を最終192へ重複加算しない。
 Document 390pxのIME変換中の拒否診断と、通常Hostのdesktop／390pxで第二pageへ戻った参照選択を
@@ -610,13 +607,11 @@ ignoredな`work/issue265-r10-red/`へ保存し、Gitには追加しない。
 optionalに加算した。保存成功したimmutable versionだけの伝搬、exact閉包とhash、destinationの
 local Undoの責務は維持する。CI再開、main merge、公開upstream同期は行っていない。
 
-
 実装修正commitは`7e3c1d6630173ec17498312c80860d33f558ed03`。
 同commitのlocal public snapshot exportとmanifest／residual checkは**1639 source files＋manifest**でPASS。
 snapshot SHA-256は`1e4271402ec28c58bab0fad65895aa4fa7bdf6dfdca13ee3a31df2a708c9f443`。
 出力先は`/tmp/issue265-r10-public`。公開先への同期・pushは実行していない。
 この検査はlocal snapshotの収録・整合性・残留検査であり、別checkoutの全runtime再検証を意味しない。
-
 
 ## PR #265 Document表示能力・保存履歴・command境界のレビュー3件（2026-10-16）
 
@@ -624,11 +619,11 @@ snapshot SHA-256は`1e4271402ec28c58bab0fad65895aa4fa7bdf6dfdca13ee3a31df2a708c9
 確認した。通常コメント・inline thread・review submissionと編集時刻、過去の返信・commitを照合し、
 21:50 JSTの未対応3件を修正した。前回の棚卸しreviewに挙がった4件は修正・返信済みで重複対応しない。
 
-| 指摘（review comment ID） | 判断・修正と検証 |
-| --- | --- |
-| 4294826487 Documentのfit切替 | 既存のDocumentは幅と元の縦横比でeditor／HTML／PDF／printを描画し、crop用の固定高さを持たない。対応していないcontain／cover controlをDocumentで非表示にし、幅調整と自然比率を表示する。3 canvasのfitは従来どおり。固定／連動×保持metadataのcontain／cover×desktop／mobileの8 UIでcontrolなし・幅変更・実画像の自然比率・HTML幅／高さ指定なし・metadata保持・Undoを確認。既存版やhashは書き換えない |
-| 4294826495 不正な保存versionの読込 | IndexedDBの全versionを各domainのvalidContentで検証してから参照履歴を走査する。4 domain×schemaVersion／fit改変×desktop／mobileの16 UIで読込エラー、健全な別Artifactの表示、IndexedDB全recordのbyte不変、保持recordのnative JSON export、reload後も同じ拒否と保存内容を確認 |
-| 4294826504 不正envelopeのcommand適用 | local sessionで変更前のdomainからnative validatorを選び、参照検出がfalseでもcommand結果を検証する。4 domain×schemaVersion／fit／source改変×local／proposalの24 unitで適用を拒否し、content・revision・Undo／Redoの不変を確認。追加4 unitで正常commandのUndo後にも不正結果を拒否し、Redoが失われず正常結果を復元できることを確認 |
+| 指摘（review comment ID）            | 判断・修正と検証                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4294826487 Documentのfit切替         | 既存のDocumentは幅と元の縦横比でeditor／HTML／PDF／printを描画し、crop用の固定高さを持たない。対応していないcontain／cover controlをDocumentで非表示にし、幅調整と自然比率を表示する。3 canvasのfitは従来どおり。固定／連動×保持metadataのcontain／cover×desktop／mobileの8 UIでcontrolなし・幅変更・実画像の自然比率・HTML幅／高さ指定なし・metadata保持・Undoを確認。既存版やhashは書き換えない |
+| 4294826495 不正な保存versionの読込   | IndexedDBの全versionを各domainのvalidContentで検証してから参照履歴を走査する。4 domain×schemaVersion／fit改変×desktop／mobileの16 UIで読込エラー、健全な別Artifactの表示、IndexedDB全recordのbyte不変、保持recordのnative JSON export、reload後も同じ拒否と保存内容を確認                                                                                                                         |
+| 4294826504 不正envelopeのcommand適用 | local sessionで変更前のdomainからnative validatorを選び、参照検出がfalseでもcommand結果を検証する。4 domain×schemaVersion／fit／source改変×local／proposalの24 unitで適用を拒否し、content・revision・Undo／Redoの不変を確認。追加4 unitで正常commandのUndo後にも不正結果を拒否し、Redoが失われず正常結果を復元できることを確認                                                                   |
 
 新規unitは28件。変更前Host modelへのalias実行では**28 failed**で、すべて「拒否されずthrowしない」
 挙動差を確認した。修正後は**28 passed**。新規UIは12シナリオ×desktop/mobileの**24 passed**。
@@ -641,17 +636,16 @@ desktop 1440×1000、mobile touch emulation 390×844。先行画面でDocument�
 fit control非表示、390pxで不正履歴の診断・健全Artifactの表示を目視確認した。
 最終結果は以下へ記録する。
 
-
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS |
-| file policy／tooling | 2078 files PASS／52 passed |
-| 参照unit／Host境界unit | 85＋28 passed（最終全unit内）。新規28件を含む |
-| `npm test`（追加network権限付き） | 234 files、2472 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行 |
-| `npm run build` | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続 |
-| reference Playwright dev | 216 passed（既存192＋今回24） |
-| reference Playwright production設定の対象回帰 | 42 passed。今回の24＋4 Surfaceの通常埋め込み8＋通常Hostの4 Surface統合2＋read-only8。配布buildの26＋public APIをproduction modeでbundleした独立テストHost 16 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
+| 検査                                                    | 結果                                                                                                                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS                                                                                                                                                         |
+| file policy／tooling                                    | 2078 files PASS／52 passed                                                                                                                                   |
+| 参照unit／Host境界unit                                  | 85＋28 passed（最終全unit内）。新規28件を含む                                                                                                                |
+| `npm test`（追加network権限付き）                       | 234 files、2472 passed、9 skipped（既存optional Spatial WASM）。browser suite終了後に単独実行                                                                |
+| `npm run build`                                         | PASS、通常・独立reference Host・React preview。既存chunk-size warning継続                                                                                    |
+| reference Playwright dev                                | 216 passed（既存192＋今回24）                                                                                                                                |
+| reference Playwright production設定の対象回帰           | 42 passed。今回の24＋4 Surfaceの通常埋め込み8＋通常Hostの4 Surface統合2＋read-only8。配布buildの26＋public APIをproduction modeでbundleした独立テストHost 16 |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px                                                  |
 
 browser-error fixtureは全対象でPASS。先行24ケースは最終216へ重複加算しない。
 本番は今回の変更・4 Surfaceの通常経路・read-onlyへ対象を絞って検証した。前回headの全192件の
@@ -665,13 +659,11 @@ log・download・画面は`/tmp/issue265-r11-*`、変更前modelとalias検証co
 保存成功した版だけの連動とdestination local Undoの分離を維持する。
 CI再開、main merge、公開upstream同期、PR／Issueの終了操作は行っていない。
 
-
 実装修正commitは`b9d28609a7adcdab2a03c9e0d353652ded3e01a7`。
 同commitのlocal public snapshot exportとmanifest／residual checkは**1640 source files＋manifest**でPASS。
 snapshot SHA-256は`bb684ed2d00f9836e70a25b625c2f123491e0b34c8658da6d4f2a874a0edea8e`。
 出力先は`/tmp/issue265-r11-public`。公開先への同期・pushは実行していない。
 この検査はlocal snapshotの収録・整合性・残留検査であり、別checkoutの全runtime再検証を意味しない。
-
 
 ## PR #265 作成待機・Document復帰・独立Host移動と権限のレビュー4件（2026-10-16）
 
@@ -680,12 +672,12 @@ snapshot SHA-256は`bb684ed2d00f9836e70a25b625c2f123491e0b34c8658da6d4f2a874a0ed
 照合した。22:22 JSTの新規inline 3件に加え、review本文にだけ記載されたDocumentの1件も対象とした。
 過去の自分の対応報告からは再実行していない。
 
-| 指摘（review ID／comment ID） | 判断・修正と検証 |
-| --- | --- |
+| 指摘（review ID／comment ID）         | 判断・修正と検証                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | review 5548361706 Documentのimage復帰 | focusAddressでembedded nodeをNodeSelectionとして選択し、Hostへ選択を通知する。dispatch前にeditorへfocusし、React node viewの初期layoutとimage読込後も対象の表示位置を合わせる。両Host×固定／連動×desktop／mobileの8 UIで、離れた別imageを含む長文Documentから戻って正しい選択・全体の縦方向表示・Inspector caption・native content不変を確認 |
-| 4295109296 作成待機中の選択変更 | source・mode・再取得をbusy中は無効にし、開始済みの古い発見要求も無効化する。固定／連動×desktop／mobileの4 UIで遅延listとreadを個別に止め、選択表示が変わらず指定したsource／modeで配置され、完了後に操作可能となりUndoも機能することを確認 |
-| 4295109307 独立Hostの復帰先kind | source編集中はdestination kind selectorを無効化する。4 Surface×desktop／mobileの8 UIで移動中にkindを保持し、戻るとselectorが有効になり元のSurfaceの参照が解決済みとなることを確認 |
-| 4295109319 失効後のsource移動 | 現在権限をHost.openより先に検証する。編集中の失効ではsource editorも隠し、command／proposal適用と保存queue開始・hash後の永続化直前も検証する。Data／Graph×固定／連動×desktop／mobileの8 UIで移動拒否・保存byte不変・権限回復後の移動、さらに4 UIで編集中／hash待機中の失効・保存公開拒否・元の保存値95保持を確認 |
+| 4295109296 作成待機中の選択変更       | source・mode・再取得をbusy中は無効にし、開始済みの古い発見要求も無効化する。固定／連動×desktop／mobileの4 UIで遅延listとreadを個別に止め、選択表示が変わらず指定したsource／modeで配置され、完了後に操作可能となりUndoも機能することを確認                                                                                                   |
+| 4295109307 独立Hostの復帰先kind       | source編集中はdestination kind selectorを無効化する。4 Surface×desktop／mobileの8 UIで移動中にkindを保持し、戻るとselectorが有効になり元のSurfaceの参照が解決済みとなることを確認                                                                                                                                                            |
+| 4295109319 失効後のsource移動         | 現在権限をHost.openより先に検証する。編集中の失効ではsource editorも隠し、command／proposal適用と保存queue開始・hash後の永続化直前も検証する。Data／Graph×固定／連動×desktop／mobileの8 UIで移動拒否・保存byte不変・権限回復後の移動、さらに4 UIで編集中／hash待機中の失効・保存公開拒否・元の保存値95保持を確認                             |
 
 新規UIは16シナリオ×desktop/mobileの32ケース。先行実行は**24 passed／8 failed**で、
 Documentのnode選択は復元されたがfocus前のdispatchではProseMirrorがscrollしなかった。
@@ -702,16 +694,15 @@ desktop 1440×1000、mobile touch emulation 390×844。
 通常Host desktopのimage全体とInspector caption、390pxの復帰選択と、権限失効時の元editor非表示・
 保存無効・拒否診断を目視確認した。最終結果は以下へ記録する。
 
-
-| 検査 | 結果 |
-| --- | --- |
-| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。buildの型検査も最終コードで実行 |
-| file policy／tooling | 2078 files PASS／52 passed |
-| `npm test`（追加network権限付き） | 234 files、2472 passed、9 skipped（既存optional Spatial WASM）。全browser suite終了後に単独実行 |
-| reference Playwright dev | 248 passed（既存216＋今回32） |
-| reference Playwright production設定の対象回帰 | 50 passed。今回32＋4 Surfaceの通常埋め込み8＋通常Hostの4 Surface統合2＋read-only8。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 12 |
-| 既存独立Host／read-only／mobile | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px |
-| `npm run build` | PASS。通常・独立reference Host・React preview。既存chunk-size warning継続 |
+| 検査                                                    | 結果                                                                                                                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| lint／typecheck／変更TS・TSXのPrettier／diff whitespace | PASS。buildの型検査も最終コードで実行                                                                                                                      |
+| file policy／tooling                                    | 2078 files PASS／52 passed                                                                                                                                 |
+| `npm test`（追加network権限付き）                       | 234 files、2472 passed、9 skipped（既存optional Spatial WASM）。全browser suite終了後に単独実行                                                            |
+| reference Playwright dev                                | 248 passed（既存216＋今回32）                                                                                                                              |
+| reference Playwright production設定の対象回帰           | 50 passed。今回32＋4 Surfaceの通常埋め込み8＋通常Hostの4 Surface統合2＋read-only8。配布buildの38＋public APIをproduction modeでbundleした独立テストHost 12 |
+| 既存独立Host／read-only／mobile                         | production previewで`issue2-embedding.spec.ts`／`issue2-mobile.spec.ts`の3 cases PASS。mobileは390px／768px                                                |
+| `npm run build`                                         | PASS。通常・独立reference Host・React preview。既存chunk-size warning継続                                                                                  |
 
 browser-error fixtureは全対象でPASS。先行確認のケースを最終248へ重複加算しない。
 productionは今回の変更と4 Surfaceの通常経路・read-onlyに対象を絞った。現在の全248ケースを
@@ -731,7 +722,6 @@ CI再開、main merge、公開upstream同期、PR／Issueの終了操作は行�
 local public exportの初回は、UTF-8の本文をUTF-16LEでも検査する際の偶然の一致で
 `personal-name`判定となり拒否された。検出ruleは維持し、同じ意味の文書表現へ直した。
 出力が作られなかったため初回checkもENOENTとなった。これらをPASS扱いにしない。
-
 
 実装修正commitは`05821276decb874a260829a7f6be20e381aa0a83`。
 同commitのlocal public snapshot exportとmanifest／residual checkは**1640 source files＋manifest**でPASS。

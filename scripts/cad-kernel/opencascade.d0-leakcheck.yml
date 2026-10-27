@@ -1,0 +1,256 @@
+# D0 leak-check build (issue #355): the D1 bindings the kernel and probes use, a 512 MiB memory cap,
+# an exception-release helper and a heap counter. Built with the image pinned in leakcheck-build.mjs.
+mainBuild:
+  name: opencascade.d0-leakcheck.js
+  bindings:
+    - symbol: OCJS
+    - symbol: Handle_IMeshTools_Context
+    - symbol: BRepAlgoAPI_Algo
+    - symbol: BRepAlgoAPI_BooleanOperation
+    - symbol: BRepAlgoAPI_BuilderAlgo
+    - symbol: BRepAlgoAPI_Common
+    - symbol: BRepAlgoAPI_Cut
+    - symbol: BRepAlgoAPI_Fuse
+    - symbol: BRepBndLib
+    - symbol: BRepBuilderAPI_Command
+    - symbol: BRepBuilderAPI_MakeEdge
+    - symbol: BRepBuilderAPI_MakeFace
+    - symbol: BRepBuilderAPI_MakePolygon
+    - symbol: BRepBuilderAPI_MakeShape
+    - symbol: BRepBuilderAPI_MakeWire
+    - symbol: BRepBuilderAPI_ModifyShape
+    - symbol: BRepBuilderAPI_Transform
+    - symbol: BRepCheck_Analyzer
+    - symbol: BRepClass3d_SClassifier
+    - symbol: BRepClass3d_SolidClassifier
+    - symbol: BRepGProp
+    - symbol: BRepMesh_DiscretRoot
+    - symbol: BRepMesh_IncrementalMesh
+    - symbol: BRepPrimAPI_MakeBox
+    - symbol: BRepPrimAPI_MakeCylinder
+    - symbol: BRepPrimAPI_MakeOneAxis
+    - symbol: BRepPrimAPI_MakePrism
+    - symbol: BRepPrimAPI_MakeRevol
+    - symbol: BRepPrimAPI_MakeSphere
+    - symbol: BRepPrimAPI_MakeSweep
+    - symbol: BRep_Tool
+    - symbol: Bnd_Box
+    - symbol: GProp_GProps
+    - symbol: Handle_Poly_Triangulation
+    - symbol: Handle_Standard_Type
+    - symbol: Message_ProgressRange
+    - symbol: Poly_Triangle
+    - symbol: Poly_Triangulation
+    - symbol: ShapeAnalysis_ShapeTolerance
+    - symbol: Standard_Failure
+    - symbol: Standard_Transient
+    - symbol: Standard_Type
+    - symbol: TopAbs_Orientation
+    - symbol: TopAbs_ShapeEnum
+    - symbol: TopAbs_State
+    - symbol: TopExp_Explorer
+    - symbol: TopLoc_Location
+    - symbol: TopoDS
+    - symbol: TopoDS_Compound
+    - symbol: TopoDS_Edge
+    - symbol: TopoDS_Face
+    - symbol: TopoDS_Shape
+    - symbol: TopoDS_Shell
+    - symbol: TopoDS_Solid
+    - symbol: TopoDS_Vertex
+    - symbol: TopoDS_Wire
+    - symbol: gp_Ax1
+    - symbol: gp_Ax2
+    - symbol: gp_Circ
+    - symbol: gp_Dir
+    - symbol: gp_Pnt
+    - symbol: gp_Quaternion
+    - symbol: gp_Trsf
+    - symbol: gp_Vec
+    # D2 STEP (CAD11): AP214 geometry subset, writer and reader; files go through Emscripten FS.
+    # Interface_Static is bound but its static setters are not exposed; the writer defaults
+    # (AP214, millimetres) are used and the kernel test checks them in the file header.
+    - symbol: IFSelect_ReturnStatus
+    - symbol: Interface_Static
+    - symbol: STEPControl_Reader
+    - symbol: STEPControl_StepModelType
+    - symbol: STEPControl_Writer
+    - symbol: XSControl_Reader
+    # D2 STEP import (CAD11/CAD13): the normalized BRep asset (BRepTools text format), written
+    # once at import and read to evaluate. The sequence/string bindings were meant for the
+    # reader's FileUnits but cannot be constructed without NCollection_BaseSequence; the import
+    # reads the length unit from the file text instead (step-import.ts).
+    - symbol: BRepTools
+    - symbol: BRep_Builder
+    - symbol: TColStd_SequenceOfAsciiString
+    - symbol: TCollection_AsciiString
+    - symbol: TopoDS_Builder
+    # R1 (docs/cad/r1-modeling.md, Kernel build): shape history and topology maps for persistent
+    # references, detail features, sketch curves, loft and sweep. Lists and maps are iterated by
+    # copy + RemoveFirst and by index (FindKey), so no NCollection iterators are bound.
+    - symbol: NCollection_BaseList
+    - symbol: NCollection_BaseMap
+    - symbol: TopTools_ListOfShape
+    - symbol: TopTools_IndexedMapOfShape
+    - symbol: TopTools_IndexedDataMapOfShapeListOfShape
+    - symbol: TopExp
+    - symbol: BRepTools_History
+    - symbol: Handle_BRepTools_History
+    - symbol: BRepFilletAPI_LocalOperation
+    - symbol: BRepFilletAPI_MakeFillet
+    - symbol: BRepFilletAPI_MakeChamfer
+    - symbol: ChFi3d_FilletShape
+    - symbol: BRepOffsetAPI_MakeOffsetShape
+    - symbol: BRepOffsetAPI_MakeThickSolid
+    - symbol: BRepOffset_Mode
+    - symbol: GeomAbs_JoinType
+    - symbol: BRepOffsetAPI_DraftAngle
+    - symbol: Draft_ErrorStatus
+    - symbol: GC_Root
+    - symbol: GC_MakeArcOfCircle
+    - symbol: Geom_Geometry
+    - symbol: Geom_Curve
+    - symbol: Handle_Geom_Curve
+    - symbol: Geom_BoundedCurve
+    - symbol: Geom_TrimmedCurve
+    - symbol: Handle_Geom_TrimmedCurve
+    - symbol: gp_Pln
+    - symbol: gp_Ax3
+    - symbol: BRepOffsetAPI_ThruSections
+    - symbol: BRepOffsetAPI_MakePipeShell
+    - symbol: BRepBuilderAPI_TransitionMode
+    - symbol: BRepBuilderAPI_PipeError
+    - symbol: BRepFill_TypeOfContact
+    - symbol: GeomAbs_Shape
+    # R1c shell: OCCT's offset gives the edges it builds a fixed 1e-3 mm tolerance whatever the
+    # geometry. The evaluator limits it to the result tolerance and keeps the result only if the
+    # shape checker (geometry checks on) still passes.
+    - symbol: ShapeFix_ShapeTolerance
+    # Edge polylines of the display mesh, for the edge pick table.
+    - symbol: Poly_PolygonOnTriangulation
+    - symbol: Handle_Poly_PolygonOnTriangulation
+    # R2a (docs/cad/r2a-freeform.md, Kernel build): splines, surface features, sewing, splitting,
+    # free boundaries and the sampled continuity check. Arrays are filled with SetValue.
+    - symbol: TColgp_Array1OfPnt
+    - symbol: TColStd_Array1OfReal
+    - symbol: TColStd_Array1OfInteger
+    - symbol: Geom_BSplineCurve
+    - symbol: Handle_Geom_BSplineCurve
+    - symbol: Geom_Surface
+    - symbol: Handle_Geom_Surface
+    - symbol: Geom_BoundedSurface
+    - symbol: Geom_BSplineSurface
+    - symbol: Handle_Geom_BSplineSurface
+    - symbol: GeomFill_FillingStyle
+    - symbol: GeomFill_BSplineCurves
+    - symbol: BRepFill_Filling
+    - symbol: BRepBuilderAPI_Sewing
+    - symbol: Handle_BRepBuilderAPI_Sewing
+    - symbol: BRepBuilderAPI_MakeShell
+    - symbol: BRepBuilderAPI_MakeSolid
+    - symbol: BRepAlgoAPI_Splitter
+    # R2c (docs/cad/r2c-architecture.md): plane sections, half-spaces and polygonal hidden lines.
+    - symbol: BRepAlgoAPI_Section
+    - symbol: BRepPrimAPI_MakeHalfSpace
+    - symbol: HLRAlgo_Projector
+    - symbol: HLRBRep_PolyAlgo
+    - symbol: Handle_HLRBRep_PolyAlgo
+    - symbol: HLRBRep_PolyHLRToShape
+    - symbol: BRepProj_Projection
+    - symbol: ShapeAnalysis_FreeBounds
+    - symbol: BRepAdaptor_Curve
+    - symbol: BRepAdaptor_Surface
+    - symbol: BRepLProp_SLProps
+    - symbol: GeomAbs_SurfaceType
+    - symbol: GeomAbs_CurveType
+    - symbol: Geom2d_Geometry
+    - symbol: Geom2d_Curve
+    - symbol: Handle_Geom2d_Curve
+    - symbol: gp_Pnt2d
+    - symbol: gp_Vec2d
+    - symbol: gp_Dir2d
+    - symbol: GeomAPI_ProjectPointOnSurf
+    - symbol: GCPnts_AbscissaPoint
+    - symbol: ShapeFix_Shell
+    - symbol: ShapeFix_Root
+    # R2b (docs/cad/r2b-assembly.md, Kernel build): XDE documents for the AP242 assembly writer
+    # and reader (products, instances with locations, names, colours), the sequence base class
+    # that TDF_LabelSequence needs, and the cylinder of a connector's axis. OCJS adds the
+    # Interface_Static setters (the schema) and a label's name, which bindings cannot reach.
+    - symbol: NCollection_BaseSequence
+    - symbol: TDF_Label
+    - symbol: TDF_LabelSequence
+    - symbol: TDF_Attribute
+    - symbol: Handle_TDF_Attribute
+    - symbol: Standard_GUID
+    - symbol: CDM_Document
+    - symbol: TDocStd_Document
+    - symbol: Handle_TDocStd_Document
+    - symbol: TCollection_ExtendedString
+    - symbol: TDataStd_GenericEmpty
+    - symbol: TDataStd_GenericExtString
+    - symbol: TDataStd_Name
+    - symbol: Handle_TDataStd_Name
+    - symbol: XCAFDoc_DocumentTool
+    - symbol: XCAFDoc_ShapeTool
+    - symbol: Handle_XCAFDoc_ShapeTool
+    - symbol: XCAFDoc_ColorTool
+    - symbol: Handle_XCAFDoc_ColorTool
+    - symbol: XCAFDoc_ColorType
+    - symbol: Quantity_Color
+    - symbol: Quantity_TypeOfColor
+    - symbol: STEPCAFControl_Writer
+    - symbol: STEPCAFControl_Reader
+    - symbol: gp_Cylinder
+  emccFlags:
+    - -flto
+    - -fexceptions
+    - -sDISABLE_EXCEPTION_CATCHING=0
+    - -O3
+    - -sEXPORT_ES6=1
+    - -sUSE_ES6_IMPORT_META=0
+    - -sEXPORTED_RUNTIME_METHODS=['FS']
+    - -sINITIAL_MEMORY=100MB
+    - -sMAXIMUM_MEMORY=512MB
+    - -sALLOW_MEMORY_GROWTH=1
+    - -sUSE_FREETYPE=1
+    - -sLLD_REPORT_UNDEFINED
+    - --no-entry
+additionalCppCode: |
+  #include <malloc.h>
+  #include <Interface_Static.hxx>
+  #include <TDF_Label.hxx>
+  #include <TDataStd_Name.hxx>
+  #include <TCollection_AsciiString.hxx>
+  extern "C" void __cxa_increment_exception_refcount(void*);
+  extern "C" void __cxa_decrement_exception_refcount(void*);
+  typedef Handle(IMeshTools_Context) Handle_IMeshTools_Context;
+  class OCJS {
+  public:
+    static Standard_Failure* getStandard_FailureData(intptr_t exceptionPtr) {
+      return reinterpret_cast<Standard_Failure*>(exceptionPtr);
+    }
+    // A C++ exception that reaches JS is never caught in C++, so its object stays allocated.
+    // Call once after decoding: runs the destructor and frees it.
+    static void releaseException(intptr_t exceptionPtr) {
+      __cxa_increment_exception_refcount(reinterpret_cast<void*>(exceptionPtr));
+      __cxa_decrement_exception_refcount(reinterpret_cast<void*>(exceptionPtr));
+    }
+    // Bytes currently allocated by malloc (dlmalloc uordblks). Leak check only.
+    static double heapAllocatedBytes() {
+      return static_cast<double>(mallinfo().uordblks);
+    }
+    // Interface_Static parameters (write.step.schema, ...): its static setters are not bound.
+    static bool setStaticInteger(Standard_CString name, int value) {
+      return Interface_Static::SetIVal(name, value);
+    }
+    static int staticInteger(Standard_CString name) {
+      return Interface_Static::IVal(name);
+    }
+    // A label's TDataStd_Name as UTF-8 (empty when it has none).
+    static TCollection_AsciiString labelName(const TDF_Label& label) {
+      Handle(TDataStd_Name) name;
+      if (!label.FindAttribute(TDataStd_Name::GetID(), name)) return TCollection_AsciiString();
+      return TCollection_AsciiString(name->Get(), Standard_True);
+    }
+  };

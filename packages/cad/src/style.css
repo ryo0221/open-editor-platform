@@ -38,16 +38,102 @@
   font-size: 13px;
   pointer-events: none;
 }
-.cad-fit {
+.cad-viewport-failure {
+  color: #b42318;
+}
+/* Above the view tools, out of the way of the shape's centre. */
+.cad-measure {
+  position: absolute;
+  left: 10px;
+  bottom: 56px;
+  max-width: min(360px, calc(100% - 20px));
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 92%);
+  color: #33414f;
+  font-size: 13px;
+}
+.cad-measure p {
+  margin: 0 0 4px;
+}
+.cad-measure p:last-child {
+  margin: 0;
+}
+.cad-measure output {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Shading and comb settings: top right, clear of the measurement and the view tools. */
+.cad-analysis {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  gap: 6px;
+  max-width: min(320px, calc(100% - 20px));
+}
+.cad-analysis section {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 92%);
+  color: #33414f;
+  font-size: 13px;
+}
+.cad-analysis p {
+  margin: 0 0 4px;
+}
+.cad-legend {
+  height: 10px;
+  border-radius: 3px;
+}
+.cad-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+.cad-view-tools {
   position: absolute;
   right: 10px;
   bottom: 10px;
+  left: 10px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.cad-view-tools > * {
+  pointer-events: auto;
+}
+.cad-views {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px 2px 8px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 88%);
+  color: #33414f;
+  font-size: 13px;
+}
+.cad-views select {
+  min-width: 0;
+  max-width: 180px;
+  font: inherit;
 }
 .cad-navigator ul,
 .cad-navigator ol {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.cad-tree ul {
+  padding-left: 12px;
+  border-left: 1px solid var(--ep-border, #d0d7de);
+}
+.cad-tree > li.cad-muted,
+.cad-tree li.cad-muted {
+  padding: 2px 6px;
 }
 .cad-item {
   width: 100%;
@@ -134,6 +220,132 @@
   justify-self: start;
   color: #b42318;
 }
+.cad-inspector .ep-section button,
+.cad-references button,
+.cad-tools button {
+  padding: 6px 10px;
+  border: 1px solid #c4ced8;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cad-inspector .ep-section button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cad-references button,
+.cad-tools button {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+}
+.cad-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.cad-references,
+.cad-tools {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cad-references li,
+.cad-tools li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.cad-reference-name {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cad-reference-state {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cad-reference-resolved {
+  background: #e7f6ec;
+  color: #146c2e;
+}
+.cad-reference-ambiguous {
+  background: #fff4e0;
+  color: #8a5200;
+}
+.cad-reference-missing {
+  background: #fdeceb;
+  color: #b42318;
+}
+.cad-reference-unknown {
+  background: #eef1f4;
+  color: #4b5a68;
+}
+.cad-rebind {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100% - 32px));
+  max-height: calc(100% - 24px);
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #f0c36d;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+.cad-rebind-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cad-rebind-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cad-rebind-choice {
+  display: grid;
+  flex-basis: 100%;
+  gap: 6px;
+}
+.cad-rebind-choice output {
+  font-variant-numeric: tabular-nums;
+}
+.cad-rebind .cad-row button:disabled {
+  opacity: 0.5;
+}
+.cad-viewport-failure button {
+  /* The note lets pointers through to the view; its button takes them. */
+  pointer-events: auto;
+  display: block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid #c4ced8;
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .cad-muted {
   margin: 0;
   color: #607080;
@@ -160,4 +372,176 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+.cad-export {
+  display: grid;
+  gap: 12px;
+  min-width: min(420px, 80vw);
+  max-width: 560px;
+}
+.cad-export fieldset {
+  display: grid;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.cad-export label {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.cad-export-report {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.cad-export-report dd {
+  margin: 0;
+}
+.cad-migration {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.cad-migration th,
+.cad-migration td {
+  padding: 2px 8px;
+  text-align: left;
+}
+.cad-export-report .cad-hash {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+/* Sketch mode: the drawing over the 3D view, which stays mounted beneath it. */
+.cad-sketch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: #fbfcfd;
+}
+.cad-sketch-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  cursor: crosshair;
+  touch-action: none;
+}
+.cad-sketch-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px #2f6fb3;
+}
+.cad-sketch-canvas.cad-sketch-tool-select {
+  cursor: default;
+}
+.cad-sketch-canvas line,
+.cad-sketch-canvas circle,
+.cad-sketch-canvas path {
+  fill: none;
+  stroke: #1d2733;
+  stroke-width: 1.6px;
+  vector-effect: non-scaling-stroke;
+}
+.cad-sketch-canvas polyline {
+  fill: none;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.cad-sketch-canvas .cad-sketch-comb path,
+.cad-sketch-canvas .cad-sketch-comb polyline {
+  stroke: #7c3aed;
+  stroke-width: 1px;
+  pointer-events: none;
+}
+.cad-sketch-canvas .cad-sketch-comb path {
+  stroke-opacity: 0.6;
+}
+.cad-sketch-canvas .cad-sketch-control {
+  stroke: #9aa6b4;
+  stroke-dasharray: 2 3;
+  pointer-events: none;
+}
+.cad-sketch-canvas .cad-sketch-point {
+  fill: #fff;
+  stroke-width: 1.4px;
+}
+.cad-sketch-canvas .is-construction {
+  stroke: #7a8796;
+  stroke-dasharray: 6 4;
+}
+.cad-sketch-canvas .is-selected {
+  stroke: #2f6fb3;
+  stroke-width: 2.6px;
+}
+.cad-sketch-canvas .cad-sketch-point.is-selected {
+  fill: #2f6fb3;
+}
+.cad-sketch-canvas .is-problem {
+  stroke: #c0392b;
+  stroke-width: 2.6px;
+}
+.cad-sketch-canvas .cad-sketch-axes line {
+  stroke: #c8d0da;
+  stroke-width: 1px;
+}
+.cad-sketch-canvas .cad-sketch-preview * {
+  stroke: #2f6fb3;
+  stroke-dasharray: 4 3;
+}
+.cad-sketch-view-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.cad-sketch-panel {
+  display: grid;
+  gap: 8px;
+}
+.cad-sketch-panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.cad-sketch-constraints {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cad-sketch-constraints li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.cad-sketch-constraints li.is-problem {
+  background: #fdecea;
+}
+.cad-sketch-constraints .cad-item {
+  flex: 1 1 auto;
+}
+.cad-loft-sections {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* R2b-3 BOM: the table scrolls inside its dialog. */
+.cad-bom-scroll {
+  max-height: 60vh;
+  overflow: auto;
+}
+.cad-bom fieldset {
+  border: 0;
+  padding: 0;
+}
+/* U4: what a failed document still shows, under the reason, in the note's own colour. */
+.cad-partial-failure {
+  display: block;
+  margin-top: 4px;
+  color: #33414f;
 }

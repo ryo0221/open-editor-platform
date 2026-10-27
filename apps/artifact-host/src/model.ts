@@ -1,3 +1,7 @@
+import { createEstimate, isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
+import { verifyArtifactEstimate as verifyEstimateArtifact } from './estimate-bim';
+import { createAnalysis, isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
+import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { createArtifact, type Artifact, type StorageAdapter } from '@editor-platform/artifact-core';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
 import {
@@ -20,7 +24,7 @@ import {
 } from '@editor-platform/whiteboard/model';
 import {
   createDesign,
-  isDesign,
+  isDesignWithPaths,
   makeDesignElement,
   type DesignContent,
 } from '@editor-platform/design/model';
@@ -36,6 +40,7 @@ import {
   type CadDocument,
   type CadKernelProfile,
 } from '@editor-platform/cad-core';
+import { f31BoxBuilding, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
 import { sealReactEnvironment, type ReactRuntimeResolution } from '@editor-platform/react-ui-core';
 import { exportDesignReact } from '@editor-platform/design-react-core';
 export interface CodeContent {
@@ -46,12 +51,15 @@ export interface CodeContent {
   source: string;
 }
 export type HostContent =
+  | EstimateDocument
+  | AnalysisDocument
   | SlideContent
   | WhiteboardContent
   | DesignContent
   | StructuredData
   | CodeContent
-  | CadDocument;
+  | CadDocument
+  | BimDocument;
 export const isCode = (v: unknown): v is CodeContent => {
   if (!v || typeof v !== 'object') return false;
   const c = v as Partial<CodeContent>;
@@ -138,6 +146,32 @@ export function productDesign(title = 'Your product'): DesignContent {
 export const isStaticSlide = (value: unknown): value is SlideContent =>
   isDeck(value) && !hasSlideAnimations(value);
 export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
+  estimate: {
+    kind: 'estimate',
+    validate: isEstimate,
+    preflight: verifyEstimateArtifact,
+    capabilities: {
+      undo: true,
+      nativeJson: true,
+      formats: [],
+      preview: 'none',
+      shared: false,
+      proposals: true,
+    },
+  },
+  analysis: {
+    kind: 'analysis',
+    validate: isAnalysis,
+    preflight: verifyAnalysisArtifact,
+    capabilities: {
+      undo: true,
+      nativeJson: true,
+      formats: [],
+      preview: 'none',
+      shared: false,
+      proposals: true,
+    },
+  },
   slide: {
     kind: 'slide',
     validate: isStaticSlide,
@@ -170,7 +204,7 @@ export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
   },
   design: {
     kind: 'design',
-    validate: isDesign,
+    validate: isDesignWithPaths,
     capabilities: {
       undo: true,
       nativeJson: true,
@@ -179,7 +213,7 @@ export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
       shared: false,
     },
     async export(_format, c) {
-      if (!isDesign(c)) throw Error('Not Design');
+      if (!isDesignWithPaths(c)) throw Error('Not Design');
       return exportDesignReact(c, nativeResolution);
     },
   },
@@ -202,6 +236,18 @@ export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
     kind: 'cad',
     validate: isCadDocument,
     // PNG comes from the Surface viewport (exact evaluated shape); no headless renderer here.
+    capabilities: {
+      undo: true,
+      nativeJson: true,
+      formats: [],
+      preview: 'none',
+      shared: false,
+    },
+  },
+  bim: {
+    kind: 'bim',
+    validate: isBimDocument,
+    // Drawings and IFC come with R2c-5 and R2c-6.
     capabilities: {
       undo: true,
       nativeJson: true,
@@ -242,6 +288,8 @@ export function domainExecute<T extends HostContent>(
 }
 export function referenceArtifacts(): Artifact<HostContent>[] {
   const seeds: [string, string, HostContent][] = [
+    ['estimate', '見積・積算', createEstimate()],
+    ['analysis', '計算・分析ノート', createAnalysis()],
     ['slide', 'Presentation', createDeck()],
     ['whiteboard', 'Canvas', createWhiteboard()],
     ['design', 'Product page', productDesign()],
@@ -277,6 +325,10 @@ export function cadSample(
     id: 'reference-cad',
   };
 }
+/** A one-room building (F31), offered like the CAD sample only when the Host supplies a kernel. */
+export function bimSample(): Artifact<HostContent> {
+  return { ...createArtifact('bim', 'Building', f31BoxBuilding()), id: 'reference-bim' };
+}
 /** Explicit browser-local adapter. It neither infers access nor promises server durability. */
 export class BrowserArtifactStorage implements StorageAdapter<Artifact<HostContent>> {
   constructor(
@@ -307,6 +359,11 @@ export class BrowserArtifactStorage implements StorageAdapter<Artifact<HostConte
   }
   async put(artifact: Artifact<HostContent>) {
     this.storage.setItem(this.prefix + artifact.id, JSON.stringify(artifact));
+  }
+  async putIfAbsent(artifact: Artifact<HostContent>) {
+    const key = this.prefix + artifact.id;
+    if (!this.storage.getItem(key)) this.storage.setItem(key, JSON.stringify(artifact));
+    return (await this.get(artifact.id))!;
   }
   async remove(id: string) {
     this.storage.removeItem(this.prefix + id);

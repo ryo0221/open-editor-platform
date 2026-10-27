@@ -12,8 +12,23 @@ export interface GraphConnectionInput {
   type: string;
   from: string;
   to: string;
+  /** Name for a new connection, stored in its type's string label field. */
+  label: string;
+  /** True while an IME composition is open in the label input. */
+  composing?: boolean;
 }
-export type GraphConnectionPatch = Partial<Pick<GraphConnectionInput, 'from' | 'to' | 'type'>>;
+export type GraphConnectionPatch = Partial<
+  Pick<GraphConnectionInput, 'from' | 'to' | 'type' | 'label' | 'composing'>
+>;
+
+/** The attribute a new connection's name goes into, when its type names connections by text. */
+export function graphConnectionLabelField(profile: GraphProfile, type: string) {
+  const edgeType = profile.edges[type],
+    field = edgeType?.ui?.labelField;
+  return field && edgeType.schema[field]?.type === 'string' && !edgeType.schema[field].readOnly
+    ? field
+    : undefined;
+}
 
 /** Connection form buffer bound to one source revision and selection. */
 export function useGraphConnection({
@@ -34,6 +49,7 @@ export function useGraphConnection({
     type: edge?.type ?? Object.keys(profile.edges)[0] ?? '',
     from: edge?.from ?? '',
     to: edge?.to ?? '',
+    label: '',
   });
   const [connection, setConnection] = useState(currentConnection);
   const connectionStale = connection.base !== stamp || connection.target !== id;
@@ -74,9 +90,12 @@ export function prepareGraphConnection({
     throw new Error('Stale connection input; reload current values before editing.');
   if (!from || !to || !edgeType)
     throw new Error('接続の種類と両端を選択するか、接続入力をキャンセルしてください。');
+  if (connection.composing) throw new Error('入力変換を確定してください。');
   const existing = graph.edges.find((edge) => edge.id === connection.target);
   if ((existing ? profile.edges[existing.type] : profile.edges[edgeType])?.readOnly)
     throw new Error('この接続の定義は編集できません。');
+  const labelField = graphConnectionLabelField(profile, edgeType),
+    label = connection.label.trim();
   const intent: GraphIntent = existing
     ? { type: 'reconnect-edge', id: existing.id, from, to }
     : {
@@ -86,7 +105,7 @@ export function prepareGraphConnection({
           type: edgeType,
           from,
           to,
-          attributes: {},
+          attributes: labelField && label ? { [labelField]: label } : {},
         },
       };
   return intent;

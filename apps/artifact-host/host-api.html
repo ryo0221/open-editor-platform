@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Host API fixture</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" />
+    <style>
+      body {
+        margin: 0;
+        font:
+          14px/1.4 system-ui,
+          sans-serif;
+      }
+      .host-api {
+        display: grid;
+        gap: 12px;
+        padding: 12px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
+      }
+      .host-api > header,
+      .host-api > .host-api-save,
+      .host-api > [role='alert'],
+      .host-api > .host-api-editor {
+        grid-column: 1 / -1;
+      }
+      .host-api header,
+      .host-api-save {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+      }
+      .host-api h1,
+      .host-api h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+      .host-api-editor {
+        height: 520px;
+        min-width: 0;
+        border: 1px solid #ccc;
+      }
+      .host-api-tool,
+      .host-api-review {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+      .host-api output {
+        min-width: 0;
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+      .host-api textarea {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 48px;
+      }
+      .host-api output[aria-label='Draft text'],
+      .host-api pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+        padding: 6px;
+        background: #f4f4f4;
+      }
+      @media (max-width: 720px) {
+        .host-api {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/host-api-fixture.tsx"></script>
+  </body>
+</html>

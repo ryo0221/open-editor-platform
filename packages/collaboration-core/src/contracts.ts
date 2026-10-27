@@ -184,6 +184,8 @@ export interface ProposalState {
   state: 'ready' | 'preview' | 'applied' | 'conflicted' | 'cancelled' | 'rejected';
   token?: string;
   receipt?: Receipt;
+  /** External references that failed the last preview or apply check, with reasons. */
+  stale?: import('@editor-platform/artifact-core').StaleRead[];
 }
 export interface Preview<T> {
   token: string;

@@ -1,21 +1,42 @@
+import { IndexedDBStorage } from '@editor-platform/artifact-core';
+import { createVideoAnimationSources } from './animation-source';
+import { mountV3Host } from '../../../../packages/video-metadata/host-animation/host-v3';
+import { productCodecV3 } from '../../../../packages/video-metadata/host-animation/product-codec-v3.mjs';
 // Approved private validation entry; the reviewed slot exclusively owns workspace handoff.
 import './pcm-backend.mjs';
 import { createV2MountSlot } from '../../../../packages/video-metadata/host-media/m2/mount-adapter.mjs';
-import { productCodecV2 } from '../../../../packages/video-metadata/host-media/m2/product-codec-v2.mjs';
 import { normalPersistence, acquireProject, committedProject } from './persistence.mjs';
 import { readM2Catalog } from './catalog';
 import { privateVideoM2, privateVideoM2Url } from './registration';
 import { scratchStatus } from '../../../../packages/video-metadata/host-media/indexed-media/scratch.mjs';
 import { acquireValidationOwner } from './validation-owner.mjs';
-async function mount(root, entryId) {
+async function mount(root, entryId, navigate = (url) => globalThis.location.assign(url)) {
   const owner = await acquireValidationOwner();
   const shadow = root.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `<style>:host{display:block;height:100dvh;overflow:auto;font:16px system-ui;color:#182333}*{box-sizing:border-box}[hidden]{display:none!important}section{max-width:1100px;margin:auto;padding:12px}button,input,select{font:inherit;max-width:100%}button{padding:8px;margin:4px}label{display:block;margin:8px 0}canvas{display:block;max-width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap}p[role=alert]{color:#a12626}</style><section><h1>Video（複数素材・音声編集）</h1><p>Private local validation · desktop 1280 profile. Managed Video logical budget only; old builds and other writers must not share this validation origin. Shared editing and migration unavailable.</p><nav aria-label="Video M2 project navigation"></nav><p role="alert" id="notice"></p><div id="workspace"></div><div id="versions"></div></section>`;
+  shadow.innerHTML = `<style>:host{display:block;height:100dvh;overflow:auto;font:16px system-ui;color:#182333}*{box-sizing:border-box}[hidden]{display:none!important}section{max-width:1100px;margin:auto;padding:12px}button,input,select{font:inherit;max-width:100%}button{padding:8px;margin:4px}label{display:block;margin:8px 0}canvas{display:block;max-width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap}p[role=alert]{color:#a12626}</style><section><h1>Video</h1><p>Private local validation · desktop 1280 profile. Managed Video logical budget only; old builds and other writers must not share this validation origin. Shared editing unavailable. Current native Video format only. Older review formats are refused without modifying their stored data.</p><nav aria-label="Video M2 project navigation"></nav><p role="alert" id="notice"></p><div id="workspace"></div><div id="versions"></div></section>`;
   const nav = shadow.querySelector('nav'),
     notice = shadow.querySelector('#notice');
   const versions = shadow.querySelector('#versions');
   const slot = createV2MountSlot(shadow.querySelector('#workspace'));
   const adapters = new WeakMap();
+  const ownedProjects = new Map();
+  async function acquireOwnedProject(id) {
+    let owned = ownedProjects.get(id);
+    if (!owned) {
+      owned = { users: 0, release: await acquireProject(id) };
+      ownedProjects.set(id, owned);
+    }
+    owned.users++;
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      if (--owned.users === 0) {
+        ownedProjects.delete(id);
+        await owned.release();
+      }
+    };
+  }
   let switching = true,
     closed = false,
     closing;
@@ -25,7 +46,7 @@ async function mount(root, entryId) {
   function busy(value) {
     switching = value;
     nav.setAttribute('aria-busy', String(value));
-    for (const node of nav.querySelectorAll('button,input')) node.disabled = value;
+    for (const node of nav.querySelectorAll('button,input,select')) node.disabled = value;
   }
   async function run(action) {
     if (switching || closed) return;
@@ -68,14 +89,23 @@ async function mount(root, entryId) {
         await unlock?.();
       })());
     try {
-      unlock = await acquireProject(adapter.id);
+      unlock = await acquireOwnedProject(adapter.id);
       if (entry) {
         source = await committedProject(entry, new globalThis.AbortController().signal);
         file = source.file;
       }
       const workspace = await slot.replace({
         file,
-        codec: owner.codec(productCodecV2),
+        codec: owner.codec(productCodecV3),
+        mountHost: (target, factory, codec, file, options) =>
+          mountV3Host(
+            target,
+            factory,
+            codec,
+            createVideoAnimationSources(new IndexedDBStorage(), () => !closed),
+            file,
+            options,
+          ),
         factory: async (live, input) => {
           const p = await adapter.factory(live, input);
           const close = p.close.bind(p);
@@ -131,13 +161,13 @@ async function mount(root, entryId) {
     await owner.close();
     closed = true;
     globalThis.removeEventListener('beforeunload', beforeUnload);
-    globalThis.location.assign(destination);
+    navigate(destination);
   }
   button('Return to Library', () => leave('/'));
-  button('New Video M2 project', () => replace());
-  button('Reload saved Video M2 project', () => leave(globalThis.location.href));
+  button('New Video project', () => replace());
+  button('Reload saved Video project', () => leave(globalThis.location.href));
   const label = globalThis.document.createElement('label');
-  label.textContent = 'Open portable Video M2 project ';
+  label.textContent = 'Open portable Video project ';
   const input = globalThis.document.createElement('input');
   input.type = 'file';
   input.disabled = true;
@@ -149,7 +179,7 @@ async function mount(root, entryId) {
   label.append(input);
   nav.append(label);
   button('Retry Library registration', () => adapters.get(slot.current()).retryLocator());
-  button('Saved Video M2 versions', async () => {
+  button('Saved Video versions', async () => {
     const history = await adapters.get(slot.current()).versions();
     versions.replaceChildren();
     for (const version of history.versions) {

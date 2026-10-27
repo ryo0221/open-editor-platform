@@ -9,9 +9,14 @@ function nativeContent(content: Content): NativeContent {
     'layers' in content ||
     'rootCompositionId' in content ||
     'lanes' in content ||
-    'kernelProfile' in content
+    'kernelProfile' in content ||
+    'axes' in content
   )
     throw new Error('Expected native content');
+  if ('domain' in content && content.domain === 'estimate')
+    throw Error('Estimate has no template adapter');
+  if ('domain' in content && content.domain === 'analysis')
+    throw Error('Analysis has no template adapter');
   return content;
 }
 import { expect, type Page, type TestInfo } from '@playwright/test';

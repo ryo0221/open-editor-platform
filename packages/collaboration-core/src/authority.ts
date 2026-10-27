@@ -1,4 +1,9 @@
-import { deepFreeze } from '@editor-platform/artifact-core';
+import {
+  checkReadVersions,
+  deepFreeze,
+  type CurrentRead,
+  type StaleRead,
+} from '@editor-platform/artifact-core';
 import {
   canonical,
   copy,
@@ -43,6 +48,15 @@ const codecMethods = <T>(codec: DomainCodec<T>) => [
   codec.encode,
   codec.encodeActions,
 ];
+/** Synchronous Host hook for a proposal's external references (artifact ID and exact
+ * version). `true` and `false` keep the original contract; a CurrentRead also says why. */
+export type ExternalCheck = (reference: string, version: string) => boolean | CurrentRead;
+const externalRead = (answer: boolean | CurrentRead, version: string): CurrentRead =>
+  answer === true
+    ? { status: 'available', versionId: version }
+    : answer === false
+      ? { status: 'changed' }
+      : answer;
 export class Authority<T> {
   private state: Snapshot<T>;
   private seed: Snapshot<T>;
@@ -78,7 +92,7 @@ export class Authority<T> {
     readonly codec: DomainCodec<T>,
     snapshot: Snapshot<T>,
     readonly now = () => Date.now(),
-    readonly externalCheck: (reference: string, version: string) => boolean = () => false,
+    readonly externalCheck: ExternalCheck = () => false,
   ) {
     validateSnapshot(codec, snapshot);
     this.state = copy(snapshot);
@@ -184,7 +198,7 @@ export class Authority<T> {
           canonical(op.actions)
         )
           fail('protocol-error', 'Proposal intent changed');
-        this.checkProposal(p.proposal);
+        this.checkProposal(p);
       }
       checkConditions(this.codec, this.state, op.conditions);
       const prepared = this.inverseEvaluations.get(input);
@@ -401,20 +415,35 @@ export class Authority<T> {
   proposal(id: string) {
     return copy(this.proposals.get(id));
   }
-  private checkProposal(p: Proposal) {
+  private checkProposal(state: ProposalState) {
+    const p = state.proposal;
     if (p.reads === null) {
       if (p.baseRevision !== this.state.revision)
         fail('stale-precondition', 'Unknown read scope requires unchanged artifact', ['*']);
     } else checkConditions(this.codec, this.state, p.reads);
     checkConditions(this.codec, this.state, p.writes);
-    if (!p.external.every((d) => this.externalCheck(d.reference, d.version)))
-      fail('stale-precondition', 'External read dependency changed');
+    // Every external reference is asked at this synchronous point; the reasons and the
+    // changed references stay on the proposal for the Host to show.
+    const stale: StaleRead[] = p.external.flatMap((d) =>
+      checkReadVersions([{ artifactId: d.reference, versionId: d.version }], () =>
+        externalRead(this.externalCheck(d.reference, d.version), d.version),
+      ),
+    );
+    delete state.stale;
+    if (stale.length) {
+      state.stale = stale;
+      fail(
+        'stale-precondition',
+        `External read dependency changed: ${stale.map((s) => `${s.artifactId} ${s.reason}`).join(', ')}`,
+        stale.map((s) => `external:${s.artifactId}`),
+      );
+    }
   }
   preview(principal: Principal, id: string): Preview<T> {
     const p = this.proposals.get(id);
     if (!p || !['ready', 'preview', 'conflicted'].includes(p.state))
       fail('cancelled', 'Proposal is terminal or missing');
-    this.checkProposal(p.proposal);
+    this.checkProposal(p);
     const op = operation(this.codec, this.state, principal, p.proposal.actions, 'proposal');
     this.authorize(principal, op);
     const result = this.evaluate(this.state, p.proposal.actions, principal.actorId);
@@ -434,7 +463,7 @@ export class Authority<T> {
     try {
       if (!p || p.state !== 'preview' || p.token !== token)
         fail('cancelled', 'Preview token is missing, superseded, or cancelled');
-      this.checkProposal(p.proposal);
+      this.checkProposal(p);
       const op = operation(this.codec, this.state, principal, p.proposal.actions, 'proposal');
       op.operationId = `proposal:${id}`;
       op.transactionId = id;
@@ -593,7 +622,7 @@ export class Authority<T> {
     codec: DomainCodec<T>,
     value: ReturnType<Authority<T>['backup']>,
     now?: () => number,
-    externalCheck?: (reference: string, version: string) => boolean,
+    externalCheck?: ExternalCheck,
   ) {
     if (
       !serializable(value) ||

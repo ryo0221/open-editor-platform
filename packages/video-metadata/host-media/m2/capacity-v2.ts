@@ -1,6 +1,10 @@
 import { assertVideoContentV2, type VideoContentV2 } from '@editor-platform/video-core';
 /** Private Host bound for full controlled delivery and save envelopes, not a Core limit. */
 export function assertHostCapacityV2(content: VideoContentV2) {
+  assertControlledVideoCapacity(content);
+}
+/** Same existing boundary budget across private native schemas. */
+export function assertControlledVideoCapacity(content: unknown) {
   const long = '\u0000'.repeat(256);
   const scope = { artifactId: long, sessionId: long, generation: long };
   const revision = { kind: 'local-draft', sessionId: long, sequence: Number.MAX_SAFE_INTEGER };

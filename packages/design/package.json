@@ -8,11 +8,15 @@
     "./model": "./src/model.ts",
     "./prototype": "./src/prototype.ts",
     "./publication": "./src/component-publication.ts",
-    "./web-contract": "./src/web-contract.ts"
+    "./web-contract": "./src/web-contract.ts",
+    "./pagination": "./src/pagination.ts",
+    "./page-proposal-diff": "./src/page-proposal-diff.ts",
+    "./page-artwork": "./src/page-artwork.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/geometry-core": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/reuse-core": "*",
@@ -21,6 +25,7 @@
     "lucide-react": "1.51.0"
   },
   "peerDependencies": {
+    "react-dom": "^19.1.1",
     "react": "^19.1.1"
   }
 }
