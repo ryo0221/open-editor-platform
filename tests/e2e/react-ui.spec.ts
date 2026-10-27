@@ -233,14 +233,18 @@ test('W3 an unbound input types into a preview-only value that never reaches the
 test('W3 a preview host that never answers is named instead of loading forever', async ({
   page,
 }) => {
-  await page.route('http://127.0.0.1:5174/**', (route) => route.abort());
+  const previewRoute = /^http:\/\/127\.0\.0\.1:(?:5174|4174)\//;
+  await page.route(previewRoute, (route) => route.abort());
   await page.goto('/');
   await page.getByRole('button', { name: 'New React UI', exact: true }).click();
+  const preview = page.locator('iframe[title="React component preview"]');
+  await expect(preview).toHaveAttribute('src', previewRoute);
+  const previewOrigin = new URL((await preview.getAttribute('src'))!).origin;
   await expect(
     page.getByRole('status').filter({ hasText: 'Preview host not responding' }),
-  ).toContainText('http://127.0.0.1:5174', { timeout: 15_000 });
+  ).toContainText(previewOrigin, { timeout: 15_000 });
   await expect(page.getByRole('status').filter({ hasText: 'Restart preview' })).toBeVisible();
-  await page.unroute('http://127.0.0.1:5174/**');
+  await page.unroute(previewRoute);
   await page.getByRole('button', { name: 'Restart preview', exact: true }).click();
   const frame = page.frameLocator('iframe[title="React component preview"]');
   await expect(frame.getByText('Color study', { exact: true })).toBeVisible();
