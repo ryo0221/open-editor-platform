@@ -320,3 +320,40 @@ test('AN15/19 ordinary source-update trial is non-mutating, rejectable and accep
     .click();
   await expect(page.getByRole('cell', { name: '100', exact: true })).toBeVisible();
 });
+
+test('historical scenario output survives condition deletion, CSV and reload', async ({ page }) => {
+  const document = await analysisFixture();
+  document.runs = [await calculateRun(document, 'saved-higher', 'higher')];
+  const savedRuns = structuredClone(document.runs);
+  const artifact = createArtifact('analysis', 'Historical scenario', document);
+  await page.goto('/');
+  await page
+    .locator('input[type=file]')
+    .first()
+    .setInputFiles({
+      name: 'historical-analysis.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ ...artifact, annotations: [] })),
+    });
+  const result = page.getByRole('region', { name: '計算結果', exact: true });
+  await expect(result.getByRole('cell', { name: '88', exact: true })).toBeVisible();
+  await page.getByText('条件JSONを編集（複製・並替・mapping・Chart設定）', { exact: true }).click();
+  await page.getByRole('button', { name: '現在の条件を読む', exact: true }).click();
+  const recipe = page.getByLabel('条件JSON', { exact: true });
+  const next = JSON.parse(await recipe.inputValue());
+  next.scenarios = [];
+  await recipe.fill(JSON.stringify(next));
+  await page.getByRole('button', { name: '条件を確定', exact: true }).click();
+  await expect(result.getByRole('cell', { name: '88', exact: true })).toBeVisible();
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'CSV出力（静的）', exact: true }).click();
+  const download = await pending;
+  const { readFile } = await import('node:fs/promises');
+  expect(await readFile((await download.path())!, 'utf8')).toContain('88');
+  expect((await nativeArtifact(page)).draft.content).toMatchObject({
+    scenarios: [],
+    runs: savedRuns,
+  });
+  await page.reload();
+  await expect(result.getByRole('cell', { name: '88', exact: true })).toBeVisible();
+});

@@ -6,13 +6,9 @@ import {
   type ReferenceAdapter,
   type ReferenceSnapshot,
 } from '@editor-platform/artifact-references';
-import {
-  makeBasis,
-  verifyAnalysis,
-  type AnalysisDocument,
-  type Table,
-} from '@editor-platform/analysis-core';
+import { verifyAnalysis, type AnalysisDocument, type Table } from '@editor-platform/analysis-core';
 import { browserAnalysisWorker, workerRequest, type AnalysisWorkerFactory } from './host';
+import { isCurrentRun } from './current-run';
 export function resultSvg(table: Table, chart = false): string {
   if (table.rows.length > 100 || table.fields.length > 30)
     throw new ReferenceError(
@@ -106,12 +102,7 @@ export function createAnalysisReferenceAdapter(
           runId === null
             ? [...document.runs]
                 .reverse()
-                .find(
-                  (r) =>
-                    r.results[outputId] &&
-                    canonicalJson(r.basis) ===
-                      canonicalJson(makeBasis(document, r.basis.scenarioId)),
-                )
+                .find((r) => r.results[outputId] && isCurrentRun(document, r))
             : document.runs.find((r) => r.id === runId),
         table = run?.results[outputId];
       if (!run || !table || !['table', 'chart'].includes(target.kind) || target.nodeIds)
@@ -128,8 +119,7 @@ export function createAnalysisReferenceAdapter(
       if (target.rowIds?.some((id) => !table.rows.some((r) => r.id === id)))
         throw new ReferenceError('missing-target', '結果行がありません。');
       const rows = table.rows.filter((r) => !target.rowIds || target.rowIds.includes(r.id));
-      const historical =
-        canonicalJson(run.basis) !== canonicalJson(makeBasis(document, run.basis.scenarioId));
+      const historical = !isCurrentRun(document, run);
       return svgReferenceProjection(
         resultSvg({ ...table, fields, rows }, target.kind === 'chart'),
         document.title + (historical ? ' · 過去の条件の結果' : ' · 検証済み結果'),

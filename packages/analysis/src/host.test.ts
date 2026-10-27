@@ -211,3 +211,19 @@ it('restoring successful inputs uses normal guarded commands and one Undo', asyn
     ),
   ).toThrow('read-only');
 });
+
+it('retained scenario results stay readable and exportable after removing the scenario', async () => {
+  const { session, controller } = await fixture();
+  await controller.run('higher');
+  const run = session.content.runs[0],
+    saved = canonicalJson(run);
+  expect((await controller.verifiedOutput(run.id, 'total-output')).historical).toBe(false);
+  controller.edit({ ...session.content, scenarios: [] }, 'Remove scenarios');
+  const output = await controller.verifiedOutput(run.id, 'total-output');
+  expect(output.historical).toBe(true);
+  expect(output.table.rows[0].values.total).toBe('88');
+  expect(canonicalJson(output.run)).toBe(saved);
+  await expect(controller.prepare('higher')).rejects.toThrow('missing-scenario');
+  session.undo();
+  expect((await controller.verifiedOutput(run.id, 'total-output')).historical).toBe(false);
+});

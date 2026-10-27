@@ -19,6 +19,7 @@ import {
   type AnalysisGuard,
   type Run,
 } from '@editor-platform/analysis-core';
+import { isCurrentRun } from './current-run';
 export interface AnalysisPort extends AnalysisGuard {
   read(): AnalysisDocument;
   revision(): string;
@@ -217,8 +218,7 @@ export class AnalysisController {
     return {
       table,
       run,
-      historical:
-        canonicalJson(run.basis) !== canonicalJson(makeBasis(document, run.basis.scenarioId)),
+      historical: !isCurrentRun(document, run),
     };
   }
 }

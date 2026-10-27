@@ -91,3 +91,39 @@ it('AN17/18 current-result targets follow a saved recomputation while fixed byte
   generation = 'scope-2';
   expect(() => adapter.project(snapshot, target)).toThrow('preflight');
 });
+
+it('removed scenarios remain historical references and cannot hide an older current result', async () => {
+  const document = await analysisFixture();
+  document.runs = [
+    await calculateRun(document, 'current'),
+    await calculateRun(document, 'historical', 'higher'),
+  ];
+  document.scenarios = [];
+  const snapshot: ReferenceSnapshot = {
+    artifactId: 'analysis',
+    domain: 'analysis',
+    versionId: 'v1',
+    revision: 1,
+    content: document,
+    contentHash: await contentHash(document),
+    dependencies: [],
+  };
+  const adapter = createAnalysisReferenceAdapter({ worker: testWorker });
+  await adapter.prepare!(snapshot);
+  const historical = adapter.project(snapshot, {
+    kind: 'table',
+    viewId: JSON.stringify(['historical', 'total-output']),
+  });
+  expect(JSON.stringify(historical)).toContain('過去の条件の結果');
+  const current = adapter.project(snapshot, {
+    kind: 'table',
+    viewId: JSON.stringify([null, 'total-output']),
+  });
+  expect(JSON.stringify(current)).toContain('検証済み結果');
+  expect(current).toEqual(
+    adapter.project(snapshot, {
+      kind: 'table',
+      viewId: JSON.stringify(['current', 'total-output']),
+    }),
+  );
+});

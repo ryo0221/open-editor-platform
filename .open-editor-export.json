@@ -2077,18 +2077,23 @@
       "mode": "100644"
     },
     {
+      "path": "packages/analysis/src/current-run.ts",
+      "sha256": "7f097a9d6e060b34ca0b4d5f5de5b0388f60bde93d6164c78b4e33ec6cfe1bf8",
+      "mode": "100644"
+    },
+    {
       "path": "packages/analysis/src/expression-editor.tsx",
       "sha256": "f807c4b2e23879ac999f6bd02ba0ae197f63ae164199bd28aa21f988063666b6",
       "mode": "100644"
     },
     {
       "path": "packages/analysis/src/host.test.ts",
-      "sha256": "614848aa3a200ac9fb79b2ffe168f6d2d65453282d57c9491c3503e374607f8d",
+      "sha256": "b174614fd98c55b0d8f4376a6394c46e97ccd9c40e2b9d91d8d517a83c84324d",
       "mode": "100644"
     },
     {
       "path": "packages/analysis/src/host.ts",
-      "sha256": "ed1f19eceaef1ad68745f23ea35f35903c7edf32f76d35c3d08d90918e436be3",
+      "sha256": "5a2b35bc3767e928e55780236f9f885edf242f6c0adf87c28383518146df06c3",
       "mode": "100644"
     },
     {
@@ -2098,12 +2103,12 @@
     },
     {
       "path": "packages/analysis/src/references.test.ts",
-      "sha256": "ad0dc4abbcc60858657a8e514c33e730205000c1b4628e662c994e8e9597001d",
+      "sha256": "ee2499c4717541693872886c1ebe27704f70627858dbb5222e22f2d728d89904",
       "mode": "100644"
     },
     {
       "path": "packages/analysis/src/references.ts",
-      "sha256": "a96d828069945bcfcdbba2d2394218c0a6a61ec62b3909ac4b99883b84a59ef3",
+      "sha256": "fffcf3551bdcf6765fb0addf3aa6b0405a0ff12e0552f3453124ace5d312f9e6",
       "mode": "100644"
     },
     {
@@ -12123,7 +12128,7 @@
     },
     {
       "path": "tests/e2e/analysis-notebook.spec.ts",
-      "sha256": "3b8374de6317cd133db597ca6eac8838b7586ec5b7141655d33bacaea2c1d259",
+      "sha256": "4ad1532120d3db4e73e59945f9a2a361f817ab982694b245446449cee4c86af7",
       "mode": "100644"
     },
     {
