@@ -85,4 +85,28 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // ADR 019: the character domain shares only geometry and time, never CAD or building content.
+    files: ['packages/character/**/*.{ts,tsx}', 'packages/character-*/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@editor-platform/cad',
+                '@editor-platform/cad-*',
+                '@editor-platform/cad/*',
+                '@editor-platform/bim',
+                '@editor-platform/bim-*',
+                '@editor-platform/bim/*',
+              ],
+              message: 'character packages do not import CAD or BIM packages (ADR 019).',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

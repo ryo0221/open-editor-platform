@@ -19,6 +19,7 @@ import {
   f11Region,
   f15Loft,
   f15Wing,
+  f15Canopy,
   f15Sweep,
   f16Reference,
   f16Sketch,
@@ -1335,6 +1336,58 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
   };
   const rounded = (v: readonly number[]) => v.map((x) => Math.round(x * 1e6) / 1e6 + 0);
 
+  /** Per face: the triangles' area on the texture (mm²) over their area in space. */
+  const textureStretch = (mesh: CadMesh) => {
+    const uv = mesh.uvs!;
+    const p = mesh.positions;
+    const byFace = new Map<number, { uv: number; xyz: number }>();
+    for (let t = 0; t < mesh.faceIds.length; t++) {
+      const [a, b, c] = [0, 1, 2].map((k) => mesh.indices[t * 3 + k]!);
+      const e1 = [0, 1, 2].map((k) => p[b * 3 + k]! - p[a * 3 + k]!);
+      const e2 = [0, 1, 2].map((k) => p[c * 3 + k]! - p[a * 3 + k]!);
+      const xyz =
+        Math.hypot(
+          e1[1]! * e2[2]! - e1[2]! * e2[1]!,
+          e1[2]! * e2[0]! - e1[0]! * e2[2]!,
+          e1[0]! * e2[1]! - e1[1]! * e2[0]!,
+        ) / 2;
+      // Signed: a mirrored image would be negative.
+      const flat =
+        ((uv[b * 2]! - uv[a * 2]!) * (uv[c * 2 + 1]! - uv[a * 2 + 1]!) -
+          (uv[c * 2]! - uv[a * 2]!) * (uv[b * 2 + 1]! - uv[a * 2 + 1]!)) /
+        2;
+      const f = byFace.get(mesh.faceIds[t]!) ?? { uv: 0, xyz: 0 };
+      f.uv += flat;
+      f.xyz += xyz;
+      byFace.set(mesh.faceIds[t]!, f);
+    }
+    return [...byFace.values()].map((f) => f.uv / f.xyz);
+  };
+
+  it('gives every face real-size texture coordinates, never mirrored (#662)', async () => {
+    // F02: a 100 × 50 × 5 plate with a hole: planes and a cylinder, both unrolled exactly.
+    const { mesh: plate } = await evaluated('tex-plate', f02Plate());
+    expect(plate.uvs!.length).toBe((plate.positions.length / 3) * 2);
+    for (const r of textureStretch(plate)) expect(r).toBeCloseTo(1, 2);
+    // The side at y = 0 faces −y: the texture runs along x and up z, in model mm.
+    let side = 0;
+    for (let v = 0; v < plate.positions.length / 3; v++) {
+      const [x, y, z] = [0, 1, 2].map((k) => plate.positions[v * 3 + k]! + plate.origin[k]!);
+      if (Math.abs(y!) > 1e-9 || plate.normals[v * 3 + 1]! > -0.99) continue;
+      expect(plate.uvs![v * 2]).toBeCloseTo(x!, 4);
+      expect(plate.uvs![v * 2 + 1]).toBeCloseTo(z!, 4);
+      side++;
+    }
+    expect(side).toBeGreaterThanOrEqual(4);
+    // A loft from a square to a circle: its sides follow their parameters, close to real size.
+    const { mesh: loft } = await evaluated('tex-loft', f15Loft());
+    for (const r of textureStretch(loft)) {
+      expect(r).toBeGreaterThan(0.7);
+      expect(r).toBeLessThan(1.3);
+    }
+    expect(plate.uvs!.every(Number.isFinite)).toBe(true);
+  });
+
   it('lofts five closed spline sections whose wire matching OCCT refuses (ST-89)', async () => {
     // OCCT's matching throws SameNumberByPolarMethod for these five; each has one edge, so the
     // loft is built without it: ruled, it is the two halves exactly.
@@ -1346,6 +1399,20 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     expect(new Set(five.mesh.topology.faces.map((f) => JSON.stringify(f.name)))).toContain(
       JSON.stringify(['side:e:s']),
     );
+  });
+
+  it('lofts five closed spline sections whose matching says profiles are inconsistent (ST-89#2)', async () => {
+    // OCCT throws `BRepFill :: profiles are inconsistent` for this canopy (a flat first section),
+    // with no `BRepFill_CompatibleWires` in the message: built again without the matching.
+    const five = await evaluated('st89-canopy-five', f15Canopy('five'));
+    const front = await evaluated('st89-canopy-front', f15Canopy('front'));
+    const back = await evaluated('st89-canopy-back', f15Canopy('back'));
+    const v = (x: typeof five) => solid(x.evaluation.bodies.canopy!).volumeMm3;
+    // The halves are matched by OCCT and the five are not, so their rulings differ slightly.
+    expect(Math.abs(v(five) / (v(front) + v(back)) - 1)).toBeLessThan(0.01);
+    const smooth = await evaluated('st89-canopy-smooth', f15Canopy('five', false));
+    expect(rounded(smooth.evaluation.bodies.canopy!.bounds[0].slice(0, 1))).toEqual([1500]);
+    expect(smooth.evaluation.bodies.canopy!.bounds[1][0]).toBeCloseTo(3250, 3);
   });
 
   it('lofts F15 from a square to a smaller square or a circle (R1e, CAD35)', async () => {
@@ -2701,7 +2768,8 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
       expect(Math.hypot(mesh.normals[i], mesh.normals[i + 1], mesh.normals[i + 2])).toBeCloseTo(
         1,
         5,
-      );
+      ); // Nor on the texture (#662): each face covers its real size.
+    for (const r of textureStretch(mesh)) expect(r).toBeCloseTo(1, 2);
   });
 
   it("shows an earlier build's document only as a declared reference (CAD17)", async () => {

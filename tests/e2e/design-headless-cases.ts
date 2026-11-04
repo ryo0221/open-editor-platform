@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
+import { createDesign, makeDesignElement } from '@editor-platform/design/model';
 import { nestedTextFixture } from '../fixtures/design-nested-text/content';
 
 let bundle: Promise<{ js: string; css: string }>;
@@ -34,6 +35,61 @@ async function host(page: Page) {
 const source = (page: Page) => page.getByTestId('design-source');
 const history = (page: Page) => page.getByLabel('Host history state', { exact: true });
 export function designHeadlessCases() {
+  test('#615 image attribution follows replacement through cancel, Undo/Redo and reload', async ({
+    page,
+  }, info) => {
+    const src =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==';
+    const provenance = { src, source: 'Fixture artist', license: 'CC0' };
+    const image = { ...makeDesignElement('image'), id: 'coat', name: 'Coat', src, provenance };
+    const initial = {
+      ...createDesign(),
+      elements: [
+        image,
+        { ...image, id: 'background', name: 'Background', bounds: { ...image.bounds, x: 400 } },
+      ],
+    };
+    await page.addInitScript((encoded) => {
+      if (!sessionStorage.getItem('design-headless-content'))
+        sessionStorage.setItem('design-headless-content', encoded);
+    }, JSON.stringify(initial));
+    await host(page);
+    const read = async () => JSON.parse((await source(page).textContent())!);
+    const input = page.getByLabel('Design JSON intents', { exact: true });
+    // A different encoding string is a new native source, even for equivalent pixels.
+    const replacement = src + '\n';
+    await input.fill(
+      JSON.stringify([
+        {
+          type: 'update',
+          id: 'coat',
+          patch: {
+            src: replacement,
+            provenance: { ...provenance, src: replacement, source: 'Replacement artist' },
+          },
+        },
+      ]),
+    );
+    await page.getByRole('button', { name: 'Preview intents', exact: true }).click();
+    await page.getByRole('button', { name: 'Cancel intents', exact: true }).click();
+    expect((await read()).elements).toEqual(initial.elements);
+    await page.getByRole('button', { name: 'Preview intents', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply intents', exact: true }).click();
+    expect((await read()).elements[0].provenance.source).toBe('Replacement artist');
+    expect((await read()).elements[1]).toEqual(initial.elements[1]);
+    await page.getByRole('button', { name: 'Host undo', exact: true }).click();
+    expect((await read()).elements).toEqual(initial.elements);
+    await page.getByRole('button', { name: 'Host redo', exact: true }).click();
+    await page.getByRole('button', { name: 'Host save', exact: true }).click();
+    await page.reload();
+    expect((await read()).elements[0].provenance.source).toBe('Replacement artist');
+    await input.fill(JSON.stringify([{ type: 'update', id: 'coat', patch: { src } }]));
+    await page.getByRole('button', { name: 'Preview intents', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply intents', exact: true }).click();
+    expect((await read()).elements[0].provenance).toBeUndefined();
+    expect((await read()).elements[1].provenance).toEqual(provenance);
+    await page.screenshot({ path: info.outputPath('raster-provenance.png') });
+  });
   test('#27 nested JSON state overrides reveal and unlock only the addressed text', async ({
     page,
   }, info) => {
@@ -46,18 +102,16 @@ export function designHeadlessCases() {
     await host(page);
     const canvas = page.getByRole('application', { name: 'Design canvas', exact: true });
     await expect(canvas.getByText('Nested title', { exact: true })).toHaveCount(0);
-    await page
-      .getByLabel('Design JSON intents', { exact: true })
-      .fill(
-        JSON.stringify([
-          {
-            type: 'override',
-            id: 'card',
-            partId: ['section', 'title'],
-            patch: { locked: false, hidden: false },
-          },
-        ]),
-      );
+    await page.getByLabel('Design JSON intents', { exact: true }).fill(
+      JSON.stringify([
+        {
+          type: 'override',
+          id: 'card',
+          partId: ['section', 'title'],
+          patch: { locked: false, hidden: false },
+        },
+      ]),
+    );
     await page.getByRole('button', { name: 'Preview intents', exact: true }).click();
     await expect(page.getByRole('alert')).toHaveCount(0);
     await page.getByRole('button', { name: 'Apply intents', exact: true }).click();

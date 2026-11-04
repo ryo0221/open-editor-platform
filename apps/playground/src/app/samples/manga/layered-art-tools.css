@@ -1,0 +1,51 @@
+.layered-art-form {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 78vh;
+  overflow: auto;
+  min-width: 0;
+}
+.layered-art-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.layered-art-form textarea,
+.layered-art-form input {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.layered-art-rough {
+  max-width: 100%;
+  height: 18vh;
+  object-fit: contain;
+}
+.layered-art-preview {
+  width: 100%;
+  height: 55vh;
+  object-fit: contain;
+  background: white;
+}
+.layered-art-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.layered-art-form ul {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding-left: 1.3rem;
+  font-size: 0.85rem;
+}
+.ep-dialog:has(.layered-art-form) {
+  width: min(60rem, 94vw);
+}
+@media (max-width: 600px) {
+  .layered-art-form ul {
+    grid-template-columns: 1fr;
+  }
+  .layered-art-preview {
+    height: 45vh;
+  }
+}

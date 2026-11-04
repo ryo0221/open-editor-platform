@@ -20,7 +20,7 @@ export function describeDrawing(d: Drawing): string {
       `Position: ${b.x}, ${b.y} px · Size: ${b.width} × ${b.height} px · Rotation: ${d.rotation ?? 0}°`,
       `Fill: ${d.fill} · Stroke: ${d.stroke ?? 'default'} / ${d.strokeWidth ?? 1} px · Opacity: ${Math.round((d.opacity ?? 1) * 100)}%`,
       `Visibility: ${d.hidden ? 'hidden' : 'visible'} · ${d.locked ? 'locked' : 'unlocked'}`,
-      `Corner radius: ${d.radius ?? 0} · Dash: ${d.dash || 'solid'} · Arrowhead: ${d.arrowhead ?? 'none'}`,
+      `Corner radius: ${d.radius ?? 0} · Dash: ${d.dash || 'solid'} · Arrowhead: ${d.arrowhead ?? 'none'}${d.lineDirection ? ` · Direction: ${d.lineDirection}` : ''}`,
     ];
   if (d.text) lines.push(`Text: ${d.text}`);
   if (d.typography)

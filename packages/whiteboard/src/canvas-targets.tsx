@@ -1,6 +1,11 @@
-import { deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
+import { clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import { DrawingView, type CanvasTarget } from '@editor-platform/canvas-ui';
 import { whiteboardDrawing, type WhiteboardNode, type WhiteboardSection } from './model';
+import {
+  BoardNodeContent,
+  type WhiteboardNodeRenderer,
+  type WhiteboardInteractionMode,
+} from './node-content';
 
 type BoardTarget = CanvasTarget &
   (
@@ -47,7 +52,15 @@ export function boardSectionTarget(section: WhiteboardSection, zoom: number): Bo
 
 // Native records travel with the target. CanvasStage overlays transient geometry
 // without consulting a changing content map or closing over the current camera.
-export function renderBoardTarget(value: CanvasTarget) {
+export function renderBoardTarget(
+  value: CanvasTarget,
+  host?: {
+    renderNodeContent?: WhiteboardNodeRenderer;
+    mode: WhiteboardInteractionMode;
+    selected: readonly string[];
+    readOnly: boolean;
+  },
+) {
   const target = value as BoardTarget;
   if (target.boardType === 'section')
     return (
@@ -71,6 +84,30 @@ export function renderBoardTarget(value: CanvasTarget) {
         </text>
       </g>
     );
+  const node: WhiteboardNode = {
+    ...target.node,
+    bounds: target.bounds,
+    rotation: target.rotation,
+  };
+  if (node.kind === 'shape' && host?.renderNodeContent) {
+    const owned = deepFreeze(clone(node));
+    const custom = host.renderNodeContent({
+      node: owned,
+      size: Object.freeze({ width: owned.bounds.width, height: owned.bounds.height }),
+      mode: host.mode,
+      selected: host.selected.includes(node.id),
+      readOnly: host.readOnly,
+    });
+    if (custom !== undefined)
+      return (
+        <>
+          <DrawingView drawing={whiteboardDrawing(node)} />
+          <BoardNodeContent node={node} mode={host.mode}>
+            {custom}
+          </BoardNodeContent>
+        </>
+      );
+  }
   return (
     <DrawingView
       drawing={whiteboardDrawing({

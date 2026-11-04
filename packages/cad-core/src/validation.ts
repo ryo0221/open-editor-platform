@@ -1,3 +1,8 @@
+import {
+  geometryMaterialPreset,
+  geometryTextureLimits,
+  geometryTextureSetProblems,
+} from '@editor-platform/geometry-core';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { assemblyKeys, validateAssembly } from './assembly-validation';
 import {
@@ -812,7 +817,10 @@ const sha256Ref = (v: unknown): v is string =>
 const assetBytes: Record<CadAssetKind, number> = {
   'source-step': cadLimits.stepBytes,
   'normalized-brep': cadLimits.brepBytes,
+  'texture-png': geometryTextureLimits.imageBytes,
+  'texture-jpeg': geometryTextureLimits.imageBytes,
 };
+const textureKinds = new Set<unknown>(['texture-png', 'texture-jpeg']);
 
 /** D2 asset refs: shape, per-kind media type and size, one ref per kind and hash. */
 function validateAssets(c: Check, assets: unknown[]): Map<string, CadAssetKind> {
@@ -828,7 +836,7 @@ function validateAssets(c: Check, assets: unknown[]): Map<string, CadAssetKind> 
     }
     c.keys(a, ['id', 'kind', 'sha256', 'byteLength', 'mediaType'], path);
     const idOk = c.id(a.id, `${path}.id`);
-    if (a.kind !== 'source-step' && a.kind !== 'normalized-brep') {
+    if (typeof a.kind !== 'string' || !Object.hasOwn(cadAssetMediaTypes, a.kind)) {
       c.error('asset-kind', `${path}.kind`);
       continue;
     }
@@ -836,12 +844,17 @@ function validateAssets(c: Check, assets: unknown[]): Map<string, CadAssetKind> 
     else if (hashes.has(`${a.kind} ${a.sha256}`)) c.error('asset-duplicate', `${path}.sha256`);
     else hashes.add(`${a.kind} ${a.sha256}`);
     const n = a.byteLength;
-    if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1 || n > assetBytes[a.kind])
+    if (
+      typeof n !== 'number' ||
+      !Number.isSafeInteger(n) ||
+      n < 1 ||
+      n > assetBytes[a.kind as CadAssetKind]
+    )
       c.error('asset-size', `${path}.byteLength`);
     else total += n;
-    if (a.mediaType !== cadAssetMediaTypes[a.kind])
+    if (a.mediaType !== cadAssetMediaTypes[a.kind as CadAssetKind])
       c.error('asset-media-type', `${path}.mediaType`);
-    if (idOk) kinds.set(a.id as string, a.kind);
+    if (idOk) kinds.set(a.id as string, a.kind as CadAssetKind);
   }
   if (total > cadLimits.assetBytes) c.error('limit-asset-bytes', '$.assets');
   return kinds;
@@ -1364,6 +1377,42 @@ const countLimits = [
 ] as const;
 
 /** Full CAD validation from unknown input: schema, references, graph and limits. */
+/** A body's appearance (#661): colour, opacity and, optionally, a finish and its preset. */
+function checkAppearance(c: Check, a: unknown, ap: string) {
+  if (!record(a)) return c.error('appearance', ap);
+  c.keys(a, ['color', 'opacity'], ap, ['roughness', 'metalness', 'material', 'textures']);
+  if (typeof a.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(a.color))
+    c.error('appearance-color', `${ap}.color`);
+  const unit = (v: unknown) => finite(v) && v >= 0 && v <= 1;
+  if (!unit(a.opacity)) c.error('appearance-opacity', `${ap}.opacity`);
+  for (const k of ['roughness', 'metalness'] as const)
+    if (Object.hasOwn(a, k) && !unit(a[k])) c.error(`appearance-${k}`, `${ap}.${k}`);
+  if (
+    Object.hasOwn(a, 'material') &&
+    (typeof a.material !== 'string' || !geometryMaterialPreset(a.material))
+  )
+    c.error('appearance-material', `${ap}.material`);
+  if (Object.hasOwn(a, 'textures')) checkTextures(c, a.textures, `${ap}.textures`);
+  return true;
+}
+/** #662: a texture set's shape (its maps' assets are checked against the content's). */
+function checkTextures(c: Check, t: unknown, tp: string) {
+  for (const [code, key] of geometryTextureSetProblems(t, cadId))
+    c.error(
+      code === 'unknown-field' || code === 'missing-field'
+        ? code
+        : code === 'texture'
+          ? 'appearance-textures'
+          : `appearance-${code}`,
+      key ? `${tp}.${key}` : tp,
+    );
+}
+/** The diagnostics of an appearance on its own (`setAppearance`), at `$`. */
+export function validateCadAppearance(value: unknown): CadDiagnostic[] {
+  const c = new Check();
+  checkAppearance(c, value, '$');
+  return c.d;
+}
 export function isCadDocument(value: unknown): value is CadDocument {
   return validateCad(value).length === 0;
 }
@@ -1458,7 +1507,21 @@ export function validateCad(value: unknown): CadDiagnostic[] {
   features.forEach((f, i) =>
     validateFeature(c, f, `$.features[${i}]`, profiles, sketches, assets, usedAssets, featureIds),
   );
-  // The closure is exact: an asset no feature reads is not kept in the content.
+  // #662: a body's texture maps name texture assets (consumed bodies keep their look too).
+  if (Array.isArray(value.bodies))
+    value.bodies.forEach((b, i) => {
+      const maps =
+        record(b) && record(b.appearance) && record(b.appearance.textures)
+          ? b.appearance.textures.maps
+          : undefined;
+      if (!record(maps)) return;
+      for (const [role, id] of Object.entries(maps)) {
+        if (!textureKinds.has(assets.get(id as string)))
+          c.error('asset-missing', `$.bodies[${i}].appearance.textures.maps.${role}`);
+        else usedAssets.add(id as string);
+      }
+    });
+  // The closure is exact: an asset no feature or body reads is not kept in the content.
   if (Array.isArray(value.assets))
     value.assets.forEach(
       (a, i) =>
@@ -1572,15 +1635,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
         c.error('body-consumed-by', `${path}.consumedByFeatureId`);
     } else if (b.state === 'active' && result && cadId(b.id))
       active.push({ id: b.id, result: result.id });
-    const ap = `${path}.appearance`;
-    if (!record(b.appearance)) c.error('appearance', ap);
-    else {
-      c.keys(b.appearance, ['color', 'opacity'], ap);
-      if (typeof b.appearance.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(b.appearance.color))
-        c.error('appearance-color', `${ap}.color`);
-      const o = b.appearance.opacity;
-      if (!finite(o) || o < 0 || o > 1) c.error('appearance-opacity', `${ap}.opacity`);
-    }
+    checkAppearance(c, b.appearance, `${path}.appearance`);
   }
   if (graphOk && !c.d.some((x) => x.code === 'feature-cycle'))
     for (const a of active) {
@@ -1668,3 +1723,18 @@ export function assertCad(value: unknown): asserts value is CadDocument {
   if (errors.length) throw new CadValidationError(errors);
 }
 export type { ParameterValues };
+
+/**
+ * The limit a `*-range` refusal (#589) broke, in words, so a refusal never fails silently:
+ * `cad-invalid:coordinate-range@…` → `±10,000,000 mm (10 km)`.
+ */
+export function cadRangeLimit(code: string): string | undefined {
+  const reason = /(?:^|[:])([a-z-]+-range)(?:@|$)/.exec(code)?.[1];
+  const mm = (v: number) =>
+    `${v.toLocaleString('en-US')} mm${v >= 1_000_000 ? ` (${(v / 1_000_000).toLocaleString('en-US')} km)` : ''}`;
+  if (reason === 'coordinate-range' || reason === 'step-coordinate-range')
+    return `±${mm(cadLimits.coordinateMm)}`;
+  if (reason === 'dimension-range' || reason === 'sketch-dimension-range')
+    return `${cadLimits.minDimensionMm} – ${mm(cadLimits.maxDimensionMm)}`;
+  return undefined;
+}

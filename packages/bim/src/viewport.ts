@@ -1,9 +1,7 @@
 import {
-  AmbientLight,
   BufferGeometry,
   CanvasTexture,
   Color,
-  DirectionalLight,
   DoubleSide,
   Float32BufferAttribute,
   GridHelper,
@@ -32,7 +30,9 @@ import {
   disposeInstances,
   instancePath,
   instancesGroup,
+  ViewLighting,
   type ViewSolid,
+  type PathRenderSource,
 } from '@editor-platform/geometry-view';
 
 export interface BimViewportOptions {
@@ -92,6 +92,8 @@ export class BimViewport {
   private frame = 0;
   private fitted = false;
   private down: { x: number; y: number } | undefined;
+  /** Standard or realistic lighting (#665); a plan never shows the shadows. */
+  private readonly lighting: ViewLighting;
 
   constructor(
     private readonly host: HTMLElement,
@@ -106,9 +108,8 @@ export class BimViewport {
     this.scene.background = new Color('#f4f6f8');
     this.perspective.up.set(0, 0, 1);
     this.perspective.position.set(20_000, -30_000, 20_000);
-    const sun = new DirectionalLight('#ffffff', 1.6);
-    sun.position.set(1, -1.5, 2);
-    this.scene.add(new AmbientLight('#ffffff', 0.7), sun, this.marks, this.axes);
+    this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0.7 });
+    this.scene.add(this.marks, this.axes);
     this.controls = this.makeControls();
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
@@ -145,6 +146,7 @@ export class BimViewport {
   /** Shows the solids; the first content that has bounds frames the 3D camera. */
   show(solids: ViewSolid[], bounds: Bounds | undefined) {
     this.clear();
+    this.lighting.invalidate();
     this.group = instancesGroup(solids);
     this.scene.add(this.group);
     // A plan keeps its framing while drawing; only Fit view or another level reframes it.
@@ -240,7 +242,12 @@ export class BimViewport {
       );
       const lines = new LineSegments(
         geometry,
-        new LineDashedMaterial({ color: '#b45309', dashSize: 600, gapSize: 300 }),
+        new LineDashedMaterial({
+          color: '#b45309',
+          dashSize: 600,
+          gapSize: 300,
+          toneMapped: false,
+        }),
       );
       lines.computeLineDistances();
       lines.raycast = noRaycast;
@@ -294,6 +301,19 @@ export class BimViewport {
     }
     this.render();
   }
+  /**
+   * The shown solids and the camera, for a path-traced render (#664); none in a plan, whose
+   * cut the path tracer would not keep.
+   */
+  renderSource(): PathRenderSource | undefined {
+    if (this.plan || !this.group) return undefined;
+    return { roots: [this.group], camera: this.camera };
+  }
+  /** Switches the realistic lighting (environment light, tone mapping, shadows) on or off. */
+  setRealistic(on: boolean) {
+    this.lighting.setRealistic(on);
+    this.render();
+  }
   dispose() {
     this.resize.disconnect();
     cancelAnimationFrame(this.frame);
@@ -302,6 +322,7 @@ export class BimViewport {
     this.axesShown = undefined;
     this.drawAxes();
     this.controls.dispose();
+    this.lighting.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -419,6 +440,7 @@ export class BimViewport {
       const size = this.plan ? (this.planSpan * 2 * 0.045) / this.orthographic.zoom : 0.028;
       for (const child of this.axes.children)
         if (child instanceof Sprite) child.scale.set(size, size, 1);
+      this.lighting.prepare(this.group ? [this.group] : [], !this.plan);
       this.renderer.render(this.scene, this.camera);
     });
   }
@@ -448,6 +470,8 @@ function axisLabel(text: string, over: boolean) {
       map: new CanvasTexture(canvas),
       sizeAttenuation: false,
       depthTest: !over,
+      // A label keeps its colours under the realistic lighting's tone mapping.
+      toneMapped: false,
     }),
   );
   sprite.raycast = noRaycast;

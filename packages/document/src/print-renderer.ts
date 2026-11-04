@@ -1,5 +1,12 @@
 import { type PrintedTextLine } from './pdf-text';
-import { layoutPrintTable, tableLineHeight } from './print-layout';
+import {
+  layoutPrintTable,
+  placePrintLine,
+  type PrintInk,
+  printTextLines,
+  tableLineHeight,
+  type PrintUnit,
+} from './print-layout';
 import {
   nestedLists,
   styledDocumentSpans,
@@ -12,6 +19,22 @@ import {
 type PrintTable = ReturnType<typeof layoutPrintTable>;
 type PrintTableCell = PrintTable['cells'][number];
 type PrintTableLine = PrintTableCell['lines'][number];
+
+/** A 傍点 is a filled dot of `radius` ems, its centre `offset` ems from the text's edge; `reach`
+ * is the room it takes beside the text. */
+export const emphasisDot = { offset: 0.18, radius: 0.08, reach: 0.3 } as const;
+export function paintEmphasisDot(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+) {
+  ctx.beginPath();
+  ctx.arc(x, y, emphasisDot.radius * size, 0, Math.PI * 2);
+  ctx.fill();
+}
+const dotted = (token: PrintToken) =>
+  !!token.span.emphasisDots && !/^[\s\p{P}]+$/u.test(token.text);
 
 interface PrintToken {
   text: string;
@@ -34,7 +57,7 @@ export function printFont(span: InlineSpan, size: number, family?: string) {
   return `${span.italic ? 'italic ' : ''}${span.bold ? '700' : '400'} ${size}px ${span.code ? 'monospace' : family ? '"' + family + '"' : 'system-ui'}`;
 }
 
-function blockFontSize(block: DocumentBlock) {
+export function blockFontSize(block: DocumentBlock) {
   return block.style?.fontSize !== undefined
     ? (block.style.fontSize * 4) / 3
     : block.type === 'heading'
@@ -42,18 +65,18 @@ function blockFontSize(block: DocumentBlock) {
       : 16;
 }
 
-function blockLineHeight(block: DocumentBlock, fontSize: number) {
+export function blockLineHeight(block: DocumentBlock, fontSize: number) {
   return block.style?.lineHeight !== undefined ? block.style.lineHeight * fontSize : undefined;
 }
 
-function blockSpans(block: DocumentBlock) {
+export function blockSpans(block: DocumentBlock) {
   return styledDocumentSpans(
     block.rich ?? [{ text: block.text, ...(block.type === 'heading' ? { bold: true } : {}) }],
     block.style,
   );
 }
 
-function blockSpaceAfter(block: DocumentBlock) {
+export function blockSpaceAfter(block: DocumentBlock) {
   return block.style?.spaceAfter !== undefined
     ? (block.style.spaceAfter * 4) / 3
     : block.type === 'heading'
@@ -117,6 +140,8 @@ async function renderMermaidSource(
 }
 
 /** Paginated canvas output with the PDF text layer recorded per page. */
+const paintedBlockTypes = new Set(['image', 'table', 'mermaid']);
+
 export class DocumentPrintRenderer {
   readonly pages: HTMLCanvasElement[] = [];
   readonly textPages: PrintedTextLine[][] = [];
@@ -148,6 +173,8 @@ export class DocumentPrintRenderer {
     this.pages.push(canvas);
     this.textPages.push([]);
     this.y = this.margin;
+    this.inkBottom = 0;
+    this.underDots = false;
   }
 
   ensure(size: number) {
@@ -165,6 +192,17 @@ export class DocumentPrintRenderer {
     }
     ctx.fillStyle = token.span.color ?? '#253044';
     ctx.fillText(token.text, x, y + size);
+    // The text's top is about 0.12em below the line's top and its bottom 0.12em below the
+    // baseline; under a ruby the dots move below the text.
+    if (dotted(token))
+      paintEmphasisDot(
+        ctx,
+        x + token.width / 2,
+        token.span.ruby
+          ? y + (1.12 + emphasisDot.offset) * size
+          : y + (0.12 - emphasisDot.offset) * size,
+        size,
+      );
     if (token.span.underline || token.span.link || token.span.strike) {
       ctx.strokeStyle = ctx.fillStyle;
       ctx.lineWidth = 0.8;
@@ -175,27 +213,89 @@ export class DocumentPrintRenderer {
     }
   }
 
-  private flushLine(line: { tokens: PrintToken[]; width: number }, style: PrintTextStyle) {
-    this.ensure(style.lineHeight);
+  private drawRuby(unit: PrintUnit, x: number, style: PrintTextStyle) {
+    const { ctx, y } = this;
+    const rubySize = style.size * 0.5;
+    ctx.font = `400 ${rubySize}px ${style.family ? `"${style.family}"` : 'system-ui'}`;
+    ctx.fillStyle = unit.tokens[0].span.color ?? '#253044';
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'center';
+    ctx.fillText(unit.ruby!.text, x + unit.width / 2, y + 0.12 * style.size - 1 - 0.12 * rubySize);
+    ctx.textAlign = 'left';
+  }
+
+  /** Lowest ink of the last text line on this page (the page edge on a new page), and whether
+   * it was 傍点 under a ruby. Annotated lines keep clear of it across paragraphs and list items. */
+  private inkBottom = 0;
+  private underDots = false;
+
+  private flushLine(units: PrintUnit[], style: PrintTextStyle) {
+    const place = () =>
+      placePrintLine(units, style.size, style.lineHeight, {
+        floor: this.inkBottom - this.y,
+        underDots: this.underDots,
+      });
+    let placed = place();
+    // The page must hold 傍点 under a ruby as well as the line; a new page changes the placing.
+    this.ensure(
+      placed.top +
+        (placed.ink.underDots ? Math.max(style.lineHeight, placed.reach.below) : style.lineHeight),
+    );
+    placed = place();
+    this.y += placed.top;
+    this.inkBottom = this.y + placed.reach.below;
+    this.underDots = placed.ink.underDots;
+    const width = units.reduce((n, u) => n + u.width, 0);
     let x =
-      this.margin +
-      style.indent +
-      alignOffset(style.align, this.usable - style.indent - line.width);
-    this.textPages.at(-1)!.push({
-      text: line.tokens.map((token) => token.text).join(''),
-      x,
-      y: this.y + style.size,
-      size: style.size,
-      width: line.width,
-      order: this.order++,
-    });
-    for (const token of line.tokens) {
-      this.drawToken(token, x, style);
-      x += token.width;
+      this.margin + style.indent + alignOffset(style.align, this.usable - style.indent - width);
+    // The search layer follows the printed base text: a base spread under a wide reading is its
+    // own run, so selection never covers the padding.
+    let run = { text: '', x, width: 0 };
+    const flushRun = () => {
+      if (run.text)
+        this.textPages.at(-1)!.push({
+          ...run,
+          y: this.y + style.size,
+          size: style.size,
+          order: this.order++,
+        });
+    };
+    for (const unit of units) {
+      if (unit.ruby) this.drawRuby(unit, x, style);
+      if (unit.pad) {
+        flushRun();
+        run = { text: '', x: x + unit.pad, width: 0 };
+      }
+      let at = x + unit.pad;
+      for (const token of unit.tokens) {
+        this.drawToken(token, at, style);
+        run.text += token.text;
+        run.width += token.width;
+        at += token.width;
+      }
+      x += unit.width;
+      if (unit.pad) {
+        flushRun();
+        run = { text: '', x, width: 0 };
+      }
     }
+    flushRun();
     this.y += style.lineHeight;
-    line.tokens = [];
-    line.width = 0;
+  }
+
+  private lines(spans: InlineSpan[], size: number, indent: number, family?: string) {
+    return printTextLines(
+      spans,
+      this.usable - indent,
+      (text, span) => {
+        this.ctx.font = printFont(span, size, family);
+        return this.ctx.measureText(text).width;
+      },
+      (text) => {
+        this.ctx.font = `400 ${size * 0.5}px ${family ? `"${family}"` : 'system-ui'}`;
+        return this.ctx.measureText(text).width;
+      },
+    );
   }
 
   text(
@@ -207,21 +307,7 @@ export class DocumentPrintRenderer {
     family?: string,
   ) {
     const style = { size, indent, lineHeight, align, family };
-    const line = { tokens: [] as PrintToken[], width: 0 };
-    for (const span of spans)
-      for (const char of span.text) {
-        if (char === '\n') {
-          this.flushLine(line, style);
-          continue;
-        }
-        this.ctx.font = printFont(span, size, family);
-        const cw = this.ctx.measureText(char).width;
-        if (line.width + cw > this.usable - indent && line.tokens.length)
-          this.flushLine(line, style);
-        line.tokens.push({ text: char, span, width: cw });
-        line.width += cw;
-      }
-    if (line.tokens.length || !spans.some((s) => s.text)) this.flushLine(line, style);
+    for (const line of this.lines(spans, size, indent, family)) this.flushLine(line, style);
   }
 
   async loadImage(src: string) {
@@ -287,25 +373,11 @@ export class DocumentPrintRenderer {
     lineHeight = size * 1.65,
     family?: string,
   ) {
-    let lines = 0,
-      width = 0;
-    for (const span of spans)
-      for (const char of span.text) {
-        if (char === '\n') {
-          lines++;
-          width = 0;
-          continue;
-        }
-        this.ctx.font = printFont(span, size, family);
-        const cw = this.ctx.measureText(char).width;
-        if (width + cw > this.usable - indent && width > 0) {
-          lines++;
-          width = 0;
-        }
-        width += cw;
-      }
-    if (width > 0 || !spans.some((span) => span.text)) lines++;
-    return lines * lineHeight;
+    return this.lines(spans, size, indent, family).reduce((sum, line) => {
+      const placed = placePrintLine(line, size, lineHeight, this.measureInk);
+      this.measureInk = placed.ink;
+      return sum + placed.top + lineHeight;
+    }, 0);
   }
 
   private measureList(items: DocumentListItem[], numbered: boolean, depth = 0, start = 1): number {
@@ -375,22 +447,37 @@ export class DocumentPrintRenderer {
     return this.measureTextBlock(block);
   }
 
-  measuredHeight(block: DocumentBlock): number {
-    return (
-      this.measureBlockBody(block) +
-      ((block.style?.spaceBefore ?? 0) * 4) / 3 +
-      blockSpaceAfter(block)
-    );
+  /** Ink state carried through measuring, as drawing carries `inkBottom`. */
+  private measureInk: PrintInk = { floor: 0, underDots: false };
+
+  /** `chained` continues from the block measured just before instead of the current page. */
+  measuredHeight(block: DocumentBlock, chained = false): number {
+    if (!chained) this.measureInk = { floor: this.inkBottom - this.y, underDots: this.underDots };
+    const before = ((block.style?.spaceBefore ?? 0) * 4) / 3,
+      after = blockSpaceAfter(block);
+    this.measureInk.floor -= before;
+    // As in drawing, an image or table starts below 傍点 hanging from the line before it.
+    const clear =
+      paintedBlockTypes.has(block.type) && this.measureInk.underDots
+        ? Math.max(0, this.measureInk.floor)
+        : 0;
+    const body = clear + this.measureBlockBody(block);
+    if (paintedBlockTypes.has(block.type)) this.measureInk = { floor: 0, underDots: false };
+    // 傍点 under a ruby can hang past the last line; the page must hold them too.
+    this.measureTrail = this.measureInk.underDots ? Math.max(0, this.measureInk.floor - after) : 0;
+    this.measureInk.floor -= after;
+    return body + before + after;
   }
+  private measureTrail = 0;
 
   /** Keeps a heading run on the page of the block that follows it. */
   keepHeadingWithNext(visible: DocumentBlock[], index: number) {
     const { h, margin } = this;
     let grouped = this.measuredHeight(visible[index]),
       next = index + 1;
-    while (visible[next]?.type === 'heading') grouped += this.measuredHeight(visible[next++]);
+    while (visible[next]?.type === 'heading') grouped += this.measuredHeight(visible[next++], true);
     if (!visible[next]) return;
-    const following = this.measuredHeight(visible[next]);
+    const following = this.measuredHeight(visible[next], true) + this.measureTrail;
     const pair = grouped + following;
     if (pair <= h - margin * 2) this.ensure(pair);
     else
@@ -425,6 +512,7 @@ export class DocumentPrintRenderer {
     }
     ctx.fillStyle = token.span.color ?? '#253044';
     ctx.fillText(token.text, x, baseline);
+    if (dotted(token)) paintEmphasisDot(ctx, x + token.width / 2, baseline - 13 - 1, 13);
     for (const mark of ['underline', 'strike'] as const)
       if (token.span[mark] || (mark === 'underline' && token.span.link)) {
         ctx.strokeStyle = ctx.fillStyle;
@@ -552,7 +640,15 @@ export class DocumentPrintRenderer {
     const block = visible[index];
     if (block.type === 'heading') this.keepHeadingWithNext(visible, index);
     if (block.style?.spaceBefore) this.y += (block.style.spaceBefore * 4) / 3;
+    // 傍点 under a ruby can hang below their line; an image or table starts below them.
+    if (paintedBlockTypes.has(block.type) && this.underDots)
+      this.y = Math.max(this.y, this.inkBottom);
     await this.blockBody(block);
+    // Images and tables are not text lines; a later reading keeps clear of their bottom too.
+    if (paintedBlockTypes.has(block.type)) {
+      this.inkBottom = this.y;
+      this.underDots = false;
+    }
     this.y += blockSpaceAfter(block);
   }
 

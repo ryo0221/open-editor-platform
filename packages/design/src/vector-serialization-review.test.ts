@@ -37,6 +37,44 @@ it('allows a stable caller-owned resource ID without mutating drawing addresses'
   expect(drawing.id).toBe('a-b');
 });
 
+it('isolates polygon frame clips for simultaneous before and after drawing occurrences', () => {
+  const source = collidingVectors();
+  const drawing = designDrawingProjector(source)(source.elements[0])[0];
+  const render = (occurrence: string, edge: number) =>
+    serializeSvg(
+      drawingPrimitives(
+        {
+          ...drawing,
+          clipBounds: [
+            {
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100,
+              polygon: [
+                { x: 0, y: 0 },
+                { x: edge, y: 0 },
+                { x: 1, y: 1 },
+                { x: 0, y: 1 },
+              ],
+            },
+          ],
+        },
+        occurrence,
+      ),
+    );
+  const before = render('before', 0.5),
+    after = render('after', 0.8);
+  expect(before).toContain('clip-path="url(#frame-before-0)"');
+  expect(after).toContain('clip-path="url(#frame-after-0)"');
+  const combined = before + after;
+  const ids = [...combined.matchAll(/clipPath id="([^"]+)"/g)].map((match) => match[1]);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(before).toContain('L50 0');
+  expect(after).toContain('L80 0');
+  expect(drawing.id).toBe('a-b');
+});
+
 it.each([false, true])(
   'keeps ancestor frame clipping and visibility with colliding native IDs, hidden=%s',
   (hidden) => {

@@ -1,5 +1,11 @@
-.ep-document-scroll {
+.ep-document-column {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.ep-document-scroll {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   background: #eef1f5;
   padding: 28px;
@@ -270,6 +276,10 @@
     box-shadow: none;
     padding: 0 !important;
   }
+  .ep-document-column {
+    display: block;
+    height: auto;
+  }
   .ep-document-scroll {
     overflow: visible;
   }
@@ -312,4 +322,155 @@
 .ep-diagram-scroll:focus-visible {
   outline: 2px solid #4b6bfb;
   outline-offset: 2px;
+}
+.ep-workspace-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #d5dce5;
+  flex-wrap: wrap;
+}
+.ep-novel-scene {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ep-novel-count,
+.ep-novel-note {
+  color: #667085;
+  font-size: 12px;
+}
+.ep-novel-empty {
+  padding: 9px;
+  color: #667085;
+  font-size: 13px;
+}
+.ep-novel-panel {
+  font-size: 13px;
+}
+.ep-novel-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.ep-novel-stats dd {
+  margin: 0;
+}
+.ep-novel-findings {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+}
+.ep-novel-findings li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+.ep-novel-findings button {
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  text-align: left;
+  cursor: pointer;
+}
+.ep-novel-reading {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  box-sizing: border-box;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px;
+  background: white;
+  line-height: 1.9;
+}
+.ep-workspace-switch [aria-label='執筆と通読'] {
+  display: inline-flex;
+  gap: 4px;
+}
+.ep-ruby {
+  position: relative;
+}
+.ep-ruby::after {
+  content: attr(data-ruby);
+  position: absolute;
+  left: -2em;
+  right: -2em;
+  bottom: 100%;
+  font-size: 0.5em;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+/* 傍点: over the text (to its right in vertical text), on the other side under a ruby. */
+.ep-emphasis {
+  text-emphasis: filled sesame;
+}
+.ep-ruby .ep-emphasis,
+ruby .ep-emphasis {
+  text-emphasis-position: under left;
+}
+/* Vertical manuscript (縦書き). Only the display turns; text, selection and addresses do not. */
+.ep-document-scroll[data-writing-mode='vertical-rl'] {
+  writing-mode: vertical-rl;
+}
+.ep-document-page[data-writing-mode='vertical-rl'] {
+  writing-mode: vertical-rl;
+  min-height: 0;
+  height: min(1056px, max(480px, calc(100dvh - 260px)));
+  max-width: none;
+  margin: 0;
+}
+.ep-document-page[data-writing-mode='vertical-rl'] .ProseMirror {
+  min-height: 0;
+  min-width: 100%;
+  height: 100%;
+  font-family: 'Noto Serif CJK JP', 'Noto Sans CJK JP', serif;
+  line-height: 1.9;
+}
+.ep-tcy {
+  text-combine-upright: all;
+}
+[data-writing-mode='vertical-rl'] .ep-ruby::after {
+  left: 100%;
+  right: auto;
+  top: -2em;
+  bottom: -2em;
+  writing-mode: vertical-rl;
+  text-align: center;
+}
+.ep-novel-reading[data-writing-mode='vertical-rl'] {
+  writing-mode: vertical-rl;
+  max-width: none;
+  overflow: auto;
+}
+/* Japanese line breaking on screen: strict kinsoku, hanging 、。 where the browser supports it.
+   Manuscript-paper estimates use the deterministic breakJapaneseLines helper instead. */
+[data-workspace='novel'] .ep-document-page .ProseMirror,
+.ep-document-page[data-writing-mode='vertical-rl'] .ProseMirror,
+.ep-novel-reading {
+  line-break: strict;
+  hanging-punctuation: allow-end;
+}
+
+.ep-novel-reading-image {
+  writing-mode: horizontal-tb;
+  margin: 1rem;
+  max-width: min(100%, 600px);
+}
+.ep-novel-reading-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+}
+.ep-novel-reading-image figcaption {
+  font-size: 0.875rem;
 }

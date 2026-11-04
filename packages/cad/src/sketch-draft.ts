@@ -7,6 +7,7 @@ import {
   sketchElement,
   solveSketch,
   splineSelfIntersects,
+  splineThrough,
   type CadSketch,
   type CadSketchConstraint,
   type CadSketchEntity,
@@ -190,14 +191,25 @@ export function addArc(
   };
 }
 
-/** A spline through control points `poles` (existing points or new ones), open or closed. */
+/**
+ * A spline on control points `poles` (existing points or new ones), open or closed. With
+ * `through`, the inputs are points the curve passes through instead (SC-5): new control points are
+ * computed for them, and an open spline keeps its first and last input as its end poles.
+ */
 export function addSpline(
   s: CadSketch,
   poles: SketchPointInput[],
   degree: 2 | 3 | 5,
   closed: boolean,
   retired?: Retired,
+  through = false,
 ): SketchAdded {
+  if (through) {
+    const at = (p: SketchPointInput) => ('id' in p ? (s.solved[p.id] ?? [0, 0]) : p.at);
+    const computed = splineThrough(poles.map(at), degree, closed);
+    const end = (i: number) => !closed && (i === 0 || i === poles.length - 1);
+    poles = computed.map((q, i) => (end(i) ? poles[i]! : { at: q }));
+  }
   const ids: string[] = [];
   for (const p of poles) {
     let id: string;

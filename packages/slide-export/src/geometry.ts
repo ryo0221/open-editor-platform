@@ -1,4 +1,4 @@
-import { shapePath, type Bounds, type Drawing } from '@editor-platform/editor-core';
+import { lineArrowheads, shapePath, type Bounds, type Drawing } from '@editor-platform/editor-core';
 
 const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) =>
   (1 - t) ** 3 * p0 + 3 * (1 - t) ** 2 * t * p1 + 3 * (1 - t) * t * t * p2 + t ** 3 * p3;
@@ -59,21 +59,14 @@ export function shapeRasterBounds(drawing: Drawing): Bounds {
   if (drawing.kind !== 'shape') return { ...b };
   const kind = drawing.shape ?? 'rectangle';
   const extent = new Extent(b.width, b.height);
-  includePath(extent, shapePath(kind, b.width, b.height));
-  if (
-    kind === 'arrow' ||
-    kind === 'double-arrow' ||
-    drawing.arrowhead === 'end' ||
-    drawing.arrowhead === 'both'
-  ) {
-    const endY = kind === 'elbow' ? b.height : kind === 'curve' ? 0 : b.height / 2;
-    extent.include(b.width - 10, endY - 6);
-    extent.include(b.width, endY + 6);
-  }
-  if (kind === 'double-arrow' || drawing.arrowhead === 'both') {
-    extent.include(0, b.height / 2 - 6);
-    extent.include(10, b.height / 2 + 6);
-  }
+  includePath(extent, shapePath(kind, b.width, b.height, drawing.lineDirection));
+  // The heads of a line, whichever way it runs (#589).
+  for (const head of lineArrowheads(
+    kind,
+    { x: 0, y: 0, width: b.width, height: b.height },
+    drawing,
+  ))
+    includePath(extent, head);
   const { left, top, right, bottom } = extent;
   return { x: b.x + left, y: b.y + top, width: right - left, height: bottom - top };
 }

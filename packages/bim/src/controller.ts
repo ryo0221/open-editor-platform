@@ -8,8 +8,10 @@ import {
   type BimDocument,
   type BimElement,
   type BimOperation,
+  type BimAssetRef,
   type BimView,
 } from '@editor-platform/bim-core';
+import type { GeometryTextureRole, GeometryTextureSet } from '@editor-platform/geometry-core';
 import type { EditorSession } from '@editor-platform/editor-core';
 import type { BimIfcExport } from '@editor-platform/bim-ifc';
 import { BimDrawings } from './drawing';
@@ -38,6 +40,17 @@ export interface BimControllerOptions {
   assets?(): Map<string, Uint8Array>;
   /** The Host's CAD versions: part types read their shapes from it (R2c-U2). */
   parts?: BimPartSource;
+  /** The Host's store of texture images (#662); without it materials take no textures. */
+  textures?: BimAssetStore;
+}
+
+/**
+ * Where a Host keeps a building's texture images (#662): by content hash, outside the content.
+ * `stage` resolves once the bytes are stored; the content names them afterwards, in its own edit.
+ */
+export interface BimAssetStore {
+  get(sha256: string): Uint8Array | undefined;
+  stage(assets: { ref: BimAssetRef; bytes: Uint8Array }[]): Promise<void>;
 }
 
 /** Why the last edit was refused: a diagnostic or operation code and the entities it names. */
@@ -47,6 +60,8 @@ export interface BimNotice {
   path?: string;
   /** A refused delete: the entities it would have deleted, on the content it was refused on. */
   delete?: { ids: string[]; hash: string };
+  /** The Host's own words, when it refused (a texture that could not be stored). */
+  message?: string;
 }
 
 export interface BimState {
@@ -194,6 +209,109 @@ export class BimController {
     } catch (error) {
       return this.refuse({ code: error instanceof Error ? error.message : String(error), ids: [] });
     }
+  }
+
+  /** Whether the Host stores texture images, so a material can take one (#662). */
+  get canTexture() {
+    return !!this.options.textures;
+  }
+  /** A stored texture image's bytes, by hash. */
+  assetBytes(sha256: string) {
+    return this.options.textures?.get(sha256);
+  }
+  /**
+   * Puts a downloaded texture on a material (#662): the images are stored with the Host first,
+   * then the material names them in one edit, which also adds their refs. As in glTF the values
+   * multiply the maps, so a colour map makes the colour white and a roughness or metalness map
+   * makes that value 1. Returns the refusal's code, which is also the `notice`.
+   */
+  async adoptTextures(
+    materialId: string,
+    files: readonly { role: GeometryTextureRole; bytes: Uint8Array; mediaType: string }[],
+    textures: Omit<GeometryTextureSet, 'maps'>,
+  ): Promise<string | undefined> {
+    const store = this.options.textures;
+    if (!store) return this.refuse({ code: 'texture-unavailable', ids: [] });
+    if (!this.options.canEdit()) return this.refuse({ code: 'permission-denied', ids: [] });
+    if (!files.length) return this.refuse({ code: 'texture-empty', ids: [] });
+    const doc = this.current.content;
+    if (!doc.materials.some((m) => m.id === materialId))
+      return this.refuse({ code: 'target-missing', ids: [materialId] });
+    // Each image by its hash; IDs are given after staging, against the content as it is then.
+    const staged: { ref: BimAssetRef; bytes: Uint8Array }[] = [];
+    const roles: [GeometryTextureRole, BimAssetRef][] = [];
+    for (const file of files) {
+      const kind =
+        file.mediaType === 'image/png'
+          ? 'texture-png'
+          : file.mediaType === 'image/jpeg'
+            ? 'texture-jpeg'
+            : undefined;
+      if (!kind) return this.refuse({ code: 'texture-media-type', ids: [] });
+      const digest = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', file.bytes as BufferSource),
+      );
+      const sha256 = `sha256:${Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+      let ref = staged.find((a) => a.ref.kind === kind && a.ref.sha256 === sha256)?.ref;
+      if (!ref) {
+        // A provisional ID for the Host; the edit gives the final one.
+        const id = bimNewId(doc, 'asset', new Set(staged.map((x) => x.ref.id)));
+        ref = {
+          id,
+          kind,
+          sha256,
+          byteLength: file.bytes.byteLength,
+          mediaType: kind === 'texture-png' ? 'image/png' : 'image/jpeg',
+        };
+        staged.push({ ref, bytes: file.bytes });
+      }
+      roles.push([file.role, ref]);
+    }
+    try {
+      await store.stage(staged);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return this.refuse({ code: 'texture-stage-failed', ids: [], message });
+    }
+    // Read the content again: an edit (or another texture) may have landed while the images
+    // were stored. An image it already holds keeps its ref; a new one gets an ID free in the
+    // whole document's namespace (Codex).
+    const now = this.current.content;
+    const material = now.materials.find((m) => m.id === materialId);
+    if (!material) return this.refuse({ code: 'target-missing', ids: [materialId] });
+    const taken = new Set<string>();
+    const added: BimAssetRef[] = [];
+    const final = new Map<BimAssetRef, BimAssetRef>();
+    for (const { ref } of staged) {
+      const held = now.assets?.find((a) => a.kind === ref.kind && a.sha256 === ref.sha256);
+      if (held) final.set(ref, held);
+      else {
+        const id = bimNewId(now, 'asset', taken);
+        taken.add(id);
+        const next = { ...ref, id };
+        added.push(next);
+        final.set(ref, next);
+      }
+    }
+    const maps: GeometryTextureSet['maps'] = {};
+    for (const [role, ref] of roles) maps[role] = final.get(ref)!.id;
+    const a = material.appearance ?? { color: '#ffffff', opacity: 1, roughness: 1, metalness: 0 };
+    const { preset: _preset, ...look } = a;
+    return this.apply({
+      type: 'update',
+      collection: 'materials',
+      entity: {
+        ...material,
+        appearance: {
+          ...look,
+          ...(maps.color ? { color: '#ffffff' } : {}),
+          ...(maps.roughness ? { roughness: 1 } : {}),
+          ...(maps.metalness ? { metalness: 1 } : {}),
+          textures: { ...textures, maps },
+        },
+      },
+      assets: added,
+    });
   }
 
   /**

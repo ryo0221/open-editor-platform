@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { cadJointTypes, type CadDocument, type CadJointType } from '@editor-platform/cad-core';
 import type { CadAssembly, CadJointCreation } from './assembly';
 import type { CadConnectorChoice } from './joint-authoring';
+import { useStatusProps } from './status-role';
 
 export const jointTypeLabel: Record<CadJointType, string> = {
   fastened: 'Fastened',
@@ -94,6 +95,7 @@ export function JointCreator({
   busy: boolean;
 }) {
   const { step, parent, child, status, message } = creating;
+  const notice = useStatusProps();
   return (
     <div className="cad-component cad-joint-create" data-testid="cad-joint-create">
       <p>
@@ -103,7 +105,7 @@ export function JointCreator({
       <Side title="Child" choice={child} onAgain={() => assembly.pickAgain('child')} />
       {step !== 'type' && (
         <>
-          <p role="status">
+          <p {...notice}>
             {step === 'parent'
               ? '親の接続点：viewportで面・辺・頂点をクリックするか、原点を選びます。'
               : '子の接続点：動かす部品の面・辺・頂点をクリックするか、その部品の原点を選びます。'}
@@ -141,7 +143,7 @@ export function JointCreator({
       </label>
       {statusText[status] && (
         <p
-          role={status === 'broken' || status === 'refused' ? 'alert' : 'status'}
+          {...(status === 'broken' || status === 'refused' ? { role: 'alert' } : notice)}
           className={status === 'broken' || status === 'refused' ? 'cad-diagnostic' : undefined}
           data-testid="cad-joint-preview"
           data-status={status}

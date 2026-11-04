@@ -15,13 +15,26 @@ import {
   Package,
   Plus,
   Redo2,
+  Sun,
   Trash2,
   Undo2,
+  Aperture,
 } from 'lucide-react';
+import { geometryMaterialPresets } from '@editor-platform/geometry-core';
+import {
+  PathRenderDialog,
+  TextureEditor,
+  ViewTextureCache,
+  viewTexturesOf,
+  type PathRenderSource,
+} from '@editor-platform/geometry-view';
 import {
   bimDrawingScales,
   bimDrawingSvg,
   bimLimits,
+  bimLayerFaceMaterialIds,
+  bimSurfaceMaterialId,
+  type BimAppearance,
   type BimDocument,
   type BimDrawingScale,
   type BimView,
@@ -145,6 +158,10 @@ export function BimSurface({
   const [axesShown, setAxesShown] = useState(true);
   const [typeId, setTypeId] = useState<string | undefined>();
   const [fit, setFit] = useState(0);
+  const [realistic, setRealistic] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  /** The 3D view's solids and camera for a render (#664), set while the 3D view is shown. */
+  const renderSource = useRef<() => PathRenderSource | undefined>(undefined);
   const [plan, setPlan] = useState(false);
   const [tool, setTool] = useState<BimDraftTool>('select');
   const [arc, setArc] = useState(false);
@@ -212,6 +229,19 @@ export function BimSurface({
               </select>
             </label>
             <IconButton icon={Maximize} label="Fit view" onClick={() => setFit((n) => n + 1)} />
+            <IconButton
+              icon={Sun}
+              label="Realistic lighting"
+              aria-pressed={realistic}
+              onClick={() => setRealistic((on) => !on)}
+            />
+            <IconButton
+              icon={Aperture}
+              label="Render image"
+              reason="Path-traced still image of the 3D view; not in a plan or a drawing"
+              disabled={plan || !!openView}
+              onClick={() => setRendering(true)}
+            />
             {exportIfc && (
               <IconButton
                 icon={FileDown}
@@ -241,6 +271,11 @@ export function BimSurface({
             </span>
             {failed.length ? ` · ${failed.length} not built` : ''}
             {exportIfc?.writing ? ' · Writing IFC…' : ''}
+            {!exportIfc?.writing && exportIfc?.losses.length ? (
+              <span data-testid="bim-ifc-losses" title={exportIfc.losses.join('\n')}>
+                {' · IFC written without texture maps'}
+              </span>
+            ) : null}
             {state.readOnly ? ' · Read only' : ''}
           </span>
         }
@@ -278,6 +313,7 @@ export function BimSurface({
               <p className="bim-notice" role="alert">
                 Refused: {state.notice.code}
                 {state.notice.ids.length ? ` (${state.notice.ids.join(', ')})` : ''}
+                {state.notice.message ? ` ${state.notice.message}` : ''}
                 <button onClick={() => controller.dismissNotice()} aria-label="Dismiss">
                   ×
                 </button>
@@ -327,6 +363,8 @@ export function BimSurface({
             hidden={hidden}
             axesShown={axesShown}
             fit={fit}
+            realistic={realistic}
+            renderSource={renderSource}
             plan={planView}
             drawing={activeTool !== 'select'}
             onPlan={draft.onPlan}
@@ -341,6 +379,13 @@ export function BimSurface({
           />
         )}
       </EditorLayout>
+      {rendering && (
+        <PathRenderDialog
+          name={name}
+          source={() => renderSource.current?.()}
+          onClose={() => setRendering(false)}
+        />
+      )}
     </div>
   );
 }
@@ -354,6 +399,8 @@ function Viewport({
   hidden,
   axesShown,
   fit,
+  realistic,
+  renderSource,
   plan,
   drawing,
   onPlan,
@@ -365,6 +412,8 @@ function Viewport({
   hidden: ReadonlySet<BimElementKind>;
   axesShown: boolean;
   fit: number;
+  realistic: boolean;
+  renderSource: { current: (() => PathRenderSource | undefined) | undefined };
   plan: BimPlanView | undefined;
   drawing: boolean;
   onPlan(xy: [number, number], kind: 'move' | 'click' | 'double', mmPerPx: number): void;
@@ -398,19 +447,48 @@ function Viewport({
     } catch {
       setFailure('This browser cannot draw the 3D view (WebGL is unavailable).');
     }
+    renderSource.current = () => view.current?.renderSource();
     return () => {
+      renderSource.current = undefined;
       view.current?.dispose();
       view.current = undefined;
     };
-  }, [controller]);
-  const solids = useMemo(
+  }, [controller, renderSource]);
+  // #662: each texture image decoded once by hash; the view is drawn again as each is ready.
+  const [texturesLoaded, setTexturesLoaded] = useState(0);
+  const textureCache = useMemo(
     () =>
-      bimViewSolids(state.content, state.evaluation, {
+      controller.canTexture
+        ? new ViewTextureCache(() => setTexturesLoaded((n) => n + 1))
+        : undefined,
+    [controller],
+  );
+  useEffect(() => () => textureCache?.dispose(), [textureCache]);
+  const solids = useMemo(
+    () => {
+      const built = bimViewSolids(state.content, state.evaluation, {
         selection: new Set(state.selection),
         hiddenKinds: hidden,
         parts: state.parts,
-      }),
-    [state.content, state.evaluation, state.selection, hidden, state.parts],
+        textures: (set) =>
+          viewTexturesOf(set, state.content.assets ?? [], textureCache, (sha) =>
+            controller.assetBytes(sha),
+          ),
+      });
+      // Every image the building draws was asked for: free the others (a replaced texture).
+      textureCache?.sweep();
+      return built;
+    },
+    // texturesLoaded: an image decoded since.
+    [
+      state.content,
+      state.evaluation,
+      state.selection,
+      hidden,
+      state.parts,
+      textureCache,
+      texturesLoaded,
+    ],
   );
   const bounds = useMemo(
     () => bimViewBounds(state.evaluation, state.content),
@@ -424,6 +502,7 @@ function Viewport({
     if (fit && fitBounds.current) view.current?.fit(fitBounds.current);
   }, [fit]);
   useEffect(() => view.current?.setPlan(plan, fitBounds.current), [plan]);
+  useEffect(() => view.current?.setRealistic(realistic), [realistic]);
   useEffect(() => {
     if (view.current) view.current.drawing = drawing;
   }, [drawing]);
@@ -571,6 +650,7 @@ function Field({
   type = 'text',
   min,
   max,
+  step,
   onCommit,
 }: {
   label: string;
@@ -579,6 +659,7 @@ function Field({
   type?: 'text' | 'number';
   min?: number;
   max?: number;
+  step?: number;
   onCommit(value: string): string | undefined;
 }) {
   if (readOnly)
@@ -594,6 +675,7 @@ function Field({
       type={type}
       min={min}
       max={max}
+      step={step}
       onCommit={(v) => onCommit(v) === undefined}
     />
   );
@@ -1364,6 +1446,7 @@ function TypeEditor({
         onCommit={(v) => update({ name: v })}
       />
       {fields}
+      <MaterialLooks controller={controller} doc={doc} type={type} readOnly={readOnly} />
       {type.kind === 'part' && (
         <p className="bim-hint">
           CAD part version {type.source.versionId} of {type.source.artifactId}
@@ -1376,6 +1459,181 @@ function TypeEditor({
         onChange={(patch) => update(patch as Partial<BimType>)}
       />
     </div>
+  );
+}
+
+/**
+ * #661: the look of the material a type's surfaces show (its first layer's, or a column's or
+ * beam's own). A library preset copies its values; a value changed by hand makes it custom;
+ * "Kind colour" draws the elements in their kind's colour, as before materials. The material is
+ * shared: every type made of it changes with it.
+ */
+/**
+ * #662 (2c): a layered type shows its first layer's material on one face and every edge, and
+ * its last layer's on the other face, so each gets its own section when they differ.
+ */
+function MaterialLooks({
+  controller,
+  doc,
+  type,
+  readOnly,
+}: {
+  controller: BimController;
+  doc: BimDocument;
+  type: BimType;
+  readOnly: boolean;
+}) {
+  const faces = bimLayerFaceMaterialIds(type);
+  const wall = type.kind === 'wall';
+  if (!faces || faces.first === faces.last)
+    return (
+      <MaterialLook
+        controller={controller}
+        doc={doc}
+        materialId={bimSurfaceMaterialId(type)}
+        readOnly={readOnly}
+      />
+    );
+  return (
+    <>
+      <MaterialLook
+        controller={controller}
+        doc={doc}
+        materialId={faces.first}
+        readOnly={readOnly}
+        hint={
+          wall
+            ? 'First layer: the face right of the drawing direction, and the ends and edges.'
+            : 'First layer: the underside and the edges.'
+        }
+      />
+      <MaterialLook
+        controller={controller}
+        doc={doc}
+        materialId={faces.last}
+        readOnly={readOnly}
+        title="Other face material"
+        testId="bim-material-last"
+        hint={wall ? 'Last layer: the face left of the drawing direction.' : 'Last layer: the top.'}
+      />
+    </>
+  );
+}
+
+function MaterialLook({
+  controller,
+  doc,
+  materialId,
+  readOnly,
+  title = 'Surface material',
+  testId = 'bim-material',
+  hint,
+}: {
+  controller: BimController;
+  doc: BimDocument;
+  materialId: string | undefined;
+  readOnly: boolean;
+  title?: string;
+  testId?: string;
+  hint?: string;
+}) {
+  const id = materialId;
+  const material = doc.materials.find((m) => m.id === id);
+  if (!material) return null;
+  const a = material.appearance;
+  const set = (appearance: BimAppearance | undefined) => {
+    const { appearance: _was, ...rest } = material;
+    return controller.apply({
+      type: 'update',
+      collection: 'materials',
+      entity: appearance ? { ...rest, appearance } : rest,
+    });
+  };
+  const custom = (patch: Partial<BimAppearance>) => {
+    if (!a) return undefined;
+    const { preset: _preset, ...rest } = { ...a, ...patch };
+    return set(rest);
+  };
+  const users = doc.types.filter(
+    (t) =>
+      bimSurfaceMaterialId(t) === material.id || bimLayerFaceMaterialIds(t)?.last === material.id,
+  ).length;
+  const unit = (key: 'roughness' | 'metalness' | 'opacity', label: string) =>
+    a && (
+      <Field
+        label={label}
+        type="number"
+        min={0}
+        max={1}
+        step={0.05}
+        value={a[key]}
+        readOnly={readOnly}
+        onCommit={(v) => custom({ [key]: Number(v) })}
+      />
+    );
+  return (
+    <section className="bim-material" aria-label={title} data-testid={testId}>
+      <h4>
+        {title}: {material.name}
+      </h4>
+      {hint && <p className="bim-hint">{hint}</p>}
+      {users > 1 && <p className="bim-hint">Shared by {users} types.</p>}
+      <label className="ep-field">
+        Look
+        <select
+          value={a ? (a.preset ?? 'custom') : ''}
+          disabled={readOnly}
+          onChange={(e) => {
+            const p = geometryMaterialPresets.find((x) => x.id === e.target.value);
+            if (!e.target.value) set(undefined);
+            else if (p)
+              set({
+                color: p.color,
+                opacity: p.opacity,
+                roughness: p.roughness,
+                metalness: p.metalness,
+                preset: p.id,
+              });
+          }}
+        >
+          <option value="">Kind colour</option>
+          {a && !a.preset && <option value="custom">Custom</option>}
+          {geometryMaterialPresets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {a && (
+        <>
+          <Field
+            label="Colour"
+            value={a.color}
+            readOnly={readOnly}
+            onCommit={(v) => {
+              const color = v.trim().toLowerCase();
+              return /^#[0-9a-f]{6}$/.test(color) ? custom({ color }) : 'appearance-color';
+            }}
+          />
+          {unit('roughness', 'Roughness')}
+          {unit('metalness', 'Metalness')}
+          {unit('opacity', 'Opacity')}
+        </>
+      )}
+      <TextureEditor
+        set={a?.textures}
+        readOnly={readOnly}
+        canAdd={controller.canTexture}
+        testId={testId === 'bim-material' ? 'bim-texture' : `${testId}-texture`}
+        onChange={(textures) => {
+          if (!a) return;
+          const { textures: _old, ...look } = a;
+          set(textures ? { ...look, textures } : look);
+        }}
+        onAdd={(files, textures) => controller.adoptTextures(material.id, files, textures)}
+      />
+    </section>
   );
 }
 
@@ -1546,6 +1804,7 @@ function useIfcExport(
   const guard = useContext(EditorExportGuardContext);
   const inputs = useContext(EditorInputsContext);
   const [writing, setWriting] = useState(false);
+  const [losses, setLosses] = useState<string[]>([]);
   if (!ifc) return undefined;
   const run = async () => {
     try {
@@ -1559,13 +1818,16 @@ function useIfcExport(
     try {
       const fileName = bimFileName(name, 'ifc');
       const file = await controller.exportIfc({ ...ifc(), fileName });
-      if (file)
+      if (file) {
         bimDownload(new Blob([file.bytes as BlobPart], { type: 'application/x-step' }), fileName);
+        // #663: what the file does not carry, until the next export.
+        setLosses(file.losses);
+      }
     } finally {
       setWriting(false);
     }
   };
-  return { writing, run };
+  return { writing, run, losses };
 }
 
 /**

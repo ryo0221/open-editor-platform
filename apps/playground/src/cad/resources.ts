@@ -1,6 +1,8 @@
 /**
- * The Playground's CAD asset closure (docs/cad/integration.md, D2): immutable STEP and BRep
- * bytes kept in the stored record beside the Artifact envelope, never inside the content.
+ * The Playground's CAD asset closure (docs/cad/integration.md, D2): immutable STEP, BRep and
+ * texture image (#662) bytes kept in the stored record beside the Artifact envelope, never inside the content.
+ * A building (`bim`) keeps its materials' texture images (#662) the same way, in the same field,
+ * and so does a character (C1d) its mesh and texture assets.
  */
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import {
@@ -10,11 +12,14 @@ import {
   type CadDocument,
 } from '@editor-platform/cad-core';
 import type { CadAssetStore } from '@editor-platform/cad';
+import { characterAssetMediaTypes } from '@editor-platform/character-core';
 import type { StoredArtifact } from '../model';
 import { cadPartClosure, validateCadParts } from './parts';
+import { portableCharacterRecord } from '../character/parts';
 
 /** One kept asset. Shared by every content (draft or version) that names its hash. */
 export interface CadResource {
+  /** A CAD asset kind; a character's records hold character asset kinds here (C1d). */
   kind: CadAssetKind;
   sha256: string;
   byteLength: number;
@@ -31,11 +36,21 @@ export const cadNativeFileBytes = 16_000_000;
 export const cadInsertReserveBytes = 8 * 1024;
 
 const key = (kind: string, sha256: string) => `${kind} ${sha256}`;
-/** The draft, every version and every retained part version (R2b): all name assets. */
-const contents = (record: StoredArtifact) => [
+/**
+ * The draft, every version and every retained part version (R2b): all name assets. A building's
+ * draft and versions name only their own images: the CAD versions it places are drawn without
+ * their textures, so their assets are not carried.
+ */
+const contents = (record: StoredArtifact): { assets?: readonly CadAssetRef[] }[] => [
   ...([record.draft.content, ...record.versions.map((v) => v.content)] as CadDocument[]),
-  ...cadPartClosure(record).reached.values(),
+  ...(record.kind === 'cad' ? cadPartClosure(record).reached.values() : []),
 ];
+/** The kinds of record that keep asset bytes beside their content. */
+const keepsAssets = (record: StoredArtifact) =>
+  record.kind === 'cad' || record.kind === 'bim' || record.kind === 'character';
+/** The media type each asset kind must carry, by the record's domain. */
+const mediaTypesOf = (record: StoredArtifact): Readonly<Record<string, string>> =>
+  record.kind === 'character' ? characterAssetMediaTypes : cadAssetMediaTypes;
 /** Asset refs named by the draft, every retained version and the part versions they place. */
 export function cadClosure(record: StoredArtifact): Map<string, CadAssetRef> {
   const refs = new Map<string, CadAssetRef>();
@@ -68,11 +83,16 @@ export async function sha256Ref(bytes: Uint8Array) {
  * else. Unreferenced bytes (a cancelled insert, an Undo in this session) stay local only.
  */
 export function portableCadRecord(record: StoredArtifact): StoredArtifact {
-  if (record.kind !== 'cad') return record;
+  if (!keepsAssets(record)) return record;
   const closure = cadClosure(record);
   const cadResources = (record.cadResources ?? []).filter((r) =>
     closure.has(key(r.kind, r.sha256)),
   );
+  // A building's placed versions are kept by `portableBimRecord`; a character's props reach
+  // only the versions its draft and versions place.
+  if (record.kind === 'bim') return record.cadResources ? { ...record, cadResources } : record;
+  if (record.kind === 'character')
+    return portableCharacterRecord(record.cadResources ? { ...record, cadResources } : record);
   // Part versions the draft and versions no longer place stay local only, like assets.
   const reached = cadPartClosure(record).reached;
   return {
@@ -91,7 +111,7 @@ export const nativeBytes = (record: StoredArtifact) =>
  * the draft too), so a file is never written that the Playground cannot read back.
  */
 export function assertCadNativeFits(record: StoredArtifact, action: 'version' | 'export') {
-  if (record.kind !== 'cad') return;
+  if (record.kind !== 'cad' && record.kind !== 'character') return;
   const size = nativeBytes(portableCadRecord(record));
   if (size <= cadNativeFileBytes) return;
   const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます`;
@@ -108,18 +128,20 @@ export function assertCadNativeFits(record: StoredArtifact, action: 'version' | 
  * draft and every version resolves, and nothing else is carried.
  */
 export async function validateCadRecord(record: StoredArtifact) {
-  validateCadParts(record);
+  if (record.kind === 'cad') validateCadParts(record);
   const resources = record.cadResources ?? [];
   if (!Array.isArray(resources)) throw new Error('CAD resources');
   const seen = new Map<string, CadResource>();
+  const mediaTypes = mediaTypesOf(record);
   for (const r of resources) {
     if (
       !r ||
       typeof r !== 'object' ||
       Object.keys(r).sort().join() !== 'byteLength,bytes,encoding,kind,mediaType,sha256' ||
       r.encoding !== 'base64' ||
-      (r.kind !== 'source-step' && r.kind !== 'normalized-brep') ||
-      r.mediaType !== cadAssetMediaTypes[r.kind]
+      typeof r.kind !== 'string' ||
+      !Object.hasOwn(mediaTypes, r.kind) ||
+      r.mediaType !== mediaTypes[r.kind]
     )
       throw new Error('CAD resource');
     if (seen.has(key(r.kind, r.sha256))) throw new Error('CAD resource duplicated');
@@ -163,7 +185,10 @@ export function mergeCadResources(
 export function createCadAssetStore(options: {
   record(): StoredArtifact | undefined;
   persist(record: StoredArtifact): Promise<boolean>;
+  /** The record its native file carries; a building's also drops versions it no longer places. */
+  portable?(record: StoredArtifact): StoredArtifact;
 }): CadAssetStore {
+  const portableOf = options.portable ?? portableCadRecord;
   const decoded = new Map<string, Uint8Array>();
   return {
     get(sha256) {
@@ -195,7 +220,7 @@ export function createCadAssetStore(options: {
           });
       }
       // Measured with the real serializer: the native file after the insert must stay importable.
-      const portable = portableCadRecord(record);
+      const portable = portableOf(record);
       const named = new Set(assets.map((a) => key(a.ref.kind, a.ref.sha256)));
       const size = nativeBytes({
         ...portable,

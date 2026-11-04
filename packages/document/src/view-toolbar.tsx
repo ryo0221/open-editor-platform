@@ -7,6 +7,8 @@ import {
   Strikethrough,
   Code,
   Link,
+  Dot,
+  Languages,
   Highlighter,
   Plus,
   List,
@@ -119,6 +121,8 @@ function MarkButtons({
             hasMark('highlight'),
           )}
           {toolButton('Link', Link, actions.openLink, hasMark('link'))}
+          {toolButton('Ruby', Languages, actions.openRuby, hasMark('ruby'))}
+          {toolButton('Emphasis dots', Dot, () => mark('emphasisDots'), hasMark('emphasisDots'))}
         </div>
       </Menu>
     </>

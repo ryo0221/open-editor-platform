@@ -1,13 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createArtifact,
   MemoryStorage,
   serializeArtifact,
   type Artifact,
 } from '@editor-platform/artifact-core';
-import { command, type ProposedCommands } from '@editor-platform/editor-core';
+import {
+  command,
+  type ProposalDiffAdapter,
+  type ProposedCommands,
+} from '@editor-platform/editor-core';
 import {
   ArtifactEditor,
+  changedElementsFromDiff,
   EditorHostError,
   loadHostArtifact,
   type EditorHostAdapter,
@@ -158,6 +163,53 @@ describe('Host API: saved notification, saved read and proposal review', () => {
     expect(host.readSaved().content.text).toBe('first');
   });
 
+  it('names the elements an accepted proposal changed when the adapter reads them', () => {
+    const diff = (throws = false): ProposalDiffAdapter<Content> => ({
+      domain: 'example',
+      has: () => true,
+      diff: (before, after) => {
+        if (throws) throw new Error('diff failed');
+        const change = (elementId: string) => ({
+          domain: 'example',
+          kind: 'text' as const,
+          elementId,
+          property: 'text',
+        });
+        return {
+          // An artifact-level setting ('') is not an element; a repeated ID is listed once.
+          changes: before.text === after.text ? [] : [change('text'), change(''), change('text')],
+          view: [change('view')],
+          fallback: [],
+        };
+      },
+    });
+    const host = new ArtifactEditor(
+      artifact(),
+      { ...adapter, changedElements: changedElementsFromDiff(diff()) },
+      new MemoryStorage(),
+    );
+    const seen = observe(host);
+    host.propose(proposal('changed', 'from tool'));
+    const accepted = host.acceptProposal('changed');
+    expect(accepted.changedElementIds).toEqual(['text']);
+    expect(seen.resolved).toEqual([accepted]);
+    host.propose(proposal('rejected', 'other'));
+    expect(host.rejectProposal('rejected').changedElementIds).toBeUndefined();
+    // Without a reader the result has no IDs; a failing reader keeps the proposal for review.
+    const plain = new ArtifactEditor(artifact(), adapter, new MemoryStorage());
+    plain.propose(proposal('p', 'x'));
+    expect(plain.acceptProposal('p').changedElementIds).toBeUndefined();
+    const broken = new ArtifactEditor(
+      artifact(),
+      { ...adapter, changedElements: changedElementsFromDiff(diff(true)) },
+      new MemoryStorage(),
+    );
+    broken.propose(proposal('p', 'x'));
+    expect(code(() => broken.acceptProposal('p'))).toBe('proposal-invalid');
+    expect(broken.content.text).toBe('initial');
+    expect(broken.proposals.map((p) => p.id)).toEqual(['p']);
+  });
+
   it('rejects without changing content or history, and refuses stale proposals', () => {
     const host = new ArtifactEditor(artifact(), adapter, new MemoryStorage());
     const seen = observe(host);
@@ -281,4 +333,89 @@ describe('Host API: saved notification, saved read and proposal review', () => {
     expect(errors).toHaveLength(1);
     expect(seen[0].artifactId).toBe(host.id);
   });
+});
+
+describe('Host saved-version witness and retry', () => {
+  it('captures proposal ancestry with the saved revision, rather than edits made during IO', async () => {
+    const store = new MemoryStorage<Artifact<Content>>();
+    let release!: () => void,
+      held = false;
+    const storage = {
+      get: store.get.bind(store),
+      list: store.list.bind(store),
+      remove: store.remove.bind(store),
+      put: async (a: Artifact<Content>) => {
+        if (held)
+          await new Promise<void>((r) => {
+            release = r;
+          });
+        await store.put(a);
+      },
+    };
+    const host = new ArtifactEditor(artifact(), adapter, storage),
+      seen = observe(host);
+    await host.save({ commitVersion: true });
+    const base = host.artifact.draft.baseVersionId;
+    let applied = '';
+    host.propose(proposal('one', 'proposal'), {
+      onApplied: (e) => {
+        applied = e.transactionId;
+      },
+    });
+    host.acceptProposal('one');
+    held = true;
+    const saving = host.save({ commitVersion: true });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    host.undo();
+    host.execute(edit('new branch'));
+    release();
+    await saving;
+    expect(seen.saved.at(-1)).toMatchObject({
+      baseVersionId: base,
+      proposalTransactions: [applied],
+      dirty: true,
+    });
+    expect(host.readSaved().content.text).toBe('proposal');
+    expect(host.content.text).toBe('new branch');
+    expect(host.proposalTransactions).toEqual([]);
+    held = false;
+    await host.save({ commitVersion: true });
+    expect(seen.saved.at(-1)!.proposalTransactions).toEqual([]);
+  });
+  for (const changed of [false, true])
+    it(`reuses a lost immutable save without duplicate versions (later edit=${changed})`, async () => {
+      const store = new MemoryStorage<Artifact<Content>>();
+      let lose = true;
+      const storage = {
+        get: store.get.bind(store),
+        list: store.list.bind(store),
+        remove: store.remove.bind(store),
+        put: async (a: Artifact<Content>) => {
+          await store.put(a);
+          if (lose) {
+            lose = false;
+            throw Error('lost response');
+          }
+        },
+      };
+      const host = new ArtifactEditor(artifact(), adapter, storage),
+        seen = observe(host);
+      // Unchanged content still needs protection if a new version's acknowledgement is lost.
+      if (changed) host.execute(edit('saved candidate'));
+      await expect(host.save({ commitVersion: true })).rejects.toMatchObject({
+        code: 'save-failed',
+      });
+      expect(host.snapshot.dirty).toBe(true);
+      expect(() => host.close('require-saved')).toThrow();
+      const uncertain = (await store.get(host.id))!.versions[0];
+      expect(seen.saved).toEqual([]);
+      if (changed) host.execute(edit('later input'));
+      await host.save({ commitVersion: true });
+      const persisted = (await store.get(host.id))!;
+      expect(persisted.versions).toHaveLength(changed ? 2 : 1);
+      expect(persisted.versions[0]).toEqual(uncertain);
+      expect(seen.saved[0].versionId).toBe(uncertain.versionId);
+      expect(host.content.text).toBe(changed ? 'later input' : 'initial');
+      expect(host.snapshot.dirty).toBe(false);
+    });
 });

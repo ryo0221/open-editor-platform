@@ -3,6 +3,7 @@ import { newId } from '@editor-platform/artifact-core';
 import { transaction, type EditorCommand } from '@editor-platform/editor-core';
 import { insertElement, updateElement, type DesignContent } from './model';
 import { insertDesignPage, insertDesignPanel, setDesignPagination } from './pagination';
+import { mangaDialoguePlacement } from './manga-dialogue';
 
 /** Generic native page controls, shared by ordinary and independent Design Surfaces. */
 export function DesignPagePanel({
@@ -35,17 +36,23 @@ export function DesignPagePanel({
   }
   function dialogue(panelId: string) {
     const panel = content.elements.find((e) => e.id === panelId)!;
+    const placement = mangaDialoguePlacement(panel, 400);
+    if (!placement) return;
     const id = newId('dialogue');
     const insert = insertElement('text', {
       id,
       parentId: panelId,
-      bounds: { x: panel.bounds.x + 30, y: panel.bounds.y + 30, width: 400, height: 70 },
+      bounds: placement.bounds,
     });
     if (
       apply(
         transaction('Insert dialogue', [
           insert,
-          updateElement(id, { text: 'Dialogue', fill: '#111111' }),
+          updateElement(id, {
+            typography: placement.typography,
+            text: 'Dialogue',
+            fill: '#111111',
+          }),
         ]),
       )
     )
@@ -108,7 +115,7 @@ export function DesignPagePanel({
                   ↑
                 </button>
                 <button
-                  disabled={readOnly}
+                  disabled={readOnly || !!p.division}
                   onClick={() => addPanel(p.frameId)}
                   aria-label={`Add panel to page ${index + 1}`}
                 >
@@ -137,7 +144,11 @@ export function DesignPagePanel({
                         ↑
                       </button>
                       <button
-                        disabled={readOnly}
+                        disabled={
+                          readOnly ||
+                          !mangaDialoguePlacement(content.elements.find((e) => e.id === id)!, 400)
+                        }
+                        title="小さすぎるコマには台詞を配置できません"
                         onClick={() => dialogue(id)}
                         aria-label={`Add dialogue to panel ${index + 1}.${i + 1}`}
                       >

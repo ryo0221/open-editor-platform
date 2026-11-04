@@ -16,6 +16,7 @@ import {
   type JsonValue,
   type ProfileRef,
 } from './model';
+import { isGraphNodeIcon, type GraphNodeIcon } from './icon';
 export interface AttributeSchema {
   type: 'string' | 'number' | 'boolean' | 'enum' | 'array' | 'object';
   required?: boolean;
@@ -52,6 +53,12 @@ export interface GraphNodeType extends GraphType {
      * lists types by group in Profile order; types without one go under "Other".
      */
     group?: string;
+    /** Type default icon, drawn as a badge over the node's top-left corner. */
+    icon?: GraphNodeIcon;
+    /** Attribute in this type's schema whose value picks an icon from `icons`. */
+    iconBy?: string;
+    /** Attribute value (compared as a string) → icon; unmapped values use `icon`. */
+    icons?: Record<string, GraphNodeIcon>;
   };
 }
 export interface GraphEdgeType extends GraphType {
@@ -60,8 +67,15 @@ export interface GraphEdgeType extends GraphType {
     edgeStyle?: { color?: string; dash?: number[] };
   };
   connection?: {
+    /** Node types allowed at each end; omitted means any node type. */
     from?: string[];
     to?: string[];
+    /**
+     * Section types allowed at each end (#594). Section ends are opt-in: omitted or `[]` means a
+     * Section cannot be an end of this edge type, a list names the Section types that can.
+     */
+    fromSections?: string[];
+    toSections?: string[];
     allowSelf?: boolean;
     allowParallel?: boolean;
     allowCycles?: boolean;
@@ -163,6 +177,13 @@ function uiValid(ui: unknown, depth = 0, scope?: UiScope): boolean {
       if (key === 'shape' && scope === 'node' && depth === 0) return isGraphNodeShape(v);
       if (key === 'group' && scope === 'node' && depth === 0)
         return typeof v === 'string' && v.trim().length > 0 && v.length <= 40;
+      if (key === 'icon' && scope === 'node' && depth === 0) return isGraphNodeIcon(v);
+      if (key === 'iconBy' && scope === 'node' && depth === 0) return validGraphId(v);
+      if (key === 'icons' && scope === 'node' && depth === 0)
+        return (
+          plainRecord(v) &&
+          Object.entries(v).every(([value, icon]) => value.length <= 200 && isGraphNodeIcon(icon))
+        );
       if (key === 'style' && (scope === 'node' || scope === 'section') && depth === 0)
         return validGraphStyle(v);
       if (['label', 'description', 'labelField'].includes(key)) return typeof v === 'string';
@@ -227,6 +248,12 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
       (t.readOnly !== undefined && typeof t.readOnly !== 'boolean')
     )
       return false;
+    // Value icons need the field they are keyed by, and that field must exist on the type.
+    if (scope === 'node' && plainRecord(t.ui)) {
+      const { iconBy, icons } = t.ui;
+      if (icons !== undefined && iconBy === undefined) return false;
+      if (iconBy !== undefined && !Object.hasOwn(t.schema, iconBy as string)) return false;
+    }
     if (section) return t.contains === undefined || containsValid(t.contains);
     if (!edge || t.connection === undefined) return true;
     const c = t.connection;
@@ -238,6 +265,7 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
             Array.isArray(v) &&
             v.every((id) => typeof id === 'string' && Object.hasOwn(p.nodes, id))
           );
+        if (k === 'fromSections' || k === 'toSections') return typeList(v, p.sections);
         if (['allowSelf', 'allowParallel', 'allowCycles'].includes(k))
           return typeof v === 'boolean';
         return (
@@ -428,15 +456,25 @@ type AddGraphDiagnostic = (
 function checkConnectionRules(
   e: GraphEdgeList[number],
   c: NonNullable<GraphEdgeType['connection']>,
-  nodes: Map<string, GraphDocument['nodes'][number]>,
+  ends: { nodes: Map<string, { type: string }>; sections: Map<string, { type: string }> },
   count: EdgeTypeCounts,
   add: AddGraphDiagnostic,
 ) {
-  if (
-    (c.from && !c.from.includes(nodes.get(e.from)!.type)) ||
-    (c.to && !c.to.includes(nodes.get(e.to)!.type))
-  )
+  let outsideNodes = false,
+    outsideSections = false;
+  for (const side of ['from', 'to'] as const) {
+    const node = ends.nodes.get(e[side]);
+    if (node) outsideNodes ||= !!c[side] && !c[side].includes(node.type);
+    else {
+      // A Section end is allowed only when the edge type names its Section type (#594).
+      const allowed = c[side === 'from' ? 'fromSections' : 'toSections'];
+      outsideSections ||= !allowed?.includes(ends.sections.get(e[side])!.type);
+    }
+  }
+  if (outsideNodes)
     add(e.id, 'connection-type', 'This connection is outside the declared node types', 'edge');
+  if (outsideSections)
+    add(e.id, 'connection-section', 'This connection type cannot end at this section type', 'edge');
   if (c.allowSelf === false && e.from === e.to)
     add(e.id, 'self', 'Self connections are prohibited', 'edge');
   if (c.allowParallel === false && count.pairs.get(canonicalJson([e.from, e.to]))! > 1)
@@ -476,7 +514,10 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
         ...validateAttributes(n.attributes, t.schema, { scope: 'node', elementId: n.id }),
       );
   }
-  const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
+  const ends = {
+    nodes: new Map(graph.nodes.map((n) => [n.id, n])),
+    sections: new Map(graph.sections.map((s) => [s.id, s])),
+  };
   const counts = countEdgesByType(graph, profile);
   for (const e of graph.edges) {
     const t = profile.edges[e.type];
@@ -485,9 +526,7 @@ export function validateGraph(graph: GraphDocument, profile: GraphProfile): Grap
       continue;
     }
     result.push(...validateAttributes(e.attributes, t.schema, { scope: 'edge', elementId: e.id }));
-    const c = t.connection;
-    if (!c) continue;
-    checkConnectionRules(e, c, nodes, counts.get(e.type)!, add);
+    checkConnectionRules(e, t.connection ?? {}, ends, counts.get(e.type)!, add);
   }
   checkSections(graph, profile, add, result);
   return result;

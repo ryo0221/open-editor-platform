@@ -113,7 +113,7 @@ export function graphInspectorTitle(
       ? (profile.edges[edge.type].ui?.label ?? edge.type)
       : section
         ? label(section.id)
-        : 'Graph properties';
+        : undefined;
 }
 
 /** A named connection shows its name alone; an unnamed one shows its relation type. */
@@ -204,28 +204,33 @@ function graphNodeSizing(
   return { nodeSizeKey, sizeOf };
 }
 
+/**
+ * Routes and labels of the drawn connections. `boxes` are the drawn nodes and collapsed Sections,
+ * which routes avoid; `frames` are the open Section frames a connection may end at (#594), which
+ * routes may cross like the frames of every other Section.
+ */
 function graphEdgeLayout(
   input: GraphSceneInput,
   edges: GraphEdge[],
   boxes: Record<string, GraphBox>,
+  frames: Record<string, GraphBox>,
   looks: Record<string, GraphNodeLook>,
   edgeText: (edge: GraphEdge) => string,
 ) {
   const { visibleEdgeTypes, labelSizes } = input;
+  const end = (id: string) => (Object.hasOwn(boxes, id) ? boxes[id] : frames[id]);
   const visibleEdges = edges.filter(
     (edge) =>
-      boxes[edge.from] &&
-      boxes[edge.to] &&
-      (!visibleEdgeTypes || visibleEdgeTypes.includes(edge.type)),
+      end(edge.from) && end(edge.to) && (!visibleEdgeTypes || visibleEdgeTypes.includes(edge.type)),
   );
   const ends = new Map<string, GraphRouteEnds>(
     visibleEdges.map((edge) => [
       edge.id,
       {
-        source: boxes[edge.from],
-        target: boxes[edge.to],
-        sourceShape: looks[edge.from].shape,
-        targetShape: looks[edge.to].shape,
+        source: end(edge.from),
+        target: end(edge.to),
+        sourceShape: looks[edge.from]?.shape ?? 'rectangle',
+        targetShape: looks[edge.to]?.shape ?? 'rectangle',
       },
     ]),
   );
@@ -233,12 +238,7 @@ function graphEdgeLayout(
     new Map(
       visibleEdges.map((edge) => [
         edge.id,
-        routeGraphEdge(
-          boxes[edge.from],
-          boxes[edge.to],
-          Object.values(boxes),
-          edge.from === edge.to,
-        ),
+        routeGraphEdge(end(edge.from), end(edge.to), Object.values(boxes), edge.from === edge.to),
       ]),
     ),
     ends,
@@ -299,11 +299,14 @@ function graphSectionLayout(input: GraphSceneInput, positions: Record<string, Po
   const hiddenSections = new Set(
     graph.sections.filter((s) => s.parentId !== undefined && holder(s.parentId)).map((s) => s.id),
   );
+  // Hidden nodes and Sections stand for their outermost collapsed Section, which is also where
+  // connections that end at them (#594) are redrawn.
   const representative = new Map<string, string>();
   for (const n of graph.nodes) {
     const h = n.sectionId === undefined ? undefined : holder(n.sectionId);
     if (h) representative.set(n.id, h);
   }
+  for (const s of hiddenSections) representative.set(s, holder(s)!);
   const collapsedBoxes: Record<string, GraphBox> = {};
   for (const id of collapsed)
     if (frames[id] && !hiddenSections.has(id))
@@ -317,8 +320,10 @@ function graphSectionLayout(input: GraphSceneInput, positions: Record<string, Po
     edges: GraphEdge[] = [],
     edgeIds = new Set(graph.edges.map((e) => e.id));
   for (const edge of graph.edges) {
-    // The Host filter applies to the real ends, before members are replaced by their Section.
-    if (shown && !(shown.has(edge.from) && shown.has(edge.to))) continue;
+    // The Host filter applies to the real node ends, before members are replaced by their
+    // Section. Sections are not filtered, so a Section end always passes.
+    if (shown && ![edge.from, edge.to].every((id) => shown.has(id) || Object.hasOwn(frames, id)))
+      continue;
     const from = representative.get(edge.from) ?? edge.from,
       to = representative.get(edge.to) ?? edge.to;
     if (from === edge.from && to === edge.to) {
@@ -400,10 +405,17 @@ export function computeGraphScene(input: GraphSceneInput) {
       ? `${profile.edges[edge.type]?.ui?.label ?? edge.type} ×${summary.count}`
       : graphEdgeText(profile, edge);
   };
+  // Open, drawn Section frames that connections may end at (#594).
+  const frameEnds: Record<string, GraphBox> = Object.fromEntries(
+    sections.order
+      .filter((s) => !Object.hasOwn(sections.collapsedBoxes, s.id))
+      .map((s) => [s.id, sections.frames[s.id]]),
+  );
   const { visibleEdges, routes, edgeLabels } = graphEdgeLayout(
     input,
     sections.edges,
     boxes,
+    frameEnds,
     looks,
     edgeText,
   );
@@ -507,7 +519,7 @@ export function graphNodeDropIntents(input: {
   }
 }
 
-export function initialGraphCamera(initialView: 'origin' | 'fit' | GraphCamera): GraphCamera {
+export function initialGraphCamera(initialView: GraphInitialView): GraphCamera {
   const view =
     typeof initialView === 'object' &&
     [initialView.x, initialView.y, initialView.zoom].every(Number.isFinite) &&
@@ -515,6 +527,32 @@ export function initialGraphCamera(initialView: 'origin' | 'fit' | GraphCamera):
       ? initialView
       : { x: 0, y: 0, zoom: 1 };
   return { x: view.x, y: view.y, zoom: Math.max(0.001, Math.min(2, view.zoom)) };
+}
+
+/**
+ * The camera a Surface opens with (#589): `fit` shows the whole drawing and never magnifies
+ * it (a selection is only emphasized); `selection` opens on the selected node and its
+ * neighbours, as `fit` without one.
+ */
+export type GraphInitialView = 'origin' | 'fit' | 'selection' | GraphCamera;
+/** The largest zoom an automatic Fit of the whole drawing opens with: it never magnifies. */
+export const graphFitMaxZoom = 1;
+/**
+ * The camera after a ctrl/⌘ wheel step (or a pinch) at `cursor` in canvas pixels: the point
+ * under the cursor stays under it, as in drawing tools (#589). `scroll` is folded into the pan.
+ */
+export function wheelGraphCamera(
+  camera: GraphCamera,
+  cursor: { x: number; y: number },
+  scroll: { x: number; y: number },
+  deltaY: number,
+): GraphCamera {
+  const zoom = Math.max(0.001, Math.min(2, camera.zoom * Math.exp(-deltaY * 0.002)));
+  const world = {
+    x: (cursor.x + scroll.x - camera.x) / camera.zoom,
+    y: (cursor.y + scroll.y - camera.y) / camera.zoom,
+  };
+  return { x: cursor.x - world.x * zoom, y: cursor.y - world.y * zoom, zoom };
 }
 
 export const zoomOutStep = (z: number) =>
@@ -527,20 +565,31 @@ export const nudgedGraphPosition = (key: string, p: Position): Position => ({
   y: p.y + (key === 'ArrowDown' ? 10 : key === 'ArrowUp' ? -10 : 0),
 });
 
+/**
+ * What a dragged connection end lands on: a drawn node (within 14px of it), else a collapsed
+ * Section's box, else the innermost open Section frame holding the point (#594). Whether the
+ * edge type may end there is checked separately.
+ */
 export function findEndpointTarget(
   point: Position,
   visible: GraphNode[],
   boxes: Record<string, GraphBox>,
+  sections?: {
+    graph: GraphDocument;
+    layout: Pick<GraphScene['sections'], 'frames' | 'order' | 'collapsedBoxes'>;
+  },
 ) {
-  return [...visible].reverse().find((node) => {
-    const box = boxes[node.id];
-    return (
-      point.x >= box.x - 14 &&
-      point.x <= box.x + box.width + 14 &&
-      point.y >= box.y - 14 &&
-      point.y <= box.y + box.height + 14
-    );
-  })?.id;
+  const near = (box: GraphBox, pad: number) =>
+    point.x >= box.x - pad &&
+    point.x <= box.x + box.width + pad &&
+    point.y >= box.y - pad &&
+    point.y <= box.y + box.height + pad;
+  const node = [...visible].reverse().find((node) => near(boxes[node.id], 14))?.id;
+  if (node || !sections) return node;
+  const collapsed = Object.entries(sections.layout.collapsedBoxes)
+    .reverse()
+    .find(([, box]) => near(box, 0))?.[0];
+  return collapsed ?? graphDropSection(sections.graph, sections.layout, point) ?? undefined;
 }
 
 export function retainedDeletedDrafts(

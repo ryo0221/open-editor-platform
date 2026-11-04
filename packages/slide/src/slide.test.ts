@@ -12,6 +12,7 @@ import {
   slideDiff,
   transformObjects,
   makeSlideObject,
+  slideWithLayout,
 } from './model';
 it('compares individual slide objects with readable geometry and no embedded image bytes', () => {
   const before = createDeck(),
@@ -85,4 +86,22 @@ it('duplicates adjacent to its source with stable preview IDs and one undo', () 
   expect(copy.objects[0].id).not.toBe(source.objects[0].id);
   expect(session.undo()).toEqual(deck);
   expect(session.redo()).toEqual(preview);
+});
+
+it('#589: an exported SVG keeps the slide title, and a long layout title is not cut', () => {
+  const deck = createDeck();
+  const slide = slideWithLayout(0, 'title', deck.width, deck.height);
+  slide.title = '吊り橋の点検';
+  slide.objects[0]!.text = '橋梁点検の報告：吊り橋の主ケーブルと補剛桁の状態';
+  deck.slides = [slide];
+  const svg = exportSlideSvg(deck, slide);
+  expect(svg).toContain('<title>吊り橋の点検</title>');
+  // The title shrinks into its box: every line of it is inside the 80 px clip.
+  const box = slide.objects[0]!.bounds;
+  const title = svg.split('</text>')[0]!;
+  const baselines = [...title.matchAll(/<tspan x="[\d.]+" y="([\d.]+)">/g)].map((m) =>
+    Number(m[1]),
+  );
+  expect(baselines.length).toBeGreaterThan(0);
+  for (const y of baselines) expect(y).toBeLessThanOrEqual(box.y + box.height);
 });

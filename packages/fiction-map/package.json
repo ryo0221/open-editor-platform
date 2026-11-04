@@ -1,0 +1,31 @@
+{
+  "name": "@editor-platform/fiction-map",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./model": "./src/model.ts",
+    "./surface": "./src/surface.tsx",
+    "./styles.css": "./src/styles.css",
+    "./host": "./src/host.ts",
+    "./render": "./src/render.ts",
+    "./image-export": "./src/image-export.ts",
+    "./output-panel": "./src/output-panel.tsx",
+    "./artifact-surface": "./src/artifact-surface.tsx",
+    "./world-panel": "./src/world-panel.tsx",
+    "./saved-views": "./src/saved-views.tsx",
+    "./native-input": "./src/native-input.tsx"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "0.1.0",
+    "@editor-platform/editor-core": "0.1.0",
+    "@editor-platform/geometry-core": "0.0.0",
+    "@editor-platform/canvas-ui": "0.1.0",
+    "@editor-platform/editor-ui": "0.2.0",
+    "@editor-platform/editor-host": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

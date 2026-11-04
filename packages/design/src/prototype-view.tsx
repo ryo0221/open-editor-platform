@@ -186,8 +186,8 @@ function PrototypeFrame(props: FrameProps) {
   const visible = new Set(targets.map((t) => [t.elementId, ...t.partIds].join('-')));
   const drawings = designPaintOrder(content)
     .filter((e) => included.has(e.id) && visible.has(e.id))
-    .flatMap(designDrawingProjector(content))
-    .filter((d) => visible.has(d.id));
+    .flatMap(designDrawingProjector(content, visible))
+    .filter((d) => visible.has(d.panelBorderOf ?? d.id));
   const b = f.bounds;
   return (
     <svg

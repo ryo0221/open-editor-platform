@@ -6,6 +6,8 @@ export interface ReferenceTarget {
   columnIds?: string[];
   rowIds?: string[];
   nodeIds?: string[];
+  /** Fiction Map stable feature IDs (1..200); never aliases Graph node IDs. */
+  featureIds?: string[];
 }
 export interface ReferenceSource {
   artifactId: string;
@@ -52,6 +54,12 @@ export interface ReferenceHost {
   subscribe(notify: (artifactId: string) => void): () => void;
   /** Revalidate current authorization even when displaying a retained fixed version. */
   checkAccess?(source: ReferenceSource): void | Promise<void>;
+  /** Optional live retention check for the exact version/hash, without following latest. */
+  checkSnapshot?(
+    source: ReferenceSource,
+    snapshot: ReferenceSnapshot,
+    signal: AbortSignal,
+  ): void | Promise<void>;
   open?(
     source: ReferenceSource,
     destinationElementId: string,
@@ -64,6 +72,8 @@ export interface ReferenceProjection {
 }
 export interface ReferenceAdapter {
   domain: string;
+  /** Omitted preserves existing fixed/follow behavior. */
+  modes?: readonly EmbeddedReference['mode'][];
   /** Async verification preflight for retained and live snapshots; project remains synchronous. */
   prepare?(snapshot: ReferenceSnapshot): Promise<void>;
   validate(snapshot: ReferenceSnapshot): void;
@@ -186,6 +196,13 @@ export function validReferenceSource(value: unknown): value is ReferenceSource {
     !!t &&
     id(t.kind) &&
     nativeId(t.viewId) &&
+    (t.featureIds === undefined ||
+      (s.domain === 'fiction-map' &&
+        Array.isArray(t.featureIds) &&
+        t.featureIds.length > 0 &&
+        t.featureIds.length <= 200 &&
+        t.featureIds.every(nativeId) &&
+        new Set(t.featureIds).size === t.featureIds.length)) &&
     [t.columnIds, t.rowIds, t.nodeIds].every(
       (ids) =>
         ids === undefined ||
@@ -324,6 +341,17 @@ export class ReferenceResolver {
     if (!adapter) throw new ReferenceError('unsupported', `参照元の種類 ${domain} は未対応です。`);
     return adapter;
   }
+  allowedModes(source: ReferenceSource): readonly EmbeddedReference['mode'][] {
+    const adapter = this.adapters.get(source.domain);
+    return adapter ? (adapter.modes ?? ['fixed', 'follow']) : [];
+  }
+  private assertMode(reference: Pick<EmbeddedReference, 'source' | 'mode'>) {
+    if (!this.allowedModes(reference.source).includes(reference.mode))
+      throw new ReferenceError(
+        'unsupported',
+        'This source supports fixed saved-version references only',
+      );
+  }
   async validate(snapshot: ReferenceSnapshot, source: ReferenceSource): Promise<ReferenceSnapshot> {
     const owned = await this.verify(snapshot, source);
     this.accept(owned, false);
@@ -420,11 +448,13 @@ export class ReferenceResolver {
   ): Promise<EmbeddedReference> {
     if (!validReferenceSource(source) || !['fixed', 'follow'].includes(mode))
       throw new ReferenceError('error', '不正な参照設定です。');
+    this.assertMode({ source, mode });
     await this.host.checkAccess?.(source);
     const snapshot = await this.verify(
       await this.host.read(source, new AbortController().signal),
       source,
     );
+    await this.host.checkSnapshot?.(source, snapshot, new AbortController().signal);
     await this.host.checkAccess?.(source);
     this.accept(snapshot);
     return deepFreeze({ schemaVersion: 1, source: clone(source), mode, fit: 'contain', snapshot });
@@ -446,6 +476,7 @@ export class ReferenceResolver {
     try {
       if (!validEmbeddedReference(reference))
         throw new ReferenceError('error', '参照情報が不正です。');
+      this.assertMode(reference);
       await this.host.checkAccess?.(reference.source);
       const retained =
         reference.mode === 'follow'
@@ -457,6 +488,7 @@ export class ReferenceResolver {
           : await this.host.read(reference.source, request.signal),
         reference.source,
       );
+      await this.host.checkSnapshot?.(reference.source, snapshot, request.signal);
       await this.host.checkAccess?.(reference.source);
       if (this.generations.get(key) !== generation) return this.get(reference);
       if (reference.mode === 'follow') {
@@ -544,6 +576,7 @@ export class ReferenceResolver {
     for (const item of references) {
       const r = item.reference!;
       if (!validEmbeddedReference(r)) throw new ReferenceError('error', '参照情報が不正です。');
+      this.assertMode(r);
       await this.host.checkAccess?.(r.source);
       const key = canonicalJson([r.source.artifactId, r.source.domain]);
       const following = live && r.mode === 'follow';
@@ -553,6 +586,7 @@ export class ReferenceResolver {
       // Never deduplicate retained closures: each one must be hash-checked and
       // compared even when version IDs and content hashes happen to match.
       const snapshot = await this.verify(following ? await reads.get(key)! : r.snapshot, r.source);
+      if (live) await this.host.checkSnapshot?.(r.source, snapshot, new AbortController().signal);
       await this.host.checkAccess?.(r.source);
       if (following) {
         if (snapshot.revision < r.snapshot.revision)

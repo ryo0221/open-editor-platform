@@ -92,7 +92,7 @@ test('#43 #44 #49 Data Graph opens its record and Fields; labels follow renames 
   await dataProjection(page, 'Graph');
   await page.getByRole('button', { name: 'Select node Planning', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Renamed target');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await page.getByRole('button', { name: 'Select node Form saved by Host', exact: true }).click();
   await expect(
     page
@@ -149,7 +149,7 @@ test('#42 #48 native Graph moves the body, retargets both ends, cancels and avoi
   graph.edges[0].to = 'third';
   await page.goto('/');
   await importUsability(page, 'structured-graph', graph);
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await selectConnection(page, 'Select connection Related: Research to Delivery');
   await expect(page.locator('[data-node-id="resource-b"]')).not.toHaveClass(/connected/);
   await expect(page.locator('[data-node-id="resource-a"]')).toHaveClass(/connected/);
@@ -201,7 +201,7 @@ test('#42 Data Graph moves either endpoint atomically and refuses an occupied so
   await page.goto('/');
   await importRelationData(page);
   await dataProjection(page, 'Graph');
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await selectConnection(page, 'Select connection Related: Research to Planning');
   await dragBetween(
     page,
@@ -232,7 +232,7 @@ test('#42 Data Graph moves either endpoint atomically and refuses an occupied so
   await dataProjection(page, 'Graph');
   await page.getByRole('button', { name: 'Select node Planning', exact: true }).click();
   await page.getByLabel('Related', { exact: true }).selectOption('node:research');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   const occupied = (await nativeArtifact(page)).draft.content;
   await selectConnection(page, 'Select connection Related: Research to Delivery');
   await dragBetween(

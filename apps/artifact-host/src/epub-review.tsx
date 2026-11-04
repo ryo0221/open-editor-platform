@@ -139,10 +139,10 @@ export function EpubReview({
   }
   return (
     <section aria-label="EPUB export review">
-      <h3>EPUB export — horizontal subset</h3>
+      <h3>EPUB export — reflowable subset</h3>
       <p>
-        Captures saved chapter versions. Vertical text, ruby, links, images and fixed pagination are
-        unsupported.
+        Captures saved chapter versions. All-vertical chapters become a vertical EPUB with ruby;
+        mixed writing modes, links, images and fixed pagination are unsupported.
       </p>
       <label>
         EPUB title{' '}

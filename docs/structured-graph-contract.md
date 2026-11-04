@@ -70,6 +70,15 @@ Graph content、確定version、hash、編集履歴には表示設定を保存�
 変更はintent `set-node-shape {id, shape|null}` と `set-node-style {id, style|null}` で、nullと空のstyleは保存値を消して既定へ戻す。
 意味のデータ（type・属性・接続）を変えず、それぞれ一編集でUndoする。`move-node` は形と塗りを保持する。readOnlyのnode typeは変更を拒否する。
 
+## ノードのアイコン (workflow-definitions #8, Preview)
+
+Profileのnode typeは `ui.icon`（型の既定）、`ui.iconBy`（その型のschemaにある属性名）と `ui.icons`（属性値を文字列にした値 → アイコン）を持てる。
+決め方は `icons[String(attributes[iconBy])]` → `icon` → なし。object・array・null・未設定の値は既定へ落ちる。
+アイコンは組み込みの名前（`graphNodeIcons`：document・table・diagram・screen・code・image・slides・chart・map・cube・pages・video・calendar・list・folder・step・check・flag・person）だけで、
+未知の名前、path data、URL、`iconBy` の無い `icons`、schemaに無い `iconBy`、Sectionやedgeのアイコンは拒否する。
+Surfaceはアイコンをノードの左上の角にバッジとして重ね（`data-icon`、`--ep-graph-node-icon-background`・`--ep-graph-node-icon-color`）、
+Paletteは型の既定アイコン、参照SVGは同じバッジを描く。アイコンはProfileから毎回決め、Graph content・presentation・履歴には保存しない。
+
 輪郭は平坦化した多角形の純粋な幾何（`graphShapePolygon` ほか、headlessからも使える）で、Surfaceの描画・選択の当たり範囲（輪郭で切り抜く）・線の端点・参照のSVGで共有する。線の端点は `separateGraphRoutes` が辺の上に分けた接続点から内向きに進み、最初に輪郭と交わる点で止める。
 形ごとに接続点を並べる範囲を辺の中央寄りに狭め、平行な関係も別の端点を持つ。自動の高さはラベルが形の内側に収まる高さ（最小70px）。
 ラベルの色は塗りに対して対比の高い黒か白（どの色でも4.5:1以上）。寸法はこのPhaseでは保存しない。
@@ -86,10 +95,10 @@ Profileの `sections` はSectionの型ごとに `{schema, ui?, readOnly?, contai
 範囲の外に描かれた所属ノードは `outside-section` の `warning`（`blocking: false`）にとどめて自動で直さない。
 
 intentは `add-section {section, bounds}`・`set-node-section {id, sectionId|null}`・`set-section-parent {id, parentId|null}`・
-`move-section {id, position}`・`resize-section {id, bounds}`・`set-section-style {id, style|null}`・`delete-section {id}`、
+`move-section {id, position}`・`resize-section {id, bounds}`・`set-section-style {id, style|null}`・`delete-section {id, cascade?}`、
 属性は既存の `set-attribute`/`remove-attribute` の `scope: 'section'`。それぞれ一編集でUndoする。
 `move-section` は子孫のSectionの枠と所属ノード（既定位置のものも）を同じだけ動かし、`resize-section` は所属を変えない。
-`delete-section` は中身（ノードと子のSection）を親へ、親が無ければ最上位へ移し、ノードと関係を残す。
+`delete-section` は中身（ノードと子のSection）を親へ、親が無ければ最上位へ移し、ノードと関係を残す（Section自身につながる関係は[Sectionにつなぐ接続](#sectionにつなぐ接続-594-preview)）。
 自分の子孫を親にする操作は「A section cannot be placed inside itself」、深さの超過は「Sections can nest at most 8 levels」で拒否する。
 readOnlyの型のSectionは、新規作成・属性・枠・親・存在・中身（ノードと子のSection）の変更をbatch全体で拒否する。
 
@@ -106,6 +115,31 @@ Sectionを編集できるSurfaceでノードをドラッグして離すと、ノ
 たたんだ枠と隠れた枠は対象にしない。どの枠にも無いときは所属を外し、`GraphSurface` の
 `sectionDropOutside: 'keep'` で所属を残す（既定 `'clear'`）。`contains` や readOnly の型のSectionが断る所属は変えずに
 移動だけを入れ、理由を示す。Inspectorの `Node section` と `set-node-section` はそのまま使える。
+
+## Sectionにつなぐ接続 (#594, Preview)
+
+Edgeの `from`・`to` はノードのIDかSectionのIDを取る。IDはGraphの中で一意なので、IDがどちらを指すかを決め、端点の種類は持たない
+（`graphEndpointKind(graph, id)` が `'node' | 'section' | undefined` を返す）。schemaは2のままで、Sectionにつながる接続を持つGraphは
+この版より前の読み込みでは不正として断られる。
+Sectionの端点はProfileの許可が要る。edge typeの `connection.fromSections`・`toSections` はSectionの型の一覧で、省略と `[]` は
+Sectionにつなげない、一覧はその型のSectionにだけつなげる（ノードの `from`・`to` と違い、既定は禁止）。未知の型と重複はProfileとして拒否する。
+許されないSectionの端点は `connection-section` の `blocking` の診断になり、`add-edge`・`reconnect-edge` はbatch全体で断られる。
+ノードの型の `from`・`to` はノードの端点にだけ掛かり、自己接続・並行・接続数・循環の規則はノードと同じにSectionの端点にも掛かる。
+Sectionと自分の中のノードをつなぐ接続も許す。
+
+`delete-section {id, cascade?}` は、そのSection自身につながる接続があるとき `cascade: true` が無ければ
+「Section has connections; confirm cascade deletion」で断り、`true` ならその接続も同じ編集で消す。中のノードの接続は残る。
+接続の無いSectionは従来どおり `cascade` なしで消せる。Surfaceの削除の確認はその本数を示して `cascade: true` で消す。Undoで全部戻る。
+ノードの削除はそのノードの接続だけを消し、Sectionにつながる接続には触れない。
+
+Surfaceは開いた枠の辺の中央に端点を置き、ノードを避けて（枠は避けずに）経路を引く。たたんだSectionにつながる接続はその箱へ引き、
+たたんだ親の中に隠れたSectionの接続は、ノードと同じく一番外のたたんだSectionへの「種類名 ×件数」の線にまとめる。
+たたんだSectionと自分の中のノードの接続は隠す。Hostのノードの絞り込みはノードの端点にだけ掛かり、Sectionの端点は絞らない。
+選んだ接続の端のSectionは `connected` の枠になる。端点のドラッグはノード（14px以内）、たたんだ箱、開いた枠のうち最も内側の順に
+接続先を探し、Profileが断る先は理由を示して変えない。Inspectorの接続の両端は、関係の種類がSectionを許すときSectionも選べる。
+`arrangeGraph` はSectionの端点を、その入れ物の中の項目（Section）として列の順に数える。参照のSVGは描いた枠への接続を描き、
+ノードを絞って枠を描かない参照ではその接続を描かない。DataのGraphと `sections: true` でないadapterはSectionを持たないので、
+Sectionへの接続も作れない。
 
 ## 図の作成支援 (#396 Phase 3, Preview)
 

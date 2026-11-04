@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Dialog } from '@editor-platform/editor-ui';
-import { safeLink, type BlockType, type DocumentContent } from './model';
+import { rubyLimits, safeLink, type BlockType, type DocumentContent } from './model';
 import { type DocumentActions } from './view-actions';
 import { type useFindReplace } from './view-hooks';
 import { blockLabels } from './view-model';
@@ -108,6 +108,39 @@ export function InsertBlockDialog({
           </button>
         ))}
       </div>
+    </Dialog>
+  );
+}
+
+export function RubyDialog({
+  ruby,
+  setRuby,
+  actions,
+}: {
+  ruby: string;
+  setRuby: (reading: string) => void;
+  actions: DocumentActions;
+}) {
+  const reading = ruby.trim();
+  return (
+    <Dialog title="ルビ" onClose={actions.closeRuby}>
+      <label>
+        読み
+        <input
+          aria-label="ルビの読み"
+          value={ruby}
+          maxLength={rubyLimits.text}
+          onChange={(e) => setRuby(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && reading && !e.nativeEvent.isComposing)
+              actions.setRuby(reading);
+          }}
+        />
+      </label>
+      <button disabled={!reading} onClick={() => actions.setRuby(reading)}>
+        ルビを付ける
+      </button>
+      <button onClick={() => actions.setRuby(null)}>ルビを外す</button>
     </Dialog>
   );
 }

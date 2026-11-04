@@ -1,3 +1,9 @@
+import {
+  createFictionMap,
+  validateFictionMap,
+  type FictionMapContent,
+} from '@editor-platform/fiction-map/model';
+import { isPreparedDesignPageCommand } from '@editor-platform/design/page-proposals';
 import { createEstimate, isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
 import { createAnalysis, isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
 import { emptyGeo, assertGeo, type GeoDocument } from '@editor-platform/geo-core';
@@ -15,6 +21,7 @@ import {
   type GraphDocument,
 } from '@editor-platform/structured-graph/model';
 import { createArtifact, type Artifact } from '@editor-platform/artifact-core';
+import { isPreparedInkCommand } from './app/design-ink-proposal';
 import {
   type Annotation,
   type ElementAddress,
@@ -51,6 +58,11 @@ import {
 import { createDesign, isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { emptyCad, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
 import { bimStarter, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
+import {
+  isCharacterDocument,
+  validateCharacter,
+  type CharacterDocument,
+} from '@editor-platform/character-core';
 import type { CadResource } from './cad/resources';
 import type { CadPartRecord } from './cad/parts';
 export { isCadDocument };
@@ -69,6 +81,7 @@ import {
   looksLikeSchedule,
   type ScheduleDocument,
 } from '@editor-platform/schedule/model';
+import { characterStarter } from './character/starter';
 import { createReferenceDocument } from '../../react-ui-reference/src/catalog';
 import {
   readAnimationV1,
@@ -82,6 +95,7 @@ import {
   type AnimationContent2,
 } from '@editor-platform/animation-core/v2';
 export type Content =
+  | FictionMapContent
   | EstimateDocument
   | AnalysisDocument
   | AnimationContentV1
@@ -98,8 +112,10 @@ export type Content =
   | SlideContent
   | ScheduleDocument
   | CadDocument
-  | BimDocument;
+  | BimDocument
+  | CharacterDocument;
 export type Kind =
+  | 'fiction-map'
   | 'estimate'
   | 'analysis'
   | 'animation'
@@ -115,11 +131,16 @@ export type Kind =
   | 'react-ui'
   | 'schedule'
   | 'cad'
-  | 'bim';
+  | 'bim'
+  | 'character';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
-  /** CAD D2 asset bytes (STEP originals, normalized BRep) named by the draft and versions. */
+  /**
+   * CAD D2 asset bytes (STEP originals, normalized BRep, texture images) named by the draft and
+   * versions; a building's (`bim`) texture images too (#662), and a character's mesh and texture
+   * assets (C1d).
+   */
   cadResources?: CadResource[];
   /** R2b part versions (content by hash) placed by the draft and versions, nested ones included. */
   cadParts?: CadPartRecord[];
@@ -147,6 +168,11 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     label: 'Animation',
     icon: '▶',
     description: 'Create and reuse 2D animation with a timeline',
+  },
+  'fiction-map': {
+    label: 'Fiction Map',
+    icon: '◇',
+    description: 'Edit a bounded fictional plane, independent of Geo',
   },
   geo: { label: 'Geo', icon: '◎', description: 'Map geographic features and pinned Data values' },
   'structured-graph': {
@@ -177,6 +203,11 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     icon: '⌂',
     description: 'Model a building by levels, elements and types',
   },
+  character: {
+    label: 'Character',
+    icon: '☺',
+    description: 'Import, view and play a rigged glTF or VRM character',
+  },
 };
 /**
  * The Host-supplied CAD kernel build (the custom development OpenCascade.js while D0 is open).
@@ -200,45 +231,54 @@ export function makeArtifact(
   graphTemplate: GraphTemplateId = 'relations',
 ): StoredArtifact {
   const content: Content =
-    kind === 'estimate'
-      ? createEstimate()
-      : kind === 'analysis'
-        ? createAnalysis()
-        : kind === 'animation'
-          ? createAnimation2()
-          : kind === 'geo'
-            ? emptyGeo()
-            : kind === 'structured-graph'
-              ? graphTemplates.find((t) => t.id === graphTemplate)!.create()
-              : kind === 'react-ui'
-                ? createReferenceDocument()
-                : kind === 'document'
-                  ? createDocument()
-                  : kind === 'data'
-                    ? createData()
-                    : kind === 'review'
-                      ? createReview()
-                      : kind === 'whiteboard'
-                        ? createWhiteboard()
-                        : kind === 'design'
-                          ? createDesign()
-                          : kind === 'slide'
-                            ? createDeck()
-                            : kind === 'schedule'
-                              ? createSchedule(
-                                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-                                )
-                              : kind === 'cad'
-                                ? emptyCad(cadKernelProfile)
-                                : kind === 'bim'
-                                  ? bimStarter()
-                                  : createFile();
+    kind === 'fiction-map'
+      ? createFictionMap()
+      : kind === 'estimate'
+        ? createEstimate()
+        : kind === 'analysis'
+          ? createAnalysis()
+          : kind === 'animation'
+            ? createAnimation2()
+            : kind === 'geo'
+              ? emptyGeo()
+              : kind === 'structured-graph'
+                ? graphTemplates.find((t) => t.id === graphTemplate)!.create()
+                : kind === 'react-ui'
+                  ? createReferenceDocument()
+                  : kind === 'document'
+                    ? createDocument()
+                    : kind === 'data'
+                      ? createData()
+                      : kind === 'review'
+                        ? createReview()
+                        : kind === 'whiteboard'
+                          ? createWhiteboard()
+                          : kind === 'design'
+                            ? createDesign()
+                            : kind === 'slide'
+                              ? createDeck()
+                              : kind === 'schedule'
+                                ? createSchedule(
+                                    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                                  )
+                                : kind === 'cad'
+                                  ? emptyCad(cadKernelProfile)
+                                  : kind === 'bim'
+                                    ? bimStarter()
+                                    : kind === 'character'
+                                      ? characterStarter().doc
+                                      : createFile();
   return {
     ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
     annotations: [],
+    // A new character starts as the sample figure, its mesh bytes kept beside the content.
+    ...(kind === 'character'
+      ? { cadResources: characterStarter().resources as unknown as CadResource[] }
+      : {}),
   };
 }
 export function validContent(kind: string, content: unknown): content is Content {
+  if (kind === 'fiction-map') return validateFictionMap(content).ok;
   if (kind === 'estimate') return isEstimate(content);
   if (kind === 'analysis') return isAnalysis(content);
   if (
@@ -318,6 +358,8 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'schedule') return isSchedule(content);
   if (kind === 'cad') return isCadDocument(content);
   if (kind === 'bim') return isBimDocument(content);
+  if (kind === 'character')
+    return isCharacterDocument(content) && validateCharacter(content).length === 0;
   return kind === 'document'
     ? isDocument(content)
     : kind === 'data'
@@ -498,33 +540,39 @@ export function createLocalSession(content: Content): EditorSession<Content> {
             return next;
           },
         });
-      const validate = isAnalysis(current)
-        ? isAnalysis
-        : animation
-          ? (value: unknown) => validContent('animation', value)
-          : isDeck(current)
-            ? isDeck
-            : isDocument(current)
-              ? isDocument
-              : isDesignWithPaths(current)
-                ? isDesignWithPaths
-                : isWhiteboard(current)
-                  ? isWhiteboard
-                  : undefined;
+      const validate = validContent('fiction-map', current)
+        ? (value: unknown) => validContent('fiction-map', value)
+        : isAnalysis(current)
+          ? isAnalysis
+          : animation
+            ? (value: unknown) => validContent('animation', value)
+            : isDeck(current)
+              ? isDeck
+              : isDocument(current)
+                ? isDocument
+                : isDesignWithPaths(current)
+                  ? isDesignWithPaths
+                  : isWhiteboard(current)
+                    ? isWhiteboard
+                    : undefined;
       return super.executeView({
         ...cmd,
         apply(value) {
           if (
             isDesignWithPaths(value) &&
-            value.schemaVersion === 3 &&
-            cmd.context?.origin === 'proposal'
+            value.schemaVersion >= 3 &&
+            cmd.context?.origin === 'proposal' &&
+            !isPreparedInkCommand(cmd) &&
+            !isPreparedDesignPageCommand(cmd)
           )
             throw new Error('Structured paths/schema3 proposals are not supported');
           const next = cmd.apply(value);
           if (
             isDesignWithPaths(next) &&
-            next.schemaVersion === 3 &&
-            cmd.context?.origin === 'proposal'
+            next.schemaVersion >= 3 &&
+            cmd.context?.origin === 'proposal' &&
+            !isPreparedInkCommand(cmd) &&
+            !isPreparedDesignPageCommand(cmd)
           )
             throw new Error('Structured paths/schema3 proposals are not supported');
           if (validate ? !validate(next) : containsEmbeddedReference(next))

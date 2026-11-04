@@ -30,7 +30,11 @@ import {
   isLiteralPosition,
   mm,
   position,
+  type CadAppearance,
   type CadAssetRef,
+  type CadTextures,
+  cadAssetMediaTypes,
+  cadTextureKind,
   type CadBody,
   type CadBodyEvaluation,
   type CadDocument,
@@ -62,7 +66,11 @@ import {
   type CadContinuitySample,
   combScale,
   type CadCombSample,
+  featureSketches,
+  upstreamFeatures,
+  cadRangeLimit,
 } from '@editor-platform/cad-core';
+import type { GeometryTextureRole } from '@editor-platform/geometry-core';
 import {
   CadExportError,
   displayDeflectionMm,
@@ -71,7 +79,10 @@ import {
   writeGlb,
   writeStl,
   type CadBodyCurvature,
+  type CadExportBody,
+  type CadExportImage,
   type CadExportReport,
+  type CadExportTextures,
   type CadMesh,
   type CadStepImportReport,
   type CadStepImportResult,
@@ -131,6 +142,8 @@ export interface CadSnapshot {
   evaluation: CadEvaluation | undefined;
   /** Why the current content has no shape, with the feature or body that caused it. */
   geometryFailure: string | undefined;
+  /** The same failure for a Host or an assistant to read: code, part, operation and reason. */
+  failureReport: CadFailureReport | undefined;
   /**
    * U4: what the failed current content still shows: the bodies outside the failure, and the
    * failed bodies drawn as their shape before the failure (display only).
@@ -275,6 +288,22 @@ export interface CadStepImportPreview {
   fileName: string;
   report: CadStepImportReport;
 }
+/**
+ * #663: the image work a GLB's textures need, in the Host (the browser decodes and encodes
+ * images). Each returns a PNG.
+ */
+export interface CadTextureImageTools {
+  /**
+   * glTF's metal/roughness image: green from the roughness map's green, blue from the metalness
+   * map's blue (what the view reads of each), 255 for a map not given; the size of the first.
+   */
+  packMetallicRoughness(
+    roughness?: CadExportImage,
+    metalness?: CadExportImage,
+  ): Promise<Uint8Array>;
+  /** A DirectX normal map with its green flipped, as glTF's are OpenGL. */
+  flipNormalGreen(normal: CadExportImage): Promise<Uint8Array>;
+}
 export interface CadControllerOptions {
   session: CadSession;
   kernel: CadKernelPort;
@@ -288,6 +317,8 @@ export interface CadControllerOptions {
     request: CadEvaluateRequest,
     deflectionMm: number,
   ): Promise<{ evaluation: CadEvaluation; meshes: CadMesh[] }>;
+  /** #663: packs and converts texture images for GLB; without it such maps are left out. */
+  textureImages?: CadTextureImageTools;
   /** Re-evaluates exact content and writes its active bodies as STEP (CatalogKernelPort.exportStep). */
   exportStep?(
     request: CadEvaluateRequest,
@@ -350,7 +381,16 @@ export function retainedBytes(meshes: Iterable<CadMesh>): number {
   const seen = new Set<ArrayBufferLike>();
   let bytes = 0;
   for (const m of meshes) {
-    const buffers = [m.positions, m.normals, m.indices, m.faceIds, m.vertices, m.edges, m.edgeIds];
+    const buffers = [
+      m.positions,
+      m.normals,
+      ...(m.uvs ? [m.uvs] : []),
+      m.indices,
+      m.faceIds,
+      m.vertices,
+      m.edges,
+      m.edgeIds,
+    ];
     for (const { buffer } of buffers)
       if (!seen.has(buffer)) {
         seen.add(buffer);
@@ -535,13 +575,21 @@ const messages: Record<string, string> = {
     'STEPのsolidが有効な形状ではないため、取り込めません（自動修正はしません）。',
   'step-tolerance-unsupported':
     'STEPの形状の許容誤差（tolerance）が0.0001 mmより大きいため、取り込めません。',
-  'step-coordinate-range': 'STEPの形状が座標の上限（±1,000,000 mm）を超えています。',
+  'step-coordinate-range': `STEPの形状が座標の上限（${cadRangeLimit('step-coordinate-range')}）を超えています。`,
+  'coordinate-range': `座標が上限（${cadRangeLimit('coordinate-range')}）を超えています。原点の近くに置くか、値を小さくしてください。`,
+  'dimension-range': `寸法は${cadRangeLimit('dimension-range')}の範囲にしてください。`,
   'step-import-unsupported-build':
     'この文書のkernel buildはSTEPを取り込めません。「Migrate to current kernel」で現在のbuildへ移行してから取り込んでください。',
   'step-import-timeout': 'STEPの読み込みが時間内に終わりませんでした。',
   'step-import-interrupted': 'STEPの読み込みが中断されました。もう一度取り込んでください。',
   'step-import-changed': '読み込んだ後に文書のkernelが変わったため、もう一度取り込んでください。',
   'asset-stage-failed': 'STEPのデータを保存できませんでした。',
+  'texture-stage-failed': 'テクスチャの画像を保存できませんでした。',
+  'texture-unavailable': 'このHostは画像を保存できないため、テクスチャを使えません。',
+  'texture-empty': '使える画像がありません。',
+  'texture-media-type': 'テクスチャはPNGかJPEGの画像だけ使えます。',
+  'texture-stale':
+    '画像を保存している間に文書が変わりました。もう一度テクスチャを追加してください。',
   cancelled: '計算を取り消しました。',
   'reference-ambiguous':
     '参照していた面・辺が分かれて、どれを指すか決まりません。候補から選び直してください。',
@@ -574,8 +622,7 @@ const messages: Record<string, string> = {
   'sketch-spline-degree': 'スプラインの次数は2・3・5のどれかにしてください。',
   'sketch-degenerate':
     'スケッチの要素が潰れる（長さ・半径が0になる、円が重なる）ため、変更しませんでした。',
-  'sketch-dimension-range':
-    '寸法が範囲の外です（0.001 mm より小さい、または大きすぎる）。変更しませんでした。',
+  'sketch-dimension-range': `寸法が範囲（${cadRangeLimit('sketch-dimension-range')}）の外です。変更しませんでした。`,
   'sketch-reference': 'スケッチの拘束が無い要素を指しています。',
   'sketch-solution-mismatch': 'スケッチの保存された位置が拘束を満たしていません。',
   'sketch-unavailable': '今はスケッチを始められません（編集中の操作を先に終えてください）。',
@@ -697,19 +744,73 @@ function kernelExceptionMessage(code: string): string {
   for (const [pattern, text] of kernelExceptions) if (pattern.test(code)) return text;
   return 'この寸法では形状を作れません。';
 }
-/** describeCode plus the feature or body named by a kernel failure, found in `doc`. */
-export function describeFailure(doc: CadDocument, code: string, elementId?: string): string {
+/**
+ * A geometry failure in a form a Host or an assistant can read (#589): the plain reason, the
+ * kernel's own text apart, and the part and operation it happened in, by name and ID.
+ */
+export interface CadFailureReport {
+  code: string;
+  /** The plain reason shown to the user (describeCode). */
+  message: string;
+  retryable: boolean;
+  /** `kernel-exception`: the kernel's exception type and text; kept out of `message`. */
+  kernelReason?: string;
+  /** The body (part) the failure belongs to: named directly, or the body built from the feature. */
+  bodyId?: string;
+  bodyName?: string;
+  /** The operation that failed, its name and its type (extrude, boolean, fillet …). */
+  featureId?: string;
+  featureName?: string;
+  operation?: string;
+  sketchId?: string;
+  sketchName?: string;
+}
+/** The active body built from `featureId` (a consumed one if no active body reads it). */
+function bodyOfFeature(doc: CadDocument, featureId: string) {
+  const reads = (b: CadDocument['bodies'][number]) =>
+    upstreamFeatures(doc.features, [b.resultFeatureId]).has(featureId);
+  return (
+    doc.bodies.find((b) => b.state === 'active' && reads(b)) ?? doc.bodies.find((b) => reads(b))
+  );
+}
+/** `failure` on `doc` as a report: what failed, where, and why. */
+export function cadFailureReport(
+  doc: CadDocument,
+  failure: { code: string; featureId?: string; retryable?: boolean },
+): CadFailureReport {
+  const { code, featureId: elementId } = failure;
   const feature = doc.features.find((f) => f.id === elementId);
-  const body = feature ? undefined : doc.bodies.find((b) => b.id === elementId);
-  const sketch = feature || body ? undefined : doc.sketches.find((s) => s.id === elementId);
-  const cause = feature
-    ? `feature「${feature.name}」`
-    : body
-      ? `body「${body.name}」`
-      : sketch
-        ? `sketch「${sketch.name}」`
-        : undefined;
-  return cause ? `${describeCode(code)}原因：${cause}` : describeCode(code);
+  const sketch = feature ? undefined : doc.sketches.find((s) => s.id === elementId);
+  const body = feature
+    ? bodyOfFeature(doc, feature.id)
+    : sketch
+      ? doc.features
+          .filter((f) => featureSketches(f).includes(sketch.id))
+          .map((f) => bodyOfFeature(doc, f.id))
+          .find(Boolean)
+      : doc.bodies.find((b) => b.id === elementId);
+  const kernel = /^kernel-exception:(.+)$/s.exec(code)?.[1];
+  return {
+    code,
+    message: describeCode(code),
+    retryable: !!failure.retryable,
+    ...(kernel ? { kernelReason: kernel } : {}),
+    ...(body ? { bodyId: body.id, bodyName: body.name } : {}),
+    ...(feature
+      ? { featureId: feature.id, featureName: feature.name, operation: feature.type }
+      : {}),
+    ...(sketch ? { sketchId: sketch.id, sketchName: sketch.name } : {}),
+  };
+}
+/** describeCode plus the part and the operation named by a kernel failure, found in `doc`. */
+export function describeFailure(doc: CadDocument, code: string, elementId?: string): string {
+  const r = cadFailureReport(doc, { code, featureId: elementId });
+  const where = [
+    r.bodyId !== undefined && `body「${r.bodyName}」（ID ${r.bodyId}）`,
+    r.featureId !== undefined && `feature「${r.featureName}」（${r.operation}、ID ${r.featureId}）`,
+    r.sketchId !== undefined && `sketch「${r.sketchName}」（ID ${r.sketchId}）`,
+  ].filter(Boolean);
+  return where.length ? `${r.message}原因：${where.join('の')}` : r.message;
 }
 
 /**
@@ -939,6 +1040,7 @@ export class CadController {
       geometryState: this.coordinator.geometryState,
       evaluation,
       geometryFailure: failure && describeFailure(content, failure.code, failure.featureId),
+      failureReport: failure && cadFailureReport(content, failure),
       partialFailure:
         failure && own?.length
           ? {
@@ -1025,11 +1127,26 @@ export class CadController {
     this.fitBudget(cadContentHash(content));
     // Drop a selection whose element no longer exists (Undo, delete).
     if (this.selection && !this.exists(content, this.selection)) this.selection = null;
+    this.selectFailure(content);
     // Progress belongs to a running evaluation only.
     if (!this.evaluatingEdit && this.coordinator.geometryState !== 'reevaluating')
       this.progress = undefined;
     this.snapshot = this.build();
     for (const listener of this.listeners) listener();
+  }
+  /** The failure the part was last selected for; each new failure selects its part once. */
+  private failureSelected: string | undefined;
+  /** A new failure selects the part it happened in, so the Inspector shows it (#589). */
+  private selectFailure(content: CadDocument) {
+    const failure = this.coordinator.geometryFailure;
+    const key = failure && `${failure.contentHash} ${failure.code} ${failure.featureId ?? ''}`;
+    if (!failure || key === this.failureSelected) return;
+    this.failureSelected = key;
+    // A failure the document's tolerance set answers keeps the document settings in view.
+    if (failure.code.split(/[:@]/)[0] === 'result-tolerance') return;
+    const { bodyId, featureId } = cadFailureReport(content, failure);
+    if (bodyId) this.selection = { kind: 'body', id: bodyId };
+    else if (featureId) this.selection = { kind: 'feature', id: featureId };
   }
   private exists(doc: CadDocument, s: NonNullable<CadSelection>) {
     // A pick id names a face or edge of one evaluation only.
@@ -1382,21 +1499,129 @@ export class CadController {
       mesh: byBody.get(b.id),
     }));
     if (bodies.some((b) => !b.mesh)) return refuse('export-mismatch');
+    const losses: string[] = [];
+    // One image object per asset, and one conversion per map, so a GLB embeds each image once.
+    const images = new Map<string, CadExportImage | undefined>();
+    const conversions = new Map<string, Promise<CadExportImage | undefined>>();
+    if (format === 'glb')
+      for (const body of bodies as CadExportBody[]) {
+        const textures = await this.glbTextures(content, body, { images, conversions }, losses);
+        if (textures) body.textures = textures;
+      }
     const write = format === 'stl' ? writeStl : writeGlb;
     try {
-      return write(bodies as Parameters<typeof write>[0], {
-        sourceContentHash: contentHash,
-        buildHash: evaluation.buildHash,
-        // GLB: the coarsest body's display deflection bounds the chord error of the whole file.
-        deflectionMm:
-          format === 'stl'
-            ? deflectionMm
-            : Math.max(...active.map((b) => displayDeflectionMm(evaluation.bodies[b.id].bounds))),
-      });
+      return write(
+        bodies as Parameters<typeof write>[0],
+        {
+          sourceContentHash: contentHash,
+          buildHash: evaluation.buildHash,
+          // GLB: the coarsest body's display deflection bounds the chord error of the whole file.
+          deflectionMm:
+            format === 'stl'
+              ? deflectionMm
+              : Math.max(...active.map((b) => displayDeflectionMm(evaluation.bodies[b.id].bounds))),
+        },
+        losses,
+      );
     } catch (error) {
       if (error instanceof CadExportError) return refuse(error.code, error.bodyName);
       throw error;
     }
+  }
+  /**
+   * #663: a body's texture set as GLB writes it, from the content's image assets. The colour,
+   * occlusion and an OpenGL normal map go as stored; roughness and metalness become glTF's one
+   * metal/roughness image, and a DirectX normal map is flipped, by the Host's image tools. A map
+   * whose image is missing or cannot be converted is left out and named in `losses`.
+   */
+  private async glbTextures(
+    content: CadDocument,
+    { name, appearance }: { name: string; appearance: CadAppearance },
+    {
+      images,
+      conversions,
+    }: {
+      images: Map<string, CadExportImage | undefined>;
+      conversions: Map<string, Promise<CadExportImage | undefined>>;
+    },
+    losses: string[],
+  ): Promise<CadExportTextures | undefined> {
+    const set = appearance.textures;
+    if (!set) return undefined;
+    const image = (role: GeometryTextureRole): CadExportImage | undefined => {
+      const id = set.maps[role];
+      if (!id) return undefined;
+      const ref = content.assets.find((a) => a.id === id);
+      if (ref && !images.has(ref.sha256)) {
+        const bytes = this.options.assets?.get(ref.sha256);
+        images.set(
+          ref.sha256,
+          bytes && {
+            bytes,
+            mediaType: ref.mediaType === 'image/png' ? 'image/png' : 'image/jpeg',
+          },
+        );
+      }
+      const found = ref && images.get(ref.sha256);
+      if (!found) losses.push(`${name}: the ${role} map is not written, as its image is missing.`);
+      return found;
+    };
+    const out: CadExportTextures = { sizeMm: set.sizeMm, rotationDeg: set.rotationDeg };
+    const color = image('color');
+    const occlusion = image('occlusion');
+    if (color) out.color = color;
+    if (occlusion) out.occlusion = occlusion;
+    const tools = this.options.textureImages;
+    /** The asset hash of a map, which names a conversion. */
+    const shaOf = (role: GeometryTextureRole) =>
+      content.assets.find((a) => a.id === set.maps[role])?.sha256 ?? '';
+    /** A converted image, made once per export for the same maps (Codex). */
+    const converted = async (
+      key: string,
+      what: string,
+      run: (tools: CadTextureImageTools) => Promise<Uint8Array>,
+    ): Promise<CadExportImage | undefined> => {
+      let made = conversions.get(key);
+      if (!made) {
+        made = (async () => {
+          try {
+            if (tools) return { bytes: await run(tools), mediaType: 'image/png' as const };
+          } catch {
+            // Reported below, as when there are no tools.
+          }
+          return undefined;
+        })();
+        conversions.set(key, made);
+      }
+      const image = await made;
+      if (!image) losses.push(`${name}: ${what} not written, as the image could not be converted.`);
+      return image;
+    };
+    const normal = image('normal');
+    if (normal) {
+      const gl =
+        set.normal === 'dx'
+          ? await converted(`flip ${shaOf('normal')}`, 'the normal map is', (t) =>
+              t.flipNormalGreen(normal),
+            )
+          : normal;
+      if (gl) out.normal = gl;
+    }
+    const roughness = image('roughness');
+    const metalness = image('metalness');
+    if (roughness || metalness) {
+      // One image for both reads its green as roughness and its blue as metalness, as the view.
+      const packed =
+        roughness && roughness === metalness
+          ? roughness
+          : await converted(
+              `pack ${roughness ? shaOf('roughness') : ''} ${metalness ? shaOf('metalness') : ''}`,
+              'the roughness and metalness maps are',
+              (t) => t.packMetallicRoughness(roughness, metalness),
+            );
+      if (packed) out.metallicRoughness = packed;
+    }
+    return out;
   }
   /**
    * STEP (AP214, millimetres, exact solids, one root shape per active body) of exactly the
@@ -1572,6 +1797,96 @@ export class CadController {
         },
       },
       body: this.newBody(id, name.replace(/\.(step|stp)$/i, '') || 'STEP'),
+    });
+  }
+  /** #662: the bytes the Host keeps for an asset's hash (texture images for the view). */
+  assetBytes(sha256: string): Uint8Array | undefined {
+    return this.options.assets?.get(sha256);
+  }
+  /** #662: texture sets need the Host to keep their images, as STEP import does. */
+  get canTexture() {
+    return !!this.options.assets;
+  }
+  /**
+   * #662: puts a texture set on a body. The images are stored with the Host first (as STEP
+   * import does), then one `setAppearance` names them. As in glTF the look's values multiply
+   * the maps, so a colour map makes the colour white, a roughness or metalness map its value 1;
+   * the library preset is dropped (the look is now the images').
+   */
+  async adoptTextures(
+    bodyId: string,
+    files: readonly { role: GeometryTextureRole; bytes: Uint8Array; mediaType: string }[],
+    textures: Omit<CadTextures, 'maps'>,
+  ): Promise<boolean> {
+    const refuse = (code: string, message?: string) => {
+      this.fail(code);
+      if (message && this.diagnostic) this.diagnostic.message = message;
+      this.emit();
+      return false;
+    };
+    const { assets } = this.options;
+    if (!assets) return refuse('texture-unavailable');
+    if (!this.options.canEdit()) return refuse('permission-denied');
+    if (!files.length) return refuse('texture-empty');
+    const content = this.coordinator.content;
+    const body = content.bodies.find((b) => b.id === bodyId);
+    if (!body) return refuse('target-missing');
+    const staged: { ref: CadAssetRef; bytes: Uint8Array }[] = [];
+    const maps: CadTextures['maps'] = {};
+    for (const file of files) {
+      const kind = cadTextureKind(file.mediaType);
+      if (!kind) return refuse('texture-media-type');
+      const digest = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', file.bytes as BufferSource),
+      );
+      const sha256 = `sha256:${Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+      const ref = content.assets.find((a) => a.kind === kind && a.sha256 === sha256) ??
+        staged.find((a) => a.ref.kind === kind && a.ref.sha256 === sha256)?.ref ?? {
+          id: this.id('asset'),
+          kind,
+          sha256,
+          byteLength: file.bytes.byteLength,
+          mediaType: cadAssetMediaTypes[kind],
+        };
+      if (!staged.some((a) => a.ref === ref)) staged.push({ ref, bytes: file.bytes });
+      maps[file.role] = ref.id;
+    }
+    const operation = ++this.operation;
+    this.busy = true;
+    this.staging = true;
+    this.emit();
+    try {
+      await assets.stage(staged);
+    } catch (error) {
+      this.staging = false;
+      if (operation === this.operation) this.busy = false;
+      const message = error instanceof Error ? error.message : String(error);
+      return refuse('asset-stage-failed', `${describeCode('texture-stage-failed')}${message}`);
+    }
+    this.staging = false;
+    if (operation === this.operation) this.busy = false;
+    // Built on the content as it is now: an Undo or another edit while the images were stored
+    // is kept, never overwritten by the look read before (Codex). New IDs must still be free.
+    const now = this.coordinator.content;
+    const current = now.bodies.find((b) => b.id === bodyId);
+    if (!current) return refuse('target-missing');
+    const held = new Set(now.assets.map((a) => a.id));
+    for (const { ref } of staged)
+      if (!content.assets.some((a) => a.id === ref.id) && held.has(ref.id))
+        return refuse('texture-stale');
+    const { material: _preset, ...look } = current.appearance;
+    const appearance: CadAppearance = {
+      ...look,
+      ...(maps.color ? { color: '#ffffff' } : {}),
+      ...(maps.roughness ? { roughness: 1 } : {}),
+      ...(maps.metalness ? { metalness: 1 } : {}),
+      textures: { ...textures, maps },
+    };
+    return this.run({
+      type: 'setAppearance',
+      bodyId,
+      appearance,
+      assets: staged.map((a) => a.ref).filter((r) => !held.has(r.id)),
     });
   }
   /** Discards the read file; nothing was stored. */
@@ -2225,9 +2540,12 @@ export class CadController {
   ) {
     return this.add((s) => addArc(s, center, start, end, clockwise, this.sketchIds));
   }
-  /** Adds a spline (R2a) through control points, degree 3 unless given. */
-  sketchSpline(poles: SketchPointInput[], closed: boolean, degree: 2 | 3 | 5 = 3) {
-    return this.add((s) => addSpline(s, poles, degree, closed, this.sketchIds));
+  /**
+   * Adds a spline (R2a) on control points, degree 3 unless given; with `through`, the points are
+   * on the curve and its control points are computed (SC-5).
+   */
+  sketchSpline(poles: SketchPointInput[], closed: boolean, degree: 2 | 3 | 5 = 3, through = false) {
+    return this.add((s) => addSpline(s, poles, degree, closed, this.sketchIds, through));
   }
   /** Adds a constraint; a redundant or conflicting one is refused and highlighted. */
   sketchConstrain(k: SketchConstraintInput) {

@@ -8,7 +8,12 @@ import {
   type Artifact,
 } from '@editor-platform/artifact-core';
 import { command } from '@editor-platform/editor-core';
-import { ArtifactEditor, loadHostArtifact, type EditorHostAdapter } from './index';
+import {
+  ArtifactEditor,
+  hostNativeArtifactByteLimit,
+  loadHostArtifact,
+  type EditorHostAdapter,
+} from './index';
 type Content = { schemaVersion: 1; text: string };
 const valid = (v: unknown): v is Content =>
   !!v &&
@@ -265,20 +270,33 @@ describe('native persistence size boundary', () => {
   it('rejects retained snapshot growth before storage and keeps the last reloadable save', async () => {
     const storage = new MemoryStorage<Artifact<Content>>();
     const host = new ArtifactEditor(artifact(), adapter, storage);
-    host.execute(edit('あ'.repeat(2 * 1024 * 1024)));
+    const characters = Math.floor(hostNativeArtifactByteLimit / 8);
+    host.execute(edit('あ'.repeat(characters)));
     const first = await host.save({ commitVersion: true });
-    host.execute(edit('い'.repeat(2 * 1024 * 1024)));
+    host.execute(edit('い'.repeat(characters)));
     await expect(host.save({ commitVersion: true })).rejects.toMatchObject({
       code: 'invalid-artifact',
     });
-    expect(host.snapshot.saving).toBe(false);
-    expect(host.snapshot.dirty).toBe(true);
+    const rejected = host.snapshot;
+    expect(rejected.saving).toBe(false);
+    expect(rejected.dirty).toBe(true);
     expect(host.artifact.versions).toEqual(first.artifact.versions);
     const persisted = await storage.get(host.id);
     expect(persisted).toEqual(first.artifact);
     await expect(loadHostArtifact(serializeArtifact(persisted!), adapter)).resolves.toEqual(
       first.artifact,
     );
+  });
+  it('retries retained snapshot growth after correcting only the draft, preserving history and Undo', async () => {
+    const storage = new MemoryStorage<Artifact<Content>>();
+    const host = new ArtifactEditor(artifact(), adapter, storage);
+    const characters = Math.floor(hostNativeArtifactByteLimit / 8);
+    host.execute(edit('あ'.repeat(characters)));
+    const first = await host.save({ commitVersion: true });
+    host.execute(edit('い'.repeat(characters)));
+    await expect(host.save({ commitVersion: true })).rejects.toMatchObject({
+      code: 'invalid-artifact',
+    });
     // Correct only the draft; keep all saved versions and the existing Undo stack.
     host.execute(edit('corrected'));
     const retry = await host.save({ commitVersion: true });
@@ -289,7 +307,9 @@ describe('native persistence size boundary', () => {
   it('rejects an oversized draft at save and native export without marking it saved', async () => {
     const storage = new MemoryStorage<Artifact<Content>>();
     const host = new ArtifactEditor(artifact(), adapter, storage);
-    host.execute(edit('x'.repeat(16 * 1024 * 1024)));
+    // Preserve the exact UTF-8 payload bytes with fewer UTF-16 code units.
+    const bytes = hostNativeArtifactByteLimit;
+    host.execute(edit('界'.repeat(Math.floor(bytes / 3)) + 'x'.repeat(bytes % 3)));
     await expect(host.save()).rejects.toMatchObject({ code: 'invalid-artifact' });
     await expect(host.export('native-json')).rejects.toMatchObject({ code: 'invalid-artifact' });
     expect(host.snapshot.dirty).toBe(true);

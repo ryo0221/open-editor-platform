@@ -28,8 +28,8 @@ import {
   type Vec3,
 } from './model';
 import { applyCadOperation, type CadOperation } from './operations';
-import { cadId } from './validation';
-import type { CadSketch, CadSketchConstraint } from './sketch';
+import { cadId, cadRangeLimit } from './validation';
+import { splineThrough, type CadSketch, type CadSketchConstraint } from './sketch';
 
 /** mm, or expression text of a length. */
 export type CadBuildLength = number | string | Length;
@@ -88,7 +88,9 @@ export class CadBuildError extends Error {
     readonly what: string,
     readonly code: string,
   ) {
-    super(`step ${step} (${what}): ${code}`);
+    // A value out of range names the limit it broke (#589).
+    const limit = cadRangeLimit(code);
+    super(`step ${step} (${what}): ${code}${limit ? ` (limit ${limit})` : ''}`);
   }
 }
 
@@ -220,9 +222,18 @@ export class CadBuilder {
     const sketchId = this.sketch(name, plane, p, lines);
     return { sketchId, region: { outer: lines.map((l) => l.id), holes: [] } };
   }
-  /** A closed cubic spline sketch on the control points `poles`; its region is the spline. */
-  closedSpline(name: string, plane: CadBuildPlane, poles: [number, number][]): CadSketchSection {
-    const p = Object.fromEntries(poles.map((q, i) => [`p${i}`, q] as const));
+  /**
+   * A closed cubic spline sketch on the control points `poles`; its region is the spline. With
+   * `through`, the curve passes through `poles` instead and its control points are computed (SC-5).
+   */
+  closedSpline(
+    name: string,
+    plane: CadBuildPlane,
+    poles: [number, number][],
+    options: { through?: boolean } = {},
+  ): CadSketchSection {
+    const at = options.through ? splineThrough(poles, 3, true) : poles;
+    const p = Object.fromEntries(at.map((q, i) => [`p${i}`, q] as const));
     const sketchId = this.sketch(name, plane, p, [
       { type: 'spline', id: 's', poles: Object.keys(p), degree: 3, closed: true },
     ]);
@@ -369,7 +380,19 @@ export class CadBuilder {
     return id;
   }
 
-  /** One Boolean of `tools` into `target` (body IDs); the tools are consumed. */
+  /**
+   * A new name for a body, feature, sketch or parameter by ID; the ID stays. A named union (or
+   * common) names its resulting body too (#589); without a name the body keeps its first
+   * body's name, and this names it for the set (#538).
+   */
+  rename(id: string, name: string) {
+    this.#apply(`rename "${name}"`, { type: 'rename', targetId: id, name });
+  }
+  /**
+   * One Boolean of `tools` into `target` (body IDs); the tools are consumed. `name` names the
+   * Boolean; a union or common makes a new part, so its body takes the name too (#589). A cut
+   * is still the target (a plate with holes), and keeps its name, as does an unnamed Boolean.
+   */
   boolean(
     target: string,
     tools: string[],
@@ -387,11 +410,19 @@ export class CadBuilder {
         booleanFeatureId,
         placementFeatureId: this.#id(`${booleanFeatureId}-placement`, 'feature'),
       },
-      ...(name ? [{ type: 'rename' as const, targetId: booleanFeatureId, name }] : []),
+      ...(name
+        ? [
+            { type: 'rename' as const, targetId: booleanFeatureId, name },
+            ...(mode === 'cut' ? [] : [{ type: 'rename' as const, targetId: target, name }]),
+          ]
+        : []),
     );
     return booleanFeatureId;
   }
-  /** Copies of `tool` by `layout`, joined into or cut from `target`; the tool is consumed. */
+  /**
+   * Copies of `tool` by `layout`, joined into or cut from `target`; the tool is consumed. `name`
+   * names the pattern, and the body of a union, as for a Boolean (#589).
+   */
   pattern(
     target: string,
     tool: string,
@@ -422,7 +453,12 @@ export class CadBuilder {
         patternFeatureId,
         placementFeatureId: this.#id(`${patternFeatureId}-placement`, 'feature'),
       },
-      ...(name ? [{ type: 'rename' as const, targetId: patternFeatureId, name }] : []),
+      ...(name
+        ? [
+            { type: 'rename' as const, targetId: patternFeatureId, name },
+            ...(mode === 'cut' ? [] : [{ type: 'rename' as const, targetId: target, name }]),
+          ]
+        : []),
     );
     return patternFeatureId;
   }

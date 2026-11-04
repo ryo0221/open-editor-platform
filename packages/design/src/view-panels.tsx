@@ -342,10 +342,16 @@ export function designCanvasTargets(
       label: `Design object ${e.name}`,
       ...(e.path
         ? {
-            hitBounds: designExportPaintBounds(project(e), e.bounds, e.rotation),
+            hitBounds: designExportPaintBounds(
+              project(e).filter((d) => !d.panelBorderOf),
+              e.bounds,
+              e.rotation,
+            ),
             hitClipBounds: project(e)[0]?.clipBounds,
           }
-        : {}),
+        : project(e)[0]?.clipBounds?.some((clip) => clip.shape || clip.polygon)
+          ? { hitClipBounds: project(e)[0]?.clipBounds }
+          : {}),
       paintBounds: extension?.render
         ? undefined
         : designPaintBounds(project(e), e.bounds, e.rotation),

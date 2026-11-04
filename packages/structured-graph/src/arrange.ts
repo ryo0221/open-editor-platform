@@ -51,9 +51,14 @@ export function arrangeGraph(
       .filter((n) => n.sectionId === container)
       .map((n) => ({ kind: 'node' as const, id: n.id })),
   ];
-  /** The item directly inside `container` that holds this node, if the node is inside it. */
-  const holderIn = (nodeId: string, container: string | undefined): Item | undefined => {
-    let item: Item = { kind: 'node', id: nodeId };
+  /**
+   * The item directly inside `container` that holds this edge end, if the end is inside it. An
+   * end is a node or a Section (#594).
+   */
+  const holderIn = (endId: string, container: string | undefined): Item | undefined => {
+    let item: Item = sectionIds.has(endId)
+      ? { kind: 'section', id: endId }
+      : { kind: 'node', id: endId };
     for (let i = 0; i <= graphLimits.sectionDepth + 1; i++) {
       const up = containerOf(item);
       if (up === container) return item;

@@ -80,6 +80,35 @@ copies or workspace declarations as well as viewer/scripting runtime imports.
 The existing scripted-PDF browser regression must render without executing its
 document action. Validation results are recorded in [status](../status.md).
 
+## Publication tooling update (2026-11-04)
+
+Vite is pinned to **6.4.5** for GHSA-8g5g-mxqh-grgj. The development lint graph
+is updated to ESLint **10.14.0**, the existing `@eslint/js` **9.36.0** recommended rules and TypeScript ESLint
+**8.72.1**, with an explicit minimatch **11.0.1** override for
+GHSA-g3hv-75wg-m249. This is a dependency fix, not an advisory suppression.
+The earlier audit results above describe their original execution dates only.
+
+ESLint 9's legacy minimatch 3 dependency cannot safely receive a blanket modern
+API override. ESLint 10 removes that legacy graph: the resolved consumers are
+ESLint, `@eslint/config-array` and `@typescript-eslint/typescript-estree`, using
+the named `Minimatch` and `minimatch` APIs retained by minimatch 11. The installed
+graph contains only 11.0.1. TypeScript ESLint declares ESLint 10 compatibility;
+the existing recommended rule set is preserved rather than adopting new lint policy
+in this security update. The existing Node minimum (22.13) and recommended Node 24.19.0 remain valid.
+The tooling regression exercises TypeScript/JavaScript linting, glob-based
+domain import restrictions and ignored output paths with the installed graph.
+
+Vite, ESLint and TypeScript ESLint retain their upstream MIT licenses.
+minimatch 11.0.1 uses BlueOak-1.0.0; its upstream license is retained in
+[minimatch license](minimatch-BlueOak-1.0.0.txt) and its package metadata.
+It is an independently licensed development dependency, not relicensed under
+the project AGPL grant. No existing runtime attribution or third-party notice is removed. Fresh npm/OSV audits and the exact
+snapshot's functional checks remain mandatory before publication.
+
+- [Vite advisory](https://github.com/advisories/GHSA-8g5g-mxqh-grgj)
+- [minimatch advisory](https://github.com/advisories/GHSA-g3hv-75wg-m249)
+- [ESLint 10 migration guide](https://eslint.org/docs/latest/use/migrate-to-10.0.0)
+
 ## References
 
 - [PDF.js upstream advisory](https://github.com/mozilla/pdf.js/security/advisories/GHSA-hq66-cqwq-w95j)

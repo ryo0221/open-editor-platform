@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { crc32, deflateSync } from 'node:zlib';
+import { zipSync } from 'fflate';
 import { expect, test, type Page } from '@playwright/test';
 import { Box3 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -26,6 +28,34 @@ test.beforeEach(({ page }) => {
 });
 test.afterEach(() => expect(errors).toEqual([]));
 
+/** A small RGB (or, with four values a pixel, RGBA) PNG drawn by `pixel` (#662 textures). */
+function png(size: number, pixel: (x: number, y: number) => number[]): Uint8Array {
+  const channels = pixel(0, 0).length;
+  const rows = Buffer.alloc((size * channels + 1) * size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++)
+      rows.set(pixel(x, y), y * (size * channels + 1) + 1 + x * channels);
+  const chunk = (type: string, data: Buffer) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])) >>> 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr.set([8, channels === 4 ? 6 : 2, 0, 0, 0], 8);
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(rows)),
+      chunk('IEND', Buffer.alloc(0)),
+    ]),
+  );
+}
 const kernel = !!process.env.CAD_OCCT_DIST;
 // The test host puts its first Surface's controller on window.cad.
 const cadSnapshot = (page: Page) =>
@@ -187,6 +217,17 @@ test.describe('with the development kernel', () => {
     const end = await cadSnapshot(page);
     expect(end.contentHash).toBe(start.contentHash);
     expect(end.selection).toBeNull();
+  });
+
+  test('leaves role=status to a Host that shows its own (#563)', async ({ page }) => {
+    await page.goto('/?fixture=plate&view=plan&readonly=1&statusRole=none');
+    await ready(page);
+    await (await tool(page, 'Measure distance')).click();
+    const panel = page.locator('.cad-measure');
+    await expect(panel).toContainText('Click a point on a body');
+    await expect(panel).toHaveAttribute('aria-live', 'polite');
+    // Only the Host's status remains; the Surface's notices and outputs are still live regions.
+    await expect(page.getByRole('status')).toHaveText('Host status');
   });
 
   test('picks faces and edges and shows their persistent names (R1b, CAD31)', async ({ page }) => {
@@ -610,6 +651,235 @@ test.describe('with the development kernel', () => {
     await expect(bodies(page)).toHaveCount(2);
   });
 
+  test('gives a body a material from the library, a custom finish, and Undo takes them back (#661)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=plate');
+    await ready(page);
+    await (await panel(page, 'Elements')).getByRole('button', { name: 'plate' }).first().click();
+    const appearance = (await panel(page, 'Inspector')).getByTestId('cad-appearance');
+    await expect(appearance.getByLabel('Material')).toHaveValue('');
+    const look = async () =>
+      (await cadSnapshot(page)).content.bodies.find((b) => b.id === 'plate')!.appearance;
+    const before = await look();
+    await appearance.getByLabel('Material').selectOption({ label: 'Brass' });
+    await ready(page);
+    await expect
+      .poll(look)
+      .toEqual({ color: '#c9a24b', opacity: 1, roughness: 0.3, metalness: 1, material: 'brass' });
+    await expect(appearance.getByLabel('Metalness')).toHaveValue('1');
+    // A value changed by hand makes the look custom.
+    const roughness = appearance.getByLabel('Roughness');
+    await roughness.fill('0.8');
+    await roughness.press('Enter');
+    await ready(page);
+    await expect.poll(look).toEqual({ color: '#c9a24b', opacity: 1, roughness: 0.8, metalness: 1 });
+    await expect(appearance.getByLabel('Material')).toHaveValue('');
+    // A colour that is not #rrggbb is not committed.
+    const colour = appearance.getByLabel('Colour');
+    await colour.fill('gold');
+    await colour.press('Enter');
+    await expect.poll(look).toMatchObject({ color: '#c9a24b' });
+    await colour.fill('#3366CC');
+    await colour.press('Enter');
+    await ready(page);
+    await expect.poll(look).toMatchObject({ color: '#3366cc' });
+    await page.getByTestId('cad-shading').selectOption('realistic');
+    await page.screenshot({ path: test.info().outputPath('material.png') });
+    for (let i = 0; i < 3; i++) {
+      await (await tool(page, 'Undo')).click();
+      await ready(page);
+    }
+    await expect.poll(look).toEqual(before);
+  });
+
+  test('puts a downloaded texture zip on a body at its real size, and takes it off (#662)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=plate&assets=1');
+    await ready(page);
+    await (await panel(page, 'Elements')).getByRole('button', { name: 'plate' }).first().click();
+    const appearance = (await panel(page, 'Inspector')).getByTestId('cad-appearance');
+    const content = async () => (await cadSnapshot(page)).content;
+    const look = async () => (await content()).bodies.find((b) => b.id === 'plate')!.appearance;
+    const before = await look();
+    // A zip as ambientCG gives it: colour, OpenGL normal, a height map and a preview.
+    const zip = zipSync({
+      'Test001_1K-PNG_Color.png': png(64, (x, y) =>
+        (Math.floor(y / 8) % 2 ? x + 4 : x) % 16 < 14 && y % 8 < 7
+          ? [164, 85, 61]
+          : [220, 214, 200],
+      ),
+      'Test001_1K-PNG_NormalGL.png': png(16, () => [128, 128, 255]),
+      'Test001_1K-PNG_Displacement.png': png(16, () => [128, 128, 128]),
+      'Test001.png': png(16, () => [0, 0, 0]),
+    });
+    await appearance.getByLabel('Texture files').setInputFiles({
+      name: 'Test001_1K-PNG.zip',
+      mimeType: 'application/zip',
+      buffer: Buffer.from(zip),
+    });
+    const dialog = page.getByTestId('view-texture-import');
+    await expect(dialog.getByLabel('Map of Test001_1K-PNG_Color.png')).toHaveValue('color');
+    await expect(dialog.getByLabel('Map of Test001_1K-PNG_NormalGL.png')).toHaveValue('normal');
+    await expect(dialog.getByLabel('Map of Test001_1K-PNG_Displacement.png')).toHaveValue('');
+    await expect(dialog.getByLabel('Map of Test001.png')).toHaveValue('');
+    await expect(dialog.getByLabel('Name')).toHaveValue('Test001');
+    await dialog.getByLabel('Width (mm)').fill('20');
+    await dialog.getByLabel('Height (mm)').fill('10');
+    await dialog.getByLabel('Source URL').fill('https://ambientcg.com/view?id=Test001');
+    await dialog.getByRole('button', { name: 'Add texture' }).click();
+    await ready(page);
+    await expect.poll(async () => (await look()).textures?.sizeMm).toEqual([20, 10]);
+    const textured = await content();
+    expect(textured.assets.map((a) => a.kind)).toEqual(['texture-png', 'texture-png']);
+    expect((await look()).textures).toEqual({
+      maps: { color: textured.assets[0]!.id, normal: textured.assets[1]!.id },
+      sizeMm: [20, 10],
+      rotationDeg: 0,
+      normal: 'gl',
+      name: 'Test001',
+      source: 'https://ambientcg.com/view?id=Test001',
+      license: 'CC0',
+    });
+    expect((await look()).color).toBe('#ffffff');
+    await expect(appearance.getByTestId('cad-texture')).toContainText('Test001');
+    // The size is edited in the Inspector.
+    const width = appearance.getByLabel('Width (mm)');
+    await width.fill('40');
+    await width.press('Enter');
+    await ready(page);
+    await expect.poll(async () => (await look()).textures?.sizeMm).toEqual([40, 10]);
+    const canvas = page.locator('.cad-canvas-host canvas');
+    await page.getByTestId('cad-shading').selectOption('realistic');
+    // The image is decoded after the first draw, then the bodies are drawn with it.
+    await page.waitForTimeout(500);
+    const withTexture = await canvas.screenshot({ path: test.info().outputPath('texture.png') });
+    await appearance.getByRole('button', { name: 'Remove texture' }).click();
+    await ready(page);
+    await expect.poll(async () => (await look()).textures).toBeUndefined();
+    expect((await content()).assets).toEqual([]);
+    await page.waitForTimeout(500);
+    expect((await canvas.screenshot()).equals(withTexture)).toBe(false);
+    for (let i = 0; i < 3; i++) {
+      await (await tool(page, 'Undo')).click();
+      await ready(page);
+    }
+    await expect.poll(look).toEqual(before);
+    expect((await content()).assets).toEqual([]);
+  });
+
+  test('renders a path-traced PNG that stops at the time limit with the image reached (#664)', async ({
+    page,
+  }) => {
+    test.skip(test.info().project.name !== 'desktop', 'desktop layout');
+    // Software WebGL (no GPU) compiles the path-tracing shader for about a minute.
+    test.setTimeout(480_000);
+    await page.goto('/?fixture=plate');
+    await ready(page);
+    await (await tool(page, 'Render image')).click();
+    const dialog = page.getByRole('dialog', { name: 'Render image' });
+    await dialog.getByLabel('Width (px)').fill('120');
+    await dialog.getByLabel('Height (px)').fill('80');
+    await dialog.getByLabel('Samples').fill('4096');
+    await dialog.getByLabel('Time limit (s, 0 = none)').fill('1');
+    await dialog.getByLabel('Floor under the model').uncheck();
+    await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+    // The limit ends sampling once a whole sample is in; the image reached is kept.
+    await expect(dialog.getByTestId('view-render-done')).toHaveText(
+      /^120 × 80 px, \d+ samples? \(time limit reached\)$/,
+      { timeout: 400_000 },
+    );
+    const download = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Save PNG' }).click();
+    expect((await download).suggestedFilename()).toMatch(/-render\.png$/);
+    const file = await readFile((await (await download).path())!);
+    expect([file.readUInt32BE(16), file.readUInt32BE(20)]).toEqual([120, 80]);
+    await page.screenshot({ path: test.info().outputPath('cad-render.png') });
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test('exports a textured body to GLB with its finish, coordinates and images (#663)', async ({
+    page,
+  }) => {
+    test.skip(test.info().project.name !== 'desktop', 'desktop layout');
+    await page.goto('/?fixture=plate&assets=1');
+    await ready(page);
+    await (await panel(page, 'Elements')).getByRole('button', { name: 'plate' }).first().click();
+    const appearance = (await panel(page, 'Inspector')).getByTestId('cad-appearance');
+    // A set with a DirectX normal map and separate roughness and metalness maps.
+    const zip = zipSync({
+      'Test002_1K-PNG_Color.png': png(16, (x) => (x < 8 ? [200, 40, 40] : [40, 40, 200])),
+      'Test002_1K-PNG_NormalDX.png': png(16, () => [128, 100, 255]),
+      // Transparent pixels keep their values, as the view reads them (Codex).
+      'Test002_1K-PNG_Roughness.png': png(16, () => [90, 90, 90, 0]),
+      'Test002_1K-PNG_Metalness.png': png(8, () => [30, 30, 30]),
+    });
+    await appearance.getByLabel('Texture files').setInputFiles({
+      name: 'Test002_1K-PNG.zip',
+      mimeType: 'application/zip',
+      buffer: Buffer.from(zip),
+    });
+    const textureDialog = page.getByTestId('view-texture-import');
+    await expect(textureDialog.getByLabel('Map of Test002_1K-PNG_NormalDX.png')).toHaveValue(
+      'normal',
+    );
+    await textureDialog.getByLabel('Width (mm)').fill('20');
+    await textureDialog.getByLabel('Height (mm)').fill('10');
+    await textureDialog.getByRole('button', { name: 'Add texture' }).click();
+    await ready(page);
+    await expect
+      .poll(
+        async () =>
+          (await cadSnapshot(page)).content.bodies.find((b) => b.id === 'plate')!.appearance
+            .textures?.normal,
+      )
+      .toBe('dx');
+
+    const dialog = page.getByRole('dialog', { name: 'Export 3D file' });
+    await (await tool(page, 'Export STEP, STL or GLB')).click();
+    await dialog.getByLabel(/^GLB/).check();
+    await dialog.getByRole('button', { name: 'Prepare file' }).click();
+    await expect(dialog.getByLabel('Export report')).toContainText('Y-up');
+    const download = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Save GLB' }).click();
+    const bytes = new Uint8Array(await readFile((await (await download).path())!));
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const jsonLength = view.getUint32(12, true);
+    const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)));
+    const bin = 20 + jsonLength + 8;
+    const material = json.materials[0];
+    expect(material.pbrMetallicRoughness).toMatchObject({
+      baseColorTexture: { index: 0 },
+      metallicRoughnessTexture: expect.any(Object),
+    });
+    expect(material.normalTexture).toEqual(expect.any(Object));
+    expect(json.meshes[0].primitives[0].attributes.TEXCOORD_0).toEqual(expect.any(Number));
+    // Each embedded image, decoded by the browser: its first pixel.
+    const imageBytes = (texture: number) => {
+      const bv = json.bufferViews[json.images[json.textures[texture].source].bufferView];
+      return Buffer.from(bytes.subarray(bin + bv.byteOffset, bin + bv.byteOffset + bv.byteLength));
+    };
+    const firstPixel = (b: Buffer) =>
+      page.evaluate(async (data) => {
+        const blob = await (await fetch(`data:image/png;base64,${data}`)).blob();
+        const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext('2d')!;
+        context.drawImage(bitmap, 0, 0);
+        return [bitmap.width, ...context.getImageData(0, 0, 1, 1).data];
+      }, b.toString('base64'));
+    expect(await firstPixel(imageBytes(0))).toEqual([16, 200, 40, 40, 255]);
+    // Roughness in green, metalness (scaled to 16 px) in blue; the normal's green flipped.
+    expect(
+      await firstPixel(imageBytes(material.pbrMetallicRoughness.metallicRoughnessTexture.index)),
+    ).toEqual([16, 255, 90, 30, 255]);
+    expect(await firstPixel(imageBytes(material.normalTexture.index))).toEqual([
+      16, 128, 155, 255, 255,
+    ]);
+  });
+
   test('opens with the saved view, switches views and saves one (ST-27#9, #11)', async ({
     page,
   }) => {
@@ -661,6 +931,54 @@ test.describe('with the development kernel', () => {
     expect(saved.bodyIds).toHaveLength(2);
     // The plate spans x 0–80 and the new box sits beside it: the fit centres past the plate.
     expect(saved.camera.target[0]).toBeGreaterThan(41);
+  });
+
+  test('the eye hides a body in the view only; Save view keeps the shown ones (ST-27#9, #13)', async ({
+    page,
+  }) => {
+    test.skip(test.info().project.name !== 'desktop', 'desktop layout');
+    await page.goto('/?fixture=plate&persist=1');
+    await ready(page);
+    await page.getByRole('button', { name: 'Add box' }).click();
+    await ready(page);
+    await expect(bodies(page)).toHaveCount(2);
+    const box = page.getByRole('checkbox', { name: 'Show Box' });
+    const plate = page.getByRole('checkbox', { name: 'Show Plate' });
+    await expect(box).toBeChecked();
+    const hash = async () => (await cadSnapshot(page)).contentHash;
+    const before = await hash();
+    const undoable = await page.getByRole('button', { name: 'Undo' }).isEnabled();
+    await box.click();
+    await expect(box).not.toBeChecked();
+    // Hiding is view state: the content, its hash and the history stay.
+    expect(await hash()).toBe(before);
+    expect(await page.getByRole('button', { name: 'Undo' }).isEnabled()).toBe(undoable);
+    await page.getByRole('button', { name: 'Save view' }).click();
+    await ready(page);
+    const views = page.getByLabel('Views');
+    const [saved] = (await cadSnapshot(page)).content.namedViews;
+    await expect(views).toHaveValue(saved!.id);
+    expect(saved!.bodyIds).toEqual(['plate']);
+    await expect(box).not.toBeChecked();
+    // Hiding every body leaves nothing to save.
+    await plate.click();
+    await expect(page.getByRole('button', { name: 'Save view' })).toBeDisabled();
+    await views.selectOption({ label: 'Whole model' });
+    await expect(box).toBeChecked();
+    await expect(plate).toBeChecked();
+    // A view that hides a body is chosen in Views: the document opens with the whole model.
+    await page.reload();
+    await ready(page);
+    await expect(views).toHaveValue('');
+    await expect(box).toBeChecked();
+    await views.selectOption({ label: 'View 1' });
+    await expect(box).not.toBeChecked();
+    // Showing a body the view leaves out draws it until another view is chosen.
+    await box.click();
+    await expect(box).toBeChecked();
+    await views.selectOption({ label: 'Whole model' });
+    await views.selectOption({ label: 'View 1' });
+    await expect(box).not.toBeChecked();
   });
 
   test('a saved view with Y up still orbits (ST-27#9)', async ({ page }) => {
@@ -1555,6 +1873,57 @@ test.describe('Sketch mode (R1d-3, CAD34)', () => {
     ).toBeCloseTo(1, 6);
     await (await tool(page, 'Undo')).click();
     await ready(page);
+    expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
+  });
+
+  test('draws a spline through points: the curve passes through each click (ST-45#5, SC-5)', async ({
+    page,
+  }) => {
+    test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+    test.skip(narrow(), 'sketching is desktop only');
+    await page.goto('/');
+    await ready(page);
+    const before = await cadSnapshot(page);
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Sketch on XY' }).click();
+    await page.getByRole('button', { name: 'Draw spline through points', exact: true }).click();
+    const wave = [
+      [-90, -60],
+      [-70, -40],
+      [-50, -60],
+      [-30, -40],
+    ] as const;
+    for (const [u, v] of wave) await click(page, u, v);
+    await page.keyboard.press('Enter');
+    const square = [
+      [0, 0],
+      [40, 0],
+      [40, 30],
+      [0, 30],
+    ] as const;
+    for (const [u, v] of square) await click(page, u, v);
+    await click(page, 0, 0);
+    await expect(page.getByTestId('cad-sketch-region')).toHaveText(
+      'Closed region: 1 edges, 0 holes',
+    );
+    await page.screenshot({ path: test.info().outputPath('sketch-spline-through.png') });
+    const sketch = (await cadSnapshot(page)).sketch!.sketch;
+    const splines = sketch.entities.filter((e) => e.type === 'spline');
+    expect(splines).toHaveLength(2);
+    // Stored as control points, as any spline: the clicked points lie on the curve.
+    for (const [e, points] of [
+      [splines[0]!, wave],
+      [splines[1]!, square],
+    ] as const) {
+      const closed = !!e.closed;
+      const poles = e.poles.map((id) => sketch.solved[id]!);
+      expect(poles).toHaveLength(4);
+      const curve = splinePoints(poles, 3, closed, 6);
+      for (const [u, v] of points)
+        expect(Math.min(...curve.map((q) => Math.hypot(q[0] - u, q[1] - v)))).toBeLessThan(0.5);
+    }
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect.poll(async () => (await cadSnapshot(page)).sketch).toBeUndefined();
     expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
   });
 
@@ -2689,6 +3058,52 @@ test.describe('continuity (R2a-4, CAD43)', () => {
     // Another pick hides the report: it belongs to the edge it was made for.
     await page.keyboard.press('Escape');
     await expect.poll(async () => (await cadSnapshot(page)).continuity).toBeUndefined();
+  });
+});
+
+test.describe('realistic lighting (#665)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+
+  /** A digest of the view's pixels, to tell two drawings apart. */
+  const drawn = (page: Page) =>
+    page
+      .getByTestId('cad-viewport')
+      .locator('canvas')
+      .evaluate((canvas: HTMLCanvasElement) => {
+        const copy = document.createElement('canvas');
+        [copy.width, copy.height] = [canvas.width, canvas.height];
+        const g = copy.getContext('2d')!;
+        g.drawImage(canvas, 0, 0);
+        const { data } = g.getImageData(0, 0, copy.width, copy.height);
+        let hash = 0;
+        for (let i = 0; i < data.length; i++) hash = (Math.imul(hash, 31) + data[i]!) | 0;
+        return hash;
+      });
+
+  test('draws the shape under environment light and shadows, and Shaded draws it as before', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=seam&view=side');
+    await ready(page);
+    const before = await cadSnapshot(page);
+    const canvas = page.getByTestId('cad-viewport').locator('canvas');
+    await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+    const standard = await drawn(page);
+    const shading = page.getByTestId('cad-shading');
+    await shading.selectOption('realistic');
+    await expect(canvas).toHaveAttribute('data-lighting', 'realistic');
+    await expect.poll(() => drawn(page)).not.toBe(standard);
+    // No analysis panel: the realistic lighting is a way to look, not a measurement.
+    await expect(page.locator('.cad-analysis')).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('surface-realistic.png') });
+    // An analysis shading is drawn under the standard lighting.
+    await shading.selectOption('zebra');
+    await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+    await shading.selectOption('shaded');
+    await expect.poll(() => drawn(page)).toBe(standard);
+    const after = await cadSnapshot(page);
+    expect(after.contentHash).toBe(before.contentHash);
+    expect(after.canUndo).toBe(false);
   });
 });
 

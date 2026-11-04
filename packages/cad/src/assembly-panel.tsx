@@ -30,7 +30,9 @@ import { validJointFields } from './joint-values';
 import { BomDialog } from './bom-panel';
 import { PatternDialog, PatternInspector, patternSize } from './component-pattern-panel';
 import { JointsSection } from './joints-panel';
+import { useStatusProps } from './status-role';
 import { UpdatePartsDialog } from './part-update-panel';
+import { finishOf, viewTexturesOf, type ViewTextureCache } from '@editor-platform/geometry-view';
 import type { CadViewport } from './viewport';
 
 const stateLabel: Record<CadComponentState, string> = {
@@ -54,14 +56,22 @@ export function AssemblyLayer({
   view,
   snapshot,
   restored,
+  textures,
 }: {
   assembly: CadAssembly;
   view: RefObject<CadViewport | null>;
   snapshot: CadSnapshot;
   restored: number;
+  /** #662: the view's decoded texture images, the Host's bytes, and a count of images ready. */
+  textures?: {
+    cache: ViewTextureCache;
+    read(sha256: string): Uint8Array | undefined;
+    loaded: number;
+  };
 }) {
   const parts = useSyncExternalStore(assembly.subscribe, assembly.getSnapshot);
   const [fits, setFits] = useState(true);
+  const status = useStatusProps();
   // The parts are drawn again only when what they show changes: a joint drag's values (shown in
   // its Inspector) move the drawn parts by their matrices alone.
   const { creating, selectedJoint, selected, selectedPattern, meshes } = parts;
@@ -156,6 +166,13 @@ export function AssemblyLayer({
               mesh,
               color: body?.appearance.color ?? '#9aa4b1',
               opacity: body?.appearance.opacity ?? 1,
+              ...finishOf(body?.appearance),
+              textures: viewTexturesOf(
+                body?.appearance.textures,
+                o.content?.assets ?? [],
+                textures?.cache,
+                (sha) => textures?.read(sha),
+              ),
               sheet: body?.kind === 'sheet',
             };
           });
@@ -199,7 +216,20 @@ export function AssemblyLayer({
     // Pending parts evaluate largest on screen first (R2b-4).
     assembly.setScreenSize((bounds) => viewport.screenSize(bounds));
     viewport.showParts([...byVersion.values()]);
-  }, [assembly, view, snapshot, creating, selected, selectedPattern, meshes, simplified, restored]);
+    // Every image the parts draw was asked for: free the others.
+    textures?.cache.sweep();
+  }, [
+    assembly,
+    view,
+    snapshot,
+    creating,
+    selected,
+    selectedPattern,
+    meshes,
+    simplified,
+    restored,
+    textures,
+  ]);
   useEffect(() => {
     const viewport = view.current;
     if (!viewport) return;
@@ -217,7 +247,7 @@ export function AssemblyLayer({
   }, [view, snapshot, creating, selectedJoint, restored]);
   useEffect(() => () => view.current?.showJointMarks({ frames: [], points: [] }), [view]);
   return fits ? null : (
-    <p className="cad-viewport-note" role="status">
+    <p className="cad-viewport-note" {...status}>
       部品の形状が3D表示に使えるメモリーの上限を超えるため、部品を箱で表示しています。
     </p>
   );
@@ -273,13 +303,14 @@ function InsertPartDialog({
     };
   }, [assembly]);
   const { inserting } = useSyncExternalStore(assembly.subscribe, assembly.getSnapshot);
+  const status = useStatusProps();
   const chosen =
     typeof list === 'object' ? list.find((c) => c.artifactId === choice?.artifactId) : undefined;
   return (
     <Dialog title="Insert part" onClose={onClose}>
       <div className="cad-export" data-testid="cad-insert-part">
         <p>保存した版だけを挿入できます。版は自動では更新されません。</p>
-        {list === 'loading' && <p role="status">読み込んでいます…</p>}
+        {list === 'loading' && <p {...status}>読み込んでいます…</p>}
         {list === 'failed' && <p role="alert">部品の一覧を読み込めませんでした。</p>}
         {typeof list === 'object' && !list.length && (
           <p>挿入できる部品がありません。部品の文書で版を保存してください。</p>

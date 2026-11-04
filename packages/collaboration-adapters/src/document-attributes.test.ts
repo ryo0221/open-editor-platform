@@ -243,3 +243,47 @@ it('image attribute adoption and selective Undo retain peer image captions, docu
   const tr = documentAttributeTransform(before, [{ id: 'image', values: { src: asset } }]);
   expect(tr.mapping.map(3)).toBe(3);
 });
+
+it('refuses ruby and 傍点 in shared editing until the novel stages are accepted', () => {
+  const plain = {
+    schemaVersion: 2 as const,
+    blocks: [{ id: 'p', type: 'paragraph' as const, text: '東京' }],
+  };
+  expect(documentCodec.validate(plain)).toBe(true);
+  expect(
+    documentCodec.validate({
+      ...plain,
+      blocks: [
+        {
+          ...plain.blocks[0],
+          rich: [{ text: '東京', ruby: { text: 'とうきょう', base: '東京' } }],
+        },
+      ],
+    }),
+  ).toBe(false);
+  expect(
+    documentCodec.validate({
+      ...plain,
+      blocks: [{ ...plain.blocks[0], rich: [{ text: '東京', emphasisDots: true }] }],
+    }),
+  ).toBe(false);
+});
+
+it('refuses a vertical manuscript in shared editing until the novel stages are accepted', () => {
+  const plain = {
+    schemaVersion: 2 as const,
+    blocks: [{ id: 'p', type: 'paragraph' as const, text: '縦' }],
+  };
+  expect(
+    documentCodec.validate({
+      ...plain,
+      page: { size: 'A4' as const, margin: 64, writingMode: 'vertical-rl' as const },
+    }),
+  ).toBe(false);
+  expect(
+    documentCodec.validate({
+      ...plain,
+      page: { size: 'A4' as const, margin: 64, writingMode: 'horizontal-tb' as const },
+    }),
+  ).toBe(true);
+});

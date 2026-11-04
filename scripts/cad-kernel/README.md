@@ -27,12 +27,37 @@ E2E_SUITE=cad npx playwright test
 
 `scripts/dev/cad-kernel.mjs` and the tests refuse a Wasm whose SHA-256 differs from `build.mjs`.
 
+## Reproducing the hash
+
+The same inputs do not give the same Wasm everywhere. The pinned `buildFromYaml.py` passes the binding and OCCT objects (about 5,400 `.o` files) to `emcc` in `os.walk` order without sorting, so the link order is the directory order of the filesystem the image is unpacked on. Re-linking the same objects in name order gives another Wasm (`2a1f513b…` instead of `dfa4d5de…`, checked 2026-10-27). A rootfs exported from the image and unpacked on another disk links in another order too: the #502 C1 record (`d8e68450…`) and the 2026-10-26 demo of #538 (`c93cf02e…`, a flattened rootfs built in parallel) are both of this kind.
+
+- Prefer the released build over a rebuild (next section).
+- To rebuild, run `build.sh` with the Docker daemon of a standard cloud container, which unpacks the image the same way. This reproduced `dfa4d5de…` on 2026-10-27. Do not run the image from a rootfs extracted with other tools.
+- A hash mismatch with unchanged inputs is this order, not a changed source. Do not replace the expected hash with it.
+- Disk: the pinned image is 18 layers, 1.81 GB compressed (registry manifest, checked 2026-10-28), and the build writes about 5,400 objects beside it. Start dockerd with the `overlay2` storage driver, as the 2026-10-27 run did. The `vfs` driver copies every layer in full, which ran out of disk in #538; do not work around that by flattening the image to a rootfs (above).
+
+Sorting the link order makes the build independent of the filesystem but changes the hash. It belongs in the next build that replaces this one (see below), together with the new `wasmSha256`.
+
+## Released builds
+
+Each build is released on the public repository named by `cadKernelRelease` in `build.mjs`, as a GitHub release tagged `cad-kernel-<first 12 hex digits of the Wasm SHA-256>`. Downloading needs no token. A release carries the loader, the Wasm, the types, `NOTICE.txt`, `cad-kernel-source.tar` (the `source/` of `bundle.sh`, the corresponding source the LGPL requires to travel with the Wasm) and `SHA256SUMS`.
+
+```sh
+npm run cad:kernel:fetch                      # the current build into work/cad-kernel
+node scripts/cad-kernel/fetch.mjs work/cad-kernel-r2b --build 034dd34a  # an earlier build, once released
+node scripts/cad-kernel/fetch.mjs work/cad-kernel --source               # also unpack source/
+```
+
+`fetch.mjs` checks the Wasm against `wasmSha256` and the loader against `jsSha256` in `build.mjs`, and the other files against the release's `SHA256SUMS`. It writes nothing when a check fails and refuses a build without `jsSha256` or with `revoked: true`. `CAD_KERNEL_RELEASE_URL` replaces `https://github.com/<repository>/releases/download` with a mirror of the same layout.
+
+To release a new build, run `build.sh`, then `bundle.sh`, then `sh scripts/cad-kernel/release.sh <kernel-dir>`. This checks the hashes, checks `source/SHA256SUMS` and writes the assets to `<kernel-dir>/release/`. Adding `--publish` creates the release with `gh` and makes the kernel public. Only builds that EditorPlatform's owner approved for public release are published.
+
 ## Replacing the kernel
 
 Documents name the exact build that evaluates them (`kernelProfile.buildHash`). When a new build replaces this one:
 
 1. Move the current entry of `build.mjs` into `cadKernelPrevious` (keep `id`, `js`, `wasm`, `wasmSha256`). Set `substitute: true` once the new build has been checked on the old documents' features, so the Hosts show those documents read-only with the new build. Set `revoked: true` instead to stop a build entirely.
-2. Put the new build's file names and hash in `cadKernelBuild`.
+2. Put the new build's file names, `wasmSha256` and `jsSha256` in `cadKernelBuild`, and release it (Released builds).
 3. To keep evaluating old documents exactly, keep the old output directory and list it in `CAD_OCCT_RETAINED` (comma-separated). The development server checks each Wasm against `cadKernelPrevious` and serves it under `/cad-kernel/<hash prefix>/`.
 
 Editors move a document to the new build with "Migrate to current kernel", which is one undoable edit. Saved versions keep their build. Documents created with the npm build name its hash and report `kernel-build-unavailable` with this kernel.

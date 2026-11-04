@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { privateVideoBuild } from './scripts/dev/private-video.mjs';
 import { dependencySecurity } from './scripts/dev/dependency-security.mjs';
 import { cadDevelopmentKernel } from './scripts/dev/cad-kernel.mjs';
+import { playgroundMangaSample } from './scripts/dev/playground-manga.mjs';
 export default defineConfig({
   root: 'apps/playground',
   plugins: [
@@ -13,6 +14,7 @@ export default defineConfig({
     privateVideoBuild(),
     dependencySecurity(),
     cadDevelopmentKernel(),
+    playgroundMangaSample(),
   ],
   worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },
   // Resolve sanitizer/math dependencies separately so the existing public security pins
@@ -50,6 +52,19 @@ export default defineConfig({
     rollupOptions: {
       treeshake: false,
       input: {
+        creativeProduction: fileURLToPath(
+          new URL('./apps/playground/creative-production.html', import.meta.url),
+        ),
+        storyTimeline: fileURLToPath(
+          new URL('./apps/playground/story-timeline.html', import.meta.url),
+        ),
+        storyBoard: fileURLToPath(new URL('./apps/playground/story-board.html', import.meta.url)),
+        settingDesign: fileURLToPath(
+          new URL('./apps/playground/setting-design.html', import.meta.url),
+        ),
+        creativeDesign: fileURLToPath(
+          new URL('./apps/playground/creative-design.html', import.meta.url),
+        ),
         collaboration: fileURLToPath(
           new URL('./apps/playground/collaboration.html', import.meta.url),
         ),

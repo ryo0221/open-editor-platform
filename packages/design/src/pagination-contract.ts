@@ -1,9 +1,11 @@
+import { newId } from '@editor-platform/artifact-core';
+import { mapDivisionNode, validDivisionTree, type DesignPageDivision } from './division-geometry';
 import type { DesignContent } from './model';
 export interface DesignPagination {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   direction: 'rtl' | 'ltr';
   /** IDs are native frame IDs; array order is reading order, independent of z-order. */
-  pages: { frameId: string; panelIds: string[] }[];
+  pages: { frameId: string; panelIds: string[]; division?: DesignPageDivision }[];
   images: { elementId: string; source: string; license: string }[];
 }
 export const designPaginationLimits = Object.freeze({
@@ -23,7 +25,7 @@ export function validDesignPagination(
   if (
     !object(raw) ||
     !fields(raw, ['schemaVersion', 'direction', 'pages', 'images']) ||
-    raw.schemaVersion !== 1 ||
+    (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) ||
     !['rtl', 'ltr'].includes(String(raw.direction)) ||
     !Array.isArray(raw.pages) ||
     raw.pages.length > designPaginationLimits.pages ||
@@ -36,7 +38,13 @@ export function validDesignPagination(
   for (const page of raw.pages) {
     if (
       !object(page) ||
-      !fields(page, ['frameId', 'panelIds']) ||
+      !fields(page, [
+        'frameId',
+        'panelIds',
+        ...(page.division !== undefined ? ['division'] : []),
+      ]) ||
+      (page.division !== undefined &&
+        (raw.schemaVersion !== 2 || !validDivisionTree(page.division))) ||
       !text(page.frameId) ||
       used.has(page.frameId) ||
       !Array.isArray(page.panelIds) ||
@@ -87,7 +95,26 @@ export function duplicateDesignPagination(
             ...(!frameId && mapping.has(id) ? [mapping.get(id)!] : []),
           ]),
         },
-        ...(frameId ? [{ frameId, panelIds: page.panelIds.map((id) => mapping.get(id)!) }] : []),
+        ...(frameId
+          ? [
+              {
+                frameId,
+                panelIds: page.panelIds.map((id) => mapping.get(id)!),
+                ...(page.division
+                  ? {
+                      division: {
+                        ...page.division,
+                        root: mapDivisionNode(page.division.root, (node) =>
+                          'panelId' in node
+                            ? { panelId: mapping.get(node.panelId)! }
+                            : { ...node, dividerId: newId('divider') },
+                        ),
+                      },
+                    }
+                  : {}),
+              },
+            ]
+          : []),
       ];
     }),
     images: pagination.images.flatMap((image) => [

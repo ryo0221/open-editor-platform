@@ -1,6 +1,21 @@
-import type { BimDocument, BimElementKind, BimPlacement } from '@editor-platform/bim-core';
+import {
+  BimContext,
+  bimLayerFaceMaterialIds,
+  bimSurfaceMaterialId,
+  bimWallAxis,
+  type BimDocument,
+  type BimElement,
+  type BimElementKind,
+  type BimPlacement,
+} from '@editor-platform/bim-core';
 import type { GeometryMesh } from '@editor-platform/geometry-kernel-occt';
-import type { ViewMesh, ViewSolid, ViewSolidMesh } from '@editor-platform/geometry-view';
+import type { GeometryTextureSet } from '@editor-platform/geometry-core';
+import type {
+  ViewMesh,
+  ViewSolid,
+  ViewSolidMesh,
+  ViewTextureSet,
+} from '@editor-platform/geometry-view';
 import type { BimEvaluation } from './evaluate';
 import { partFaceBodies, type BimPartStatus } from './parts';
 
@@ -18,6 +33,135 @@ export const bimKindStyle: Record<BimElementKind, { color: string; opacity: numb
   part: { color: '#a78bfa', opacity: 1 },
 };
 
+/** How an element is drawn: colour, opacity and, from its material (#661), a finish. */
+export type BimLook = {
+  color: string;
+  opacity: number;
+  roughness?: number;
+  metalness?: number;
+  /** #662: the material's image maps. */
+  textures?: GeometryTextureSet;
+};
+/**
+ * Each element's look: its type's surface material's appearance when that material has one
+ * (#661), else its kind's colour, as before materials.
+ */
+export function bimElementLooks(doc: BimDocument): (el: BimElement) => BimLook {
+  const materials = new Map(doc.materials.map((m) => [m.id, m]));
+  const types = new Map(doc.types.map((t) => [t.id, t]));
+  return (el) => {
+    const type = 'typeId' in el ? types.get(el.typeId) : undefined;
+    const material = type && materials.get(bimSurfaceMaterialId(type) ?? '');
+    return lookOf(material?.appearance, el.kind);
+  };
+}
+
+const lookOf = (
+  a: NonNullable<BimDocument['materials'][number]['appearance']> | undefined,
+  kind: BimElementKind,
+): BimLook =>
+  a
+    ? {
+        color: a.color,
+        opacity: a.opacity,
+        roughness: a.roughness,
+        metalness: a.metalness,
+        ...(a.textures ? { textures: a.textures } : {}),
+      }
+    : bimKindStyle[kind];
+
+/**
+ * #662 (2c): the look of a layered element's last-layer face (a wall's left of its drawing
+ * direction, a slab's or roof's top) when it differs from the rest, which shows the first
+ * layer's (`bimElementLooks`). Undefined when both faces look the same.
+ */
+export function bimElementFaceLooks(doc: BimDocument): (el: BimElement) => BimLook | undefined {
+  const materials = new Map(doc.materials.map((m) => [m.id, m]));
+  const types = new Map(doc.types.map((t) => [t.id, t]));
+  return (el) => {
+    if (el.kind !== 'wall' && el.kind !== 'slab' && el.kind !== 'roof') return undefined;
+    const type = types.get(el.typeId);
+    const ids = type && bimLayerFaceMaterialIds(type);
+    if (!ids || ids.first === ids.last) return undefined;
+    const first = lookOf(materials.get(ids.first)?.appearance, el.kind);
+    const last = lookOf(materials.get(ids.last)?.appearance, el.kind);
+    return JSON.stringify(first) === JSON.stringify(last) ? undefined : last;
+  };
+}
+
+/**
+ * Which faces of a layered element's mesh show its last layer: per face index, true for a vertical wall
+ * face square to the axis that looks to the left of the drawing direction (radially on an arc
+ * wall), or a slab or roof face that looks up. Every other face (ends, reveals, edges, underside) is false.
+ */
+export function bimLastLayerFaces(ctx: BimContext, el: BimElement, mesh: GeometryMesh): boolean[] {
+  const normals: [number, number, number][] = [];
+  const centres: [number, number, number, number][] = [];
+  const p = mesh.positions;
+  for (let t = 0; t < mesh.faceIndices.length; t++) {
+    const f = mesh.faceIndices[t]!;
+    const [a, b, c] = [0, 1, 2].map((k) => mesh.indices[t * 3 + k]! * 3);
+    const e1 = [0, 1, 2].map((k) => p[b! + k]! - p[a! + k]!);
+    const e2 = [0, 1, 2].map((k) => p[c! + k]! - p[a! + k]!);
+    const n: [number, number, number] = [
+      e1[1]! * e2[2]! - e1[2]! * e2[1]!,
+      e1[2]! * e2[0]! - e1[0]! * e2[2]!,
+      e1[0]! * e2[1]! - e1[1]! * e2[0]!,
+    ];
+    const area = Math.hypot(...n);
+    const sum = (normals[f] ??= [0, 0, 0]);
+    const at = (centres[f] ??= [0, 0, 0, 0]);
+    for (let k = 0; k < 3; k++) {
+      sum[k]! += n[k]!;
+      at[k]! += (area * (p[a! + k]! + p[b! + k]! + p[c! + k]!)) / 3;
+    }
+    at[3]! += area;
+  }
+  const axis = el.kind === 'wall' ? bimWallAxis(ctx, el) : undefined;
+  return normals.map((sum, f) => {
+    const len = Math.hypot(...sum);
+    if (!(len > 0)) return false;
+    const n = sum.map((x) => x / len) as [number, number, number];
+    // Any face that looks up is a top: a roof may slope up to 60° (n.z = 0.5), Codex.
+    if (!axis) return n[2] > 0.1;
+    let left: [number, number];
+    if (axis.arc) {
+      const c = centres[f]!;
+      const r = [c[0]! / c[3]! - axis.arc.center[0], c[1]! / c[3]! - axis.arc.center[1]];
+      const lr = Math.hypot(r[0]!, r[1]!) || 1;
+      const sign = Math.sign(axis.arc.sweep) || 1;
+      left = [(-sign * r[0]!) / lr, (-sign * r[1]!) / lr];
+    } else left = [-axis.x[1], axis.x[0]];
+    // A side face is vertical (a top cut by a sloping roof stays with the edges) and square to
+    // the axis: an end moved by an oblique butt join may still look partly left (Codex).
+    const along = n[0] * left[1] - n[1] * left[0];
+    return Math.abs(n[2]) < 0.1 && Math.abs(along) < 0.1 && n[0] * left[0] + n[1] * left[1] > 0.7;
+  });
+}
+
+const faceMeshes = new WeakMap<ViewMesh, Map<string, [ViewMesh, ViewMesh]>>();
+/** A mesh split into the triangles of the faces `last` names and the rest. */
+function splitByFaces(kernel: GeometryMesh, mesh: ViewMesh, last: boolean[]): [ViewMesh, ViewMesh] {
+  const key = last.map((x) => (x ? 1 : 0)).join('');
+  let cached = faceMeshes.get(mesh);
+  const hit = cached?.get(key);
+  if (hit) return hit;
+  const parts: [number[], number[]] = [[], []];
+  for (let t = 0; t < kernel.faceIndices.length; t++)
+    parts[last[kernel.faceIndices[t]!] ? 1 : 0].push(
+      mesh.indices[3 * t]!,
+      mesh.indices[3 * t + 1]!,
+      mesh.indices[3 * t + 2]!,
+    );
+  const out = parts.map((indices) => ({ ...mesh, indices: new Uint32Array(indices) })) as [
+    ViewMesh,
+    ViewMesh,
+  ];
+  if (!cached) faceMeshes.set(mesh, (cached = new Map()));
+  cached.set(key, out);
+  return out;
+}
+
 /** A kernel mesh re-centred on its bounds, so large site coordinates keep float precision. */
 const viewMeshes = new WeakMap<GeometryMesh, ViewMesh>();
 function viewMesh(mesh: GeometryMesh, bounds: [number[], number[]]): ViewMesh {
@@ -30,7 +174,7 @@ function viewMesh(mesh: GeometryMesh, bounds: [number[], number[]]): ViewMesh {
   ];
   const positions = new Float32Array(mesh.positions.length);
   for (let i = 0; i < positions.length; i++) positions[i] = mesh.positions[i]! - origin[i % 3]!;
-  v = { origin, positions, normals: mesh.normals, indices: mesh.indices };
+  v = { origin, positions, normals: mesh.normals, uvs: mesh.uvs, indices: mesh.indices };
   viewMeshes.set(mesh, v);
   return v;
 }
@@ -66,6 +210,8 @@ export interface BimViewOptions {
   hiddenKinds?: ReadonlySet<BimElementKind>;
   /** Part shapes by content hash: a part without its shape is drawn as its type's bounds. */
   parts?: ReadonlyMap<string, BimPartStatus>;
+  /** #662: a material's texture set as the view draws it (its decoded images). */
+  textures?: (set: GeometryTextureSet) => ViewTextureSet | undefined;
 }
 
 /**
@@ -79,6 +225,9 @@ export function bimViewSolids(
 ): ViewSolid[] {
   if (!evaluation) return [];
   const solids = new Map<string, ViewSolid>();
+  const looks = bimElementLooks(doc);
+  const faceLooks = bimElementFaceLooks(doc);
+  let ctx: BimContext | undefined;
   for (const el of doc.elements) {
     if (options.hiddenKinds?.has(el.kind)) continue;
     const r = evaluation.elements.get(el.id);
@@ -105,16 +254,38 @@ export function bimViewSolids(
       continue;
     }
     if (r?.status !== 'ok' || !r.mesh.indices.length) continue;
-    const style = bimKindStyle[el.kind];
-    const key = `${r.solid}\u0000${el.kind}`;
+    const style = looks(el);
+    const lastLook = faceLooks(el);
+    // A wall's faces are told apart by its drawing direction: its solid is its own.
+    const key = `${r.solid}\u0000${el.kind}\u0000${JSON.stringify(style)}${
+      lastLook ? `\u0000${JSON.stringify(lastLook)}\u0000${el.kind === 'wall' ? el.id : ''}` : ''
+    }`;
     const status = el.kind === 'part' ? partStatus(doc, el.typeId, options.parts) : undefined;
     let solid = solids.get(key);
     if (!solid) {
       const mesh = viewMesh(r.mesh, r.measure.bounds);
       const bodies = status && partBodyMeshes(r.mesh, mesh, status);
       const sheet = !!status?.kinds.includes('sheet');
+      const drawn = (m: ViewMesh, look: BimLook): ViewSolidMesh => ({
+        mesh: m,
+        color: look.color,
+        opacity: look.opacity,
+        ...(look.roughness === undefined ? {} : { roughness: look.roughness }),
+        ...(look.metalness === undefined ? {} : { metalness: look.metalness }),
+        ...(look.textures && options.textures ? { textures: options.textures(look.textures) } : {}),
+        sheet,
+      });
+      let faces: ViewSolidMesh[] | undefined;
+      if (lastLook) {
+        ctx ??= new BimContext(doc);
+        const [rest, last] = splitByFaces(r.mesh, mesh, bimLastLayerFaces(ctx, el, r.mesh));
+        faces = [
+          ...(rest.indices.length ? [drawn(rest, style)] : []),
+          ...(last.indices.length ? [drawn(last, lastLook)] : []),
+        ];
+      }
       solid = {
-        meshes: bodies ?? [{ mesh, color: style.color, opacity: style.opacity, sheet }],
+        meshes: bodies ?? faces ?? [drawn(mesh, style)],
         bounds: r.measure.bounds,
         instances: [],
       };
@@ -158,7 +329,10 @@ export function partBodyMeshes(
   const key = JSON.stringify([looks, status.faces, kinds]);
   let cached = bodyMeshes.get(mesh);
   if (cached?.has(key)) return cached.get(key);
-  const groupOf = looks.map((l, i) => `${l.color.toLowerCase()} ${l.opacity} ${kinds[i]}`);
+  const groupOf = looks.map(
+    (l, i) =>
+      `${l.color.toLowerCase()} ${l.opacity} ${l.roughness ?? ''} ${l.metalness ?? ''} ${kinds[i]}`,
+  );
   const triangles = new Map<string, number[]>();
   let ok = true;
   for (let t = 0; t < kernel.faceIndices.length && ok; t++) {
@@ -179,6 +353,8 @@ export function partBodyMeshes(
         mesh: triangles.size === 1 ? mesh : { ...mesh, indices: new Uint32Array(indices) },
         color: looks[body]!.color,
         opacity: looks[body]!.opacity,
+        ...(looks[body]!.roughness === undefined ? {} : { roughness: looks[body]!.roughness }),
+        ...(looks[body]!.metalness === undefined ? {} : { metalness: looks[body]!.metalness }),
         sheet: kinds[body] === 'sheet',
       };
     });

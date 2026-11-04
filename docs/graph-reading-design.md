@@ -44,6 +44,7 @@ Inspector非表示のHostは既存の `select` と `selectedId` で独自パネ�
 初期Fitと指定されたfilter Fitは可視ラベルの実測を待つが、計測更新だけで手動cameraを戻さない。
 経路拒否により描画しないラベルは待たず、空白・ゼロ幅文字のゼロ寸法も計測完了として扱う。
 経路拒否の診断と全Graphの検証は維持する。
+自動のFit（初期`fit`とfilter Fit）は全体を収め、100%を超えて拡大しない。`selectedId`があっても選択は強調だけで、寄らない。選んだノードとその隣に寄って開くのは`initialView: 'selection'`（#589）。ctrl/⌘ + wheelとピンチはカーソルの位置を中心に拡大・縮小し、通常のwheelはスクロールのまま。
 別Graphへの切替時はorigin/customもDOM scrollを0へ戻し、
 同じGraphの再描画・編集では手動scrollを維持する。
 `nodeSize` は40–4000 logical px/軸、異常値は200×70へ戻す。

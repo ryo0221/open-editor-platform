@@ -15,8 +15,10 @@ import {
   LevelFormat,
   AlignmentType,
   PageOrientation,
+  PageTextDirectionType,
   TableLayoutType,
   ShadingType,
+  EmphasisMarkType,
   VerticalMergeType,
   BorderStyle,
   type ParagraphChild,
@@ -74,6 +76,7 @@ export async function encodeOwnedDocx(
           (header ? true : style?.fontWeight === undefined ? undefined : style.fontWeight === 700),
         italics: !!s.italic,
         strike: !!s.strike,
+        emphasisMark: s.emphasisDots ? { type: EmphasisMarkType.DOT } : undefined,
         underline: s.underline ? {} : undefined,
         color: (s.color ?? style?.color)?.slice(1),
         shading:
@@ -309,6 +312,9 @@ export async function encodeOwnedDocx(
               left: plan.page.margin,
               right: plan.page.margin,
             },
+            ...(plan.page.vertical
+              ? { textDirection: PageTextDirectionType.TOP_TO_BOTTOM_RIGHT_TO_LEFT }
+              : {}),
           },
         },
         children,

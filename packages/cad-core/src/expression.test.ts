@@ -203,7 +203,7 @@ describe('schema 2 expressions (F10, CAD27)', () => {
       'count-range',
     ]);
     expect(typed({ type: 'length', expression: expr('W'), value: 1 })).toEqual(['unknown-field']);
-    expect(typed({ type: 'length', expression: expr('W * 1e5') })).toEqual(['coordinate-range']);
+    expect(typed({ type: 'length', expression: expr('W * 1e6') })).toEqual(['coordinate-range']);
   });
 
   it('rejects parameter cycles and reports parameters that read a broken one', () => {

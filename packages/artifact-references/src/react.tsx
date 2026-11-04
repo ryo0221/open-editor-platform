@@ -98,7 +98,10 @@ export function ReferenceTools({
       // A pending discovery must not replace the choices of this creation.
       request.current++;
       update({ busy: true, error: '' });
-      const ref = await resolver!.create(options[Number(source)].source, mode);
+      const ref = await resolver!.create(
+        options[Number(source)].source,
+        resolver!.allowedModes(options[Number(source)].source).includes(mode) ? mode : 'fixed',
+      );
       if (!current() || latest.current.readOnly) return;
       if (latest.current.identity !== identity)
         throw new Error('配置先の選択が変わりました。再度配置してください。');
@@ -140,11 +143,26 @@ export function ReferenceTools({
         <select
           aria-label="埋め込みの更新方式"
           disabled={busy}
-          value={mode}
+          value={
+            options[Number(source)] &&
+            resolver &&
+            !resolver.allowedModes(options[Number(source)].source).includes(mode)
+              ? 'fixed'
+              : mode
+          }
           onChange={(e) => setMode(e.target.value as EmbeddedReference['mode'])}
         >
           <option value="fixed">固定版</option>
-          <option value="follow">更新連動（保存済みの変更）</option>
+          <option
+            value="follow"
+            disabled={
+              !!options[Number(source)] &&
+              !!resolver &&
+              !resolver.allowedModes(options[Number(source)].source).includes('follow')
+            }
+          >
+            更新連動（保存済みの変更）
+          </option>
         </select>
       </label>
       <button
@@ -257,7 +275,12 @@ export function ReferenceInspector({
           }
         >
           <option value="fixed">固定版</option>
-          <option value="follow">更新連動（保存済みの変更）</option>
+          <option
+            value="follow"
+            disabled={!resolver?.allowedModes(reference.source).includes('follow')}
+          >
+            更新連動（保存済みの変更）
+          </option>
         </select>
       </label>
       {fitSupported ? (

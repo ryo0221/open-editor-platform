@@ -295,6 +295,21 @@ describe('normal editor prepared domain transactions', () => {
     expect(authority.snapshot().content.slides[0].objects).toHaveLength(2);
     expect(authority.snapshot().content.slides[0].objects[0].fill).toBe('#aabbcc');
   });
+  it('shares a line direction change like any other visual field (#589)', () => {
+    const { d, page, authority } = fixture();
+    const id = d.slides[0].objects[0].id;
+    const edit = prepareEditorCommand(
+      slideEditorCodec,
+      authority.snapshot(),
+      B,
+      updateObject(page, id, { shape: 'arrow', lineDirection: 'vertical' }),
+    )!;
+    expect(authority.commit(B, edit).status).toBe('accepted');
+    expect(authority.snapshot().content.slides[0].objects[0]).toMatchObject({
+      shape: 'arrow',
+      lineDirection: 'vertical',
+    });
+  });
   it('preserves changed inserted elements by rejecting old Undo and deletion ABA', () => {
     const { authority, page } = fixture();
     const insert = prepareEditorCommand(

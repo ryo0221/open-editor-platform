@@ -27,6 +27,9 @@ export interface BimPartLook {
   /** `#rrggbb`. */
   color: string;
   opacity: number;
+  /** #661: the body's finish (0–1 each), when its CAD appearance has one. */
+  roughness?: number;
+  metalness?: number;
 }
 /**
  * A version's shape: its active bodies as one BRep, their bounds and kinds. `looks` and `faces`,

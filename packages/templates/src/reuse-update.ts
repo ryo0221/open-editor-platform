@@ -62,7 +62,7 @@ export interface ComponentUpdatePreview {
 type Part = Record<string, unknown> & { id: string };
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
 const designFields =
-  'name fill src stroke strokeWidth dash opacity radius rotation flipX flipY locked hidden shape imageFit alt arrowhead clipContent sizing'.split(
+  'name fill src stroke strokeWidth dash opacity radius rotation flipX flipY locked hidden shape imageFit alt arrowhead lineDirection clipContent sizing'.split(
     ' ',
   );
 const nestedFields: Record<string, string[]> = {

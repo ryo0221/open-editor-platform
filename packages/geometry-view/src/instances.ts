@@ -22,13 +22,22 @@ import {
   MeshStandardMaterial,
   type Intersection,
 } from 'three';
-import type { GeometryVec3 as Vec3 } from '@editor-platform/geometry-core';
+import { setViewFinish } from './lighting';
+import {
+  disposeViewTextures,
+  setViewTextures,
+  viewTextureBytes,
+  type ViewTextureSet,
+} from './textures';
+import { geometryDefaultFinish, type GeometryVec3 as Vec3 } from '@editor-platform/geometry-core';
 
 /** A triangle mesh in its solid's frame: positions relative to `origin` (mm). */
 export interface ViewMesh {
   origin: [number, number, number];
   positions: Float32Array;
   normals: Float32Array;
+  /** #662: real-size texture coordinates (mm), two per position. */
+  uvs?: Float32Array;
   indices: Uint32Array;
 }
 export interface ViewInstance {
@@ -42,6 +51,11 @@ export interface ViewSolidMesh<M extends ViewMesh = ViewMesh> {
   mesh: M;
   color: string;
   opacity: number;
+  /** #661: the finish (0–1 each); the default finish when absent. */
+  roughness?: number;
+  metalness?: number;
+  /** #662: image maps, drawn where the mesh has texture coordinates. */
+  textures?: ViewTextureSet;
   sheet: boolean;
 }
 export interface ViewSolid<M extends ViewMesh = ViewMesh> {
@@ -168,16 +182,16 @@ export function instancesGroup(
 }
 /** One solid's meshes at its instances; `pickable` keeps the mesh for picks on it, and outlines. */
 function meshesAt(group: Group, part: ViewSolid, meshes: ViewSolidMesh[], pickable: boolean) {
-  for (const { mesh, color, opacity: native, sheet } of meshes) {
+  for (const solidMesh of meshes) {
+    const { mesh, color, opacity: native, sheet } = solidMesh;
     const opacity = native * (part.dim ? 0.45 : 1);
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
     geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
+    if (mesh.uvs) geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
     geometry.setIndex(new BufferAttribute(mesh.indices, 1));
     const material = new MeshStandardMaterial({
       color,
-      roughness: 0.55,
-      metalness: 0.05,
       transparent: opacity < 1,
       opacity,
       depthWrite: opacity >= 1,
@@ -185,6 +199,9 @@ function meshesAt(group: Group, part: ViewSolid, meshes: ViewSolidMesh[], pickab
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
+    setViewFinish(material, solidMesh);
+    // A mesh made without texture coordinates draws without image maps.
+    setViewTextures(material, mesh.uvs ? solidMesh.textures : undefined);
     // Positions are relative to the mesh origin, inside the solid's frame.
     const offset = new Matrix4().makeTranslation(...mesh.origin);
     const source = pickable ? mesh : undefined;
@@ -303,6 +320,9 @@ export function instancesBytes(group: Group, seen = new Set<unknown>()) {
     const arrays = [...Object.values(g.attributes), ...(g.index ? [g.index] : [])].map(
       (a) => a.array,
     );
+    const material = (o as { material?: unknown }).material;
+    for (const m of Array.isArray(material) ? material : [material])
+      if (m) bytes += viewTextureBytes(m, seen);
     const im = o as InstancedMesh;
     if (im.isInstancedMesh)
       arrays.push(im.instanceMatrix.array, ...(im.instanceColor ? [im.instanceColor.array] : []));
@@ -321,9 +341,15 @@ export function disposeInstances(group: Group) {
     for (const r of [x.geometry, x.material])
       if (r && !done.has(r)) {
         done.add(r);
+        if (r === x.material) disposeViewTextures(r);
         r.dispose();
       }
     if ((o as InstancedMesh).isInstancedMesh) (o as InstancedMesh).dispose();
   });
   group.clear();
 }
+/** A look's finish: the default finish where it names none (#661). */
+export const finishOf = (look: { roughness?: number; metalness?: number } | undefined) => ({
+  roughness: look?.roughness ?? geometryDefaultFinish.roughness,
+  metalness: look?.metalness ?? geometryDefaultFinish.metalness,
+});

@@ -20,6 +20,7 @@ import {
   type BimLevelHeight,
   type BimLoop,
   type BimLoopVertex,
+  type BimAppearance,
   type BimMaterial,
   type BimPoint,
   type BimProfile,
@@ -611,9 +612,55 @@ class Importer {
           ? (category as BimMaterial['category'])
           : 'other',
       };
+      const look = this.materialLook(m.id, ep);
+      if (look) mat.appearance = look;
       this.idOf.set(m.id, mat.id);
       this.doc.materials.push(mat);
     }
+  }
+  /**
+   * #663: a material's look from its definition representation's first surface style: the
+   * colour and transparency of its shading, and of a rendering the specular roughness and a
+   * metal reflectance (the exact metalness from our own `EP_Constraints`). Undefined without one.
+   */
+  materialLook(id: number, ep: Map<string, P21Value> | undefined): BimAppearance | undefined {
+    const rep = this.g
+      .all('IFCMATERIALDEFINITIONREPRESENTATION')
+      .find((r) => r.args[3]?.t === 'ref' && r.args[3].id === id);
+    const styles = items(rep?.args[2])
+      .flatMap((r) => items(this.g.get(r)?.args[3]))
+      .flatMap((i) => items(this.g.get(i)?.args[1]))
+      // IFC2X3 wraps styles in an assignment.
+      .flatMap((s) => {
+        const e = this.g.get(s);
+        return e?.type === 'IFCPRESENTATIONSTYLEASSIGNMENT' ? items(e.args[0]) : [s];
+      })
+      .map((s) => this.g.get(s))
+      .filter((s) => s?.type === 'IFCSURFACESTYLE');
+    const shading = styles
+      .flatMap((s) => items(s!.args[2]).map((x) => this.g.get(x)))
+      .find((x) => x?.type === 'IFCSURFACESTYLESHADING' || x?.type === 'IFCSURFACESTYLERENDERING');
+    const colour = this.g.get(shading?.args[0]);
+    if (!shading || colour?.type !== 'IFCCOLOURRGB') return undefined;
+    const rgb = [1, 2, 3].map((k) => num(colour.args[k]));
+    if (rgb.some((c) => c === undefined || !Number.isFinite(c))) return undefined;
+    const unit = (v: number) => Math.min(1, Math.max(0, v));
+    const hex = (c: number) =>
+      Math.round(unit(c) * 255)
+        .toString(16)
+        .padStart(2, '0');
+    const rendering = shading.type === 'IFCSURFACESTYLERENDERING';
+    const highlight = rendering ? shading.args[7] : undefined;
+    const roughness = typeName(highlight) === 'IFCSPECULARROUGHNESS' ? num(highlight) : undefined;
+    const metalness = num(ep?.get('Metalness')) ?? (enumValue(shading.args[8]) === 'METAL' ? 1 : 0);
+    const preset = text(ep?.get('Preset'));
+    return {
+      color: `#${rgb.map((c) => hex(c!)).join('')}`,
+      opacity: unit(1 - (num(shading.args[1]) ?? 0)),
+      roughness: unit(roughness ?? 0.55),
+      metalness: unit(metalness),
+      ...(preset ? { preset } : {}),
+    };
   }
   /** A material for content without one. */
   fallbackMaterial() {

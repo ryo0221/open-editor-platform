@@ -221,3 +221,11 @@ Claude等の拡張Hostはこのportへの接続が別途必要で、本体の追
 埋め込み先が切り替われば完了を拒否する。別domainの履歴を混ぜて保存・出力しない。
 
 Analysisの保存結果は任意の`ReferenceAdapter.prepare(snapshot)`非同期preflightを通します。resolverはliveと保持版の両方でこのhookをawaitしてから、既存の同期validate/projectへ渡します。[Analysisの接続](analysis-notebook/guide.md)を参照してください。
+
+## Fiction Map saved-version adapter
+
+`fictionMapReferenceAdapter` in `@editor-platform/reference-adapters` projects saved Fiction Map native to static SVG. Targets distinguish document bounds (`kind: fiction-map-document`, `viewId: document`) from a named view (`kind: fiction-map-view`, exact `viewId`). Optional `featureIds` is a unique nonempty set of at most 200 native IDs, each at most 512 characters, permitted only for this domain; it does not reuse nodeIds. Missing IDs reject the target. Hidden layers stay hidden.
+
+The adapter declares `modes: ['fixed']`; creation, refresh and capture reject follow. Other adapters omit the additive modes field and retain their existing fixed/follow support. Fixed snapshots retain exact Artifact/version/hash; no draft/latest substitution is performed. Forbidden removes cached pixels, while offline can use a verified snapshot only with warning. See the Fiction Map D3 contract for integration and World ownership.
+
+Hosts may implement optional `checkSnapshot(source,snapshot,signal)` to verify current retention of an exact version/hash without following latest. It runs before live projection/publication and is followed by another access check. Normal Playground uses it for Fiction Map; missing saved version is an explicit `missing-target`, contradiction is `stale`. Omission preserves prior consumers. Structural import/history verification does not require live source availability; live display does. An offline result permits only warned verified snapshot fallback, while forbidden removes pixels.

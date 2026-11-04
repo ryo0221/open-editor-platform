@@ -1,11 +1,12 @@
-import { useContext, useEffect, useId, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { canonicalJson, newId } from '@editor-platform/artifact-core';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { EditorHistoryContext, EditorInputsContext } from '@editor-platform/editor-ui';
 import { type GraphAttributeDraft } from './attribute-draft';
-import { type GraphCamera, type GraphNodeSize } from './display';
+import { type GraphNodeSize } from './display';
 import { type GraphLocale } from './diagnostics';
 import { type GraphSourceActions } from './definition';
+import { GraphLabelsContext, resolveGraphSurfaceLabels, type GraphSurfaceLabels } from './labels';
 import {
   type GraphDocument,
   type GraphNode,
@@ -27,6 +28,7 @@ import {
   type GraphDrag,
   type GraphEndpointGesture,
   type GraphSectionDrag,
+  type GraphInitialView,
 } from './view-model';
 import { createSectionDragHandlers } from './view-sections';
 import { useGraphMeasurements } from './view-measure';
@@ -51,11 +53,14 @@ import {
   focusGraphCanvas,
   handleGraphKeyDown,
 } from './view-gestures';
-import { GraphToolbar, GraphViewControls } from './view-toolbar';
+import { GraphToolbar, GraphViewControls, type GraphToolbarOptions } from './view-toolbar';
 import { GraphCanvas } from './view-canvas';
 import { GraphInspector } from './view-inspector';
 import { GraphDeletionDialog } from './view-dialog';
 import './styles.css';
+export { graphSurfaceLabels, type GraphSurfaceLabels } from './labels';
+export { type GraphToolbarOptions } from './view-toolbar';
+export { type GraphInitialView, wheelGraphCamera } from './view-model';
 export interface GraphSurfaceProps {
   content: GraphDocument;
   profile: GraphProfile;
@@ -72,8 +77,12 @@ export interface GraphSurfaceProps {
   visibleEdgeTypes?: string[];
   /** Show the built-in Inspector. Hosts may supply their own panel using selection notifications. */
   showInspector?: boolean;
-  /** Applied once per graph after the canvas has a measurable size. Defaults to origin. */
-  initialView?: 'origin' | 'fit' | GraphCamera;
+  /**
+   * Applied once per graph after the canvas has a measurable size. Defaults to origin. `fit`
+   * shows the whole drawing without magnifying it, a selected node only emphasized;
+   * `selection` opens on the selected node or Section and its neighbours (#589).
+   */
+  initialView?: GraphInitialView;
   /** Refit on visibleNodeIds changes, preserving the camera on ordinary content edits. */
   fitOnFilterChange?: boolean;
   /** Emphasize the selected node and its immediate neighbors in the complete graph. */
@@ -91,7 +100,15 @@ export interface GraphSurfaceProps {
   onError?: (message: string) => void;
   /** Adapter/Host preflight may reject a source-specific edit without changing content. */
   previewEdit?: (intents: GraphIntent[], base: string) => void;
+  /** Wording of diagnostics, the toolbar, the Inspector and dialogs. Defaults to `'ja'`. */
   locale?: GraphLocale;
+  /** Host replacements for the locale's visible wording. */
+  labels?: Partial<GraphSurfaceLabels>;
+  /**
+   * Toolbar items to show. `false` hides the toolbar and view controls; an item set to false is
+   * hidden while editing stays available elsewhere (canvas gestures, Inspector, keys).
+   */
+  toolbar?: GraphToolbarOptions;
   sourceActions?: GraphSourceActions;
   /**
    * Offer node shape and style choices (default true). Set false when the source cannot save
@@ -139,12 +156,18 @@ export function GraphSurface({
   onError,
   previewEdit,
   locale = 'ja',
+  labels: labelOverrides,
+  toolbar = {},
   sourceActions,
   shapeEditing = true,
   shapeOnCreate = true,
   sectionEditing = true,
   sectionDropOutside = 'clear',
 }: GraphSurfaceProps) {
+  const labels = useMemo(
+    () => resolveGraphSurfaceLabels(locale, labelOverrides),
+    [locale, labelOverrides],
+  );
   const [nodeShape, setNodeShape] = useState<GraphNodeShape | ''>('');
   const [sectionType, setSectionType] = useGraphSectionType(profile);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -241,6 +264,12 @@ export function GraphSurface({
     canvas,
     viewport,
     drawingBounds: scene.drawingBounds,
+    selectionBounds: [
+      ...[...graphNeighbors(graph, node, true)].flatMap((id) =>
+        scene.boxes[id] ? [scene.boxes[id]] : [],
+      ),
+      ...(section && scene.sections.frames[section.id] ? [scene.sections.frames[section.id]] : []),
+    ],
     initialView,
     fitOnFilterChange,
     filterKey: scene.filterKey,
@@ -289,6 +318,7 @@ export function GraphSurface({
     zoom,
     visible: scene.visible,
     boxes: scene.boxes,
+    sections: scene.sections,
     graph,
     profile,
     locale,
@@ -395,147 +425,155 @@ export function GraphSurface({
     }
   };
   return (
-    <div
-      className="ep-graph"
-      ref={root}
-      aria-label="Structured Graph Editor"
-      onKeyDown={(e) =>
-        handleGraphKeyDown(e, {
-          root,
-          deletion,
-          setDeletion,
-          history,
-          readOnly,
-          cancelGestures,
-          remove,
-          node,
-          profile,
-          positions,
-          apply,
-        })
-      }
-    >
-      <GraphToolbar
-        readOnly={readOnly}
-        profile={profile}
-        sourceActions={sourceActions}
-        node={node}
-        edge={edge}
-        section={section}
-        id={id}
-        scope={scope}
-        inputs={inputs}
-        hasPendingInput={() => !!drafts.current.size || connection.dirty}
-        setDefinitionTarget={setDefinitionTarget}
-        setError={setError}
-        selectionReadOnly={!!type.readOnly}
-        nodeType={nodeType}
-        setNodeType={setNodeType}
-        nodeShape={nodeShape}
-        setNodeShape={shapeEditing && shapeOnCreate ? setNodeShape : undefined}
-        onAddNode={() => addNode()}
-        onPaletteAdd={(type) => addNode(type)}
-        paletteInto={section && sectionsEditable ? scene.label(section.id) : undefined}
-        onArrange={arrange}
-        sectionType={sectionType}
-        setSectionType={sectionsEditable ? setSectionType : undefined}
-        onAddSection={sectionsEditable ? addSection : undefined}
-        onGraphProperties={() => choose(graph.id)}
-        onDelete={remove}
-        zoom={zoom}
-        setZoom={setZoom}
-        setPan={setPan}
-      />
-      <GraphViewControls setPan={setPan} onFit={() => fit()} />
-      <div className="ep-graph-body">
-        <GraphCanvas
-          canvasRef={canvas}
-          scene={scene}
-          zoom={zoom}
-          pan={pan}
-          marker={marker}
-          profile={profile}
-          selected={selected}
-          node={node}
-          edge={edge}
-          neighbors={neighbors}
-          highlightAdjacent={highlightAdjacent}
-          readOnly={readOnly}
-          autoSize={nodeSize === undefined}
-          overlay={overlay}
-          endpoint={endpoint}
-          choose={choose}
-          nodeDrag={nodeDrag}
-          endpointHandlers={endpointHandlers}
-          graph={graph}
-          collapsed={collapsed}
-          toggleSection={toggleSection}
-          sectionHandlers={sectionDragHandlers}
-          sectionsReadOnly={!sectionsEditable}
-        />
-        <GraphInspector
-          showInspector={showInspector}
-          graph={graph}
-          profile={profile}
-          locale={locale}
-          sourceActions={sourceActions}
-          readOnly={readOnly}
-          node={node}
-          edge={edge}
-          section={section}
-          sectionEditing={sectionsEditable}
-          onFitSection={
-            section
-              ? () =>
-                  fit([
-                    scene.sections.collapsedBoxes[section.id] ?? scene.sections.frames[section.id],
-                  ])
-              : undefined
-          }
-          id={id}
-          scope={scope}
-          type={type}
-          attributes={attributes}
-          stamp={stamp}
-          definitionTarget={definitionTarget}
-          onCloseDefinition={() => setDefinitionTarget(undefined)}
-          apply={apply}
-          problems={problems}
-          drafts={drafts.current}
-          inputs={inputs}
-          setError={setError}
-          error={error}
-          shapeEditing={shapeEditing}
-          label={label}
-          choose={choose}
-          connection={connection}
-          connectionStale={connectionStale}
-          editConnection={editConnection}
-          resetConnection={resetConnection}
-          onSubmitConnection={() =>
-            submitGraphConnection({
-              prepare: prepareConnection,
-              apply,
-              connection,
-              setConnection,
-              setError,
-            })
-          }
-        />
+    <GraphLabelsContext.Provider value={labels}>
+      <div
+        className="ep-graph"
+        ref={root}
+        aria-label="Structured Graph Editor"
+        onKeyDown={(e) =>
+          handleGraphKeyDown(e, {
+            root,
+            deletion,
+            setDeletion,
+            history,
+            readOnly,
+            cancelGestures,
+            remove,
+            node,
+            profile,
+            positions,
+            apply,
+          })
+        }
+      >
+        {toolbar && (
+          <GraphToolbar
+            readOnly={readOnly}
+            options={toolbar}
+            profile={profile}
+            sourceActions={sourceActions}
+            node={node}
+            edge={edge}
+            section={section}
+            id={id}
+            scope={scope}
+            inputs={inputs}
+            hasPendingInput={() => !!drafts.current.size || connection.dirty}
+            setDefinitionTarget={setDefinitionTarget}
+            setError={setError}
+            selectionReadOnly={!!type.readOnly}
+            nodeType={nodeType}
+            setNodeType={setNodeType}
+            nodeShape={nodeShape}
+            setNodeShape={shapeEditing && shapeOnCreate ? setNodeShape : undefined}
+            onAddNode={() => addNode()}
+            onPaletteAdd={(type) => addNode(type)}
+            paletteInto={section && sectionsEditable ? scene.label(section.id) : undefined}
+            onArrange={arrange}
+            sectionType={sectionType}
+            setSectionType={sectionsEditable ? setSectionType : undefined}
+            onAddSection={sectionsEditable ? addSection : undefined}
+            onGraphProperties={() => choose(graph.id)}
+            onDelete={remove}
+            zoom={zoom}
+            setZoom={setZoom}
+            setPan={setPan}
+          />
+        )}
+        {toolbar && toolbar.zoom !== false && (
+          <GraphViewControls setPan={setPan} onFit={() => fit()} />
+        )}
+        <div className="ep-graph-body">
+          <GraphCanvas
+            canvasRef={canvas}
+            scene={scene}
+            zoom={zoom}
+            pan={pan}
+            marker={marker}
+            profile={profile}
+            selected={selected}
+            node={node}
+            edge={edge}
+            neighbors={neighbors}
+            highlightAdjacent={highlightAdjacent}
+            readOnly={readOnly}
+            autoSize={nodeSize === undefined}
+            overlay={overlay}
+            endpoint={endpoint}
+            choose={choose}
+            nodeDrag={nodeDrag}
+            endpointHandlers={endpointHandlers}
+            graph={graph}
+            collapsed={collapsed}
+            toggleSection={toggleSection}
+            sectionHandlers={sectionDragHandlers}
+            sectionsReadOnly={!sectionsEditable}
+          />
+          <GraphInspector
+            showInspector={showInspector}
+            graph={graph}
+            profile={profile}
+            locale={locale}
+            sourceActions={sourceActions}
+            readOnly={readOnly}
+            node={node}
+            edge={edge}
+            section={section}
+            sectionEditing={sectionsEditable}
+            onFitSection={
+              section
+                ? () =>
+                    fit([
+                      scene.sections.collapsedBoxes[section.id] ??
+                        scene.sections.frames[section.id],
+                    ])
+                : undefined
+            }
+            id={id}
+            scope={scope}
+            type={type}
+            attributes={attributes}
+            stamp={stamp}
+            definitionTarget={definitionTarget}
+            onCloseDefinition={() => setDefinitionTarget(undefined)}
+            apply={apply}
+            problems={problems}
+            drafts={drafts.current}
+            inputs={inputs}
+            setError={setError}
+            error={error}
+            shapeEditing={shapeEditing}
+            label={label}
+            choose={choose}
+            connection={connection}
+            connectionStale={connectionStale}
+            editConnection={editConnection}
+            resetConnection={resetConnection}
+            onSubmitConnection={() =>
+              submitGraphConnection({
+                prepare: prepareConnection,
+                apply,
+                connection,
+                setConnection,
+                setError,
+              })
+            }
+          />
+        </div>
+        {!showInspector && error && <p role="alert">{error}</p>}
+        {deletion && (
+          <GraphDeletionDialog
+            graph={graph}
+            deletion={deletion}
+            onConfirm={() => confirmDeletion(deletion)}
+            onCancel={() => {
+              setDeletion(undefined);
+              focusGraphCanvas(root);
+            }}
+          />
+        )}
       </div>
-      {!showInspector && error && <p role="alert">{error}</p>}
-      {deletion && (
-        <GraphDeletionDialog
-          graph={graph}
-          deletion={deletion}
-          onConfirm={() => confirmDeletion(deletion)}
-          onCancel={() => {
-            setDeletion(undefined);
-            focusGraphCanvas(root);
-          }}
-        />
-      )}
-    </div>
+    </GraphLabelsContext.Provider>
   );
 }
 /** Convenience native Surface; Host executor remains the authority and history owner. */

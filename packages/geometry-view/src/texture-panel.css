@@ -1,0 +1,45 @@
+/* #662: texture sets in the CAD and BIM appearance sections and the import dialog. */
+.view-texture,
+.view-texture-dialog {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.view-texture p {
+  margin: 0;
+}
+.view-texture-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+}
+.view-texture-muted {
+  margin: 0;
+  color: var(--ep-muted, #57606a);
+  font-size: 0.85em;
+}
+.view-texture-url {
+  overflow-wrap: anywhere;
+}
+.view-texture-info {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+.view-texture-info dd {
+  margin: 0;
+}
+.view-texture-files {
+  border-collapse: collapse;
+  width: 100%;
+}
+.view-texture-files th,
+.view-texture-files td {
+  border-bottom: 1px solid var(--ep-border, #d0d7de);
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}

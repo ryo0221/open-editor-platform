@@ -16,6 +16,7 @@ import {
   type GraphDeletion,
   type GraphDrag,
   type GraphEndpointGesture,
+  type GraphScene,
 } from './view-model';
 
 export const focusGraphCanvas = (root: RefObject<HTMLDivElement | null>) =>
@@ -91,6 +92,8 @@ export interface EndpointContext {
   zoom: number;
   visible: GraphNode[];
   boxes: Record<string, GraphBox>;
+  /** Section frames a connection end may be dropped on (#594). */
+  sections: GraphScene['sections'];
   graph: GraphDocument;
   profile: GraphProfile;
   locale: GraphLocale;
@@ -144,10 +147,13 @@ function endpointCandidate(
   const rect = root.current?.querySelector('.ep-graph-plane')?.getBoundingClientRect();
   if (!rect) return;
   const point = { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
-  const target = findEndpointTarget(point, context.visible, context.boxes);
+  const target = findEndpointTarget(point, context.visible, context.boxes, {
+    graph: context.graph,
+    layout: context.sections,
+  });
   const reason = target
     ? endpointReason(context, endpoint, target)
-    : '接続先のノードへ端点を移動してください。';
+    : '接続先のノードかまとまりへ端点を移動してください。';
   return { ...endpoint, point, target, reason };
 }
 

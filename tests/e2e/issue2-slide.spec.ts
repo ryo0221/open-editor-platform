@@ -217,3 +217,25 @@ test('H1 compact shell, panels, geometry and a five-page exported deck', async (
   await page.screenshot({ path: info.outputPath('slide-deck-after.png') });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+test('#589 an arrow runs vertically or diagonally, saved and drawn that way', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'New Slide Deck', exact: true }).click();
+  await insertShape(page, 'arrow');
+  await number(page, 'Element width', '120');
+  await number(page, 'Element height', '160');
+  const direction = page.getByLabel('Line direction', { exact: true });
+  await expect(direction).toHaveValue('horizontal');
+  await direction.selectOption('down');
+  const deck = (await nativeArtifact(page)).draft.content as SlideContent;
+  const arrow = deck.slides[0]!.objects.at(-1)!;
+  expect(arrow).toMatchObject({ shape: 'arrow', lineDirection: 'down' });
+  const canvas = page.getByRole('application', { name: 'Slide canvas' });
+  await expect(canvas.locator('path[d="M0 0 L120 160"]')).toHaveCount(1);
+  await direction.selectOption('vertical');
+  await expect(canvas.locator('path[d="M60 0 L60 160"]')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(direction).toHaveValue('down');
+  await page.screenshot({ path: info.outputPath('slide-589-arrow-direction.png') });
+});

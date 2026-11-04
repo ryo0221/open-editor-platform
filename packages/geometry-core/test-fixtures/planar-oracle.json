@@ -1,0 +1,1256 @@
+{
+  "schema": 1,
+  "python": "CPython 3.12.14",
+  "generatorSha256": "cb050d56d417b6e0608b55b0614b2676b9d38b69d55f75e78a2ea23d0be059af",
+  "seed": "0x596a",
+  "cases": [
+    {
+      "id": "triangle",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4010000000000000", "0000000000000000"],
+        ["0000000000000000", "4008000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "rectangle",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4010000000000000", "0000000000000000"],
+        ["4010000000000000", "4008000000000000"],
+        ["0000000000000000", "4008000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "bow-tie-algebraic-zero",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "4000000000000000"],
+        ["0000000000000000", "4000000000000000"],
+        ["4000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 0
+    },
+    {
+      "id": "proper-cross",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4010000000000000", "4010000000000000"],
+        ["0000000000000000", "4010000000000000"],
+        ["4010000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 0
+    },
+    {
+      "id": "shared-endpoint",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "t-junction",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000000000", "4000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "collinear-overlap",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["4008000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "overlap",
+      "areaSign": 0
+    },
+    {
+      "id": "reversed-same-segment",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "overlap",
+      "areaSign": 0
+    },
+    {
+      "id": "vertical-overlap",
+      "points": [
+        ["4000000000000000", "c008000000000000"],
+        ["4000000000000000", "4008000000000000"],
+        ["4000000000000000", "bff0000000000000"],
+        ["4000000000000000", "4010000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "overlap",
+      "areaSign": 0
+    },
+    {
+      "id": "near-gap",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000001000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 0
+    },
+    {
+      "id": "near-touch",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "3d50000000000000"],
+        ["3ff0000000000000", "4000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "point-interior",
+      "points": [
+        ["3ff0000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["4000000000000000", "3ff0000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "interior",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "point-endpoint",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["4000000000000000", "3ff0000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "point-outside-collinear",
+      "points": [
+        ["4008000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"],
+        ["4000000000000000", "3ff0000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": -1
+    },
+    {
+      "id": "point-degenerate-equal",
+      "points": [
+        ["4000000000000000", "4008000000000000"],
+        ["4000000000000000", "4008000000000000"],
+        ["4000000000000000", "4008000000000000"],
+        ["4000000000000000", "4008000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "point-degenerate-unequal",
+      "points": [
+        ["4000000000000000", "4008000000000000"],
+        ["4010000000000000", "4008000000000000"],
+        ["4010000000000000", "4008000000000000"],
+        ["4000000000000000", "4008000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "outside",
+      "segmentRelation": "overlap",
+      "areaSign": 0
+    },
+    {
+      "id": "two-points-same-y",
+      "points": [
+        ["0000000000000000", "3ff0000000000000"],
+        ["0000000000000000", "3ff0000000000000"],
+        ["4000000000000000", "3ff0000000000000"],
+        ["4000000000000000", "3ff0000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "disjoint",
+      "areaSign": 0
+    },
+    {
+      "id": "two-points-same-x",
+      "points": [
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000000000", "4000000000000000"],
+        ["3ff0000000000000", "4000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "disjoint",
+      "areaSign": 0
+    },
+    {
+      "id": "point-on-segment",
+      "points": [
+        ["3ff0000000000000", "0000000000000000"],
+        ["3ff0000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["4000000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "signed-zero",
+      "points": [
+        ["0000000000000000", "8000000000000000"],
+        ["8000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["8000000000000000", "8000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "all-zero",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "subnormal-area",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["0000000000000001", "0000000000000000"],
+        ["0000000000000000", "0000000000000001"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "underflow-area",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["1a70000000000000", "0000000000000000"],
+        ["0000000000000000", "1a70000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "overflow-differences",
+      "points": [
+        ["ffefffffffffffff", "ffefffffffffffff"],
+        ["7fefffffffffffff", "ffefffffffffffff"],
+        ["0000000000000000", "7fefffffffffffff"],
+        ["ffefffffffffffff", "ffefffffffffffff"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "mixed-subnormal-and-max",
+      "points": [
+        ["0000000000000000", "0000000000000001"],
+        ["7fefffffffffffff", "0000000000000000"],
+        ["ffefffffffffffff", "0000000000000000"],
+        ["0000000000000000", "8000000000000001"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 0
+    },
+    {
+      "id": "negative-subnormal",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["8000000000000001", "0000000000000000"],
+        ["0000000000000000", "0000000000000001"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": -1
+    },
+    {
+      "id": "near-collinear",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "3ff0000000000000"],
+        ["4000000000000000", "4000000000000002"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "product-cancellation",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["3ff0000000000000", "3ff0000000000001"],
+        ["3feffffffffffffe", "3ff0000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "origin-ulp",
+      "points": [
+        ["4415af1d78b58c40", "4415af1d78b58c40"],
+        ["4415af1d78b58c41", "4415af1d78b58c40"],
+        ["4415af1d78b58c40", "4415af1d78b58c41"],
+        ["4415af1d78b58c40", "4415af1d78b58c40"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "origin-lost-increment",
+      "points": [
+        ["4415af1d78b58c40", "4415af1d78b58c40"],
+        ["4415af1d78b58c40", "4415af1d78b58c40"],
+        ["4415af1d78b58c40", "4415af1d78b58c40"],
+        ["4415af1d78b58c40", "4415af1d78b58c40"]
+      ],
+      "orientation": 0,
+      "pointRelation": "endpoint",
+      "segmentRelation": "touch",
+      "areaSign": 0
+    },
+    {
+      "id": "geo-boundary-triangle",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["405e000000000000", "0000000000000000"],
+        ["406e000000000000", "4059000000000000"],
+        ["0000000000000000", "0000000000000000"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "touch",
+      "areaSign": 1
+    },
+    {
+      "id": "geo-boundary-tiny-square",
+      "points": [
+        ["0000000000000000", "0000000000000000"],
+        ["3eb0c6f7a0b5ed8d", "0000000000000000"],
+        ["3eb0c6f7a0b5ed8d", "3eb0c6f7a0b5ed8d"],
+        ["0000000000000000", "3eb0c6f7a0b5ed8d"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-00",
+      "points": [
+        ["57eb31b4ef5ffa20", "1231677864c15a39"],
+        ["6bfb8a446f923a0f", "7d4e4a40fa280524"],
+        ["fe1ef6eeed40133d", "c4997ca08dda3cce"],
+        ["d699946f2a0f8ef4", "df6cae497fdd606f"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-01",
+      "points": [
+        ["2a75ea19326a8a36", "815a4b535e3f9968"],
+        ["11a31e66630e3e15", "315cdb8485879c49"],
+        ["59a1db285f090b49", "80cf8e6e98f6fc38"],
+        ["167574ee8f2bbe7b", "59e50a08af815c2f"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-02",
+      "points": [
+        ["1e3094879d061fb3", "4c2039ee7efc87ae"],
+        ["010e2aee3c24710e", "eda2b47fd3fedc78"],
+        ["b14d60123e6e2be8", "bf7e1a09462765d8"],
+        ["b9bc87b6fdd85b69", "cf2aaea5326de6f1"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-03",
+      "points": [
+        ["40623c7b0f790f86", "4ca08dceda83eb57"],
+        ["98a9b06d88ebd793", "5912990e8184e2a4"],
+        ["f69b5a3df3a06373", "9f0071f93ed81d14"],
+        ["27bd0772633e46cc", "074fbf9261a33eb2"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-04",
+      "points": [
+        ["100b23389e356d99", "fa4fc3560aa689f1"],
+        ["491dcadf4e6229be", "bd9cfd017c670f1a"],
+        ["3ed8fef5177ca892", "3fc6be743993f7be"],
+        ["30b3a757f37a98e7", "a2de851520fa5854"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-05",
+      "points": [
+        ["078deb8ed7efaf64", "a87e6e8210476a8e"],
+        ["859ad484f7212017", "a58fcc7338c58cde"],
+        ["fd67760058b03ff6", "2d0393f78d618c58"],
+        ["f95562c98c5d8fc1", "735402af39e5a3ca"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-06",
+      "points": [
+        ["d1f88474841bd1da", "235a98d90a7f61cf"],
+        ["ceb6ac9cfa8075b9", "417261804d139e33"],
+        ["48f39a8da50baeca", "8ae21db924b12e78"],
+        ["bad7de2baf47dcda", "d497859c0c520ebf"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-07",
+      "points": [
+        ["d725d53f308bee68", "699fdb0886c10a4c"],
+        ["a9e0e8c4ec497674", "96c6c705b95e14c8"],
+        ["cd23fd4bff39d58c", "6140839c93ce6580"],
+        ["e3f734f0f27babba", "63fcdad8a226ec48"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-08",
+      "points": [
+        ["388807d97f9419e9", "4ef78730e11f718d"],
+        ["33605e57c17d2a7d", "37e7afe2bab2ed9d"],
+        ["0d8ec50e4709db6e", "e423fcca94172023"],
+        ["ff305b547005b87c", "28cfabf14d6183ad"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-09",
+      "points": [
+        ["69f28ab52a2f855a", "fe5647873e2ef32d"],
+        ["2df1f0bb2e3166f9", "495748d2b75df5ff"],
+        ["db9fcac96e9cbe0b", "787590b38c356c8f"],
+        ["ce722ee19c6386f0", "cc0fe7b405df373f"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-10",
+      "points": [
+        ["b1f2603af94f5b25", "1b94073dadebb614"],
+        ["3eb05907f3e6dee3", "ee5d1b3ad6dfd307"],
+        ["a45ecada603f7e23", "58e921926d7898b9"],
+        ["b3a6a59804681311", "fe6fd8767748466d"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-11",
+      "points": [
+        ["f38eca9ed1ad0c71", "07268137b9eed2b4"],
+        ["9e5f09d7016657a7", "d75ac300f9847d34"],
+        ["5cbeb128e0da34bc", "cb6b09b71e7d981a"],
+        ["1ebfc26d0d736329", "ed5750769530e3ce"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-12",
+      "points": [
+        ["13424e2960d177a3", "14eb825761f27077"],
+        ["f6451fa3f111c860", "3e670c23c03ffa39"],
+        ["c324768cafdad694", "6487a538af167bc6"],
+        ["ad1f925044e14c7f", "07a57e108ed4d322"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-13",
+      "points": [
+        ["9536fc99ea94d050", "6511cdcc2e593d6c"],
+        ["a4712874ba105834", "fb0331aaf9dfed5c"],
+        ["518d07a5489400f7", "fb94c3c584ba0e69"],
+        ["851c9d33bfe75d80", "e036c237f5a8dd1d"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-14",
+      "points": [
+        ["b28a74c66ad9cd3c", "0f07ee5f5c4428f1"],
+        ["50705e51a1940e41", "2f18be0a3af704f6"],
+        ["54e40410c8dd507f", "8ab62256c297be0a"],
+        ["65a8345fcdc8d143", "8584aa2c9a210cf0"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-15",
+      "points": [
+        ["a3b76c7f15a51254", "ac58b6e2d35db6ed"],
+        ["035f5a3dd98ae986", "fa7fe18c7da1b03f"],
+        ["a4bf08770aa45c13", "6eec8dfaed5e277d"],
+        ["95be02f5a1d02691", "ea0ab21f150c0b6c"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-16",
+      "points": [
+        ["fbd160e8b7bf63ca", "046d485c8026a040"],
+        ["92a9606428ef5ff8", "268e21efa53410c0"],
+        ["20c8024db7bb1dc9", "586712edc45158e0"],
+        ["a1b64c03c96d8d59", "8b81c794110af2d1"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-17",
+      "points": [
+        ["e4c77dd54f0c5585", "32a5b54f4a734db9"],
+        ["971e3d329c558af7", "a4a1a58c46beffc8"],
+        ["c27a23b274e1eb93", "3bfd027d5a3f86bb"],
+        ["eeb646e7470dd430", "df4c0708300f7bd7"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-18",
+      "points": [
+        ["656865e69f97fcb8", "b093964b2ba10c53"],
+        ["09b4194312c5ed1b", "54b068435858a0bb"],
+        ["ca51eb239fb61945", "2484427e100875aa"],
+        ["24417a5e86dd052e", "b281aa5cc5d559b4"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-19",
+      "points": [
+        ["a382ac5983e523b8", "bf444669fd7172bd"],
+        ["8bf6873e5f82e723", "facde7d16dd19db2"],
+        ["db6b44b6ffdeb946", "5c5e3c54d21692bb"],
+        ["7590640794a45eca", "03c0a10e0a373365"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-20",
+      "points": [
+        ["ea71701f32c07d64", "b92fee554382d56f"],
+        ["471beb812447470e", "202704284d8960a7"],
+        ["f0b497d8e4a0a719", "40ed06ea3e40bfd8"],
+        ["2d28142896e5ceec", "970e6fd092e6d304"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-21",
+      "points": [
+        ["986d8744fb37084b", "4d480e0382f6365f"],
+        ["0a68e00cd4e79b63", "289fa127ab3bdb80"],
+        ["7144e382b1d976b2", "cd8db439f1720f62"],
+        ["416e27932f6de8b9", "9d72a248b8e0c027"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-22",
+      "points": [
+        ["a96c539440b52898", "2edb716819a73e17"],
+        ["7072c84dd8155bad", "a0e021c53ddc58a8"],
+        ["910fec9019465377", "db5af4bd1e67f4c9"],
+        ["94165b90682f1cf1", "b602e510236a8d43"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-23",
+      "points": [
+        ["fb1ef57ec9f4dea3", "37568959e7fdb352"],
+        ["30b371207a0b4906", "f8ad1900658bc08b"],
+        ["a15eeb99bcf100ce", "11e26405591424f5"],
+        ["3d545007557b0c39", "30417c1c6b0f64b1"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-24",
+      "points": [
+        ["2b8b50194a39f987", "db854433efefa01e"],
+        ["f430f8f0b7fb8d3d", "5ebc23daebc9dd2f"],
+        ["d7448ba64a8d67db", "d39abb071b291d1b"],
+        ["33a56a5c57e2f0d5", "15d6deb3a5243ab9"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-25",
+      "points": [
+        ["3514bf11458bf4e1", "300cfd3727fb1475"],
+        ["e9a75a646437abbf", "d33e3297713c52b5"],
+        ["51af1757c26385bb", "80c6c7f1280a9dd7"],
+        ["cfa60ed102195059", "04d369ea4e024b0e"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-26",
+      "points": [
+        ["8d25ed98a6954605", "fbd8464598ae3637"],
+        ["201e4cf4f8ed7677", "1faca5f93e8ee5d9"],
+        ["d13464a67b75ea03", "910cc91dbbd2660a"],
+        ["46bc3680d27c843b", "43f83167e31d4200"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-27",
+      "points": [
+        ["2e2440111fee9fcf", "087132982e2143fb"],
+        ["d9421756ad1c10ea", "7c6e7f7a482ae36f"],
+        ["59246cd3f42c43a9", "bde52f6cdd56f5b7"],
+        ["8658d1d26b04d8e6", "00c48eae57d2efe3"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-28",
+      "points": [
+        ["7abd0f1f3f178c80", "2978fa074f8312aa"],
+        ["80236bce4602ab23", "c16eab25ce50a145"],
+        ["5e19e939f796c7a2", "720f2cf131b9a2a9"],
+        ["2bb49ddb61b3bb15", "7bf09a31db72b170"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-29",
+      "points": [
+        ["46969fe2fc13a102", "d162e7290796016b"],
+        ["fa04d149f6f1bfa2", "987692573193b91b"],
+        ["8e1cc705a78ad750", "58a9f0e7a6962c0a"],
+        ["4bf002f126bac67f", "ce650ad816feeb98"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-30",
+      "points": [
+        ["45f118b3752f8a2b", "f6c515277d257e8e"],
+        ["5a4195150263d3f2", "9ae8f6c92c3fcc17"],
+        ["fe4a1097d4fca2de", "18ec927752e3ab15"],
+        ["f3a20b715b6cc0da", "b411a2eabeec9dad"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-31",
+      "points": [
+        ["f18a741bb19384c0", "f280e8c2dc25ecf9"],
+        ["56ed0b5fdebe1825", "41d2050e406c723e"],
+        ["d26d09ccaaf08130", "2419fa0f349c9104"],
+        ["1dc47d7fc641ce8f", "cfcb9f14deb72729"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-32",
+      "points": [
+        ["0899455254bdc854", "ffaea5b18c9d11fd"],
+        ["c8279e204dca2429", "424c1728ccfe433a"],
+        ["dd73fd73bd2d5063", "c81246607e203ee2"],
+        ["c0dae52a7b0b0ccf", "6e05461b58399daa"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-33",
+      "points": [
+        ["44da90475d26b1ac", "0380cec4813864a7"],
+        ["c0e1ce7b448d0816", "756c92dc6a58b9c5"],
+        ["1f589ff8fcf5d677", "85ff2f7fd30afe55"],
+        ["f001e58e7fd1b968", "36218e10d307c04e"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-34",
+      "points": [
+        ["3ff15d3f1362b82b", "ebf513bf39c11109"],
+        ["2370e720bab11129", "4f4a00aa015ea5a5"],
+        ["ed3be3147e92a55d", "fab5e01d2224e5b2"],
+        ["2d0625af8e06d0ba", "3953e8f3cb82a982"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-35",
+      "points": [
+        ["a8ffd137e3624d72", "8d36f73616e1c886"],
+        ["282c1bb3ca238ada", "04e0cdd201304cb4"],
+        ["6287a04d94d3ee53", "40d274652a0aee04"],
+        ["5158dc2d188dcaa0", "99474c0889348b21"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-36",
+      "points": [
+        ["587ed0c98511c282", "68c92eef87c25eef"],
+        ["cfad7cc93b2bffa6", "f85a43b43ef0d104"],
+        ["c4ae3fb398335691", "8cd0a7a50a0efa8c"],
+        ["58395be6d37b9bdf", "8a82600acc2b6827"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-37",
+      "points": [
+        ["87a6cde48a3d23ca", "eec4c12b3a56f7d7"],
+        ["18f0ac08d7de39f4", "a1a7ada36eeda7dd"],
+        ["ed2e7cc838e3f5a0", "ea2e256bd0b07c40"],
+        ["0d29d7de9fdb060f", "c3618fed1682751c"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-38",
+      "points": [
+        ["34465e7d2fc0d02c", "161e185fb90ca5cb"],
+        ["34f9fe42583dec2d", "76349776bc0fc798"],
+        ["7e4668250fbbd85f", "15bbe26e5ad57287"],
+        ["2ec6596fa5cda443", "fe765eecf94cf8dd"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-39",
+      "points": [
+        ["cc24ba16596689a5", "9aa119ebc8a1c908"],
+        ["8c178e1dc7696033", "617609f2904f8233"],
+        ["52d1847f943ae3b2", "dc92ea0627edff73"],
+        ["0aa66bfaf6918f58", "7cf8138d0c82feb8"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-40",
+      "points": [
+        ["54a0e694ef44ce04", "17d0dcea4c009326"],
+        ["297124316976dc20", "46f68de8c7f35a33"],
+        ["f950c69c48009832", "183a75d068e4fb63"],
+        ["d54b66302a641ce5", "4fdea35fb3664cbb"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-41",
+      "points": [
+        ["5627e9ef27219e8b", "f7478618c86dcdf3"],
+        ["bacd7417adc3fac8", "0917c64886c3de3c"],
+        ["a2d0c7b46daf633b", "4783410c58c3ec08"],
+        ["708915e6787afa4c", "8a0acb2042dc1f59"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-42",
+      "points": [
+        ["cc34f150ce6b37f6", "bbbe982102f47021"],
+        ["4347df2477f89db6", "424e18b761367f92"],
+        ["660e13079c81a2cc", "f319b505ee637995"],
+        ["44929bdd13502e59", "bd21f2c3398846b3"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-43",
+      "points": [
+        ["445cbb2e0700dd12", "a416bedc199c6e5c"],
+        ["b413bebd16459d19", "927f5d2530453033"],
+        ["70e125a05697ec2f", "02a4715957a90d3c"],
+        ["d6dac6fdd651ff3b", "d48de8c7c6107904"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-44",
+      "points": [
+        ["6eb5c66749ac80d6", "c30df207b8217574"],
+        ["1d072e0e7c71409e", "22749ba2da30d0f8"],
+        ["117e1531bdfc4e38", "67fc8b1ce8fa7184"],
+        ["e3f7bb1d986faa45", "361eac1eb112f231"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-45",
+      "points": [
+        ["c5ac6bab295b61f4", "60aa0a21746030c6"],
+        ["79bac5345061dc8f", "7eed206b63f299b6"],
+        ["e2b82f24f82bb00d", "82b116d18cee152f"],
+        ["76deef21b5ba17ca", "29f8ae1f74f4d4fb"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-46",
+      "points": [
+        ["8856d9bd2e028925", "b177ce730eb8dd53"],
+        ["7746499d8564ddc1", "a602e0a6c5112d54"],
+        ["a582c6006ec4df7f", "0f30ed7512ec12d9"],
+        ["b8689c2f4b3bb19f", "8d5da996e90cb5c3"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-47",
+      "points": [
+        ["5c7d64d366786486", "af161c252ae135a0"],
+        ["ca3daf2e7e86daa8", "b8fe0153c806b951"],
+        ["e5ad09587ae2105d", "010e1af445dfced0"],
+        ["d4581c77f2a6e290", "1fe355b55d16882c"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-48",
+      "points": [
+        ["8f22e58b58a66a6d", "eb12ebbc6bb58077"],
+        ["53c6f08cfa2a8d2a", "73faa8098f9a5334"],
+        ["c0de9438c5931dee", "0208fd11810b99ed"],
+        ["e728e65b14fa8f69", "9ee0a435cbb98272"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-49",
+      "points": [
+        ["ee6c311db1b87c15", "d5e396ec8e230583"],
+        ["a3508b64ff9e31d3", "677683caf8d2d290"],
+        ["1a0541746d3a5dfe", "23b2a60dcbb2d94d"],
+        ["9e1c1d1ca9cfad60", "b8f85372a0b52b27"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-50",
+      "points": [
+        ["a13b41e0c3ce99eb", "037cd4e1c232b0fc"],
+        ["9a830d8b7dc7ca43", "566c4cd1a2813549"],
+        ["1b81b3af888c54f8", "094b02f61ba89779"],
+        ["638388bb76604a16", "1fba74272443ac81"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-51",
+      "points": [
+        ["22fb6dd04950c113", "6ac578b91f529bb3"],
+        ["e4f45b32312b909c", "bf085b822c065d47"],
+        ["2681d453e5a1ee9a", "89ae38933e7250db"],
+        ["7ce9c9bcd24029b9", "d9c46f8f65416bed"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-52",
+      "points": [
+        ["f50eb0e3168c164c", "7a81dce7b5804f1d"],
+        ["3972afbd6a7f58ac", "c6b6e0c344d538cb"],
+        ["cf7b0645946003bb", "18cd5324f80fa236"],
+        ["075206befdc78a21", "1a7ed944b8fe0f0e"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "cross",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-53",
+      "points": [
+        ["15f4e1afdca600ae", "3e682ea3ed724ab7"],
+        ["7d23e69c63955a57", "d316666859f431f0"],
+        ["a5bfda1624e8015a", "bb5ce03f54a65fcb"],
+        ["27011632c7ead2ca", "9426e00ca61cc8f0"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-54",
+      "points": [
+        ["3d2e146907aed015", "07066ee7ebd37483"],
+        ["74c27b60f5e0d237", "661e73db33501098"],
+        ["202cd3de18d420e7", "68f54f08f07889cb"],
+        ["cfd9071681107819", "bd0ec2eefe5239f3"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-55",
+      "points": [
+        ["61007e8494988007", "dcf3fcde6ba72fbe"],
+        ["8d9ae8a8c9a8de1c", "f384a6e1ffc05d75"],
+        ["cbeebdf47022ba19", "8a18be4e7256439f"],
+        ["179fd1616c92d39f", "7386adfb82a80e01"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-56",
+      "points": [
+        ["47007381ff4fc182", "b4af99f33a6e1b27"],
+        ["d35505de87d80212", "d58e2317f4de6f76"],
+        ["362903b4e1197ee4", "2b7a44cbf619810c"],
+        ["660e53038bad5784", "2467404d0f82316b"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-57",
+      "points": [
+        ["fd6ce5c5214fccad", "c5888e0804f66310"],
+        ["887eb2e42ed0bff3", "21df32862e22fb11"],
+        ["19f9f7e655c995ec", "d1840cfcb4c92adf"],
+        ["cbac98841ba42b18", "8f9ee6826468f365"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-58",
+      "points": [
+        ["5c49d83f86847f59", "cbf79dcc6e1e5128"],
+        ["ffcb08efee24488b", "0fe7855493189469"],
+        ["0ad30dee3d971a78", "012daf3ab19f9b2e"],
+        ["0c3700ce34651801", "3ca7f32356742970"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-59",
+      "points": [
+        ["a925abe3016d1086", "acb0fab5342a3a82"],
+        ["31a63028bae817e6", "025e144b2dc63757"],
+        ["3e7976e1794394b4", "3a025cf081d4deaa"],
+        ["820f558f7f57012f", "b56ec8d1cf08223c"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-60",
+      "points": [
+        ["b186ef0663d69c84", "9a1d3f861e8c42f8"],
+        ["ee6180cf2eb77a99", "43b31ee91d5c0079"],
+        ["ed46e29cfd080dd2", "24a82c83e39fe187"],
+        ["dae5f70f2da35aa9", "80411d66fb6076f3"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    },
+    {
+      "id": "finite-bits-61",
+      "points": [
+        ["7e659de7a752c146", "d2b6cc156d9971e9"],
+        ["96c93184e52ae2b4", "c3baf30fd992e1bf"],
+        ["f9b40f01f835c98e", "02c6750c5ac90684"],
+        ["771ce40732bfa3e8", "89be273ab3c2633b"]
+      ],
+      "orientation": 1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-62",
+      "points": [
+        ["bac93f53a0a28444", "911a527329eea4d6"],
+        ["151caafaff9fb10a", "936cba6e09a075a9"],
+        ["f88f3b66ef84fe85", "33d4588350579db8"],
+        ["a07545d501832c10", "74766d9e0f773f8e"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": -1
+    },
+    {
+      "id": "finite-bits-63",
+      "points": [
+        ["c3184ff07f70a12b", "45f5d20c1caca64e"],
+        ["81837a783e32eecb", "90faeac30406806d"],
+        ["0205bc15a6823929", "fec56b342cec6880"],
+        ["40ed1fb342db7092", "1b461b9ef4f9fc9d"]
+      ],
+      "orientation": -1,
+      "pointRelation": "outside",
+      "segmentRelation": "disjoint",
+      "areaSign": 1
+    }
+  ]
+}

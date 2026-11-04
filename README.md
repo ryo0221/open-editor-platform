@@ -23,13 +23,18 @@ See [assets and environment setup](docs/repository-assets.md) for font preparati
 
 Run an optional reference service in another terminal when needed:
 
-| Command                        | Purpose                             |
-| ------------------------------ | ----------------------------------- |
-| `npm run collaboration:server` | In-memory shared-editing authority  |
-| `npm run react-ui:dev`         | Registered React preview/build Host |
-| `npm run artifact-host:dev`    | Independent artifact editing Host   |
+| Command                        | Purpose                                                                                                                                                              |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run collaboration:server` | In-memory shared-editing authority                                                                                                                                   |
+| `npm run react-ui:dev`         | Registered React preview/build Host                                                                                                                                  |
+| `npm run artifact-host:dev`    | Independent artifact editing Host                                                                                                                                    |
+| `npm run fiction-map:dev`      | Independent Fiction Map local Surface ([API and limits](packages/fiction-map/README.md)); local Host registration, saved versions and fixed references are available |
 
 ## Use and integrate
+
+Character provides experimental 3D character editing and animation. See the
+[public overview and limits](docs/character/README.md); this does not certify
+production acceptance, performance or external model rights.
 
 The Playground artifact library creates editable artifacts and offers templates
 for supported domains. Editing a draft and saving an immutable version are separate
@@ -39,7 +44,7 @@ See [status and limits](docs/status.md) and [Surface contracts](docs/surface-sem
 Structured Graph is **Preview / Experimental (pre-1.0)**. Its schema and API may change
 without notice, and older formats are refused rather than migrated. Export the Graphs you
 want to keep as native JSON before updating. Changes are recorded in
-the Structured Graph change record.
+[the Structured Graph change record](docs/structured-graph/changes.md).
 
 Import workspace packages through public `@editor-platform/*` entrypoints.
 Packages expose TypeScript source for a bundler-aware Host.

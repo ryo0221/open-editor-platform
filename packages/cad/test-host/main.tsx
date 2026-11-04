@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { viewTextureImageTools } from '@editor-platform/geometry-view';
 import {
   applyCadOperation,
   CadAssemblyPort,
@@ -38,6 +39,7 @@ import {
   CadAssembly,
   CadController,
   CadSurface,
+  type CadAssetStore,
   type CadPartSourceHost,
   type CadPartStore,
   cadBudgets,
@@ -305,6 +307,18 @@ if (camera)
 const perf = params.get('perf') === '1' ? cadPerf(cadBudgets.mainBytes) : undefined;
 if (perf) Object.assign(window, { cadPerf: perf });
 
+// ?assets=1: the Host keeps asset bytes in memory for the page's life (texture images, #662).
+const kept = new Map<string, Uint8Array>();
+const assetStore: CadAssetStore | undefined =
+  params.get('assets') === '1'
+    ? {
+        get: (sha256) => kept.get(sha256),
+        stage: async (list) => {
+          for (const { ref, bytes } of list) kept.set(ref.sha256, bytes);
+        },
+      }
+    : undefined;
+
 let n = 0;
 function mount() {
   const build = {
@@ -342,6 +356,8 @@ function mount() {
     kernel: parts ?? port,
     exportMeshes: (request, deflectionMm) => port.exportMeshes(request, deflectionMm),
     exportStep: (request) => port.exportStep(request),
+    // As the binding (#663).
+    textureImages: viewTextureImageTools,
     analyzeContinuity: (request, edge) => port.analyzeContinuity(request, edge),
     analyzeCurvature: (request) => port.analyzeCurvature(request),
     analyzeComb: (request, edge) => port.analyzeComb(request, edge),
@@ -349,6 +365,7 @@ function mount() {
     currentKernel: { id: build.id, buildHash: build.buildHash },
     permissionGeneration: () => 1,
     newId: (prefix) => `${prefix}-${++n}`,
+    ...(assetStore ? { assets: assetStore } : {}),
     ...(persist
       ? {
           onApplied: (content: CadDocument) =>
@@ -378,15 +395,23 @@ const cad: (typeof surfaces)[0] & { setGpuBytes?(bytes: number | undefined): voi
 Object.assign(window, { cad });
 // The first Surface's field buffers, as a Host registry holds them (Sketch mode's entries flush it).
 const inputs = new EditorInputs();
+// ?statusRole=none: the Host shows its own role=status and the Surface's notices drop the role (#563).
+const hostStatus = params.get('statusRole') === 'none';
 function First() {
   const [budget, setBudget] = useState(gpuBytes);
   cad.setGpuBytes = setBudget;
   return (
     <EditorInputsContext.Provider value={inputs}>
+      {hostStatus && (
+        <p role="status" style={{ position: 'fixed', bottom: 0, left: 0, margin: 0 }}>
+          Host status
+        </p>
+      )}
       <CadSurface
         controller={cad.controller}
         gpuBytes={budget}
         {...(cad.assembly ? { assembly: cad.assembly } : {})}
+        {...(hostStatus ? { statusRole: 'none' as const } : {})}
       />
     </EditorInputsContext.Provider>
   );

@@ -80,7 +80,8 @@ it('names the element and field that make Design content invalid', () => {
   const cases: [unknown, string | undefined][] = [
     [{ ...createDesign(), elements: [text] }, undefined],
     [null, '$'],
-    [{ ...createDesign(), schemaVersion: 4 }, 'schemaVersion'],
+    [{ ...createDesign(), schemaVersion: 5 }, 'schemaVersion'],
+    [{ ...createDesign(), schemaVersion: 4 }, 'panel division/geometry'],
     [
       { ...createDesign(), elements: [text, { ...text, opacity: 2 }] },
       'elements[1].id (duplicate element "copy")',

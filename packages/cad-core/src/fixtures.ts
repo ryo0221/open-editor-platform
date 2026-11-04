@@ -1022,6 +1022,61 @@ export function f15Wing(kind: 'five' | 'half' = 'five'): CadDocument {
   });
 }
 /**
+ * F15 canopy (ST-89#2): a car's glass canopy through five closed cubic spline sections on YZ
+ * planes (u = Y, v = Z, normal +X), the first one flat (40 mm high, 1,600 mm wide). OCCT's wire
+ * matching throws `BRepFill :: profiles are inconsistent` for it. `front`/`back`: sections 1–3 or
+ * 3–5 only; ruled by default (then `five` is the two of them exactly).
+ */
+export function f15Canopy(kind: 'five' | 'front' | 'back' = 'five', ruled = true): CadDocument {
+  // [x, half width, bottom, top, top width ratio] → eight poles around the section.
+  const rows: [number, number, number, number, number][] = [
+    [1500, 800, 760, 800, 0.9],
+    [1900, 770, 760, 1080, 0.78],
+    [2400, 700, 760, 1170, 0.72],
+    [2950, 640, 760, 1040, 0.72],
+    [3250, 560, 760, 880, 0.75],
+  ];
+  const section = ([, w, z0, z1, top]: (typeof rows)[number]): [number, number][] => [
+    [0, z0],
+    [w * 0.85, z0],
+    [w, z0 + (z1 - z0) * 0.4],
+    [w * top, z1],
+    [0, z1 + (z1 - z0) * 0.04],
+    [-w * top, z1],
+    [-w, z0 + (z1 - z0) * 0.4],
+    [-w * 0.85, z0],
+  ];
+  const chosen = kind === 'front' ? rows.slice(0, 3) : kind === 'back' ? rows.slice(2) : rows;
+  const yz: Quaternion = [0.5, 0.5, 0.5, 0.5];
+  const sketches = chosen.map((row, i) => {
+    const solved = Object.fromEntries(section(row).map((p, k) => [`p${k}`, p]));
+    return freeSketch(
+      `canopy-s${i}`,
+      [row[0], 0, 0],
+      yz,
+      [{ type: 'spline', id: 's', poles: Object.keys(solved), degree: 3, closed: true }],
+      solved,
+    );
+  });
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    sketches,
+    features: [
+      {
+        id: 'canopy-loft',
+        name: 'Canopy loft',
+        type: 'loft',
+        inputFeatureIds: [],
+        args: {
+          sections: sketches.map((x) => ({ sketchId: x.id, region: { outer: ['s'], holes: [] } })),
+          ruled,
+        },
+      },
+    ],
+    bodies: [body('canopy', 'canopy-loft')],
+  });
+}
+/**
  * F15 sweep: a circle of r5 on YZ (u = Y, v = Z, normal +X) carried along a path on XY, 50 mm
  * along +X and then a quarter turn of r30 about (50, 30), into body `pipe`. Volume by Pappus:
  * 25π × (50 + 15π) mm³.

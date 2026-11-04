@@ -1,3 +1,5 @@
+import { createFictionMap, type FictionMapContent } from '@editor-platform/fiction-map/model';
+import { fictionMapHostAdapter, parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
 import { createEstimate, isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
 import { verifyArtifactEstimate as verifyEstimateArtifact } from './estimate-bim';
 import { createAnalysis, isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
@@ -51,6 +53,7 @@ export interface CodeContent {
   source: string;
 }
 export type HostContent =
+  | FictionMapContent
   | EstimateDocument
   | AnalysisDocument
   | SlideContent
@@ -146,6 +149,7 @@ export function productDesign(title = 'Your product'): DesignContent {
 export const isStaticSlide = (value: unknown): value is SlideContent =>
   isDeck(value) && !hasSlideAnimations(value);
 export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
+  'fiction-map': fictionMapHostAdapter as EditorHostAdapter<HostContent>,
   estimate: {
     kind: 'estimate',
     validate: isEstimate,
@@ -306,6 +310,7 @@ export function referenceArtifacts(): Artifact<HostContent>[] {
       },
     ],
     ['data', 'Records / Kanban', createData()],
+    ['fiction-map', 'Fiction Map', createFictionMap()],
   ];
   return seeds.map(([kind, name, content]) => ({
     ...createArtifact(kind, name, content),
@@ -353,7 +358,10 @@ export class BrowserArtifactStorage implements StorageAdapter<Artifact<HostConte
     const kind = raw && typeof raw === 'object' && 'kind' in raw ? String(raw.kind) : '';
     const adapter = hostAdapters[kind];
     if (!adapter) throw Error('Unsupported saved artifact kind');
-    const artifact = await loadHostArtifact(text, adapter);
+    const artifact =
+      kind === 'fiction-map'
+        ? await parseFictionMapArtifact(text)
+        : await loadHostArtifact(text, adapter);
     if (artifact.id !== id) throw Error('Stored artifact ID mismatch');
     return artifact;
   }

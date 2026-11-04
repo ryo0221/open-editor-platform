@@ -14,12 +14,15 @@ import {
   type GeometryVec3,
 } from '@editor-platform/geometry-core';
 import { vertexNormals } from './mesh';
+import { faceTextureUvs } from './texture-uv';
 import { decodeKernelException, type OcModule } from './module';
 
 /** Triangles of one shape in model space, faces in the kernel's explorer order. */
 export interface GeometryMesh {
   positions: Float32Array;
   normals: Float32Array;
+  /** #662: real-size texture coordinates (mm), two per position. */
+  uvs: Float32Array;
   indices: Uint32Array;
   /** Per triangle, the 0-based index of its face. */
   faceIndices: Uint32Array;
@@ -358,6 +361,7 @@ export async function evaluateGeometry(
     const positions: number[] = [];
     const indices: number[] = [];
     const faceIndices: number[] = [];
+    const textured: { face: unknown; tri: OcModule; offset: number }[] = [];
     let index = 0;
     explore(shape, 'TopAbs_FACE', (current) => {
       const face = own(oc.TopoDS.Face_1(current));
@@ -371,6 +375,7 @@ export async function evaluateGeometry(
           const p = own(own(tri.Node(i)).Transformed(trsf));
           positions.push(p.X(), p.Y(), p.Z());
         }
+        textured.push({ face, tri, offset });
         const reversed = face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
         for (let i = 1; i <= tri.NbTriangles(); i++) {
           const t = own(tri.Triangle(i));
@@ -382,9 +387,14 @@ export async function evaluateGeometry(
       index++;
     });
     const pos = new Float32Array(positions);
+    // #662: real-size texture coordinates (mm), as the CAD meshes have.
+    const uvs = new Float32Array((pos.length / 3) * 2);
+    for (const t of textured)
+      faceTextureUvs(oc, own, t.face, t.tri, positions, [0, 0, 0], uvs, t.offset);
     return {
       positions: pos,
       normals: vertexNormals(pos, indices),
+      uvs,
       indices: new Uint32Array(indices),
       faceIndices: new Uint32Array(faceIndices),
     };

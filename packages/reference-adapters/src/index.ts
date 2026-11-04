@@ -1,3 +1,5 @@
+import { fictionMapReferenceAdapter } from './fiction-map';
+export { fictionMapReferenceAdapter } from './fiction-map';
 import { assertGeo, renderGeoSvg, fitGeoExtent, type GeoDocument } from '@editor-platform/geo-core';
 import { resolveGeoBackgrounds } from '@editor-platform/geo-core/backgrounds';
 import {
@@ -26,6 +28,8 @@ import {
   fitGraphRoutesToShapes,
   graphLabelColor,
   graphShapePath,
+  graphNodeIconPath,
+  resolveGraphNodeIcon,
   resolveGraphNodeLook,
   resolveGraphSectionStyle,
   graphSectionAncestors,
@@ -194,13 +198,6 @@ export const graphReferenceAdapter: ReferenceAdapter = {
         },
       ]),
     );
-    const edges = graph.edges.filter((e) => boxes.has(e.from) && boxes.has(e.to));
-    if (nodes.length > 100 || edges.length > 300)
-      throw new ReferenceError('error', 'Graph参照は100 nodes／300 edgesまでです。');
-    const e = escapeXml,
-      allBounds: Bounds[] = [...boxes.values()];
-    let body =
-      '<defs><marker id="reference-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#697386"/></marker></defs>';
     // Section frames of the shown nodes and their ancestors, outermost first, under everything.
     const shownSections = new Set(
       target.nodeIds
@@ -211,6 +208,16 @@ export const graphReferenceAdapter: ReferenceAdapter = {
           )
         : graph.sections.map((s) => s.id),
     );
+    // A connection may end at a drawn Section frame (#594); routes avoid nodes only.
+    const end = (id: string) =>
+      boxes.get(id) ?? (shownSections.has(id) ? graph.presentation.sections[id] : undefined);
+    const edges = graph.edges.filter((e) => end(e.from) && end(e.to));
+    if (nodes.length > 100 || edges.length > 300)
+      throw new ReferenceError('error', 'Graph参照は100 nodes／300 edgesまでです。');
+    const e = escapeXml,
+      allBounds: Bounds[] = [...boxes.values()];
+    let body =
+      '<defs><marker id="reference-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#697386"/></marker></defs>';
     const frames = graph.sections
       .filter((s) => shownSections.has(s.id))
       .map((s) => ({ s, depth: graphSectionAncestors(graph.sections, s.id)?.length ?? 0 }))
@@ -225,10 +232,10 @@ export const graphReferenceAdapter: ReferenceAdapter = {
     const looks = new Map(nodes.map((n) => [n.id, resolveGraphNodeLook(graph, profile, n)]));
     for (const edge of edges) {
       const ends = {
-        source: boxes.get(edge.from)!,
-        target: boxes.get(edge.to)!,
-        sourceShape: looks.get(edge.from)!.shape,
-        targetShape: looks.get(edge.to)!.shape,
+        source: end(edge.from)!,
+        target: end(edge.to)!,
+        sourceShape: looks.get(edge.from)?.shape ?? 'rectangle',
+        targetShape: looks.get(edge.to)?.shape ?? 'rectangle',
       };
       // The same outline endpoints as the Surface: arrows meet the node shapes.
       const route = fitGraphRoutesToShapes(
@@ -265,6 +272,10 @@ export const graphReferenceAdapter: ReferenceAdapter = {
         shape === 'rectangle'
           ? `<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="3" ${paint}/><text x="${b.x + 12}" y="${b.y + 39}" font-size="18"${color}>${text}</text>`
           : `<path d="${e(graphShapePath(shape, b))}" ${paint}/><text x="${b.x + b.width / 2}" y="${b.y + b.height / 2 + 6}" text-anchor="middle" font-size="18"${color}>${text}</text>`;
+      // The same corner badge as the Surface, from the built-in icon paths only.
+      const icon = resolveGraphNodeIcon(profile, node);
+      if (icon)
+        body += `<g transform="translate(${b.x - 10} ${b.y - 10})"><circle cx="12" cy="12" r="12" fill="#ffffff" stroke="${e(style.stroke ?? '#5269c8')}"/><path d="${graphNodeIconPath(icon)}" transform="translate(3 3) scale(0.75)" fill="none" stroke="${e(style.stroke ?? '#5269c8')}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>`;
     }
     const bounds = allBounds.length
       ? unionBounds(allBounds)
@@ -312,6 +323,7 @@ export const geoReferenceAdapter: ReferenceAdapter = {
   },
 };
 export const nativeReferenceAdapters = [
+  fictionMapReferenceAdapter,
   dataReferenceAdapter,
   graphReferenceAdapter,
   geoReferenceAdapter,

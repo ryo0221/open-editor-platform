@@ -30,6 +30,7 @@ export interface EditorInputSnapshot {
 export class EditorInputError extends Error {}
 /** A save/export/switch boundary shared by independent Hosts and ordinary Surfaces. */
 export class EditorInputs {
+  private flushing = false;
   private boundaries = new Set<EditorInputBoundary>();
   private listeners = new Set<() => void>();
   private snapshot: EditorInputSnapshot = {
@@ -68,6 +69,7 @@ export class EditorInputs {
     return () => this.listeners.delete(listener);
   };
   history(direction: 'undo' | 'redo'): boolean {
+    this.assertNotFlushing();
     for (const boundary of [...this.boundaries].reverse())
       if (boundary.history?.(direction)) {
         this.changed();
@@ -91,14 +93,35 @@ export class EditorInputs {
     )
       return;
     this.snapshot = { dirty, composing, settling, canUndo, canRedo };
-    this.listeners.forEach((listener) => listener());
+    const errors: unknown[] = [];
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Input notification failed');
   };
+  private assertNotFlushing() {
+    if (this.flushing) throw new EditorInputError('入力の確定が進行中です。');
+  }
   /**
    * Commits every buffered input. `keepEditor` is for a save that leaves the editor open (a
    * version save, a draft save): it captures the committed content and lets settling work finish
    * afterwards instead of refusing.
    */
   flush(options: { keepEditor?: boolean } = {}): void {
+    this.assertNotFlushing();
+    this.flushing = true;
+    try {
+      this.flushPrepared(options);
+    } finally {
+      this.flushing = false;
+    }
+  }
+  private flushPrepared(options: { keepEditor?: boolean }): void {
     const prepared: { boundary: EditorInputBoundary; commit: () => void | boolean }[] = [];
     // Settling work that was already pending; anything that starts settling below was started by
     // this flush's own commits (e.g. a field whose value starts an evaluation).
@@ -112,7 +135,10 @@ export class EditorInputs {
       try {
         if (state.composing)
           throw new EditorInputError('日本語などの入力変換を確定してから保存してください。');
-        prepared.push({ boundary, commit: boundary.prepare() });
+        const commit = boundary.prepare();
+        if (typeof commit !== 'function')
+          throw new EditorInputError('入力の準備は同期の確定関数を返す必要があります。');
+        prepared.push({ boundary, commit });
       } catch (error) {
         boundary.focus();
         throw new EditorInputError(

@@ -54,12 +54,17 @@ import { BoardInspector } from './board-inspector';
 import { BoardToolbar } from './board-toolbar';
 import { BoardConnectorLayer, useEndpointDrag } from './board-connectors';
 import { freeBounds } from './placement';
+import type { WhiteboardNodeRenderer, WhiteboardInteractionMode } from './node-content';
 export interface WhiteboardSurfaceProps extends ReferenceSurfaceProps {
   content: WhiteboardContent;
   execute: (command: EditorCommand<WhiteboardContent>) => void | boolean;
   select: (ids: string[], region?: Region) => void;
   readOnly?: boolean;
   layout?: Partial<EditorLayoutProps>;
+  /** Optional trusted shape content. Native model and ordinary renderer are unchanged. */
+  renderNodeContent?: WhiteboardNodeRenderer;
+  /** Content mode keeps camera/view interactions while refusing native layout/text changes. */
+  interactionMode?: WhiteboardInteractionMode;
 }
 type Apply = (cmd: EditorCommand<WhiteboardContent>) => boolean;
 
@@ -250,9 +255,12 @@ export function WhiteboardSurface({
   content: source,
   execute,
   select,
-  readOnly = false,
+  readOnly: sourceReadOnly = false,
   layout,
+  renderNodeContent,
+  interactionMode = 'layout',
 }: WhiteboardSurfaceProps) {
+  const readOnly = sourceReadOnly || interactionMode === 'content';
   const board = useBoardContent(source, references);
   const { content, nodes, contentBounds, paintOrder } = board;
   const selection = useBoardSelection(content, select, focusReferenceId);
@@ -373,6 +381,19 @@ export function WhiteboardSurface({
         )}
         <CanvasStage
           {...boardStageProps({ ...shared, ...board })}
+          inputOwner={interactionMode === 'content' ? 'point' : 'object'}
+          objectRevision={interactionMode}
+          render={
+            renderNodeContent
+              ? (target) =>
+                  renderBoardTarget(target, {
+                    renderNodeContent,
+                    mode: interactionMode,
+                    selected: ids,
+                    readOnly,
+                  })
+              : renderBoardTarget
+          }
           onSelect={choose}
           onDelete={() => action('delete')}
           onAction={action}

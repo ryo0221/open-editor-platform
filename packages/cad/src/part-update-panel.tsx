@@ -8,6 +8,7 @@ import type { CadPartDef } from '@editor-platform/cad-core';
 import { Dialog } from '@editor-platform/editor-ui';
 import type { CadAssembly, CadPartCandidate, CadVersionSummary } from './assembly';
 import { describeCode } from './controller';
+import { useStatusProps } from './status-role';
 
 const size = (s: CadVersionSummary | undefined) =>
   s ? s.sizeMm.map((v) => +v.toFixed(2)).join(' × ') + ' mm' : '—';
@@ -26,6 +27,7 @@ export function UpdatePartsDialog({
   onClose: () => void;
 }) {
   const { update } = useSyncExternalStore(assembly.subscribe, assembly.getSnapshot);
+  const status = useStatusProps();
   const [list, setList] = useState<CadPartCandidate[] | 'loading' | 'failed'>('loading');
   // A part imported into this document has no other versions.
   const parts = partIds.flatMap((id) =>
@@ -72,7 +74,7 @@ export function UpdatePartsDialog({
             <p>
               選んだ版を部品に使います。jointの接続点は新しい版の上で解決し直し、採用は1つの編集です。
             </p>
-            {list === 'loading' && <p role="status">読み込んでいます…</p>}
+            {list === 'loading' && <p {...status}>読み込んでいます…</p>}
             {list === 'failed' && <p role="alert">部品の版の一覧を読み込めませんでした。</p>}
             <ul className="cad-part-candidates" aria-label="Parts to update">
               {parts.map((p) => (
@@ -111,7 +113,7 @@ export function UpdatePartsDialog({
             </div>
           </>
         )}
-        {update?.status === 'preparing' && <p role="status">新しい版を計算しています…</p>}
+        {update?.status === 'preparing' && <p {...status}>新しい版を計算しています…</p>}
         {update && update.status !== 'preparing' && (
           <>
             <table className="cad-update-table" aria-label="Changes">
@@ -141,7 +143,7 @@ export function UpdatePartsDialog({
               </tbody>
             </table>
             {update.status === 'ready' && (
-              <p role="status" data-testid="cad-update-moved">
+              <p {...status} data-testid="cad-update-moved">
                 {update.moved.length
                   ? `動く部品：${update.moved.join('、')}`
                   : '配置の変わる部品はありません。'}

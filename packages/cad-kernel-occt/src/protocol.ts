@@ -28,6 +28,12 @@ export interface CadMesh {
   origin: [number, number, number];
   positions: Float32Array;
   normals: Float32Array;
+  /**
+   * #662: real-size texture coordinates (mm), two per node of `positions`: a plane projected on
+   * the model's axes, any other face along its own parameters scaled to mm. Absent on meshes
+   * made before textures (they draw without image maps).
+   */
+  uvs?: Float32Array;
   indices: Uint32Array;
   faceIds: Uint32Array;
   /**
@@ -208,6 +214,7 @@ export const meshBytes = (meshes: readonly CadMesh[]) =>
       n +
       m.positions.byteLength +
       m.normals.byteLength +
+      (m.uvs?.byteLength ?? 0) +
       m.indices.byteLength +
       m.faceIds.byteLength +
       m.vertices.byteLength +

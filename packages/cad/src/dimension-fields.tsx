@@ -15,6 +15,7 @@ import {
   type Length,
 } from '@editor-platform/cad-core';
 import { readCadInput } from './expression-input';
+import { Output } from './status-role';
 
 export const parameterName = (doc: CadDocument) => (id: string) =>
   doc.parameters.find((p) => p.id === id)?.name ?? id;
@@ -57,9 +58,9 @@ export function LengthField({
     return (
       <div className="cad-readonly-field">
         <span>{label}</span>
-        <output>
+        <Output>
           {fmt(resolveLength(length, parameterValues(doc)))} mm{bound ? ` (= ${bound})` : ''}
-        </output>
+        </Output>
       </div>
     );
   }
@@ -96,10 +97,10 @@ export function AngleField({
     return (
       <div className="cad-readonly-field">
         <span>{label}</span>
-        <output>
+        <Output>
           {fmt((resolveAngle(angle, parameterValues(doc)) * 180) / Math.PI)}° (={' '}
           {parameterName(doc)(angle.parameterId)})
-        </output>
+        </Output>
       </div>
     );
   return (
@@ -136,10 +137,10 @@ export function CountField({
     return (
       <div className="cad-readonly-field">
         <span>{label}</span>
-        <output>
+        <Output>
           {parameterValues(doc).get(count.parameterId)?.value} (={' '}
           {parameterName(doc)(count.parameterId)})
-        </output>
+        </Output>
       </div>
     );
   return (

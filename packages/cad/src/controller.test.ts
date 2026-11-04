@@ -27,12 +27,14 @@ import {
   type CadContinuitySample,
   type CadCombSample,
   cadContentHash,
+  upstreamFeatures,
 } from '@editor-platform/cad-core';
 import type { CadMesh } from '@editor-platform/cad-kernel-occt';
 import { cadInputState } from './binding';
 import {
   CadController,
   describeCode,
+  cadFailureReport,
   referenceRows,
   retainedBytes,
   topologyInfo,
@@ -196,7 +198,16 @@ describe('CadController', () => {
     const plate = controller.getSnapshot().content.bodies.find((b) => b.id === 'plate')!;
     expect(controller.getSnapshot()).toMatchObject({
       geometryState: 'geometry-error',
-      geometryFailure: `表示できる形状の上限を超えています。原因：body「${plate.name}」`,
+      geometryFailure: `表示できる形状の上限を超えています。原因：body「${plate.name}」（ID plate）`,
+      // #589: the same failure for a Host or an assistant, and the part selected.
+      failureReport: {
+        code: 'output-limit',
+        message: describeCode('output-limit'),
+        retryable: false,
+        bodyId: 'plate',
+        bodyName: plate.name,
+      },
+      selection: { kind: 'body', id: 'plate' },
     });
     // Recalculate clears it once the kernel answers.
     await controller.refresh({ retry: true });
@@ -217,13 +228,56 @@ describe('CadController', () => {
     });
   });
 
+  it('reports the part, the operation and the kernel reason of a failed feature (#589)', async () => {
+    const { controller, failNext } = setup();
+    const doc = controller.getSnapshot().content;
+    const feature = doc.features.find((f) => f.inputFeatureIds.length === 0)!;
+    const body = doc.bodies.find((b) =>
+      upstreamFeatures(doc.features, [b.resultFeatureId]).has(feature.id),
+    )!;
+    failNext('kernel-exception:Standard_Failure:BOP failed', feature.id);
+    await controller.refresh();
+    const report = cadFailureReport(doc, {
+      code: 'kernel-exception:Standard_Failure:BOP failed',
+      featureId: feature.id,
+    });
+    expect(report).toMatchObject({
+      bodyId: body.id,
+      bodyName: body.name,
+      featureId: feature.id,
+      featureName: feature.name,
+      operation: feature.type,
+      kernelReason: 'Standard_Failure:BOP failed',
+    });
+    // The plain message keeps the kernel's own words out.
+    expect(report.message).not.toContain('Standard_Failure');
+    const shown = controller.getSnapshot();
+    expect(shown.selection).toEqual({ kind: 'body', id: body.id });
+    expect(shown.geometryFailure).toContain(`（${feature.type}、ID ${feature.id}）`);
+    // The part is selected once: choosing something else keeps the choice.
+    controller.select(null);
+    controller.select({ kind: 'parameter', id: 'W' });
+    expect(controller.getSnapshot().selection).toEqual({ kind: 'parameter', id: 'W' });
+  });
+
+  it('keeps the document settings in view for a tolerance failure (#589)', async () => {
+    const { controller, failNext } = setup();
+    failNext('result-tolerance', 'plate');
+    await controller.refresh();
+    expect(controller.getSnapshot()).toMatchObject({
+      geometryState: 'geometry-error',
+      failureReport: { bodyId: 'plate' },
+      selection: null,
+    });
+  });
+
   it('names a feature that exists only in the refused edit (ST-28#9)', async () => {
     const { controller, session, failNext } = setup();
     await controller.refresh();
     failNext('timeout', 'sphere-1');
     expect(await controller.addPrimitive('sphere')).toBe(false);
     expect(controller.getSnapshot().diagnostic?.message).toBe(
-      '形状計算が時間内に終わりませんでした。大きなBooleanやpatternを小さく分けるか、要素の数を減らしてください。原因：feature「Sphere」',
+      '形状計算が時間内に終わりませんでした。大きなBooleanやpatternを小さく分けるか、要素の数を減らしてください。原因：body「Sphere」（ID body-2）のfeature「Sphere」（sphere、ID sphere-1）',
     );
     expect(session.content.features.some((f) => f.id === 'sphere-1')).toBe(false);
     expect(controller.getSnapshot().geometryState).toBe('ready');

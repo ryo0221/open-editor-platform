@@ -56,7 +56,13 @@ const section = (
   },
   ...(contains ? { contains } : {}),
 });
-const edge = (label: string, field: string, fieldLabel: string, dash?: number[]) => ({
+const edge = (
+  label: string,
+  field: string,
+  fieldLabel: string,
+  dash?: number[],
+  sections?: string[],
+) => ({
   schema: { [field]: { type: 'string' as const } },
   ui: {
     label,
@@ -65,7 +71,13 @@ const edge = (label: string, field: string, fieldLabel: string, dash?: number[])
     fields: { [field]: { label: fieldLabel } },
     ...(dash ? { edgeStyle: { dash } } : {}),
   },
-  connection: { allowSelf: false, allowParallel: true, allowCycles: true },
+  connection: {
+    allowSelf: false,
+    allowParallel: true,
+    allowCycles: true,
+    // Section types the connection may start or end at (#594).
+    ...(sections ? { fromSections: sections, toSections: sections } : {}),
+  },
 });
 
 export const diagramProfile: GraphProfile = {
@@ -95,7 +107,12 @@ export const diagramProfile: GraphProfile = {
     person: node('Person', 'Organization', 'ellipse', '#ffffff'),
   },
   edges: {
-    connects: edge('Connects to', 'protocol', 'Protocol'),
+    connects: edge('Connects to', 'protocol', 'Protocol', undefined, [
+      'environment',
+      'network',
+      'layer',
+      'unit',
+    ]),
     flow: edge('Then', 'label', 'Label'),
     reports: edge('Reports to', 'label', 'Label', [6, 4]),
   },

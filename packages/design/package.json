@@ -6,12 +6,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
+    "./raster-canvas": "./src/raster-canvas.ts",
     "./prototype": "./src/prototype.ts",
     "./publication": "./src/component-publication.ts",
     "./web-contract": "./src/web-contract.ts",
     "./pagination": "./src/pagination.ts",
     "./page-proposal-diff": "./src/page-proposal-diff.ts",
-    "./page-artwork": "./src/page-artwork.ts"
+    "./page-artwork": "./src/page-artwork.ts",
+    "./division": "./src/division.ts",
+    "./page-proposals": "./src/page-proposals.ts",
+    "./manga-proposal-diff": "./src/manga-proposal-diff.ts",
+    "./creative-proposal-diff": "./src/creative-proposal-diff.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
@@ -22,7 +27,8 @@
     "@editor-platform/reuse-core": "*",
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/artifact-references": "*",
-    "lucide-react": "1.51.0"
+    "lucide-react": "1.51.0",
+    "@editor-platform/editor-host": "*"
   },
   "peerDependencies": {
     "react-dom": "^19.1.1",

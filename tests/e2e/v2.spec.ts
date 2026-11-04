@@ -54,7 +54,7 @@ test('whiteboard nodes, connector, pointer move/resize, undo, comments and SVG e
   await page.mouse.up();
   await expect(page.getByLabel('Element x', { exact: true })).not.toHaveValue(oldX);
   const resize = (await page
-      .getByRole('button', { name: 'Resize sticky 3', exact: true })
+      .getByRole('button', { name: 'Resize se', exact: true })
       .boundingBox())!,
     oldWidth = await page.getByLabel('Element width', { exact: true }).inputValue();
   await page.mouse.move(resize.x + 4, resize.y + 4);

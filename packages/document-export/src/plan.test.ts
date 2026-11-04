@@ -209,3 +209,42 @@ it('D10 cancellation prevents output and a fresh call can retry', async () => {
     ),
   ).rejects.toThrow('cancel');
 });
+it('V0 writes each ruby reading once after its base, as a reported approximation', async () => {
+  const c = contractDocument();
+  const ruby = { text: 'とうきょう', base: '東京' };
+  c.blocks[1].rich = [
+    { text: '朝の' },
+    { text: '東', ruby, bold: true },
+    { text: '京', ruby },
+    { text: 'は静か' },
+  ];
+  const p = await prepare(c);
+  const found = p.report.diagnostics.filter((d) => d.code === 'RUBY_AS_TEXT');
+  expect(found).toHaveLength(1);
+  const encoded = await encodeDocumentDocx(p, consent(p));
+  if (encoded.status !== 'ok') throw Error('Missing output');
+  const xml = new TextDecoder().decode(unzipSync(encoded.bytes)['word/document.xml']);
+  const text = [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join('');
+  expect(text).toContain('朝の東京（とうきょう）は静か');
+});
+it('V1 exports a vertical manuscript as a vertical Word section and reports it', async () => {
+  const c = contractDocument();
+  c.page = { size: 'A4', margin: 64, writingMode: 'vertical-rl' };
+  const p = await prepare(c);
+  expect(p.report.diagnostics.some((d) => d.code === 'VERTICAL_AS_WORD_LAYOUT')).toBe(true);
+  const encoded = await encodeDocumentDocx(p, consent(p));
+  if (encoded.status !== 'ok') throw Error('Missing output');
+  const xml = new TextDecoder().decode(unzipSync(encoded.bytes)['word/document.xml']);
+  expect(xml).toMatch(/<w:textDirection w:val="tbRl"\/>/);
+});
+it('V0 writes 傍点 as Word emphasis marks, without a report', async () => {
+  const c = contractDocument();
+  c.blocks[1].rich = [{ text: '朝の' }, { text: '東京', emphasisDots: true }];
+  const p = await prepare(c);
+  expect(p.report.diagnostics.filter((d) => /EMPHASIS/.test(d.code))).toEqual([]);
+  const encoded = await encodeDocumentDocx(p, consent(p));
+  if (encoded.status !== 'ok') throw Error('Missing output');
+  const xml = new TextDecoder().decode(unzipSync(encoded.bytes)['word/document.xml']);
+  expect(xml).toMatch(/<w:em w:val="dot"\/>[\s\S]*?<w:t[^>]*>東京<\/w:t>/);
+  expect(xml.match(/<w:em /g)).toHaveLength(1);
+});

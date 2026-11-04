@@ -116,6 +116,21 @@ Existing malformed prototype destinations remain readable and diagnosable after
 deleting a frame. Explicit interaction/prototype writes validate newly submitted
 frame references; unrelated edits do not rewrite retained broken links.
 
+`diagnoseDesign(content)` (#565) lists broken component references that
+`isDesign` keeps readable, as `{ code, path, message }[]` in the same shape as
+`diagnoseDesignPrototype`. Codes are `missing-component` (an instance's
+`componentId` is not in `components`), `missing-nested-component` (an instance
+part inside a component, or a nested `componentId` override, points at a missing
+component) and `missing-override-part` (an override key is not a part of the
+component it applies to; template-only components have the single part `root`).
+Paths use IDs, for example `elements/card/overrides/section/overrides/title`.
+A broken nested definition is reported once at `components/<id>/elements/<part>`,
+not once per instance. A part swapped by `componentId` without its own `overrides`
+inherits the definition's overrides, so those are checked against the replacement
+and reported at the swap's `componentId` path. Nested overrides are followed to the
+native depth of 16.
+It is pure and never repairs content; Hosts decide whether to warn or refuse.
+
 ## Capability and acceptance matrix
 
 | Capability                                            | Scope / acceptance evidence                                                                                                                               |

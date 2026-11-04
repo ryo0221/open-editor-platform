@@ -46,13 +46,16 @@ export const relationProfile: GraphProfile = {
         label: 'Entity',
         labelField: 'name',
         order: ['name', 'category', 'active', 'score', 'tags', 'details'],
+        // The category picks the corner icon, so resources and topics read apart at a glance.
+        iconBy: 'category',
+        icons: { Resource: 'cube', Topic: 'list' },
       },
     },
     organization: party('Organization'),
     company: party('Company'),
     financier: party('Bank or financier'),
     authority: party('Government or regulator'),
-    person: party('Person'),
+    person: { ...party('Person'), ui: { ...party('Person').ui, icon: 'person' } },
   },
   edges: {
     related: {

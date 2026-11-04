@@ -1,6 +1,6 @@
 export * from './model';
 export { validateAnimation } from './validate';
-export { frameTick, mapNestedTick } from './time';
+export { frameTick, mapNestedTick, easingProgress } from './time';
 export { prepareAnimation, inspectPreparedComposition, type PreparedAnimation } from './prepare';
 export { evaluateAnimation, type EvaluatedScene, type SceneRect, type Matrix } from './evaluate';
 export { replaceTrack, type AnimationEditScope } from './commands';

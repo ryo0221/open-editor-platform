@@ -6,6 +6,7 @@ import {
   type Artifact,
 } from '@editor-platform/artifact-core';
 import { isDocument, type DocumentContent } from './model';
+import { assertReferenceItems, type ReferenceResolver } from '@editor-platform/artifact-references';
 
 export interface DocumentSequenceSource {
   artifact: Artifact<DocumentContent>;
@@ -41,10 +42,14 @@ export const documentSequenceLimits = Object.freeze({
   sources: 128,
   blocks: 2000,
   textCharacters: 1_000_000,
+  nativeBytes: 8 * 1024 * 1024,
 });
 /** Derived, owned content only. Never saves/commits a second manuscript or resolves "latest".
  * Feed a successful content to the existing DOCX preflight; keep this manifest with its report. */
-export async function composeDocumentSequence(input: readonly DocumentSequenceSource[]) {
+export async function composeDocumentSequence(
+  input: readonly DocumentSequenceSource[],
+  options: { references?: ReferenceResolver } = {},
+) {
   // Capture all inputs before hashing, so concurrent Host changes cannot change a source.
   const sources = clone(input);
   const manifest: DocumentSequenceManifest = {
@@ -107,7 +112,9 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
         });
       if (
         content.page &&
-        Object.keys(content.page).some((k) => !['size', 'margin', 'landscape'].includes(k))
+        Object.keys(content.page).some(
+          (k) => !['size', 'margin', 'landscape', 'writingMode'].includes(k),
+        )
       )
         add({
           code: 'unsupported',
@@ -125,7 +132,7 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
         });
       for (const block of content.blocks) {
         if (
-          !['paragraph', 'heading'].includes(block.type) ||
+          !['paragraph', 'heading', 'image'].includes(block.type) ||
           block.rich?.some((span) =>
             Object.keys(span).some(
               (k) =>
@@ -139,6 +146,8 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
                   'link',
                   'color',
                   'highlight',
+                  'ruby',
+                  'emphasisDots',
                 ].includes(k),
             ),
           ) ||
@@ -155,6 +164,7 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
                 'level',
                 'align',
                 'indent',
+                ...(block.type === 'image' ? ['src', 'width', 'alt', 'caption', 'reference'] : []),
               ].includes(k),
           )
         ) {
@@ -163,7 +173,7 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
             severity: 'error',
             sourceIndex,
             elementId: block.id,
-            message: 'Initial sequence subset supports paragraph/heading rich text only',
+            message: 'Sequence supports paragraph/heading rich text and images only',
           });
           continue;
         }
@@ -175,13 +185,39 @@ export async function composeDocumentSequence(input: readonly DocumentSequenceSo
     }
   if (
     output.blocks.length > documentSequenceLimits.blocks ||
-    characters > documentSequenceLimits.textCharacters
+    characters > documentSequenceLimits.textCharacters ||
+    new TextEncoder().encode(canonicalJson(output)).length > documentSequenceLimits.nativeBytes
   )
     add({
       code: 'limit',
       severity: 'error',
-      message: 'Combined output exceeds 2000 blocks / 1000000 UTF-16 units',
+      message: 'Combined output exceeds 2000 blocks / 1000000 UTF-16 units / 8 MiB native JSON',
     });
+  if (!manifest.diagnostics.some((d) => d.severity === 'error')) {
+    try {
+      assertReferenceItems(output.blocks);
+      const referenced = output.blocks.some((b) => b.reference);
+      if (referenced) {
+        if (output.blocks.some((b) => b.reference && b.reference.mode !== 'fixed'))
+          throw Error('Read-through requires explicitly fixed image references');
+        if (!options.references) throw Error('Image reference Host is not connected');
+        // Capture once for the entire sequence: current access, exact retained source,
+        // hashes and aggregate reference budgets. Never substitute a draft/latest version.
+        output.blocks = await options.references.capture(output.blocks);
+        if (
+          new TextEncoder().encode(canonicalJson(output)).length >
+          documentSequenceLimits.nativeBytes
+        )
+          throw Error('Captured image output exceeds 8 MiB native JSON');
+      }
+    } catch (error) {
+      add({
+        code: 'invalid-source',
+        severity: 'error',
+        message: `Image references: ${String(error)}`,
+      });
+    }
+  }
   add({
     code: 'not-included',
     severity: 'warning',

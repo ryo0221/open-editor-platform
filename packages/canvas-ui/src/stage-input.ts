@@ -12,6 +12,8 @@ import type { CanvasStageProps, CanvasTarget, CanvasView } from './index';
 import type { CanvasSpatialQuery } from './spatial-query';
 import {
   arrowDelta,
+  canObjectTransform,
+  isObjectGesture,
   backgroundDragMode,
   createDrag,
   dragStarted,
@@ -159,6 +161,8 @@ export interface StageDragContext {
   svg: RefObject<SVGSVGElement | null>;
   spatial: RefObject<CanvasSpatialQuery | undefined>;
   editing?: StageEditing;
+  inputOwner?: 'object' | 'point';
+  objectRevision?: unknown;
   readOnly: boolean;
   view: CanvasView;
   targets: CanvasTarget[];
@@ -177,41 +181,99 @@ export interface StageDragContext {
 }
 
 /** Pointer drag lifecycle for pan, pen, marquee/insert and move/resize/rotate gestures. */
-export function stageDrag(c: StageDragContext) {
-  function reset() {
+export function stageDrag(read: () => StageDragContext) {
+  function reset(d = read().drag.current, clearState = true) {
+    const c = read();
+    if (!d || c.drag.current !== d) return;
+    // Detach first: release/lostcapture and synchronous Host updates are reentrant.
     c.drag.current = null;
-    c.setPreview(undefined);
-    c.setMarquee(undefined);
-    c.setGuides([]);
-    c.setPath([]);
+    if (clearState) {
+      c.setPreview(undefined);
+      c.setMarquee(undefined);
+      c.setGuides([]);
+      c.setPath([]);
+    }
+    // Finish old visual cleanup before release callbacks can begin a new gesture.
+    if (d.capture && d.pointerId !== undefined && d.capture.hasPointerCapture(d.pointerId))
+      d.capture.releasePointerCapture(d.pointerId);
+  }
+  function allowed(c: StageDragContext, mode: string, ids: string[]) {
+    return (
+      !c.editing &&
+      !c.readOnly &&
+      c.inputOwner !== 'point' &&
+      canObjectTransform(c.targets, ids, mode)
+    );
+  }
+  function valid(d: StageDrag) {
+    const c = read();
+    return c.drag.current === d && prerequisites(d);
+  }
+  function prerequisites(d: StageDrag) {
+    const c = read();
+    return (
+      !isObjectGesture(d.mode) ||
+      (allowed(c, d.mode, d.ids) && Object.is(d.objectRevision, c.objectRevision))
+    );
+  }
+  function invalidateObject() {
+    const d = read().drag.current;
+    if (d && isObjectGesture(d.mode) && !valid(d)) reset(d);
   }
   function begin(e: React.PointerEvent, mode: string, ids: string[], handle = '') {
-    if (c.editing || (c.readOnly && mode !== 'pan')) return;
+    let c = read();
+    if (
+      c.editing ||
+      (c.readOnly && mode !== 'pan') ||
+      (isObjectGesture(mode) && !allowed(c, mode, ids))
+    )
+      return;
     e.preventDefault();
     e.stopPropagation();
     c.svg.current?.focus({ preventScroll: true });
-    c.drag.current = createDrag(c.targets, {
+    // Focus/selection callbacks may synchronously change capabilities or targets.
+    c = read();
+    if (isObjectGesture(mode) && !allowed(c, mode, ids)) return;
+    reset();
+    c = read();
+    // Replacing a gesture can flush Host updates or start another gesture on release.
+    if (c.drag.current || (isObjectGesture(mode) && !allowed(c, mode, ids))) return;
+    const d = createDrag(c.targets, {
       mode,
-      ids,
+      ids: [...ids],
       handle,
       client: { x: e.clientX, y: e.clientY },
       point: c.world(e),
       view: c.view,
       shift: e.shiftKey,
     });
-    // Capture on the object wrapper even though its handler is delegated. Native
-    // click/double-click targets follow pointer capture; capturing on the SVG
-    // would lose the object that should enter text/group editing on double-click.
     const object =
       e.target instanceof Element ? e.target.closest<SVGGElement>('[data-canvas-target]') : null;
-    (object ?? e.currentTarget).setPointerCapture(e.pointerId);
+    d.capture = object ?? e.currentTarget;
+    d.pointerId = e.pointerId;
+    d.startedAt = e.timeStamp;
+    d.objectRevision = c.objectRevision;
+    c.drag.current = d;
+    d.capture.setPointerCapture(e.pointerId);
   }
   function cancel() {
-    if (c.drag.current?.mode === 'pan') c.setView({ ...c.view, pan: c.drag.current.pan });
-    reset();
+    const c = read(),
+      d = c.drag.current;
+    if (d?.mode === 'pan') c.setView({ ...c.view, pan: d.pan });
+    reset(d);
+  }
+  function lostCapture(e: React.PointerEvent) {
+    const d = read().drag.current;
+    if (
+      d?.capture === e.target &&
+      d.pointerId === e.pointerId &&
+      !d.capture.hasPointerCapture(e.pointerId)
+    )
+      cancel();
   }
   function marquee(d: StageDrag, point: Point, e: React.PointerEvent, commit: boolean) {
-    const b = marqueeBox(d, point, e.shiftKey);
+    const c = read(),
+      b = marqueeBox(d, point, e.shiftKey);
     c.setMarquee(b);
     if (!commit) return;
     if (d.mode === 'insert')
@@ -229,49 +291,84 @@ export function stageDrag(c: StageDragContext) {
       );
   }
   function transform(d: StageDrag, point: Point, e: React.PointerEvent, commit: boolean) {
-    const { change, guides } = transformChange(d, point, e, c.view, c.targets);
-    if (guides) c.setGuides(guides);
+    if (!valid(d)) {
+      reset(d);
+      return;
+    }
+    const c = read(),
+      { change, guides } = transformChange(d, point, e, c.view, c.targets);
     try {
       if (commit) {
-        if (Object.values(change).some((v) => Math.abs(v) > 0.01)) c.onTransform(d.ids, change);
-      } else
-        c.setPreview(
-          (c.previewTransform ?? ((ids, delta) => transformGeometry(c.targets, ids, delta)))(
-            d.ids,
-            change,
-          ),
-        );
+        // Check live prerequisites after calculation and before the callback.
+        if (!valid(d)) {
+          reset(d);
+          return;
+        }
+        // A successful command can synchronously advance revision/start a new gesture.
+        reset(d);
+        // Capture release can itself run Host callbacks. Check again after cleanup.
+        if (!prerequisites(d) || read().drag.current) return;
+        if (Object.values(change).some((v) => Math.abs(v) > 0.01))
+          read().onTransform(d.ids, change);
+      } else {
+        const preview = (
+          c.previewTransform ?? ((ids, delta) => transformGeometry(c.targets, ids, delta))
+        )(d.ids, change);
+        // A preview callback may flush a Host update; never install its stale result.
+        if (!valid(d)) {
+          reset(d);
+          return;
+        }
+        const current = read();
+        if (guides) current.setGuides(guides);
+        current.setPreview(preview);
+      }
     } catch {
-      /* domain command reports locked selections; no partial preview */
+      // Preserve recoverable domain-preview rejection behavior; invalidation
+      // still always cancels and no partial callback result has been installed.
+      if (commit || !valid(d)) reset(d);
     }
   }
   function move(e: React.PointerEvent, commit = false) {
-    const d = c.drag.current;
-    if (!d) return;
+    const c = read(),
+      d = c.drag.current;
+    if (
+      !d ||
+      (d.pointerId !== undefined && d.pointerId !== e.pointerId) ||
+      (d.startedAt !== undefined && e.timeStamp < d.startedAt)
+    )
+      return;
+    if (!valid(d)) {
+      reset(d);
+      return;
+    }
     if (!dragStarted(d, { x: e.clientX, y: e.clientY })) {
-      if (commit) {
-        c.drag.current = null;
-        c.setPreview(undefined);
-        c.setGuides([]);
-      }
+      if (commit) reset(d);
       return;
     }
     const point = c.world(e);
-    if (d.mode === 'pan') {
+    if (d.mode === 'pan')
       c.setView({
         ...c.view,
         fit: false,
         pan: { x: d.pan.x + e.clientX - d.start.x, y: d.pan.y + e.clientY - d.start.y },
       });
-    } else if (d.mode === 'pen') {
+    else if (d.mode === 'pen') {
       d.path.push(point);
       c.setPath([...d.path]);
       if (commit && d.path.length > 1) c.onFreehand?.(d.path);
     } else if (d.mode === 'marquee' || d.mode === 'insert') marquee(d, point, e, commit);
     else transform(d, point, e, commit);
-    if (commit) reset();
+    if (commit) reset(d);
   }
-  return { begin, cancel, move };
+  return {
+    begin,
+    cancel,
+    move,
+    invalidateObject,
+    lostCapture,
+    dispose: () => reset(undefined, false),
+  };
 }
 
 export interface StagePointerDownContext {

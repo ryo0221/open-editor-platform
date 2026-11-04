@@ -9,6 +9,7 @@ import {
 import { EditorSession } from '@editor-platform/editor-core';
 import {
   ArtifactEditor,
+  hostNativeArtifactByteLimit,
   loadHostArtifact,
   type EditorHostAdapter,
 } from '@editor-platform/editor-host';
@@ -219,11 +220,15 @@ it('preserves unsaved draft and Undo on storage failure; retry uses the existing
   expect(host.snapshot.dirty).toBe(false);
   expect(host.canUndo).toBe(true);
 });
-it('retains a 16 MiB-overflow draft/version history and permits correction/retry', async () => {
-  const artifact = createArtifact('design', 'n'.repeat(16 * 1024 * 1024), createDesign());
+it('retains a current-boundary-overflow draft/version history and permits correction/retry', async () => {
+  const artifact = createArtifact(
+    'design',
+    'n'.repeat(hostNativeArtifactByteLimit),
+    createDesign(),
+  );
   const host = new ArtifactEditor(artifact, adapter, new MemoryStorage());
   host.execute(insertDesignPath(presetDesignPath('line')));
-  await expect(host.save({ commitVersion: true })).rejects.toThrow('16 MiB');
+  await expect(host.save({ commitVersion: true })).rejects.toThrow('64 MiB');
   expect(host.snapshot.dirty).toBe(true);
   expect(host.canUndo).toBe(true);
 });

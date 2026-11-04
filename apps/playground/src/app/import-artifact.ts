@@ -1,3 +1,4 @@
+import { parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
 import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './estimate-bim';
 import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { clone, contentHash, deserializeArtifact, newId } from '@editor-platform/artifact-core';
@@ -11,6 +12,7 @@ import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
 import { validateNativeReusableDefinitions, type Domain } from '@editor-platform/templates';
 import { artifactReferenceItems, validateArtifactReferenceHistory } from '../artifact-references';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
+import { validateCharacterParts } from '../character/parts';
 import type { CadPartRecord } from '../cad/parts';
 import type { CadDocument } from '@editor-platform/cad-core';
 import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
@@ -29,7 +31,8 @@ async function importedArtifact(
   value: unknown,
   exists: (id: string) => boolean,
 ): Promise<{ record: StoredArtifact; name: string; originalId: string }> {
-  const artifact = deserializeArtifact(text);
+  const parsed = deserializeArtifact(text);
+  const artifact = parsed.kind === 'fiction-map' ? await parseFictionMapArtifact(text) : parsed;
   const invalid = [artifact.draft.content, ...artifact.versions.map((v) => v.content)].find(
     (content) => !validContent(artifact.kind, content),
   );
@@ -72,11 +75,25 @@ async function importedArtifact(
     if (parts !== undefined) record.cadParts = parts;
     await validateCadRecord(record);
   }
+  if (record.kind === 'character') {
+    // Its mesh and texture assets travel in the same file; a missing or altered one refuses it.
+    const raw = (value as StoredArtifact).cadResources;
+    if (raw !== undefined) record.cadResources = raw;
+    // The CAD versions its props place too (C2b): a missing or altered one refuses the file.
+    const parts = (value as StoredArtifact).cadParts;
+    if (parts !== undefined) record.cadParts = parts;
+    validateCharacterParts(record);
+    await validateCadRecord(record);
+  }
   if (record.kind === 'bim') {
     // The CAD versions the building places travel in the same file (its retained closure).
     const parts = (value as StoredArtifact).cadParts;
     if (parts !== undefined) record.cadParts = parts;
     validateBimParts(record);
+    // Its materials' texture images (#662), checked as CAD assets are.
+    const raw = (value as StoredArtifact).cadResources;
+    if (raw !== undefined) record.cadResources = raw;
+    await validateCadRecord(record);
   }
   const raw = value as { annotations?: unknown };
   if (raw.annotations !== undefined) {
@@ -107,6 +124,8 @@ function hasReusableAdapter(kind: string, content: Content) {
     kind !== 'schedule' &&
     kind !== 'cad' &&
     kind !== 'bim' &&
+    kind !== 'character' &&
+    kind !== 'fiction-map' &&
     !(isDeck(content) && hasSlideAnimations(content))
   );
 }

@@ -1,4 +1,18 @@
 import {
+  validDesignRasterProvenance,
+  rasterSourcePatch,
+  type DesignRasterProvenance,
+} from './raster-provenance';
+export {
+  validDesignRasterProvenance,
+  deriveDesignRasterProvenance,
+  type DesignRasterSource,
+  type DesignRasterAncestor,
+  type DesignRasterProvenance,
+} from './raster-provenance';
+import { validDivisionContent } from './division-contract';
+import { validPanelGeometry, type DesignPanelGeometry } from './division-geometry';
+import {
   validDesignPagination,
   duplicateDesignPagination,
   type DesignPagination,
@@ -14,6 +28,8 @@ import {
 import { designExportPaintBounds } from './paint-bounds';
 export * from './path';
 export * from './path-commands';
+export * from './stroke-path';
+export * from './raster';
 import {
   validEmbeddedReference,
   validReferenceItems,
@@ -71,6 +87,7 @@ import {
   type Bounds,
   type EditorCommand,
   shapeNames,
+  lineDirections,
 } from '@editor-platform/editor-core';
 import { validNativeReuse, record, type ReuseState } from '@editor-platform/reuse-core';
 import { reactComponentKey } from '@editor-platform/react-ui-core';
@@ -87,6 +104,7 @@ import { captureDesignData, designId, rejectDesign } from './command-data';
 export { DesignCommandError } from './command-data';
 export * from './vector';
 export * from './intents';
+export * from './diagnostics';
 export type DesignElementType =
   | 'frame'
   | 'rectangle'
@@ -97,6 +115,8 @@ export type DesignElementType =
   | 'shape'
   | 'react';
 export interface DesignElement extends VisualStyle {
+  provenance?: DesignRasterProvenance;
+  panelGeometry?: DesignPanelGeometry;
   /** Reference source is canonical; src is a retained rendering cache. */
   reference?: EmbeddedReference;
   /** Colorable path geometry belongs to native Design shapes. */
@@ -143,6 +163,7 @@ export interface DesignComponent {
     | 'text'
     | 'fill'
     | 'src'
+    | 'provenance'
     | 'typography'
     | 'runs'
     | 'stroke'
@@ -166,7 +187,7 @@ export interface DesignContent {
   pagination?: DesignPagination;
   prototyping?: DesignPrototype;
   web?: DesignWebSettings;
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   reuse?: ReuseState;
   styles?: { id: string; name: string; appearance: Partial<VisualStyle> & { fill?: string } }[];
   elements: DesignElement[];
@@ -174,6 +195,8 @@ export interface DesignContent {
 }
 /** Projection-only native text location; never stored in Design content or SVG. */
 export interface DesignDrawing extends Drawing {
+  /** Projection-only border painted after the last visible child; never an editable target. */
+  panelBorderOf?: string;
   textSourcePath?: readonly (string | number)[];
   /** Instance-local text address, independent of drawing IDs and definition ownership. */
   instanceText?: { elementId: string; partIds: readonly string[]; name: string };
@@ -239,12 +262,59 @@ function command(
 ): EditorCommand<DesignContent> {
   return nativeCommand(type, label, (current) => {
     const next = invalidateChangedImageSources(current, apply(current));
+    assertDivisionPageResize(current, next);
     assertDesignContent(next);
     return next;
   });
 }
 /** Native source replacement invalidates attribution; explicit provenance commands may register it again. */
 function invalidateChangedImageSources(before: DesignContent, next: DesignContent): DesignContent {
+  // Includes component definitions and raw instance overrides; provenance is bound
+  // to src, so independently changed bytes cannot retain an old attribution.
+  const clean = <T extends Partial<DesignElement>>(e: T, inherited?: Partial<DesignElement>): T => {
+    let value = e;
+    const effective = { ...inherited, ...e };
+    if (
+      Object.hasOwn(e, 'provenance') &&
+      (e.provenance === undefined ||
+        (e.provenance &&
+          (effective.type === 'image' || Object.hasOwn(e, 'src')) &&
+          e.provenance.src !== effective.src))
+    ) {
+      value = { ...e };
+      delete value.provenance;
+    }
+    if (e.overrides) {
+      const component = next.components.find((c) => c.id === effective.componentId);
+      const entries = Object.entries(e.overrides).map(
+        ([id, p]) =>
+          [
+            id,
+            clean(
+              p,
+              component?.elements?.find((part) => part.id === id) ??
+                (id === 'root' ? component?.template : undefined),
+            ),
+          ] as const,
+      );
+      if (entries.some(([id, p]) => p !== e.overrides![id]))
+        value = { ...value, overrides: Object.fromEntries(entries) };
+    }
+    return value;
+  };
+  const elements = next.elements.map((e) => clean(e));
+  const components = next.components.map((c) => {
+    const template = clean(c.template),
+      parts = c.elements?.map((e) => clean(e));
+    return template === c.template && !parts?.some((e, i) => e !== c.elements![i])
+      ? c
+      : { ...c, template, ...(parts ? { elements: parts } : {}) };
+  });
+  if (
+    elements.some((e, i) => e !== next.elements[i]) ||
+    components.some((c, i) => c !== next.components[i])
+  )
+    next = { ...next, elements, components };
   if (!next.pagination?.images.length) return next;
   const old = new Map(
     before.elements.filter((e) => e.type === 'image').map((e) => [e.id, appearance(before, e)]),
@@ -275,10 +345,24 @@ export function guardDesignCommand(
     apply(current) {
       if (!writable()) rejectDesign('design-read-only', 'Design is read only');
       const next = value.apply(value.readonlyInput ? current : clone(current));
+      assertDivisionPageResize(current, next);
       assertDesignContent(next);
       return next;
     },
   };
+}
+function assertDivisionPageResize(before: DesignContent, after: DesignContent) {
+  for (const page of before.pagination?.pages ?? []) {
+    if (
+      !page.division ||
+      !after.pagination?.pages.some((p) => p.frameId === page.frameId && p.division)
+    )
+      continue;
+    const a = before.elements.find((e) => e.id === page.frameId)!,
+      b = after.elements.find((e) => e.id === page.frameId);
+    if (b && (a.bounds.width !== b.bounds.width || a.bounds.height !== b.bounds.height))
+      throw Error('Linked page resize requires a dedicated layout preview; detach first');
+  }
 }
 export function assertDesignContent(value: unknown): asserts value is DesignContent {
   if (!isDesignWithPaths(value)) {
@@ -313,6 +397,7 @@ const elementFields = new Set([
   'text',
   'fill',
   'src',
+  'provenance',
   'parentId',
   'componentId',
   'overrides',
@@ -346,6 +431,7 @@ const elementFields = new Set([
   'crop',
   'alt',
   'arrowhead',
+  'lineDirection',
 ]);
 function componentPart(c: DesignComponent, id: string): DesignElement {
   const part = c.elements?.find((e) => e.id === id);
@@ -450,7 +536,17 @@ function assertElementChange(
   templateOnly = false,
 ): asserts patch is Partial<DesignElement> {
   assertPatchShape(element, patch);
-  const next = { ...element, ...patch } as DesignElement;
+  if (
+    patch.provenance !== undefined &&
+    (!validDesignRasterProvenance(patch.provenance) ||
+      patch.provenance.src !== (patch.src ?? element.src))
+  )
+    rejectDesign(
+      'design-provenance',
+      'Raster provenance must describe the selected image source',
+      element.id,
+    );
+  const next = rasterSourcePatch(element, patch);
   if (!validElement(next))
     rejectDesign('design-patch', 'Invalid Design element values', element.id);
   // Schema 1/2 component templates can have type instance without retaining a
@@ -667,6 +763,7 @@ export const transformElements = (
         rejectDesign('design-transform', 'Invalid Design transform delta');
       for (const id of ids) targetElement(d, id);
       const next = transformDesign(d, ids, delta);
+      assertDivisionPageResize(d, next);
       assertDesignContent(next);
       return next;
     }),
@@ -775,12 +872,17 @@ export function transformDesign(
   return next;
 }
 export function designPreview(d: DesignContent, ids: string[], delta: TransformDelta) {
-  return new Map(
-    transformDesign(d, ids, delta).elements.map((e) => [
-      e.id,
-      { bounds: e.bounds, rotation: e.rotation ?? 0 },
-    ]),
-  );
+  let next = transformDesign(d, ids, delta);
+  if (d.elements.some((e) => e.panelGeometry)) {
+    try {
+      assertDivisionPageResize(d, next);
+      assertDesignContent(next);
+    } catch {
+      // A generic resize must not display geometry that a linked page cannot commit.
+      next = d;
+    }
+  }
+  return new Map(next.elements.map((e) => [e.id, { bounds: e.bounds, rotation: e.rotation ?? 0 }]));
 }
 export const deleteElements = (ids: string[]): EditorCommand<DesignContent> =>
   withCommandReads<DesignContent>(
@@ -1005,6 +1107,7 @@ export const createComponent = (
           text: first.text,
           fill: first.fill,
           src: first.src,
+          ...(first.provenance ? { provenance: clone(first.provenance) } : {}),
           typography: first.typography,
           runs: first.runs,
           stroke: first.stroke,
@@ -1042,6 +1145,7 @@ export const createComponent = (
           ...d.elements.filter((e) => !all.has(e.id)),
           {
             ...first,
+            ...(first.provenance ? { provenance: undefined } : {}),
             ...(first.vector ? { vector: undefined } : {}),
             ...(first.interactions ? { interactions: undefined } : {}),
             id: first.id,
@@ -1127,6 +1231,7 @@ export const updateComponent = (
             'interactions',
             'vector',
             'src',
+            'provenance',
           ].includes(key),
       )
     )
@@ -1175,8 +1280,7 @@ export function applyDesignOverride(
   override?: Partial<DesignElement>,
 ): DesignElement {
   return {
-    ...part,
-    ...override,
+    ...rasterSourcePatch(part, override ?? {}),
     ...(part.interactions !== undefined || override?.interactions !== undefined
       ? { interactions: override?.interactions ?? part.interactions }
       : {}),
@@ -1185,14 +1289,21 @@ export function applyDesignOverride(
   };
 }
 type ElementLookup = Pick<ReadonlyMap<string, DesignElement>, 'get' | 'has'>;
-function frameClips(index: ElementLookup, e: DesignElement) {
-  const clips: (Bounds & { rotation?: number })[] = [];
+function frameClips(d: DesignContent, index: ElementLookup, e: DesignElement) {
+  const clips: NonNullable<Drawing['clipBounds']> = [];
+  if (e.panelGeometry) clips.push({ ...e.bounds, polygon: e.panelGeometry.polygon });
   let parent = e.parentId ? index.get(e.parentId) : undefined;
   const seen = new Set<string>();
   while (parent && !seen.has(parent.id)) {
     seen.add(parent.id);
-    if (parent.type === 'frame' && parent.clipContent)
-      clips.push({ ...parent.bounds, rotation: parent.rotation });
+    if (parent.type === 'frame' && appearance(d, parent).clipContent) {
+      const effective = appearance(d, parent);
+      clips.push({
+        ...parent.bounds,
+        rotation: effective.rotation,
+        ...(parent.panelGeometry ? { polygon: parent.panelGeometry.polygon } : {}),
+      });
+    }
     parent = parent.parentId ? index.get(parent.parentId) : undefined;
   }
   return clips;
@@ -1272,21 +1383,55 @@ export function designInstanceElements(
   return instanceParts({ ...c, elements: local }, { ...appearance(d, raw), overrides: {} }, idFor);
 }
 /** Call-scoped projector for one immutable render/export snapshot. */
-export function designDrawingProjector(d: DesignContent) {
+export function designDrawingProjector(d: DesignContent, included?: ReadonlySet<string>) {
   const index = new Map(d.elements.map((e) => [e.id, e]));
   const elements = new Map(d.elements.map((e, i) => [e.id, ['elements', i] as DesignSourcePath]));
   const components = new Map(
     d.components.map((c, i) => [c.id, ['components', i] as DesignSourcePath]),
   );
-  return (raw: DesignElement) =>
+  // A filled child must not cover an inside panel stroke. Attach a noninteractive
+  // border to the subtree's last visible drawing, preserving sibling/page z-order.
+  const ends = new Map<string, string>();
+  const panelPaint = d.elements.some((e) => e.panelGeometry) ? designPaintOrder(d) : [];
+  for (const e of panelPaint.filter((e) => !e.hidden && (!included || included.has(e.id)))) {
+    for (let p = e.parentId && index.get(e.parentId); p; p = p.parentId && index.get(p.parentId))
+      if (p.panelGeometry) ends.set(p.id, e.id);
+  }
+  const borders = new Map<string, DesignElement[]>();
+  const borderIds = new Map<string, string>();
+  const occupied = new Set(index.keys());
+  for (const [panelId, lastId] of ends) {
+    if (included && (!included.has(panelId) || !included.has(lastId))) continue;
+    borders.set(lastId, [...(borders.get(lastId) ?? []), index.get(panelId)!]);
+    let id = `${panelId}-border`;
+    while (occupied.has(id)) id += '-border';
+    occupied.add(id);
+    borderIds.set(panelId, id);
+  }
+  const draw = (raw: DesignElement) =>
     projectDesignDrawing(d, raw, index, raw.id, {
       content: d,
       components,
       owners: elements.has(raw.id) ? [elements.get(raw.id)!] : [],
     });
+  return (raw: DesignElement): DesignDrawing[] => [
+    ...draw(raw).map((drawing) =>
+      borderIds.has(raw.id) ? { ...drawing, stroke: 'none' } : drawing,
+    ),
+    ...(borders.get(raw.id) ?? []).flatMap((panel) =>
+      draw(panel).map((drawing) => ({
+        ...drawing,
+        id: borderIds.get(panel.id)!,
+        panelBorderOf: panel.id,
+        fill: 'none',
+        text: '',
+        runs: undefined,
+      })),
+    ),
+  ];
 }
 export function designDrawings(d: DesignContent, raw: DesignElement): DesignDrawing[] {
-  return designDrawingProjector(d)(raw);
+  return designDrawingProjector(d, new Set([raw.id]))(raw);
 }
 /** Private drawing-hierarchy IDs for instance parts that cannot alias native records. */
 function allocatePartIds(index: ElementLookup, instanceId: string, c: DesignComponent) {
@@ -1449,6 +1594,7 @@ function projectDesignDrawing(
     unlockedVisibleText(d, index, raw, e);
   return [
     leafDrawing(
+      d,
       e,
       raw,
       drawingId,
@@ -1494,6 +1640,7 @@ function textSource(
   return { textOwner, textInstance };
 }
 function leafDrawing(
+  d: DesignContent,
   e: DesignElement,
   raw: DesignElement,
   drawingId: string,
@@ -1509,7 +1656,8 @@ function leafDrawing(
     instanceText,
     path: e.path ? projectDesignPath(e.path, e) : undefined,
     vector: e.type === 'shape' && validDesignVector(e.vector) ? e.vector : undefined,
-    clipBounds: frameClips(index, raw),
+    clipBounds: frameClips(d, index, raw),
+    polygon: e.panelGeometry?.polygon,
     kind: drawingKind(e.type),
     shape: e.shape ?? 'rectangle',
     typography: e.typography ?? { fontSize: 28 },
@@ -1616,7 +1764,7 @@ export function designDiff(a: DesignContent, b: DesignContent): CompareResult {
 /** Shared SVG/PNG extent. Ordinary shapes retain their legacy export bounds. */
 export function designExportBounds(d: DesignContent, ids?: string[]): Bounds {
   const included = ids?.length ? descendantIds(d.elements, ids) : undefined;
-  const project = designDrawingProjector(d);
+  const project = designDrawingProjector(d, included);
   return unionBounds(
     designPaintOrder(d)
       .filter((e) => !e.hidden && (!included || included.has(e.id)))
@@ -1633,7 +1781,7 @@ export function exportDesignSvg(
   const box = designExportBounds(d, ids),
     pad = options.padding ?? 20;
   return drawingSvg(
-    chosen.flatMap(designDrawingProjector(d)),
+    chosen.flatMap(designDrawingProjector(d, included)),
     { x: box.x - pad, y: box.y - pad, width: box.width + pad * 2, height: box.height + pad * 2 },
     options.background,
   );
@@ -1693,6 +1841,14 @@ const elementChecks: [field: string, check: (e: DesignElement) => boolean][] = [
   ['name', (e) => typeof e.name === 'string'],
   ['text', (e) => typeof e.text === 'string'],
   ['fill', (e) => typeof e.fill === 'string'],
+  [
+    'provenance',
+    (e) =>
+      optional(
+        e.provenance,
+        (p) => e.type === 'image' && validDesignRasterProvenance(p) && p.src === e.src,
+      ),
+  ],
   ['interactions', (e) => optional(e.interactions, validDesignInteractions)],
   ['overrides', (e) => optional(e.overrides, (o) => validDesignOverrides(o))],
   ['style', (e) => validVisualStyle(e)],
@@ -1703,6 +1859,10 @@ const elementChecks: [field: string, check: (e: DesignElement) => boolean][] = [
   [
     'vector',
     (e) => optional(e.vector, (v) => e.type === 'shape' && !e.path && validDesignVector(v)),
+  ],
+  [
+    'panelGeometry',
+    (e) => optional(e.panelGeometry, (g) => e.type === 'frame' && validPanelGeometry(g)),
   ],
   ['path', (e) => optional(e.path, (p) => e.type === 'shape' && !e.vector && validDesignPath(p))],
   [
@@ -1724,6 +1884,7 @@ const elementChecks: [field: string, check: (e: DesignElement) => boolean][] = [
   ['shape', (e) => optional(e.shape, oneOf(shapeNames))],
   ['imageFit', (e) => optional(e.imageFit, oneOf(['fit', 'fill']))],
   ['arrowhead', (e) => optional(e.arrowhead, oneOf(['none', 'end', 'both']))],
+  ['lineDirection', (e) => optional(e.lineDirection, oneOf(lineDirections))],
   ['strokeWidth', (e) => optional(e.strokeWidth, (v) => v >= 0)],
   ['radius', (e) => optional(e.radius, (v) => v >= 0)],
   ['crop', (e) => optional(e.crop, validCrop)],
@@ -1762,6 +1923,10 @@ const validComponentTemplate = (t: DesignComponent['template']) =>
   typeof t.fill === 'string' &&
   optional(t.interactions, validDesignInteractions) &&
   validVisualStyle(t) &&
+  optional(
+    t.provenance,
+    (p) => t.type === 'image' && validDesignRasterProvenance(p) && p.src === t.src,
+  ) &&
   optional(t.vector, (v) => t.type === 'shape' && validDesignVector(v)) &&
   optional(t.web, validDesignWebElement);
 const validComponentSize = (c: DesignComponent) =>
@@ -1785,7 +1950,12 @@ function validComponent(c: DesignComponent): boolean {
 export function designContentProblem(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return '$';
   const d = value as DesignContent;
-  if (d.schemaVersion !== 1 && d.schemaVersion !== 2 && d.schemaVersion !== 3)
+  if (
+    d.schemaVersion !== 1 &&
+    d.schemaVersion !== 2 &&
+    d.schemaVersion !== 3 &&
+    d.schemaVersion !== 4
+  )
     return 'schemaVersion';
   if (!Array.isArray(d.elements)) return 'elements';
   if (!validReferenceItems(d.elements)) return 'elements (references)';
@@ -1801,7 +1971,8 @@ export function designContentProblem(value: unknown): string | undefined {
     const component = componentProblem(c, `components[${i}]`);
     if (component) return component;
   }
-  if (!validPathStorage(d, d.schemaVersion === 3)) return 'path storage/limits';
+  if (!validDivisionContent(d)) return 'panel division/geometry';
+  if (!validPathStorage(d, d.schemaVersion >= 3)) return 'path storage/limits';
   return referencedVectorOverrideProblem(d);
 }
 const named = (path: string, kind: string, id: unknown) =>
@@ -1863,7 +2034,7 @@ export function isDesign(value: unknown): value is DesignContent {
 /** Explicit local/native opt-in. Does not grant template/shared/React/Animation support. */
 export function isDesignWithPaths(value: unknown): value is DesignContent {
   const d = value as DesignContent | null;
-  return !!d && validDesignBody(d) && validPathStorage(d, d.schemaVersion === 3);
+  return !!d && validDesignBody(d) && validPathStorage(d, d.schemaVersion >= 3);
 }
 function validPathStorage(d: DesignContent, allow: boolean): boolean {
   if (
@@ -1882,7 +2053,7 @@ function validPathStorage(d: DesignContent, allow: boolean): boolean {
       const template = payload && typeof payload === 'object' ? payload.template : undefined;
       if (template?.domain === 'design' && record(template.content)) {
         const native = template.content as unknown as DesignContent;
-        if (native.schemaVersion === 3) return false;
+        if (native.schemaVersion >= 3) return false;
         // Retained templates may use unresolved asset placeholders, so validate only
         // native path storage here; template expansion owns its other validation.
         if (
@@ -1937,7 +2108,10 @@ function validDesignBody(value: unknown): value is DesignContent {
   if (!value || typeof value !== 'object') return false;
   const d = value as DesignContent;
   return (
-    (d.schemaVersion === 1 || d.schemaVersion === 2 || d.schemaVersion === 3) &&
+    (d.schemaVersion === 1 ||
+      d.schemaVersion === 2 ||
+      d.schemaVersion === 3 ||
+      d.schemaVersion === 4) &&
     Array.isArray(d.elements) &&
     validReferenceItems(d.elements) &&
     Array.isArray(d.components) &&
@@ -1947,6 +2121,7 @@ function validDesignBody(value: unknown): value is DesignContent {
     (d.pagination === undefined || validDesignPagination(d.pagination, d.elements)) &&
     validElements(d.elements) &&
     d.components.every(validComponent) &&
+    validDivisionContent(d) &&
     validReferencedVectorOverrides(d)
   );
 }
@@ -1957,9 +2132,16 @@ const validReferencedVectorOverrides = (content: DesignContent) =>
 function referencedVectorOverrideProblem(content: DesignContent): string | undefined {
   const components = new Map(content.components.map((c) => [c.id, c]));
   const containsVector = (patch: Partial<DesignElement>): boolean =>
-    patch.vector !== undefined || Object.values(patch.overrides ?? {}).some(containsVector);
+    patch.vector !== undefined ||
+    patch.provenance !== undefined ||
+    Object.values(patch.overrides ?? {}).some(containsVector);
   const visit = (element: Partial<DesignElement>, depth = 0): boolean => {
     if (element.vector !== undefined && element.type !== 'shape') return false;
+    if (
+      element.provenance !== undefined &&
+      (element.type !== 'image' || element.provenance.src !== element.src)
+    )
+      return false;
     if (!element.overrides) return true;
     if (depth >= 16) return false;
     const component =
@@ -1970,9 +2152,13 @@ function referencedVectorOverrideProblem(content: DesignContent): string | undef
         : component && id === 'root'
           ? component.template
           : undefined;
-      // Keep unrelated legacy override fields readable; new vector data needs a real target.
+      // Keep unrelated legacy override fields readable; attributed data needs a real target.
       if (!target) return !containsVector(patch);
-      return visit({ ...target, ...patch, vector: patch.vector ?? target.vector }, depth + 1);
+      if (patch.provenance && patch.provenance.src !== (patch.src ?? target.src)) return false;
+      return visit(
+        { ...rasterSourcePatch(target, patch), vector: patch.vector ?? target.vector },
+        depth + 1,
+      );
     });
   };
   const element = content.elements.findIndex((e) => !visit(e));
@@ -2011,6 +2197,8 @@ function validDesignOverride(raw: unknown, depth: number): boolean {
   return (
     p.reference === undefined &&
     p.path === undefined &&
+    p.panelGeometry === undefined &&
+    optional(p.provenance, validDesignRasterProvenance) &&
     optional(p.vector, validDesignVector) &&
     optional(p.interactions, validDesignInteractions) &&
     optional(p.bounds, validBounds) &&
@@ -2179,8 +2367,15 @@ function leafInstanceOverride(
   key: string,
   effective: DesignElement,
 ): Partial<DesignElement> {
-  const { patch } = edit;
   const previous = instance.overrides?.[key];
+  // A retained override is not newly submitted attribution. Clear it before
+  // validating the merged patch, while still rejecting explicitly wrong metadata.
+  const patch =
+    !Object.hasOwn(edit.patch, 'provenance') &&
+    previous?.provenance &&
+    previous.provenance.src !== (Object.hasOwn(edit.patch, 'src') ? edit.patch.src : effective.src)
+      ? { ...edit.patch, provenance: undefined }
+      : edit.patch;
   const root = previous?.overrides?.root;
   // A legacy direct edit must update any scoped values that would otherwise
   // mask it. Keep untouched root fields and explicit override-map replacement.
@@ -2359,7 +2554,11 @@ export const updateComponentPart = (
         componentId,
       );
     const part = componentPart(c, partId);
-    assertEditable(c.elements, [partId]);
+    const stateOnly =
+      Object.keys(patch).length > 0 &&
+      Object.keys(patch).every((key) => ['locked', 'hidden'].includes(key));
+    if (stateOnly) assertDesignPathEditable(d, c.elements, partId, true);
+    else assertEditable(c.elements, [partId]);
     assertElementChange(d, part, patch, c.elements);
     return {
       ...d,

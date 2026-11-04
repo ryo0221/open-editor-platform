@@ -9,7 +9,14 @@ export const cadKernelBuild = {
   js: 'opencascade.d0-leakcheck.js',
   wasm: 'opencascade.d0-leakcheck.wasm',
   wasmSha256: 'dfa4d5de076cbad21c3cbda1df5310dc567d4041ef47d5ef1b2021ab3072ae3d',
+  /** The loader's SHA-256, checked by fetch.mjs (the development server checks the Wasm only). */
+  jsSha256: '722be394001770e5f4eb0f566ac980d5b3a9f36298ab150e528935dbb097b17f',
 };
+/**
+ * Where built kernels are released (README.md, "Released builds"): one GitHub release per build,
+ * tagged `cad-kernel-<first 12 hex digits of wasmSha256>`, made by release.sh, read by fetch.mjs.
+ */
+export const cadKernelRelease = { repository: 'ryo0221/open-editor-platform' };
 /**
  * Earlier development builds (docs/cad/model.md, kernel update). A Host serves one for exact
  * evaluation when CAD_OCCT_RETAINED lists its directory. `substitute: true` approves the

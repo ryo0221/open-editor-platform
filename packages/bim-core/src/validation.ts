@@ -1,3 +1,8 @@
+import {
+  geometryMaterialPreset,
+  geometryTextureLimits,
+  geometryTextureSetProblems,
+} from '@editor-platform/geometry-core';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { deriveBim } from './derive';
 import { distance } from './geometry';
@@ -176,7 +181,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     'views',
     'propertySets',
   ] as const;
-  c.keys(value, ['schemaVersion', 'units', 'axes', 'project', ...collections], '$');
+  c.keys(value, ['schemaVersion', 'units', 'axes', 'project', ...collections], '$', ['assets']);
   if (value.units !== 'mm') c.error('units', '$.units');
   if (value.axes !== 'right-handed-z-up') c.error('axes', '$.axes');
   for (const k of collections) if (!Array.isArray(value[k])) c.error('collection', `$.${k}`);
@@ -203,8 +208,45 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     c.coordinate(p.siteElevationMm, '$.project.siteElevationMm');
   }
 
-  // Pass 1: entity shapes and IDs (one namespace for the whole document).
   const kindOf = new Map<string, string>();
+  // #662: texture images, by hash: one ref per hash, a PNG or JPEG within the image limit.
+  const textureAssets = new Map<string, string>();
+  if (Object.hasOwn(value, 'assets')) {
+    const assets = value.assets;
+    if (!Array.isArray(assets) || assets.length > bimLimits.materials * 5)
+      c.error('assets', '$.assets');
+    else {
+      const hashes = new Set<string>();
+      assets.forEach((a, i) => {
+        const at = `$.assets[${i}]`;
+        if (!record(a) || !c.keys(a, ['id', 'kind', 'sha256', 'byteLength', 'mediaType'], at))
+          return void c.error('asset', at);
+        const media = { 'texture-png': 'image/png', 'texture-jpeg': 'image/jpeg' }[
+          a.kind as string
+        ];
+        if (!media || a.mediaType !== media) c.error('asset-kind', `${at}.kind`);
+        if (typeof a.sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(a.sha256))
+          c.error('asset-hash', `${at}.sha256`);
+        else if (hashes.has(a.sha256)) c.error('asset-duplicate', `${at}.sha256`);
+        else hashes.add(a.sha256);
+        const n = a.byteLength;
+        if (
+          typeof n !== 'number' ||
+          !Number.isSafeInteger(n) ||
+          n < 1 ||
+          n > geometryTextureLimits.imageBytes
+        )
+          c.error('asset-size', `${at}.byteLength`);
+        if (c.id(a.id, `${at}.id`)) {
+          kindOf.set(a.id as string, 'asset');
+          textureAssets.set(a.id as string, at);
+        }
+      });
+    }
+  }
+  const usedAssets = new Set<string>();
+
+  // Pass 1: entity shapes and IDs (one namespace for the whole document).
   const levelElevations: number[] = [];
   v.levels.forEach((l, i) => {
     const at = `$.levels[${i}]`;
@@ -235,13 +277,50 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   });
   v.materials.forEach((m, i) => {
     const at = `$.materials[${i}]`;
-    if (!record(m) || !c.keys(m, ['id', 'name', 'category'], at))
+    if (!record(m) || !c.keys(m, ['id', 'name', 'category'], at, ['appearance']))
       return void c.error('material', at);
+    if (Object.hasOwn(m, 'appearance')) {
+      const a = m.appearance;
+      const ap = `${at}.appearance`;
+      if (
+        !record(a) ||
+        !c.keys(a, ['color', 'opacity', 'roughness', 'metalness'], ap, ['preset', 'textures'])
+      )
+        c.error('material-appearance', ap);
+      else {
+        if (typeof a.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(a.color))
+          c.error('material-appearance', `${ap}.color`);
+        for (const k of ['opacity', 'roughness', 'metalness'] as const) {
+          const v = a[k];
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1)
+            c.error('material-appearance', `${ap}.${k}`);
+        }
+        if (
+          Object.hasOwn(a, 'preset') &&
+          (typeof a.preset !== 'string' || !geometryMaterialPreset(a.preset))
+        )
+          c.error('material-appearance', `${ap}.preset`);
+        if (Object.hasOwn(a, 'textures')) {
+          const tp = `${ap}.textures`;
+          const problems = geometryTextureSetProblems(a.textures, bimId);
+          for (const [, key] of problems) c.error('material-texture', key ? `${tp}.${key}` : tp);
+          if (!problems.length)
+            for (const [role, id] of Object.entries(
+              (a.textures as { maps: Record<string, string> }).maps,
+            )) {
+              if (!textureAssets.has(id)) c.error('asset-missing', `${tp}.maps.${role}`);
+              else usedAssets.add(id);
+            }
+        }
+      }
+    }
     if (c.id(m.id, `${at}.id`)) kindOf.set(m.id as string, 'material');
     c.name(m.name, `${at}.name`);
     if (!(bimMaterialCategories as readonly unknown[]).includes(m.category))
       c.error('material-category', `${at}.category`);
   });
+  // The closure is exact: an image no material names is not kept.
+  for (const [id, at] of textureAssets) if (!usedAssets.has(id)) c.error('asset-unreferenced', at);
   const psetDefs = new Map<string, Map<string, string>>();
   v.propertySets.forEach((s, i) => {
     const at = `$.propertySets[${i}]`;

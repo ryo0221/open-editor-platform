@@ -16,6 +16,7 @@ import {
   CadExportError,
   checkClosedMesh,
   dropCollapsed,
+  glbTextureCoordinates,
   writeGlb,
   writeStl,
   type CadExportBody,
@@ -225,9 +226,131 @@ describe('GLB', () => {
   });
 });
 
+/** The JSON chunk of a GLB. */
+function glbJson(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + view.getUint32(12, true))));
+}
+/** An accessor's floats, read from the GLB's binary chunk. */
+function glbFloats(bytes: Uint8Array, json: ReturnType<typeof glbJson>, accessor: number) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const bin = 20 + view.getUint32(12, true) + 8;
+  const a = json.accessors[accessor];
+  const bv = json.bufferViews[a.bufferView];
+  const size = a.type === 'VEC2' ? 2 : a.type === 'VEC3' ? 3 : 1;
+  return Array.from(
+    new Float32Array(
+      bytes.slice(bin + bv.byteOffset, bin + bv.byteOffset + a.count * size * 4).buffer,
+    ),
+  );
+}
+
+describe('GLB textures (#663)', () => {
+  const png = { bytes: new Uint8Array([137, 80, 78, 71, 1]), mediaType: 'image/png' as const };
+  const jpeg = {
+    bytes: new Uint8Array([255, 216, 255, 1, 2, 3]),
+    mediaType: 'image/jpeg' as const,
+  };
+  const uvBox = () => {
+    const mesh = box([2, 2, 2], [0, 0, 0]);
+    mesh.uvs = new Float32Array((mesh.positions.length / 3) * 2).map((_, i) => i * 10);
+    return mesh;
+  };
+  it('writes the finish, the maps with their images once each, and turned coordinates', () => {
+    const textures = {
+      color: jpeg,
+      normal: png,
+      metallicRoughness: png,
+      occlusion: jpeg,
+      sizeMm: [500, 250] as [number, number],
+      rotationDeg: 90,
+    };
+    const look = { color: '#ffffff', opacity: 1, roughness: 0.3, metalness: 1 };
+    const { bytes, report } = writeGlb(
+      [
+        { ...body(uvBox()), appearance: look, textures },
+        { ...body(uvBox()), name: 'Plain' },
+      ],
+      meta,
+    );
+    expect(bytes.byteLength % 4).toBe(0);
+    const json = glbJson(bytes);
+    const [textured, plain] = json.materials;
+    expect(textured).toMatchObject({
+      pbrMetallicRoughness: {
+        metallicFactor: 1,
+        roughnessFactor: 0.3,
+        baseColorTexture: { index: 0 },
+        metallicRoughnessTexture: { index: 1 },
+      },
+      normalTexture: { index: 1 },
+      occlusionTexture: { index: 0 },
+    });
+    // A look without a finish is written with the default one, as the view draws it.
+    expect(plain.pbrMetallicRoughness).toEqual({
+      baseColorFactor: [...[1, 0.5, 0].map((c) => (c === 0.5 ? expect.any(Number) : c)), 1],
+      metallicFactor: 0.05,
+      roughnessFactor: 0.55,
+    });
+    expect(json.images).toEqual([
+      { bufferView: expect.any(Number), mimeType: 'image/jpeg' },
+      { bufferView: expect.any(Number), mimeType: 'image/png' },
+    ]);
+    expect(json.samplers).toEqual([
+      { magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 },
+    ]);
+    // The image bytes are in the binary chunk as given.
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const bin = 20 + view.getUint32(12, true) + 8;
+    const imageView = json.bufferViews[json.images[1].bufferView];
+    expect(
+      Array.from(
+        bytes.subarray(
+          bin + imageView.byteOffset,
+          bin + imageView.byteOffset + imageView.byteLength,
+        ),
+      ),
+    ).toEqual(Array.from(png.bytes));
+    expect(json.bufferViews.every((v: { byteOffset: number }) => v.byteOffset % 4 === 0)).toBe(
+      true,
+    );
+    // A quarter turn: u' = v / 500, v' = −(−u) / 250, as the view's repeat and rotation.
+    const uv = glbFloats(bytes, json, json.meshes[0].primitives[0].attributes.TEXCOORD_0);
+    expect(uv[0]).toBeCloseTo(10 / 500, 6);
+    expect(uv[1]).toBeCloseTo(0 / 250, 6);
+    expect(uv[2]).toBeCloseTo(30 / 500, 6);
+    expect(uv[3]).toBeCloseTo(20 / 250, 6);
+    expect(json.meshes[1].primitives[0].attributes.TEXCOORD_0).toBeUndefined();
+    expect(report.losses).toHaveLength(1);
+  });
+  it('flips v without a turn, and names a body whose mesh has no texture coordinates', () => {
+    const uv = glbTextureCoordinates(new Float32Array([100, 50]), {
+      sizeMm: [100, 100],
+      rotationDeg: 0,
+    });
+    expect(Array.from(uv)).toEqual([1, -0.5]);
+    const { bytes, report } = writeGlb(
+      [
+        {
+          ...body(box([2, 2, 2], [0, 0, 0])),
+          textures: { color: png, sizeMm: [1, 1], rotationDeg: 0 },
+        },
+      ],
+      meta,
+    );
+    const json = glbJson(bytes);
+    expect(json.images).toBeUndefined();
+    expect(json.materials[0].pbrMetallicRoughness.baseColorTexture).toBeUndefined();
+    expect(report.losses[1]).toMatch(/^Plate: the texture maps are not written/);
+  });
+});
+
 describe('CadController.exportMesh', () => {
   /** A kernel that evaluates F02 as an 80×50×5 box and records export requests. */
-  function setup(document = f02Plate()) {
+  function setup(
+    document = f02Plate(),
+    extra: Partial<ConstructorParameters<typeof CadController>[0]> = {},
+  ) {
     const exportRequests: number[] = [];
     let exportBodies: Record<string, unknown> | undefined;
     /** When set, the STL triangulation job ends with this code. */
@@ -237,26 +360,39 @@ describe('CadController.exportMesh', () => {
       contentHash: request.candidateHash,
       buildHash: fixtureKernel.buildHash,
       geometryDigest: 'digest',
-      bodies: {
-        plate: {
-          kind: 'solid' as const,
-          volumeMm3: 20_000,
-          areaMm2: 1,
-          bounds: [
-            [0, 0, 0],
-            [80, 50, 5],
-          ],
-        },
-      },
+      bodies: Object.fromEntries(
+        request.document.bodies.map((b) => [
+          b.id,
+          {
+            kind: 'solid' as const,
+            volumeMm3: 20_000,
+            areaMm2: 1,
+            bounds: [
+              [0, 0, 0],
+              [80, 50, 5],
+            ],
+          },
+        ]),
+      ),
     });
-    const plate = () => ({ ...box([80, 50, 5], [40, 25, 2.5]), bodyId: 'plate' });
+    const plate = () => {
+      const mesh = box([80, 50, 5], [40, 25, 2.5]);
+      // Real-size coordinates (mm): x and y of each node, as a plane's projection.
+      const uvs = new Float32Array((mesh.positions.length / 3) * 2);
+      for (let v = 0; v < uvs.length / 2; v++)
+        uvs.set([mesh.positions[v * 3] + 40, mesh.positions[v * 3 + 1] + 25], v * 2);
+      return { ...mesh, uvs, bodyId: 'plate' };
+    };
     /** While set, an edit's evaluation waits for `release()`. */
     let held: Promise<void> | undefined;
     let release = () => {};
     const kernel: CadKernelPort = {
       evaluate: async (request) => {
         await held;
-        controller.receiveMeshes(request.candidateHash, [plate()]);
+        controller.receiveMeshes(
+          request.candidateHash,
+          request.document.bodies.map((b) => ({ ...plate(), bodyId: b.id })),
+        );
         return evaluation(request);
       },
       cancel: () => {},
@@ -266,6 +402,7 @@ describe('CadController.exportMesh', () => {
       kernel,
       canEdit: () => true,
       permissionGeneration: () => 1,
+      ...extra,
       exportStep: async (request) => {
         const result = evaluation(request);
         if (exportBodies && result.status === 'ok') result.bodies = exportBodies as never;
@@ -285,7 +422,10 @@ describe('CadController.exportMesh', () => {
           };
         const result = evaluation(request);
         if (exportBodies && result.status === 'ok') result.bodies = exportBodies as never;
-        return { evaluation: result, meshes: [plate()] };
+        return {
+          evaluation: result,
+          meshes: request.document.bodies.map((b) => ({ ...plate(), bodyId: b.id })),
+        };
       },
     });
     return {
@@ -303,6 +443,96 @@ describe('CadController.exportMesh', () => {
     };
   }
 
+  it('writes a body’s texture set to GLB: packed, converted, or named as lost (#663)', async () => {
+    const image = (n: number) => new Uint8Array([n, n, n, n]);
+    const kept = new Map<string, Uint8Array>([
+      ['sha256:c', image(1)],
+      ['sha256:n', image(2)],
+      ['sha256:r', image(3)],
+      ['sha256:m', image(4)],
+    ]);
+    const document = f02Plate();
+    const ref = (id: string, sha: string, mediaType = 'image/png') => ({
+      id,
+      kind: (mediaType === 'image/png' ? 'texture-png' : 'texture-jpeg') as 'texture-png',
+      sha256: sha,
+      byteLength: 4,
+      mediaType,
+    });
+    document.assets = [
+      ref('asset-c', 'sha256:c', 'image/jpeg'),
+      ref('asset-n', 'sha256:n'),
+      ref('asset-r', 'sha256:r'),
+      ref('asset-m', 'sha256:m'),
+      ref('asset-o', 'sha256:missing'),
+    ];
+    document.bodies[0]!.appearance = {
+      color: '#ffffff',
+      opacity: 1,
+      textures: {
+        maps: {
+          color: 'asset-c',
+          normal: 'asset-n',
+          roughness: 'asset-r',
+          metalness: 'asset-m',
+          occlusion: 'asset-o',
+        },
+        sizeMm: [1000, 1000],
+        rotationDeg: 0,
+        normal: 'dx',
+        name: 'Bricks',
+      },
+    };
+    // A second body with the same set: each image is converted and embedded once (Codex).
+    document.bodies.push({ ...document.bodies[0]!, id: 'copy', name: 'Copy' });
+    const calls: string[] = [];
+    const { controller } = setup(document, {
+      assets: { get: (sha) => kept.get(sha), stage: async () => {} },
+      textureImages: {
+        packMetallicRoughness: async (r, m) => {
+          calls.push(`pack ${r?.bytes[0]} ${m?.bytes[0]}`);
+          return image(9);
+        },
+        flipNormalGreen: async (n) => {
+          calls.push(`flip ${n.bytes[0]}`);
+          return image(8);
+        },
+      },
+    });
+    await controller.refresh();
+    const glb = await controller.exportMesh('glb');
+    expect(calls).toEqual(['flip 2', 'pack 3 4']);
+    const json = glbJson(glb!.bytes);
+    expect(json.images.map((i: { mimeType: string }) => i.mimeType)).toEqual([
+      'image/jpeg',
+      'image/png',
+      'image/png',
+    ]);
+    expect(json.materials[0].occlusionTexture).toBeUndefined();
+    expect(json.materials[1].normalTexture).toEqual(json.materials[0].normalTexture);
+    expect(json.materials[1].pbrMetallicRoughness.metallicRoughnessTexture).toEqual(
+      json.materials[0].pbrMetallicRoughness.metallicRoughnessTexture,
+    );
+    expect(glb!.report.losses).toContain(
+      'plate: the occlusion map is not written, as its image is missing.',
+    );
+
+    // Without the Host's image tools, the maps that need converting are left out and named.
+    const bare = setup(document, {
+      assets: { get: (sha) => kept.get(sha), stage: async () => {} },
+    });
+    await bare.controller.refresh();
+    const plain = await bare.controller.exportMesh('glb');
+    const parsed = glbJson(plain!.bytes);
+    expect(parsed.materials[0].normalTexture).toBeUndefined();
+    expect(parsed.materials[0].pbrMetallicRoughness.baseColorTexture).toEqual({ index: 0 });
+    expect(plain!.report.losses).toEqual(
+      expect.arrayContaining([
+        'plate: the normal map is not written, as the image could not be converted.',
+        'plate: the roughness and metalness maps are not written, as the image could not be converted.',
+      ]),
+    );
+  });
   it('refuses before the shape is evaluated', async () => {
     const { controller } = setup();
     expect(await controller.exportMesh('glb')).toBeUndefined();

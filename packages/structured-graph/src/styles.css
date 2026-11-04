@@ -1,9 +1,11 @@
+/* Host theming: set any --ep-graph-* variable on .ep-graph or an ancestor. The defaults are the
+   light look; node and Section paint chosen in content still wins over the defaults. */
 .ep-graph {
   font:
     14px/1.4 system-ui,
     sans-serif;
-  color: #172033;
-  background: #f8fafc;
+  color: var(--ep-graph-text, #172033);
+  background: var(--ep-graph-surface, #f8fafc);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -24,9 +26,9 @@
   color: inherit;
 }
 .ep-graph button {
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--ep-graph-border, #cbd5e1);
   border-radius: 6px;
-  background: white;
+  background: var(--ep-graph-control, white);
   padding: 6px 10px;
   cursor: pointer;
 }
@@ -35,7 +37,7 @@
   cursor: default;
 }
 .ep-graph :focus-visible {
-  outline: 3px solid #60a5fa;
+  outline: 3px solid var(--ep-graph-focus, #60a5fa);
   outline-offset: 2px;
 }
 .ep-graph-toolbar {
@@ -44,7 +46,10 @@
   gap: 6px;
   flex-wrap: wrap;
   padding: 10px;
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 1px solid var(--ep-graph-border, #cbd5e1);
+}
+.ep-graph-toolbar select {
+  background-color: var(--ep-graph-control, white);
 }
 .ep-graph-toolbar label {
   display: flex;
@@ -63,8 +68,8 @@
   min-width: 0;
   min-height: 260px;
   overflow: auto;
-  background-color: #f1f5f9;
-  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-color: var(--ep-graph-canvas, #f1f5f9);
+  background-image: radial-gradient(var(--ep-graph-grid, #cbd5e1) 1px, transparent 1px);
   background-size: 20px 20px;
 }
 .ep-graph-world {
@@ -92,8 +97,10 @@
   min-height: 0;
   height: 70px;
   display: flex;
-  background: var(--ep-graph-node-fill, white);
-  border: 1px var(--ep-graph-node-border-style, solid) var(--ep-graph-node-stroke, #94a3b8);
+  color: var(--ep-graph-node-text, #172033);
+  background: var(--ep-graph-node-fill, var(--ep-graph-node-default-fill, white));
+  border: 1px var(--ep-graph-node-border-style, solid)
+    var(--ep-graph-node-stroke, var(--ep-graph-node-default-stroke, #94a3b8));
   border-width: var(--ep-graph-node-stroke-width, 1px);
   box-shadow: 0 3px 8px #0f172a12;
   border-radius: 3px;
@@ -114,13 +121,37 @@
   filter: drop-shadow(0 3px 4px #0f172a14);
 }
 .ep-graph-node-shape path {
-  fill: var(--ep-graph-node-fill, white);
-  stroke: var(--ep-graph-node-stroke, #94a3b8);
+  fill: var(--ep-graph-node-fill, var(--ep-graph-node-default-fill, white));
+  stroke: var(--ep-graph-node-stroke, var(--ep-graph-node-default-stroke, #94a3b8));
   stroke-width: var(--ep-graph-node-stroke-width, 1px);
 }
 .ep-graph-node.connected .ep-graph-node-shape path {
   stroke: #60a5fa;
   stroke-width: 3px;
+}
+/* The type or value icon, as a badge over the top-left corner so every shape keeps it visible. */
+.ep-graph-plane .ep-graph-node-icon {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+  box-sizing: border-box;
+  overflow: visible;
+  pointer-events: none;
+  background: var(--ep-graph-node-icon-background, white);
+  border: 1px solid var(--ep-graph-node-stroke, var(--ep-graph-node-default-stroke, #94a3b8));
+  border-radius: 50%;
+  box-shadow: 0 1px 3px #0f172a26;
+}
+.ep-graph-node-icon path {
+  fill: none;
+  stroke: var(--ep-graph-node-icon-color, var(--ep-graph-node-stroke, #475569));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 /* Positioned so the label paints above the absolutely positioned outline. */
 .ep-graph-node:not([data-shape='rectangle']) .ep-graph-node-select {
@@ -199,12 +230,12 @@
   pointer-events: all;
 }
 .ep-graph-edge-label rect {
-  fill: #fff;
-  stroke: #cbd5e1;
+  fill: var(--ep-graph-panel, #fff);
+  stroke: var(--ep-graph-border, #cbd5e1);
 }
 .ep-graph-edge-label text {
   font-size: 12px;
-  fill: #334155;
+  fill: var(--ep-graph-muted-text, #334155);
 }
 .ep-graph-edge-label.deferred {
   visibility: hidden;
@@ -237,16 +268,16 @@
   bottom: 8px;
   margin: 8px;
   padding: 8px;
-  background: #fffbeb;
-  border: 1px solid #fbbf24;
+  background: var(--ep-graph-status, #fffbeb);
+  border: 1px solid var(--ep-graph-status-border, #fbbf24);
   pointer-events: none;
 }
 .ep-graph-inspector {
   width: 300px;
   padding: 14px;
   overflow: auto;
-  background: #fff;
-  border-left: 1px solid #cbd5e1;
+  background: var(--ep-graph-panel, #fff);
+  border-left: 1px solid var(--ep-graph-border, #cbd5e1);
 }
 .ep-graph-inspector h2 {
   font-size: 18px;
@@ -261,9 +292,9 @@
 .ep-graph-inspector textarea {
   width: 100%;
   padding: 7px;
-  border: 1px solid #94a3b8;
+  border: 1px solid var(--ep-graph-input-border, #94a3b8);
   border-radius: 5px;
-  background: white;
+  background: var(--ep-graph-control, white);
 }
 .ep-graph-inspector label,
 .ep-graph-inspector small {
@@ -274,7 +305,7 @@
 }
 .ep-graph-inspector [role='alert'],
 .ep-graph-diagnostic {
-  color: #b91c1c;
+  color: var(--ep-graph-danger, #b91c1c);
   overflow-wrap: anywhere;
 }
 .ep-graph-actions {
@@ -312,7 +343,7 @@
 }
 .ep-graph-dialog {
   max-width: 430px;
-  background: white;
+  background: var(--ep-graph-panel, white);
   border-radius: 10px;
   padding: 20px;
   box-shadow: 0 8px 40px #0003;
@@ -333,7 +364,7 @@
     width: 100%;
     overflow: visible;
     border-left: 0;
-    border-top: 1px solid #cbd5e1;
+    border-top: 1px solid var(--ep-graph-border, #cbd5e1);
   }
   .ep-graph-toolbar {
     padding: 7px;
@@ -349,13 +380,25 @@
   position: absolute;
   z-index: 0;
   box-sizing: border-box;
-  background: var(--ep-graph-section-fill, #f8fafc);
-  border: 2px var(--ep-graph-section-border-style, dashed) var(--ep-graph-section-stroke, #94a3b8);
+  background: var(--ep-graph-section-fill, var(--ep-graph-section-default-fill, #f8fafc));
+  border: 2px var(--ep-graph-section-border-style, dashed)
+    var(--ep-graph-section-stroke, var(--ep-graph-section-default-stroke, #94a3b8));
   border-radius: 8px;
   pointer-events: none;
 }
 .ep-graph-section.selected {
   outline: 3px solid #3b82f6;
+}
+/* A Section at an end of the selected connection, or under a dragged connection end (#594). */
+.ep-graph-section.connected {
+  border-color: #60a5fa;
+  border-style: solid;
+}
+.ep-graph-section.valid-target {
+  outline: 3px solid #16a34a;
+}
+.ep-graph-section.invalid-target {
+  outline: 3px solid #dc2626;
 }
 .ep-graph-section.collapsed {
   border-style: solid;
@@ -420,9 +463,9 @@
 .ep-graph-palette > summary {
   cursor: pointer;
   padding: 4px 8px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--ep-graph-border, #cbd5e1);
   border-radius: 4px;
-  background: white;
+  background: var(--ep-graph-control, white);
   list-style: none;
 }
 .ep-graph-palette[open] > [role='group'] {
@@ -434,9 +477,9 @@
   max-height: 60vh;
   overflow: auto;
   padding: 8px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--ep-graph-border, #cbd5e1);
   border-radius: 6px;
-  background: white;
+  background: var(--ep-graph-panel, white);
   box-shadow: 0 6px 18px rgb(15 23 42 / 0.15);
 }
 .ep-graph-palette section {
@@ -449,7 +492,7 @@
   grid-column: 1 / -1;
   margin: 4px 0 0;
   font-size: 12px;
-  color: #475569;
+  color: var(--ep-graph-muted-text, #475569);
 }
 .ep-graph-palette button {
   display: flex;
@@ -466,5 +509,5 @@
 .ep-graph-palette-target {
   margin: 0 0 6px;
   font-size: 12px;
-  color: #475569;
+  color: var(--ep-graph-muted-text, #475569);
 }

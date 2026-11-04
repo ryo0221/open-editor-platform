@@ -1,0 +1,516 @@
+.character-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.character-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.character-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: hidden;
+  background: #eef1f4;
+}
+.character-canvas-host,
+.character-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.character-viewport-note {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 92%);
+  color: #b42318;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.character-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.character-time {
+  width: auto;
+}
+.character-time-readout {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #344054;
+  white-space: nowrap;
+}
+.character-status {
+  font-size: 12px;
+  color: #475467;
+}
+.character-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  font-size: 13px;
+}
+.character-parts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.character-parts label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+.character-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+}
+.character-facts > div {
+  display: contents;
+}
+.character-facts dt {
+  color: #475467;
+}
+.character-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.character-losses {
+  margin: 0;
+  padding-left: 18px;
+}
+.character-file {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.character-error {
+  color: #b42318;
+  margin: 0;
+}
+.character-stage {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.character-stage .character-viewport {
+  flex: 1;
+  height: auto;
+}
+.character-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  border-top: 1px solid #d0d5dd;
+  background: #fff;
+}
+.character-transport .character-time {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.character-terms {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.character-terms dt {
+  color: #475467;
+  font-size: 12px;
+}
+.character-terms dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.character-viewport:focus-visible {
+  outline: 2px solid #2e6bd6;
+  outline-offset: -2px;
+}
+.character-bones {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
+  border-top: 1px solid #e4e7ec;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.character-bones button {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+}
+.character-bones button[aria-pressed='true'] {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.character-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #475467;
+}
+.character-fields {
+  border: 0;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.character-fields legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 2px;
+}
+.character-field {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr) 2em;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.character-field input {
+  min-width: 0;
+  width: 100%;
+}
+.character-field-unit {
+  color: #667085;
+}
+.character-dopesheet {
+  border-top: 1px solid #e4e7ec;
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  max-height: 30vh;
+  overflow: auto;
+}
+.character-keys-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.character-keys-empty {
+  margin: 4px 0;
+  color: #667085;
+}
+.character-tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.character-track {
+  display: grid;
+  grid-template-columns: minmax(6em, 10em) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.character-track-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #344054;
+}
+.character-track-lane {
+  position: relative;
+  height: 20px;
+  margin: 0 8px;
+  background: #f2f4f7;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.character-track-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #d92d20;
+  pointer-events: none;
+}
+.character-key {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #344054;
+  background: #fdb022;
+  transform: translate(-50%, -50%) rotate(45deg);
+  cursor: pointer;
+}
+.character-key[aria-pressed='true'] {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+@media (max-width: 600px) {
+  .character-track {
+    grid-template-columns: minmax(4em, 7em) minmax(0, 1fr);
+  }
+}
+.character-stage > .character-error {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+/* C2b props: listed under the parts, chosen like a bone. */
+.character-props {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 0;
+  border-top: 1px solid #e4e7ec;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.character-props li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.character-props button {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.character-props button[aria-pressed='true'] {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.character-prop-state {
+  font-size: 12px;
+  color: #667085;
+}
+.character-add-prop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+.character-add-prop select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 140px;
+}
+/* C3: parts as choosable rows, and mesh edit mode. */
+.character-parts li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.character-parts button,
+.character-mesh button {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.character-parts button[aria-pressed='true'],
+.character-mesh button[aria-pressed='true'] {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.character-mesh button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.character-mesh {
+  display: grid;
+  gap: 8px;
+}
+.character-mesh-modes,
+.character-mesh-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.character-mesh-count {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.character-mesh-op {
+  border: 1px solid #e4e7ec;
+  border-radius: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  display: grid;
+  gap: 4px;
+}
+.character-mesh-op legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 2px;
+}
+.character-mesh .character-field {
+  grid-template-columns: 8em minmax(0, 1fr);
+}
+.character-viewport-note[role='status'] {
+  color: #344054;
+}
+/* C3g: the move gizmo over the view; only its handles take the pointer. */
+.character-gizmo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.character-gizmo-hit {
+  stroke: transparent;
+  pointer-events: stroke;
+  cursor: grab;
+}
+.character-gizmo .active .character-gizmo-hit {
+  cursor: grabbing;
+}
+.character-gizmo-readout {
+  font:
+    600 12px/1 system-ui,
+    sans-serif;
+  fill: #101828;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 3px;
+}
+/* C4: the UV layout of the edited cage. */
+.character-uv-view {
+  width: 100%;
+  max-width: 200px;
+  aspect-ratio: 1;
+  display: block;
+}
+.character-uv-view rect {
+  fill: #f8fafc;
+  stroke: #98a2b3;
+  stroke-width: 1;
+}
+.character-uv-view path {
+  fill: rgba(46, 107, 214, 0.12);
+  stroke: #2e6bd6;
+  stroke-width: 0.75;
+}
+.character-materials {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.character-materials li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.character-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #98a2b3;
+}
+.character-material-image {
+  color: #475467;
+}
+.character-material-actions {
+  display: flex;
+  gap: 4px;
+}
+/* C5a: the bones over the view. */
+.character-bone-overlay line {
+  stroke: #f79009;
+  stroke-width: 2;
+}
+.character-bone-overlay circle {
+  fill: #ffffff;
+  stroke: #f79009;
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: pointer;
+}
+.character-bone-overlay .selected {
+  stroke: #1570ef;
+}
+.character-bone-overlay circle.selected {
+  fill: #1570ef;
+}
+.character-name-field input,
+.character-name-field select {
+  min-width: 0;
+  flex: 1;
+}
+/* C5d: IK handles (a drag poses the chain). */
+.character-ik-overlay rect {
+  fill: #ffffff;
+  stroke: #7a5af8;
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: grab;
+  touch-action: none;
+}
+.character-ik-overlay rect.solving {
+  fill: #7a5af8;
+}
+/* C5b: binding a part to a skeleton. */
+.character-bind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+.character-bind select {
+  min-width: 0;
+  flex: 1;
+}
+.character-weight-overlay circle {
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+.character-weight-overlay .character-brush {
+  stroke: #101828;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}

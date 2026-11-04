@@ -143,6 +143,23 @@ describe('bim part source (R2c-3c-3b)', () => {
       );
     expect(await of(assembly)).toBe('part-assembly-unsupported');
     expect(await of(imported)).toBe('part-assets-unsupported');
+    // #662: texture images are the look, not the shape: such a version is read.
+    const tex = {
+      id: 't',
+      kind: 'texture-png',
+      sha256: `sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+      mediaType: 'image/png',
+    };
+    const textured = await stored('cad', 'Tex', { ...plate(), assets: [tex] });
+    await expect(
+      createBimPartSource({
+        records: () => [textured],
+        record: () => undefined,
+        persist: async () => true,
+        kernel: kernel().k,
+      }).shape(refOf(textured)),
+    ).resolves.toMatchObject({ kinds: ['solid'] });
     // A failure is not kept: the next read tries again.
     const held: { k?: BimPartKernel } = {};
     const late = createBimPartSource({

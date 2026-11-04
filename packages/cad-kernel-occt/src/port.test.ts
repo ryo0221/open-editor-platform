@@ -17,7 +17,7 @@ import {
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { describe, expect, it } from 'vitest';
-import { WorkerKernelPort, type WorkerLike } from './port';
+import { CadEvaluationMemory, WorkerKernelPort, type WorkerLike } from './port';
 import type { CadWorkerRequest, CadWorkerResponse } from './protocol';
 
 const build = {
@@ -409,6 +409,71 @@ describe('WorkerKernelPort (CAD24)', () => {
   });
 });
 
+describe('evaluation memory past one port (#589)', () => {
+  const plate = (id: string): CadEvaluateRequest => ({
+    requestId: id,
+    generation: 1,
+    baseHash: cadContentHash(f02Plate()),
+    candidateHash: cadContentHash(f02Plate()),
+    document: f02Plate(),
+  });
+  it('a port mounted again for the same content answers without a Worker job', async () => {
+    const memory = new CadEvaluationMemory();
+    const first = fakeWorkers();
+    const before = new WorkerKernelPort({ spawn: first.spawn, build, timers: manualTimers(), memory });
+    const evaluated = before.evaluate(plate('a'));
+    first.workers[0].send({ type: 'ready', buildHash: build.buildHash });
+    await flush();
+    first.workers[0].send(ok(plate('a')));
+    expect(await evaluated).toMatchObject({ status: 'ok' });
+    before.dispose();
+    // A larger view mounts a new binding: same content, nothing evaluated again.
+    const second = fakeWorkers();
+    const meshes: string[] = [];
+    const after = new WorkerKernelPort({
+      spawn: second.spawn,
+      build,
+      timers: manualTimers(),
+      memory,
+      onMeshes: (hash) => void meshes.push(hash),
+    });
+    expect(await after.evaluate(plate('b'))).toMatchObject({
+      status: 'ok',
+      contentHash: plate('b').candidateHash,
+    });
+    expect(second.workers).toHaveLength(0);
+    expect(meshes).toEqual([plate('b').candidateHash]);
+    // Another build, a coarse mesh or no memory evaluates as before.
+    const other = new WorkerKernelPort({
+      spawn: second.spawn,
+      build: { ...build, buildHash: `sha256:${'1'.repeat(64)}` },
+      timers: manualTimers(),
+      memory,
+    });
+    void other.evaluate(plate('c'));
+    void after.evaluate({ ...plate('d'), coarse: true });
+    expect(second.workers).toHaveLength(2);
+  });
+  it('keeps the most recent entries only', () => {
+    const memory = new CadEvaluationMemory(1);
+    const value = (contentHash: string) => ({
+      evaluation: {
+        status: 'ok' as const,
+        contentHash,
+        buildHash: build.buildHash,
+        geometryDigest: 'd',
+        bodies: {},
+      },
+      meshes: [],
+    });
+    memory.set('a', value('a'));
+    memory.set('b', value('b'));
+    expect(memory.get('a')).toBeUndefined();
+    expect(memory.get('b')?.evaluation.contentHash).toBe('b');
+    expect(memory.size).toBe(1);
+  });
+});
+
 describe('placement-only edits (CM-3b)', () => {
   const shaft = fixtureVersion('shaft', 'v1', f03Revolve());
   // The plate's own features, with one shaft placed beside them.
@@ -620,12 +685,35 @@ describe('split evaluations (CM-4, P3)', () => {
     expect(await result).toMatchObject({ status: 'ok' });
   });
 
-  it('an export or analysis is never split', async () => {
-    const { worker, port, r } = await started();
-    void port.exportMeshes(request('x'), 0.1);
+  it('splits an export as well; only a newer export supersedes it (SC-2)', async () => {
+    const { worker, port, r, progress } = await started();
     worker.send(ok(r));
     await flush();
-    expect(sent(worker, 'evaluate').at(-1)).not.toHaveProperty('slice');
+    const step = port.exportStep(request('step'));
+    await flush();
+    expect(sent(worker, 'evaluate').at(-1)).toMatchObject({
+      requestId: 'step',
+      step: true,
+      slice: { ms: 5000 },
+    });
+    // An edit's evaluation waiting meanwhile does not end the export: it runs after it.
+    const edit = port.evaluate(request('edit'));
+    worker.send(continued(request('step'), 4));
+    expect(sent(worker, 'continue')).toEqual([{ type: 'continue', requestId: 'step' }]);
+    // The display's progress is not the export's.
+    expect(progress).toEqual([]);
+    worker.send({ ...ok(request('step')), step: new Uint8Array([1]) } as CadWorkerResponse);
+    expect(await step).toMatchObject({ step: new Uint8Array([1]) });
+    await flush();
+    expect(sent(worker, 'evaluate').at(-1)).toMatchObject({ requestId: 'edit' });
+    worker.send(ok(request('edit')));
+    expect(await edit).toMatchObject({ status: 'ok' });
+    // A newer export supersedes a paused one.
+    const first = port.exportMeshes(request('stl-1'), 0.1);
+    await flush();
+    void port.exportMeshes(request('stl-2'), 0.1);
+    worker.send(continued(request('stl-1'), 2));
+    expect(await first).toMatchObject({ evaluation: { status: 'error', code: 'superseded' } });
   });
 
   it('stops between jobs on a cancel, on newer waiting work and at the total limit', async () => {
@@ -662,13 +750,23 @@ describe('split evaluations (CM-4, P3)', () => {
     expect(sent(long.worker, 'cancel')).toEqual([{ type: 'cancel', requestId: 'split' }]);
   });
 
-  it("caps each job's limit at what is left of the total limit", async () => {
-    const { worker, r, result, timers, tick } = await started({ totalTimeoutMs: 60_000 });
-    tick(45_000);
+  it('gives a split job 120 s for one long feature, capped at what is left of the total (SU1)', async () => {
+    const { worker, r, result, timers, tick } = await started();
+    tick(250_000);
     worker.send(continued(r, 3));
-    // The first job had the job limit; the next one only the 15 s left of the total.
-    expect(timers.delays).toEqual([30_000, 15_000]);
+    // The first job had the split job limit; the next one only the 50 s left of the 5 min.
+    expect(timers.delays).toEqual([120_000, 50_000]);
     timers.fireAll();
     expect(await result).toMatchObject({ status: 'error', code: 'timeout' });
+  });
+
+  it('keeps 30 s for a job that is not split, such as a STEP read', async () => {
+    const { workers, spawn } = fakeWorkers();
+    const timers = manualTimers();
+    const port = new WorkerKernelPort({ spawn, build, timers });
+    void port.importStep('read', new Uint8Array([1]));
+    workers[0].send({ type: 'ready', buildHash: build.buildHash });
+    await flush();
+    expect(timers.delays).toEqual([30_000]);
   });
 });

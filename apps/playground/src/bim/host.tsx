@@ -8,7 +8,8 @@ import { WorkerKernelPort } from '@editor-platform/cad-kernel-occt';
 import CadKernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
-import { createBimPartSource, type BimPartKernel } from './parts';
+import { createCadAssetStore, portableCadRecord } from '../cad/resources';
+import { createBimPartSource, portableBimRecord, type BimPartKernel } from './parts';
 
 /**
  * Playground binding for the building Surface. An edit is one session command applied at once;
@@ -59,6 +60,12 @@ export default function BimHost({
         record: () => storage.current.record(),
         persist: (r) => storage.current.persistRecord(r),
         kernel: parts,
+      }),
+      // #662: materials' texture images, kept in the record beside the content.
+      textures: createCadAssetStore({
+        record: () => storage.current.record(),
+        persist: (r) => storage.current.persistRecord(r),
+        portable: (r) => portableBimRecord(portableCadRecord(r)),
       }),
       canEdit: () => !access.current,
       onApplied: (content) => {

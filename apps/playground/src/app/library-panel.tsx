@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import type { MangaCreationOptions } from './manga-workspace';
 import { X } from 'lucide-react';
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
@@ -78,6 +80,8 @@ export function LibraryPanel({
   graphTemplate,
   onGraphTemplateChange,
   onCreate,
+  onCreateManga,
+  onCreateNovel,
   onCreateFromTemplate,
   onOpenReusableLibrary,
   onOfficeImport,
@@ -100,12 +104,20 @@ export function LibraryPanel({
   graphTemplate: GraphTemplateId;
   onGraphTemplateChange(template: GraphTemplateId): void;
   onCreate(kind: Kind): void;
+  onCreateManga(options: MangaCreationOptions): Promise<void>;
+  onCreateNovel(): Promise<void>;
   onCreateFromTemplate(): void;
   onOpenReusableLibrary(): void;
   onOfficeImport(): void;
   onActivate(id: string): void;
   onImportFiles(files: File[]): void;
 }) {
+  const [mangaOptions, setMangaOptions] = useState<MangaCreationOptions>({
+    landscape: false,
+    direction: 'rtl',
+  });
+  const [creatingManga, setCreatingManga] = useState(false);
+  const [creatingNovel, setCreatingNovel] = useState(false);
   const openPrivate = privateVideo.openEditor;
   const privateDisabled = !loaded || busy;
   return (
@@ -164,6 +176,63 @@ export function LibraryPanel({
       <button className="primary new-artifact" onClick={() => onCreate(kind)} disabled={!loaded}>
         ＋ New artifact
       </button>
+      <details>
+        <summary>漫画を作成</summary>
+        <label>
+          用紙
+          <select
+            aria-label="漫画の用紙"
+            value={mangaOptions.landscape ? 'landscape' : 'portrait'}
+            onChange={(e) =>
+              setMangaOptions({ ...mangaOptions, landscape: e.target.value === 'landscape' })
+            }
+          >
+            <option value="portrait">縦 600 × 800</option>
+            <option value="landscape">横 800 × 600</option>
+          </select>
+        </label>
+        <label>
+          読み方向
+          <select
+            aria-label="漫画の読み方向"
+            value={mangaOptions.direction}
+            onChange={(e) =>
+              setMangaOptions({ ...mangaOptions, direction: e.target.value as 'rtl' | 'ltr' })
+            }
+          >
+            <option value="rtl">右から左</option>
+            <option value="ltr">左から右</option>
+          </select>
+        </label>
+        <button
+          disabled={!loaded || shared || readOnly || busy || creatingManga}
+          onClick={async () => {
+            setCreatingManga(true);
+            try {
+              await onCreateManga(mangaOptions);
+            } finally {
+              setCreatingManga(false);
+            }
+          }}
+        >
+          漫画を新規作成
+        </button>
+      </details>
+      <button
+        title="ルビ・傍点・縦書きを使ったサンプル原稿（3章）で小説ワークスペースを開きます"
+        disabled={!loaded || shared || readOnly || busy || creatingNovel}
+        onClick={async () => {
+          setCreatingNovel(true);
+          try {
+            await onCreateNovel();
+          } finally {
+            setCreatingNovel(false);
+          }
+        }}
+      >
+        小説デモを作成
+      </button>
+      <a href="/creative-production.html">人物・場所を参照して小説・漫画を制作</a>
       <button disabled={!loaded || shared} onClick={onCreateFromTemplate}>
         テンプレートから作成
       </button>
@@ -239,13 +308,19 @@ export function WelcomePanel({
   privateVideo,
   onFindTemplates,
   onCreate,
+  onCreateManga,
+  onCreateNovel,
 }: {
   loaded: boolean;
   busy: boolean;
   privateVideo: PrivateVideoLaunchers;
   onFindTemplates(): void;
   onCreate(kind: Kind): void;
+  onCreateManga(options: MangaCreationOptions): Promise<void>;
+  onCreateNovel(): Promise<void>;
 }) {
+  const [creatingManga, setCreatingManga] = useState(false);
+  const [creatingNovel, setCreatingNovel] = useState(false);
   const openPrivate = privateVideo.openEditor;
   return (
     <div className="welcome">
@@ -264,6 +339,32 @@ export function WelcomePanel({
         テンプレートを探す
       </button>
       <div className="welcome-tools">
+        <button
+          disabled={!loaded || busy || creatingManga}
+          onClick={async () => {
+            setCreatingManga(true);
+            try {
+              await onCreateManga({ landscape: false, direction: 'rtl' });
+            } finally {
+              setCreatingManga(false);
+            }
+          }}
+        >
+          漫画を作成
+        </button>
+        <button
+          disabled={!loaded || busy || creatingNovel}
+          onClick={async () => {
+            setCreatingNovel(true);
+            try {
+              await onCreateNovel();
+            } finally {
+              setCreatingNovel(false);
+            }
+          }}
+        >
+          小説デモを作成
+        </button>
         {privateVideo.showEditor && (
           <button
             aria-label="New Video project (private)"

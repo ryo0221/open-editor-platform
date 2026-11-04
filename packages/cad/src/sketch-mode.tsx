@@ -6,7 +6,7 @@ import {
   IconButton,
   isTextInput,
 } from '@editor-platform/editor-ui';
-import { Circle, MousePointer2, PenLine, Scan, Spline, Waves } from 'lucide-react';
+import { Circle, MousePointer2, PenLine, Scan, Spline, SplinePointer, Waves } from 'lucide-react';
 import {
   cadCurvature,
   cadLimits,
@@ -15,6 +15,7 @@ import {
   formatExpression,
   splineComb,
   splinePoints,
+  splineThrough,
   type CadCombSample,
   type CadDocument,
   type CadSketch,
@@ -25,13 +26,15 @@ import {
 import type { CadController, CadSketchView } from './controller';
 import { readCadInput } from './expression-input';
 import { constraintTargets, currentLength, type SketchConstraintInput } from './sketch-draft';
+import { Output } from './status-role';
 
 /**
  * Sketch mode (docs/cad/r1-modeling.md, Surface, CAD34): the drawing on its plane, seen from the
  * plane's +normal with u to the right and v up, and the panel that constrains and finishes it.
  * Desktop only; nothing here is an edit until Finish.
  */
-export type SketchTool = 'select' | 'line' | 'arc' | 'circle' | 'spline';
+/** `through`: a spline drawn through the clicked points instead of on them (SC-5). */
+export type SketchTool = 'select' | 'line' | 'arc' | 'circle' | 'spline' | 'through';
 type Pt = [number, number];
 /** Pointer tolerance for snapping and picking, in screen pixels. */
 const snapPx = 8;
@@ -201,13 +204,16 @@ export function SketchCanvas({
         if (pendingRef.current.length) setPending([]);
         else controller.cancelSketch();
       }
-      if (e.key === 'Enter' && toolRef.current === 'spline' && ownsKeyRef.current(e)) {
+      const splining = toolRef.current === 'spline' || toolRef.current === 'through';
+      if (e.key === 'Enter' && splining && ownsKeyRef.current(e)) {
         const poles = pendingRef.current;
         if (poles.length < 4) return;
         e.preventDefault();
         controller.sketchSpline(
           poles.map((q) => (q.id ? { id: q.id } : { at: q.at })),
           false,
+          3,
+          toolRef.current === 'through',
         );
         setPending([]);
       }
@@ -275,9 +281,13 @@ export function SketchCanvas({
     } else if (tool === 'arc' && next.length === 3) {
       controller.sketchArc(asInput(next[0]!), asInput(next[1]!), asInput(q), false);
       setPending([]);
-    } else if (tool === 'spline' && pending.length >= 4 && dist(q.at, pending[0]!.at) <= snap) {
-      // Back on the first control point: the spline closes.
-      controller.sketchSpline(pending.map(asInput), true);
+    } else if (
+      (tool === 'spline' || tool === 'through') &&
+      pending.length >= 4 &&
+      dist(q.at, pending[0]!.at) <= snap
+    ) {
+      // Back on the first point: the spline closes.
+      controller.sketchSpline(pending.map(asInput), true, 3, tool === 'through');
       setPending([]);
     } else setPending(next);
   }
@@ -333,12 +343,18 @@ export function SketchCanvas({
       {tool === 'line' && (
         <line x1={pending[0]!.at[0]} y1={-pending[0]!.at[1]} x2={cursor[0]} y2={-cursor[1]} />
       )}
-      {tool === 'spline' && (
+      {(tool === 'spline' || tool === 'through') && (
         <polyline
-          points={[...pending.map((q) => q.at), cursor].map(([x, y]) => `${x},${-y}`).join(' ')}
+          points={(tool === 'through' && pending.length >= 3
+            ? // The open curve through the points so far and the cursor, as Enter would add it.
+              splinePoints(splineThrough([...pending.map((q) => q.at), cursor], 3, false), 3, false)
+            : [...pending.map((q) => q.at), cursor]
+          )
+            .map(([x, y]) => `${x},${-y}`)
+            .join(' ')}
         />
       )}
-      {tool !== 'line' && tool !== 'spline' && (
+      {tool !== 'line' && tool !== 'spline' && tool !== 'through' && (
         <circle
           cx={pending[0]!.at[0]}
           cy={-pending[0]!.at[1]}
@@ -485,6 +501,12 @@ export function SketchTools({
       Waves,
       'Draw spline',
       'Click 4 or more control points; Enter ends it, a click on the first point closes it',
+    ],
+    [
+      'through',
+      SplinePointer,
+      'Draw spline through points',
+      'Click 4 or more points on the curve; Enter ends it, a click on the first point closes it',
     ],
   ];
   return (
@@ -687,9 +709,9 @@ export function SketchPanel({
   return (
     <section className="cad-sketch-panel" aria-label="Sketch" data-testid="cad-sketch-panel">
       <h2 ref={heading}>{view.isNew ? 'New sketch' : `Edit ${sketch.name}`}</h2>
-      <output className="cad-sketch-dof" data-testid="cad-sketch-dof">
+      <Output className="cad-sketch-dof" data-testid="cad-sketch-dof">
         {view.dof === 0 ? 'Fully constrained' : `${view.dof} degrees of freedom`}
-      </output>
+      </Output>
       {fieldError && (
         <p role="alert" className="cad-diagnostic" data-testid="cad-sketch-field-error">
           {fieldError}
@@ -721,7 +743,7 @@ export function SketchPanel({
                 value={comb}
                 onChange={(e) => onComb(Number(e.target.value))}
               />{' '}
-              <output>×{2 ** comb}</output>
+              <Output>×{2 ** comb}</Output>
             </label>
           )}
         </div>

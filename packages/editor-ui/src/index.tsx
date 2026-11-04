@@ -22,6 +22,7 @@ import {
 import './styles.css';
 import { useEditorInput } from './inputs';
 export * from './inputs';
+export * from './workspace';
 export { PanelLeft, PanelRight, Maximize2, X, MoreHorizontal, ChevronDown };
 export function IconButton({
   icon: Icon,
@@ -538,7 +539,8 @@ export function CommitInput({
   placeholder,
 }: {
   value: string | number;
-  onCommit: (value: string) => boolean | void;
+  /** Return the stored string when the native command normalizes the submitted value. */
+  onCommit: (value: string) => boolean | void | string;
   label: string;
   type?: string;
   min?: number;
@@ -564,8 +566,11 @@ export function CommitInput({
   const commit = () => {
     if (draft === lastCommitted.current) return;
     if (!valid()) throw new Error(`有効な${label}を入力してください。`);
-    if (onCommit(draft) === false) return false;
-    lastCommitted.current = draft;
+    const result = onCommit(draft);
+    if (result === false) return false;
+    const committed = typeof result === 'string' ? result : draft;
+    lastCommitted.current = committed;
+    if (committed !== draft) setDraft(committed);
     setInputError('');
   };
   useEditorInput({

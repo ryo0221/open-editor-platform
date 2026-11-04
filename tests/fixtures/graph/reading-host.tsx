@@ -124,7 +124,7 @@ function Host() {
     }
     return new EditorSession(content);
   });
-  const [selected, select] = useState<string>();
+  const [selected, select] = useState<string | undefined>(query.get('selected') ?? undefined);
   const [hostReadOnly, setReadOnly] = useState(true),
     [profileReadOnly, setProfileReadOnly] = useState(false);
   const [showInspector, setInspector] = useState(true),
@@ -141,7 +141,9 @@ function Host() {
         ? undefined
         : query.get('view') === 'custom'
           ? { x: 30, y: 45, zoom: 0.75 }
-          : 'fit',
+          : query.get('view') === 'selection'
+            ? 'selection'
+            : 'fit',
   );
   const currentProfile = {
     ...profile,

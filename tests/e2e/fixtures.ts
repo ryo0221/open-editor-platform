@@ -128,3 +128,20 @@ export async function replaceFileSource(
   await page.getByLabel('Open file', { exact: true }).setInputFiles(files);
   await page.getByRole('button', { name: 'Confirm source replacement', exact: true }).click();
 }
+
+export async function editorToolbarAction(page: Page, name: string, preserveInput = false) {
+  const button = page.getByRole('button', { name, exact: true });
+  const menu = page.getByRole('button', { name: 'More editor tools', exact: true });
+  // Controlled prop-change tests must retain the pointer/composition in progress.
+  const click = async (target: typeof button) => {
+    if (preserveInput) await target.evaluate((e) => (e as HTMLButtonElement).click());
+    else await target.click();
+  };
+  if (!(await button.isVisible())) await click(menu);
+  await click(button);
+  if (
+    !preserveInput &&
+    (await page.getByRole('dialog', { name: 'More editor tools', exact: true }).isVisible())
+  )
+    await click(menu);
+}

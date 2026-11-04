@@ -117,7 +117,7 @@ export async function checkDefaultLabelUpdates(page: Page) {
     .poll(() => first.evaluate((el) => parseFloat((el as HTMLElement).style.height)))
     .toBeGreaterThan(height);
   expect(await readingSnapshot(page)).toEqual(original);
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expectGraphFitted(page);
   await expectPorts(page);
   await page.getByLabel('Host read only', { exact: true }).uncheck();
@@ -125,10 +125,10 @@ export async function checkDefaultLabelUpdates(page: Page) {
   const name = page.getByLabel('name', { exact: true });
   const text = (await name.inputValue()).repeat(2);
   await name.fill(text);
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await expectVisibleLabels(page);
   await expectPorts(page);
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expectGraphFitted(page);
   await page.getByRole('button', { name: 'Host Undo', exact: true }).click();
   expect((await readingSnapshot(page)).source).toBe(original.source);

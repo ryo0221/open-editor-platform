@@ -2,13 +2,14 @@ import { clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core'
 import type { Bounds } from '@editor-platform/editor-core';
 import {
   designDrawingProjector,
-  designDrawings,
   type DesignContent,
   type DesignElement,
   type DesignDrawing,
 } from './model';
 
 interface RenderedElement {
+  panelElements?: DesignContent['elements'];
+  pagination: DesignContent['pagination'];
   components: DesignContent['components'];
   styles: DesignContent['styles'];
   parents: DesignElement[];
@@ -47,11 +48,14 @@ function ancestorChain(raw: DesignElement, index: Map<string, DesignElement>) {
 function reusable(
   previous: RenderedElement,
   content: DesignContent,
+  panelElements: DesignContent['elements'] | undefined,
   parents: DesignElement[],
   bounds: DesignElement['bounds'],
   rotation: DesignElement['rotation'],
 ) {
   return (
+    previous.panelElements === panelElements &&
+    previous.pagination === content.pagination &&
     previous.components === content.components &&
     previous.styles === content.styles &&
     previous.parents.length === parents.length &&
@@ -69,21 +73,26 @@ export function createDesignRenderCache() {
   return (content: DesignContent) => {
     const owned = isDeepFrozen(content);
     const index = new Map(content.elements.map((element) => [element.id, element]));
+    const panelElements = content.elements.some((e) => e.panelGeometry)
+      ? content.elements
+      : undefined;
     const project = designDrawingProjector(content);
     return (raw: DesignElement, bounds = raw.bounds, rotation = raw.rotation): DesignDrawing[] => {
       // Mutable and shallow-frozen Host trees must observe in-place edits,
       // including replaced definitions and parent records.
       if (!owned || !isDeepFrozen(raw))
-        return designDrawings(content, { ...raw, bounds, rotation });
+        return designDrawingProjector(content)({ ...raw, bounds, rotation });
       const parents = ancestorChain(raw, index);
       const previous = rendered.get(raw);
-      if (previous && reusable(previous, content, parents, bounds, rotation))
+      if (previous && reusable(previous, content, panelElements, parents, bounds, rotation))
         return previous.drawings;
       // The preview geometry belongs to CanvasStage. Own it before freezing the
       // private drawing; all other borrowed branches are certified immutable.
       const geometry = { ...bounds };
       const drawings = deepFreeze(project({ ...raw, bounds: geometry, rotation }));
       rendered.set(raw, {
+        panelElements,
+        pagination: content.pagination,
         components: content.components,
         styles: content.styles,
         parents,

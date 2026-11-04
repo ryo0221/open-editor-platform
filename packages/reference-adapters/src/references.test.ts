@@ -18,7 +18,11 @@ import {
 import { nativeReferenceAdapters } from './index';
 import { createData, setCell, type StructuredData } from '@editor-platform/structured-data/model';
 import { defaultView } from '@editor-platform/structured-data/views';
-import { createRelationGraph, relationProfile } from '@editor-platform/structured-graph/model';
+import {
+  createRelationGraph,
+  graphNodeIconPath,
+  relationProfile,
+} from '@editor-platform/structured-graph/model';
 import { createDeck, insertObject, isDeck, slideDiff } from '@editor-platform/slide/model';
 import { createDesign, makeDesignElement, isDesign } from '@editor-platform/design/model';
 import {
@@ -317,6 +321,10 @@ describe('committed artifact references', () => {
     h.host.read = async () => current;
     const ref = await h.resolver.create(graphSource, 'follow');
     expect(svg(h.resolver.project(ref.snapshot, graphSource.target).src)).toContain('supports');
+    // The Profile's category icons are drawn as corner badges from the built-in paths.
+    const first = svg(h.resolver.project(ref.snapshot, graphSource.target).src);
+    expect(first).toContain(`<path d="${graphNodeIconPath('cube')}"`);
+    expect(first).toContain(`<path d="${graphNodeIconPath('list')}"`);
     const next = clone(graph);
     next.nodes[0].attributes.name = '自動化';
     next.edges[0].attributes.label = '連動';
@@ -372,6 +380,37 @@ describe('committed artifact references', () => {
     );
     expect(subset).toContain('Platform');
     expect(subset).not.toContain('Unrelated');
+    // A connection that ends at a Section (#594) is drawn to its frame, and left out when the
+    // frame is not drawn.
+    const arrows = (text: string) => text.split('marker-end="url(#reference-arrow)"').length - 1;
+    const linked = clone(grouped);
+    linked.edges.push({
+      id: 'to-unrelated',
+      type: 'related',
+      from: 'resource-a',
+      to: 'other',
+      attributes: { label: 'Section link' },
+    });
+    const linkedProfile = clone(relationProfile);
+    Object.assign(linkedProfile.edges.related.connection!, { toSections: ['group'] });
+    const linkedSnapshot = {
+      ...current,
+      content: linked,
+      dependencies: [
+        {
+          ...dependency,
+          content: linkedProfile,
+          contentHash: await contentHash(linkedProfile),
+        },
+      ],
+    };
+    const toSection = svg(h.resolver.project(linkedSnapshot, graphSource.target).src);
+    expect(arrows(toSection)).toBe(arrows(framed) + 1);
+    expect(toSection).toContain('Section link');
+    const linkedSubset = svg(
+      h.resolver.project(linkedSnapshot, { ...graphSource.target, nodeIds: ['resource-a'] }).src,
+    );
+    expect(linkedSubset).not.toContain('Section link');
     expect(rendered.snapshot!.content).toEqual(next);
     expect(rendered.snapshot!.dependencies).toEqual([dependency]);
     await expect(

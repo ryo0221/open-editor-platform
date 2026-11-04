@@ -41,6 +41,45 @@ The Host owns persistence, artifact/version lifecycle, permissions, annotation s
 
 QA-18 is exercised in `tests/e2e/issue2-embedding.spec.ts`: no Playground CSS request, actual edits in visual and text editors, Host Undo/Redo, read-only content invariance, external panel controls, narrow-container overlays and screenshots for every surface.
 
+## Trusted content inside Whiteboard shapes (#660)
+
+`WhiteboardSurface.renderNodeContent` optionally renders trusted Host SVG inside a shape.
+It receives an owned immutable node (including gesture-preview bounds/rotation), local
+`size`, `mode`, `selected`, and the board's `readOnly`. Return `undefined` for the ordinary
+native drawing. The Surface applies the native translation, rotation, flip and local clip;
+the callback draws in `(0,0)..(width,height)`. Never interpret stored text as code or a
+component name. Referenced-owner permissions remain the Host's responsibility.
+
+`interactionMode="layout"` (default) keeps ordinary selection/transform/text commands;
+custom content has no pointer hit ownership. `"content"` delegates pointer/keyboard focus
+to the content and refuses native board mutations while preserving camera interaction
+(including Space/middle-button pan). It is view state, not a saved native field. The Host
+must guard pending native inputs before switching modes/board identity and enforce
+permissions and pending-operation guards in its command/history/save entrypoints.
+No callback keeps the ordinary drawing. A content-mode control may change a cursor even
+when the board itself is read-only; it must not treat that as source edit permission.
+
+`@editor-platform/fiction-map/render` exports `createFictionMapProjection` and
+`hitFictionMapProjection`. The immutable projection shares the SVG renderer's admitted
+native content, saved view, visible layers, feature subset, letterbox, y-axis and clip.
+Use `visiblePoint` for markers and the same projection for hit testing; `unproject` refuses
+the letterbox/outside clip. Recreate it when panel dimensions, saved exact or view change,
+and discard stale asynchronous results. These are coordinate helpers, not a new source
+or location inference engine.
+
+## Surface status beside a Host status (#563)
+
+`CadSurface` and `EstimateSurface` show their notices (preparing the shape, measure results,
+計算中…) as `role=status` named 「CAD の状態」 (the measure panel 「Distance」) and 「見積の状態」. A Host
+that shows its own `role=status` around the Surface passes `statusRole="none"`: the notices
+stay `aria-live="polite"` without the role, so the Host's status is the only one in its frame.
+Alerts keep `role=alert`.
+
+```tsx
+<p role="status">{saveNotice}</p>
+<CadSurface controller={binding.controller} statusRole="none" />
+```
+
 ## Pending inputs and keyboard history (#44 / #47)
 
 Import `EditorInputs` from `@editor-platform/editor-core` and
@@ -182,17 +221,38 @@ camera controls remain usable. The trusted Host must also reject content edits.
 
 Graph reading Hosts can configure these public props (also accepted by `NativeGraphSurface`):
 
-| Prop                | Default                                  | Behavior                                                                                                                                                                                                             |
-| ------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `showInspector`     | `true`                                   | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.                                                                                                          |
-| `initialView`       | `'origin'`                               | `'fit'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable.                                                                                                                           |
-| `fitOnFilterChange` | `false`                                  | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera.                                                                                                       |
-| `nodeSize`          | 200px width, automatic height (min 70px) | Optional fixed `{width,height}` or `(node) => ({width,height})`, 40–4000 logical px per axis. Supplied invalid sizes retain the fixed 200×70 fallback.                                                               |
-| `visibleEdgeTypes`  | all                                      | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                                                                                                                              |
-| `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                                                                                    |
-| `shapeEditing`      | `true`                                   | Offer the toolbar `New node shape` and the Inspector `Appearance` choices. Pass `false` when the source has nowhere to save node shapes and styles.                                                                  |
-| `shapeOnCreate`     | `true`                                   | Offer a shape for new nodes, applied in the same edit as the node. Pass `false` for a presentation sidecar, which refuses mixed presentation and semantic batches.                                                   |
-| `sectionEditing`    | `true`                                   | Offer `Section type`/`Add section`, Section frames with move, resize and collapse, and the Inspector `Node section`/`Section settings`. Pass `false` for sources that cannot save Sections (Data, sidecar adapters). |
+| Prop                | Default                                  | Behavior                                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `showInspector`     | `true`                                   | Hide the built-in Inspector while retaining input buffers; connect a Host panel with `select`/`selectedId`.                                                                                                                                                                                                              |
+| `initialView`       | `'origin'`                               | `'fit'`, `'selection'`, `'origin'` or `{x,y,zoom}`; applied once per graph when the canvas is measurable. `'fit'` shows the whole drawing at 100% or less, a selected node only emphasized; `'selection'` opens on the selected node or Section and its neighbors (#589). ctrl/⌘ + wheel or a pinch zooms at the cursor. |
+| `fitOnFilterChange` | `false`                                  | Refit when the `visibleNodeIds` set changes; equivalent arrays and ordinary content edits preserve the camera.                                                                                                                                                                                                           |
+| `nodeSize`          | 200px width, automatic height (min 70px) | Optional fixed `{width,height}` or `(node) => ({width,height})`, 40–4000 logical px per axis. Supplied invalid sizes retain the fixed 200×70 fallback.                                                                                                                                                                   |
+| `visibleEdgeTypes`  | all                                      | Render only these relation types, composed with `visibleNodeIds`. `[]` hides all edges.                                                                                                                                                                                                                                  |
+| `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                                                                                                                                                                                        |
+| `shapeEditing`      | `true`                                   | Offer the toolbar `New node shape` and the Inspector `Appearance` choices. Pass `false` when the source has nowhere to save node shapes and styles.                                                                                                                                                                      |
+| `shapeOnCreate`     | `true`                                   | Offer a shape for new nodes, applied in the same edit as the node. Pass `false` for a presentation sidecar, which refuses mixed presentation and semantic batches.                                                                                                                                                       |
+| `sectionEditing`    | `true`                                   | Offer `Section type`/`Add section`, Section frames with move, resize and collapse, and the Inspector `Node section`/`Section settings`. Pass `false` for sources that cannot save Sections (Data, sidecar adapters).                                                                                                     |
+
+| Prop      | Default | Behavior                                                                                                                                                                                                                                                |
+| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `locale`  | `'ja'`  | Wording of diagnostics, toolbar, Inspector, palette and dialogs (`ja` or `en`). Accessible names set by `aria-label` stay English.                                                                                                                      |
+| `labels`  | none    | `Partial<GraphSurfaceLabels>` replacing the locale's wording; `graphSurfaceLabels.ja`/`.en` are the dictionaries.                                                                                                                                       |
+| `toolbar` | all     | `false` hides the toolbar and view controls. Otherwise set `source`, `palette`, `addNode`, `addSection`, `arrange`, `properties`, `delete` or `zoom` to `false` to hide that item; editing stays available on the canvas, in the Inspector and by keys. |
+
+Hosts theme the Surface with CSS variables on `.ep-graph` or an ancestor; defaults are the light
+colours: `--ep-graph-surface`, `--ep-graph-text`, `--ep-graph-panel`, `--ep-graph-control`,
+`--ep-graph-border`, `--ep-graph-input-border`, `--ep-graph-muted-text`, `--ep-graph-canvas`,
+`--ep-graph-grid`, `--ep-graph-focus`, `--ep-graph-danger`, `--ep-graph-status`,
+`--ep-graph-status-border`, `--ep-graph-node-text`, `--ep-graph-node-default-fill`,
+`--ep-graph-node-default-stroke`, `--ep-graph-section-default-fill` and
+`--ep-graph-section-default-stroke`, `--ep-graph-node-icon-background` and
+`--ep-graph-node-icon-color`. Fills and strokes saved in content or declared by the Profile
+still win over the node and Section defaults.
+
+To tell node kinds apart at a glance, a Profile node type can declare a default `ui.shape` and
+`ui.style`, and a corner icon: `ui.icon` for the type, or `ui.iconBy` (a field of the type) with
+`ui.icons` (field value → icon) to vary it per node, such as a deliverable's form. Icons are
+built-in names (`graphNodeIcons`); see the [contract](structured-graph-contract.md#ノードのアイコン-workflow-definitions-8-preview).
 
 The toolbar also offers `Arrange diagram` (headless: `arrangeGraph`, one Undo of `move-node`/`resize-section`)
 unless the Surface is read-only, and a `Palette` of node types when the Profile names a use with
@@ -540,3 +600,41 @@ Pure APIs are exported from `@editor-platform/design/prototype`: `setDesignInter
 `designPrototypeTargets`. Editing commands go through the Host's existing Session and
 permission boundary. Native fields and compatibility are defined in the
 [prototype contract](design-prototype-contract.md).
+
+### Synchronous input commit guards
+
+`EditorInputs.flush()` rejects a non-function prepare result during preflight, before any
+commit, and rejects nested flush/history calls on the **same registry** until its final
+notification returns. Coordination across owners with separate registries belongs to the
+Host. A reentry error has no individual boundary label or focus target: show its general
+message rather than moving focus to an arbitrary input. `changed()` notifies all current
+subscribers even if one throws, then reports the exception (an `AggregateError` for multiple
+failures). Such failure does not roll back the updated input snapshot. A notification
+exception propagates as a failed `flush()` even when native edits and input consumption
+have already succeeded. The Host may therefore stop navigation or saving before persistence;
+it must retain the committed edits and retry the boundary without replaying consumed input.
+This differs from native `ArtifactEditor` observer errors reported through `onObserverError`.
+This is not a sandbox for callbacks: `prepare()` must not execute commands, reserve IDs,
+start asynchronous validation or write storage. Validate references explicitly outside
+flush, then synchronously check the prepared input's generation, current permission and
+operation-specific read-set before executing its native command. Use local revision as
+well when the operation depends on an entire owner snapshot.
+
+Both explicit confirmation and registry flush must consume successful input synchronously.
+When native notifications run inside command execution, an in-flight guard must reject
+reentry until execution returns and the input is consumed; then run form finalization.
+Notification failure does not undo a native commit. Cancel invalidates pending validation;
+its eventual result must not apply.
+When multiple inputs of one owner must commit atomically, prepare one native `transaction`
+for that owner. The registry itself still preserves earlier accepted commits on a later
+commit refusal; it does not roll them back.
+
+### 物語タイムラインの参照Host
+
+`@editor-platform/reference-artifact-host/creative/workspace`の`TimelineWorkbench`はowner別ArtifactEditorを保持し、`TimelineAnalysisHost`は保存版・実draft候補・確認済み差替表を読取専用で評価します。nativeの編集確定と診断は別入口です。権限/source失効の通知、結果の`current()`、未対応能力の拒否、二段階保存と復旧の接続はTimelineのHost契約を参照してください。最終差分の受入は検証記録に限定します。
+
+### 物語ボードの参照Host
+
+`@editor-platform/reference-artifact-host/creative/workspace`の`mountStoryBoard({ artifacts, settingsId, namespace, linksKey, mayRead, mayEdit })`は、既存の表示設定Dataを明示IDで開きます。root要素とローカルStory linksが必要です。返る`permissionsChanged()`/`sourcesChanged()`をtrusted Hostから呼び、古い非同期open/投影を失効させてください。`StoryBoardHost`へ`StoryBoardController`を注入して自分の入口へ組み込むこともできます。Editorごとのnativeモデル/Sessionを使い、新しいEditor kindや共通Contentは持ちません。
+
+設定schema・採用版/固定版の読取・保存/失敗/取消/権限と画面契約・操作・最終検証。通常Whiteboard exportへの連動panel画像出力、shared、日内精度、経路推定は対象外です。

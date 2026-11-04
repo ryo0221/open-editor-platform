@@ -314,7 +314,7 @@ export function captureDesignAnimation(
           layer = {
             ...common,
             type: 'path',
-            path: path2(shapePath(d.shape!, d.bounds.width, d.bounds.height)),
+            path: path2(shapePath(d.shape!, d.bounds.width, d.bounds.height, d.lineDirection)),
             fill: color(d.fill),
             stroke: color(d.stroke ?? '#5b6472'),
             strokeWidth: d.strokeWidth ?? 1,

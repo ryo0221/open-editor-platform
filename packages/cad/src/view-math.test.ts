@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { CadCamera, CadNamedView } from '@editor-platform/cad-core';
-import { defaultGrid, gridFor, initialView, niceStep, orbitRotateSpeed, viewOf } from './view-math';
+import {
+  compareSizes,
+  defaultGrid,
+  gridFor,
+  initialView,
+  niceStep,
+  orbitRotateSpeed,
+  standardViews,
+  viewOf,
+} from './view-math';
 
 describe('viewport math', () => {
   it('picks 1, 2 or 5 × 10ⁿ steps', () => {
@@ -62,7 +71,7 @@ describe('viewport math', () => {
     expect(viewOf(top, { type: 'perspective', fovRad: 0.8 }).camera).toEqual(top);
   });
 
-  it('opens with the first named view whose bodies are all shown (ST-27#9)', () => {
+  it('opens with the first named view that shows every body (ST-27#9)', () => {
     const view = (id: string, bodyIds: string[]): CadNamedView => ({
       id,
       name: id,
@@ -73,5 +82,48 @@ describe('viewport math', () => {
     const views = [view('gone', ['old']), view('side', ['body']), view('top', ['body'])];
     expect(initialView(views, new Set(['body']))?.id).toBe('side');
     expect(initialView([], new Set(['body']))).toBeUndefined();
+    // An interior view first does not hide the shell on opening: the whole model opens.
+    const car = [view('interior', ['seat']), view('exterior', ['shell', 'seat'])];
+    expect(initialView(car, new Set(['shell', 'seat']))?.id).toBe('exterior');
+    expect(initialView(car.slice(0, 1), new Set(['shell', 'seat']))).toBeUndefined();
+  });
+
+  it('standard views look along the axes with a valid up, planar ones orthographic (#538)', () => {
+    for (const v of Object.values(standardViews)) {
+      expect(Math.hypot(...v.from)).toBeCloseTo(1, 12);
+      // The view direction is never parallel to up (validateCad would refuse it saved).
+      const [f, u] = [v.from, v.up];
+      const cross = [
+        f[1] * u[2] - f[2] * u[1],
+        f[2] * u[0] - f[0] * u[2],
+        f[0] * u[1] - f[1] * u[0],
+      ];
+      expect(Math.hypot(...cross)).toBeGreaterThan(0.5);
+    }
+    expect(standardViews.plan).toMatchObject({
+      from: [0, 0, 1],
+      up: [0, 1, 0],
+      orthographic: true,
+    });
+    expect(standardViews.front.from).toEqual([0, -1, 0]);
+    expect(standardViews['three-quarter'].orthographic).toBe(false);
+  });
+
+  it('compares two bodies by size along each axis (#538)', () => {
+    // A 1,200 mm route against 1,600 mm equipment, then the route widened to 2,000 mm.
+    const equipment: [CadCamera['position'], CadCamera['position']] = [
+      [200, 0, 0],
+      [1800, 2000, 1800],
+    ];
+    const route = (width: number): typeof equipment => [
+      [0, -5000, 0],
+      [width, 15000, 2500],
+    ];
+    expect(compareSizes(route(1200), equipment)).toEqual([
+      { axis: 'X', a: 1200, b: 1600, difference: -400 },
+      { axis: 'Y', a: 20000, b: 2000, difference: 18000 },
+      { axis: 'Z', a: 2500, b: 1800, difference: 700 },
+    ]);
+    expect(compareSizes(route(2000), equipment)[0]!.difference).toBe(400);
   });
 });

@@ -15,6 +15,7 @@ import {
   parameterValues,
   resolveLength,
   resolvePosition,
+  splinePoints,
   validateCad,
   type CadDocument,
 } from './index';
@@ -134,6 +135,8 @@ describe('O1 builder (CM-8)', () => {
     ]);
     expect(operations.reduce(applyCadOperation, emptyCad(fixtureKernel))).toEqual(document);
     expect(document.features.find((f) => f.id === 'hole-cut')?.name).toBe('Hole cut');
+    // #589: a cut is still the plate: its body keeps the name.
+    expect(document.bodies.find((x) => x.id === plate)?.name).toBe('Plate');
     expect(document.bodies.find((x) => x.id === 'hole')).toMatchObject({
       state: 'consumed',
       consumedByFeatureId: 'hole-cut',
@@ -158,6 +161,35 @@ describe('O1 builder (CM-8)', () => {
       b.box('constructor', { size: [1, 1, 1] }),
     ]).toEqual(['prototype-2', 'constructor-2']);
     expect(b.document.bodies.find((x) => x.id === 'prototype-2')?.name).toBe('Prototype');
+  });
+
+  it('a named union names the part it makes; an unnamed one keeps the first name (#589)', () => {
+    const b = cadBuilder(fixtureKernel);
+    const deck = (i: number) =>
+      b.box(`Deck ${i}`, { origin: [i * 1000, 0, 0], size: [1000, 500, 100] });
+    const [a, c] = [deck(0), deck(1)];
+    b.boolean(a!, [c!], 'union', 'Deck (2)');
+    expect(active(b.document).map((x) => [x.id, x.name])).toEqual([['deck-0', 'Deck (2)']]);
+    const [d, e] = [deck(2), deck(3)];
+    b.boolean(d!, [e!], 'union');
+    expect(active(b.document).find((x) => x.id === d)?.name).toBe('Deck 2');
+  });
+
+  it('names a union of many members for the set, keeping IDs and shape (#538)', () => {
+    const b = cadBuilder(fixtureKernel);
+    const columns = [0, 1, 2].map((i) =>
+      b.box(`Column grid 1 ${i + 1}`, { origin: [i * 6000, 0, 0], size: [1000, 1000, 4500] }),
+    );
+    b.boolean(columns[0]!, columns.slice(1), 'union', 'Join columns');
+    const before = b.document;
+    b.rename(columns[0]!, 'Columns (3)');
+    const { document: doc } = b.build();
+    expect(errors(doc)).toEqual([]);
+    expect(active(doc).map((x) => [x.id, x.name])).toEqual([['column-grid-1-1', 'Columns (3)']]);
+    // Only the name changed: features, IDs and the consumed members are as before.
+    expect(doc.features).toEqual(before.features);
+    expect(doc.bodies.map((x) => x.id)).toEqual(before.bodies.map((x) => x.id));
+    expect(() => b.rename('missing', 'X')).toThrow(CadBuildError);
   });
 
   it('a refused step names its number, what it built and the code, and changes nothing (ST-91 #4)', () => {
@@ -243,6 +275,25 @@ describe('O1 builder (CM-8)', () => {
     if (a?.type !== 'box') throw new Error('a');
     expect(a.args.orientation).toEqual([0, 0, 0, 1]);
     expect(a.args.size[0]).toEqual({ literalMm: 10 });
+  });
+
+  it('a closed spline through points passes through them (ST-45#5)', () => {
+    const b = cadBuilder(fixtureKernel);
+    const points: [number, number][] = [
+      [0, 0],
+      [600, 0],
+      [600, 300],
+      [0, 300],
+    ];
+    const { sketchId } = b.closedSpline('Dash', {}, points, { through: true });
+    const sketch = b.document.sketches.find((s) => s.id === sketchId)!;
+    const poles = ['p0', 'p1', 'p2', 'p3'].map((id) => sketch.solved[id]!);
+    const curve = splinePoints(poles, 3, true, 6);
+    for (const q of points)
+      expect(Math.min(...curve.map((x) => Math.hypot(x[0] - q[0], x[1] - q[1])))).toBeLessThan(
+        1e-6,
+      );
+    expect(errors(b.document)).toEqual([]);
   });
 
   it('solves a sketch by its constraints, so a pattern path follows a parameter (ST-104 #1)', () => {

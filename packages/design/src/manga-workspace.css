@@ -1,0 +1,129 @@
+.manga-workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.manga-workspace > .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.manga-workspace-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-bottom: 1px solid #d5dce5;
+  flex-wrap: wrap;
+}
+.manga-panel {
+  padding: 8px;
+  font-size: 13px;
+}
+.manga-panel h2 {
+  margin: 4px 0 8px;
+}
+.manga-panel p {
+  line-height: 1.6;
+}
+.manga-panel nav,
+.manga-view-controls {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.manga-panel fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #aab6c6;
+  border-radius: 6px;
+  min-width: 0;
+}
+.manga-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.manga-panel input,
+.manga-panel select {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.manga-preview {
+  padding: 8px;
+  border: 2px solid #246e99;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+.manga-panel button {
+  white-space: normal;
+}
+
+.manga-review {
+  padding: 8px;
+  font-size: 13px;
+  border-bottom: 1px solid #c9d2df;
+}
+.manga-review textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 90px;
+}
+.manga-review label {
+  display: block;
+  margin: 6px 0;
+}
+.ep-page-pair {
+  display: flex;
+  gap: 6px;
+}
+.ep-page-pair figure {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.ep-page-pair svg {
+  width: 100%;
+  border: 1px solid #bac8d2;
+  background: white;
+}
+.ep-page-pair ol {
+  font-size: 11px;
+  padding-left: 20px;
+}
+
+.manga-reading {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 20px;
+  background: #edf0f4;
+  z-index: 4;
+}
+.manga-reading header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  background: #edf0f4;
+  padding: 6px 0;
+  z-index: 1;
+}
+.manga-reading .ep-page-comparison {
+  max-width: 1000px;
+  margin: 0 auto 24px;
+}
+.manga-blank-page {
+  flex: 1;
+  min-width: 0;
+}
+
+.ep-toolbar .manga-workspace-switch,
+.ep-overflow-body .manga-workspace-switch {
+  padding: 0;
+  border-bottom: 0;
+}

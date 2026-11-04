@@ -1,4 +1,10 @@
-import { Schema, Node as PMNode, type NodeSpec, type MarkSpec } from 'prosemirror-model';
+import {
+  Schema,
+  Node as PMNode,
+  type NodeSpec,
+  type MarkSpec,
+  type MarkType,
+} from 'prosemirror-model';
 import { createEngineJsonWriter } from './engine-json';
 import { Step, Mapping, Transform } from 'prosemirror-transform';
 import { immutableCommand, type LocalCommandContext } from '@editor-platform/editor-core';
@@ -41,6 +47,7 @@ import {
 } from '@editor-platform/artifact-core';
 import {
   safeLink,
+  validRuby,
   documentStyleCss,
   isDocument,
   nestedLists,
@@ -176,6 +183,35 @@ export function normalizedColor(value: string): string | undefined {
   return '#' + channels.map((n) => n.toString(16).padStart(2, '0')).join('');
 }
 const marks: Record<string, MarkSpec> = {
+  ruby: {
+    attrs: { text: {}, base: {}, id: { default: null } },
+    inclusive: false,
+    // First in the schema so it wraps other marks: one reading per run, over mixed formatting.
+    // The reading is drawn by CSS from the attribute, so the base text stays ordinary editable text.
+    toDOM: (m) => [
+      'span',
+      { class: 'ep-ruby', 'data-ruby': m.attrs.text, 'data-ruby-base': m.attrs.base },
+      0,
+    ],
+    parseDOM: [
+      {
+        tag: 'span.ep-ruby[data-ruby]',
+        getAttrs: (dom) => {
+          // A pasted ruby keeps the base it was set on, so a partial copy is still reported,
+          // and gets its own identity so it never merges with the copied original.
+          const ruby = {
+            text: (dom as HTMLElement).getAttribute('data-ruby') ?? '',
+            base:
+              (dom as HTMLElement).getAttribute('data-ruby-base') ??
+              (dom as HTMLElement).textContent ??
+              '',
+            id: newId('ruby'),
+          };
+          return validRuby(ruby) ? ruby : false;
+        },
+      },
+    ],
+  },
   bold: {
     excludes: 'bold normal_weight',
     toDOM: () => ['strong', 0],
@@ -189,6 +225,16 @@ const marks: Record<string, MarkSpec> = {
   italic: { toDOM: () => ['em', 0], parseDOM: [{ tag: 'em' }, { tag: 'i' }] },
   underline: { toDOM: () => ['u', 0], parseDOM: [{ tag: 'u' }] },
   strike: { toDOM: () => ['s', 0], parseDOM: [{ tag: 's' }, { tag: 'del' }] },
+  emphasisDots: {
+    toDOM: () => ['span', { class: 'ep-emphasis' }, 0],
+    parseDOM: [
+      { tag: 'span.ep-emphasis' },
+      {
+        style: 'text-emphasis-style',
+        getAttrs: (value) => (String(value).trim() && value !== 'none' ? null : false),
+      },
+    ],
+  },
   code: { code: true, toDOM: () => ['code', 0], parseDOM: [{ tag: 'code' }] },
   link: {
     attrs: { href: {} },
@@ -252,9 +298,11 @@ export function inlineNodes(rich: InlineSpan[], schema = documentSchema): PMNode
                 mark.create(
                   key === 'link'
                     ? { href: value }
-                    : key === 'color' || key === 'highlight'
-                      ? { value }
-                      : undefined,
+                    : key === 'ruby'
+                      ? { text: value.text, base: value.base, id: value.id ?? null }
+                      : key === 'color' || key === 'highlight'
+                        ? { value }
+                        : undefined,
                 ),
               ]
             : [];
@@ -280,10 +328,18 @@ export function spansFromNode(node: PMNode): InlineSpan[] {
     const span: InlineSpan = { text: child.text ?? '' };
     for (const mark of child.marks) {
       if (mark.type.name === 'link') span.link = mark.attrs.href;
+      else if (mark.type.name === 'ruby')
+        span.ruby = {
+          text: mark.attrs.text,
+          base: mark.attrs.base,
+          ...(mark.attrs.id ? { id: mark.attrs.id } : {}),
+        };
       else if (mark.type.name === 'normal_weight') span.bold = false;
       else if (mark.type.name === 'color' || mark.type.name === 'highlight')
         span[mark.type.name] = mark.attrs.value;
-      else if (['bold', 'italic', 'underline', 'strike', 'code'].includes(mark.type.name))
+      else if (
+        ['bold', 'italic', 'underline', 'strike', 'code', 'emphasisDots'].includes(mark.type.name)
+      )
         span[mark.type.name as 'bold'] = true;
     }
     spans.push(span);
@@ -692,27 +748,43 @@ export const nextTableCell: import('prosemirror-state').Command = (state, dispat
 };
 /** Selected, pending or contiguous link under a caret, across formatting runs. */
 export function activeDocumentLink(state: EditorState) {
+  const active = activeMarkRange(state, documentSchema.marks.link);
+  return active && { from: active.from, to: active.to, href: active.mark.attrs.href as string };
+}
+/** Selected, pending or contiguous ruby under a caret. */
+export function activeDocumentRuby(state: EditorState) {
+  const active = activeMarkRange(state, documentSchema.marks.ruby);
+  return (
+    active && {
+      from: active.from,
+      to: active.to,
+      ruby: {
+        text: active.mark.attrs.text as string,
+        base: active.mark.attrs.base as string,
+        ...(active.mark.attrs.id ? { id: active.mark.attrs.id as string } : {}),
+      },
+    }
+  );
+}
+function activeMarkRange(state: EditorState, type: MarkType) {
   const { $from, empty, from, to } = state.selection;
-  const link = documentSchema.marks.link;
   // Non-inclusive marks disappear from $from.marks() at either edge. Prefer
-  // the right link at a boundary between different URLs, then the left link.
+  // the right mark at a boundary between different attributes, then the left one.
   const mark =
-    link.isInSet(
+    type.isInSet(
       state.storedMarks ?? (!empty ? $from.nodeAfter?.marks : undefined) ?? $from.marks(),
     ) ??
     (empty
-      ? (link.isInSet($from.nodeAfter?.marks ?? []) ?? link.isInSet($from.nodeBefore?.marks ?? []))
+      ? (type.isInSet($from.nodeAfter?.marks ?? []) ?? type.isInSet($from.nodeBefore?.marks ?? []))
       : undefined);
   if (!mark) return;
-  if (!empty) return { from, to, href: mark.attrs.href as string };
+  if (!empty) return { from, to, mark };
   const parent = $from.parent;
   let child = parent.childAfter($from.parentOffset);
   if (!child.node || !mark.isInSet(child.node.marks))
     child = parent.childBefore($from.parentOffset);
   if (!child.node || !mark.isInSet(child.node.marks))
-    return mark.isInSet(state.storedMarks ?? [])
-      ? { from, to, href: mark.attrs.href as string }
-      : undefined;
+    return mark.isInSet(state.storedMarks ?? []) ? { from, to, mark } : undefined;
   let start = $from.start() + child.offset,
     end = start + child.node.nodeSize,
     left = child.index,
@@ -721,7 +793,7 @@ export function activeDocumentLink(state: EditorState) {
     start -= parent.child(--left).nodeSize;
   while (right < parent.childCount && mark.isInSet(parent.child(right).marks))
     end += parent.child(right++).nodeSize;
-  return { from: start, to: end, href: mark.attrs.href as string };
+  return { from: start, to: end, mark };
 }
 /** Apply replaces link attributes; removing a link is an explicit separate action. */
 export function setDocumentLink(href: string | null): import('prosemirror-state').Command {
@@ -736,6 +808,30 @@ export function setDocumentLink(href: string | null): import('prosemirror-state'
     } else if (href !== null) tr.addStoredMark(type.create({ href }));
     if (range && state.selection.empty && href !== null) tr.addStoredMark(type.create({ href }));
     if (href === null) tr.removeStoredMark(type);
+    dispatch?.(tr);
+    return true;
+  };
+}
+/** Sets the reading on the selection (or the ruby under the caret) and records its base text.
+ * A ruby stays inside one text block and never spans a line break. `null` removes it. */
+export function setDocumentRuby(reading: string | null): import('prosemirror-state').Command {
+  return (state, dispatch) => {
+    const type = documentSchema.marks.ruby;
+    const range = state.selection.empty ? activeDocumentRuby(state) : state.selection;
+    if (!range) return false;
+    const { from, to } = range;
+    const $from = state.doc.resolve(from);
+    if (!$from.sameParent(state.doc.resolve(to)) || !$from.parent.inlineContent) return false;
+    const tr = state.tr.removeMark(from, to, type);
+    if (reading !== null) {
+      const ruby = {
+        text: reading.trim(),
+        base: state.doc.textBetween(from, to, '\n', '\n'),
+        id: newId('ruby'),
+      };
+      if (!validRuby(ruby)) return false;
+      tr.addMark(from, to, type.create(ruby));
+    }
     dispatch?.(tr);
     return true;
   };

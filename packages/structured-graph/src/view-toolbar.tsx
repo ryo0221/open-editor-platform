@@ -10,6 +10,7 @@ import {
 } from './model';
 import { GraphShapeSelect } from './view-appearance';
 import { GraphNodePalette } from './view-palette';
+import { useGraphLabels } from './labels';
 import { type GraphProfile } from './profile';
 import {
   errorMessage,
@@ -46,6 +47,7 @@ function GraphSourceMenu({
   setDefinitionTarget,
   setError,
 }: GraphSourceMenuProps) {
+  const t = useGraphLabels();
   const openSource = () => {
     if (sourceActions?.onOpenSource) sourceActions.onOpenSource(id);
     else {
@@ -76,17 +78,40 @@ function GraphSourceMenu({
   return (
     <Menu label="Graph source and definitions">
       <p>
-        所有元: {sourceActions?.owner ?? `Host Profile ${profile.id}`} ·{' '}
+        {t.sourceOwner}: {sourceActions?.owner ?? `Host Profile ${profile.id}`} ·{' '}
         {node?.type ?? edge?.type ?? section?.type ?? profile.id}
       </p>
-      <button onClick={openSource}>元データを開く</button>
-      <button onClick={openDefinition}>データ定義</button>
+      <button onClick={openSource}>{t.openSource}</button>
+      <button onClick={openDefinition}>{t.openDefinition}</button>
     </Menu>
   );
 }
 
+/**
+ * Toolbar items a Host may hide without making the Surface read-only. `false` hides the whole
+ * toolbar and the view controls; an omitted item is shown.
+ */
+export type GraphToolbarOptions =
+  | false
+  | {
+      /** Owner line, source and data-definition menu. */
+      source?: boolean;
+      /** Node palette (shown only when the Profile groups its node types). */
+      palette?: boolean;
+      /** Node type, new node shape and Add node. */
+      addNode?: boolean;
+      /** Section type and Add section. */
+      addSection?: boolean;
+      arrange?: boolean;
+      properties?: boolean;
+      delete?: boolean;
+      /** Zoom, pan, Reset view and Fit graph. */
+      zoom?: boolean;
+    };
+
 export interface GraphToolbarProps extends GraphSourceMenuProps {
   readOnly: boolean;
+  options?: Exclude<GraphToolbarOptions, false>;
   selectionReadOnly: boolean;
   nodeType: string;
   setNodeType: (type: string) => void;
@@ -111,54 +136,60 @@ export interface GraphToolbarProps extends GraphSourceMenuProps {
 
 export function GraphToolbar(props: GraphToolbarProps) {
   const { readOnly, profile, node, edge, nodeType, setNodeType, zoom, setZoom, setPan } = props;
+  const t = useGraphLabels(),
+    show = { ...props.options };
   return (
     <div className="ep-graph-toolbar" role="toolbar" aria-label="Graph tools">
       {!readOnly && (
         <>
-          <GraphSourceMenu {...props} />
-          {props.onPaletteAdd && (
+          {show.source !== false && <GraphSourceMenu {...props} />}
+          {show.palette !== false && props.onPaletteAdd && (
             <GraphNodePalette
               profile={profile}
               into={props.paletteInto}
               onAdd={props.onPaletteAdd}
             />
           )}
-          <label>
-            Node type
-            <select
-              aria-label="Node type"
-              value={nodeType}
-              onChange={(e) => setNodeType(e.target.value)}
-              disabled={readOnly}
-            >
-              {Object.entries(profile.nodes).map(([key, t]) => (
-                <option key={key} value={key}>
-                  {t.ui?.label ?? key}
-                </option>
-              ))}
-            </select>
-          </label>
-          {props.setNodeShape && (
-            <label>
-              Shape
-              <GraphShapeSelect
-                label="New node shape"
-                value={props.nodeShape ?? ''}
-                typeDefault={profile.nodes[nodeType]?.ui?.shape ?? 'rectangle'}
-                onChange={props.setNodeShape}
-              />
-            </label>
-          )}
-          <button
-            disabled={readOnly || !nodeType || !!profile.nodes[nodeType]?.readOnly}
-            onClick={props.onAddNode}
-          >
-            Add node
-          </button>
-          {props.onAddSection && props.setSectionType && (
+          {show.addNode !== false && (
             <>
               <label>
-                Section type
+                {t.nodeType}
+                <select
+                  aria-label="Node type"
+                  value={nodeType}
+                  onChange={(e) => setNodeType(e.target.value)}
+                  disabled={readOnly}
+                >
+                  {Object.entries(profile.nodes).map(([key, t]) => (
+                    <option key={key} value={key}>
+                      {t.ui?.label ?? key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {props.setNodeShape && (
+                <label>
+                  {t.shape}
+                  <GraphShapeSelect
+                    label="New node shape"
+                    value={props.nodeShape ?? ''}
+                    typeDefault={profile.nodes[nodeType]?.ui?.shape ?? 'rectangle'}
+                    onChange={props.setNodeShape}
+                  />
+                </label>
+              )}
+              <button
+                disabled={readOnly || !nodeType || !!profile.nodes[nodeType]?.readOnly}
+                onClick={props.onAddNode}
+              >
+                {t.addNode}
+              </button>
+            </>
+          )}
+          {show.addSection !== false && props.onAddSection && props.setSectionType && (
+            <>
+              <label>
+                {t.sectionType}
                 <select
                   aria-label="Section type"
                   value={props.sectionType}
@@ -175,20 +206,39 @@ export function GraphToolbar(props: GraphToolbarProps) {
                 disabled={!props.sectionType || !!profile.sections[props.sectionType]?.readOnly}
                 onClick={props.onAddSection}
               >
-                {node ? 'Add section around node' : 'Add section'}
+                {node ? t.addSectionAroundNode : t.addSection}
               </button>
             </>
           )}
-          {props.onArrange && <button onClick={props.onArrange}>Arrange diagram</button>}
-          <button onClick={props.onGraphProperties}>Graph properties</button>
-          <button
-            disabled={readOnly || (!node && !edge) || props.selectionReadOnly}
-            onClick={props.onDelete}
-          >
-            Delete selection
-          </button>
+          {show.arrange !== false && props.onArrange && (
+            <button onClick={props.onArrange}>{t.arrange}</button>
+          )}
+          {show.properties !== false && (
+            <button onClick={props.onGraphProperties}>{t.graphProperties}</button>
+          )}
+          {show.delete !== false && (
+            <button
+              disabled={readOnly || (!node && !edge) || props.selectionReadOnly}
+              onClick={props.onDelete}
+            >
+              {t.deleteSelection}
+            </button>
+          )}
         </>
       )}
+      {show.zoom !== false && <GraphZoomControls zoom={zoom} setZoom={setZoom} setPan={setPan} />}
+    </div>
+  );
+}
+
+function GraphZoomControls({
+  zoom,
+  setZoom,
+  setPan,
+}: Pick<GraphToolbarProps, 'zoom' | 'setZoom' | 'setPan'>) {
+  const t = useGraphLabels();
+  return (
+    <>
       <button aria-label="Zoom out" onClick={() => setZoom(zoomOutStep)}>
         −
       </button>
@@ -202,7 +252,7 @@ export function GraphToolbar(props: GraphToolbarProps) {
           setPan({ x: 0, y: 0 });
         }}
       >
-        Reset view
+        {t.resetView}
       </button>
       <button aria-label="Pan left" onClick={() => setPan((p) => ({ ...p, x: p.x - 50 }))}>
         ←
@@ -210,7 +260,7 @@ export function GraphToolbar(props: GraphToolbarProps) {
       <button aria-label="Pan right" onClick={() => setPan((p) => ({ ...p, x: p.x + 50 }))}>
         →
       </button>
-    </div>
+    </>
   );
 }
 
@@ -221,6 +271,7 @@ export function GraphViewControls({
   setPan: Dispatch<SetStateAction<Position>>;
   onFit: () => void;
 }) {
+  const t = useGraphLabels();
   return (
     <div className="ep-graph-view-controls">
       <button aria-label="Pan up" onClick={() => setPan((p) => ({ ...p, y: p.y - 50 }))}>
@@ -229,7 +280,7 @@ export function GraphViewControls({
       <button aria-label="Pan down" onClick={() => setPan((p) => ({ ...p, y: p.y + 50 }))}>
         ↓
       </button>
-      <button onClick={onFit}>Fit graph</button>
+      <button onClick={onFit}>{t.fitGraph}</button>
     </div>
   );
 }

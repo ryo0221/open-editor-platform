@@ -18,4 +18,4 @@ CAD_OCCT_DIST=work/cad-kernel npx vite --config packages/cad/vite.config.ts
 CAD_OCCT_DIST=work/cad-kernel E2E_SUITE=cad npx playwright test
 ```
 
-Query options: `?fixture=plate`, `?fixture=holes` (F12's two holes and the rim fillet), `?fixture=fillet` (F12's top fillet), `?persist=1` (the last applied content is reopened on reload), `?view=side` (with `fixture=plate`: a saved orthographic side view), `?readonly=1`, `?kernel=missing`. See verification.
+Query options: `?fixture=plate`, `?fixture=holes` (F12's two holes and the rim fillet), `?fixture=fillet` (F12's top fillet), `?persist=1` (the last applied content is reopened on reload), `?view=side` (with `fixture=plate`: a saved orthographic side view), `?readonly=1`, `?kernel=missing`, `?statusRole=none` (a Host status beside the Surface, #563). See verification.

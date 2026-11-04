@@ -6,6 +6,10 @@ import {
 } from '@editor-platform/document/sequence';
 import {
   documentStyleCss,
+  isVerticalDocument,
+  rubyGroups,
+  emphasisDotsCss,
+  uprightDigitRanges,
   type DocumentContent,
   type InlineSpan,
 } from '@editor-platform/document/model';
@@ -30,7 +34,7 @@ export interface DocumentEpubMetadata {
   modified: string;
 }
 export interface DocumentEpubReport extends ExportReport<DocumentExportAddress> {
-  format: 'epub3-horizontal';
+  format: 'epub3-horizontal' | 'epub3-vertical';
   metadata: DocumentEpubMetadata;
   sources: DocumentSequenceManifest;
   chapters: {
@@ -51,6 +55,7 @@ const plans = new WeakMap<
 >();
 export const documentEpubLimits = Object.freeze({ bytes: 16 * 1024 * 1024, creators: 16 });
 export const documentEpubExporterVersion = 'epub-horizontal/1.0.0';
+export const documentEpubVerticalExporterVersion = 'epub-vertical/1.0.0';
 const xmlText = (value: string) =>
   [...value].every((char) => {
     const n = char.codePointAt(0)!;
@@ -124,14 +129,28 @@ function ownMetadata(raw: DocumentEpubMetadata): DocumentEpubMetadata | undefine
   value.creators = creators;
   return clone(value);
 }
-function inline(span: InlineSpan) {
-  let result = xml(span.text).replace(/\n/g, '<br/>');
+/** `upright` holds 縦中横 ranges within this span; runs crossing spans stay in the text
+ * direction, as in the editor. */
+function inline(span: InlineSpan, upright: [number, number][] = []) {
+  let result = '',
+    at = 0;
+  for (const [start, end] of upright) {
+    result +=
+      xml(span.text.slice(at, start)) +
+      `<span class="tcy">${xml(span.text.slice(start, end))}</span>`;
+    at = end;
+  }
+  result = (result + xml(span.text.slice(at))).replace(/\n/g, '<br/>');
   if (span.code) result = `<code>${result}</code>`;
   if (span.bold) result = `<strong>${result}</strong>`;
   if (span.italic) result = `<em>${result}</em>`;
   if (span.strike) result = `<s>${result}</s>`;
   const css = [
     span.bold === false ? 'font-weight:400' : '',
+    // Older EPUB readers know 傍点 only under the -epub- prefix.
+    span.emphasisDots
+      ? `-epub-text-emphasis-style:filled sesame;${span.ruby ? '-epub-text-emphasis-position:under left;' : ''}${emphasisDotsCss(!!span.ruby)}`
+      : '',
     span.underline ? 'text-decoration:underline' : '',
     span.color ? `color:${span.color}` : '',
     span.highlight ? `background-color:${span.highlight}` : '',
@@ -139,6 +158,30 @@ function inline(span: InlineSpan) {
     .filter(Boolean)
     .join(';');
   return css ? `<span style="${xml(css)}">${result}</span>` : result;
+}
+function inlines(spans: InlineSpan[], vertical: boolean) {
+  const text = spans.map((s) => s.text).join('');
+  const ranges = vertical ? uprightDigitRanges(text) : [];
+  const starts: number[] = [];
+  spans.reduce((offset, span) => (starts.push(offset), offset + span.text.length), 0);
+  // Ranges and spans are both in text order, so one pass assigns each range to its span.
+  let next = 0;
+  const html = spans.map((span, i) => {
+    const end = starts[i] + span.text.length;
+    const own: [number, number][] = [];
+    while (next < ranges.length && ranges[next][0] < end) {
+      const [a, b] = ranges[next++];
+      // A run crossing into the next span stays in the text direction, as in the editor.
+      if (b <= end) own.push([a - starts[i], b - starts[i]]);
+    }
+    return inline(span, own);
+  });
+  return rubyGroups(spans)
+    .map(({ spans: group, start, ruby }) => {
+      const inner = html.slice(start, start + group.length).join('');
+      return ruby ? `<ruby>${inner}<rt>${xml(ruby.text)}</rt></ruby>` : inner;
+    })
+    .join('');
 }
 const xhtml = (title: string, language: string, body: string) =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${xml(language)}" lang="${xml(language)}"><head><meta charset="UTF-8"/><title>${xml(title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>${body}</body></html>`;
@@ -184,13 +227,37 @@ export async function prepareDocumentEpub(
       'error',
       'Supply bounded XML-safe title/language/identifier/creators and an exact UTC modified time; unknown metadata is unsupported',
     );
+  // Composition keeps only the first chapter's page settings, so check every exact source.
+  const modes = sources.map(({ artifact, versionId }) => {
+    const version = artifact.versions.find((v) => v.versionId === versionId);
+    return version ? isVerticalDocument(version.content) : undefined;
+  });
+  const vertical = isVerticalDocument(content) || modes.includes(true);
+  if (vertical && modes.includes(false))
+    add(
+      'MIXED_WRITING_MODE',
+      'error',
+      'Every chapter must use the same writing mode; set all chapters to vertical or all to horizontal',
+    );
   add(
     'REFLOW_FONT_DIFFERENCE',
     'warning',
-    'Horizontal reflowable EPUB uses reader fonts. Page settings, native fonts, line breaks, vertical text, ruby and fixed pagination are not preserved.',
+    vertical
+      ? 'Vertical reflowable EPUB uses reader fonts and line breaking. Page settings, native fonts, the manuscript grid and fixed pagination are not preserved; only one or two ASCII digits are set upright.'
+      : 'Horizontal reflowable EPUB uses reader fonts. Page settings, native fonts, line breaks and fixed pagination are not preserved.',
   );
   for (const block of content.blocks) {
-    if (!xmlText(block.text) || block.rich?.some((s) => !xmlText(s.text)))
+    if (block.type === 'image')
+      add(
+        'IMAGE_UNSUPPORTED',
+        'error',
+        'Images and their captions are not supported by EPUB export; use the image-capable reading view instead',
+        block.id,
+      );
+    if (
+      !xmlText(block.text) ||
+      block.rich?.some((s) => !xmlText(s.text) || (s.ruby && !xmlText(s.ruby.text)))
+    )
       add(
         'INVALID_XML_TEXT',
         'error',
@@ -240,16 +307,19 @@ export async function prepareDocumentEpub(
         const css =
           (documentStyleCss(block.style) ? documentStyleCss(block.style) + ';' : '') +
           (block.align ? `text-align:${block.align};` : '') +
-          (block.indent ? `margin-left:${block.indent * 1.5}em;` : '');
+          (block.indent
+            ? `${vertical ? 'margin-top' : 'margin-left'}:${block.indent * 1.5}em;`
+            : '');
         paragraphs.push(
-          `<${tag} id="${id}"${css ? ` style="${xml(css)}"` : ''}>${(block.rich ?? [{ text: block.text }]).map(inline).join('')}</${tag}>`,
+          `<${tag} id="${id}"${css ? ` style="${xml(css)}"` : ''}>${inlines(block.rich ?? [{ text: block.text }], vertical)}</${tag}>`,
         );
       }
       chapters.push({ sourceIndex: source.order, path: 'EPUB/' + path, title, elements });
       files['EPUB/' + path] = xhtml(title, book.language, paragraphs.join('\n'));
     }
-    files['EPUB/style.css'] =
-      'html { writing-mode: horizontal-tb; } body { font-family: serif; line-height: 1.6; } p,h1,h2,h3,h4,h5,h6 { white-space: pre-wrap; }';
+    files['EPUB/style.css'] = vertical
+      ? 'html { writing-mode: vertical-rl; -webkit-writing-mode: vertical-rl; -epub-writing-mode: vertical-rl; } body { font-family: serif-ja, serif; line-height: 1.8; line-break: strict; -webkit-line-break: strict; } p,h1,h2,h3,h4,h5,h6 { white-space: pre-wrap; } rt { font-size: 50%; } .tcy { text-combine-upright: all; -webkit-text-combine: horizontal; -epub-text-combine: horizontal; }'
+      : 'html { writing-mode: horizontal-tb; } body { font-family: serif; line-height: 1.6; } p,h1,h2,h3,h4,h5,h6 { white-space: pre-wrap; }';
     files['EPUB/nav.xhtml'] = xhtml(
       'Contents',
       book.language,
@@ -258,13 +328,13 @@ export async function prepareDocumentEpub(
     files['META-INF/container.xml'] =
       '<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="EPUB/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
     files['EPUB/package.opf'] =
-      `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="pub-id">${xml(book.identifier)}</dc:identifier><dc:title>${xml(book.title)}</dc:title><dc:language>${xml(book.language)}</dc:language>${book.creators.map((c) => `<dc:creator>${xml(c)}</dc:creator>`).join('')}<meta property="dcterms:modified">${book.modified}</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="style" href="style.css" media-type="text/css"/><item id="sources" href="sources.json" media-type="application/json"/><item id="report" href="export-report.json" media-type="application/json"/>${chapters.map((c, i) => `<item id="chapter-${i + 1}" href="${c.path.slice(5)}" media-type="application/xhtml+xml"/>`).join('')}</manifest><spine page-progression-direction="ltr">${chapters.map((_, i) => `<itemref idref="chapter-${i + 1}"/>`).join('')}</spine></package>`;
+      `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="pub-id">${xml(book.identifier)}</dc:identifier><dc:title>${xml(book.title)}</dc:title><dc:language>${xml(book.language)}</dc:language>${book.creators.map((c) => `<dc:creator>${xml(c)}</dc:creator>`).join('')}<meta property="dcterms:modified">${book.modified}</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="style" href="style.css" media-type="text/css"/><item id="sources" href="sources.json" media-type="application/json"/><item id="report" href="export-report.json" media-type="application/json"/>${chapters.map((c, i) => `<item id="chapter-${i + 1}" href="${c.path.slice(5)}" media-type="application/xhtml+xml"/>`).join('')}</manifest><spine page-progression-direction="${vertical ? 'rtl' : 'ltr'}">${chapters.map((_, i) => `<itemref idref="chapter-${i + 1}"/>`).join('')}</spine></package>`;
   }
   const reportBase = {
     schemaVersion: 1 as const,
-    exporterVersion: documentEpubExporterVersion,
+    exporterVersion: vertical ? documentEpubVerticalExporterVersion : documentEpubExporterVersion,
     basis,
-    format: 'epub3-horizontal' as const,
+    format: vertical ? ('epub3-vertical' as const) : ('epub3-horizontal' as const),
     metadata: book,
     sources: clone(sequence.manifest),
     chapters,

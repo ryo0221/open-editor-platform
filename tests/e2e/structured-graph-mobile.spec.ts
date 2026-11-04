@@ -13,8 +13,8 @@ test('mobile ordinary Graph: attributes, deletion Cancel, readonly and persisted
     page.getByRole('button', { name: 'Select node Mobile Research', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Select node Mobile Research', exact: true }).click();
-  await page.getByRole('button', { name: 'Delete selection', exact: true }).click();
-  await page.getByRole('button', { name: 'Cancel deletion', exact: true }).click();
+  await page.getByRole('button', { name: '選択を削除', exact: true }).click();
+  await page.getByRole('button', { name: '削除をやめる', exact: true }).click();
   await expect(
     page.getByRole('button', { name: 'Select node Mobile Research', exact: true }),
   ).toBeVisible();
@@ -52,7 +52,7 @@ test('#396 mobile node shapes: Appearance choices, outline drawing, no page over
   const shape = page.getByLabel('Node shape', { exact: true });
   await shape.scrollIntoViewIfNeeded();
   await shape.selectOption('cylinder');
-  await page.getByLabel('Node fill', { exact: true }).selectOption({ label: 'Green' });
+  await page.getByLabel('Node fill', { exact: true }).selectOption({ label: '緑' });
   await expect(node).toHaveAttribute('data-shape', 'cylinder');
   await expect(node.locator('.ep-graph-node-shape path')).toHaveAttribute('d', / A/);
   expect(
@@ -71,7 +71,7 @@ test('#396 mobile Sections: add around a node, choose membership, collapse, no p
   await page.goto('/');
   await create(page, 'structured-graph');
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
-  await page.getByRole('button', { name: 'Add section around node', exact: true }).click();
+  await page.getByRole('button', { name: 'ノードを囲むまとまりを追加', exact: true }).click();
   const sectionId = ((await nativeArtifact(page)).draft.content as GraphDocument).sections[0].id;
   // Membership is also a plain choice in the Inspector, no drag needed.
   await page.getByRole('button', { name: 'Select node Planning', exact: true }).click();
@@ -114,8 +114,8 @@ test('#396 mobile diagrams: flowchart template, palette, Arrange diagram, no pag
   await expect(page.getByRole('group', { name: 'Node palette', exact: true })).toBeHidden();
   const added = ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.at(-1)!;
   expect(added.type).toBe('record');
-  await page.getByRole('button', { name: 'Arrange diagram', exact: true }).click();
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '図を並べ直す', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('[data-node-id="check"]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath('flowchart-mobile.png') });

@@ -28,6 +28,7 @@ export {
 } from './port';
 export {
   BimController,
+  type BimAssetStore,
   type BimControllerOptions,
   type BimNotice,
   type BimSession,

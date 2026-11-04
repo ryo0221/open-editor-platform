@@ -2,6 +2,7 @@ import { clone, contentHash, deepFreeze } from '@editor-platform/artifact-core';
 import {
   isDocument,
   nestedLists,
+  rubyGroups,
   type DocumentBlock,
   type DocumentContent,
   type DocumentListItem,
@@ -102,6 +103,7 @@ function docxPage(content: DocumentContent) {
     height: size[pageSettings.landscape ? 0 : 1],
     margin: Math.round(pageSettings.margin * 15),
     landscape: !!pageSettings.landscape,
+    vertical: pageSettings.writingMode === 'vertical-rl',
   };
   return { pageSettings, page };
 }
@@ -170,6 +172,14 @@ function addContentDiagnostics(run: PlanRun) {
     add('LIMIT_EXCEEDED', 'error', 'At most 2,000 top-level blocks can be exported');
   if (pageSettings.landscape !== undefined && typeof pageSettings.landscape !== 'boolean')
     add('PAGE_SETTINGS_INVALID', 'error', 'Page orientation must be a boolean');
+  if (run.page.vertical)
+    add(
+      'VERTICAL_AS_WORD_LAYOUT',
+      'warning',
+      'Vertical writing is exported as a vertical Word section; line breaking, upright digits and ruby placement follow Word',
+      { domain: 'document' },
+      'appearance',
+    );
 }
 function hasInvalidCharacter(text: string) {
   for (const char of text) {
@@ -222,8 +232,25 @@ function richSpan(run: PlanRun, s: InlineSpan, i: number, address: Address, code
   }
   return span;
 }
-const rich = (run: PlanRun, spans: InlineSpan[], address: Address, code = false): InlineSpan[] =>
-  spans.map((s, i) => richSpan(run, s, i, address, code));
+/** DOCX has no ruby here: each reading follows its base text in parentheses, reported once per ruby. */
+function rich(run: PlanRun, spans: InlineSpan[], address: Address, code = false): InlineSpan[] {
+  return rubyGroups(spans).flatMap(({ spans: group, start, ruby }) => {
+    const runs = group.map((s, i) => {
+      const { ruby: _ruby, ...span } = s;
+      return richSpan(run, span, start + i, address, code);
+    });
+    if (!ruby) return runs;
+    run.add(
+      'RUBY_AS_TEXT',
+      'warning',
+      `Ruby becomes text in parentheses: ${ruby.text}`,
+      { ...address, path: `runs/${start}` },
+      'editability',
+    );
+    checkText(run, ruby.text, address);
+    return [...runs, { text: `（${ruby.text}）` }];
+  });
+}
 function paragraph(
   run: PlanRun,
   spans: InlineSpan[],

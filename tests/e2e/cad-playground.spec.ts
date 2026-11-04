@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import {
   applyCadOperation,
+  cadBuilder,
   f11Bracket,
   f12Fillet,
   f40Car,
@@ -13,6 +14,7 @@ import {
   f15Loft,
   f15Sweep,
   f17Sheets,
+  fixtureKernel,
   partVersionId,
   r1Housing,
   r2bParts,
@@ -784,9 +786,10 @@ test('R2b-1 assembly: insert a saved part twice, place it, save, reload and roun
   ).toEqual([120, 30, 0]);
   // A placement the document refuses (past the coordinate limit) is reported and the fields
   // return to the stored placement, as the Inspector does: nothing is left pending.
-  await placement.getByLabel('X (mm)').fill('1000001');
+  await placement.getByLabel('X (mm)').fill('10000001');
   await placement.getByRole('button', { name: 'Apply placement' }).click();
-  await expect(page.getByText('値が許容範囲の外です。')).toBeVisible();
+  // #589: the refusal names the limit.
+  await expect(page.getByText('±10,000,000 mm (10 km)')).toBeVisible();
   await expect(placement.getByLabel('X (mm)')).toHaveValue('120');
   expect(
     ((await nativeArtifact(page)).draft.content as CadDocument).solvedPoses[doc.components[1]!.id]!
@@ -1110,4 +1113,115 @@ test('R2b-1 assembly read only and narrow: components listed, nothing inserted o
   await components(page).nth(2).click();
   await expect(page.getByRole('form', { name: 'Placement' }).getByLabel('X (mm)')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Remove', exact: true })).toHaveCount(0);
+});
+
+/**
+ * #538: an equipment route 1,200 mm wide (a parameter) beside 1,600 mm equipment, and 4 columns
+ * joined into one body named for the set.
+ */
+function routeModel() {
+  const b = cadBuilder(fixtureKernel);
+  b.parameter('Route width', 'length', 1200);
+  b.box('Route', { size: ['{Route width}', 20000, 2500] }, { color: '#3b82f6', opacity: 0.4 });
+  b.box('Equipment', { origin: [-200, 2000, 0], size: [1600, 2000, 1800] }, { color: '#dc2626' });
+  const columns = [0, 1, 2, 3].map((i) =>
+    b.box(`Column grid 1 ${i + 1}`, { origin: [4000, i * 5000, 0], size: [1000, 1000, 4500] }),
+  );
+  b.boolean(columns[0]!, columns.slice(1), 'union', 'Join columns');
+  b.rename(columns[0]!, 'Columns (4)');
+  return b.build().document;
+}
+test('compare a route with the equipment through edit, Undo, Redo, save and reload; a joined body counts its solids (#538)', async ({
+  page,
+}) => {
+  const narrow = test.info().project.name !== 'desktop';
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'route.json', {
+    ...empty,
+    name: 'Equipment route',
+    draft: { ...empty.draft, content: { ...routeModel(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Equipment route');
+  await ready(page);
+  const elements = async () => {
+    if (narrow && !(await bodies(page).first().isVisible()))
+      await page.getByRole('button', { name: 'Toggle Elements', exact: true }).click();
+  };
+  await elements();
+  await expect(bodies(page)).toHaveCount(3);
+  // The joined columns: one body, named for the set, that says it holds 4 solids.
+  await expect(bodies(page).filter({ hasText: 'Columns (4)' })).toHaveText('Columns (4)4 solids');
+  await expect(page.getByText('Bodies (3)', { exact: true })).toBeVisible();
+
+  const compare = async (expected: string) => {
+    await elements();
+    await bodies(page).filter({ hasText: 'Route' }).click();
+    const section = page
+      .locator('.cad-inspector details')
+      .filter({ has: page.getByText('Compare size', { exact: true }) });
+    if (narrow && !(await section.isVisible()))
+      await page.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
+    if ((await section.getAttribute('open')) === null) await section.locator('summary').click();
+    await section.getByLabel('With body').selectOption({ label: 'Equipment' });
+    await expect(page.getByTestId('cad-compare-X')).toHaveText(expected);
+    await expect(page.getByTestId('cad-compare-size')).toContainText('1,600');
+  };
+  await compare('400 smaller');
+  await expect(page.locator('.cad-inspector')).toContainText('not per side');
+  await page.screenshot({
+    path: test.info().outputPath(`cad-538-compare-${narrow ? 'narrow' : 'desktop'}.png`),
+  });
+
+  // A standard view moves the camera only: the draft is unchanged.
+  const before = (await nativeArtifact(page)).draft.content;
+  if (!narrow) {
+    await page.getByTestId('cad-standard-view').selectOption('plan');
+    await page.screenshot({ path: test.info().outputPath('cad-538-plan.png') });
+    await page.getByTestId('cad-standard-view').selectOption('front');
+    expect((await nativeArtifact(page)).draft.content).toEqual(before);
+  }
+
+  // Widen the route to 2,000 mm: 400 mm to spare in total.
+  await elements();
+  await page
+    .getByRole('list', { name: 'Parameters' })
+    .getByRole('button', { name: /Route width/ })
+    .click();
+  const value = page.locator('.cad-inspector').getByLabel(/^Value/);
+  if (narrow && !(await value.isVisible()))
+    await page.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
+  await value.fill('2000');
+  await value.press('Enter');
+  await ready(page);
+  await compare('400 larger');
+  const history = async (name: 'Undo' | 'Redo') => {
+    if (narrow)
+      await page.getByRole('button', { name: 'More artifact actions', exact: true }).click();
+    await page.getByRole('button', { name, exact: true }).click();
+    await ready(page);
+  };
+  await history('Undo');
+  await compare('400 smaller');
+  await history('Redo');
+  await compare('400 larger');
+  if (narrow)
+    await page.getByRole('button', { name: 'More artifact actions', exact: true }).click();
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  await compare('400 larger');
+  const record = await nativeArtifact(page);
+  const content = record.versions[0].content as CadDocument;
+  expect(content.parameters.find((p) => p.name === 'Route width')).toMatchObject({ value: 2000 });
+  expect(content.bodies.find((b) => b.state === 'active' && b.name === 'Columns (4)')?.id).toBe(
+    'column-grid-1-1',
+  );
+  if (narrow) {
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+  }
 });

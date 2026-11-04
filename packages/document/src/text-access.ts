@@ -25,7 +25,8 @@ export interface DocumentText {
 export const documentTextSeparator = '\n\n';
 
 const leafText = (node: PMNode) => (node.type.name === 'hard_break' ? '\n' : '');
-function textblocks(doc: PMNode) {
+/** Text blocks of an engine document with their stable and top-level block IDs. */
+export function documentTextblocks(doc: PMNode) {
   const found: { id: string; blockId: string; node: PMNode; pos: number }[] = [];
   doc.forEach((block, offset) => {
     if (block.isTextblock) {
@@ -54,7 +55,7 @@ function textblocks(doc: PMNode) {
 export function documentText(content: DocumentContent): DocumentText {
   const segments: DocumentTextSegment[] = [];
   let text = '';
-  for (const block of textblocks(contentToNode(content))) {
+  for (const block of documentTextblocks(contentToNode(content))) {
     if (segments.length) text += documentTextSeparator;
     const value = block.node.textBetween(0, block.node.content.size, '', leafText);
     segments.push({
@@ -120,7 +121,7 @@ export function documentTextEditCommand(
 ): EditorCommand<DocumentContent> {
   if (!edits.length) throw new Error('No text edits');
   const doc = contentToNode(base);
-  const blocks = new Map(textblocks(doc).map((block) => [block.id, block]));
+  const blocks = new Map(documentTextblocks(doc).map((block) => [block.id, block]));
   const ranges = edits.map((edit) => {
     const block = blocks.get(edit.segmentId);
     if (!block) throw new Error('Unknown text element: ' + edit.segmentId);

@@ -1,3 +1,4 @@
+import type { FictionMapContent } from '@editor-platform/fiction-map/model';
 import { isEstimate, makeEstimateBasis } from '@editor-platform/estimate-core';
 import { isAnalysis, makeBasis } from '@editor-platform/analysis-core';
 import type { MutableRefObject } from 'react';
@@ -38,6 +39,36 @@ export function savedRecordReferences(context: {
   navigation: MutableRefObject<(sourceId: string, elementId: string, pageId?: string) => boolean>;
 }): ReferenceSource {
   return {
+    async checkSnapshot(source, snapshot) {
+      if (source.domain !== 'fiction-map') return;
+      const artifact = context.saved.current.get(source.artifactId);
+      if (!artifact || artifact.kind !== 'fiction-map')
+        throw new ReferenceError('missing-source', 'Saved Fiction Map is missing');
+      const version = artifact.versions.find((v) => v.versionId === snapshot.versionId);
+      if (!version)
+        throw new ReferenceError('missing-target', 'Saved Fiction Map version is missing');
+      if (
+        version.contentHash !== snapshot.contentHash ||
+        canonicalJson(version.content) !== canonicalJson(snapshot.content) ||
+        (await contentHash(version.content)) !== snapshot.contentHash
+      )
+        throw new ReferenceError(
+          'stale',
+          'Saved Fiction Map version/hash contradicts the reference',
+        );
+      // Hashing may yield while a saved source is removed/replaced. Never accept that old read.
+      const current = context.saved.current.get(source.artifactId);
+      if (!current || current.kind !== 'fiction-map')
+        throw new ReferenceError('missing-source', 'Saved Fiction Map is missing');
+      const retained = current.versions.find((v) => v.versionId === snapshot.versionId);
+      if (!retained)
+        throw new ReferenceError('missing-target', 'Saved Fiction Map version is missing');
+      if (
+        retained.contentHash !== snapshot.contentHash ||
+        canonicalJson(retained.content) !== canonicalJson(snapshot.content)
+      )
+        throw new ReferenceError('stale', 'Saved Fiction Map changed during verification');
+    },
     async list() {
       const options: ReferenceOption[] = [];
       for (const a of context.saved.current.values()) {
@@ -156,6 +187,24 @@ export function savedRecordReferences(context: {
                   target: { kind, viewId: view.id },
                 },
               });
+        } else if (a.kind === 'fiction-map' && validContent('fiction-map', content)) {
+          options.push({
+            label: `${a.name} · Document bounds · Fiction Map`,
+            source: {
+              artifactId: a.id,
+              domain: 'fiction-map',
+              target: { kind: 'fiction-map-document', viewId: 'document' },
+            },
+          });
+          for (const view of (content as FictionMapContent).namedViews)
+            options.push({
+              label: `${a.name} · ${view.name} · Fiction Map`,
+              source: {
+                artifactId: a.id,
+                domain: 'fiction-map',
+                target: { kind: 'fiction-map-view', viewId: view.id },
+              },
+            });
         } else if (a.kind === 'geo' && validContent('geo', content)) {
           for (const view of [
             { id: 'default', name: 'Current map' },

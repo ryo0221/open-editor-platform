@@ -18,6 +18,8 @@ import {
   Copy,
   Cylinder,
   Disc,
+  Eye,
+  EyeOff,
   FileDown,
   FileUp,
   ImageDown,
@@ -35,6 +37,7 @@ import {
   Torus,
   Trash2,
   Undo2,
+  Aperture,
 } from 'lucide-react';
 import {
   CommitInput,
@@ -62,6 +65,7 @@ import {
   resolvePosition,
   sketchDefaultPath,
   sketchElement,
+  type CadAppearance,
   type CadBody,
   type CadBodyEvaluation,
   type CadCurveSource,
@@ -98,7 +102,7 @@ import type { CadAssembly, CadStepAssemblyImportPreview } from './assembly';
 import { AssemblyLayer, AssemblyPanel } from './assembly-panel';
 import { PartPropertiesSection } from './bom-panel';
 import { modelTree, type CadTreeNode } from './model-tree';
-import { initialView } from './view-math';
+import { compareSizes, initialView, standardViews, type CadStandardView } from './view-math';
 import { SketchCanvas, SketchPanel, SketchTools, type SketchTool } from './sketch-mode';
 import {
   AngleField,
@@ -109,6 +113,15 @@ import {
   LengthField,
   parameterName,
 } from './dimension-fields';
+import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
+import {
+  finishOf,
+  PathRenderDialog,
+  viewTexturesOf,
+  ViewTextureCache,
+} from '@editor-platform/geometry-view';
+import { TextureSection } from './texture-panel';
+import { geometryMaterialPresets } from '@editor-platform/geometry-core';
 import './style.css';
 
 const parameterUnit = (type: CadDocument['parameters'][number]['type']) =>
@@ -122,17 +135,30 @@ const bodyMetrics = (
   id: string,
 ): CadBodyEvaluation | undefined =>
   evaluation?.status === 'ok' ? evaluation.bodies[id] : evaluation?.partial?.[id];
+/** The disjoint solids of a body of more than one, from its own build's result (K1). */
+const solidCount = (snapshot: CadSnapshot, id: string) => {
+  const e = snapshot.evaluation;
+  const m = e?.status === 'ok' && e.reference ? undefined : bodyMetrics(e, id);
+  return m?.kind === 'solid' ? m.solids : undefined;
+};
 const stateText: Record<CadSnapshot['geometryState'], string> = {
   ready: 'Shape up to date',
   reevaluating: 'Recalculating shape…',
   'geometry-error': 'Shape could not be calculated',
 };
 
-/** Active bodies shown for a named view, or all of them for the whole model. */
-const shownBodies = (doc: CadDocument, viewId: string | null) => {
+/**
+ * Active bodies shown for a named view, or all of them for the whole model. `toggled` holds the
+ * bodies the eye in the Bodies list flipped from that (private view state, SU3).
+ */
+const shownBodies = (
+  doc: CadDocument,
+  viewId: string | null,
+  toggled: ReadonlySet<string> = new Set(),
+) => {
   const active = doc.bodies.filter((b) => b.state === 'active').map((b) => b.id);
   const view = doc.namedViews.find((v) => v.id === viewId);
-  return view ? active.filter((id) => view.bodyIds.includes(id)) : active;
+  return active.filter((id) => (view ? view.bodyIds.includes(id) : true) !== toggled.has(id));
 };
 
 /** Root width at or under which sketching is off (docs/cad/r1-modeling.md: desktop only). */
@@ -143,6 +169,7 @@ function Viewport({
   snapshot,
   view,
   viewId,
+  toggled,
   onViewId,
   moving,
   measuring,
@@ -167,10 +194,13 @@ function Viewport({
   snapshot: CadSnapshot;
   view: RefObject<CadViewport | null>;
   viewId: string | null;
+  /** Bodies shown or hidden against the view by the eye in the Bodies list. */
+  toggled: ReadonlySet<string>;
   onViewId(id: string | null): void;
   /** The Move tool is on: primary drag moves bodies instead of orbiting. */
   moving: boolean;
 }) {
+  const status = useStatusProps();
   const host = useRef<HTMLDivElement>(null);
   const [lost, setLost] = useState(false);
   /** Bytes the GPU budget refused for the shown shape (CAD26). */
@@ -236,7 +266,9 @@ function Viewport({
   // A new budget applies to the viewport in place: its shape, tools and camera stay.
   useEffect(() => view.current?.setGpuBudget(gpuBytes), [view, gpuBytes]);
   // Shading (R2a-4): display only, never part of the content.
-  const [shading, setShading] = useState<'shaded' | 'zebra' | 'mean' | 'gauss'>('shaded');
+  const [shading, setShading] = useState<'shaded' | 'realistic' | 'zebra' | 'mean' | 'gauss'>(
+    'shaded',
+  );
   const [zebraAxis, setZebraAxis] = useState<'x' | 'y' | 'z'>('z');
   /** Zebra on the selected body only; the others keep their colour. */
   const [zebraSelected, setZebraSelected] = useState(false);
@@ -248,11 +280,29 @@ function Viewport({
   const [rangeStep, setRangeStep] = useState(0);
   /** The comb scale is the automatic one times 2 to this power. */
   const [combStep, setCombStep] = useState(0);
+  // #662: each texture image decoded once; the bodies are drawn again when one is ready.
+  const [texturesLoaded, setTexturesLoaded] = useState(0);
+  const textureCache = useMemo(
+    () => new ViewTextureCache(() => setTexturesLoaded((n) => n + 1)),
+    [],
+  );
+  // The placed parts' images, swept by their own layer's build.
+  const partTextureCache = useMemo(
+    () => new ViewTextureCache(() => setTexturesLoaded((n) => n + 1)),
+    [],
+  );
+  useEffect(
+    () => () => {
+      textureCache.dispose();
+      partTextureCache.dispose();
+    },
+    [textureCache, partTextureCache],
+  );
   const curving = shading === 'mean' || shading === 'gauss';
   const curvature = snapshot.curvature;
   const shownIds = useMemo(
-    () => new Set(shownBodies(snapshot.content, viewId)),
-    [snapshot.content, viewId],
+    () => new Set(shownBodies(snapshot.content, viewId, toggled)),
+    [snapshot.content, viewId, toggled],
   );
   // The values on the current meshes only: computed for this content, and these are its meshes.
   const values = useMemo(() => {
@@ -298,7 +348,9 @@ function Viewport({
         ? { mode: 'zebra', axis: zebraAxis, stripes, selectedOnly: zebraSelected }
         : values && range
           ? { mode: 'curvature', range }
-          : { mode: 'shaded' };
+          : shading === 'realistic'
+            ? { mode: 'realistic' }
+            : { mode: 'shaded' };
     view.current?.setShading(mode);
     const selection = snapshot.selection;
     const picked = selection?.kind === 'face' || selection?.kind === 'edge' ? selection : undefined;
@@ -312,6 +364,13 @@ function Viewport({
             mesh,
             color: body?.appearance.color ?? '#9aa4b1',
             opacity: body?.appearance.opacity ?? 1,
+            ...finishOf(body?.appearance),
+            textures: viewTexturesOf(
+              body?.appearance.textures,
+              snapshot.content.assets,
+              textureCache,
+              (sha) => controller.assetBytes(sha),
+            ),
             selected: snapshot.selection?.kind === 'body' && snapshot.selection.id === mesh.bodyId,
             sheet: body?.kind === 'sheet',
             ...(values?.has(mesh.bodyId) ? { curvature: values.get(mesh.bodyId)! } : {}),
@@ -324,6 +383,8 @@ function Viewport({
       !!meshes?.current,
       !meshes?.current && !meshes?.preview,
     );
+    // Every image the bodies draw was asked for: free the others (a replaced texture).
+    textureCache.sweep();
     // Whole model fits only once all bodies are shown again.
     if (refit.current) {
       refit.current = false;
@@ -342,6 +403,9 @@ function Viewport({
     stripes,
     values,
     range,
+    textureCache,
+    texturesLoaded,
+    controller,
   ]);
   useEffect(() => {
     view.current?.setMoveTool(
@@ -387,6 +451,14 @@ function Viewport({
   useEffect(() => {
     view.current?.showMeasure(rebind ? marked : points.map((p) => p.point));
   }, [view, points, restored, rebind, marked]);
+  const partTextures = useMemo(
+    () => ({
+      cache: partTextureCache,
+      read: (sha: string) => controller.assetBytes(sha),
+      loaded: texturesLoaded,
+    }),
+    [partTextureCache, controller, texturesLoaded],
+  );
   const views = snapshot.content.namedViews;
   const hasBodies =
     snapshot.content.bodies.some((b) => b.state === 'active') ||
@@ -401,22 +473,28 @@ function Viewport({
     <div className="cad-viewport" data-testid="cad-viewport">
       <div ref={host} className="cad-canvas-host" />
       {assembly && (
-        <AssemblyLayer assembly={assembly} view={view} snapshot={snapshot} restored={restored} />
+        <AssemblyLayer
+          assembly={assembly}
+          view={view}
+          snapshot={snapshot}
+          restored={restored}
+          textures={partTextures}
+        />
       )}
       {lost && (
-        <p className="cad-viewport-note" role="status">
+        <p className="cad-viewport-note" {...status}>
           3D表示を利用できません。一覧とInspectorから編集・保存できます。
         </p>
       )}
       {!lost && overGpu !== undefined && (
-        <p className="cad-viewport-note" role="status">
+        <p className="cad-viewport-note" {...status}>
           形状が3D表示に使えるメモリーの上限を超えるため、表示していません（
           {(overGpu / 1024 / 1024).toFixed(1)} MiB）。一覧とInspectorから編集・保存できます。
         </p>
       )}
       {!hasBodies && <p className="cad-viewport-note">Add a body from the toolbar to start.</p>}
       {hasBodies && !lost && !snapshot.meshes && snapshot.geometryState !== 'geometry-error' && (
-        <p className="cad-viewport-note" role="status">
+        <p className="cad-viewport-note" {...status}>
           Preparing the 3D shape…
         </p>
       )}
@@ -424,10 +502,16 @@ function Viewport({
       {!lost && !snapshot.busy && !snapshot.rebind && snapshot.geometryFailure && (
         <div
           className="cad-viewport-note cad-viewport-failure"
-          role="status"
+          {...status}
           data-testid="cad-geometry-failure"
         >
           {snapshot.geometryFailure}
+          {snapshot.failureReport?.kernelReason && (
+            <details className="cad-kernel-reason">
+              <summary>Kernel detail</summary>
+              <code>{snapshot.failureReport.kernelReason}</code>
+            </details>
+          )}
           {snapshot.partialFailure && (
             <span className="cad-partial-failure">
               {snapshot.partialFailure.shown > 0 &&
@@ -455,7 +539,7 @@ function Viewport({
           onClear={() => setMeasure({ hash: '', points: [] })}
         />
       )}
-      {(shading !== 'shaded' || comb) && (
+      {((shading !== 'shaded' && shading !== 'realistic') || comb) && (
         <div className="cad-analysis">
           {shading === 'zebra' && (
             <section aria-label="Zebra" data-testid="cad-zebra">
@@ -488,7 +572,7 @@ function Viewport({
                   value={stripes}
                   onChange={(e) => setStripes(Number(e.target.value))}
                 />{' '}
-                <output>{stripes}</output>
+                <Output>{stripes}</Output>
               </label>{' '}
               <label>
                 <input
@@ -545,7 +629,7 @@ function Viewport({
                   value={combStep}
                   onChange={(e) => setCombStep(Number(e.target.value))}
                 />{' '}
-                <output>×{2 ** combStep}</output>
+                <Output>×{2 ** combStep}</Output>
               </label>{' '}
               <button type="button" onClick={() => controller.hideComb()}>
                 Hide
@@ -563,6 +647,7 @@ function Viewport({
             data-testid="cad-shading"
           >
             <option value="shaded">Shaded</option>
+            <option value="realistic">Realistic</option>
             <option value="zebra">Zebra</option>
             <option value="mean">Mean curvature</option>
             <option value="gauss">Gauss curvature</option>
@@ -581,6 +666,24 @@ function Viewport({
             </select>
           </label>
         )}
+        <label className="cad-views">
+          <span>Look</span>
+          {/* Camera only, like Fit view: the document and its named views are not changed. */}
+          <select
+            value=""
+            onChange={(e) => view.current?.fit({ view: e.target.value as CadStandardView })}
+            data-testid="cad-standard-view"
+          >
+            <option value="" disabled>
+              From…
+            </option>
+            {Object.entries(standardViews).map(([id, v]) => (
+              <option key={id} value={id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="cad-views">
           <input
             type="checkbox"
@@ -674,7 +777,7 @@ function CurvatureLegend({
               value={rangeStep}
               onChange={(e) => onRangeStep(Number(e.target.value))}
             />{' '}
-            <output>×{2 ** rangeStep}</output>
+            <Output>×{2 ** rangeStep}</Output>
           </label>
           <p className="cad-muted">
             At ×1, {cadCurvature.rangePercentile * 100}% of the shown nodes are within the range.
@@ -698,6 +801,7 @@ function Measurement({
   snapshot: CadSnapshot;
   onClear(): void;
 }) {
+  const status = useStatusProps('Distance');
   const names = new Map(snapshot.content.bodies.map((b) => [b.id, b.name]));
   const { evaluation } = snapshot;
   const [a, b] = points;
@@ -716,7 +820,7 @@ function Measurement({
     result = (
       <>
         <p>
-          Distance <output data-testid="cad-distance">{fmt(Math.hypot(...delta))}</output> mm
+          Distance <Output data-testid="cad-distance">{fmt(Math.hypot(...delta))}</Output> mm
           {Math.hypot(...delta) >= 10_000 && (
             <span className="cad-muted"> ({fmtGrouped(Math.hypot(...delta) / 1000)} m)</span>
           )}
@@ -733,7 +837,7 @@ function Measurement({
     );
   }
   return (
-    <section className="cad-measure" aria-label="Distance" role="status">
+    <section className="cad-measure" aria-label="Distance" {...status}>
       {points.length === 0 && (
         <p>Click a point on a body. A click near a corner snaps to that vertex.</p>
       )}
@@ -752,6 +856,81 @@ function Measurement({
         )}
       </p>
     </section>
+  );
+}
+
+/**
+ * Compare size (#538): the selected body's overall size along X, Y and Z beside another body's,
+ * and the difference. Display only, readOnly too; on the evaluated hash in millimetres, as
+ * Distance. The bounds say nothing about turning, height clearance or load.
+ */
+function CompareSize({
+  body,
+  others,
+  snapshot,
+}: {
+  body: CadBody;
+  others: CadBody[];
+  snapshot: CadSnapshot;
+}) {
+  const [otherId, setOtherId] = useState('');
+  const other = others.find((b) => b.id === otherId);
+  const a = bodyMetrics(snapshot.evaluation, body.id);
+  const b = other && bodyMetrics(snapshot.evaluation, other.id);
+  const rows = a && b ? compareSizes(a.bounds, b.bounds) : [];
+  // Rounded as shown, so a difference of 0.004 mm reads as the same size.
+  const shown = (v: number) => Math.round(v * 100) / 100 || 0;
+  return (
+    <Section title="Compare size" open={false}>
+      <label className="ep-field">
+        With body
+        <select value={otherId} onChange={(e) => setOtherId(e.target.value)}>
+          <option value="">Choose…</option>
+          {others.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {other && !b && <p className="cad-muted">{other.name} has no calculated shape to compare.</p>}
+      {other && b && (
+        <>
+          <table className="cad-compare" data-testid="cad-compare-size">
+            <thead>
+              <tr>
+                <th scope="col">Axis</th>
+                <th scope="col">{body.name}</th>
+                <th scope="col">{other.name}</th>
+                <th scope="col">Difference</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const d = shown(r.difference);
+                return (
+                  <tr key={r.axis}>
+                    <th scope="row">{r.axis}</th>
+                    <td>{fmtGrouped(r.a, 2)}</td>
+                    <td>{fmtGrouped(r.b, 2)}</td>
+                    <td data-testid={`cad-compare-${r.axis}`}>
+                      {d === 0
+                        ? 'Same'
+                        : `${fmtGrouped(Math.abs(d), 2)} ${d < 0 ? 'smaller' : 'larger'}`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="cad-muted">
+            Overall sizes along the world axes (millimetres), and how much {body.name} is smaller or
+            larger than {other.name} in total, not per side. They do not check position, turning,
+            height clearance or load. Shape {snapshot.contentHash.slice(0, 15)}….
+          </p>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -1135,7 +1314,7 @@ function FeatureArgs({
         <>
           <div className="cad-readonly-field">
             <span>Sections</span>
-            <output data-testid="cad-loft-sections">{names.join(' → ')}</output>
+            <Output data-testid="cad-loft-sections">{names.join(' → ')}</Output>
           </div>
           {derived.map((x, i) =>
             'derivedFrom' in x ? (
@@ -1187,13 +1366,13 @@ function FeatureArgs({
         <>
           <div className="cad-readonly-field">
             <span>Profile</span>
-            <output>{name(feature.args.profile.sketchId)}</output>
+            <Output>{name(feature.args.profile.sketchId)}</Output>
           </div>
           <div className="cad-readonly-field">
             <span>Path</span>
-            <output>
+            <Output>
               {name(feature.args.path.sketchId)} ({feature.args.path.elements.length} elements)
-            </output>
+            </Output>
           </div>
           <label className="ep-field">
             Orientation
@@ -1217,9 +1396,9 @@ function FeatureArgs({
       return (
         <div className="cad-readonly-field">
           <span>Curves</span>
-          <output data-testid="cad-boundary-curves">
+          <Output data-testid="cad-boundary-curves">
             {feature.args.curves.map((c) => curveLabel(doc, c)).join(' → ')}
-          </output>
+          </Output>
         </div>
       );
     case 'fill':
@@ -1275,7 +1454,7 @@ function FeatureArgs({
         <>
           <div className="cad-readonly-field">
             <span>Joining distance</span>
-            <output>{feature.args.toleranceMm} mm</output>
+            <Output>{feature.args.toleranceMm} mm</Output>
           </div>
           <label className="cad-check">
             <input
@@ -1467,7 +1646,7 @@ function DocumentSettings({
     <Section title="Document">
       <div className="cad-readonly-field">
         <span>Tolerance set</span>
-        <output data-testid="cad-tolerance-set">{current ?? 'custom'}</output>
+        <Output data-testid="cad-tolerance-set">{current ?? 'custom'}</Output>
       </div>
       {!snapshot.readOnly && (
         <button
@@ -1576,11 +1755,12 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
           ) : (
             <div className="cad-readonly-field" key={axis}>
               <span>{axis}</span>
-              <output>{fmt(at[i])} mm</output>
+              <Output>{fmt(at[i])} mm</Output>
             </div>
           ),
         )}
       </Section>
+      <AppearanceSection body={body} controller={controller} readOnly={readOnly} />
       <Section title="Measurements">
         {metrics ? (
           <dl className="cad-metrics">
@@ -1626,6 +1806,9 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
           <p className="cad-muted">Available after the shape is calculated.</p>
         )}
       </Section>
+      {metrics && others.length > 0 && (
+        <CompareSize body={body} others={others} snapshot={snapshot} />
+      )}
       {!readOnly && body.state === 'active' && (
         <Section title="Combine">
           <label className="ep-field">
@@ -1702,6 +1885,108 @@ const trimSideLabels = {
  * (a solid when they close), trim it with a sketch's closed chain, a plane or another sheet, and
  * thicken it into a solid.
  */
+/**
+ * #661: a body's material: a preset from the library copies its colour, opacity and finish;
+ * changing one value makes the look custom (the preset's name is dropped). Display only.
+ */
+function AppearanceSection({
+  body,
+  controller,
+  readOnly,
+}: {
+  body: CadBody;
+  controller: CadController;
+  readOnly: boolean;
+}) {
+  const a = body.appearance;
+  const finish = finishOf(a);
+  const set = (appearance: CadAppearance) =>
+    void controller.run({ type: 'setAppearance', bodyId: body.id, appearance });
+  /** One value changed by hand: the look is no longer the preset's. */
+  const custom = (patch: Partial<CadAppearance>) => {
+    const { material: _preset, ...rest } = { ...a, ...patch };
+    set(rest);
+  };
+  const preset = geometryMaterialPresets.find((p) => p.id === a.material);
+  if (readOnly)
+    return (
+      <Section title="Appearance">
+        <dl className="cad-metrics" data-testid="cad-appearance">
+          <dt>Material</dt>
+          <dd>{preset?.name ?? 'Custom'}</dd>
+          <dt>Colour</dt>
+          <dd>
+            <span className="cad-swatch" style={{ background: a.color }} aria-hidden="true" />{' '}
+            {a.color}
+          </dd>
+          <dt>Roughness</dt>
+          <dd>{finish.roughness}</dd>
+          <dt>Metalness</dt>
+          <dd>{finish.metalness}</dd>
+          <dt>Opacity</dt>
+          <dd>{a.opacity}</dd>
+        </dl>
+        <TextureSection body={body} controller={controller} readOnly />
+      </Section>
+    );
+  const unit = (key: 'roughness' | 'metalness' | 'opacity', label: string, value: number) => (
+    <CommitInput
+      label={label}
+      type="number"
+      min={0}
+      max={1}
+      step={0.05}
+      value={value}
+      onCommit={(v) => custom({ [key]: Number(v) })}
+    />
+  );
+  return (
+    <Section title="Appearance">
+      <div data-testid="cad-appearance">
+        <label className="ep-field">
+          Material
+          <select
+            value={preset?.id ?? ''}
+            onChange={(e) => {
+              const p = geometryMaterialPresets.find((x) => x.id === e.target.value);
+              if (!p) return custom({});
+              set({
+                color: p.color,
+                opacity: p.opacity,
+                roughness: p.roughness,
+                metalness: p.metalness,
+                material: p.id,
+              });
+            }}
+          >
+            <option value="">Custom</option>
+            {geometryMaterialPresets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="cad-row">
+          <span className="cad-swatch" style={{ background: a.color }} aria-hidden="true" />
+          <CommitInput
+            label="Colour"
+            value={a.color}
+            onCommit={(v) => {
+              const color = v.trim().toLowerCase();
+              if (!/^#[0-9a-f]{6}$/.test(color)) return false;
+              custom({ color });
+            }}
+          />
+        </div>
+        {unit('roughness', 'Roughness', finish.roughness)}
+        {unit('metalness', 'Metalness', finish.metalness)}
+        {unit('opacity', 'Opacity', a.opacity)}
+        <TextureSection body={body} controller={controller} readOnly={false} />
+      </div>
+    </Section>
+  );
+}
 function SheetSection({
   body,
   others,
@@ -2152,6 +2437,7 @@ function RebindPanel({
   controller: CadController;
   snapshot: CadSnapshot;
 }) {
+  const status = useStatusProps();
   const rebind = snapshot.rebind;
   if (!rebind) return null;
   return (
@@ -2182,10 +2468,10 @@ function RebindPanel({
               </span>
               {selectable.length ? (
                 <div className="cad-rebind-choice" role="group" aria-label="Candidates">
-                  <output data-testid="cad-rebind-candidate">
+                  <Output data-testid="cad-rebind-candidate">
                     Candidate {at + 1} of {selectable.length}
                     {hint ? ` at (${hint.centroid.map((c) => fmt(c, 1)).join(', ')})` : ''}
-                  </output>
+                  </Output>
                   <div className="cad-row">
                     <button
                       type="button"
@@ -2217,7 +2503,7 @@ function RebindPanel({
         })}
       </ol>
       {rebind.message && (
-        <p className="cad-muted" role="status">
+        <p className="cad-muted" {...status}>
           {rebind.message}
         </p>
       )}
@@ -2714,10 +3000,16 @@ function Navigator({
   controller,
   snapshot,
   narrow,
+  shown,
+  onToggle,
 }: {
   controller: CadController;
   snapshot: CadSnapshot;
   narrow: boolean;
+  /** Bodies drawn in the viewport now. */
+  shown: ReadonlySet<string>;
+  /** Shows or hides a body in the viewport only: never an edit, so readOnly allows it too. */
+  onToggle(id: string): void;
 }) {
   const { content: doc, selection } = snapshot;
   // Sketching is desktop work: on a narrow root the entries stay, disabled, with the reason.
@@ -2738,30 +3030,55 @@ function Navigator({
   };
   const onFace = snapshot.topology?.kind === 'face' && !!snapshot.topology.normal;
   const [making, setMaking] = useState<'loft' | 'sweep' | 'surface' | 'boundary'>();
-  const item = (
+  const button = (
     kind: 'body' | 'feature' | 'parameter',
     id: string,
     label: string,
     extra?: string,
   ) => (
-    <li key={id}>
-      <button
-        type="button"
-        className="cad-item"
-        aria-pressed={selection?.kind === kind && selection.id === id}
-        onClick={() => controller.select({ kind, id })}
-      >
-        {label}
-        {extra && <small>{extra}</small>}
-      </button>
-    </li>
+    <button
+      type="button"
+      className="cad-item"
+      aria-pressed={selection?.kind === kind && selection.id === id}
+      onClick={() => controller.select({ kind, id })}
+    >
+      {label}
+      {extra && <small>{extra}</small>}
+    </button>
   );
+  const item = (...args: Parameters<typeof button>) => <li key={args[1]}>{button(...args)}</li>;
   const active = doc.bodies.filter((b) => b.state === 'active');
   const values = parameterValues(doc);
   return (
     <nav className="cad-navigator" aria-label="CAD elements">
       <Section title={`Bodies (${active.length})`}>
-        <ul aria-label="Bodies">{active.map((b) => item('body', b.id, b.name))}</ul>
+        <ul aria-label="Bodies">
+          {active.map((b) => {
+            const on = shown.has(b.id);
+            const Icon = on ? Eye : EyeOff;
+            // A body of several disjoint solids says so, so a body is not read as one member (#538).
+            const solids = solidCount(snapshot, b.id);
+            return (
+              <li key={b.id} className="cad-body-row">
+                {button(
+                  'body',
+                  b.id,
+                  b.name,
+                  solids ? `${fmtGrouped(solids, 0)} solids` : undefined,
+                )}
+                <label className="cad-eye" title={on ? 'Hide in the view' : 'Show in the view'}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    aria-label={`Show ${b.name}`}
+                    onChange={() => onToggle(b.id)}
+                  />
+                  <Icon size={16} strokeWidth={1.7} aria-hidden="true" />
+                </label>
+              </li>
+            );
+          })}
+        </ul>
       </Section>
       <Section title="Model tree" open={false}>
         <ModelTree doc={doc} item={item} />
@@ -3374,8 +3691,21 @@ export interface CadSurfaceProps {
   gpuBytes?: number;
   /** R2b: placed parts and their edits (`CadBinding.assembly`). */
   assembly?: CadAssembly;
+  /**
+   * "none" when the Host shows its own role=status around the Surface: the Surface's notices
+   * stay polite live regions without the role. By default they are role=status named
+   * "CAD の状態" (the measure panel "Distance").
+   */
+  statusRole?: CadStatusRole;
 }
-export function CadSurface({
+export function CadSurface({ statusRole = 'status', ...props }: CadSurfaceProps) {
+  return (
+    <StatusRoleContext.Provider value={statusRole}>
+      <Surface {...props} />
+    </StatusRoleContext.Provider>
+  );
+}
+function Surface({
   controller,
   hostHistory,
   name = 'cad',
@@ -3384,8 +3714,9 @@ export function CadSurface({
   onExportCsv,
   gpuBytes,
   assembly,
-}: CadSurfaceProps) {
+}: Omit<CadSurfaceProps, 'statusRole'>) {
   const [exportingFile, setExportingFile] = useState(false);
+  const [rendering, setRendering] = useState(false);
   const [moveTool, setMoveTool] = useState(false);
   const [measureTool, setMeasureTool] = useState(false);
   const [pickTool, setPickTool] = useState<'face' | 'edge'>();
@@ -3405,8 +3736,9 @@ export function CadSurface({
   }
   const view = useRef<CadViewport | null>(null);
   const { readOnly, busy } = snapshot;
-  // Private view state: which named view is shown. Opens with the first one that still fits.
-  const [viewId, setViewId] = useState<string | null>(
+  // Private view state: which named view is shown. Opens with the first one that shows every
+  // body, otherwise with the whole model (SU2).
+  const [viewId, setShownViewId] = useState<string | null>(
     () =>
       initialView(
         snapshot.content.namedViews,
@@ -3415,9 +3747,22 @@ export function CadSurface({
   );
   // Undo of Save view, or another edit, removed the view shown: keep the camera, show all bodies.
   const shownView = snapshot.content.namedViews.some((v) => v.id === viewId) ? viewId : null;
+  // Bodies the eye in the Bodies list showed or hid against the view: choosing a view resets it.
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(new Set());
+  const setViewId = (id: string | null) => {
+    setShownViewId(id);
+    setToggled(new Set());
+  };
+  const toggleBody = (id: string) =>
+    setToggled((t) => {
+      const next = new Set(t);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const shownIds = shownBodies(snapshot.content, shownView, toggled);
   async function saveView() {
     const current = view.current?.currentView();
-    const bodyIds = shownBodies(snapshot.content, shownView);
+    const bodyIds = shownIds;
     if (!current || !bodyIds.length) return;
     const id = await controller.saveView(current, bodyIds);
     if (id) setViewId(id);
@@ -3460,28 +3805,34 @@ export function CadSurface({
   );
   const pngExportable = exportable && !partsLeft && drawn;
   const guardExport = useContext(EditorExportGuardContext);
-  async function exportPng(background: boolean) {
+  /** Whether the view shows the confirmed content now; reports why not. PNG and Render (#664). */
+  function pictureReady(): boolean {
+    const refuse = (message: string) => (controller.report(message), false);
     // The Host guard flushes pending inputs first; a field it commits starts a new evaluation.
     try {
       guardExport?.();
     } catch (error) {
-      return controller.report(error instanceof Error ? error.message : String(error));
+      return refuse(error instanceof Error ? error.message : String(error));
     }
     const now = controller.getSnapshot();
-    if (now.reference) return controller.report(describeCode('kernel-reference-only'));
-    if (mismatched(now)) return controller.report(describeCode('assembly-pose-mismatch'));
+    if (now.reference) return refuse(describeCode('kernel-reference-only'));
+    if (mismatched(now)) return refuse(describeCode('assembly-pose-mismatch'));
     // A joint being made shows poses that are not content (R2b-2c).
-    if (assembly?.getSnapshot().creating) return controller.report(describeCode('joint-creating'));
+    if (assembly?.getSnapshot().creating) return refuse(describeCode('joint-creating'));
     if (now.busy || !now.meshes?.current || now.geometryState !== 'ready')
-      return controller.report('形状を計算中です。計算が終わってから、もう一度操作してください。');
-    if (!drawn) return controller.report(describeCode('png-not-drawn'));
+      return refuse('形状を計算中です。計算が終わってから、もう一度操作してください。');
+    if (!drawn) return refuse(describeCode('png-not-drawn'));
     // A drag shows a placement that is not committed (and Escape may still cancel it).
     if (view.current?.dragging || view.current?.draggingJoint)
-      return controller.report(
+      return refuse(
         view.current.dragging
           ? 'bodyを移動している途中です。離すかEscapeで取り消してから、もう一度操作してください。'
           : 'jointを動かしている途中です。離すかEscapeで取り消してから、もう一度操作してください。',
       );
+    return true;
+  }
+  async function exportPng(background: boolean) {
+    if (!pictureReady()) return;
     const png = await view.current?.capture({ background });
     if (!png) return;
     if (onExportPng) return onExportPng(png, { background });
@@ -3700,7 +4051,7 @@ export function CadSurface({
                   icon={BookmarkPlus}
                   label="Save view"
                   reason="Saves the current camera and shown bodies as a named view"
-                  disabled={disabled || !shownBodies(snapshot.content, shownView).length}
+                  disabled={disabled || !shownIds.length}
                   onClick={() => void saveView()}
                 />
                 <IconButton
@@ -3716,6 +4067,13 @@ export function CadSurface({
                   reason="Available when the shape is up to date and drawn"
                   disabled={!pngExportable}
                   onClick={() => void exportPng(false)}
+                />
+                <IconButton
+                  icon={Aperture}
+                  label="Render image"
+                  reason="Path-traced still image of this view; available when the shape is up to date and drawn"
+                  disabled={!pngExportable}
+                  onClick={() => pictureReady() && setRendering(true)}
                 />
                 {importAvailable && !readOnly ? (
                   <IconButton
@@ -3763,7 +4121,13 @@ export function CadSurface({
                 onExportCsv={onExportCsv}
               />
             )}
-            <Navigator controller={controller} snapshot={snapshot} narrow={narrow} />
+            <Navigator
+              controller={controller}
+              snapshot={snapshot}
+              narrow={narrow}
+              shown={new Set(shownIds)}
+              onToggle={toggleBody}
+            />
           </>
         }
         inspector={
@@ -3846,6 +4210,7 @@ export function CadSurface({
           snapshot={snapshot}
           view={view}
           viewId={shownView}
+          toggled={toggled}
           onViewId={setViewId}
           moving={moveTool && !disabled}
           // Not while an edit evaluates: a dropped move still shows its uncommitted placement.
@@ -3890,6 +4255,14 @@ export function CadSurface({
           if (file) void importStep(file);
         }}
       />
+      {rendering && (
+        <PathRenderDialog
+          name={name}
+          source={() => view.current?.renderSource()}
+          onSavePng={onExportPng && ((png) => onExportPng(png, { background: true }))}
+          onClose={() => setRendering(false)}
+        />
+      )}
       {exportingFile && (
         <ExportFileDialog
           controller={controller}

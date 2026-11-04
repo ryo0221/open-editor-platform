@@ -6,6 +6,7 @@ import {
   type ProposalReads,
 } from '@editor-platform/artifact-core';
 export * from './text';
+export * from './japanese-lines';
 export * from './validation';
 export * from './describe';
 export * from './visual-patch';
@@ -127,8 +128,9 @@ export function transaction<T>(
 }
 /** Local-only snapshot history. Never ingest remote edits through this session. */
 export class EditorSession<T> {
-  private past: T[] = [];
-  private future: T[] = [];
+  private past: { content: T; proposals: readonly string[] }[] = [];
+  private future: { content: T; proposals: readonly string[] }[] = [];
+  private proposals: readonly string[] = [];
   private readonly sessionId = newId('session');
   private sequence = 0;
   private mergeKey: string | undefined;
@@ -143,6 +145,10 @@ export class EditorSession<T> {
   }
   get revision(): LocalDraftRevision {
     return { kind: 'local-draft', sessionId: this.sessionId, sequence: this.sequence };
+  }
+  /** Session-only proposal transaction ancestry, restored by the same native Undo/Redo. */
+  get proposalTransactions(): readonly string[] {
+    return [...this.proposals];
   }
   private assertMutationAvailable() {
     if (this.validatingHistory) throw new Error('HistoryValidationReentrancy');
@@ -166,6 +172,23 @@ export class EditorSession<T> {
   get canUndo() {
     return this.past.length > 0;
   }
+  /**
+   * The frozen history entries for a Host's budget check (for example the bytes of assets they
+   * reference): Undo's oldest first, Redo's in the order Redo restores them. Never mutate them;
+   * they are the canonical history.
+   */
+  historyEntries(direction: 'undo' | 'redo'): readonly T[] {
+    const source = direction === 'undo' ? this.past : [...this.future].reverse();
+    return source.map((e) => deepFreeze(e.content));
+  }
+  /** Forgets the oldest `count` Undo entries (a Host's memory budget). Redo is untouched. */
+  forgetOldestUndo(count: number) {
+    this.assertMutationAvailable();
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('forgetOldestUndo count');
+    this.past.splice(0, Math.min(count, this.past.length));
+    // A merge group whose Undo entry is gone must not absorb the next edit.
+    if (this.past.length === 0) this.mergeKey = undefined;
+  }
   get canRedo() {
     return this.future.length > 0;
   }
@@ -184,10 +207,12 @@ export class EditorSession<T> {
     // Freeze before updating history, so a failed command cannot partially commit.
     const value = deepFreeze(cmd.readonlyInput ? next : clone(next));
     if (!cmd.context?.mergeKey || cmd.context.mergeKey !== this.mergeKey)
-      this.past.push(this.value);
+      this.past.push({ content: this.value, proposals: this.proposals });
     this.mergeKey = cmd.context?.mergeKey;
     if (this.past.length > 100) this.past.shift();
     this.value = value;
+    if (cmd.context?.origin === 'proposal' && cmd.context.transactionId)
+      this.proposals = [...this.proposals, cmd.context.transactionId];
     this.future = [];
     this.sequence++;
     return this.value;
@@ -197,7 +222,7 @@ export class EditorSession<T> {
    * it has already checked. */
   peekHistory(direction: 'undo' | 'redo'): T | undefined {
     const source = direction === 'undo' ? this.past : this.future;
-    return source.length ? deepFreeze(source[source.length - 1]) : undefined;
+    return source.length ? deepFreeze(source[source.length - 1].content) : undefined;
   }
   /** Optional synchronous pre-commit validation; throws leave all history state untouched. */
   undo(validateCandidate?: (candidate: T) => void) {
@@ -223,15 +248,17 @@ export class EditorSession<T> {
     this.assertMutationAvailable();
     const source = direction === 'undo' ? this.past : this.future;
     const destination = direction === 'undo' ? this.future : this.past;
-    const candidate = source.length ? source[source.length - 1] : this.value;
+    const candidate = source.length ? source[source.length - 1].content : this.value;
     if (source.length) this.validateHistory(candidate, validateCandidate);
     // Own/freeze the result before changing history. Callers of the legacy
     // methods still receive independent mutable copies.
     const result = immutableView ? deepFreeze(candidate) : clone(candidate);
     this.breakHistoryGroup();
     if (source.length) {
-      destination.push(this.value);
-      this.value = source.pop()!;
+      destination.push({ content: this.value, proposals: this.proposals });
+      const restored = source.pop()!;
+      this.value = restored.content;
+      this.proposals = restored.proposals;
       this.sequence++;
     }
     return result;

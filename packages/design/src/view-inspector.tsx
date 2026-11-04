@@ -30,6 +30,7 @@ import type { DesignExtensionContext, DesignSurfaceExtension } from './view';
 // Inspector sections of the Design surface. Each section edits the single selected element.
 export interface DesignInspectorProps {
   references: ReferenceSurfaceProps['references'];
+  manga?: boolean;
   content: DesignContent;
   element: DesignElement | undefined;
   chosen: DesignElement[];
@@ -56,6 +57,7 @@ interface SectionProps {
   apply: (cmd: EditorCommand<DesignContent>) => boolean;
 }
 export function DesignInspector({
+  manga = false,
   references,
   content,
   element,
@@ -92,7 +94,7 @@ export function DesignInspector({
       />
       <fieldset disabled={readOnly} className="inspector-fields">
         <ReferenceWarnings items={content.elements} resolver={references} />
-        <DesignPrototypeSettings content={content} element={element} apply={apply} />
+        {!manga && <DesignPrototypeSettings content={content} element={element} apply={apply} />}
         <VisualInspector
           items={chosen.map((e) => {
             const first = designDrawings(content, e)[0];
@@ -107,7 +109,7 @@ export function DesignInspector({
           }}
         />
         {extension?.inspector?.(extensionContext)}
-        {section && element.type !== 'instance' && element.type !== 'react' && (
+        {!manga && section && element.type !== 'instance' && element.type !== 'react' && (
           <HtmlSemanticsSection {...section} />
         )}
         {section && (

@@ -17,7 +17,13 @@ import {
   type CadPartLookup,
   type CadSolvedPose,
 } from './assembly';
-import { resolveAngle, resolveLength, resolvePosition, type ParameterValues } from './graph';
+import {
+  parameterValues,
+  resolveAngle,
+  resolveLength,
+  resolvePosition,
+  type ParameterValues,
+} from './graph';
 import type { Angle, CadDocument, Length, Position3, Quaternion } from './model';
 import type { CadReferenceProblem, CadTopologyRef } from './topology';
 
@@ -392,6 +398,54 @@ export function previewJointPose(
     composePoses(solution.parent, jointMotion(joint.type, values)),
     invertPose(solution.child),
   );
+}
+/**
+ * Every direct component's pose for other joint values, from one solve and without a kernel
+ * (character props, C2b: a joint keyed on a timeline replays each frame). Each solved joint keeps
+ * its connector frames and moves its child by the new values; its parent connector follows the
+ * component it lies on, so a chain (shoulder, then elbow) moves together. A joint that did not
+ * solve leaves its child where the solve put it; values not given are the document's own.
+ */
+export function posesForJointValues(
+  doc: CadDocument,
+  solved: { poses: Record<string, CadSolvedPose>; joints: Record<string, CadJointSolution> },
+  values: ReadonlyMap<string, Partial<Record<CadJointValueKey, number>>>,
+  params: ParameterValues = parameterValues(doc),
+): Record<string, CadSolvedPose> {
+  const poses: Record<string, CadSolvedPose> = { ...solved.poses };
+  const moved = new Set<string>();
+  const children = new Set(doc.joints.map((j) => j.child.componentId));
+  let pending = [...doc.joints];
+  while (pending.length) {
+    const later: CadJoint[] = [];
+    for (const joint of pending) {
+      const [first] = joint.parent.componentPath;
+      const on = first === undefined ? undefined : stepComponent(doc, first, params);
+      // A parent that a joint moves is placed first (validation keeps the joints a tree).
+      if (on && children.has(on.component.id) && !moved.has(on.component.id)) {
+        later.push(joint);
+        continue;
+      }
+      const child = joint.child.componentId;
+      moved.add(child);
+      const solution = solved.joints[joint.id];
+      if (solution?.status !== 'solved') continue;
+      const before =
+        first === undefined ? identityPose() : stepPose(doc, solved.poses, first, params);
+      const after = first === undefined ? identityPose() : stepPose(doc, poses, first, params);
+      if (!before || !after) continue;
+      // The parent connector relative to the component it lies on, then where that is now.
+      const parent = composePoses(after, composePoses(invertPose(before), solution.parent));
+      const own = { ...jointValues(joint, params), ...values.get(joint.id) };
+      poses[child] = composePoses(
+        composePoses(parent, jointMotion(joint.type, own)),
+        invertPose(solution.child),
+      );
+    }
+    if (later.length === pending.length) break;
+    pending = later;
+  }
+  return poses;
 }
 /** Components a joint moves directly (its children), by component ID. */
 export const jointChildren = (doc: Pick<CadDocument, 'joints'>) =>

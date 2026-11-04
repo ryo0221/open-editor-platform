@@ -24,15 +24,15 @@ host.propose({
 host.acceptProposal(proposalId);
 ```
 
-`ArtifactEditor` のpropose/accept/rejectはlocal target revisionとpermissionを検査します。外部Artifactを読んだ提案は、既存 `previewHostProposal` / `applyHostProposal` と `checkProposalReads` にexact reference versionsを渡す経路を使ってください。local pending proposalだけでは外部参照の鮮度を保証しません。共有操作は既存Documentのauthority/text preparation subsetに限定します。
+`ArtifactEditor` のpropose/accept/rejectはlocal target revisionとpermissionを検査します。adapterに `changedElements: documentChangedElementIds` を渡すと、採用の結果（`acceptProposal` の戻り値と `onProposalResolved`）の `changedElementIds` に、提案で変わった段落・見出し・リスト項目・表の段落のIDが入ります（追加・削除されたリストや表は中の項目・段落も）。どの段落が提案由来かの来歴はHostがこれと採否の記録から作り、Documentのcontentには保存しません。外部Artifactを読んだ提案は、既存 `previewHostProposal` / `applyHostProposal` と `checkProposalReads` にexact reference versionsを渡す経路を使ってください。local pending proposalだけでは外部参照の鮮度を保証しません。共有操作は既存Documentのauthority/text preparation subsetに限定します。
 
 ### 章横断の派生出力
 
 `@editor-platform/document/sequence` の `composeDocumentSequence([{ artifact, versionId }, ...])` に確定版を順に渡します。全入力をawait前に所有し、kind/native content/version所属/hashを検証。失敗は `ok: false` とdiagnosticsを返し、部分的な `content` は返しません。成功時はreadonlyな `{ content, manifest }` を返します。正本として自動保存しません。
 
-初期subsetはparagraph/heading、rich marks、既存text style、hidden、align/indentです。表/画像/HTML/未知field/reuseは拒否。最大128出典、合計2000ブロック/100万UTF-16単位。出力IDは `sequence:<出典index>:<元ID>`。manifestには各出典のArtifact/version/hash/順序とID対応、page設定差、annotation等の未収録を記録します。
+通読sequenceはparagraph/heading、rich marks、既存text style、hidden、align/indentと、image（src/width/alt/caption/reference）を受け付けます。表/HTML/未知field/reuseは拒否。最大128出典、合計2000ブロック/100万UTF-16単位/8 MiB canonical native JSON。参照画像はfixedのみで、`composeDocumentSequence(sources, { references })`へ既存HostのReferenceResolverを渡し、全章を一度のcaptureで検証します。保持version/hash・現在権限・参照の集約上限（64件/閉包4 MiB）に失敗したら部分結果を返しません。draft/latestへの置換はしません。通常画像は既存nativeのsafeAssetUrl契約を用い、外部画像の可用性やライセンスを保証しません。通読SurfaceでもReferenceImageを用い、権限失効時は画素を取り除きます。画像対応は通読の範囲で、DOCX/EPUB/印刷の各adapterが画像を受け付ける保証ではありません。出力IDは `sequence:<出典index>:<元ID>`。manifestには各出典のArtifact/version/hash/順序とID対応、page設定差、annotation等の未収録を記録します。
 
-DOCXはこのcontentを既存 `captureDocumentExportSnapshot` → `prepareDocumentDocx` → 人によるreport確認 → `encodeDocumentDocx` に渡します。章manifestとDOCXのloss reportを両方保持してください。初期版は章の内容を連続結合し、改ページを強制しません。EPUBは下記N2aの水平subset。日本語縦書き、ルビ、完成小説の出版組版は未実装です。PDFは既存Documentの経路を使い、別のPDF text engineを作りません。
+DOCXはこのcontentを既存 `captureDocumentExportSnapshot` → `prepareDocumentDocx` → 人によるreport確認 → `encodeDocumentDocx` に渡します。章manifestとDOCXのloss reportを両方保持してください。初期版は章の内容を連続結合し、改ページを強制しません。EPUBは下記N2aの水平subsetと、全章が縦書きのときのV3縦書きsubset。縦書きの印刷・PDFは段落と見出しの原稿を既存のDocument PDF経路で縦組みにします（表・画像などを含むと止める）。完成小説の出版組版は未実装です。PDFは既存Documentの経路を使い、別のPDF text engineを作りません。
 
 ### N2a: 水平EPUB 3
 
@@ -66,7 +66,11 @@ const result = await encodeDocumentEpub(
 
 reportはexact出典・順序・hash、元ID→派生ID→XHTML ID、metadata、exporterVersion、planHash、差異diagnosticsを保持します。basisは結合contentのlocal-draftであり、新規saved Artifact/versionを表しません。EPUB内の `sources.json` と `export-report.json` に同じ情報を収録します。章名とnavigation labelはArtifact.nameです。
 
-対象はparagraph/heading、inline書式、既存block style、align/indent。hiddenは警告付きでreading contentから除外します。link/画像/表/HTML/reuse/未知field/ruby/縦書きは全体を拒否。fontを埋め込まず、page設定・readerによる改行/書体/固定ページの差は同意が必要な警告です。最大128出典・2000blocks・100万UTF-16単位、無圧縮entry合計16MiB、creator最大16名。metadataはXML-safeな有界文字列です。上限はperformance保証ではありません。
+対象はparagraph/heading、inline書式、既存block style、align/indent。hiddenは警告付きでreading contentから除外します。link/画像/表/HTML/reuse/未知fieldは全体を拒否。通読用composerが受け付けた通常imageもEPUB prepareでは`IMAGE_UNSUPPORTED`（error、派生block ID付き）で明示拒否し、画像やcaptionを黙って落としたbytesを返さない。ルビは `<ruby>…<rt>` で出す。傍点（`emphasisDots`）は `text-emphasis`（`-epub-` 接頭辞つきも併記、ルビのある字では反対側）で出す。全章が縦書き（`page.writingMode: 'vertical-rl'`）のときは縦書きEPUB（下記V3）、縦書きと横書きの章が混ざるときは `MIXED_WRITING_MODE` で拒否。fontを埋め込まず、page設定・readerによる改行/書体/固定ページの差は同意が必要な警告です。最大128出典・2000blocks・100万UTF-16単位、無圧縮entry合計16MiB、creator最大16名。metadataはXML-safeな有界文字列です。上限はperformance保証ではありません。
+
+### V3: 縦書きEPUB 3（小説）
+
+同じ `prepareDocumentEpub` で、全章の確定版が縦書きなら report の `format` が `'epub3-vertical'`、`exporterVersion` が `'epub-vertical/1.0.0'` になる。`html` に `writing-mode: vertical-rl`、spine は `page-progression-direction="rtl"`、1〜2桁の半角数字は編集画面と同じ規則で `<span class="tcy">`（`text-combine-upright`）、字下げは `margin-top`。改行と書体はreaderが決めるので、原稿用紙のマスや `breakJapaneseLines` の改行は再現しない（同意が必要な `REFLOW_FONT_DIFFERENCE` warning）。横書きの出力はルビ以外N2aと同じ。
 
 prepareのAbortSignalは例外、encodeの中止は `status: 'cancelled'`。encodeはok/blocked/cancelled/failedを返し、失敗時に部分bytesを返しません。planは同じprocessでprepareしたものだけ使用できます。同期ZIP中の即時割り込みは保証しません。Hostはencode前とdownload前にも現在のinput/IME guardを確認し、拒否時はcaptured planと同意を保持します。saved version/章順の変更ではpreviewをstaleにし、再prepareと同意を求めます。原稿・Undo・versionは変更しません。[段階設計](document-publishing-design.md)・[検証](verification/document-epub/README.md)を参照。
 
@@ -100,6 +104,12 @@ prepareのAbortSignalは例外、encodeの中止は `status: 'cancelled'`。enco
 通常DesignSurfaceにPages panelがあります。ページ/コマ作成、選択、読み順変更、方向、台詞追加を行います。移動/リサイズ/台詞編集/画像は既存canvas/Inspectorを使います。削除はnative `deleteElements` が同じtransactionでmetadataも除去。Undoは同じIDを復元し、新規作成は新IDにします。ページ移動後に別の古いIDを再利用しません。通常Duplicateはページ/コマを元の読み順の直後へ登録し、画像のsource/licenseも新しいelement IDへatomicに複製します。pagination付きDesignの要素copy/cut/pasteはmetadata付きclipboard未対応として変更前に拒否します（native text engine内の文字列clipboardとは別です）。
 
 local/native validatorは既存 `isDesignWithPaths`。legacy `isDesign` はpaginationを拒否するため、未対応shared/template/reuse/React adapterへ渡すと失敗します。public `designIntentCommand` もpaginationには非対応です。新規M0 adapterはlocalのArtifactEditor経路のみ。Hostは未対応経路を有効化しません。
+
+### 漫画ワークスペースと連動コマ
+
+DesignSurfaceのview-onlyな `workspace` とschema4/pagination2の連動コマを追加しています。[操作・データ・API・上限](manga-creation/guide.md)を参照してください。移行は初回の明示的な境界採用時に一つのUndo対象として行い、旧versionは変更しません。`isDesignWithPaths` が旧原稿と新形式を検証し、legacy `isDesign` の対応範囲は広げません。
+
+新しい `designPageProposalCommand` は分割木/形状/所属/読み順と依存する台詞等をレビューして一括採用します。上記M0 `designPageEditCommand` とdiffは従来の狭い契約を維持し、新しい形状を任意のpatchとして扱いません。コマ内の画像・文字・pathは既存のnative要素です。境界変更で絵を拡縮しません。shared/template/reuseは未対応です。
 
 ### M1a: localベクター線画・吹き出し
 

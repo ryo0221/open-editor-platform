@@ -102,7 +102,7 @@ test('reading Host: dense labels avoid nodes and each other; styles and deferred
   await expect(group.locator('title')).toContainText('Relation');
   await page.keyboard.press('Enter');
   await expect(group).toHaveClass(/selected/);
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).focus();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).focus();
   await expect(label).toBeVisible();
   await page.screenshot({ path: info.outputPath('graph-dense-labels-desktop.png') });
 });
@@ -157,7 +157,7 @@ test('reading Host: ordinary content edits and Undo preserve the manual camera',
   expect(await readingSnapshot(page)).toEqual(original);
   await page.getByLabel('Host read only', { exact: true }).uncheck();
   await expect(page.getByLabel('name', { exact: true })).toHaveValue('Edited label');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   expect(JSON.parse((await readingSnapshot(page)).source).nodes[0].attributes.name).toBe(
     'Edited label',
   );
@@ -235,4 +235,42 @@ test('default node labels: derived height drives overlap refusal and explicit si
   page,
 }) => {
   await checkDefaultOverlap(page);
+});
+test('#589: Fit with a selection shows the whole drawing; selection view and wheel zoom at the cursor', async ({
+  page,
+}, info) => {
+  const zoom = async () =>
+    Number((await page.getByLabel('Graph zoom', { exact: true }).textContent())!.replace('%', ''));
+  // A small drawing with a selected node opens whole, not magnified around the selection.
+  await mountReadingGraphHost(page, '?wide-label&selected=n0');
+  await expect(page.getByTestId('reading-selection')).toHaveText('n0');
+  await expect.poll(zoom).toBeLessThanOrEqual(100);
+  for (const id of ['n0', 'n1'])
+    await expect(page.locator(`[data-node-id="${id}"]`)).toBeInViewport({ ratio: 1 });
+  // The whole graph: Fit sees all of it; the selection view opens on the node and neighbours.
+  await mountReadingGraphHost(page, '?selected=n4');
+  await expect.poll(zoom).toBeLessThan(100);
+  const fitted = await zoom();
+  await mountReadingGraphHost(page, '?view=selection&selected=n4');
+  await expect.poll(zoom).toBeGreaterThan(fitted);
+  await expect(page.locator('[data-node-id="n4"]')).toBeInViewport({ ratio: 1 });
+  // ctrl + wheel zooms toward the cursor: the node under it stays under it.
+  const node = page.locator('[data-node-id="n4"]');
+  const before = (await node.boundingBox())!;
+  const at = { x: before.x + 10, y: before.y + 10 };
+  await page.mouse.move(at.x, at.y);
+  const start = await zoom();
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -200);
+  await page.keyboard.up('Control');
+  await expect.poll(zoom).toBeGreaterThan(start);
+  const after = (await node.boundingBox())!;
+  const scale = after.width / before.width;
+  expect(Math.abs(after.x + 10 * scale - at.x)).toBeLessThan(2);
+  expect(Math.abs(after.y + 10 * scale - at.y)).toBeLessThan(2);
+  // A plain wheel still scrolls the canvas, without zooming.
+  const zoomed = await zoom();
+  await page.mouse.wheel(0, 200);
+  expect(await zoom()).toBe(zoomed);
+  await page.screenshot({ path: info.outputPath('graph-589-selection-wheel.png') });
 });

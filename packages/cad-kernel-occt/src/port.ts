@@ -37,6 +37,11 @@ export interface WorkerKernelPortOptions {
   /** Forced stop for one job, Worker start-up included (initial limit 30 s). */
   jobTimeoutMs?: number;
   /**
+   * SU1: the job limit of a split evaluation (initial 120 s). Its jobs end at a feature boundary
+   * after about `sliceMs`, so only one long feature (one large Boolean) runs up to this.
+   */
+  sliceJobTimeoutMs?: number;
+  /**
    * Receives meshes of every successful evaluation, and of a failed one that shows the bodies
    * outside the failure (U4); ownership of the buffers moves to the callee.
    */
@@ -65,7 +70,50 @@ export interface WorkerKernelPortOptions {
     done: number,
     total: number,
   ): void;
+  /**
+   * #589: ok display evaluations kept past this port, so a Surface mounted again for the same
+   * content (a larger view, another panel) shows it without evaluating again.
+   */
+  memory?: CadEvaluationMemory;
 }
+/**
+ * Ok display evaluations and their meshes by the exact request (build, content, connectors,
+ * coarse mesh, reference display), shared by every port given it (#589). The meshes are read
+ * only: every port that answers from it hands the same arrays to its `onMeshes`.
+ */
+export class CadEvaluationMemory {
+  private readonly kept = new Map<
+    string,
+    { evaluation: CadEvaluation & { status: 'ok' }; meshes: CadMesh[] }
+  >();
+  /** Answers by the request; `entries` most recent (initial 2: the large models are large). */
+  constructor(readonly entries = 2) {}
+  get(key: string) {
+    const hit = this.kept.get(key);
+    if (hit) {
+      // The most recent stays longest.
+      this.kept.delete(key);
+      this.kept.set(key, hit);
+    }
+    return hit;
+  }
+  set(key: string, value: { evaluation: CadEvaluation & { status: 'ok' }; meshes: CadMesh[] }) {
+    this.kept.delete(key);
+    this.kept.set(key, value);
+    for (const old of this.kept.keys()) {
+      if (this.kept.size <= this.entries) break;
+      this.kept.delete(old);
+    }
+  }
+  clear() {
+    this.kept.clear();
+  }
+  get size() {
+    return this.kept.size;
+  }
+}
+/** The memory the CAD binding uses unless its Host gives another one (or none). */
+export const sharedCadEvaluationMemory = new CadEvaluationMemory();
 /** One queued Worker request: an evaluation (display, export) or a STEP read. */
 interface Job {
   requestId: string;
@@ -86,6 +134,8 @@ interface Job {
   cancelling?: true;
   /** CM-4: when the evaluation's first job was sent, for `totalTimeoutMs`. */
   began?: number;
+  /** In the export slot: only a newer export supersedes it, and it reports no progress. */
+  export?: true;
 }
 const failed = (
   request: CadEvaluateRequest,
@@ -150,6 +200,24 @@ export class WorkerKernelPort implements CadKernelPort {
     };
   }
 
+  /**
+   * The hash a kept result is given is the document's own; the bytes it reads are still here,
+   * and still the bytes the document names (the Worker would refuse others).
+   */
+  private readable(request: CadEvaluateRequest) {
+    return (
+      cadContentHash(request.document) === request.candidateHash &&
+      request.document.assets.every((a) => {
+        if (a.kind !== 'normalized-brep') return true;
+        const bytes = this.options.assets?.(a.sha256);
+        return (
+          !!bytes &&
+          bytes.byteLength === a.byteLength &&
+          `sha256:${bytesToHex(sha256(bytes))}` === a.sha256
+        );
+      })
+    );
+  }
   /** `reference`: only for a substitution the Host approved (CatalogKernelPort decides). */
   evaluate(
     request: CadEvaluateRequest,
@@ -164,18 +232,7 @@ export class WorkerKernelPort implements CadKernelPort {
       !this.disposed &&
       kept?.key === key &&
       kept.evaluation.contentHash !== request.candidateHash &&
-      // The hash the result is given is the document's own; the bytes it reads are still here,
-      // and still the bytes the document names (the Worker would refuse others).
-      cadContentHash(request.document) === request.candidateHash &&
-      request.document.assets.every((a) => {
-        if (a.kind !== 'normalized-brep') return true;
-        const bytes = this.options.assets?.(a.sha256);
-        return (
-          !!bytes &&
-          bytes.byteLength === a.byteLength &&
-          `sha256:${bytesToHex(sha256(bytes))}` === a.sha256
-        );
-      })
+      this.readable(request)
     ) {
       // As a newer job would, it supersedes the one waiting.
       if (this.waiting) this.waiting.fail('superseded', true);
@@ -186,18 +243,37 @@ export class WorkerKernelPort implements CadKernelPort {
       this.options.onMeshes?.(request.candidateHash, kept.meshes);
       return Promise.resolve(evaluation);
     }
+    // #589: the same exact request answered before, by this port or another one of the page.
+    const memoryKey =
+      key === undefined
+        ? undefined
+        : `${this.options.build.buildHash} ${request.candidateHash} ${JSON.stringify([request.connectors ?? [], !!request.coarse, !!reference])}`;
+    const remembered = memoryKey && this.options.memory?.get(memoryKey);
+    if (remembered && !this.disposed && this.readable(request)) {
+      if (this.waiting) this.waiting.fail('superseded', true);
+      this.waiting = undefined;
+      this.reused++;
+      this.own = { key: key!, ...remembered };
+      this.options.onMeshes?.(request.candidateHash, remembered.meshes);
+      return Promise.resolve(remembered.evaluation);
+    }
     return new Promise((resolve) =>
       this.enqueue(
         this.evaluation(
           request,
           {
             ...(reference ? { reference } : {}),
-            // Only a display evaluation is split; an export or analysis runs as one job.
-            slice: { ms: this.options.sliceMs ?? 20_000 },
+            slice: this.slice(),
           },
           (data) => {
-            if (key !== undefined && data.evaluation.status === 'ok')
+            if (key !== undefined && data.evaluation.status === 'ok') {
               this.own = { key, evaluation: data.evaluation, meshes: data.meshes };
+              if (data.evaluation.contentHash === request.candidateHash)
+                this.options.memory?.set(memoryKey!, {
+                  evaluation: data.evaluation,
+                  meshes: data.meshes,
+                });
+            }
             if (data.evaluation.status === 'ok' || data.meshes.length)
               this.options.onMeshes?.(data.evaluation.contentHash, data.meshes);
             resolve(data.evaluation);
@@ -219,7 +295,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { deflectionMm },
+          { deflectionMm, slice: this.slice() },
           (data) => resolve({ evaluation: data.evaluation, meshes: data.meshes }),
           (evaluation) => resolve({ evaluation, meshes: [] }),
         ),
@@ -234,7 +310,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { step: true },
+          { step: true, slice: this.slice() },
           (data) => resolve(data.step ? { evaluation: data.evaluation, step: data.step } : data),
           (evaluation) => resolve({ evaluation }),
         ),
@@ -252,7 +328,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { brep: true },
+          { brep: true, slice: this.slice() },
           (data) => resolve(data.brep ? { evaluation: data.evaluation, brep: data.brep } : data),
           (evaluation) => resolve({ evaluation }),
         ),
@@ -271,7 +347,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { continuity: edge },
+          { continuity: edge, slice: this.slice() },
           (data) =>
             resolve(
               data.continuity
@@ -295,7 +371,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { curvature: true },
+          { curvature: true, slice: this.slice() },
           (data) =>
             resolve({
               evaluation: data.evaluation,
@@ -317,7 +393,7 @@ export class WorkerKernelPort implements CadKernelPort {
       this.enqueueExport(
         this.evaluation(
           request,
-          { comb: edge },
+          { comb: edge, slice: this.slice() },
           (data) =>
             resolve(
               data.comb
@@ -432,8 +508,16 @@ export class WorkerKernelPort implements CadKernelPort {
     this.waiting = job;
     void this.pump();
   }
+  /**
+   * CM-4: a display evaluation, an export and an analysis all run as jobs of about `sliceMs`
+   * (SC-2): an export evaluates the whole graph again, and would otherwise be one 30 s job.
+   */
+  private slice() {
+    return { ms: this.options.sliceMs ?? 20_000 };
+  }
   private enqueueExport(job: Job) {
     if (this.disposed) return job.fail('kernel-unavailable', true);
+    job.export = true;
     if (this.waitingExport) this.waitingExport.fail('superseded', true);
     this.waitingExport = job;
     void this.pump();
@@ -552,14 +636,16 @@ export class WorkerKernelPort implements CadKernelPort {
   private continue(job: Job, data: Extract<CadWorkerResponse, { type: 'continued' }>) {
     if (job.message.type !== 'evaluate' || !job.message.slice) return;
     if (job.cancelling) return this.finish(job, () => job.fail('cancelled', true));
-    if (this.waiting) return this.finish(job, () => job.fail('superseded', true));
+    // An edit's evaluation waits for an export to end, as it would for one long job (CAD21).
+    if (job.export ? this.waitingExport : this.waiting)
+      return this.finish(job, () => job.fail('superseded', true));
     if (this.now() - job.began! >= (this.options.totalTimeoutMs ?? 300_000)) {
       // The Worker ends the paused evaluation as cancelled.
       this.worker!.postMessage({ type: 'cancel', requestId: job.requestId });
       return this.finish(job, () => job.fail('timeout', false, job.elementId));
     }
     const { requestId, candidateHash } = job.message;
-    this.options.onProgress?.({ requestId, candidateHash }, data.done, data.total);
+    if (!job.export) this.options.onProgress?.({ requestId, candidateHash }, data.done, data.total);
     this.timers.clear(job.timer);
     job.timer = this.timers.set(
       () => this.stop(job, 'timeout', false, job.elementId),
@@ -569,8 +655,9 @@ export class WorkerKernelPort implements CadKernelPort {
   }
   /** A job's limit: the job limit, and for a split evaluation no later than its total limit. */
   private limit(job: Job) {
-    const each = this.options.jobTimeoutMs ?? 30_000;
-    if (job.message.type !== 'evaluate' || !job.message.slice) return each;
+    if (job.message.type !== 'evaluate' || !job.message.slice)
+      return this.options.jobTimeoutMs ?? 30_000;
+    const each = this.options.sliceJobTimeoutMs ?? 120_000;
     const left = (this.options.totalTimeoutMs ?? 300_000) - (this.now() - job.began!);
     return Math.max(0, Math.min(each, left));
   }

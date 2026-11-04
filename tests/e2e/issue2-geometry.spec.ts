@@ -78,7 +78,7 @@ test('QA-05 eight rotated handles follow the pointer at 25/100/200 percent after
     expect((await nativeArtifact(page)).draft.content).toEqual(initial);
     for (const handle of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
       const grip = canvas.getByRole('button', {
-        name: handle === 'se' ? 'Resize shape object 1' : `Resize ${handle}`,
+        name: `Resize ${handle}`,
         exact: true,
       });
       const point = (await grip.boundingBox())!;

@@ -13,6 +13,7 @@
     "@editor-platform/structured-graph": "*",
     "@editor-platform/geo-core": "*",
     "@editor-platform/schedule": "*",
-    "@editor-platform/time-axis": "*"
+    "@editor-platform/time-axis": "*",
+    "@editor-platform/fiction-map": "0.0.0"
   }
 }

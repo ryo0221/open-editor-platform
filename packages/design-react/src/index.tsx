@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { clone, newId } from '@editor-platform/artifact-core';
 import { command } from '@editor-platform/editor-core';
 import {
@@ -81,6 +81,7 @@ export function DesignReactSurface({
     [mode, setMode] = useState<'edit' | 'interact'>('edit');
   const [exportDiagnostics, setExportDiagnostics] = useState<ReactUiDiagnostic[]>([]);
   const [diagnosticTarget, setDiagnosticTarget] = useState<{ id: string }>();
+  useEffect(() => setDiagnosticTarget(surface.focusRequest), [surface.focusRequest]);
   const [publicationTarget, setPublicationTarget] = useState<string>();
   const [review, setReview] = useState<DesignReactBundle>();
   const [target, setTarget] = useState('');
@@ -322,11 +323,17 @@ export function DesignReactSurface({
         {...surface}
         execute={checkedExecute}
         content={content}
-        extension={
-          content.schemaVersion === 3
+        extension={{
+          ...(content.schemaVersion >= 3
             ? { beforeGraphicExport: extension.beforeGraphicExport }
-            : extension
-        }
+            : extension),
+          toolbar: (context) => (
+            <>
+              {surface.extension?.toolbar?.(context)}
+              {content.schemaVersion < 3 && extension.toolbar(context)}
+            </>
+          ),
+        }}
         publicationRequest={publicationTarget}
         focusRequest={diagnosticTarget}
         onPublicationClosed={() => setPublicationTarget(undefined)}

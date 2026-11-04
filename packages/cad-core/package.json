@@ -9,6 +9,7 @@
   "dependencies": {
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/geometry-core": "*",
     "@noble/hashes": "1.8.0"
   }
 }

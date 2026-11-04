@@ -1,7 +1,37 @@
+import { readFile } from 'node:fs/promises';
+import { crc32, deflateSync } from 'node:zlib';
+import { zipSync } from 'fflate';
 import { expect, test, type Page } from '@playwright/test';
 
 // The building Surface's test host (R2c-3c). Needs the development kernel (CAD_OCCT_DIST).
 test.skip(!process.env.CAD_OCCT_DIST, 'CAD_OCCT_DIST is not set');
+
+/** A small RGB PNG drawn by `pixel` (#662 textures). */
+function png(size: number, pixel: (x: number, y: number) => number[]): Uint8Array {
+  const rows = Buffer.alloc((size * 3 + 1) * size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) rows.set(pixel(x, y), y * (size * 3 + 1) + 1 + x * 3);
+  const chunk = (type: string, data: Buffer) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])) >>> 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(rows)),
+      chunk('IEND', Buffer.alloc(0)),
+    ]),
+  );
+}
 
 const modelState = (page: Page) => page.getByTestId('bim-model-state');
 const ready = (page: Page) => expect(modelState(page)).toHaveText('Model up to date');
@@ -78,6 +108,78 @@ test('selects an element from the list and the view, edits it, and undoes the ed
   await expect.poll(async () => (await state(page)).selection.length).toBe(0);
 });
 
+test('realistic lighting draws the building with environment light and shadows (#665)', async ({
+  page,
+}) => {
+  await page.goto('/?fixture=box');
+  await ready(page);
+  const canvas = page.getByTestId('bim-viewport').locator('canvas');
+  await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+  const button = await tool(page, 'Realistic lighting');
+  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await button.click();
+  await expect(canvas).toHaveAttribute('data-lighting', 'realistic');
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: test.info().outputPath('bim-realistic.png') });
+  // A click still selects the element under the pointer: the ground is never picked.
+  await (await tool(page, 'Fit view')).click();
+  const view = page.getByTestId('bim-viewport');
+  const box = (await view.boundingBox())!;
+  await view.click({ position: { x: box.width / 2, y: box.height / 2 } });
+  await expect.poll(async () => (await state(page)).selection.length).toBe(1);
+  await (await tool(page, 'Realistic lighting')).click();
+  await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+});
+
+test('renders a path-traced PNG of the 3D view, and Cancel goes back to editing (#664)', async ({
+  page,
+}) => {
+  // Software WebGL (no GPU) compiles the path-tracing shader for about a minute.
+  test.setTimeout(480_000);
+  await page.goto('/?fixture=box');
+  await ready(page);
+  await (await tool(page, 'Fit view')).click();
+  await (await tool(page, 'Render image')).click();
+  const dialog = page.getByRole('dialog', { name: 'Render image' });
+  await dialog.getByLabel('Width (px)').fill('160');
+  await dialog.getByLabel('Height (px)').fill('100');
+  await dialog.getByLabel('Samples').fill('2');
+  await dialog.getByLabel('Time limit (s, 0 = none)').fill('0');
+  await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+  await expect(dialog.getByTestId('view-render-done')).toHaveText(
+    '160 × 100 px, 2 samples (all samples)',
+    { timeout: 400_000 },
+  );
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Save PNG' }).click();
+  const file = await readFile((await (await download).path())!);
+  expect(file.readUInt32BE(16)).toBe(160);
+  expect(file.readUInt32BE(20)).toBe(100);
+  // The building is drawn: the image is not one flat colour.
+  const pixels = await dialog.getByTestId('view-render-image').evaluate((img: HTMLImageElement) => {
+    const c = Object.assign(document.createElement('canvas'), { width: 160, height: 100 });
+    const g = c.getContext('2d')!;
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, 160, 100).data;
+    return new Set(Array.from({ length: 160 * 100 }, (_, i) => d[i * 4] >> 4)).size;
+  });
+  expect(pixels).toBeGreaterThan(3);
+  await page.screenshot({ path: test.info().outputPath('bim-render.png') });
+  // A long render is cancelled: nothing kept, the settings back, then the editor.
+  await dialog.getByLabel('Samples').fill('4096');
+  await dialog.getByRole('button', { name: 'Render again' }).click();
+  await expect(dialog.getByTestId('view-render-progress')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog.getByTestId('view-render-progress')).toHaveCount(0);
+  await expect(dialog.getByTestId('view-render-done')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const view = page.getByTestId('bim-viewport');
+  const box = (await view.boundingBox())!;
+  await view.click({ position: { x: box.width / 2, y: box.height / 2 } });
+  await expect.poll(async () => (await state(page)).selection.length).toBe(1);
+});
+
 test('a type edit rebuilds the shared solid and the walls it opens', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'desktop flow');
   await page.goto('/?fixture=box');
@@ -94,6 +196,190 @@ test('a type edit rebuilds the shared solid and the walls it opens', async ({ pa
   // The window solid and the two walls with windows (north, east).
   expect(s.sent!.solids).toBe(3);
   expect(s.elements['win-n1']!.volume).toBeCloseTo(1200 * 1500 * 50, 3);
+});
+
+test('gives a type’s surface material a look from the library, and Undo takes it back (#661)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?fixture=box');
+  await ready(page);
+  await inspector(page).getByRole('tab', { name: 'Types' }).click();
+  await inspector(page)
+    .getByRole('button', { name: /^RC 180 \+ plaster 20/ })
+    .click();
+  const material = inspector(page).getByTestId('bim-material');
+  await expect(material).toContainText('Surface material: Concrete');
+  await expect(material).toContainText('Shared by');
+  const look = material.getByLabel('Look');
+  await expect(look).toHaveValue('');
+  const concrete = () =>
+    page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            bimController: {
+              state: { content: { materials: { id: string; appearance?: unknown }[] } };
+            };
+          }
+        ).bimController.state.content.materials.find((m) => m.id === 'm-concrete')!.appearance,
+    );
+  await look.selectOption({ label: 'Brick' });
+  await expect
+    .poll(concrete)
+    .toEqual({ color: '#a4553d', opacity: 1, roughness: 0.85, metalness: 0, preset: 'brick' });
+  // A value changed by hand makes it custom.
+  const roughness = material.getByLabel('Roughness');
+  await roughness.fill('0.4');
+  await roughness.press('Enter');
+  await expect
+    .poll(concrete)
+    .toEqual({ color: '#a4553d', opacity: 1, roughness: 0.4, metalness: 0 });
+  await expect(look).toHaveValue('custom');
+  await (await tool(page, 'Realistic lighting')).click();
+  await page.screenshot({ path: test.info().outputPath('bim-material.png') });
+  await (await tool(page, 'Undo')).click();
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(concrete).toBeUndefined();
+  await expect(look).toHaveValue('');
+});
+
+test('puts a downloaded texture on a type’s surface material, and Undo takes it off (#662)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?fixture=box&assets=1&ifc=1');
+  await ready(page);
+  await inspector(page).getByRole('tab', { name: 'Types' }).click();
+  await inspector(page)
+    .getByRole('button', { name: /^RC 180 \+ plaster 20/ })
+    .click();
+  const material = inspector(page).getByTestId('bim-material');
+  const snapshot = () =>
+    page.evaluate(() => {
+      const c = (
+        window as unknown as {
+          bimController: {
+            state: {
+              content: {
+                materials: { id: string; appearance?: Record<string, unknown> }[];
+                assets?: { id: string; kind: string }[];
+              };
+            };
+          };
+        }
+      ).bimController.state.content;
+      return {
+        look: c.materials.find((m) => m.id === 'm-concrete')!.appearance,
+        assets: c.assets,
+      };
+    });
+  // Poly Haven's names: diffuse, OpenGL normal and roughness.
+  const zip = zipSync({
+    'red_brick_diff_1k.png': png(64, (x, y) =>
+      (Math.floor(y / 8) % 2 ? x + 4 : x) % 16 < 14 && y % 8 < 7 ? [164, 85, 61] : [220, 214, 200],
+    ),
+    'red_brick_nor_gl_1k.png': png(16, () => [128, 128, 255]),
+    'red_brick_rough_1k.png': png(16, () => [200, 200, 200]),
+  });
+  await material.getByLabel('Texture files').setInputFiles({
+    name: 'red_brick_1k.zip',
+    mimeType: 'application/zip',
+    buffer: Buffer.from(zip),
+  });
+  const dialog = page.getByTestId('view-texture-import');
+  await expect(dialog.getByLabel('Map of red_brick_diff_1k.png')).toHaveValue('color');
+  await expect(dialog.getByLabel('Map of red_brick_nor_gl_1k.png')).toHaveValue('normal');
+  await expect(dialog.getByLabel('Map of red_brick_rough_1k.png')).toHaveValue('roughness');
+  await dialog.getByLabel('Width (mm)').fill('1200');
+  await dialog.getByLabel('Height (mm)').fill('600');
+  await dialog.getByLabel('Source URL').fill('https://polyhaven.com/a/red_brick');
+  await dialog.getByRole('button', { name: 'Add texture' }).click();
+  await expect.poll(async () => (await snapshot()).assets?.length).toBe(3);
+  const { look, assets } = await snapshot();
+  expect(look).toMatchObject({
+    color: '#ffffff',
+    roughness: 1,
+    textures: {
+      maps: { color: assets![0]!.id, normal: assets![1]!.id, roughness: assets![2]!.id },
+      sizeMm: [1200, 600],
+      rotationDeg: 0,
+      normal: 'gl',
+      name: 'red_brick',
+      source: 'https://polyhaven.com/a/red_brick',
+      license: 'CC0',
+    },
+  });
+  await expect(material.getByTestId('bim-texture')).toContainText('red_brick');
+  await ready(page);
+  const canvas = page.getByTestId('bim-viewport').locator('canvas');
+  await (await tool(page, 'Realistic lighting')).click();
+  await page.waitForTimeout(500);
+  const withTexture = await canvas.screenshot({
+    path: test.info().outputPath('bim-texture.png'),
+  });
+  // IFC keeps the look, not the images, and says so (#663).
+  const download = page.waitForEvent('download');
+  await (await tool(page, 'Export IFC')).click();
+  const ifc = await readFile((await (await download).path())!, 'utf8');
+  expect(ifc).toMatch(/IFCMATERIALDEFINITIONREPRESENTATION\(/);
+  expect(ifc).toMatch(/IFCSURFACESTYLE\('Concrete',\.BOTH\.,\(#\d+\)\);/);
+  await expect(page.getByTestId('bim-ifc-losses')).toHaveText(
+    ' · IFC written without texture maps',
+  );
+  await expect(page.getByTestId('bim-ifc-losses')).toHaveAttribute(
+    'title',
+    'The texture maps of Concrete are not written: IFC keeps its colour and finish.',
+  );
+  // The size is edited in the Inspector.
+  const width = material.getByLabel('Width (mm)');
+  await width.fill('2400');
+  await width.press('Enter');
+  await expect
+    .poll(async () => ((await snapshot()).look?.textures as { sizeMm: number[] }).sizeMm)
+    .toEqual([2400, 600]);
+  await (await tool(page, 'Undo')).click();
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(async () => (await snapshot()).look).toBeUndefined();
+  expect((await snapshot()).assets).toBeUndefined();
+  await page.waitForTimeout(500);
+  expect((await canvas.screenshot()).equals(withTexture)).toBe(false);
+});
+
+test('gives a wall’s two faces their own layer’s look (#662, 2c)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?fixture=box');
+  await ready(page);
+  await inspector(page).getByRole('tab', { name: 'Types' }).click();
+  await inspector(page)
+    .getByRole('button', { name: /^RC 180 \+ plaster 20/ })
+    .click();
+  const outer = inspector(page).getByTestId('bim-material');
+  const inner = inspector(page).getByTestId('bim-material-last');
+  await expect(outer).toContainText('Surface material: Concrete');
+  await expect(outer).toContainText('right of the drawing direction');
+  await expect(inner).toContainText('Other face material: Plaster');
+  await outer.getByLabel('Look').selectOption({ label: 'Brick' });
+  await inner.getByLabel('Look').selectOption({ label: 'White plaster' });
+  const looks = () =>
+    page.evaluate(() =>
+      (
+        window as unknown as {
+          bimController: {
+            state: { content: { materials: { id: string; appearance?: { preset?: string } }[] } };
+          };
+        }
+      ).bimController.state.content.materials.map((m) => [m.id, m.appearance?.preset ?? null]),
+    );
+  await expect.poll(looks).toEqual([
+    ['m-concrete', 'brick'],
+    ['m-finish', 'plaster'],
+    ['m-steel', null],
+  ]);
+  await ready(page);
+  await (await tool(page, 'Realistic lighting')).click();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: test.info().outputPath('bim-two-faces.png') });
 });
 
 test('names a refused edit and changes nothing', async ({ page }) => {

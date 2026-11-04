@@ -6,6 +6,26 @@ and StructuredData models. Code is an explicit reference Host extension. The pur
 commands and StorageAdapter. It does not own application routing, identity, access
 policy, SORA content, code execution or a universal node model.
 
+Hosts projecting objects through `CanvasStage` can opt out of resize per target
+with `resizable: false` and cancel stale object previews with the optional opaque
+`objectRevision` token. See the [Canvas interaction contracts](../packages/canvas-ui/README.md)
+for identity, selection and cancellation rules. Native command permission and
+revision checks remain Host-owned.
+
+A pointer revision precondition belongs to that pointer operation. Clear it on the
+matching `pointerup`/`pointercancel` even outside the Canvas parent, **after** the
+synchronous Canvas command callback. The [R2 Host fixture](../tests/fixtures/canvas-r2/host.tsx)
+and [R0 Host fixture](../tests/fixtures/fiction-map-r0/host.tsx) use a window bubble
+listener, matching pointer ID and start timestamp, with listener cleanup on unmount.
+Object terminal events must propagate to that listener; a Host intercepting them
+must finish its own precondition cleanup after processing the command. Point input
+keeps its separate preconditions and does not seed the object record.
+
+Do not clear a command precondition on capture release or in an earlier capture
+handler: normal commit releases capture before calling `onTransform`, so stale
+commands still need validation then. After a canceled pointer finishes, a fresh
+Arrow command uses the current native revision without requiring another click.
+
 ## Adapters and actual connection
 
 | Experience   | Previous Studio                          | Current public connection                                                             | Declared output / limit                                                                                                    |
@@ -56,8 +76,10 @@ host.close('require-saved');
 
 `Artifact<T>` and `StorageAdapter<Artifact<T>>` retain the native T. A validator checks
 initial/draft/all retained version content; `loadHostArtifact` additionally validates
-canonical hashes before opening JSON (16 MiB UTF-8 limit). Save and native JSON
+canonical hashes before opening JSON (64 MiB UTF-8 limit). Save and native JSON
 export enforce the same serialized envelope limit, including retained versions. An
+exported `hostNativeArtifactByteLimit` exposes that byte budget to consuming Hosts
+for preflight estimates; an estimate never replaces the serializer's final check. An
 oversized save fails before storage, preserving the previous saved record and dirty
 draft; retained versions are never silently pruned. Retained version IDs,
 parents and draft base are checked. Public commands are applied to private Session
@@ -66,6 +88,13 @@ Commands retain transaction/read context. Change listeners can read native conte
 revision, dirty/saving state and selection; listener failures do not corrupt accepted
 changes. Formats are adapter-specific, and unsupported requests return an addressed
 `EditorHostError` rather than an empty successful export.
+
+The native byte budget is an admission limit, not a storage quota guarantee. The
+reference application's `BrowserArtifactStorage` uses localStorage and can fail
+well below it. Hosts handling large artwork can inject the existing artifact-core
+`IndexedDBStorage` with their own database name, or another durable adapter. A
+storage quota failure remains `save-failed`, retains the draft and previous saved
+record, and must not be reported as saved.
 
 The reference application in `apps/artifact-host` uses only public packages and its
 own CSS/models, without Playground state/CSS or SORA schema. Run
@@ -116,6 +145,16 @@ The existing `ArtifactEditor`, input boundaries, permission callback,
   accepted result is an unsaved draft change (`dirty: true`) until the Host saves.
   Rejecting changes neither content nor history. Closing the Session withdraws open
   proposals.
+- **Changed elements.** An adapter that sets `changedElements(before, after)` gets
+  `changedElementIds` on an accepted result: the stable IDs whose content the reviewed
+  preview changed, added or removed, once each. Document uses
+  `documentChangedElementIds` (`@editor-platform/document/proposal-diff`): block,
+  paragraph, list-item and table-paragraph IDs, including every item or table paragraph
+  inside an added or removed list or table. Other domains can use
+  `changedElementsFromDiff(proposalDiffAdapter)`. Artifact-level settings and saved view
+  changes are not listed. A Host records which parts came from a proposal (provenance)
+  from these IDs. A reader that throws refuses the accept (`proposal-invalid`) and keeps
+  the proposal pending. Without `changedElements` the field is absent.
 - **Document text.** `documentText(content)` returns text with each native hard_break
   as `\n`, segments joined by a blank line, and stable segment IDs (paragraph, heading,
   code block, list paragraph, table-cell paragraph). Every character is one engine
@@ -137,6 +176,62 @@ contract.
 
 ## Session, input, save and close
 
+### Final proposal assertion and exact apply observation
+
+`ArtifactEditor.propose(proposal, hooks?)` accepts optional `HostProposalHooks<T>`:
+
+- `beforeApply()` is a synchronous, void-returning final assertion. Preview does not
+  call it. The owned commit commands retain it, including when a caller extracts a
+  command from review and invokes `execute`. It may run once per command; it must be
+  pure and idempotent. Throwing, returning a value/Promise, losing native permission,
+  or changing the target revision refuses the proposal before its commit. Do remote
+  preflight before entering this synchronous boundary; it is not a distributed lock.
+- `onApplied(event)` observes one successful `acceptProposal`, before Surface/change
+  subscribers can edit again. `HostProposalApplied<T>` contains Artifact/kind,
+  proposal/transaction IDs, exact before/after local revisions, a copy of the accepted
+  content, and the adapter's `changedElementIds` when supplied. Domain adapters may
+  use qualified address keys. Later changes to the hooks object do not replace the
+  captured callbacks. The accepted proposal is removed before observers run.
+
+The retained preview owns independent base/content copies, even when a command
+retains the object it returned. Accept checks the actual command result against
+the reviewed content, validates it, then derives changed IDs inside the same atomic
+commit boundary. The diff reader receives independent copies; its returned ID list
+is copied too. A failed diff or a permission/revision change during inspection
+refuses the commit. These checks finish before apply/Surface notifications.
+
+This is an unsaved local apply observation. Reject/stale/failed apply and Undo/Redo
+do not emit another apply receipt. The existing `onProposalResolved` outcome retains
+its semantics; after a reentrant subscriber edit its revision can already be newer,
+so use `onApplied` when exact accepted content/revision is required.
+Executing an extracted command enforces its final guard but does not accept the
+proposal or emit `onApplied`. For formal generation adoption the Host must reconcile
+the successful `acceptProposal` result with its apply observation; ordinary native
+editing alone does not establish generation adoption or saved usage.
+
+The Host owns durable recording. Synchronous throws and rejected observer Promises
+go to `onObserverError`; they do not undo the native commit or make it a failed apply.
+Capture the event first, then retry recording idempotently using the transaction ID
+and the Host's preallocated operation ID. No event is replayed after a crash/reload.
+Do not infer a lost request association merely from equal image bytes.
+
+To record an immutable saved version, observe `onSaved` after successful storage,
+require `committed`, and inspect `readSaved(event.versionId)` with its real hash and
+content. Independently establish whether the applied operation remains in that save.
+An apply receipt alone, or a save after a pre-save Undo, is not saved usage. Persisted
+draft saves must not be attributed to their unchanged base version. These callbacks
+do not make the native store and a Host receipt store atomic.
+
+`ArtifactEditor.proposalTransactions` exposes copies of the proposal transaction IDs
+in the current local native history branch. The IDs follow the same Undo/Redo entries;
+ordinary edits retain them, Undo before an apply removes them, and a new Session starts
+empty. This is ephemeral general proposal ancestry, not persisted provenance or a
+second history. `onSaved` additionally captures `proposalTransactions` and `baseVersionId`
+with the saved revision, before asynchronous IO. Later input cannot rewrite that witness.
+A consuming Host must still verify the real saved target/content, or a confirmed retained
+base usage after reload. The IDs alone do not prove that an image still uses that result.
+`withdrawProposal(id)` removes a pending review without a native content/history edit.
+
 The Host retains one controller per artifact ID. Attach/detach removes Surface
 listeners only. Switching kind or selecting another artifact does not reconstruct
 EditorSession; two same-kind artifacts have separate history. Selection and
@@ -154,6 +249,12 @@ A failed flush retains the edit buffer; confirm/cancel it before retrying naviga
 Save captures native content and revision, optionally commits an immutable version,
 and awaits StorageAdapter.put. Failure retains draft/history and returns `save-failed` for storage failures or
 `invalid-artifact` for an oversized native envelope.
+A failed/uncertain put retains the exact candidate (including its immutable version ID).
+Retry reuses that candidate; if later input changed, resolve the old candidate before
+saving the newly captured content. A superseding draft-only write creates no version.
+The uncertain put remains dirty and blocks require-saved close even when bytes equal
+the previous draft. This does not make a blind storage adapter a distributed CAS:
+consuming Hosts still own storage conflicts and commit-time authorization.
 Concurrent saves/close return `save-busy`. A delayed success updates the saved baseline
 without overwriting newer Session edits; `result.dirty` requires another save.
 The trusted Host checks permission at command/Undo/Redo/save boundaries and its storage
@@ -269,3 +370,17 @@ Analysis uses the optional `EditorHostAdapter.preflight(artifact)` hook for asyn
 
 Estimate also registers `verifyEstimateArtifact` as its async preflight and reprojects retained CAD/BIM quantities before admitting results. The Host supplies `EstimateBimEvaluator` for kernel quantities, honors its AbortSignal, and owns Data publication permissions, receipts, persistence and retry through `WorkPublicationHost`.
 Its pure calculation model remains separate from Data and CAD/BIM; see the Estimate Host guide.
+
+## Fiction Map local bridge
+
+Fiction Map uses the existing per-Artifact Session and storage lifecycle. `adoptFictionMapBase` validates an owned native snapshot and pins canonical content/revision. `FictionMapArtifactSurface` accepts the existing ArtifactEditor directly; the minimal public history bridge (`peekHistory`, optional synchronous candidate validator for Undo/Redo) enables D1's validated commands without exposing a second history. Existing consumers may omit the validator.
+
+Hosts retaining a mounted Surface while masking revoked read access can supply
+`FictionMapArtifactSurface.mayRead(): boolean`. Saved-image output checks that live
+grant and its observed access generation after asynchronous work, independently of
+`host.readOnly` (which can remain true for a viewer). Revocation followed by restoration
+invalidates an earlier output; a newly requested authorized output can proceed.
+The Host must also remove unauthorized content from the displayed document and
+retain pending input/leave guards; this callback supplies no DOM masking or identity service.
+
+Draft and all retained versions require D1 admission and retained hash verification. Generic draft image export is unsupported for this adapter; the explicit saved-version output panel produces SVG/PNG from an immutable version and saved view. Input boundaries reject unresolved Inspector/composition/drawing text rather than silently saving it. See the D3 contract and verification.

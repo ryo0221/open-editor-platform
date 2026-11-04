@@ -6,7 +6,11 @@
   "exports": {
     ".": "./src/HostApp.tsx",
     "./model": "./src/model.ts",
-    "./preview": "./src/preview.tsx"
+    "./preview": "./src/preview.tsx",
+    "./creative": "./src/creative/index.ts",
+    "./creative/browser": "./src/creative/browser.tsx",
+    "./creative/setting": "./src/creative/setting.ts",
+    "./creative/workspace": "./src/creative/workspace/index.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
@@ -35,6 +39,8 @@
     "@editor-platform/estimate": "*",
     "@editor-platform/estimate-core": "*",
     "@editor-platform/canvas-ui": "*",
-    "@editor-platform/document-export": "*"
+    "@editor-platform/document-export": "*",
+    "@editor-platform/fiction-map": "*",
+    "prosemirror-state": "1.4.4"
   }
 }

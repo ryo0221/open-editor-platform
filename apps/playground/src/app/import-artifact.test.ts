@@ -142,3 +142,19 @@ describe('importing several native files at once (ST-03#5, ST-03#6)', () => {
     await expect(readImportFiles([broken], context())).rejects.toThrow(/^(?!broken\.json)/);
   });
 });
+
+it('admits Fiction Map native history without routing it through template adapters', async () => {
+  const { createFictionMap } = await import('@editor-platform/fiction-map/model');
+  const artifact = await commitVersion(
+    createArtifact('fiction-map', 'Map', createFictionMap()),
+    null,
+    'first',
+  );
+  const [imported] = await readImportFiles([file(artifact)], context());
+  expect(imported.kind).toBe('fiction-map');
+  expect(imported.draft.content).toEqual(artifact.draft.content);
+  expect(imported.versions[0].contentHash).toBe(artifact.versions[0].contentHash);
+  const bad = structuredClone(artifact);
+  bad.versions[0].contentHash = '0'.repeat(64);
+  await expect(readImportFiles([file(bad)], context())).rejects.toThrow('hash');
+});

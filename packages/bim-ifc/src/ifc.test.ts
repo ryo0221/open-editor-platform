@@ -427,7 +427,7 @@ describe('IFC export (R2c-4a, CAD66)', () => {
     }).text;
     expect(count(out, 'IFCSHELLBASEDSURFACEMODEL')).toBe(2);
     expect(out).toContain("IFCSURFACESTYLE('#f2efe6',.BOTH.,");
-    expect(out).toMatch(/=IFCSURFACESTYLESHADING\(#\d+,0\.6\);/);
+    expect(out).toMatch(/=IFCSURFACESTYLERENDERING\(#\d+,0\.6,\$,\$,\$,\$,\$,\$,\.NOTDEFINED\.\);/);
     // The same look on both: one surface model; a look already written is shared.
     const same = writeIfc(doc, {
       ...options,

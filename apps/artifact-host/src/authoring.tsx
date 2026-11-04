@@ -7,6 +7,7 @@ import {
   createArtifact,
   commitVersion,
   newId,
+  canonicalJson,
   type Artifact,
 } from '@editor-platform/artifact-core';
 import {
@@ -26,7 +27,12 @@ import {
   loadHostArtifact,
   type EditorHostAdapter,
 } from '@editor-platform/editor-host';
-import { DocumentSurface, documentProposalDiff } from '@editor-platform/document';
+import {
+  DocumentSurface,
+  documentProposalDiff,
+  type DocumentWorkspace,
+} from '@editor-platform/document';
+import type { NotationRule } from '@editor-platform/document/manuscript';
 import { isDocument, type DocumentContent } from '@editor-platform/document/model';
 import {
   documentTextAccess,
@@ -39,6 +45,10 @@ import { DesignSurface } from '@editor-platform/design';
 import { isDesignWithPaths, type DesignContent } from '@editor-platform/design/model';
 import { captureDesignPages, designPageEditCommand } from '@editor-platform/design/pagination';
 import { designPageProposalDiff } from '@editor-platform/design/page-proposal-diff';
+import {
+  designPageProposalCommand,
+  type DesignPageProposalContext,
+} from '@editor-platform/design/page-proposals';
 import { exportPages, downloadBlob } from '@editor-platform/canvas-ui';
 import { chapterSeed, comicSeed } from './authoring-fixtures';
 import './authoring.css';
@@ -65,6 +75,11 @@ const designAdapter: EditorHostAdapter<DesignContent> = {
   capabilities,
 };
 type Content = DocumentContent | DesignContent;
+/** Fixture notation dictionary. Real dictionaries belong to the consuming Host. */
+const notationRules: NotationRule[] = [
+  { id: 'scene', preferred: '場面', avoid: ['シーン'] },
+  { id: 'night', preferred: '夜', avoid: ['夜中'] },
+];
 interface FixtureState {
   chapters: ArtifactEditor<DocumentContent>[];
   design: ArtifactEditor<DesignContent>;
@@ -82,6 +97,8 @@ function App({ chapters, design, permission, storage }: FixtureState) {
     const value = raw ? JSON.parse(raw) : [0, 1, 2];
     return Array.isArray(value) && [...value].sort().join(',') === '0,1,2' ? value : [0, 1, 2];
   });
+  const [workspace, setWorkspace] = useState<'design' | 'manga'>('design');
+  const [documentWorkspace, setDocumentWorkspace] = useState<DocumentWorkspace>('document');
   const [error, setError] = useState('');
   const [docx, setDocx] = useState(false);
   const [inputs] = useState(() => new EditorInputs());
@@ -93,6 +110,41 @@ function App({ chapters, design, permission, storage }: FixtureState) {
   const [find, setFind] = useState('夜');
   const [replace, setReplace] = useState('夕暮れ');
   const [derived, setDerived] = useState<Awaited<ReturnType<typeof composeDocumentSequence>>>();
+  // 通読: the Host composes the saved chapter versions in its own order; drafts stay out.
+  const [reading, setReading] = useState<{ content?: DocumentContent; problem?: string }>({});
+  const savedKey = order.map((i) => chapters[i].artifact.draft.baseVersionId).join(',');
+  useEffect(() => {
+    if (documentWorkspace !== 'novel') return;
+    let live = true;
+    composeDocumentSequence(
+      order.map((i) => ({
+        artifact: chapters[i].artifact,
+        versionId: chapters[i].artifact.draft.baseVersionId!,
+      })),
+    ).then(
+      (result) => {
+        if (!live) return;
+        const errors = result.manifest.diagnostics.filter((d) => d.severity === 'error');
+        setReading(
+          result.content
+            ? { content: result.content }
+            : {
+                problem: `通読を作れません: ${errors
+                  .map((d) =>
+                    d.sourceIndex === undefined
+                      ? d.message
+                      : `Chapter ${order[d.sourceIndex] + 1}: ${d.message}`,
+                  )
+                  .join(' / ')}`,
+              },
+        );
+      },
+      (error) => live && setReading({ problem: `通読を作れません: ${String(error)}` }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [documentWorkspace, savedKey]);
   const [capture, setCapture] = useState<Awaited<ReturnType<typeof captureDesignPages>>>();
   const host = (active === 3 ? design : chapters[active]) as ArtifactEditor<Content>;
   useEffect(() => {
@@ -128,6 +180,22 @@ function App({ chapters, design, permission, storage }: FixtureState) {
     refresh();
   };
   const snapshot = host.snapshot;
+  const pageContext = (): DesignPageProposalContext => ({
+    artifactId: design.id,
+    versionId: design.artifact.draft.baseVersionId,
+    revision: design.revision,
+    content: design.content,
+    readOnly: design.readOnly || !permission.edit,
+    readReference(id) {
+      const chapter = chapters.find((c) => c.id === id);
+      if (!chapter) return { status: 'missing' };
+      const artifact = chapter.artifact;
+      const version = artifact.versions.find((v) => v.versionId === artifact.draft.baseVersionId);
+      if (!version || canonicalJson(chapter.content) !== canonicalJson(version.content))
+        return { status: 'changed' };
+      return { status: 'available', versionId: version.versionId };
+    },
+  });
   const execute = (cmd: EditorCommand<Content>) => run(() => host.execute(cmd));
   function select(ids: string[], region?: Region) {
     host.select({
@@ -299,6 +367,25 @@ function App({ chapters, design, permission, storage }: FixtureState) {
             >
               {active === 3 ? (
                 <DesignSurface
+                  workspace={workspace}
+                  onWorkspaceRequest={setWorkspace}
+                  inkInput
+                  pageReview={{
+                    current: pageContext,
+                    flushInputs: () => design.flushInputs(),
+                    accept(plan) {
+                      design.flushInputs();
+                      const cmd = designPageProposalCommand(plan, pageContext);
+                      design.propose({ ...plan.proposal, commands: [cmd] });
+                      try {
+                        design.acceptProposal(plan.proposal.id);
+                      } catch (e) {
+                        if (design.proposals.some((p) => p.id === plan.proposal.id))
+                          design.rejectProposal(plan.proposal.id);
+                        throw e;
+                      }
+                    },
+                  }}
                   content={design.content}
                   readOnly={host.readOnly}
                   execute={(cmd) => execute(cmd as EditorCommand<Content>)}
@@ -306,6 +393,30 @@ function App({ chapters, design, permission, storage }: FixtureState) {
                 />
               ) : (
                 <DocumentSurface
+                  workspace={documentWorkspace}
+                  onWorkspaceRequest={setDocumentWorkspace}
+                  novel={{
+                    notationRules,
+                    ...(reading.content
+                      ? {
+                          reading: {
+                            content: reading.content,
+                            label: '保存した章を章順に結合した通読です。',
+                          },
+                        }
+                      : { readingUnavailable: reading.problem }),
+                    onNotationProposal: ({ command, findings }) =>
+                      run(() => {
+                        const doc = chapters[active];
+                        doc.flushInputs();
+                        doc.propose({
+                          id: newId('proposal'),
+                          summary: `表記の直し（${findings.length}件）`,
+                          baseLocalRevision: doc.revision,
+                          commands: [command],
+                        });
+                      }),
+                  }}
                   content={chapters[active].content}
                   readOnly={host.readOnly}
                   execute={(cmd) => execute(cmd as EditorCommand<Content>)}

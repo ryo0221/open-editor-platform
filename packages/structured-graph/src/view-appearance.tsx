@@ -2,6 +2,7 @@ import { graphNodeShapes, type GraphDocument, type GraphNode, type GraphNodeShap
 import { type GraphProfile } from './profile';
 import { resolveGraphNodeLook } from './shape';
 import { type GraphApply } from './view-model';
+import { useGraphLabels } from './labels';
 
 export const graphShapeLabels: Record<GraphNodeShape, string> = {
   rectangle: 'Rectangle',
@@ -38,6 +39,7 @@ export function GraphShapeSelect({
   disabled?: boolean;
   onChange: (shape: GraphNodeShape | '') => void;
 }) {
+  const t = useGraphLabels();
   return (
     <select
       aria-label={label}
@@ -45,10 +47,10 @@ export function GraphShapeSelect({
       disabled={disabled}
       onChange={(e) => onChange(e.target.value as GraphNodeShape | '')}
     >
-      <option value="">Type default ({graphShapeLabels[typeDefault]})</option>
+      <option value="">{t.typeDefaultShape(t.shapes[typeDefault])}</option>
       {graphNodeShapes.map((shape) => (
         <option key={shape} value={shape}>
-          {graphShapeLabels[shape]}
+          {t.shapes[shape]}
         </option>
       ))}
     </select>
@@ -74,6 +76,7 @@ export function GraphNodeAppearance({
   editable: boolean;
   apply: GraphApply;
 }) {
+  const t = useGraphLabels();
   const look = resolveGraphNodeLook(graph, profile, node),
     saved = graph.presentation.nodes[node.id],
     ui = profile.nodes[node.type]?.ui,
@@ -81,8 +84,8 @@ export function GraphNodeAppearance({
   if (readOnly || !editable)
     return (
       <p className="ep-graph-appearance-summary">
-        Shape: {graphShapeLabels[look.shape]}
-        {!editable && !readOnly && ' (this source keeps the type default)'}
+        {t.shapeSummary(t.shapes[look.shape])}
+        {!editable && !readOnly && t.shapeKeptByType}
       </p>
     );
   const disabled = !!profile.nodes[node.type]?.readOnly;
@@ -96,9 +99,9 @@ export function GraphNodeAppearance({
   };
   return (
     <fieldset className="ep-graph-appearance" aria-label="Node appearance">
-      <legend>Appearance</legend>
+      <legend>{t.appearance}</legend>
       <label>
-        Shape
+        {t.shape}
         <GraphShapeSelect
           label="Node shape"
           value={saved?.shape ?? ''}
@@ -110,26 +113,26 @@ export function GraphNodeAppearance({
         />
       </label>
       <label>
-        Fill
+        {t.fill}
         <select
           aria-label="Node fill"
           value={saved?.style?.fill ?? ''}
           disabled={disabled}
           onChange={(e) => setStyle('fill', e.target.value || undefined)}
         >
-          <option value="">Type default</option>
+          <option value="">{t.typeDefault}</option>
           {saved?.style?.fill && !graphFillPalette.some((c) => c.value === saved.style!.fill) && (
             <option value={saved.style.fill}>{saved.style.fill}</option>
           )}
           {graphFillPalette.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {t.fills[c.value] ?? c.label}
             </option>
           ))}
         </select>
       </label>
       <label>
-        Outline
+        {t.outline}
         <select
           aria-label="Node outline"
           value={saved?.style?.dash ? (saved.style.dash.length ? 'dashed' : 'solid') : ''}
@@ -141,9 +144,9 @@ export function GraphNodeAppearance({
             )
           }
         >
-          <option value="">Type default</option>
-          <option value="solid">Solid</option>
-          <option value="dashed">Dashed</option>
+          <option value="">{t.typeDefault}</option>
+          <option value="solid">{t.solid}</option>
+          <option value="dashed">{t.dashed}</option>
         </select>
       </label>
     </fieldset>

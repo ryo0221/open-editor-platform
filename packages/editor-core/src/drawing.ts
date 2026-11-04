@@ -68,7 +68,15 @@ export interface VisualStyle {
   crop?: { x: number; y: number; scale: number };
   alt?: string;
   arrowhead?: 'none' | 'end' | 'both';
+  /**
+   * Where a straight line, arrow or double arrow runs in its box (#589): `horizontal` (the
+   * default) left to right, `vertical` top to bottom, `down` top-left to bottom-right, `up`
+   * bottom-left to top-right. Flip reverses it.
+   */
+  lineDirection?: LineDirection;
 }
+export const lineDirections = ['horizontal', 'vertical', 'down', 'up'] as const;
+export type LineDirection = (typeof lineDirections)[number];
 export interface SvgPrimitive {
   tag:
     | 'g'
@@ -80,7 +88,8 @@ export interface SvgPrimitive {
     | 'tspan'
     | 'image'
     | 'defs'
-    | 'clipPath';
+    | 'clipPath'
+    | 'title';
   attrs: Record<string, string | number>;
   children?: Array<SvgPrimitive | string>;
 }
@@ -94,7 +103,14 @@ export interface Drawing extends VisualStyle {
   id: string;
   kind: 'shape' | 'text' | 'image' | 'group' | 'table' | 'chart' | 'freehand';
   bounds: Bounds;
-  clipBounds?: (Bounds & { rotation?: number })[];
+  clipBounds?: (Bounds & {
+    rotation?: number;
+    shape?: ShapeKind;
+    polygon?: Array<{ x: number; y: number }>;
+    radius?: number;
+    flipX?: boolean;
+    flipY?: boolean;
+  })[];
   text: string;
   fill: string;
   src?: string;
@@ -106,6 +122,8 @@ export interface Drawing extends VisualStyle {
   };
   /** Rendering-only structured path projection, with world paint extent. */
   path?: { d: string; fillRule: 'nonzero' | 'evenodd'; paintBounds: Bounds };
+  /** Normalized convex outline; caller supplies the same clip for inside stroke. */
+  polygon?: Array<{ x: number; y: number }>;
   points?: Array<{ x: number; y: number }>;
   table?: {
     rows: string[][];
@@ -122,56 +140,74 @@ export interface Drawing extends VisualStyle {
     legend?: boolean;
   };
 }
-export function shapePath(kind: ShapeKind, w: number, h: number): string {
-  const polygon = (points: number[][]) =>
-    points.map((xy, i) => `${i ? 'L' : 'M'}${xy[0] * w} ${xy[1] * h}`).join(' ') + 'Z';
+/** Shared normalized vertices for convex native outlines (clockwise in SVG coordinates). */
+export function convexShapePoints(kind: ShapeKind): number[][] | undefined {
   switch (kind) {
     case 'triangle':
-      return polygon([
+      return [
         [0.5, 0],
         [1, 1],
         [0, 1],
-      ]);
+      ];
     case 'right-triangle':
-      return polygon([
+      return [
         [0, 0],
         [1, 1],
         [0, 1],
-      ]);
+      ];
     case 'diamond':
-      return polygon([
+      return [
         [0.5, 0],
         [1, 0.5],
         [0.5, 1],
         [0, 0.5],
-      ]);
+      ];
     case 'parallelogram':
-      return polygon([
+      return [
         [0.2, 0],
         [1, 0],
         [0.8, 1],
         [0, 1],
-      ]);
+      ];
     case 'trapezoid':
-      return polygon([
+      return [
         [0.2, 0],
         [0.8, 0],
         [1, 1],
         [0, 1],
-      ]);
+      ];
     case 'pentagon':
     case 'hexagon':
-    case 'octagon':
-    case 'star': {
-      const count = kind === 'pentagon' ? 5 : kind === 'hexagon' ? 6 : kind === 'octagon' ? 8 : 10;
+    case 'octagon': {
+      const count = kind === 'pentagon' ? 5 : kind === 'hexagon' ? 6 : 8;
+      return Array.from({ length: count }, (_, i) => {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / count;
+        return [0.5 + Math.cos(angle) / 2, 0.5 + Math.sin(angle) / 2];
+      });
+    }
+    default:
+      return undefined;
+  }
+}
+export function shapePath(
+  kind: ShapeKind,
+  w: number,
+  h: number,
+  direction?: LineDirection,
+): string {
+  const polygon = (points: number[][]) =>
+    points.map((xy, i) => `${i ? 'L' : 'M'}${xy[0] * w} ${xy[1] * h}`).join(' ') + 'Z';
+  const convex = convexShapePoints(kind);
+  if (convex) return polygon(convex);
+  switch (kind) {
+    case 'star':
       return polygon(
-        Array.from({ length: count }, (_, i) => {
-          const a = -Math.PI / 2 + (i * 2 * Math.PI) / count,
-            r = kind === 'star' && i % 2 ? 0.22 : 0.5;
+        Array.from({ length: 10 }, (_, i) => {
+          const a = -Math.PI / 2 + (i * 2 * Math.PI) / 10,
+            r = i % 2 ? 0.22 : 0.5;
           return [0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r];
         }),
       );
-    }
     case 'arrow-right':
       return polygon([
         [0, 0.25],
@@ -248,8 +284,11 @@ export function shapePath(kind: ShapeKind, w: number, h: number): string {
       return `M ${w * 0.16} ${h * 0.78} C ${-w * 0.08} ${h * 0.78} ${-w * 0.02} ${h * 0.3} ${w * 0.2} ${h * 0.32} C ${w * 0.12} ${-h * 0.08} ${w * 0.65} ${-h * 0.08} ${w * 0.68} ${h * 0.23} C ${w * 1.02} ${h * 0.02} ${w * 1.15} ${h * 0.65} ${w * 0.88} ${h * 0.7} C ${w * 0.9} ${h * 1.08} ${w * 0.43} ${h * 1.02} ${w * 0.41} ${h * 0.82} C ${w * 0.32} ${h * 1.08} ${w * 0.1} ${h * 0.98} ${w * 0.16} ${h * 0.78} Z`;
     case 'line':
     case 'arrow':
-    case 'double-arrow':
-      return `M0 ${h / 2} H${w}`;
+    case 'double-arrow': {
+      if (!direction || direction === 'horizontal') return `M0 ${h / 2} H${w}`;
+      const [start, end] = straightLineEnds({ x: 0, y: 0, width: w, height: h }, direction);
+      return `M${start.x} ${start.y} L${end.x} ${end.y}`;
+    }
     case 'elbow':
       return `M0 0 H${w / 2} V${h} H${w}`;
     case 'curve':
@@ -257,6 +296,73 @@ export function shapePath(kind: ShapeKind, w: number, h: number): string {
     default:
       return `M0 0H${w}V${h}H0Z`;
   }
+}
+/** The start and end of a straight line, arrow or double arrow in `b` (#589). */
+export function straightLineEnds(
+  b: Bounds,
+  direction: LineDirection = 'horizontal',
+): [{ x: number; y: number }, { x: number; y: number }] {
+  const { x, y, width: w, height: h } = b;
+  if (direction === 'vertical')
+    return [
+      { x: x + w / 2, y },
+      { x: x + w / 2, y: y + h },
+    ];
+  if (direction === 'down')
+    return [
+      { x, y },
+      { x: x + w, y: y + h },
+    ];
+  if (direction === 'up')
+    return [
+      { x, y: y + h },
+      { x: x + w, y },
+    ];
+  return [
+    { x, y: y + h / 2 },
+    { x: x + w, y: y + h / 2 },
+  ];
+}
+/**
+ * A 10 × 12 open head at `tip`, pointing along the unit vector `u`; `n` is the line's normal,
+ * so both heads of a line list their sides in the same order.
+ */
+const arrowheadPath = (
+  tip: { x: number; y: number },
+  u: { x: number; y: number },
+  n: { x: number; y: number },
+) =>
+  `M${tip.x - 10 * u.x - 6 * n.x} ${tip.y - 10 * u.y - 6 * n.y} L${tip.x} ${tip.y} L${tip.x - 10 * u.x + 6 * n.x} ${tip.y - 10 * u.y + 6 * n.y}`;
+/**
+ * The arrowhead paths of a line shape in `b` (absolute coordinates): at its end for an arrow
+ * or `arrowhead: 'end' | 'both'`, and at its start for a double arrow or `'both'`. A straight
+ * line's heads follow its `lineDirection` (#589).
+ */
+export function lineArrowheads(
+  kind: ShapeKind,
+  b: Bounds,
+  style: Pick<VisualStyle, 'arrowhead' | 'lineDirection'>,
+): string[] {
+  const end =
+    kind === 'arrow' ||
+    kind === 'double-arrow' ||
+    style.arrowhead === 'end' ||
+    style.arrowhead === 'both';
+  const start = kind === 'double-arrow' || style.arrowhead === 'both';
+  const heads: string[] = [];
+  const straight = kind === 'line' || kind === 'arrow' || kind === 'double-arrow';
+  const [from, to] = straightLineEnds(b, straight ? style.lineDirection : 'horizontal');
+  const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+  const u = { x: (to.x - from.x) / length, y: (to.y - from.y) / length };
+  const n = { x: -u.y, y: u.x };
+  if (end) {
+    const tip = straight
+      ? to
+      : { x: b.x + b.width, y: kind === 'elbow' ? b.y + b.height : kind === 'curve' ? b.y : to.y };
+    heads.push(arrowheadPath(tip, straight ? u : { x: 1, y: 0 }, straight ? n : { x: 0, y: 1 }));
+  }
+  if (start) heads.push(arrowheadPath(from, { x: -u.x, y: -u.y }, n));
+  return heads;
 }
 export function shapePrimitives(
   kind: ShapeKind,
@@ -291,32 +397,16 @@ export function shapePrimitives(
   const line = ['line', 'arrow', 'double-arrow', 'elbow', 'curve'].includes(kind);
   const children = [
     p('path', {
-      d: shapePath(kind, b.width, b.height),
+      d: shapePath(kind, b.width, b.height, style.lineDirection),
       transform: `translate(${b.x} ${b.y})`,
       ...attrs,
       fill: line ? 'none' : fill,
     }),
   ];
-  if (
-    kind === 'arrow' ||
-    kind === 'double-arrow' ||
-    style.arrowhead === 'end' ||
-    style.arrowhead === 'both'
-  ) {
-    const y = kind === 'elbow' ? b.y + b.height : kind === 'curve' ? b.y : b.y + b.height / 2;
+  for (const d of lineArrowheads(kind, b, style))
     children.push(
       p('path', {
-        d: `M${b.x + b.width - 10} ${y - 6} L${b.x + b.width} ${y} L${b.x + b.width - 10} ${y + 6}`,
-        fill: 'none',
-        stroke: attrs.stroke,
-        'stroke-width': attrs['stroke-width'],
-      }),
-    );
-  }
-  if (kind === 'double-arrow' || style.arrowhead === 'both')
-    children.push(
-      p('path', {
-        d: `M${b.x + 10} ${b.y + b.height / 2 - 6} L${b.x} ${b.y + b.height / 2} L${b.x + 10} ${b.y + b.height / 2 + 6}`,
+        d,
         fill: 'none',
         stroke: attrs.stroke,
         'stroke-width': attrs['stroke-width'],
@@ -604,6 +694,8 @@ export function drawingPrimitives(
   options: DrawingRenderOptions = {},
 ): SvgPrimitive[] {
   if (d.hidden) return [];
+  // Every resource below, including ancestor frame clips, uses this occurrence ID.
+  // The same native drawing can coexist in the canvas and before/after comparisons.
   d = { ...d, id: resourceId };
   const b = d.bounds;
   let nodes: SvgPrimitive[] = [];
@@ -691,7 +783,19 @@ export function drawingPrimitives(
   else if (d.kind === 'group') nodes = [];
   else if (d.kind === 'text') nodes = textPrimitives(d, options);
   else {
-    if (d.path) {
+    if (d.polygon) {
+      nodes = [
+        p('path', {
+          d: polygonOutline(d.polygon, b),
+          fill: d.fill,
+          stroke: d.stroke ?? 'none',
+          'stroke-width': 2 * (d.strokeWidth ?? 2),
+          'stroke-linejoin': 'bevel',
+          'stroke-linecap': 'butt',
+          'stroke-dasharray': d.dash ?? '',
+        }),
+      ];
+    } else if (d.path) {
       nodes = [
         p('path', {
           d: d.path.d,
@@ -759,15 +863,37 @@ export function drawingPrimitives(
   return (d.clipBounds ?? []).reduce<SvgPrimitive[]>(
     (children, clip, i) => [
       p('defs', {}, [
-        p('clipPath', { id: `frame-${d.id}-${i}` }, [
-          p('rect', {
-            x: clip.x,
-            y: clip.y,
-            width: clip.width,
-            height: clip.height,
-            transform: `rotate(${clip.rotation ?? 0} ${clip.x + clip.width / 2} ${clip.y + clip.height / 2})`,
-          }),
-        ]),
+        p(
+          'clipPath',
+          {
+            id: `frame-${d.id}-${i}`,
+            ...(clip.shape || clip.polygon
+              ? {
+                  transform: `translate(${clip.x + clip.width / 2} ${clip.y + clip.height / 2}) rotate(${clip.rotation ?? 0}) scale(${clip.flipX ? -1 : 1} ${clip.flipY ? -1 : 1}) translate(${-clip.x - clip.width / 2} ${-clip.y - clip.height / 2})`,
+                }
+              : {}),
+          },
+          [
+            ...(clip.polygon
+              ? [p('path', { d: polygonOutline(clip.polygon, clip), fill: '#000' })]
+              : clip.shape
+                ? shapePrimitives(
+                    clip.shape,
+                    { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
+                    { radius: clip.radius, stroke: 'none', strokeWidth: 0 },
+                    '#000',
+                  )
+                : [
+                    p('rect', {
+                      x: clip.x,
+                      y: clip.y,
+                      width: clip.width,
+                      height: clip.height,
+                      transform: `rotate(${clip.rotation ?? 0} ${clip.x + clip.width / 2} ${clip.y + clip.height / 2})`,
+                    }),
+                  ]),
+          ],
+        ),
       ]),
       p('g', { 'clip-path': `url(#frame-${d.id}-${i})` }, children),
     ],
@@ -786,6 +912,26 @@ export function serializeSvg(nodes: SvgPrimitive[]): string {
     )
     .join('');
 }
-export function drawingSvg(drawings: Drawing[], bounds: Bounds, background?: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">${background ? serializeSvg([p('rect', { ...bounds, fill: background })]) : ''}${serializeSvg(drawings.flatMap((d, i) => drawingPrimitives(d, `graphic-${i}`)))}</svg>`;
+/** `title` names the image (a page's title) for viewers, readers and assistants (#589). */
+export function drawingSvg(
+  drawings: Drawing[],
+  bounds: Bounds,
+  background?: string,
+  title?: string,
+): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}">${title ? serializeSvg([p('title', {}, [title])]) : ''}${background ? serializeSvg([p('rect', { ...bounds, fill: background })]) : ''}${serializeSvg(drawings.flatMap((d, i) => drawingPrimitives(d, `graphic-${i}`)))}</svg>`;
+}
+
+export function polygonOutline(
+  points: readonly { x: number; y: number }[],
+  bounds: Bounds,
+): string {
+  return (
+    points
+      .map(
+        (p, i) =>
+          `${i ? 'L' : 'M'}${bounds.x + p.x * bounds.width} ${bounds.y + p.y * bounds.height}`,
+      )
+      .join(' ') + 'Z'
+  );
 }

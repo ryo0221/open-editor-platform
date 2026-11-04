@@ -1,4 +1,10 @@
-import { clone, contentHash, deepFreeze, type Artifact } from '@editor-platform/artifact-core';
+import {
+  clone,
+  canonicalJson,
+  contentHash,
+  deepFreeze,
+  type Artifact,
+} from '@editor-platform/artifact-core';
 import {
   command,
   withCommandReads,
@@ -15,6 +21,7 @@ import {
   updateElement,
   transformElements,
   designDrawings,
+  designDrawingProjector,
   designPaintOrder,
   type DesignContent,
 } from './model';
@@ -27,6 +34,15 @@ export function setDesignPagination(value: DesignPagination): EditorCommand<Desi
   const owned = captureDesignData(value, true);
   return withCommandReads(
     command('design.pagination', 'Set page reading order', (d) => {
+      if (
+        d.pagination?.pages.some(
+          (page) =>
+            page.division &&
+            canonicalJson(page.division) !==
+              canonicalJson(owned.pages.find((p) => p.frameId === page.frameId)?.division ?? null),
+        )
+      )
+        throw Error('Use division commands to change linked panels');
       if (!validDesignPagination(owned, d.elements))
         throw Error('Invalid page/panel IDs or reading order');
       const next = { ...d, pagination: clone(owned) };
@@ -298,11 +314,7 @@ export async function captureDesignPages(
       panelIds: [...p.panelIds],
       width: frame.bounds.width,
       height: frame.bounds.height,
-      svg: drawingSvg(
-        elements.flatMap((e) => designDrawings(d, e)),
-        frame.bounds,
-        '#ffffff',
-      ),
+      svg: drawingSvg(elements.flatMap(designDrawingProjector(d, ids)), frame.bounds, '#ffffff'),
     };
   });
   const included = descendantIds(

@@ -71,7 +71,7 @@ export type EditorChange =
   | { kind: 'graph-position'; rowId: string; value: { x: number; y: number } | null }
   | { kind: 'cell'; rowId: string; columnId: string; value: unknown };
 const visual =
-  'shape stroke strokeWidth dash opacity radius rotation flipX flipY locked hidden typography runs imageFit crop alt arrowhead'.split(
+  'shape stroke strokeWidth dash opacity radius rotation flipX flipY locked hidden typography runs imageFit crop alt arrowhead lineDirection'.split(
     ' ',
   );
 const objectFields = [

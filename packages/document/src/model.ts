@@ -41,6 +41,77 @@ export interface InlineSpan {
   link?: string;
   color?: string;
   highlight?: string;
+  /** Reading over this run. `base` is the text it was set on, so a later partial edit of
+   * the base can be reported instead of silently keeping a wrong reading. */
+  ruby?: InlineRuby;
+  /** 傍点: a sesame dot beside each character, on the ruby side unless the run also has ruby. */
+  emphasisDots?: boolean;
+}
+export type DocumentWritingMode = 'horizontal-tb' | 'vertical-rl';
+export const documentWritingModes: readonly DocumentWritingMode[] = [
+  'horizontal-tb',
+  'vertical-rl',
+];
+export const isVerticalDocument = (content: Pick<DocumentContent, 'page'>) =>
+  content.page?.writingMode === 'vertical-rl';
+/** Runs of one or two ASCII digits set upright in vertical text (縦中横); longer numbers stay
+ * in the text direction. A digit carrying a combining mark (a keycap such as 1️⃣) is left as
+ * it is, so a run always covers whole graphemes. Offsets are within `text`. */
+export function uprightDigitRanges(text: string): [number, number][] {
+  return Array.from(text.matchAll(/(?<![0-9])[0-9]{1,2}(?![0-9\p{M}])/gu), (m) => [
+    m.index,
+    m.index + m[0].length,
+  ]);
+}
+export interface InlineRuby {
+  text: string;
+  base: string;
+  /** Distinguishes adjacent rubies with the same reading, e.g. 「人」「人」 each read 「ひと」. */
+  id?: string;
+}
+export const rubyLimits = { text: 64, base: 256 } as const;
+export function validRuby(value: unknown): value is InlineRuby {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  return (
+    Object.keys(r).every((k) => k === 'text' || k === 'base' || k === 'id') &&
+    (r.id === undefined || (typeof r.id === 'string' && !!r.id && r.id.length <= 64)) &&
+    typeof r.text === 'string' &&
+    typeof r.base === 'string' &&
+    !!r.text.trim() &&
+    !!r.base &&
+    r.text.length <= rubyLimits.text &&
+    r.base.length <= rubyLimits.base &&
+    !/[\r\n]/.test(r.text + r.base) &&
+    // The Aozora delimiters stay unambiguous in Markdown export.
+    !/[｜《》]/.test(r.text)
+  );
+}
+export const sameRuby = (a?: InlineRuby, b?: InlineRuby) =>
+  !!a && !!b && a.text === b.text && a.base === b.base && a.id === b.id;
+/** Whether any inline run (paragraphs, list items, table cells) carries a ruby or 傍点. */
+export function documentHasRubyOrEmphasis(content: DocumentContent): boolean {
+  const walk = (value: unknown): boolean =>
+    Array.isArray(value)
+      ? value.some(walk)
+      : !!value &&
+        typeof value === 'object' &&
+        ((value as InlineSpan).ruby !== undefined ||
+          (value as InlineSpan).emphasisDots !== undefined ||
+          Object.values(value).some(walk));
+  return walk(content.blocks);
+}
+/** Consecutive spans carrying the same ruby form one run; `start` is the first span's index. */
+export function rubyGroups(
+  spans: InlineSpan[],
+): { spans: InlineSpan[]; start: number; ruby?: InlineRuby }[] {
+  const groups: { spans: InlineSpan[]; start: number; ruby?: InlineRuby }[] = [];
+  spans.forEach((span, start) => {
+    const last = groups[groups.length - 1];
+    if (span.ruby && last?.ruby && sameRuby(last.ruby, span.ruby)) last.spans.push(span);
+    else groups.push({ spans: [span], start, ...(span.ruby ? { ruby: span.ruby } : {}) });
+  });
+  return groups;
 }
 export interface DocumentListItem {
   id: string;
@@ -166,7 +237,13 @@ export function styledDocumentSpans(spans: InlineSpan[], style?: DocumentTextSty
 export interface DocumentContent {
   schemaVersion: 1 | 2;
   reuse?: ReuseState;
-  page?: { size: 'A4' | 'Letter'; margin: number; landscape?: boolean };
+  page?: {
+    size: 'A4' | 'Letter';
+    margin: number;
+    landscape?: boolean;
+    /** Manuscript setting used by display and output; omitted means horizontal. */
+    writingMode?: DocumentWritingMode;
+  };
   blocks: DocumentBlock[];
 }
 /** Semantic text addresses include paragraphs inside lists/tables, without engine positions. */
@@ -608,10 +685,11 @@ function validSpans(value: unknown): value is InlineSpan[] {
       (s) =>
         s &&
         typeof s.text === 'string' &&
-        ['bold', 'italic', 'underline', 'strike', 'code'].every(
+        ['bold', 'italic', 'underline', 'strike', 'code', 'emphasisDots'].every(
           (k) => s[k] === undefined || typeof s[k] === 'boolean',
         ) &&
         (s.link === undefined || (typeof s.link === 'string' && safeLink(s.link))) &&
+        (s.ruby === undefined || validRuby(s.ruby)) &&
         ['color', 'highlight'].every(
           (k) => s[k] === undefined || (typeof s[k] === 'string' && /^#[0-9a-f]{3,8}$/i.test(s[k])),
         ),
@@ -729,7 +807,8 @@ export function isDocument(value: unknown): value is DocumentContent {
         ['A4', 'Letter'].includes(d.page.size) &&
         Number.isFinite(d.page.margin) &&
         d.page.margin >= 24 &&
-        d.page.margin <= 160)) &&
+        d.page.margin <= 160 &&
+        (d.page.writingMode === undefined || documentWritingModes.includes(d.page.writingMode)))) &&
     validBlocks(d.blocks) &&
     validReferenceItems(d.blocks)
   );
@@ -812,7 +891,18 @@ function validBlocks(blocks: DocumentBlock[]): boolean {
 export function safeLink(url: string) {
   return /^(https?:\/\/|mailto:|#)/i.test(url);
 }
+/** CSS for 傍点; under a ruby the dots move to the other side of the text. */
+export const emphasisDotsCss = (withRuby: boolean) =>
+  `text-emphasis:filled sesame${withRuby ? ';text-emphasis-position:under left' : ''}`;
 export function spansHtml(spans: InlineSpan[]): string {
+  return rubyGroups(spans)
+    .map(({ spans, ruby }) => {
+      const inner = spansHtmlRuns(spans);
+      return ruby ? `<ruby>${inner}<rt>${escapeHtml(ruby.text)}</rt></ruby>` : inner;
+    })
+    .join('');
+}
+function spansHtmlRuns(spans: InlineSpan[]): string {
   return spans
     .map((s) => {
       let value = escapeHtml(s.text).replaceAll('\n', '<br/>');
@@ -823,6 +913,7 @@ export function spansHtml(spans: InlineSpan[]): string {
       if (s.strike) value = `<s>${value}</s>`;
       const style = [
         s.bold === false ? 'font-weight:400' : '',
+        s.emphasisDots ? emphasisDotsCss(!!s.ruby) : '',
         s.color && /^#[0-9a-f]{3,8}$/i.test(s.color) ? `color:${s.color}` : '',
         s.highlight && /^#[0-9a-f]{3,8}$/i.test(s.highlight)
           ? `background-color:${s.highlight}`
@@ -837,20 +928,29 @@ export function spansHtml(spans: InlineSpan[]): string {
     })
     .join('');
 }
+/** Ruby uses the Aozora notation ｜親文字《よみ》, which Markdown leaves as text. */
 export function spansMarkdown(spans: InlineSpan[]): string {
+  return rubyGroups(spans)
+    .map(({ spans, ruby }) => {
+      const inner = spansMarkdownRuns(spans);
+      return ruby ? `｜${inner}《${markdownText(ruby.text)}》` : inner;
+    })
+    .join('');
+}
+const markdownText = (text: string) =>
+  text
+    .replaceAll('\\', '\\\\')
+    .replaceAll('`', '\\`')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;');
+function spansMarkdownRuns(spans: InlineSpan[]): string {
   return spans
     .map((s) =>
       s.text
         .split('\n')
         .map((text) => {
           if (!text) return '';
-          let value = s.code
-            ? text
-            : text
-                .replaceAll('\\', '\\\\')
-                .replaceAll('`', '\\`')
-                .replaceAll('&', '&amp;')
-                .replaceAll('<', '&lt;');
+          let value = s.code ? text : markdownText(text);
           if (s.code) {
             const runs = text.match(/`+/g) ?? [];
             const delimiter = '`'.repeat(

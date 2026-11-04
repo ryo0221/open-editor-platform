@@ -1,0 +1,18 @@
+{
+  "name": "@editor-platform/character-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./gltf-fixtures": "./src/gltf-fixtures.ts"
+  },
+  "dependencies": {
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/geometry-core": "*",
+    "@editor-platform/geometry-mesh": "*",
+    "@noble/hashes": "1.8.0"
+  }
+}

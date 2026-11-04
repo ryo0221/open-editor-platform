@@ -77,6 +77,11 @@ const operationKeys: Record<
   deleteClosure: { required: ['type', 'ids', 'cascade'], ids: [] },
   duplicateClosure: { required: ['type', 'bodyIds', 'idMap'], ids: [] },
   rename: { required: ['type', 'targetId', 'name'], ids: ['targetId'] },
+  setAppearance: {
+    required: ['type', 'bodyId', 'appearance'],
+    optional: ['assets'],
+    ids: ['bodyId'],
+  },
   saveNamedView: { required: ['type', 'view'], ids: [] },
   reorderFeatures: { required: ['type', 'featureIds'], ids: [] },
   setKernelBuild: { required: ['type', 'kernelId', 'buildHash'], ids: ['kernelId'] },
@@ -172,52 +177,55 @@ export function assertCadOperation(op: unknown): asserts op is CadOperation {
                                   ? idList(op.bodyIds) && record(op.idMap)
                                   : op.type === 'rename'
                                     ? typeof op.name === 'string'
-                                    : op.type === 'saveNamedView'
-                                      ? record(op.view)
-                                      : op.type === 'reorderFeatures'
-                                        ? idList(op.featureIds)
-                                        : op.type === 'setKernelBuild'
-                                          ? typeof op.buildHash === 'string'
-                                          : op.type === 'setToleranceSet'
-                                            ? typeof op.set === 'string'
-                                            : op.type === 'insertImportedBody'
-                                              ? Array.isArray(op.assets) &&
-                                                record(op.feature) &&
-                                                record(op.body)
-                                              : op.type === 'insertComponents'
-                                                ? Array.isArray(op.parts) &&
-                                                  Array.isArray(op.components) &&
-                                                  op.components.length > 0
-                                                : op.type === 'setComponentPlacement'
-                                                  ? record(op.placement)
-                                                  : op.type === 'replacePartSources'
-                                                    ? Array.isArray(op.parts) &&
-                                                      op.parts.length > 0 &&
-                                                      op.parts.every(
-                                                        (p) =>
-                                                          record(p) &&
-                                                          cadId(p.partId) &&
-                                                          record(p.source) &&
-                                                          record(p.hint),
-                                                      )
-                                                    : op.type === 'insertComponentPattern' ||
-                                                        op.type === 'updateComponentPattern'
-                                                      ? record(op.pattern)
-                                                      : op.type === 'setComponentBom'
-                                                        ? op.bom === 'include' ||
-                                                          op.bom === 'exclude'
-                                                        : op.type === 'setPartProperties'
-                                                          ? typeof op.partNumber === 'string' &&
-                                                            typeof op.description === 'string'
-                                                          : op.type === 'updateFeature'
-                                                            ? record(op.args)
-                                                            : op.type === 'updateSketch'
-                                                              ? record(op.plane) &&
-                                                                Array.isArray(op.entities) &&
-                                                                Array.isArray(op.constraints) &&
-                                                                record(op.solved)
-                                                              : record(op.plane) &&
-                                                                record(op.shape);
+                                    : op.type === 'setAppearance'
+                                      ? record(op.appearance) &&
+                                        (op.assets === undefined || Array.isArray(op.assets))
+                                      : op.type === 'saveNamedView'
+                                        ? record(op.view)
+                                        : op.type === 'reorderFeatures'
+                                          ? idList(op.featureIds)
+                                          : op.type === 'setKernelBuild'
+                                            ? typeof op.buildHash === 'string'
+                                            : op.type === 'setToleranceSet'
+                                              ? typeof op.set === 'string'
+                                              : op.type === 'insertImportedBody'
+                                                ? Array.isArray(op.assets) &&
+                                                  record(op.feature) &&
+                                                  record(op.body)
+                                                : op.type === 'insertComponents'
+                                                  ? Array.isArray(op.parts) &&
+                                                    Array.isArray(op.components) &&
+                                                    op.components.length > 0
+                                                  : op.type === 'setComponentPlacement'
+                                                    ? record(op.placement)
+                                                    : op.type === 'replacePartSources'
+                                                      ? Array.isArray(op.parts) &&
+                                                        op.parts.length > 0 &&
+                                                        op.parts.every(
+                                                          (p) =>
+                                                            record(p) &&
+                                                            cadId(p.partId) &&
+                                                            record(p.source) &&
+                                                            record(p.hint),
+                                                        )
+                                                      : op.type === 'insertComponentPattern' ||
+                                                          op.type === 'updateComponentPattern'
+                                                        ? record(op.pattern)
+                                                        : op.type === 'setComponentBom'
+                                                          ? op.bom === 'include' ||
+                                                            op.bom === 'exclude'
+                                                          : op.type === 'setPartProperties'
+                                                            ? typeof op.partNumber === 'string' &&
+                                                              typeof op.description === 'string'
+                                                            : op.type === 'updateFeature'
+                                                              ? record(op.args)
+                                                              : op.type === 'updateSketch'
+                                                                ? record(op.plane) &&
+                                                                  Array.isArray(op.entities) &&
+                                                                  Array.isArray(op.constraints) &&
+                                                                  record(op.solved)
+                                                                : record(op.plane) &&
+                                                                  record(op.shape);
   if (!ok) throw new Error('operation-schema');
 }
 
@@ -241,6 +249,7 @@ const labels: Record<CadOperationType, string> = {
   deleteClosure: 'Delete',
   duplicateClosure: 'Duplicate',
   rename: 'Rename',
+  setAppearance: 'Change appearance',
   saveNamedView: 'Save view',
   reorderFeatures: 'Reorder features',
   setKernelBuild: 'Change kernel build',

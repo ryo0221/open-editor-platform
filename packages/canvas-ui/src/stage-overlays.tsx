@@ -1,7 +1,7 @@
 import type React from 'react';
 import type { Bounds, Point } from '@editor-platform/editor-core';
 import type { CanvasTarget } from './index';
-import { handleAnchor, selectionHandles, type SnapGuide } from './stage-model';
+import { canObjectTransform, handleAnchor, selectionHandles, type SnapGuide } from './stage-model';
 
 export function CanvasGrid({ label, bounds }: { label: string; bounds: Bounds }) {
   return (
@@ -66,27 +66,31 @@ export function SelectionOverlay(props: {
       transform={`rotate(${props.rotation} ${box.x + box.width / 2} ${box.y + box.height / 2})`}
     >
       <rect {...box} fill="none" stroke="#3267c8" strokeWidth={1 / zoom} pointerEvents="none" />
-      {selectionHandles.map((handle) => {
-        const { x, y } = handleAnchor(handle, box),
-          sz = 8 / zoom;
-        return (
-          <rect
-            key={handle}
-            role="button"
-            aria-label={`Resize ${handle === 'se' && selected.length === 1 ? targets.find((t) => t.id === selected[0])?.label : handle}`}
-            x={x - sz / 2}
-            y={y - sz / 2}
-            width={sz}
-            height={sz}
-            fill="white"
-            stroke="#3267c8"
-            strokeWidth={1 / zoom}
-            style={{ cursor: `${handle}-resize` }}
-            onPointerDown={(e) => props.onBegin(e, 'resize', handle)}
-          />
-        );
-      })}
-      {selected.every((id) => targets.find((t) => t.id === id)?.rotatable !== false) && (
+      {canObjectTransform(targets, selected, 'resize') &&
+        selectionHandles.map((handle) => {
+          const { x, y } = handleAnchor(handle, box),
+            sz = 8 / zoom;
+          return (
+            <rect
+              key={handle}
+              role="button"
+              aria-label={`Resize ${handle}`}
+              aria-description={
+                selected.length === 1 ? targets.find((t) => t.id === selected[0])?.label : undefined
+              }
+              x={x - sz / 2}
+              y={y - sz / 2}
+              width={sz}
+              height={sz}
+              fill="white"
+              stroke="#3267c8"
+              strokeWidth={1 / zoom}
+              style={{ cursor: `${handle}-resize` }}
+              onPointerDown={(e) => props.onBegin(e, 'resize', handle)}
+            />
+          );
+        })}
+      {canObjectTransform(targets, selected, 'rotate') && (
         <>
           <line
             x1={box.x + box.width / 2}

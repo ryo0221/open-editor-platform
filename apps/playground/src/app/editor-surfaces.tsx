@@ -1,10 +1,30 @@
+import { PlaygroundFictionMap } from '../fiction-map/host';
+import type { FictionMapContent } from '@editor-platform/fiction-map/model';
+import { designPageReviewHost } from './design-page-review';
+import { readMangaWorkspace, writeMangaWorkspace } from './manga-workspace';
+import {
+  novelNotationRules,
+  readNovelChapters,
+  readNovelWorkspace,
+  writeNovelWorkspace,
+} from './novel-workspace';
 import { isEstimate } from '@editor-platform/estimate-core';
 import { PlaygroundEstimate } from './estimate-host';
 import { isAnalysis } from '@editor-platform/analysis-core';
 import { PlaygroundAnalysis } from './analysis-host';
-import { lazy, memo, Suspense, useMemo, type ComponentProps, type MutableRefObject } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  type ComponentProps,
+  type MutableRefObject,
+} from 'react';
 import { flushSync } from 'react-dom';
-import { canonicalJson, clone } from '@editor-platform/artifact-core';
+import { canonicalJson, clone, deepFreeze } from '@editor-platform/artifact-core';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type {
@@ -12,6 +32,7 @@ import type {
   EditorInputs,
   EditorSession,
   ElementAddress,
+  ProposedCommands,
   Region,
   Selection,
 } from '@editor-platform/editor-core';
@@ -24,6 +45,7 @@ import {
 } from '@editor-platform/animation-core/v2';
 import { NativeGraphSurface, relationProfile } from '@editor-platform/structured-graph';
 import type { BimDocument } from '@editor-platform/bim-core';
+import type { CharacterDocument } from '@editor-platform/character-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
@@ -74,7 +96,8 @@ import {
 import { GeoSurface } from '../geo/surface';
 import type { GeoDocument } from '@editor-platform/geo-core';
 import { isGraphDocument } from '@editor-platform/structured-graph';
-import { DocumentSurface, isDocument } from '@editor-platform/document';
+import { DocumentSurface, isDocument, type DocumentContent } from '@editor-platform/document';
+import { composeDocumentSequence } from '@editor-platform/document/sequence';
 import { WhiteboardSurface, isWhiteboard } from '@editor-platform/whiteboard';
 import { SlideSurface, isDeck } from '@editor-platform/slide';
 import { isSchedule, type ScheduleDocument } from '@editor-platform/schedule/model';
@@ -97,6 +120,8 @@ import {
   slideDataSnapshots,
 } from './surface-sources';
 import { graphProfileFor } from './graph-templates';
+import { DesignInkTools, type DesignInkToolsControl } from './design-ink-tools';
+import { MangaArtTools } from 'virtual:playground-manga-tools';
 
 const referenceReactExamples = [
   { name: 'Product page', document: createReferenceDocument('product') },
@@ -109,7 +134,10 @@ const MemoDataSurface = memo(DataSurface);
 const MemoDesignSurface = memo(function ReferenceDesignSurface(
   props: ComponentProps<typeof DesignReactSurface>,
 ) {
-  const runtime = useMemo(() => referenceDesignRuntime(props.content), [props.content]);
+  // Playground replaces native content on edits. Keep that immutable snapshot stable
+  // across pending-input/status renders so a pointer gesture retains its revision.
+  const content = useMemo(() => deepFreeze(clone(props.content)), [props.content]);
+  const runtime = useMemo(() => referenceDesignRuntime(content), [content]);
   const settings =
     new URLSearchParams(location.search).get('design-dependencies') === '1'
       ? referenceDependencyDesignSettings
@@ -118,6 +146,7 @@ const MemoDesignSurface = memo(function ReferenceDesignSurface(
   return (
     <DesignReactSurface
       {...props}
+      content={content}
       settings={settings}
       runtime={runtime}
       registrations={registrations}
@@ -129,6 +158,7 @@ const MemoWhiteboardSurface = memo(WhiteboardSurface);
 const CadHost = lazy(() => import('../cad/host'));
 // The building Surface and its kernel Worker load only when a building opens.
 const BimHost = lazy(() => import('../bim/host'));
+const CharacterHost = lazy(() => import('../character/host'));
 
 export function checkedContent(content: unknown, kind: string | undefined) {
   return {
@@ -137,6 +167,10 @@ export function checkedContent(content: unknown, kind: string | undefined) {
     animation:
       kind === 'animation' && validContent('animation', content)
         ? (content as AnimationHostContent)
+        : undefined,
+    fictionMap:
+      kind === 'fiction-map' && validContent('fiction-map', content)
+        ? (content as FictionMapContent)
         : undefined,
     geo: kind === 'geo' && validContent('geo', content) ? (content as GeoDocument) : undefined,
     graph: kind === 'structured-graph' && isGraphDocument(content) ? content : undefined,
@@ -154,6 +188,10 @@ export function checkedContent(content: unknown, kind: string | undefined) {
     schedule: kind === 'schedule' && isSchedule(content) ? content : undefined,
     cad: kind === 'cad' && validContent('cad', content) ? (content as CadDocument) : undefined,
     bim: kind === 'bim' && validContent('bim', content) ? (content as BimDocument) : undefined,
+    character:
+      kind === 'character' && validContent('character', content)
+        ? (content as CharacterDocument)
+        : undefined,
   };
 }
 export type RenderedContent = ReturnType<typeof checkedContent>;
@@ -202,6 +240,8 @@ export interface SurfaceHost {
   flushInputs(): boolean;
   history(direction: 'undo' | 'redo'): void;
   saveVersion(): Promise<void>;
+  /** Shows Host-built commands in the proposal review; the author applies or rejects them. */
+  reviewProposal(value: ProposedCommands<Content>): void;
   addComment(selection: Selection, body: string): Promise<boolean | undefined>;
   dataViewChanged(view: DataView): void;
   editPrivateSettings(id: string, patch: PrivateViewSettings): void;
@@ -571,51 +611,111 @@ function DesignHost({
   content: NonNullable<RenderedContent['design']>;
 }) {
   const { active, readOnly, sharedSession } = host;
+  const latest = useRef(host);
+  latest.current = host;
+  const [workspaceChoice, setWorkspaceChoice] = useState<{
+    id: string;
+    workspace: 'design' | 'manga';
+  }>();
+  const workspace =
+    workspaceChoice?.id === active.id ? workspaceChoice.workspace : readMangaWorkspace(active.id);
+  const [inkFocus, setInkFocus] = useState<{ artifactId: string; id: string }>();
+  const inkTools = useRef<DesignInkToolsControl>(null);
+  const [rasterSelection, setRasterSelection] = useState<
+    import('./design-ink-proposal').InkContext['rasterSelection'] & { artifactId: string }
+  >();
   return (
-    <MemoDesignSurface
-      references={sharedSession ? undefined : host.references}
-      focusReferenceId={host.revealAddress?.elementId}
-      prototype={{
-        artifactId: active.id,
-        annotations: active.annotations,
-        onCreateAnnotation: readOnly
-          ? undefined
-          : async (address, body) => {
-              if (!(await host.addComment({ addresses: [address] }, body)))
-                throw new Error('Comment could not be created');
-            },
-        onFlowComplete: (event) => {
-          host.setStatus(`Prototype flow completed: ${event.flowId}`);
-        },
-      }}
-      content={content}
-      runtime={referenceRuntimeAdapter}
-      revisions={[{ component: referenceTextRevision, propMap: { text: 'content' }, slotMap: {} }]}
-      registerGenerated={(source) => registerGeneratedReact(host, source)}
-      regenerationTargets={host.records
-        .filter(
-          (record) =>
-            record.kind === 'react-ui' &&
-            record.designReactConversion?.sourceArtifactId === active.id,
-        )
-        .map((record) => ({
-          id: record.id,
-          name: record.name,
-          basis: record.designReactConversion!.basis,
-          document: record.draft.content as ReactUiDocument,
-        }))}
-      applyRegeneration={(...args) => applyReactRegeneration(host, ...args)}
-      registrations={referenceDesignSettings.registrations}
-      settings={referenceDesignSettings}
-      publicationReadOnlyReason={
-        sharedSession
-          ? '共有Hostはnative React公開設定を受け付けません。編集可能なローカル成果物で設定してください。'
-          : undefined
-      }
-      readOnly={readOnly}
-      execute={host.execute}
-      select={host.select}
-    />
+    <div className="playground-design-workspace">
+      {!host.shared && (
+        <DesignInkTools
+          control={inkTools}
+          key={active.id}
+          host={host}
+          rasterSelection={rasterSelection}
+          onChoose={(id) => setInkFocus({ artifactId: active.id, id })}
+        />
+      )}
+      {!host.shared && MangaArtTools && (
+        <Suspense fallback={<p role="status">作画サンプルを読み込み中です。</p>}>
+          <MangaArtTools key={active.id} host={host} />
+        </Suspense>
+      )}
+      <MemoDesignSurface
+        extension={
+          !host.shared
+            ? {
+                toolbar: () => (
+                  <button
+                    className="design-ink-open"
+                    onClick={(event) => inkTools.current?.open(event.currentTarget)}
+                  >
+                    作画ツールを開く
+                  </button>
+                ),
+              }
+            : undefined
+        }
+        workspace={workspace}
+        onWorkspaceRequest={(workspace) => {
+          setWorkspaceChoice({ id: active.id, workspace });
+          writeMangaWorkspace(active.id, workspace);
+        }}
+        pageReview={host.shared ? undefined : designPageReviewHost(latest, active.id)}
+        mangaReadOnlyReason={
+          host.shared ? '共有セッションでは漫画のページ編集に対応していません。' : undefined
+        }
+        inkInput={!host.shared}
+        rasterInput={!host.shared}
+        onRasterSelection={(selection) =>
+          setRasterSelection({ ...selection, artifactId: active.id })
+        }
+        focusRequest={inkFocus?.artifactId === active.id ? inkFocus : undefined}
+        references={sharedSession ? undefined : host.references}
+        focusReferenceId={host.revealAddress?.elementId}
+        prototype={{
+          artifactId: active.id,
+          annotations: active.annotations,
+          onCreateAnnotation: readOnly
+            ? undefined
+            : async (address, body) => {
+                if (!(await host.addComment({ addresses: [address] }, body)))
+                  throw new Error('Comment could not be created');
+              },
+          onFlowComplete: (event) => {
+            host.setStatus(`Prototype flow completed: ${event.flowId}`);
+          },
+        }}
+        content={content}
+        runtime={referenceRuntimeAdapter}
+        revisions={[
+          { component: referenceTextRevision, propMap: { text: 'content' }, slotMap: {} },
+        ]}
+        registerGenerated={(source) => registerGeneratedReact(host, source)}
+        regenerationTargets={host.records
+          .filter(
+            (record) =>
+              record.kind === 'react-ui' &&
+              record.designReactConversion?.sourceArtifactId === active.id,
+          )
+          .map((record) => ({
+            id: record.id,
+            name: record.name,
+            basis: record.designReactConversion!.basis,
+            document: record.draft.content as ReactUiDocument,
+          }))}
+        applyRegeneration={(...args) => applyReactRegeneration(host, ...args)}
+        registrations={referenceDesignSettings.registrations}
+        settings={referenceDesignSettings}
+        publicationReadOnlyReason={
+          sharedSession
+            ? '共有Hostはnative React公開設定を受け付けません。編集可能なローカル成果物で設定してください。'
+            : undefined
+        }
+        readOnly={readOnly || (host.shared && workspace === 'manga')}
+        execute={host.execute}
+        select={host.select}
+      />
+    </div>
   );
 }
 
@@ -695,8 +795,10 @@ function DocumentHost({
   content: NonNullable<RenderedContent['document']>;
 }) {
   const { active, sharedSession, sharedPreview, revealAddress } = host;
+  const novel = useNovel(host);
   return (
     <DocumentSurface
+      {...novel}
       references={sharedSession ? undefined : host.references}
       focusReferenceId={revealAddress?.elementId}
       textEngine={sharedPreview ? undefined : sharedSession?.text('text')}
@@ -709,6 +811,95 @@ function DocumentHost({
       focusAddress={revealAddress}
     />
   );
+}
+
+/** Novel demo chapters open in the novel workspace; ordinary Documents keep their chrome. */
+function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurface>> {
+  const { active, records } = host;
+  const chapterIds = host.shared ? undefined : readNovelChapters(active.id);
+  const [choice, setChoice] = useState<{ id: string; workspace: 'document' | 'novel' }>();
+  const workspace = choice?.id === active.id ? choice.workspace : readNovelWorkspace(active.id);
+  // 通読 composes the saved version of every chapter in the Host's order; drafts stay out.
+  const chapters = chapterIds?.map((id) => records.find((r) => r.id === id));
+  const savedKey = chapters?.map((c) => `${c?.id}@${c?.draft.baseVersionId}`).join(',');
+  const [reading, setReading] = useState<{
+    key: string;
+    content?: DocumentContent;
+    problem?: string;
+  }>();
+  useEffect(() => {
+    if (!chapters || !savedKey || workspace !== 'novel') return;
+    let live = true;
+    const missing = chapters.findIndex((c) => !c?.draft.baseVersionId);
+    if (missing >= 0) {
+      setReading({
+        key: savedKey,
+        problem: `通読を作れません: 第${missing + 1}章が見つからないか、保存されていません。`,
+      });
+      return;
+    }
+    composeDocumentSequence(
+      chapters.map((c) => ({
+        artifact: c as import('@editor-platform/artifact-core').Artifact<DocumentContent>,
+        versionId: c!.draft.baseVersionId!,
+      })),
+      { references: host.references },
+    ).then(
+      (result) =>
+        live &&
+        setReading(
+          result.content
+            ? { key: savedKey, content: result.content }
+            : {
+                key: savedKey,
+                problem: `通読を作れません: ${result.manifest.diagnostics
+                  .filter((d) => d.severity === 'error')
+                  .map((d) => d.message)
+                  .join(' / ')}`,
+              },
+        ),
+      (error) => live && setReading({ key: savedKey, problem: `通読を作れません: ${error}` }),
+    );
+    return () => {
+      live = false;
+    };
+    // savedKey names every input that changes the read-through.
+  }, [savedKey, workspace, host.references]);
+  if (!chapterIds) return {};
+  const current = reading?.key === savedKey ? reading : undefined;
+  return {
+    workspace,
+    onWorkspaceRequest: (next) => {
+      setChoice({ id: active.id, workspace: next });
+      writeNovelWorkspace(active.id, next);
+    },
+    novel: {
+      notationRules: novelNotationRules,
+      ...(current?.content
+        ? {
+            reading: {
+              content: current.content,
+              label: `保存した${chapterIds.length}章を章順に結合した通読です。`,
+            },
+          }
+        : { readingUnavailable: current?.problem ?? '通読を準備しています。' }),
+      onNotationProposal: ({ command, findings }) => {
+        const session = host.sessions.current.get(active.id);
+        if (!session || !active.draft.baseVersionId || !host.flushInputs()) return;
+        host.reviewProposal({
+          id: crypto.randomUUID(),
+          baseLocalRevision: session.revision,
+          reads: {
+            target: { artifactId: active.id, versionId: active.draft.baseVersionId },
+            references: [],
+          },
+          source: 'Playground notation dictionary',
+          summary: `表記の直し（${findings.length}件）`,
+          commands: [command as EditorCommand<Content>],
+        });
+      },
+    },
+  };
 }
 
 function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: RenderedContent }) {
@@ -735,6 +926,9 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
         />
       )}
       {rendered.reactUi && <ReactUiHost key={active.id} host={host} content={rendered.reactUi} />}
+      {rendered.fictionMap && !sharedSession && session && (
+        <PlaygroundFictionMap key={active.id} host={host} />
+      )}
       {rendered.geo && !sharedSession && session && <GeoHost key={active.id} host={host} />}
       {rendered.cad && !sharedSession && session && (
         <Suspense fallback={<p className="empty-state">Loading 3D CAD…</p>}>
@@ -770,6 +964,25 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
             record={() => latestRecord(host)}
             persistRecord={async (record) => (await host.persist(record)) !== false}
             records={() => host.recordsRef.current}
+          />
+        </Suspense>
+      )}
+      {rendered.character && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Character…</p>}>
+          <CharacterHost
+            key={active.id}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<CharacterDocument>
+            }
+            readOnly={readOnly}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            record={() => latestRecord(host)}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
+            records={() => host.recordsRef.current}
+            history={host.history}
           />
         </Suspense>
       )}

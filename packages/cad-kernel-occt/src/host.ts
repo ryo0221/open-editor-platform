@@ -43,6 +43,7 @@ const transferables = (meshes: CadMesh[]) =>
       [
         m.positions.buffer,
         m.normals.buffer,
+        ...(m.uvs ? [m.uvs.buffer] : []),
         m.indices.buffer,
         m.faceIds.buffer,
         m.vertices.buffer,

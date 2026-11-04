@@ -57,7 +57,7 @@ test('Document: edit → saved event → saved read → proposal → preview →
   await shot(page, info, 'document-review');
   await review.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(page.getByLabel('Proposal results').getByRole('listitem')).toHaveText([
-    'accepted (unsaved)',
+    'accepted (unsaved): doc-body',
   ]);
   await expect(output(page, 'Draft state')).toHaveText('Unsaved changes');
   await expect(page.locator('[data-block-id="doc-body"]')).toContainText('Review on Thursday.');
@@ -107,7 +107,7 @@ test('Data: reject leaves content; accept by API saves and reloads; text read is
   await review.getByRole('button', { name: 'Accept by API', exact: true }).click();
   await expect(page.getByLabel('Proposal results').getByRole('listitem')).toHaveText([
     'rejected',
-    'accepted (unsaved)',
+    'accepted (unsaved): row-1',
   ]);
   await button(page, 'Save version').click();
   await expect(output(page, 'Draft state')).toHaveText('Saved');
@@ -180,7 +180,7 @@ test('stale, read-only and unconfirmed-input refusals use the same accept path',
   await expect(output(page, 'Draft text')).toContainText('Review on Thursday.');
   await expect(page.getByLabel('Proposal results').getByRole('listitem')).toHaveText([
     'stale (unsaved)',
-    'accepted (unsaved)',
+    'accepted (unsaved): doc-body',
   ]);
 });
 

@@ -16,7 +16,8 @@ export function graphNodeSize(size?: GraphNodeSize): GraphNodeSize {
     : { width: 200, height: 70 };
 }
 /** Shows the whole drawing as large as it fits, up to 2×, centred in the viewport. */
-export function fitGraphView(boxes: Bounds[], viewport: GraphNodeSize): GraphCamera {
+/** The boxes centred in the viewport, scaled to fit it but never above `maxZoom`. */
+export function fitGraphView(boxes: Bounds[], viewport: GraphNodeSize, maxZoom = 2): GraphCamera {
   if (!boxes.length) return { x: 0, y: 0, zoom: 1 };
   const minX = Math.min(...boxes.map((box) => box.x)),
     minY = Math.min(...boxes.map((box) => box.y)),
@@ -25,7 +26,7 @@ export function fitGraphView(boxes: Bounds[], viewport: GraphNodeSize): GraphCam
   const zoom = Math.max(
     0.001,
     Math.min(
-      2,
+      maxZoom,
       Math.max(1, viewport.width - 40) / (maxX - minX),
       Math.max(1, viewport.height - 40) / (maxY - minY),
     ),

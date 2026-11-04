@@ -1,11 +1,9 @@
 import {
-  AmbientLight,
   Box3,
   BufferAttribute,
   BackSide,
   BufferGeometry,
   Color,
-  DirectionalLight,
   DoubleSide,
   EdgesGeometry,
   FrontSide,
@@ -35,6 +33,15 @@ import {
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
+  disposeViewTextures,
+  setViewFinish,
+  setViewTextures,
+  ViewLighting,
+  viewTextureBytes,
+  type ViewTextureSet,
+  type PathRenderSource,
+} from '@editor-platform/geometry-view';
+import {
   combTip,
   curvatureColor,
   type CadCamera,
@@ -46,7 +53,15 @@ import {
   type Vec3,
 } from '@editor-platform/cad-core';
 import type { CadMesh } from '@editor-platform/cad-kernel-occt';
-import { defaultGrid, gridFor, orbitRotateSpeed, viewOf, type Bounds } from './view-math';
+import {
+  defaultGrid,
+  gridFor,
+  orbitRotateSpeed,
+  standardViews,
+  viewOf,
+  type Bounds,
+  type CadStandardView,
+} from './view-math';
 import {
   disposeParts,
   lodLevel,
@@ -66,6 +81,11 @@ export interface ViewportBody {
   color: string;
   /** The body's native appearance opacity (0–1). */
   opacity: number;
+  /** #661: the finish (0–1 each); the default finish when absent. */
+  roughness?: number;
+  metalness?: number;
+  /** #662: image maps, drawn where the mesh has texture coordinates. */
+  textures?: ViewTextureSet;
   selected: boolean;
   /** A sheet is drawn from both sides, its back in a darker tint (docs/cad/r2a-freeform.md). */
   sheet?: boolean;
@@ -85,6 +105,8 @@ const beforeFailureOpacity = 0.3;
  */
 export type CadShading =
   | { mode: 'shaded' }
+  /** Shaded under the realistic lighting: environment light, tone mapping, shadows (#665). */
+  | { mode: 'realistic' }
   | { mode: 'zebra'; axis: 'x' | 'y' | 'z'; stripes: number; selectedOnly?: boolean }
   | { mode: 'curvature'; range: number };
 /** The comb's colour: teeth and the line through their tips. */
@@ -247,6 +269,8 @@ export class CadViewport {
   /** The curvature comb drawn over the shape. */
   private readonly combs = new Group();
   private shading: CadShading = { mode: 'shaded' };
+  /** Standard or realistic lighting (#665); the analysis shadings always use the standard. */
+  private readonly lighting: ViewLighting;
   private measuring = false;
   private topologyTool: 'face' | 'edge' | undefined;
   private readonly resize: ResizeObserver;
@@ -328,16 +352,13 @@ export class CadViewport {
     this.scene.add(
       this.grid,
       this.axes,
-      new AmbientLight('#ffffff', 0.6),
       this.bodies,
       this.parts,
       this.marks,
       this.jointMarks,
       this.combs,
     );
-    const sun = new DirectionalLight('#ffffff', 1.6);
-    sun.position.set(1, -1.5, 2);
-    this.scene.add(sun);
+    this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0.6 });
     this.controls = this.makeControls();
     const canvas = this.renderer.domElement;
     canvas.addEventListener('webglcontextlost', (e) => {
@@ -346,7 +367,11 @@ export class CadViewport {
       this.clear();
       options.onContextLost();
     });
-    canvas.addEventListener('webglcontextrestored', () => options.onContextRestored?.());
+    canvas.addEventListener('webglcontextrestored', () => {
+      // The environment map was drawn on the GPU: it is drawn again on the new context.
+      this.lighting.contextRestored();
+      options.onContextRestored?.();
+    });
     canvas.addEventListener('pointerdown', (e) => {
       this.pointers.add(e.pointerId);
       this.down = { x: e.clientX, y: e.clientY };
@@ -498,7 +523,10 @@ export class CadViewport {
   }
   private render() {
     cancelAnimationFrame(this.frame);
-    this.frame = requestAnimationFrame(() => this.renderer.render(this.scene, this.camera));
+    this.frame = requestAnimationFrame(() => {
+      this.lighting.prepare([this.bodies, this.parts]);
+      this.renderer.render(this.scene, this.camera);
+    });
   }
   private release = (e: PointerEvent) => this.pointers.delete(e.pointerId);
   /** Whether a body is being dragged: its display offset is not committed content. */
@@ -609,6 +637,8 @@ export class CadViewport {
       const origin = child.userData.origin as Vec3;
       child.position.set(origin[0] + delta.x, origin[1] + delta.y, origin[2] + delta.z);
     }
+    // The moved body's shadow and the ground follow it.
+    this.lighting.invalidate();
     this.render();
   }
   /** R2b-2c: clicks pick connectors (faces, edges, vertices) for a new joint, or select again. */
@@ -668,6 +698,7 @@ export class CadViewport {
       : delta;
     this.partsPose = { moves: posed(drag.tool), delta: deltas, key: drag.key };
     poseParts(this.parts, this.partsPose.moves, deltas);
+    this.lighting.invalidate();
     this.render();
   }
   private endJointDrag(commit: boolean) {
@@ -689,6 +720,7 @@ export class CadViewport {
     if (!this.partsPose) return;
     this.partsPose = undefined;
     poseParts(this.parts, new Set());
+    this.lighting.invalidate();
     this.render();
   }
   /**
@@ -1026,6 +1058,7 @@ export class CadViewport {
       this.marks.remove(child);
       if (child instanceof Points || child instanceof LineSegments) {
         child.geometry.dispose();
+        disposeViewTextures(child.material);
         (child.material as { dispose(): void }).dispose();
       }
     }
@@ -1045,6 +1078,7 @@ export class CadViewport {
       this.bodies.remove(child);
       if (child instanceof Mesh || child instanceof LineSegments) {
         child.geometry.dispose();
+        disposeViewTextures(child.material);
         (child.material as { dispose(): void }).dispose();
       }
     }
@@ -1111,6 +1145,8 @@ export class CadViewport {
             seen.add(a.array);
             bytes += (a.array as ArrayLike<number> & { byteLength: number }).byteLength;
           }
+        // #662: each image once, with its mipmaps.
+        bytes += viewTextureBytes(child.material, seen);
       }
     return bytes;
   }
@@ -1122,14 +1158,17 @@ export class CadViewport {
   show(bodies: ViewportBody[], current: boolean, dim = !current) {
     this.lastShown = { bodies, current, dim };
     this.clear();
+    this.lighting.invalidate();
     this.pickable = current;
     const shading = this.shading;
-    for (const { mesh, color, opacity: native, selected, sheet, highlight, curvature } of bodies) {
+    for (const body of bodies) {
+      const { mesh, color, opacity: native, selected, sheet, highlight, curvature } = body;
       // Stale dimming multiplies the native opacity instead of replacing it.
       const opacity = native * (dim ? 0.35 : 1) * (mesh.beforeFailure ? beforeFailureOpacity : 1);
       const geometry = new BufferGeometry();
       geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
       geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
+      if (mesh.uvs) geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
       geometry.setIndex(new BufferAttribute(mesh.indices, 1));
       const colored = shading.mode === 'curvature' && !!curvature;
       if (colored) {
@@ -1167,8 +1206,6 @@ export class CadViewport {
         new MeshStandardMaterial({
           color: colored ? '#ffffff' : color,
           vertexColors: colored,
-          roughness: 0.55,
-          metalness: 0.05,
           transparent: opacity < 1,
           opacity,
           depthWrite: opacity >= 1,
@@ -1177,6 +1214,15 @@ export class CadViewport {
           emissiveIntensity: selected ? 0.12 : 0,
           ...offset,
         });
+      // Not the model's look: a path-traced render refuses it (#664).
+      if (zebra || colored) material.userData.analysis = true;
+      // The analysis shadings read the shape alone: every body in the default finish.
+      if (material instanceof MeshStandardMaterial) {
+        setViewFinish(material, colored ? undefined : body);
+        // The image maps are the look, not the shape: the curvature shading leaves them out,
+        // and a mesh made without texture coordinates draws without them.
+        if (!colored && mesh.uvs) setViewTextures(material, body.textures);
+      }
       const solid = new Mesh(geometry, material);
       solid.userData.bodyId = mesh.bodyId;
       // The back of a sheet: the same triangles seen from behind, darker so the sides differ.
@@ -1258,6 +1304,7 @@ export class CadViewport {
   /** Shades bodies this way from the next `show` on; display only. */
   setShading(shading: CadShading) {
     this.shading = shading;
+    this.lighting.setRealistic(shading.mode === 'realistic');
   }
   /**
    * Draws a curvature comb over the shape (model space): a tooth from each sample away from the
@@ -1306,6 +1353,7 @@ export class CadViewport {
       this.combs.remove(child);
       if (child instanceof LineSegments) {
         child.geometry.dispose();
+        disposeViewTextures(child.material);
         (child.material as { dispose(): void }).dispose();
       }
     }
@@ -1385,6 +1433,7 @@ export class CadViewport {
    */
   showParts(parts: ViewportPart[]): boolean {
     this.lastParts = parts;
+    this.lighting.invalidate();
     this.scene.remove(this.parts);
     disposeParts(this.parts);
     const levels = new Map<string, ViewLevel>();
@@ -1459,11 +1508,17 @@ export class CadViewport {
     );
     if (changed) this.showParts(this.lastParts);
   }
-  /** Fits the shown bodies. `reset` also returns to the perspective three-quarter view. */
-  fit({ reset = false }: { reset?: boolean } = {}) {
-    if (reset) this.use(this.perspective);
+  /**
+   * Fits the shown bodies. `reset` also returns to the perspective three-quarter view; `view`
+   * looks from one of the standard views instead (camera only: nothing is stored).
+   */
+  fit({ reset = false, view }: { reset?: boolean; view?: CadStandardView } = {}) {
+    // Nothing shown: keep the camera as it is, so a later fit starts from a set-up one.
     const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
     if (box.isEmpty()) return;
+    const standard = view ? standardViews[view] : undefined;
+    if (standard) this.use(standard.orthographic ? this.orthographic : this.perspective);
+    else if (reset) this.use(this.perspective);
     const center = box.getCenter(new Vector3());
     const radius = box.getSize(new Vector3()).length() / 2 || 50;
     // Fit the narrower of the vertical and horizontal fields of view (portrait phones).
@@ -1472,11 +1527,13 @@ export class CadViewport {
     const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * aspect);
     const distance = (radius * 1.1) / Math.sin(Math.min(vertical, horizontal) / 2);
     // Keep the direction the user turned to; the first fit and a reset look from the front left.
-    const direction =
-      this.fitted && !reset
+    const direction = standard
+      ? new Vector3(...standard.from)
+      : this.fitted && !reset
         ? this.camera.position.clone().sub(this.controls.target).normalize()
-        : new Vector3(0.55, -0.75, 0.6).normalize();
-    if (reset) this.camera.up.set(0, 0, 1);
+        : new Vector3(...standardViews['three-quarter'].from);
+    if (standard) this.camera.up.set(...standard.up);
+    else if (reset) this.camera.up.set(0, 0, 1);
     this.orbit();
     this.camera.position.copy(center.clone().addScaledVector(direction, distance));
     if (this.camera === this.perspective) {
@@ -1517,6 +1574,10 @@ export class CadViewport {
       this.render();
     });
   }
+  /** The shown bodies and parts and the camera, for a path-traced render (#664). */
+  renderSource(): PathRenderSource {
+    return { roots: [this.bodies, this.parts], camera: this.camera };
+  }
   dispose() {
     window.removeEventListener('keydown', this.onKey, true);
     window.removeEventListener('pointerup', this.release, true);
@@ -1530,6 +1591,7 @@ export class CadViewport {
     this.clearMarks();
     this.showJointMarks({ frames: [], points: [] });
     this.clearComb();
+    this.lighting.dispose();
     this.grid.dispose();
     this.axes.dispose();
     this.renderer.dispose();

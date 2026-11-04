@@ -1014,12 +1014,12 @@ test('independent public Host: chart/Graph, proposal rejection and permission/of
   await page.getByRole('button', { name: '元を編集', exact: true }).click();
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
   await page.getByRole('textbox', { name: 'name', exact: true }).fill('自動化');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   const edge = page.getByRole('button', { name: /Select connection Related/ });
   await edge.focus();
   await edge.press('Enter');
   await page.getByRole('textbox', { name: 'label', exact: true }).fill('連動');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await page.getByRole('button', { name: '参照元を保存', exact: true }).click();
   await expect(page.locator('header')).toContainText('元の保存版 2');
   await page.getByRole('button', { name: '埋め込み先に戻る', exact: true }).click();

@@ -1,7 +1,8 @@
+import type { EstimateSettlement } from './settlement';
 import { EstimateBrowse, formatAmount as format } from './browse';
 import type { EstimateBimEvaluator } from './bim-source';
 import type { WorkPublicationHost, WorkPublicationPreview } from './publication';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { canonicalJson, newId } from '@editor-platform/artifact-core';
 import type { EditorInputBoundary } from '@editor-platform/editor-core';
 import type { StructuredData } from '@editor-platform/structured-data/model';
@@ -27,6 +28,7 @@ import {
 } from './host';
 import type { EstimateSourceOption, EstimateGeometrySourceOption } from './sources';
 import { EstimateFields, type EditDraft } from './forms';
+import { StatusRoleContext, useStatusProps, type EstimateStatusRole } from './status-role';
 const EstimateCadPanel = lazy(() =>
   import('./cad-panel').then((m) => ({ default: m.EstimateCadPanel })),
 );
@@ -35,6 +37,11 @@ const EstimateBimPanel = lazy(() =>
 );
 export interface EstimateSurfaceProps {
   port: EstimatePort;
+  /** Stable calculation scope identity. For document/session replacement, also remount
+   * with a React key so private form/candidate state cannot cross sessions. */
+  instanceKey?: object | string;
+  /** Register this Surface's calculation observer; cleanup must remove only this handle. */
+  registerSettlement?(handle: EstimateSettlement): () => void;
   publication?: WorkPublicationHost;
   sources?: EstimateSourceOption[];
   quantitySources?: EstimateGeometrySourceOption[];
@@ -47,6 +54,11 @@ export interface EstimateSurfaceProps {
   copyData?(data: StructuredData, requestId: string): Promise<void>;
   select?(id: string): void;
   openSource?(id: string): void;
+  /**
+   * "none" when the Host shows its own role=status around the Surface: the Surface's notices
+   * stay polite live regions without the role. By default they are role=status named "見積の状態".
+   */
+  statusRole?: EstimateStatusRole;
 }
 function download(name: string, text: string, type: string) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -56,9 +68,19 @@ function download(name: string, text: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export function EstimateSurface(props: EstimateSurfaceProps) {
+export function EstimateSurface({ statusRole = 'status', ...props }: EstimateSurfaceProps) {
+  return (
+    <StatusRoleContext.Provider value={statusRole}>
+      <Surface {...props} />
+    </StatusRoleContext.Provider>
+  );
+}
+function Surface(props: Omit<EstimateSurfaceProps, 'statusRole'>) {
   const latest = useRef(props);
-  latest.current = props;
+  // Pending work must not observe a speculative render's replacement session.
+  useLayoutEffect(() => {
+    latest.current = props;
+  });
   const [draft, updateDraft] = useState<EditDraft>();
   const buffer = useRef({
     draft: undefined as EditDraft | undefined,
@@ -117,11 +139,23 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
     }),
     [],
   );
-  const controller = useMemo(
-    () => new EstimateController(port, props.worker),
-    [port, props.worker],
+  const controllerRef = useRef<EstimateController | null>(null);
+  const controller = () => {
+    if (!controllerRef.current) throw Error('Estimate Surface is detached');
+    return controllerRef.current;
+  };
+  useLayoutEffect(() => {
+    const owned = new EstimateController(port, props.worker);
+    controllerRef.current = owned;
+    return () => {
+      owned.close();
+      if (controllerRef.current === owned) controllerRef.current = null;
+    };
+  }, [port, props.worker, props.instanceKey]);
+  useLayoutEffect(
+    () => props.registerSettlement?.(controller().settlement),
+    [props.worker, props.instanceKey, props.registerSettlement],
   );
-  useEffect(() => () => controller.close(), [controller]);
   useEffect(
     () =>
       props.registerInput?.({
@@ -155,7 +189,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
     let active = true;
     setVerified('');
     if (calculation && readable && !draft)
-      void controller
+      void controller()
         .verifiedCalculation(calculation.id)
         .then(() => {
           if (active) setVerified(signature);
@@ -164,9 +198,18 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
     return () => {
       active = false;
     };
-  }, [controller, signature, calculation?.id, readable, draft]);
+  }, [
+    props.worker,
+    props.instanceKey,
+    props.registerSettlement,
+    signature,
+    calculation?.id,
+    readable,
+    draft,
+  ]);
   const attempt = async (fn: () => void | Promise<void>) => {
     setError('');
+    setStatus('');
     try {
       await fn();
     } catch (e) {
@@ -175,7 +218,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
   };
   const editing = (next: EstimateDocument, label: string) => {
     port.flush();
-    controller.edit(next, label);
+    controller().edit(next, label);
   };
   const open = (d: EditDraft) => {
     if (buffer.current.draft) {
@@ -183,7 +226,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
       return;
     }
     execution.current++;
-    controller.cancel();
+    controller().cancel();
     setBusy(false);
     setCandidate(undefined);
     setDraft(structuredClone(d));
@@ -213,7 +256,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
             : [...entries, d.value],
         };
       }
-      controller.edit(next, 'Edit estimate item');
+      controller().edit(next, 'Edit estimate item');
       setDraft(undefined);
     } finally {
       buffer.current.committing = false;
@@ -349,7 +392,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
       evidence: `保存Dataの明示選択: ${sourceRow}/${sourceField}`,
       source: { snapshotKey: retained.key, rowId: sourceRow, fieldId: sourceField },
     };
-    controller.edit(
+    controller().edit(
       {
         ...base,
         rates: [...base.rates, rate],
@@ -388,15 +431,15 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
         ? base.retainedSources
         : [...base.retainedSources, retained],
     };
-    setCandidate(await controller.prepare(scenario || null, next, retention));
+    setCandidate(await controller().prepare(scenario || null, next, retention));
   }
   const execute = async (preview: boolean) => {
     const token = ++execution.current;
     setBusy(true);
     try {
-      if (preview) setCandidate(await controller.prepare(scenario || null, undefined, retention));
+      if (preview) setCandidate(await controller().prepare(scenario || null, undefined, retention));
       else {
-        await controller.run(scenario || null, retention);
+        await controller().run(scenario || null, retention);
         setSelectedCalculation('');
         setStatus('計算結果を採用しました。');
       }
@@ -404,6 +447,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
       if (token === execution.current) setBusy(false);
     }
   };
+  const notice = useStatusProps();
   return (
     <section className="ep-estimate" aria-label="見積・積算">
       <header>
@@ -440,7 +484,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
             disabled={!busy}
             onClick={() => {
               execution.current++;
-              controller.cancel();
+              controller().cancel();
               setBusy(false);
             }}
           >
@@ -451,7 +495,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
             onClick={() =>
               void attempt(() => {
                 execution.current++;
-                controller.cancel();
+                controller().cancel();
                 port.flush();
                 props.history('undo');
               })
@@ -464,7 +508,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
             onClick={() =>
               void attempt(() => {
                 execution.current++;
-                controller.cancel();
+                controller().cancel();
                 port.flush();
                 props.history('redo');
               })
@@ -486,7 +530,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
           </button>
         </div>
         {error && <p role="alert">{error}</p>}
-        <p role="status">{busy ? '計算中…' : status}</p>
+        <p {...notice}>{busy ? '計算中…' : status}</p>
       </header>
       {!readable ? (
         <p role="alert">
@@ -571,7 +615,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                 sources={props.quantitySources}
                 edit={editing}
                 trial={async (next) => {
-                  setCandidate(await controller.prepare(scenario || null, next, retention));
+                  setCandidate(await controller().prepare(scenario || null, next, retention));
                 }}
               />
             </Suspense>
@@ -584,7 +628,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                 evaluate={props.evaluateBim}
                 edit={editing}
                 trial={async (next) => {
-                  setCandidate(await controller.prepare(scenario || null, next, retention));
+                  setCandidate(await controller().prepare(scenario || null, next, retention));
                 }}
               />
             </Suspense>
@@ -1104,7 +1148,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                 disabled={readOnly}
                 onClick={() =>
                   void attempt(() => {
-                    controller.apply(candidate);
+                    controller().apply(candidate);
                     setCandidate(undefined);
                     setSelectedCalculation('');
                     setStatus('試算を採用しました。');
@@ -1116,7 +1160,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
               <button
                 onClick={() => {
                   execution.current++;
-                  controller.cancel();
+                  controller().cancel();
                   setCandidate(undefined);
                 }}
               >
@@ -1226,7 +1270,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                 onClick={() =>
                   void attempt(async () => {
                     port.flush();
-                    const c = await controller.verifiedCalculation(calculation.id);
+                    const c = await controller().verifiedCalculation(calculation.id);
                     await props.save();
                     setWorkPublication(await props.publication!.prepare(c));
                   })
@@ -1254,7 +1298,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                     onClick={() =>
                       void attempt(async () => {
                         port.flush();
-                        await controller.verifiedCalculation(calculation.id);
+                        await controller().verifiedCalculation(calculation.id);
                         await workPublication.apply();
                         setWorkPublication(undefined);
                         setStatus('工程Dataへの公開を保存しました。');
@@ -1349,7 +1393,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                   disabled={verified !== signature}
                   onClick={() =>
                     void attempt(async () => {
-                      const c = await controller.verifiedCalculation(calculation.id),
+                      const c = await controller().verifiedCalculation(calculation.id),
                         out = estimateCsv(c);
                       download('estimate.csv', out.csv, 'text/csv');
                       download(
@@ -1366,7 +1410,7 @@ export function EstimateSurface(props: EstimateSurfaceProps) {
                   disabled={!props.copyData || verified !== signature}
                   onClick={() =>
                     void attempt(async () => {
-                      const c = await controller.verifiedCalculation(calculation.id);
+                      const c = await controller().verifiedCalculation(calculation.id);
                       await props.copyData?.(
                         estimateData(c),
                         `estimate-copy-${c.id}-${c.basisHash}`,

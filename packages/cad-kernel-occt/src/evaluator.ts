@@ -3,6 +3,7 @@ import {
   KernelJobCancelled,
   vertexNormals,
   type OcModule,
+  faceTextureUvs,
 } from '@editor-platform/geometry-kernel-occt';
 import {
   attachFrame,
@@ -852,6 +853,12 @@ export async function evaluateCad(
       image,
     );
   }
+  /** The volume of a shape's solids (mm³), whatever their orientation. */
+  function volume(shape: unknown): number {
+    const props = own(new oc.GProp_GProps_1());
+    oc.BRepGProp.VolumeProperties_1(shape, props, false, false, false);
+    return Math.abs(props.Mass());
+  }
   /**
    * Whether `tool` takes a solid out of `target`. A tool that only touches the target (or misses
    * it) cuts nothing: their common part has no solid then, however small a genuine cut is (F04).
@@ -1202,8 +1209,9 @@ export async function evaluateCad(
   }
   /**
    * `BRepOffsetAPI_ThruSections` through the wires, built. OCCT first matches the wires' edges
-   * and seams (`BRepFill_CompatibleWires`); for closed spline sections (five through a wing) that
-   * matching can throw (`SameNumberByPolarMethod`, `profiles are inconsistent`) although every
+   * and seams (`BRepFill_CompatibleWires`); for closed spline sections (five through a wing, a
+   * canopy with a flat first section) that matching can throw (`SameNumberByPolarMethod`, or
+   * `BRepFill :: profiles are inconsistent`, which does not name the class) although every
    * section has the same number of edges and needs none. Then it is built once more without the matching (ST-89):
    * the sections join seam to seam as drawn, and the result is still checked as any loft is.
    */
@@ -1229,7 +1237,9 @@ export async function evaluateCad(
         explore(w, 'TopAbs_EDGE', () => n++);
         return n;
       });
-      const matching = message.includes('BRepFill_CompatibleWires');
+      const matching =
+        message.includes('BRepFill_CompatibleWires') ||
+        message.includes('BRepFill :: profiles are inconsistent');
       if (!matching || edges.some((n) => n !== edges[0]))
         throw new CadKernelError(
           `kernel-exception:${type}${message ? `:${message}` : ''}`,
@@ -2220,20 +2230,42 @@ export async function evaluateCad(
       }
       case 'boolean': {
         const [target, ...tools] = f.inputFeatureIds.map((i) => shapes.get(i)!);
+        // Tool faces are prefixed with the tool's feature ID (Booleanのtoolの名前).
+        const build = () =>
+          combine(
+            f.id,
+            f.args.mode,
+            target!,
+            tools,
+            tools.map((_, k) => `tool:${f.inputFeatureIds[k + 1]}`),
+          );
+        if (f.args.mode !== 'cut') return build();
         // A tool that only touches the target (or misses it) cuts nothing: a degenerate Boolean
         // (F04) that would still consume the tool. Their common part has no solid then, however
         // small a genuine cut is. Union and common report it as several solids or an empty result.
-        if (f.args.mode === 'cut')
+        // The common part is a second Boolean as costly as the cut (SC-6: 13–17 s each on a
+        // smooth loft), so a single tool whose cut takes out over 1% of the target is taken as
+        // overlapping without it. A smaller result or a failed cut checks the tool as before.
+        // Several tools are checked before the cut, as before: a missing one is refused without
+        // the all-tools Boolean. A tool that cuts nothing is still refused by its own code.
+        const check = () => {
           for (const tool of tools)
             if (!overlaps(target!, tool)) throw new CadKernelError('boolean-no-overlap', f.id);
-        // Tool faces are prefixed with the tool's feature ID (Booleanのtoolの名前).
-        return combine(
-          f.id,
-          f.args.mode,
-          target!,
-          tools,
-          tools.map((_, k) => `tool:${f.inputFeatureIds[k + 1]}`),
-        );
+        };
+        if (tools.length !== 1) {
+          check();
+          return build();
+        }
+        let result: Named | undefined;
+        let failure: unknown;
+        try {
+          result = build();
+        } catch (error) {
+          failure = error;
+        }
+        if (!(result && volume(result.shape) < 0.99 * volume(target!.shape))) check();
+        if (!result) throw failure;
+        return result;
       }
       case 'pattern': {
         const [target, tool] = f.inputFeatureIds.map((i) => shapes.get(i)!);
@@ -2652,6 +2684,8 @@ export async function evaluateCad(
     const positions: number[] = [];
     const indices: number[] = [];
     const faceIds: number[] = [];
+    /** Each face's triangulation, for its texture coordinates (#662). */
+    const textured: { face: unknown; tri: OcModule; offset: number }[] = [];
     const { topology, edge: edgeShape } = tableOf(body);
     /** Each face's triangulation and where its nodes start in `positions`, for edge polylines. */
     const triangulations: {
@@ -2674,6 +2708,7 @@ export async function evaluateCad(
         positions.push(p.X() - origin[0], p.Y() - origin[1], p.Z() - origin[2]);
       }
       if (options.curvature) curvature.push({ face: topoFace, tri, offset });
+      textured.push({ face: topoFace, tri, offset });
       const reversed = topoFace.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
       for (let i = 1; i <= tri.NbTriangles(); i++) {
         const t = own(tri.Triangle(i));
@@ -2703,6 +2738,9 @@ export async function evaluateCad(
     }
     const pos = new Float32Array(positions);
     const normals = vertexNormals(pos, indices);
+    const uvs = new Float32Array((pos.length / 3) * 2);
+    for (const t of textured)
+      faceTextureUvs(oc, own, t.face, t.tri, positions, origin, uvs, t.offset);
     let curvatures: CadMesh['curvature'];
     if (options.curvature) {
       curvatures = {
@@ -2724,6 +2762,7 @@ export async function evaluateCad(
       origin,
       positions: pos,
       normals,
+      uvs,
       indices: new Uint32Array(indices),
       faceIds: new Uint32Array(faceIds),
       vertices: new Float64Array([...vertices.values()].flat()),
@@ -2765,6 +2804,7 @@ export async function evaluateCad(
     );
     const positions: number[] = [];
     const indices: number[] = [];
+    const textured: { face: unknown; tri: OcModule; offset: number }[] = [];
     explore(shape, 'TopAbs_FACE', (current) => {
       const topoFace = own(oc.TopoDS.Face_1(current));
       const loc = own(new oc.TopLoc_Location_1());
@@ -2777,6 +2817,7 @@ export async function evaluateCad(
         const p = own(own(tri.Node(i)).Transformed(trsf));
         positions.push(p.X() - origin[0], p.Y() - origin[1], p.Z() - origin[2]);
       }
+      textured.push({ face: topoFace, tri, offset });
       const reversed = topoFace.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
       for (let i = 1; i <= tri.NbTriangles(); i++) {
         const t = own(tri.Triangle(i));
@@ -2784,6 +2825,9 @@ export async function evaluateCad(
         indices.push(...(reversed ? [a, c, b] : [a, b, c]));
       }
     });
+    const uvs = new Float32Array((positions.length / 3) * 2);
+    for (const t of textured)
+      faceTextureUvs(oc, own, t.face, t.tri, positions, origin, uvs, t.offset);
     oc.BRepTools.Clean(shape, true);
     const pos = new Float32Array(positions);
     return {
@@ -2791,6 +2835,7 @@ export async function evaluateCad(
       origin,
       positions: pos,
       normals: vertexNormals(pos, indices),
+      uvs,
       indices: new Uint32Array(indices),
       faceIds: new Uint32Array(0),
       vertices: new Float64Array(0),

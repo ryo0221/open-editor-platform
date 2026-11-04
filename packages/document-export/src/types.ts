@@ -101,6 +101,6 @@ export interface OwnedDocxPlan {
   font?: ExportFontProfile;
   codeFont?: ExportFontProfile;
   numbering: { reference: string; level: number; kind: 'bullet' | 'number'; start?: number }[];
-  page: { width: number; height: number; margin: number; landscape: boolean };
+  page: { width: number; height: number; margin: number; landscape: boolean; vertical?: boolean };
   assets: Map<string, ExportAsset & { hash: string }>;
 }

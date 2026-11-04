@@ -12,7 +12,7 @@ import type { BimPartReference, BimPartShape, BimPartSource } from '@editor-plat
 import { isBimDocument, type BimDocument } from '@editor-platform/bim-core';
 import type { StoredArtifact } from '../model';
 import type { CadPartRecord } from '../cad/parts';
-import { cadNativeFileBytes, nativeBytes } from '../cad/resources';
+import { cadNativeFileBytes, nativeBytes, portableCadRecord } from '../cad/resources';
 
 /** What the source needs of a CAD kernel: one exact document written as BRep. */
 export interface BimPartKernel {
@@ -42,7 +42,10 @@ export function createBimPartSource(options: {
     if (!doc) throw new Error('part-source-missing');
     // A version that places parts or reads imported files needs its own closure; not yet.
     if (doc.parts?.length) throw new Error('part-assembly-unsupported');
-    if (doc.assets.length) throw new Error('part-assets-unsupported');
+    // Texture images (#662) are the look, not the shape: the building draws a part's bodies by
+    // their colour and finish, so only imported shapes need a closure here.
+    if (doc.assets.some((a) => a.kind !== 'texture-png' && a.kind !== 'texture-jpeg'))
+      throw new Error('part-assets-unsupported');
     const kernel = options.kernel;
     if (!kernel) throw new Error('kernel-build-unavailable');
     // One build for the building and every part (R2b-U6).
@@ -91,7 +94,7 @@ export function createBimPartSource(options: {
         { contentHash: source.contentHash, content: doc },
       ];
       // The native file must still import with this version in it (the type names it next).
-      const portable = portableBimRecord(record);
+      const portable = portableBimRecord(portableCadRecord(record));
       const next = { ...portable, cadParts: [...(portable.cadParts ?? []), cadParts.at(-1)!] };
       if (nativeBytes(next) > cadNativeFileBytes) throw new Error('part-file-too-large');
       if (!(await options.persist({ ...record, cadParts }))) throw new Error('part-retain-failed');
@@ -128,7 +131,8 @@ export function assertBimNativeFits(
   action: 'version' | 'export' | 'import',
 ) {
   if (record.kind !== 'bim') return;
-  const size = nativeBytes(portableBimRecord(record));
+  // Its texture images (#662) count too: only those its draft and versions name.
+  const size = nativeBytes(portableBimRecord(portableCadRecord(record)));
   if (size <= cadNativeFileBytes) return;
   const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます`;
   throw new Error(

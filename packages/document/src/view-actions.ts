@@ -8,7 +8,9 @@ import { readImage } from '@editor-platform/canvas-ui';
 import {
   documentSchema,
   activeDocumentLink,
+  activeDocumentRuby,
   setDocumentLink,
+  setDocumentRuby,
   blockNode,
   activeBlock,
   jumpToBlock,
@@ -28,6 +30,8 @@ export interface DocumentActionContext {
   setInsertOpen: (open: boolean) => void;
   setLink: (href: string) => void;
   setLinkOpen: (open: boolean) => void;
+  setRuby: (reading: string) => void;
+  setRubyOpen: (open: boolean) => void;
 }
 
 function run(ctx: DocumentActionContext, cmd: Command) {
@@ -129,6 +133,23 @@ function openLink(ctx: DocumentActionContext) {
   ctx.setLinkOpen(true);
 }
 
+function openRuby(ctx: DocumentActionContext) {
+  const editor = ctx.view.current;
+  if (!editor || ctx.callbacks.current.readOnly) return;
+  const state = editor.state;
+  if (state.selection.empty && !activeDocumentRuby(state)) {
+    ctx.setError('ルビを付ける文字を選んでください');
+    return;
+  }
+  ctx.setRuby(activeDocumentRuby(state)?.ruby.text ?? '');
+  ctx.setRubyOpen(true);
+}
+
+function closeRuby(ctx: DocumentActionContext) {
+  flushSync(() => ctx.setRubyOpen(false));
+  ctx.view.current?.focus();
+}
+
 function closeLink(ctx: DocumentActionContext) {
   // Unmount the modal and finish its generic focus cleanup before restoring
   // ProseMirror's caret/stored marks; the editor is inert while it stays open.
@@ -188,6 +209,8 @@ export function documentActions(ctx: DocumentActionContext) {
     mark,
     openLink: () => openLink(ctx),
     closeLink: () => closeLink(ctx),
+    openRuby: () => openRuby(ctx),
+    closeRuby: () => closeRuby(ctx),
     pageSetting: (patch: Partial<NonNullable<DocumentContent['page']>>) => pageSetting(ctx, patch),
     textStyle: (value: string) => {
       const [type, l] = value.split('-');
@@ -202,6 +225,13 @@ export function documentActions(ctx: DocumentActionContext) {
     setLink: (href: string | null) => {
       run(ctx, setDocumentLink(href));
       closeLink(ctx);
+    },
+    setRuby: (reading: string | null) => {
+      const editor = ctx.view.current;
+      if (editor && !setDocumentRuby(reading)(editor.state))
+        ctx.setError('ルビは一つの段落の中、改行をまたがない範囲に付けられます');
+      else run(ctx, setDocumentRuby(reading));
+      closeRuby(ctx);
     },
     navigate: (blockId: string) => navigate(ctx, blockId),
   };

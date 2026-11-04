@@ -112,6 +112,66 @@ describe('IFC import (R2c-4b, CAD67)', () => {
     }
   });
 
+  it('brings materials’ looks back, without their textures (#663)', () => {
+    const { doc, options } = f35WithFollow();
+    const [first, second] = doc.materials;
+    first!.appearance = {
+      color: '#a4553d',
+      opacity: 0.4,
+      roughness: 0.85,
+      metalness: 0,
+      preset: 'brick',
+      textures: {
+        maps: { color: 'asset-1' },
+        sizeMm: [1200, 600],
+        rotationDeg: 0,
+        normal: 'gl',
+        name: 'Bricks',
+      },
+    };
+    second!.appearance = { color: '#c8ccd0', opacity: 1, roughness: 0.25, metalness: 0.8 };
+    doc.assets = [
+      {
+        id: 'asset-1',
+        kind: 'texture-png',
+        sha256: `sha256:${'a'.repeat(64)}`,
+        byteLength: 4,
+        mediaType: 'image/png',
+      },
+    ];
+    const out = writeIfc(doc, options);
+    expect(out.losses).toEqual([
+      `The texture maps of ${first!.name} are not written: IFC keeps its colour and finish.`,
+    ]);
+    // A rendering style per material, tied to it for any reader.
+    expect(out.text).toMatch(
+      /=IFCSURFACESTYLERENDERING\(#\d+,0\.6,\$,\$,\$,\$,#\d+,IFCSPECULARROUGHNESS\(0\.85\),\.PLASTIC\.\);/,
+    );
+    expect(out.text).toMatch(
+      /=IFCSURFACESTYLERENDERING\(#\d+,0\.,\$,\$,\$,\$,IFCNORMALISEDRATIOMEASURE\(1\.\),IFCSPECULARROUGHNESS\(0\.25\),\.METAL\.\);/,
+    );
+    expect(out.text.match(/=IFCMATERIALDEFINITIONREPRESENTATION\(/g)).toHaveLength(2);
+    const back = imported(readIfc(out.bytes, resolveAll)).document;
+    const { textures: _, ...look } = first!.appearance;
+    expect(back.materials[0]!.appearance).toEqual(look);
+    expect(back.materials[1]!.appearance).toEqual(second!.appearance);
+    expect(back.materials.slice(2).every((m) => !m.appearance)).toBe(true);
+    // Another tool's shading (no rendering, no EP_Constraints): its colour and transparency.
+    const foreign = out.text
+      .replace(
+        /IFCSURFACESTYLERENDERING\((#\d+),([^,]+),[^;]*\);/g,
+        'IFCSURFACESTYLESHADING($1,$2);',
+      )
+      .replace(/'Metalness'|'Preset'/g, "'Other'");
+    const read = imported(readIfc(new TextEncoder().encode(foreign), resolveAll)).document;
+    expect(read.materials[0]!.appearance).toEqual({
+      color: '#a4553d',
+      opacity: 0.4,
+      roughness: 0.55,
+      metalness: 0,
+    });
+  });
+
   it('follows the same changes as the original: levels, grids, types', () => {
     const { doc, options } = f35WithFollow();
     // A wall rising to 2F and one fixed at the same height.

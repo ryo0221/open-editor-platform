@@ -2,7 +2,9 @@ import { readFile } from 'node:fs/promises';
 import { unzipSync, strFromU8 } from 'fflate';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { test, expect } from './fixtures';
-import type { Artifact } from '@editor-platform/artifact-core';
+import { createArtifact, type Artifact } from '@editor-platform/artifact-core';
+import { createWhiteboard } from '@editor-platform/whiteboard/model';
+import { build } from 'esbuild';
 import type { HostContent } from '../../apps/artifact-host/src/model';
 const studio = !!process.env.HOST_STUDIO_URL;
 const names = studio
@@ -60,6 +62,89 @@ async function shot(page: Page, info: TestInfo, name: string) {
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await expect(page.getByLabel('成果物一覧', { exact: true })).toBeVisible();
+});
+test('capacity: imports and exports above 16 MiB while preserving the draft on localStorage quota failure', async ({
+  page,
+}) => {
+  test.skip(studio, 'The capacity fixture targets the reference Artifact Host.');
+  const artifact = createArtifact('whiteboard', 'Native capacity fixture', createWhiteboard(), {
+    source: 'created',
+    format: 'x'.repeat(17 * 1024 * 1024),
+  });
+  await page.locator('input[type="file"][accept=".json,.ifc"]').setInputFiles({
+    name: 'capacity.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(artifact)),
+  });
+  const target = page.getByRole('button', { name: artifact.name + 'を開く', exact: true });
+  await expect(target).toBeVisible();
+  await target.click();
+  await page.getByRole('button', { name: '保存してアプリに戻る', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('save-failed');
+  await expect(page.getByLabel('成果物Editor', { exact: true })).toBeVisible();
+  const exported = await native(page);
+  expect(exported.id).toBe(artifact.id);
+  expect(exported.provenance).toEqual(artifact.provenance);
+  expect(exported.draft.content).toEqual(artifact.draft.content);
+  expect(exported.versions).toHaveLength(0);
+});
+
+let capacityBundle: Promise<{ js: string; css: string }>;
+test('capacity: public IndexedDB Host saves and reopens the same owner above 16 MiB', async ({
+  page,
+}) => {
+  test.skip(studio, 'The fixture uses the reference Host origin.');
+  capacityBundle ??= build({
+    entryPoints: ['tests/fixtures/native-capacity/host.tsx'],
+    bundle: true,
+    write: false,
+    outdir: '/tmp/native-capacity-browser',
+    format: 'esm',
+    define: { 'process.env.NODE_ENV': '"production"' },
+  }).then((result) => ({
+    js: result.outputFiles!.find((file) => file.path.endsWith('.js'))!.text,
+    css: result.outputFiles!.find((file) => file.path.endsWith('.css'))?.text ?? '',
+  }));
+  const bundle = await capacityBundle;
+  await page.route('**/capacity.js', (route) =>
+    route.fulfill({ contentType: 'text/javascript', body: bundle.js }),
+  );
+  await page.route('**/capacity.css', (route) =>
+    route.fulfill({ contentType: 'text/css', body: bundle.css }),
+  );
+  await page.route('**/capacity-host', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><link rel="stylesheet" href="/capacity.css"><div id="root"></div><script type="module" src="/capacity.js"></script>',
+    }),
+  );
+  await page.goto('/capacity-host');
+  const artifact = {
+    ...createArtifact('whiteboard', 'Large persisted owner', createWhiteboard(), {
+      source: 'created',
+      format: 'x'.repeat(17 * 1024 * 1024),
+    }),
+    id: 'native-capacity-fixture',
+  };
+  await page.getByLabel('Import native').setInputFiles({
+    name: 'capacity.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(artifact)),
+  });
+  await page.getByRole('button', { name: 'Save version', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Storage status', exact: true })).toHaveText(
+    'Saved',
+  );
+  await page.reload();
+  await expect(page.getByLabel('Native versions')).toHaveText('1');
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export native', exact: true }).click();
+  const saved = JSON.parse(await readFile((await (await pending).path())!, 'utf8'));
+  expect(saved.id).toBe(artifact.id);
+  expect(saved.provenance).toEqual(artifact.provenance);
+  expect(saved.draft.content).toEqual(artifact.draft.content);
+  expect(saved.versions).toHaveLength(1);
+  expect(saved.draft.baseVersionId).toBe(saved.versions[0].versionId);
 });
 test('list → native Slide edit/save/back/reopen/reload with retained same-tab Undo', async ({
   page,

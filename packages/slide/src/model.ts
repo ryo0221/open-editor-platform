@@ -615,6 +615,7 @@ export function exportSlideSvg(deck: SlideContent, slide: Slide): string {
     slidePaintOrder(slide).map(slideDrawing),
     { x: 0, y: 0, width: deck.width, height: deck.height },
     slide.background,
+    slide.title,
   );
 }
 const checkedObjectLists = new WeakSet<SlideObject[]>();
@@ -743,7 +744,8 @@ export function slideWithLayout(
       'text',
       'Title',
       { x: 60, y: 40, width: width - 120, height: 80 },
-      { typography: { fontSize: 40, bold: true } },
+      // A long title shrinks to its box instead of losing its second line (#589).
+      { typography: { fontSize: 40, bold: true, overflow: 'fit' } },
     );
   if (layout === 'title')
     insert('text', 'Subtitle', { x: 60, y: 150, width: width - 120, height: 100 });

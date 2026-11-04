@@ -13,6 +13,7 @@ import {
   EditorInputsContext,
 } from '@editor-platform/editor-ui';
 import {
+  changedElementsFromDiff,
   ArtifactEditor,
   EditorHostError,
   loadHostArtifact,
@@ -23,6 +24,7 @@ import {
 } from '@editor-platform/editor-host';
 import { DocumentSurface } from '@editor-platform/document';
 import { isDocument, type DocumentContent } from '@editor-platform/document/model';
+import { documentChangedElementIds } from '@editor-platform/document/proposal-diff';
 import {
   documentText,
   documentTextAccess,
@@ -37,6 +39,7 @@ import {
   setCell,
   type StructuredData,
 } from '@editor-platform/structured-data/model';
+import { dataProposalDiff } from '@editor-platform/structured-data/proposal-diff';
 
 /** Independent Host fixture for the public Host API (#400). It imports public packages
  * only: no Playground state, CSS or build-time source replacement. The "external tool"
@@ -55,11 +58,13 @@ const documentAdapter: EditorHostAdapter<DocumentContent> = {
   validate: isDocument,
   capabilities,
   text: documentTextAccess,
+  changedElements: documentChangedElementIds,
 };
 const dataAdapter: EditorHostAdapter<StructuredData> = {
   kind: 'data',
   validate: isStructuredData,
   capabilities,
+  changedElements: changedElementsFromDiff(dataProposalDiff),
 };
 const PREFIX = 'host-api-fixture:';
 class FixtureStorage<T> implements StorageAdapter<Artifact<T>> {
@@ -429,7 +434,10 @@ function Fixture({
         ))}
         <ol aria-label="Proposal results">
           {results.map((r, i) => (
-            <li key={i}>{`${r.outcome}${r.dirty ? ' (unsaved)' : ''}`}</li>
+            <li key={i}>
+              {`${r.outcome}${r.dirty ? ' (unsaved)' : ''}`}
+              {r.changedElementIds && `: ${r.changedElementIds.join(', ')}`}
+            </li>
           ))}
         </ol>
       </section>

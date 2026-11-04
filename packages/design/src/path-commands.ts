@@ -86,7 +86,7 @@ export function insertDesignPath(
       if (parentId) editable(d, parentId);
       const next = layoutDesign({
         ...d,
-        schemaVersion: 3,
+        schemaVersion: d.schemaVersion === 4 ? 4 : 3,
         elements: [
           ...d.elements,
           {

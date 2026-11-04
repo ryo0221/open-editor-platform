@@ -77,7 +77,44 @@ export function viewOf(camera: CadCamera, projection: CadProjection) {
   };
 }
 
-/** The view to open with: the first named view whose bodies are all still shown, if any. */
+/**
+ * The view to open with: the first named view that shows every active body, if any. A view that
+ * hides some bodies (an interior view) is chosen in Views, never opened by itself (SU2).
+ */
 export function initialView(views: CadNamedView[], activeBodyIds: ReadonlySet<string>) {
-  return views.find((v) => v.bodyIds.every((id) => activeBodyIds.has(id)));
+  return views.find((v) => [...activeBodyIds].every((id) => v.bodyIds.includes(id)));
+}
+
+/** The fixed views of the viewport's View menu: view state only, never stored in the document. */
+export type CadStandardView = 'plan' | 'front' | 'right' | 'three-quarter';
+/**
+ * Where each standard view looks from (a unit vector from the target towards the camera) and
+ * its up. Plan looks down Z with Y up; front looks along +Y and right along −X, both Z up. The
+ * planar views are orthographic so equal lengths read equal anywhere on screen.
+ */
+export const standardViews: Record<
+  CadStandardView,
+  { label: string; from: Vec3; up: Vec3; orthographic: boolean }
+> = {
+  plan: { label: 'Plan (top)', from: [0, 0, 1], up: [0, 1, 0], orthographic: true },
+  front: { label: 'Front', from: [0, -1, 0], up: [0, 0, 1], orthographic: true },
+  right: { label: 'Right', from: [1, 0, 0], up: [0, 0, 1], orthographic: true },
+  'three-quarter': {
+    label: 'Three-quarter',
+    from: [0.55, -0.75, 0.6].map((v) => v / Math.hypot(0.55, 0.75, 0.6)) as Vec3,
+    up: [0, 0, 1],
+    orthographic: false,
+  },
+};
+
+/**
+ * Sizes of two bodies' bounds along X, Y and Z, and `a` minus `b`: what Compare size shows. Bounds
+ * are the evaluated shapes' axis-aligned boxes, so this compares overall extents only.
+ */
+export function compareSizes(a: Bounds, b: Bounds) {
+  return [0, 1, 2].map((i) => {
+    const sa = a[1][i]! - a[0][i]!;
+    const sb = b[1][i]! - b[0][i]!;
+    return { axis: 'XYZ'[i] as 'X' | 'Y' | 'Z', a: sa, b: sb, difference: sa - sb };
+  });
 }

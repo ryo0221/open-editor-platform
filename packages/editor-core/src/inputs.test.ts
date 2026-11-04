@@ -217,3 +217,99 @@ it('rolls back a registration when synchronous listener notification throws', ()
   inputs.flush();
   expect(prepare).not.toHaveBeenCalled();
 });
+it('rejects a non-function preparation before any earlier input commits', () => {
+  const inputs = new EditorInputs();
+  const commit = vi.fn();
+  inputs.register({
+    label: 'first',
+    read: () => ({ dirty: true }),
+    prepare: () => commit,
+    focus() {},
+  });
+  const remove = inputs.register({
+    label: 'async',
+    read: () => ({ dirty: true }),
+    focus() {},
+    prepare: (() => Promise.resolve(() => {})) as unknown as () => () => void,
+  });
+  expect(() => inputs.flush()).toThrow();
+  expect(commit).not.toHaveBeenCalled();
+  remove();
+  inputs.flush();
+  expect(commit).toHaveBeenCalledOnce();
+});
+it('refuses nested flush and history during commit and releases the guard after failure', () => {
+  const inputs = new EditorInputs();
+  let nested = false;
+  const commits = [0, 0];
+  const history = vi.fn(() => true);
+  for (const index of [0, 1])
+    inputs.register({
+      label: String(index),
+      read: () => ({ dirty: true }),
+      focus() {},
+      history,
+      prepare: () => () => {
+        commits[index]++;
+        if (index === 0 && !nested) {
+          nested = true;
+          expect(() => inputs.flush()).toThrow(/進行中/);
+          expect(() => inputs.history('undo')).toThrow(/進行中/);
+        }
+      },
+    });
+  inputs.flush();
+  expect(commits).toEqual([1, 1]);
+  expect(history).not.toHaveBeenCalled();
+  expect(inputs.history('undo')).toBe(true);
+});
+it('keeps the flush guard through changed notification and releases it after observer failure', () => {
+  const inputs = new EditorInputs();
+  let dirty = true;
+  const commit = vi.fn(() => {
+    dirty = false;
+  });
+  inputs.register({ label: 'form', read: () => ({ dirty }), prepare: () => commit, focus() {} });
+  const stop = inputs.subscribe(() => {
+    expect(() => inputs.flush()).toThrow(/進行中/);
+    throw Error('notification failed');
+  });
+  expect(() => inputs.flush()).toThrow('notification failed');
+  stop();
+  inputs.flush();
+  expect(commit).toHaveBeenCalledOnce();
+});
+it('notifies every subscriber before reporting observer failures and retains the committed buffer', () => {
+  const inputs = new EditorInputs();
+  let dirty = true;
+  const commit = vi.fn(() => {
+    dirty = false;
+  });
+  inputs.register({ label: 'form', read: () => ({ dirty }), prepare: () => commit, focus() {} });
+  const first = Error('first observer');
+  const second = Error('second observer');
+  const stopFirst = inputs.subscribe(() => {
+    throw first;
+  });
+  const stopSecond = inputs.subscribe(() => {
+    throw second;
+  });
+  const notified = vi.fn(() => {
+    expect(inputs.getSnapshot().dirty).toBe(0);
+    expect(() => inputs.flush()).toThrow(/進行中/);
+  });
+  inputs.subscribe(notified);
+  let failure: unknown;
+  try {
+    inputs.flush();
+  } catch (error) {
+    failure = error;
+  }
+  expect(notified).toHaveBeenCalledOnce();
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as AggregateError).errors).toEqual([first, second]);
+  stopFirst();
+  stopSecond();
+  inputs.flush();
+  expect(commit).toHaveBeenCalledOnce();
+});

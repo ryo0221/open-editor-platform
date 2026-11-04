@@ -1,0 +1,25 @@
+{
+  "name": "@editor-platform/character",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./weights": "./src/weights-entry.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/character-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/geometry-mesh": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "react-dom": "19.1.1"
+  }
+}

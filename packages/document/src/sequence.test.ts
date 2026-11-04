@@ -24,6 +24,10 @@ import {
   documentTextAccess,
   findDocumentText,
 } from '@editor-platform/document/text';
+import { ReferenceResolver, ReferenceError } from '@editor-platform/artifact-references';
+import { fictionMapReferenceAdapter } from '@editor-platform/reference-adapters';
+import { createFictionMap } from '@editor-platform/fiction-map/model';
+import { contentHash } from '@editor-platform/artifact-core';
 import { composeDocumentSequence } from '@editor-platform/document/sequence';
 
 const adapter: EditorHostAdapter<DocumentContent> = {
@@ -180,7 +184,7 @@ describe('Document chapter sources', () => {
     b.artifact = await commitVersion(
       createArtifact('document', 'Unsupported', {
         schemaVersion: 2,
-        blocks: [{ id: 'img', type: 'image', text: '', src: 'data:image/png;base64,AA==' }],
+        blocks: [{ id: 'img', type: 'html', text: '<b>unsupported</b>' }],
       } as DocumentContent),
       null,
       'fixture',
@@ -208,9 +212,21 @@ describe('Document chapter sources', () => {
       ).manifest.diagnostics,
     ).toContainEqual(expect.objectContaining({ code: 'page-settings' }));
   });
-  it('does not silently flatten unknown ruby or page writing-mode fields', async () => {
+  it('keeps a vertical writing mode and refuses unknown inline or page fields', async () => {
+    const vertical = await commitVersion(
+      createArtifact('document', 'Vertical', {
+        ...chapter(1),
+        page: { size: 'A4' as const, margin: 64, writingMode: 'vertical-rl' as const },
+      }),
+      null,
+      'fixture',
+    );
+    const kept = await composeDocumentSequence([
+      { artifact: vertical, versionId: vertical.versions[0].versionId },
+    ]);
+    expect(kept.content?.page?.writingMode).toBe('vertical-rl');
     for (const content of [
-      { ...chapter(1), page: { size: 'A4' as const, margin: 64, writingMode: 'vertical' } },
+      { ...chapter(1), page: { size: 'A4' as const, margin: 64, columns: 2 } as never },
       {
         ...chapter(1),
         blocks: [
@@ -218,7 +234,8 @@ describe('Document chapter sources', () => {
             id: 'ruby',
             type: 'paragraph' as const,
             text: '字',
-            rich: [{ text: '字', ruby: 'じ' }],
+            // 傍点 is not modelled yet.
+            rich: [{ text: '字', emphasis: 'sesame' } as never],
           },
         ],
       },
@@ -235,6 +252,124 @@ describe('Document chapter sources', () => {
       expect(result.content).toBeUndefined();
       expect(result.manifest.diagnostics.some((d) => d.code === 'unsupported')).toBe(true);
     }
+  });
+  it('combines saved images without changing IDs or source bytes and rejects unavailable or corrupt fixed references atomically', async () => {
+    const native = createFictionMap();
+    const snapshot = {
+      artifactId: 'map',
+      domain: 'fiction-map',
+      versionId: 'map-v1',
+      revision: 1,
+      content: native,
+      contentHash: await contentHash(native),
+      dependencies: [],
+    };
+    let denied = false;
+    const resolver = new ReferenceResolver(
+      {
+        list: async () => [],
+        subscribe: () => () => {},
+        read: async () => snapshot,
+        checkAccess: () => {
+          if (denied) throw new ReferenceError('forbidden', 'revoked');
+        },
+        checkSnapshot: async (_source, retained) => {
+          if (retained.versionId !== 'map-v1') throw Error('missing retained version');
+        },
+      },
+      [fictionMapReferenceAdapter],
+      'reader',
+    );
+    const reference = await resolver.create(
+      {
+        artifactId: 'map',
+        domain: 'fiction-map',
+        target: { kind: 'fiction-map-document', viewId: 'document' },
+      },
+      'fixed',
+    );
+    const artifact = await commitVersion(
+      createArtifact('document', 'Illustrated', {
+        ...chapter(1),
+        blocks: [
+          ...chapter(1).blocks,
+          {
+            id: 'map',
+            type: 'image',
+            text: '',
+            reference,
+            src: 'data:image/png;base64,AA==',
+            caption: 'Saved map',
+            width: 600,
+          },
+        ],
+      } as DocumentContent),
+      null,
+      'fixture',
+    );
+    const input = [{ artifact, versionId: artifact.versions[0].versionId }];
+    const before = canonicalJson(input);
+    expect((await composeDocumentSequence(input)).ok).toBe(false);
+    const result = await composeDocumentSequence(input, { references: resolver });
+    expect(result.ok).toBe(true);
+    expect(result.content!.blocks[3]).toMatchObject({
+      id: 'sequence:0:map',
+      caption: 'Saved map',
+      reference,
+    });
+    expect(result.content!.blocks[3].src).toContain('data:image/svg');
+    expect(canonicalJson(input)).toBe(before);
+    denied = true;
+    const rejected = await composeDocumentSequence(input, { references: resolver });
+    expect(rejected.content).toBeUndefined();
+    expect(rejected.manifest.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'invalid-source',
+        message: expect.stringContaining('revoked'),
+      }),
+    );
+    denied = false;
+    const broken = clone(input);
+    broken[0].artifact.versions[0].content.blocks[3].reference!.snapshot.contentHash = 'corrupt';
+    broken[0].artifact.versions[0].contentHash = await contentHash(
+      broken[0].artifact.versions[0].content,
+    );
+    expect(
+      (await composeDocumentSequence(broken, { references: resolver })).content,
+    ).toBeUndefined();
+  });
+  it('accepts ordinary image captions in vertical chapters and rejects unknown image fields', async () => {
+    const content = {
+      ...chapter(1),
+      page: { size: 'A4' as const, margin: 64, writingMode: 'vertical-rl' as const },
+      blocks: [
+        {
+          id: 'image',
+          type: 'image' as const,
+          text: '',
+          src: 'data:image/png;base64,AA==',
+          alt: 'Map',
+          caption: 'Caption',
+          width: 500,
+        },
+      ],
+    };
+    const artifact = await commitVersion(
+      createArtifact('document', 'Image', content),
+      null,
+      'fixture',
+    );
+    const input = [{ artifact, versionId: artifact.versions[0].versionId }];
+    const result = await composeDocumentSequence(input);
+    expect(result.ok).toBe(true);
+    expect(result.content!.page).toEqual(content.page);
+    expect(result.content!.blocks[0]).toMatchObject({ caption: 'Caption', alt: 'Map' });
+    const unknown = clone(input);
+    Object.assign(unknown[0].artifact.versions[0].content.blocks[0], { crop: true });
+    unknown[0].artifact.versions[0].contentHash = await contentHash(
+      unknown[0].artifact.versions[0].content,
+    );
+    expect((await composeDocumentSequence(unknown)).content).toBeUndefined();
   });
   it('captures all source bytes before the first async hash and exposes a DOM-free public API', async () => {
     const s = await source(1);

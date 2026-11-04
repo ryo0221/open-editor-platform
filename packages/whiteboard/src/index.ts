@@ -4,3 +4,8 @@ export * from './sections';
 export * from './export';
 export * from './ports';
 export * from './proposal-diff';
+export type {
+  WhiteboardNodeRenderer,
+  WhiteboardNodeRenderContext,
+  WhiteboardInteractionMode,
+} from './node-content';

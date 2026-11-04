@@ -4,6 +4,8 @@ import { type GraphDocument, type GraphEdge, type GraphNode, type Position } fro
 import { type GraphProfile } from './profile';
 import { type GraphRoute } from './routing';
 import { graphShapeLabels } from './view-appearance';
+import { useGraphLabels } from './labels';
+import { graphNodeIconPath, resolveGraphNodeIcon, type GraphNodeIcon } from './icon';
 import {
   graphLabelColor,
   graphShapeMetrics,
@@ -116,7 +118,14 @@ function GraphEdgeView(props: GraphEdgeViewProps) {
             height={placement.bounds.height}
             rx="5"
           />
-          <text x={placement.point.x} y={placement.point.y + 4} textAnchor="middle">
+          {/* Measure glyphs at a stable local origin. Fractional route positions otherwise
+              make getBBox rounding alternate label sizes and trigger a render/layout loop. */}
+          <text
+            x={0}
+            y={4}
+            transform={`translate(${placement.point.x} ${placement.point.y})`}
+            textAnchor="middle"
+          >
             {displayText}
           </text>
         </g>
@@ -159,6 +168,7 @@ interface GraphNodeViewProps {
   className: string;
   text: string;
   typeLabel: string;
+  icon?: GraphNodeIcon;
   overlayText?: string;
   autoSizeKey?: string;
   readOnly: boolean;
@@ -202,6 +212,7 @@ function GraphNodeView({
   className,
   text,
   typeLabel,
+  icon,
   overlayText,
   autoSizeKey,
   readOnly,
@@ -223,6 +234,7 @@ function GraphNodeView({
       data-node-id={n.id}
       data-auto-size-key={autoSizeKey}
       data-shape={look.shape}
+      data-icon={icon}
     >
       {paint.path && (
         <svg
@@ -232,6 +244,11 @@ function GraphNodeView({
           height={box.height}
         >
           <path d={paint.path} strokeDasharray={look.style.dash?.join(' ')} />
+        </svg>
+      )}
+      {icon && (
+        <svg className="ep-graph-node-icon" aria-hidden="true" viewBox="0 0 24 24">
+          <path d={graphNodeIconPath(icon)} />
         </svg>
       )}
       <button
@@ -350,6 +367,7 @@ function GraphNodes(props: GraphCanvasProps) {
       className={graphNodeClassName(n.id, props)}
       text={scene.label(n.id)}
       typeLabel={profile.nodes[n.type].ui?.label ?? n.type}
+      icon={resolveGraphNodeIcon(profile, n)}
       overlayText={overlay?.[n.id]}
       autoSizeKey={props.autoSize ? scene.nodeSizeKey(n) : undefined}
       readOnly={readOnly}
@@ -363,6 +381,7 @@ function GraphNodes(props: GraphCanvasProps) {
 export function GraphCanvas(props: GraphCanvasProps) {
   const { canvasRef, scene, zoom, pan, marker, endpoint } = props;
   const { worldWidth, worldHeight, routes, label } = scene;
+  const t = useGraphLabels();
   return (
     <div
       className="ep-graph-canvas"
@@ -393,6 +412,8 @@ export function GraphCanvas(props: GraphCanvasProps) {
             toggle={props.toggleSection}
             choose={props.choose}
             handlers={props.sectionHandlers}
+            edge={props.edge}
+            endpoint={endpoint}
           />
           <svg width={worldWidth} height={worldHeight} aria-label="Graph connections">
             <defs>
@@ -420,11 +441,11 @@ export function GraphCanvas(props: GraphCanvasProps) {
         <p className="ep-graph-gesture-status" role="status">
           {endpoint.target && !endpoint.reason
             ? `${label(endpoint.target)}へ接続します`
-            : (endpoint.reason ?? '接続先のノードへ端点を移動してください。')}
+            : (endpoint.reason ?? '接続先のノードかまとまりへ端点を移動してください。')}
         </p>
       )}
       {!scene.visible.length && !scene.sections.order.length && (
-        <p className="ep-graph-empty">No visible nodes. Add a node or clear the view filter.</p>
+        <p className="ep-graph-empty">{t.noVisibleNodes}</p>
       )}
     </div>
   );

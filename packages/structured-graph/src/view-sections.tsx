@@ -5,6 +5,7 @@ import {
   graphSectionAncestors,
   graphSectionSubtree,
   type GraphDocument,
+  type GraphEdge,
   type GraphNode,
   type GraphSection,
 } from './model';
@@ -12,7 +13,13 @@ import { type GraphProfile } from './profile';
 import { type GraphSectionBounds } from './commands';
 import { graphLabelColor, resolveGraphSectionStyle } from './shape';
 import { graphFillPalette } from './view-appearance';
-import { type GraphApply, type GraphScene, type GraphSectionDrag } from './view-model';
+import { useGraphLabels } from './labels';
+import {
+  type GraphApply,
+  type GraphEndpointGesture,
+  type GraphScene,
+  type GraphSectionDrag,
+} from './view-model';
 
 export interface SectionDragHandlers {
   start(event: PointerEvent<HTMLElement>, id: string, mode: GraphSectionDrag['mode']): void;
@@ -88,7 +95,6 @@ export function createSectionDragHandlers(context: {
   };
 }
 
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 /** Section frames, parents first, drawn under nodes and connections. */
 export function GraphSectionFrames({
   graph,
@@ -100,6 +106,8 @@ export function GraphSectionFrames({
   toggle,
   choose,
   handlers,
+  edge,
+  endpoint,
 }: {
   graph: GraphDocument;
   profile: GraphProfile;
@@ -110,6 +118,10 @@ export function GraphSectionFrames({
   toggle: (id: string) => void;
   choose: (id: string) => boolean;
   handlers: SectionDragHandlers;
+  /** The selected connection: a Section at either end is marked as connected (#594). */
+  edge?: GraphEdge;
+  /** A dragged connection end over a Section marks it as a valid or refused target. */
+  endpoint?: GraphEndpointGesture;
 }) {
   return scene.sections.order.map((section) => {
     const type = profile.sections[section.type],
@@ -129,7 +141,7 @@ export function GraphSectionFrames({
     return (
       <div
         key={section.id}
-        className={`ep-graph-section ${selected === section.id ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''}`}
+        className={`ep-graph-section ${selected === section.id ? 'selected' : ''} ${isCollapsed ? 'collapsed' : ''} ${edge && (edge.from === section.id || edge.to === section.id) ? 'connected' : ''} ${endpoint?.target === section.id ? (endpoint.reason ? 'invalid-target' : 'valid-target') : ''}`}
         data-section-id={section.id}
         style={{
           left: frame.x,
@@ -211,10 +223,11 @@ export function GraphNodeSectionField({
   label: (id: string) => string;
   apply: GraphApply;
 }) {
+  const t = useGraphLabels();
   if (!Object.keys(profile.sections).length) return null;
   return (
     <label className="ep-graph-membership">
-      Section
+      {t.section}
       <select
         aria-label="Node section"
         value={node.sectionId ?? ''}
@@ -223,7 +236,7 @@ export function GraphNodeSectionField({
           apply([{ type: 'set-node-section', id: node.id, sectionId: e.target.value || null }])
         }
       >
-        <option value="">No section</option>
+        <option value="">{t.noSection}</option>
         {sectionOptions(graph, label).map((o) => (
           <option key={o.id} value={o.id}>
             {o.text}
@@ -255,25 +268,25 @@ export function GraphSectionPanel({
   /** Fits the camera to this Section's frame; a view change only. */
   onFit?: () => void;
 }) {
+  const t = useGraphLabels();
   const [confirming, setConfirming] = useState(false);
   const disabled = readOnly || !!profile.sections[section.type]?.readOnly,
     style = graph.presentation.sections[section.id].style,
     nodes = graph.nodes.filter((n) => n.sectionId === section.id),
     children = graph.sections.filter((s) => s.parentId === section.id),
-    destination = section.parentId ? label(section.parentId) : 'the top level';
+    connections = graph.edges.filter((e) => e.from === section.id || e.to === section.id).length,
+    destination = section.parentId ? label(section.parentId) : undefined;
   return (
     <fieldset className="ep-graph-appearance" aria-label="Section settings">
-      <legend>Section</legend>
-      <p className="ep-graph-section-members">
-        {count(nodes.length, 'node')} and {count(children.length, 'section')} inside
-      </p>
+      <legend>{t.section}</legend>
+      <p className="ep-graph-section-members">{t.sectionMembers(nodes.length, children.length)}</p>
       {onFit && (
         <button type="button" onClick={onFit}>
-          Fit section
+          {t.fitSection}
         </button>
       )}
       <label>
-        Parent
+        {t.parent}
         <select
           aria-label="Parent section"
           value={section.parentId ?? ''}
@@ -284,7 +297,7 @@ export function GraphSectionPanel({
             ])
           }
         >
-          <option value="">No parent</option>
+          <option value="">{t.noParent}</option>
           {sectionOptions(graph, label, section.id).map((o) => (
             <option key={o.id} value={o.id}>
               {o.text}
@@ -293,7 +306,7 @@ export function GraphSectionPanel({
         </select>
       </label>
       <label>
-        Fill
+        {t.fill}
         <select
           aria-label="Section fill"
           value={style?.fill ?? ''}
@@ -311,26 +324,26 @@ export function GraphSectionPanel({
             ]);
           }}
         >
-          <option value="">Type default</option>
+          <option value="">{t.typeDefault}</option>
           {style?.fill && !graphFillPalette.some((c) => c.value === style.fill) && (
             <option value={style.fill}>{style.fill}</option>
           )}
           {graphFillPalette.map((c) => (
             <option key={c.value} value={c.value}>
-              {c.label}
+              {t.fills[c.value] ?? c.label}
             </option>
           ))}
         </select>
       </label>
       {!disabled && !confirming && (
-        <button onClick={() => setConfirming(true)}>Delete section</button>
+        <button onClick={() => setConfirming(true)}>{t.deleteSection}</button>
       )}
       {!disabled && confirming && (
         <div role="group" aria-label="Confirm section deletion">
           <p>
-            Deleting “{label(section.id)}” moves {count(nodes.length, 'node')} and{' '}
-            {count(children.length, 'section')} to {destination}. Nodes and connections stay.
+            {t.deleteSectionConfirm(label(section.id), nodes.length, children.length, destination)}
           </p>
+          {connections > 0 && <p>{t.deleteSectionConnections(connections)}</p>}
           {[...nodes, ...children].length > 0 && (
             <ul>
               {nodes.map((n) => (
@@ -343,13 +356,14 @@ export function GraphSectionPanel({
           )}
           <button
             onClick={() => {
-              if (apply([{ type: 'delete-section', id: section.id }]))
+              // The confirmation names the connections that end at the Section (#594).
+              if (apply([{ type: 'delete-section', id: section.id, cascade: true }]))
                 choose(section.parentId ?? graph.id);
             }}
           >
-            Delete and move contents up
+            {t.deleteSectionApply}
           </button>
-          <button onClick={() => setConfirming(false)}>Cancel section deletion</button>
+          <button onClick={() => setConfirming(false)}>{t.cancelSectionDeletion}</button>
         </div>
       )}
     </fieldset>

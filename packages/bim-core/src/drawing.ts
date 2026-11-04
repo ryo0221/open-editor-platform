@@ -327,8 +327,20 @@ export function bimCutClass(doc: BimDocument, id: string): string {
   const category = doc.materials.find((m) => m.id === materialId)?.category;
   return `cut cut-${el.kind}${category ? ` m-${category}` : ''}`;
 }
-const materialOf = (t: BimType) =>
+/** The material a type's surfaces show: its first layer's, or a column's or beam's own. */
+export const bimSurfaceMaterialId = (t: BimType) =>
   'layers' in t ? t.layers[0]?.materialId : 'materialId' in t ? t.materialId : undefined;
+const materialOf = bimSurfaceMaterialId;
+/**
+ * #662 (2c): the materials a layered type's two faces show, as its layers lie (the IFC export's
+ * layer set usage): the first layer is on a wall's right of its drawing direction and under a
+ * slab or roof, the last on the wall's left and on top. Every other face (ends, top and bottom
+ * of a wall, edges, reveals) shows the first layer's. Undefined for a type without layers.
+ */
+export function bimLayerFaceMaterialIds(t: BimType): { first: string; last: string } | undefined {
+  if (!('layers' in t) || !t.layers.length) return undefined;
+  return { first: t.layers[0]!.materialId, last: t.layers[t.layers.length - 1]!.materialId };
+}
 
 const fmt = (n: number) => String(Math.round(n));
 

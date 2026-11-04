@@ -12,6 +12,7 @@ import {
   type EstimateBimEvaluator,
 } from './bim-source';
 import { retainCadSource } from './cad-source';
+import { useStatusProps } from './status-role';
 export function EstimateBimPanel({
   port,
   sources,
@@ -32,6 +33,7 @@ export function EstimateBimPanel({
     [metric, setMetric] = useState<EstimateBimMetric>('netVolume'),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  const notice = useStatusProps();
   const option = sources[selected],
     native = option && isBimDocument(option.content) ? option.content : undefined;
   const retain = async (input: EstimateGeometrySourceOption) => {
@@ -193,7 +195,7 @@ export function EstimateBimPanel({
       </fieldset>
       {busy && (
         <>
-          <p role="status">保存版の数量を検証しています…</p>
+          <p {...notice}>保存版の数量を検証しています…</p>
           <button
             onClick={() => {
               request.current?.abort();

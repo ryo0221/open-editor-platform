@@ -166,6 +166,19 @@ function PageSection({
             <option>Letter</option>
           </select>
         </label>
+        <label className="ep-field">
+          Writing mode
+          <select
+            aria-label="Writing mode"
+            value={content.page?.writingMode ?? 'horizontal-tb'}
+            onChange={(e) =>
+              pageSetting({ writingMode: e.target.value as 'horizontal-tb' | 'vertical-rl' })
+            }
+          >
+            <option value="horizontal-tb">横書き</option>
+            <option value="vertical-rl">縦書き</option>
+          </select>
+        </label>
         <CommitInput
           label="Page margin"
           value={content.page?.margin ?? 64}

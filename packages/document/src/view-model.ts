@@ -17,7 +17,9 @@ import {
 } from '@editor-platform/editor-core';
 import { type ReferenceSurfaceProps } from '@editor-platform/artifact-references/react';
 import { documentSchema, addTableRowAndSelect, nodeToContent } from './engine';
+import { uprightDigitDecorations } from './vertical';
 import {
+  isVerticalDocument,
   resolveDocumentAddress,
   type BlockType,
   type DocumentBlock,
@@ -105,7 +107,9 @@ export function documentDecorations(
   content: DocumentContent,
   annotations: Annotation[],
 ) {
-  const decorations: Decoration[] = [];
+  const decorations: Decoration[] = isVerticalDocument(content)
+    ? [...uprightDigitDecorations(state.doc)]
+    : [];
   if (state.doc.childCount > windowedTextLimit || content.blocks.length > windowedTextLimit)
     activeTextDecorations(state, decorations);
   if (!annotations.length)
@@ -190,10 +194,11 @@ export function topLevelBlockPosition(state: EditorState | undefined, id: string
 }
 
 export function pageStyle(content: DocumentContent) {
-  return {
-    padding: content.page?.margin ?? 64,
-    width: content.page?.size === 'Letter' ? 816 : 794,
-  };
+  const width = content.page?.size === 'Letter' ? 816 : 794;
+  // Vertical lines run the page height; the manuscript grows leftwards and scrolls sideways.
+  return isVerticalDocument(content)
+    ? { padding: content.page?.margin ?? 64, minWidth: width }
+    : { padding: content.page?.margin ?? 64, width };
 }
 
 const referencesChanged = '取得中に参照接続が変わりました。再実行してください。';

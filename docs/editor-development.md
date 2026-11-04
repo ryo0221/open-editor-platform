@@ -67,6 +67,12 @@ Model、validation、commands、serializationなどのheadless経路はReact/DOM
 
 Localでは`EditorSession<T>`がhistoryとrevisionを持ちます。Typingの`mergeKey`は適切な連続入力だけをまとめ、選択移動等でhistory groupを切ります。Sessionのsnapshot Undoへremote更新を流してはいけません。
 
+未確定フォームは`EditorInputs`に登録し、`ArtifactEditor.registerInputBoundary`にはownerのregistryを一つ接続します。複数の独立flush callbackの順次実行では横断preflightになりません。prepareは同期・副作用なしで、ID予約・native編集・非同期処理を開始しません。同一ownerの複数入力に全体無変更が必要なら、一つの既存transactionへまとめて検証し、明示確定と自動flushを同じcommit/成功消費/finalizeへ通します。
+
+非同期参照検証はprepare外で行い、取消・入力変更・対象変更・権限変更を結果に反映します。単一対象はread-setと要求世代、owner全体に依存する操作はlocal revisionもcommit時に検査します。対象変更後のUndoで値が戻るABAも旧要求を復活させません。読取/編集権限が変わったらHostは表示と古い検証を失効させます。失効通知を省いてUIのreadOnlyだけで代用しません。
+
+sessionの現在draft、永続化draft、immutable version/hashは用途ごとに読取sourceを選びます。固定参照を未保存draftで解決せず、編集中の元資料を古いstorage draftで表示しません。domain IDは削除後も別項目へ再利用しない発行方針を定め、保持版や予約済みIDを考慮します。Artifact CoreのUUID発行はdomain固有idFormを置き換える理由になりません。[埋め込み契約](embedding.md#synchronous-input-commit-guards)と独立Hostの`input-boundary-contract.test.ts`を参照してください。
+
 Shared操作を宣言する場合、幾何計算などの入力に使ったread dependencyも設計します。`withCommandReads`で対象を示し、必要な場合は`['*']`でcontent全体をpinします。書き込み対象だけ検査して、計算に使った古い値を無条件に適用しないでください。
 
 最低限、適用結果、入力の非破壊、無関係な値の保持、Undo/Redo、失敗/Cancelの無変更を確認します。Snapshot全体が同じことに加え、安定IDや参照、旧version hashも検査します。意図した挙動と別のfieldが一緒に変わる問題を、小さなassertionだけで見逃さないようにします。

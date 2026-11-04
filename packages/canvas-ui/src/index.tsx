@@ -2,7 +2,13 @@ import './styles.css';
 import { CanvasSpatialQuery } from './spatial-query';
 import { CanvasTextEditor, CanvasTextContext } from './text-editor';
 import { useCanvasFit, useCanvasWheel } from './stage-hooks';
-import { stageDoubleClick, stageDrag, stageKeyDown, stagePointerDown } from './stage-input';
+import {
+  stageDoubleClick,
+  stageDrag,
+  stageKeyDown,
+  stagePointerDown,
+  type StageDragContext,
+} from './stage-input';
 import {
   paintedTargets,
   pastePosition,
@@ -29,6 +35,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -74,6 +81,8 @@ export interface CanvasTarget extends GeometryItem {
   hitBox?: boolean;
   container?: boolean;
   rotatable?: boolean;
+  /** UI capability only: false disables whole-selection Canvas resize, not move/rotate. */
+  resizable?: boolean;
   /** Domain-owned scoped text hits inside a native compound object. */
   textParts?: {
     id: string;
@@ -268,6 +277,8 @@ export interface CanvasStageProps {
   overlay?: ReactNode | ((targets: CanvasTarget[]) => ReactNode);
   /** Explicit input ownership; point mode leaves camera/history/text input guards intact. */
   inputOwner?: 'object' | 'point';
+  /** Opaque, Host-stable token: Object.is changes cancel object gestures only. */
+  objectRevision?: unknown;
   onPointKeyDown?: (event: import('react').KeyboardEvent<SVGSVGElement>) => void;
   readOnly?: boolean;
   width?: number;
@@ -348,7 +359,23 @@ const CanvasObject = memo(
             pointerEvents="none"
           />
         )}
-        {target.hitBox && <rect {...projected.bounds} fill="transparent" />}
+        {target.hitBox &&
+          (target.hitClipBounds?.length ? (
+            <DrawingView
+              drawing={{
+                id: `${target.id}-box-hit`,
+                kind: 'shape',
+                text: '',
+                fill: 'transparent',
+                stroke: 'none',
+                bounds: projected.bounds,
+                rotation: projected.rotation,
+                clipBounds: target.hitClipBounds,
+              }}
+            />
+          ) : (
+            <rect {...projected.bounds} fill="transparent" />
+          ))}
         <g visibility={editing ? 'hidden' : undefined}>{render(projected)}</g>
       </g>
     );
@@ -471,6 +498,7 @@ export function CanvasStage({
   underlay,
   overlay,
   inputOwner = 'object',
+  objectRevision,
   onPointKeyDown,
   readOnly = false,
   width = 1000,
@@ -544,11 +572,13 @@ export function CanvasStage({
       viewRef.current.zoom,
     );
   };
-  const { begin, cancel, move } = stageDrag({
+  const dragContext: StageDragContext = {
     drag,
     svg: ref,
     spatial,
     editing,
+    inputOwner,
+    objectRevision,
     readOnly,
     view,
     targets,
@@ -564,7 +594,18 @@ export function CanvasStage({
     previewTransform,
     onInsert,
     onFreehand,
+  };
+  const latestDragContext = useRef(dragContext);
+  const { begin, cancel, move, invalidateObject, lostCapture, dispose } = stageDrag(
+    () => latestDragContext.current,
+  );
+  // Every committed render: mutable targets can change without reference changes.
+  // Read only committed props, including from old handlers/reentrant callbacks.
+  useLayoutEffect(() => {
+    latestDragContext.current = dragContext;
+    invalidateObject();
   });
+  useLayoutEffect(() => () => dispose(), []);
   // Delegate object events to the SVG. Repeated geometry edits need not allocate
   // and install a pair of closures on every object; handlers resolve current data.
   const targetById = new Map(targets.map((target) => [target.id, target]));
@@ -672,6 +713,7 @@ export function CanvasStage({
         onPointerMove={(e) => move(e)}
         onPointerUp={(e) => move(e, true)}
         onPointerCancel={cancel}
+        onLostPointerCapture={lostCapture}
         onKeyUp={(e) => {
           if (e.key === ' ') spaceHeld.current = false;
         }}

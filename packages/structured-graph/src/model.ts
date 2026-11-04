@@ -21,6 +21,10 @@ export interface GraphNode {
 export interface GraphEdge {
   id: string;
   type: string;
+  /**
+   * The ends: a node ID or a Section ID (#594). IDs are unique across the Graph, so the ID says
+   * which. A Section end needs an edge type whose Profile connection lists that Section type.
+   */
   from: string;
   to: string;
   attributes: Attributes;
@@ -248,6 +252,15 @@ export function graphSectionSubtree(sections: readonly GraphSection[], id: strin
   }
   return out;
 }
+/** What an edge end refers to: a node, a Section (#594), or nothing in this Graph. */
+export function graphEndpointKind(
+  graph: Pick<GraphDocument, 'nodes' | 'sections'>,
+  id: string,
+): 'node' | 'section' | undefined {
+  if (graph.nodes.some((n) => n.id === id)) return 'node';
+  if (graph.sections.some((s) => s.id === id)) return 'section';
+  return undefined;
+}
 /** Schema 1 Graphs are refused rather than read: the preview has no reader for older formats. */
 export const graphSchemaMessage = (value: unknown) =>
   plainRecord(value) && value.schemaVersion === 1
@@ -315,7 +328,11 @@ export function isGraphDocument(value: unknown): value is GraphDocument {
   const nodes = new Set(g.nodes.map((n) => n.id)),
     sections = new Set(g.sections.map((s) => s.id));
   if (
-    g.edges.some((e) => !nodes.has(e.from) || !nodes.has(e.to)) ||
+    // An edge end is a node or a Section (#594).
+    g.edges.some(
+      (e) =>
+        !(nodes.has(e.from) || sections.has(e.from)) || !(nodes.has(e.to) || sections.has(e.to)),
+    ) ||
     Object.keys(g.presentation.nodes).some((id) => !nodes.has(id)) ||
     g.nodes.some((n) => n.sectionId !== undefined && !sections.has(n.sectionId)) ||
     g.sections.some(

@@ -294,7 +294,7 @@ describe('assembly in the Surface (R2b-1, CAD49/CAD51/CAD53/CAD54)', () => {
     expect(controller.getSnapshot().content.solvedPoses[a]!.translationMm).toEqual([5, 0, 0]);
     // A refused entry is not kept.
     const now = placementFields(controller.getSnapshot().content.solvedPoses[a]!);
-    assembly.setDraft(a, { fields: ['1000001', ...now.slice(1)], shown: now });
+    assembly.setDraft(a, { fields: ['10000001', ...now.slice(1)], shown: now });
     expect(await assembly.applyDraft(a)).toBe(false);
     expect(assembly.getSnapshot().drafts.size).toBe(0);
     // Undo changes the stored placement under an entry: the entry goes with it.

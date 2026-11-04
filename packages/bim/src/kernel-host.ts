@@ -23,6 +23,7 @@ const transferables = (evaluation: GeometryEvaluation) =>
           ? ([
               r.mesh.positions.buffer,
               r.mesh.normals.buffer,
+              r.mesh.uvs.buffer,
               r.mesh.indices.buffer,
               r.mesh.faceIndices.buffer,
             ] as ArrayBuffer[])

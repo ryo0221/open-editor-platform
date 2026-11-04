@@ -241,7 +241,7 @@ const nodeCenter = (n: WhiteboardNode): Point => ({
   y: n.bounds.y + n.bounds.height / 2,
 });
 /** Maps between a node's local (unrotated, unflipped) frame and world coordinates. */
-function nodeFrame(n: WhiteboardNode) {
+export function whiteboardNodeFrame(n: WhiteboardNode) {
   const { x: cx, y: cy } = nodeCenter(n);
   const angle = ((n.rotation ?? 0) * Math.PI) / 180,
     cos = Math.cos(angle),
@@ -289,7 +289,7 @@ function nodeEndpoint(
   other: Point,
   port: WhiteboardConnector['fromPort'],
 ): Point {
-  const frame = nodeFrame(n);
+  const frame = whiteboardNodeFrame(n);
   if (port && port !== 'auto') return frame.world(portLocalPoint(n, port));
   const { x: dx, y: dy } = frame.local(other);
   if (dx === 0 && dy === 0) return { x: frame.cx, y: frame.cy };

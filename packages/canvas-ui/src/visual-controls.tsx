@@ -42,6 +42,7 @@ import {
   type Alignment,
   type Bounds,
   type Drawing,
+  type LineDirection,
   type ShapeKind,
   type VisualStyle,
 } from '@editor-platform/editor-core';
@@ -482,6 +483,28 @@ function AppearanceSection({
             <option value="2 3">Dotted</option>
           </select>
         </label>
+        {items.every(
+          (i) => i.kind === 'shape' && ['line', 'arrow', 'double-arrow'].includes(i.shape ?? ''),
+        ) && (
+          <label className="ep-field">
+            Direction
+            <select
+              aria-label="Line direction"
+              value={mixed('lineDirection') ? 'mixed' : (first.lineDirection ?? 'horizontal')}
+              onChange={(e) => onPatch({ lineDirection: e.target.value as LineDirection })}
+            >
+              {mixed('lineDirection') && (
+                <option value="mixed" disabled>
+                  Mixed
+                </option>
+              )}
+              <option value="horizontal">Horizontal →</option>
+              <option value="vertical">Vertical ↓</option>
+              <option value="down">Diagonal ↘</option>
+              <option value="up">Diagonal ↗</option>
+            </select>
+          </label>
+        )}
       </div>
     </Section>
   );

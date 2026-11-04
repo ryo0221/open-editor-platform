@@ -1,4 +1,5 @@
 import type { TextRun, TextStyle } from './drawing';
+import { kinsokuNoLineEnd as noLineEnd, kinsokuNoLineStart as noLineStart } from './japanese-lines';
 
 /** Runs are optional rich formatting over the same UTF-16 text, never a second text source. */
 export function normalizedRuns(text: string, runs?: TextRun[]): TextRun[] {
@@ -25,11 +26,6 @@ const advance = (char: string, style: TextStyle) =>
     (style.bold ? 1.03 : 1) +
   (style.letterSpacing ?? 0);
 
-// Japanese line breaking (kinsoku): these never start a line…
-const noLineStart =
-  /[、。，．・：；？！ー～…‥）〕］｝〉》」』】〙〗〟’”｠゛゜ゝゞヽヾ々〻ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶㇰ-ㇿ]/u;
-// …and these never end one.
-const noLineEnd = /[（〔［｛〈《「『【〘〖〝‘“｟]/u;
 /** How many trailing characters move to the next line so neither line breaks a kinsoku rule.
  * Gives up (0) after a few characters, or when the line would empty, and overflows instead. */
 function kinsokuCarry(line: { text: string }[], next: string): number {

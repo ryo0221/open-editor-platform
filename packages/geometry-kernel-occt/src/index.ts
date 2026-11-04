@@ -17,3 +17,4 @@ export {
   type GeometryProjection,
   type GeometryResult,
 } from './ops';
+export { faceTextureUvs } from './texture-uv';

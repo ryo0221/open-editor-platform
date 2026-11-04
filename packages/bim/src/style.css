@@ -283,3 +283,13 @@
   justify-content: flex-end;
   gap: 8px;
 }
+/* #661: the look of a type's surface material. */
+.bim-material {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bim-material h4 {
+  margin: 4px 0 0;
+  font-size: 13px;
+}

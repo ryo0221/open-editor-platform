@@ -290,3 +290,21 @@ export const documentProposalDiff: ProposalDiffAdapter<DocumentContent> = {
     return { changes, view: [], fallback };
   },
 };
+
+/**
+ * Stable IDs whose content differs, for a Host recording provenance: each changed, added or
+ * removed block, paragraph, list item or table paragraph once, in diff order. An added or
+ * removed list or table also names every list item or table paragraph inside it.
+ */
+export function documentChangedElementIds(before: DocumentContent, after: DocumentContent) {
+  const ids = new Set<string>();
+  const blocks = new Map([...before.blocks, ...after.blocks].map((b) => [b.id, b]));
+  for (const change of documentProposalDiff.diff(before, after).changes) {
+    if (!change.elementId) continue;
+    ids.add(change.elementId);
+    const block = blocks.get(change.elementId);
+    if (block && (change.kind === 'added' || change.kind === 'removed'))
+      for (const id of textAddresses(block).keys()) ids.add(id);
+  }
+  return [...ids];
+}

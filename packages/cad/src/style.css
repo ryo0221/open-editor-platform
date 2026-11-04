@@ -194,6 +194,27 @@
   text-align: right;
   overflow-wrap: anywhere;
 }
+.cad-compare {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.cad-compare th,
+.cad-compare td {
+  padding: 2px 4px;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.cad-compare th:first-child {
+  width: 3em;
+  text-align: left;
+}
+.cad-compare thead th {
+  font-weight: 600;
+  border-bottom: 1px solid #dde3e8;
+}
 .cad-row {
   display: flex;
   flex-wrap: wrap;
@@ -544,4 +565,46 @@
   display: block;
   margin-top: 4px;
   color: #33414f;
+}
+/* SU3: the eye beside a body shows or hides it in the viewport only. */
+.cad-body-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cad-body-row .cad-item {
+  flex: 1;
+  min-width: 0;
+}
+.cad-eye {
+  position: relative;
+  display: inline-flex;
+  padding: 6px;
+  border-radius: 6px;
+  color: #607080;
+  cursor: pointer;
+}
+.cad-eye input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.cad-eye:has(input:focus-visible) {
+  outline: 2px solid #2563eb;
+}
+.cad-eye:has(input:not(:checked)) {
+  color: #a0aab4;
+}
+/* #661: a body's colour beside its value. */
+.cad-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  align-self: center;
+  border: 1px solid #c7ced6;
+  border-radius: 4px;
+  vertical-align: middle;
 }

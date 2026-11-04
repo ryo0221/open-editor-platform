@@ -9,6 +9,7 @@ import { f20TopFace, f20TopFrame, r2bJoints } from './joints-fixtures';
 import {
   connectorRefKey,
   invertPose,
+  posesForJointValues,
   previewJointPose,
   solveJoints,
   type CadConnectorFrame,
@@ -115,6 +116,36 @@ describe('joints (R2b-2, CAD47)', () => {
     if (slide.status !== 'solved') return;
     near(previewJointPose({ type: 'slider' }, slide, { distance: 3 }), pose([40, 25, 8], turn(30)));
     near(invertPose(invertPose(slide.parent)), slide.parent);
+  });
+
+  it('poses a chain for other joint values from one solve, as a fresh solve would', () => {
+    const { assembly: doc, closure, frames } = r2bJoints();
+    const solve = (d: CadDocument) =>
+      solveJoints(
+        d,
+        parameterValues(d),
+        (h) => closure.get(h),
+        (at, ref) => frames.get(`${at} ${connectorRefKey(ref)}`),
+        () => true,
+      );
+    const s = solve(doc);
+    // No values: the solve's own poses.
+    const same = posesForJointValues(doc, s, new Map());
+    for (const id of Object.keys(s.poses)) near(same[id]!, s.poses[id]!);
+    // The shaft turns to 90° and the plate on it slides to 4 mm: the plates riding on the
+    // shaft follow it, as solving the document with those values does.
+    const values = new Map([
+      ['j-turn', { angle: Math.PI / 2 }],
+      ['j-slide', { distance: 4 }],
+    ]);
+    const moved = posesForJointValues(doc, s, values);
+    const edited = structuredClone(doc);
+    edited.joints.find((j) => j.id === 'j-turn')!.values = { angle: { literalRad: Math.PI / 2 } };
+    edited.joints.find((j) => j.id === 'j-slide')!.values = { distance: mm(4) };
+    const fresh = solve(edited);
+    for (const id of Object.keys(fresh.poses)) near(moved[id]!, fresh.poses[id]!);
+    near(moved['c-plate-3']!, fresh.poses['c-plate-3']!);
+    expect(posesDiffer(moved['c-plate-3']!, s.poses['c-plate-3']!)).toBe(true);
   });
 
   it('refuses a cycle, two parents, a placed child, a value out of range, and stray values', () => {

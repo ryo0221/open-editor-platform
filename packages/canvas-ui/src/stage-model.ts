@@ -39,9 +39,31 @@ export interface StageDrag {
   path: Point[];
   shift: boolean;
   moved?: boolean;
+  pointerId?: number;
+  startedAt?: number;
+  objectRevision?: unknown;
+  capture?: Element;
 }
 type Size = { width: number; height: number };
 type Space = 'page' | 'infinite';
+
+/** Resolve every selected ID; never partially transform a mixed/missing selection. */
+export function canObjectTransform(targets: CanvasTarget[], ids: string[], mode: string) {
+  return (
+    ids.length > 0 &&
+    ids.every((id) => {
+      const target = targets.find((t) => t.id === id);
+      return (
+        !!target &&
+        !target.hidden &&
+        !target.locked &&
+        (mode !== 'resize' || target.resizable !== false) &&
+        (mode !== 'rotate' || target.rotatable !== false)
+      );
+    })
+  );
+}
+export const isObjectGesture = (mode: string) => ['move', 'resize', 'rotate'].includes(mode);
 
 export const selectionHandles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 

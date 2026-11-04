@@ -1,3 +1,12 @@
+import { parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
+import { FictionMapArtifactSurface } from '@editor-platform/fiction-map/artifact-surface';
+import '@editor-platform/fiction-map/styles.css';
+import {
+  undoFictionMap,
+  redoFictionMap,
+  type FictionMapSession,
+  type FictionMapContent,
+} from '@editor-platform/fiction-map/model';
 import { ArtifactEstimate } from './estimate';
 import { ArtifactAnalysis } from './analysis';
 import {
@@ -24,6 +33,7 @@ import {
   EditorHostError,
   HostAccessDisplay,
   scheduleAccessExpiry,
+  hostNativeArtifactByteLimit,
   loadHostArtifact,
   type HostAccessAdapter,
 } from '@editor-platform/editor-host';
@@ -152,6 +162,13 @@ function EditorView({
     },
     defaultPanels: { left: true, right: window.innerWidth > 1050 },
   };
+  if (host.artifact.kind === 'fiction-map')
+    return (
+      <FictionMapArtifactSurface
+        host={host as unknown as ArtifactEditor<FictionMapContent>}
+        onError={onError}
+      />
+    );
   if (host.artifact.kind === 'estimate')
     return (
       <ArtifactEstimate host={host} artifacts={artifacts} storage={storage} onCreated={onCreated} />
@@ -620,13 +637,16 @@ export function HostApp({
     if (!ready || !selected) return;
     if (/\.ifc$/i.test(selected.name)) return importIfc(selected);
     try {
-      if (selected.size > 16 * 1024 * 1024) throw Error('JSONは16 MiB以内です');
+      if (selected.size > hostNativeArtifactByteLimit) throw Error('JSONは64 MiB以内です');
       const text = await selected.text(),
         raw: unknown = JSON.parse(text);
       const kind = raw && typeof raw === 'object' && 'kind' in raw ? String(raw.kind) : '';
       const adapter = hostAdapters[kind];
       if (!adapter) throw Error('Unknown artifact kind');
-      const imported = await loadHostArtifact(text, adapter);
+      const imported =
+        kind === 'fiction-map'
+          ? await parseFictionMapArtifact(text)
+          : await loadHostArtifact(text, adapter);
       const current = sessions.current.get(imported.id);
       const existing = current?.artifact ?? artifactsRef.current.find((a) => a.id === imported.id);
       if (permissions.current.get(imported.id) === false || current?.snapshot.readOnly)
@@ -783,7 +803,13 @@ export function HostApp({
               disabled={!snap?.canUndo || snap.readOnly}
               onClick={() => {
                 try {
-                  host.undo();
+                  if (host.artifact.kind === 'fiction-map') {
+                    const r = undoFictionMap(
+                      host as unknown as FictionMapSession,
+                      () => !host.readOnly,
+                    );
+                    if (!r.ok) throw Error(r.diagnostic.code);
+                  } else host.undo();
                 } catch (e) {
                   fail(e);
                 }
@@ -796,7 +822,13 @@ export function HostApp({
               disabled={!snap?.canRedo || snap.readOnly}
               onClick={() => {
                 try {
-                  host.redo();
+                  if (host.artifact.kind === 'fiction-map') {
+                    const r = redoFictionMap(
+                      host as unknown as FictionMapSession,
+                      () => !host.readOnly,
+                    );
+                    if (!r.ok) throw Error(r.diagnostic.code);
+                  } else host.redo();
                 } catch (e) {
                   fail(e);
                 }

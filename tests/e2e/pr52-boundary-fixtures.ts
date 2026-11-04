@@ -344,7 +344,7 @@ export async function graphConnectionBoundary(page: Page) {
     .first()
     .click();
   await expect(
-    page.getByText('Connection input is stale. Reload current values.', { exact: true }),
+    page.getByText('接続の入力が古くなっています。現在の値を読み込んでください。', { exact: true }),
   ).toBeVisible();
   await page.getByRole('form', { name: 'Connection editor', exact: true }).dispatchEvent('submit');
   await expect(
@@ -355,7 +355,7 @@ export async function graphConnectionBoundary(page: Page) {
   expect(await independentSource(page)).toEqual(original);
   await expect(page.getByRole('alert').filter({ hasText: 'Graph:' }).first()).toBeVisible();
   await expect(to).toHaveValue(target);
-  await page.getByRole('button', { name: 'Reload connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を読み込み直す', exact: true }).click();
   await to.selectOption(target);
   await page.getByRole('form', { name: 'Connection editor', exact: true }).dispatchEvent('submit');
   const changed = await independentSource<GraphDocument>(page);
@@ -379,7 +379,7 @@ export async function graphConnectionBoundary(page: Page) {
   await expect(page.getByLabel('Graph save status')).toContainText('Stale connection');
   expect(await source()).toEqual(moved);
   await expect(to).toHaveValue('resource-a');
-  await page.getByRole('button', { name: 'Reload connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を読み込み直す', exact: true }).click();
   await to.selectOption('resource-a');
   await page.getByLabel('Graph Host read only', { exact: true }).check();
   await page.getByRole('button', { name: 'Host save', exact: true }).dispatchEvent('click');

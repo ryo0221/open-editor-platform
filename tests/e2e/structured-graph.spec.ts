@@ -15,7 +15,7 @@ import { createDataGraphFixture, dataFieldId } from '@editor-platform/structured
 import { createArtifact, commitVersion } from '@editor-platform/artifact-core';
 import { createDocument } from '@editor-platform/document/model';
 import { artifactMenu } from './template-fixtures';
-import { graphSourceAction } from './usability-fixtures';
+import { graphSourceAction, selectConnection } from './usability-fixtures';
 import { confirmed, monitor } from './practical-fixtures';
 import type { ReferenceDefinition } from '../../apps/graph-reference/src/definition';
 test('independent native: typed properties, one drag edit, cancel, Undo, versions, reload and readonly', async ({
@@ -29,7 +29,7 @@ test('independent native: typed properties, one drag edit, cancel, Undo, version
     page.getByRole('button', { name: 'Select node Independent Research', exact: true }),
   ).toBeVisible();
   await page.getByLabel('name', { exact: true }).fill('Cancelled');
-  await page.getByRole('button', { name: 'Cancel attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性の入力をやめる', exact: true }).click();
   expect((await independentSource(page)).nodes[0].attributes.name).toBe('Independent Research');
   const mover = page.getByRole('button', { name: 'Move node Independent Research', exact: true }),
     box = (await mover.boundingBox())!;
@@ -52,7 +52,7 @@ test('independent native: typed properties, one drag edit, cancel, Undo, version
   await expect(page.getByRole('status').first()).toHaveText('Reloaded locally');
   expect(await independentSource(page)).toEqual(exported.draft.content);
   await page.getByLabel('Host read only', { exact: true }).check();
-  await expect(page.getByRole('button', { name: 'Add node', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ノードを追加', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Host Undo', exact: true })).toBeDisabled();
   await page.screenshot({ path: info.outputPath('independent-native-desktop.png') });
 });
@@ -103,18 +103,18 @@ test('ordinary native: keyboard selection, cascade preview Cancel, deletion Undo
   await page.goto('/');
   await create(page, 'structured-graph');
   const original = (await nativeArtifact(page)).draft.content;
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   expect((await nativeArtifact(page)).draft.content).toEqual(original);
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
   await page.keyboard.press('Delete');
   await expect(
     page.getByRole('dialog', { name: 'Confirm graph deletion', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel deletion', exact: true }).click();
+  await page.getByRole('button', { name: '削除をやめる', exact: true }).click();
   expect((await nativeArtifact(page)).draft.content).toEqual(original);
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
   await page.keyboard.press('Delete');
-  await page.getByRole('button', { name: 'Confirm deletion', exact: true }).click();
+  await page.getByRole('button', { name: '削除する', exact: true }).click();
   expect(((await nativeArtifact(page)).draft.content as GraphDocument).edges).toHaveLength(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   expect((await nativeArtifact(page)).draft.content).toEqual(original);
@@ -128,7 +128,7 @@ test('ordinary native: keyboard selection, cascade preview Cancel, deletion Undo
   await expect(page.getByRole('button', { name: /^Comments \(/ })).toBeDisabled();
   await page.getByLabel('Read only', { exact: true }).check();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: 'Add node', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ノードを追加', exact: true })).toHaveCount(0);
 });
 test('ordinary Data: Grid→Graph→Form common Undo and persisted layout, unknown values and hidden target', async ({
   page,
@@ -146,11 +146,11 @@ test('ordinary Data: Grid→Graph→Form common Undo and persisted layout, unkno
   await expect(page.getByLabel('New node shape', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Select node Grid Research', exact: true }).click();
   await expect(page.getByLabel('Node shape', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('(this source keeps the type default)')).toBeVisible();
+  await expect(page.getByText('（この元データでは種類の既定のままです）')).toBeVisible();
   await page.getByLabel('Relation type', { exact: true }).selectOption('related');
   await page.getByLabel('Connection from', { exact: true }).selectOption({ label: 'Planning' });
   await page.getByLabel('Connection to', { exact: true }).selectOption({ label: 'Delivery' });
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   expect(
     ((await nativeArtifact(page)).draft.content as StructuredData).rows[1].values.related,
   ).toBe('delivery');
@@ -306,7 +306,7 @@ test('connection editor refreshes clean input and refuses dirty input after sour
   await selectEdge();
   await expect(page.getByLabel('Connection from', { exact: true })).toHaveValue('resource-a');
   await page.getByLabel('Connection to', { exact: true }).selectOption('resource-a');
-  await page.getByRole('button', { name: 'Retarget connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続先を変更', exact: true }).click();
   expect((await independentSource(page)).edges[0].to).toBe('resource-a');
   await page.getByRole('button', { name: 'Host Undo', exact: true }).click();
   await expect(page.getByLabel('Connection to', { exact: true })).toHaveValue('resource-b');
@@ -315,20 +315,20 @@ test('connection editor refreshes clean input and refuses dirty input after sour
   await page.getByRole('button', { name: 'Host Redo', exact: true }).click();
   const before = await independentSource(page);
   await expect(
-    page.getByText('Connection input is stale. Reload current values.', { exact: true }),
+    page.getByText('接続の入力が古くなっています。現在の値を読み込んでください。', { exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Retarget connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続先を変更', exact: true }).click();
   await expect(page.getByRole('alert').first()).toContainText('Stale connection input');
   expect(await independentSource(page)).toEqual(before);
-  await page.getByRole('button', { name: 'Reload connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を読み込み直す', exact: true }).click();
   await expect(page.getByLabel('Connection from', { exact: true })).toHaveValue('resource-a');
   await expect(page.getByLabel('Connection to', { exact: true })).toHaveValue('resource-a');
   await page.getByLabel('Connection to', { exact: true }).selectOption('resource-b');
   await page.getByRole('button', { name: 'Select node Planning', exact: true }).click();
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   expect(await independentSource(page)).toEqual(before);
   await expect(
-    page.getByText('Connection input is stale. Reload current values.', { exact: true }),
+    page.getByText('接続の入力が古くなっています。現在の値を読み込んでください。', { exact: true }),
   ).toBeVisible();
 });
 
@@ -500,11 +500,11 @@ test('Definition object edits preserve hidden children and clearing the object r
   expect(await independentSource(page)).toEqual(original);
   await page.getByRole('button', { name: 'Select node Check', exact: true }).click();
   await page.getByLabel('config', { exact: true }).fill('');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'undeclared child' })).toBeVisible();
   expect(await independentSource(page)).toEqual(original);
   await expect(page.getByRole('button', { name: 'Host Undo', exact: true })).toBeDisabled();
-  await page.getByRole('button', { name: 'Cancel attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性の入力をやめる', exact: true }).click();
   expect(await downloadJson(page, 'Export Definition')).toEqual(original);
 });
 
@@ -777,7 +777,7 @@ test('arbitrary Data column IDs: property, relation, selection and native Undo',
     .getByRole('button', { name: 'Select connection Related: Alpha to Beta', exact: true })
     .press('Enter');
   await page.getByLabel('Connection to', { exact: true }).selectOption('node:a');
-  await page.getByRole('button', { name: 'Retarget connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続先を変更', exact: true }).click();
   expect(
     ((await nativeArtifact(page)).draft.content as StructuredData).rows[0].values.constructor,
   ).toBe('a');
@@ -786,7 +786,7 @@ test('arbitrary Data column IDs: property, relation, selection and native Undo',
   await page.getByLabel('Relation type', { exact: true }).selectOption(dataFieldId('constructor'));
   await page.getByLabel('Connection from', { exact: true }).selectOption('node:b');
   await page.getByLabel('Connection to', { exact: true }).selectOption('node:a');
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   expect(
     ((await nativeArtifact(page)).draft.content as StructuredData).rows[1].values.constructor,
   ).toBe('a');
@@ -811,7 +811,7 @@ test('bounded public Profile: valid Add draft, correction, Undo and effective re
     JSON.parse((await page.getByTestId('bounded-source').textContent())!);
   const revision = () => page.getByTestId('bounded-revision').textContent();
   const empty = await source();
-  await page.getByRole('button', { name: 'Add node', exact: true }).click();
+  await page.getByRole('button', { name: 'ノードを追加', exact: true }).click();
   await page.getByRole('button', { name: 'Select node New', exact: true }).click();
   const added = await source();
   expect(added.nodes[0].attributes).toEqual({
@@ -827,11 +827,11 @@ test('bounded public Profile: valid Add draft, correction, Undo and effective re
   );
   const beforeInvalid = await revision();
   await page.getByLabel('negative', { exact: true }).fill('0');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: /range/i })).toBeVisible();
   expect(await source()).toEqual(added);
   expect(await revision()).toBe(beforeInvalid);
-  await page.getByRole('button', { name: 'Cancel attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性の入力をやめる', exact: true }).click();
   await graphAttribute(page, 'New', 'negative', '-2');
   expect((await source()).nodes[0].attributes.negative).toBe(-2);
   await page.getByRole('button', { name: 'Host Undo', exact: true }).click();
@@ -841,13 +841,7 @@ test('bounded public Profile: valid Add draft, correction, Undo and effective re
   await page.getByRole('button', { name: 'Host Redo', exact: true }).click();
   await page.getByLabel('Profile read only', { exact: true }).check();
   await page.getByRole('button', { name: 'Select node New', exact: true }).click();
-  for (const name of [
-    'Add node',
-    'Move node New',
-    'Delete selection',
-    'Apply attributes',
-    'Add connection',
-  ])
+  for (const name of ['ノードを追加', 'Move node New', '選択を削除', '属性を適用', '接続を追加'])
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   for (const label of [
     'Node type',
@@ -938,7 +932,7 @@ test('saved Data restoration verifies protected history and restores rows with U
   await dataProjection(page, 'Graph');
   await page.getByRole('button', { name: 'Select node Saved Research', exact: true }).click();
   await page.keyboard.press('Delete');
-  await page.getByRole('button', { name: 'Confirm deletion', exact: true }).click();
+  await page.getByRole('button', { name: '削除する', exact: true }).click();
   const deleted = await independentSource<StructuredData>(page);
   expect(deleted.rows.some((r) => r.id === 'research')).toBe(false);
   await page.getByText('Saved versions', { exact: true }).click();
@@ -981,7 +975,7 @@ test('native hidden object members survive declared edits and reject overwrite o
     await expect(page.getByRole('alert').filter({ hasText: 'undeclared child' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Undo', exact: true }).first()).toBeDisabled();
     // Export now preflights retained input too: discard the rejected buffer before reading native.
-    await page.getByRole('button', { name: 'Cancel attributes', exact: true }).click();
+    await page.getByRole('button', { name: '属性の入力をやめる', exact: true }).click();
     expect((await nativeArtifact(page)).draft.content).toEqual(graph);
   }
   await page.screenshot({ path: info.outputPath('native-retained-object.png') });
@@ -1007,7 +1001,7 @@ test('duplicate Data options project and edit without mutating native options or
       .getByRole('option', { name: 'Topic', exact: true }),
   ).toHaveCount(1);
   await page.getByLabel('Category', { exact: true }).selectOption('Topic');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   const next = (await nativeArtifact(page)).draft.content as StructuredData;
   expect(next.columns).toEqual(original.columns);
   expect(next.rows[0].values.category).toBe('Topic');
@@ -1098,7 +1092,7 @@ test('Definition projection bounds derived identities and explicitly rejects unr
     .getByRole('button', { name: 'Select connection Output: Research to Notes', exact: true })
     .press('Enter');
   await page.getByLabel('Connection to', { exact: true }).selectOption('output:phase-plan');
-  await page.getByRole('button', { name: 'Retarget connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続先を変更', exact: true }).click();
   expect((await independentSource<ReferenceDefinition>(page)).phases[0].output).toBe(
     'output:phase-plan',
   );
@@ -1126,11 +1120,11 @@ test('#378 party node types, name-only connection labels, typed connection names
   const labels = page.locator('.ep-graph-edge-label text');
   await expect(labels).toHaveText(['supports']);
   await page.getByLabel('Node type', { exact: true }).selectOption({ label: 'Bank or financier' });
-  await page.getByRole('button', { name: 'Add node', exact: true }).click();
+  await page.getByRole('button', { name: 'ノードを追加', exact: true }).click();
   const added = ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.at(-1)!;
   expect(added.type).toBe('financier');
   await expect(page.locator(`[data-node-id="${added.id}"]`)).toContainText('Bank or financier');
-  await page.getByRole('button', { name: 'Graph properties', exact: true }).click();
+  await page.getByRole('button', { name: 'グラフの設定', exact: true }).click();
   // Read before typing: exporting flushes a pending connection input.
   const before = (await nativeArtifact(page)).draft.content as GraphDocument;
   await page.getByLabel('Connection from', { exact: true }).selectOption('resource-a');
@@ -1139,10 +1133,10 @@ test('#378 party node types, name-only connection labels, typed connection names
   await name.fill('融資');
   // An unfinished IME composition keeps the connection pending.
   await name.dispatchEvent('compositionstart', { data: '' });
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   await expect(page.locator('.ep-graph-edge-label text')).toHaveText(['supports']);
   await name.dispatchEvent('compositionend', { data: '' });
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   const after = (await nativeArtifact(page)).draft.content as GraphDocument;
   expect(after.edges.at(-1)).toMatchObject({
     type: 'related',
@@ -1163,7 +1157,7 @@ test('#378 party node types, name-only connection labels, typed connection names
   // Fit enlarges the small drawing and centres it, without changing content.
   const zoom = page.getByLabel('Graph zoom', { exact: true });
   await expect(zoom).toHaveText('100%');
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expect(zoom).not.toHaveText('100%');
   const canvas = (await page
     .getByRole('group', { name: 'Graph canvas', exact: true })
@@ -1238,7 +1232,7 @@ test('#396 node shapes and paint: Inspector and new-node shape, outline endpoint
   ).toBe(true);
   // The connection now ends on the ellipse outline, not on the bounding box.
   await expect.poll(() => edge.getAttribute('d')).not.toBe(straight);
-  await appearance.getByLabel('Node fill', { exact: true }).selectOption({ label: 'Dark' });
+  await appearance.getByLabel('Node fill', { exact: true }).selectOption({ label: '濃色' });
   await appearance.getByLabel('Node outline', { exact: true }).selectOption('dashed');
   // Labels on a dark fill switch to white text.
   await expect
@@ -1261,7 +1255,7 @@ test('#396 node shapes and paint: Inspector and new-node shape, outline endpoint
   await expect(redo).toBeEnabled();
   // A new node takes the chosen shape in the same edit as its creation.
   await page.getByLabel('New node shape', { exact: true }).selectOption('diamond');
-  await page.getByRole('button', { name: 'Add node', exact: true }).click();
+  await page.getByRole('button', { name: 'ノードを追加', exact: true }).click();
   const added = ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.at(-1)!;
   await expect(page.locator(`[data-node-id="${added.id}"]`)).toHaveAttribute(
     'data-shape',
@@ -1315,7 +1309,7 @@ test('#396 Sections: create around a node, rename, move with members, resize, co
   const before = (await nativeArtifact(page)).draft.content as GraphDocument;
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
   await expect(page.getByLabel('Section type', { exact: true })).toHaveValue('group');
-  await page.getByRole('button', { name: 'Add section around node', exact: true }).click();
+  await page.getByRole('button', { name: 'ノードを囲むまとまりを追加', exact: true }).click();
   let graph = (await nativeArtifact(page)).draft.content as GraphDocument;
   const sectionId = graph.sections[0].id;
   expect(graph.nodes.find((n) => n.id === 'resource-a')!.sectionId).toBe(sectionId);
@@ -1329,7 +1323,7 @@ test('#396 Sections: create around a node, rename, move with members, resize, co
   // The name is a semantic attribute.
   await page.getByRole('button', { name: 'Select section New section', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Backend');
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   await expect(
     page.getByRole('button', { name: 'Select section Backend', exact: true }),
   ).toBeVisible();
@@ -1399,11 +1393,11 @@ test('#396 Sections: create around a node, rename, move with members, resize, co
   await expect(page.locator(`[data-section-id="${sectionId}"]`)).toBeVisible();
   // Deleting lists what moves up; the node and its connection stay.
   await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
-  await page.getByRole('button', { name: 'Delete section', exact: true }).click();
+  await page.getByRole('button', { name: 'まとまりを削除', exact: true }).click();
   const confirm = page.getByRole('group', { name: 'Confirm section deletion', exact: true });
-  await expect(confirm).toContainText('moves 1 node and 0 sections to the top level');
+  await expect(confirm).toContainText('ノード 1 個とまとまり 0 個は最上位へ移ります');
   await expect(confirm.getByRole('listitem')).toHaveText(['Research']);
-  await confirm.getByRole('button', { name: 'Delete and move contents up', exact: true }).click();
+  await confirm.getByRole('button', { name: '削除して中身を上へ移す', exact: true }).click();
   const deleted = (await nativeArtifact(page)).draft.content as GraphDocument;
   expect(deleted.sections).toEqual([]);
   expect(deleted.nodes.find((n) => n.id === 'resource-a')).not.toHaveProperty('sectionId');
@@ -1433,13 +1427,13 @@ test('#396 diagrams: architecture template, palette into a Section, Arrange diag
     ).toBeVisible();
   await expect(page.locator('[data-node-id="db"]')).toHaveAttribute('data-shape', 'cylinder');
   await expect(page.locator('[data-node-id="cloud"]')).toHaveAttribute('data-shape', 'cloud');
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await page.screenshot({ path: info.outputPath('architecture-template-desktop.png') });
   // The palette adds a typed node inside the selected Section in one edit.
   await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
   await page.locator('.ep-graph-palette > summary').click();
   const palette = page.getByRole('group', { name: 'Node palette', exact: true });
-  await expect(palette).toContainText('Adds inside “Backend”');
+  await expect(palette).toContainText('「Backend」の中に追加します');
   await expect(palette.getByRole('region')).toHaveCount(3);
   await palette.getByRole('button', { name: 'Add Queue', exact: true }).click();
   graph = (await nativeArtifact(page)).draft.content as GraphDocument;
@@ -1447,7 +1441,7 @@ test('#396 diagrams: architecture template, palette into a Section, Arrange diag
   expect(queue).toMatchObject({ type: 'queue', sectionId: 'backend' });
   // Arrange diagram lays out by Section in one edit and keeps membership.
   const before = graph;
-  await page.getByRole('button', { name: 'Arrange diagram', exact: true }).click();
+  await page.getByRole('button', { name: '図を並べ直す', exact: true }).click();
   const arranged = (await nativeArtifact(page)).draft.content as GraphDocument;
   expect(arranged.nodes).toEqual(before.nodes);
   expect(arranged.presentation).not.toEqual(before.presentation);
@@ -1461,12 +1455,82 @@ test('#396 diagrams: architecture template, palette into a Section, Arrange diag
   await page.screenshot({ path: info.outputPath('architecture-arranged-desktop.png') });
   // Fit section is a view change only.
   await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
-  await page.getByRole('button', { name: 'Fit section', exact: true }).click();
+  await page.getByRole('button', { name: 'まとまりを表示', exact: true }).click();
   expect((await nativeArtifact(page)).draft.content).toEqual(arranged);
   await page.screenshot({ path: info.outputPath('architecture-fit-section-desktop.png') });
   await save(page, 1);
   await page.reload();
   await expect(page.locator(`[data-node-id="${queue.id}"]`)).toBeVisible();
+});
+
+test('#594 connections end at a Section: add, retarget by drag, collapse, delete with Undo and reload', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('structured-graph');
+  await page.getByLabel('Graph template', { exact: true }).selectOption('architecture');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  await expect(page.getByLabel('Artifact name')).toBeVisible();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
+  const initial = (await nativeArtifact(page)).draft.content as GraphDocument;
+  // The diagram Profile lets "Connects to" end at a Section, so the ends list Sections too.
+  const form = page.getByRole('form', { name: 'Connection editor', exact: true });
+  await form.getByLabel('Relation type', { exact: true }).selectOption('connects');
+  await expect(
+    form.getByLabel('Connection to', { exact: true }).locator('optgroup[label="まとまり"] option'),
+  ).toHaveText(['Production', 'Frontend', 'Backend']);
+  await form.getByLabel('Connection from', { exact: true }).selectOption('user');
+  await form.getByLabel('Connection to', { exact: true }).selectOption('backend');
+  await form.getByRole('button', { name: '接続を追加', exact: true }).click();
+  let graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  const added = graph.edges.find((e) => e.to === 'backend')!;
+  expect(added).toMatchObject({ type: 'connects', from: 'user' });
+  const line = page.locator(`[data-edge-id="${added.id}"]`);
+  await expect(line.locator('path').first()).toHaveAttribute('d', /^M/);
+  await selectConnection(page, 'Select connection Connects to: User to Backend');
+  await expect(page.locator('[data-section-id="backend"]')).toHaveClass(/connected/);
+  await page.screenshot({ path: info.outputPath('section-connection-desktop.png') });
+  // Drag the end into an empty corner of the Frontend frame.
+  const frontend = (await page.locator('[data-section-id="frontend"]').boundingBox())!;
+  const handle = page.getByRole('button', { name: 'Drag connection to: Connects to', exact: true });
+  const start = (await handle.boundingBox())!;
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(frontend.x + 4, frontend.y + frontend.height - 4, { steps: 8 });
+  await expect(page.locator('[data-section-id="frontend"]')).toHaveClass(/valid-target/);
+  await page.mouse.up();
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.edges.find((e) => e.id === added.id)!.to).toBe('frontend');
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.edges.find((e) => e.id === added.id)!.to).toBe('backend');
+  // Collapsing Production redraws the connection to its box as a summary line. The line from
+  // User runs along Production's header here, so the toggle is pressed from the keyboard.
+  await page
+    .getByRole('button', { name: 'Collapse section Production', exact: true })
+    .press('Enter');
+  await expect(line).toHaveCount(0);
+  await expect(page.locator('[data-edge-id^="section-summary:"]').first()).toBeVisible();
+  await page.screenshot({ path: info.outputPath('section-connection-collapsed-desktop.png') });
+  await page.getByRole('button', { name: 'Expand section Production', exact: true }).click();
+  await expect(line).toHaveCount(1);
+  // Deleting Backend names the connection that goes with it; Undo restores both.
+  await page.getByRole('button', { name: 'Select section Backend', exact: true }).click();
+  await page.getByRole('button', { name: 'まとまりを削除', exact: true }).click();
+  const confirm = page.getByRole('group', { name: 'Confirm section deletion', exact: true });
+  await expect(confirm).toContainText('このまとまりにつながる接続 1 本も一緒に削除されます。');
+  const beforeDelete = (await nativeArtifact(page)).draft.content as GraphDocument;
+  await confirm.getByRole('button', { name: '削除して中身を上へ移す', exact: true }).click();
+  graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.sections.map((s) => s.id)).not.toContain('backend');
+  expect(graph.edges.map((e) => e.id)).toEqual(initial.edges.map((e) => e.id));
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await nativeArtifact(page)).draft.content).toEqual(beforeDelete);
+  await save(page, 1);
+  await page.reload();
+  await expect(page.locator(`[data-edge-id="${added.id}"]`)).toHaveCount(1);
 });
 
 test('#448 dropping a node into a Section frame changes its membership in the same Undo', async ({
@@ -1479,7 +1543,7 @@ test('#448 dropping a node into a Section frame changes its membership in the sa
   await page.getByLabel('Graph template', { exact: true }).selectOption('architecture');
   await page.getByRole('button', { name: 'New artifact' }).click();
   await expect(page.getByLabel('Artifact name')).toBeVisible();
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   const before = (await nativeArtifact(page)).draft.content as GraphDocument;
   expect(before.nodes.find((n) => n.id === 'api')!.sectionId).toBe('backend');
   // Drag API server so that its centre ends inside the Frontend frame.
@@ -1506,4 +1570,38 @@ test('#448 dropping a node into a Section frame changes its membership in the sa
   // The inspector field stays.
   await page.getByRole('button', { name: 'Select node API server', exact: true }).click();
   await expect(page.getByLabel('Node section', { exact: true })).toBeVisible();
+});
+
+test('#8 node icons: the category picks the corner badge, which follows edits and keeps the label clickable', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  await create(page, 'structured-graph');
+  const research = page.locator('[data-node-id="resource-a"]'),
+    planning = page.locator('[data-node-id="resource-b"]');
+  await expect(research).toHaveAttribute('data-icon', 'cube');
+  await expect(planning).toHaveAttribute('data-icon', 'list');
+  const badge = research.locator('.ep-graph-node-icon');
+  await expect(badge).toBeVisible();
+  // The badge sits over the top-left corner and does not cover the label.
+  const [node, icon] = await Promise.all([research.boundingBox(), badge.boundingBox()]);
+  expect(icon!.x).toBeLessThan(node!.x);
+  expect(icon!.y).toBeLessThan(node!.y);
+  expect(
+    await research.evaluate((n) => {
+      const label = n.querySelector('.ep-graph-node-content')!,
+        r = label.getBoundingClientRect();
+      return label.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+    }),
+  ).toBe(true);
+  await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
+  await page.getByLabel('category', { exact: true }).selectOption('Topic');
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
+  await expect(research).toHaveAttribute('data-icon', 'list');
+  await page.screenshot({ path: info.outputPath('node-icons-desktop.png') });
+  // The icon is drawn from the Profile, not saved with the Graph.
+  const graph = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(graph.presentation.nodes['resource-a']).not.toHaveProperty('icon');
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await expect(research).toHaveAttribute('data-icon', 'cube');
 });

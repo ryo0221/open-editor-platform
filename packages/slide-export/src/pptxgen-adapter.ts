@@ -3,6 +3,8 @@ import { strFromU8, strToU8, unzipSync, zip } from 'fflate';
 import { canonicalJson, clone, deepFreeze } from '@editor-platform/artifact-core';
 import {
   shapePath,
+  lineArrowheads,
+  straightLineEnds,
   type Bounds,
   type Drawing,
   type ShapeKind,
@@ -59,18 +61,12 @@ const lineKinds: readonly string[] = ['line', 'arrow', 'double-arrow'];
 /** Native M/L/Z outline of a non-rectangular shape, including drawn arrowheads. */
 function shapeOutline(d: Drawing, kind: ShapeKind) {
   const b = d.bounds;
+  const local = { x: 0, y: 0, width: b.width, height: b.height };
   let path = lineKinds.includes(kind)
-    ? `M0 ${b.height / 2} L${b.width} ${b.height / 2}`
+    ? (([s, e]) => `M${s.x} ${s.y} L${e.x} ${e.y}`)(straightLineEnds(local, d.lineDirection))
     : shapePath(kind, b.width, b.height);
-  if (
-    kind === 'arrow' ||
-    kind === 'double-arrow' ||
-    d.arrowhead === 'end' ||
-    d.arrowhead === 'both'
-  )
-    path += ` M${b.width - 10} ${b.height / 2 - 6} L${b.width} ${b.height / 2} L${b.width - 10} ${b.height / 2 + 6}`;
-  if (kind === 'double-arrow' || d.arrowhead === 'both')
-    path += ` M10 ${b.height / 2 - 6} L0 ${b.height / 2} L10 ${b.height / 2 + 6}`;
+  // Heads follow the line's direction (#589).
+  for (const head of lineArrowheads(kind, local, d)) path += ` ${head}`;
   return path;
 }
 /** Office custom dash XML for a CSS dash list, or undefined when nothing is dashed. */

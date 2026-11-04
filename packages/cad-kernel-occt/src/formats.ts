@@ -4,7 +4,29 @@ import type {
   CadStepPlan,
   CadToleranceSet,
 } from '@editor-platform/cad-core';
+import { geometryDefaultFinish } from '@editor-platform/geometry-core';
 import type { CadMesh } from './protocol';
+
+/** An image to embed in a file, as the document stores it. */
+export interface CadExportImage {
+  bytes: Uint8Array;
+  mediaType: 'image/png' | 'image/jpeg';
+}
+/**
+ * #663: a body's texture set as glTF takes it. `metallicRoughness` is one image holding
+ * roughness in green and metalness in blue (glTF's packing, as the view reads its maps); a
+ * normal map is OpenGL (y up). The images are written once each, by identity.
+ */
+export interface CadExportTextures {
+  color?: CadExportImage;
+  normal?: CadExportImage;
+  metallicRoughness?: CadExportImage;
+  occlusion?: CadExportImage;
+  /** The size one image covers on a face (mm): width, height. */
+  sizeMm: [number, number];
+  /** Turn of the image on the face, counter-clockwise (degrees). */
+  rotationDeg: number;
+}
 
 /** One active body to export: its evaluated mesh and how it is shown. */
 export interface CadExportBody {
@@ -13,6 +35,8 @@ export interface CadExportBody {
   kind: CadBodyKind;
   appearance: CadAppearance;
   mesh: CadMesh;
+  /** #663: GLB only; drawn when the mesh has texture coordinates. */
+  textures?: CadExportTextures;
 }
 /** Preflight report: what the file is made from and what it does not keep (docs/cad/integration.md). */
 export interface CadExportReport {
@@ -209,7 +233,27 @@ const rgb = (hex: string) =>
   [1, 3, 5].map((i) => srgbToLinear(parseInt(hex.slice(i, i + 2), 16) / 255));
 
 /**
- * glTF 2.0 binary for display: one node per body with its colour. Converted once at this
+ * Texture coordinates as glTF reads them from the mesh's real-size ones (mm): divided by the size
+ * one image covers and turned as the view does (three.js `Texture.repeat` and `rotation` about the
+ * origin), then with v flipped, as glTF's images start at their top row and the view's at the
+ * bottom. The image repeats, so the flip needs no offset.
+ */
+export function glbTextureCoordinates(uvs: Float32Array, set: CadExportTextures): Float32Array {
+  const r = (set.rotationDeg * Math.PI) / 180;
+  const [c, s] = [Math.cos(r), Math.sin(r)];
+  const [w, h] = set.sizeMm;
+  const out = new Float32Array(uvs.length);
+  for (let i = 0; i < uvs.length; i += 2) {
+    const [u, v] = [uvs[i], uvs[i + 1]];
+    out[i] = (c * u + s * v) / w;
+    out[i + 1] = -(-s * u + c * v) / h;
+  }
+  return out;
+}
+
+/**
+ * glTF 2.0 binary for display: one node per body with its look (colour, opacity, roughness and
+ * metalness) and, #663, its texture maps with their images embedded. Converted once at this
  * boundary from millimetres and Z-up to glTF's metres and Y-up: (x, y, z) → (x, z, −y) / 1000.
  */
 export function writeGlb(
@@ -218,6 +262,7 @@ export function writeGlb(
     CadExportReport,
     'format' | 'units' | 'bodies' | 'triangles' | 'transforms' | 'losses'
   >,
+  extraLosses: readonly string[] = [],
 ): { bytes: Uint8Array; report: CadExportReport } {
   const { bodies, dropped } = dropCollapsed(given);
   checkClosedMesh(bodies);
@@ -230,17 +275,42 @@ export function writeGlb(
   let length = 0;
   const bufferViews: object[] = [];
   const accessors: object[] = [];
-  const add = (data: ArrayBufferView, target: number) => {
+  const add = (data: ArrayBufferView, target?: number) => {
     const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    bufferViews.push({ buffer: 0, byteOffset: length, byteLength: bytes.byteLength, target });
+    bufferViews.push({
+      buffer: 0,
+      byteOffset: length,
+      byteLength: bytes.byteLength,
+      ...(target ? { target } : {}),
+    });
     chunks.push(bytes);
-    length += bytes.byteLength; // every array here is a multiple of 4 bytes
+    length += bytes.byteLength;
+    // An image may end anywhere: the next view starts on a multiple of 4 bytes.
+    const gap = (4 - (length % 4)) % 4;
+    if (gap) {
+      chunks.push(new Uint8Array(gap));
+      length += gap;
+    }
     return bufferViews.length - 1;
   };
+  const accessor = (a: object) => accessors.push(a) - 1;
+  const images: object[] = [];
+  const textures: object[] = [];
+  const imageIndex = new Map<Uint8Array, number>();
+  const texture = (image: CadExportImage) => {
+    let index = imageIndex.get(image.bytes);
+    if (index === undefined) {
+      index = images.push({ bufferView: add(image.bytes), mimeType: image.mediaType }) - 1;
+      textures.push({ sampler: 0, source: index });
+      imageIndex.set(image.bytes, index);
+    }
+    return { index };
+  };
+  const losses: string[] = [];
   const nodes: object[] = [];
   const meshes: object[] = [];
   const materials: object[] = [];
-  for (const [i, { name, kind, appearance, mesh }] of bodies.entries()) {
+  for (const [i, { name, kind, appearance, mesh, textures: set }] of bodies.entries()) {
     const count = mesh.positions.length / 3;
     const positions = new Float32Array(count * 3);
     const normals = new Float32Array(count * 3);
@@ -258,38 +328,61 @@ export function writeGlb(
       const [nx, ny, nz] = [0, 1, 2].map((k) => mesh.normals[v * 3 + k]);
       normals.set(toGltf(nx, ny, nz, 1), v * 3);
     }
-    accessors.push(
-      { bufferView: add(positions, 34962), componentType: 5126, count, type: 'VEC3', min, max },
-      { bufferView: add(normals, 34962), componentType: 5126, count, type: 'VEC3' },
-      {
-        bufferView: add(new Uint32Array(mesh.indices), 34963),
-        componentType: 5125,
-        count: mesh.indices.length,
-        type: 'SCALAR',
-      },
-    );
+    const attributes: Record<string, number> = {
+      POSITION: accessor({
+        bufferView: add(positions, 34962),
+        componentType: 5126,
+        count,
+        type: 'VEC3',
+        min,
+        max,
+      }),
+      NORMAL: accessor({
+        bufferView: add(normals, 34962),
+        componentType: 5126,
+        count,
+        type: 'VEC3',
+      }),
+    };
+    const maps =
+      set && (['color', 'normal', 'metallicRoughness', 'occlusion'] as const).filter((r) => set[r]);
+    const textured = !!set && !!maps?.length && mesh.uvs?.length === count * 2;
+    if (set && maps?.length && !textured)
+      losses.push(
+        `${name}: the texture maps are not written, as its mesh has no texture coordinates.`,
+      );
+    if (textured)
+      attributes.TEXCOORD_0 = accessor({
+        bufferView: add(glbTextureCoordinates(mesh.uvs!, set), 34962),
+        componentType: 5126,
+        count,
+        type: 'VEC2',
+      });
+    const indices = accessor({
+      bufferView: add(new Uint32Array(mesh.indices), 34963),
+      componentType: 5125,
+      count: mesh.indices.length,
+      type: 'SCALAR',
+    });
     const opaque = appearance.opacity >= 1;
     materials.push({
       name,
       pbrMetallicRoughness: {
         baseColorFactor: [...rgb(appearance.color), appearance.opacity],
-        metallicFactor: 0,
-        roughnessFactor: 0.6,
+        metallicFactor: appearance.metalness ?? geometryDefaultFinish.metalness,
+        roughnessFactor: appearance.roughness ?? geometryDefaultFinish.roughness,
+        ...(textured && set.color ? { baseColorTexture: texture(set.color) } : {}),
+        ...(textured && set.metallicRoughness
+          ? { metallicRoughnessTexture: texture(set.metallicRoughness) }
+          : {}),
       },
+      ...(textured && set.normal ? { normalTexture: texture(set.normal) } : {}),
+      ...(textured && set.occlusion ? { occlusionTexture: texture(set.occlusion) } : {}),
       ...(opaque ? {} : { alphaMode: 'BLEND' }),
       // A sheet has no inside: both sides are visible.
       ...(kind === 'sheet' ? { doubleSided: true } : {}),
     });
-    meshes.push({
-      name,
-      primitives: [
-        {
-          attributes: { POSITION: i * 3, NORMAL: i * 3 + 1 },
-          indices: i * 3 + 2,
-          material: i,
-        },
-      ],
-    });
+    meshes.push({ name, primitives: [{ attributes, indices, material: i }] });
     // Positions stay relative to the body's box centre (float32 precision); the node places them.
     nodes.push({ name, mesh: i, translation: toGltf(...mesh.origin, 1 / 1000) });
   }
@@ -301,6 +394,14 @@ export function writeGlb(
     nodes,
     meshes,
     materials,
+    ...(images.length
+      ? {
+          // Repeating, with mipmaps, as the view draws them.
+          samplers: [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }],
+          images,
+          textures,
+        }
+      : {}),
     accessors,
     bufferViews,
     buffers: [{ byteLength: length }],
@@ -341,6 +442,8 @@ export function writeGlb(
       ],
       losses: [
         'A display mesh: exact surfaces, feature history, parameters and named views are not kept.',
+        ...extraLosses,
+        ...losses,
       ],
     },
   };
@@ -397,8 +500,8 @@ export function stepReport(
     transforms: [],
     losses: [
       bodies > 1
-        ? `Feature history, parameters, body names, colours and named views are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP214), side by side without an assembly structure.`
-        : 'Feature history, parameters, the body name, colour and named views are not written: the body is its solids, or one surface (shell), with exact surfaces (AP214).',
+        ? `Feature history, parameters, body names, colours, materials, textures and named views are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP214), side by side without an assembly structure.`
+        : 'Feature history, parameters, the body name, colour, material, textures and named views are not written: the body is its solids, or one surface (shell), with exact surfaces (AP214).',
       ...(note
         ? [
             `The tolerance set (${note.toleranceSet}) is written only as a note in the file header; the largest tolerance in the shapes is ${note.maxToleranceMm} mm.`,

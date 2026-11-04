@@ -1,3 +1,4 @@
+import { renderFictionMapSvg } from '@editor-platform/fiction-map/render';
 import { canonicalJson, type CompareResult } from '@editor-platform/artifact-core';
 import { documentDiff, isDocument } from '@editor-platform/document';
 import { dataDiff, isStructuredData } from '@editor-platform/structured-data';
@@ -61,6 +62,28 @@ export function compareVersions(
   };
 }
 
+function SavedFictionMap({ content }: { content: unknown }) {
+  if (
+    !content ||
+    typeof content !== 'object' ||
+    !('kind' in content) ||
+    content.kind !== 'fiction-map'
+  )
+    return null;
+  try {
+    const r = renderFictionMapSvg(content, { width: 600, height: 400 });
+    return (
+      <img
+        alt="Immutable Fiction Map version"
+        style={{ maxWidth: '100%', maxHeight: 250 }}
+        src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(r.svg)}`}
+      />
+    );
+  } catch {
+    return <p role="alert">Invalid saved Fiction Map</p>;
+  }
+}
+
 export function HistoryView({
   versions,
   onRestore,
@@ -87,6 +110,7 @@ export function HistoryView({
               </p>
               <code title={v.contentHash}>SHA-256 {v.contentHash.slice(0, 16)}…</code>
             </div>
+            <SavedFictionMap content={v.content} />
             <button onClick={() => onRestore(v)}>Restore to draft</button>
           </article>
         ))

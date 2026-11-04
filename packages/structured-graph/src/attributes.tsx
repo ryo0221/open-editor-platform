@@ -5,6 +5,7 @@ import { PropertyInput } from '@editor-platform/property-input';
 import { type Attributes, type GraphDiagnostic } from './model';
 import { type AttributeSchema, type AttributeUi } from './profile';
 import { type GraphIntent } from './commands';
+import { useGraphLabels } from './labels';
 import {
   emptyAttributeValue,
   formatAttribute,
@@ -37,6 +38,7 @@ export function GraphAttributes({
   diagnostics?: GraphDiagnostic[];
   drafts: Map<string, GraphAttributeDraft>;
 }) {
+  const t = useGraphLabels();
   const inputs = useContext(EditorInputsContext);
   const initial = () =>
     Object.fromEntries(
@@ -224,13 +226,13 @@ export function GraphAttributes({
       {error && <p role="alert">{error}</p>}
       <div className="ep-graph-actions">
         <button disabled={readOnly || stale || !dirty} type="submit">
-          Apply attributes
+          {t.applyAttributes}
         </button>
         <button type="button" onClick={reset}>
-          Cancel attributes
+          {t.cancelAttributes}
         </button>
       </div>
-      <small>Undeclared attributes are retained.</small>
+      <small>{t.undeclaredRetained}</small>
       <output className="ep-graph-hidden" aria-label="Canonical attributes">
         {canonicalJson(attributes)}
       </output>

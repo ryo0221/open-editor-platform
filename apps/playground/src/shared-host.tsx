@@ -58,13 +58,15 @@ async function connect(
   initial?: StoredArtifact,
 ) {
   if (
+    domain === 'fiction-map' ||
     domain === 'structured-graph' ||
     domain === 'analysis' ||
     domain === 'estimate' ||
     domain === 'geo' ||
     domain === 'schedule' ||
     domain === 'cad' ||
-    domain === 'bim'
+    domain === 'bim' ||
+    domain === 'character'
   )
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))

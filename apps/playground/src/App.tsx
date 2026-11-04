@@ -1,3 +1,16 @@
+import { verifyFictionMapArtifact } from '@editor-platform/fiction-map/host';
+import {
+  undoFictionMap,
+  redoFictionMap,
+  type FictionMapSession,
+} from '@editor-platform/fiction-map/model';
+import {
+  makeMangaArtifact,
+  saveNewManga,
+  writeMangaWorkspace,
+  type MangaCreationOptions,
+} from './app/manga-workspace';
+import { makeNovelArtifacts, saveNewNovel } from './app/novel-workspace';
 import { createEstimateReferenceAdapter } from '@editor-platform/estimate/references';
 import { playgroundEstimateQuantities } from './app/estimate-bim';
 import { createAnalysisReferenceAdapter } from '@editor-platform/analysis/references';
@@ -13,6 +26,8 @@ import {
   validateCadRecord,
 } from './cad/resources';
 import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
+import { assertCharacterHistoryFits } from './character/import-fit';
+import type { CharacterDocument } from '@editor-platform/character-core';
 import { assertCadContentFits } from './cad/native-size';
 import { mergeCadParts } from './cad/parts';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
@@ -82,6 +97,7 @@ import {
   type Selection,
   type ElementAddress,
   type Annotation,
+  type ProposedCommands,
 } from '@editor-platform/editor-core';
 import {
   captureDocumentReferences,
@@ -649,6 +665,65 @@ export default function App({
         '取得中に成果物または入力が変わりました。入力を保持しています。再実行してください。',
       );
   }
+  const mangaCreation = useRef<
+    | {
+        options: string;
+        artifact: StoredArtifact;
+        pending?: Promise<void>;
+      }
+    | undefined
+  >(undefined);
+  function createManga(options: MangaCreationOptions): Promise<void> {
+    if (mangaCreation.current?.pending) return mangaCreation.current.pending;
+    if (!loaded || shared || busy || readOnly || !flushInputs()) return Promise.resolve();
+    const optionsKey = canonicalJson(options);
+    if (!mangaCreation.current || mangaCreation.current.options !== optionsKey)
+      mangaCreation.current = { options: optionsKey, artifact: makeMangaArtifact(options) };
+    const request = mangaCreation.current;
+    const task = (async () => {
+      try {
+        const saved = await saveNewManga(request.artifact);
+        writeMangaWorkspace(saved.id, 'manga');
+        sessions.current.set(saved.id, createLocalSession(saved.draft.content));
+        await persist(saved, true);
+        activate(saved.id);
+        mangaCreation.current = undefined;
+      } catch (error) {
+        setError(`漫画を作成できませんでした。設定を保持しています: ${String(error)}`);
+      } finally {
+        request.pending = undefined;
+      }
+    })();
+    request.pending = task;
+    return task;
+  }
+  const novelCreation = useRef<
+    { artifacts: Promise<StoredArtifact[]>; pending?: Promise<void> } | undefined
+  >(undefined);
+  function createNovel(): Promise<void> {
+    if (novelCreation.current?.pending) return novelCreation.current.pending;
+    if (!loaded || shared || busy || readOnly || !flushInputs()) return Promise.resolve();
+    // Retries reuse the same chapters, so a failed save never leaves a second novel behind.
+    novelCreation.current ??= { artifacts: makeNovelArtifacts() };
+    const request = novelCreation.current;
+    const task = (async () => {
+      try {
+        const saved = await saveNewNovel(await request.artifacts);
+        for (const chapter of saved) {
+          sessions.current.set(chapter.id, createLocalSession(chapter.draft.content));
+          await persist(chapter, true);
+        }
+        activate(saved[0].id);
+        novelCreation.current = undefined;
+      } catch (error) {
+        setError(`小説を作成できませんでした: ${String(error)}`);
+      } finally {
+        request.pending = undefined;
+      }
+    })();
+    request.pending = task;
+    return task;
+  }
   function create(nextKind: Kind) {
     if (!flushInputs()) return;
     if (shared) {
@@ -708,7 +783,22 @@ export default function App({
     }
     const local = session as EditorSession<Content>;
     let content: Content;
-    if (active.kind === 'schedule') {
+    if (active.kind === 'fiction-map') {
+      if (pending.dirty || pending.composing) {
+        setError('Apply or cancel Fiction Map input before history.');
+        return;
+      }
+      const step = (direction === 'undo' ? undoFictionMap : redoFictionMap)(
+        local as unknown as FictionMapSession,
+        () => !currentTarget.current.readOnly && currentTarget.current.activeId === active.id,
+      );
+      if (!step.ok) {
+        setError(step.diagnostic.code);
+        return;
+      }
+      if (!step.value.changed) return;
+      content = step.value.content;
+    } else if (active.kind === 'schedule') {
       // Removing a Schedule event while details hold refused text could lose it: refused.
       const step = stepScheduleHistory(
         local as unknown as EditorSession<ScheduleDocument>,
@@ -718,6 +808,18 @@ export default function App({
       );
       if ('refused' in step) return setError(step.refused);
       content = step.content as unknown as Content;
+    } else if (active.kind === 'character') {
+      const record = recordsRef.current.find((r) => r.id === active.id) ?? active;
+      try {
+        const candidate = local.peekHistory(direction);
+        if (candidate !== undefined)
+          assertCharacterHistoryFits(record, candidate as unknown as CharacterDocument);
+        content = local[direction]();
+      } catch (e) {
+        return setError(
+          `${direction === 'undo' ? 'Undo' : 'Redo'} not applied: ${(e as Error).message}`,
+        );
+      }
     } else if (active.kind === 'cad') {
       // CAD Undo/Redo is admitted like an edit: the native file must still import (CAD23).
       // The history entry itself is checked, so content counted before is not encoded again.
@@ -800,11 +902,17 @@ export default function App({
     try {
       await verifyEstimateArtifact(saved);
       await verifyAnalysisArtifact(saved);
+      if (saved.kind === 'fiction-map') await verifyFictionMapArtifact(saved);
       if (saved.kind === 'geo') await validateGeoRecord(saved);
       // A version may only name CAD assets the record keeps.
       if (saved.kind === 'cad') await validateCadRecord(portableCadRecord(saved));
       // A building's version may only place CAD versions the record keeps.
-      if (saved.kind === 'bim') validateBimParts(portableBimRecord(saved));
+      // A character's version may only name assets the record keeps.
+      if (saved.kind === 'character') await validateCadRecord(portableCadRecord(saved));
+      if (saved.kind === 'bim') {
+        validateBimParts(portableBimRecord(saved));
+        await validateCadRecord(portableCadRecord(saved));
+      }
       const captured = await captureArtifactReferences(saved.draft.content, references);
       // Plain native versions can commit their owned capture while later native edits remain
       // in the draft. References and Geo resource admission retain strict identity checks.
@@ -1076,16 +1184,29 @@ export default function App({
       if (!active.draft.baseVersionId)
         throw new Error('Save a version before requesting an external proposal');
       const liveRevision = sessions.current.get(active.id)!.revision;
-      const value = mockProposal(
-        {
-          artifact: { artifactId: active.id, versionId: active.draft.baseVersionId },
-          liveRevision,
-          selection,
-          operation: 'external-demo',
-          input: null,
-        },
-        active.draft.content,
+      reviewProposal(
+        mockProposal(
+          {
+            artifact: { artifactId: active.id, versionId: active.draft.baseVersionId },
+            liveRevision,
+            selection,
+            operation: 'external-demo',
+            input: null,
+          },
+          active.draft.content,
+        ),
       );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  /** Opens Host-built commands in the same review dialog; nothing is applied until accepted. */
+  function reviewProposal(value: ProposedCommands<Content>) {
+    if (!active) return;
+    try {
+      if (!active.draft.baseVersionId)
+        throw new Error('Save a version before requesting an external proposal');
+      const liveRevision = sessions.current.get(active.id)!.revision;
       const review = reviewProposedCommands(
         {
           content: active.draft.content,
@@ -1135,7 +1256,9 @@ export default function App({
   // validation and the heavy surfaces tied to their actual content/permission inputs.
   const rendered = useMemo(() => checkedContent(content, active?.kind), [content, active?.kind]);
   const nativeReuseSupported =
-    !rendered.animation && !(rendered.slide && hasSlideAnimations(rendered.slide));
+    !rendered.fictionMap &&
+    !rendered.animation &&
+    !(rendered.slide && hasSlideAnimations(rendered.slide));
   const animationHistoryPending =
     active?.kind === 'animation' && !!(inputStatus.dirty || inputStatus.composing);
   const exported = useMemo(
@@ -1256,6 +1379,7 @@ export default function App({
     flushInputs,
     history,
     saveVersion,
+    reviewProposal,
     addComment,
     dataViewChanged,
     editPrivateSettings,
@@ -1505,6 +1629,8 @@ export default function App({
                   graphTemplate={graphTemplate}
                   onGraphTemplateChange={setGraphTemplate}
                   onCreate={create}
+                  onCreateManga={createManga}
+                  onCreateNovel={createNovel}
                   onCreateFromTemplate={() => setTemplateKind('whole')}
                   onOpenReusableLibrary={() => setReusableOpen('library')}
                   onOfficeImport={() => setOfficeImportOpen(true)}
@@ -1533,6 +1659,8 @@ export default function App({
                       privateVideo={privateVideo}
                       onFindTemplates={() => setTemplateKind('whole')}
                       onCreate={create}
+                      onCreateManga={createManga}
+                      onCreateNovel={createNovel}
                     />
                   ) : (
                     <>
@@ -1589,6 +1717,12 @@ export default function App({
                                         v.content as unknown as CadDocument,
                                         'この版に戻す',
                                       );
+                                    if (active.kind === 'character')
+                                      assertCharacterHistoryFits(
+                                        recordsRef.current.find((r) => r.id === active.id) ??
+                                          active,
+                                        v.content as unknown as CharacterDocument,
+                                      );
                                     return clone(v.content);
                                   }),
                                 );
@@ -1623,7 +1757,8 @@ export default function App({
                           active.kind !== 'estimate' &&
                           active.kind !== 'geo' &&
                           active.kind !== 'cad' &&
-                          active.kind !== 'bim' && (
+                          active.kind !== 'bim' &&
+                          active.kind !== 'character' && (
                             <CommentsInspector
                               active={active}
                               content={content}

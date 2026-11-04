@@ -49,13 +49,16 @@
     "@editor-platform/bim": "*",
     "@editor-platform/bim-core": "*",
     "@editor-platform/cad": "*",
+    "@editor-platform/character": "*",
+    "@editor-platform/character-core": "*",
     "@editor-platform/cad-core": "*",
     "@editor-platform/cad-kernel-occt": "*",
     "@editor-platform/schedule": "*",
     "@editor-platform/analysis": "*",
     "@editor-platform/analysis-core": "*",
-    "@editor-platform/editor-host": "*",
     "@editor-platform/estimate": "*",
-    "@editor-platform/estimate-core": "*"
+    "@editor-platform/estimate-core": "*",
+    "@editor-platform/fiction-map": "*",
+    "@editor-platform/reference-artifact-host": "*"
   }
 }

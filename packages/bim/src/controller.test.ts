@@ -10,6 +10,7 @@ import { BimController } from './controller';
 import { bimDirectKernel, type BimKernel } from './evaluate';
 import { createBimKernelHost } from './kernel-host';
 import type { BimWorkerResponse } from './protocol';
+import type { ViewMesh } from '@editor-platform/geometry-view';
 import { bimViewSolids } from './view';
 
 /** The controller and the Worker's kernel host (R2c-3c), against the development build. */
@@ -104,6 +105,119 @@ describe.skipIf(!dist)(
       c.apply({ type: 'update', collection: 'types', entity: { ...t, widthMm: 1200 } as typeof t });
       await settled(c);
       expect(c.state.evaluation!.sent.solids).toBe(3);
+    });
+
+    it('draws a textured material on its walls along real-size coordinates (#662)', async () => {
+      const doc = f31BoxBuilding();
+      const wall = doc.elements.find((e) => e.id === 'w-south')!;
+      const type = doc.types.find((t) => 'typeId' in wall && t.id === wall.typeId)!;
+      const material = doc.materials.find(
+        (m) => 'layers' in type && m.id === type.layers[0]!.materialId,
+      )!;
+      material.appearance = {
+        color: '#ffffff',
+        opacity: 1,
+        roughness: 1,
+        metalness: 0,
+        textures: {
+          maps: { color: 'img' },
+          sizeMm: [1000, 1000],
+          rotationDeg: 0,
+          normal: 'gl',
+          name: 'Bricks',
+        },
+      };
+      doc.assets = [
+        {
+          id: 'img',
+          kind: 'texture-png',
+          sha256: `sha256:${'a'.repeat(64)}`,
+          byteLength: 10,
+          mediaType: 'image/png',
+        },
+      ];
+      const session = new EditorSession<BimDocument>(doc);
+      const c = new BimController({ session, kernel: bimDirectKernel(oc), canEdit: () => true });
+      await settled(c);
+      const asked: unknown[] = [];
+      const solids = bimViewSolids(c.state.content, c.state.evaluation, {
+        selection: new Set(),
+        textures: (set) => (asked.push(set), { maps: {}, sizeMm: set.sizeMm }),
+      });
+      // Once per solid of a wall made of the material.
+      expect(asked.length).toBeGreaterThan(0);
+      for (const set of asked) expect(set).toEqual(material.appearance.textures);
+      const solid = solids.find((s) => s.instances.some((i) => i.path[0] === 'w-south'))!;
+      const m = solid.meshes![0]!;
+      expect(m.textures?.sizeMm).toEqual([1000, 1000]);
+      const { positions, uvs, indices } = m.mesh;
+      expect(uvs).toBeDefined();
+      expect(uvs!.length).toBe((positions.length / 3) * 2);
+      // Every triangle covers as much of the image (mm²) as of the wall.
+      let area = 0;
+      let uvArea = 0;
+      for (let i = 0; i < indices.length; i += 3) {
+        const [a, b, d] = [indices[i]!, indices[i + 1]!, indices[i + 2]!];
+        const p = (k: number, j: number) => positions[k * 3 + j]!;
+        const e1 = [0, 1, 2].map((j) => p(b, j) - p(a, j));
+        const e2 = [0, 1, 2].map((j) => p(d, j) - p(a, j));
+        area +=
+          Math.hypot(
+            e1[1]! * e2[2]! - e1[2]! * e2[1]!,
+            e1[2]! * e2[0]! - e1[0]! * e2[2]!,
+            e1[0]! * e2[1]! - e1[1]! * e2[0]!,
+          ) / 2;
+        const u = (k: number, j: number) => uvs![k * 2 + j]!;
+        uvArea +=
+          Math.abs(
+            (u(b, 0) - u(a, 0)) * (u(d, 1) - u(a, 1)) - (u(b, 1) - u(a, 1)) * (u(d, 0) - u(a, 0)),
+          ) / 2;
+      }
+      expect(uvArea / area).toBeCloseTo(1, 3);
+    });
+
+    it('draws a wall’s last layer on its left face and a slab’s on its top (#662, 2c)', async () => {
+      const doc = f31BoxBuilding();
+      const look = (color: string) => ({ color, opacity: 1, roughness: 0.8, metalness: 0 });
+      doc.materials.find((m) => m.id === 'm-concrete')!.appearance = look('#a4553d');
+      doc.materials.find((m) => m.id === 'm-finish')!.appearance = look('#f5f5f4');
+      const session = new EditorSession<BimDocument>(doc);
+      const c = new BimController({ session, kernel: bimDirectKernel(oc), canEdit: () => true });
+      await settled(c);
+      const solids = bimViewSolids(c.state.content, c.state.evaluation, { selection: new Set() });
+      const wall = solids.find((s) => s.instances.some((i) => i.path[0] === 'w-south'))!;
+      expect(wall.instances).toHaveLength(1);
+      const byColor = new Map(wall.meshes!.map((m) => [m.color, m.mesh]));
+      expect([...byColor.keys()].sort()).toEqual(['#a4553d', '#f5f5f4']);
+      // w-south runs along +x: the plaster (last layer) faces +y, inside the box.
+      const normalsOf = (m: ViewMesh) => {
+        const out: number[][] = [];
+        for (let i = 0; i < m.indices.length; i += 3) {
+          const [a, b, d] = [0, 1, 2].map((k) => m.indices[i + k]! * 3);
+          const e1 = [0, 1, 2].map((k) => m.positions[b! + k]! - m.positions[a! + k]!);
+          const e2 = [0, 1, 2].map((k) => m.positions[d! + k]! - m.positions[a! + k]!);
+          const n = [
+            e1[1]! * e2[2]! - e1[2]! * e2[1]!,
+            e1[2]! * e2[0]! - e1[0]! * e2[2]!,
+            e1[0]! * e2[1]! - e1[1]! * e2[0]!,
+          ];
+          const l = Math.hypot(...n);
+          if (l > 1e-6) out.push(n.map((x) => x / l));
+        }
+        return out;
+      };
+      const inside = normalsOf(byColor.get('#f5f5f4')!);
+      expect(inside.length).toBeGreaterThan(0);
+      for (const n of inside) expect(n[1]).toBeGreaterThan(0.7);
+      // The outside face (−y) is concrete, with the ends, top and reveals.
+      expect(normalsOf(byColor.get('#a4553d')!).some((n) => n[1]! < -0.7)).toBe(true);
+      // A slab of one material keeps one mesh.
+      const slab = solids.find((s) =>
+        s.instances.some(
+          (i) => c.state.content.elements.find((e) => e.id === i.path[0])?.kind === 'slab',
+        ),
+      )!;
+      expect(slab.meshes).toHaveLength(1);
     });
 
     it('runs a batch in the Worker host and stops it on cancel', async () => {

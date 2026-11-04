@@ -2,10 +2,12 @@ export * from './model';
 export {
   assertCad,
   cadId,
+  cadRangeLimit,
   canonicalContentBytes,
   CadValidationError,
   isCadDocument,
   validateCad,
+  validateCadAppearance,
 } from './validation';
 export * from './graph';
 export * from './operations';

@@ -5,7 +5,12 @@ import { formatGraphDiagnostic, type GraphLocale } from './diagnostics';
 import { type GraphDocument } from './model';
 import { GraphValidationError, type GraphProfile } from './profile';
 import { graphCommand, type GraphIntent } from './commands';
-import { initialGraphCamera } from './view-model';
+import {
+  graphFitMaxZoom,
+  initialGraphCamera,
+  wheelGraphCamera,
+  type GraphInitialView,
+} from './view-model';
 
 export interface GraphLatest {
   graph: GraphDocument;
@@ -99,7 +104,9 @@ export interface GraphCameraInput {
   canvas: RefObject<HTMLDivElement | null>;
   viewport: GraphNodeSize;
   drawingBounds: Bounds[];
-  initialView: 'origin' | 'fit' | GraphCamera;
+  /** The selected node and its neighbours, for `initialView: 'selection'`. */
+  selectionBounds: Bounds[];
+  initialView: GraphInitialView;
   fitOnFilterChange: boolean;
   filterKey: string;
   visibleCount: number;
@@ -117,14 +124,15 @@ function deferAutomaticFit(setup: CameraSetup, input: GraphCameraInput) {
   const { labelsMeasured, nodesMeasured, initialView, filterKey, fitOnFilterChange } = input;
   return (
     (!labelsMeasured || !nodesMeasured) &&
-    ((!setup.initialized && initialView === 'fit') ||
+    ((!setup.initialized && (initialView === 'fit' || initialView === 'selection')) ||
       (setup.initialized && setup.filter !== filterKey && fitOnFilterChange))
   );
 }
 
 /** Zoom and pan state with the one-time initial view and optional refit on filter changes. */
 export function useGraphCamera(input: GraphCameraInput) {
-  const { graphId, canvas, viewport, drawingBounds, initialView, fitOnFilterChange } = input;
+  const { graphId, canvas, viewport, drawingBounds, selectionBounds, initialView } = input;
+  const { fitOnFilterChange } = input;
   const { filterKey, visibleCount, labelsMeasured, nodesMeasured } = input;
   const [zoom, setZoom] = useState(1),
     [pan, setPan] = useState({ x: 0, y: 0 });
@@ -138,8 +146,8 @@ export function useGraphCamera(input: GraphCameraInput) {
     }
   };
   /** The whole drawing, or only the given boxes (such as one Section's frame). */
-  function fit(boxes: Bounds[] = drawingBounds) {
-    show(fitGraphView(boxes, viewport));
+  function fit(boxes: Bounds[] = drawingBounds, maxZoom?: number) {
+    show(fitGraphView(boxes, viewport, maxZoom));
   }
   useEffect(() => {
     if (!viewport.width || !viewport.height) return;
@@ -152,11 +160,15 @@ export function useGraphCamera(input: GraphCameraInput) {
     // Defer only a pending automatic Fit until their actual glyph bounds arrive.
     if (deferAutomaticFit(setup, input)) return;
     if (!setup.initialized) {
-      if (initialView === 'fit' && !visibleCount) return;
+      const fits = initialView === 'fit' || initialView === 'selection';
+      if (fits && !visibleCount) return;
       setup.initialized = true;
-      if (initialView === 'fit') fit();
+      // #589: Fit opens on the whole drawing without magnifying it; a selection is only
+      // emphasized. Only `selection` opens on the selected node and its neighbours.
+      if (initialView === 'selection' && selectionBounds.length) fit(selectionBounds);
+      else if (fits) fit(drawingBounds, graphFitMaxZoom);
       else show(initialGraphCamera(initialView));
-    } else if (setup.filter !== filterKey && fitOnFilterChange) fit();
+    } else if (setup.filter !== filterKey && fitOnFilterChange) fit(drawingBounds, graphFitMaxZoom);
     setup.filter = filterKey;
   }, [
     graphId,
@@ -169,5 +181,36 @@ export function useGraphCamera(input: GraphCameraInput) {
     labelsMeasured,
     nodesMeasured,
   ]);
+  useGraphWheelZoom(canvas, { x: pan.x, y: pan.y, zoom }, show);
   return { zoom, setZoom, pan, setPan, fit };
+}
+
+/** ctrl/⌘ + wheel (and a trackpad pinch) zooms at the cursor; a plain wheel scrolls (#589). */
+function useGraphWheelZoom(
+  canvas: RefObject<HTMLDivElement | null>,
+  camera: GraphCamera,
+  show: (view: GraphCamera) => void,
+) {
+  const latest = useRef({ camera, show });
+  latest.current = { camera, show };
+  useEffect(() => {
+    const element = canvas.current;
+    if (!element) return;
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const rect = element.getBoundingClientRect();
+      const lines = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
+      latest.current.show(
+        wheelGraphCamera(
+          latest.current.camera,
+          { x: e.clientX - rect.left, y: e.clientY - rect.top },
+          { x: element.scrollLeft, y: element.scrollTop },
+          e.deltaY * lines,
+        ),
+      );
+    };
+    element.addEventListener('wheel', wheel, { passive: false });
+    return () => element.removeEventListener('wheel', wheel);
+  }, [canvas]);
 }

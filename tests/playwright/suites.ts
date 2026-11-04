@@ -280,6 +280,25 @@ function packagePreview(
 
 /** Suites by name. Functions run only for the selected suite. */
 export const suites: Record<string, () => Suite> = {
+  'playground-raster': () =>
+    preview(
+      '/tmp/editor-platform-playground-raster-results',
+      editorProjects(/playground-raster.spec.ts/, /playground-raster.spec.ts/, true),
+      [server.preview],
+    ),
+  'playground-ink': () =>
+    preview(
+      '/tmp/editor-platform-playground-ink-results',
+      editorProjects(/playground-ink.spec.ts/, /playground-ink.spec.ts/, true),
+      [server.preview],
+    ),
+  'estimate-settlement': () => ({
+    testMatch: /estimate-settlement.spec.ts$/,
+    outputDir: '/tmp/estimate-settlement-e2e',
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/estimate-settlement.spec.ts$/, undefined, true),
+    webServer: [server.dev],
+  }),
   'estimate.production': () => ({
     ...defaults,
     ...playwrightTimeouts,
@@ -306,6 +325,95 @@ export const suites: Record<string, () => Suite> = {
     ),
     webServer: [server.preview, server.artifactHost],
   }),
+  // R3 public native export clipping contracts; no server or optional Wasm needed.
+  'fiction-map-r3': () => ({
+    projects: editorProjects(/fiction-map-r3\.spec\.ts$/, /fiction-map-r3\.spec\.ts$/, true),
+    workers: 1,
+    outputDir: '/tmp/editor-fiction-map-r3-results',
+  }),
+  // Independent production Host; keep its specs outside the Playground testDir.
+  'fiction-map-d2': () => ({
+    use: { baseURL: 'http://127.0.0.1:4192' },
+    testDir: './tests/fiction-map-d2',
+    projects: editorProjects(/surface\.spec\.ts$/, /surface\.spec\.ts$/, true),
+    workers: 1,
+    outputDir: '/tmp/editor-fiction-map-d2-results',
+    webServer: [
+      {
+        command: 'npm run fiction-map:preview',
+        url: 'http://127.0.0.1:4192',
+        reuseExistingServer: false,
+      },
+    ],
+  }),
+  'fiction-map-d4': () => ({
+    use: { baseURL: 'http://127.0.0.1:4173' },
+    testDir: './tests/fiction-map-d4',
+    projects: editorProjects(
+      /(acceptance|references|map-ux|refinement|examples)\.spec\.ts$/,
+      /(acceptance|references|map-ux|refinement|examples)\.spec\.ts$/,
+      true,
+    ),
+    workers: 1,
+    outputDir: '/tmp/editor-fiction-map-d4-results',
+    webServer: [
+      server.preview,
+      {
+        command: 'npm run fiction-map:preview',
+        url: 'http://127.0.0.1:4192',
+        reuseExistingServer: false,
+      },
+    ],
+  }),
+  'fiction-map-d3': () => ({
+    use: { baseURL: 'http://127.0.0.1:4173' },
+    testDir: './tests/fiction-map-d3',
+    projects: editorProjects(/host\.spec\.ts$/, /host\.spec\.ts$/, true),
+    workers: 1,
+    outputDir: '/tmp/editor-fiction-map-d3-results',
+    webServer: [
+      server.preview,
+      server.artifactHost,
+      {
+        command: 'npm run fiction-map:preview',
+        url: 'http://127.0.0.1:4192',
+        reuseExistingServer: false,
+      },
+    ],
+  }),
+  // R2 integrated public-API probe, desktop and 390px browser emulation.
+  'canvas-r2': () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/canvas-r2\.spec\.ts$/, /canvas-r2\.spec\.ts$/, true),
+    workers: 1,
+    outputDir: '/tmp/editor-canvas-r2-results',
+    webServer: [server.dev],
+  }),
+  // R0 public-API probe: independent fixture, no new native kind or Host registration.
+  'fiction-map-r0': () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/fiction-map-r0\.spec\.ts$/, /fiction-map-r0-mobile\.spec\.ts$/),
+    workers: 1,
+    timeout: 60_000,
+    outputDir: '/tmp/editor-fiction-map-r0-results',
+    webServer: [server.dev],
+  }),
+  // Existing functional regressions only: no benchmark or new shared implementation.
+  // Run npm run build first: Artifact Host uses vite preview from dist/artifact-host.
+  'fiction-map-r0-regression': () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: [
+      {
+        name: 'desktop',
+        testMatch:
+          /(?:design-path|issue2-embedding|issue2-geometry|issue2-rich-canvas|geo-backgrounds|geo-workspace)\.spec\.ts$/,
+        use: desktopUse,
+      },
+    ],
+    workers: 1,
+    outputDir: '/tmp/editor-fiction-map-r0-regression-results',
+    webServer: [server.dev, server.artifactHost],
+  }),
   'design-path.production': () => ({
     use: { baseURL: 'http://127.0.0.1:4173' },
     projects: [{ name: 'desktop', testMatch: 'design-path.spec.ts', use: desktopUse }],
@@ -326,6 +434,98 @@ export const suites: Record<string, () => Suite> = {
       server.dev,
       server.collaboration,
     ],
+  }),
+
+  'creative-map': () => ({
+    outputDir: '/tmp/editor-platform-cw3-results',
+    timeout: 90_000,
+    workers: 2,
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/creative-map.spec.ts$/, /creative-map.spec.ts$/, true),
+    webServer: [server.dev, server.artifactHost],
+  }),
+  'creative-world-generation': () => ({
+    outputDir: '/tmp/editor-platform-cw2-results',
+    timeout: 90_000,
+    workers: 2,
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(
+      /creative-world-generation.spec.ts$/,
+      /creative-world-generation.spec.ts$/,
+      true,
+    ),
+    webServer: [server.dev, server.artifactHost],
+  }),
+
+  'creative-world-context': () => ({
+    outputDir: '/tmp/editor-platform-cw1-results',
+    timeout: 90_000,
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(
+      /creative-world-context(?:-review)?.spec.ts$/,
+      /creative-world-context(?:-review)?.spec.ts$/,
+      true,
+    ),
+    webServer: [server.dev, server.artifactHost],
+  }),
+
+  'story-board': () => ({
+    outputDir: '/tmp/editor-platform-story-board-results',
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(
+      /(?:story-board(?:-.*)?|whiteboard-add-sticky).spec.ts$/,
+      /story-board(?:-.*)?.spec.ts$/,
+    ),
+    webServer: [server.dev, server.artifactHost],
+  }),
+
+  'story-timeline': () => ({
+    outputDir: '/tmp/editor-platform-story-timeline-results',
+    timeout: 60_000,
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(
+      /story-timeline(?:-edit)?.spec.ts$/,
+      /story-timeline(?:-edit)?.spec.ts$/,
+      true,
+    ),
+    webServer: [server.dev, server.artifactHost],
+  }),
+
+  'creative-production': () => ({
+    outputDir: '/tmp/editor-platform-creative-production-results',
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(/creative-production.spec.ts$/, /creative-production.spec.ts$/, true),
+    webServer: [server.dev],
+  }),
+
+  'creative-production-preview': () => ({
+    outputDir: '/tmp/editor-platform-creative-production-preview-results',
+    use: { baseURL: 'http://127.0.0.1:4173' },
+    projects: editorProjects(/creative-production.spec.ts$/, /creative-production.spec.ts$/, true),
+    webServer: [server.preview],
+  }),
+
+  'creative-design': () => ({
+    outputDir: '/tmp/editor-platform-creative-design-results',
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: editorProjects(
+      /creative-(character|setting|layer-generation)\.spec\.ts$/,
+      /creative-(character|setting|layer-generation)\.spec\.ts$/,
+      true,
+    ),
+    webServer: [server.dev],
+  }),
+
+  'creative-layer-generation.production': () => ({
+    use: { baseURL: 'http://127.0.0.1:4173' },
+    projects: editorProjects(
+      /creative-layer-generation\.spec\.ts$/,
+      /creative-layer-generation\.spec\.ts$/,
+      true,
+    ),
+    workers: 1,
+    outputDir: '/tmp/editor-creative-layer-generation-production',
+    webServer: [server.preview],
   }),
 
   'import-batch': () => ({
@@ -375,7 +575,7 @@ export const suites: Record<string, () => Suite> = {
   'graph.production': () =>
     production(
       '/tmp/editor-platform-graph-results',
-      /(^|\/)(?:structured-graph(?:-reading)?|issue2-data|issue2-embedding|practical-data)\.spec\.ts$/,
+      /(^|\/)(?:structured-graph(?:-reading|-fractional-drag)?|issue2-data|issue2-embedding|practical-data)\.spec\.ts$/,
       /(^|\/)(?:structured-graph(?:-reading)?-mobile|mobile)\.spec\.ts$/,
       { workers: 1 },
     ),
@@ -587,13 +787,32 @@ export const suites: Record<string, () => Suite> = {
   priority: () => references('/tmp/editor-priority-results', 'priority-import-reference.spec.ts'),
 
   // Artifact Host reference (or an external studio with HOST_STUDIO_URL).
+  'manga-workspace.production': () => ({
+    expect: playwrightTimeouts.expect,
+    workers: 2,
+    timeout: 90_000,
+    outputDir: 'work/manga-workspace-verification/browser',
+    projects: ['normal', 'host'].flatMap((host) =>
+      editorProjects(/manga-(?:workspace(?:-output)?|panel-border)\.spec\.ts/, undefined, true).map(
+        (p) => ({
+          ...p,
+          name: host + '-' + p.name,
+          use: {
+            ...p.use,
+            baseURL: host === 'host' ? 'http://127.0.0.1:4177' : 'http://127.0.0.1:4173',
+          },
+        }),
+      ),
+    ),
+    webServer: [server.preview, server.artifactHost],
+  }),
   'authoring.production': () => ({
     expect: playwrightTimeouts.expect,
     workers: 2,
     timeout: 90_000,
     outputDir: '/tmp/editor-platform-authoring-results',
     projects: [
-      ...editorProjects(/authoring\.spec\.ts/, undefined, true).map((p) => ({
+      ...editorProjects(/(?:authoring|novel-workspace)\.spec\.ts/, undefined, true).map((p) => ({
         ...p,
         name: 'host-' + p.name,
         use: { ...p.use, baseURL: 'http://127.0.0.1:4177' },
@@ -615,7 +834,11 @@ export const suites: Record<string, () => Suite> = {
       ? 'work/issue-33-36/studio-results'
       : 'work/issue-33-36/reference-results',
     use: { baseURL: process.env.HOST_STUDIO_URL ?? 'http://127.0.0.1:4177' },
-    projects: editorProjects(/(?:host-(?:integration|api)|authoring)\.spec\.ts/, undefined, true),
+    projects: editorProjects(
+      /(?:host-(?:integration|api)|authoring|novel-workspace)\.spec\.ts/,
+      undefined,
+      true,
+    ),
     webServer: process.env.HOST_STUDIO_URL ? [] : [server.artifactHost],
   }),
 
@@ -747,6 +970,30 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // Character Surface standalone host (C1c): no kernel, software WebGL.
+  character: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/character/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/character-surface-results',
+    use: {
+      baseURL: 'http://127.0.0.1:4205',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/character/vite.config.ts',
+        url: 'http://127.0.0.1:4205',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // The building Surface in the ordinary Playground (development kernel from CAD_OCCT_DIST).
   'bim.playground': () => ({
     timeout: 180_000,
@@ -764,6 +1011,30 @@ export const suites: Record<string, () => Suite> = {
       {
         command: 'npx vite --host 127.0.0.1 --port 4202 --strictPort',
         url: 'http://127.0.0.1:4202',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The character Surface in the ordinary Playground (C1d). The CH20 props test needs CAD_OCCT_DIST
+  // (development kernel); the others need none. Its own port, so a stale
+  // preview server on the CAD ports is never reused.
+  'character.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/character-playground-results',
+    testMatch: /character-playground.spec.ts$/,
+    use: {
+      baseURL: 'http://127.0.0.1:4206',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4206 --strictPort',
+        url: 'http://127.0.0.1:4206',
         reuseExistingServer: !ci,
         timeout: 60_000,
       },

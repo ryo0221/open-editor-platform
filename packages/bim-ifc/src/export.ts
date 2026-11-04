@@ -76,6 +76,9 @@ export interface BimIfcPartMesh {
 export interface BimIfcPartStyle {
   color: string;
   opacity: number;
+  /** #663: the finish (0–1 each), written as the rendering's specular roughness and method. */
+  roughness?: number;
+  metalness?: number;
 }
 
 /**
@@ -181,7 +184,8 @@ function solidBodies(mesh: BimIfcPartMesh): SolidBody[] | undefined {
   }
   return [...bodies.values()];
 }
-const lookKey = (look: BimIfcPartStyle) => `${look.color.toLowerCase()} ${look.opacity}`;
+const lookKey = (look: BimIfcPartStyle) =>
+  `${look.color.toLowerCase()} ${look.opacity} ${look.roughness ?? ''} ${look.metalness ?? ''}`;
 const rays = [
   [0.5773, 0.5779, 0.5768],
   [-0.2673, 0.8018, 0.5345],
@@ -225,6 +229,8 @@ export interface BimIfcExport {
   /** GlobalId by `bim` ID (levels, types and elements). */
   globalIds: Map<string, string>;
   entityCount: number;
+  /** #663: what the file does not carry (texture maps), for the user. */
+  losses: string[];
 }
 
 export const bimIfcKinds = {
@@ -391,6 +397,7 @@ export function writeIfc(doc: BimDocument, options: BimIfcExportOptions): BimIfc
 
   const w = new P21Writer();
   const add = (name: string, ...args: P21Value[]) => w.add(name, args);
+  const losses = new Set<string>();
   /** Document entities and auxiliary entities hash in separate namespaces (IDs hold no NUL). */
   const guidKey = (ns: 'entity' | 'aux', key: string) =>
     stableGuid(`${options.artifactId}\u0000${ns}\u0000${key}`);
@@ -429,22 +436,45 @@ export function writeIfc(doc: BimDocument, options: BimIfcExportOptions): BimIfc
     );
   };
   const worldPlacement = add('IFCAXIS2PLACEMENT3D', origin3, $, $);
-  /** One surface style per look (OH-U1), seen from both sides as a sheet is. */
+  /**
+   * One surface style per look (OH-U1), seen from both sides as a sheet is. #663: an
+   * `IfcSurfaceStyleRendering` (a shading, for readers that know no more): the colour and
+   * transparency, and a finish as the specular roughness and a metal or plastic reflectance,
+   * the specular colour being the surface colour for a metal and a 4% grey otherwise.
+   */
   const surfaceStyles = new Map<string, P21Value>();
-  const surfaceStyle = (look: BimIfcPartStyle) => {
-    const k = lookKey(look);
+  const surfaceStyle = (look: BimIfcPartStyle, name = look.color.toLowerCase()) => {
+    const k = `${lookKey(look)} ${name}`;
     let style = surfaceStyles.get(k);
     if (!style) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(look.color.slice(i, i + 2), 16) / 255);
+      const finish = look.roughness !== undefined || look.metalness !== undefined;
+      const metal = (look.metalness ?? 0) >= 0.5;
       style = add(
         'IFCSURFACESTYLE',
-        str(look.color.toLowerCase()),
+        str(name),
         enumOf('BOTH'),
         list([
           add(
-            'IFCSURFACESTYLESHADING',
+            'IFCSURFACESTYLERENDERING',
             add('IFCCOLOURRGB', $, real(r!), real(g!), real(b!)),
             real(1 - Math.min(1, Math.max(0, look.opacity))),
+            $,
+            $,
+            $,
+            $,
+            finish
+              ? metal
+                ? typed('IFCNORMALISEDRATIOMEASURE', real(1))
+                : add('IFCCOLOURRGB', $, real(0.04), real(0.04), real(0.04))
+              : $,
+            finish
+              ? typed(
+                  'IFCSPECULARROUGHNESS',
+                  real(Math.min(1, Math.max(0, look.roughness ?? 0.55))),
+                )
+              : $,
+            enumOf(finish ? (metal ? 'METAL' : 'PLASTIC') : 'NOTDEFINED'),
           ),
         ]),
       );
@@ -852,13 +882,43 @@ export function writeIfc(doc: BimDocument, options: BimIfcExportOptions): BimIfc
   const materials = new Map(
     doc.materials.map((m) => {
       const ref = add('IFCMATERIAL', label(m.name), $, label(m.category));
+      const look = m.appearance;
       add(
         'IFCMATERIALPROPERTIES',
         label('EP_Constraints'),
         $,
-        list([single('BimId', ident(m.id))]),
+        list([
+          single('BimId', ident(m.id)),
+          // #663: the exact metalness, which the reflectance method only rounds.
+          ...(look
+            ? [single('Metalness', typed('IFCNORMALISEDRATIOMEASURE', real(look.metalness)))]
+            : []),
+          ...(look?.preset ? [single('Preset', ident(look.preset))] : []),
+        ]),
         ref,
       );
+      // #663: the material's look, as viewers colour what it makes.
+      if (look) {
+        if (look.textures)
+          losses.add(
+            `The texture maps of ${m.name} are not written: IFC keeps its colour and finish.`,
+          );
+        add(
+          'IFCMATERIALDEFINITIONREPRESENTATION',
+          $,
+          $,
+          list([
+            add(
+              'IFCSTYLEDREPRESENTATION',
+              body,
+              label('Style'),
+              label('Material'),
+              list([add('IFCSTYLEDITEM', $, list([surfaceStyle(look, m.name)]), $)]),
+            ),
+          ]),
+          ref,
+        );
+      }
       return [m.id, ref];
     }),
   );
@@ -1773,7 +1833,13 @@ export function writeIfc(doc: BimDocument, options: BimIfcExportOptions): BimIfc
     authorization: '',
     schemas: ['IFC4'],
   });
-  return { text, bytes: new TextEncoder().encode(text), globalIds, entityCount: w.count };
+  return {
+    text,
+    bytes: new TextEncoder().encode(text),
+    globalIds,
+    entityCount: w.count,
+    losses: [...losses],
+  };
 }
 
 /**

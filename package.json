@@ -14,6 +14,7 @@
     "spatial:build": "node scripts/build-spatial-wasm.mjs",
     "spatial:test": "node scripts/build-spatial-wasm.mjs --test",
     "cad:kernel": "sh scripts/cad-kernel/build.sh work/cad-kernel",
+    "cad:kernel:fetch": "node scripts/cad-kernel/fetch.mjs work/cad-kernel",
     "fonts:fetch": "node scripts/fetch-office-fonts.mjs",
     "fonts:check": "node scripts/check-office-fonts.mjs",
     "predev": "npm run fonts:check",
@@ -38,7 +39,10 @@
     "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e",
     "smoke": "node scripts/smoke.mjs",
     "format": "prettier --write .",
-    "collaboration:server": "node scripts/collaboration-server.mjs"
+    "collaboration:server": "node scripts/collaboration-server.mjs",
+    "fiction-map:dev": "vite --config vite.fiction-map.config.ts",
+    "fiction-map:build": "vite build --config vite.fiction-map.config.ts",
+    "fiction-map:preview": "vite preview --config vite.fiction-map.config.ts"
   },
   "dependencies": {
     "dompurify": "3.4.17",
@@ -66,17 +70,18 @@
     "@types/react-dom": "19.1.9",
     "@vitejs/plugin-react": "4.7.0",
     "esbuild": "0.25.12",
-    "eslint": "9.36.0",
+    "eslint": "10.14.0",
     "fake-indexeddb": "6.2.4",
     "prettier": "3.6.2",
     "typescript": "5.9.2",
-    "typescript-eslint": "8.71.2",
-    "vite": "6.4.4",
+    "typescript-eslint": "8.72.1",
+    "vite": "6.4.5",
     "vitest": "4.1.12"
   },
   "overrides": {
     "katex": "0.18.2",
-    "image-size": "2.0.4"
+    "image-size": "2.0.4",
+    "minimatch": "11.0.1"
   },
   "license": "AGPL-3.0-only"
 }

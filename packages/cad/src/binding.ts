@@ -6,11 +6,17 @@ import {
 } from '@editor-platform/cad-core';
 import {
   CatalogKernelPort,
+  sharedCadEvaluationMemory,
+  type CadEvaluationMemory,
   type CadCatalogBuild,
   type CadKernelCatalog,
   type WorkerLike,
 } from '@editor-platform/cad-kernel-occt';
 import { EditorInputs } from '@editor-platform/editor-core';
+import {
+  viewTextureImageTools,
+  viewTextureImageToolsAvailable,
+} from '@editor-platform/geometry-view';
 import { CadAssembly, type CadPartSourceHost, type CadPartStore } from './assembly';
 import { CadController, type CadAssetStore } from './controller';
 
@@ -48,6 +54,12 @@ export interface CadBindingOptions {
   parts?: CadPartStore;
   /** R2b: the Host's part-source capability (list, read and access of saved versions). */
   partSource?: CadPartSourceHost;
+  /**
+   * #589: shapes already calculated, kept past this binding. A Surface mounted again for the
+   * same content (a larger view of it) shows it without evaluating again. The page's shared
+   * memory by default; `null` keeps nothing past the binding.
+   */
+  memory?: CadEvaluationMemory | null;
 }
 export interface CadBinding {
   controller: CadController;
@@ -112,6 +124,7 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
           ? assembly.receive(hash, meshes)
           : controller.receiveMeshes(hash, meshes),
       ...(options.assets ? { assets: (sha256: string) => options.assets!.get(sha256) } : {}),
+      ...(options.memory !== null ? { memory: options.memory ?? sharedCadEvaluationMemory } : {}),
       // How far a long evaluation got (CM-4); a part's is shown by the parts' own count.
       onProgress: ({ candidateHash }, done, total) => {
         if (!assemblyPort.partJobs.has(candidateHash)) controller.receiveProgress(done, total);
@@ -137,6 +150,7 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
     onApplied: options.onApplied,
     exportMeshes: (request, deflectionMm) => port.exportMeshes(request, deflectionMm),
     exportStep: (request) => port.exportStep(request),
+    ...(viewTextureImageToolsAvailable() ? { textureImages: viewTextureImageTools } : {}),
     analyzeContinuity: (request, edge) => port.analyzeContinuity(request, edge),
     analyzeCurvature: (request) => port.analyzeCurvature(request),
     analyzeComb: (request, edge) => port.analyzeComb(request, edge),

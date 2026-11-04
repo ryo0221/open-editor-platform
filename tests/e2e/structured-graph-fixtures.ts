@@ -38,7 +38,7 @@ export async function storeIndependentDefinition(page: Page, content: unknown) {
 export async function graphAttribute(page: Page, node: string, field: string, value: string) {
   await page.getByRole('button', { name: `Select node ${node}`, exact: true }).click();
   await page.getByLabel(field, { exact: true }).fill(value);
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
 }
 export async function dataProjection(page: Page, name: string) {
   const menu = page.getByRole('button', { name: 'More editor tools', exact: true });
@@ -89,3 +89,5 @@ async function mountGraphFixture(page: Page, name: string, query = '') {
 export const mountBoundedGraphHost = (page: Page) => mountGraphFixture(page, 'bounded');
 export const mountReadingGraphHost = (page: Page, query = '') =>
   mountGraphFixture(page, 'reading', query);
+export const mountFractionalDragGraphHost = (page: Page, query = '') =>
+  mountGraphFixture(page, 'fractional-drag', query);

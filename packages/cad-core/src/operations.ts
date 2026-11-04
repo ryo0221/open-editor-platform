@@ -54,7 +54,7 @@ import {
 } from './joints-operations';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
-import { assertCad, cadId, record } from './validation';
+import { assertCad, cadId, record, validateCadAppearance } from './validation';
 
 /** Same digest as artifact-core `contentHash`, computed synchronously for command base checks. */
 export const cadContentHash = (doc: CadDocument) =>
@@ -169,6 +169,17 @@ export type CadOperation =
   | { type: 'deleteClosure'; ids: string[]; cascade: boolean }
   | { type: 'duplicateClosure'; bodyIds: string[]; idMap: Record<string, string> }
   | { type: 'rename'; targetId: string; name: string }
+  /** #661: a body's colour, opacity and finish; display only, the shape is unchanged. */
+  | {
+      type: 'setAppearance';
+      bodyId: string;
+      appearance: CadAppearance;
+      /**
+       * #662: texture assets the appearance names that the content does not hold yet (stored
+       * with the Host first). Assets no body or feature names any more are dropped.
+       */
+      assets?: CadAssetRef[];
+    }
   | { type: 'saveNamedView'; view: CadNamedView }
   | { type: 'reorderFeatures'; featureIds: string[] }
   /** Explicit kernel migration: the next draft names another exact build (docs/cad/model.md). */
@@ -285,11 +296,13 @@ function addBody(doc: CadDocument, b: CadNewBody) {
 }
 /** Asset refs no imported feature reads any more leave the content (the Host keeps the bytes). */
 function pruneAssets(doc: CadDocument) {
-  const used = new Set(
-    doc.features.flatMap((f) =>
+  const used = new Set([
+    ...doc.features.flatMap((f) =>
       f.type === 'imported' ? [f.args.sourceAssetId, f.args.brepAssetId] : [],
     ),
-  );
+    // #662: texture images, by every body that names them (consumed ones too).
+    ...doc.bodies.flatMap((b) => Object.values(b.appearance.textures?.maps ?? {})),
+  ]);
   doc.assets = doc.assets.filter((a) => used.has(a.id));
 }
 
@@ -706,6 +719,24 @@ function apply(
         ...next.joints,
       ];
       find(targets, op.targetId, 'target-missing').name = op.name;
+      return next;
+    }
+    case 'setAppearance': {
+      const body = find(next.bodies, op.bodyId, 'target-missing');
+      const issue = validateCadAppearance(op.appearance)[0];
+      if (issue) fail(`appearance-invalid:${issue.code}`);
+      if (canonicalJson(body.appearance) === canonicalJson(op.appearance))
+        fail('appearance-unchanged');
+      for (const ref of op.assets ?? []) {
+        const kept = next.assets.find((a) => a.id === ref.id);
+        if (kept) {
+          if (canonicalJson(kept) !== canonicalJson(ref)) fail('asset-conflict');
+          continue;
+        }
+        if (ref.kind !== 'texture-png' && ref.kind !== 'texture-jpeg') fail('asset-kind');
+        next.assets.push(clone(ref));
+      }
+      body.appearance = clone(op.appearance);
       return next;
     }
     case 'saveNamedView': {

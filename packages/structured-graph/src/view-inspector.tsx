@@ -7,6 +7,7 @@ import { GraphNodeAppearance } from './view-appearance';
 import { GraphNodeSectionField, GraphSectionPanel } from './view-sections';
 import { type GraphSourceActions } from './definition';
 import { formatGraphDiagnostic, type GraphLocale } from './diagnostics';
+import { useGraphLabels } from './labels';
 import {
   type Attributes,
   type GraphDiagnostic,
@@ -42,17 +43,50 @@ export interface GraphConnectionFormProps {
   onSubmitConnection: () => void;
 }
 
-function graphNodeOptions({ graph, label }: Pick<GraphConnectionFormProps, 'graph' | 'label'>) {
-  return graph.nodes.map((n) => (
+/**
+ * The choices for one connection end: the nodes, and the Sections when the relation type may end
+ * at a Section there (#594). The end already saved stays listed so the select shows it.
+ */
+function GraphEndOptions({
+  graph,
+  profile,
+  label,
+  type,
+  side,
+  current,
+}: Pick<GraphConnectionFormProps, 'graph' | 'profile' | 'label'> & {
+  type: string;
+  side: 'from' | 'to';
+  current: string;
+}) {
+  const t = useGraphLabels();
+  const allowed =
+    profile.edges[type]?.connection?.[side === 'from' ? 'fromSections' : 'toSections'];
+  const sections = graph.sections.filter((s) => allowed?.includes(s.type) || s.id === current);
+  const nodes = graph.nodes.map((n) => (
     <option key={n.id} value={n.id}>
       {label(n.id)}
     </option>
   ));
+  if (!sections.length) return nodes;
+  return (
+    <>
+      <optgroup label={t.endNodes}>{nodes}</optgroup>
+      <optgroup label={t.endSections}>
+        {sections.map((s) => (
+          <option key={s.id} value={s.id}>
+            {label(s.id)}
+          </option>
+        ))}
+      </optgroup>
+    </>
+  );
 }
 
 function GraphConnectionForm(props: GraphConnectionFormProps) {
   const { profile, edge, readOnly, connection, editConnection, resetConnection } = props;
   const { from, to, type: edgeType } = connection;
+  const t = useGraphLabels();
   const labelField = edge ? undefined : graphConnectionLabelField(profile, edgeType);
   // A disabled or removed input may never deliver compositionend.
   const labelGone = readOnly || !labelField;
@@ -77,25 +111,25 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
         props.onSubmitConnection();
       }}
     >
-      <h3>{edge ? 'Retarget connection' : 'Connect nodes'}</h3>
+      <h3>{edge ? t.retargetConnection : t.connectNodes}</h3>
       <label>
-        Relation type
+        {t.relationType}
         <select
           aria-label="Relation type"
           disabled={readOnly || !!edge}
           value={edge?.type ?? edgeType}
           onChange={(e) => editConnection({ type: e.target.value })}
         >
-          <option value="">Choose relation</option>
-          {Object.entries(profile.edges).map(([key, t]) => (
+          <option value="">{t.chooseRelation}</option>
+          {Object.entries(profile.edges).map(([key, type]) => (
             <option key={key} value={key}>
-              {t.ui?.label ?? key}
+              {type.ui?.label ?? key}
             </option>
           ))}
         </select>
       </label>
       <label>
-        From
+        {t.from}
         <select
           aria-label="Connection from"
           value={from}
@@ -103,11 +137,11 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
           onChange={(e) => editConnection({ from: e.target.value })}
         >
           <option value="">Choose node</option>
-          {graphNodeOptions(props)}
+          <GraphEndOptions {...props} type={edge?.type ?? edgeType} side="from" current={from} />
         </select>
       </label>
       <label>
-        To
+        {t.to}
         <select
           aria-label="Connection to"
           value={to}
@@ -115,12 +149,12 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
           onChange={(e) => editConnection({ to: e.target.value })}
         >
           <option value="">Choose node</option>
-          {graphNodeOptions(props)}
+          <GraphEndOptions {...props} type={edge?.type ?? edgeType} side="to" current={to} />
         </select>
       </label>
       {labelField && (
         <label>
-          Connection label
+          {t.connectionLabel}
           <input
             aria-label="Connection label"
             value={connection.label}
@@ -141,17 +175,15 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
             resetConnection();
           }}
         >
-          Use selected connection
+          {t.useSelectedConnection}
         </button>
       )}
       <button type="button" onClick={() => resetConnection()}>
-        Cancel connection input
+        {t.cancelConnection}
       </button>
-      {props.connectionStale && (
-        <p role="status">Connection input is stale. Reload current values.</p>
-      )}
+      {props.connectionStale && <p role="status">{t.connectionStale}</p>}
       <button type="button" onClick={() => resetConnection()}>
-        Reload connection
+        {t.reloadConnection}
       </button>
       <button
         disabled={
@@ -161,7 +193,7 @@ function GraphConnectionForm(props: GraphConnectionFormProps) {
         }
         type="submit"
       >
-        {edge ? 'Retarget connection' : 'Add connection'}
+        {edge ? t.retargetConnection : t.addConnection}
       </button>
     </form>
   );
@@ -178,9 +210,10 @@ function GraphRetainedDrafts({
   inputs: ContextType<typeof EditorInputsContext>;
   setError: (message: string) => void;
 }) {
+  const t = useGraphLabels();
   return retainedDeletedDrafts(drafts, graph).map(([id, draft]) => (
     <details key={id}>
-      <summary>削除された対象の未確定入力があります</summary>
+      <summary>{t.retainedDeleted}</summary>
       <textarea
         aria-label="Retained deleted Graph input"
         readOnly
@@ -193,7 +226,7 @@ function GraphRetainedDrafts({
           setError('');
         }}
       >
-        Discard deleted Graph input
+        {t.discardRetained}
       </button>
     </details>
   ));
@@ -218,10 +251,11 @@ function GraphOverview({
   label,
   choose,
 }: GraphOverviewProps) {
+  const t = useGraphLabels();
   return (
     <>
       <section aria-label="Graph diagnostics">
-        <h3>Diagnostics ({problems.length})</h3>
+        <h3>{t.diagnostics(problems.length)}</h3>
         {problems.map((d, i) => (
           <button
             key={`${d.elementId}:${d.code}:${i}`}
@@ -233,8 +267,8 @@ function GraphOverview({
         ))}
       </section>
       <details>
-        <summary>Nodes and connections</summary>
-        {readOnly && <button onClick={() => choose(graph.id)}>Graph summary</button>}
+        <summary>{t.nodesAndConnections}</summary>
+        {readOnly && <button onClick={() => choose(graph.id)}>{t.graphSummary}</button>}
         {graph.nodes.map((n) => (
           <button key={n.id} onClick={() => choose(n.id)}>
             {label(n.id)}
@@ -339,15 +373,16 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
 
 export function GraphInspector(props: GraphInspectorProps) {
   const { graph, profile, node, edge, readOnly, sourceActions, definitionTarget, label } = props;
+  const t = useGraphLabels();
   return (
     <aside
       className="ep-graph-inspector"
       aria-label="Graph Inspector"
       hidden={!props.showInspector}
     >
-      <h2>{graphInspectorTitle(profile, label, node, edge, props.section)}</h2>
+      <h2>{graphInspectorTitle(profile, label, node, edge, props.section) ?? t.graphProperties}</h2>
       <p className="ep-graph-source-owner">
-        所有元: {sourceActions?.owner ?? `Host Profile ${profile.id}`} · 種類:{' '}
+        {t.sourceOwner}: {sourceActions?.owner ?? `Host Profile ${profile.id}`} · {t.kind}:{' '}
         {node?.type ?? edge?.type ?? props.section?.type ?? 'graph'}
       </p>
       {definitionTarget && (

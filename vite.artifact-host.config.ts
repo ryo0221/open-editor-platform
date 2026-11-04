@@ -41,6 +41,15 @@ export default defineConfig({
     rollupOptions: {
       treeshake: false,
       input: {
+        production: fileURLToPath(new URL('./apps/artifact-host/production.html', import.meta.url)),
+        'story-timeline': fileURLToPath(
+          new URL('./apps/artifact-host/story-timeline.html', import.meta.url),
+        ),
+        'story-board': fileURLToPath(
+          new URL('./apps/artifact-host/story-board.html', import.meta.url),
+        ),
+        setting: fileURLToPath(new URL('./apps/artifact-host/setting.html', import.meta.url)),
+        creative: fileURLToPath(new URL('./apps/artifact-host/creative.html', import.meta.url)),
         authoring: fileURLToPath(new URL('./apps/artifact-host/authoring.html', import.meta.url)),
         index: fileURLToPath(new URL('./apps/artifact-host/index.html', import.meta.url)),
         access: fileURLToPath(new URL('./apps/artifact-host/access.html', import.meta.url)),

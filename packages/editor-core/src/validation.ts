@@ -1,3 +1,4 @@
+import { lineDirections } from './drawing';
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const optional = (value: unknown, valid: (value: unknown) => boolean) =>
@@ -51,6 +52,7 @@ export function validVisualStyle(value: unknown): boolean {
         record(crop) && finite(crop.x) && finite(crop.y) && finite(crop.scale) && crop.scale > 0,
     ) &&
     optional(value.imageFit, (v) => v === 'fit' || v === 'fill') &&
+    optional(value.lineDirection, (v) => (lineDirections as readonly unknown[]).includes(v)) &&
     optional(value.alt, (v) => typeof v === 'string')
   );
 }

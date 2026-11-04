@@ -12,10 +12,11 @@ import { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import '@editor-platform/editor-ui/styles.css';
 import kernelBuild from 'virtual:cad-kernel-build';
-import { BimController, BimSurface, WorkerBimKernel } from '../src';
+import { BimController, BimSurface, WorkerBimKernel, type BimAssetStore } from '../src';
 import KernelWorker from '../src/worker?worker';
 
-// Standalone host: ?fixture=starter|box|types|office|gable|hip, ?readonly=1, ?kernel=missing.
+// Standalone host: ?fixture=starter|box|types|office|gable|hip, ?readonly=1, ?kernel=missing,
+// ?assets=1 (the Host keeps texture images in memory for the page's life, #662).
 const params = new URLSearchParams(location.search);
 const fixtures: Record<string, () => BimDocument> = {
   starter: bimStarter,
@@ -33,9 +34,20 @@ const kernel = new WorkerBimKernel({
   build: params.get('kernel') === 'missing' ? undefined : (kernelBuild ?? undefined),
 });
 const readOnly = params.get('readonly') === '1';
+const kept = new Map<string, Uint8Array>();
+const textures: BimAssetStore | undefined =
+  params.get('assets') === '1'
+    ? {
+        get: (sha256) => kept.get(sha256),
+        stage: async (list) => {
+          for (const { ref, bytes } of list) kept.set(ref.sha256, bytes);
+        },
+      }
+    : undefined;
 const controller = new BimController({
   session,
   kernel,
+  ...(textures ? { textures } : {}),
   canEdit: () => !readOnly,
   onApplied: (content) => Object.assign(window, { bimApplied: content }),
 });
@@ -55,6 +67,9 @@ function App() {
     <BimSurface
       controller={controller}
       name="Building"
+      {...(params.get('ifc') === '1'
+        ? { ifc: () => ({ artifactId: 'test-host', timeStamp: '2026-11-03T00:00:00Z' }) }
+        : {})}
       onUndo={() => history('undo')}
       onRedo={() => history('redo')}
     />

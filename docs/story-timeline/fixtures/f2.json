@@ -1,0 +1,3926 @@
+{
+  "$contract": "story-timeline-t0/1",
+  "tableSchema": "tl1",
+  "dependencyRules": "tl-deps/1",
+  "fixture": "f2",
+  "story": "story-S",
+  "artifacts": [
+    {
+      "schemaVersion": 1,
+      "id": "story-ledger-A",
+      "name": "筋の台帳（世界A）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": [
+                "event",
+                "derive-time",
+                "after",
+                "travel-min",
+                "cause",
+                "participant",
+                "knows",
+                "info-use",
+                "claim",
+                "fact",
+                "presence",
+                "exception",
+                "exception-basis"
+              ],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.time.kind",
+              "name": "時点の種類",
+              "type": "select",
+              "options": ["unset", "point", "day", "interval", "range", "derived"]
+            },
+            {
+              "id": "tl1.time.start",
+              "name": "開始日",
+              "type": "number"
+            },
+            {
+              "id": "tl1.time.end",
+              "name": "終了日",
+              "type": "number"
+            },
+            {
+              "id": "tl1.clock",
+              "name": "時計",
+              "type": "text"
+            },
+            {
+              "id": "tl1.offset.min",
+              "name": "最小日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.offset.max",
+              "name": "最大日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.anchor",
+              "name": "基準端",
+              "type": "select",
+              "options": ["start", "end"]
+            },
+            {
+              "id": "tl1.ind.ch",
+              "name": "人物",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ind.origin",
+              "name": "個体の世界",
+              "type": "text"
+            },
+            {
+              "id": "tl1.info",
+              "name": "情報",
+              "type": "text"
+            },
+            {
+              "id": "tl1.mode",
+              "name": "様態",
+              "type": "select",
+              "options": [
+                "observe",
+                "told",
+                "believe",
+                "doubt",
+                "deny",
+                "forget",
+                "assert",
+                "true",
+                "false"
+              ]
+            },
+            {
+              "id": "tl1.complete",
+              "name": "情報源は全部",
+              "type": "boolean"
+            },
+            {
+              "id": "tl1.loc",
+              "name": "場所",
+              "type": "text"
+            },
+            {
+              "id": "tl1.certainty",
+              "name": "確度",
+              "type": "select",
+              "options": ["confirmed", "uncertain"]
+            },
+            {
+              "id": "tl1.diag",
+              "name": "診断の種類",
+              "type": "select",
+              "options": [
+                "single-event",
+                "disclosure",
+                "presence",
+                "multi-event",
+                "transfer",
+                "external-event"
+              ]
+            },
+            {
+              "id": "tl1.rule",
+              "name": "規則の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.reason",
+              "name": "理由",
+              "type": "text"
+            },
+            {
+              "id": "tl1.scope",
+              "name": "規則の範囲",
+              "type": "text"
+            },
+            {
+              "id": "tl1.hypothesis",
+              "name": "仮定の識別",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "EV-001",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "王の即位",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 0
+              }
+            },
+            {
+              "id": "EV-002",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "暗号文S1が作られる",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 1
+              }
+            },
+            {
+              "id": "EV-002.knows.S1",
+              "values": {
+                "tl1.row": "knows",
+                "tl1.subject": "EV-002",
+                "tl1.info": "S1",
+                "tl1.mode": "observe",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-101",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "敵が橋を破壊する",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 2
+              }
+            },
+            {
+              "id": "EV-101.who",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-101",
+                "tl1.ind.ch": "CH-003",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-102",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "密使が壊れた橋を見つけて迂回する",
+                "tl1.time.kind": "derived"
+              }
+            },
+            {
+              "id": "EV-102.derive",
+              "values": {
+                "tl1.row": "derive-time",
+                "tl1.subject": "EV-102",
+                "tl1.ref.item": "EV-101",
+                "tl1.anchor": "start",
+                "tl1.offset.min": 1,
+                "tl1.offset.max": 1
+              }
+            },
+            {
+              "id": "EV-102.who",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-102",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-102.cause",
+              "values": {
+                "tl1.row": "cause",
+                "tl1.subject": "EV-102",
+                "tl1.ref.item": "EV-101"
+              }
+            },
+            {
+              "id": "EV-103",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "密使が主人公へS1を届ける",
+                "tl1.time.kind": "derived"
+              }
+            },
+            {
+              "id": "EV-103.derive",
+              "values": {
+                "tl1.row": "derive-time",
+                "tl1.subject": "EV-103",
+                "tl1.ref.item": "EV-102",
+                "tl1.anchor": "start",
+                "tl1.offset.min": 2,
+                "tl1.offset.max": 2
+              }
+            },
+            {
+              "id": "EV-103.who.messenger",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-103",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-103.who.hero",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-103",
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-103.knows.S1",
+              "values": {
+                "tl1.row": "knows",
+                "tl1.subject": "EV-103",
+                "tl1.info": "S1",
+                "tl1.mode": "told",
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-103.knows.S2",
+              "values": {
+                "tl1.row": "knows",
+                "tl1.subject": "EV-103",
+                "tl1.info": "S2",
+                "tl1.mode": "told",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-104",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "主人公がS1だけにある情報を使う",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 6
+              }
+            },
+            {
+              "id": "EV-104.use.S1",
+              "values": {
+                "tl1.row": "info-use",
+                "tl1.subject": "EV-104",
+                "tl1.info": "S1",
+                "tl1.ref.item": "EV-103",
+                "tl1.complete": true,
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-A"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "story-ledger-A",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": [
+                  "event",
+                  "derive-time",
+                  "after",
+                  "travel-min",
+                  "cause",
+                  "participant",
+                  "knows",
+                  "info-use",
+                  "claim",
+                  "fact",
+                  "presence",
+                  "exception",
+                  "exception-basis"
+                ],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.time.kind",
+                "name": "時点の種類",
+                "type": "select",
+                "options": ["unset", "point", "day", "interval", "range", "derived"]
+              },
+              {
+                "id": "tl1.time.start",
+                "name": "開始日",
+                "type": "number"
+              },
+              {
+                "id": "tl1.time.end",
+                "name": "終了日",
+                "type": "number"
+              },
+              {
+                "id": "tl1.clock",
+                "name": "時計",
+                "type": "text"
+              },
+              {
+                "id": "tl1.offset.min",
+                "name": "最小日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.offset.max",
+                "name": "最大日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.anchor",
+                "name": "基準端",
+                "type": "select",
+                "options": ["start", "end"]
+              },
+              {
+                "id": "tl1.ind.ch",
+                "name": "人物",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ind.origin",
+                "name": "個体の世界",
+                "type": "text"
+              },
+              {
+                "id": "tl1.info",
+                "name": "情報",
+                "type": "text"
+              },
+              {
+                "id": "tl1.mode",
+                "name": "様態",
+                "type": "select",
+                "options": [
+                  "observe",
+                  "told",
+                  "believe",
+                  "doubt",
+                  "deny",
+                  "forget",
+                  "assert",
+                  "true",
+                  "false"
+                ]
+              },
+              {
+                "id": "tl1.complete",
+                "name": "情報源は全部",
+                "type": "boolean"
+              },
+              {
+                "id": "tl1.loc",
+                "name": "場所",
+                "type": "text"
+              },
+              {
+                "id": "tl1.certainty",
+                "name": "確度",
+                "type": "select",
+                "options": ["confirmed", "uncertain"]
+              },
+              {
+                "id": "tl1.diag",
+                "name": "診断の種類",
+                "type": "select",
+                "options": [
+                  "single-event",
+                  "disclosure",
+                  "presence",
+                  "multi-event",
+                  "transfer",
+                  "external-event"
+                ]
+              },
+              {
+                "id": "tl1.rule",
+                "name": "規則の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.reason",
+                "name": "理由",
+                "type": "text"
+              },
+              {
+                "id": "tl1.scope",
+                "name": "規則の範囲",
+                "type": "text"
+              },
+              {
+                "id": "tl1.hypothesis",
+                "name": "仮定の識別",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "EV-001",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "王の即位",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 0
+                }
+              },
+              {
+                "id": "EV-002",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "暗号文S1が作られる",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 1
+                }
+              },
+              {
+                "id": "EV-002.knows.S1",
+                "values": {
+                  "tl1.row": "knows",
+                  "tl1.subject": "EV-002",
+                  "tl1.info": "S1",
+                  "tl1.mode": "observe",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-101",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "敵が橋を破壊する",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 2
+                }
+              },
+              {
+                "id": "EV-101.who",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-101",
+                  "tl1.ind.ch": "CH-003",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-102",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "密使が壊れた橋を見つけて迂回する",
+                  "tl1.time.kind": "derived"
+                }
+              },
+              {
+                "id": "EV-102.derive",
+                "values": {
+                  "tl1.row": "derive-time",
+                  "tl1.subject": "EV-102",
+                  "tl1.ref.item": "EV-101",
+                  "tl1.anchor": "start",
+                  "tl1.offset.min": 1,
+                  "tl1.offset.max": 1
+                }
+              },
+              {
+                "id": "EV-102.who",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-102",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-102.cause",
+                "values": {
+                  "tl1.row": "cause",
+                  "tl1.subject": "EV-102",
+                  "tl1.ref.item": "EV-101"
+                }
+              },
+              {
+                "id": "EV-103",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "密使が主人公へS1を届ける",
+                  "tl1.time.kind": "derived"
+                }
+              },
+              {
+                "id": "EV-103.derive",
+                "values": {
+                  "tl1.row": "derive-time",
+                  "tl1.subject": "EV-103",
+                  "tl1.ref.item": "EV-102",
+                  "tl1.anchor": "start",
+                  "tl1.offset.min": 2,
+                  "tl1.offset.max": 2
+                }
+              },
+              {
+                "id": "EV-103.who.messenger",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-103",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-103.who.hero",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-103",
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-103.knows.S1",
+                "values": {
+                  "tl1.row": "knows",
+                  "tl1.subject": "EV-103",
+                  "tl1.info": "S1",
+                  "tl1.mode": "told",
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-103.knows.S2",
+                "values": {
+                  "tl1.row": "knows",
+                  "tl1.subject": "EV-103",
+                  "tl1.info": "S2",
+                  "tl1.mode": "told",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-104",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "主人公がS1だけにある情報を使う",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 6
+                }
+              },
+              {
+                "id": "EV-104.use.S1",
+                "values": {
+                  "tl1.row": "info-use",
+                  "tl1.subject": "EV-104",
+                  "tl1.info": "S1",
+                  "tl1.ref.item": "EV-103",
+                  "tl1.complete": true,
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-A"
+                }
+              }
+            ]
+          },
+          "contentHash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "story-ledger-B",
+      "name": "筋の台帳（世界B）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": [
+                "event",
+                "derive-time",
+                "after",
+                "travel-min",
+                "cause",
+                "participant",
+                "knows",
+                "info-use",
+                "claim",
+                "fact",
+                "presence",
+                "exception",
+                "exception-basis"
+              ],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.time.kind",
+              "name": "時点の種類",
+              "type": "select",
+              "options": ["unset", "point", "day", "interval", "range", "derived"]
+            },
+            {
+              "id": "tl1.time.start",
+              "name": "開始日",
+              "type": "number"
+            },
+            {
+              "id": "tl1.time.end",
+              "name": "終了日",
+              "type": "number"
+            },
+            {
+              "id": "tl1.clock",
+              "name": "時計",
+              "type": "text"
+            },
+            {
+              "id": "tl1.offset.min",
+              "name": "最小日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.offset.max",
+              "name": "最大日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.anchor",
+              "name": "基準端",
+              "type": "select",
+              "options": ["start", "end"]
+            },
+            {
+              "id": "tl1.ind.ch",
+              "name": "人物",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ind.origin",
+              "name": "個体の世界",
+              "type": "text"
+            },
+            {
+              "id": "tl1.info",
+              "name": "情報",
+              "type": "text"
+            },
+            {
+              "id": "tl1.mode",
+              "name": "様態",
+              "type": "select",
+              "options": [
+                "observe",
+                "told",
+                "believe",
+                "doubt",
+                "deny",
+                "forget",
+                "assert",
+                "true",
+                "false"
+              ]
+            },
+            {
+              "id": "tl1.complete",
+              "name": "情報源は全部",
+              "type": "boolean"
+            },
+            {
+              "id": "tl1.loc",
+              "name": "場所",
+              "type": "text"
+            },
+            {
+              "id": "tl1.certainty",
+              "name": "確度",
+              "type": "select",
+              "options": ["confirmed", "uncertain"]
+            },
+            {
+              "id": "tl1.diag",
+              "name": "診断の種類",
+              "type": "select",
+              "options": [
+                "single-event",
+                "disclosure",
+                "presence",
+                "multi-event",
+                "transfer",
+                "external-event"
+              ]
+            },
+            {
+              "id": "tl1.rule",
+              "name": "規則の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.reason",
+              "name": "理由",
+              "type": "text"
+            },
+            {
+              "id": "tl1.scope",
+              "name": "規則の範囲",
+              "type": "text"
+            },
+            {
+              "id": "tl1.hypothesis",
+              "name": "仮定の識別",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "EV-201",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "橋の破壊計画が阻止される",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 2
+              }
+            },
+            {
+              "id": "EV-202",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "密使が橋を渡りS1を届ける",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 3
+              }
+            },
+            {
+              "id": "EV-202.who.messenger",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-202",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-B"
+              }
+            },
+            {
+              "id": "EV-202.knows.S1",
+              "values": {
+                "tl1.row": "knows",
+                "tl1.subject": "EV-202",
+                "tl1.info": "S1",
+                "tl1.mode": "told",
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-B"
+              }
+            },
+            {
+              "id": "EV-203",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "主人公がS1の情報を使う",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 4
+              }
+            },
+            {
+              "id": "EV-203.use.S1",
+              "values": {
+                "tl1.row": "info-use",
+                "tl1.subject": "EV-203",
+                "tl1.info": "S1",
+                "tl1.ref.item": "EV-202",
+                "tl1.complete": true,
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-B"
+              }
+            },
+            {
+              "id": "EV-204",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "受取",
+                "tl1.time.kind": "derived"
+              }
+            },
+            {
+              "id": "EV-204.derive",
+              "values": {
+                "tl1.row": "derive-time",
+                "tl1.subject": "EV-204",
+                "tl1.anchor": "start",
+                "tl1.offset.min": 1,
+                "tl1.offset.max": 1,
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-103",
+                "tl1.ref.facet": "time"
+              }
+            },
+            {
+              "id": "EV-204.who.messenger",
+              "values": {
+                "tl1.row": "participant",
+                "tl1.subject": "EV-204",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A"
+              }
+            },
+            {
+              "id": "EV-204.knows.S2",
+              "values": {
+                "tl1.row": "knows",
+                "tl1.subject": "EV-204",
+                "tl1.info": "S2",
+                "tl1.mode": "told",
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-B"
+              }
+            },
+            {
+              "id": "EV-205",
+              "values": {
+                "tl1.row": "event",
+                "tl1.label": "主人公がS2を使う",
+                "tl1.time.kind": "day",
+                "tl1.time.start": 7
+              }
+            },
+            {
+              "id": "EV-205.use.S2",
+              "values": {
+                "tl1.row": "info-use",
+                "tl1.subject": "EV-205",
+                "tl1.info": "S2",
+                "tl1.ref.item": "EV-204",
+                "tl1.complete": true,
+                "tl1.ind.ch": "CH-001",
+                "tl1.ind.origin": "WL-B"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "story-ledger-B",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": [
+                  "event",
+                  "derive-time",
+                  "after",
+                  "travel-min",
+                  "cause",
+                  "participant",
+                  "knows",
+                  "info-use",
+                  "claim",
+                  "fact",
+                  "presence",
+                  "exception",
+                  "exception-basis"
+                ],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.time.kind",
+                "name": "時点の種類",
+                "type": "select",
+                "options": ["unset", "point", "day", "interval", "range", "derived"]
+              },
+              {
+                "id": "tl1.time.start",
+                "name": "開始日",
+                "type": "number"
+              },
+              {
+                "id": "tl1.time.end",
+                "name": "終了日",
+                "type": "number"
+              },
+              {
+                "id": "tl1.clock",
+                "name": "時計",
+                "type": "text"
+              },
+              {
+                "id": "tl1.offset.min",
+                "name": "最小日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.offset.max",
+                "name": "最大日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.anchor",
+                "name": "基準端",
+                "type": "select",
+                "options": ["start", "end"]
+              },
+              {
+                "id": "tl1.ind.ch",
+                "name": "人物",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ind.origin",
+                "name": "個体の世界",
+                "type": "text"
+              },
+              {
+                "id": "tl1.info",
+                "name": "情報",
+                "type": "text"
+              },
+              {
+                "id": "tl1.mode",
+                "name": "様態",
+                "type": "select",
+                "options": [
+                  "observe",
+                  "told",
+                  "believe",
+                  "doubt",
+                  "deny",
+                  "forget",
+                  "assert",
+                  "true",
+                  "false"
+                ]
+              },
+              {
+                "id": "tl1.complete",
+                "name": "情報源は全部",
+                "type": "boolean"
+              },
+              {
+                "id": "tl1.loc",
+                "name": "場所",
+                "type": "text"
+              },
+              {
+                "id": "tl1.certainty",
+                "name": "確度",
+                "type": "select",
+                "options": ["confirmed", "uncertain"]
+              },
+              {
+                "id": "tl1.diag",
+                "name": "診断の種類",
+                "type": "select",
+                "options": [
+                  "single-event",
+                  "disclosure",
+                  "presence",
+                  "multi-event",
+                  "transfer",
+                  "external-event"
+                ]
+              },
+              {
+                "id": "tl1.rule",
+                "name": "規則の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.reason",
+                "name": "理由",
+                "type": "text"
+              },
+              {
+                "id": "tl1.scope",
+                "name": "規則の範囲",
+                "type": "text"
+              },
+              {
+                "id": "tl1.hypothesis",
+                "name": "仮定の識別",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "EV-201",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "橋の破壊計画が阻止される",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 2
+                }
+              },
+              {
+                "id": "EV-202",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "密使が橋を渡りS1を届ける",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 3
+                }
+              },
+              {
+                "id": "EV-202.who.messenger",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-202",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-B"
+                }
+              },
+              {
+                "id": "EV-202.knows.S1",
+                "values": {
+                  "tl1.row": "knows",
+                  "tl1.subject": "EV-202",
+                  "tl1.info": "S1",
+                  "tl1.mode": "told",
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-B"
+                }
+              },
+              {
+                "id": "EV-203",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "主人公がS1の情報を使う",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 4
+                }
+              },
+              {
+                "id": "EV-203.use.S1",
+                "values": {
+                  "tl1.row": "info-use",
+                  "tl1.subject": "EV-203",
+                  "tl1.info": "S1",
+                  "tl1.ref.item": "EV-202",
+                  "tl1.complete": true,
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-B"
+                }
+              },
+              {
+                "id": "EV-204",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "受取",
+                  "tl1.time.kind": "derived"
+                }
+              },
+              {
+                "id": "EV-204.derive",
+                "values": {
+                  "tl1.row": "derive-time",
+                  "tl1.subject": "EV-204",
+                  "tl1.anchor": "start",
+                  "tl1.offset.min": 1,
+                  "tl1.offset.max": 1,
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-103",
+                  "tl1.ref.facet": "time"
+                }
+              },
+              {
+                "id": "EV-204.who.messenger",
+                "values": {
+                  "tl1.row": "participant",
+                  "tl1.subject": "EV-204",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A"
+                }
+              },
+              {
+                "id": "EV-204.knows.S2",
+                "values": {
+                  "tl1.row": "knows",
+                  "tl1.subject": "EV-204",
+                  "tl1.info": "S2",
+                  "tl1.mode": "told",
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-B"
+                }
+              },
+              {
+                "id": "EV-205",
+                "values": {
+                  "tl1.row": "event",
+                  "tl1.label": "主人公がS2を使う",
+                  "tl1.time.kind": "day",
+                  "tl1.time.start": 7
+                }
+              },
+              {
+                "id": "EV-205.use.S2",
+                "values": {
+                  "tl1.row": "info-use",
+                  "tl1.subject": "EV-205",
+                  "tl1.info": "S2",
+                  "tl1.ref.item": "EV-204",
+                  "tl1.complete": true,
+                  "tl1.ind.ch": "CH-001",
+                  "tl1.ind.origin": "WL-B"
+                }
+              }
+            ]
+          },
+          "contentHash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "character-sheet",
+      "name": "人物表",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "ch.name",
+              "name": "名前",
+              "type": "text",
+              "required": true
+            }
+          ],
+          "rows": [
+            {
+              "id": "CH-001",
+              "values": {
+                "ch.name": "主人公"
+              }
+            },
+            {
+              "id": "CH-002",
+              "values": {
+                "ch.name": "密使"
+              }
+            },
+            {
+              "id": "CH-003",
+              "values": {
+                "ch.name": "敵"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "character-sheet",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "ch.name",
+                "name": "名前",
+                "type": "text",
+                "required": true
+              }
+            ],
+            "rows": [
+              {
+                "id": "CH-001",
+                "values": {
+                  "ch.name": "主人公"
+                }
+              },
+              {
+                "id": "CH-002",
+                "values": {
+                  "ch.name": "密使"
+                }
+              },
+              {
+                "id": "CH-003",
+                "values": {
+                  "ch.name": "敵"
+                }
+              }
+            ]
+          },
+          "contentHash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "scene-cards-A",
+      "name": "シーンカード（世界A）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": ["scene", "cite"],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.info",
+              "name": "情報",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "SC-001",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "主人公がS1を使う"
+              }
+            },
+            {
+              "id": "SC-001.cite.ev",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-001",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-104",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-001.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-001",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-001",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-002",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "密使の迂回"
+              }
+            },
+            {
+              "id": "SC-002.cite.ev",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-002",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-102",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-002.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-002",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-002",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-003",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "橋が落ちた日（回想）"
+              }
+            },
+            {
+              "id": "SC-003.cite.ev",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-003",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-101",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-003.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-003",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-003",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-004",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "即位と暗号"
+              }
+            },
+            {
+              "id": "SC-004.cite.ev1",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-004",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-001",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-004.cite.ev2",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-004",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-002",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-004.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-004",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-002",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-005",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "犯人の視点"
+              }
+            },
+            {
+              "id": "SC-005.cite.ev",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-005",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-101",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-005.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-005",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-003",
+                "tl1.ref.facet": "whole"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "scene-cards-A",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": ["scene", "cite"],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.info",
+                "name": "情報",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "SC-001",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "主人公がS1を使う"
+                }
+              },
+              {
+                "id": "SC-001.cite.ev",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-001",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-104",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-001.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-001",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-001",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-002",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "密使の迂回"
+                }
+              },
+              {
+                "id": "SC-002.cite.ev",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-002",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-102",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-002.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-002",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-002",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-003",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "橋が落ちた日（回想）"
+                }
+              },
+              {
+                "id": "SC-003.cite.ev",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-003",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-101",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-003.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-003",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-003",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-004",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "即位と暗号"
+                }
+              },
+              {
+                "id": "SC-004.cite.ev1",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-004",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-001",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-004.cite.ev2",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-004",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-002",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-004.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-004",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-002",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-005",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "犯人の視点"
+                }
+              },
+              {
+                "id": "SC-005.cite.ev",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-005",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-101",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-005.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-005",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-003",
+                  "tl1.ref.facet": "whole"
+                }
+              }
+            ]
+          },
+          "contentHash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "scene-cards-B",
+      "name": "シーンカード（世界B）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": ["scene", "cite"],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.info",
+              "name": "情報",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "SC-006",
+              "values": {
+                "tl1.row": "scene",
+                "tl1.label": "主人公がS2を使う（B）"
+              }
+            },
+            {
+              "id": "SC-006.cite.ev",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-006",
+                "tl1.ref.artifact": "story-ledger-B",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                "tl1.ref.item": "EV-205",
+                "tl1.ref.facet": "whole"
+              }
+            },
+            {
+              "id": "SC-006.cite.cast",
+              "values": {
+                "tl1.row": "cite",
+                "tl1.subject": "SC-006",
+                "tl1.ref.artifact": "character-sheet",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                "tl1.ref.item": "CH-001",
+                "tl1.ref.facet": "whole"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "scene-cards-B",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": ["scene", "cite"],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.info",
+                "name": "情報",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "SC-006",
+                "values": {
+                  "tl1.row": "scene",
+                  "tl1.label": "主人公がS2を使う（B）"
+                }
+              },
+              {
+                "id": "SC-006.cite.ev",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-006",
+                  "tl1.ref.artifact": "story-ledger-B",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                  "tl1.ref.item": "EV-205",
+                  "tl1.ref.facet": "whole"
+                }
+              },
+              {
+                "id": "SC-006.cite.cast",
+                "values": {
+                  "tl1.row": "cite",
+                  "tl1.subject": "SC-006",
+                  "tl1.ref.artifact": "character-sheet",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "9a064168034aa0170814c2ad00df0dc207c735fd32a516f8651b75fbe2f22c96",
+                  "tl1.ref.item": "CH-001",
+                  "tl1.ref.facet": "whole"
+                }
+              }
+            ]
+          },
+          "contentHash": "ff115549c974e114b2532d22ad73628962e779f60a22f36d28f5cfa42a095071",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "world-S",
+      "name": "世界の覚え書き（作品S・構造）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": [
+                "clock",
+                "worldline",
+                "clock-offset",
+                "inherits",
+                "transfer",
+                "transfer-info",
+                "location-exclusive",
+                "location-contains",
+                "exception",
+                "exception-target",
+                "exception-basis"
+              ],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.ref2.artifact",
+              "name": "参照先2 Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.version",
+              "name": "参照先2の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.hash",
+              "name": "参照先2のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.item",
+              "name": "参照先2の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.time.kind",
+              "name": "時点の種類",
+              "type": "select",
+              "options": ["unset", "point", "day", "interval", "range", "derived"]
+            },
+            {
+              "id": "tl1.time.start",
+              "name": "開始日",
+              "type": "number"
+            },
+            {
+              "id": "tl1.clock",
+              "name": "時計",
+              "type": "text"
+            },
+            {
+              "id": "tl1.clock2",
+              "name": "換算先の時計",
+              "type": "text"
+            },
+            {
+              "id": "tl1.offset.min",
+              "name": "最小日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.offset.max",
+              "name": "最大日数",
+              "type": "number"
+            },
+            {
+              "id": "tl1.ind.ch",
+              "name": "人物",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ind.origin",
+              "name": "個体の世界",
+              "type": "text"
+            },
+            {
+              "id": "tl1.info",
+              "name": "情報",
+              "type": "text"
+            },
+            {
+              "id": "tl1.loc",
+              "name": "場所",
+              "type": "text"
+            },
+            {
+              "id": "tl1.loc2",
+              "name": "場所2",
+              "type": "text"
+            },
+            {
+              "id": "tl1.world.parent",
+              "name": "親の世界線",
+              "type": "text"
+            },
+            {
+              "id": "tl1.diag",
+              "name": "診断の種類",
+              "type": "select",
+              "options": [
+                "single-event",
+                "disclosure",
+                "presence",
+                "multi-event",
+                "transfer",
+                "external-event"
+              ]
+            },
+            {
+              "id": "tl1.rule",
+              "name": "規則の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.reason",
+              "name": "理由",
+              "type": "text"
+            },
+            {
+              "id": "tl1.scope",
+              "name": "規則の範囲",
+              "type": "text"
+            },
+            {
+              "id": "tl1.hypothesis",
+              "name": "仮定の識別",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "CL-1",
+              "values": {
+                "tl1.row": "clock",
+                "tl1.label": "相対日（王の即位を0日とする）"
+              }
+            },
+            {
+              "id": "WL-A",
+              "values": {
+                "tl1.row": "worldline",
+                "tl1.label": "世界A",
+                "tl1.clock": "CL-1"
+              }
+            },
+            {
+              "id": "WL-B",
+              "values": {
+                "tl1.row": "worldline",
+                "tl1.label": "世界B",
+                "tl1.clock": "CL-1",
+                "tl1.world.parent": "WL-A",
+                "tl1.time.kind": "point",
+                "tl1.time.start": 2
+              }
+            },
+            {
+              "id": "WL-B.inherit.EV-001",
+              "values": {
+                "tl1.row": "inherits",
+                "tl1.subject": "WL-B",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-001"
+              }
+            },
+            {
+              "id": "WL-B.inherit.EV-002",
+              "values": {
+                "tl1.row": "inherits",
+                "tl1.subject": "WL-B",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-002"
+              }
+            },
+            {
+              "id": "TR-001",
+              "values": {
+                "tl1.row": "transfer",
+                "tl1.label": "密使がS2をBへ運ぶ",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-103",
+                "tl1.ref2.artifact": "story-ledger-B",
+                "tl1.ref2.version": "fixture-v1",
+                "tl1.ref2.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                "tl1.ref2.item": "EV-204"
+              }
+            },
+            {
+              "id": "TR-001.carries.S2",
+              "values": {
+                "tl1.row": "transfer-info",
+                "tl1.subject": "TR-001",
+                "tl1.info": "S2"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "world-S",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": [
+                  "clock",
+                  "worldline",
+                  "clock-offset",
+                  "inherits",
+                  "transfer",
+                  "transfer-info",
+                  "location-exclusive",
+                  "location-contains",
+                  "exception",
+                  "exception-target",
+                  "exception-basis"
+                ],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.ref2.artifact",
+                "name": "参照先2 Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.version",
+                "name": "参照先2の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.hash",
+                "name": "参照先2のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.item",
+                "name": "参照先2の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.time.kind",
+                "name": "時点の種類",
+                "type": "select",
+                "options": ["unset", "point", "day", "interval", "range", "derived"]
+              },
+              {
+                "id": "tl1.time.start",
+                "name": "開始日",
+                "type": "number"
+              },
+              {
+                "id": "tl1.clock",
+                "name": "時計",
+                "type": "text"
+              },
+              {
+                "id": "tl1.clock2",
+                "name": "換算先の時計",
+                "type": "text"
+              },
+              {
+                "id": "tl1.offset.min",
+                "name": "最小日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.offset.max",
+                "name": "最大日数",
+                "type": "number"
+              },
+              {
+                "id": "tl1.ind.ch",
+                "name": "人物",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ind.origin",
+                "name": "個体の世界",
+                "type": "text"
+              },
+              {
+                "id": "tl1.info",
+                "name": "情報",
+                "type": "text"
+              },
+              {
+                "id": "tl1.loc",
+                "name": "場所",
+                "type": "text"
+              },
+              {
+                "id": "tl1.loc2",
+                "name": "場所2",
+                "type": "text"
+              },
+              {
+                "id": "tl1.world.parent",
+                "name": "親の世界線",
+                "type": "text"
+              },
+              {
+                "id": "tl1.diag",
+                "name": "診断の種類",
+                "type": "select",
+                "options": [
+                  "single-event",
+                  "disclosure",
+                  "presence",
+                  "multi-event",
+                  "transfer",
+                  "external-event"
+                ]
+              },
+              {
+                "id": "tl1.rule",
+                "name": "規則の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.reason",
+                "name": "理由",
+                "type": "text"
+              },
+              {
+                "id": "tl1.scope",
+                "name": "規則の範囲",
+                "type": "text"
+              },
+              {
+                "id": "tl1.hypothesis",
+                "name": "仮定の識別",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "CL-1",
+                "values": {
+                  "tl1.row": "clock",
+                  "tl1.label": "相対日（王の即位を0日とする）"
+                }
+              },
+              {
+                "id": "WL-A",
+                "values": {
+                  "tl1.row": "worldline",
+                  "tl1.label": "世界A",
+                  "tl1.clock": "CL-1"
+                }
+              },
+              {
+                "id": "WL-B",
+                "values": {
+                  "tl1.row": "worldline",
+                  "tl1.label": "世界B",
+                  "tl1.clock": "CL-1",
+                  "tl1.world.parent": "WL-A",
+                  "tl1.time.kind": "point",
+                  "tl1.time.start": 2
+                }
+              },
+              {
+                "id": "WL-B.inherit.EV-001",
+                "values": {
+                  "tl1.row": "inherits",
+                  "tl1.subject": "WL-B",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-001"
+                }
+              },
+              {
+                "id": "WL-B.inherit.EV-002",
+                "values": {
+                  "tl1.row": "inherits",
+                  "tl1.subject": "WL-B",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-002"
+                }
+              },
+              {
+                "id": "TR-001",
+                "values": {
+                  "tl1.row": "transfer",
+                  "tl1.label": "密使がS2をBへ運ぶ",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-103",
+                  "tl1.ref2.artifact": "story-ledger-B",
+                  "tl1.ref2.version": "fixture-v1",
+                  "tl1.ref2.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                  "tl1.ref2.item": "EV-204"
+                }
+              },
+              {
+                "id": "TR-001.carries.S2",
+                "values": {
+                  "tl1.row": "transfer-info",
+                  "tl1.subject": "TR-001",
+                  "tl1.info": "S2"
+                }
+              }
+            ]
+          },
+          "contentHash": "715c94b0593afde65b854f4c40f0780aac165fa44488d33494dabce2de81ff3d",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "composition-S",
+      "name": "構成図（作品S・提示位置）",
+      "kind": "data",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "columns": [
+            {
+              "id": "tl1.row",
+              "name": "行の種類",
+              "type": "select",
+              "options": [
+                "occurrence",
+                "experience",
+                "exception",
+                "exception-target",
+                "exception-basis"
+              ],
+              "required": true
+            },
+            {
+              "id": "tl1.label",
+              "name": "名前",
+              "type": "text"
+            },
+            {
+              "id": "tl1.subject",
+              "name": "対象の行",
+              "type": "relation"
+            },
+            {
+              "id": "tl1.ref.artifact",
+              "name": "参照先Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.version",
+              "name": "参照先の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.hash",
+              "name": "参照先のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.item",
+              "name": "参照先の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref.facet",
+              "name": "参照の範囲",
+              "type": "select",
+              "options": [
+                "whole",
+                "existence",
+                "participants",
+                "time",
+                "content",
+                "info",
+                "evaluation"
+              ]
+            },
+            {
+              "id": "tl1.ref2.artifact",
+              "name": "参照先2 Artifact",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.version",
+              "name": "参照先2の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.hash",
+              "name": "参照先2のhash",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ref2.item",
+              "name": "参照先2の項目",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ind.ch",
+              "name": "人物",
+              "type": "text"
+            },
+            {
+              "id": "tl1.ind.origin",
+              "name": "個体の世界",
+              "type": "text"
+            },
+            {
+              "id": "tl1.order",
+              "name": "提示の並び",
+              "type": "number"
+            },
+            {
+              "id": "tl1.part",
+              "name": "話",
+              "type": "text"
+            },
+            {
+              "id": "tl1.diag",
+              "name": "診断の種類",
+              "type": "select",
+              "options": [
+                "single-event",
+                "disclosure",
+                "presence",
+                "multi-event",
+                "transfer",
+                "external-event"
+              ]
+            },
+            {
+              "id": "tl1.rule",
+              "name": "規則の版",
+              "type": "text"
+            },
+            {
+              "id": "tl1.reason",
+              "name": "理由",
+              "type": "text"
+            },
+            {
+              "id": "tl1.scope",
+              "name": "規則の範囲",
+              "type": "text"
+            },
+            {
+              "id": "tl1.hypothesis",
+              "name": "仮定の識別",
+              "type": "text"
+            }
+          ],
+          "rows": [
+            {
+              "id": "OC-001",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第1話 SC-001（受入のoccurrence-sc001-first）",
+                "tl1.order": 10,
+                "tl1.part": "第1話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-001"
+              }
+            },
+            {
+              "id": "OC-002",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第2話 SC-002",
+                "tl1.order": 20,
+                "tl1.part": "第2話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-002"
+              }
+            },
+            {
+              "id": "OC-003",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第3話 SC-004",
+                "tl1.order": 30,
+                "tl1.part": "第3話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-004"
+              }
+            },
+            {
+              "id": "OC-004",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第5話 SC-005",
+                "tl1.order": 50,
+                "tl1.part": "第5話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-005"
+              }
+            },
+            {
+              "id": "OC-005",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第8話 SC-003（回想）",
+                "tl1.order": 80,
+                "tl1.part": "第8話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-003"
+              }
+            },
+            {
+              "id": "OC-006",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第8話 SC-001 再提示（受入のoccurrence-sc001-reprise）",
+                "tl1.order": 85,
+                "tl1.part": "第8話",
+                "tl1.ref.artifact": "scene-cards-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                "tl1.ref.item": "SC-001"
+              }
+            },
+            {
+              "id": "OC-007",
+              "values": {
+                "tl1.row": "occurrence",
+                "tl1.label": "第9話 SC-006",
+                "tl1.order": 90,
+                "tl1.part": "第9話",
+                "tl1.ref.artifact": "scene-cards-B",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "ff115549c974e114b2532d22ad73628962e779f60a22f36d28f5cfa42a095071",
+                "tl1.ref.item": "SC-006"
+              }
+            },
+            {
+              "id": "XP-001",
+              "values": {
+                "tl1.row": "experience",
+                "tl1.label": "A出身の密使: A:EV-103→B:EV-204",
+                "tl1.ind.ch": "CH-002",
+                "tl1.ind.origin": "WL-A",
+                "tl1.ref.artifact": "story-ledger-A",
+                "tl1.ref.version": "fixture-v1",
+                "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                "tl1.ref.item": "EV-103",
+                "tl1.ref2.artifact": "story-ledger-B",
+                "tl1.ref2.version": "fixture-v1",
+                "tl1.ref2.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                "tl1.ref2.item": "EV-204"
+              }
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "composition-S",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "columns": [
+              {
+                "id": "tl1.row",
+                "name": "行の種類",
+                "type": "select",
+                "options": [
+                  "occurrence",
+                  "experience",
+                  "exception",
+                  "exception-target",
+                  "exception-basis"
+                ],
+                "required": true
+              },
+              {
+                "id": "tl1.label",
+                "name": "名前",
+                "type": "text"
+              },
+              {
+                "id": "tl1.subject",
+                "name": "対象の行",
+                "type": "relation"
+              },
+              {
+                "id": "tl1.ref.artifact",
+                "name": "参照先Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.version",
+                "name": "参照先の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.hash",
+                "name": "参照先のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.item",
+                "name": "参照先の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref.facet",
+                "name": "参照の範囲",
+                "type": "select",
+                "options": [
+                  "whole",
+                  "existence",
+                  "participants",
+                  "time",
+                  "content",
+                  "info",
+                  "evaluation"
+                ]
+              },
+              {
+                "id": "tl1.ref2.artifact",
+                "name": "参照先2 Artifact",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.version",
+                "name": "参照先2の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.hash",
+                "name": "参照先2のhash",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ref2.item",
+                "name": "参照先2の項目",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ind.ch",
+                "name": "人物",
+                "type": "text"
+              },
+              {
+                "id": "tl1.ind.origin",
+                "name": "個体の世界",
+                "type": "text"
+              },
+              {
+                "id": "tl1.order",
+                "name": "提示の並び",
+                "type": "number"
+              },
+              {
+                "id": "tl1.part",
+                "name": "話",
+                "type": "text"
+              },
+              {
+                "id": "tl1.diag",
+                "name": "診断の種類",
+                "type": "select",
+                "options": [
+                  "single-event",
+                  "disclosure",
+                  "presence",
+                  "multi-event",
+                  "transfer",
+                  "external-event"
+                ]
+              },
+              {
+                "id": "tl1.rule",
+                "name": "規則の版",
+                "type": "text"
+              },
+              {
+                "id": "tl1.reason",
+                "name": "理由",
+                "type": "text"
+              },
+              {
+                "id": "tl1.scope",
+                "name": "規則の範囲",
+                "type": "text"
+              },
+              {
+                "id": "tl1.hypothesis",
+                "name": "仮定の識別",
+                "type": "text"
+              }
+            ],
+            "rows": [
+              {
+                "id": "OC-001",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第1話 SC-001（受入のoccurrence-sc001-first）",
+                  "tl1.order": 10,
+                  "tl1.part": "第1話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-001"
+                }
+              },
+              {
+                "id": "OC-002",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第2話 SC-002",
+                  "tl1.order": 20,
+                  "tl1.part": "第2話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-002"
+                }
+              },
+              {
+                "id": "OC-003",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第3話 SC-004",
+                  "tl1.order": 30,
+                  "tl1.part": "第3話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-004"
+                }
+              },
+              {
+                "id": "OC-004",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第5話 SC-005",
+                  "tl1.order": 50,
+                  "tl1.part": "第5話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-005"
+                }
+              },
+              {
+                "id": "OC-005",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第8話 SC-003（回想）",
+                  "tl1.order": 80,
+                  "tl1.part": "第8話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-003"
+                }
+              },
+              {
+                "id": "OC-006",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第8話 SC-001 再提示（受入のoccurrence-sc001-reprise）",
+                  "tl1.order": 85,
+                  "tl1.part": "第8話",
+                  "tl1.ref.artifact": "scene-cards-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "a8fc0094bd04c79f7f0b37a1b773f2be08d751fc9c744f95f416907d51a28359",
+                  "tl1.ref.item": "SC-001"
+                }
+              },
+              {
+                "id": "OC-007",
+                "values": {
+                  "tl1.row": "occurrence",
+                  "tl1.label": "第9話 SC-006",
+                  "tl1.order": 90,
+                  "tl1.part": "第9話",
+                  "tl1.ref.artifact": "scene-cards-B",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "ff115549c974e114b2532d22ad73628962e779f60a22f36d28f5cfa42a095071",
+                  "tl1.ref.item": "SC-006"
+                }
+              },
+              {
+                "id": "XP-001",
+                "values": {
+                  "tl1.row": "experience",
+                  "tl1.label": "A出身の密使: A:EV-103→B:EV-204",
+                  "tl1.ind.ch": "CH-002",
+                  "tl1.ind.origin": "WL-A",
+                  "tl1.ref.artifact": "story-ledger-A",
+                  "tl1.ref.version": "fixture-v1",
+                  "tl1.ref.hash": "6ca58ae030b46597b3d9585e4c874c7d75bed6f27eb01412f14042c8173b06fc",
+                  "tl1.ref.item": "EV-103",
+                  "tl1.ref2.artifact": "story-ledger-B",
+                  "tl1.ref2.version": "fixture-v1",
+                  "tl1.ref2.hash": "1f132164c6aa1ae5746c38785e5f2a49f16f6c2dba59dc154456dd4c8448da3e",
+                  "tl1.ref2.item": "EV-204"
+                }
+              }
+            ]
+          },
+          "contentHash": "ea010576c2cfc943492ec0d0aa69fae7a7f8f015bdcebb4c3654b724c6c4654a",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "manuscript-ch01",
+      "name": "第1話",
+      "kind": "document",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "blocks": [
+            {
+              "id": "h-ch01",
+              "type": "heading",
+              "level": 1,
+              "text": "第1話"
+            },
+            {
+              "id": "p-sc001-first",
+              "type": "paragraph",
+              "text": "主人公は、まだ誰も知らないはずの暗号の中身を口にした。"
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "manuscript-ch01",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "blocks": [
+              {
+                "id": "h-ch01",
+                "type": "heading",
+                "level": 1,
+                "text": "第1話"
+              },
+              {
+                "id": "p-sc001-first",
+                "type": "paragraph",
+                "text": "主人公は、まだ誰も知らないはずの暗号の中身を口にした。"
+              }
+            ]
+          },
+          "contentHash": "4ec022412ba2e86c7cc7d916486a6cc7f1dce152af2ca132851f7210a5f869d6",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "manuscript-ch02",
+      "name": "第2話",
+      "kind": "document",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "blocks": [
+            {
+              "id": "h-ch02",
+              "type": "heading",
+              "level": 1,
+              "text": "第2話"
+            },
+            {
+              "id": "p-sc002-a",
+              "type": "paragraph",
+              "text": "橋は落ちていた。密使は川上へ向かった。"
+            },
+            {
+              "id": "p-sc002-b",
+              "type": "paragraph",
+              "text": "浅瀬を探して二日を失った。"
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "manuscript-ch02",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "blocks": [
+              {
+                "id": "h-ch02",
+                "type": "heading",
+                "level": 1,
+                "text": "第2話"
+              },
+              {
+                "id": "p-sc002-a",
+                "type": "paragraph",
+                "text": "橋は落ちていた。密使は川上へ向かった。"
+              },
+              {
+                "id": "p-sc002-b",
+                "type": "paragraph",
+                "text": "浅瀬を探して二日を失った。"
+              }
+            ]
+          },
+          "contentHash": "5bebf587725a7819365e2694ba47b85f0776a0fcde57323ff790248852953911",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "manuscript-ch08",
+      "name": "第8話",
+      "kind": "document",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "blocks": [
+            {
+              "id": "h-ch08",
+              "type": "heading",
+              "level": 1,
+              "text": "第8話"
+            },
+            {
+              "id": "p-sc003",
+              "type": "paragraph",
+              "text": "あの夜、橋に火を放ったのは誰だったか。"
+            },
+            {
+              "id": "p-sc001-reprise",
+              "type": "paragraph",
+              "text": "もう一度、主人公が暗号を口にした場面を思い出す。"
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "manuscript-ch08",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "blocks": [
+              {
+                "id": "h-ch08",
+                "type": "heading",
+                "level": 1,
+                "text": "第8話"
+              },
+              {
+                "id": "p-sc003",
+                "type": "paragraph",
+                "text": "あの夜、橋に火を放ったのは誰だったか。"
+              },
+              {
+                "id": "p-sc001-reprise",
+                "type": "paragraph",
+                "text": "もう一度、主人公が暗号を口にした場面を思い出す。"
+              }
+            ]
+          },
+          "contentHash": "4437d3aa2c7178ebf78684e388e1d5c3efa6eb51a6e8d84fc3c2bc89bdf95022",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "manuscript-ch09",
+      "name": "第9話",
+      "kind": "document",
+      "draft": {
+        "content": {
+          "schemaVersion": 2,
+          "blocks": [
+            {
+              "id": "h-ch09",
+              "type": "heading",
+              "level": 1,
+              "text": "第9話"
+            },
+            {
+              "id": "p-sc006",
+              "type": "paragraph",
+              "text": "Bの主人公は、追伸の一行を頼りに動いた。"
+            }
+          ]
+        },
+        "baseVersionId": "fixture-v1",
+        "updatedAt": "2026-11-01T00:00:00.000Z"
+      },
+      "versions": [
+        {
+          "artifactId": "manuscript-ch09",
+          "versionId": "fixture-v1",
+          "parentVersionId": null,
+          "schemaVersion": 1,
+          "content": {
+            "schemaVersion": 2,
+            "blocks": [
+              {
+                "id": "h-ch09",
+                "type": "heading",
+                "level": 1,
+                "text": "第9話"
+              },
+              {
+                "id": "p-sc006",
+                "type": "paragraph",
+                "text": "Bの主人公は、追伸の一行を頼りに動いた。"
+              }
+            ]
+          },
+          "contentHash": "e2c65a8a225741613d00dfe6fbc2335e727c5a5cc1646c92a1d1a6277d050e36",
+          "createdAt": "2026-11-01T00:00:00.000Z",
+          "createdBy": null,
+          "reason": "Story Timeline T0 fixture"
+        }
+      ],
+      "provenance": {
+        "source": "created"
+      }
+    }
+  ],
+  "links": {
+    "schemaVersion": 2,
+    "scenes": [
+      {
+        "id": "region-ch01-sc001",
+        "kind": "document",
+        "origin": {
+          "artifactId": "manuscript-ch01",
+          "versionId": "fixture-v1",
+          "elementId": "p-sc001-first"
+        },
+        "members": [],
+        "items": []
+      },
+      {
+        "id": "region-ch02-a",
+        "kind": "document",
+        "origin": {
+          "artifactId": "manuscript-ch02",
+          "versionId": "fixture-v1",
+          "elementId": "p-sc002-a"
+        },
+        "members": [],
+        "items": []
+      },
+      {
+        "id": "region-ch02-b",
+        "kind": "document",
+        "origin": {
+          "artifactId": "manuscript-ch02",
+          "versionId": "fixture-v1",
+          "elementId": "p-sc002-b"
+        },
+        "members": [],
+        "items": []
+      },
+      {
+        "id": "region-ch08-sc001",
+        "kind": "document",
+        "origin": {
+          "artifactId": "manuscript-ch08",
+          "versionId": "fixture-v1",
+          "elementId": "p-sc001-reprise"
+        },
+        "members": [],
+        "items": []
+      },
+      {
+        "id": "region-ch09-sc006",
+        "kind": "document",
+        "origin": {
+          "artifactId": "manuscript-ch09",
+          "versionId": "fixture-v1",
+          "elementId": "p-sc006"
+        },
+        "members": [],
+        "items": []
+      }
+    ],
+    "story": {
+      "id": "story-S",
+      "namespace": "ns:story-S",
+      "composition": "composition-S",
+      "worldSettings": "world-S",
+      "characters": "character-sheet",
+      "ledgers": [
+        {
+          "world": "WL-A",
+          "artifactId": "story-ledger-A"
+        },
+        {
+          "world": "WL-B",
+          "artifactId": "story-ledger-B"
+        }
+      ],
+      "sceneCards": ["scene-cards-A", "scene-cards-B"]
+    },
+    "occurrenceLinks": [
+      {
+        "id": "OL-001",
+        "occurrence": {
+          "artifactId": "composition-S",
+          "versionId": "fixture-v1",
+          "contentHash": "ea010576c2cfc943492ec0d0aa69fae7a7f8f015bdcebb4c3654b724c6c4654a",
+          "itemId": "OC-001"
+        },
+        "regions": [
+          {
+            "sceneId": "region-ch01-sc001",
+            "address": {
+              "artifactId": "manuscript-ch01",
+              "versionId": "fixture-v1",
+              "elementId": "p-sc001-first"
+            }
+          }
+        ]
+      },
+      {
+        "id": "OL-002",
+        "occurrence": {
+          "artifactId": "composition-S",
+          "versionId": "fixture-v1",
+          "contentHash": "ea010576c2cfc943492ec0d0aa69fae7a7f8f015bdcebb4c3654b724c6c4654a",
+          "itemId": "OC-006"
+        },
+        "regions": [
+          {
+            "sceneId": "region-ch08-sc001",
+            "address": {
+              "artifactId": "manuscript-ch08",
+              "versionId": "fixture-v1",
+              "elementId": "p-sc001-reprise"
+            }
+          }
+        ]
+      },
+      {
+        "id": "OL-003",
+        "occurrence": {
+          "artifactId": "composition-S",
+          "versionId": "fixture-v1",
+          "contentHash": "ea010576c2cfc943492ec0d0aa69fae7a7f8f015bdcebb4c3654b724c6c4654a",
+          "itemId": "OC-002"
+        },
+        "regions": [
+          {
+            "sceneId": "region-ch02-a",
+            "address": {
+              "artifactId": "manuscript-ch02",
+              "versionId": "fixture-v1",
+              "elementId": "p-sc002-a"
+            }
+          },
+          {
+            "sceneId": "region-ch02-b",
+            "address": {
+              "artifactId": "manuscript-ch02",
+              "versionId": "fixture-v1",
+              "elementId": "p-sc002-b"
+            }
+          }
+        ]
+      },
+      {
+        "id": "OL-004",
+        "occurrence": {
+          "artifactId": "composition-S",
+          "versionId": "fixture-v1",
+          "contentHash": "ea010576c2cfc943492ec0d0aa69fae7a7f8f015bdcebb4c3654b724c6c4654a",
+          "itemId": "OC-007"
+        },
+        "regions": [
+          {
+            "sceneId": "region-ch09-sc006",
+            "address": {
+              "artifactId": "manuscript-ch09",
+              "versionId": "fixture-v1",
+              "elementId": "p-sc006"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "stage": "TL05d/f/h/i/k/l（T3b）、TL05e/j（T3a）、TL13（T2/T3）、TL14d（T2）",
+    "candidateA": {
+      "id": "candidate-A",
+      "owner": "story-ledger-A",
+      "base": "fixture-v1",
+      "edit": [
+        {
+          "row": "EV-101",
+          "set": {
+            "tl1.time.start": 4
+          }
+        }
+      ],
+      "draftContentHash": "a212036e4e0a2f2f67fb73f0e9bb717e3a8a1d77910f9ec58d292769ddf37312"
+    },
+    "contexts": {
+      "adopted": {
+        "A": {
+          "EV-101": 2,
+          "EV-102": 3,
+          "EV-103": 5,
+          "EV-104": 6
+        },
+        "B": {
+          "EV-204": 6,
+          "EV-205": 7
+        },
+        "story-ledger-A#EV-104.use.S1": "satisfied",
+        "story-ledger-B#EV-205.use.S2": "satisfied"
+      },
+      "candidate-A-no-substitution": {
+        "A": {
+          "EV-101": 4,
+          "EV-102": 5,
+          "EV-103": 7,
+          "EV-104": 6
+        },
+        "B": {
+          "EV-204": 6,
+          "EV-205": 7
+        },
+        "story-ledger-A#EV-104.use.S1": "contradiction",
+        "story-ledger-B#EV-205.use.S2": "satisfied",
+        "scene-cards-A#SC-001.cite.ev": "story-ledger-A@fixture-v1#EV-104",
+        "scene-cards-B#SC-006.cite.ev": "story-ledger-B@fixture-v1#EV-205",
+        "candidates": "u1-cases.json#U1-T"
+      }
+    },
+    "candidates": [
+      {
+        "id": "candidate-A",
+        "owner": "story-ledger-A",
+        "base": "fixture-v1",
+        "draft": "real"
+      },
+      {
+        "id": "candidate-B",
+        "owner": "story-ledger-B",
+        "base": "fixture-v1",
+        "draft": "virtual"
+      },
+      {
+        "id": "candidate-world-S",
+        "owner": "world-S",
+        "base": "fixture-v1",
+        "draft": "virtual"
+      },
+      {
+        "id": "candidate-scene-A",
+        "owner": "scene-cards-A",
+        "base": "fixture-v1",
+        "draft": "virtual"
+      },
+      {
+        "id": "candidate-scene-B",
+        "owner": "scene-cards-B",
+        "base": "fixture-v1",
+        "draft": "virtual"
+      }
+    ],
+    "scopeSC001SC006": {
+      "scope": {
+        "kind": "information-use",
+        "targets": ["scene-cards-A#SC-001", "scene-cards-B#SC-006"]
+      },
+      "generatedRows": [
+        {
+          "source": "candidate-scene-A",
+          "owner": "scene-cards-A",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "SC-001.cite.ev",
+            "ref": "ref"
+          },
+          "expectOld": "story-ledger-A@fixture-v1#EV-104",
+          "to": {
+            "candidate": "candidate-A",
+            "item": "EV-104"
+          }
+        },
+        {
+          "source": "candidate-B",
+          "owner": "story-ledger-B",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "EV-204.derive",
+            "ref": "ref"
+          },
+          "expectOld": "story-ledger-A@fixture-v1#EV-103",
+          "to": {
+            "candidate": "candidate-A",
+            "item": "EV-103"
+          }
+        },
+        {
+          "source": "candidate-world-S",
+          "owner": "world-S",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "TR-001",
+            "ref": "ref"
+          },
+          "expectOld": "story-ledger-A@fixture-v1#EV-103",
+          "to": {
+            "candidate": "candidate-A",
+            "item": "EV-103"
+          }
+        },
+        {
+          "source": "candidate-world-S",
+          "owner": "world-S",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "TR-001",
+            "ref": "ref2"
+          },
+          "expectOld": "story-ledger-B@fixture-v1#EV-204",
+          "to": {
+            "candidate": "candidate-B",
+            "item": "EV-204"
+          }
+        },
+        {
+          "source": "candidate-scene-B",
+          "owner": "scene-cards-B",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "SC-006.cite.ev",
+            "ref": "ref"
+          },
+          "expectOld": "story-ledger-B@fixture-v1#EV-205",
+          "to": {
+            "candidate": "candidate-B",
+            "item": "EV-205"
+          }
+        }
+      ],
+      "retainedCandidatesOutsideScope": [
+        "scene-cards-A#SC-002.cite.ev",
+        "scene-cards-A#SC-003.cite.ev",
+        "scene-cards-A#SC-005.cite.ev"
+      ],
+      "notEvaluatedByThisTable": [
+        "composition-S#XP-001",
+        "reader disclosure at occurrences",
+        "manuscript text"
+      ]
+    },
+    "hypotheses": {
+      "none": {
+        "rows": [],
+        "B": {
+          "EV-204": 6
+        },
+        "story-ledger-B#EV-205.use.S2": "satisfied",
+        "label": "現採用・A案のみ"
+      },
+      "time-only": {
+        "rows": [1],
+        "candidate-B": {
+          "EV-204": 8
+        },
+        "transfer": "old-endpoints",
+        "candidate-B#EV-205.use.S2": "insufficient",
+        "scene-cards-B#SC-006": "not-reevaluated (旧版を読む)",
+        "leaf": "TL05h"
+      },
+      "without-SC006": {
+        "rows": [1, 2, 3],
+        "candidate-B": {
+          "EV-204": 8
+        },
+        "candidate-B#EV-205.use.S2": "hypothesis-contradiction",
+        "scene-cards-B#SC-006": "not-reevaluated (旧版を読む)",
+        "leaf": "TL05f"
+      },
+      "full": {
+        "rows": [0, 1, 2, 3, 4],
+        "candidate-A": {
+          "EV-103": 7
+        },
+        "candidate-B": {
+          "EV-204": 8,
+          "EV-205": 7
+        },
+        "candidate-B#EV-205.use.S2": "hypothesis-contradiction",
+        "scene-cards-A#SC-001": "hypothesis-contradiction",
+        "scene-cards-B#SC-006": "hypothesis-contradiction",
+        "excluded": ["story-ledger-B#EV-203", "manuscript-ch02"],
+        "destinations": ["OL-001", "OL-002", "OL-004"],
+        "leaf": "TL05d"
+      }
+    },
+    "sameBaseCandidates": {
+      "leaf": "TL05i",
+      "candidates": ["candidate-B1", "candidate-B2"],
+      "rows": [
+        {
+          "source": "candidate-B1",
+          "owner": "story-ledger-B",
+          "base": "fixture-v1",
+          "selector": {
+            "row": "EV-204.derive",
+            "ref": "ref"
+          },
+          "expectOld": "story-ledger-A@fixture-v1#EV-103",
+          "to": {
+            "candidate": "candidate-A",
+            "item": "EV-103"
+          }
+        }
+      ],
+      "result": {
+        "candidate-B1": {
+          "EV-204": 8
+        },
+        "candidate-B2": {
+          "EV-204": 6
+        },
+        "adopted": {
+          "EV-204": 6
+        }
+      }
+    },
+    "separateRelations": {
+      "TL13g-no-transfer": {
+        "remove": ["world-S#TR-001", "world-S#TR-001.carries.S2", "story-ledger-B#EV-204.knows.S2"],
+        "note": "移送と情報保持の関係（transfer・transfer-info・受取時のknows）だけを除く。CH-001@WL-BがS2を得る根拠が他に残らないこと",
+        "B": {
+          "EV-204": 6
+        },
+        "story-ledger-B#EV-205.use.S2": "insufficient"
+      },
+      "TL13h-no-derivation": {
+        "replace": {
+          "story-ledger-B#EV-204": {
+            "tl1.time.kind": "day",
+            "tl1.time.start": 6
+          }
+        },
+        "remove": ["story-ledger-B#EV-204.derive"],
+        "B": {
+          "EV-204": 6
+        },
+        "story-ledger-B#EV-205.use.S2": "satisfied"
+      }
+    },
+    "experience": {
+      "leaf": "TL14d",
+      "story": "story-S",
+      "owner": "composition-S",
+      "rows": {
+        "XP-001": {
+          "individual": "CH-002@WL-A",
+          "from": "story-ledger-A@fixture-v1#EV-103",
+          "to": "story-ledger-B@fixture-v1#EV-204"
+        }
+      },
+      "notMembers": ["story-ledger-B#EV-205", "CH-002@WL-B"]
+    },
+    "transferOwner": {
+      "leaf": "TL13a",
+      "owner": "world-S",
+      "fixedAt": "operation start",
+      "unchangedBy": ["表示世界A/Bの切替", "表示作品の切替"]
+    }
+  }
+}

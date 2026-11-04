@@ -6,6 +6,7 @@ import { BimContext } from './derive';
 import { bimWallAxis } from './solids';
 import {
   bimTolerance,
+  type BimAssetRef,
   type BimDocument,
   type BimElement,
   type BimPoint,
@@ -39,7 +40,16 @@ type Entity = BimDocument[BimCollection][number];
 export type BimOperation =
   | { type: 'insert'; entities: Partial<{ [K in BimCollection]: BimDocument[K] }> }
   /** Replaces one entity by ID; an element or type keeps its kind. */
-  | { type: 'update'; collection: BimCollection; entity: Entity }
+  | {
+      type: 'update';
+      collection: BimCollection;
+      entity: Entity;
+      /**
+       * #662: texture images a material's look names that the document does not hold yet
+       * (stored with the Host first).
+       */
+      assets?: BimAssetRef[];
+    }
   /** Without `cascade`, deleting an entity something depends on is refused (`in-use`). */
   | { type: 'delete'; ids: string[]; cascade: boolean }
   | { type: 'setProject'; project: BimProject };
@@ -132,6 +142,13 @@ export function applyBimOperation(doc: BimDocument, op: BimOperation): BimDocume
       if (old.kind !== (op.entity as { kind?: string }).kind)
         throw new BimOperationError('update-kind');
       list[i] = structuredClone(op.entity);
+      for (const ref of op.assets ?? []) {
+        next.assets ??= [];
+        const kept = next.assets.find((a) => a.id === ref.id);
+        if (kept && canonicalJson(kept) !== canonicalJson(ref))
+          throw new BimOperationError('asset-conflict');
+        if (!kept) next.assets.push(structuredClone(ref));
+      }
       break;
     }
     case 'delete': {
@@ -164,8 +181,19 @@ export function applyBimOperation(doc: BimDocument, op: BimOperation): BimDocume
       next.project = structuredClone(op.project);
       break;
   }
+  pruneAssets(next);
   assertBim(next);
   return next;
+}
+
+/** #662: drops the images no material names; no `assets` when none is left. */
+function pruneAssets(doc: BimDocument) {
+  if (!doc.assets) return;
+  const used = new Set(
+    doc.materials.flatMap((m) => Object.values(m.appearance?.textures?.maps ?? {})),
+  );
+  doc.assets = doc.assets.filter((a) => used.has(a.id));
+  if (!doc.assets.length) delete doc.assets;
 }
 
 /** Shape gate for operation data from UI, headless callers or proposals. */
@@ -180,7 +208,8 @@ export function assertBimOperation(op: unknown): asserts op is BimOperation {
           ([k, v]) => (bimCollections as readonly string[]).includes(k) && Array.isArray(v),
         )
       : op.type === 'update'
-        ? keys === 'collection,entity,type' &&
+        ? (keys === 'collection,entity,type' ||
+            (keys === 'assets,collection,entity,type' && Array.isArray(op.assets))) &&
           (bimCollections as readonly unknown[]).includes(op.collection) &&
           record(op.entity) &&
           bimId(op.entity.id)

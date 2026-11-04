@@ -202,13 +202,13 @@ test('PR #40 added Definition relationships keep canonical IDs through native co
   await expect(page.getByRole('status').first()).toHaveText('Ready');
   const initial = await independentSource<ReferenceDefinition>(page);
   await selectConnection(page, 'Select connection Output: Research to Notes');
-  await page.getByRole('button', { name: 'Delete selection', exact: true }).click();
+  await page.getByRole('button', { name: '選択を削除', exact: true }).click();
   const disconnected = await independentSource<ReferenceDefinition>(page);
   await page.getByRole('button', { name: 'Select node Research', exact: true }).click();
   await page.getByLabel('Relation type', { exact: true }).selectOption('output');
   await page.getByLabel('Connection from', { exact: true }).selectOption('phase-research');
   await page.getByLabel('Connection to', { exact: true }).selectOption(initial.shapes[0].id);
-  await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+  await page.getByRole('button', { name: '接続を追加', exact: true }).click();
   expect(await independentSource(page)).toEqual(initial);
   const edge = page.getByRole('button', {
     name: 'Select connection Output: Research to Notes',

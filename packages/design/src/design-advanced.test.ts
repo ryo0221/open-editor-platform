@@ -22,6 +22,7 @@ import {
   groupElements,
   designDiff,
   transformDesign,
+  isDesign,
 } from './model';
 it('transforms immutable Frame constraints once and reuses unrelated immutable geometry', () => {
   const frame = {
@@ -313,4 +314,15 @@ it('lays out added children and produces clipped frame exports without domain ID
   const svg = exportDesignSvg(d, [frame.id]);
   expect(svg).toContain('clipPath');
   expect(svg).not.toContain(a.id);
+});
+it('patches and validates a line direction (#589)', () => {
+  const line = { ...makeDesignElement('shape'), shape: 'arrow' as const };
+  const d: DesignContent = { ...createDesign(), elements: [line] };
+  const session = new EditorSession(d);
+  session.execute(patchDesign([line.id], { lineDirection: 'down' }));
+  expect(session.content.elements[0]).toMatchObject({ lineDirection: 'down' });
+  expect(isDesign(session.content)).toBe(true);
+  expect(isDesign({ ...d, elements: [{ ...line, lineDirection: 'sideways' }] } as unknown)).toBe(
+    false,
+  );
 });

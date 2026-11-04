@@ -19,6 +19,8 @@ export interface PrintedTextLine {
   size: number;
   width: number;
   order: number;
+  /** A vertical column: `x` is its centre, `y` its top and `width` its length downwards. */
+  vertical?: boolean;
 }
 const fixedFile = 'NotoSansCJKjp-Regular.otf';
 const fixedHash = '828bf816295d2f293f5f25f09777b3be53ff981df1ec1d7a57cc66f12b50ab55';
@@ -97,7 +99,24 @@ export function addPdfText(page: PDFPage, font: PDFFont, height: number, lines: 
       beginText(),
       setFontAndSize(key, size),
       setTextRenderingMode(TextRenderingMode.Invisible),
-      setTextMatrix((line.width * 0.75) / width, 0, 0, 1, line.x * 0.75, (height - line.y) * 0.75),
+      line.vertical
+        ? // Rotated a quarter turn clockwise, so search and copy read down the column.
+          setTextMatrix(
+            0,
+            (-line.width * 0.75) / width,
+            1,
+            0,
+            (line.x - line.size * 0.4) * 0.75,
+            (height - line.y) * 0.75,
+          )
+        : setTextMatrix(
+            (line.width * 0.75) / width,
+            0,
+            0,
+            1,
+            line.x * 0.75,
+            (height - line.y) * 0.75,
+          ),
       showText(font.encodeText(text)),
       endText(),
     );

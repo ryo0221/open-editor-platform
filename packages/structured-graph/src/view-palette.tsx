@@ -1,10 +1,12 @@
 import { useRef } from 'react';
 import { type GraphProfile } from './profile';
 import { graphShapePath } from './shape';
+import { graphNodeIconPath } from './icon';
+import { useGraphLabels } from './labels';
 
 /**
  * Node types as a palette, grouped by the Profile's `ui.group` (a use or a layer) in Profile
- * order; shown only when the Profile groups its types. Each entry shows the type's default shape and paint and adds one node of that type;
+ * order; shown only when the Profile groups its types. Each entry shows the type's default shape, paint and icon and adds one node of that type;
  * with a Section selected, the node is added inside it in the same edit.
  */
 export function GraphNodePalette({
@@ -17,20 +19,21 @@ export function GraphNodePalette({
   into?: string;
   onAdd: (type: string) => void;
 }) {
+  const t = useGraphLabels();
   const menu = useRef<HTMLDetailsElement>(null);
   const groups = new Map<string, [string, GraphProfile['nodes'][string]][]>();
   for (const entry of Object.entries(profile.nodes)) {
     if (entry[1].readOnly) continue;
-    const group = entry[1].ui?.group ?? 'Other';
+    const group = entry[1].ui?.group ?? t.paletteOther;
     groups.set(group, [...(groups.get(group) ?? []), entry]);
   }
   // Without groups the Node type menu already lists every type.
   if (!Object.values(profile.nodes).some((t) => t.ui?.group)) return null;
   return (
     <details className="ep-graph-palette" ref={menu}>
-      <summary>Palette</summary>
+      <summary>{t.palette}</summary>
       <div role="group" aria-label="Node palette">
-        {into && <p className="ep-graph-palette-target">Adds inside “{into}”</p>}
+        {into && <p className="ep-graph-palette-target">{t.paletteInto(into)}</p>}
         {[...groups].map(([group, types]) => (
           <section key={group} aria-label={group}>
             <h4>{group}</h4>
@@ -54,6 +57,17 @@ export function GraphNodePalette({
                       fill={fill}
                       stroke={t.ui?.style?.stroke ?? '#5269c8'}
                     />
+                    {t.ui?.icon && (
+                      <path
+                        d={graphNodeIconPath(t.ui.icon)}
+                        transform="translate(11 5) scale(0.58)"
+                        fill="none"
+                        stroke={t.ui?.style?.stroke ?? '#5269c8'}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
                   </svg>
                   <span>{label}</span>
                 </button>

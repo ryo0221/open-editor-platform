@@ -116,8 +116,12 @@ export type GraphIntent =
   /** Changes the frame only; membership and node positions stay. */
   | { type: 'resize-section'; id: string; bounds: GraphSectionBounds }
   | { type: 'set-section-style'; id: string; style: GraphNodeStyle | null }
-  /** Removes the Section; its direct members move up to its parent. Nodes and edges stay. */
-  | { type: 'delete-section'; id: string };
+  /**
+   * Removes the Section; its direct members move up to its parent and their edges stay. Edges that
+   * end at the Section itself (#594) go with it, so a Section with such edges needs
+   * `cascade: true`, as a node with edges does.
+   */
+  | { type: 'delete-section'; id: string; cascade?: boolean };
 type RawGraphIntent = Record<string, unknown>;
 function attributeIntentKeys(raw: RawGraphIntent): string[] {
   if (
@@ -213,7 +217,11 @@ const graphIntentKeys: Record<GraphIntent['type'], (raw: RawGraphIntent) => stri
     if (raw.style !== null && !validGraphStyle(raw.style)) throw new Error('Invalid section style');
     return ['type', 'id', 'style'];
   },
-  'delete-section': () => ['type', 'id'],
+  'delete-section': (raw) => {
+    if (raw.cascade !== undefined && typeof raw.cascade !== 'boolean')
+      throw new Error('Invalid cascade choice');
+    return ['type', 'id', ...(Object.hasOwn(raw, 'cascade') ? ['cascade'] : [])];
+  },
 };
 export type GraphSectionIntent = Extract<
   GraphIntent,
@@ -462,7 +470,11 @@ function applySectionIntent(next: GraphDocument, intent: GraphSectionIntent) {
       return;
     }
     case 'delete-section': {
-      const parent = sectionIn(next, intent.id).parentId;
+      const parent = sectionIn(next, intent.id).parentId,
+        ends = (e: GraphEdge) => e.from === intent.id || e.to === intent.id;
+      if (!intent.cascade && next.edges.some(ends))
+        throw new Error('Section has connections; confirm cascade deletion');
+      next.edges = next.edges.filter((e) => !ends(e));
       for (const n of next.nodes)
         if (n.sectionId === intent.id) {
           if (parent === undefined) delete n.sectionId;

@@ -10,6 +10,7 @@ import type {
   CadPartProperties,
   CadSolvedPose,
 } from './assembly';
+import type { GeometryNormalConvention, GeometryTextureRole } from '@editor-platform/geometry-core';
 import type { CadExpression, CadParameterType } from './expression';
 import type { CadSketch, CadSketchRegion } from './sketch';
 import type { CadTopologyRef } from './topology';
@@ -360,6 +361,35 @@ export interface CadAppearance {
   /** `#rrggbb` sRGB. */
   color: string;
   opacity: number;
+  /**
+   * #661: the finish (glTF metal/roughness, each 0–1). Absent: the default finish
+   * (`geometryDefaultFinish`), as bodies were drawn before materials.
+   */
+  roughness?: number;
+  metalness?: number;
+  /** #661: the library preset these values were copied from (`geometryMaterialPresets`). */
+  material?: string;
+  /**
+   * #662: image maps over the look, each a texture asset of the content. As in glTF, the
+   * colour, roughness and metalness multiply the maps.
+   */
+  textures?: CadTextures;
+}
+/** #662: a texture set on a body, as the user read it from downloaded image files. */
+export interface CadTextures {
+  /** Asset IDs (`texture-png` / `texture-jpeg`) by map; at least one. */
+  maps: Partial<Record<GeometryTextureRole, string>>;
+  /** The size one image covers on a face (mm): width, height. */
+  sizeMm: [number, number];
+  /** Turn of the image on the face, counter-clockwise (degrees, −360 to 360). */
+  rotationDeg: number;
+  /** The normal map's convention: a DirectX map is drawn with its green flipped. */
+  normal: GeometryNormalConvention;
+  /** The set's name (e.g. the downloaded file's). */
+  name: string;
+  /** Where it was downloaded from (`http(s)://`) and its licence, as the user gave them. */
+  source?: string;
+  license?: string;
 }
 /**
  * R2a (docs/cad/r2a-freeform.md, Surface body): a body is one valid solid, or one sheet: one
@@ -412,12 +442,22 @@ export interface CadAssetRef {
   byteLength: number;
   mediaType: string;
 }
-export type CadAssetKind = 'source-step' | 'normalized-brep';
+/** #662: a texture image is a PNG or a JPEG asset, one kind each. */
+export type CadAssetKind = 'source-step' | 'normalized-brep' | 'texture-png' | 'texture-jpeg';
 /** One media type per kind; the BRep is OCCT's text format (`BRepTools::Write`). */
 export const cadAssetMediaTypes: Readonly<Record<CadAssetKind, string>> = Object.freeze({
   'source-step': 'model/step',
   'normalized-brep': 'model/x-occt-brep',
+  'texture-png': 'image/png',
+  'texture-jpeg': 'image/jpeg',
 });
+/** The texture asset kind of an image media type. */
+export const cadTextureKind = (mediaType: string): CadAssetKind | undefined =>
+  mediaType === 'image/png'
+    ? 'texture-png'
+    : mediaType === 'image/jpeg'
+      ? 'texture-jpeg'
+      : undefined;
 export type CadSchemaVersion = 2;
 export interface CadDocument {
   schemaVersion: CadSchemaVersion;
@@ -454,9 +494,13 @@ export interface CadDiagnostic {
 
 /** Initial safety limits (model.md). Not performance claims. */
 export const cadLimits = Object.freeze({
-  coordinateMm: 1_000_000,
+  /**
+   * ±10 km (#589): civil works (a long bridge, a river reach) in mm. Display meshes are 32-bit
+   * floats, about 1 mm apart at this distance from the origin; further needs a coarser unit.
+   */
+  coordinateMm: 10_000_000,
   minDimensionMm: 0.001,
-  maxDimensionMm: 1_000_000,
+  maxDimensionMm: 10_000_000,
   affineScale: 1_000_000,
   /** Active bodies (docs/cad/complex-models.md, CM-U3); consumed tools count only in `allBodies`. */
   bodies: 64,

@@ -42,6 +42,10 @@ const messages: Record<string, [string, string]> = {
     'この種類のノード同士は接続できません。データ定義で許可された種類を選択してください。',
     'These node types cannot be connected. Choose an allowed type.',
   ],
+  'connection-section': [
+    'この種類の接続はこのまとまりにつなげられません。データ定義で許可されたまとまりか、ノードを選択してください。',
+    'This connection type cannot end at this section. Choose an allowed section or a node.',
+  ],
   'node-type': [
     'ノードの種類が未定義です。所有元のデータ定義を確認してください。',
     'The node type is unknown. Check its owner’s definition.',

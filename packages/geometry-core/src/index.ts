@@ -39,3 +39,27 @@ export {
   f30Transform,
   type GeometryFixture,
 } from './fixtures';
+export {
+  geometryCategoryPreset,
+  geometryDefaultFinish,
+  geometryMaterialPreset,
+  geometryMaterialPresets,
+  type GeometryFinish,
+  type GeometryLook,
+  type GeometryMaterialCategory,
+  type GeometryMaterialPreset,
+} from './materials';
+export {
+  geometryPlanarTextureUv,
+  geometryTextureSetProblems,
+  geometryTextureFileRole,
+  geometryTextureLimits,
+  geometryTextureMediaType,
+  geometryTextureMediaTypes,
+  geometryTextureRoles,
+  type GeometryNormalConvention,
+  type GeometryTextureFileRole,
+  type GeometryTextureRole,
+  type GeometryTextureSet,
+  geometryTextureImageSize,
+} from './textures';

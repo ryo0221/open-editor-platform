@@ -1,7 +1,20 @@
+import { MangaReading } from './manga-reading';
+import { MangaSplitOverlay } from './manga-split';
+import type { DesignDivisionOperation } from './division';
+import { MangaReview, type DesignPageReviewHost } from './manga-review';
+export type { DesignPageReviewHost } from './manga-review';
+import { MangaPanel } from './manga-panel';
+import { mangaEditingContext } from './manga-context';
+import { mangaDialoguePlacement } from './manga-dialogue';
+import { MangaBoundaryOverlay } from './manga-boundaries';
+import { useDesignWorkspace, type DesignWorkspaceProps } from './workspace';
+export type { DesignWorkspace, DesignWorkspaceTransition } from './workspace';
 import { DesignPagePanel } from './page-panel';
 import { designExportPaintBounds } from './paint-bounds';
 import { designPathPoint } from './path';
 import { useDesignPathEditor } from './path-editor';
+import { useDesignStrokeInput } from './stroke-input';
+import { designStrokeParent } from './stroke-path';
 import { insertDesignPath, presetDesignPath } from './path-commands';
 import { guardDesignCommand } from './model';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
@@ -28,10 +41,13 @@ import {
 } from './view-panels';
 import { DesignPrototypeSurface, type DesignPrototypeSurfaceProps } from './prototype-view';
 import { useEffect, useRef, useState } from 'react';
+import { DesignRasterControls, type DesignRasterSelection } from './raster-editor';
+export type { DesignRasterSelection } from './raster-editor';
 import { Frame, Component, Scan } from 'lucide-react';
 import { clone, newId, isDeepFrozen, deepFreeze } from '@editor-platform/artifact-core';
 import {
   command,
+  EditorInputs,
   descendantIds,
   unionBounds,
   type Bounds,
@@ -87,6 +103,7 @@ const DesignDrawings = memo(function DesignDrawings({
       {drawings.map((drawing, index) => (
         <g
           key={`${drawing.id}-${index}`}
+          pointerEvents={drawing.panelBorderOf ? 'none' : undefined}
           data-canvas-text-target={
             textParts.find((p) => p.drawingId === instanceTextKey(drawing))?.id
           }
@@ -105,6 +122,8 @@ export interface DesignExtensionContext {
   choose(ids: string[]): void;
 }
 export interface DesignSurfaceExtension {
+  /** Host navigation remains usable while native edit fields are readonly. */
+  workspaceReferences?(context: DesignExtensionContext): ReactNode;
   publicationDiagnostics?(
     candidate: DesignContent,
     componentId: string,
@@ -117,7 +136,14 @@ export interface DesignSurfaceExtension {
   /** An opaque Host element paints its slot subtree once; the native tree stays editable. */
   canvasOwner?(element: DesignElement): string | undefined;
 }
-export interface DesignSurfaceProps extends ReferenceSurfaceProps {
+export interface DesignSurfaceProps extends ReferenceSurfaceProps, DesignWorkspaceProps {
+  /** Opt-in uniform-width native stroke input. Pressure/eraser/brush engines are not provided. */
+  inkInput?: boolean;
+  pageReview?: DesignPageReviewHost;
+  mangaReadOnlyReason?: string;
+  /** Opt-in local embedded-PNG pixel editing. No pressure/shared raster engine. */
+  rasterInput?: boolean;
+  onRasterSelection?(selection: DesignRasterSelection): void;
   prototype?: Omit<DesignPrototypeSurfaceProps, 'content' | 'onClose'>;
   extension?: DesignSurfaceExtension;
   content: DesignContent;
@@ -136,9 +162,23 @@ export function DesignSurface(props: DesignSurfaceProps) {
   const renderContent = isDeepFrozen(props.content)
     ? props.content
     : deepFreeze(clone(props.content));
-  return <DesignSurfaceEditor {...props} renderContent={renderContent} />;
+  const hostInputs = useContext(EditorInputsContext);
+  const ownInputs = useMemo(() => new EditorInputs(), []);
+  return (
+    <EditorInputsContext.Provider value={hostInputs ?? ownInputs}>
+      <DesignSurfaceEditor {...props} renderContent={renderContent} />
+    </EditorInputsContext.Provider>
+  );
 }
 function DesignSurfaceEditor({
+  pageReview,
+  mangaReadOnlyReason,
+  workspace,
+  onWorkspaceRequest,
+  onWorkspaceTransition,
+  inkInput = false,
+  rasterInput = false,
+  onRasterSelection,
   references,
   focusReferenceId,
   content,
@@ -156,20 +196,34 @@ function DesignSurfaceEditor({
 }: DesignSurfaceProps & { renderContent: DesignContent }) {
   // Structured paths allow projected coordinates up to 1e12, beyond the
   // ordinary infinite canvas range. Keep camera controls and fitting consistent.
-  const minZoom = content.schemaVersion === 3 ? 1e-12 : 0.001;
+  const minZoom = content.schemaVersion >= 3 ? 1e-12 : 0.001;
   const prototypeControl = useRef<{ open(): void }>(null);
   const projectedElements = useReferenceItems(content.elements, references);
   const projectedById = new Map(projectedElements.map((e) => [e.id, e]));
   const guardExport = useContext(EditorExportGuardContext);
-  const inputs = useContext(EditorInputsContext);
+  const inputs = useContext(EditorInputsContext)!;
+  const work = useDesignWorkspace({ workspace, onWorkspaceRequest, onWorkspaceTransition }, inputs);
+  const [divisionPreview, setDivisionPreview] = useState<DesignContent>();
+  const [divisionReviewPending, setDivisionReviewPending] = useState(false);
+  const [reading, setReading] = useState<{ mode: 'spread' | 'all'; pageId: string }>();
+  const [drawSplit, setDrawSplit] = useState(false);
+  useEffect(() => setDrawSplit(false), [work.displayed, readOnly]);
+  const [splitRequest, setSplitRequest] = useState<{
+    op: DesignDivisionOperation;
+    base: DesignContent;
+  }>();
+  const displayContent =
+    work.displayed === 'manga' ? (divisionPreview ?? renderContent) : renderContent;
+  const previewReadOnly = readOnly || (work.displayed === 'manga' && divisionReviewPending);
+  const displayElements = new Map(displayContent.elements.map((e) => [e.id, e]));
   const [publication, setPublication] = useState<string>();
   useEffect(() => {
     if (publicationRequest) setPublication(publicationRequest);
   }, [publicationRequest]);
   const renderCache = useMemo(createDesignRenderCache, []);
   const project = useMemo(
-    () => designRenderSnapshot(renderContent, renderCache),
-    [renderContent, renderCache],
+    () => designRenderSnapshot(displayContent, renderCache),
+    [displayContent, renderCache],
   );
   const projectPointEdit = useMemo(() => {
     const visible = new Set(
@@ -179,7 +233,6 @@ function DesignSurfaceEditor({
     );
     return (e: DesignElement) => (visible.has(e.id) ? project(e) : []);
   }, [renderContent, project]);
-  const elements = new Map(content.elements.map((e) => [e.id, e]));
   const scopedTexts = useMemo(() => collectScopedTexts(content, project), [content, project]);
   const [selected, setSelected] = useState<string[]>([]),
     [view, setView] = useState<CanvasView>(initialCanvasView),
@@ -196,6 +249,14 @@ function DesignSurfaceEditor({
   const ids = selected.filter((id) => content.elements.some((e) => e.id === id)),
     chosen = content.elements.filter((e) => ids.includes(e.id)),
     element = chosen.length === 1 ? chosen[0] : undefined;
+  const [mangaPageId, setMangaPageId] = useState<string>();
+  const mangaContext = useMemo(
+    () => mangaEditingContext(renderContent, selected, mangaPageId),
+    [renderContent, selected, mangaPageId],
+  );
+  const mangaParent = mangaContext.panel ?? mangaContext.frame;
+  const mangaDialogue = mangaParent && mangaDialoguePlacement(mangaParent);
+  useEffect(() => setMangaPageId(mangaContext.page?.frameId), [mangaContext.page?.frameId]);
   useEffect(() => {
     if (focusReferenceId) choose([focusReferenceId]);
   }, [focusReferenceId]);
@@ -272,7 +333,18 @@ function DesignSurfaceEditor({
       return true;
     },
   });
-  pointBusy.current = pathEditor.busy;
+  const strokeInput = useDesignStrokeInput({
+    enabled: inkInput,
+    readOnly,
+    blocked: pathEditor.editing,
+    content: renderContent,
+    zoom: view.zoom,
+    parentId: designStrokeParent(content, element?.id),
+    apply,
+    created: (id) => choose([id]),
+    error: setError,
+  });
+  pointBusy.current = () => pathEditor.busy() || strokeInput.busy();
   const choose = (ids: string[]) => {
     if (
       pathEditor.editing &&
@@ -289,8 +361,12 @@ function DesignSurfaceEditor({
       choose([focusRequest.id]);
     }
   }, [focusRequest, select]);
-  function add(type: DesignElementType, patch: Partial<DesignElement> = {}) {
-    const parent = element?.type === 'frame' ? element : undefined;
+  function add(
+    type: DesignElementType,
+    patch: Partial<DesignElement> = {},
+    mangaOwner?: DesignElement,
+  ) {
+    const parent = mangaOwner ?? (element?.type === 'frame' ? element : undefined);
     const rect = viewport.current?.getBoundingClientRect();
     const center = {
       x: rect ? (rect.width / 2 - view.pan.x) / view.zoom : 450,
@@ -355,7 +431,8 @@ function DesignSurfaceEditor({
       apply(
         command('design.paste', 'Paste elements', (d) => ({
           ...d,
-          schemaVersion: duplicates.some((e) => e.path) ? 3 : d.schemaVersion,
+          schemaVersion:
+            d.schemaVersion === 4 ? 4 : duplicates.some((e) => e.path) ? 3 : d.schemaVersion,
           elements: [...d.elements, ...duplicates],
         })),
       );
@@ -419,13 +496,22 @@ function DesignSurfaceEditor({
   const inspector = (
     <>
       <div>{pathEditor.controls}</div>
+      <DesignRasterControls
+        enabled={rasterInput}
+        content={renderContent}
+        element={element}
+        readOnly={readOnly}
+        apply={apply}
+        onSelection={onRasterSelection}
+      />
       <DesignInspector
+        manga={work.displayed === 'manga'}
         references={references}
         content={content}
         element={element}
         chosen={chosen}
         ids={ids}
-        readOnly={readOnly}
+        readOnly={previewReadOnly}
         apply={apply}
         geometry={geometry}
         setError={setError}
@@ -439,6 +525,7 @@ function DesignSurfaceEditor({
   );
   const toolbar = (
     <>
+      {strokeInput.controls}
       <ReferenceTools
         identity={ids.join(',')}
         resolver={references}
@@ -549,7 +636,7 @@ function DesignSurfaceEditor({
     />
   );
   return (
-    <>
+    <div className="manga-workspace" data-workspace={work.displayed} {...work.events}>
       <DesignPrototypeController
         control={prototypeControl}
         content={{ ...content, elements: projectedElements }}
@@ -557,32 +644,91 @@ function DesignSurfaceEditor({
       />
       <EditorLayout
         viewKey="design"
-        leftLabel="Design navigator"
+        leftLabel={work.displayed === 'manga' ? '漫画のページ・コマ' : 'Design navigator'}
         inspectorLabel="Design inspector"
         toolbar={
           <>
-            <button
-              onClick={() => prototypeControl.current?.open()}
-              disabled={
-                !designPaintOrder(content).some(
-                  (element) => element.type === 'frame' && !element.hidden,
-                )
-              }
-            >
-              Open prototype
-            </button>
-            {toolbar}
+            {work.controls}
+            {work.displayed === 'design' && (
+              <button
+                onClick={() => prototypeControl.current?.open()}
+                disabled={
+                  !designPaintOrder(content).some(
+                    (element) => element.type === 'frame' && !element.hidden,
+                  )
+                }
+              >
+                Open prototype
+              </button>
+            )}
+            {work.displayed === 'manga' ? (
+              <>
+                <button
+                  disabled={previewReadOnly || !mangaDialogue}
+                  title={
+                    mangaParent && !mangaDialogue
+                      ? '台詞を配置するにはコマを広げてください'
+                      : undefined
+                  }
+                  onClick={() =>
+                    mangaDialogue && add('text', { ...mangaDialogue, text: '台詞' }, mangaParent)
+                  }
+                >
+                  台詞を追加
+                </button>
+                {strokeInput.controls}
+                <button disabled={!ids.length} onClick={() => fit(ids)}>
+                  選択コマを表示
+                </button>
+              </>
+            ) : (
+              toolbar
+            )}
             {extension?.toolbar?.(extensionContext)}
           </>
         }
         left={
           <>
-            <DesignPagePanel content={content} apply={apply} choose={choose} readOnly={readOnly} />
-            {left}
+            <div hidden={work.displayed !== 'manga'}>
+              <MangaPanel
+                onRead={(mode, pageId) => setReading({ mode, pageId })}
+                splitRequest={splitRequest}
+                onDrawSplit={() => setDrawSplit(true)}
+                content={renderContent}
+                selected={ids}
+                currentPageId={mangaContext.page?.frameId}
+                readOnly={readOnly}
+                apply={apply}
+                choose={choose}
+                fit={fit}
+                preview={(value) => {
+                  setDivisionPreview(value);
+                  setDivisionReviewPending(!!value);
+                }}
+              />
+            </div>
+            <div hidden={work.displayed === 'manga'}>
+              <DesignPagePanel
+                content={content}
+                apply={apply}
+                choose={choose}
+                readOnly={readOnly}
+              />
+              {left}
+            </div>
             {extension?.library?.(extensionContext)}
           </>
         }
-        inspector={inspector}
+        inspector={
+          <>
+            {extension?.workspaceReferences?.(extensionContext)}
+            <div hidden={work.displayed !== 'manga'}>
+              <MangaReview host={pageReview} content={renderContent} />
+              {mangaReadOnlyReason && <p role="status">{mangaReadOnlyReason}</p>}
+            </div>
+            {inspector}
+          </>
+        }
         status={
           <>
             <span>
@@ -606,7 +752,7 @@ function DesignSurfaceEditor({
         }
         {...layout}
       >
-        <div ref={viewport} style={{ height: '100%' }}>
+        <div ref={viewport} style={{ height: '100%', position: 'relative' }}>
           {error && (
             <div className="surface-error" role="alert">
               {error}
@@ -615,9 +761,43 @@ function DesignSurfaceEditor({
           )}
           <CanvasStage
             virtualize
-            inputOwner={pathEditor.editing ? 'point' : 'object'}
-            onPointKeyDown={pathEditor.keyDown}
-            overlay={pathEditor.overlay}
+            inputOwner={pathEditor.editing || strokeInput.active || drawSplit ? 'point' : 'object'}
+            onPointKeyDown={strokeInput.active ? strokeInput.keyDown : pathEditor.keyDown}
+            overlay={
+              <>
+                {work.displayed === 'manga' &&
+                  drawSplit &&
+                  !readOnly &&
+                  !pathEditor.editing &&
+                  !strokeInput.active && (
+                    <MangaSplitOverlay
+                      content={renderContent}
+                      selected={ids}
+                      currentPageId={mangaContext.page?.frameId}
+                      zoom={view.zoom}
+                      preview={setDivisionPreview}
+                      propose={(op) => setSplitRequest({ op, base: renderContent })}
+                      cancel={() => setDrawSplit(false)}
+                    />
+                  )}
+                {pathEditor.overlay}
+                {strokeInput.overlay}
+                {work.displayed === 'manga' && (
+                  <MangaBoundaryOverlay
+                    content={renderContent}
+                    displayContent={displayContent}
+                    selected={ids}
+                    currentPageId={mangaContext.page?.frameId}
+                    zoom={view.zoom}
+                    disabled={
+                      previewReadOnly || strokeInput.active || pathEditor.editing || drawSplit
+                    }
+                    preview={setDivisionPreview}
+                    apply={apply}
+                  />
+                )}
+              </>
+            }
             label="Design canvas"
             space="infinite"
             minZoom={minZoom}
@@ -626,9 +806,15 @@ function DesignSurfaceEditor({
             view={view}
             onViewChange={setView}
             selected={canvasSelection}
-            targets={designCanvasTargets(content, project, canvasOwners, scopedTexts, extension)}
+            targets={designCanvasTargets(
+              displayContent,
+              project,
+              canvasOwners,
+              scopedTexts,
+              extension,
+            )}
             onSelect={choose}
-            readOnly={readOnly}
+            readOnly={previewReadOnly}
             onTransform={(ids, delta) => apply(transformElements(ids, delta))}
             onDelete={() => action('delete')}
             onAction={action}
@@ -649,7 +835,7 @@ function DesignSurfaceEditor({
             }}
             onImage={(f) => void image(f)}
             render={(target) => {
-              const raw = elements.get(target.id)!;
+              const raw = displayElements.get(target.id)!;
               const external = extension?.render?.(raw, target.bounds);
               if (external) return external;
               return (
@@ -665,6 +851,13 @@ function DesignSurfaceEditor({
               );
             }}
           />
+          {work.displayed === 'manga' && reading && (
+            <MangaReading
+              content={renderContent}
+              {...reading}
+              close={() => setReading(undefined)}
+            />
+          )}
           {publication && content.components.some((component) => component.id === publication) && (
             <ComponentPublicationDialog
               key={publication}
@@ -691,7 +884,7 @@ function DesignSurfaceEditor({
           close={() => setPreset(undefined)}
         />
       )}
-    </>
+    </div>
   );
 }
 

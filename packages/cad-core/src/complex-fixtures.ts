@@ -76,7 +76,8 @@ function wheel(b: CadBuilder, n: string, [x, y, z]: [number | string, number, nu
     { radius: 220, height: 190, origin: [x, y + 20, z], orientation: alongY },
     { color: '#d5d8dc' },
   );
-  b.boolean(revolved, [rim], 'union', `Rim ${n} joined`);
+  // A named union names the part it makes (#589): each union is named for its result.
+  b.boolean(revolved, [rim], 'union', `Wheel ${n}`);
 }
 /** F40's wheel centres: front and rear axle, left and right (the tyre's inner side). */
 const f40Axles = [900, '{Rear axle X}'] as const;
@@ -257,7 +258,7 @@ export function f41Bridge(
       { color: '#d35400' },
     );
   });
-  if (braced) b.boolean(arches, braces, 'union', 'Cross bracing');
+  if (braced) b.boolean(arches, braces, 'union', 'Arches');
   if (lamps) {
     // The rib's outer arc again, on the rib's mid plane, kept 3° from each foot: 15 cube lamps from
     // one end to the other.
@@ -280,7 +281,7 @@ export function f41Bridge(
       lamp,
       { type: 'curve', path: { sketchId: line, elements: ['ao'] }, count: 15, align: true },
       'union',
-      'Lamps',
+      'Arches',
     );
   }
   b.mirror(arches, { normal: [0, 1, 0] }, 'Mirror arch');
@@ -298,7 +299,7 @@ export function f41Bridge(
       ),
     ),
   );
-  b.boolean(arches, hangers, 'union', 'Hangers');
+  b.boolean(arches, hangers, 'union', 'Arches');
   const grey = { color: '#aab7b8' };
   const slab = b.box(
     'Deck',
@@ -331,7 +332,7 @@ export function f41Bridge(
       { color: '#7f8c8d' },
     ),
   ]);
-  b.boolean(slab, [...ties, girder, ...supports], 'union', 'Deck and substructure');
+  b.boolean(slab, [...ties, girder, ...supports], 'union', 'Deck');
   for (const [i, y] of [7300, -7420].entries()) {
     const rail = b.box(
       `Railing ${i + 1}`,
@@ -348,7 +349,7 @@ export function f41Bridge(
       post,
       { type: 'linear', direction: [1, 0, 0], count: '{Railing posts}', spacing: 2500 },
       'union',
-      `Posts ${i + 1}`,
+      `Railing ${i + 1}`,
     );
   }
   b.box(
@@ -494,10 +495,10 @@ export function f42Airliner(
     );
   });
   if (mirrored) b.mirror(wings[0]!, { normal: [0, 1, 0] }, 'Mirror wing');
-  else b.boolean(wings[0]!, [wings[1]!], 'union', 'Join wing halves');
+  else b.boolean(wings[0]!, [wings[1]!], 'union', 'Wing');
   // K2 (CM-6): the wings joined to the fuselage, which needs the `large` tolerances.
   if (tolerance !== 'standard') b.toleranceSet(tolerance);
-  if (joined) b.boolean(airframe, [wings[0]!], 'union', 'Join wings to fuselage');
+  if (joined) b.boolean(airframe, [wings[0]!], 'union', 'Airframe');
   b.loft(
     'Stabiliser',
     [
@@ -574,7 +575,7 @@ export function f42Airliner(
       { size: [5600, 300, 1400], origin: [10_400, ey - 150, ez + 900] },
       { color: '#aab7b8' },
     );
-    b.boolean(engine, [fan, pylon], 'union', `Engine ${i + 1} parts`);
+    b.boolean(engine, [fan, pylon], 'union', `Engine ${i + 1}`);
   }
   // Windows: short cylinders across the fuselage, tied by a hidden bar into one solid.
   const z = 550;
@@ -594,7 +595,7 @@ export function f42Airliner(
     window,
     { type: 'linear', direction: [1, 0, 0], count: 40, spacing: 500 },
     'union',
-    'Window row',
+    'Windows',
   );
   b.box(
     'Windscreen',

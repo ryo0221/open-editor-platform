@@ -146,6 +146,68 @@ export function splinePoints(
   } else out[out.length - 1] = out[0]!;
   return out;
 }
+/** The point of a spline at `t` (0 to the number of knot spans), as `splinePoints` samples it. */
+function splinePointAt(
+  poles: readonly (readonly [number, number])[],
+  degree: number,
+  closed: boolean,
+  t: number,
+): [number, number] {
+  const { cps, knots } = fullSpline(degree, closed, poles);
+  const spans = closed ? poles.length : poles.length - degree;
+  return deBoor(cps, knots, degree, degree + Math.min(Math.floor(t), spans - 1), t);
+}
+/**
+ * Control points of a spline that passes through `points` in order (SC-5, a curve drawn
+ * through points): as many poles as points, each point on the curve at its pole's Greville
+ * abscissa (the mean of the pole's inner knots), where the collocation matrix of a uniform
+ * B-spline is invertible. An open spline starts and ends on its first and last points; a closed
+ * one goes round through all of them. The stored form stays poles: only the drawing differs.
+ */
+export function splineThrough(
+  points: readonly (readonly [number, number])[],
+  degree: number,
+  closed: boolean,
+): [number, number][] {
+  const n = points.length;
+  const p = degree;
+  const { knots } = fullSpline(p, closed, points);
+  // Periodic poles wrap: pole i is centred (p − 1) / 2 spans before knot i.
+  const at = (i: number) =>
+    closed
+      ? (((i - (p - 1) / 2) % n) + n) % n
+      : knots.slice(i + 1, i + p + 1).reduce((a, k) => a + k, 0) / p;
+  // a[j][i]: the weight of pole i in the point at parameter at(j).
+  const unit = (i: number) => points.map((_, k) => [k === i ? 1 : 0, 0] as const);
+  const a = Array.from({ length: n }, (_, j) =>
+    Array.from({ length: n }, (_, i) => splinePointAt(unit(i), p, closed, at(j))[0]),
+  );
+  const rhs = points.map((q) => [q[0], q[1]]);
+  // Gaussian elimination with partial pivoting: n is at most cadLimits' 256 poles.
+  for (let c = 0; c < n; c++) {
+    let best = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(a[r]![c]!) > Math.abs(a[best]![c]!)) best = r;
+    [a[c], a[best]] = [a[best]!, a[c]!];
+    [rhs[c], rhs[best]] = [rhs[best]!, rhs[c]!];
+    for (let r = c + 1; r < n; r++) {
+      const f = a[r]![c]! / a[c]![c]!;
+      if (!f) continue;
+      for (let k = c; k < n; k++) a[r]![k]! -= f * a[c]![k]!;
+      rhs[r]![0]! -= f * rhs[c]![0]!;
+      rhs[r]![1]! -= f * rhs[c]![1]!;
+    }
+  }
+  const out: [number, number][] = Array.from({ length: n }, () => [0, 0]);
+  for (let r = n - 1; r >= 0; r--) {
+    let [x, y] = rhs[r] as [number, number];
+    for (let k = r + 1; k < n; k++) {
+      x -= a[r]![k]! * out[k]![0];
+      y -= a[r]![k]! * out[k]![1];
+    }
+    out[r] = [x / a[r]![r]!, y / a[r]![r]!];
+  }
+  return out;
+}
 /** Residual tolerances of a stored solution; the solver converges an order tighter. */
 export const sketchTolerance = Object.freeze({
   length: cadTolerance.linearToleranceMm,

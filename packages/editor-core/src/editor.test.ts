@@ -9,6 +9,45 @@ import {
   type Selection,
 } from './index';
 describe('command history', () => {
+  it('restores proposal ancestry with native history and excludes failed/new-branch operations', () => {
+    const s = new EditorSession({ text: 'initial' });
+    const propose = (id: string, text: string) =>
+      command('proposal', 'Apply', () => ({ text }), { origin: 'proposal', transactionId: id });
+    s.execute(propose('p1', 'first'));
+    s.execute(command('local', 'Local', () => ({ text: 'local' })));
+    s.execute(propose('p2', 'second'));
+    expect(s.proposalTransactions).toEqual(['p1', 'p2']);
+    const copy = s.proposalTransactions as string[];
+    copy.push('forged');
+    expect(s.proposalTransactions).toEqual(['p1', 'p2']);
+    s.undo();
+    expect(s.proposalTransactions).toEqual(['p1']);
+    s.redo();
+    expect(s.proposalTransactions).toEqual(['p1', 'p2']);
+    s.undo();
+    s.undo();
+    s.undo();
+    expect(s.proposalTransactions).toEqual([]);
+    s.redo();
+    expect(s.proposalTransactions).toEqual(['p1']);
+    s.execute(propose('branch', 'branch'));
+    expect(s.proposalTransactions).toEqual(['p1', 'branch']);
+    expect(s.canRedo).toBe(false);
+    expect(() =>
+      s.execute(
+        command(
+          'bad',
+          'Bad',
+          () => {
+            throw Error('failed');
+          },
+          { origin: 'proposal', transactionId: 'failed' },
+        ),
+      ),
+    ).toThrow('failed');
+    expect(s.proposalTransactions).toEqual(['p1', 'branch']);
+    expect(new EditorSession(s.content).proposalTransactions).toEqual([]);
+  });
   it('offers an immutable rendering result while legacy snapshots and commands stay isolated', () => {
     const s = new EditorSession({ rows: [{ value: 1 }, { value: 2 }] });
     const view = s.executeView(

@@ -5,7 +5,7 @@ import { fitGraphView, graphNodeSize, graphBoxesOverlap, placeGraphEdgeLabels } 
 import { routeGraphEdge, routeIntersects, separateGraphRoutes } from './routing';
 import { isGraphProfile, validateGraph } from './profile';
 import { createRelationGraph, relationProfile } from './reference';
-import { graphEdgeText } from './view-model';
+import { graphEdgeText, graphFitMaxZoom, wheelGraphCamera } from './view-model';
 import { graphConnectionLabelField, prepareGraphConnection } from './view-connection';
 
 it('fits negative coordinates and actual custom dimensions at desktop and mobile widths', () => {
@@ -28,6 +28,31 @@ it('fits negative coordinates and actual custom dimensions at desktop and mobile
     }
   }
   expect(fitGraphView([], { width: 390, height: 330 })).toEqual({ x: 0, y: 0, zoom: 1 });
+});
+
+it('an automatic Fit never magnifies a small drawing; a Fit of chosen boxes may (#589)', () => {
+  const small = [{ x: 0, y: 0, width: 200, height: 70 }];
+  const viewport = { width: 1100, height: 700 };
+  expect(fitGraphView(small, viewport, graphFitMaxZoom).zoom).toBe(1);
+  expect(fitGraphView(small, viewport).zoom).toBe(2);
+});
+
+it('zooms a wheel step at the cursor: the point under it stays (#589)', () => {
+  const camera = { x: 40, y: -20, zoom: 0.5 };
+  const cursor = { x: 300, y: 200 },
+    scroll = { x: 100, y: 30 };
+  const world = (c: typeof camera, s = { x: 0, y: 0 }) => ({
+    x: (cursor.x + s.x - c.x) / c.zoom,
+    y: (cursor.y + s.y - c.y) / c.zoom,
+  });
+  for (const deltaY of [-120, 120, -1000]) {
+    const next = wheelGraphCamera(camera, cursor, scroll, deltaY);
+    expect(next.zoom > camera.zoom).toBe(deltaY < 0);
+    // The scroll is folded into the pan (the Surface resets it to 0).
+    expect(world(next).x).toBeCloseTo(world(camera, scroll).x, 9);
+    expect(world(next).y).toBeCloseTo(world(camera, scroll).y, 9);
+  }
+  expect(wheelGraphCamera(camera, cursor, scroll, -100_000).zoom).toBe(2);
 });
 
 it('uses actual dimensions for ports, obstacle avoidance and overlap refusal', () => {

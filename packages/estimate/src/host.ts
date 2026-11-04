@@ -1,3 +1,4 @@
+import { EstimateSettlementTracker } from './settlement';
 import { canonicalJson, newId, type Artifact } from '@editor-platform/artifact-core';
 import {
   previewProposedCommands,
@@ -92,6 +93,8 @@ export interface EstimateCandidate {
 }
 /** Private execution state; edits and successful calculations use the existing Host Session. */
 export class EstimateController {
+  private readonly settlementTracker = new EstimateSettlementTracker();
+  readonly settlement = this.settlementTracker.handle;
   private serial = 0;
   private abort?: AbortController;
   private closed = false;
@@ -101,6 +104,7 @@ export class EstimateController {
     private readonly worker: EstimateWorkerFactory = browserEstimateWorker,
   ) {}
   cancel() {
+    this.settlementTracker.cancel();
     this.serial++;
     this.abort?.abort();
     this.abort = undefined;
@@ -108,6 +112,7 @@ export class EstimateController {
   close() {
     this.closed = true;
     this.cancel();
+    this.settlementTracker.close();
   }
   private guard(document = this.port.read()) {
     if (this.closed) throw new CalculationError('closed');
@@ -119,14 +124,38 @@ export class EstimateController {
     this.guard();
     this.port.execute(replaceEstimate(this.port.read(), next, this.port, label));
   }
+  private startCalculation() {
+    // Preserve the prior request if the new attempt is refused before it starts.
+    try {
+      this.port.flush();
+      this.guard();
+    } catch (error) {
+      this.settlementTracker.refuse(error);
+      throw error;
+    }
+    this.cancel();
+    return this.settlementTracker.begin();
+  }
   async prepare(
     scenarioId: string | null = null,
     candidate?: EstimateDocument,
     retention: 'append' | 'replace' = 'append',
   ): Promise<EstimateCandidate> {
-    this.port.flush();
-    this.guard();
-    this.cancel();
+    const sequence = this.startCalculation();
+    try {
+      const result = await this.prepareCandidate(scenarioId, candidate, retention);
+      this.settlementTracker.finish(sequence, 'candidate');
+      return result;
+    } catch (error) {
+      this.settlementTracker.finish(sequence, 'failed', error);
+      throw error;
+    }
+  }
+  private async prepareCandidate(
+    scenarioId: string | null = null,
+    candidate?: EstimateDocument,
+    retention: 'append' | 'replace' = 'append',
+  ): Promise<EstimateCandidate> {
     const base = structuredClone(this.port.read()),
       revision = this.port.revision(),
       generation = this.port.generation(),
@@ -185,6 +214,23 @@ export class EstimateController {
     return reviewed;
   }
   apply(candidate: EstimateCandidate) {
+    try {
+      this.checkCandidate(candidate);
+    } catch (error) {
+      // A refused old preview must not supersede the calculation being observed.
+      this.settlementTracker.refuse(error);
+      throw error;
+    }
+    const sequence = this.settlementTracker.begin();
+    try {
+      this.executeCandidate(candidate);
+      this.settlementTracker.finish(sequence, 'accepted');
+    } catch (error) {
+      this.settlementTracker.finish(sequence, 'failed', error);
+      throw error;
+    }
+  }
+  private checkCandidate(candidate: EstimateCandidate) {
     if (this.prepared.get(candidate) !== canonicalJson(candidate))
       throw new CalculationError('unverified-candidate');
     this.port.flush();
@@ -195,6 +241,8 @@ export class EstimateController {
       candidate.generation !== this.port.generation()
     )
       throw new CalculationError('stale-result');
+  }
+  private executeCandidate(candidate: EstimateCandidate) {
     this.port.execute(
       transaction(
         'Accept estimate calculation',
@@ -205,7 +253,16 @@ export class EstimateController {
     this.serial++;
   }
   async run(scenarioId: string | null = null, retention: 'append' | 'replace' = 'append') {
-    this.apply(await this.prepare(scenarioId, undefined, retention));
+    const sequence = this.startCalculation();
+    try {
+      const candidate = await this.prepareCandidate(scenarioId, undefined, retention);
+      this.checkCandidate(candidate);
+      this.executeCandidate(candidate);
+      this.settlementTracker.finish(sequence, 'accepted');
+    } catch (error) {
+      this.settlementTracker.finish(sequence, 'failed', error);
+      throw error;
+    }
   }
   async verifiedCalculation(id: string) {
     this.port.flush();

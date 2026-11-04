@@ -13,6 +13,7 @@ import {
   solveSketch,
   splineKnots,
   splinePoints,
+  splineThrough,
   type CadSketch,
 } from './sketch';
 import { validateCad } from './validation';
@@ -27,6 +28,36 @@ type Loose = Record<string, unknown>;
 const spline = (s: CadSketch) => s.entities.find((e) => e.id === 'sp') as unknown as Loose;
 
 describe('sketch splines (R2a-2, CAD40)', () => {
+  it('poles of a spline through points: the curve passes through every point (ST-45#5)', () => {
+    // A dashboard-like outline: the poles alone would round the corners well inside.
+    const points: [number, number][] = [
+      [0, 0],
+      [400, -30],
+      [800, 0],
+      [820, 160],
+      [400, 220],
+      [-20, 160],
+    ];
+    for (const closed of [false, true])
+      for (const degree of [2, 3, 5]) {
+        const poles = splineThrough(points, degree, closed);
+        expect(poles).toHaveLength(points.length);
+        // Each point sits at a multiple of 1 / (2 p) of a span, which these samples include.
+        const samples = splinePoints(poles, degree, closed, 2 * degree);
+        for (const q of points) {
+          const d = Math.min(...samples.map((x) => Math.hypot(x[0] - q[0], x[1] - q[1])));
+          expect(d, `${closed ? 'closed' : 'open'} degree ${degree}`).toBeLessThan(1e-9);
+        }
+        if (!closed) {
+          expect(poles[0]).toEqual(points[0]);
+          expect(poles.at(-1)![0]).toBeCloseTo(points.at(-1)![0], 9);
+        }
+        // Through the corners, the poles go outside the points' polygon.
+        if (closed && degree === 3)
+          expect(Math.max(...poles.map((q) => q[0]))).toBeGreaterThan(820);
+      }
+  });
+
   it('knots: uniform and clamped when open, all simple when closed', () => {
     expect(splineKnots(5, 3, false)).toEqual({ knots: [0, 1, 2], mults: [4, 1, 4] });
     expect(splineKnots(6, 5, false)).toEqual({ knots: [0, 1], mults: [6, 6] });

@@ -2,6 +2,7 @@
  * Building (BIM) document model, schema 1 — the only schema (docs/cad/r2c-architecture.md, 文書のmodel).
  * Independent of the CAD document: it shares no types with `cad-core`.
  */
+import type { GeometryTextureSet } from '@editor-platform/geometry-core';
 
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
@@ -49,10 +50,38 @@ export const bimMaterialCategories = [
   'other',
 ] as const;
 export type BimMaterialCategory = (typeof bimMaterialCategories)[number];
+/**
+ * #661: how a material's surfaces are drawn (glTF metal/roughness, each 0–1). `preset` is the
+ * library preset the values were copied from (`geometryMaterialPresets`).
+ */
+export interface BimAppearance {
+  /** `#rrggbb` sRGB. */
+  color: string;
+  opacity: number;
+  roughness: number;
+  metalness: number;
+  preset?: string;
+  /**
+   * #662: image maps over the look, each a texture asset of the document. As in glTF, the
+   * colour, roughness and metalness multiply the maps.
+   */
+  textures?: GeometryTextureSet;
+}
+/** #662: an image a material's texture names, kept by the Host by its hash. */
+export interface BimAssetRef {
+  id: string;
+  kind: 'texture-png' | 'texture-jpeg';
+  /** `sha256:<hex>` of the bytes. */
+  sha256: string;
+  byteLength: number;
+  mediaType: 'image/png' | 'image/jpeg';
+}
 export interface BimMaterial {
   id: string;
   name: string;
   category: BimMaterialCategory;
+  /** #661: absent, the elements made of it keep their kind's colour. */
+  appearance?: BimAppearance;
 }
 export interface BimLayer {
   materialId: string;
@@ -269,6 +298,11 @@ export interface BimDocument {
   joins: BimWallJoin[];
   views: BimView[];
   propertySets: BimPropertySetDef[];
+  /**
+   * #662: the texture images the materials name (absent when none). The closure is exact: an
+   * image no material names is not kept.
+   */
+  assets?: BimAssetRef[];
 }
 
 export interface BimDiagnostic {

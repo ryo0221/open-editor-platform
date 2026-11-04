@@ -3,7 +3,8 @@ import { PDFDocument } from 'pdf-lib';
 import { addPdfText, preparePdfTextFont } from './pdf-text';
 import { DocumentPrintRenderer } from './print-renderer';
 import { downloadBlob } from '@editor-platform/canvas-ui';
-import { type DocumentContent } from './model';
+import { isVerticalDocument, type DocumentContent } from './model';
+import { layoutVerticalDocument, paintVerticalPages, verticalTextLines } from './print-vertical';
 /** Browser font rasterization keeps Unicode and installed fonts consistent in exported PDF. */
 export async function renderDocumentLayout(content: DocumentContent) {
   await document.fonts.ready;
@@ -13,6 +14,18 @@ export async function renderDocumentLayout(content: DocumentContent) {
     w = landscape ? height : width,
     h = landscape ? width : height,
     margin = content.page?.margin ?? 64;
+  if (isVerticalDocument(content)) {
+    const measure = document.createElement('canvas').getContext('2d')!;
+    const layout = layoutVerticalDocument(
+      content,
+      { width: w, height: h, margin },
+      (text, font) => {
+        measure.font = font;
+        return measure.measureText(text).width;
+      },
+    );
+    return { pages: paintVerticalPages(layout), textPages: verticalTextLines(layout) };
+  }
   const renderer = new DocumentPrintRenderer(w, h, margin);
   await renderer.preload(content);
   const visible = content.blocks.filter((block) => !block.hidden);

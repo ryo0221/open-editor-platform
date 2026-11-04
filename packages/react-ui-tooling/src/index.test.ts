@@ -68,6 +68,9 @@ it('Host policy controls sample/exclusion/wrapper without modifying source or ot
     }),
   ).toThrow(/unknown component/);
 });
+// Reuse unchanged dependency syntax trees, never the virtual component or its type checker.
+// Parsing the same TypeScript/React declarations for every case obscures the contract tests.
+const dependencyFiles = new Map<string, ts.SourceFile>();
 function fixture(source: string) {
   const name = resolve('work/issue-38/type-fixture.tsx');
   const host = ts.createCompilerHost({});
@@ -75,7 +78,14 @@ function fixture(source: string) {
   host.getSourceFile = (path, language, onError, fresh) =>
     path === name
       ? ts.createSourceFile(path, source, language, true, ts.ScriptKind.TSX)
-      : read(path, language, onError, fresh);
+      : (() => {
+          if (fresh || !dependencyFiles.has(path)) {
+            const file = read(path, language, onError, fresh);
+            if (file) dependencyFiles.set(path, file);
+            return file;
+          }
+          return dependencyFiles.get(path);
+        })();
   const p = ts.createProgram(
     [name],
     {

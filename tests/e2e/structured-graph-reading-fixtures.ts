@@ -41,7 +41,7 @@ export async function checkReadingControls(page: Page) {
   expect(
     Number.parseFloat((await page.getByLabel('Graph zoom', { exact: true }).textContent())!),
   ).toBeLessThan(fittedZoom);
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expectGraphFitted(page);
   const node = page.locator('[data-node-id="n0"] .ep-graph-node-select');
   const fullLabel =
@@ -52,12 +52,12 @@ export async function checkReadingControls(page: Page) {
   await expect(page.getByTestId('reading-selection')).toHaveText('n0');
   await expect(page.locator('.ep-graph-attribute-values')).toContainText(fullLabel);
   for (const name of [
-    'Add node',
-    'Delete selection',
-    'Graph properties',
-    'Apply attributes',
-    'Cancel attributes',
-    'Add connection',
+    'ノードを追加',
+    '選択を削除',
+    'グラフの設定',
+    '属性を適用',
+    '属性の入力をやめる',
+    '接続を追加',
   ])
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   await expect(
@@ -71,7 +71,7 @@ export async function checkReadingControls(page: Page) {
   await expect(page.locator('[data-edge-id="e2-1-0"]')).toHaveClass(/dimmed/);
   await page.getByLabel('Show Inspector', { exact: true }).uncheck();
   await expect(page.getByLabel('Graph Inspector', { exact: true })).toBeHidden();
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expectGraphFitted(page);
   await page.locator('[data-node-id="n1"] button').click();
   await expect(page.getByTestId('reading-selection')).toHaveText('n1');
@@ -79,9 +79,9 @@ export async function checkReadingControls(page: Page) {
   await expect(page.locator('.ep-graph-attribute-values')).toContainText('Item 1');
   await page.getByLabel('Profile read only', { exact: true }).check();
   await page.getByLabel('Host read only', { exact: true }).uncheck();
-  await expect(page.getByRole('button', { name: 'Add node', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ノードを追加', exact: true })).toHaveCount(0);
   await page.getByLabel('Profile read only', { exact: true }).uncheck();
-  await expect(page.getByRole('button', { name: 'Add node', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'ノードを追加', exact: true })).toBeEnabled();
   await expect(page.getByLabel('Connection editor', { exact: true })).toBeVisible();
   await page.getByLabel('Host read only', { exact: true }).check();
   expect(await readingSnapshot(page)).toEqual(original);
@@ -185,7 +185,7 @@ export async function checkCompositionReadonly(
   await page.locator('[data-node-id="n0"] .ep-graph-node-select').click();
   await expect(input).toHaveValue('未確定の属性を保持');
   expect(await readingSnapshot(page)).toEqual(original);
-  await page.getByRole('button', { name: 'Apply attributes', exact: true }).click();
+  await page.getByRole('button', { name: '属性を適用', exact: true }).click();
   expect(JSON.parse((await readingSnapshot(page)).source).nodes[0].attributes.name).toBe(
     '未確定の属性を保持',
   );
@@ -267,7 +267,7 @@ export async function checkMeasuredInitialFit(page: Page, mode: 'fresh' | 'switc
       };
     });
   const before = await bounds();
-  await page.getByRole('button', { name: 'Fit graph', exact: true }).click();
+  await page.getByRole('button', { name: '全体を表示', exact: true }).click();
   await expect.poll(async () => (await bounds()).fits).toBe(true);
   expect(before, 'initial Fit must include measured glyph bounds as manual Fit does').toMatchObject(
     { fits: true },
