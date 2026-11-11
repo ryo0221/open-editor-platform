@@ -2,6 +2,7 @@ import {
   boxMesh,
   encodeEpm,
   epmSha256,
+  multiresTopology,
   type EpmMesh,
   type WeightBone,
 } from '@editor-platform/geometry-mesh';
@@ -82,9 +83,59 @@ export function characterMaterialImage(
   return { op: { type: 'setMaterialMap', id: materialId, role, asset: ref }, ref, bytes };
 }
 
+/** C7d: the part's materials that another part uses too (a map baked for it would land there). */
+export function characterSharedMaterials(doc: CharacterDocument, partId: string): string[] {
+  const part = doc.parts.find((p) => p.id === partId);
+  if (!part) return [];
+  return [...new Set(part.materials)].filter((id) =>
+    doc.parts.some((p) => p.id !== partId && p.materials.includes(id)),
+  );
+}
+
+/**
+ * C7d: the edit that puts a baked normal map (PNG bytes; stage them with the Host first, then run
+ * `op`) on every material of a part. Materials other parts share are copied for this part when
+ * `copyShared`; otherwise throws `character-material-shared`. Throws `character-image-format`
+ * for bytes that are not a PNG and `character-image-size` past the image limit.
+ */
+export function characterNormalBake(
+  doc: CharacterDocument,
+  partId: string,
+  bytes: Uint8Array,
+  copyShared: boolean,
+): {
+  op: Extract<CharacterOperation, { type: 'setPartNormalMap' }>;
+  ref: CharacterAssetRef;
+  bytes: Uint8Array;
+} {
+  const part = doc.parts.find((p) => p.id === partId);
+  if (!part) throw new Error('character-missing-part');
+  if (characterImageKind(bytes) !== 'texture-png') throw new Error('character-image-format');
+  if (bytes.length > gltfImportLimits.imageBytes) throw new Error('character-image-size');
+  const shared = characterSharedMaterials(doc, partId);
+  if (shared.length && !copyShared) throw new Error('character-material-shared');
+  const taken = characterIds(doc);
+  const copies = shared.map((from) => {
+    const m = doc.materials.find((x) => x.id === from)!;
+    const id = freshCharacterId(doc, `${from}-${part.id}`, taken);
+    taken.add(id);
+    return { from, id, name: `${m.name} (${part.name})` };
+  });
+  const sha256 = epmSha256(bytes);
+  const ref: CharacterAssetRef = {
+    id: freshCharacterId(doc, `${part.id}-normal-${sha256.slice(7, 19)}`, taken),
+    kind: 'texture-png',
+    sha256,
+    byteLength: bytes.length,
+    mediaType: characterAssetMediaTypes['texture-png'],
+  };
+  return { op: { type: 'setPartNormalMap', id: partId, asset: ref, copies }, ref, bytes };
+}
+
 /**
  * The edit that swaps a part's mesh for an edited one (C3): stage `bytes` with the Host first,
- * then run `op`. The part keeps its ID, materials, skin and morphs.
+ * then run `op`. The part keeps its ID, materials, skin and morphs. On a part with a multires,
+ * an edit that changes the faces throws `character-multires-topology`.
  */
 export function characterMeshEdit(
   doc: CharacterDocument,
@@ -95,6 +146,10 @@ export function characterMeshEdit(
   ref: CharacterAssetRef;
   bytes: Uint8Array;
 } {
+  // C7a: a sculpted part keeps its faces; moving its vertices is fine (the detail follows).
+  const multires = doc.parts.find((p) => p.id === partId)?.multires;
+  if (multires && multiresTopology(mesh) !== multires.topology)
+    throw new Error('character-multires-topology');
   const { ref, bytes } = characterMeshAsset(doc, mesh, `${partId}-mesh`);
   return { op: { type: 'setPartMesh', id: partId, asset: ref }, ref, bytes };
 }

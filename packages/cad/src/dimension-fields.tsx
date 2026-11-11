@@ -33,7 +33,9 @@ const metres = { mm: [1e3, 1e4, 'm'], 'mm²': [1e6, 1e6, 'm²'], 'mm³': [1e9, 1
  */
 export function fmtQuantity(n: number, unit: keyof typeof metres, digits = 3): string {
   const [scale, from, inMetres] = metres[unit];
-  const text = `${fmtGrouped(n, digits)} ${unit}`;
+  // WM3: a watch part's quantity below the last digit keeps 3 significant digits, not 0.
+  const tiny = Math.abs(n) >= 1e-12 && Math.abs(n) < 0.5 * 10 ** -digits;
+  const text = `${tiny ? String(Number(n.toPrecision(3))) : fmtGrouped(n, digits)} ${unit}`;
   return Math.abs(n) >= from ? `${text} (${fmtGrouped(n / scale, 3)} ${inMetres})` : text;
 }
 

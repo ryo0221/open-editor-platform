@@ -308,12 +308,99 @@ it('lays out added children and produces clipped frame exports without domain ID
       },
     },
     a = { ...makeDesignElement('rectangle'), parentId: frame.id },
-    b = { ...makeDesignElement('rectangle'), parentId: frame.id };
-  const d = layoutDesign({ ...createDesign(), elements: [frame, a, b] });
+    b = { ...makeDesignElement('rectangle'), parentId: frame.id },
+    // Taller than the frame, so the frame clip really cuts it.
+    tall = {
+      ...makeDesignElement('rectangle'),
+      parentId: frame.id,
+      bounds: { ...makeDesignElement('rectangle').bounds, height: frame.bounds.height * 3 },
+    };
+  const d = layoutDesign({ ...createDesign(), elements: [frame, a, b, tall] });
   expect(d.elements[2].bounds.y - d.elements[1].bounds.y).toBe(a.bounds.height + 12);
   const svg = exportDesignSvg(d, [frame.id]);
   expect(svg).toContain('clipPath');
   expect(svg).not.toContain(a.id);
+});
+it('leaves out a frame clip that cuts nothing, and keeps it when a child overflows (#124)', () => {
+  const frame = {
+      ...makeDesignElement('frame'),
+      clipContent: true,
+      bounds: { x: 0, y: 0, width: 400, height: 300 },
+    },
+    inside = {
+      ...makeDesignElement('rectangle'),
+      parentId: frame.id,
+      bounds: { x: 20, y: 20, width: 100, height: 80 },
+    },
+    over = { ...inside, id: 'over', bounds: { x: 350, y: 20, width: 100, height: 80 } };
+  const clips = (svg: string) => [...svg.matchAll(/clip-path="url\(#frame-/g)].length;
+  const only = exportDesignSvg({ ...createDesign(), elements: [frame, inside] }, [frame.id]);
+  expect(clips(only)).toBe(0);
+  // Rotated past the frame edge, the same child needs the clip again.
+  const turned = exportDesignSvg(
+    {
+      ...createDesign(),
+      elements: [
+        frame,
+        { ...inside, bounds: { x: 0, y: 20, width: 400, height: 80 }, rotation: 30 },
+      ],
+    },
+    [frame.id],
+  );
+  expect(clips(turned)).toBe(1);
+  const both = exportDesignSvg({ ...createDesign(), elements: [frame, inside, over] }, [frame.id]);
+  expect(clips(both)).toBe(1);
+});
+it('keeps a frame clip when a miter, cloud, arrowhead or bullet reaches past the frame (#124)', () => {
+  const frame = {
+      ...makeDesignElement('frame'),
+      clipContent: true,
+      bounds: { x: 0, y: 0, width: 200, height: 200 },
+    },
+    // The top miter of this thin triangle reaches about y = -3.8, above the frame.
+    triangle = {
+      ...makeDesignElement('shape'),
+      parentId: frame.id,
+      shape: 'triangle' as const,
+      strokeWidth: 10,
+      bounds: { x: 20, y: 12, width: 100, height: 150 },
+    };
+  const svg = exportDesignSvg({ ...createDesign(), elements: [frame, triangle] }, [frame.id]);
+  expect([...svg.matchAll(/clip-path="url\(#frame-/g)].length).toBe(1);
+  // A cloud's curves reach past its own box, so its frame clip is always kept.
+  const cloud = {
+    ...triangle,
+    shape: 'cloud' as const,
+    strokeWidth: 1,
+    bounds: { x: 20, y: 20, width: 100, height: 100 },
+  };
+  const clouded = exportDesignSvg({ ...createDesign(), elements: [frame, cloud] }, [frame.id]);
+  expect([...clouded.matchAll(/clip-path="url\(#frame-/g)].length).toBe(1);
+  // A fixed-size arrowhead on a flat triangle reaches above the frame.
+  const headed = {
+    ...triangle,
+    strokeWidth: 1,
+    arrowhead: 'end' as const,
+    bounds: { x: 20, y: 4, width: 100, height: 2 },
+  };
+  const arrowed = exportDesignSvg({ ...createDesign(), elements: [frame, headed] }, [frame.id]);
+  expect([...arrowed.matchAll(/clip-path="url\(#frame-/g)].length).toBe(1);
+  // An empty expanded list item still paints its bullet below its own box.
+  const bullet = {
+    ...makeDesignElement('text'),
+    parentId: frame.id,
+    text: '',
+    typography: { fontSize: 100, list: true, overflow: 'expand' as const },
+    bounds: { x: 20, y: 20, width: 100, height: 20 },
+  };
+  const listed = exportDesignSvg(
+    {
+      ...createDesign(),
+      elements: [{ ...frame, bounds: { ...frame.bounds, height: 40 } }, bullet],
+    },
+    [frame.id],
+  );
+  expect([...listed.matchAll(/clip-path="url\(#frame-/g)].length).toBe(1);
 });
 it('patches and validates a line direction (#589)', () => {
   const line = { ...makeDesignElement('shape'), shape: 'arrow' as const };

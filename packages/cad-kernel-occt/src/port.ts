@@ -12,6 +12,10 @@ import type {
   CadBodyCurvature,
   CadBrepExport,
   CadCombResult,
+  CadFaceDistanceQuery,
+  CadFaceDistanceResult,
+  CadGapFlushEdges,
+  CadGapFlushResult,
   CadContinuityResult,
   CadKernelBuild,
   CadMesh,
@@ -20,7 +24,8 @@ import type {
   CadWorkerResponse,
 } from './protocol';
 import type { CadStepAssemblyImportResult } from './step-assembly-import';
-import type { CadStepImportResult } from './step-import';
+import type { CadStepImportOptions, CadStepImportResult } from './step-import';
+import type { CadStepPmiWritten } from './step-pmi-write';
 
 /** The subset of a dedicated Worker the port uses (also satisfied by test doubles). */
 export interface WorkerLike {
@@ -208,7 +213,7 @@ export class WorkerKernelPort implements CadKernelPort {
     return (
       cadContentHash(request.document) === request.candidateHash &&
       request.document.assets.every((a) => {
-        if (a.kind !== 'normalized-brep') return true;
+        if (a.kind !== 'normalized-brep' && a.kind !== 'pmi') return true;
         const bytes = this.options.assets?.(a.sha256);
         return (
           !!bytes &&
@@ -305,13 +310,22 @@ export class WorkerKernelPort implements CadKernelPort {
   /** Evaluates the same exact document again and writes its active bodies as STEP. */
   exportStep(
     request: CadEvaluateRequest,
-  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array }> {
+  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array; stepPmi?: CadStepPmiWritten }> {
     return new Promise((resolve) =>
       this.enqueueExport(
         this.evaluation(
           request,
           { step: true, slice: this.slice() },
-          (data) => resolve(data.step ? { evaluation: data.evaluation, step: data.step } : data),
+          (data) =>
+            resolve(
+              data.step
+                ? {
+                    evaluation: data.evaluation,
+                    step: data.step,
+                    ...(data.stepPmi ? { stepPmi: data.stepPmi } : {}),
+                  }
+                : data,
+            ),
           (evaluation) => resolve({ evaluation }),
         ),
       ),
@@ -406,14 +420,66 @@ export class WorkerKernelPort implements CadKernelPort {
     );
   }
   /**
+   * CR3d: evaluates the same exact document again and samples the gap and flush between two
+   * border edges, in the export slot like the comb.
+   */
+  analyzeGapFlush(
+    request: CadEvaluateRequest,
+    edges: CadGapFlushEdges,
+  ): Promise<{ evaluation: CadEvaluation; gapFlush?: CadGapFlushResult }> {
+    return new Promise((resolve) =>
+      this.enqueueExport(
+        this.evaluation(
+          request,
+          { gapFlush: edges, slice: this.slice() },
+          (data) =>
+            resolve(
+              data.gapFlush
+                ? { evaluation: data.evaluation, gapFlush: data.gapFlush }
+                : { evaluation: data.evaluation },
+            ),
+          (evaluation) => resolve({ evaluation }),
+        ),
+      ),
+    );
+  }
+  /**
+   * CR4a: evaluates the same exact document again and measures the exact distances from points
+   * to faces (bond candidates), in the export slot like the gap and flush.
+   */
+  measureFaceDistances(
+    request: CadEvaluateRequest,
+    queries: CadFaceDistanceQuery[],
+  ): Promise<{ evaluation: CadEvaluation; faceDistances?: CadFaceDistanceResult[] }> {
+    return new Promise((resolve) =>
+      this.enqueueExport(
+        this.evaluation(
+          request,
+          { faceDistances: queries, slice: this.slice() },
+          (data) =>
+            resolve(
+              data.faceDistances
+                ? { evaluation: data.evaluation, faceDistances: data.faceDistances }
+                : { evaluation: data.evaluation },
+            ),
+          (evaluation) => resolve({ evaluation }),
+        ),
+      ),
+    );
+  }
+  /**
    * D2: reads one STEP file with this build into a normalized BRep and its preflight report.
    * Queues like an evaluation; the bytes are copied, the caller keeps them.
    */
-  importStep(requestId: string, bytes: Uint8Array): Promise<CadStepImportResult> {
+  importStep(
+    requestId: string,
+    bytes: Uint8Array,
+    options: CadStepImportOptions = {},
+  ): Promise<CadStepImportResult> {
     return new Promise((resolve) =>
       this.enqueue({
         requestId,
-        message: { type: 'import-step', requestId, bytes },
+        message: { type: 'import-step', requestId, bytes, ...(options.pmi ? { options } : {}) },
         fail: (code) =>
           resolve({
             status: 'rejected',
@@ -430,11 +496,20 @@ export class WorkerKernelPort implements CadKernelPort {
    * R2b-5: reads one STEP assembly with this build into its shapes' BReps and flattened
    * instances. Queues like an evaluation; the bytes are copied, the caller keeps them.
    */
-  importStepAssembly(requestId: string, bytes: Uint8Array): Promise<CadStepAssemblyImportResult> {
+  importStepAssembly(
+    requestId: string,
+    bytes: Uint8Array,
+    options: CadStepImportOptions = {},
+  ): Promise<CadStepAssemblyImportResult> {
     return new Promise((resolve) =>
       this.enqueue({
         requestId,
-        message: { type: 'import-step-assembly', requestId, bytes },
+        message: {
+          type: 'import-step-assembly',
+          requestId,
+          bytes,
+          ...(options.pmi ? { options } : {}),
+        },
         fail: (code) =>
           resolve({
             status: 'rejected',
@@ -477,6 +552,8 @@ export class WorkerKernelPort implements CadKernelPort {
       continuity?: { bodyId: string; edge: number };
       curvature?: true;
       comb?: { bodyId: string; edge: number };
+      gapFlush?: CadGapFlushEdges;
+      faceDistances?: CadFaceDistanceQuery[];
       slice?: { ms: number };
     },
     onResult: (data: Extract<CadWorkerResponse, { type: 'result' }>) => void,
@@ -484,7 +561,7 @@ export class WorkerKernelPort implements CadKernelPort {
   ): Job {
     const assets: Record<string, Uint8Array> = {};
     for (const a of request.document.assets)
-      if (a.kind === 'normalized-brep') {
+      if (a.kind === 'normalized-brep' || a.kind === 'pmi') {
         const bytes = this.options.assets?.(a.sha256);
         if (bytes) assets[a.sha256] = bytes;
       }

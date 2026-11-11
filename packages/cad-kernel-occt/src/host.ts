@@ -85,8 +85,11 @@ export function createKernelHost(options: KernelHostOptions) {
       continuity: edge,
       curvature,
       comb: combEdge,
+      gapFlush: gapFlushEdges,
+      faceDistances: faceQueries,
       coarse,
       slice,
+      analysisSurface: surfaceWanted,
     } = message;
     if (!jobs.take(requestId)) return options.post({ type: 'cancelled', requestId }, []);
     if (!oc || (document.kernelProfile.buildHash !== buildHash && !reference))
@@ -111,9 +114,13 @@ export function createKernelHost(options: KernelHostOptions) {
         evaluation,
         meshes,
         step: file,
+        stepPmi,
         brep,
         continuity,
         comb,
+        gapFlush,
+        faceDistances,
+        analysisSurface,
       } = await evaluateCad(oc, document, candidateHash, {
         ...options.evaluate,
         ...(deflectionMm === undefined ? {} : { deflectionMm }),
@@ -125,7 +132,11 @@ export function createKernelHost(options: KernelHostOptions) {
         ...(edge ? { continuity: edge } : {}),
         ...(curvature ? { curvature } : {}),
         ...(combEdge ? { comb: combEdge } : {}),
+        ...(gapFlushEdges ? { gapFlush: gapFlushEdges } : {}),
+        ...(faceQueries ? { faceDistances: faceQueries } : {}),
         ...(coarse ? { coarse } : {}),
+        // An analysis is made from exact shapes only, like a STEP file.
+        ...(surfaceWanted && !reference ? { analysisSurface: surfaceWanted } : {}),
         // A substitute build's reference display never feeds or uses the exact shapes, and
         // gives no measurements: not even of the bodies outside a failure.
         ...(reference ? { partial: false as const } : { placement, features }),
@@ -161,15 +172,29 @@ export function createKernelHost(options: KernelHostOptions) {
           generation,
           evaluation: result,
           meshes,
-          ...(file ? { step: file } : {}),
+          ...(file ? { step: file, ...(stepPmi ? { stepPmi } : {}) } : {}),
           ...(brep ? { brep } : {}),
           ...(continuity ? { continuity } : {}),
           ...(comb ? { comb } : {}),
+          ...(gapFlush ? { gapFlush } : {}),
+          ...(faceDistances ? { faceDistances } : {}),
+          ...(analysisSurface ? { analysisSurface } : {}),
         },
         [
           ...transferables(meshes),
           ...(file ? [file.buffer as ArrayBuffer] : []),
           ...(brep ? [brep.bytes.buffer as ArrayBuffer] : []),
+          ...(analysisSurface && 'surface' in analysisSurface
+            ? [
+                analysisSurface.surface.points.buffer as ArrayBuffer,
+                analysisSurface.surface.triangles.buffer as ArrayBuffer,
+                analysisSurface.surface.faces.buffer as ArrayBuffer,
+                analysisSurface.surface.edges.offsets.buffer as ArrayBuffer,
+                analysisSurface.surface.edges.nodes.buffer as ArrayBuffer,
+                analysisSurface.surface.midpoints.pairs.buffer as ArrayBuffer,
+                analysisSurface.surface.midpoints.points.buffer as ArrayBuffer,
+              ]
+            : []),
         ],
       );
     } catch (error) {
@@ -185,7 +210,7 @@ export function createKernelHost(options: KernelHostOptions) {
     const { requestId, bytes } = message;
     if (!jobs.take(requestId)) return options.post({ type: 'cancelled', requestId }, []);
     const result: CadStepImportResult = oc
-      ? importStep(oc, bytes, buildHash!)
+      ? importStep(oc, bytes, buildHash!, message.options)
       : { status: 'rejected', code: 'step-import-unsupported-build' };
     options.post(
       { type: 'import-result', requestId, result },
@@ -199,7 +224,7 @@ export function createKernelHost(options: KernelHostOptions) {
     const { requestId, bytes } = message;
     if (!jobs.take(requestId)) return options.post({ type: 'cancelled', requestId }, []);
     const result: CadStepAssemblyImportResult = oc
-      ? importStepAssembly(oc, bytes, buildHash!)
+      ? importStepAssembly(oc, bytes, buildHash!, message.options)
       : { status: 'rejected', code: 'step-import-unsupported-build' };
     jobs.finish(requestId);
     options.post(

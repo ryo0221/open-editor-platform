@@ -33,11 +33,21 @@ export interface BimLevel {
   name: string;
   elevationMm: number;
 }
+/** Which ends of a grid axis carry its bubble (TW0e). Omitted: both. */
+export const bimGridBubbles = ['both', 'start', 'end', 'none'] as const;
+export type BimGridBubbles = (typeof bimGridBubbles)[number];
 export interface BimGridAxis {
   id: string;
   label: string;
   start: Vec2;
   end: Vec2;
+  /** TW0e: the ends whose bubble is drawn (plans, drawings and the 3D view). Omitted: both. */
+  bubbles?: BimGridBubbles;
+}
+/** Whether a grid axis draws its bubble at this end (TW0e). */
+export function bimGridBubbleAt(axis: Pick<BimGridAxis, 'bubbles'>, end: 'start' | 'end') {
+  const b = axis.bubbles ?? 'both';
+  return b === 'both' || b === end;
 }
 export const bimMaterialCategories = [
   'concrete',
@@ -94,7 +104,9 @@ export type BimProfile =
   | { shape: 'h'; depthMm: number; widthMm: number; webMm: number; flangeMm: number }
   | { shape: 'l'; depthMm: number; widthMm: number; thicknessMm: number }
   | { shape: 'channel'; depthMm: number; widthMm: number; webMm: number; flangeMm: number }
-  | { shape: 'box'; depthMm: number; widthMm: number; wallMm: number };
+  | { shape: 'box'; depthMm: number; widthMm: number; wallMm: number }
+  /** #936: a circular hollow section (steel pipe); the wall is under the radius. */
+  | { shape: 'pipe'; diameterMm: number; wallMm: number };
 
 /** Common properties exported as `Pset_*Common` (R2c-U8). */
 export interface BimCommonProperties {
@@ -117,7 +129,7 @@ interface TypeBase extends Described {
 }
 export type BimType =
   | (TypeBase & { kind: 'wall' | 'slab' | 'roof'; layers: BimLayer[] })
-  | (TypeBase & { kind: 'column' | 'beam'; profile: BimProfile; materialId: string })
+  | (TypeBase & { kind: 'column' | 'beam' | 'member'; profile: BimProfile; materialId: string })
   | (TypeBase & { kind: 'door' | 'window'; widthMm: number; heightMm: number })
   | (TypeBase & {
       kind: 'part';
@@ -148,14 +160,27 @@ export interface BimWall extends ElementBase {
   top: BimTop;
   /** Cut by the underside of this roof (`halfSpace`); quantities then come from the kernel. */
   clipBy?: string;
+  /**
+   * LR2 (docs/cad/bim-lean-ramp.md): the wall leans by this angle (rad, at most 60° either way)
+   * about its axis at the base, to the right looking from start to end (outward on a
+   * counter-clockwise ring; an arc wall becomes a cone). The thickness is square to the faces.
+   * Absent or 0: upright.
+   */
+  lean?: number;
 }
 export interface BimSlab extends ElementBase {
   kind: 'slab';
   typeId: string;
-  /** Height of the slab's top face. */
+  /** Height of the slab's top face (along the slope's edge, for a sloped slab). */
   top: BimLevelHeight;
   boundary: BimLoop;
   holes: BimLoop[];
+  /**
+   * TW5: a sloped slab (a ramp). Its top is the plane through boundary edge `edge` (from vertex
+   * `edge` to the next) at `top`, rising square to that edge to `endTop` at the boundary's corner
+   * farthest from it. The thickness is vertical, the sides upright. Absent: level.
+   */
+  slope?: { edge: number; endTop: BimLevelHeight };
 }
 export interface BimColumn extends ElementBase {
   kind: 'column';
@@ -165,14 +190,44 @@ export interface BimColumn extends ElementBase {
   base: BimLevelHeight;
   top: BimTop;
   clipBy?: string;
+  /**
+   * TW2: plan position of the column's top, for a column that leans. Absent: straight above
+   * `at`. The section runs along the axis and its ends are square to it.
+   */
+  topAt?: BimPoint;
+  /**
+   * TW5: the top section's size as a share of the base's (0.1–1), a tapered column; the
+   * section (walls included) scales about the axis and the sides are ruled. Absent: 1.
+   */
+  topScale?: number;
 }
 export interface BimBeam extends ElementBase {
   kind: 'beam';
   typeId: string;
   start: BimPoint;
   end: BimPoint;
-  /** Height of the beam's top face. */
+  /** Height of the beam's top face (at its start, when it slopes). */
   top: BimLevelHeight;
+  /** TW2: height of the top face at the end, for a sloping beam. Absent: level, at `top`. */
+  endTop?: BimLevelHeight;
+}
+/** TW2: one end of a member: a plan point and the height of the member's axis there. */
+export interface BimMemberEnd {
+  at: BimPoint;
+  height: BimLevelHeight;
+}
+/**
+ * TW2: a straight member at any slope (a brace or a lattice diagonal), written to IFC as
+ * `IfcMember`. Its section (a `member` type's profile) is centred on the axis from `start` to
+ * `end`, the profile's depth upright (or along +y for a vertical member), turned by
+ * `rotationRad` about the axis. Its ends are square to the axis.
+ */
+export interface BimMember extends ElementBase {
+  kind: 'member';
+  typeId: string;
+  start: BimMemberEnd;
+  end: BimMemberEnd;
+  rotationRad: number;
 }
 export interface BimWallOpening {
   alongMm: number;
@@ -228,6 +283,8 @@ export interface BimSpace extends ElementBase {
   /** Absent: up to the next level above, which must exist. */
   top?: BimTop;
   boundary: BimLoop;
+  /** TW1: rooms around a core or a shaft (at most `bimLimits.holes`). Absent: none. */
+  holes?: BimLoop[];
 }
 export interface BimPart extends ElementBase {
   kind: 'part';
@@ -236,11 +293,60 @@ export interface BimPart extends ElementBase {
   base: BimLevelHeight;
   rotationRad: number;
 }
+/**
+ * LR3: a spiral ramp around `center`, from `startAngleRad` turning by `sweepRad` (positive
+ * counter-clockwise, at most 3 turns either way), between two radii. Its top is a helicoid: each
+ * radius stays level and rises in step with the angle, from `base` (the top at the start) to
+ * `top` (the top at the end). Its thickness (a `slab` type's layers) is measured vertically.
+ */
+export interface BimRamp extends ElementBase {
+  kind: 'ramp';
+  typeId: string;
+  center: BimPoint;
+  innerRadiusMm: number;
+  outerRadiusMm: number;
+  startAngleRad: number;
+  sweepRad: number;
+  base: BimLevelHeight;
+  top: BimLevelHeight;
+}
+/**
+ * LS5: a guard along a spiral ramp's inner or outer edge: a band as thick as its type's layers
+ * (a wall type), standing `heightMm` above the ramp's top and rising with it.
+ */
+export interface BimRailing extends ElementBase {
+  kind: 'railing';
+  typeId: string;
+  hostId: string;
+  side: 'inner' | 'outer';
+  heightMm: number;
+}
+/**
+ * LS6: a straight flight of steps up `directionRad` from `start`, the plan point at the foot of
+ * its first riser on its centre line, `widthMm` across. `risers` equal risers climb from `base`
+ * to `top`, `treadMm` apart (one tread fewer than risers: the last riser reaches the top). Under
+ * the steps a sloping waist as thick as its type's layers (a slab type), square to the pitch.
+ */
+export interface BimStair extends ElementBase {
+  kind: 'stair';
+  typeId: string;
+  start: BimPoint;
+  directionRad: number;
+  widthMm: number;
+  risers: number;
+  treadMm: number;
+  base: BimLevelHeight;
+  top: BimLevelHeight;
+}
 export type BimElement =
   | BimWall
   | BimSlab
   | BimColumn
   | BimBeam
+  | BimMember
+  | BimRamp
+  | BimRailing
+  | BimStair
   | BimOpening
   | BimDoor
   | BimWindow
@@ -276,7 +382,8 @@ export type BimView =
       depthMm: number;
       scale: BimDrawingScale;
     };
-export const bimDrawingScales = [50, 100, 200] as const;
+/** Drawing scales (1:n). 1:500 and 1:1000 draw a whole tall building on a sheet (TW0c). */
+export const bimDrawingScales = [50, 100, 200, 500, 1000] as const;
 export type BimDrawingScale = (typeof bimDrawingScales)[number];
 export const bimPropertyTypes = ['string', 'number', 'boolean', 'length'] as const;
 export interface BimPropertySetDef {
@@ -322,8 +429,20 @@ export const bimLimits = Object.freeze({
   arcRadiusMm: 1_000_000_000,
   minDimensionMm: 1,
   maxSectionMm: 10_000,
+  /** LR2: how far a wall may lean either way (60°). */
+  wallLeanRad: Math.PI / 3,
+  /** LR3: how far a spiral ramp may turn either way (3 turns). */
+  rampSweepRad: 6 * Math.PI,
+  /** LS5: a railing stands at most this high above its ramp. */
+  railingHeightMm: 3000,
+  /**
+   * LS6: what a stair's steps may be (where its shape holds together; no building-code check):
+   * risers 50–250 mm high and 2–50 of them, treads 150–500 mm deep.
+   */
+  stair: { riserMm: [50, 250], risers: [2, 50], treadMm: [150, 500] },
   minStoreyMm: 1_000,
-  maxStoreyMm: 100_000,
+  /** As far as a coordinate reaches (TW0d): a tall tower's decks need no unused levels between. */
+  maxStoreyMm: 1_000_000,
   levels: 64,
   gridAxes: 256,
   types: 1_000,

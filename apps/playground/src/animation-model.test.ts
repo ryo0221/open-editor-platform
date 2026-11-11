@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { command } from '@editor-platform/editor-core';
+import { f02Plate } from '@editor-platform/cad-core';
 import * as animation from '@editor-platform/animation-core';
 import * as animation2 from '@editor-platform/animation-core/v2';
 import {
@@ -92,7 +93,14 @@ it('rejects other native domains before the full Animation reader while still va
   try {
     for (const kind of Object.keys(kinds) as Kind[]) {
       if (kind === 'animation') continue;
-      expect(validContent('animation', makeArtifact(kind, 1).draft.content)).toBe(false);
+      // A structural analysis is made of a saved CAD version.
+      const source =
+        kind === 'simulation'
+          ? { artifactId: 'cad', versionId: 'v1', bodyId: 'plate', label: '', content: f02Plate() }
+          : undefined;
+      expect(
+        validContent('animation', makeArtifact(kind, 1, undefined, source).draft.content),
+      ).toBe(false);
     }
     expect(read).not.toHaveBeenCalled();
     const candidate = makeArtifact('animation', 1).draft.content;

@@ -1,6 +1,7 @@
 import { geometryNodeKey, validateGeometry } from '@editor-platform/geometry-core';
 import { describe, expect, it } from 'vitest';
-import { f31BoxBuilding, f33Types, f37Office, f39Roofs } from './fixtures';
+import { f31BoxBuilding, f33Types, f37Office, f39Roofs, f48Ramp } from './fixtures';
+import { deriveBim } from './derive';
 import { bimGeometry } from './ops';
 
 describe('bim op graph (R2c-3a)', () => {
@@ -10,7 +11,24 @@ describe('bim op graph (R2c-3a)', () => {
     f37: f37Office,
     gable: () => f39Roofs('gable'),
     hip: () => f39Roofs('hip'),
+    f48: f48Ramp,
   };
+
+  it('keeps a sloped slab near the limit a valid graph, and refuses one that rises too far (TW5)', () => {
+    const near = f48Ramp();
+    const ramp = near.elements.find((e) => e.id === 's-ramp')!;
+    if (ramp.kind !== 'slab') throw new Error();
+    ramp.top = { level: 'l-gl', offsetMm: -999_800 };
+    ramp.slope = { edge: 3, endTop: { level: 'l-gl', offsetMm: -999_000 } };
+    expect(deriveBim(near).diagnostics).toEqual([]);
+    expect(validateGeometry(bimGeometry(near).graph, [])).toEqual([]);
+    // From −999,000 to +999,000 mm: each height within the limit, the rise not.
+    ramp.top = { level: 'l-gl', offsetMm: -999_000 };
+    ramp.slope = { edge: 3, endTop: { level: 'l-gl', offsetMm: 999_000 } };
+    expect(deriveBim(near).diagnostics.map((d) => [d.code, d.path])).toEqual([
+      ['coordinate', '$.elements[0].slope.endTop'],
+    ]);
+  });
 
   it('gives every element with a solid a node of a valid graph', () => {
     for (const [name, f] of Object.entries(fixtures)) {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { r2bJoints } from '@editor-platform/cad-core';
+import { currentConfigurationValues, mr1ArmWings, r2bJoints } from '@editor-platform/cad-core';
 
 /** The prop view of a CAD version (C2b-3), over a stand-in for the CAD binding. */
 const fake = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const fake = vi.hoisted(() => ({
   simplified: new Set<string>(),
   later: new Map<string, { state: string }>(),
   notify: [] as (() => void)[],
+  sweep: (_samples: { tick: number }[]): unknown => ({ error: 'unset' }),
 }));
 vi.mock('@editor-platform/cad-kernel-occt/worker?worker', () => ({ default: class {} }));
 vi.mock('../model', () => ({ cadKernel: { id: 'k' }, cadKernels: [] }));
@@ -27,11 +28,12 @@ vi.mock('@editor-platform/cad', async (real) => ({
       coarseMeshes: (h: string) => fake.coarse.get(h),
       getSnapshot: () => ({ simplified: fake.simplified }),
       later: (h: string) => fake.later.get(h),
+      checkInterferenceAlong: async (samples: { tick: number }[]) => fake.sweep(samples),
     },
     dispose: () => {},
   }),
 }));
-const { CharacterPropEvaluation } = await import('./props');
+const { CharacterPropEvaluation, kernelFailure, propVersionJoints } = await import('./props');
 
 const rig = r2bJoints();
 const mesh = (bodyId: string) => ({
@@ -54,9 +56,9 @@ const ok = (pending: string[] = []) => ({
     ...(pending.length ? { pending } : {}),
   },
 });
-const evaluate = () =>
+const evaluate = (doc = rig.assembly) =>
   new CharacterPropEvaluation(
-    rig.assembly,
+    doc,
     (h) => rig.closure.get(h),
     () => {},
   );
@@ -120,5 +122,153 @@ describe('CharacterPropEvaluation', () => {
     const drawn = p.view.draw(new Map());
     expect(drawn.filter((i) => i.mesh.positions.length === 72)).toHaveLength(1);
     expect(drawn.filter((i) => i.mesh.positions.length === 9)).toHaveLength(5);
+  });
+  it('lists the forms with their own values in radians and mm, and why one cannot be used (MR4b, TS-1712)', () => {
+    const doc = structuredClone(rig.assembly);
+    const now = currentConfigurationValues(doc);
+    const past = structuredClone(now);
+    past['j-slide'] = { distance: { literalMm: 30 } };
+    const stale = structuredClone(now);
+    delete stale['j-turn'];
+    doc.configurations = [
+      { id: 'f-now', name: 'Now', values: now },
+      { id: 'f-past', name: 'Past', values: past },
+      { id: 'f-stale', name: 'Stale', values: stale },
+    ];
+    const p = evaluate(doc);
+    for (const v of [rig.plate, rig.shaft, rig.pair]) fake.meshes.set(v.contentHash, [mesh('b')]);
+    settle({ evaluation: ok() });
+    if (p.view.status !== 'ready') throw new Error(p.view.status);
+    const forms = p.view.forms!;
+    expect(forms.map((f) => [f.id, f.problem])).toEqual([
+      ['f-now', undefined],
+      ['f-past', 'joint-limit'],
+      ['f-stale', 'configuration-stale'],
+    ]);
+    // The angle the parameter gave (30°) in radians, the slide in mm, as the keys store them.
+    expect(forms[0]!.values['j-turn']).toEqual({ angle: Math.PI / 6 });
+    expect(forms[0]!.values['j-slide']).toEqual({ distance: 12 });
+    expect(forms[2]!.values).toEqual({});
+  });
+});
+
+describe('kernelFailure (C8p, TS-1296)', () => {
+  it('names a kernel that could not run, not an element that failed on its own', () => {
+    const elements = (...codes: string[]) => ({
+      elements: new Map(codes.map((code, i) => [`e${i}`, { status: 'error', code }])),
+    });
+    expect(kernelFailure({ elements: new Map([['w', { status: 'ok' }]]) })).toBeUndefined();
+    expect(kernelFailure(elements('shape-too-large'))).toBeUndefined();
+    expect(kernelFailure(elements('shape-too-large', 'kernel-crashed'))).toBe('kernel-crashed');
+    expect(kernelFailure(elements('kernel-load-failed'))).toBe('kernel-load-failed');
+  });
+});
+
+describe('propVersionJoints (MR4c, TS-1713)', () => {
+  it('lists the keyable values with their limits, and the values that follow another joint', () => {
+    const { assembly } = mr1ArmWings();
+    const v = propVersionJoints(assembly);
+    // The right wing follows the left: it has no value of its own to key, and is a follower.
+    expect(v.joints.some((j) => j.id === 'j-wing-r')).toBe(false);
+    expect(v.followers).toEqual([
+      {
+        joint: 'j-wing-r',
+        key: 'angle',
+        from: { joint: 'j-wing-l', key: 'angle' },
+        ratio: -1,
+        offset: 0,
+        min: -Math.PI / 2,
+        max: Math.PI / 2,
+      },
+    ]);
+    const wing = v.joints.find((j) => j.id === 'j-wing-l')!;
+    expect(wing.values).toEqual([
+      { key: 'angle', saved: (40 * Math.PI) / 180, min: -Math.PI / 2, max: Math.PI / 2 },
+    ]);
+    // Without its own limits a follower still keeps the safety bound: one turn either way.
+    const bare = structuredClone(assembly);
+    const r = bare.joints.find((j) => j.id === 'j-wing-r')!;
+    r.limits = [];
+    expect(propVersionJoints(bare).followers[0]).toMatchObject({
+      min: -2 * Math.PI,
+      max: 2 * Math.PI,
+    });
+  });
+
+  it('bounds a keyed angle by one turn, or a continuous joint and its followers by its bound (WM2a, TS-1886)', () => {
+    const { assembly } = mr1ArmWings();
+    const doc = structuredClone(assembly);
+    for (const j of doc.joints.filter((x) => x.id.startsWith('j-wing'))) j.limits = [];
+    const one = propVersionJoints(doc);
+    expect(one.joints.find((j) => j.id === 'j-wing-l')!.values[0]).toMatchObject({
+      min: -2 * Math.PI,
+      max: 2 * Math.PI,
+    });
+    for (const j of doc.joints.filter((x) => x.id.startsWith('j-wing'))) j.continuous = true;
+    const many = propVersionJoints(doc);
+    const bound = { min: -1_000_000, max: 1_000_000 };
+    expect(many.joints.find((j) => j.id === 'j-wing-l')!.values[0]).toMatchObject(bound);
+    expect(many.followers[0]).toMatchObject(bound);
+  });
+});
+
+describe('checkInterferenceAlong in the prop view (MR5, TS-1714)', () => {
+  it('sends the keyed values as plain data and names the parts by their components', async () => {
+    fake.notify = [];
+    const p = evaluate();
+    for (const v of [rig.plate, rig.shaft, rig.pair]) fake.meshes.set(v.contentHash, [mesh('b')]);
+    settle({ evaluation: ok() });
+    if (p.view.status !== 'ready') throw new Error(p.view.status);
+    let sent: unknown;
+    fake.sweep = (samples) => {
+      sent = samples;
+      return {
+        content: rig.assembly,
+        report: {
+          status: 'ok',
+          samples: samples.length,
+          hits: [
+            {
+              tick: 1000,
+              findings: [
+                {
+                  a: [],
+                  b: ['c-pair', 'pair-b'],
+                  kind: 'intersect',
+                  depthMm: 1.5,
+                  crossings: 3,
+                  contained: 0,
+                },
+              ],
+            },
+          ],
+          unchecked: [['c-shaft']],
+          stale: [],
+          jumps: [{ tick: 1000, mount: 'm-x', from: 'j-a', to: 'j-b', mm: 2, rad: 0 }],
+        },
+      };
+    };
+    const r = await p.view.checkInterferenceAlong!([
+      { tick: 1000, values: new Map([['j-turn', { angle: 1 }]]) },
+    ]);
+    expect(sent).toEqual([{ tick: 1000, values: { 'j-turn': { angle: 1 } } }]);
+    const names = rig.assembly.components.map((c) => [c.id, c.name]);
+    const name = (id: string) => names.find(([i]) => i === id)![1];
+    expect(r).toMatchObject({
+      status: 'ok',
+      samples: 1,
+      hits: [{ tick: 1000, overlaps: [{ a: 'Own shape', kind: 'intersect', depthMm: 1.5 }] }],
+      unchecked: [name('c-shaft')],
+      // MR7: switches that move their part, as the check found them.
+      jumps: [{ tick: 1000, mount: 'm-x', from: 'j-a', to: 'j-b', mm: 2, rad: 0 }],
+    });
+    // A nested part is named by the components on its path.
+    if (r.status === 'ok')
+      expect(r.hits[0]!.overlaps[0]!.b).toMatch(new RegExp(`^${name('c-pair')} / `));
+    fake.sweep = () => ({ error: 'interference-not-ready' });
+    expect(await p.view.checkInterferenceAlong!([])).toEqual({
+      status: 'refused',
+      code: 'interference-not-ready',
+    });
   });
 });

@@ -26,12 +26,31 @@
     ><button id="reload">Reload saved draft</button><button id="uninstall">Uninstall</button>
     <p>
       Switch bundled fixture packages while keeping this draft and its history. The Host verifies
-      the bundled code against its build-time hashes before loading it. These are local fixture
-      packages, not third-party downloads. Switching does not migrate or restore document versions.
+      the bundled code against its build-time hashes before loading it, keeps the verified packages
+      in this browser and verifies them again on the next start. These are local fixture packages,
+      not third-party downloads. Switching does not migrate or restore document versions.
     </p>
     <p id="pin" aria-label="Installed fixture"></p>
+    <p id="retention" aria-label="Package retention"></p>
     <button id="install-v2">Install fixture 0.0.2</button>
     <button id="restore-v1">Restore fixture 0.0.1</button>
+    <fieldset>
+      <legend>Retained packages</legend>
+      <label
+        >Package
+        <select id="package-version">
+          <option>0.0.1</option>
+          <option selected>0.0.2</option>
+        </select></label
+      >
+      <button id="remove-package">Remove retained package</button>
+      <button id="retain-package">Retain package</button>
+      <p>
+        Removing deletes the package's kept bytes from this browser. It is refused while the package
+        is needed, and it never changes saved drafts or document versions. Uninstall only closes the
+        Editor and keeps the package.
+      </p>
+    </fieldset>
     <fieldset>
       <legend>Document versions</legend>
       <button id="save-document-version">Save document version</button>
@@ -49,6 +68,7 @@
     </fieldset>
     <main id="surface"></main>
     <p id="status" role="status"></p>
+    <button id="repair-packages" hidden>Repair damaged packages from this build</button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,4 +1,16 @@
 import {
+  atShare,
+  bezierCurve,
+  distanceToCurve,
+  fitCurve,
+  gordonSurface,
+  joinedCurve,
+  movedCurve,
+  reversedCurve,
+  type GordonSurface,
+  type NetworkCurve,
+} from './gordon';
+import {
   decodeKernelException,
   KernelJobCancelled,
   vertexNormals,
@@ -8,6 +20,9 @@ import {
 import {
   attachFrame,
   cadContentHash,
+  cadContinuity,
+  cadFlareProfiles,
+  curvatureDeviation,
   dependencyEdges,
   dependencyOrder,
   featureKind,
@@ -15,8 +30,11 @@ import {
   sketchAttachment,
   featureReferenceSources,
   cadLimits,
+  cadSpotWeldLimits,
   cadToleranceSetOf,
   sketchPath,
+  sketchWithOffset,
+  CadSketchError,
   sketchRegion,
   sketchElementPoints,
   sketchElement,
@@ -33,8 +51,13 @@ import {
   resolveCount,
   resolveRatio,
   resolveLength,
+  resolveSpurGear,
+  spurGearProblem,
+  spurGearSketch,
   resolvePosition,
   blendFaceName,
+  edgeName,
+  topoNameKey,
   faceNameKey,
   sharedFaceName,
   cadReferenceCandidates,
@@ -44,6 +67,8 @@ import {
   elementGeometry,
   upstreamFeatures,
   type CadConnectorFrame,
+  type CadSpotWeld,
+  type CadSpotWeldPoints,
   type CadReferenceProblem,
   type CadTopologyRef,
   type CadBodyEvaluation,
@@ -51,11 +76,13 @@ import {
   type CadBodyKind,
   type CadFaceName,
   type CadTopologyTable,
+  type CadPmiTracking,
   type CadDocument,
   type CadEvaluation,
   type CadFeature,
   type CadProfile,
   type CadSketch,
+  type CadTrimTool,
   type CadSketchPath,
   type CadEdgeChain,
   type CadCurveSource,
@@ -71,26 +98,62 @@ import {
   type Length,
   type Quaternion,
   type Vec3,
+  pmiAssetProblem,
+  cadBodyPmi,
+  cadBodyPmiPlacements,
+  cadPmiItemStates,
+  cadPmiTrackedIndex,
+  readCadPmiAsset,
+  profileOutline,
+  profileReach,
+  rotateVector,
 } from '@editor-platform/cad-core';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
+import {
+  AnalysisSurfaceLimit,
+  finishSurface,
+  improveSurface,
+  type RawSurface,
+  type RawTriangle,
+  type SurfaceSizing,
+  type Xyz,
+} from './analysis-surface';
 import { connectorFrame } from './connector-frames';
-import { edgeContinuity } from './continuity';
+import { edgeContinuity, surfaceProjector } from './continuity';
+import { edgeGapFlush } from './gap-flush';
+import { faceSetDistances } from './face-distance';
+import { spotWeldPoints } from './spot-weld';
 import { edgeComb, nodeCurvature } from './curvature';
 import {
   cadOutputLimits,
   meshBytes,
+  type CadAnalysisPreparation,
+  type CadAnalysisMeasures,
+  type CadAnalysisSurface,
+  type CadAnalysisSurfaceRequest,
+  type CadAnalysisSurfaceResult,
   type CadBrepExport,
   type CadCombResult,
+  type CadFaceDistanceQuery,
+  type CadFaceDistanceResult,
+  type CadGapFlushEdges,
+  type CadGapFlushResult,
   type CadContinuityResult,
   type CadMesh,
+  type CadPreparationHistory,
 } from './protocol';
+import { preparationFaces, type FaceSample } from './preparation';
 import { withToleranceNote } from './formats';
 import { shapeMetrics } from './metrics';
 import { sheetTopology } from './sheet-topology';
+import { noPmiWritten, pmiWriteSpec, writePmiStep, type CadStepPmiWritten } from './step-pmi-write';
 
 /** The Embind module and its exception decoding live in `geometry-kernel-occt` (R2c-1). */
 export { decodeKernelException, type OcModule };
+
+/** R3i-2: a body whose midsurface is not made (`midsurface-unsupported`); the message says why. */
+class MidsurfaceRefusal extends Error {}
 
 export class CadKernelError extends Error {
   constructor(
@@ -151,6 +214,18 @@ export interface EvaluateOptions {
   /** Also sample the curvature comb of one edge's curve, like `continuity` (R2a-4). */
   comb?: { bodyId: string; edge: number };
   /**
+   * CR3d: also sample the gap and flush from one body's border edge to another's, each by its
+   * index in its body's pick table. Display only, like `continuity`.
+   */
+  gapFlush?: CadGapFlushEdges;
+  /** CR4a: also the exact distances from points to faces, per query (bond candidates). */
+  faceDistances?: CadFaceDistanceQuery[];
+  /**
+   * R3c-2a: also the boundary of one body as the analysis mesher's input (`CadAnalysisSurface`),
+   * triangulated afresh at `deflectionMm`. Not a display evaluation.
+   */
+  analysisSurface?: CadAnalysisSurfaceRequest;
+  /**
    * D2 asset bytes by `sha256:<hex>`, from the Host's closure. Imported features read their
    * normalized BRep here; bytes that do not match the ref's hash and size are refused.
    */
@@ -172,8 +247,10 @@ export interface EvaluateOptions {
   placement?: PlacementCache;
   /**
    * The Worker's dependency-closure cache (docs/cad/complex-models.md, P1・P2; CM-3): each
-   * feature's shape by the hash of what it reads. Used and refreshed only by display
-   * evaluations, like `placement`; with it, `placement` borrows its kept shapes from this cache.
+   * feature's shape by the hash of what it reads. Used and refreshed by display evaluations and
+   * (CR5f-5) by analysis surface requests, which build the same exact shapes: a run asks for each
+   * body's surface in turn, and builds the document once. With it, `placement` (display only)
+   * borrows its kept shapes from this cache.
    */
   features?: FeatureCache;
   /**
@@ -193,6 +270,8 @@ type Shape = { delete(): void; isDeleted?(): boolean };
  */
 type KeptBody = {
   shape: Shape;
+  /** PMI-4a: the shape's imported origins (`PmiOrigins`). */
+  origins?: PmiOrigins;
   names: (CadFaceName | null)[];
   edges: { index: number; name: CadFaceName }[];
   placed: boolean;
@@ -237,8 +316,27 @@ export const featureCacheBudget = Object.freeze({
   perEdge: 1024,
   perVertex: 256,
 });
+const pmiKinds = ['TopAbs_FACE', 'TopAbs_EDGE', 'TopAbs_VERTEX'] as const;
+type PmiKind = (typeof pmiKinds)[number];
+/** The imported feature and the 1-based index of the sub-shape in its BRep's map. */
+type PmiOrigin = { feature: string; index: number; exact: boolean };
+/**
+ * PMI-4a: the face, edge and vertex maps' imported origins, aligned with each map. An origin is
+ * `exact` while every feature since the import kept that sub-shape itself (the same kernel
+ * shape, placed rigidly at most); a split, a trimmed boundary, a merge or a rebuilt shape makes
+ * its images inexact. A feature that does not carry origins drops them.
+ */
+type PmiOrigins = Record<PmiKind, (PmiOrigin | null)[]>;
+const copyOrigins = (o: PmiOrigins | undefined): PmiOrigins | undefined =>
+  o && {
+    TopAbs_FACE: [...o.TopAbs_FACE],
+    TopAbs_EDGE: [...o.TopAbs_EDGE],
+    TopAbs_VERTEX: [...o.TopAbs_VERTEX],
+  };
 type CachedFeature = {
   shape: Shape;
+  /** PMI-4a: the shape's imported origins (`PmiOrigins`). */
+  origins?: PmiOrigins;
   names: (CadFaceName | null)[];
   edges: { index: number; name: CadFaceName }[];
   /** The shape's tolerances as built (`toleranceState`): a reuse finds it unchanged. */
@@ -332,6 +430,8 @@ export function placementIdentity(doc: CadDocument, options: EvaluateOptions = {
   const cleared = structuredClone(doc);
   // Placed parts, joints and their solved poses never change this document's own shapes.
   cleared.parts = [];
+  // CR4e: spot welds change no shape; their points are made after the shapes.
+  delete cleared.spotWelds;
   cleared.components = [];
   cleared.joints = [];
   cleared.solvedPoses = {};
@@ -355,6 +455,39 @@ export function placementIdentity(doc: CadDocument, options: EvaluateOptions = {
  */
 export const meshDeflection = Object.freeze({ relative: 0.001, minMm: 0.001 });
 /** R2b-4: the coarse display mesh, 1% of the bounding-box diagonal and 1 rad (LOD). */
+/**
+ * R3c-2a: the bounds of an analysis surface's chordal deflection: at least 1e-5 of the body's
+ * bounding-box diagonal and the display minimum (finer only multiplies triangles) and at most 10 mm; the angle in (0, π/2].
+ */
+export const analysisDeflection = Object.freeze({ relativeMin: 1e-5, maxMm: 10 });
+/** The most triangles an analysis surface may have (the mesher's input limit). */
+export const analysisSurfaceTriangles = 2_000_000;
+
+/**
+ * R3c-2b: preparation settings the kernel can apply: thresholds null or positive and finite,
+ * explicit faces distinct indices of the body.
+ */
+export function preparationOk(p: CadAnalysisPreparation, faces: number): boolean {
+  const threshold = (x: number | null) => x === null || (Number.isFinite(x) && x > 0);
+  return (
+    threshold(p.removeHolesBelow) &&
+    threshold(p.removeFilletsBelow) &&
+    Array.isArray(p.removeFaces) &&
+    p.removeFaces.every((f) => Number.isSafeInteger(f) && f >= 0 && f < faces) &&
+    new Set(p.removeFaces).size === p.removeFaces.length
+  );
+}
+const subV = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dotV = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const crossV = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+const scaleV = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
+const normalizeV = (a: Vec3): Vec3 => scaleV(a, 1 / Math.hypot(...a));
+const addV = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const lerpV = (a: Vec3, b: Vec3, t: number): Vec3 => addV(a, scaleV(subV(b, a), t));
 export const meshLod = Object.freeze({ coarse: { relative: 0.01, angularRad: 1 } });
 export function displayDeflectionMm(
   bounds: readonly [Vec3, Vec3],
@@ -379,9 +512,14 @@ export async function evaluateCad(
   evaluation: CadEvaluation;
   meshes: CadMesh[];
   step?: Uint8Array;
+  /** PMI-4b/4c: what the STEP file carries of the bodies' PMI, when any body has PMI. */
+  stepPmi?: CadStepPmiWritten;
   brep?: CadBrepExport;
   continuity?: CadContinuityResult;
   comb?: CadCombResult;
+  gapFlush?: CadGapFlushResult;
+  faceDistances?: CadFaceDistanceResult[];
+  analysisSurface?: CadAnalysisSurfaceResult;
 }> {
   // Every Embind wrapper is owned, including ones returned by builders (.Shape(), ex.Current()):
   // deleting a builder does not delete them. A Set keeps own() idempotent.
@@ -481,7 +619,51 @@ export async function evaluateCad(
     names: (CadFaceName | null)[];
     /** A sheet's named boundaries: free edges and the name each borders (`boundaryNames`). */
     edges?: { edge: unknown; name: CadFaceName }[];
+    /** PMI-4a: the imported sub-shapes each face, edge and vertex comes from (`PmiOrigins`). */
+    origins?: PmiOrigins;
   };
+  /**
+   * Origins of `result` carried from `from` through a builder's history: each origin of
+   * `from` goes to its images, exact only when the image is the sub-shape itself (IsPartner)
+   * and alone. A sub-shape that is an image of two origins keeps neither exactly.
+   */
+  const carryOrigins = (out: Named, from: Named, image: (s: unknown) => unknown[]) => {
+    if (!from.origins) return;
+    const maps = pmiKinds.map((k) => (k === 'TopAbs_FACE' ? out.faces : shapeMap(out.shape, k)));
+    const origins = (out.origins ??= {
+      TopAbs_FACE: Array(maps[0]!.Size()).fill(null),
+      TopAbs_EDGE: Array(maps[1]!.Size()).fill(null),
+      TopAbs_VERTEX: Array(maps[2]!.Size()).fill(null),
+    });
+    pmiKinds.forEach((kind, k) => {
+      const list = from.origins![kind];
+      if (!list.some(Boolean)) return;
+      const source = kind === 'TopAbs_FACE' ? from.faces : shapeMap(from.shape, kind);
+      for (let i = 1; i <= source.Size(); i++) {
+        const origin = list[i - 1];
+        if (!origin) continue;
+        const sub = own(source.FindKey(i)) as { IsPartner(o: unknown): boolean };
+        let images: unknown[];
+        try {
+          images = image(sub).filter(Boolean);
+        } catch {
+          images = [];
+        }
+        const exact =
+          origin.exact &&
+          images.length === 1 &&
+          (images[0] as { IsPartner(o: unknown): boolean }).IsPartner(sub);
+        for (const made of images) {
+          const j = maps[k]!.FindIndex(made);
+          if (j < 1) continue;
+          const had = origins[kind][j - 1];
+          origins[kind][j - 1] = had ? { ...had, exact: false } : { ...origin, exact };
+        }
+      }
+    });
+  };
+  /** R3i-2: a body's midsurface, its thickness and the history from the body's faces and edges. */
+  type Midsurface = { body: Named; history: CadPreparationHistory; thicknessMm: number };
   const named = (shape: unknown, nameOf: (face: unknown) => CadFaceName | null): Named => {
     const faces = shapeMap(shape, 'TopAbs_FACE');
     const names = [];
@@ -504,6 +686,7 @@ export async function evaluateCad(
         ? (result as Named)
         : named(result, () => null);
     if (!naming) return out;
+    carryOrigins(out, from, image);
     for (let i = 1; i <= from.faces.Size(); i++) {
       const name = from.names[i - 1];
       if (!name) continue;
@@ -512,8 +695,17 @@ export async function evaluateCad(
         if (j > 0 && !out.names[j - 1]) out.names[j - 1] = rename(name);
       }
     }
-    for (const { edge, name } of from.edges ?? [])
-      for (const made of image(edge)) (out.edges ??= []).push({ edge: made, name: rename(name) });
+    for (const { edge, name } of from.edges ?? []) {
+      // CR4g: a copying transform (a mirror) has no image of a named edge that is not in the
+      // input's shape (a trim names the cut edges of the pieces it leaves out too).
+      let made: unknown[];
+      try {
+        made = image(edge);
+      } catch {
+        made = [];
+      }
+      for (const e of made) (out.edges ??= []).push({ edge: e, name: rename(name) });
+    }
     return out;
   };
   /**
@@ -527,6 +719,7 @@ export async function evaluateCad(
     image: (face: unknown) => unknown[],
   ): Named => {
     if (!naming) return out;
+    for (const { tool } of tools) carryOrigins(out, tool, image);
     const found = new Map<number, Map<string, CadFaceName>>();
     for (const { tool, prefix } of tools)
       for (let i = 1; i <= tool.faces.Size(); i++) {
@@ -753,13 +946,43 @@ export async function evaluateCad(
     resolvePosition(p.plane.origin, params),
   ];
   /** An imported feature's BRep bytes, refused when missing or not matching their ref. */
-  function assetBytes(f: Extract<CadFeature, { type: 'imported' }>) {
-    const ref = doc.assets.find((a) => a.id === f.args.brepAssetId);
+  function assetBytes(f: Extract<CadFeature, { type: 'imported' }>, id = f.args.brepAssetId) {
+    const ref = doc.assets.find((a) => a.id === id);
     const bytes = ref && options.assets?.get(ref.sha256);
     if (!ref || !bytes) throw new CadKernelError('asset-missing', f.id);
     if (bytes.byteLength !== ref.byteLength || `sha256:${bytesToHex(sha256(bytes))}` !== ref.sha256)
       throw new CadKernelError('asset-hash-mismatch', f.id);
     return bytes;
+  }
+  /**
+   * A kept shape's imported assets, checked as a rebuild checks them: the BRep's and the `pmi`
+   * asset's bytes must be present and match their refs. The cache keys hold the refs, so a kept
+   * shape was built (and its PMI checked against it) with the same bytes.
+   */
+  function checkImportedAssets(f: Extract<CadFeature, { type: 'imported' }>) {
+    assetBytes(f);
+    if (f.args.pmiAssetId !== undefined) assetBytes(f, f.args.pmiAssetId);
+  }
+  /** PMI-2 (CAD82): a `pmi` asset that does not fit its body is refused with `pmi-invalid`. */
+  function checkPmi(f: Extract<CadFeature, { type: 'imported' }>, shape: unknown) {
+    const bytes = assetBytes(f, f.args.pmiAssetId);
+    let json: unknown;
+    try {
+      json = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } catch {
+      throw new CadKernelError('pmi-invalid', f.id);
+    }
+    const count = (kind: string) => {
+      const map = own(new oc.TopTools_IndexedMapOfShape_1());
+      oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum[kind], map);
+      return map.Extent() as number;
+    };
+    const counts = {
+      faces: count('TopAbs_FACE'),
+      edges: count('TopAbs_EDGE'),
+      vertices: count('TopAbs_VERTEX'),
+    };
+    if (pmiAssetProblem(json, counts) !== undefined) throw new CadKernelError('pmi-invalid', f.id);
   }
   /**
    * A full turn's history leaves some side faces out (OCCT 7.6 gives no Generated face for a
@@ -847,11 +1070,82 @@ export async function evaluateCad(
     }
     if (!op.IsDone() || op.HasErrors()) throw new CadKernelError('boolean-failed', featureId);
     const image = history(op);
+    if (mode === 'union') checkUnion(featureId, own(op.Shape()), [target, ...tools], image);
     return carryTools(
       carry(own(op.Shape()), target, image),
       tools.map((tool, k) => ({ tool, prefix: prefixes[k]! })),
       image,
     );
+  }
+  /**
+   * TW4 (docs/cad/bim-tower.md): a union OCCT could not finish is refused as such, not as a
+   * fault of the model. Members whose end caps meet at one point (a lattice's nodes) can make it
+   * return a shape with no solid (48 tubes: 3 solids of no volume, invalid), or split one
+   * operand's solid between two result solids (3 ring tubes: 2 solids that touch). A union
+   * keeps each operand solid whole, in one result solid, and is never smaller than its largest
+   * operand. Operands that only touch still give `solids-touching` in `checkSolid`.
+   */
+  function checkUnion(
+    featureId: string,
+    result: unknown,
+    operands: Named[],
+    image: (face: unknown) => unknown[],
+  ) {
+    const incomplete = () => new CadKernelError('boolean-incomplete', featureId);
+    const solids = shapeMap(result, 'TopAbs_SOLID');
+    if (!solids.Size()) throw incomplete();
+    if (volume(result) < (1 - 1e-3) * Math.max(...operands.map((o) => volume(o.shape))))
+      throw incomplete();
+    // Builds before R1 have neither the history to follow the faces by nor the maps below.
+    if (solids.Size() === 1 || !naming) return;
+    const owners = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+    oc.TopExp.MapShapesAndAncestors(
+      result,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+      owners,
+    );
+    // Each operand solid, by the result solid its faces went into.
+    const groups = new Map<number, unknown[]>();
+    for (const operand of operands)
+      explore(operand.shape, 'TopAbs_SOLID', (solid) => {
+        const into = new Set<number>();
+        explore(solid, 'TopAbs_FACE', (face) => {
+          for (const made of image(face)) {
+            const at = owners.FindIndex(made);
+            if (at) for (const s of listOf(owners.FindFromIndex(at))) into.add(solids.FindIndex(s));
+          }
+        });
+        if (into.size > 1) throw incomplete();
+        for (const i of into) groups.set(i, [...(groups.get(i) ?? []), solid]);
+      });
+    // Result solids that touch, from operand solids that overlap (3 legs and the 2 rings between
+    // them: 2 solids): the union failed to merge them. Ones whose operands only touch are refused
+    // later as `solids-touching`.
+    const touching = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+    oc.TopExp.MapShapesAndAncestors(
+      result,
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+      touching,
+    );
+    const pairs = new Set<string>();
+    for (let v = 1; v <= touching.Size(); v++) {
+      const at = [...new Set(listOf(touching.FindFromIndex(v)).map((x) => solids.FindIndex(x)))];
+      for (const i of at) for (const j of at) if (i < j) pairs.add(`${i} ${j}`);
+    }
+    for (const pair of pairs) {
+      const [i, j] = pair.split(' ').map(Number);
+      for (const a of groups.get(i!) ?? [])
+        for (const b of groups.get(j!) ?? []) {
+          const common = own(
+            new oc.BRepAlgoAPI_Common_3(a, b, own(new oc.Message_ProgressRange_1())),
+          );
+          if (!common.IsDone() || common.HasErrors()) continue;
+          if (volume(own(common.Shape())) > 1e-6 * Math.min(volume(a), volume(b)))
+            throw incomplete();
+        }
+    }
   }
   /** The volume of a shape's solids (mm³), whatever their orientation. */
   function volume(shape: unknown): number {
@@ -1103,6 +1397,103 @@ export async function evaluateCad(
     );
   }
   /**
+   * A curve's range [a, b] broken at its knots: a B-spline is smooth only between them (shifted
+   * by periods on a periodic one), so each piece is one polynomial span. Other curves: [a, b].
+   */
+  function knotBreaks(
+    curve: {
+      DynamicType(): unknown;
+      IsPeriodic(): boolean;
+      Period(): number;
+      NbKnots?: () => number;
+      Knot?: (i: number) => number;
+    },
+    a: number,
+    b: number,
+  ): number[] {
+    const breaks = [a, b];
+    const type = own(curve.DynamicType() as { get(): { Name(): string } })
+      .get()
+      .Name();
+    if (type === 'Geom_BSplineCurve' && curve.NbKnots && curve.Knot) {
+      const period = curve.IsPeriodic() ? curve.Period() : 0;
+      for (let i = 1; i <= curve.NbKnots(); i++) {
+        const k = curve.Knot(i);
+        const shifts = period > 0 ? Math.ceil((b - a) / period) + 1 : 0;
+        for (let n = -shifts; n <= shifts; n++) {
+          const t = k + n * period;
+          if (t > a && t < b) breaks.push(t);
+          if (!(period > 0)) break;
+        }
+      }
+    }
+    breaks.sort((x, y) => x - y);
+    const spans = breaks.filter((t, i) => i === 0 || t - breaks[i - 1]! > 1e-12 * (b - a));
+    if (spans[spans.length - 1] !== b) spans[spans.length - 1] = b;
+    return spans;
+  }
+  /** A Gordon surface (gordon.ts) built as one cubic B-spline face. */
+  function gordonFace(f: CadFeature, made: GordonSurface) {
+    const rows = made.poles.length,
+      cols = made.poles[0]!.length;
+    const poles = own(new oc.TColgp_Array2OfPnt_2(1, rows, 1, cols));
+    made.poles.forEach((row, i) =>
+      row.forEach((p, j) => poles.SetValue(i + 1, j + 1, pnt(p[0], p[1], p[2]))),
+    );
+    const reals = (xs: number[]) => {
+      const a = own(new oc.TColStd_Array1OfReal_2(1, xs.length));
+      xs.forEach((x, i) => a.SetValue(i + 1, x));
+      return a;
+    };
+    const ints = (xs: number[]) => {
+      const a = own(new oc.TColStd_Array1OfInteger_2(1, xs.length));
+      xs.forEach((x, i) => a.SetValue(i + 1, x));
+      return a;
+    };
+    const surface = own(
+      new oc.Handle_Geom_Surface_2(
+        new oc.Geom_BSplineSurface_1(
+          poles,
+          reals(made.uKnots),
+          reals(made.vKnots),
+          ints(made.uMults),
+          ints(made.vMults),
+          made.degree,
+          made.degree,
+          false,
+          false,
+        ),
+      ),
+    );
+    const maker = own(
+      new oc.BRepBuilderAPI_MakeFace_8(surface, doc.kernelProfile.linearToleranceMm),
+    );
+    if (!maker.IsDone()) throw new CadKernelError('surface-failed', f.id);
+    return { face: own(maker.Face()), surface };
+  }
+  /** An edge's curve between its vertices, for gordon.ts (CR1d). */
+  function networkCurve(f: CadFeature, edge: unknown): NetworkCurve {
+    const handle = own(oc.BRep_Tool.Curve_2(edge, 0, 0));
+    if (handle.IsNull()) throw new CadKernelError('surface-failed', f.id);
+    const curve = handle.get();
+    const first = own(new oc.TopoDS_Vertex());
+    const last = own(new oc.TopoDS_Vertex());
+    oc.TopExp.Vertices_1(edge, first, last, false);
+    const t0 = oc.BRep_Tool.Parameter_2(first, edge) as number;
+    let t1 = oc.BRep_Tool.Parameter_2(last, edge) as number;
+    if (t1 === t0 && curve.IsPeriodic()) t1 = t0 + (curve.Period() as number);
+    const P = own(new oc.gp_Pnt_1());
+    return {
+      t0,
+      t1,
+      breaks: knotBreaks(curve, t0, t1),
+      at: (t) => {
+        curve.D0(t, P);
+        return [P.X(), P.Y(), P.Z()];
+      },
+    };
+  }
+  /**
    * Refuses curves that do not close a loop in their order: each shares an end with the next
    * (the last with the first) within the linear tolerance, by the first curve that does not.
    */
@@ -1321,8 +1712,12 @@ export async function evaluateCad(
    * A sweep's path in world space: its lines and arcs end to end in order, joined at their shared
    * points, and each edge with the element it was made from.
    */
-  function pathWire(f: CadFeature, path: CadSketchPath, closed: 'allow' | 'refuse' = 'refuse') {
-    const sketch = sketches.get(path.sketchId)!;
+  function pathWire(
+    f: CadFeature,
+    path: CadSketchPath,
+    closed: 'allow' | 'refuse' = 'refuse',
+    sketch: CadSketch = sketches.get(path.sketchId)!,
+  ) {
     const g = sketchPath(sketch, path.elements, closed);
     if ('code' in g) throw new CadKernelError(g.code, f.id);
     const tol = doc.kernelProfile.linearToleranceMm;
@@ -1467,6 +1862,28 @@ export async function evaluateCad(
    * The area-weighted normal of a face's triangles, wound outward as its orientation says (as the
    * display mesh is), or undefined when the face does not mesh.
    */
+  /**
+   * CR1b: whether a fill face meets the face beside one of its G2 sides with the same normal
+   * curvature across the side at every continuity sample (within cadContinuity.g2Relative).
+   * Both faces are meshed as copies (the projections start from their nodes); a face whose
+   * normal faces the other way has its curvature counted with the opposite sign.
+   */
+  function fillMeetsG2(fill: unknown, edge: unknown, beside: unknown): boolean {
+    const copy = (face: unknown) => {
+      const c = own(
+        own(new oc.BRepBuilderAPI_Transform_2(face, own(new oc.gp_Trsf_1()), true)).Shape(),
+      );
+      own(new oc.BRepMesh_IncrementalMesh_2(c, 0.5, false, 0.2, false));
+      return own(oc.TopoDS.Face_1(c));
+    };
+    const samples = edgeContinuity(oc, own, edge, [copy(fill), copy(beside)]);
+    if (samples === 'continuity-projection-failed') return false;
+    return samples.every((s) => {
+      const turned = s.g1Deg > 90;
+      const [a, b] = s.curvature;
+      return curvatureDeviation([a, turned ? -b : b]) <= cadContinuity.g2Relative * (1 + 1e-9);
+    });
+  }
   function outwardNormal(face: unknown, area: number): Vec3 | undefined {
     const copy = own(
       own(new oc.BRepBuilderAPI_Transform_2(face, own(new oc.gp_Trsf_1()), true)).Shape(),
@@ -1598,53 +2015,111 @@ export async function evaluateCad(
    * kept side gathered in one shell. Pieces are `trim:<ID>:<side>/<their face's name>`; the cut
    * edges are named by where the cut runs (`cutBoundaryName`).
    */
-  function trim(f: Extract<CadFeature, { type: 'trim' }>, shapes: Map<string, Named>): Named {
-    const input = shapes.get(f.inputFeatureIds[0])!;
-    const tool = f.args.tool;
+  /**
+   * R2a-3 trim, and CR3b's panel (the same cut of a sheet read as its source, never consumed).
+   * With a gap the sketch chain is offset `gap / 2` into the kept side first (`sketchWithOffset`),
+   * its cut edges still named by the source chain's elements.
+   */
+  function trim(
+    f: Extract<CadFeature, { type: 'trim' | 'panel' }>,
+    shapes: Map<string, Named>,
+  ): Named {
+    const input = shapes.get(f.type === 'panel' ? f.args.source.featureId : f.inputFeatureIds[0])!;
+    const tool: CadTrimTool = f.args.tool;
+    const gap = f.args.gap ? len(f.args.gap) : 0;
     const [min, max] = boundsOf(input.shape);
     const centre = min.map((x, i) => (x + max[i]!) / 2) as Vec3;
     const size = Math.hypot(...min.map((x, i) => max[i]! - x)) + 10;
     let toolShape: unknown;
     let side: (p: Vec3) => number;
-    const cuts: { face: unknown; name: CadFaceName }[] = [];
+    // A sketch chain's signed distance from its plane, for the 86M2 sides below.
+    let across: ((p: Vec3) => number) | undefined;
+    const cuts: { face: unknown; name: CadFaceName; chain?: number }[] = [];
+    // CR3c: the sketch chains a trim cuts with, and those left out (`ifMissed: 'skip'`).
+    let chainCount = 0;
+    const skipped = new Set<number>();
     if ('sketchId' in tool) {
-      // The chain's planar face moved back along the sketch's normal and swept through the
-      // input: a prism whose sides cut it. A point is inside where the prism holds it.
-      const chain = pathWire(f, tool, 'allow');
+      // Each chain's planar face moved back along the sketch's normal and swept through the
+      // input: a prism whose sides cut it. A point is inside where a prism holds it. CR3c: the
+      // tool's chain and `chains` are cut at once, each one's cut faces tagged with its index.
       const [q, origin] = frames.get(tool.sketchId)!;
       const n = own(own(new oc.gp_Dir_4(0, 0, 1)).Transformed(quaternionTrsf(q)));
       const normal: Vec3 = [n.X(), n.Y(), n.Z()];
       const off = normal.reduce((a, x, i) => a + x * (centre[i]! - origin[i]!), 0);
+      across = (p) => normal.reduce((a, x, i) => a + x * (p[i]! - origin[i]!), 0);
       const reach = Math.abs(off) + size;
-      const face = own(new oc.BRepBuilderAPI_MakeFace_15(chain.wire, true));
-      if (!face.IsDone()) throw new CadKernelError('trim-failed', f.id);
-      const trsf = own(new oc.gp_Trsf_1());
-      trsf.SetTranslation_1(own(new oc.gp_Vec_4(...normal.map((x) => x * (off - reach)))));
-      const moved = own(new oc.BRepBuilderAPI_Transform_2(own(face.Face()), trsf, false));
-      const prism = own(
-        new oc.BRepPrimAPI_MakePrism_1(
-          own(moved.Shape()),
-          own(new oc.gp_Vec_4(...normal.map((x) => x * 2 * reach))),
-          false,
-          true,
-        ),
-      );
-      toolShape = own(prism.Shape());
-      for (const { edge, id } of chain.edges)
-        for (const made of listOf(prism.Generated(own(moved.ModifiedShape(edge)))))
-          explore(made, 'TopAbs_FACE', (face) =>
-            cuts.push({ face, name: cutBoundaryName({ sketchId: tool.sketchId, element: id }) }),
+      const all = [tool.elements, ...(f.type === 'trim' ? (f.args.chains ?? []) : [])];
+      const classifiers: unknown[] = [];
+      const compound = own(new oc.TopoDS_Compound());
+      const builder = own(new oc.BRep_Builder());
+      builder.MakeCompound(compound);
+      all.forEach((elements, k) => {
+        let chain: ReturnType<typeof pathWire>;
+        let source = (id: string) => id;
+        const at: (string | number)[] = k ? ['chains', k - 1] : ['tool'];
+        if (gap) {
+          let moved: ReturnType<typeof sketchWithOffset>;
+          try {
+            moved = sketchWithOffset(
+              sketches.get(tool.sketchId)!,
+              elements,
+              ((f.args.keep === 'outside' ? 1 : -1) * gap) / 2,
+            );
+          } catch (error) {
+            if (error instanceof CadSketchError)
+              throw new CadKernelError(error.code, f.id, false, undefined, [['gap'], at]);
+            throw error;
+          }
+          const from = new Map(moved.ids.map((id, i) => [id, moved.offset.pieces[i]!.source]));
+          source = (id) => from.get(id) ?? id;
+          chain = pathWire(
+            f,
+            { sketchId: tool.sketchId, elements: moved.ids },
+            'allow',
+            moved.sketch,
           );
-      const classifier = own(new oc.BRepClass3d_SolidClassifier_1());
-      classifier.Load(toolShape);
+        } else chain = pathWire(f, { sketchId: tool.sketchId, elements }, 'allow');
+        const face = own(new oc.BRepBuilderAPI_MakeFace_15(chain.wire, true));
+        if (!face.IsDone()) throw new CadKernelError('trim-failed', f.id);
+        const trsf = own(new oc.gp_Trsf_1());
+        trsf.SetTranslation_1(own(new oc.gp_Vec_4(...normal.map((x) => x * (off - reach)))));
+        const moved = own(new oc.BRepBuilderAPI_Transform_2(own(face.Face()), trsf, false));
+        const prism = own(
+          new oc.BRepPrimAPI_MakePrism_1(
+            own(moved.Shape()),
+            own(new oc.gp_Vec_4(...normal.map((x) => x * 2 * reach))),
+            false,
+            true,
+          ),
+        );
+        const solid = own(prism.Shape());
+        builder.Add(compound, solid);
+        for (const { edge, id } of chain.edges)
+          for (const made of listOf(prism.Generated(own(moved.ModifiedShape(edge)))))
+            explore(made, 'TopAbs_FACE', (face) =>
+              cuts.push({
+                face,
+                name: cutBoundaryName({ sketchId: tool.sketchId, element: source(id) }),
+                chain: k,
+              }),
+            );
+        const classifier = own(new oc.BRepClass3d_SolidClassifier_1());
+        classifier.Load(solid);
+        classifiers.push(classifier);
+      });
+      toolShape = compound;
+      chainCount = all.length;
       side = (p) => {
-        classifier.Perform(pnt(...p), doc.kernelProfile.linearToleranceMm);
-        const state = classifier.State();
-        return state === oc.TopAbs_State.TopAbs_IN
-          ? 1
-          : state === oc.TopAbs_State.TopAbs_OUT
-            ? -1
-            : 0;
+        let on = false;
+        for (const [k, classifier] of classifiers.entries()) {
+          if (skipped.has(k)) continue;
+          const c = classifier as { Perform(p: unknown, t: number): void; State(): unknown };
+          c.Perform(pnt(...p), doc.kernelProfile.linearToleranceMm);
+          const state = c.State();
+          if (state === oc.TopAbs_State.TopAbs_IN) return 1;
+          if (state !== oc.TopAbs_State.TopAbs_OUT) on = true;
+        }
+        return on ? 0 : -1;
       };
     } else if ('plane' in tool) {
       const o = resolvePosition(tool.plane.origin, params);
@@ -1712,6 +2187,18 @@ export async function evaluateCad(
     }
     // A tool that cuts nothing leaves the sheet as it was: refused, not kept or emptied.
     if (!cut) throw new CadKernelError('trim-no-cut', f.id, false, undefined, [['tool']]);
+    // CR3c: a sketch chain whose sides meet no face is named, or left out with `skip`.
+    const chainPath = (k: number): (string | number)[] => (k ? ['chains', k - 1] : ['tool']);
+    if (chainCount) {
+      const hit = new Set<number>();
+      for (const { face, chain } of cuts)
+        if (chain !== undefined && !hit.has(chain) && listOf(splitter.Generated(face)).length)
+          hit.add(chain);
+      const missed = [...Array(chainCount).keys()].filter((k) => !hit.has(k));
+      if (missed.length && (f.type !== 'trim' || f.args.ifMissed !== 'skip'))
+        throw new CadKernelError('trim-no-cut', f.id, false, undefined, missed.map(chainPath));
+      for (const k of missed) skipped.add(k);
+    }
     const want = f.args.keep === 'inside' || f.args.keep === 'front' ? 1 : -1;
     const kept: typeof pieces = [];
     for (const p of pieces) {
@@ -1725,7 +2212,44 @@ export async function evaluateCad(
     const shell = own(new oc.TopoDS_Shell());
     builder.MakeShell(shell);
     for (const { piece } of kept) builder.Add(shell, piece);
-    const prefix = `trim:${f.id}:${f.args.keep}`;
+    // CR3c (86M3): kept pieces that fall apart are refused naming the chains whose cut edges
+    // border more than one of them (a window run off the panel's edge, two windows meeting).
+    if (chainCount && kept.length > 1) {
+      const topology = sheetTopology(oc, shell, own);
+      if (!topology.connected) {
+        const faces = own(new oc.TopTools_IndexedMapOfShape_1());
+        oc.TopExp.MapShapes_1(shell, oc.TopAbs_ShapeEnum.TopAbs_FACE, faces);
+        const ancestors = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+        oc.TopExp.MapShapesAndAncestors(
+          shell,
+          oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+          oc.TopAbs_ShapeEnum.TopAbs_FACE,
+          ancestors,
+        );
+        const parts = new Map<number, Set<number>>();
+        for (const { face, chain } of cuts) {
+          if (chain === undefined || skipped.has(chain)) continue;
+          for (const made of listOf(splitter.Generated(face)))
+            explore(made, 'TopAbs_EDGE', (edge) => {
+              const e = ancestors.FindIndex(edge);
+              if (e < 1) return;
+              for (const g of listOf(ancestors.FindFromIndex(e)))
+                (parts.get(chain) ?? parts.set(chain, new Set()).get(chain)!).add(
+                  topology.component[faces.FindIndex(g) - 1]!,
+                );
+            });
+        }
+        const culprits = [...parts].filter(([, c]) => c.size > 1).map(([k]) => k);
+        throw new CadKernelError(
+          'trim-disconnected',
+          f.id,
+          false,
+          undefined,
+          (culprits.length ? culprits : [...Array(chainCount).keys()]).map(chainPath),
+        );
+      }
+    }
+    const prefix = `${f.type}:${f.id}:${f.args.keep}`;
     const result = named(shell, () => null);
     if (!naming) return result;
     for (const { piece, from } of kept) {
@@ -1737,11 +2261,1381 @@ export async function evaluateCad(
     for (const { edge, name } of input.edges ?? [])
       for (const made of image(edge))
         (result.edges ??= []).push({ edge: made, name: prefixFaceName(prefix, name) });
+    const cutEdges: { edge: unknown; name: CadFaceName }[] = [];
+    // CR3c: chains that overlap cut each other's sides inside what is taken away; only the cut
+    // edges left on the result are named.
+    let inResult: { FindIndex(s: unknown): number } | undefined;
+    if (chainCount > 1) {
+      const edges = own(new oc.TopTools_IndexedMapOfShape_1());
+      oc.TopExp.MapShapes_1(result.shape, oc.TopAbs_ShapeEnum.TopAbs_EDGE, edges);
+      inResult = edges;
+    }
     for (const { face, name } of cuts)
       for (const made of listOf(splitter.Generated(face)))
-        explore(made, 'TopAbs_EDGE', (edge) => (result.edges ??= []).push({ edge, name }));
+        explore(made, 'TopAbs_EDGE', (edge) => {
+          if (!inResult || inResult.FindIndex(edge) > 0) cutEdges.push({ edge, name });
+        });
+    // 86M2 (CR3b): a chain carried through both sides of a body (a car's left and right) cuts
+    // each side along the same element. Such an element's edges are told apart by the side of the
+    // sketch's plane they lie on (`at:front` along its normal, `at:back`); one side keeps the name.
+    if (across) {
+      const sides = cutEdges.map(({ edge }) => {
+        const c = networkCurve(f, own(oc.TopoDS.Edge_1(edge)));
+        const d = across!(c.at((c.t0 + c.t1) / 2));
+        const eps = doc.kernelProfile.linearToleranceMm;
+        return d > eps ? 'front' : d < -eps ? 'back' : undefined;
+      });
+      const seen = new Map<string, Set<string | undefined>>();
+      cutEdges.forEach(({ name }, i) => {
+        const k = faceNameKey(name);
+        seen.set(k, (seen.get(k) ?? new Set()).add(sides[i]));
+      });
+      cutEdges.forEach((x, i) => {
+        const both = seen.get(faceNameKey(x.name))!;
+        if (both.has('front') && both.has('back') && sides[i])
+          x.name = [...x.name, `at:${sides[i]}`];
+      });
+    }
+    for (const x of cutEdges) (result.edges ??= []).push(x);
     return result;
   }
+  /**
+   * CR2a: the input's faces divided by a ribbon, the sketch's chain carried through the input
+   * along the sketch's normal (`BRepAlgoAPI_Splitter`), every piece kept in one shell. A piece
+   * is `split:<ID>:<side>/<its face's name>`: `left` or `right` of an open chain looking down
+   * the normal, `inside` or `outside` of a closed one. A dividing edge lies between two pieces,
+   * so it is named by their faces (`… left | … right`), not by the chain's element.
+   */
+  function split(f: Extract<CadFeature, { type: 'split' }>, shapes: Map<string, Named>): Named {
+    const input = shapes.get(f.inputFeatureIds[0])!;
+    const { pieces, splitter } = divide(f, input, f.args.tool);
+    const builder = own(new oc.BRep_Builder());
+    const shell = own(new oc.TopoDS_Shell());
+    builder.MakeShell(shell);
+    for (const { piece } of pieces) builder.Add(shell, piece);
+    const result = named(shell, () => null);
+    if (!naming) return result;
+    for (const { piece, from, side: s } of pieces) {
+      const j = result.faces.FindIndex(piece);
+      const name = input.names[from - 1];
+      if (j > 0 && name) result.names[j - 1] = prefixFaceName(`split:${f.id}:${s}`, name);
+    }
+    const image = history(splitter);
+    for (const { edge, name } of input.edges ?? [])
+      for (const made of image(edge))
+        (result.edges ??= []).push({ edge: made, name: prefixFaceName(`split:${f.id}`, name) });
+    return result;
+  }
+  /**
+   * A sheet's faces divided along a sketch's chain carried along the sketch's normal (CR2a,
+   * CR2c): each piece with the input face it came from and its side of the chain.
+   */
+  function divide(f: CadFeature, input: Named, tool: CadSketchPath) {
+    const [min, max] = boundsOf(input.shape);
+    const centre = min.map((x, i) => (x + max[i]!) / 2) as Vec3;
+    const size = Math.hypot(...min.map((x, i) => max[i]! - x)) + 10;
+    const chain = pathWire(f, tool, 'allow');
+    const [q, origin] = frames.get(tool.sketchId)!;
+    const axis = (x: number, y: number, z: number): Vec3 => {
+      const d = own(own(new oc.gp_Dir_4(x, y, z)).Transformed(quaternionTrsf(q)));
+      return [d.X(), d.Y(), d.Z()];
+    };
+    const [X, Y, normal] = [axis(1, 0, 0), axis(0, 1, 0), axis(0, 0, 1)];
+    const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const off = dot(normal, centre.map((x, i) => x - origin[i]!) as Vec3);
+    const reach = Math.abs(off) + size;
+    const trsf = own(new oc.gp_Trsf_1());
+    trsf.SetTranslation_1(own(new oc.gp_Vec_4(...normal.map((x) => x * (off - reach)))));
+    const moved = own(new oc.BRepBuilderAPI_Transform_2(chain.wire, trsf, false));
+    const ribbon = own(
+      new oc.BRepPrimAPI_MakePrism_1(
+        own(moved.Shape()),
+        own(new oc.gp_Vec_4(...normal.map((x) => x * 2 * reach))),
+        false,
+        true,
+      ),
+    );
+    // The chain as a polyline in the sketch's plane, in its own direction, within half of
+    // `splitSideReachMm` of the curve: 64 spans per edge, each halved while its middle lies off
+    // its chord (a fixed count is 0.3 mm off a 1 m arc and would put a piece beside the arc on
+    // the wrong side, Codex on #919). A point nearer the polyline than the reach is on neither
+    // side, so only the triangles of a piece clear of the curve decide its side.
+    const local = (p: Vec3): [number, number] => {
+      const d = p.map((x, i) => x - origin[i]!) as Vec3;
+      return [dot(d, X), dot(d, Y)];
+    };
+    const line: [number, number][] = [];
+    for (const { edge } of chain.edges) {
+      const c = networkCurve(f, own(oc.TopoDS.Edge_1(edge)));
+      const at = (t: number) => local(c.at(t));
+      const span = (
+        t0: number,
+        t1: number,
+        p0: [number, number],
+        p1: [number, number],
+        depth: number,
+      ) => {
+        const tm = (t0 + t1) / 2;
+        const pm = at(tm);
+        const off = Math.hypot(pm[0] - (p0[0] + p1[0]) / 2, pm[1] - (p0[1] + p1[1]) / 2);
+        if (off > splitSideReachMm / 2 && depth < 16) {
+          span(t0, tm, p0, pm, depth + 1);
+          span(tm, t1, pm, p1, depth + 1);
+        } else line.push(p1);
+      };
+      let p = at(c.t0);
+      if (!line.length) line.push(p);
+      for (let k = 1; k <= 64; k++) {
+        const t0 = c.t0 + ((c.t1 - c.t0) * (k - 1)) / 64;
+        const next = at(c.t0 + ((c.t1 - c.t0) * k) / 64);
+        span(t0, c.t0 + ((c.t1 - c.t0) * k) / 64, p, next, 0);
+        p = next;
+      }
+    }
+    const closed = sketchPath(sketches.get(tool.sketchId)!, tool.elements, 'allow');
+    const loop = !('code' in closed) && closed.closed;
+    const side = (p: Vec3): number => {
+      const [x, y] = local(p);
+      // The nearest segment (left of it is +1 for an open chain) and, for a loop, the winding
+      // number about the point.
+      let best = Infinity;
+      let s = 0;
+      let wind = 0;
+      for (let k = 0; k + 1 < line.length; k++) {
+        const [a, b] = [line[k]!, line[k + 1]!];
+        const [dx, dy] = [b[0] - a[0], b[1] - a[1]];
+        const cross = dx * (y - a[1]) - dy * (x - a[0]);
+        if (loop) {
+          if (a[1] <= y && b[1] > y && cross > 0) wind++;
+          else if (a[1] > y && b[1] <= y && cross < 0) wind--;
+        }
+        const t = Math.max(
+          0,
+          Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / (dx * dx + dy * dy || 1)),
+        );
+        const d = Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+        if (d < best) [best, s] = [d, Math.sign(cross)];
+      }
+      if (best < splitSideReachMm) return 0;
+      return loop ? (wind !== 0 ? 1 : -1) : s;
+    };
+    const splitter = own(new oc.BRepAlgoAPI_Splitter_1());
+    const args = own(new oc.TopTools_ListOfShape_1());
+    own(args.Append_1(input.shape));
+    const tools = own(new oc.TopTools_ListOfShape_1());
+    own(tools.Append_1(own(ribbon.Shape())));
+    splitter.SetArguments(args);
+    splitter.SetTools(tools);
+    splitter.Build(own(new oc.Message_ProgressRange_1()));
+    if (!splitter.IsDone() || splitter.HasErrors()) throw new CadKernelError('split-failed', f.id);
+    const pieces: { piece: unknown; from: number; side: string }[] = [];
+    let cut = false;
+    const names = loop ? ['inside', 'outside'] : ['left', 'right'];
+    for (let i = 1; i <= input.faces.Size(); i++) {
+      const face = own(input.faces.FindKey(i));
+      if (splitter.IsDeleted(face)) continue;
+      const made = listOf(splitter.Modified(face));
+      if (made.length > 1) cut = true;
+      for (const piece of made.length ? made : [face]) {
+        const s = pieceSide(piece, side);
+        if (s === 0)
+          throw new CadKernelError('split-side-undetermined', f.id, false, undefined, [['tool']]);
+        pieces.push({ piece, from: i, side: names[s > 0 ? 0 : 1]! });
+      }
+    }
+    // A chain that divides no face (it misses the sheet, or stops inside a face) is refused.
+    if (!cut) throw new CadKernelError('split-missed', f.id, false, undefined, [['tool']]);
+    // The chain element each cut edge runs along: chain edge → ribbon face → its section edges.
+    const cuts: { edge: unknown; element: string }[] = [];
+    for (const { edge, id } of chain.edges)
+      for (const face of listOf(ribbon.Generated(own(moved.ModifiedShape(edge)))))
+        for (const made of listOf(splitter.Generated(face)))
+          explore(made, 'TopAbs_EDGE', (e) => cuts.push({ edge: e, element: id }));
+    const elementOf = (edge: unknown) =>
+      cuts.find((c) => (c.edge as OcModule).IsSame(edge))?.element;
+    return { pieces, splitter, loop, normal, elementOf };
+  }
+  /**
+   * CR2c: a press line. The sheet is divided along the chain (as `split`), the pieces on
+   * `side` moved `depth` along their normal (`front`) or against it (`back`), a ruled wall run
+   * from each dividing edge to its moved copy, all sewn into one shell, and the wall's two
+   * borders rounded by `radius`. The pieces that stay are `press:<ID>:<side>/<name>`, the moved
+   * ones `press:<ID>:moved/<name>`, a wall `press:<ID>/wall:<the dividing edge's name>/e:<the chain element>` and a
+   * rounding `blend:<the edge's name>`. Any step OCCT cannot make is `press-line-failed`.
+   */
+  /**
+   * CR6d: a round groove. The sketch's chain is projected along the sketch's normal onto the
+   * solid (`BRepProj_Projection`, which projects onto every face it crosses, both ways); the
+   * projected lines on the faces nearest the sketch's plane are kept (a seat's top, not its
+   * underside), a circle of the radius is swept along each (`MakePipeShell`, the circle normal to
+   * the line where it starts), and the tubes are cut from the solid at once. Each tube's faces are
+   * `groove:<id>:<i>/…`, i in the order of the kept lines.
+   */
+  function groove(f: Extract<CadFeature, { type: 'groove' }>, shapes: Map<string, Named>): Named {
+    const input = shapes.get(f.inputFeatureIds[0])!;
+    const failed = (code = 'groove-failed', path: (string | number)[] = ['radius']) =>
+      new CadKernelError(code, f.id, false, undefined, [path]);
+    const r = len(f.args.radius);
+    const chain = pathWire(f, f.args.tool, 'allow');
+    const [q, origin] = frames.get(f.args.tool.sketchId)!;
+    const n = own(own(new oc.gp_Dir_4(0, 0, 1)).Transformed(quaternionTrsf(q)));
+    const normal: Vec3 = [n.X(), n.Y(), n.Z()];
+    const axis = (x: number, y: number): Vec3 => {
+      const d = own(own(new oc.gp_Dir_4(x, y, 0)).Transformed(quaternionTrsf(q)));
+      return [d.X(), d.Y(), d.Z()];
+    };
+    const xAxis = axis(1, 0);
+    const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let projection;
+    try {
+      projection = own(new oc.BRepProj_Projection_1(chain.wire, input.shape, n));
+    } catch {
+      throw failed('groove-no-hit', ['tool']);
+    }
+    if (!projection.IsDone()) throw failed('groove-no-hit', ['tool']);
+    // The projected lines' edges, each with the way back to the sketch (`u`) and how far it is.
+    const edges: { edge: unknown; u: Vec3; off: number }[] = [];
+    for (projection.Init(); projection.More(); projection.Next())
+      explore(own(projection.Current()), 'TopAbs_EDGE', (e) => {
+        const edge = own(oc.TopoDS.Edge_1(e));
+        const c = networkCurve(f, edge);
+        const mid = c.at((c.t0 + c.t1) / 2);
+        // A line down a wall along the projection (every point of it over the same point of the
+        // sketch) is where the chain crosses a step, not a place to groove. A line up a steep face
+        // still moves across the sketch and is kept.
+        const start = c.at(c.t0);
+        const across = (p: Vec3) => {
+          const d = p.map((x, i) => x - start[i]!) as Vec3;
+          const along = dot(d, normal);
+          return Math.hypot(...d.map((x, i) => x - along * normal[i]!));
+        };
+        const quarter = c.at(c.t0 + (c.t1 - c.t0) / 4);
+        if (Math.max(across(quarter), across(mid), across(c.at(c.t1))) < 1e-3) return;
+        const height = (p: Vec3) => dot(p, normal) - dot(origin, normal);
+        const h = height(mid);
+        // The curtain reaches the sketch's plane from every point of the edge (its farthest point
+        // sets the length; the half-space past the plane is cut off).
+        let far = 0;
+        for (let k = 0; k <= 32; k++)
+          far = Math.max(far, Math.abs(height(c.at(c.t0 + ((c.t1 - c.t0) * k) / 32))));
+        edges.push({
+          edge,
+          u: normal.map((x) => -(Math.sign(h) || 1) * x) as Vec3,
+          off: far,
+        });
+      });
+    if (!edges.length) throw failed('groove-no-hit', ['tool']);
+    /**
+     * The parts of each edge seen from the sketch: the curtain from 0.01 mm above the edge back to
+     * the sketch's plane, met by the input, hides the parameters its pieces span (a hollow part's
+     * inner wall under the face, a lower face under an overhang, all or in part).
+     */
+    const pieces: unknown[] = [];
+    for (const { edge, u, off } of edges) {
+      const c = networkCurve(f, edge);
+      const [lo, hi] = [Math.min(c.t0, c.t1), Math.max(c.t0, c.t1)];
+      const hidden: [number, number][] = [];
+      if (off > 0.02) {
+        const shift = own(new oc.gp_Trsf_1());
+        shift.SetTranslation_1(own(new oc.gp_Vec_4(...u.map((x) => x * 0.01))));
+        const lifted = own(new oc.BRepBuilderAPI_Transform_2(edge, shift, true));
+        const prism = own(
+          new oc.BRepPrimAPI_MakePrism_1(
+            own(lifted.Shape()),
+            own(new oc.gp_Vec_4(...u.map((x) => x * (off - 0.01)))),
+            false,
+            true,
+          ),
+        );
+        // The edge's side of the sketch's plane: a box from the plane away from the sketch, around
+        // the edge's middle on the plane and wider than the edge and its curtain.
+        const middle = c.at((lo + hi) / 2);
+        const onPlane = middle.map(
+          (x, i) => x - (dot(middle, normal) - dot(origin, normal)) * normal[i]!,
+        ) as Vec3;
+        let reach = off + 10;
+        for (let k = 0; k <= 32; k++) {
+          const p = c.at(lo + ((hi - lo) * k) / 32);
+          reach = Math.max(reach, Math.hypot(...p.map((x, i) => x - middle[i]!)) + off + 10);
+        }
+        const back = u.map((x) => -x) as Vec3;
+        // The box's own y is back × x, whichever way that turns the sketch's y.
+        const boxY: Vec3 = [
+          back[1]! * xAxis[2]! - back[2]! * xAxis[1]!,
+          back[2]! * xAxis[0]! - back[0]! * xAxis[2]!,
+          back[0]! * xAxis[1]! - back[1]! * xAxis[0]!,
+        ];
+        const corner = onPlane.map((x, i) => x - reach * (xAxis[i]! + boxY[i]!)) as Vec3;
+        const side = own(
+          new oc.BRepPrimAPI_MakeBox_5(
+            own(
+              new oc.gp_Ax2_2(
+                pnt(...corner),
+                own(new oc.gp_Dir_4(...back)),
+                own(new oc.gp_Dir_4(...xAxis)),
+              ),
+            ),
+            2 * reach,
+            2 * reach,
+            off + 1,
+          ),
+        );
+        const trimmed = own(
+          new oc.BRepAlgoAPI_Common_3(
+            own(prism.Shape()),
+            own(side.Shape()),
+            own(new oc.Message_ProgressRange_1()),
+          ),
+        );
+        if (!trimmed.IsDone() || trimmed.HasErrors()) throw failed();
+        const common = own(
+          new oc.BRepAlgoAPI_Common_3(
+            input.shape,
+            own(trimmed.Shape()),
+            own(new oc.Message_ProgressRange_1()),
+          ),
+        );
+        if (!common.IsDone() || common.HasErrors()) throw failed();
+        // A point of the curtain read back as the edge's parameter under it.
+        const grid = Array.from({ length: 129 }, (_, k) => lo + ((hi - lo) * k) / 128);
+        const gap = (t: number, p: Vec3) => {
+          const d = c.at(t).map((x, i) => p[i]! - x) as Vec3;
+          const along = dot(d, u);
+          return Math.hypot(...d.map((x, i) => x - along * u[i]!));
+        };
+        const paramOf = (p: Vec3) => {
+          let k = 0;
+          grid.forEach((t, i) => {
+            if (gap(t, p) < gap(grid[k]!, p)) k = i;
+          });
+          let [a, b] = [grid[Math.max(0, k - 1)]!, grid[Math.min(128, k + 1)]!];
+          for (let i = 0; i < 40; i++) {
+            const m1 = a + (b - a) / 3;
+            const m2 = b - (b - a) / 3;
+            if (gap(m1, p) < gap(m2, p)) b = m2;
+            else a = m1;
+          }
+          return (a + b) / 2;
+        };
+        explore(own(common.Shape()), 'TopAbs_FACE', (face) => {
+          const ts: number[] = [];
+          explore(face, 'TopAbs_EDGE', (e) => {
+            const fc = networkCurve(f, own(oc.TopoDS.Edge_1(e)));
+            for (let k = 0; k <= 8; k++) ts.push(paramOf(fc.at(fc.t0 + ((fc.t1 - fc.t0) * k) / 8)));
+          });
+          if (ts.length) hidden.push([Math.min(...ts), Math.max(...ts)]);
+        });
+      }
+      // The seen spans: [lo, hi] less the hidden ones.
+      hidden.sort((x, y) => x[0] - y[0]);
+      let from = lo;
+      const seen: [number, number][] = [];
+      for (const [a, b] of hidden) {
+        if (a > from) seen.push([from, a]);
+        from = Math.max(from, b);
+      }
+      if (from < hi) seen.push([from, hi]);
+      const handle = own(oc.BRep_Tool.Curve_2(edge, 0, 0));
+      for (const [a, b] of seen) {
+        if (a === lo && b === hi) {
+          pieces.push(edge);
+          continue;
+        }
+        // A sliver between two hidden spans is no groove: measured along the curve, so a closed or
+        // nearly closed span whose ends meet is kept.
+        let length = 0;
+        for (let k = 1; k <= 16; k++) {
+          const p = c.at(a + ((b - a) * k) / 16);
+          const q = c.at(a + ((b - a) * (k - 1)) / 16);
+          length += Math.hypot(...p.map((x, i) => x - q[i]!));
+        }
+        if (length < 0.01) continue;
+        const piece = own(new oc.BRepBuilderAPI_MakeEdge_25(handle, a, b));
+        if (!piece.IsDone()) throw failed();
+        pieces.push(own(piece.Edge()));
+      }
+    }
+    if (!pieces.length) throw failed('groove-no-hit', ['tool']);
+    // Each tube face named by the sketch element it runs along (`tube:e:<id>`), or by the point
+    // where it turns or ends (`tube:v:<id>`): the nearest place on the chain to its centroid.
+    const g = sketchPath(sketches.get(f.args.tool.sketchId)!, f.args.tool.elements, 'allow');
+    if ('code' in g) throw failed(g.code, ['tool']);
+    const polylines = g.elements.flatMap((e) => {
+      const pts: [number, number][] =
+        e.type === 'line'
+          ? [e.a, e.b]
+          : e.type === 'arc'
+            ? Array.from({ length: 33 }, (_, k) => {
+                const t = e.start + (e.sweep * k) / 32;
+                return [e.c[0] + e.r * Math.cos(t), e.c[1] + e.r * Math.sin(t)] as [number, number];
+              })
+            : e.pts;
+      return [
+        {
+          id: e.id,
+          ends: e.ends,
+          pts: pts.map(([u, v]) => worldPoint(f.args.tool.sketchId, u, v)),
+        },
+      ];
+    });
+    const nameOfFace = (face: unknown): string => {
+      const c = faceProps(face).centroid;
+      // In the sketch's plane.
+      const h = dot(c, normal) - dot(origin, normal);
+      const q = c.map((x, i) => x - h * normal[i]!) as Vec3;
+      let best = { d: Infinity, name: 'tube' };
+      for (const l of polylines) {
+        const last = l.pts.length - 1;
+        for (let k = 0; k < last; k++) {
+          const a = l.pts[k]!;
+          const b = l.pts[k + 1]!;
+          const ab = b.map((x, i) => x - a[i]!) as Vec3;
+          const len2 = dot(ab, ab);
+          const t = len2 > 0 ? dot(q.map((x, i) => x - a[i]!) as Vec3, ab) / len2 : 0;
+          const tc = Math.min(1, Math.max(0, t));
+          const d = Math.hypot(...q.map((x, i) => x - (a[i]! + tc * ab[i]!)));
+          if (d >= best.d - 1e-9) continue;
+          const atStart = k === 0 && t <= 1e-6;
+          const atEnd = k === last - 1 && t >= 1 - 1e-6;
+          best = {
+            d,
+            name: atStart
+              ? `tube:v:${l.ends[0]}`
+              : atEnd
+                ? `tube:v:${l.ends[1]}`
+                : `tube:e:${l.id}`,
+          };
+        }
+      }
+      return best.name;
+    };
+    // A tube along each seen piece: a circle at its start, normal to it there, swept along it.
+    const ends: Vec3[] = [];
+    const tubes: Named[] = pieces.map((piece) => {
+      const c = networkCurve(f, piece);
+      const h = (c.t1 - c.t0) * 1e-4;
+      const at = c.at(c.t0);
+      const next = c.at(c.t0 + h);
+      const d = next.map((x, i) => x - at[i]!) as Vec3;
+      const l = Math.hypot(...d);
+      if (!(l > 0)) throw failed();
+      const along = d.map((x) => x / l) as Vec3;
+      ends.push(at, c.at(c.t1));
+      // The circle's seam toward the sketch: in the part the cut takes away, so the groove's
+      // wall along each element stays one face.
+      const h0 = dot(at, normal) - dot(origin, normal);
+      const up = normal.map((x) => -(Math.sign(h0) || 1) * x) as Vec3;
+      const toward = up.map((x, i) => x - dot(up, along) * along[i]!) as Vec3;
+      const vx = Math.hypot(...toward);
+      const circle = own(
+        new oc.BRepBuilderAPI_MakeEdge_8(
+          own(
+            new oc.gp_Circ_2(
+              own(
+                vx > 1e-6
+                  ? new oc.gp_Ax2_2(
+                      pnt(...at),
+                      own(new oc.gp_Dir_4(...along)),
+                      own(new oc.gp_Dir_4(...toward)),
+                    )
+                  : new oc.gp_Ax2_3(pnt(...at), own(new oc.gp_Dir_4(...along))),
+              ),
+              r,
+            ),
+          ),
+        ),
+      );
+      if (!circle.IsDone()) throw failed();
+      const profile = own(new oc.BRepBuilderAPI_MakeWire_2(own(circle.Edge())));
+      const spine = own(new oc.BRepBuilderAPI_MakeWire_2(piece));
+      const pipe = own(new oc.BRepOffsetAPI_MakePipeShell(own(spine.Wire())));
+      pipe.SetMode_1(false);
+      pipe.Add_1(own(profile.Wire()), false, false);
+      if (!pipe.IsReady()) throw failed();
+      try {
+        pipe.Build(own(new oc.Message_ProgressRange_1()));
+        if (!pipe.IsDone() || !pipe.MakeSolid()) throw failed();
+      } catch {
+        throw failed();
+      }
+      return named(own(pipe.Shape()), (face) => [nameOfFace(face)]);
+    });
+    for (const tube of tubes) if (!overlaps(input, tube)) throw failed('groove-no-hit', ['tool']);
+    // Where two pieces meet (a corner of the chain), a ball of the radius rounds the turn.
+    const tol = doc.kernelProfile.linearToleranceMm * 10;
+    const joints: Vec3[] = [];
+    ends.forEach((p, i) => {
+      if (joints.some((q) => Math.hypot(...p.map((x, k) => x - q[k]!)) < tol)) return;
+      if (
+        ends.some(
+          (q, j) => j !== i && j >> 1 !== i >> 1 && Math.hypot(...p.map((x, k) => x - q[k]!)) < tol,
+        )
+      )
+        joints.push(p);
+    });
+    for (const p of joints) {
+      const ball = own(new oc.BRepPrimAPI_MakeSphere_5(pnt(...p), r));
+      tubes.push(named(own(ball.Shape()), (face) => [nameOfFace(face)]));
+    }
+    return combine(
+      f.id,
+      'cut',
+      input,
+      tubes,
+      tubes.map((_, i) => `groove:${f.id}:${i}`),
+    );
+  }
+  function pressLine(
+    f: Extract<CadFeature, { type: 'pressLine' }>,
+    shapes: Map<string, Named>,
+  ): Named {
+    const input = shapes.get(f.inputFeatureIds[0])!;
+    const { pieces, elementOf, splitter } = divide(f, input, f.args.tool);
+    const failed = () =>
+      new CadKernelError('press-line-failed', f.id, false, undefined, [['depth']]);
+    const nameOf = (p: (typeof pieces)[number], as: string) => {
+      const name = input.names[p.from - 1];
+      return name ? prefixFaceName(`press:${f.id}:${as}`, name) : null;
+    };
+    const moving = pieces.filter((p) => p.side === f.args.side);
+    const staying = pieces.filter((p) => p.side !== f.args.side);
+    if (!moving.length || !staying.length) throw failed();
+    const builder = own(new oc.BRep_Builder());
+    const shellOf = (faces: unknown[]) => {
+      const shell = own(new oc.TopoDS_Shell());
+      builder.MakeShell(shell);
+      for (const face of faces) builder.Add(shell, face);
+      return shell;
+    };
+    const moved = shellOf(moving.map((p) => p.piece));
+    const stays = shellOf(staying.map((p) => p.piece));
+    // The dividing edges: shared by a piece that moves and one that stays.
+    const stayEdges = shapeMap(stays, 'TopAbs_EDGE');
+    const dividing: unknown[] = [];
+    explore(moved, 'TopAbs_EDGE', (e) => {
+      if (stayEdges.FindIndex(e) > 0 && !dividing.some((d) => (d as OcModule).IsSame(e)))
+        dividing.push(own(oc.TopoDS.Edge_1(e)));
+    });
+    if (!dividing.length) throw failed();
+    const d = len(f.args.depth) * (f.args.toward === 'back' ? -1 : 1);
+    const off = own(new oc.BRepOffsetAPI_MakeOffsetShape());
+    off.PerformBySimple(moved, d);
+    try {
+      off.Build(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    if (!off.IsDone()) throw failed();
+    const offset = own(off.Shape());
+    refitEdges(offset, moved, d);
+    // Each dividing edge's moved copy: the offset edge whose middle lies nearest its middle
+    // moved by the depth.
+    const middle = (edge: unknown): Vec3 => {
+      const c = networkCurve(f, edge);
+      return c.at((c.t0 + c.t1) / 2);
+    };
+    const offsetEdges: { edge: unknown; mid: Vec3 }[] = [];
+    explore(offset, 'TopAbs_EDGE', (e) => {
+      const edge = own(oc.TopoDS.Edge_1(e));
+      if (!oc.BRep_Tool.Degenerated(edge)) offsetEdges.push({ edge, mid: middle(edge) });
+    });
+    const copyOf = (edge: unknown) => {
+      const m = middle(edge);
+      let best: { edge: unknown; mid: Vec3 } | undefined;
+      let dist = Infinity;
+      for (const o of offsetEdges) {
+        const gap = Math.hypot(...o.mid.map((x, i) => x - m[i]!));
+        if (gap < dist) [best, dist] = [o, gap];
+      }
+      return best && Math.abs(dist - Math.abs(d)) <= Math.max(0.05 * Math.abs(d), 0.01)
+        ? best.edge
+        : undefined;
+    };
+    const pairs = dividing.map((edge) => {
+      const copy = copyOf(edge);
+      if (!copy) throw failed();
+      return { edge, copy };
+    });
+    const walls = pairs.map(({ edge, copy }) => {
+      const wire = (e: unknown) => own(own(new oc.BRepBuilderAPI_MakeWire_2(e)).Wire());
+      let loft;
+      try {
+        loft = thruSections(f.id, [wire(edge), wire(copy)], false, true);
+      } catch {
+        throw failed();
+      }
+      let face: unknown;
+      explore(own(loft.Shape()), 'TopAbs_FACE', (x) => (face ??= x));
+      if (!face) throw failed();
+      return face;
+    });
+    const tolerance = Math.max(10 * doc.kernelProfile.linearToleranceMm, 1e-3);
+    const sewing = own(new oc.BRepBuilderAPI_Sewing(tolerance, true, true, true, false));
+    sewing.Add(stays);
+    for (const wall of walls) sewing.Add(wall);
+    sewing.Add(offset);
+    try {
+      sewing.Perform(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    let sewn = own(sewing.SewedShape());
+    const image = (s: unknown) =>
+      sewing.IsModifiedSubShape(s) ? own(sewing.ModifiedSubShape(s)) : s;
+    let shells = 0;
+    let one: unknown;
+    explore(sewn, 'TopAbs_SHELL', (sh) => ((one = sh), shells++));
+    const faceCount = staying.length + walls.length + moving.length;
+    if (shells !== 1 || shapeMap(one, 'TopAbs_FACE').Size() !== faceCount) throw failed();
+    sewn = one;
+    const before = named(sewn, () => null);
+    // The input's named edges (free borders) carried through the split, the move of the moved
+    // side and the sew, so a border keeps its own name (Codex on #921).
+    if (naming) {
+      const movedEdges = shapeMap(moved, 'TopAbs_EDGE');
+      for (const { edge, name } of input.edges ?? [])
+        for (const piece of history(splitter)(edge)) {
+          const at = movedEdges.FindIndex(piece) > 0 ? copyOf(own(oc.TopoDS.Edge_1(piece))) : piece;
+          if (at)
+            (before.edges ??= []).push({
+              edge: image(at),
+              name: prefixFaceName(`press:${f.id}`, name),
+            });
+        }
+    }
+    // Names before the rounding: staying, moved and wall faces.
+    const nameAt = (face: unknown, name: CadFaceName | null) => {
+      const j = before.faces.FindIndex(image(face));
+      if (naming && j > 0 && name) before.names[j - 1] = name;
+    };
+    for (const p of staying) nameAt(p.piece, nameOf(p, p.side));
+    moving.forEach((p) => {
+      for (const face of listOf(off.Generated(p.piece))) nameAt(face, nameOf(p, 'moved'));
+    });
+    const sideNames = (edge: unknown) => {
+      const [a, b] = [staying, moving].map((list) =>
+        list.find((p) => shapeMap(p.piece, 'TopAbs_EDGE').FindIndex(edge) > 0),
+      );
+      const [na, nb] = [a && nameOf(a, a.side), b && nameOf(b, 'moved')];
+      return na && nb ? edgeName(na, nb) : null;
+    };
+    const wallNames = pairs.map(({ edge }) => {
+      const between = naming ? sideNames(edge) : null;
+      // A closed chain's walls all lie between the same two pieces: the chain element tells
+      // them apart (Codex on #921).
+      const element = elementOf(edge);
+      return between
+        ? prefixFaceName(`press:${f.id}`, [
+            `wall:${topoNameKey(between)}`,
+            ...(element ? [`e:${element}`] : []),
+          ])
+        : null;
+    });
+    walls.forEach((w, k) => nameAt(w, wallNames[k]!));
+    if (!own(new oc.BRepCheck_Analyzer(sewn, true, false)).IsValid_2()) throw failed();
+    // The wall's two borders rounded.
+    const rounded = pairs.flatMap(({ edge, copy }) => [image(edge), image(copy)]);
+    const op = own(new oc.BRepFilletAPI_MakeFillet(sewn, oc.ChFi3d_FilletShape.ChFi3d_Rational));
+    const r = len(f.args.radius);
+    for (const e of rounded) op.Add_2(r, own(oc.TopoDS.Edge_1(e)));
+    try {
+      op.Build(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    if (!op.IsDone()) throw failed();
+    const shape = own(op.Shape());
+    if (
+      maxTolerance(shape) > doc.kernelProfile.maxResultLinearToleranceMm ||
+      !own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2()
+    )
+      throw failed();
+    const result = carry(shape, before, history(op));
+    if (naming && before.edges?.length) {
+      const edges = shapeMap(shape, 'TopAbs_EDGE');
+      const have = (e: unknown) => edges.FindIndex(e) > 0;
+      const mids: { edge: unknown; mid: Vec3 }[] = [];
+      for (let i = 1; i <= edges.Size(); i++) {
+        const e = own(oc.TopoDS.Edge_1(own(edges.FindKey(i))));
+        if (!oc.BRep_Tool.Degenerated(e)) mids.push({ edge: e, mid: middle(e) });
+      }
+      // An edge the rounding reports as modified may come back as one not in the result, and
+      // the one in the result can be the edge itself or a copy found by its middle.
+      const fillet = history(op);
+      result.edges = [];
+      for (const { edge, name } of before.edges) {
+        const made = fillet(edge).filter(have);
+        if (!made.length && have(edge)) made.push(edge);
+        if (!made.length) {
+          const m = middle(own(oc.TopoDS.Edge_1(edge)));
+          const found = mids.find(
+            (x) =>
+              Math.hypot(...x.mid.map((v, i) => v - m[i]!)) <=
+              10 * doc.kernelProfile.linearToleranceMm,
+          );
+          if (found) made.push(found.edge);
+        }
+        for (const e of made) result.edges.push({ edge: e, name });
+      }
+      // The new free edges where an open line meets a border (the wall's and the rounds' ends)
+      // are named by that border: `press:<ID>:end/<border>`, from a named free edge they meet
+      // at a vertex, so each end can be referenced (Codex on #921).
+      const free = freeEdges(shape);
+      const vertices = (e: unknown) => {
+        const out: unknown[] = [];
+        explore(e, 'TopAbs_VERTEX', (v) => out.push(v));
+        return out;
+      };
+      const meets = (a: unknown, b: unknown) =>
+        vertices(a).some((v) => vertices(b).some((w) => (v as OcModule).IsSame(w)));
+      const labelled = new Set(result.edges.map((x) => edges.FindIndex(x.edge)));
+      const prefix = `press:${f.id}`;
+      for (let pass = 0; pass < 3; pass++)
+        for (const i of free) {
+          if (labelled.has(i)) continue;
+          const e = own(edges.FindKey(i));
+          const by = result.edges.find(
+            (x) =>
+              x.name[0]!.startsWith(prefix) &&
+              free.has(edges.FindIndex(x.edge)) &&
+              meets(e, x.edge),
+          );
+          if (!by) continue;
+          result.edges.push({ edge: e, name: prefixFaceName(`${prefix}:end`, by.name.slice(1)) });
+          labelled.add(i);
+        }
+    }
+    if (naming) {
+      const ancestors = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+      oc.TopExp.MapShapesAndAncestors(
+        sewn,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_FACE,
+        ancestors,
+      );
+      for (const e of rounded) {
+        const k = ancestors.FindIndex(e);
+        const faces = k > 0 ? listOf(ancestors.FindFromIndex(k)) : [];
+        const names = faces.map((x) => before.names[before.faces.FindIndex(x) - 1]);
+        if (names.length !== 2 || !names[0] || !names[1]) continue;
+        const name = blendFaceName(edgeName(names[0], names[1]));
+        for (const face of listOf(op.Generated(e))) {
+          const j = result.faces.FindIndex(face);
+          if (j > 0 && !result.names[j - 1]) result.names[j - 1] = name;
+        }
+      }
+    }
+    return sheetOf(result);
+  }
+  /**
+   * CR2d: a flare. The sheet is divided along the chain (as `split`); the pieces on the arch's
+   * side go, and a fill takes their place: G1 or G2 to the staying pieces along the chain,
+   * through the arch moved `height` along the gone pieces' mean normal, and through ramps from
+   * where the chain meets the sheet's border to the moved arch's ends. The fill is a Gordon
+   * surface (a plate, `BRepFill_Filling`, stays some 5e-3 mm off the chain: past the result
+   * tolerance) and is sewn to the staying pieces. Staying pieces are `flare:<ID>/<name>`, the
+   * fill `flare:<ID>/surface`, its moved arch `flare:<ID>:moved/<the edge it replaces>` and its
+   * ramps `flare:<ID>:first/…` and `flare:<ID>:last/…` (by the chain's end they start from).
+   */
+  function flare(f: Extract<CadFeature, { type: 'flare' }>, shapes: Map<string, Named>): Named {
+    const input = shapes.get(f.inputFeatureIds[0])!;
+    const failed = (path: (string | number)[] = ['height']) =>
+      new CadKernelError('flare-failed', f.id, false, undefined, [path]);
+    const [archIndex] = resolveRefs(f, input, [{ path: ['arch'], ref: f.args.arch }]);
+    const table = tableOf(input);
+    if (table.topology.edges[archIndex!]!.faces.length !== 1)
+      throw new CadKernelError('flare-arch-not-free', f.id, false, undefined, [['arch']]);
+    const arch = table.edge(archIndex!);
+    const { pieces, splitter } = divide(f, input, f.args.tool);
+    const image = history(splitter);
+    const archPieces = image(arch);
+    const edgesOf = (s: unknown) => shapeMap(s, 'TopAbs_EDGE');
+    // The side the arch lies on goes.
+    const sides = new Set(
+      pieces
+        .filter((p) => archPieces.some((e) => edgesOf(p.piece).FindIndex(e) > 0))
+        .map((p) => p.side),
+    );
+    if (sides.size !== 1)
+      throw new CadKernelError('flare-arch-side', f.id, false, undefined, [['arch']]);
+    const [goSide] = [...sides];
+    const going = pieces.filter((p) => p.side === goSide);
+    const staying = pieces.filter((p) => p.side !== goSide);
+    if (!staying.length) throw failed(['tool']);
+    const builder = own(new oc.BRep_Builder());
+    const shellOf = (faces: unknown[]) => {
+      const shell = own(new oc.TopoDS_Shell());
+      builder.MakeShell(shell);
+      for (const face of faces) builder.Add(shell, face);
+      return shell;
+    };
+    const stays = shellOf(staying.map((p) => p.piece));
+    // Outward: the gone pieces' mean normal, weighted by area.
+    const n: Vec3 = [0, 0, 0];
+    for (const p of going) {
+      const area = faceProps(p.piece).area;
+      const m = outwardNormal(p.piece, area);
+      if (m) for (let i = 0; i < 3; i++) n[i] += m[i]! * area;
+    }
+    const nl = Math.hypot(...n);
+    if (!(nl > 0)) throw failed();
+    const v = n.map((x) => (x / nl) * len(f.args.height)) as Vec3;
+    // The gone region's border: dividing edges (shared with a staying piece) and free edges.
+    const stayEdges = edgesOf(stays);
+    const free = freeEdges(input.shape);
+    const inputEdges = edgesOf(input.shape);
+    const isArch = (e: unknown) => archPieces.some((a) => (a as OcModule).IsSame(e));
+    const dividing: { edge: unknown; face: unknown }[] = [];
+    const border: { edge: unknown; arch: boolean }[] = [];
+    const seen: unknown[] = [];
+    for (const p of going)
+      explore(p.piece, 'TopAbs_EDGE', (e) => {
+        if (seen.some((x) => (x as OcModule).IsSame(e))) return;
+        seen.push(e);
+        const edge = own(oc.TopoDS.Edge_1(e));
+        if (oc.BRep_Tool.Degenerated(edge)) return;
+        if (stayEdges.FindIndex(edge) > 0) {
+          const face = staying.find((q) => edgesOf(q.piece).FindIndex(edge) > 0)!.piece;
+          dividing.push({ edge, face: own(oc.TopoDS.Face_1(face)) });
+          return;
+        }
+        // A free edge of the input, or a piece of one.
+        const from = [...free].some((i) =>
+          image(own(inputEdges.FindKey(i))).some((x) => (x as OcModule).IsSame(edge)),
+        );
+        if (from || isArch(edge)) border.push({ edge, arch: isArch(edge) });
+      });
+    if (!dividing.length || !border.some((b) => b.arch)) throw failed(['tool']);
+    const dist = (a: Vec3, b: Vec3) => Math.hypot(...a.map((x, i) => x - b[i]!));
+    const close = (a: Vec3, b: Vec3) => dist(a, b) <= 1e-4;
+    const move = (p: Vec3) => p.map((x, i) => x + v[i]!) as Vec3;
+    // The chain and the arch, each one curve end to end (the arch moved); a border edge that
+    // is neither runs from the chain's end to the arch's end, and a ramp takes its place.
+    const chain = joinedCurve(dividing.map((d) => networkCurve(f, d.edge)));
+    const archEdges = border.filter((b) => b.arch);
+    const archCurve = joinedCurve(archEdges.map((b) => networkCurve(f, b.edge)));
+    const ramps = border.filter((b) => !b.arch);
+    if (!chain || !archCurve || ramps.length !== 2) throw failed(['tool']);
+    const [c0, c1] = [chain.at(chain.t0), chain.at(chain.t1)];
+    let [a0, a1] = [archCurve.at(archCurve.t0), archCurve.at(archCurve.t1)];
+    const rampEnds = ramps.map((b) => {
+      const c = networkCurve(f, b.edge);
+      return [c.at(c.t0), c.at(c.t1)] as const;
+    });
+    const joins = (r: readonly [Vec3, Vec3], p: Vec3, q: Vec3) =>
+      (close(r[0], p) && close(r[1], q)) || (close(r[1], p) && close(r[0], q));
+    // The arch runs the chain's way: its start is the ramp's end from the chain's start.
+    let archRun = archCurve;
+    if (!rampEnds.some((r) => joins(r, c0, a0))) {
+      archRun = reversedCurve(archCurve);
+      [a0, a1] = [a1, a0];
+    }
+    const first = ramps.findIndex((_, i) => joins(rampEnds[i]!, c0, a0));
+    const last = ramps.findIndex((_, i) => joins(rampEnds[i]!, c1, a1));
+    if (first < 0 || last < 0 || first === last) throw failed(['tool']);
+    // CR2d: the fill is a Gordon surface (gordon.ts) through the chain, the moved arch and
+    // profiles across from one to the other at equal shares of their lengths. Each profile
+    // leaves the sheet in its tangent plane (G1) and, for G2, with the sheet's normal curvature
+    // that way, and rises to the moved arch: a cubic rising as 3s² − 2s³ (G1) or as s³ (G2).
+    // The first and last profiles are the ramps.
+    const meshed = (face: unknown) => {
+      const c = own(
+        own(new oc.BRepBuilderAPI_Transform_2(face, own(new oc.gp_Trsf_1()), true)).Shape(),
+      );
+      own(new oc.BRepMesh_IncrementalMesh_2(c, 0.5, false, 0.2, false));
+      return own(oc.TopoDS.Face_1(c));
+    };
+    const projectors = dividing.map((d) => surfaceProjector(oc, own, meshed(d.face)));
+    const onSheet = (p: Vec3) => {
+      for (const s of projectors) {
+        const at = s.project(p);
+        if (at) return { at, s };
+      }
+      return undefined;
+    };
+    const chainAt = atShare(chain);
+    const archAt = atShare(archRun);
+    const g2 = f.args.continuity === 'G2';
+    const count = cadFlareProfiles;
+    const profiles: NetworkCurve[] = [];
+    for (let j = 0; j < count; j++) {
+      const share = j / (count - 1);
+      const a = chainAt(share);
+      const z = archAt(share);
+      const d = z.map((x, i) => x - a[i]!) as Vec3;
+      const sheet = onSheet(a);
+      if (!sheet) throw failed();
+      const n = sheet.at.normal;
+      const along = d.map((x, i) => x - dotV(d, n) * n[i]!) as Vec3;
+      const l = Math.hypot(...along);
+      if (!(l > 1e-6)) throw failed();
+      const T = along.map((x) => (x / l) * Math.hypot(...d)) as Vec3;
+      const Z = move(z);
+      const plus = (p: Vec3, q: Vec3, k = 1) => p.map((x, i) => x + k * q[i]!) as Vec3;
+      // A cubic, which the surface's cubic fit keeps exactly: for G2 its second pole stays at
+      // the sheet's curvature (C''(0) = 6 (P2 − 2 P1 + P0) = k |T|² n), so it rises as s³.
+      const p1 = plus(a, T, 1 / 3);
+      const p2 = g2
+        ? plus(plus(p1, T, 1 / 3), n, (sheet.s.curvature(sheet.at, T) * dotV(T, T)) / 6)
+        : plus(Z, d, -1 / 3);
+      profiles.push(bezierCurve([a, p1, p2, Z]));
+    }
+    const fit = doc.kernelProfile.maxResultLinearToleranceMm * 0.8;
+    const surfaceOf = gordonSurface([chain, movedCurve(archRun, v)], profiles, fit, fit);
+    if ('code' in surfaceOf) throw failed();
+    const made = gordonFace(f, surfaceOf).face;
+    // Which network curve each of the fill's edges lies on (its midpoint nearest).
+    const network = [chain, movedCurve(archRun, v), profiles[0]!, profiles[count - 1]!];
+    const roles: ('chain' | 'arch' | 'first' | 'last')[] = ['chain', 'arch', 'first', 'last'];
+    const madeEdges: { edge: unknown; role: (typeof roles)[number] }[] = [];
+    explore(made, 'TopAbs_EDGE', (e) => {
+      const edge = own(oc.TopoDS.Edge_1(e));
+      if (oc.BRep_Tool.Degenerated(edge)) return;
+      const c = networkCurve(f, edge);
+      const mid = c.at((c.t0 + c.t1) / 2);
+      const d = network.map((n) => distanceToCurve(n, mid));
+      madeEdges.push({ edge, role: roles[d.indexOf(Math.min(...d))]! });
+    });
+    // G1 (and G2) to the staying pieces, as the continuity check measures it.
+    const madeMeshed = meshed(made);
+    for (const d of dividing) {
+      const samples = edgeContinuity(oc, own, d.edge, [madeMeshed, meshed(d.face)]);
+      if (samples === 'continuity-projection-failed') throw failed();
+      if (samples.some((s) => Math.min(s.g1Deg, 180 - s.g1Deg) > cadContinuity.g1Deg))
+        throw new CadKernelError('fill-g1-unreached', f.id, false, undefined, [['continuity']]);
+      if (g2 && !fillMeetsG2(made, d.edge, d.face))
+        throw new CadKernelError('fill-g2-unreached', f.id, false, undefined, [['continuity']]);
+    }
+    const tolerance = Math.max(10 * doc.kernelProfile.linearToleranceMm, 1e-3);
+    const sewing = own(new oc.BRepBuilderAPI_Sewing(tolerance, true, true, true, false));
+    sewing.Add(stays);
+    sewing.Add(made);
+    try {
+      sewing.Perform(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    const sewnImage = (s: unknown) =>
+      sewing.IsModifiedSubShape(s) ? own(sewing.ModifiedSubShape(s)) : s;
+    let shells = 0;
+    let shell: unknown;
+    explore(own(sewing.SewedShape()), 'TopAbs_SHELL', (sh) => ((shell = sh), shells++));
+    if (shells !== 1 || shapeMap(shell, 'TopAbs_FACE').Size() !== staying.length + 1)
+      throw failed();
+    if (
+      maxTolerance(shell) > doc.kernelProfile.maxResultLinearToleranceMm ||
+      !own(new oc.BRepCheck_Analyzer(shell, true, false)).IsValid_2()
+    )
+      throw failed();
+    const result = named(shell, () => null);
+    if (!naming) return result;
+    const at = (face: unknown, name: CadFaceName | null) => {
+      const j = result.faces.FindIndex(sewnImage(face));
+      if (j > 0 && name) result.names[j - 1] = name;
+    };
+    for (const p of staying) {
+      const name = input.names[p.from - 1];
+      at(p.piece, name ? prefixFaceName(`flare:${f.id}`, name) : null);
+    }
+    at(made, [`flare:${f.id}`, 'surface']);
+    // Edge names: the input's named borders on the staying side keep theirs; a new edge of the
+    // fill is named by the border edge it replaces (the moved arch by its first named piece).
+    const resultEdges = edgesOf(shell);
+    const nameOfEdge = new Map<unknown, CadFaceName>();
+    for (const { edge, name } of input.edges ?? [])
+      for (const piece of image(edge)) nameOfEdge.set(piece, name);
+    const nameFor = (e: unknown) => {
+      for (const [k, name] of nameOfEdge) if ((k as OcModule).IsSame(e)) return name;
+      return undefined;
+    };
+    for (const p of staying)
+      explore(p.piece, 'TopAbs_EDGE', (e) => {
+        const name = nameFor(e);
+        const img = sewnImage(e);
+        if (name && resultEdges.FindIndex(img) > 0)
+          (result.edges ??= []).push({ edge: img, name: prefixFaceName(`flare:${f.id}`, name) });
+      });
+    const replaced = {
+      chain: undefined,
+      arch: archEdges.map((b) => nameFor(b.edge)).find((x) => x),
+      first: nameFor(ramps[first]!.edge),
+      last: nameFor(ramps[last]!.edge),
+    };
+    // The two ramps often replace pieces of one border, and their neighbours have the same
+    // names too: each is told by its end of the chain (Codex, #927).
+    const tag = { chain: 'moved', arch: 'moved', first: 'first', last: 'last' } as const;
+    for (const { edge, role } of madeEdges) {
+      const name = replaced[role];
+      const img = sewnImage(edge);
+      if (name && resultEdges.FindIndex(img) > 0)
+        (result.edges ??= []).push({
+          edge: img,
+          name: prefixFaceName(`flare:${f.id}:${tag[role]}`, name),
+        });
+    }
+    return result;
+  }
+  /**
+   * CR4d: a profile sweep. The section (`profileOutline`) is placed square to the path where it
+   * starts: its height along the path sketch's normal (`normal`), along the in-plane normal
+   * (`inPlane`, B × T) or along `up` (a straight path only), turned over by `flip`. It is swept
+   * with the binormal held: the sketch's normal for a planar path, so the section turns with the
+   * path in its plane. Faces are `side:p:<side>` with `path:e:<element>` (as a surface sweep's),
+   * the start and end edges `start`/`end` and the long free edges `edge:start:p:<first side>`
+   * and `edge:end:p:<last side>`.
+   */
+  function profileSweep(f: Extract<CadFeature, { type: 'profileSweep' }>): Named {
+    const failed = (code = 'profile-sweep-failed', path: (string | number)[] = ['path']) =>
+      new CadKernelError(code, f.id, false, undefined, [path]);
+    const p = f.args.profile;
+    const outline = profileOutline(
+      p.kind,
+      len(p.height),
+      len(p.width),
+      len(p.flange),
+      len(p.radius),
+    );
+    if ('code' in outline) throw failed(outline.code, ['profile']);
+    const path = pathWire(f, f.args.path);
+    if (path.tightest <= profileReach(outline.segments))
+      throw failed('profile-sweep-tight', ['profile']);
+    const edgeCurve = (e: unknown) => networkCurve(f, own(oc.TopoDS.Edge_1(e)));
+    const first = edgeCurve(path.edges[0]!.edge);
+    const o = first.at(first.t0);
+    const h = (first.t1 - first.t0) * 1e-6;
+    const T = normalizeV(subV(first.at(first.t0 + h), o));
+    const B = normalizeV(rotateVector(frames.get(f.args.path.sketchId)![0], [0, 0, 1]));
+    const s = f.args.flip ? -1 : 1;
+    let up: Vec3;
+    let binormal: Vec3;
+    if (f.args.up === 'normal') [up, binormal] = [scaleV(B, s), B];
+    else if (f.args.up === 'inPlane') [up, binormal] = [scaleV(crossV(B, T), s), B];
+    else {
+      up = scaleV(f.args.up, s);
+      if (Math.abs(dotV(up, T)) > 1e-6) throw failed('profile-up', ['up']);
+      // Along a vector, the path is straight: every element a line on the first one's line.
+      for (const { edge } of path.edges) {
+        const c = edgeCurve(edge);
+        for (let k = 0; k <= 8; k++) {
+          const q = subV(c.at(c.t0 + ((c.t1 - c.t0) * k) / 8), o);
+          if (Math.hypot(...subV(q, scaleV(T, dotV(q, T)))) > doc.kernelProfile.linearToleranceMm)
+            throw failed('profile-up-curved', ['up']);
+        }
+      }
+      binormal = crossV(up, T);
+    }
+    const U = crossV(up, T);
+    const at = ([u, v]: [number, number]) => addV(o, addV(scaleV(U, u), scaleV(up, v)));
+    const tol = doc.kernelProfile.linearToleranceMm;
+    const builder = own(new oc.BRep_Builder());
+    const vertices: { p: Vec3; v: unknown }[] = [];
+    const vertex = (q: Vec3) => {
+      const known = vertices.find((x) => Math.hypot(...subV(x.p, q)) <= 1e-9);
+      if (known) return known.v;
+      const v = own(new oc.TopoDS_Vertex());
+      builder.MakeVertex_2(v, pnt(...q), tol);
+      vertices.push({ p: q, v });
+      return v;
+    };
+    const wire = own(new oc.BRepBuilderAPI_MakeWire_1());
+    const made: { edge: unknown; id: string }[] = [];
+    for (const seg of outline.segments) {
+      const [a, b] = [at(seg.a), at(seg.b)];
+      let edge;
+      if (seg.kind === 'line') edge = new oc.BRepBuilderAPI_MakeEdge_2(vertex(a), vertex(b));
+      else {
+        const c = at(seg.centre);
+        const axis = normalizeV(crossV(subV(a, c), subV(b, c)));
+        const r = Math.hypot(...subV(a, c));
+        const frame = own(new oc.gp_Ax2_3(pnt(...c), own(new oc.gp_Dir_4(...axis))));
+        edge = new oc.BRepBuilderAPI_MakeEdge_11(
+          own(new oc.gp_Circ_2(frame, r)),
+          vertex(a),
+          vertex(b),
+        );
+      }
+      own(edge);
+      if (!edge.IsDone()) throw failed();
+      wire.Add_1(own(edge.Edge()));
+      if (!wire.IsDone()) throw failed();
+      made.push({ edge: own(wire.Edge()), id: seg.name });
+    }
+    const profile = {
+      wire: own(wire.Wire()),
+      edges: made,
+      closed: false,
+      ends: [[`edge:start:p:${made[0]!.id}`], [`edge:end:p:${made[made.length - 1]!.id}`]] as [
+        CadFaceName,
+        CadFaceName,
+      ],
+    };
+    const pipe = own(new oc.BRepOffsetAPI_MakePipeShell(path.wire));
+    pipe.SetMode_3(own(new oc.gp_Dir_4(...binormal)));
+    pipe.Add_1(profile.wire, false, false);
+    if (!pipe.IsReady()) throw failed();
+    try {
+      pipe.Build(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    if (!pipe.IsDone()) throw failed();
+    const generated = (x: unknown) => pipe.Generated(x);
+    const result = sweptNames(
+      {
+        FirstShape_1: () => pipe.FirstShape(),
+        LastShape_1: () => pipe.LastShape(),
+        Generated: generated,
+        Shape: () => pipe.Shape(),
+      },
+      made.map(({ edge, id }) => ({ edge, name: [`side:p:${id}`] })),
+      false,
+    );
+    if (naming) pathNames(result, pipe, path.edges);
+    return sheetOf(
+      boundaryNames(result, generated, profile, own(pipe.FirstShape()), own(pipe.LastShape())),
+    );
+  }
+  /** How near a flange strip's border (and the other shape's) a crossing may lie (CR4c), in mm. */
+  const flangeContactMm = 0.01;
+  /**
+   * CR4c: a flange. Each free edge (a closed one in two halves) gets a ruled strip: from the
+   * edge to the edge moved `width` along d = cos(angle)·out + sin(angle)·(±n), where n is the
+   * sheet's normal (its front) and out the sheet's tangent away from it, square to the edge
+   * (material lies left of an edge run as its face has it, seen from the front). The strip is a
+   * Gordon surface (gordon.ts) through the edge, the moved edge and the two straight ends, so
+   * its ends are square to the edge. The strips are sewn to the sheet. A strip whose far side
+   * turns back on itself, or that crosses the sheet or another strip anywhere but along their
+   * borders, is refused as `flange-self-intersects`. The sheet's faces are `flange:<ID>/<name>`,
+   * a strip `flange:<ID>:wall/<k>` (k the edge's place in `edges`, `.0`/`.1` for a closed edge's
+   * halves), its far edge `flange:<ID>:far/<k>` and its ends `flange:<ID>:start|end/<k>`.
+   */
+  function flange(f: Extract<CadFeature, { type: 'flange' }>, shapes: Map<string, Named>): Named {
+    const input = shapes.get(f.inputFeatureIds[0])!;
+    const failed = (path: (string | number)[] = ['width']) =>
+      new CadKernelError('flange-failed', f.id, false, undefined, [path]);
+    const crossing = (path: (string | number)[]) =>
+      new CadKernelError('flange-self-intersects', f.id, false, undefined, [path]);
+    const indices = resolveRefs(
+      f,
+      input,
+      f.args.edges.map((ref, i) => ({ path: ['edges', i], ref })),
+    );
+    const table = tableOf(input);
+    const width = len(f.args.width);
+    const angle = resolveAngle(f.args.angle, params);
+    const [ca, sa] = [Math.cos(angle), Math.sin(angle) * (f.args.toward === 'front' ? 1 : -1)];
+    const reversed = (s: unknown) =>
+      (s as { Orientation_1(): { value: number } }).Orientation_1().value ===
+      oc.TopAbs_Orientation.TopAbs_REVERSED.value;
+    const meshed = (face: unknown) => {
+      const c = own(
+        own(new oc.BRepBuilderAPI_Transform_2(face, own(new oc.gp_Trsf_1()), true)).Shape(),
+      );
+      own(new oc.BRepMesh_IncrementalMesh_2(c, 0.5, false, 0.2, false));
+      return own(oc.TopoDS.Face_1(c));
+    };
+    type Strip = {
+      key: string;
+      path: (string | number)[];
+      root: NetworkCurve;
+      far: NetworkCurve;
+      ends: [NetworkCurve, NetworkCurve];
+      face?: unknown;
+    };
+    const strips: Strip[] = [];
+    const P = own(new oc.gp_Pnt_1());
+    const D = own(new oc.gp_Vec_1());
+    indices.forEach((k, i) => {
+      const path = ['edges', i];
+      const row = table.topology.edges[k]!;
+      const edge = table.edge(k);
+      const face = row.faces.length === 1 ? table.face(row.faces[0]!) : undefined;
+      if (!face || oc.BRep_Tool.Degenerated(edge) || oc.BRep_Tool.IsClosed_2(edge, face))
+        throw new CadKernelError('flange-edge-not-free', f.id, false, undefined, [path]);
+      // How the face runs the edge: material on its left, seen from the face's front.
+      let run = 0;
+      explore(face, 'TopAbs_EDGE', (e) => {
+        if ((e as OcModule).IsSame(edge)) run = reversed(e) ? -1 : 1;
+      });
+      if (!run) throw failed(path);
+      const handle = own(oc.BRep_Tool.Curve_2(edge, 0, 0));
+      if (handle.IsNull()) throw failed(path);
+      const curve = handle.get();
+      const sheet = surfaceProjector(oc, own, meshed(face));
+      const root = networkCurve(f, edge);
+      const dir = (t: number): Vec3 => {
+        curve.D1(t, P, D);
+        const p: Vec3 = [P.X(), P.Y(), P.Z()];
+        const n = sheet.project(p)?.normal;
+        const l = D.Magnitude();
+        if (!n || !(l > 0)) throw failed(path);
+        const along = scaleV([D.X(), D.Y(), D.Z()], run / l);
+        const out = crossV(along, n);
+        const o = Math.hypot(...out);
+        if (!(o > 0.5)) throw failed(path);
+        return [0, 1, 2].map((j) => width * (ca * (out[j]! / o) + sa * n[j]!)) as Vec3;
+      };
+      // A closed edge in two halves, so each strip has two ends.
+      const closed = root.at(root.t0).every((x, j) => Math.abs(x - root.at(root.t1)[j]!) <= 1e-7);
+      const mid = (root.t0 + root.t1) / 2;
+      const spans: [number, number][] = closed
+        ? [
+            [root.t0, mid],
+            [mid, root.t1],
+          ]
+        : [[root.t0, root.t1]];
+      spans.forEach(([a, b], h) => {
+        const piece: NetworkCurve = {
+          t0: a,
+          t1: b,
+          at: root.at,
+          breaks: (root.breaks ?? [root.t0, root.t1])
+            .filter((t) => t > a && t < b)
+            .concat([a, b])
+            .sort((x, y) => x - y),
+        };
+        const far: NetworkCurve = { ...piece, at: (t) => addV(root.at(t), dir(t)) };
+        const line = (t: number) => {
+          const p = root.at(t);
+          const q = far.at(t);
+          return bezierCurve([p, lerpV(p, q, 1 / 3), lerpV(p, q, 2 / 3), q]);
+        };
+        // The far side turns back where it runs against the edge (a tight inside curve).
+        const n = 256;
+        for (let j = 0; j < n; j++) {
+          const [s, t] = [a + ((b - a) * j) / n, a + ((b - a) * (j + 1)) / n];
+          if (dotV(subV(far.at(t), far.at(s)), subV(root.at(t), root.at(s))) <= 0)
+            throw crossing(path);
+        }
+        strips.push({
+          key: closed ? `${i}.${h}` : `${i}`,
+          path,
+          root: piece,
+          far,
+          ends: [line(a), line(b)],
+        });
+      });
+    });
+    const fit = doc.kernelProfile.maxResultLinearToleranceMm * 0.8;
+    for (const s of strips) {
+      const made = gordonSurface([s.root, s.far], s.ends, fit, fit);
+      if ('code' in made) throw failed(s.path);
+      s.face = gordonFace(f, made).face;
+    }
+    // Strips meet the sheet and each other only along their borders.
+    const polyline = (c: NetworkCurve) =>
+      Array.from({ length: 513 }, (_, j) => c.at(c.t0 + ((c.t1 - c.t0) * j) / 512));
+    const near = (lines: Vec3[][], p: Vec3) =>
+      lines.some((l) =>
+        l.some((q, j) => {
+          if (!j) return false;
+          const o = l[j - 1]!;
+          const d = subV(q, o);
+          const dd = dotV(d, d);
+          const u = dd > 0 ? Math.min(1, Math.max(0, dotV(subV(p, o), d) / dd)) : 0;
+          return Math.hypot(...subV(p, addV(o, scaleV(d, u)))) <= flangeContactMm;
+        }),
+      );
+    const inputEdges = shapeMap(input.shape, 'TopAbs_EDGE');
+    const sheetBorder = [...freeEdges(input.shape)].map((j) =>
+      polyline(networkCurve(f, own(oc.TopoDS.Edge_1(own(inputEdges.FindKey(j)))))),
+    );
+    const borders = strips.map((s) => [s.root, s.far, ...s.ends].map(polyline));
+    const crosses = (a: unknown, b: unknown, aBorder: Vec3[][], bBorder: Vec3[][]) => {
+      const op = own(new oc.BRepAlgoAPI_Section_3(a, b, false));
+      op.Build(own(new oc.Message_ProgressRange_1()));
+      if (!op.IsDone()) return true;
+      let bad = false;
+      explore(own(op.Shape()), 'TopAbs_EDGE', (e) => {
+        if (bad) return;
+        const c = networkCurve(f, own(oc.TopoDS.Edge_1(e)));
+        for (const t of [0.25, 0.5, 0.75]) {
+          const m = c.at(c.t0 + (c.t1 - c.t0) * t);
+          if (!near(aBorder, m) || !near(bBorder, m)) bad = true;
+        }
+      });
+      return bad;
+    };
+    strips.forEach((s, i) => {
+      if (crosses(s.face, input.shape, borders[i]!, sheetBorder)) throw crossing(s.path);
+      for (let j = i + 1; j < strips.length; j++)
+        if (crosses(s.face, strips[j]!.face, borders[i]!, borders[j]!))
+          throw crossing(strips[j]!.path);
+    });
+    const tolerance = Math.max(10 * doc.kernelProfile.linearToleranceMm, 1e-3);
+    const sewing = own(new oc.BRepBuilderAPI_Sewing(tolerance, true, true, true, false));
+    sewing.Add(input.shape);
+    for (const s of strips) sewing.Add(s.face);
+    try {
+      sewing.Perform(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    const sewnImage = (s: unknown) =>
+      sewing.IsModifiedSubShape(s) ? own(sewing.ModifiedSubShape(s)) : s;
+    let shells = 0;
+    let shell: unknown;
+    explore(own(sewing.SewedShape()), 'TopAbs_SHELL', (sh) => ((shell = sh), shells++));
+    if (
+      shells !== 1 ||
+      shapeMap(shell, 'TopAbs_FACE').Size() !== input.faces.Size() + strips.length
+    )
+      throw failed();
+    // Every strip is joined to the sheet along its edge.
+    const free = freeEdges(shell);
+    const shellEdges = shapeMap(shell, 'TopAbs_EDGE');
+    const roleOf = (s: Strip, edge: unknown) => {
+      const c = networkCurve(f, edge);
+      const m = c.at((c.t0 + c.t1) / 2);
+      const d = [s.root, s.far, ...s.ends].map((n) => distanceToCurve(n, m));
+      return (['root', 'far', 'start', 'end'] as const)[d.indexOf(Math.min(...d))]!;
+    };
+    const stripEdges = strips.map((s) => {
+      const out: { edge: unknown; role: ReturnType<typeof roleOf> }[] = [];
+      explore(s.face, 'TopAbs_EDGE', (e) => {
+        const edge = own(oc.TopoDS.Edge_1(e));
+        if (oc.BRep_Tool.Degenerated(edge)) return;
+        const role = roleOf(s, edge);
+        if (role === 'root' && free.has(shellEdges.FindIndex(sewnImage(edge))))
+          throw failed(s.path);
+        out.push({ edge, role });
+      });
+      return out;
+    });
+    if (
+      maxTolerance(shell) > doc.kernelProfile.maxResultLinearToleranceMm ||
+      !own(new oc.BRepCheck_Analyzer(shell, true, false)).IsValid_2()
+    )
+      throw failed();
+    const result = named(shell, () => null);
+    if (!naming) return result;
+    for (let j = 1; j <= input.faces.Size(); j++) {
+      const name = input.names[j - 1];
+      const at = result.faces.FindIndex(sewnImage(own(input.faces.FindKey(j))));
+      if (at > 0 && name) result.names[at - 1] = prefixFaceName(`flange:${f.id}`, name);
+    }
+    strips.forEach((s) => {
+      const at = result.faces.FindIndex(sewnImage(s.face));
+      if (at > 0) result.names[at - 1] = [`flange:${f.id}:wall`, s.key];
+    });
+    // Edge names: the sheet's named borders keep theirs; a strip's far edge and ends by it.
+    const resultEdges = shapeMap(shell, 'TopAbs_EDGE');
+    for (const { edge, name } of input.edges ?? []) {
+      const img = sewnImage(edge);
+      if (resultEdges.FindIndex(img) > 0)
+        (result.edges ??= []).push({ edge: img, name: prefixFaceName(`flange:${f.id}`, name) });
+    }
+    strips.forEach((s, i) => {
+      for (const { edge, role } of stripEdges[i]!) {
+        const img = sewnImage(edge);
+        if (role !== 'root' && resultEdges.FindIndex(img) > 0)
+          (result.edges ??= []).push({ edge: img, name: [`flange:${f.id}:${role}`, s.key] });
+      }
+    });
+    return result;
+  }
+  /** How near a split's chain a point is on neither side of it (CR2a), in mm. */
+  const splitSideReachMm = 0.001;
   /** The joining distance a failed sew is tried again with, to tell a gap from sheets apart. */
   const sewGapReachMm = 1;
   /**
@@ -1840,6 +3734,215 @@ export async function evaluateCad(
    * the normal's side keeps each face's name, the other is `inner/<name>`, and the side along a
    * free edge is `side:<the edge's name>`.
    */
+  /**
+   * CR2e: OCCT's simple offset approximates each new edge's curve to its vertices' tolerance and
+   * keeps whatever it reaches: along a long edge of a car's skin (4 m, a B-spline of many spans)
+   * that is some 0.75 mm off the offset face. The offset keeps each edge's curves on the faces
+   * and their parameters, so the exact edge at a parameter is its source's point moved `d`
+   * along the source face's normal there. Each edge past the result tolerance gets a curve
+   * fitted to those points (least squares, cubic, up to 512 poles) and the tolerance it then
+   * needs; one the fit cannot bring within half the result tolerance is left as it is.
+   */
+  function refitEdges(shape: unknown, source: unknown, d: number) {
+    const limit = doc.kernelProfile.maxResultLinearToleranceMm;
+    const sourceFaces = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+    oc.TopExp.MapShapesAndAncestors(
+      source,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      sourceFaces,
+    );
+    const vertexEdges = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+    oc.TopExp.MapShapesAndAncestors(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      vertexEdges,
+    );
+    const builder = own(new oc.BRep_Builder());
+    const loose: unknown[] = [];
+    explore(shape, 'TopAbs_EDGE', (e) => {
+      const edge = own(oc.TopoDS.Edge_1(e));
+      if (
+        (oc.BRep_Tool.Tolerance_2(edge) as number) > limit &&
+        !loose.some((x) => (x as OcModule).IsSame(edge))
+      )
+        loose.push(edge);
+    });
+    if (!loose.length) return;
+    const meshedFaces = new Map<unknown, ReturnType<typeof surfaceProjector>>();
+    const projector = (face: unknown) => {
+      for (const [k, p] of meshedFaces) if ((k as OcModule).IsSame(face)) return p;
+      const c = own(
+        own(new oc.BRepBuilderAPI_Transform_2(face, own(new oc.gp_Trsf_1()), true)).Shape(),
+      );
+      own(new oc.BRepMesh_IncrementalMesh_2(c, 0.5, false, 0.2, false));
+      const p = surfaceProjector(oc, own, own(oc.TopoDS.Face_1(c)));
+      meshedFaces.set(face, p);
+      return p;
+    };
+    for (let k = 1; k <= sourceFaces.Extent(); k++) {
+      const from = own(oc.TopoDS.Edge_1(own(sourceFaces.FindKey(k))));
+      if (oc.BRep_Tool.Degenerated(from)) continue;
+      const faces = listOf(sourceFaces.FindFromIndex(k));
+      if (!faces.length) continue;
+      const src = networkCurve({ id: '' } as CadFeature, from);
+      const onSource = projector(faces[0]);
+      const srcMid = src.at((src.t0 + src.t1) / 2);
+      // Its offset copy: the loose edge over the same parameters whose middle lies the offset
+      // away (the offset's history does not list edges).
+      for (const edge of loose) {
+        const old = networkCurve({ id: '' } as CadFeature, edge);
+        if (Math.abs(old.t0 - src.t0) > 1e-9 || Math.abs(old.t1 - src.t1) > 1e-9) continue;
+        const o0 = old.at((old.t0 + old.t1) / 2);
+        const gap = Math.hypot(...o0.map((x, i) => x - srcMid[i]!));
+        if (Math.abs(gap - Math.abs(d)) > 2 * (oc.BRep_Tool.Tolerance_2(edge) as number) + 1e-6)
+          continue;
+        const moved = (t: number, sign: number): Vec3 | undefined => {
+          const p = src.at(t);
+          const at = onSource.project(p);
+          return at && (p.map((x, i) => x + sign * d * at.normal[i]!) as Vec3);
+        };
+        const mid = (src.t0 + src.t1) / 2;
+        const o = old.at(mid);
+        const away = (q?: Vec3) => (q ? Math.hypot(...q.map((x, i) => x - o[i]!)) : Infinity);
+        const sign = away(moved(mid, 1)) <= away(moved(mid, -1)) ? 1 : -1;
+        let best: { fit: ReturnType<typeof fitCurve>; deviation: number } | undefined;
+        for (let n = 16; n <= 512 && !(best && best.deviation <= limit / 10); n *= 2) {
+          const m = 8 * n;
+          const ts = Array.from({ length: m + 1 }, (_, i) => i / m);
+          const points = ts.map((s) => moved(src.t0 + (src.t1 - src.t0) * s, sign));
+          if (points.some((p) => !p)) break;
+          const fit = fitCurve(ts, points as Vec3[], n);
+          let deviation = 0;
+          for (let i = 0; i <= 2 * m; i++) {
+            const s = i / (2 * m);
+            const q = moved(src.t0 + (src.t1 - src.t0) * s, sign)!;
+            const p = fit.at(s);
+            deviation = Math.max(deviation, Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]));
+          }
+          if (!best || deviation < best.deviation) best = { fit, deviation };
+        }
+        if (!best || best.deviation > limit / 2) continue;
+        const { knots, poles } = best.fit;
+        const distinct = [...new Set(knots)];
+        const P1 = own(new oc.TColgp_Array1OfPnt_2(1, poles.length));
+        poles.forEach((p, i) => P1.SetValue(i + 1, pnt(...p)));
+        const K = own(new oc.TColStd_Array1OfReal_2(1, distinct.length));
+        distinct.forEach((x, i) => K.SetValue(i + 1, src.t0 + (src.t1 - src.t0) * x));
+        const M = own(new oc.TColStd_Array1OfInteger_2(1, distinct.length));
+        distinct.forEach((x, i) => M.SetValue(i + 1, knots.filter((y) => y === x).length));
+        const curve = own(
+          new oc.Handle_Geom_Curve_2(new oc.Geom_BSplineCurve_1(P1, K, M, 3, false)),
+        );
+        builder.UpdateEdge_1(edge, curve, best.deviation);
+        // The edge and its vertices down to what it and the vertices' other edges need.
+        const first = own(new oc.TopoDS_Vertex());
+        const last = own(new oc.TopoDS_Vertex());
+        oc.TopExp.Vertices_1(edge, first, last, false);
+        let need = Math.max(2 * best.deviation, 1e-7);
+        for (const v of [first, last]) {
+          const j = vertexEdges.FindIndex(v);
+          if (j > 0)
+            for (const e of listOf(vertexEdges.FindFromIndex(j)))
+              if (!(e as OcModule).IsSame(edge))
+                need = Math.max(need, oc.BRep_Tool.Tolerance_2(own(oc.TopoDS.Edge_1(e))) as number);
+        }
+        own(new oc.ShapeFix_ShapeTolerance()).LimitTolerance(
+          edge,
+          0,
+          need,
+          oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+        );
+      }
+    }
+  }
+  /**
+   * CR2b: a copy of a sheet moved along its normal. Each face keeps its source's name under
+   * `offset:`; a result OCCT cannot make (a distance past a curvature radius, faces that would
+   * cross) is refused with `offset-failed` and the source faces it lists.
+   */
+  function offsetSurface(
+    f: Extract<CadFeature, { type: 'offsetSurface' }>,
+    shapes: Map<string, Named>,
+  ): Named {
+    const source = shapes.get(f.args.source.featureId)!;
+    const d = len(f.args.distance) * (f.args.side === 'back' ? -1 : 1);
+    const off = own(new oc.BRepOffsetAPI_MakeOffsetShape());
+    off.PerformBySimple(source.shape, d);
+    const failed = () =>
+      new CadKernelError('offset-failed', f.id, false, undefined, [['distance']]);
+    try {
+      off.Build(own(new oc.Message_ProgressRange_1()));
+    } catch {
+      throw failed();
+    }
+    if (!off.IsDone()) throw failed();
+    const shape = own(off.Shape());
+    refitEdges(shape, source.shape, d);
+    let faces = 0;
+    explore(shape, 'TopAbs_FACE', () => faces++);
+    if (
+      faces !== source.faces.Size() ||
+      maxTolerance(shape) > doc.kernelProfile.maxResultLinearToleranceMm ||
+      !own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2()
+    )
+      throw failed();
+    // Past a curvature radius the copy of a face turns inside out yet stays valid: its mean
+    // normal (as the face is oriented) points against its source's.
+    const areas = tableOf(source).topology.faces.map((x) => x.area);
+    for (let i = 1; i <= source.faces.Size(); i++) {
+      const from = own(source.faces.FindKey(i));
+      const a = outwardNormal(from, areas[i - 1]!);
+      for (const face of listOf(off.Generated(from))) {
+        const b = outwardNormal(face, areas[i - 1]!);
+        if (a && b && a[0] * b[0] + a[1] * b[1] + a[2] * b[2] <= 0) throw failed();
+      }
+    }
+    const result = named(shape, () => null);
+    if (naming)
+      for (let i = 1; i <= source.faces.Size(); i++) {
+        const name = source.names[i - 1];
+        if (!name) continue;
+        for (const face of listOf(off.Generated(own(source.faces.FindKey(i))))) {
+          const j = result.faces.FindIndex(face);
+          if (j > 0 && !result.names[j - 1]) result.names[j - 1] = prefixFaceName('offset', name);
+        }
+      }
+    // The source's named borders: each copy lies |d| from its source edge, midpoint to midpoint
+    // (the simple offset keeps the parameter). Without them every border of a one-face sheet
+    // has the same faces and cannot be referenced (Codex, #930).
+    if (naming && source.edges?.length) {
+      const free: { edge: unknown; mid: Vec3 }[] = [];
+      const edgeFaces = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+      oc.TopExp.MapShapesAndAncestors(
+        shape,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_FACE,
+        edgeFaces,
+      );
+      for (let k = 1; k <= edgeFaces.Extent(); k++) {
+        const edge = own(oc.TopoDS.Edge_1(own(edgeFaces.FindKey(k))));
+        if (oc.BRep_Tool.Degenerated(edge) || listOf(edgeFaces.FindFromIndex(k)).length !== 1)
+          continue;
+        const c = networkCurve(f, edge);
+        free.push({ edge, mid: c.at((c.t0 + c.t1) / 2) });
+      }
+      const reach = Math.max(10 * doc.kernelProfile.maxResultLinearToleranceMm, 1e-3);
+      for (const { edge, name } of source.edges) {
+        const c = networkCurve(f, own(oc.TopoDS.Edge_1(edge)));
+        const mid = c.at((c.t0 + c.t1) / 2);
+        let best: { edge: unknown; gap: number } | undefined;
+        for (const x of free) {
+          const gap = Math.abs(Math.hypot(...x.mid.map((v, i) => v - mid[i]!)) - Math.abs(d));
+          if (gap < reach && (!best || gap < best.gap)) best = { edge: x.edge, gap };
+        }
+        if (best)
+          (result.edges ??= []).push({ edge: best.edge, name: prefixFaceName('offset', name) });
+      }
+    }
+    return sheetOf(result);
+  }
   function thicken(f: Extract<CadFeature, { type: 'thicken' }>, shapes: Map<string, Named>): Named {
     const input = shapes.get(f.inputFeatureIds[0])!;
     const t = len(f.args.thickness);
@@ -1909,6 +4012,11 @@ export async function evaluateCad(
     return result;
   }
   function build(f: CadFeature, shapes: Map<string, Named>): Named {
+    // #820: an imported body above the document's limit is placed only, never machined.
+    if (f.type !== 'imported' && f.type !== 'transform')
+      for (const id of f.inputFeatureIds)
+        if (toleranceLimit(id) > doc.kernelProfile.maxResultLinearToleranceMm)
+          throw new CadKernelError('input-tolerance', f.id);
     switch (f.type) {
       case 'box': {
         const size = f.args.size.map(len) as Vec3;
@@ -1948,6 +4056,21 @@ export async function evaluateCad(
           f.args.orientation,
           resolvePosition(f.args.origin, params),
         );
+      case 'spurGear': {
+        // WM1a: the outline with its bore and windows as holes, extruded once (no Boolean).
+        const spec = resolveSpurGear(f.args, params);
+        const problem = spurGearProblem(spec);
+        if (problem) throw new CadKernelError(problem.code, f.id);
+        const { sketch, region } = spurGearSketch(spec, `${f.id}:gear`);
+        const { face, sides } = regionFace(f, sketch, region);
+        const vec = own(new oc.gp_Vec_4(0, 0, len(f.args.faceWidth)));
+        const prism = own(new oc.BRepPrimAPI_MakePrism_1(face, vec, false, true));
+        return place(
+          sweptNames(prism, sides, true),
+          f.args.orientation,
+          resolvePosition(f.args.origin, params),
+        );
+      }
       case 'extrude': {
         const { face, sides, frame } = swept(f);
         const vec = own(new oc.gp_Vec_4(0, 0, f.args.direction * len(f.args.distance)));
@@ -2125,8 +4248,59 @@ export async function evaluateCad(
           });
         return sheetOf(result);
       }
+      case 'curveNetwork': {
+        // CR1d: a Gordon surface through u- and v-curves that cross (gordon.ts works it out on
+        // the curves' points), built as one cubic B-spline face named `surface`.
+        const ways = (['u', 'v'] as const).map((way) =>
+          f.args[way].map((c, i) => curveOf(f, c, [way, i], shapes)),
+        );
+        const network = ways.map((list) => list.map((c) => networkCurve(f, c.edge)));
+        const tolerance = f.args.toleranceMm;
+        const made = gordonSurface(network[0]!, network[1]!, tolerance, tolerance);
+        if ('code' in made) {
+          const paths: (string | number)[][] =
+            made.code === 'curve-network-gap'
+              ? [
+                  ['u', made.u],
+                  ['v', made.v],
+                ]
+              : made.code === 'curve-network-fit'
+                ? [['toleranceMm']]
+                : [[made.curve[0], made.curve[1]]];
+          throw new CadKernelError(made.code, f.id, false, undefined, paths);
+        }
+        const { face, surface } = gordonFace(f, made);
+        const result = named(face, () => ['surface']);
+        // The four border edges are the first and last curves each way, the face's iso lines
+        // v = 0 and 1 (u-curves) and u = 0 and 1 (v-curves). Each edge takes the border whose
+        // iso line's midpoint is nearest its own, so a thin network keeps every name. Inner
+        // curves lie on the face and are no edges.
+        if (naming) {
+          const borders = ways.flatMap((list) => [list[0]!, list[list.length - 1]!]);
+          const P = own(new oc.gp_Pnt_1());
+          const at = (u: number, v: number): Vec3 => {
+            surface.get().D0(u, v, P);
+            return [P.X(), P.Y(), P.Z()];
+          };
+          const mids = [at(0.5, 0), at(0.5, 1), at(0, 0.5), at(1, 0.5)];
+          const taken = new Set<number>();
+          explore(result.shape, 'TopAbs_EDGE', (edge) => {
+            const e = own(oc.TopoDS.Edge_1(edge));
+            if (oc.BRep_Tool.Degenerated(e)) return;
+            const c = networkCurve(f, e);
+            const mid = c.at((c.t0 + c.t1) / 2);
+            const d = mids.map((p) => Math.hypot(p[0] - mid[0], p[1] - mid[1], p[2] - mid[2]));
+            const k = d.indexOf(Math.min(...d));
+            if (d[k]! > tolerance || taken.has(k)) return;
+            taken.add(k);
+            (result.edges ??= []).push({ edge, name: borders[k]!.boundary });
+          });
+        }
+        return sheetOf(result);
+      }
       case 'fill': {
-        // A plate through the curves (BRepFill_Filling), G1 to the face beside a G1 edge.
+        // A plate through the curves (BRepFill_Filling), G1 to the face beside a G1 edge and G2
+        // (also the same curvature across it) beside a G2 edge (CR1b).
         const curves = f.args.boundary.map((b, i) =>
           curveOf(f, b.curve, ['boundary', i, 'curve'], shapes),
         );
@@ -2134,12 +4308,16 @@ export async function evaluateCad(
         const filling = own(new oc.BRepFill_Filling(3, 15, 2, false, 1e-5, 1e-4, 0.01, 0.1, 8, 9));
         f.args.boundary.forEach((b, i) => {
           const c = curves[i]!;
-          if (b.continuity === 'G1') {
+          if (b.continuity !== 'G0') {
             if (!c.face)
               throw new CadKernelError('fill-no-adjacent-face', f.id, false, undefined, [
                 ['boundary', i, 'continuity'],
               ]);
-            filling.Add_2(c.edge, c.face, oc.GeomAbs_Shape.GeomAbs_G1, true);
+            // The plate reads the order as the constraint's derivative count (0, 1, 2) and refuses
+            // GeomAbs_G2 (enum value 3): its curvature constraint is GeomAbs_C1 (value 2).
+            const order =
+              b.continuity === 'G2' ? oc.GeomAbs_Shape.GeomAbs_C1 : oc.GeomAbs_Shape.GeomAbs_G1;
+            filling.Add_2(c.edge, c.face, order, true);
           } else filling.Add_1(c.edge, oc.GeomAbs_Shape.GeomAbs_C0, true);
         });
         filling.Build();
@@ -2154,10 +4332,21 @@ export async function evaluateCad(
             false,
             undefined,
             f.args.boundary.flatMap((b, i) =>
-              b.continuity === 'G1' ? [['boundary', i, 'continuity']] : [],
+              b.continuity !== 'G0' ? [['boundary', i, 'continuity']] : [],
             ),
           );
-        const result = named(own(filling.Face()), () => ['surface']);
+        const made = own(filling.Face());
+        // G2 is checked as the continuity check does it (cadContinuity.g2Relative): the plate's
+        // own G2 error is a curvature difference without a reference, so samples along each G2
+        // side compare the fill's normal curvature across it with the face beside it.
+        const unreached = f.args.boundary.flatMap((b, i) =>
+          b.continuity === 'G2' && !fillMeetsG2(made, curves[i]!.edge, curves[i]!.face)
+            ? [['boundary', i, 'continuity'] as (string | number)[]]
+            : [],
+        );
+        if (unreached.length)
+          throw new CadKernelError('fill-g2-unreached', f.id, false, undefined, unreached);
+        const result = named(made, () => ['surface']);
         if (naming)
           for (const c of curves)
             for (const made of listOf(filling.Generated(c.edge)))
@@ -2194,8 +4383,23 @@ export async function evaluateCad(
           boundaryNames(result, generated, profile, own(pipe.FirstShape()), own(pipe.LastShape())),
         );
       }
+      case 'profileSweep':
+        return profileSweep(f);
+      case 'offsetSurface':
+        return offsetSurface(f, shapes);
       case 'trim':
+      case 'panel':
         return trim(f, shapes);
+      case 'split':
+        return split(f, shapes);
+      case 'pressLine':
+        return pressLine(f, shapes);
+      case 'groove':
+        return groove(f, shapes);
+      case 'flare':
+        return flare(f, shapes);
+      case 'flange':
+        return flange(f, shapes);
       case 'sew':
         return sew(f, shapes);
       case 'thicken':
@@ -2222,8 +4426,23 @@ export async function evaluateCad(
             own(new oc.Message_ProgressRange_1()),
           );
           if (!ok) throw new CadKernelError('asset-unreadable', f.id);
+          // PMI-2: the kept PMI must name sub-shapes of this BRep and datums of its own asset.
+          if (f.args.pmiAssetId !== undefined) checkPmi(f, shape);
           // An imported body has no recipe to name its faces by; R1 features cannot reference it.
-          return named(shape, () => null);
+          const body = named(shape, () => null);
+          // PMI-4a: each sub-shape its PMI may target is followed through the later features.
+          if (f.args.pmiAssetId !== undefined && naming)
+            body.origins = Object.fromEntries(
+              pmiKinds.map((kind) => [
+                kind,
+                Array.from({ length: shapeMap(shape, kind).Size() }, (_, i) => ({
+                  feature: f.id,
+                  index: i + 1,
+                  exact: true,
+                })),
+              ]),
+            ) as PmiOrigins;
+          return body;
         } finally {
           if (oc.FS.analyzePath(path).exists) oc.FS.unlink(path);
         }
@@ -2280,7 +4499,10 @@ export async function evaluateCad(
           along = pathPlacements(g, n);
           if (!along) throw new CadKernelError('pattern-path', f.id);
         }
-        for (let i = 0; i < n; i++) {
+        // CR6d: a linear grid repeats the row; copy `row × n + i` is copy i of that row.
+        const rows = l.type === 'linear' && l.rows ? resolveCount(l.rows.count, params) : 1;
+        for (let k = 0; k < n * rows; k++) {
+          const [i, row] = [k % n, Math.floor(k / n)];
           const trsf = own(new oc.gp_Trsf_1());
           if (l.type === 'curve') {
             // Into the sketch's frame, from the start to copy i's place (turned with the path when
@@ -2303,7 +4525,11 @@ export async function evaluateCad(
             trsf.Multiply(own(frame.Inverted()));
           } else if (l.type === 'linear') {
             const d = len(l.spacing) * i;
-            trsf.SetTranslation_1(own(new oc.gp_Vec_4(...l.direction.map((x) => x * d))));
+            const e = l.rows ? len(l.rows.spacing) * row : 0;
+            const across = l.rows?.direction ?? [0, 0, 0];
+            trsf.SetTranslation_1(
+              own(new oc.gp_Vec_4(...l.direction.map((x, a) => x * d + across[a]! * e))),
+            );
           } else {
             const axis = own(
               new oc.gp_Ax1_2(
@@ -2322,9 +4548,35 @@ export async function evaluateCad(
         if (f.args.mode === 'cut')
           for (const copy of copies)
             if (!overlaps(target!, copy)) throw new CadKernelError('pattern-no-overlap', f.id);
-        // Copy i's faces are `copy:<pattern ID>:<i>/…` (命名), from the layout alone.
-        const prefixes = copies.map((_, i) => `copy:${f.id}:${i}`);
+        // Copy i's faces are `copy:<pattern ID>:<i>/…` (命名), from the layout alone. A grid's
+        // copy i of row r ≥ 1 is `copy:<pattern ID>:<i>:row<r>`, so its name keeps to the same
+        // place when the count along a row changes (row 0 keeps the single row's names).
+        const prefixes = copies.map((_, k) => {
+          const [i, row] = [k % n, Math.floor(k / n)];
+          return row ? `copy:${f.id}:${i}:row${row}` : `copy:${f.id}:${i}`;
+        });
         return combine(f.id, f.args.mode, target!, copies, prefixes);
+      }
+      case 'mirrorCopy': {
+        // CR4b: the source reflected as a new body; the source stays (not an input).
+        const input = shapes.get(f.args.source.featureId)!;
+        const { origin, normal } = f.args.plane;
+        const trsf = own(new oc.gp_Trsf_1());
+        trsf.SetMirror_3(
+          own(
+            new oc.gp_Ax2_3(
+              pnt(...(resolvePosition(origin, params) as Vec3)),
+              own(new oc.gp_Dir_4(...normal)),
+            ),
+          ),
+        );
+        const builder = own(new oc.BRepBuilderAPI_Transform_2(input.shape, trsf, true));
+        return carry(
+          own(builder.Shape()),
+          input,
+          (face) => [own(builder.ModifiedShape(face))],
+          (name) => prefixFaceName(`mirror:${f.id}`, name),
+        );
       }
       case 'mirror': {
         const input = shapes.get(f.inputFeatureIds[0])!;
@@ -2372,8 +4624,28 @@ export async function evaluateCad(
           op = own(
             new oc.BRepFilletAPI_MakeFillet(input.shape, oc.ChFi3d_FilletShape.ChFi3d_Rational),
           );
+          // CR1e: an edge of a sheet needs a face on both sides; a free border has one.
+          const free = edges.filter((_, i) => table.topology.edges[found[i]!]!.faces.length < 2);
+          if (free.length)
+            throw new CadKernelError(
+              'fillet-free-edge',
+              f.id,
+              false,
+              undefined,
+              free.map((e) => e.path),
+            );
           const r = len(f.args.radius);
-          for (const e of edges) op.Add_2(r, e.shape);
+          const { radiusEnd, radii } = f.args;
+          if (radii && radiusEnd) {
+            // 2–8 radii along each edge: (0, radius), the points between, (1, radiusEnd).
+            const law = [[0, r], ...radii.map((p) => [p.at, len(p.radius)]), [1, len(radiusEnd)]];
+            const array = own(new oc.TColgp_Array1OfPnt2d_2(1, law.length));
+            law.forEach(([u, R], i) => array.SetValue(i + 1, own(new oc.gp_Pnt2d_3(u!, R!))));
+            for (const e of edges) op.Add_5(array, e.shape);
+          } else if (radiusEnd) {
+            const r2 = len(radiusEnd);
+            for (const e of edges) op.Add_3(r, r2, e.shape);
+          } else for (const e of edges) op.Add_2(r, e.shape);
         } else {
           op = own(new oc.BRepFilletAPI_MakeChamfer(input.shape));
           const d = len(f.args.distance);
@@ -2580,7 +4852,9 @@ export async function evaluateCad(
       });
     }
     const face = (i: number) => own(oc.TopoDS.Face_1(own(body.faces.FindKey(i + 1))));
-    return { topology, edge, face };
+    /** An edge's index in the table (its edge → face map), or -1. */
+    const edgeIndex = (e: unknown) => ancestors.FindIndex(e) - 1;
+    return { topology, edge, face, edgeIndex };
   }
   /** One reference of a feature, with its place in the feature's args. */
   type Use = { path: (string | number)[]; ref: CadTopologyRef };
@@ -2772,6 +5046,961 @@ export async function evaluateCad(
       edgeIds: new Uint32Array(edgeIds),
       topology,
       ...(curvatures ? { curvature: curvatures } : {}),
+      ...(body.origins ? { pmi: pmiTracking(body) } : {}),
+    };
+  }
+  /**
+   * PMI-4a: for each import a body's sub-shapes come from, the imported faces, edges and
+   * vertices the body still has exactly once and unchanged, with their index in its topology
+   * table. A sub-shape that is gone, changed, or there twice (copies) is left out. With
+   * `shapeIndices` (PMI-4b, the STEP writer), the index is the 1-based one in
+   * `TopExp::MapShapes` of the body's shape of each kind instead.
+   */
+  function pmiTracking(body: Named, shapeIndices = false): CadPmiTracking[] {
+    const edgeIndex = shapeIndices ? undefined : tableOf(body).edgeIndex;
+    const out = new Map<string, CadPmiTracking>();
+    const fields = {
+      TopAbs_FACE: 'faces',
+      TopAbs_EDGE: 'edges',
+      TopAbs_VERTEX: 'vertices',
+    } as const;
+    for (const kind of pmiKinds) {
+      const list = body.origins![kind];
+      const map = kind === 'TopAbs_EDGE' && !shapeIndices ? shapeMap(body.shape, kind) : undefined;
+      /** Each origin's table index, or -1 once it is seen twice or inexactly. */
+      const found = new Map<string, Map<number, number>>();
+      list.forEach((origin, j) => {
+        if (!origin) return;
+        const of = found.get(origin.feature) ?? new Map<number, number>();
+        found.set(origin.feature, of);
+        const index = !origin.exact
+          ? -1
+          : shapeIndices
+            ? j + 1
+            : kind === 'TopAbs_EDGE'
+              ? edgeIndex!(own(map!.FindKey(j + 1)))
+              : j;
+        of.set(origin.index, of.has(origin.index) || index < 0 ? -1 : index);
+      });
+      for (const [feature, of] of found) {
+        const t =
+          out.get(feature) ??
+          out
+            .set(feature, { featureId: feature, faces: [], edges: [], vertices: [] })
+            .get(feature)!;
+        for (const [index, at] of [...of].sort((a, b) => a[0] - b[0]))
+          if (at >= 0) t[fields[kind]].push(index, at);
+      }
+    }
+    return [...out.values()];
+  }
+
+  /**
+   * PMI-4b/4c (docs/cad/pmi.md, 書き出し): the `OCJS.addPmi` lines of each body for its STEP and
+   * what is and is not written, or undefined when no body carries PMI. A body's items are
+   * written when they are current on it (`cadPmiItemStates` over its own tracking), on the
+   * body's own sub-shapes; with several PMI imports in a body, or a build without the writer,
+   * none are.
+   */
+  function stepPmiOf(bodies: { id: string; final: Named }[]):
+    | {
+        bodies: { id: string; shape: unknown; pmi: string[] }[];
+        report: CadStepPmiWritten;
+      }
+    | undefined {
+    const report = noPmiWritten();
+    let any = false;
+    /** Datum names already written: the writer merges datums by name across the file. */
+    const datumNames = new Set<string>();
+    const out = bodies.map(({ id, final }) => {
+      const body = { id, shape: final.shape, pmi: [] as string[] };
+      const state = cadBodyPmi(doc, id);
+      if (state.status === 'none') return body;
+      /** The kept asset of one import, undefined when it does not read. */
+      const assetOf = (featureId: string, assetId: string) => {
+        const g = doc.features.find((h) => h.id === featureId);
+        return g?.type === 'imported' ? readCadPmiAsset(assetBytes(g, assetId)) : undefined;
+      };
+      if (state.status === 'stale') {
+        // Every import's PMI is left out; an asset two imports share counts once.
+        const seen = new Set<string>();
+        for (const i of state.imports) {
+          if (seen.has(i.assetId)) continue;
+          seen.add(i.assetId);
+          const asset = assetOf(i.featureId, i.assetId);
+          if (!asset) continue;
+          any = true;
+          report.stale += asset.items.length;
+          report.views += asset.views?.length ?? 0;
+        }
+        return body;
+      }
+      const f = doc.features.find((g) => g.id === state.featureId);
+      if (f?.type !== 'imported') return body;
+      const asset = assetOf(f.id, state.assetId);
+      if (!asset) return body;
+      any = true;
+      if (typeof oc.OCJS?.addPmi !== 'function') {
+        report.unsupportedBuild += asset.items.length;
+        report.views += asset.views?.length ?? 0;
+        return body;
+      }
+      const tracking = final.origins
+        ? pmiTracking(final).find((t) => t.featureId === f.id)
+        : undefined;
+      const states = cadPmiItemStates(asset, tracking);
+      const written = final.origins
+        ? pmiTracking(final, true).find((t) => t.featureId === f.id)
+        : undefined;
+      body.pmi = pmiWriteSpec(
+        asset,
+        states,
+        {
+          face: oc.TopAbs_ShapeEnum.TopAbs_FACE.value,
+          edge: oc.TopAbs_ShapeEnum.TopAbs_EDGE.value,
+          vertex: oc.TopAbs_ShapeEnum.TopAbs_VERTEX.value,
+        },
+        (t) => (written ? cadPmiTrackedIndex(written, t) : undefined),
+        cadBodyPmiPlacements(doc, id),
+        report,
+        datumNames,
+      );
+      return body;
+    });
+    return any ? { bodies: out, report } : undefined;
+  }
+
+  /**
+   * R3c-2a: the boundary of a body as the analysis mesher takes it (docs/cad/r3-analysis.md): one
+   * triangulation at `deflectionMm`, in Float64 and world coordinates, each triangle tagged with
+   * its face (topology table order), and each edge's chain of points (its polygon on the first
+   * face's triangulation). Nodes the faces share along an edge are the same computed points of
+   * that edge's discretisation and are joined by identity of their coordinates; every edge's
+   * polygon on each of its faces is then checked to land on the same joined nodes, so a chain
+   * never depends on nearness. A body that does not join up is refused, never repaired.
+   */
+  function analysisSurfaceOf(
+    body: Named,
+    deflectionMm: number,
+    angularRad: number,
+    sizing: SurfaceSizing & { minEdgeMm?: number },
+    preparation: CadAnalysisPreparation | undefined,
+    /** R3i-2: the midsurface in place of the body (`midsurfaceOf`); no preparation then. */
+    idealised?: Midsurface,
+  ): CadAnalysisSurface {
+    // The display triangulation is removed first and this one after, as for the coarse mesh, so a
+    // later evaluation that keeps the shape never reads the analysis triangulation.
+    oc.BRepTools.Clean(body.shape, true);
+    let prepared: { body: Named; history: CadPreparationHistory } | undefined;
+    try {
+      prepared = idealised ?? prepareAnalysisBody(body, deflectionMm, angularRad, preparation);
+      const shape = prepared.body.shape;
+      if (shape !== body.shape) oc.BRepTools.Clean(shape, true);
+      own(new oc.BRepMesh_IncrementalMesh_2(shape, deflectionMm, false, angularRad, false));
+      const raw = rawAnalysisSurface(prepared.body);
+      // A body face's size applies to every analysis face it became; the smallest wins.
+      const faces = new Map<number, number>();
+      for (const [face, size] of sizing.faces ?? [])
+        for (const image of prepared.history.faces[face]?.images ?? [])
+          faces.set(image, Math.min(size, faces.get(image) ?? Infinity));
+      try {
+        improveSurface(raw, { ...sizing, faces });
+      } catch (error) {
+        if (error instanceof AnalysisSurfaceLimit)
+          throw new CadKernelError('analysis-surface-limit');
+        throw error;
+      }
+      return {
+        ...finishSurface(raw),
+        history: prepared.history,
+        measures: analysisMeasures(prepared.body),
+        bodyTopology: tableOf(body).topology,
+        ...(idealised ? { shell: { thicknessMm: idealised.thicknessMm } } : {}),
+      };
+    } finally {
+      oc.BRepTools.Clean(body.shape, true);
+      if (prepared && prepared.body.shape !== body.shape)
+        oc.BRepTools.Clean(prepared.body.shape, true);
+    }
+  }
+  /**
+   * R3i-2 (docs/cad/r3-analysis.md, A3): the midsurface of a body of uniform thickness, from the
+   * feature that made it, read on the body's own shape (so a placement moves it too). The feature
+   * after any placements must be a `thicken`, a `shell` or an `extrude`:
+   * - the wall faces are the faces X whose `inner/X` is also a face (`thicken`, `shell`), or the
+   *   `start` face whose `end` is the other cap (`extrude`);
+   * - the midsurface is the wall faces offset by half the thickness into the solid;
+   * - each wall face and its partner (`reversed`: it faces the other way) become the wall face's
+   *   offset; every other face (a thicken's
+   *   side, a shell's rim at an open face, an extrude's sides) becomes the midsurface edges it
+   *   runs along, and an edge becomes the midsurface edges it lies at half the thickness from.
+   * Anything else is refused (`midsurface-unsupported`, with the reason): another feature, a wall
+   * face without its partner, a side along no midsurface edge, a failed offset, a wall thicker
+   * than a tenth of the midsurface's size.
+   */
+  function midsurfaceOf(body: Named, bodyId: string): Midsurface {
+    const refuse = (detail: string) => new MidsurfaceRefusal(detail);
+    const own3 = doc.bodies.find((b) => b.id === bodyId);
+    let f = own3 && doc.features.find((x) => x.id === own3.resultFeatureId);
+    while (f?.type === 'transform') {
+      const input = f.inputFeatureIds[0];
+      f = doc.features.find((x) => x.id === input);
+    }
+    if (!f || (f.type !== 'thicken' && f.type !== 'shell' && f.type !== 'extrude'))
+      throw refuse(
+        `the body is made by ${f ? `a ${f.type}` : 'nothing'}, not a thicken, shell or extrude`,
+      );
+    const t = len(f.type === 'extrude' ? f.args.distance : f.args.thickness);
+    const { topology, edge: edgeOf, face: faceOf } = tableOf(body);
+    const key = (n: CadFaceName | null) => (n ? JSON.stringify(n) : '');
+    const byName = new Map<string, number>();
+    body.names.forEach((n, i) => {
+      if (n) byName.set(key(n), byName.has(key(n)) ? -1 : i);
+    });
+    /** Wall face → its partner on the other side of the wall. */
+    const partner = new Map<number, number>();
+    if (f.type === 'extrude') {
+      const start = byName.get(key(['start'])),
+        end = byName.get(key(['end']));
+      if (start === undefined || end === undefined || start < 0 || end < 0)
+        throw refuse('the extrude has no single start and end face');
+      partner.set(start, end);
+    } else
+      body.names.forEach((n, i) => {
+        const j = n ? byName.get(key(['inner', ...n])) : undefined;
+        if (j !== undefined && j >= 0 && byName.get(key(n)) === i) partner.set(i, j);
+      });
+    if (!partner.size) throw refuse(`the ${f.type} has no wall faces with a partner`);
+    const partners = new Set(partner.values());
+
+    // The wall faces as one shell, oriented as on the solid, offset half the thickness inwards.
+    const builder = own(new oc.BRep_Builder());
+    const shell = own(new oc.TopoDS_Shell());
+    builder.MakeShell(shell);
+    for (const i of partner.keys()) builder.Add(shell, faceOf(i));
+    // Faces meeting at an angle (a shell's box) need joined offsets; smooth ones (a thickened
+    // skin) offset alike either way. The simple offset is the fallback.
+    const freeEdges = (n: Named) =>
+      tableOf(n).topology.edges.filter((e) => e.faces.length === 1).length;
+    const wall = named(shell, () => null);
+    const offsetBy = (join: boolean) => {
+      const op = own(new oc.BRepOffsetAPI_MakeOffsetShape());
+      if (join)
+        op.PerformByJoin(
+          shell,
+          -t / 2,
+          doc.kernelProfile.linearToleranceMm,
+          oc.BRepOffset_Mode.BRepOffset_Skin,
+          false,
+          false,
+          oc.GeomAbs_JoinType.GeomAbs_Intersection,
+          false,
+          own(new oc.Message_ProgressRange_1()),
+        );
+      else {
+        op.PerformBySimple(shell, -t / 2);
+        op.Build(own(new oc.Message_ProgressRange_1()));
+      }
+      if (!op.IsDone()) return undefined;
+      const out = named(own(op.Shape()), () => null);
+      // The same faces, joined as the wall's are: no gap opened between two of them.
+      return out.faces.Size() === wall.faces.Size() && freeEdges(out) === freeEdges(wall)
+        ? { op, out }
+        : undefined;
+    };
+    const made = offsetBy(true) ?? offsetBy(false);
+    if (!made)
+      throw refuse('the kernel could not offset the wall faces into one joined midsurface');
+    const off = made.op;
+    const mid = made.out;
+    const faceImages = new Map<number, number>();
+    for (const i of partner.keys()) {
+      const made = listOf(off.Generated(faceOf(i)));
+      const j = made.length === 1 ? mid.faces.FindIndex(made[0]) : 0;
+      if (j < 1) throw refuse(`wall face ${i} has no single offset`);
+      faceImages.set(i, j - 1);
+      faceImages.set(partner.get(i)!, j - 1);
+      mid.names[j - 1] = body.names[i] ?? null;
+    }
+    const midTable = tableOf(mid);
+    const [lo, hi] = boundsOf(mid.shape);
+    const size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+    if (!(t <= size / 10))
+      throw refuse(
+        `the wall is ${t} mm thick, more than a tenth of its ${size.toFixed(3)} mm size`,
+      );
+
+    // Edges by where they lie: a body edge is a midsurface edge's image when every sample of
+    // each lies at half the thickness (an edge between two walls) from the other's polyline.
+    /** An edge's curve on its parameter range [0, 1], or nothing for a degenerated edge. */
+    const curveOf = (edge: unknown): ((u: number) => Vec3) | undefined => {
+      if (oc.BRep_Tool.Degenerated(edge)) return undefined;
+      const handle = own(oc.BRep_Tool.Curve_2(edge, 0, 0));
+      if (handle.IsNull()) return undefined;
+      const curve = handle.get();
+      const first = own(new oc.TopoDS_Vertex());
+      const last = own(new oc.TopoDS_Vertex());
+      oc.TopExp.Vertices_1(edge, first, last, false);
+      const a = oc.BRep_Tool.Parameter_2(first, edge) as number;
+      let b = oc.BRep_Tool.Parameter_2(last, edge) as number;
+      if (b === a && curve.IsPeriodic()) b = a + (curve.Period() as number);
+      const P = own(new oc.gp_Pnt_1());
+      return (u) => {
+        curve.D0(a + (b - a) * u, P);
+        return [P.X(), P.Y(), P.Z()];
+      };
+    };
+    const fine = 33;
+    type Sampled = { at: (u: number) => Vec3; line: Vec3[]; length: number };
+    const sampled = (edge: unknown): Sampled | undefined => {
+      const at = curveOf(edge);
+      if (!at) return undefined;
+      const line = Array.from({ length: fine }, (_, k) => at(k / (fine - 1)));
+      let length = 0;
+      for (let k = 1; k < fine; k++)
+        length += Math.hypot(
+          line[k]![0] - line[k - 1]![0],
+          line[k]![1] - line[k - 1]![1],
+          line[k]![2] - line[k - 1]![2],
+        );
+      return { at, line, length };
+    };
+    const dist = (p: Vec3, q: Vec3) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    /**
+     * A point's distance from a curve itself, not its polyline: from the nearest sample, a golden
+     * section search over the parameter between its neighbours, to well below the tolerance.
+     */
+    const toCurve = (p: Vec3, c: Sampled) => {
+      let k = 0;
+      for (let j = 1; j < fine; j++) if (dist(p, c.line[j]!) < dist(p, c.line[k]!)) k = j;
+      // A closed curve's ends are one point: search on both sides of it.
+      if ((k === 0 || k === fine - 1) && dist(c.line[0]!, c.line[fine - 1]!) <= tolerance)
+        return Math.min(nearOn(p, c, 0), nearOn(p, c, fine - 1));
+      return nearOn(p, c, k);
+    };
+    const nearOn = (p: Vec3, c: Sampled, k: number) => {
+      let lo = Math.max(0, k - 1) / (fine - 1);
+      let hi = Math.min(fine - 1, k + 1) / (fine - 1);
+      const g = (Math.sqrt(5) - 1) / 2;
+      let x1 = hi - g * (hi - lo);
+      let x2 = lo + g * (hi - lo);
+      let f1 = dist(p, c.at(x1));
+      let f2 = dist(p, c.at(x2));
+      for (let i = 0; i < 60 && hi - lo > 1e-12; i++) {
+        if (f1 <= f2) {
+          hi = x2;
+          x2 = x1;
+          f2 = f1;
+          x1 = hi - g * (hi - lo);
+          f1 = dist(p, c.at(x1));
+        } else {
+          lo = x1;
+          x1 = x2;
+          f1 = f2;
+          x2 = lo + g * (hi - lo);
+          f2 = dist(p, c.at(x2));
+        }
+      }
+      return Math.min(f1, f2, dist(p, c.line[k]!));
+    };
+    const midLines = midTable.topology.edges.map((_, k) => sampled(midTable.edge(k)));
+    const tolerance = Math.max(1e-4 * t, 10 * doc.kernelProfile.maxResultLinearToleranceMm);
+    /**
+     * Two edges at half the thickness from each other over their overlap: the shorter's probes,
+     * measured to the longer curve itself. A rim edge is trimmed at the corners by up to the
+     * thickness (the outer one longer, the inner shorter than the midsurface's), so the longer
+     * one's end probes may fall past the shorter's ends.
+     */
+    const atHalf = (line: Sampled, ml: Sampled) => {
+      const [short, long] = line.length <= ml.length ? [line, ml] : [ml, line];
+      return [short.line[4]!, short.line[16]!, short.line[28]!].every(
+        (p) => Math.abs(toCurve(p, long) - t / 2) <= tolerance,
+      );
+    };
+    const midFaces = midTable.topology.edges.map((m) =>
+      [...new Set(m.faces)].sort((x, y) => x - y),
+    );
+    const same = (a: number[], b: number[]) =>
+      a.length === b.length && a.every((x, i) => x === b[i]);
+    const edgeImages = topology.edges.map((edge, e) => {
+      const line = sampled(edgeOf(e));
+      if (!line) return [];
+      const walls = edge.faces.map((f) => faceImages.get(f));
+      const images = [...new Set(walls.filter((x) => x !== undefined))].sort((x, y) => x - y);
+      if (!images.length) return []; // between two sides: through the wall, at a corner
+      const candidates = midFaces
+        .map((faces, k) => ({ faces, k }))
+        .filter(({ faces }) => same(faces, images))
+        .map(({ k }) => k);
+      if (walls.every((x) => x !== undefined)) {
+        // Between two walls (a crease, where the offsets meet at more than half the thickness
+        // from the edge) or a seam of one: the midsurface edge between their images; where
+        // there are several, those at half the thickness.
+        if (candidates.length <= 1) return candidates;
+        return candidates.filter((k) => midLines[k] && atHalf(line, midLines[k]));
+      }
+      // Between a side and a wall: the wall's free midsurface edges along it.
+      return candidates.filter((k) => midLines[k] && atHalf(line, midLines[k]));
+    });
+    const history: CadPreparationHistory = {
+      faces: topology.faces.map((_, i) => {
+        const image = faceImages.get(i);
+        // The partner faces the other way: a pressure on it pushes along the midsurface normal.
+        if (image !== undefined)
+          return {
+            deleted: false,
+            images: [image],
+            ...(partners.has(i) ? { reversed: true } : {}),
+          };
+        // A side: the midsurface edges its own edges became.
+        const edges = [
+          ...new Set(topology.edges.flatMap((e, k) => (e.faces.includes(i) ? edgeImages[k]! : []))),
+        ].sort((a, b) => a - b);
+        if (!edges.length) throw refuse(`face ${i} is neither a wall nor along a midsurface edge`);
+        return { deleted: true, images: [], edges };
+      }),
+      edges: edgeImages.map((images) => ({ deleted: images.length === 0, images })),
+      analysisFaces: mid.faces.Size(),
+      analysisEdges: midTable.topology.edges.length,
+      removed: [],
+    };
+    return { body: mid, history, thicknessMm: t };
+  }
+  /**
+   * CR5e: a sheet as its own midsurface at `thicknessMm` (0 < t ≤ 100 mm): every face and edge
+   * its own analysis face and edge. Refused without a thickness (`midsurface-unsupported`).
+   */
+  function sheetMidsurface(body: Named, thicknessMm: number | undefined): Midsurface {
+    if (!(thicknessMm! > 0 && thicknessMm! <= 100))
+      throw new MidsurfaceRefusal(
+        `a sheet is analysed as a shell of a given thickness (0–100 mm), not ${thicknessMm ?? 'none'}`,
+      );
+    // A thin shell, as a thickened solid's midsurface must be (Codex on #977).
+    const [lo, hi] = boundsOf(body.shape);
+    const size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+    if (!(thicknessMm! <= size / 10))
+      throw new MidsurfaceRefusal(
+        `the sheet is ${thicknessMm} mm thick, more than a tenth of its ${size.toFixed(3)} mm size`,
+      );
+    const { topology } = tableOf(body);
+    const one = (_: unknown, i: number) => ({ deleted: false, images: [i] });
+    return {
+      body,
+      history: {
+        faces: topology.faces.map(one),
+        edges: topology.edges.map(one),
+        analysisFaces: topology.faces.length,
+        analysisEdges: topology.edges.length,
+        removed: [],
+      },
+      thicknessMm: thicknessMm!,
+    };
+  }
+  /**
+   * R3c-2b (docs/cad/r3-analysis.md, 形状準備): the body with the faces the settings select
+   * removed by `BRepAlgoAPI_Defeaturing`, and the kernel's history of every face and edge. The
+   * faces are chosen from their own surfaces (`preparationFaces`), sampled on a triangulation at
+   * the analysis deflection. Removing nothing gives the body itself and the identity history. A
+   * removal the kernel cannot make, or one that leaves an invalid solid, is refused
+   * (`analysis-preparation-failed`), never repaired.
+   */
+  function prepareAnalysisBody(
+    body: Named,
+    deflectionMm: number,
+    angularRad: number,
+    preparation: CadAnalysisPreparation | undefined,
+  ): { body: Named; history: CadPreparationHistory } {
+    const { topology, edge: edgeOf, face: faceOf } = tableOf(body);
+    const identity = (): CadPreparationHistory => ({
+      faces: topology.faces.map((_, i) => ({ deleted: false, images: [i] })),
+      edges: topology.edges.map((_, i) => ({ deleted: false, images: [i] })),
+      analysisFaces: topology.faces.length,
+      analysisEdges: topology.edges.length,
+      removed: [],
+    });
+    if (
+      !preparation ||
+      (preparation.removeHolesBelow === null &&
+        preparation.removeFilletsBelow === null &&
+        preparation.removeFaces.length === 0)
+    )
+      return { body, history: identity() };
+    own(new oc.BRepMesh_IncrementalMesh_2(body.shape, deflectionMm, false, angularRad, false));
+    let remove: number[];
+    try {
+      const [lo, hi] = boundsOf(body.shape);
+      const tolerance = Math.max(
+        1e-6 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]),
+        1e-9,
+      );
+      const samples = topology.faces.map((_, i) => faceSample(faceOf(i)));
+      remove = preparationFaces(samples, topology.edges, preparation, tolerance);
+    } finally {
+      oc.BRepTools.Clean(body.shape, true);
+    }
+    if (remove.length === 0) return { body, history: identity() };
+    if (remove.length === topology.faces.length)
+      throw new CadKernelError('analysis-preparation-failed', 'every face removed');
+    const op = own(new oc.BRepAlgoAPI_Defeaturing());
+    op.SetShape(body.shape);
+    for (const i of remove) op.AddFaceToRemove(faceOf(i));
+    op.SetRunParallel(false);
+    op.SetToFillHistory(true);
+    op.Build(own(new oc.Message_ProgressRange_1()));
+    if (!op.IsDone() || op.HasErrors())
+      throw new CadKernelError('analysis-preparation-failed', 'defeaturing');
+    // The kernel gives the input back, with a warning only, when it cannot remove the faces.
+    if (remove.some((i) => !op.IsDeleted(faceOf(i))))
+      throw new CadKernelError('analysis-preparation-failed', 'faces not removed');
+    const shape = own(op.Shape());
+    const solids = shapeMap(shape, 'TopAbs_SOLID');
+    if (solids.Size() !== 1 || !own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2())
+      throw new CadKernelError('analysis-preparation-failed', 'result is not one valid solid');
+    const out = named(shape, () => null);
+    const outEdges = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
+    oc.TopExp.MapShapesAndAncestors(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+      outEdges,
+    );
+    const track = (element: unknown, index: (s: unknown) => number) => {
+      if (op.IsDeleted(element)) return { deleted: true, images: [] };
+      const made = listOf(op.Modified(element));
+      const images = [
+        ...new Set((made.length ? made : [element]).map((s) => index(s) - 1).filter((i) => i >= 0)),
+      ].sort((a, b) => a - b);
+      return { deleted: images.length === 0, images };
+    };
+    return {
+      body: out,
+      history: {
+        faces: topology.faces.map((_, i) => track(faceOf(i), (s) => out.faces.FindIndex(s))),
+        edges: topology.edges.map((_, i) => track(edgeOf(i), (s) => outEdges.FindIndex(s))),
+        analysisFaces: out.faces.Size(),
+        analysisEdges: outEdges.Size(),
+        removed: remove,
+      },
+    };
+  }
+  /**
+   * R3e-2: the analysis shape's exact measures (docs/cad/r3-analysis.md, 荷重の適用の検査). Face
+   * areas by `BRepGProp` with an error bound (the fixed-order rule is off by percents on a face
+   * bounded by a many-span spline). A face's vector area is ½ ∮ r × dr round its edges as the
+   * explorer gives them for the face's own orientation (outward on a solid; a seam is walked both
+   * ways and cancels), and an edge's length ∫ |r′| dt, both by adaptive Gauss–Legendre on the
+   * edge's curve: pieces are halved until the halves agree with the whole within a share of the
+   * integral of a bound on the integrand (so cancelling edges stop at roundoff), starting from the curve's knot spans (#799 review); out of budget, the measures are refused.
+   */
+  function analysisMeasures(body: Named): CadAnalysisMeasures {
+    const { topology, edge: edgeOf } = tableOf(body);
+    const P = own(new oc.gp_Pnt_1());
+    const V = own(new oc.gp_Vec_1());
+    const gx = [-0.906179845938664, -0.5384693101056831, 0, 0.5384693101056831, 0.906179845938664];
+    const gw = [
+      0.2369268850561891, 0.4786286704993665, 0.5688888888888889, 0.4786286704993665,
+      0.2369268850561891,
+    ];
+    /** An edge's curve and its own range, read from its vertices in the curve's direction. */
+    const curveOf = (edge: unknown) => {
+      if (oc.BRep_Tool.Degenerated(edge)) return undefined;
+      const handle = own(oc.BRep_Tool.Curve_2(edge, 0, 0));
+      if (handle.IsNull()) return undefined;
+      const curve = handle.get();
+      const first = own(oc.TopExp.FirstVertex(edge, false)) as { IsSame(o: unknown): boolean };
+      const last = own(oc.TopExp.LastVertex(edge, false));
+      let [a, b] = [
+        oc.BRep_Tool.Parameter_2(first, edge) as number,
+        oc.BRep_Tool.Parameter_2(last, edge) as number,
+      ];
+      // A closed edge (one vertex at both ends) may read its ends either way round: it runs
+      // forward from the smaller, over a whole period when both read the same.
+      if (first.IsSame(last)) {
+        [a, b] = [Math.min(a, b), Math.max(a, b)];
+        if (!(b > a) && curve.IsPeriodic()) b = a + (curve.Period() as number);
+      }
+      const spans = knotBreaks(curve, a, b);
+      return { curve, a, b, spans };
+    };
+    /**
+     * ∫ f(r, r′) dt over [a, b], adaptively from two pieces per smooth span. f gives `n`
+     * components and then a bound on their size at that point (|r| |r′| for r × r′, |r′| for the
+     * length): the tolerance is a share of the bound's integral, so a result that cancels to zero
+     * (a line through the origin) stops at roundoff. The work is bounded; a piece that has not
+     * converged when it runs out refuses the measures (`analysis-measures-failed`) rather than
+     * giving an approximation as exact.
+     */
+    const integrate = (
+      c: { curve: OcModule; a: number; b: number; spans: number[] },
+      n: number,
+      f: (r: Vec3, d: Vec3) => number[],
+    ): number[] => {
+      let budget = 4096 + 256 * c.spans.length;
+      const rule = (lo: number, hi: number) => {
+        budget--;
+        const out = new Array<number>(n + 1).fill(0);
+        const h = hi - lo;
+        for (let g = 0; g < 5; g++) {
+          c.curve.D1(lo + h * (0.5 + gx[g]! / 2), P, V);
+          const v = f([P.X(), P.Y(), P.Z()], [V.X(), V.Y(), V.Z()]);
+          for (let k = 0; k <= n; k++) out[k]! += (gw[g]! * h * v[k]!) / 2;
+        }
+        return out;
+      };
+      const starts: [number, number][] = [];
+      for (let i = 1; i < c.spans.length; i++) {
+        const [lo, hi] = [c.spans[i - 1]!, c.spans[i]!];
+        starts.push([lo, (lo + hi) / 2], [(lo + hi) / 2, hi]);
+      }
+      const first = starts.map(([lo, hi]) => rule(lo, hi));
+      const tol =
+        1e-12 *
+        Math.max(
+          first.reduce((t, v) => t + Math.abs(v[n]!), 0),
+          1e-300,
+        );
+      const adapt = (lo: number, hi: number, whole: number[], depth: number): number[] => {
+        const mid = (lo + hi) / 2;
+        const [l, r] = [rule(lo, mid), rule(mid, hi)];
+        const halves = whole.map((_, k) => l[k]! + r[k]!);
+        const err = Math.hypot(...halves.slice(0, n).map((x, k) => x - whole[k]!));
+        if (err <= (tol * (hi - lo)) / (c.b - c.a) || depth >= 40) return halves;
+        if (budget < 2) throw new CadKernelError('analysis-measures-failed', 'integration budget');
+        const a = adapt(lo, mid, l, depth + 1);
+        const b = adapt(mid, hi, r, depth + 1);
+        return a.map((x, k) => x + b[k]!);
+      };
+      const out = new Array<number>(n).fill(0);
+      first.forEach((whole, k) => {
+        if (budget < 2) throw new CadKernelError('analysis-measures-failed', 'integration budget');
+        const part = adapt(starts[k]![0], starts[k]![1], whole, 0);
+        for (let j = 0; j < n; j++) out[j]! += part[j]!;
+      });
+      return out;
+    };
+    const faceAreas = new Float64Array(topology.faces.length);
+    const faceVectorAreas = new Float64Array(topology.faces.length * 3);
+    for (let i = 0; i < topology.faces.length; i++) {
+      const face = own(oc.TopoDS.Face_1(own(body.faces.FindKey(i + 1))));
+      const props = own(new oc.GProp_GProps_1());
+      oc.BRepGProp.SurfaceProperties_2(face, props, 1e-9, false);
+      faceAreas[i] = props.Mass() as number;
+      const sum: Vec3 = [0, 0, 0];
+      explore(face, 'TopAbs_EDGE', (current) => {
+        const edge = own(oc.TopoDS.Edge_1(current));
+        const c = curveOf(edge);
+        if (!c) return;
+        const sign =
+          (edge as { Orientation_1(): unknown }).Orientation_1() ===
+          oc.TopAbs_Orientation.TopAbs_REVERSED
+            ? -1
+            : 1;
+        const part = integrate(c, 3, (r, d) => [
+          ...crossV(r, d),
+          Math.hypot(...r) * Math.hypot(...d),
+        ]);
+        for (let d = 0; d < 3; d++) sum[d]! += (sign * part[d]!) / 2;
+      });
+      faceVectorAreas.set(sum, 3 * i);
+    }
+    const edgeLengths = Float64Array.from(topology.edges, (_, i) => {
+      const c = curveOf(edgeOf(i));
+      return c ? integrate(c, 1, (_r, d) => [Math.hypot(...d), Math.hypot(...d)])[0]! : 0;
+    });
+    return { faceAreas, faceVectorAreas, edgeLengths };
+  }
+  /** What `preparationFaces` needs of one face, read from its surface and triangulation. */
+  function faceSample(face: unknown): FaceSample {
+    const handle = own(oc.BRep_Tool.Surface_2(face));
+    if (handle.IsNull()) return { kind: 'other', radius: Number.NaN };
+    const surface = handle.get();
+    const type = own(surface.DynamicType()).get().Name() as string;
+    const kind: FaceSample['kind'] =
+      type === 'Geom_CylindricalSurface'
+        ? 'cylinder'
+        : type === 'Geom_ToroidalSurface'
+          ? 'torus'
+          : type === 'Geom_SphericalSurface'
+            ? 'sphere'
+            : 'other';
+    const loc = own(new oc.TopLoc_Location_1());
+    const triHandle = own(oc.BRep_Tool.Triangulation(face, loc, 0));
+    if (triHandle.IsNull()) return { kind: 'other', radius: Number.NaN };
+    const tri = triHandle.get();
+    const trsf = own(loc.Transformation());
+    const xyz = (p: { X(): number; Y(): number; Z(): number }): Vec3 => [p.X(), p.Y(), p.Z()];
+    // Every face's nodes: what a removed hole encloses is told by where they lie.
+    const nodes: Vec3[] = [];
+    for (let i = 1; i <= tri.NbNodes(); i++)
+      nodes.push(xyz(own(own(tri.Node(i)).Transformed(trsf))));
+    if (kind === 'other' || !tri.HasUVNodes()) return { kind: 'other', radius: Number.NaN, nodes };
+    const P = own(new oc.gp_Pnt_1());
+    const [Su, Sv, Suu, Svv, Suv] = Array.from({ length: 5 }, () => own(new oc.gp_Vec_1()));
+    // These surfaces turn about their axis in u: the points at u = 0 and π face across it and the
+    // tangents at u = 0 and π/2 span the plane it is normal to (v = 0 for all three).
+    const at = (u: number) => {
+      surface.D1(u, 0, P, Su, Sv);
+      return { p: xyz(P), du: xyz(Su) };
+    };
+    const [a, b, c] = [at(0), at(Math.PI / 2), at(Math.PI)];
+    const cx = crossV(a.du, b.du);
+    const dir = scaleV(cx, 1 / Math.hypot(...cx));
+    const point: Vec3 = [(a.p[0] + c.p[0]) / 2, (a.p[1] + c.p[1]) / 2, (a.p[2] + c.p[2]) / 2];
+    // Curvature and side at the first node: the largest principal curvature, and whether the
+    // outward normal points to the axis (the material is outside the surface).
+    // The face's middle in its turning direction: the surface point at the middle of its own u
+    // range (u turns about the axis on all three; the range never wraps on one face), whatever
+    // how its nodes are spread.
+    let [uMin, uMax, vMin, vMax] = [Infinity, -Infinity, Infinity, -Infinity];
+    for (let i = 1; i <= tri.NbNodes(); i++) {
+      const q = own(tri.UVNode(i));
+      [uMin, uMax] = [Math.min(uMin, q.X()), Math.max(uMax, q.X())];
+      [vMin, vMax] = [Math.min(vMin, q.Y()), Math.max(vMax, q.Y())];
+    }
+    surface.D0((uMin + uMax) / 2, (vMin + vMax) / 2, P);
+    const middle = xyz(P);
+    const uv = own(tri.UVNode(1));
+    surface.D2(uv.X(), uv.Y(), P, Su, Sv, Suu, Svv, Suv);
+    const [du, dv] = [xyz(Su), xyz(Sv)];
+    const [E, F, G] = [dotV(du, du), dotV(du, dv), dotV(dv, dv)];
+    const nRaw = crossV(du, dv);
+    const reversed =
+      (face as { Orientation_1(): unknown }).Orientation_1() ===
+      oc.TopAbs_Orientation.TopAbs_REVERSED;
+    const n = scaleV(nRaw, (reversed ? -1 : 1) / Math.hypot(...nRaw));
+    const [L, M, N] = [dotV(xyz(Suu), n), dotV(xyz(Suv), n), dotV(xyz(Svv), n)];
+    const det = E * G - F * F;
+    const H = (E * N - 2 * F * M + G * L) / (2 * det);
+    const K = (L * N - M * M) / det;
+    const kmax = Math.abs(H) + Math.sqrt(Math.max(0, H * H - K));
+    const p = xyz(P);
+    const off = subV(p, point);
+    const radial = subV(off, scaleV(dir, dotV(off, dir)));
+    return {
+      kind,
+      radius: 1 / kmax,
+      axis: { point, dir },
+      nodes,
+      middle,
+      concave: dotV(n, radial) < 0,
+    };
+  }
+  /** The kernel's triangulation of a body read into `RawSurface` (analysis-surface.ts). */
+  function rawAnalysisSurface(body: Named): RawSurface {
+    const { topology, edge: edgeShape } = tableOf(body);
+    const P = own(new oc.gp_Pnt_1());
+    const Du = own(new oc.gp_Vec_1()),
+      Dv = own(new oc.gp_Vec_1());
+    const at = (): Xyz => [P.X(), P.Y(), P.Z()];
+    /**
+     * Per face: its triangulation, its nodes (world coordinates, indices from `base` in one
+     * numbering of all faces' nodes) and its surface.
+     */
+    const local: {
+      handle: { IsNull(): boolean; get(): OcModule };
+      loc: unknown;
+      base: number;
+      surface: OcModule | undefined;
+    }[] = [];
+    const coords: number[] = [];
+    const faceTriangles: { face: number; l3: [number, number, number]; uv: RawTriangle['uv'] }[] =
+      [];
+    for (let face = 1; face <= body.faces.Size(); face++) {
+      const topoFace = own(oc.TopoDS.Face_1(own(body.faces.FindKey(face))));
+      const loc = own(new oc.TopLoc_Location_1());
+      const handle = own(oc.BRep_Tool.Triangulation(topoFace, loc, 0));
+      if (handle.IsNull()) throw new CadKernelError('analysis-surface-untriangulated');
+      const tri = handle.get();
+      // The mesher's own limit (fem-mesher `surfaceLimits.triangles`), checked before copying.
+      if (faceTriangles.length + tri.NbTriangles() > analysisSurfaceTriangles)
+        throw new CadKernelError('analysis-surface-limit');
+      const base = coords.length / 3;
+      const trsf = own(loc.Transformation());
+      for (let i = 1; i <= tri.NbNodes(); i++) {
+        const p = own(own(tri.Node(i)).Transformed(trsf));
+        coords.push(p.X(), p.Y(), p.Z());
+      }
+      const reversed = topoFace.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+      const surfaceHandle = tri.HasUVNodes() ? own(oc.BRep_Tool.Surface_2(topoFace)) : undefined;
+      const surface = surfaceHandle && !surfaceHandle.IsNull() ? surfaceHandle.get() : undefined;
+      local.push({ handle, loc, base, surface });
+      const uvOf = (n: number): [number, number] => {
+        const uv = own(tri.UVNode(n));
+        return [uv.X(), uv.Y()];
+      };
+      for (let i = 1; i <= tri.NbTriangles(); i++) {
+        const t = own(tri.Triangle(i));
+        const l3 = (
+          reversed ? [t.Value(1), t.Value(3), t.Value(2)] : [t.Value(1), t.Value(2), t.Value(3)]
+        ) as [number, number, number];
+        faceTriangles.push({
+          face: face - 1,
+          l3: l3.map((n) => base + n - 1) as [number, number, number],
+          uv: surface ? [uvOf(l3[0]), uvOf(l3[1]), uvOf(l3[2])] : null,
+        });
+      }
+    }
+    /**
+     * Joining the faces' nodes. Nodes are one point when the kernel's discretisation of an edge
+     * says so: the i-th node of an edge's polygon on one face is the i-th on every other face
+     * (and on both sides of a seam). Nodes at identical coordinates are joined too (a vertex the
+     * polygons share). Nothing is joined by nearness; a joined set whose points are apart by more
+     * than the kernel's own tolerance is refused (`analysis-surface-nonconforming`).
+     */
+    const parent = Array.from({ length: coords.length / 3 }, (_, i) => i);
+    const find = (x: number): number => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]!]!;
+        x = parent[x]!;
+      }
+      return x;
+    };
+    const union = (a: number, b: number) => {
+      const [ra, rb] = [find(a), find(b)];
+      if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb);
+    };
+    const exact = new Map<string, number>();
+    for (let n = 0; n < coords.length / 3; n++) {
+      const key = `${coords[3 * n]},${coords[3 * n + 1]},${coords[3 * n + 2]}`;
+      const seen = exact.get(key);
+      if (seen === undefined) exact.set(key, n);
+      else union(seen, n);
+    }
+    /** Per edge: its polygon on its first face (global node indices) and its parameters. */
+    const polygons: ({ nodes: number[]; params: number[] | null } | undefined)[] = [];
+    let tolerance = 0;
+    for (let e = 0; e < topology.edges.length; e++) {
+      const edge = edgeShape(e);
+      if (oc.BRep_Tool.Degenerated(edge)) {
+        polygons.push(undefined);
+        continue;
+      }
+      tolerance = Math.max(tolerance, oc.BRep_Tool.Tolerance_2(edge));
+      const reversedEdge = own(oc.TopoDS.Edge_1(own((edge as { Reversed(): unknown }).Reversed())));
+      let first: { nodes: number[]; params: number[] | null } | undefined;
+      for (const f of topology.edges[e]!.faces) {
+        const { handle, loc, base } = local[f]!;
+        // Both orientations: a seam has a polygon on each side of the same face.
+        for (const oriented of [edge, reversedEdge]) {
+          const polygon = own(oc.BRep_Tool.PolygonOnTriangulation_1(oriented, handle, loc));
+          if (polygon.IsNull()) {
+            if (oriented === edge) throw new CadKernelError('analysis-surface-edge', `edge ${e}`);
+            continue;
+          }
+          const p = polygon.get();
+          const nodes = Array.from({ length: p.NbNodes() }, (_, i) => base + p.Node(i + 1) - 1);
+          if (!first) {
+            first = {
+              nodes,
+              params: p.HasParameters()
+                ? Array.from({ length: p.NbNodes() }, (_, i) => p.Parameter(i + 1))
+                : null,
+            };
+            continue;
+          }
+          if (nodes.length !== first.nodes.length)
+            throw new CadKernelError('analysis-surface-nonconforming', `edge ${e}`);
+          nodes.forEach((n, i) => union(n, first!.nodes[i]!));
+        }
+      }
+      polygons.push(first);
+    }
+    // One point per joined set, at its first node; the set must be within the tolerance.
+    const points: number[] = [];
+    const idOf = new Map<number, number>();
+    let size = 0;
+    for (let d = 0; d < 3; d++) {
+      let lo = Infinity,
+        hi = -Infinity;
+      for (let n = d; n < coords.length; n += 3) {
+        lo = Math.min(lo, coords[n]!);
+        hi = Math.max(hi, coords[n]!);
+      }
+      size = Math.max(size, hi - lo);
+    }
+    const allowed = Math.max(10 * tolerance, 1e-9 * size);
+    for (let n = 0; n < coords.length / 3; n++) {
+      const r = find(n);
+      let id = idOf.get(r);
+      if (id === undefined) {
+        id = points.length / 3;
+        idOf.set(r, id);
+        points.push(coords[3 * r]!, coords[3 * r + 1]!, coords[3 * r + 2]!);
+      }
+      const apart = Math.hypot(
+        coords[3 * n]! - points[3 * id]!,
+        coords[3 * n + 1]! - points[3 * id + 1]!,
+        coords[3 * n + 2]! - points[3 * id + 2]!,
+      );
+      if (apart > allowed) throw new CadKernelError('analysis-surface-nonconforming', `node ${n}`);
+    }
+    const joinedId = (n: number) => idOf.get(find(n))!;
+    const triangles: RawTriangle[] = [];
+    for (const t of faceTriangles) {
+      const v = t.l3.map(joinedId) as [number, number, number];
+      // A triangle that closes up on a pole or a seam encloses nothing: it is left out.
+      if (v[0] === v[1] || v[1] === v[2] || v[0] === v[2]) continue;
+      triangles.push({ v, face: t.face, uv: t.uv });
+    }
+    const chains: RawSurface['chains'] = [];
+    const curves: (OcModule | undefined)[] = [];
+    for (let e = 0; e < topology.edges.length; e++) {
+      const edge = edgeShape(e);
+      const first = polygons[e];
+      const curveHandle = first ? own(oc.BRep_Tool.Curve_2(edge, 0, 0)) : undefined;
+      curves.push(curveHandle && !curveHandle.IsNull() ? curveHandle.get() : undefined);
+      // A degenerated edge (a pole) is a point: its chain is empty.
+      chains.push({
+        nodes: first ? first.nodes.map(joinedId) : [],
+        params: curves[e] && first ? first.params : null,
+      });
+    }
+    return {
+      points,
+      triangles,
+      shapeFaces: body.faces.Size(),
+      chains,
+      surfaceAt(face, u, v) {
+        const s = local[face]!.surface;
+        if (!s) return undefined;
+        s.D0(u, v, P);
+        return at();
+      },
+      curveAt(edge, t) {
+        const c = curves[edge];
+        if (!c) return undefined;
+        c.D0(t, P);
+        return at();
+      },
+      uvAt(face, p, start) {
+        const s = local[face]!.surface;
+        if (!s) return undefined;
+        // Newton on |S(u, v) − p|² from the nearby start, so the result stays on its seam side.
+        let [u, v] = start;
+        for (let i = 0; i < 30; i++) {
+          s.D1(u, v, P, Du, Dv);
+          const r = [P.X() - p[0], P.Y() - p[1], P.Z() - p[2]];
+          const su = [Du.X(), Du.Y(), Du.Z()],
+            sv = [Dv.X(), Dv.Y(), Dv.Z()];
+          const dot = (x: number[], y: number[]) => x[0]! * y[0]! + x[1]! * y[1]! + x[2]! * y[2]!;
+          const a = dot(su, su),
+            b = dot(su, sv),
+            c = dot(sv, sv);
+          const det = a * c - b * b;
+          if (!(det > 0)) return undefined;
+          const gu = dot(su, r),
+            gv = dot(sv, r);
+          const du = (c * gu - b * gv) / det,
+            dv = (a * gv - b * gu) / det;
+          u -= du;
+          v -= dv;
+          if (Math.abs(du) + Math.abs(dv) < 1e-14 * (1 + Math.abs(u) + Math.abs(v))) break;
+        }
+        s.D0(u, v, P);
+        const miss = Math.hypot(P.X() - p[0], P.Y() - p[1], P.Z() - p[2]);
+        // Not onto the point: the caller keeps the middle UV.
+        return miss <= 1e-9 * (1 + Math.hypot(...p)) ? [u, v] : undefined;
+      },
     };
   }
 
@@ -2921,6 +6150,23 @@ export async function evaluateCad(
     return k;
   };
   /**
+   * #820: the tolerance a feature's result may have. An imported body keeps the tolerance it
+   * was read with (`maxToleranceMm`) and its placement carries it; every other feature has the
+   * document's result limit, and `build` refuses an input above that limit.
+   */
+  const featureById = new Map(doc.features.map((f) => [f.id, f]));
+  const limits = new Map<string, number>();
+  const toleranceLimit = (id: string): number => {
+    let limit = limits.get(id);
+    if (limit !== undefined) return limit;
+    const f = featureById.get(id);
+    limit = doc.kernelProfile.maxResultLinearToleranceMm;
+    if (f?.type === 'imported') limit = Math.max(limit, f.args.maxToleranceMm ?? 0);
+    else if (f?.type === 'transform') limit = Math.max(limit, toleranceLimit(f.inputFeatureIds[0]));
+    limits.set(id, limit);
+    return limit;
+  };
+  /**
    * The checks every feature result passes, within the result tolerance: one or more valid
    * solids that do not touch (K1, up to `cadLimits.solidsPerBody`), or for a sheet feature one
    * valid shell of connected faces and no solid (docs/cad/r2a-freeform.md).
@@ -2946,7 +6192,7 @@ export async function evaluateCad(
       if (!own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2())
         throw new CadKernelError('invalid-solid', featureId);
     }
-    if (maxTolerance(shape) > doc.kernelProfile.maxResultLinearToleranceMm)
+    if (maxTolerance(shape) > toleranceLimit(featureId))
       throw new CadKernelError('result-tolerance', featureId);
   };
   /** Whether two of the shape's solids share a vertex (and so maybe an edge or a face). */
@@ -2994,9 +6240,21 @@ export async function evaluateCad(
     const { type, message } = decodeKernelException(oc, error);
     return new CadKernelError(`kernel-exception:${type}${message ? `:${message}` : ''}`, id);
   };
-  const display = options.deflectionMm === undefined && !options.step && !options.brep;
+  const display =
+    options.deflectionMm === undefined &&
+    !options.step &&
+    !options.brep &&
+    !options.analysisSurface;
   const cache = display ? options.placement : undefined;
-  const features = display ? options.features : undefined;
+  // CR5f-5: an analysis surface builds the same exact shapes as a display evaluation (it cleans
+  // the triangulations it leaves, `analysisSurfaceOf`), so it reads and refreshes the feature
+  // cache too; an export (deflection, STEP, BRep) still builds the full graph.
+  const analysis =
+    options.deflectionMm === undefined &&
+    !options.step &&
+    !options.brep &&
+    !!options.analysisSurface;
+  const features = display || analysis ? options.features : undefined;
   /** The feature cache keys this evaluation used or made, kept past the budget (P1). */
   const latest = new Set<string>();
   let settle = false;
@@ -3006,7 +6264,8 @@ export async function evaluateCad(
     options.partial !== false &&
     options.deflectionMm === undefined &&
     !options.step &&
-    !options.brep;
+    !options.brep &&
+    !options.analysisSurface;
   let failure: CadKernelError | undefined;
   const failed = new Set<string>();
   const errorEvaluation = (
@@ -3036,11 +6295,12 @@ export async function evaluateCad(
     if (fast) {
       // The kept shapes skip reading the assets, not checking them: missing or altered bytes are
       // refused as the full graph refuses them.
-      for (const f of doc.features) if (f.type === 'imported') assetBytes(f);
+      for (const f of doc.features) if (f.type === 'imported') checkImportedAssets(f);
       for (const body of active) {
         const kept = cache!.bodies.get(body.id)!;
         const keptNamed = named(kept.shape, () => null);
         keptNamed.names = [...kept.names];
+        if (kept.origins) keptNamed.origins = copyOrigins(kept.origins);
         if (kept.edges.length) {
           const map = shapeMap(kept.shape, 'TopAbs_EDGE');
           keptNamed.edges = kept.edges.map(({ index, name }) => ({
@@ -3173,7 +6433,7 @@ export async function evaluateCad(
         if (kept) {
           try {
             // A kept shape skips reading the asset, not checking it, as the placement path.
-            if (f.type === 'imported') assetBytes(f);
+            if (f.type === 'imported') checkImportedAssets(f);
           } catch (error) {
             if (!partial) throw kernelError(error, f.id);
             failure ??= kernelError(error, f.id);
@@ -3185,6 +6445,7 @@ export async function evaluateCad(
           states.set(id, kept.state);
           const reused = named(kept.shape, () => null);
           reused.names = [...kept.names];
+          if (kept.origins) reused.origins = copyOrigins(kept.origins);
           if (kept.edges.length) {
             const map = shapeMap(kept.shape, 'TopAbs_EDGE');
             reused.edges = kept.edges.map(({ index, name }) => ({
@@ -3224,6 +6485,7 @@ export async function evaluateCad(
             shape: stored,
             state: states.get(id)!,
             names: [...shape.names],
+            ...(shape.origins ? { origins: copyOrigins(shape.origins) } : {}),
             edges: (shape.edges ?? []).flatMap(({ edge, name }) => {
               const index = edgeMap.FindIndex(edge);
               return index > 0 ? [{ index, name }] : [];
@@ -3340,6 +6602,41 @@ export async function evaluateCad(
         return { status: 'unsupported' };
       }
     });
+    // CR4e: each spot weld row's points, from its flanges on the bodies' final shapes.
+    let weldPoints = 0;
+    const spotWelds = doc.spotWelds?.map((w): CadSpotWeldPoints => {
+      const flange = ({ bodyId, face }: CadSpotWeld['flanges'][number]) => {
+        const final = finals.get(bodyId);
+        if (!final) return 'spot-weld-body-missing';
+        if (!naming) return 'spot-weld-unsupported';
+        const table = tableOf(final);
+        const r = resolveTopologyRef(table.topology, face);
+        if (r.status !== 'resolved') return `spot-weld-face-${r.status}`;
+        return { face: table.face(r.index), deflection: displayDeflection(boundsOf(final.shape)) };
+      };
+      const [a, b] = w.flanges.map(flange);
+      if (typeof a === 'string') return { id: w.id, status: 'error', code: a };
+      if (typeof b === 'string') return { id: w.id, status: 'error', code: b };
+      try {
+        const row = spotWeldPoints(oc, own, a!, b!, w);
+        if (typeof row === 'string') return { id: w.id, status: 'error', code: row };
+        weldPoints += row.gaps.length;
+        if (weldPoints > cadSpotWeldLimits.points)
+          return { id: w.id, status: 'error', code: 'spot-weld-points' };
+        return {
+          id: w.id,
+          status: 'ok',
+          points: [...row.points],
+          gaps: [...row.gaps],
+          tooFar: row.gaps.filter((g) => g > w.maxGapMm).length,
+          lengthMm: row.lengthMm,
+        };
+      } catch (error) {
+        // A geometry the kernel cannot read gives no points; it never fails the shapes.
+        decodeKernelException(oc, error);
+        return { id: w.id, status: 'error', code: 'spot-weld-failed' };
+      }
+    });
     let continuity: CadContinuityResult | undefined;
     if (options.continuity) {
       const { bodyId, edge } = options.continuity;
@@ -3384,11 +6681,78 @@ export async function evaluateCad(
               code: oc.BRep_Tool.Degenerated(shape) ? 'curvature-degenerate' : 'curvature-no-curve',
             };
     }
+    let gapFlush: CadGapFlushResult | undefined;
+    if (options.gapFlush) {
+      // Each edge a border of one face of its body's final shape (a sheet's edge).
+      const border = ({ bodyId, edge }: { bodyId: string; edge: number }) => {
+        const final = finals.get(bodyId);
+        const table = final && tableOf(final);
+        const faces = table?.topology.edges[edge]?.faces;
+        if (!faces?.length) return 'gap-flush-edge-missing';
+        const shape = table!.edge(edge);
+        const face = own(oc.TopoDS.Face_1(own(final!.faces.FindKey(faces[0]! + 1))));
+        if (
+          faces.length !== 1 ||
+          oc.BRep_Tool.Degenerated(shape) ||
+          oc.BRep_Tool.IsClosed_2(shape, face)
+        )
+          return 'gap-flush-not-border';
+        return { shape, face };
+      };
+      const { a, b } = options.gapFlush;
+      const [one, two] = [border(a), border(b)];
+      gapFlush =
+        a.bodyId === b.bodyId
+          ? { code: 'gap-flush-same-body' }
+          : typeof one === 'string'
+            ? { code: one }
+            : typeof two === 'string'
+              ? { code: two }
+              : (() => {
+                  const samples = edgeGapFlush(oc, own, one.shape, one.face, two.shape);
+                  return typeof samples === 'string' ? { code: samples } : { samples };
+                })();
+    }
+    let faceDistances: CadFaceDistanceResult[] | undefined;
+    if (options.faceDistances)
+      faceDistances = options.faceDistances.map(({ bodyId, faces, points, via }) => {
+        const shapesOf = (id: string, list: number[]) => {
+          const final = finals.get(id);
+          if (!final) return 'face-distance-body-missing';
+          const count = tableOf(final).topology.faces.length;
+          if (!list.length || list.some((f) => !Number.isInteger(f) || f < 0 || f >= count))
+            return 'face-distance-face-missing';
+          return {
+            shapes: list.map((f) => own(oc.TopoDS.Face_1(own(final.faces.FindKey(f + 1))))),
+            deflection: displayDeflection(boundsOf(final.shape)),
+          };
+        };
+        const shapes = shapesOf(bodyId, faces);
+        if (typeof shapes === 'string') return { code: shapes };
+        let from = points;
+        if (via) {
+          const onto = shapesOf(via.bodyId, via.faces);
+          if (typeof onto === 'string') return { code: onto };
+          const moved = faceSetDistances(oc, own, onto.shapes, points, onto.deflection);
+          if (typeof moved === 'string') return { code: moved };
+          from = moved.nearest;
+        }
+        const measured = faceSetDistances(oc, own, shapes.shapes, from, shapes.deflection);
+        return typeof measured === 'string'
+          ? { code: measured }
+          : { distances: measured.distances };
+      });
     let step: Uint8Array | undefined;
+    let stepPmi: CadStepPmiWritten | undefined;
     if (options.step) {
       // Named by the body being written, like a mesh checkpoint.
       if (active.length) await options.checkpoint?.(active[0].id);
-      step = writeStep(active.map((b) => ({ id: b.id, shape: finals.get(b.id)!.shape })));
+      const pmi = stepPmiOf(active.map((b) => ({ id: b.id, final: finals.get(b.id)! })));
+      stepPmi = pmi?.report;
+      step =
+        pmi && pmi.bodies.some((b) => b.pmi.length)
+          ? writePmiStep(oc, pmi.bodies)
+          : writeStep(active.map((b) => ({ id: b.id, shape: finals.get(b.id)!.shape })));
       // K2: the tolerance set and the largest tolerance written, as a note in the header.
       const set = cadToleranceSetOf(doc.kernelProfile);
       if (set)
@@ -3410,6 +6774,117 @@ export async function evaluateCad(
         })),
       );
     }
+    let analysisSurface: CadAnalysisSurfaceResult | undefined;
+    if (options.analysisSurface) {
+      const {
+        bodyId,
+        angularDeflectionRad,
+        maxEdgeMm,
+        minEdgeMm,
+        faceSizes,
+        pointSizes,
+        preparation,
+        clampDeflection,
+        idealisation,
+        sheetThicknessMm,
+      } = options.analysisSurface;
+      let { deflectionMm } = options.analysisSurface;
+      const final = finals.get(bodyId);
+      /** The smallest size: as small as the smallest deflection, so it cannot be a loop's way out. */
+      const smallest = final
+        ? displayDeflectionMm(boundsOf(final.shape), analysisDeflection.relativeMin)
+        : 0;
+      const sizeOk = (h: number) => h >= smallest && Number.isFinite(h);
+      // R3e-3: a run asks for its levels' deflections and lets the body's smallest raise them.
+      if (final && clampDeflection && Number.isFinite(deflectionMm))
+        deflectionMm = Math.max(
+          deflectionMm,
+          displayDeflectionMm(boundsOf(final.shape), analysisDeflection.relativeMin),
+        );
+      if (!final) analysisSurface = { code: 'analysis-body-missing' };
+      else if (
+        (maxEdgeMm !== undefined && !sizeOk(maxEdgeMm)) ||
+        (minEdgeMm !== undefined && !sizeOk(minEdgeMm)) ||
+        (faceSizes ?? []).some(
+          (f) =>
+            !Number.isSafeInteger(f.face) ||
+            f.face < 0 ||
+            f.face >= final.faces.Size() ||
+            !sizeOk(f.maxEdgeMm),
+        ) ||
+        new Set((faceSizes ?? []).map((f) => f.face)).size !== (faceSizes ?? []).length ||
+        (pointSizes &&
+          (!sizeOk(pointSizes.maxEdgeMm) ||
+            !(pointSizes.radiusMm >= 0 && Number.isFinite(pointSizes.radiusMm)) ||
+            pointSizes.points.length % 3 !== 0 ||
+            !pointSizes.points.every(Number.isFinite)))
+      )
+        analysisSurface = { code: 'analysis-size' };
+      else if (preparation && !preparationOk(preparation, final.faces.Size()))
+        analysisSurface = { code: 'analysis-preparation' };
+      else if (
+        idealisation === 'shell' &&
+        preparation &&
+        (preparation.removeHolesBelow !== null ||
+          preparation.removeFilletsBelow !== null ||
+          preparation.removeFaces.length > 0)
+      )
+        analysisSurface = { code: 'analysis-preparation' };
+      else if (
+        !(
+          deflectionMm >= displayDeflectionMm(boundsOf(final.shape), analysisDeflection.relativeMin)
+        ) ||
+        !(deflectionMm <= analysisDeflection.maxMm) ||
+        (angularDeflectionRad !== undefined &&
+          !(angularDeflectionRad > 0 && angularDeflectionRad <= Math.PI / 2))
+      )
+        analysisSurface = { code: 'analysis-deflection' };
+      else {
+        await options.checkpoint?.(bodyId);
+        try {
+          const sheet =
+            idealisation === 'shell' &&
+            kindOf(doc.bodies.find((b) => b.id === bodyId)!.resultFeatureId) === 'sheet';
+          const idealised =
+            idealisation !== 'shell'
+              ? undefined
+              : sheet
+                ? sheetMidsurface(final, sheetThicknessMm)
+                : midsurfaceOf(final, bodyId);
+          analysisSurface = {
+            surface: analysisSurfaceOf(
+              final,
+              deflectionMm,
+              angularDeflectionRad ?? 0.5,
+              {
+                maxEdgeMm: maxEdgeMm ?? Infinity,
+                minEdgeMm,
+                faces: new Map((faceSizes ?? []).map((f) => [f.face, f.maxEdgeMm])),
+                ...(pointSizes?.points.length
+                  ? {
+                      near: {
+                        points: pointSizes.points,
+                        radiusMm: pointSizes.radiusMm,
+                        sizeMm: pointSizes.maxEdgeMm,
+                      },
+                    }
+                  : {}),
+                maxTriangles: analysisSurfaceTriangles,
+                // CR5e: a sheet's faces meshed one by one (`seedSurface`).
+                ...(sheet ? { seed: true } : {}),
+              },
+              preparation,
+              idealised,
+            ),
+          };
+        } catch (error) {
+          analysisSurface =
+            error instanceof MidsurfaceRefusal
+              ? { code: 'midsurface-unsupported', detail: error.message }
+              : { code: kernelError(error, bodyId).code };
+        }
+      }
+    }
     // Optional: left out whole when they and the standard meshes together pass the output limits.
     let coarse: CadMesh[] = [];
     for (const make of coarseOf) {
@@ -3430,7 +6905,7 @@ export async function evaluateCad(
       for (const body of active) {
         const placed = identity!.movable.has(body.id);
         const f = byId.get(body.resultFeatureId)!;
-        const { shape, names, edges } = shapes.get(placed ? f.inputFeatureIds[0]! : f.id)!;
+        const { shape, names, edges, origins } = shapes.get(placed ? f.inputFeatureIds[0]! : f.id)!;
         // A shape the feature cache keeps stays its own; any other is the placement path's now.
         const borrowed = !owned.has(shape as Shape);
         owned.delete(shape as Shape);
@@ -3439,6 +6914,7 @@ export async function evaluateCad(
           ...(borrowed ? { borrowed } : {}),
           shape: shape as Shape,
           names,
+          ...(origins ? { origins: copyOrigins(origins) } : {}),
           edges: (edges ?? []).flatMap(({ edge, name }) => {
             const index = map!.FindIndex(edge);
             return index > 0 ? [{ index, name }] : [];
@@ -3472,13 +6948,18 @@ export async function evaluateCad(
         geometryDigest: `sha256:${bytesToHex(digest.digest())}`,
         bodies,
         ...(connectors ? { connectors } : {}),
+        ...(spotWelds ? { spotWelds } : {}),
       },
       // The coarse meshes follow the standard ones and are not in the digest (display only).
       meshes: [...meshes, ...coarse],
       ...(step ? { step } : {}),
+      ...(step && stepPmi ? { stepPmi } : {}),
       ...(brep ? { brep } : {}),
       ...(continuity ? { continuity } : {}),
+      ...(gapFlush ? { gapFlush } : {}),
+      ...(faceDistances ? { faceDistances } : {}),
       ...(comb ? { comb } : {}),
+      ...(analysisSurface ? { analysisSurface } : {}),
     };
   } catch (error) {
     if (error instanceof CadEvaluationCancelled) throw error;

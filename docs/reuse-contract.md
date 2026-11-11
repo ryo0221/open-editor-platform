@@ -47,8 +47,9 @@ trusted authority, independent of the captured operation identity.
 
 The schema-1 bounds are 100 definitions per closure, **2,000 retained closures per
 Artifact**, dependency depth 16, 2,048
-tokens, 16 modes, alias depth 32, 2,000 instances, 10,000 parts per definition and
-20,000 expanded parts. Generic JSON processing allows 200,000 values, depth 64 and
+tokens, 16 modes, alias depth 32, **10,000 instances**, 10,000 parts per definition and
+20,000 expanded parts. The instance bound lets one Artifact compose many screens that
+each validate alone; their adopted parts still share the expanded-part budget. Generic JSON processing allows 200,000 values, depth 64 and
 32 MiB UTF-8 JSON. Native/template/image limits can be lower and still apply.
 Nonfinite numbers, cyclic objects, reserved keys, executable values and sparse
 arrays reject before cloning/hashing. Limits are public through `reuseLimits`.

@@ -121,6 +121,17 @@ describe('STEP AP242 assembly import plan (R2b-5, R2b-U7)', () => {
       conversion,
     );
     expect(cadContentHash(other)).not.toBe(cadContentHash(a));
+    // #820: a tolerance read above the standard limit is recorded on the imported feature.
+    const loose = importedPartDocument(
+      fixtureKernel,
+      { ...shape('Wheel', 'b'), maxToleranceMm: 0.0171 },
+      assets,
+      conversion,
+    );
+    expect(validateCad(loose)).toEqual([]);
+    expect(loose.features[0]!.args).toMatchObject({ maxToleranceMm: 0.0171 });
+    expect(a.features[0]!.args).not.toHaveProperty('maxToleranceMm');
+    expect(cadContentHash(loose)).not.toBe(cadContentHash(a));
     const r = read();
     r.shapes.push(shape('Wheel', 'b'));
     r.instances.push({ shape: 2, path: ['Wheel 3'], pose: pose(30) });
@@ -178,5 +189,77 @@ describe('STEP AP242 assembly import plan (R2b-5, R2b-U7)', () => {
     const twice = structuredClone(doc) as unknown as typeof bad;
     twice.parts[1]!.source = { ...twice.parts[0]!.source };
     expect(codes(twice)).toContain('part-source-duplicate');
+  });
+});
+
+describe('the PMI of particular instances in a STEP import (PMI-5a, CAD86, TS-1436)', () => {
+  const withPmi = (component: string): CadStepAssemblyRead => ({
+    ...read(),
+    assemblyPmi: {
+      version: 1,
+      items: [
+        {
+          id: 'pmi-1',
+          kind: 'dimension',
+          type: 'Location_LinearDistance',
+          values: [5],
+          targets: [{ shape: 'face', index: 6, component: '0' }],
+          targets2: [{ shape: 'face', index: 2, component }],
+        },
+      ],
+    },
+  });
+  it('puts each target on the component made for its instance, as one asset of the edit', () => {
+    const p = plan(withPmi('2'));
+    if (p.status !== 'ok') throw new Error(p.code);
+    const asset = JSON.parse(new TextDecoder().decode(p.assemblyPmi!.bytes));
+    expect(asset.items[0].targets).toEqual([{ shape: 'face', index: 6, component: 'component-3' }]);
+    // The second wheel, never the first: the instance's own component.
+    expect(asset.items[0].targets2).toEqual([
+      { shape: 'face', index: 2, component: 'component-5' },
+    ]);
+    expect(p.components.map((c) => c.id)).toEqual(['component-3', 'component-4', 'component-5']);
+    expect(p.assemblyPmi!.ref).toMatchObject({
+      id: 'assembly-pmi',
+      kind: 'assembly-pmi',
+      byteLength: p.assemblyPmi!.bytes.byteLength,
+      mediaType: 'application/json',
+    });
+    const doc = applyCadOperation(emptyCad(fixtureKernel), {
+      type: 'insertComponents',
+      parts: p.parts,
+      components: p.components,
+      assemblyPmi: p.assemblyPmi!.ref,
+    });
+    expect(doc.assemblyPmiAssetId).toBe('assembly-pmi');
+    expect(validateCad(doc)).toEqual([]);
+    // Deleting a component keeps the asset (its items go stale, PMI-5b); deleting the last
+    // drops it, since a part document holds none.
+    const fewer = applyCadOperation(doc, {
+      type: 'deleteClosure',
+      ids: ['component-3'],
+      cascade: false,
+    });
+    expect(fewer.assemblyPmiAssetId).toBe('assembly-pmi');
+    const none = applyCadOperation(doc, {
+      type: 'deleteClosure',
+      ids: p.components.map((c) => c.id),
+      cascade: false,
+    });
+    expect(none.assemblyPmiAssetId).toBeUndefined();
+    expect(none.assets.some((a) => a.kind === 'assembly-pmi')).toBe(false);
+    // One asset per document.
+    expect(() =>
+      applyCadOperation(doc, {
+        type: 'insertComponents',
+        parts: [],
+        components: [{ ...p.components[0]!, id: 'component-9' }],
+        assemblyPmi: { ...p.assemblyPmi!.ref, id: 'assembly-pmi-2' },
+      }),
+    ).toThrow('assembly-pmi-exists');
+  });
+  it('refuses a target whose instance is not one the file placed', () => {
+    for (const wrong of ['3', '-1', '01', 'x', ''])
+      expect(plan(withPmi(wrong))).toEqual({ status: 'refused', code: 'step-assembly-pmi' });
   });
 });

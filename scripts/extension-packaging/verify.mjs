@@ -19,9 +19,11 @@ assert.ok(['baseline', 'readonly-domains', 'controlled-animation'].includes(expe
 const names = [
   'artifact-core',
   'editor-core',
+  'editor-host',
   'reuse-core',
   'extension-contract',
   'extension-runtime',
+  'geometry-core',
   'animation-core',
   'animation-player',
   'extension-sample',

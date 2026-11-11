@@ -7,3 +7,6 @@ export * from './edit-loops';
 export * from './subdivide';
 export * from './uv';
 export * from './weights';
+export * from './multires';
+export * from './sculpt';
+export * from './bake';

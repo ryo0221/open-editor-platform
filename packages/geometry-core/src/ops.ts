@@ -34,6 +34,23 @@ export type GeometryOp =
       outer: GeometryLoop;
       holes?: GeometryLoop[];
       vector: GeometryVec3;
+      /**
+       * TW5: the end's profile is the start's scaled by this about the frame's origin (a tapered
+       * column, ruled between the two). Absent: 1, the same profile.
+       */
+      endScale?: number;
+    }
+  /**
+   * LR1 (docs/cad/bim-lean-ramp.md): the solid through `sections`, each an outer loop in its own
+   * frame, in order. Every loop has as many vertices as the first and its arcs on the same
+   * edges; vertex i of one joins vertex i of the next. Two sections are ruled by default
+   * (straight lines between matching points: a leaning wall); more are joined by a smooth
+   * surface through them (a spiral ramp), unless `ruled`.
+   */
+  | {
+      op: 'loft';
+      sections: { frame: GeometryFrame; outer: GeometryLoop }[];
+      ruled?: boolean;
     }
   | { op: 'boolean'; kind: 'cut' | 'union' | 'common'; target: string; tools: string[] }
   /**
@@ -102,6 +119,8 @@ export const geometryLimits = Object.freeze({
   loopVertices: 10_000,
   holes: 1_000,
   tools: 10_000,
+  /** LR1: sections of one loft. */
+  loftSections: 256,
   /** Smallest length the ops tell apart (a vertex gap, a vector). */
   toleranceMm: 1e-6,
 });
@@ -116,6 +135,8 @@ export type GeometryIssueCode =
   | 'loop-invalid'
   | 'bulge-invalid'
   | 'vector-in-plane'
+  | 'scale-range'
+  | 'loft-sections'
   | 'rotation-invalid'
   | 'request-invalid';
 export interface GeometryIssue {
@@ -279,6 +300,50 @@ export function validateGeometry(
         // The sweep must leave the plane, by more than the tolerance along the normal.
         if (Math.abs(dot(op.vector, geometryUnit(f.z))) < geometryLimits.toleranceMm)
           issue('vector-in-plane', id, `${at}.vector`);
+        if (
+          op.endScale !== undefined &&
+          !(typeof op.endScale === 'number' && op.endScale > 0 && op.endScale <= 1)
+        )
+          issue('scale-range', id, `${at}.endScale`);
+        break;
+      }
+      case 'loft': {
+        const sections = op.sections;
+        if (!Array.isArray(sections) || sections.length < 2) {
+          issue('loft-sections', id, `${at}.sections`);
+          break;
+        }
+        if (sections.length > geometryLimits.loftSections) {
+          issue('too-many', id, `${at}.sections`);
+          break;
+        }
+        if (op.ruled !== undefined && typeof op.ruled !== 'boolean')
+          issue('loft-sections', id, `${at}.ruled`);
+        const arcs = (l: GeometryLoop) => l.map((v) => v.length === 3).join();
+        // The first loop is the pattern only once it is valid itself.
+        let first: GeometryLoop | undefined;
+        sections.forEach((s, i) => {
+          const sp = `${at}.sections[${i}]`;
+          const f = s?.frame;
+          if (!f || typeof f !== 'object') {
+            issue('frame-invalid', id, `${sp}.frame`);
+            return;
+          }
+          if (
+            !point(f.origin, id, `${sp}.frame.origin`) ||
+            !direction(f.x, id, `${sp}.frame.x`) ||
+            !direction(f.z, id, `${sp}.frame.z`)
+          )
+            return;
+          if (Math.abs(dot(geometryUnit(f.x), geometryUnit(f.z))) > 1e-9)
+            issue('frame-invalid', id, `${sp}.frame`);
+          const before = issues.length;
+          loop(s.outer, id, `${sp}.outer`);
+          if (issues.length > before) return;
+          if (i === 0) first = s.outer;
+          else if (first && (s.outer.length !== first.length || arcs(s.outer) !== arcs(first)))
+            issue('loft-sections', id, `${sp}.outer`);
+        });
         break;
       }
       case 'boolean':

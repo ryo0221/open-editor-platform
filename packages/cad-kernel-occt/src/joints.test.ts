@@ -9,7 +9,9 @@ import {
   cadContentHash,
   f01Empty,
   f02Plate,
+  f18Hood,
   f20TopFace,
+  f26Panel,
   faceNameKey,
   mm,
   position,
@@ -142,11 +144,40 @@ describe.skipIf(!dist)('R2b-2 connector frames with the development build (CAD47
     const circle = frame(got[2]);
     expect(circle.at).toEqual([40, 25, 5]);
     expect(Math.abs(circle.z[2]!)).toBe(1);
-    // A straight edge is not a connector; names that do not resolve are said so.
-    expect(got[3]).toEqual({ status: 'unsupported' });
+    // CR3e-2: a straight edge (a hinge line) is its midpoint with z along it. Names that do not
+    // resolve are said so.
+    expect(frame(got[3])).toEqual({ at: [40, 0, 5], z: [1, 0, 0] });
     expect(got[4]).toEqual({ status: 'missing', candidates: [] });
     // Only an active body's result feature is read.
     expect(got[5]).toEqual({ status: 'missing', candidates: [] });
+  }, 120_000);
+
+  it('reads the straight borders of a cut-out door as hinge axes and refuses a curved one (CR3e-2)', async () => {
+    // TS-1520, ST-258.
+    const axes = async (doc: CadDocument, bodyId: string, id: string) => {
+      const first = await run(request(doc, `${id}-names`));
+      const mesh = first.meshes.find((m: CadMesh) => m.bodyId === bodyId)!;
+      const body = doc.bodies.find((b) => b.id === bodyId)!;
+      const refs = mesh.topology.edges.map((_, i) =>
+        topologyRefOf(mesh.topology, 'edge', i, body.resultFeatureId),
+      );
+      const r = await run(request(doc, id, refs));
+      if (r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r.evaluation));
+      return r.evaluation.connectors!;
+    };
+    // The F26 door: the 20 mm square less half the 3.5 mm gap on each side (41.75–58.25 ×
+    // −38.25…−21.75).
+    const door = await axes(on(f26Panel()), 'door-body', 'door');
+    expect(door).toHaveLength(4);
+    expect(
+      door
+        .map(frame)
+        .map((f) => `${f.at.join()} ${f.z.map(Math.abs).join()}`)
+        .sort(),
+    ).toEqual(['41.75,-30,0 0,1,0', '50,-21.75,0 1,0,0', '50,-38.25,0 1,0,0', '58.25,-30,0 0,1,0']);
+    // A curved border (the hood's arched front) is no axis.
+    const hood = await axes(on(f18Hood()), f18Hood().bodies[0]!.id, 'hood');
+    expect(hood.some((f) => f.status === 'unsupported')).toBe(true);
   }, 120_000);
 
   it('names a vertex by the faces around it and reads it as its exact point (R2b-2c)', async () => {

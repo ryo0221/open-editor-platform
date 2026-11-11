@@ -98,7 +98,9 @@ export async function exportPages(
         mimeType: 'application/json',
         description: 'Exact committed artifact sources used by this export',
       });
-    const bytes = await pdf.save();
+    // Classic cross-reference tables keep every /Type /Page visible to simple page counters
+    // in external tools; object streams would compress them away (#801).
+    const bytes = await pdf.save({ useObjectStreams: false });
     downloadBlob(`${name}.pdf`, new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }));
     return;
   }

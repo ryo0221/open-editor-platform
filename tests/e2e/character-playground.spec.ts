@@ -2,8 +2,12 @@ import { deflateSync } from 'node:zlib';
 import type { Page } from '@playwright/test';
 import { testGltf } from '@editor-platform/character-core/gltf-fixtures';
 import { importGltf, type CharacterDocument } from '@editor-platform/character-core';
-import { readFileSync } from 'node:fs';
-import { r2bJoints, type CadDocument } from '@editor-platform/cad-core';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { unzipSync } from 'fflate';
+import { inspectVideoFile } from '@editor-platform/video-metadata/file-admission';
+import { r2bJoints, sk01Watch, type CadDocument } from '@editor-platform/cad-core';
+import { f31BoxBuilding } from '@editor-platform/bim-core';
 import { create, expect, nativeArtifact, save, test } from './fixtures';
 
 // C1d: the character Surface as a Playground Artifact kind. No kernel; software WebGL.
@@ -283,6 +287,262 @@ test('CH20: a character pose and a CAD joint keyed on the same timeline, played,
     (await panel(page, 'Inspector')).getByLabel('j-turn Angle', { exact: true }),
   ).toHaveValue('0', { timeout: 120_000 });
   await expect(keys.getByRole('button', { name: /^Key Rig j-turn angle at / })).toHaveCount(2);
+});
+
+// C8p (TS-1297): a saved building (BIM) placed as a prop through Add prop, drawn beside the
+// figure once its kernel evaluated it, kept in the character's record, and back after a reload.
+test('places a saved building as a prop, saves and reloads it (C8p, TS-1297)', async ({ page }) => {
+  test.skip(!process.env.CAD_OCCT_DIST, 'needs the development kernel (CAD_OCCT_DIST)');
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'bim');
+  await expect(page.getByTestId('bim-model-state')).toHaveText('Model up to date', {
+    timeout: 90_000,
+  });
+  const empty = await nativeArtifact(page);
+  await importArtifact(page, 'box.json', {
+    ...empty,
+    name: 'Box building',
+    draft: { ...empty.draft, content: f31BoxBuilding() },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Box building');
+  await expect(page.getByTestId('bim-model-state')).toHaveText('Model up to date', {
+    timeout: 90_000,
+  });
+  await save(page, 1);
+
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const before = await canvasPixels(page);
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Box building — v1 (Manual save)' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  // The version is measured before the prop is added (#718).
+  await expect(parts.getByRole('status')).toContainText('Measuring the version');
+  const props = parts.getByRole('list', { name: 'Props' });
+  await expect(props.getByRole('button', { name: 'Box building', exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
+  // Drawn once evaluated: no state beside its name, and the view shows more than the figure.
+  await expect(props.locator('.character-prop-state')).toHaveCount(0, { timeout: 120_000 });
+  await expect.poll(() => canvasPixels(page)).not.toBe(before);
+  await page.screenshot({ path: test.info().outputPath('c8p-building-prop.png') });
+  await props.getByRole('button', { name: 'Box building', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  await expect(inspector).toContainText('of a building, fixed by its content hash.');
+  // A building has no joints to key.
+  await expect(inspector).toContainText('This version has no joints to key.');
+
+  await save(page, 1);
+  const record = await nativeArtifact(page);
+  const doc = record.draft.content as CharacterDocument;
+  expect(doc.props.map((p) => p.source.kind)).toEqual(['bim']);
+  // #718 (TS-1303): measured, then placed beside the figure on its floor, not at the origin.
+  const drawn = await page.evaluate(() => {
+    const probe = (
+      window as unknown as {
+        characterProbe: {
+          parts: Record<string, { bounds: number[][] }>;
+          props: Record<string, number[][]>;
+        };
+      }
+    ).characterProbe;
+    const figure = Object.values(probe.parts).reduce(
+      (b, p) => [
+        b[0]!.map((x, k) => Math.min(x, p.bounds[0]![k]!)),
+        b[1]!.map((x, k) => Math.max(x, p.bounds[1]![k]!)),
+      ],
+      [
+        [Infinity, Infinity, Infinity],
+        [-Infinity, -Infinity, -Infinity],
+      ],
+    );
+    return { figure, prop: Object.values(probe.props)[0]! };
+  });
+  expect(drawn.prop[0]![0]).toBeGreaterThan(drawn.figure[1]![0]!);
+  expect(drawn.prop[0]![2]).toBeCloseTo(drawn.figure[0]![2]!, 0);
+  const middle = (b: number[][]) => (b[0]![1]! + b[1]![1]!) / 2;
+  expect(middle(drawn.prop)).toBeCloseTo(middle(drawn.figure), 0);
+  expect(
+    (record as { bimParts?: { contentHash: string }[] }).bimParts?.map((p) => p.contentHash),
+  ).toEqual([doc.props[0]!.source.contentHash]);
+  await page.reload();
+  await expect(viewState(page)).toHaveText('Ready');
+  const again = (await panel(page, 'Parts')).getByRole('list', { name: 'Props' });
+  await expect(again.getByRole('button', { name: 'Box building', exact: true })).toBeVisible();
+  await expect(again.locator('.character-prop-state')).toHaveCount(0, { timeout: 120_000 });
+  await expect.poll(() => canvasPixels(page), { timeout: 30_000 }).not.toBe(before);
+});
+
+// C8c, CH80 (TS-1299): a saved building placed beside the figure through Add prop, and the
+// figure's Wave exported at 1280 × 720 and 30 fps: an MP4 that ffprobe and the importer read,
+// whose first and last frames match the PNG sequence's; an export cancelled leaves nothing.
+/** One frame as RGB bytes (160 × 90 by default), decoded by ffmpeg (`select` picks frame n). */
+const rgb = (path: string, n?: number, size = '160:90') =>
+  execFileSync(
+    'ffmpeg',
+    [
+      '-v',
+      'error',
+      '-i',
+      path,
+      '-vf',
+      `${n === undefined ? '' : `select=eq(n\\,${n}),`}scale=${size}`,
+      '-frames:v',
+      '1',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'rgb24',
+      '-',
+    ],
+    { maxBuffer: 64 << 20 },
+  );
+const meanDiff = (a: Uint8Array, b: Uint8Array) => {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d += Math.abs(a[i]! - b[i]!);
+  return d / a.length;
+};
+const share = (a: Uint8Array, b: Uint8Array) => {
+  let n = 0;
+  for (let i = 0; i < a.length; i += 3)
+    if (
+      Math.abs(a[i]! - b[i]!) + Math.abs(a[i + 1]! - b[i + 1]!) + Math.abs(a[i + 2]! - b[i + 2]!) >
+      60
+    )
+      n++;
+  return n / (a.length / 3);
+};
+test('CH80: a figure and a building animated into a 720p MP4 and a PNG sequence (C8c, TS-1299)', async ({
+  page,
+}, info) => {
+  test.skip(!process.env.CAD_OCCT_DIST, 'needs the development kernel (CAD_OCCT_DIST)');
+  test.skip(info.project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'bim');
+  await expect(page.getByTestId('bim-model-state')).toHaveText('Model up to date', {
+    timeout: 90_000,
+  });
+  const empty = await nativeArtifact(page);
+  await importArtifact(page, 'box.json', {
+    ...empty,
+    name: 'Box building',
+    draft: { ...empty.draft, content: f31BoxBuilding() },
+    versions: [],
+  });
+  await expect(page.getByTestId('bim-model-state')).toHaveText('Model up to date', {
+    timeout: 90_000,
+  });
+  await save(page, 1);
+
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Box building — v1 (Manual save)' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  const props = parts.getByRole('list', { name: 'Props' });
+  await expect(props.locator('.character-prop-state')).toHaveCount(0, { timeout: 120_000 });
+  // Behind the figure, not around it: its walls run from 0 to 10 m.
+  await props.getByRole('button', { name: 'Box building', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  for (const [axis, v] of [
+    ['X', '-5000'],
+    ['Y', '3000'],
+  ] as const) {
+    await inspector.getByLabel(`Prop position ${axis}`).fill(v);
+    await inspector.getByLabel(`Prop position ${axis}`).press('Enter');
+  }
+  await expect(inspector.getByLabel('Prop position Y')).toHaveValue('3000');
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  await video.getByLabel('Export action').selectOption({ label: 'Wave' });
+  await video.getByLabel('Size').selectOption('720p');
+  // Wave is keyed at 30 fps: the action's own rate.
+  await video.getByLabel('Frame rate').selectOption('action');
+  const exported = async (button: 'Export video' | 'Export frames', name: RegExp) => {
+    const download = page.waitForEvent('download', { timeout: 180_000 });
+    await video.getByRole('button', { name: button }).click();
+    const file = await download;
+    expect(file.suggestedFilename()).toMatch(name);
+    const path = info.outputPath(file.suggestedFilename());
+    await file.saveAs(path);
+    return path;
+  };
+
+  const mp4 = await exported('Export video', /Wave\.mp4$/);
+  await expect(video.getByTestId('video-report')).toContainText(': 30 frames, 1280 × 720, 30 fps.');
+  const bytes = readFileSync(mp4);
+  const plan = (await inspectVideoFile(new Blob([bytes]), new AbortController().signal)).plan;
+  expect(plan.streams.map((s) => s.kind)).toEqual(['video']);
+  const probe = JSON.parse(
+    execFileSync('ffprobe', [
+      '-v',
+      'error',
+      '-count_frames',
+      '-show_streams',
+      '-show_format',
+      '-of',
+      'json',
+      mp4,
+    ]).toString(),
+  ) as {
+    streams: Record<string, unknown>[];
+    format: { duration: string };
+  };
+  expect(probe.streams).toHaveLength(1);
+  expect(probe.streams[0]).toMatchObject({
+    codec_name: 'h264',
+    width: 1280,
+    height: 720,
+    nb_read_frames: '30',
+    r_frame_rate: '30/1',
+  });
+  expect(Number(probe.format.duration)).toBeCloseTo(1, 3);
+
+  const zip = await exported('Export frames', /Wave\.zip$/);
+  const frames = unzipSync(readFileSync(zip));
+  const names = Object.keys(frames);
+  expect(names).toHaveLength(30);
+  const still = (name: string) => {
+    const path = info.outputPath(name);
+    writeFileSync(path, frames[name]!);
+    return rgb(path);
+  };
+  const first = still('frame-00001.png');
+  const last = still('frame-00030.png');
+  // The video's frames are the sequence's, up to H.264's loss.
+  expect(meanDiff(rgb(mp4, 0), first)).toBeLessThan(6);
+  expect(meanDiff(rgb(mp4, 29), last)).toBeLessThan(6);
+  // The figure waves: its arm is elsewhere half way (compared at full size, the figure is small).
+  const full = (name: string) => {
+    still(name);
+    return rgb(info.outputPath(name), undefined, '1280:720');
+  };
+  expect(share(full('frame-00001.png'), full('frame-00016.png'))).toBeGreaterThan(0.0001);
+
+  // The building is in the frames: hidden, the first frame loses it.
+  await props.getByLabel('Show Box building').uncheck();
+  await video.getByLabel('To (s)').fill('0.03');
+  const alone = unzipSync(readFileSync(await exported('Export frames', /Wave\.zip$/)));
+  writeFileSync(info.outputPath('alone.png'), alone['frame-00001.png']!);
+  expect(share(first, rgb(info.outputPath('alone.png')))).toBeGreaterThan(0.02);
+  await props.getByLabel('Show Box building').check();
+
+  // Cancelled mid-export: nothing is downloaded.
+  await video.getByLabel('To (s)').fill('1');
+  let downloads = 0;
+  page.on('download', () => downloads++);
+  await video.getByLabel('Frame rate').selectOption('60');
+  await video.getByRole('button', { name: 'Export video' }).click();
+  await expect(video.getByRole('status')).toContainText('Exporting video…');
+  await video.getByRole('button', { name: 'Cancel export' }).click();
+  await expect(video.getByTestId('video-report')).toHaveText(
+    'Export cancelled; nothing was saved.',
+  );
+  await page.waitForTimeout(500);
+  expect(downloads).toBe(0);
 });
 
 // C3f, CH30 (TS-1225): a humanoid modelled from a cube in the Playground. Cage elements are
@@ -681,4 +941,390 @@ test('exports the character as a GLB download that reads back with its IDs (CH60
   await expect(inspector.getByRole('list', { name: 'Export losses' })).toContainText(
     'polygons-triangulated',
   );
+});
+
+// C7e (CH70, TS-1284): the figure's head sculpted into a face on a multires, baked into a normal
+// map on the cage, played, saved and reloaded, and exported as a GLB carrying the map and
+// tangents (three.js and Blender render it: docs/verification/character-c7/README.md).
+test('sculpts a face on the figure, bakes it to a normal map, plays, saves, reloads and exports (CH70, TS-1288)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  const development = await page.evaluate(
+    () => !!document.querySelector('script[src*="@vite/client"]'),
+  );
+  test.skip(!development, 'needs the development build (window.characterProbe)');
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const project = (p: number[]) =>
+    page.evaluate(
+      (q) =>
+        (
+          window as unknown as {
+            characterProbe: { project(points: number[]): [number, number, number][] };
+          }
+        ).characterProbe.project(q),
+      p,
+    );
+  const canvas = page.locator('.character-canvas');
+  const at = async (p: [number, number, number]) => {
+    const [[x, y]] = await project(p);
+    const box = (await canvas.boundingBox())!;
+    return [box.x + x!, box.y + y!] as const;
+  };
+  let parts = await panel(page, 'Parts');
+  await parts.getByRole('button', { name: 'Body', exact: true }).click();
+  let inspector = await panel(page, 'Inspector');
+  // UVs: every edge a seam, one island per face.
+  await inspector.getByRole('button', { name: 'Edit mesh', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Edge', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Select all', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Mark seam', exact: true }).click();
+  await expect(page.getByTestId('uv-summary')).toHaveText(/^66 islands/);
+  await inspector.getByRole('button', { name: 'Done', exact: true }).click();
+  // The view brought to the face: panned (right button) to the head, then zoomed in.
+  const head: [number, number, number] = [0, -110, 1560];
+  const view = (await canvas.boundingBox())!;
+  const [hx, hy] = await at(head);
+  await page.mouse.move(hx, hy);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2, { steps: 10 });
+  await page.mouse.up({ button: 'right' });
+  await page.mouse.move(view.x + view.width / 2, view.y + view.height / 2);
+  const headWidth = async () => {
+    const [[a], [b]] = [await project([-100, -110, 1560]), await project([100, -110, 1560])];
+    return Math.abs(b![0]! - a![0]!);
+  };
+  // Zoomed in until the head is about 300 px wide.
+  for (let i = 0; i < 20 && (await headWidth()) < 300; i++) {
+    await page.mouse.wheel(0, -200);
+    await page.waitForTimeout(50);
+  }
+  expect(await headWidth()).toBeGreaterThan(250);
+  // A multires of five levels (about 68,000 vertices).
+  inspector = await panel(page, 'Inspector');
+  await inspector.getByLabel('Multires levels').selectOption('5');
+  await inspector.getByRole('button', { name: 'Add multires', exact: true }).click();
+  await expect(inspector.getByText('Multires level 5')).toBeVisible();
+  await inspector.getByRole('button', { name: 'Sculpt', exact: true }).click();
+  await expect(inspector.getByText('Sculpt · Body')).toBeVisible();
+  const [[l], [r]] = [await project([-100, -110, 1560]), await project([100, -110, 1560])];
+  const pxPerMm = Math.abs(r![0]! - l![0]!) / 200;
+  const brush = async (kind: string, radiusMm: number, strength: number) => {
+    await inspector.getByRole('button', { name: kind, exact: true }).click();
+    await inspector.getByLabel('Sculpt radius').fill(String(Math.round(radiusMm * pxPerMm)));
+    await inspector.getByLabel('Sculpt strength').fill(String(strength));
+  };
+  const stroke = async (points: [number, number, number][], invert = false) => {
+    if (invert) await page.keyboard.down('Shift');
+    const [x0, y0] = await at(points[0]!);
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    for (const p of points.slice(1)) {
+      const [x, y] = await at(p);
+      await page.mouse.move(x, y, { steps: 6 });
+    }
+    await page.mouse.up();
+    if (invert) await page.keyboard.up('Shift');
+  };
+  const sculptBefore = await canvasRgba(page);
+  // Eye sockets (Draw reversed, mirrored to the other eye), a nose, a mouth.
+  await brush('Draw', 22, 100);
+  await stroke(
+    [
+      [45, -110, 1610],
+      [50, -110, 1612],
+    ],
+    true,
+  );
+  await stroke(
+    [
+      [45, -110, 1610],
+      [40, -110, 1608],
+    ],
+    true,
+  );
+  await brush('Draw', 16, 100);
+  await stroke([
+    [0, -110, 1600],
+    [0, -110, 1560],
+  ]);
+  await stroke([
+    [0, -110, 1580],
+    [0, -110, 1555],
+  ]);
+  await brush('Draw', 10, 80);
+  await stroke(
+    [
+      [-40, -110, 1515],
+      [0, -110, 1508],
+      [40, -110, 1515],
+    ],
+    true,
+  );
+  await expect
+    .poll(async () => changed(sculptBefore, await canvasRgba(page)))
+    .toBeGreaterThan(0.01);
+  await canvas.screenshot({ path: test.info().outputPath('ch70-sculpt.png') });
+  await inspector.getByRole('button', { name: 'Done sculpting', exact: true }).click();
+
+  // Baked at 2048: the Body and Face materials get the map (the figure is the only part).
+  const plain = await canvasRgba(page);
+  await inspector.getByLabel('Bake size').selectOption('2048');
+  await inspector.getByRole('button', { name: 'Bake normal map', exact: true }).click();
+  await expect(inspector.getByTestId('bake-report')).toHaveText(/^Baked 2048 × 2048/, {
+    timeout: 120_000,
+  });
+  await expect.poll(async () => changed(plain, await canvasRgba(page))).toBeGreaterThan(0.002);
+  await canvas.screenshot({ path: test.info().outputPath('ch70-baked.png') });
+
+  // Played: the Wave moves the arm with the map on.
+  const transport = page.getByRole('group', { name: 'Playback', exact: true });
+  await transport.getByLabel('Action').selectOption({ label: 'Wave' });
+  const still = await canvasRgba(page);
+  await transport.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect.poll(async () => changed(still, await canvasRgba(page))).toBeGreaterThan(0.002);
+  await transport.getByRole('button', { name: 'Pause', exact: true }).click();
+  await canvas.screenshot({ path: test.info().outputPath('ch70-wave.png') });
+  await transport.getByRole('button', { name: 'Stop', exact: true }).click();
+  await save(page, 1);
+
+  await page.reload();
+  await expect(viewState(page)).toHaveText('Ready');
+  parts = await panel(page, 'Parts');
+  await parts.getByRole('button', { name: 'Body', exact: true }).click();
+  inspector = await panel(page, 'Inspector');
+  await expect(inspector.getByText('Multires level 5')).toBeVisible();
+
+  // Exported: the GLB names the normal texture on both materials and gives the mesh tangents.
+  const control = page.getByRole('button', { name: 'Export GLB', exact: true });
+  if (!(await control.isVisible()))
+    await page.getByRole('button', { name: 'More editor tools', exact: true }).click();
+  const [download] = await Promise.all([page.waitForEvent('download'), control.click()]);
+  const bytes = new Uint8Array(readFileSync((await download.path())!));
+  const view32 = new DataView(bytes.buffer, bytes.byteOffset);
+  const json = JSON.parse(
+    new TextDecoder().decode(bytes.subarray(20, 20 + view32.getUint32(12, true))),
+  ) as {
+    materials: { name: string; normalTexture?: { index: number } }[];
+    meshes: { primitives: { attributes: Record<string, number> }[] }[];
+  };
+  expect(json.materials.map((m) => [m.name, !!m.normalTexture])).toEqual([
+    ['Body', true],
+    ['Face', true],
+  ]);
+  expect(json.meshes[0]!.primitives.every((p) => 'TANGENT' in p.attributes)).toBe(true);
+  const back = importGltf(bytes);
+  expect(back.doc.materials.every((m) => !!m.maps.normal)).toBe(true);
+  writeFileSync(test.info().outputPath('ch70.glb'), bytes);
+});
+
+// WM5c-2b (docs/cad/watch-design.md, 通常の画面での編集 (3); W2): the saved SK-01 watch placed as a
+// prop, its escapement made as keys (WM4) and checked along the action (MR5); the rate then changed
+// from 28,800 to 21,600 beats an hour and the motion made again (replacing the keys, after
+// asking) and checked again. Undo and Redo go between the two, and the keys come back after a
+// save and reload.
+test('WM5c-2b: remake the SK-01 escapement at another rate and check it again', async ({
+  page,
+}) => {
+  test.skip(!process.env.CAD_OCCT_DIST, 'needs the development kernel (CAD_OCCT_DIST)');
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_200_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  const empty = await nativeArtifact(page);
+  const watch = sk01Watch((empty.draft.content as CadDocument).kernelProfile);
+  await importArtifact(page, 'sk01.json', {
+    ...empty,
+    name: 'SK-01',
+    draft: { ...empty.draft, content: watch.assembly },
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await expect(page.getByTestId('cad-geometry-state')).toHaveText('Shape up to date', {
+    timeout: 90_000,
+  });
+  await save(page, 1);
+
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'SK-01 — v1 (Manual save)' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  const props = parts.getByRole('list', { name: 'Props' });
+  await props.getByRole('button', { name: 'SK-01', exact: true }).click({ timeout: 120_000 });
+  const inspector = await panel(page, 'Inspector');
+  // Ready once the kernel has evaluated all 17 parts.
+  const escapement = inspector.getByTestId('character-prop-escapement');
+  await expect(escapement).toBeVisible({ timeout: 600_000 });
+  await escapement.getByLabel('Balance', { exact: true }).selectOption({ label: 'Balance' });
+  await escapement
+    .getByLabel('Pallet fork', { exact: true })
+    .selectOption({ label: 'Pallet fork' });
+  await escapement
+    .getByLabel('Escape wheel', { exact: true })
+    .selectOption({ label: 'Escape wheel' });
+  await escapement.getByLabel('Escapement length (s)').fill('1');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await expect(escapement.getByRole('status')).toContainText('Made 8 beats');
+  const sweep = inspector.getByTestId('character-prop-sweep');
+  const checked = async () => {
+    await sweep.getByLabel('Check every (s)').fill('0.0125');
+    await sweep.getByRole('button', { name: 'Check along the action' }).click();
+    await expect(page.getByTestId('character-prop-sweep-status')).toContainText(
+      'No overlap at the',
+      { timeout: 600_000 },
+    );
+  };
+  await checked();
+  const keysOf = async () =>
+    ((await nativeArtifact(page)).draft.content as CharacterDocument).actions[0]!.tracks.filter(
+      (t) => t.target.kind === 'prop-joint',
+    ).map((t) => [(t.target as { joint: string }).joint, t.keys.length] as const);
+  const at28800 = await keysOf();
+  expect(Object.fromEntries(at28800)).toMatchObject({
+    'j-balance': 17,
+    'j-pallet': 17,
+    'j-escape': 17,
+  });
+
+  // 21,600 an hour: 6 beats in the same second, after asking to replace the keys.
+  await escapement.getByLabel('Beats per hour').fill('21600');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await escapement
+    .getByRole('alertdialog', { name: 'Replace keys' })
+    .getByRole('button', {
+      name: 'Replace keys',
+    })
+    .click();
+  await expect(escapement.getByRole('status')).toContainText('Made 6 beats');
+  await checked();
+  const at21600 = await keysOf();
+  expect(Object.fromEntries(at21600)).toMatchObject({
+    'j-balance': 13,
+    'j-pallet': 13,
+    'j-escape': 13,
+  });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(keysOf).toEqual(at28800);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect.poll(keysOf).toEqual(at21600);
+  await page.screenshot({ path: test.info().outputPath('wm5c2b-escapement.png') });
+
+  await save(page, 1);
+  await page.reload();
+  await expect(viewState(page)).toHaveText('Ready');
+  expect(await keysOf()).toEqual(at21600);
+});
+
+// WM6b (ST-453, TS-1909): SK-01 running as a prop, filmed. A character with no figure and one
+// action of `WM6_VIDEO_SECONDS` (2 by default; the W2 demo makes 62) is read from a native file
+// (the Playground makes new characters with a 1 s action); SK-01 is added through Add prop,
+// turned to face the camera, its escapement made over the whole action (8 beats a second, the
+// seconds hand once a minute), and the action exported as an MP4 the length of the action.
+test('WM6b: film SK-01 running for the length of an action as an MP4', async ({ page }, info) => {
+  test.skip(!process.env.CAD_OCCT_DIST, 'needs the development kernel (CAD_OCCT_DIST)');
+  test.skip(info.project.name !== 'desktop', 'desktop flow');
+  const seconds = Number(process.env.WM6_VIDEO_SECONDS ?? 2);
+  test.setTimeout(1_200_000 + seconds * 60_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  const emptyCad = await nativeArtifact(page);
+  const watch = sk01Watch((emptyCad.draft.content as CadDocument).kernelProfile);
+  await importArtifact(page, 'sk01.json', {
+    ...emptyCad,
+    name: 'SK-01',
+    draft: { ...emptyCad.draft, content: watch.assembly },
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await expect(page.getByTestId('cad-geometry-state')).toHaveText('Shape up to date', {
+    timeout: 90_000,
+  });
+  await save(page, 1);
+
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const empty = await nativeArtifact(page);
+  const base = empty.draft.content as CharacterDocument;
+  const stage: CharacterDocument = {
+    ...base,
+    name: 'Watch stage',
+    assets: [],
+    parts: [],
+    skeletons: [],
+    skins: [],
+    morphs: [],
+    props: [],
+    actions: [
+      {
+        id: 'watch-run',
+        name: 'Watch running',
+        duration: seconds * 240_000,
+        frameRate: { numerator: 30, denominator: 1 },
+        tracks: [],
+      },
+    ],
+  };
+  const { cadResources: _, ...record } = empty as typeof empty & { cadResources?: unknown };
+  await importArtifact(page, 'stage.json', {
+    ...record,
+    name: 'Watch stage',
+    draft: { ...empty.draft, content: stage },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Watch stage');
+  await expect(viewState(page)).toHaveText('Nothing to show');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'SK-01 — v1 (Manual save)' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  const props = parts.getByRole('list', { name: 'Props' });
+  await props.getByRole('button', { name: 'SK-01', exact: true }).click({ timeout: 120_000 });
+  const inspector = await panel(page, 'Inspector');
+  // The dial (−z) to the camera, which looks along +y.
+  await inspector.getByLabel('Prop rotation X').fill('-90');
+  await inspector.getByLabel('Prop rotation X').press('Enter');
+  const escapement = inspector.getByTestId('character-prop-escapement');
+  await expect(escapement).toBeVisible({ timeout: 600_000 });
+  await escapement.getByLabel('Balance', { exact: true }).selectOption({ label: 'Balance' });
+  await escapement
+    .getByLabel('Pallet fork', { exact: true })
+    .selectOption({ label: 'Pallet fork' });
+  await escapement
+    .getByLabel('Escape wheel', { exact: true })
+    .selectOption({ label: 'Escape wheel' });
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await expect(escapement.getByRole('status')).toContainText(`Made ${seconds * 8} beats`);
+  await page.screenshot({ path: info.outputPath('wm6b-stage.png') });
+
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  await video.getByLabel('Export action').selectOption({ label: 'Watch running' });
+  await video.getByLabel('Size').selectOption('720p');
+  await video.getByLabel('Frame rate').selectOption('action');
+  const download = page.waitForEvent('download', { timeout: 300_000 + seconds * 60_000 });
+  await video.getByRole('button', { name: 'Export video' }).click();
+  const file = await download;
+  const mp4 = info.outputPath('sk01-running.mp4');
+  await file.saveAs(mp4);
+  await expect(video.getByTestId('video-report')).toContainText(
+    `: ${seconds * 30} frames, 1280 × 720, 30 fps.`,
+  );
+  const probe = JSON.parse(
+    execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', mp4], {
+      maxBuffer: 64 * 1024 * 1024,
+    }).toString(),
+  ) as { streams: Record<string, unknown>[]; format: { duration: string } };
+  expect(probe.streams[0]).toMatchObject({ codec_name: 'h264', width: 1280, height: 720 });
+  expect(Number(probe.format.duration)).toBeCloseTo(seconds, 2);
+  // The movement runs: the first and last frames differ (the wheels and the balance turned).
+  expect(meanDiff(rgb(mp4, 0, '640:360'), rgb(mp4, seconds * 30 - 1, '640:360'))).toBeGreaterThan(
+    0.2,
+  );
+  const dir = process.env.CAD_WATCH_DEMO_DIR;
+  if (dir) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/sk01-running-${seconds}s.mp4`, readFileSync(mp4));
+  }
 });

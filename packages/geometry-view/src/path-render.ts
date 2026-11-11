@@ -19,6 +19,7 @@ import {
   Material,
   Matrix4,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   type Object3D,
   OrthographicCamera,
@@ -29,6 +30,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
+import { geometryLightLimits, type GeometryEmission } from '@editor-platform/geometry-core';
 
 /** Limits of the render settings; the time limit is in seconds, 0 for none. */
 export const pathRenderLimits = {
@@ -127,14 +129,33 @@ function renderMaterial(material: Material, copies: Map<Material, Material>): Ma
     throw new Error(
       'The view shows an analysis shading. Switch the shading to Shaded or Realistic, then render.',
     );
-  const copy = material.clone();
+  let copy = material.clone();
   if (copy instanceof MeshStandardMaterial) {
     // The metalness the look asks for, not the standard lighting's stand-in (see setViewFinish).
     if (typeof material.userData.metalness === 'number')
       copy.metalness = material.userData.metalness;
-    // The selection tint is not the model's look.
-    copy.emissive.set(0x000000);
-    copy.emissiveIntensity = 0;
+    // The selection tint is not the model's look; the look's own light (CR6a) is.
+    const emission = material.userData.emission as GeometryEmission | undefined;
+    copy.emissive.set(emission ? emission.color : 0x000000);
+    copy.emissiveIntensity = emission ? emission.strength : 0;
+    // CR6a: light through the surface, refracted, in place of the view's lower opacity.
+    const transmission = material.userData.transmission;
+    if (typeof transmission === 'number' && transmission > 0) {
+      const physical = new MeshPhysicalMaterial();
+      MeshStandardMaterial.prototype.copy.call(physical, copy);
+      // The standard copy takes the physical shader's defines away.
+      physical.defines = { STANDARD: '', PHYSICAL: '' };
+      physical.transmission = transmission;
+      physical.ior =
+        (material.userData.ior as number | undefined) ?? geometryLightLimits.defaultIor;
+      physical.thickness = 0;
+      const opacity = material.userData.opacity;
+      physical.opacity = typeof opacity === 'number' ? opacity : 1;
+      physical.transparent = physical.opacity < 1;
+      physical.depthWrite = !physical.transparent;
+      copy.dispose();
+      copy = physical;
+    }
   }
   copies.set(material, copy);
   return copy;

@@ -10,7 +10,7 @@ image=$(sed -n "s/.*'\(donalffons\/opencascade.js@sha256:[0-9a-f]*\)'.*/\1/p" "$
 image="${IMAGE_PREFIX:-}$image"
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
-cp "$here/opencascade.d0-leakcheck.yml" "$here/patch-destructors.py" "$out/"
+cp "$here/opencascade.d0-leakcheck.yml" "$here/patch-destructors.py" "$here/sort-link-order.py" "$out/"
 freetype=
 if [ -n "${FREETYPE_SRC:-}" ]; then
   freetype="-v $(cd "$FREETYPE_SRC" && pwd):/freetype-port:ro"
@@ -25,5 +25,6 @@ docker run --rm -v "$out:/src" $freetype ${DOCKER_ARGS:-} --entrypoint sh "$imag
      echo https://github.com/emscripten-ports/FreeType/archive/version_1.zip > $ports/.emscripten_url
    fi &&
    python3 /src/patch-destructors.py /src/opencascade.d0-leakcheck.yml &&
+   python3 /src/sort-link-order.py /opencascade.js/src/buildFromYaml.py &&
    python3 /opencascade.js/src/buildFromYaml.py opencascade.d0-leakcheck.yml'
 sha256sum "$out/opencascade.d0-leakcheck.wasm"

@@ -19,6 +19,7 @@ import {
 import type { CadMesh } from '@editor-platform/cad-kernel-occt';
 import {
   componentStates,
+  parseEntryDraftKey,
   type CadAssembly,
   type CadComponentState,
   type CadJointCreation,
@@ -29,6 +30,7 @@ import type { ViewportPart } from './assembly-view';
 import { validJointFields } from './joint-values';
 import { BomDialog } from './bom-panel';
 import { PatternDialog, PatternInspector, patternSize } from './component-pattern-panel';
+import { InterferenceSection } from './interference-panel';
 import { JointsSection } from './joints-panel';
 import { useStatusProps } from './status-role';
 import { UpdatePartsDialog } from './part-update-panel';
@@ -74,7 +76,7 @@ export function AssemblyLayer({
   const status = useStatusProps();
   // The parts are drawn again only when what they show changes: a joint drag's values (shown in
   // its Inspector) move the drawn parts by their matrices alone.
-  const { creating, selectedJoint, selected, selectedPattern, meshes } = parts;
+  const { creating, selectedJoint, selected, selectedPattern, meshes, highlighted } = parts;
   const simplified = [...parts.simplified].sort().join(' ');
   // Placement and joint value entries not applied (any component or joint, shown or not) are
   // pending inputs: save, export and switching apply one, or refuse until it is valid. A joint
@@ -83,12 +85,24 @@ export function AssemblyLayer({
     label: 'Placement',
     read: () => {
       const s = assembly.getSnapshot();
-      return { dirty: s.drafts.size + s.jointDrafts.size > 0 || !!s.creating };
+      return {
+        dirty: s.drafts.size + s.jointDrafts.size + s.entryDrafts.size > 0 || !!s.creating,
+      };
     },
     prepare: () => {
       const s = assembly.getSnapshot();
       // A joint being made shows poses that are not content (R2b-2c): nothing leaves with them.
       if (s.creating) throw new Error(describeCode('joint-creating'));
+      // MR1b: a range or coupling typed and not applied is refused, never applied here: it is
+      // applied (or reset) where it was typed, like a joint being made.
+      const [typed] = s.entryDrafts.keys();
+      if (typed) {
+        const { kind, jointId: id } = parseEntryDraftKey(typed);
+        const name = snapshot.content.joints.find((j) => j.id === id)?.name ?? id;
+        throw new Error(
+          `${name}の${kind === 'range' ? '範囲' : '連動'}の入力が適用されていません。Apply range・Couple（Apply coupling）で適用するか、Resetで戻してから、もう一度操作してください。`,
+        );
+      }
       const { components, joints } = snapshot.content;
       const pending = [
         ...[...s.drafts].map(([id, draft]) => ({
@@ -124,7 +138,8 @@ export function AssemblyLayer({
     focus: () => {
       const s = assembly.getSnapshot();
       const id = [...s.drafts.keys()][0];
-      const joint = [...s.jointDrafts.keys()][0];
+      const typed = [...s.entryDrafts.keys()][0];
+      const joint = [...s.jointDrafts.keys()][0] ?? (typed && parseEntryDraftKey(typed).jointId);
       if (id) assembly.select(id);
       else if (joint) assembly.selectJoint(joint);
       setTimeout(() => document.querySelector<HTMLInputElement>('.cad-placement input')?.focus());
@@ -140,6 +155,7 @@ export function AssemblyLayer({
     const { occurrences } = expandAssembly(content, assembly.lookup);
     const access = occurrenceAccess(occurrences, assembly.access);
     const revokedPaths = new Set<string>();
+    const shown = new Set((highlighted ?? []).map((p) => JSON.stringify(p)));
     for (const [i, o] of occurrences.entries()) {
       const hash = o.part.source.contentHash;
       // Inside a revoked sub-assembly nothing is drawn: the sub-assembly is one box.
@@ -203,8 +219,10 @@ export function AssemblyLayer({
       entry.instances.push({
         path: o.path,
         matrix: poseMatrix(o.pose),
+        // MR3: a shown interference finding's two occurrences are drawn selected too.
         selected:
           top === selected ||
+          shown.has(JSON.stringify(o.path)) ||
           (!!selectedPattern &&
             (top === seedOf || parseCopyStep(top)?.patternId === selectedPattern)),
       });
@@ -226,6 +244,7 @@ export function AssemblyLayer({
     selected,
     selectedPattern,
     meshes,
+    highlighted,
     simplified,
     restored,
     textures,
@@ -782,6 +801,7 @@ export function AssemblyPanel({
         )}
         {pattern && <PatternInspector assembly={assembly} snapshot={snapshot} pattern={pattern} />}
         <JointsSection assembly={assembly} snapshot={snapshot} narrow={narrow} />
+        <InterferenceSection assembly={assembly} snapshot={snapshot} />
       </Section>
       {inserting && (
         <InsertPartDialog assembly={assembly} doc={doc} onClose={() => setInserting(false)} />

@@ -19,6 +19,7 @@ import {
   Trash2,
   Undo2,
   Aperture,
+  ZoomIn,
 } from 'lucide-react';
 import { geometryMaterialPresets } from '@editor-platform/geometry-core';
 import {
@@ -33,16 +34,20 @@ import {
   bimDrawingSvg,
   bimLimits,
   bimLayerFaceMaterialIds,
+  bimSchedule,
+  bimScheduleCsv,
   bimSurfaceMaterialId,
   type BimAppearance,
   type BimDocument,
   type BimDrawingScale,
+  type BimGridBubbles,
   type BimView,
   type BimElement,
   type BimElementKind,
   type BimLevelHeight,
   type BimPropertyValue,
   type BimType,
+  type Vec2,
 } from '@editor-platform/bim-core';
 import {
   CommitInput,
@@ -52,10 +57,16 @@ import {
   EditorLayout,
   IconButton,
   isTextInput,
+  type EditorLayoutProps,
   Section,
   Toolbar,
 } from '@editor-platform/editor-ui';
-import { bimDrawingKey, type BimController, type BimState } from './controller';
+import {
+  bimCurrentKernelQuantities,
+  bimDrawingKey,
+  type BimController,
+  type BimState,
+} from './controller';
 import type { BimPartCandidate, BimPartStatus } from './parts';
 import {
   bimArcHint,
@@ -66,10 +77,25 @@ import {
   useDraft,
   useNarrow,
 } from './draft-tools';
-import { draftLevel, draftPlanView, type BimDraftTool } from './drafting';
+import {
+  bimWorkingPlan,
+  draftLevel,
+  draftPlanView,
+  draftRailing,
+  type BimDraftTool,
+} from './drafting';
 import type { BimDrawingResult } from './drawing';
-import { bimDownload, bimDrawingFileName, bimFileName, bimSvgToPng } from './drawing-export';
-import { bimElementLevel, bimViewBounds, bimViewSolids } from './view';
+import {
+  bimDownload,
+  bimDrawingFileName,
+  bimFileName,
+  bimPngExport,
+  bimPngReducedDpi,
+  bimSvgPaperMm,
+  bimSvgToPng,
+} from './drawing-export';
+import { bimElementLevel, bimViewBounds, bimViewFramed, bimViewSolids } from './view';
+import { bimIfcOverImportLimit } from './ifc';
 import { BimViewport, type BimDraftMarks, type BimPlanView } from './viewport';
 import './style.css';
 
@@ -78,6 +104,10 @@ const kindLabels: Record<BimElementKind, string> = {
   slab: 'Slabs',
   column: 'Columns',
   beam: 'Beams',
+  member: 'Members',
+  ramp: 'Ramps',
+  railing: 'Railings',
+  stair: 'Stairs',
   opening: 'Openings',
   door: 'Doors',
   window: 'Windows',
@@ -92,6 +122,7 @@ const typeKindLabels: Record<BimType['kind'], string> = {
   roof: 'Roof types',
   column: 'Column types',
   beam: 'Beam types',
+  member: 'Member types',
   door: 'Door types',
   window: 'Window types',
   part: 'Part types',
@@ -102,6 +133,7 @@ const quantityLabels: Record<string, string> = {
   width: 'Thickness (mm)',
   grossArea: 'Gross area (mm²)',
   netArea: 'Net area (mm²)',
+  slopedArea: 'Sloped top area (mm²)',
   grossVolume: 'Gross volume (mm³)',
   netVolume: 'Net volume (mm³)',
   footprintArea: 'Footprint area (mm²)',
@@ -116,6 +148,22 @@ const quantityLabels: Record<string, string> = {
   grossSideArea: 'Gross side area (mm²)',
   netSideArea: 'Net side area (mm²)',
   slope: 'Slope (rad)',
+  // LR3: a spiral ramp's.
+  planArea: 'Plan area (mm²)',
+  topArea: 'Walking surface area (mm²)',
+  ringWidth: 'Width (mm)',
+  thickness: 'Thickness (mm)',
+  rise: 'Rise (mm)',
+  // LS4: openings through a ramp's turns; LS5: a railing's side.
+  openingArea: 'Opening area (mm²)',
+  grossTopArea: 'Gross walking surface area (mm²)',
+  sideArea: 'Side area (mm²)',
+  // LS6: a stair's.
+  flightWidth: 'Width (mm)',
+  numberOfRisers: 'Risers',
+  riserHeight: 'Riser (mm)',
+  treadLength: 'Tread (mm)',
+  treadArea: 'Tread area (mm²)',
 };
 const coordinate = bimLimits.coordinateMm;
 
@@ -138,6 +186,7 @@ export function BimSurface({
   onUndo,
   onRedo,
   ifc,
+  layout,
 }: {
   controller: BimController;
   name: string;
@@ -146,10 +195,13 @@ export function BimSurface({
   onRedo?: () => void;
   /** The Artifact's ID and the content's time, for Export IFC; without it there is none. */
   ifc?: () => { artifactId: string; timeStamp: string };
+  /** EditorLayout options, such as `compactBreakpoint` for a Host that places the Surface in
+   * a narrow region. */
+  layout?: Partial<EditorLayoutProps>;
 }) {
   const state = useBimState(controller);
   const exportIfc = useIfcExport(controller, name, ifc);
-  const [tab, setTab] = useState<'element' | 'types' | 'drawings'>('element');
+  const [tab, setTab] = useState<'element' | 'types' | 'drawings' | 'schedule'>('element');
   // The view chosen in Drawings, and the one whose drawing replaces the 3D view.
   const [viewId, setViewId] = useState<string | undefined>();
   const [openViewId, setOpenViewId] = useState<string | undefined>();
@@ -158,6 +210,14 @@ export function BimSurface({
   const [axesShown, setAxesShown] = useState(true);
   const [typeId, setTypeId] = useState<string | undefined>();
   const [fit, setFit] = useState(0);
+  // FU1: a press of Zoom to selection; framed when the selection has a shape.
+  const [zoom, setZoom] = useState(0);
+  const canZoom = useMemo(
+    () =>
+      state.selection.length > 0 &&
+      !!bimViewBounds(state.evaluation, state.content, state.selection),
+    [state.selection, state.evaluation, state.content],
+  );
   const [realistic, setRealistic] = useState(false);
   const [rendering, setRendering] = useState(false);
   /** The 3D view's solids and camera for a render (#664), set while the 3D view is shown. */
@@ -172,10 +232,20 @@ export function BimSurface({
   const partType = state.content.types.find((t) => t.id === typeId && t.kind === 'part')?.id;
   const draft = useDraft(controller, state, activeTool, partType, arc);
   const level = state.content.levels.find((l) => l.id === state.level);
-  const planView = useMemo(
-    () => (plan && level ? { elevationMm: level.elevationMm, cutMm: 1200 } : undefined),
-    [plan, level],
+  // TW0b: the working plan's cut and depth; a typed depth holds for its own level only.
+  const [planCut, setPlanCut] = useState<number | undefined>();
+  const [planDepth, setPlanDepth] = useState<{ level: string; mm: number } | undefined>();
+  const levels = state.content.levels;
+  const range = useMemo(
+    () =>
+      level &&
+      bimWorkingPlan({ levels }, level.id, {
+        cutMm: planCut,
+        depthMm: planDepth?.level === level.id ? planDepth.mm : undefined,
+      }),
+    [levels, level, planCut, planDepth],
   );
+  const planView = useMemo(() => (plan ? range : undefined), [plan, range]);
   // Ctrl/Cmd+Z and Shift+Ctrl/Cmd+Z go to the Host's history when it gives one (artifact Host);
   // handled here, the Host's own window shortcut sees it as done.
   const history = useContext(EditorHistoryContext);
@@ -228,7 +298,34 @@ export function BimSurface({
                 ))}
               </select>
             </label>
+            {plan && range && level && (
+              <span className="bim-plan-range" data-testid="bim-plan-range">
+                <CommitInput
+                  label="Plan cut (mm)"
+                  type="number"
+                  min={1}
+                  max={coordinate}
+                  value={range.cutMm}
+                  onCommit={(v) => setPlanCut(Number(v))}
+                />
+                <CommitInput
+                  label="Plan depth (mm)"
+                  type="number"
+                  min={1}
+                  max={2 * coordinate}
+                  value={range.depthMm}
+                  onCommit={(v) => setPlanDepth({ level: level.id, mm: Number(v) })}
+                />
+              </span>
+            )}
             <IconButton icon={Maximize} label="Fit view" onClick={() => setFit((n) => n + 1)} />
+            <IconButton
+              icon={ZoomIn}
+              label="Zoom to selection"
+              reason={canZoom ? undefined : 'Select an element that has a shape'}
+              disabled={!canZoom || !!openView}
+              onClick={() => setZoom((n) => n + 1)}
+            />
             <IconButton
               icon={Sun}
               label="Realistic lighting"
@@ -276,6 +373,11 @@ export function BimSurface({
                 {' · IFC written without texture maps'}
               </span>
             ) : null}
+            {!exportIfc?.writing && exportIfc?.overLimit ? (
+              <span data-testid="bim-ifc-over-limit">
+                {` · IFC is ${mib(exportIfc.overLimit.bytes)} MiB, over the ${mib(exportIfc.overLimit.limit)} MiB import limit: it cannot be imported again`}
+              </span>
+            ) : null}
             {state.readOnly ? ' · Read only' : ''}
           </span>
         }
@@ -297,7 +399,7 @@ export function BimSurface({
         inspector={
           <div className="bim-inspector">
             <div className="bim-tabs" role="tablist" aria-label="Inspector">
-              {(['element', 'types', 'drawings'] as const).map((t) => (
+              {(['element', 'types', 'drawings', 'schedule'] as const).map((t) => (
                 <button
                   key={t}
                   role="tab"
@@ -305,7 +407,7 @@ export function BimSurface({
                   className={tab === t ? 'bim-tab bim-tab-on' : 'bim-tab'}
                   onClick={() => settle(() => setTab(t))}
                 >
-                  {t === 'element' ? 'Element' : t === 'types' ? 'Types' : 'Drawings'}
+                  {tabLabels[t]}
                 </button>
               ))}
             </div>
@@ -335,6 +437,8 @@ export function BimSurface({
                 selected={typeId}
                 onSelect={(id) => settle(() => setTypeId(id))}
               />
+            ) : tab === 'schedule' ? (
+              <SchedulePanel state={state} building={name} />
             ) : (
               <DrawingsPanel
                 controller={controller}
@@ -347,6 +451,7 @@ export function BimSurface({
             )}
           </div>
         }
+        {...layout}
       >
         {openView ? (
           <DrawingView
@@ -363,6 +468,7 @@ export function BimSurface({
             hidden={hidden}
             axesShown={axesShown}
             fit={fit}
+            zoom={zoom}
             realistic={realistic}
             renderSource={renderSource}
             plan={planView}
@@ -399,6 +505,7 @@ function Viewport({
   hidden,
   axesShown,
   fit,
+  zoom,
   realistic,
   renderSource,
   plan,
@@ -412,9 +519,11 @@ function Viewport({
   hidden: ReadonlySet<BimElementKind>;
   axesShown: boolean;
   fit: number;
+  zoom: number;
   realistic: boolean;
   renderSource: { current: (() => PathRenderSource | undefined) | undefined };
-  plan: BimPlanView | undefined;
+  /** The working plan with its depth (TW0b); the viewport takes its level and cut. */
+  plan: (BimPlanView & { depthMm: number }) | undefined;
   drawing: boolean;
   onPlan(xy: [number, number], kind: 'move' | 'click' | 'double', mmPerPx: number): void;
   marks: BimDraftMarks | undefined;
@@ -470,6 +579,7 @@ function Viewport({
         selection: new Set(state.selection),
         hiddenKinds: hidden,
         parts: state.parts,
+        belowMm: plan ? plan.elevationMm + plan.cutMm - plan.depthMm : undefined,
         textures: (set) =>
           viewTexturesOf(set, state.content.assets ?? [], textureCache, (sha) =>
             controller.assetBytes(sha),
@@ -486,6 +596,7 @@ function Viewport({
       state.selection,
       hidden,
       state.parts,
+      plan,
       textureCache,
       texturesLoaded,
     ],
@@ -501,6 +612,15 @@ function Viewport({
   useEffect(() => {
     if (fit && fitBounds.current) view.current?.fit(fitBounds.current);
   }, [fit]);
+  // FU1: the selection framed from where the 3D camera looks now (a plan from above); FU5: turned
+  // to where nothing hides it, outward from the middle of the building first.
+  useEffect(() => {
+    if (!zoom) return;
+    const { evaluation, content, selection } = latest.current;
+    const b = bimViewBounds(evaluation, content, selection);
+    const framed = new Set([...selection, ...bimViewFramed(content, selection)]);
+    if (b) view.current?.fit(b, true, framed, fitBounds.current);
+  }, [zoom]);
   useEffect(() => view.current?.setPlan(plan, fitBounds.current), [plan]);
   useEffect(() => view.current?.setRealistic(realistic), [realistic]);
   useEffect(() => {
@@ -755,8 +875,250 @@ function PointFields({
 const heightLabel = (doc: BimDocument, h: BimLevelHeight) =>
   doc.levels.find((l) => l.id === h.level)?.name ?? h.level;
 
+/** TW2: a plan point by its numbers, `X (mm)` and `Y (mm)` after `prefix`. */
+function XYFields({
+  prefix,
+  xy,
+  readOnly,
+  onCommit,
+}: {
+  prefix: string;
+  xy: readonly number[];
+  readOnly: boolean;
+  onCommit(at: { xy: [number, number] }): string | undefined;
+}) {
+  return (
+    <>
+      {(['X', 'Y'] as const).map((axis, i) => (
+        <Field
+          key={axis}
+          label={`${prefix}${axis} (mm)`}
+          type="number"
+          min={-coordinate}
+          max={coordinate}
+          value={round(xy[i]!)}
+          readOnly={readOnly}
+          onCommit={(v) => {
+            const next: [number, number] = [xy[0]!, xy[1]!];
+            next[i] = Number(v);
+            return onCommit({ xy: next });
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * LR3c: a spiral ramp's centre, radii, angles in degrees (the turn's sign is its direction) and
+ * the level of its end. Its start's height is the element's base.
+ */
+function RampFields({
+  el,
+  doc,
+  center,
+  readOnly,
+  update,
+}: {
+  el: Extract<BimElement, { kind: 'ramp' }>;
+  doc: BimDocument;
+  center: Vec2 | undefined;
+  readOnly: boolean;
+  update(patch: Partial<BimElement>): string | undefined;
+}) {
+  const deg = (rad: number) => round((rad * 180) / Math.PI);
+  const rad = (v: string) => (Number(v) * Math.PI) / 180;
+  return (
+    <>
+      {'grid' in el.center && (
+        <p className="bim-hint">
+          On a grid crossing: it moves with the axes. A typed X or Y places it by coordinates
+          instead.
+        </p>
+      )}
+      <XYFields
+        prefix="Centre "
+        xy={center ?? [0, 0]}
+        readOnly={readOnly}
+        onCommit={(at) => update({ center: at } as Partial<BimElement>)}
+      />
+      <Field
+        label="Inner radius (mm)"
+        type="number"
+        min={1}
+        max={coordinate}
+        value={el.innerRadiusMm}
+        readOnly={readOnly}
+        onCommit={(v) => update({ innerRadiusMm: Number(v) } as Partial<BimElement>)}
+      />
+      <Field
+        label="Outer radius (mm)"
+        type="number"
+        min={1}
+        max={coordinate}
+        value={el.outerRadiusMm}
+        readOnly={readOnly}
+        onCommit={(v) => update({ outerRadiusMm: Number(v) } as Partial<BimElement>)}
+      />
+      <Field
+        label="Start angle (°)"
+        type="number"
+        min={-360}
+        max={360}
+        value={deg(el.startAngleRad)}
+        readOnly={readOnly}
+        onCommit={(v) => update({ startAngleRad: rad(v) } as Partial<BimElement>)}
+      />
+      <Field
+        label="Turn (°, + counter-clockwise)"
+        type="number"
+        min={-1080}
+        max={1080}
+        step={15}
+        value={deg(el.sweepRad)}
+        readOnly={readOnly}
+        onCommit={(v) => update({ sweepRad: rad(v) } as Partial<BimElement>)}
+      />
+      <HeightFields
+        label="End top"
+        doc={doc}
+        height={el.top}
+        readOnly={readOnly}
+        onCommit={(top) => update({ top } as Partial<BimElement>)}
+      />
+    </>
+  );
+}
+
+/**
+ * LS6: a straight stair's foot, the direction it climbs in degrees, its width, risers and tread,
+ * and the level of its top. Its foot's height is the element's base.
+ */
+function StairFields({
+  el,
+  doc,
+  start,
+  readOnly,
+  update,
+}: {
+  el: Extract<BimElement, { kind: 'stair' }>;
+  doc: BimDocument;
+  start: Vec2 | undefined;
+  readOnly: boolean;
+  update(patch: Partial<BimElement>): string | undefined;
+}) {
+  const s = bimLimits.stair;
+  return (
+    <>
+      {'grid' in el.start && (
+        <p className="bim-hint">
+          On a grid crossing: it moves with the axes. A typed X or Y places it by coordinates
+          instead.
+        </p>
+      )}
+      <XYFields
+        prefix="Foot "
+        xy={start ?? [0, 0]}
+        readOnly={readOnly}
+        onCommit={(at) => update({ start: at } as Partial<BimElement>)}
+      />
+      <Field
+        label="Direction (°)"
+        type="number"
+        min={-360}
+        max={360}
+        value={round((el.directionRad * 180) / Math.PI)}
+        readOnly={readOnly}
+        onCommit={(v) =>
+          update({ directionRad: (Number(v) * Math.PI) / 180 } as Partial<BimElement>)
+        }
+      />
+      <Field
+        label="Width (mm)"
+        type="number"
+        min={1}
+        max={coordinate}
+        value={el.widthMm}
+        readOnly={readOnly}
+        onCommit={(v) => update({ widthMm: Number(v) } as Partial<BimElement>)}
+      />
+      <Field
+        label="Risers"
+        type="number"
+        min={s.risers[0]}
+        max={s.risers[1]}
+        step={1}
+        value={el.risers}
+        readOnly={readOnly}
+        onCommit={(v) => update({ risers: Number(v) } as Partial<BimElement>)}
+      />
+      <Field
+        label="Tread (mm)"
+        type="number"
+        min={s.treadMm[0]}
+        max={s.treadMm[1]}
+        value={el.treadMm}
+        readOnly={readOnly}
+        onCommit={(v) => update({ treadMm: Number(v) } as Partial<BimElement>)}
+      />
+      <HeightFields
+        label="Top"
+        doc={doc}
+        height={el.top}
+        readOnly={readOnly}
+        onCommit={(top) => update({ top } as Partial<BimElement>)}
+      />
+    </>
+  );
+}
+
+/** TW2: a height on a level: the level, then the offset from it. */
+function HeightFields({
+  label,
+  doc,
+  height,
+  readOnly,
+  onCommit,
+}: {
+  label: string;
+  doc: BimDocument;
+  height: BimLevelHeight;
+  readOnly: boolean;
+  onCommit(height: BimLevelHeight): string | undefined;
+}) {
+  return (
+    <>
+      <label className="ep-field">
+        {label} level
+        <select
+          aria-label={`${label} level`}
+          value={height.level}
+          disabled={readOnly}
+          onChange={(e) => onCommit({ ...height, level: e.target.value })}
+        >
+          {doc.levels.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Field
+        label={`${label} offset (mm)`}
+        type="number"
+        min={-coordinate}
+        max={coordinate}
+        value={height.offsetMm}
+        readOnly={readOnly}
+        onCommit={(v) => onCommit({ ...height, offsetMm: Number(v) })}
+      />
+    </>
+  );
+}
+
 function ElementInspector({ controller, state }: { controller: BimController; state: BimState }) {
   const { content: doc, readOnly } = state;
+  const settle = useSettle();
   if (state.selection.length > 1)
     return (
       <div className="bim-panel">
@@ -772,7 +1134,10 @@ function ElementInspector({ controller, state }: { controller: BimController; st
   const r = state.evaluation?.elements.get(el.id);
   const q = state.derived.quantities.get(el.id);
   const kq = state.evaluation?.kernelQuantities.get(el.id);
-  const types = doc.types.filter((t) => t.kind === el.kind);
+  // LR3: a ramp takes a slab type; LS5: a railing a wall type.
+  const typeKind =
+    el.kind === 'ramp' || el.kind === 'stair' ? 'slab' : el.kind === 'railing' ? 'wall' : el.kind;
+  const types = doc.types.filter((t) => t.kind === typeKind);
   return (
     <div className="bim-panel" data-testid="bim-element">
       <p className="bim-kind-line">
@@ -861,6 +1226,144 @@ function ElementInspector({ controller, state }: { controller: BimController; st
           onCommit={(v) => update({ top: { ...el.top, offsetMm: num(v) } } as Partial<BimElement>)}
         />
       )}
+      {el.kind === 'column' && (
+        <>
+          <XYFields
+            prefix="Top "
+            xy={(() => {
+              const sh = state.derived.shapes.get(el.id);
+              return sh?.kind === 'column' ? (sh.topAt ?? sh.at) : [0, 0];
+            })()}
+            readOnly={readOnly}
+            onCommit={(topAt) => update({ topAt })}
+          />
+          {el.topAt && !readOnly && (
+            <button
+              type="button"
+              className="bim-button"
+              onClick={() => {
+                const { topAt: _, ...vertical } = el;
+                controller.updateElement(vertical);
+              }}
+            >
+              Make vertical
+            </button>
+          )}
+          <Field
+            label="Top scale"
+            type="number"
+            min={0.1}
+            max={1}
+            step={0.05}
+            value={el.topScale ?? 1}
+            readOnly={readOnly}
+            onCommit={(v) => {
+              // TW5: a scale of 1 is no taper, without `topScale`.
+              if (num(v) === 1) {
+                const { topScale: _, ...straight } = el;
+                return controller.updateElement(straight);
+              }
+              return update({ topScale: num(v) });
+            }}
+          />
+        </>
+      )}
+      {el.kind === 'slab' && (
+        <>
+          <label className="ep-field">
+            Slope edge
+            <select
+              aria-label="Slope edge"
+              value={el.slope ? String(el.slope.edge) : ''}
+              disabled={readOnly}
+              onChange={(e) => {
+                // TW5: the top rises square to a straight boundary edge.
+                // Level unmounts the end top field: its draft is committed first, or kept.
+                if (e.target.value === '') {
+                  const { slope: _, ...level } = el;
+                  return settle(() => controller.updateElement(level));
+                }
+                return update({
+                  slope: { edge: Number(e.target.value), endTop: el.slope?.endTop ?? el.top },
+                });
+              }}
+            >
+              <option value="">Level</option>
+              {el.boundary.map((v, i) =>
+                v[2] ? null : (
+                  <option key={i} value={i}>
+                    Edge {i + 1}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          {el.slope && (
+            <Field
+              label={`Slope end top offset from ${heightLabel(doc, el.slope.endTop)} (mm)`}
+              type="number"
+              min={-coordinate}
+              max={coordinate}
+              value={el.slope.endTop.offsetMm}
+              readOnly={readOnly}
+              onCommit={(v) =>
+                update({
+                  slope: { ...el.slope!, endTop: { ...el.slope!.endTop, offsetMm: num(v) } },
+                })
+              }
+            />
+          )}
+        </>
+      )}
+      {el.kind === 'beam' && (
+        <Field
+          label={`End top offset from ${heightLabel(doc, el.endTop ?? el.top)} (mm)`}
+          type="number"
+          min={-coordinate}
+          max={coordinate}
+          value={(el.endTop ?? el.top).offsetMm}
+          readOnly={readOnly}
+          onCommit={(v) => {
+            const endTop = { level: (el.endTop ?? el.top).level, offsetMm: num(v) };
+            // The same height as the start: a level beam, without `endTop`.
+            if (endTop.level === el.top.level && endTop.offsetMm === el.top.offsetMm) {
+              const { endTop: _, ...level } = el;
+              return controller.updateElement(level);
+            }
+            return update({ endTop });
+          }}
+        />
+      )}
+      {el.kind === 'member' &&
+        (['start', 'end'] as const).map((k) => {
+          const sh = state.derived.shapes.get(el.id);
+          const label = k === 'start' ? 'Start' : 'End';
+          const end = el[k];
+          return (
+            <fieldset key={k} className="bim-member-end">
+              <legend>{label}</legend>
+              {'grid' in end.at && (
+                <p className="bim-hint">
+                  On a grid crossing: it moves with the axes. A typed X or Y places it by
+                  coordinates instead.
+                </p>
+              )}
+              <XYFields
+                prefix={`${label} `}
+                xy={sh?.kind === 'member' ? sh[k] : [0, 0]}
+                readOnly={readOnly}
+                onCommit={(at) => update({ [k]: { ...end, at } } as Partial<BimElement>)}
+              />
+              <HeightFields
+                label={label}
+                doc={doc}
+                height={end.height}
+                readOnly={readOnly}
+                onCommit={(height) => update({ [k]: { ...end, height } } as Partial<BimElement>)}
+              />
+            </fieldset>
+          );
+        })}
       {el.kind === 'wall' && (
         <label className="ep-field">
           Axis location
@@ -876,7 +1379,95 @@ function ElementInspector({ controller, state }: { controller: BimController; st
           </select>
         </label>
       )}
-      {(el.kind === 'column' || el.kind === 'part') && (
+      {el.kind === 'ramp' && (
+        <RampFields
+          el={el}
+          doc={doc}
+          center={(state.derived.shapes.get(el.id) as { center?: Vec2 } | undefined)?.center}
+          readOnly={readOnly}
+          update={update}
+        />
+      )}
+      {el.kind === 'ramp' && !readOnly && (
+        <div className="bim-row">
+          {(['inner', 'outer'] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              className="bim-button"
+              onClick={() => {
+                // LS5: a railing along this ramp's edge, then select it.
+                try {
+                  const op = draftRailing(doc, el.id, side);
+                  if (controller.apply(op) === undefined && op.type === 'insert')
+                    controller.select([op.entities.elements![0]!.id]);
+                } catch (error) {
+                  controller.report({
+                    code: error instanceof Error ? error.message : String(error),
+                    ids: [],
+                  });
+                }
+              }}
+            >
+              Add {side} railing
+            </button>
+          ))}
+        </div>
+      )}
+      {el.kind === 'railing' && (
+        <>
+          <label className="ep-field">
+            Side
+            <select
+              aria-label="Side"
+              value={el.side}
+              disabled={readOnly}
+              onChange={(e) => update({ side: e.target.value as 'inner' | 'outer' })}
+            >
+              <option value="inner">Inner edge</option>
+              <option value="outer">Outer edge</option>
+            </select>
+          </label>
+          <Field
+            label="Height (mm)"
+            type="number"
+            min={1}
+            max={bimLimits.railingHeightMm}
+            value={el.heightMm}
+            readOnly={readOnly}
+            onCommit={(v) => update({ heightMm: num(v) } as Partial<BimElement>)}
+          />
+        </>
+      )}
+      {el.kind === 'stair' && (
+        <StairFields
+          el={el}
+          doc={doc}
+          start={(state.derived.shapes.get(el.id) as { at?: Vec2 } | undefined)?.at}
+          readOnly={readOnly}
+          update={update}
+        />
+      )}
+      {el.kind === 'wall' && (
+        <Field
+          label="Lean (°)"
+          type="number"
+          min={-60}
+          max={60}
+          step={0.5}
+          value={round(((el.lean ?? 0) * 180) / Math.PI)}
+          readOnly={readOnly}
+          onCommit={(v) => {
+            // LR2c: 0° is upright, without `lean`; a lean leans to the right of the axis.
+            if (num(v) === 0) {
+              const { lean: _, ...upright } = el;
+              return controller.updateElement(upright);
+            }
+            return update({ lean: (num(v) * Math.PI) / 180 });
+          }}
+        />
+      )}
+      {(el.kind === 'column' || el.kind === 'part' || el.kind === 'member') && (
         <Field
           label="Rotation (°)"
           type="number"
@@ -1220,6 +1811,29 @@ function GridPanel({ controller, state }: { controller: BimController; state: Bi
           {end('start', 1)}
           {end('end', 0)}
           {end('end', 1)}
+          <label className="ep-field">
+            Bubbles
+            <select
+              aria-label="Bubbles"
+              value={axis.bubbles ?? 'both'}
+              disabled={state.readOnly}
+              onChange={(e) => {
+                // TW0e: both ends is the default, kept by leaving the key out.
+                const { bubbles: _, ...rest } = axis;
+                const bubbles = e.target.value as BimGridBubbles;
+                controller.apply({
+                  type: 'update',
+                  collection: 'grids',
+                  entity: bubbles === 'both' ? rest : { ...rest, bubbles },
+                });
+              }}
+            >
+              <option value="both">Both ends</option>
+              <option value="start">Start only</option>
+              <option value="end">End only</option>
+              <option value="none">None</option>
+            </select>
+          </label>
           {!state.readOnly && (
             <DeleteButton controller={controller} state={state} ids={[axis.id]} />
           )}
@@ -1792,10 +2406,115 @@ function DrawingsPanel({
   );
 }
 
+const tabLabels = {
+  element: 'Element',
+  types: 'Types',
+  drawings: 'Drawings',
+  schedule: 'Schedule',
+} as const;
+
+/** A sum in metres (length, area or volume) for the schedule table. */
+const scheduleMetres = (v: number | undefined, power: 1 | 2 | 3) =>
+  v === undefined ? '' : (v / 1000 ** power).toFixed(power === 3 ? 3 : 2);
+
+/**
+ * TW3: the building's schedule (kind × type × level, with subtotals per material category),
+ * from the derived quantities and the kernel's measured ones, and its CSV.
+ */
+function SchedulePanel({ state, building }: { state: BimState; building: string }) {
+  const schedule = useMemo(
+    () => bimSchedule(state.content, state.derived, bimCurrentKernelQuantities(state)),
+    [state.content, state.derived, state.evaluation, state.hash, state.evaluatedHash],
+  );
+  const missing = schedule.rows.reduce((n, r) => n + r.missing, 0);
+  // Only the sums some row has: a lattice has no areas, a room list no lengths.
+  const columns = (
+    [
+      { key: 'lengthMm', label: 'Length', unit: 'm', power: 1 },
+      { key: 'areaMm2', label: 'Area', unit: 'm²', power: 2 },
+      { key: 'volumeMm3', label: 'Volume', unit: 'm³', power: 3 },
+    ] as const
+  ).filter((c) => schedule.rows.some((r) => r[c.key] !== undefined));
+  return (
+    <div className="bim-panel" data-testid="bim-schedule">
+      <button
+        className="bim-button"
+        disabled={!schedule.rows.length}
+        onClick={() =>
+          bimDownload(
+            new Blob([bimScheduleCsv(schedule)], { type: 'text/csv' }),
+            bimFileName(`${building} - Schedule`, 'csv'),
+          )
+        }
+      >
+        <Download size={15} aria-hidden="true" /> Export CSV
+      </button>
+      {missing > 0 && (
+        <p className="bim-hint" role="status">
+          {missing} element{missing === 1 ? '' : 's'} not measured yet: the sums leave{' '}
+          {missing === 1 ? 'it' : 'them'} out.
+        </p>
+      )}
+      {!schedule.rows.length ? (
+        <p className="bim-empty">This building has no elements yet.</p>
+      ) : (
+        <div className="bim-schedule-wrap">
+          <table className="bim-schedule" aria-label="Schedule">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>No.</th>
+                {columns.map((c) => (
+                  <th key={c.key}>
+                    {c.label}
+                    <span className="bim-schedule-unit">{c.unit}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {schedule.rows.map((r) => (
+                <tr key={`${r.kind}\u0000${r.typeId ?? ''}\u0000${r.level}`}>
+                  <td>
+                    {r.typeName || r.kind}
+                    <span className="bim-schedule-kind">
+                      {r.kind} · {r.levelName}
+                    </span>
+                  </td>
+                  <td>
+                    {r.count}
+                    {r.missing ? ` (${r.missing} not measured)` : ''}
+                  </td>
+                  {columns.map((c) => (
+                    <td key={c.key}>{scheduleMetres(r[c.key], c.power)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+            <tbody className="bim-schedule-subtotals">
+              {schedule.subtotals.map((t) => (
+                <tr key={t.category}>
+                  <th scope="row">Subtotal {t.category}</th>
+                  <td>{t.count}</td>
+                  {columns.map((c) => (
+                    <td key={c.key}>{scheduleMetres(t[c.key], c.power)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Export IFC (R2c-6): the Host's export boundary first, then the file of the content as it is
  * after it, measured in its own kernel job. A refusal is the Surface's notice, naming elements.
  */
+const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '');
+
 function useIfcExport(
   controller: BimController,
   name: string,
@@ -1805,6 +2524,8 @@ function useIfcExport(
   const inputs = useContext(EditorInputsContext);
   const [writing, setWriting] = useState(false);
   const [losses, setLosses] = useState<string[]>([]);
+  // TW0a: a file this app would refuse to import again (its size over the import limit).
+  const [overLimit, setOverLimit] = useState<{ bytes: number; limit: number }>();
   if (!ifc) return undefined;
   const run = async () => {
     try {
@@ -1822,12 +2543,14 @@ function useIfcExport(
         bimDownload(new Blob([file.bytes as BlobPart], { type: 'application/x-step' }), fileName);
         // #663: what the file does not carry, until the next export.
         setLosses(file.losses);
+        const limit = bimIfcOverImportLimit(file);
+        setOverLimit(limit === undefined ? undefined : { bytes: file.bytes.length, limit });
       }
     } finally {
       setWriting(false);
     }
   };
-  return { writing, run, losses };
+  return { writing, run, losses, overLimit };
 }
 
 /**
@@ -1851,6 +2574,10 @@ function DrawingView({
     { key: string; view: BimView; outcome: BimDrawingResult; svg?: string } | undefined
   >();
   const [exportError, setExportError] = useState<string | undefined>();
+  /** TW0c: what the last PNG export gave up (its resolution), said after the download. */
+  const [pngNotice, setPngNotice] = useState<string | undefined>();
+  /** TW0c: the whole sheet in the pane (the default), or the sheet's width with scrolling. */
+  const [fitWhole, setFitWhole] = useState(true);
   const guard = useContext(EditorExportGuardContext);
   const inputs = useContext(EditorInputsContext);
   // The content and the part shapes read so far: a shape arriving later draws again.
@@ -1879,6 +2606,7 @@ function DrawingView({
   // Export draws the view as it is after the flush, so it does not wait for the shown drawing.
   const save = async (ext: 'svg' | 'png') => {
     setExportError(undefined);
+    setPngNotice(undefined);
     try {
       // The Host's export boundary first: a field draft it cannot commit refuses the export.
       if (guard) guard({ keepEditor: true });
@@ -1896,6 +2624,12 @@ function DrawingView({
       const blob =
         ext === 'svg' ? new Blob([svg], { type: 'image/svg+xml' }) : await bimSvgToPng(svg);
       bimDownload(blob, bimDrawingFileName(building, now.name, ext));
+      const dpi = ext === 'png' ? bimPngReducedDpi(bimSvgPaperMm(svg)) : undefined;
+      if (dpi !== undefined)
+        setPngNotice(
+          `PNG made at ${dpi} dpi, not ${bimPngExport.dpi}: its longest side is limited to ${bimPngExport.maxSidePx} px. ` +
+            'A smaller scale (such as 1:500) or the SVG keeps the detail.',
+        );
     } catch (error) {
       setExportError(error instanceof Error ? error.message : String(error));
     }
@@ -1911,6 +2645,13 @@ function DrawingView({
               ? `Drawing failed: ${current.outcome.code}`
               : 'Drawing up to date'}
         </span>
+        <button
+          className="bim-button"
+          aria-pressed={fitWhole}
+          onClick={() => setFitWhole((on) => !on)}
+        >
+          <Maximize size={15} aria-hidden="true" /> Fit drawing
+        </button>
         <button className="bim-button" onClick={() => void save('svg')}>
           <Download size={15} aria-hidden="true" /> Export SVG
         </button>
@@ -1931,7 +2672,12 @@ function DrawingView({
           Export failed: {exportError}
         </p>
       )}
-      <div className="bim-drawing-sheet">
+      {pngNotice && (
+        <p className="bim-notice" role="status" data-testid="bim-png-notice">
+          {pngNotice}
+        </p>
+      )}
+      <div className={fitWhole ? 'bim-drawing-sheet bim-drawing-fit' : 'bim-drawing-sheet'}>
         {url && <img src={url} alt={`${view.name} drawing`} data-testid="bim-drawing-image" />}
       </div>
     </div>

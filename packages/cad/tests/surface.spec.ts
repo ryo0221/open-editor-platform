@@ -639,8 +639,12 @@ test.describe('with the development kernel', () => {
     await ready(page);
     await bodies(page).filter({ hasText: 'plate' }).click();
     await expect(inspector(page)).toContainText('19,607.301 mm³');
-    await inspector(page).getByLabel('With body').selectOption({ label: 'Box' });
-    await inspector(page).getByRole('button', { name: 'Cut' }).click();
+    // Compare size (#538) has its own "With body": pick the tool in the Combine section.
+    const combine = page
+      .locator('.cad-inspector details')
+      .filter({ has: page.getByText('Combine', { exact: true }) });
+    await combine.getByLabel('With body').selectOption({ label: 'Box' });
+    await combine.getByRole('button', { name: 'Cut' }).click();
     await ready(page);
     await expect(bodies(page)).toHaveCount(1);
     await expect(inspector(page)).not.toContainText('19,607.301 mm³');
@@ -1816,6 +1820,50 @@ test.describe('Sketch mode (R1d-3, CAD34)', () => {
     expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
   });
 
+  test('offsets a drawn rectangle into a frame and extrudes it as one edit (CR3a, ST-253#4)', async ({
+    page,
+  }) => {
+    test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+    test.skip(narrow(), 'sketching is desktop only');
+    await page.goto('/');
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Sketch on XY' }).click();
+    await rectangle(page);
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await click(page, 20, 0);
+    // One line alone is a chain too; the whole loop is offered once all four are selected.
+    const offset = page.getByRole('group', { name: 'Offset' });
+    await expect(offset).toBeVisible();
+    for (const [u, v] of [
+      [40, 10],
+      [20, 20],
+      [0, 10],
+    ] as const)
+      await click(page, u, v, true);
+    // Inwards past half the height collapses: refused with the reason, the drawing kept.
+    await offset.getByLabel('Offset distance (mm)').fill('-12');
+    await offset.getByRole('button', { name: 'Offset', exact: true }).click();
+    await expect(page.getByTestId('cad-sketch-problem')).toContainText('交わる');
+    await expect(dof(page)).toHaveText('8 degrees of freedom');
+    await offset.getByLabel('Offset distance (mm)').fill('5');
+    await offset.getByRole('button', { name: 'Offset', exact: true }).click();
+    await expect(page.getByTestId('cad-sketch-problem')).toHaveCount(0);
+    await expect(dof(page)).toHaveText('16 degrees of freedom');
+    await expect(page.getByTestId('cad-sketch-region')).toHaveText(
+      'Closed region: 4 edges, 1 holes',
+    );
+    await page.getByLabel('Extrude distance (mm)').fill('10');
+    await page.getByRole('button', { name: 'Finish and extrude' }).click();
+    await ready(page);
+    const after = await cadSnapshot(page);
+    const body = after.content.bodies.find((b) => b.state === 'active')!;
+    // A 50 × 30 frame round the 40 × 20 hole, 10 mm deep (the clicks land within 0.001 mm).
+    expect(after.evaluation?.status === 'ok' && vol(after.evaluation.bodies[body.id])).toBeCloseTo(
+      (50 * 30 - 40 * 20) * 10,
+      2,
+    );
+  });
+
   test('draws an open spline with Enter and a closed one on its first point, and extrudes the closed one (R2a-2, CAD40)', async ({
     page,
   }) => {
@@ -2184,7 +2232,7 @@ test.describe('joints (R2b-2, CAD47)', () => {
     expect(await pose(page, 'c-plate-3')).toEqual([40, 25, 22]);
     await expect(distance).toHaveValue('12');
     // Past its limit (0–20 mm) the value is refused and nothing moves.
-    await distance.fill('25');
+    await distance.fill('80');
     await page.getByRole('button', { name: 'Apply values' }).click();
     await expect(page.getByRole('alert').first()).toContainText('範囲の外');
     expect(await pose(page, 'c-plate-2')).toEqual([40, 25, 17]);
@@ -2237,6 +2285,460 @@ test.describe('joints (R2b-2, CAD47)', () => {
     await (await tool(page, 'Undo')).click();
     await ready(page);
     await expect(alert).toBeVisible();
+  });
+});
+
+test.describe('multi-axis joints and couplings (MR1, ST-400)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const rotation = async (page: Page, id: string) =>
+    (await cadSnapshot(page)).content.solvedPoses[id]!.rotation.map((v) => +v.toFixed(6));
+  const joints = async (page: Page) =>
+    (await panel(page, 'Elements')).getByRole('list', { name: 'Joints' }).getByRole('button');
+
+  test('types the angles of a spherical joint, sets ranges and couples a value, Undo and reload keep them (TS-1703)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=mr1-arm&persist=1');
+    await ready(page);
+    await expect(await joints(page)).toHaveCount(5);
+    // Every joint solves on the real kernel to the stored poses.
+    await expect(page.getByTestId('cad-pose-mismatch')).toHaveCount(0);
+    await (await joints(page)).filter({ hasText: 'j-shoulder' }).click();
+    const angle2 = page.getByRole('textbox', { name: 'Angle 2 (°)' });
+    await expect(page.getByRole('textbox', { name: 'Angle (°)' })).toHaveValue('30');
+    await expect(angle2).toHaveValue('-20');
+    await expect(page.getByRole('textbox', { name: 'Angle 3 (°)' })).toHaveValue('10');
+    // Its second angle is limited to ±90°.
+    await angle2.fill('95');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await expect(page.getByRole('alert').first()).toContainText('範囲の外');
+    const before = await rotation(page, 'c-upper');
+    await angle2.fill('-10');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await ready(page);
+    await expect.poll(() => rotation(page, 'c-upper')).not.toEqual(before);
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    expect(await rotation(page, 'c-upper')).toEqual(before);
+
+    // The right wing follows the left one mirrored: it has no field, only its formula.
+    await (await joints(page)).filter({ hasText: 'j-wing-r' }).click();
+    await expect(page.getByText(/= -1 × j-wing-l Angle/)).toBeVisible();
+    await (await joints(page)).filter({ hasText: 'j-wing-l' }).click();
+    await page.getByRole('textbox', { name: 'Angle (°)' }).fill('60');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await ready(page);
+    await expect
+      .poll(async () => {
+        const [l, r] = [await rotation(page, 'c-wing-l'), await rotation(page, 'c-wing-r')];
+        return [+(l[2]! + r[2]!).toFixed(5), +(l[3]! - r[3]!).toFixed(5), +l[2]!.toFixed(5)];
+      })
+      .toEqual([0, 0, +Math.sin(Math.PI / 6).toFixed(5)]);
+
+    // A range for the elbow, then a value past it is refused.
+    await (await joints(page)).filter({ hasText: 'j-elbow' }).click();
+    const range = page.getByRole('form', { name: 'Joint range' });
+    // A range typed and not applied holds save and export until it is applied or reset.
+    type Inputs = { cadInputs: { getSnapshot(): { dirty: number }; flush(): void } };
+    const flush = () =>
+      page.evaluate(() => {
+        try {
+          (window as unknown as Inputs).cadInputs.flush();
+          return 'flushed';
+        } catch (e) {
+          return (e as Error).message;
+        }
+      });
+    await range.getByRole('textbox', { name: 'Max (°)' }).fill('100');
+    expect(await flush()).toContain('j-elbowの範囲の入力が適用されていません');
+    // Inspecting another joint keeps it, still pending; the refusal brings its joint back.
+    await (await joints(page)).filter({ hasText: 'j-wrist' }).click();
+    expect(await flush()).toContain('j-elbowの範囲の入力が適用されていません');
+    await expect((await joints(page)).filter({ hasText: 'j-elbow' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(range.getByRole('textbox', { name: 'Max (°)' })).toHaveValue('100');
+    await range.getByRole('button', { name: 'Reset' }).click();
+    await expect(range.getByRole('textbox', { name: 'Max (°)' })).toHaveValue('150');
+    expect(await flush()).toBe('flushed');
+    // The same range typed another way applies as no edit and is resolved.
+    await range.getByRole('textbox', { name: 'Min (°)' }).fill('0.0');
+    expect(await flush()).toContain('j-elbowの範囲の入力が適用されていません');
+    await range.getByRole('button', { name: 'Apply range' }).click();
+    await expect.poll(flush).toBe('flushed');
+    await range.getByRole('textbox', { name: 'Max (°)' }).fill('120');
+    await range.getByRole('button', { name: 'Apply range' }).click();
+    await ready(page);
+    await page.getByRole('textbox', { name: 'Angle (°)' }).fill('130');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await expect(page.getByRole('alert').first()).toContainText('範囲の外');
+
+    // The wrist's second angle follows half the elbow's; removing the coupling stores it again.
+    await (await joints(page)).filter({ hasText: 'j-wrist' }).click();
+    const coupling = page.getByRole('form', { name: 'Joint coupling' });
+    await coupling.getByLabel('Coupled value').selectOption('angle2');
+    await coupling.getByLabel('Follows').selectOption('j-elbow angle');
+    // A ratio that drives it past one turn is refused, and what was typed stays to correct.
+    const ratio = coupling.getByRole('textbox', { name: 'Ratio' });
+    await ratio.fill('100');
+    await coupling.getByRole('button', { name: 'Couple' }).click();
+    await expect(page.getByRole('alert').first()).toBeVisible();
+    await ready(page);
+    await expect(ratio).toHaveValue('100');
+    await expect(coupling.getByLabel('Coupled value')).toHaveValue('angle2');
+    await expect(coupling.getByLabel('Follows')).toHaveValue('j-elbow angle');
+    await ratio.fill('0.5');
+    await coupling.getByRole('button', { name: 'Couple' }).click();
+    await ready(page);
+    await expect(page.getByRole('textbox', { name: 'Angle 2 (°)' })).toHaveCount(0);
+    await expect(page.getByText(/Angle 2 \(°\) = 0.5 × j-elbow Angle/)).toBeVisible();
+    let wrist = (await cadSnapshot(page)).content.joints.find((j) => j.id === 'j-wrist')!;
+    expect(wrist.couplings).toEqual([
+      { of: 'angle2', from: { joint: 'j-elbow', of: 'angle' }, ratio: 0.5, offset: 0 },
+    ]);
+    expect(Object.keys(wrist.values)).toEqual(['angle']);
+
+    // Saved and opened again: the same values, range and coupling.
+    await page.reload();
+    await ready(page);
+    const reread = (await cadSnapshot(page)).content;
+    wrist = reread.joints.find((j) => j.id === 'j-wrist')!;
+    expect(wrist.couplings?.[0]?.ratio).toBe(0.5);
+    expect(reread.joints.find((j) => j.id === 'j-elbow')!.limits).toEqual([
+      { of: 'angle', min: 0, max: (120 * Math.PI) / 180 },
+    ]);
+    await (await joints(page)).filter({ hasText: 'j-wrist' }).click();
+    await page
+      .getByRole('form', { name: 'Joint coupling' })
+      .getByLabel('Coupled value')
+      .selectOption('angle2');
+    await page.getByRole('button', { name: 'Remove coupling' }).click();
+    await ready(page);
+    // The elbow is at 45°, so the wrist keeps 22.5° as its own value.
+    await expect(page.getByRole('textbox', { name: 'Angle 2 (°)' })).toHaveValue('22.5');
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    await expect(page.getByRole('textbox', { name: 'Angle 2 (°)' })).toHaveCount(0);
+    await (await tool(page, 'Redo')).click();
+    await ready(page);
+    await expect(page.getByRole('textbox', { name: 'Angle 2 (°)' })).toHaveValue('22.5');
+  });
+});
+
+test.describe('forms of an assembly (MR2, ST-401)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const rotation = async (page: Page, id: string) =>
+    (await cadSnapshot(page)).content.solvedPoses[id]!.rotation.map((v) => +v.toFixed(6));
+  const row = (page: Page, name: string) =>
+    page.getByTestId('cad-form').filter({ has: page.getByText(name, { exact: true }) });
+
+  test('saves, recalls, overwrites, renames and deletes forms; stale forms wait for an overwrite; Undo and reload keep them (TS-1706)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=mr2-forms&persist=1');
+    await ready(page);
+    const elements = await panel(page, 'Elements');
+    const current = page.getByTestId('cad-form-current');
+    await expect(page.getByTestId('cad-form')).toHaveCount(2);
+    await expect(current).toHaveText('今の値：Stand');
+    await expect(row(page, 'Stand')).toContainText('現在の形態');
+
+    // Recall Flight: one edit; the wings spread and the right one follows mirrored.
+    const stand = await rotation(page, 'c-wing-l');
+    await row(page, 'Flight').getByRole('button', { name: 'Recall' }).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値：Flight');
+    const l = await rotation(page, 'c-wing-l');
+    const r = await rotation(page, 'c-wing-r');
+    expect(l).not.toEqual(stand);
+    expect(+(l[2]! + r[2]!).toFixed(5)).toBe(0);
+    expect(+l[2]!.toFixed(5)).toBe(+Math.sin((40 * Math.PI) / 180).toFixed(5));
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値：Stand');
+    expect(await rotation(page, 'c-wing-l')).toEqual(stand);
+    await (await tool(page, 'Redo')).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値：Flight');
+
+    // A changed value matches no form; save it as a new one and rename it.
+    const joints = elements.getByRole('list', { name: 'Joints' });
+    await joints.getByRole('button').filter({ hasText: 'j-elbow' }).click();
+    await page.getByRole('textbox', { name: 'Angle (°)' }).fill('30');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値はどの形態とも一致しません');
+    // A name typed and not saved holds save and export until it is saved or cleared.
+    type Inputs = { cadInputs: { flush(): void } };
+    const flush = () =>
+      page.evaluate(() => {
+        try {
+          (window as unknown as Inputs).cadInputs.flush();
+          return 'flushed';
+        } catch (e) {
+          return (e as Error).message;
+        }
+      });
+    await page.getByRole('textbox', { name: 'Form name' }).fill('Draft');
+    expect(await flush()).toContain('形態の名前が適用されていません');
+    await page.getByRole('button', { name: 'Clear name' }).click();
+    expect(await flush()).toBe('flushed');
+    await page.getByRole('textbox', { name: 'Form name' }).fill('Crouch');
+    await page.getByRole('button', { name: 'Save current as form' }).click();
+    await ready(page);
+    await expect(page.getByTestId('cad-form')).toHaveCount(3);
+    await expect(current).toHaveText('今の値：Crouch');
+    await expect(page.getByRole('textbox', { name: 'Form name' })).toHaveValue('');
+    await row(page, 'Crouch').getByRole('button', { name: 'Rename' }).click();
+    await page.getByRole('textbox', { name: 'New name' }).fill('Kneel');
+    await page.getByRole('button', { name: 'Apply name' }).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値：Kneel');
+
+    // Overwrite Stand with these values: both match; then delete Kneel.
+    await row(page, 'Stand').getByRole('button', { name: 'Overwrite' }).click();
+    await ready(page);
+    await expect(current).toHaveText('今の値：Stand・Kneel');
+    // A name being typed stays when another form is deleted.
+    const formName = page.getByRole('textbox', { name: 'Form name' });
+    await formName.fill('Keep');
+    await row(page, 'Kneel').getByRole('button', { name: 'Delete' }).click();
+    await ready(page);
+    await expect(page.getByTestId('cad-form')).toHaveCount(2);
+    await expect(formName).toHaveValue('Keep');
+    // Making a joint keeps it too (the form buttons wait meanwhile).
+    if (!narrow()) {
+      await elements.getByRole('button', { name: 'Add joint…' }).click();
+      const card = page.getByTestId('cad-joint-create');
+      await expect(card).toBeVisible();
+      await expect(formName).toHaveValue('Keep');
+      await expect(row(page, 'Stand').getByRole('button', { name: 'Delete' })).toBeDisabled();
+      await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(card).toHaveCount(0);
+      await expect(formName).toHaveValue('Keep');
+    }
+    await page.getByRole('button', { name: 'Clear name' }).click();
+
+    // Deleting the wrist leaves both forms stale: shown, valid, and not recalled.
+    await joints.getByRole('button').filter({ hasText: 'j-wrist' }).click();
+    await page.getByRole('button', { name: 'Delete joint' }).click();
+    await ready(page);
+    await expect(row(page, 'Flight')).toContainText('古い形態');
+    await expect(row(page, 'Stand')).toContainText('古い形態');
+    await expect(row(page, 'Flight').getByRole('button', { name: 'Recall' })).toBeDisabled();
+    await expect(current).toHaveText('今の値はどの形態とも一致しません');
+    // Overwriting mends one with the current joints.
+    await row(page, 'Stand').getByRole('button', { name: 'Overwrite' }).click();
+    await ready(page);
+    await expect(row(page, 'Stand')).not.toContainText('古い形態');
+    await expect(current).toHaveText('今の値：Stand');
+
+    // Saved and opened again: the same forms, Flight still stale.
+    const saved = (await cadSnapshot(page)).content.configurations;
+    await page.reload();
+    await ready(page);
+    await panel(page, 'Elements');
+    expect((await cadSnapshot(page)).content.configurations).toEqual(saved);
+    await expect(row(page, 'Flight')).toContainText('古い形態');
+    await expect(current).toHaveText('今の値：Stand');
+  });
+});
+
+test.describe('interference of an assembly (MR3, ST-402)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const finding = (page: Page, text: string) =>
+    page.getByTestId('cad-interference-finding').filter({ hasText: text });
+
+  test('checks the current pose and a form, shows a pair, allows overlaps near a joint and as a pair; Undo and reload keep them (TS-1709)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=mr2-forms&persist=1');
+    await ready(page);
+    await panel(page, 'Elements');
+    const status = page.getByTestId('cad-interference-status');
+    const check = async () => {
+      await page.getByRole('button', { name: 'Check interference' }).click();
+      await expect(status).not.toContainText('調べています');
+    };
+    await expect(status).toContainText('meshの粗さまでの検査');
+    // Standing: the bent elbow and wrist push each plate into the next; joined pairs are checked.
+    await check();
+    await expect(status).toHaveText('今の姿勢：2組が干渉しています。');
+    await expect(page.getByTestId('cad-interference-finding')).toHaveCount(2);
+    await expect(finding(page, 'c-upper と c-fore')).toContainText('交差');
+    await expect(finding(page, 'c-upper と c-fore')).toContainText(/深さの目安 \d+\.\d mm/);
+    const show = finding(page, 'c-upper と c-fore').getByRole('button', { name: 'Show' });
+    await show.click();
+    await expect(show).toHaveAttribute('aria-pressed', 'true');
+
+    // Allowed near the elbow only: one edit, and the check runs again. The 80 × 50 mm plates
+    // overlap far from the elbow, and the sphere must hold all of the overlap.
+    const elbow = finding(page, 'c-upper と c-fore');
+    await elbow.getByRole('textbox', { name: 'Radius (mm)' }).fill('80');
+    await elbow.getByRole('button', { name: 'Allow near joint' }).click();
+    await ready(page);
+    await expect(status).toHaveText('今の姿勢：1組が干渉しています。');
+    await expect(finding(page, 'c-fore と c-hand')).toHaveCount(1);
+    const allowed = page.getByTestId('cad-interference-allowance');
+    await expect(allowed).toHaveText([/c-upper と c-fore.*j-elbowの周り 半径80 mm/]);
+    // The hand pair allowed whole: nothing left.
+    await finding(page, 'c-fore と c-hand').getByRole('button', { name: 'Allow pair' }).click();
+    await ready(page);
+    await expect(status).toHaveText('今の姿勢：干渉はありません。');
+    await expect(allowed).toHaveCount(2);
+    await expect(allowed.nth(1)).toContainText('組全体');
+
+    // Removing the pair allowance is one edit; the result says it is no longer the content's.
+    await allowed.nth(1).getByRole('button', { name: 'Remove' }).click();
+    await ready(page);
+    await expect(allowed).toHaveCount(1);
+    await expect(status).toHaveText('内容が変わりました。もう一度調べてください。');
+    await expect(show).toHaveCount(0);
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    await expect(allowed).toHaveCount(2);
+    await (await tool(page, 'Redo')).click();
+    await ready(page);
+    await expect(allowed).toHaveCount(1);
+    await check();
+    await expect(status).toHaveText('今の姿勢：1組が干渉しています。');
+
+    // Flight is checked in its own poses; the document's stay as they are. A pair shown from
+    // the last result is no longer shown once the new result replaces it.
+    await finding(page, 'c-fore と c-hand').getByRole('button', { name: 'Show' }).click();
+    await expect(page.locator('[aria-pressed="true"]', { hasText: 'Show' })).toHaveCount(1);
+    await page.getByRole('combobox', { name: 'Check in' }).selectOption({ label: '形態：Flight' });
+    await check();
+    await expect(status).toContainText('形態「Flight」の姿勢：');
+    await expect(page.locator('[aria-pressed="true"]', { hasText: 'Show' })).toHaveCount(0);
+    await expect(page.getByTestId('cad-form-current')).toHaveText('今の値：Stand');
+
+    // Reload keeps the allowance; removing it brings the elbow back.
+    await page.reload();
+    await ready(page);
+    await panel(page, 'Elements');
+    await expect(allowed).toHaveCount(1);
+    await allowed.getByRole('button', { name: 'Remove' }).click();
+    await ready(page);
+    await expect(allowed).toHaveCount(0);
+    await check();
+    await expect(status).toHaveText('今の姿勢：2組が干渉しています。');
+  });
+});
+test.describe('MR7 mounts: a part with candidate joints (ST-406)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const pose = async (page: Page, id: string) =>
+    (await cadSnapshot(page)).content.solvedPoses[id]!.translationMm.map((v) => +v.toFixed(3));
+  test('switches the mount as one edit, shows the gap, keeps it in a form, adds a candidate (TS-1718)', async ({
+    page,
+  }) => {
+    test.skip(narrow(), 'desktop flow');
+    await page.goto('/?fixture=mr7-tool');
+    await ready(page);
+    const before = await cadSnapshot(page);
+    const elements = await panel(page, 'Elements');
+    const mount = elements.getByTestId('cad-mount');
+    await expect(mount).toContainText('Tool');
+    // The back is far from where the hand holds the tool: the gap is shown, not hidden.
+    await expect(mount.getByTestId('cad-mount-candidate').nth(1)).toContainText('mm');
+    const held = await pose(page, 'c-tool');
+    await mount.getByLabel('Mount of Tool').selectOption('j-tool-back');
+    await ready(page);
+    expect(await pose(page, 'c-tool')).toEqual([0, 60, 150]);
+    expect((await cadSnapshot(page)).content.mounts![0]!.active).toBe('j-tool-back');
+    // Saved as a form with the back in effect; Undo twice takes both edits back.
+    await elements.getByLabel('Form name').fill('Stowed');
+    await elements.getByRole('button', { name: 'Save current as form' }).click();
+    await ready(page);
+    expect((await cadSnapshot(page)).content.configurations![0]!.mounts).toEqual({
+      'm-tool': 'j-tool-back',
+    });
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
+    expect(await pose(page, 'c-tool')).toEqual(held);
+    // A joint made for the tool, already placed, becomes a third candidate; nothing moves.
+    await elements.getByRole('button', { name: 'Add joint…' }).click();
+    const card = page.getByTestId('cad-joint-create');
+    await card.getByRole('button', { name: 'Use origin' }).click();
+    await card.getByLabel('Child origin').selectOption('c-tool');
+    await card.getByRole('button', { name: 'Use origin' }).click();
+    await expect(card.getByTestId('cad-joint-mount-note')).toBeVisible();
+    await expect(page.getByTestId('cad-joint-preview')).toHaveAttribute('data-status', 'ready');
+    await card.getByRole('button', { name: 'Apply joint' }).click();
+    await ready(page);
+    const after = (await cadSnapshot(page)).content;
+    expect(after.mounts![0]!.joints).toHaveLength(3);
+    expect(after.mounts![0]!.active).toBe('j-tool-hand');
+    expect(await pose(page, 'c-tool')).toEqual(held);
+    // Removing the mount keeps the hand only.
+    await mount.getByRole('button', { name: 'Remove mount' }).click();
+    await ready(page);
+    const removed = (await cadSnapshot(page)).content;
+    expect(removed.mounts).toBeUndefined();
+    expect(removed.joints.filter((j) => j.child.componentId === 'c-tool').map((j) => j.id)).toEqual(
+      ['j-tool-hand'],
+    );
+  });
+});
+
+test.describe('M1 sample robot (MR1–MR3, ST-402)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const status = (page: Page) => page.getByTestId('cad-interference-status');
+  const check = async (page: Page) => {
+    await page.getByRole('button', { name: 'Check interference' }).click();
+    await expect(status(page)).not.toContainText('調べています');
+  };
+  test('stands and flies clear, finds a folded elbow and the cases (c)–(e) (TS-1710)', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=m1-robot');
+    await ready(page);
+    const elements = await panel(page, 'Elements');
+    await check(page);
+    await expect(status(page)).toHaveText('今の姿勢：干渉はありません。');
+    await page.getByRole('combobox', { name: 'Check in' }).selectOption({ label: '形態：Flight' });
+    await check(page);
+    await expect(status(page)).toHaveText('形態「Flight」の姿勢：干渉はありません。');
+    // The elbow folded far: the forearm lies in the upper arm outside the elbow's sphere.
+    await elements
+      .getByRole('list', { name: 'Joints' })
+      .getByRole('button')
+      .filter({ hasText: 'Elbow R' })
+      .click();
+    await page.getByRole('textbox', { name: 'Angle (°)' }).fill('150');
+    await page.getByRole('button', { name: 'Apply values' }).click();
+    await ready(page);
+    await page.getByRole('combobox', { name: 'Check in' }).selectOption({ label: '今の姿勢' });
+    await check(page);
+    await expect(status(page)).toHaveText('今の姿勢：1組が干渉しています。');
+    await expect(page.getByTestId('cad-interference-finding')).toContainText(
+      'Upper arm R と Forearm R',
+    );
+    // Recalling Stand straightens it: nothing left.
+    await page
+      .getByTestId('cad-form')
+      .filter({ hasText: 'Stand' })
+      .getByRole('button', { name: 'Recall' })
+      .click();
+    await ready(page);
+    await check(page);
+    await expect(status(page)).toHaveText('今の姿勢：干渉はありません。');
+
+    await page.goto('/?fixture=m1-cases');
+    await ready(page);
+    await panel(page, 'Elements');
+    await check(page);
+    await expect(status(page)).toHaveText('今の姿勢：3組が干渉しています。');
+    const findings = page.getByTestId('cad-interference-finding');
+    await expect(findings).toHaveText([
+      /Torso と Pack \(c\)内包/,
+      /Torso と Arm \(d\)交差/,
+      /Torso と Rod \(e\)内包/,
+    ]);
   });
 });
 
@@ -2513,9 +3015,9 @@ test.describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     const before = await cadSnapshot(page);
     await (await tool(page, 'Export STEP, STL or GLB')).click();
     const dialog = page.getByRole('dialog', { name: 'Export 3D file' });
-    // An assembly is STEP only.
+    // An assembly is STEP or GLB (MR6), not STL.
     await expect(dialog.getByRole('radio', { name: /^STL/ })).toBeDisabled();
-    await expect(dialog.getByRole('radio', { name: /^GLB/ })).toBeDisabled();
+    await expect(dialog.getByRole('radio', { name: /^GLB/ })).toBeEnabled();
     await expect(dialog.getByRole('radio', { name: /^STEP \(AP242 assembly/ })).toBeChecked();
     await dialog.getByRole('button', { name: 'Prepare file' }).click();
     const report = dialog.getByLabel('Export report');
@@ -2535,6 +3037,24 @@ test.describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     expect(text).toContain("PRODUCT('W-1','Wheel'");
     expect(text).toContain("PRODUCT('=B-M8','Bolt \"M8\", long'");
     expect(text.match(/NEXT_ASSEMBLY_USAGE_OCCURRENCE\(/g)).toHaveLength(27);
+    // MR6 (TS-1716): GLB of the same assembly, one node per placed body at its pose.
+    await (await tool(page, 'Export STEP, STL or GLB')).click();
+    await dialog.getByRole('radio', { name: /^GLB/ }).check();
+    await dialog.getByRole('button', { name: 'Prepare file' }).click();
+    await expect(report).toBeVisible({ timeout: 120_000 });
+    const glbDownload = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Save GLB' }).click();
+    const glbFile = await glbDownload;
+    expect(glbFile.suggestedFilename()).toMatch(/\.glb$/);
+    const glb = await readFile((await glbFile.path())!);
+    expect(glb.subarray(0, 4).toString('latin1')).toBe('glTF');
+    const gltf = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
+      nodes: { translation: number[] }[];
+    };
+    // Every placed body with nested assemblies flattened (each wheel's hub and bolts), 32 in
+    // all, each at its own place.
+    expect(gltf.nodes).toHaveLength(32);
+    expect(new Set(gltf.nodes.map((n) => n.translation.join())).size).toBeGreaterThan(20);
     // Exporting changes nothing.
     expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
   });
@@ -3022,6 +3542,67 @@ test.describe('trim, sew and thicken (R2a-3, CAD42)', () => {
   });
 });
 
+test.describe('mirror copy and the sheet front (CR4b)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+
+  test('says which way a sheet’s front faces, thickens that way and mirrors it into a new body', async ({
+    page,
+  }) => {
+    // TS-1532, ST-261: the hood's left panel.
+    await page.goto('/?fixture=hood');
+    await ready(page);
+    const select = async (name: string) => {
+      await (await panel(page, 'Elements'))
+        .getByRole('list', { name: 'Bodies' })
+        .getByRole('button', { name, exact: true })
+        .click();
+      return panel(page, 'Inspector');
+    };
+    const measured = async (id: string) => {
+      const snapshot = await cadSnapshot(page);
+      return snapshot.evaluation?.status === 'ok' ? snapshot.evaluation.bodies[id] : undefined;
+    };
+    const leftId = (await cadSnapshot(page)).content.bodies.find((b) => b.name === 'left')!.id;
+    let inspector = await select('left');
+    const note = inspector.getByTestId('cad-sheet-front');
+    await expect(note).toContainText(/Its front \(its normal\) faces mostly [+−][XYZ]/);
+    const [, sign, axis] = /mostly ([+−])([XYZ])/.exec((await note.textContent())!)!;
+    const k = 'XYZ'.indexOf(axis!);
+    const sheet = (await measured(leftId))!.bounds;
+    // Thickened 5 mm towards the front: the solid grows that way, not the other.
+    await inspector.locator('summary', { hasText: /^Thicken$/ }).click();
+    const thickness = inspector.getByLabel('Thickness (mm)');
+    await thickness.fill('5');
+    await thickness.press('Enter');
+    await inspector.getByRole('button', { name: 'Thicken', exact: true }).click();
+    await ready(page);
+    const solid = (await measured(leftId))!.bounds;
+    const grew = sign === '+' ? solid[1][k]! - sheet[1][k]! : sheet[0][k]! - solid[0][k]!;
+    const shrank = sign === '+' ? sheet[0][k]! - solid[0][k]! : solid[1][k]! - sheet[1][k]!;
+    // (Parts of a curved sheet may face a little the other way, so that side may grow less.)
+    expect(grew).toBeGreaterThan(0.5);
+    expect(grew).toBeGreaterThan(shrank + 0.5);
+    await (await tool(page, 'Undo')).click();
+    await ready(page);
+    // Mirrored across x = 0 into a new body; the panel stays.
+    inspector = await select('left');
+    await inspector.locator('summary', { hasText: /^Mirror copy$/ }).click();
+    await inspector.getByRole('combobox', { name: 'Across' }).selectOption('x');
+    const count = await bodies(page).count();
+    await inspector.getByRole('button', { name: 'Mirror into a new body', exact: true }).click();
+    await ready(page);
+    await expect(bodies(page)).toHaveCount(count + 1);
+    const snapshot = await cadSnapshot(page);
+    const copy = snapshot.content.bodies.find((b) => b.name === 'left mirrored')!;
+    const mirrored = (await measured(copy.id))!.bounds;
+    expect(mirrored[0][0]).toBeCloseTo(-sheet[1][0]!, 6);
+    expect(mirrored[1][0]).toBeCloseTo(-sheet[0][0]!, 6);
+    expect((await measured(leftId))!.bounds).toEqual(sheet);
+    await uncover(page);
+    await page.screenshot({ path: test.info().outputPath('surface-mirror-copy.png') });
+  });
+});
+
 test.describe('continuity (R2a-4, CAD43)', () => {
   test.skip(!kernel, 'CAD_OCCT_DIST is not set');
 
@@ -3252,6 +3833,235 @@ test.describe('zebra, curvature colours and combs (R2a-4, CAD43)', () => {
     await expect.poll(gridLines).toBe(shown);
     const after = await cadSnapshot(page);
     expect(after.contentHash).toBe(before.contentHash);
+  });
+
+  test('hangs the door part on its hinge edge where it stands, limits it to 0–70° and opens it (CR3e-2)', async ({
+    page,
+  }) => {
+    // TS-1522, ST-258: the F26 door made a part; the opening's left edge (x 38.25) is the parent
+    // connector and the door's (x 41.75, 3.5 mm across the gap) the child's, picked through the
+    // assembly by their meshes' edges.
+    test.skip(narrow(), 'desktop flow');
+    await page.goto('/?fixture=panel-part');
+    await ready(page);
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Add joint…' }).click();
+    const card = page.getByTestId('cad-joint-create');
+    const pick = (side: 'parent' | 'child', x: number) =>
+      page.evaluate(
+        ([side, x]) => {
+          type Mesh = { bodyId: string; topology: { edges: { centroid: number[] }[] } };
+          const { controller, assembly } = (
+            window as unknown as {
+              cad: {
+                controller: {
+                  getSnapshot(): {
+                    meshes?: { meshes: Mesh[] };
+                    content: { parts: { source: { contentHash: string } }[] };
+                  };
+                };
+                assembly: {
+                  meshes(hash: string): Mesh[] | undefined;
+                  pickConnector(p: unknown): boolean;
+                };
+              };
+            }
+          ).cad;
+          const content = controller.getSnapshot().content;
+          const mesh =
+            side === 'parent'
+              ? controller.getSnapshot().meshes!.meshes.find((m) => m.bodyId === 'panel-body')!
+              : assembly.meshes(content.parts[0].source.contentHash)![0]!;
+          const index = mesh.topology.edges.findIndex(
+            (e) =>
+              Math.abs(e.centroid[0]! - (x as number)) < 1e-6 &&
+              Math.abs(e.centroid[1]! + 30) < 1e-6,
+          );
+          if (index < 0) throw new Error(`no edge at x ${x}`);
+          return assembly.pickConnector({
+            ...(side === 'child' ? { path: ['c-door'] } : {}),
+            mesh,
+            kind: 'edge',
+            index,
+            point: mesh.topology.edges[index]!.centroid,
+          });
+        },
+        [side, x] as const,
+      );
+    expect(await pick('parent', 38.25)).toBe(true);
+    await expect(card).toContainText('This document · Edge');
+    expect(await pick('child', 41.75)).toBe(true);
+    const preview = page.getByTestId('cad-joint-preview');
+    await expect(preview).toHaveAttribute('data-status', 'ready');
+    const previewPose = () =>
+      page.evaluate(() =>
+        (
+          window as unknown as {
+            cad: {
+              assembly: { getSnapshot(): { creating?: { preview?: { content: CadDocument } } } };
+            };
+          }
+        ).cad.assembly
+          .getSnapshot()
+          .creating?.preview?.content.solvedPoses['c-door']?.translationMm.map(
+            (v) => +v.toFixed(6) + 0,
+          ),
+      );
+    // Laid edge on edge, the door would jump across the gap; kept, it stays where it stands.
+    await expect.poll(previewPose).not.toEqual([0, 0, 0]);
+    await card.getByLabel('Keep child where it stands (hinge on its own edge)').check();
+    await expect(preview).toHaveAttribute('data-status', 'ready');
+    await expect.poll(previewPose).toEqual([0, 0, 0]);
+    await card.getByRole('button', { name: 'Apply joint' }).click();
+    await ready(page);
+    const pose = async () => (await cadSnapshot(page)).content.solvedPoses['c-door']!;
+    expect((await pose()).translationMm.map((v) => +v.toFixed(6) + 0)).toEqual([0, 0, 0]);
+    // The range: 0–70°, one edit.
+    const range = page.getByRole('form', { name: 'Joint range' });
+    await range.getByLabel('Min (°)').fill('0');
+    await range.getByLabel('Max (°)').fill('70');
+    await range.getByRole('button', { name: 'Apply range' }).click();
+    await ready(page);
+    const joint = async () => (await cadSnapshot(page)).content.joints[0]!;
+    expect((await joint()).limits).toEqual([{ of: 'angle', min: 0, max: (70 * Math.PI) / 180 }]);
+    await expect(page.getByTestId('cad-joint')).toContainText('範囲 0 – 70');
+    // Opened 45° about the hinge line (along y through x = 41.75): x = 41.75·(1 − cos 45°).
+    const values = page.getByRole('form', { name: 'Joint values' });
+    await values.getByLabel('Angle (°)').fill('45');
+    await values.getByRole('button', { name: 'Apply values' }).click();
+    await ready(page);
+    const opened = (await pose()).translationMm;
+    expect(Math.abs(opened[0]!)).toBeCloseTo(41.75 * (1 - Math.SQRT1_2), 6);
+    expect(Math.abs(opened[2]!)).toBeCloseTo(41.75 * Math.SQRT1_2, 6);
+    expect(opened[1]!).toBeCloseTo(0, 6);
+    await page.screenshot({ path: test.info().outputPath('surface-door-hinge.png') });
+    // Past the range is refused; the door stays at 45°.
+    await values.getByLabel('Angle (°)').fill('80');
+    await values.getByRole('button', { name: 'Apply values' }).click();
+    await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText('範囲の外');
+    expect((await pose()).translationMm[0]).toBeCloseTo(opened[0]!, 6);
+  });
+
+  test('measures the gap and flush between the door and its panel from two picked edges (CR3d)', async ({
+    page,
+  }) => {
+    // TS-1513, ST-256: the F26 door 3.5 mm from the panel; each edge picked through the
+    // controller by its name (the two edges lie 3.5 mm apart in the plan view).
+    await page.goto('/?fixture=panel&view=plan');
+    await ready(page);
+    const pick = (bodyId: string, edge: string) =>
+      page.evaluate(
+        ([bodyId, edge]) => {
+          const { controller } = (window as unknown as { cad: { controller: CadController } }).cad;
+          const { meshes, contentHash } = controller.getSnapshot();
+          const mesh = meshes!.meshes.find((m) => m.bodyId === bodyId)!;
+          for (let i = 0; i < mesh.topology.edges.length; i++) {
+            controller.select({
+              kind: 'edge',
+              id: bodyId,
+              pick: mesh.edgeBase + 1 + i,
+              contentHash,
+            });
+            const name = JSON.stringify(controller.getSnapshot().topology?.name);
+            if (name.includes(edge)) return;
+          }
+          throw new Error(`no ${edge} on ${bodyId}`);
+        },
+        [bodyId, edge],
+      );
+    await pick('door-body', 'cut:e:s0');
+    const inspector = await panel(page, 'Inspector');
+    await inspector.getByRole('button', { name: 'Gap from this edge' }).click();
+    await pick('panel-body', 'cut:e:s0');
+    await expect(inspector).toContainText('First edge: door-body');
+    await inspector.getByRole('button', { name: 'Measure gap and flush to this edge' }).click();
+    const result = page.getByTestId('cad-gap-flush');
+    await expect(result).toContainText('50 of 50 points face each other');
+    await expect(result).toContainText('min 3.5 mm, max 3.5 mm, mean 3.5 mm');
+    const snapshot = await cadSnapshot(page);
+    expect(snapshot.gapFlush).toMatchObject({ status: 'done', to: { bodyId: 'panel-body' } });
+    // Display only: no edit.
+    expect(snapshot.canUndo).toBe(false);
+    await uncover(page);
+    await page.screenshot({ path: test.info().outputPath('surface-gap-flush.png') });
+    await result.getByRole('button', { name: 'Clear' }).click();
+    await expect(page.getByTestId('cad-gap-flush')).toHaveCount(0);
+  });
+
+  test('the B2 door’s gap follows the Panel gap parameter, measured again after the edit (CR3f)', async ({
+    page,
+  }) => {
+    // TS-1526, ST-259: the F28 door cut from the B1 skin. Its rear edge (x = 2550) below the
+    // character line, against the opening's, each picked through the controller by name.
+    test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+    test.setTimeout(900_000);
+    const settled = () => expect(state(page)).toHaveText('Shape up to date', { timeout: 300_000 });
+    await page.goto('/?fixture=b2-door');
+    await settled();
+    const pick = (bodyId: string, parts: string[]) =>
+      page.evaluate(
+        ([bodyId, parts]) => {
+          const { controller } = (window as unknown as { cad: { controller: CadController } }).cad;
+          const { meshes, contentHash } = controller.getSnapshot();
+          const mesh = meshes!.meshes.find((m) => m.bodyId === bodyId)!;
+          const seen: string[] = [];
+          for (let i = 0; i < mesh.topology.edges.length; i++) {
+            controller.select({
+              kind: 'edge',
+              id: bodyId,
+              pick: mesh.edgeBase + 1 + i,
+              contentHash,
+            });
+            const name = JSON.stringify(controller.getSnapshot().topology?.name);
+            if ((parts as string[]).every((p) => name.includes(p))) return;
+            seen.push(name);
+          }
+          throw new Error(
+            `no ${JSON.stringify(parts)} on ${bodyId}: ${seen.slice(0, 6).join('\n')}`,
+          );
+        },
+        [bodyId, parts] as const,
+      );
+    const inspector = await panel(page, 'Inspector');
+    const measure = async () => {
+      await pick('door-body', [
+        '["panel:door:inside","press:press:right",',
+        '["sketch:door-line","cut:e:b0s1"]',
+      ]);
+      await inspector.getByRole('button', { name: 'Gap from this edge' }).click();
+      await pick('skin-body', [
+        '["sketch:door-line","cut:e:b0s1"]',
+        '["trim:door-opening:outside","press:press:right",',
+      ]);
+      await inspector.getByRole('button', { name: 'Measure gap and flush to this edge' }).click();
+      const result = page.getByTestId('cad-gap-flush');
+      await expect(result).toContainText('of 50 points face each other', { timeout: 120_000 });
+      return result;
+    };
+    await expect(await measure()).toContainText('min 3.5 mm, max 3.5 mm, mean 3.5 mm');
+    // One parameter edit: the opening and the door both move to the new gap.
+    await page
+      .getByRole('list', { name: 'Parameters' })
+      .getByRole('button', { name: /^Panel gap/ })
+      .click();
+    const value = page.locator('.cad-inspector').getByLabel(/^Value/);
+    await value.fill('6');
+    await value.press('Enter');
+    await settled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    // The old result belonged to the old shape and is gone; measured again it reads 6 mm.
+    await expect(page.getByTestId('cad-gap-flush')).toHaveCount(0);
+    await expect(await measure()).toContainText('min 6 mm, max 6 mm, mean 6 mm');
+    await uncover(page);
+    await page.screenshot({ path: test.info().outputPath('surface-b2-door-gap.png') });
+    // Out of range: refused, the gap stays 6 mm.
+    await page
+      .getByRole('list', { name: 'Parameters' })
+      .getByRole('button', { name: /^Panel gap/ })
+      .click();
+    await value.fill('12');
+    await value.press('Enter');
+    await expect(page.getByRole('list', { name: 'Parameters' })).toContainText(/Panel gap\s*6 mm/);
   });
 
   test('draws the picked arc edge’s curvature comb from the exact curve', async ({ page }) => {

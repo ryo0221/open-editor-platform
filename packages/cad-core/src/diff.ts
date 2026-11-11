@@ -11,7 +11,16 @@ const collections = [
   'parts',
   'components',
   'joints',
+  'spotWelds',
+  // MR2 forms; absent when there are none.
+  'configurations',
+  'interferenceAllowances',
+  'mounts',
+  // WM2b gear meshes; absent when there are none.
+  'gearMeshes',
 ] as const;
+const list = (doc: CadDocument, key: (typeof collections)[number]): { id: string }[] =>
+  doc[key] ?? [];
 
 /** Semantic parameter/profile/sketch/feature/body/view differences by stable ID. No geometry comparison. */
 export function compareCad(before: CadDocument, after: CadDocument): Change[] {
@@ -27,8 +36,8 @@ export function compareCad(before: CadDocument, after: CadDocument): Change[] {
         after: canonicalJson(after[key]),
       });
   for (const key of collections) {
-    const a = new Map<string, object>(before[key].map((x) => [x.id, x]));
-    const b = new Map<string, object>(after[key].map((x) => [x.id, x]));
+    const a = new Map<string, object>(list(before, key).map((x) => [x.id, x]));
+    const b = new Map<string, object>(list(after, key).map((x) => [x.id, x]));
     for (const [id, x] of a)
       if (!b.has(id))
         changes.push({ elementId: id, path: key, kind: 'removed', before: canonicalJson(x) });
@@ -50,7 +59,7 @@ export function compareCad(before: CadDocument, after: CadDocument): Change[] {
     }
     const kept = (list: { id: string }[], other: Map<string, object>) =>
       list.filter((x) => other.has(x.id)).map((x) => x.id);
-    const order = [kept(before[key], b), kept(after[key], a)];
+    const order = [kept(list(before, key), b), kept(list(after, key), a)];
     order[1].forEach((id, i) => {
       if (order[0][i] !== id)
         changes.push({

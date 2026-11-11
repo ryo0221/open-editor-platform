@@ -4,6 +4,7 @@ import {
   type CadAdmission,
   cadContentHash,
   cadToleranceSetOf,
+  cadSpotWeldLimits,
   type CadToleranceSet,
   type CadLoftSection,
   candidatesOf,
@@ -17,7 +18,9 @@ import {
   featureReferences,
   jointReferences,
   sketchReferences,
+  sketchDefaultChains,
   sketchDefaultPath,
+  sketchPath,
   sketchDefaultRegion,
   sketchFreedom,
   CadSketchError,
@@ -30,10 +33,13 @@ import {
   isLiteralPosition,
   mm,
   position,
+  cadLimits,
   type CadAppearance,
   type CadAssetRef,
   type CadTextures,
   cadAssetMediaTypes,
+  cadImportToleranceMm,
+  cadTolerance,
   cadTextureKind,
   type CadBody,
   type CadBodyEvaluation,
@@ -62,6 +68,11 @@ import {
   type CadDetailType,
   type Vec3,
   continuityReport,
+  gapFlushReport,
+  type CadGapFlushReport,
+  type CadGapFlushSample,
+  type CadSpotWeld,
+  type CadSpotWeldPoints,
   type CadContinuityReport,
   type CadContinuitySample,
   combScale,
@@ -69,12 +80,22 @@ import {
   featureSketches,
   upstreamFeatures,
   cadRangeLimit,
+  cadBodyPmi,
+  cadPmiItemStates,
+  readCadPmiAsset,
+  type CadBodyPmi,
+  type CadPmiItemState,
+  type CadPmiTracking,
+  type CadPmiAsset,
+  type CadProfileKind,
 } from '@editor-platform/cad-core';
 import type { GeometryTextureRole } from '@editor-platform/geometry-core';
 import {
   CadExportError,
   displayDeflectionMm,
   stepReport,
+  type CadStepPmiWritten,
+  pmiTrackingBytes,
   topologyBytes,
   writeGlb,
   writeStl,
@@ -85,12 +106,15 @@ import {
   type CadExportTextures,
   type CadMesh,
   type CadStepImportReport,
+  type CadStepImportOptions,
   type CadStepImportResult,
+  type CadStepPmiReport,
 } from '@editor-platform/cad-kernel-occt';
 import { describeAssemblyCode } from './assembly-messages';
 import {
   addArc,
   addSpline,
+  addOffset,
   addCircle,
   addConstraint,
   addLine,
@@ -171,6 +195,13 @@ export interface CadSnapshot {
   canStop: boolean;
   diagnostic: CadDiagnostic | undefined;
   selection: CadSelection;
+  /** PMI-2: the PMI item of the selected body whose targets the view highlights. */
+  pmiFocus: { bodyId: string; itemId: string } | undefined;
+  /**
+   * PMI-3b: the saved view of the selected body's PMI the viewport shows: its camera, and only
+   * the PMI it shows.
+   */
+  pmiView: { bodyId: string; viewId: string; chosen: number } | undefined;
   /** The picked face or edge, read from the current meshes' pick table. */
   topology: CadTopologyInfo | undefined;
   canUndo: boolean;
@@ -232,7 +263,31 @@ export interface CadSnapshot {
    * by the exact build on request. Display only; gone once the content changes.
    */
   curvature: CadCurvatureView | undefined;
+  /**
+   * CR3d: the gap and flush between two bodies' facing border edges: the first edge chosen, then
+   * running or the samples and their report. For the current content only; display only.
+   */
+  gapFlush: CadGapFlushView | undefined;
+  /** CR4e: the first flange of a new spot weld row, chosen on the current content. */
+  weldStart: { bodyId: string; pick: number } | undefined;
+  /** CR4e: each spot weld row's points as the current content's evaluation made them. */
+  spotWelds: CadSpotWeldPoints[] | undefined;
 }
+/** CR3d: an edge by its body and pick number. */
+export interface CadGapFlushEdge {
+  bodyId: string;
+  pick: number;
+}
+export type CadGapFlushView =
+  | { from: CadGapFlushEdge; status: 'chosen' }
+  | { from: CadGapFlushEdge; to: CadGapFlushEdge; status: 'running' }
+  | {
+      from: CadGapFlushEdge;
+      to: CadGapFlushEdge;
+      status: 'done';
+      samples: CadGapFlushSample[];
+      report: CadGapFlushReport;
+    };
 export type CadCombView =
   | { bodyId: string; pick: number; status: 'running' }
   | {
@@ -287,6 +342,8 @@ export interface CadAssetStore {
 export interface CadStepImportPreview {
   fileName: string;
   report: CadStepImportReport;
+  /** #820: the document's result limit; a body read less precisely can be placed, not machined. */
+  resultLimitMm: number;
 }
 /**
  * #663: the image work a GLB's textures need, in the Host (the browser decodes and encodes
@@ -322,7 +379,7 @@ export interface CadControllerOptions {
   /** Re-evaluates exact content and writes its active bodies as STEP (CatalogKernelPort.exportStep). */
   exportStep?(
     request: CadEvaluateRequest,
-  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array }>;
+  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array; stepPmi?: CadStepPmiWritten }>;
   /**
    * Re-evaluates exact content and samples one edge's continuity, by its index in the body's
    * pick table (CatalogKernelPort.analyzeContinuity, R2a-4).
@@ -346,6 +403,14 @@ export interface CadControllerOptions {
     evaluation: CadEvaluation;
     comb?: { samples: CadCombSample[] } | { code: string };
   }>;
+  /** CR3d: re-evaluates exact content and samples the gap and flush between two border edges. */
+  analyzeGapFlush?(
+    request: CadEvaluateRequest,
+    edges: { a: { bodyId: string; edge: number }; b: { bodyId: string; edge: number } },
+  ): Promise<{
+    evaluation: CadEvaluation;
+    gapFlush?: { samples: CadGapFlushSample[] } | { code: string };
+  }>;
   /** The Host's current kernel build, the target of an explicit migration. */
   currentKernel?: { id: string; buildHash: string };
   /** D2: reads STEP with the document's exact build (CatalogKernelPort.importStep). */
@@ -353,6 +418,7 @@ export interface CadControllerOptions {
     profile: CadDocument['kernelProfile'],
     requestId: string,
     bytes: Uint8Array,
+    options?: CadStepImportOptions,
   ): Promise<CadStepImportResult>;
   /** D2: the Host's asset bytes. Without it, documents with imported bodies cannot evaluate. */
   assets?: CadAssetStore;
@@ -396,9 +462,20 @@ export function retainedBytes(meshes: Iterable<CadMesh>): number {
         seen.add(buffer);
         bytes += buffer.byteLength;
       }
-    bytes += topologyBytes(m.topology);
+    bytes += topologyBytes(m.topology) + pmiTrackingBytes(m.pmi);
   }
   return bytes;
+}
+/**
+ * PMI-2: the PMI a body carries, with its asset read from the Host's bytes. PMI-4a: past a
+ * change of the shape, `items` says which are current (by the evaluation's `tracking`).
+ */
+export interface CadBodyPmiView {
+  state: CadBodyPmi;
+  asset?: CadPmiAsset;
+  unreadable?: true;
+  items?: ReadonlyMap<string, CadPmiItemState>;
+  tracking?: CadPmiTracking;
 }
 /**
  * The new build's exact result for the current recipe, shown before the migration is adopted.
@@ -493,9 +570,13 @@ const messages: Record<string, string> = {
   'surface-path':
     'このスケッチの線と円弧は、1本につながった鎖（または1つの輪）になっていないため、面を作れません。',
   'boolean-failed': 'Booleanの計算に失敗しました。',
+  'boolean-incomplete':
+    'unionの計算結果から、入力したbodyの一部が抜け落ちたため確定できません。多数の部材の端が1点に集まると起きやすいです。部材の端を交点から少し離すか、unionをやめて別のbodyのままにしてください。',
   'result-tolerance':
     '計算結果の誤差が上限（0.0001 mm）を超えるため確定できません。曲面どうしが浅い角度で交わるBooleanや鏡写しで起きやすいです。交わり方を変えるか、Booleanをやめて別のbodyのままにしてください。',
   'output-limit': '表示できる形状の上限を超えています。',
+  'pmi-invalid':
+    '取り込んだPMIの記録が形状と合いません（存在しない面・辺・頂点を指しているなど）。STEPファイルを取り込み直してください。',
   'kernel-unavailable': '形状計算を開始できません。再計算を試してください。',
   'kernel-build-unavailable': 'この文書の計算に必要なkernelがありません。',
   'kernel-build-revoked': 'この文書のkernelは安全上の理由で使えなくなりました。',
@@ -548,6 +629,7 @@ const messages: Record<string, string> = {
   'asset-unreadable': '取り込んだ形状のデータを読めませんでした。',
   'step-import-unavailable': 'このHostではSTEPを取り込めません（資産を保存できません）。',
   'step-too-large': 'STEP fileが大きすぎます（16 MiBまで）。',
+  'step-export-too-large': '書き出すSTEP fileが大きすぎます（64 MiBまで）。',
   'memory-budget':
     'この形状のデータは、表示に使えるメモリーの上限を超えます。編集は入れていません。bodyや細部を減らしてください。',
   'native-too-large':
@@ -556,10 +638,12 @@ const messages: Record<string, string> = {
     '保存する文書の大きさを確かめられなかったため、編集を入れませんでした。もう一度操作してください。',
   'step-unreadable': 'STEP fileとして読めませんでした。',
   'step-schema-unsupported':
-    'このSTEPの規格（application protocol）には対応していません。AP203またはAP214で保存してください。',
+    'このSTEPの規格（application protocol）には対応していません。AP203・AP214・AP242のどれかで保存してください。',
   'step-external-reference': '別のfileを参照するSTEPは取り込めません。',
   'step-pmi':
-    '寸法・公差などの製品情報（PMI）を含むSTEPは取り込めません。形状だけを書き出したSTEPを使ってください。',
+    '寸法・公差などの製品情報（PMI）を含むSTEPは、このkernelでは読めないため取り込めません。形状だけを書き出したSTEPを使ってください。',
+  'step-pmi-partial':
+    'このSTEPには寸法・公差などの製品情報（PMI）があり、取り込むとPMIは文書に残りません。内訳を確かめ、PMIなしで取り込むかを選んでください。',
   'step-assembly':
     'assembly（部品の組み合わせ）のSTEPは、空の文書に取り込むと部品を並べたassemblyになります。body を持つ文書には1つの部品のSTEPだけを取り込めます。',
   'step-unit-unknown': 'STEPの長さの単位が分からないため、取り込めません。',
@@ -573,8 +657,10 @@ const messages: Record<string, string> = {
     'STEPの面のまとまりが有効な形状ではないため、取り込めません（自動修正はしません）。',
   'step-invalid-solid':
     'STEPのsolidが有効な形状ではないため、取り込めません（自動修正はしません）。',
-  'step-tolerance-unsupported':
-    'STEPの形状の許容誤差（tolerance）が0.0001 mmより大きいため、取り込めません。',
+  'step-tolerance-unsupported': `STEPの形状の許容誤差（tolerance）が${cadImportToleranceMm} mmより大きいため、取り込めません（自動修正はしません）。`,
+  'input-tolerance':
+    '取り込んだ形状の許容誤差（tolerance）が文書の上限より大きいため、この形状は配置・計測・書き出しだけに使えます。Booleanなどの加工には使えません。',
+  'imported-tolerance': '取り込んだ形状の許容誤差の記録が不正です。',
   'step-coordinate-range': `STEPの形状が座標の上限（${cadRangeLimit('step-coordinate-range')}）を超えています。`,
   'coordinate-range': `座標が上限（${cadRangeLimit('coordinate-range')}）を超えています。原点の近くに置くか、値を小さくしてください。`,
   'dimension-range': `寸法は${cadRangeLimit('dimension-range')}の範囲にしてください。`,
@@ -602,8 +688,78 @@ const messages: Record<string, string> = {
   'draft-faces': '中立面の周りに傾ける面がありません。',
   'draft-failed': 'この角度では抜き勾配を付けられません。',
   'fillet-failed': 'この半径では丸められない辺があります。',
+  'offset-failed':
+    'この距離ではoffsetできません（曲率半径より大きい距離では面が裏返ります）。距離を小さくしてください。',
+  'offset-distance': 'offsetの距離は0.01〜100 mmにしてください。',
+  'offset-side': 'offsetの向きは表（法線の向き）か裏にしてください。',
+  'offset-source': 'offsetするsheetを選んでください。',
+  'panel-gap': 'panelの隙間は0.5〜10 mmにしてください。',
+  'panel-source': 'panelを切り出すsheetを選んでください。',
+  'trim-gap-tool': '隙間を付けたtrimには、sketchの閉じた線を使ってください。',
+  'trim-chains': '一度に抜ける閉じた線は、道具の線と合わせて1〜32本です。',
+  'trim-chains-shared': '同じsketchの要素を2つの閉じた線で使うことはできません。',
+  'trim-chains-tool': '複数の閉じた線とifMissedは、sketchの線で切るtrimだけに使えます。',
+  'trim-if-missed': 'ifMissedに使える値はskipだけです。',
+  'trim-disconnected':
+    '抜いた後の面が2つ以上に分かれます。分けている閉じた線を外すか、面の内側に収めてください。',
+  'detail-panel': 'panelは、同じbodyのtrimと一緒に、trimの前の形から切り出してください。',
+  'split-failed': 'この線ではsheetを分けられません。',
+  'press-line-failed':
+    'このプレスラインは作れません。深さを大きくするかRを小さくしてください（段の高さに対してRが大きすぎると丸められません）。',
+  'press-line-depth': 'プレスラインの深さは0.1〜20 mmにしてください。',
+  'press-line-side': 'ずらす側は、開いた線なら左か右、閉じた線なら内か外にしてください。',
+  'press-line-toward': 'ずらす向きは表（法線の向き）か裏にしてください。',
+  'flare-failed':
+    'このフレアは作れません。線がアーチを囲んでsheetの縁から縁へ通っているか確かめ、高さを変えてみてください。',
+  'flare-height': 'フレアの高さは1〜100 mmにしてください。',
+  'flare-continuity': 'sheetとのつなぎはG1かG2にしてください。',
+  'flare-chain-closed': 'フレアの線は開いた線にしてください（sheetの縁から縁へ）。',
+  'flare-arch-not-free': 'アーチにはsheetの縁の辺を選んでください。',
+  'flare-arch-side':
+    'アーチが線のどちら側か決まりません。線がアーチを片側に分けているか確かめてください。',
+  'flange-failed': 'このフランジは作れません。幅か角度を変えてみてください。',
+  'profile-sweep-failed': 'この断面は経路に沿わせられません。経路と断面の向きを確かめてください。',
+  'profile-sweep-tight':
+    '経路の曲がりが断面より急です。曲がりのRを大きくするか、断面を小さくしてください。',
+  'profile-up': '断面の向きは経路に直角な長さ1の向きにしてください。',
+  'profile-up-curved':
+    '向きを数値で決めるのは、まっすぐな経路だけです。曲がる経路では面の法線か面の中にしてください。',
+  'profile-radius': '角のRが断面の辺に収まりません。Rを小さくしてください。',
+  'profile-flange': 'ハットとZの断面にはフランジの幅（1 mm以上）が要ります。',
+  'profile-kind': '断面の型はハット・Z・チャンネル・平板のどれかにしてください。',
+  'profile-height': '断面の高さは1〜500 mmにしてください。',
+  'profile-width': '断面の幅は1〜500 mmにしてください。',
+  'profile-flange-range': 'フランジの幅は0〜200 mmにしてください。',
+  'profile-radius-range': '角のRは0〜50 mmにしてください。',
+  'spot-weld-no-start': '先に1枚目のフランジの面を選んでください。',
+  'spot-weld-same-body': 'スポット溶接は別のbodyのフランジどうしで結んでください。',
+  'spot-weld-unchanged': 'スポット溶接の値が変わっていません。',
+  'spot-weld-pitch': 'スポット溶接のピッチは10〜200 mmにしてください。',
+  'spot-weld-end-distance': '端からの距離は0〜100 mmにしてください。',
+  'spot-weld-gap': '許す離れは0.1〜20 mmにしてください。',
+  'spot-weld-short':
+    'フランジが短く、端からの距離の内側に点が置けません。端からの距離を小さくしてください。',
+  'spot-weld-points':
+    '点が多すぎます（1列1,000点、文書全体で8,000点まで）。ピッチを大きくしてください。',
+  'spot-weld-face-missing': 'スポット溶接のフランジの面が見つかりません。結び直してください。',
+  'spot-weld-face-ambiguous': 'スポット溶接のフランジの面が1つに決まりません。結び直してください。',
+  'spot-weld-failed': 'このフランジにはスポット溶接の点を置けません。',
+  'flange-width': 'フランジの幅は1〜200 mmにしてください。',
+  'flange-angle': 'フランジの角度は0より大きく180°以下にしてください。',
+  'flange-toward': 'フランジを立てる向きは表（法線の向き）か裏にしてください。',
+  'flange-edge-not-free': 'フランジにはsheetの縁の辺（面が1つだけの辺）を選んでください。',
+  'flange-self-intersects':
+    'フランジが自分や他のフランジ、元のsheetと交わります。幅を狭くするか角度を変えてください。',
+  'split-missed': '線がsheetのどの面も分けません（面に届かないか、面の途中で止まっています）。',
+  'split-side-undetermined':
+    '分けた面がどちら側か決まりません。線が面の縁をなぞっていないか確かめてください。',
+  'fillet-free-edge': 'sheetの縁の辺は丸められません。2つの面の間の辺を選んでください。',
+  'fillet-radii-end': '途中のRを使うときは、終点のRも入れてください。',
+  'fillet-radii': '途中のRは1〜6点（両端を入れて2〜8点）にしてください。',
+  'fillet-radii-at': '途中のRの位置は0より大きく1より小さく、順に大きくしてください。',
   'chamfer-failed': 'この距離では面取りできない辺があります。',
-  'shell-failed': 'この厚さでは殻にできません。',
+  'shell-failed':
+    'この厚さでは殻にできません（OCCTのoffsetが面のつなぎ目を作れませんでした）。厚さか開ける面を変えてください。薄い外板は、曲面（sheet）を作ってThickenで厚みを付けると作れることがあります。',
   'tolerance-set-unchanged': 'この文書はすでにその許容差の組です。',
   'tolerance-set-unknown': '許容差の組は standard か large から選んでください。',
   'shell-multiple-solids':
@@ -618,6 +774,13 @@ const messages: Record<string, string> = {
   'sketch-conflicting-constraint': 'この拘束は他の拘束と矛盾するため、追加しませんでした。',
   'sketch-not-converged': 'スケッチの拘束を満たす位置が見つかりません。変更しませんでした。',
   'sketch-self-intersection': 'スプラインが自分自身と交わっています。制御点を動かしてください。',
+  'sketch-offset-chain':
+    'offsetするには、端と端がつながった1本の鎖（線・円弧・開いたスプライン）か、円・閉じたスプライン1つを選んでください。',
+  'sketch-offset-distance': 'offsetの距離は0.1〜200 mmにしてください（負の値で反対側）。',
+  'sketch-offset-self-intersects':
+    'この距離でずらすと、線が自分自身と交わるか要素が消えます。距離を小さくするか反対側にしてください。',
+  'sketch-offset-fit':
+    'ずらしたスプラインを制御点256個で0.01 mm以内に当てはめられません。距離を小さくするか、元のスプラインを分けてください。',
   'sketch-spline-poles': 'スプラインの制御点の数が範囲の外です（4〜256個、次数+1個以上）。',
   'sketch-spline-degree': 'スプラインの次数は2・3・5のどれかにしてください。',
   'sketch-degenerate':
@@ -663,12 +826,24 @@ const messages: Record<string, string> = {
   'boundary-curve-unsupported':
     '境界曲面に使える参照した辺は線と円弧だけです。ほかの曲線の辺はfillで塞いでください。',
   'fill-boundary': 'fillの境界は3〜16本にしてください。',
-  'fill-continuity': 'fillの境界のつながりはG0かG1にしてください。',
+  'fill-continuity': 'fillの境界のつながりはG0・G1・G2のどれかにしてください。',
   'fill-no-adjacent-face':
-    'G1は、隣に面が1枚だけある参照した辺にだけ使えます（sketchの曲線には隣の面がありません）。',
+    'G1とG2は、隣に面が1枚だけある参照した辺にだけ使えます（sketchの曲線には隣の面がありません）。',
   'fill-g1-unreached':
     'fillをG1の辺の隣の面に0.1°以内で接するようにできません（直角に近い面など）。G0にするか境界を変えてください。',
+  'fill-g2-unreached':
+    'fillをG2の辺の隣の面と同じ曲率（差1%以内）にできません。G1にするか、境界や隣の面を変えてください。',
   'fill-failed': 'この境界ではfillを作れません。',
+  'curve-network-curves': '曲線網の曲線は、縦・横とも2〜16本にしてください。',
+  'curve-network-tolerance': '曲線網の交わりの許容は0.0001〜1 mmにしてください。',
+  'curve-network-gap':
+    '曲線網の縦の曲線と横の曲線が許容の距離で交わっていません。示した2本が交わるように曲線を直すか、許容を広げてください。',
+  'curve-network-order':
+    '曲線網の曲線の並びが揃っていません。縦（横）の曲線は、横（縦）の曲線のどれとも同じ順に交わるように選んでください。',
+  'curve-network-end':
+    '曲線網の曲線の端が、外側の曲線との交点にありません。端の曲線で曲線網を閉じてください。',
+  'curve-network-fit':
+    '曲線網を許容の距離で通る面を作れません（制御点の数の上限）。曲線を減らすか、許容を広げてください。',
   'solid-not-sheet': 'trim・sew・thickenに使えるのはsurface body（面）だけです。',
   'trim-tool': 'trimの道具には、sketchの閉じた鎖・平面・別のsurface bodyのどれかを使ってください。',
   'trim-tool-open': 'trimに使うsketchの鎖は閉じた輪にしてください。',
@@ -691,6 +866,14 @@ const messages: Record<string, string> = {
   'thicken-side': 'thickenの向きは表（front）・裏（back）・両側（both）にしてください。',
   'thicken-failed':
     'この厚さでは面に厚みを付けられません（面が角で折れている、厚さが曲がりの半径より大きく自分と交わる）。',
+  'gap-flush-no-start': '先に1本目の縁を選んで「Gap from this edge」を押してください。',
+  'gap-flush-same-body': '隙間と段差は、別のbodyの縁どうしで測ってください。',
+  'gap-flush-edge-missing': '選んだ縁が今の形状に見つかりません。選び直してください。',
+  'gap-flush-not-border':
+    '隙間と段差は、面が片側にだけある縁（surface bodyの縁）で測ってください。',
+  'gap-flush-apart': '2本の縁が向かい合う所がありません。向かい合う縁を選んでください。',
+  'gap-flush-projection-failed': '1本目の縁を面の上に戻せなかったため、測れませんでした。',
+  'gap-flush-mismatch': '計測の間に形状が変わったため、測り直してください。',
   'continuity-edge-missing': '選んだ辺が今の形状に見つかりません。選び直してください。',
   'continuity-free-edge': 'この辺には面が片側にしか無いため、つながりを調べられません。',
   'continuity-seam': 'この辺は1つの面の継ぎ目で、2つの面の間の辺ではありません。',
@@ -803,6 +986,24 @@ export function cadFailureReport(
   };
 }
 /** describeCode plus the part and the operation named by a kernel failure, found in `doc`. */
+/**
+ * CR3c: the closed chains a failed trim names (`trim-no-cut`, `trim-disconnected`), by number
+ * and elements: "1番目（l1、l2、l3、l4）". Undefined for other failures.
+ */
+export function trimChains(
+  doc: CadDocument,
+  e: { code: string; featureId?: string; failedPaths?: (string | number)[][] },
+): string | undefined {
+  if (e.code !== 'trim-no-cut' && e.code !== 'trim-disconnected') return;
+  const f = doc.features.find((x) => x.id === e.featureId);
+  if (f?.type !== 'trim' || !('sketchId' in f.args.tool) || !e.failedPaths?.length) return;
+  const all = [f.args.tool.elements, ...(f.args.chains ?? [])];
+  const named = e.failedPaths.flatMap((p) => {
+    const k = p[0] === 'tool' ? 0 : p[0] === 'chains' && typeof p[1] === 'number' ? p[1] + 1 : -1;
+    return all[k] ? [`${k + 1}番目（${all[k].join('、')}）`] : [];
+  });
+  return named.length ? named.join('、') : undefined;
+}
 export function describeFailure(doc: CadDocument, code: string, elementId?: string): string {
   const r = cadFailureReport(doc, { code, featureId: elementId });
   const where = [
@@ -965,6 +1166,12 @@ export class CadController {
   private progress: { done: number; total: number } | undefined;
   private diagnostic: CadDiagnostic | undefined;
   private selection: CadSelection = null;
+  private pmiFocus: { bodyId: string; itemId: string } | undefined;
+  private pmiView: { bodyId: string; viewId: string; chosen: number } | undefined;
+  /** How many times a saved view was chosen: choosing the same one again aims again. */
+  private pmiViewChoices = 0;
+  /** Parsed `pmi` assets by hash (null: the bytes are not an asset). */
+  private readonly pmiAssets = new Map<string, CadPmiAsset | null>();
   private collected: CadCollectedEdge[] = [];
   /** The last continuity check, with the content and pick it was for. */
   private continuity: (CadContinuityView & { contentHash: string }) | undefined;
@@ -972,6 +1179,11 @@ export class CadController {
   private comb: (CadCombView & { contentHash: string }) | undefined;
   /** The last curvature, with the content it was for. */
   private curvature: (CadCurvatureView & { contentHash: string }) | undefined;
+  /** CR3d: the gap and flush measurement, with the content it was for (and the first edge's index). */
+  private gapFlush: (CadGapFlushView & { contentHash: string; fromEdge: number }) | undefined;
+  private weldStart:
+    | { bodyId: string; pick: number; contentHash: string; face: CadTopologyRef }
+    | undefined;
   private rejections = 0;
   /** Latest run(); only its completion may clear `busy`. */
   private operation = 0;
@@ -994,7 +1206,13 @@ export class CadController {
   /** The drawing whose Finish waits on choosing broken references: Cancel there returns to it. */
   private suspendedSketch: Omit<CadSketchView, 'region'> | undefined;
   private stepImport:
-    | (CadStepImportPreview & { source: Uint8Array; brep: Uint8Array; buildHash: string })
+    | (Omit<CadStepImportPreview, 'resultLimitMm'> & {
+        source: Uint8Array;
+        brep: Uint8Array;
+        /** PMI-2: the body's `pmi` asset, when the import kept PMI. */
+        pmi?: Uint8Array;
+        buildHash: string;
+      })
     | undefined;
   constructor(private readonly options: CadControllerOptions) {
     this.coordinator = new CadCoordinator(options);
@@ -1073,6 +1291,20 @@ export class CadController {
       canStop: this.evaluatingEdit || this.coordinator.geometryState === 'reevaluating',
       diagnostic: this.diagnostic,
       selection: this.selection,
+      pmiFocus:
+        this.pmiFocus &&
+        this.selection?.kind === 'body' &&
+        this.selection.id === this.pmiFocus.bodyId &&
+        this.pmiItemCurrent(this.pmiFocus.bodyId, this.pmiFocus.itemId)
+          ? this.pmiFocus
+          : undefined,
+      pmiView:
+        this.pmiView &&
+        this.selection?.kind === 'body' &&
+        this.selection.id === this.pmiView.bodyId &&
+        ['current', 'changed'].includes(cadBodyPmi(content, this.pmiView.bodyId).status)
+          ? this.pmiView
+          : undefined,
       topology: own ? topologyInfo(own, this.selection) : undefined,
       canUndo: this.options.session.canUndo && !this.sketching,
       canRedo: this.options.session.canRedo && !this.sketching,
@@ -1095,6 +1327,18 @@ export class CadController {
       collectedEdges: this.collected,
       continuity: this.edgeView<CadContinuityView>(this.continuity, contentHash),
       comb: this.edgeView<CadCombView>(this.comb, contentHash),
+      gapFlush:
+        this.gapFlush?.contentHash === contentHash
+          ? (({ contentHash: _, fromEdge: __, ...view }) => view as CadGapFlushView)(this.gapFlush)
+          : undefined,
+      weldStart:
+        this.weldStart?.contentHash === contentHash
+          ? { bodyId: this.weldStart.bodyId, pick: this.weldStart.pick }
+          : undefined,
+      spotWelds:
+        evaluation?.status === 'ok' && evaluation.contentHash === contentHash
+          ? evaluation.spotWelds
+          : undefined,
       curvature:
         this.curvature?.contentHash === contentHash
           ? (({ contentHash: _, ...view }) => view)(this.curvature)
@@ -1108,6 +1352,7 @@ export class CadController {
       stepImport: this.stepImport && {
         fileName: this.stepImport.fileName,
         report: this.stepImport.report,
+        resultLimitMm: this.coordinator.content.kernelProfile.maxResultLinearToleranceMm,
       },
       sketch: this.sketching && {
         ...this.sketching,
@@ -1246,6 +1491,79 @@ export class CadController {
   };
   select(selection: CadSelection) {
     this.selection = selection;
+    if (selection?.kind !== 'body' || selection.id !== this.pmiFocus?.bodyId)
+      this.pmiFocus = undefined;
+    if (selection?.kind !== 'body' || selection.id !== this.pmiView?.bodyId)
+      this.pmiView = undefined;
+    this.emit();
+  }
+  /**
+   * PMI-2: the PMI a body carries from an import, with its asset read from the Host's bytes.
+   * `asset` is undefined while the Host has no bytes or when they are not a `pmi` asset.
+   */
+  bodyPmi(bodyId: string): CadBodyPmiView {
+    const content = this.coordinator.content;
+    const state = cadBodyPmi(content, bodyId);
+    if (state.status === 'none') return { state };
+    const ref = content.assets.find((a) => a.id === state.assetId);
+    if (!ref) return { state, unreadable: true };
+    let asset = this.pmiAssets.get(ref.sha256);
+    if (asset === undefined) {
+      const bytes = this.options.assets?.get(ref.sha256);
+      if (!bytes) return { state, unreadable: true };
+      asset = readCadPmiAsset(bytes) ?? null;
+      this.pmiAssets.set(ref.sha256, asset);
+    }
+    if (!asset) return { state, unreadable: true };
+    if (state.status === 'current') return { state, asset };
+    // PMI-4a: past a change of the shape, each item by the current evaluation's tracking (none
+    // while it is not there, or for a body whose PMI is not followed: all stale).
+    const mesh =
+      state.status === 'changed'
+        ? this.meshStore
+            .get(cadContentHash(content))
+            ?.find((m) => m.bodyId === bodyId && !m.beforeFailure && !m.lod)
+        : undefined;
+    const tracking = mesh?.pmi?.find((t) => t.featureId === state.featureId);
+    return {
+      state,
+      asset,
+      items: this.pmiItemStates(asset, tracking),
+      ...(tracking ? { tracking } : {}),
+    };
+  }
+  /** Item states by asset and tracking: both stay the same objects while nothing changes. */
+  private readonly pmiStates = new WeakMap<
+    CadPmiAsset,
+    { tracking: CadPmiTracking | undefined; items: Map<string, CadPmiItemState> }
+  >();
+  private pmiItemStates(asset: CadPmiAsset, tracking: CadPmiTracking | undefined) {
+    const hit = this.pmiStates.get(asset);
+    if (hit && hit.tracking === tracking) return hit.items;
+    const items = cadPmiItemStates(asset, tracking);
+    this.pmiStates.set(asset, { tracking, items });
+    return items;
+  }
+  /** Whether a body's PMI item is current: its body's PMI is, or the item is on its own. */
+  private pmiItemCurrent(bodyId: string, itemId: string) {
+    const view = this.bodyPmi(bodyId);
+    if (!view.asset) return false;
+    if (view.state.status === 'current') return true;
+    return view.items?.get(itemId)?.current === true;
+  }
+  /** PMI-2: highlights one PMI item's targets on the selected body (display only). */
+  focusPmi(itemId: string | undefined) {
+    const s = this.selection;
+    this.pmiFocus = itemId && s?.kind === 'body' ? { bodyId: s.id, itemId } : undefined;
+    this.emit();
+  }
+  /** PMI-3b: shows one saved view of the selected body's PMI, or all of it (display only). */
+  showPmiView(viewId: string | undefined) {
+    const s = this.selection;
+    this.pmiView =
+      viewId && s?.kind === 'body'
+        ? { bodyId: s.id, viewId, chosen: ++this.pmiViewChoices }
+        : undefined;
     this.emit();
   }
   /** An edge analysis for the current pick on the current content only. */
@@ -1396,6 +1714,67 @@ export class CadController {
     this.comb = { ...at, status: 'done', samples, scale: combScale(samples) };
     this.emit();
     return samples;
+  }
+  /**
+   * CR3d: takes the picked edge (a sheet's border) as the first edge of a gap and flush
+   * measurement; measuring from another body's edge follows with `measureGapFlush`.
+   */
+  chooseGapFlushEdge(): boolean {
+    const target = this.analysisTarget(true);
+    if (typeof target === 'string') return this.refuse(target) ?? false;
+    const { bodyId, pick, edge } = target.pick!;
+    this.gapFlush = {
+      from: { bodyId, pick },
+      status: 'chosen',
+      contentHash: target.contentHash,
+      fromEdge: edge,
+    };
+    this.emit();
+    return true;
+  }
+  /**
+   * CR3d: samples the gap and flush from the chosen first edge to the picked edge of another body
+   * on the document's exact build: 50 points at equal distances along the first edge, the gap
+   * across it in its face's tangent plane and the flush along its face's normal. Display only.
+   */
+  async measureGapFlush(): Promise<CadGapFlushReport | undefined> {
+    const first = this.gapFlush;
+    const target = this.analysisTarget(true);
+    if (typeof target === 'string') return this.refuse(target);
+    if (!first || first.contentHash !== target.contentHash)
+      return this.refuse('gap-flush-no-start');
+    if (!this.options.analyzeGapFlush) return this.refuse('kernel-unavailable');
+    const to = { bodyId: target.pick!.bodyId, pick: target.pick!.pick };
+    if (to.bodyId === first.from.bodyId) return this.refuse('gap-flush-same-body');
+    const base = { from: first.from, contentHash: first.contentHash, fromEdge: first.fromEdge };
+    const mine: NonNullable<typeof this.gapFlush> = { ...base, to, status: 'running' };
+    this.gapFlush = mine;
+    this.emit();
+    const result = await this.options.analyzeGapFlush(target.request, {
+      a: { bodyId: first.from.bodyId, edge: first.fromEdge },
+      b: { bodyId: to.bodyId, edge: target.pick!.edge },
+    });
+    if (this.gapFlush !== mine) return undefined;
+    // A refusal keeps the first edge, so another second edge can be tried.
+    this.gapFlush = { ...base, status: 'chosen' };
+    const refusal = this.analysisRefusal(
+      result.evaluation,
+      target.evaluation,
+      'gap-flush-mismatch',
+    );
+    if (refusal) return this.refuse(...refusal);
+    if (!result.gapFlush) return this.refuse('gap-flush-mismatch');
+    if ('code' in result.gapFlush) return this.refuse(result.gapFlush.code);
+    const { samples } = result.gapFlush;
+    const report = gapFlushReport(samples);
+    this.gapFlush = { ...base, to, status: 'done', samples, report };
+    this.emit();
+    return report;
+  }
+  /** CR3d: stops the gap and flush measurement and its display. */
+  clearGapFlush() {
+    this.gapFlush = undefined;
+    this.emit();
   }
   /** Stops showing the comb (and drops a comb still being sampled). */
   hideComb() {
@@ -1667,10 +2046,12 @@ export class CadController {
     try {
       return {
         bytes: exported.step,
-        report: stepReport(exported.step, active.length, {
-          sourceContentHash: contentHash,
-          buildHash: evaluation.buildHash,
-        }),
+        report: stepReport(
+          exported.step,
+          active.length,
+          { sourceContentHash: contentHash, buildHash: evaluation.buildHash },
+          exported.stepPmi,
+        ),
       };
     } catch (error) {
       if (error instanceof CadExportError) return refuse(error.code);
@@ -1689,7 +2070,13 @@ export class CadController {
     fileName: string,
     bytes: Uint8Array,
     /** R2b-5: reads the file as an assembly when the kernel's scan finds assembly usages. */
-    options: { assembly?: () => Promise<unknown> } = {},
+    options: {
+      assembly?: () => Promise<unknown>;
+      /** PMI-1: the user agreed to import the shape without the file's PMI. */
+      pmi?: 'discard';
+      /** PMI-1: the file has PMI the import would not keep; asks the user instead of failing. */
+      onPmi?: (report: CadStepPmiReport) => void;
+    } = {},
   ) {
     const refuse = (code: string, detail?: string) => {
       this.fail(code);
@@ -1707,11 +2094,26 @@ export class CadController {
     this.busy = true;
     this.diagnostic = undefined;
     this.emit();
-    const result = await this.options.importStep(profile, this.id('import'), bytes);
+    const result = await this.options.importStep(
+      profile,
+      this.id('import'),
+      bytes,
+      options.pmi ? { pmi: options.pmi } : {},
+    );
     if (operation === this.operation) this.busy = false;
     if (result.status !== 'ok' && result.code === 'step-assembly' && options.assembly) {
       this.emit();
       await options.assembly();
+      return undefined;
+    }
+    if (
+      result.status !== 'ok' &&
+      result.code === 'step-pmi-partial' &&
+      result.pmi &&
+      options.onPmi
+    ) {
+      this.emit();
+      options.onPmi(result.pmi);
       return undefined;
     }
     if (result.status !== 'ok') return refuse(result.code, result.detail);
@@ -1720,6 +2122,7 @@ export class CadController {
       report: result.report,
       source: bytes,
       brep: result.brep,
+      ...(result.pmi ? { pmi: result.pmi } : {}),
       buildHash: profile.buildHash,
     };
     this.emit();
@@ -1752,10 +2155,15 @@ export class CadController {
         kind,
         sha256,
         byteLength,
-        mediaType: kind === 'source-step' ? 'model/step' : 'model/x-occt-brep',
+        mediaType: cadAssetMediaTypes[kind],
       };
     const source = refFor('source-step', report.source.sha256, report.source.byteLength);
     const brep = refFor('normalized-brep', report.brep.sha256, report.brep.byteLength);
+    // PMI-2: the semantic PMI the import kept for the body.
+    const pmi =
+      report.pmiAsset && pending.pmi
+        ? refFor('pmi', report.pmiAsset.sha256, report.pmiAsset.byteLength)
+        : undefined;
     // Staging is pending input: Host save and version boundaries wait until the edit names the
     // stored bytes (or the staging fails), so no record is captured between the two.
     const operation = ++this.operation;
@@ -1766,6 +2174,7 @@ export class CadController {
       await assets.stage([
         { ref: source, bytes: pending.source },
         { ref: brep, bytes: pending.brep },
+        ...(pmi && pending.pmi ? [{ ref: pmi, bytes: pending.pmi }] : []),
       ]);
     } catch (error) {
       this.staging = false;
@@ -1781,7 +2190,7 @@ export class CadController {
     const name = [...pending.fileName].slice(0, 256).join('') || 'STEP';
     return this.run({
       type: 'insertImportedBody',
-      assets: [source, brep],
+      assets: pmi ? [source, brep, pmi] : [source, brep],
       feature: {
         id,
         name,
@@ -1794,6 +2203,11 @@ export class CadController {
           importer: { id: content.kernelProfile.id, buildHash: pending.buildHash },
           sourceUnit: report.sourceUnit,
           scaleToMm: report.scaleToMm,
+          // #820: a shape less precise than the standard limit keeps its tolerance as read.
+          ...(report.maxToleranceMm > cadTolerance.maxResultLinearToleranceMm && {
+            maxToleranceMm: report.maxToleranceMm,
+          }),
+          ...(pmi && { pmiAssetId: pmi.id }),
         },
       },
       body: this.newBody(id, name.replace(/\.(step|stp)$/i, '') || 'STEP'),
@@ -1960,6 +2374,9 @@ export class CadController {
         shown.message += ` 離れている辺：${gaps
           .map((g) => `${formatTopoName(g.name)}（${g.featureId}）`)
           .join('、')}`;
+      // CR3c: a trim's chains that cut nothing or split the kept sheet are named.
+      const chains = trimChains(prepared.candidate, prepared.evaluation);
+      if (chains && shown) shown.message += ` 該当する閉じた線：${chains}`;
     } else if (prepared.status === 'rejected') this.fail(prepared.code);
     // A stale result superseded by a newer run leaves the outcome to it. Cancelled by history or
     // a Host sync instead, it resets the Inspector so no field keeps the cancelled value.
@@ -2341,6 +2758,10 @@ export class CadController {
     return true;
   }
   /** Whether an edit is still prepared (another edit, history or a sync drops it). */
+  /** Current edit authority from the Host, read now (not the last snapshot's). */
+  get editable() {
+    return this.options.canEdit();
+  }
   get editPrepared() {
     return !!this.prepared;
   }
@@ -2488,7 +2909,11 @@ export class CadController {
       this.emit();
       return true;
     } catch (error) {
-      this.sketching = { ...current, problem: this.sketchProblem(error, next, named) };
+      // A change refused before it gave a drawing names its elements on the current one.
+      this.sketching = {
+        ...current,
+        problem: this.sketchProblem(error, next ?? current.sketch, named),
+      };
       this.rejections++;
       this.emit();
       return false;
@@ -2546,6 +2971,23 @@ export class CadController {
    */
   sketchSpline(poles: SketchPointInput[], closed: boolean, degree: 2 | 3 | 5 = 3, through = false) {
     return this.add((s) => addSpline(s, poles, degree, closed, this.sketchIds, through));
+  }
+  /**
+   * CR3a: adds the selected chain moved `distance` mm sideways (left of an open chain as its first
+   * selected element runs, out of a closed one; negative: the other side) as new elements without
+   * constraints. Returns their IDs, or undefined when refused (the selection stays highlighted).
+   */
+  sketchOffset(ids: string[], distance: number) {
+    let added: string[] | undefined;
+    const taken = this.draw(
+      (s) => {
+        const r = addOffset(s, ids, distance, this.sketchIds);
+        added = r.ids;
+        return r.sketch;
+      },
+      () => ids,
+    );
+    return taken ? added : undefined;
   }
   /** Adds a constraint; a redundant or conflicting one is refused and highlighted. */
   sketchConstrain(k: SketchConstraintInput) {
@@ -2689,6 +3131,38 @@ export class CadController {
       type: 'insertFeatures',
       features: [feature],
       bodies: [this.newBody(id, name)],
+    });
+  }
+  /**
+   * WM1a: a standard involute spur gear (module 1 mm, 24 teeth, 20°, 5 mm wide, 5 mm bore) at the
+   * next free spot; its teeth, module, windows and the rest are edited in the inspector.
+   */
+  addGear() {
+    const id = this.id('gear');
+    return this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name: 'Gear',
+          type: 'spurGear',
+          inputFeatureIds: [],
+          args: {
+            module: mm(1),
+            teeth: { literal: 24 },
+            profile: 'involute',
+            pressureAngle: { literalRad: (20 * Math.PI) / 180 },
+            profileShift: 0,
+            addendum: 1,
+            dedendum: 1.25,
+            faceWidth: mm(5),
+            bore: mm(5),
+            origin: this.nextOrigin(),
+            orientation: identityQuaternion(),
+          },
+        },
+      ],
+      bodies: [this.newBody(id, 'Gear')],
     });
   }
   /** A width parameter, a rectangle profile and an extrusion: the parametric starting point. */
@@ -2940,6 +3414,53 @@ export class CadController {
     return applied;
   }
   /**
+   * CR4d: a member: a section of `kind` (mm dimensions) swept along the open chain `pathId`
+   * draws, into a new sheet body, its height along the sketch's normal or in its plane.
+   */
+  async addProfileSweep(
+    pathId: string,
+    profile: {
+      kind: CadProfileKind;
+      heightMm: number;
+      widthMm: number;
+      flangeMm: number;
+      radiusMm: number;
+    },
+    up: 'normal' | 'inPlane',
+    flip: boolean,
+  ) {
+    const path = this.coordinator.content.sketches.find((s) => s.id === pathId);
+    const elements = path && sketchDefaultPath(path);
+    if (!elements) return this.refuse('sweep-path') ?? false;
+    const id = this.id('member');
+    const applied = await this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name: 'Member',
+          type: 'profileSweep',
+          inputFeatureIds: [],
+          args: {
+            path: { sketchId: pathId, elements },
+            profile: {
+              kind: profile.kind,
+              height: mm(profile.heightMm),
+              width: mm(profile.widthMm),
+              flange: mm(profile.flangeMm),
+              radius: mm(profile.radiusMm),
+            },
+            up,
+            flip,
+          },
+        },
+      ],
+      bodies: [this.newBody(id, 'Member')],
+    });
+    if (applied) this.select({ kind: 'feature', id });
+    return applied;
+  }
+  /**
    * Keeps the picked edge, as a reference on its body's result, for a boundary surface, fill or
    * loft section (R2a-2c). An edge already kept is not kept twice.
    */
@@ -2970,7 +3491,7 @@ export class CadController {
    */
   async addBoundary(
     kind: 'boundarySurface' | 'fill',
-    curves: { curve: CadCurveSource; continuity?: 'G0' | 'G1' }[],
+    curves: { curve: CadCurveSource; continuity?: 'G0' | 'G1' | 'G2' }[],
   ) {
     const id = this.id(kind === 'fill' ? 'fill' : 'boundary');
     const applied = await this.run({
@@ -3003,6 +3524,31 @@ export class CadController {
     return applied;
   }
   /**
+   * CR1d: a Gordon surface through `u` curves crossed by `v` curves (2–16 each, in order), each
+   * pair meeting within `toleranceMm`, into a new sheet body. Collected edges are used up.
+   */
+  async addCurveNetwork(u: CadCurveSource[], v: CadCurveSource[], toleranceMm = 0.01) {
+    const id = this.id('network');
+    const applied = await this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name: 'Curve network',
+          type: 'curveNetwork',
+          inputFeatureIds: [],
+          args: { u, v, toleranceMm },
+        },
+      ],
+      bodies: [this.newBody(id, 'Surface')],
+    });
+    if (applied) {
+      if ([...u, ...v].some((c) => 'edge' in c)) this.collected = [];
+      this.select({ kind: 'feature', id });
+    }
+    return applied;
+  }
+  /**
    * Trims sheet `body` with a sketch's closed chain cut along the sketch's normal, a plane, or
    * another sheet body, keeping the pieces on side `keep` (R2a-3).
    */
@@ -3010,14 +3556,19 @@ export class CadController {
     body: CadBody,
     tool: { sketchId: string } | { plane: { origin: Vec3; normal: Vec3 } } | { bodyId: string },
     keep: 'inside' | 'outside' | 'front' | 'back',
+    ifMissed?: 'skip',
   ) {
     const doc = this.coordinator.content;
     let made: CadTrimTool;
+    // CR3c: a sketch of several closed chains (a row of windows) cuts them all at once.
+    let chains: string[][] | undefined;
     if ('sketchId' in tool) {
       const sketch = doc.sketches.find((s) => s.id === tool.sketchId);
-      const elements = sketch && sketchDefaultPath(sketch, 'allow');
-      if (!elements) return Promise.resolve(this.refuse('surface-path') ?? false);
-      made = { sketchId: tool.sketchId, elements };
+      const one = sketch && sketchDefaultPath(sketch, 'allow');
+      const all = one ? [one] : sketch && sketchDefaultChains(sketch);
+      if (!all) return Promise.resolve(this.refuse('surface-path') ?? false);
+      made = { sketchId: tool.sketchId, elements: all[0]! };
+      if (all.length > 1) chains = all.slice(1);
     } else if ('plane' in tool)
       made = { plane: { origin: position(...tool.plane.origin), normal: tool.plane.normal } };
     else {
@@ -3025,7 +3576,115 @@ export class CadController {
       if (!other) return Promise.resolve(this.refuse('trim-tool') ?? false);
       made = { featureId: other.resultFeatureId };
     }
-    return this.detail(body, 'trim', 'Trim', { tool: made, keep });
+    return this.detail(body, 'trim', 'Trim', {
+      tool: made,
+      keep,
+      ...(chains && { chains }),
+      ...(ifMissed && 'sketchId' in made && { ifMissed }),
+    });
+  }
+  /**
+   * CR3b: cuts a panel out of sheet `body` along the closed chain sketch `sketchId` draws, in one
+   * edit: the pieces `keep` of the chain (inside: a door in the skin) become a new sheet body,
+   * the body keeps the other side, and `gapMm` (0.5–10 mm) lies between them, half on each side
+   * of the chain.
+   */
+  async cutPanel(
+    body: CadBody,
+    sketchId: string,
+    gapMm: number,
+    keep: 'inside' | 'outside' = 'inside',
+  ) {
+    const sketch = this.coordinator.content.sketches.find((s) => s.id === sketchId);
+    const elements = sketch && sketchDefaultPath(sketch, 'allow');
+    if (!elements) return this.refuse('surface-path') ?? false;
+    const tool = { sketchId, elements };
+    const gap = mm(gapMm);
+    const trimId = this.id('trim');
+    const panelId = this.id('panel');
+    const name = `${body.name} panel`;
+    const applied = await this.run({
+      type: 'detailBody',
+      bodyId: body.id,
+      placementFeatureId: this.id('placement'),
+      feature: {
+        id: trimId,
+        name: 'Trim',
+        type: 'trim',
+        inputFeatureIds: [body.resultFeatureId],
+        args: { tool, keep: keep === 'inside' ? 'outside' : 'inside', gap },
+      },
+      panel: {
+        feature: {
+          id: panelId,
+          name,
+          type: 'panel',
+          inputFeatureIds: [],
+          args: {
+            source: { featureId: body.resultFeatureId },
+            tool: { sketchId, elements: [...elements] },
+            keep,
+            gap,
+          },
+        },
+        body: this.newBody(panelId, name),
+      },
+    });
+    if (applied) this.select({ kind: 'feature', id: panelId });
+    return applied;
+  }
+  /**
+   * CR2a: divides sheet `body` along the chain sketch `sketchId` draws (open, or one loop), carried
+   * along the sketch's normal, keeping every piece.
+   */
+  splitBody(body: CadBody, sketchId: string) {
+    const sketch = this.coordinator.content.sketches.find((s) => s.id === sketchId);
+    const elements = sketch && sketchDefaultPath(sketch, 'allow');
+    if (!elements) return Promise.resolve(this.refuse('surface-path') ?? false);
+    return this.detail(body, 'split', 'Split', { tool: { sketchId, elements } });
+  }
+  /**
+   * CR6d: a round groove of `radiusMm` in solid `body` along the chain sketch `sketchId` draws,
+   * carried along the sketch's normal onto the nearest faces.
+   */
+  groove(body: CadBody, sketchId: string, radiusMm: number) {
+    const sketch = this.coordinator.content.sketches.find((s) => s.id === sketchId);
+    const elements = sketch && sketchDefaultPath(sketch, 'allow');
+    if (!elements) return Promise.resolve(this.refuse('surface-path') ?? false);
+    return this.detail(body, 'groove', 'Groove', {
+      tool: { sketchId, elements },
+      radius: mm(radiusMm),
+    });
+  }
+  /**
+   * CR2c: a press line on sheet `body` along the chain sketch `sketchId` draws: the pieces on
+   * `side` (`left` is the inside of a closed chain, `right` the outside) moved `depthMm` along
+   * the sheet's normal (`front`) or against it (`back`), the step's borders rounded by
+   * `radiusMm`.
+   */
+  pressLine(
+    body: CadBody,
+    sketchId: string,
+    options: {
+      side: 'left' | 'right';
+      depthMm: number;
+      toward: 'front' | 'back';
+      radiusMm: number;
+    },
+  ) {
+    const sketch = this.coordinator.content.sketches.find((s) => s.id === sketchId);
+    const elements = sketch && sketchDefaultPath(sketch, 'allow');
+    if (!elements) return Promise.resolve(this.refuse('surface-path') ?? false);
+    const path = sketchPath(sketch, elements, 'allow');
+    const closed = !('code' in path) && path.closed;
+    const side = closed ? (options.side === 'left' ? 'inside' : 'outside') : options.side;
+    return this.detail(body, 'pressLine', 'Press line', {
+      tool: { sketchId, elements },
+      side,
+      depth: mm(options.depthMm),
+      toward: options.toward,
+      radius: mm(options.radiusMm),
+    });
   }
   /**
    * Sews sheet bodies into `target`'s: joined where their edges lie within `toleranceMm`, a solid
@@ -3043,6 +3702,62 @@ export class CadController {
       placementFeatureId: this.id('placement'),
     });
     if (applied) this.select({ kind: 'feature', id: sewFeatureId });
+    return applied;
+  }
+  /**
+   * CR2b: a new sheet body, sheet `body` moved `distanceMm` along its normal (`front`) or against
+   * it (`back`). The source body stays.
+   */
+  async offsetSurface(body: CadBody, distanceMm: number, side: 'front' | 'back') {
+    const id = this.id('offset');
+    const applied = await this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name: `${body.name} offset`,
+          type: 'offsetSurface',
+          inputFeatureIds: [],
+          args: { source: { featureId: body.resultFeatureId }, distance: mm(distanceMm), side },
+        },
+      ],
+      bodies: [this.newBody(id, `${body.name} offset`)],
+    });
+    if (applied) this.select({ kind: 'feature', id });
+    return applied;
+  }
+  /**
+   * CR4b: a new body, `body` reflected in the plane through the origin normal to `axis` (a left
+   * part's right copy across y = 0). The body stays; the copy follows it.
+   */
+  async mirrorCopy(body: CadBody, axis: 'x' | 'y' | 'z') {
+    const id = this.id('mirror');
+    // Within the name limit, however long the body's name.
+    const name = `${Array.from(body.name)
+      .slice(0, cadLimits.nameCodePoints - ' mirrored'.length)
+      .join('')} mirrored`;
+    const normal: [number, number, number] = [
+      axis === 'x' ? 1 : 0,
+      axis === 'y' ? 1 : 0,
+      axis === 'z' ? 1 : 0,
+    ];
+    const applied = await this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name,
+          type: 'mirrorCopy',
+          inputFeatureIds: [],
+          args: {
+            source: { featureId: body.resultFeatureId },
+            plane: { origin: position(0, 0, 0), normal },
+          },
+        },
+      ],
+      bodies: [this.newBody(id, name)],
+    });
+    if (applied) this.select({ kind: 'feature', id });
     return applied;
   }
   /** A solid of sheet `body` `thicknessMm` thick towards its normal, away, or both (R2a-3). */
@@ -3178,13 +3893,138 @@ export class CadController {
     if (applied) this.select({ kind: 'feature', id });
     return applied;
   }
-  /** A constant fillet or chamfer of the picked edge (r1-modeling.md, Surface). */
-  blendPickedEdge(type: 'fillet' | 'chamfer', sizeMm: number) {
+  /**
+   * A fillet or chamfer of the picked edge (r1-modeling.md, Surface). A fillet's radius may vary
+   * (CR1e): from `sizeMm` at the edge's start to `endMm` at its end, through `points` between.
+   */
+  blendPickedEdge(
+    type: 'fillet' | 'chamfer',
+    sizeMm: number,
+    vary?: { endMm: number; points?: { at: number; radiusMm: number }[] },
+  ) {
     const p = this.picked('edge');
     if (!p) return Promise.resolve(false);
-    return type === 'fillet'
-      ? this.detail(p.body, 'fillet', 'Fillet', { edges: [p.ref], radius: mm(sizeMm) })
-      : this.detail(p.body, 'chamfer', 'Chamfer', { edges: [p.ref], distance: mm(sizeMm) });
+    if (type === 'chamfer')
+      return this.detail(p.body, 'chamfer', 'Chamfer', { edges: [p.ref], distance: mm(sizeMm) });
+    return this.detail(p.body, 'fillet', 'Fillet', {
+      edges: [p.ref],
+      radius: mm(sizeMm),
+      ...(vary && { radiusEnd: mm(vary.endMm) }),
+      ...(vary?.points?.length && {
+        radii: vary.points.map((x) => ({ at: x.at, radius: mm(x.radiusMm) })),
+      }),
+    });
+  }
+  /**
+   * CR2d: flares the picked free edge of a sheet (a wheel arch) out by `heightMm` along the
+   * chain sketch `sketchId` draws, the fill joining the sheet G1 or G2 there.
+   */
+  flarePickedEdge(sketchId: string, heightMm: number, continuity: 'G1' | 'G2') {
+    const p = this.picked('edge');
+    if (!p) return Promise.resolve(false);
+    const sketch = this.coordinator.content.sketches.find((s) => s.id === sketchId);
+    const elements = sketch && sketchDefaultPath(sketch, 'allow');
+    if (!elements) return Promise.resolve(this.refuse('surface-path') ?? false);
+    return this.detail(p.body, 'flare', 'Flare', {
+      tool: { sketchId, elements },
+      arch: p.ref,
+      height: mm(heightMm),
+      continuity,
+    });
+  }
+  /**
+   * CR4c: a flange `widthMm` wide at `angleDeg` from the sheet, turned to its `toward` side, along
+   * the picked free edge, or along every collected free edge of its body when the picked edge is
+   * one of them.
+   */
+  async flangePickedEdge(widthMm: number, angleDeg: number, toward: 'front' | 'back') {
+    const p = this.picked('edge');
+    if (!p) return false;
+    const key = (r: CadTopologyRef) => JSON.stringify([r.featureId, r.name, r.select]);
+    const collected = this.collected
+      .filter((c) => c.free && c.ref.featureId === p.ref.featureId)
+      .map((c) => c.ref);
+    const all = collected.some((r) => key(r) === key(p.ref));
+    const applied = await this.detail(p.body, 'flange', 'Flange', {
+      edges: all ? collected : [p.ref],
+      width: mm(widthMm),
+      angle: { literalRad: (angleDeg * Math.PI) / 180 },
+      toward,
+    });
+    // The collected edges are used up, as by a fill.
+    if (applied && all) this.clearCollectedEdges();
+    return applied;
+  }
+  /**
+   * CR4e: takes the picked face (a flange) as the first flange of a new spot weld row; the row
+   * is made on another body's face with `weldToPickedFace`.
+   */
+  chooseWeldFlange(): boolean {
+    const p = this.picked('face');
+    if (!p) return false;
+    this.weldStart = {
+      bodyId: p.body.id,
+      pick: p.pick,
+      contentHash: cadContentHash(this.coordinator.content),
+      face: p.ref,
+    };
+    this.emit();
+    return true;
+  }
+  /** CR4e: forgets the chosen first flange. */
+  clearWeldFlange() {
+    this.weldStart = undefined;
+    this.emit();
+  }
+  /**
+   * CR4e: a spot weld row from the chosen first flange to the picked face of another body,
+   * `pitchMm` apart and at least `endDistanceMm` from the first flange's ends.
+   */
+  async weldToPickedFace(
+    pitchMm: number = cadSpotWeldLimits.defaultPitchMm,
+    endDistanceMm: number = cadSpotWeldLimits.defaultEndDistanceMm,
+    maxGapMm: number = cadSpotWeldLimits.defaultMaxGapMm,
+  ): Promise<string | undefined> {
+    const start = this.weldStart;
+    const content = this.coordinator.content;
+    if (!start || start.contentHash !== cadContentHash(content))
+      return this.refuse('spot-weld-no-start');
+    const p = this.picked('face');
+    if (!p) return undefined;
+    if (p.body.id === start.bodyId) return this.refuse('spot-weld-same-body');
+    const id = this.id('welds');
+    const n = (content.spotWelds?.length ?? 0) + 1;
+    const applied = await this.run({
+      type: 'setSpotWeld',
+      weld: {
+        id,
+        name: `Spot welds ${n}`,
+        flanges: [
+          { bodyId: start.bodyId, face: start.face },
+          { bodyId: p.body.id, face: p.ref },
+        ],
+        pitchMm,
+        endDistanceMm,
+        maxGapMm,
+      },
+    });
+    if (!applied) return undefined;
+    this.weldStart = undefined;
+    this.emit();
+    return id;
+  }
+  /** CR4e: changes a spot weld row's pitch, end distance or largest gap. */
+  updateSpotWeld(
+    id: string,
+    change: Partial<Pick<CadSpotWeld, 'pitchMm' | 'endDistanceMm' | 'maxGapMm'>>,
+  ) {
+    const weld = this.coordinator.content.spotWelds?.find((w) => w.id === id);
+    if (!weld) return Promise.resolve(this.refuse('target-missing', id) ?? false);
+    return this.run({ type: 'setSpotWeld', weld: { ...weld, ...change } });
+  }
+  /** CR4e: removes a spot weld row. */
+  removeSpotWeld(id: string) {
+    return this.run({ type: 'removeSpotWeld', id });
   }
   /** Hollows the picked face's body to `thicknessMm`, leaving that face open. */
   shellPickedFace(thicknessMm: number, side: 'inside' | 'outside' = 'inside') {

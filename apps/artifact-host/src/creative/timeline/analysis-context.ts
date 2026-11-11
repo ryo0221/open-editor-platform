@@ -7,6 +7,7 @@ import { isDocument } from '@editor-platform/document/model';
 import { readTimelineTable, type TimelineRole, type TimelineRow, type TimelineRef } from './table';
 import type { TimelineWorkbench } from './workbench';
 import type { CreativeWorkspaceLinksV2 } from '../workspace/model';
+import { readWorkspaceLinks } from '../workspace/links';
 import { TL1_LIMITS } from './tl1-schema';
 import { verifyNewReferences } from './refs';
 export const TIMELINE_DEPENDENCY_RULES = 'tl-deps/1';
@@ -116,7 +117,12 @@ export async function captureTimelineCandidate(
     ...(virtual ? {} : { localRevision: revision }),
   };
 }
-export class TimelineAnalysisContext {
+/** Host-owned read authority. A saved comparison requires no EditorSession/workbench creation. */
+export type TimelineSavedComparisonSource = Pick<
+  TimelineWorkbench,
+  'links' | 'source' | 'readable' | 'captureAccess' | 'accessEpoch'
+>;
+export class TimelineAnalysisContext<W extends TimelineSavedComparisonSource = TimelineWorkbench> {
   readonly links: CreativeWorkspaceLinksV2;
   readonly request: TimelineAnalysisRequest;
   readonly roles: Map<string, TimelineRole>;
@@ -131,12 +137,33 @@ export class TimelineAnalysisContext {
   private outsideTimelineCitations = new Set<string>();
   private substitutions = new Map<string, TimelineSubstitution>();
   private constructor(
-    readonly workbench: TimelineWorkbench,
+    readonly workbench: W,
     input: TimelineAnalysisRequest,
   ) {
     this.links = structuredClone(workbench.links);
     this.request = structuredClone(input);
     this.roles = rolesOf(this.links);
+  }
+  /** Saved-only comparison context. No draft/base/candidate fallback is permitted. */
+  static async createSaved(w: TimelineSavedComparisonSource, roots: readonly Exact[]) {
+    if (readWorkspaceLinks(w.links).schemaVersion !== 2)
+      throw Error('保存版比較には明示されたStory/role対応が必要です。');
+    const c = new TimelineAnalysisContext(w, {});
+    const links = canonicalJson(c.links),
+      epoch = w.accessEpoch;
+    c.guards.push(() => canonicalJson(w.links) === links && w.accessEpoch === epoch);
+    if (new TextEncoder().encode(canonicalJson(roots)).byteLength > TL1_LIMITS.projectionBytes)
+      throw Error('保存版比較の入力が上限を超えます。');
+    for (const ref of roots) {
+      if (c.adopted.has(ref.artifact) || !c.roles.has(ref.artifact))
+        throw Error('保存版比較のowner・roleが不正です。');
+      c.adopted.set(ref.artifact, { version: ref.version, hash: ref.hash });
+      const t = await c.exact(ref);
+      if (t) c.roots.set(ref.artifact, t);
+    }
+    if (!c.roots.has(c.links.story.worldSettings)) c.partial = true;
+    c.assertCurrent();
+    return c;
   }
   static async create(w: TimelineWorkbench, input: TimelineAnalysisRequest = {}) {
     if (new TextEncoder().encode(canonicalJson(input)).byteLength > TL1_LIMITS.projectionBytes)
@@ -341,6 +368,7 @@ export class TimelineAnalysisContext {
     if (
       !v ||
       a?.id !== ref.artifact ||
+      a.kind !== 'data' ||
       !role ||
       v.contentHash !== ref.hash ||
       (await contentHash(v.content)) !== ref.hash

@@ -10,6 +10,7 @@ import {
   fixtureKernel,
   fixturePart,
   fixtureVersion,
+  f26Panel,
   r2bParts,
   type CadDocument,
   type CadPartDef,
@@ -18,6 +19,7 @@ import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { readImportFiles } from '../app/import-artifact';
 import type { StoredArtifact } from '../model';
 import {
+  cadPartArtifact,
   cadPartClosure,
   createCadPartSource,
   createCadPartStore,
@@ -228,5 +230,34 @@ describe('retained part closure (R2b-1, CAD53)', () => {
     // ST-85: a saved version reads by its number, not its ID.
     expect(source.versionLabel?.(plate.id, plate.versions[0]!.versionId)).toBe('v1');
     expect(source.versionLabel?.(plate.id, 'nope')).toBeUndefined();
+  });
+
+  it('makes a part Artifact with its first version, readable as a part (CR3e)', async () => {
+    // TS-1518, ST-257.
+    const content = f26Panel();
+    const records: StoredArtifact[] = [];
+    const source = createCadPartSource({
+      records: () => records,
+      currentId: 'car',
+      open: () => {},
+      create: async (record) => void records.push(record),
+    });
+    const made = await source.createPart!('Door', content);
+    expect(records.map((r) => [r.kind, r.name, r.versions.length])).toEqual([['cad', 'Door', 1]]);
+    expect(made).toEqual({
+      artifactId: records[0]!.id,
+      versionId: records[0]!.versions[0]!.versionId,
+      contentHash: cadContentHash(content),
+    });
+    expect(records[0]!.draft.baseVersionId).toBe(made.versionId);
+    const read = await source.readVersion(made.artifactId, made.versionId);
+    expect(cadContentHash(read.content)).toBe(made.contentHash);
+    expect(read.closure).toEqual([]);
+    expect(await source.list()).toHaveLength(1);
+    // Without a Host that stores records, no part is made.
+    expect(
+      createCadPartSource({ records: () => [], currentId: 'car', open: () => {} }).createPart,
+    ).toBeUndefined();
+    await expect(cadPartArtifact('Rig', r2bParts().assembly)).rejects.toThrow('part-invalid');
   });
 });

@@ -106,12 +106,37 @@ function box(lo: number[], hi: number[], color: string): CharacterPropMesh {
 }
 const armBase = box([-150, -150, 0], [150, 150, 200], '#d0661f');
 const armLink = box([0, -60, 200], [900, 60, 320], '#e3a21a');
+// MR7: a tool held at the link's tip or set on the base (a mount with two candidates).
+const armTool = box([-40, -40, 0], [40, 40, 80], '#4a7bd0');
+const toolAt = (joint: string, a: number): [number, number, number] =>
+  joint === 'j-tool-base' ? [0, 0, 200] : [900 * Math.cos(a), 900 * Math.sin(a), 320];
 const armChoice: CharacterPropChoice = {
   artifactId: 'cad-arm',
   versionId: 'v-arm-1',
   contentHash: 'c'.repeat(64),
   label: 'Robot arm — v1',
 };
+// MR4: a second version of the arm whose turn is limited to ±90°.
+const armChoice2: CharacterPropChoice = {
+  ...armChoice,
+  versionId: 'v-arm-2',
+  contentHash: 'd'.repeat(64),
+  label: 'Robot arm — v2',
+};
+const armJoints = (limit: number) => ({
+  joints: [
+    {
+      id: 'j-turn',
+      name: 'Turn',
+      values: [{ key: 'angle' as const, saved: 0, min: -limit, max: limit }],
+    },
+  ],
+  followers: [],
+  // MR7: v2 has no mount for the tool.
+  ...(limit === Math.PI
+    ? { mounts: [{ id: 'm-tool', joints: ['j-tool-tip', 'j-tool-base'] }] }
+    : {}),
+});
 const armView: CharacterPropView =
   params.get('props') === 'failed'
     ? { status: 'failed', message: 'part-build-mismatch' }
@@ -124,8 +149,72 @@ const armView: CharacterPropView =
             values: [{ key: 'angle', saved: 0, min: -Math.PI, max: Math.PI }],
           },
         ],
-        draw: (values) => {
+        // MR4: the version's forms; one no longer fits its joints.
+        forms: [
+          { id: 'f-folded', name: 'Folded', values: { 'j-turn': { angle: 0 } } },
+          { id: 'f-open', name: 'Open', values: { 'j-turn': { angle: Math.PI / 2 } } },
+          { id: 'f-old', name: 'Old', values: {}, problem: 'configuration-stale' },
+          // MR7: the tool in hand, then set on the base with the link turned away.
+          {
+            id: 'f-hold',
+            name: 'Holding',
+            values: { 'j-turn': { angle: 0 } },
+            mounts: { 'm-tool': 'j-tool-tip' },
+          },
+          {
+            id: 'f-stow',
+            name: 'Stowed',
+            values: { 'j-turn': { angle: Math.PI / 2 } },
+            mounts: { 'm-tool': 'j-tool-base' },
+          },
+        ],
+        mounts: [
+          {
+            id: 'm-tool',
+            name: 'Tool',
+            joints: [
+              { id: 'j-tool-tip', name: 'Tip' },
+              { id: 'j-tool-base', name: 'Base' },
+            ],
+            active: 'j-tool-tip',
+          },
+        ],
+        // MR5: the link hits the base past 100° (a stand-in for the Host's mesh check).
+        checkInterferenceAlong: async (samples) => {
+          const hits = samples
+            .filter((s) => (s.values.get('j-turn')?.angle ?? 0) > (100 * Math.PI) / 180)
+            .map((s) => ({
+              tick: s.tick,
+              overlaps: [
+                {
+                  a: 'Base',
+                  b: 'Link',
+                  aId: 'base',
+                  bId: 'link',
+                  kind: 'intersect' as const,
+                  depthMm: 2,
+                },
+              ],
+            }));
+          // MR7: a switch moves the tool unless the link is at 0° (where tip and base agree, a
+          // stand-in for the Host's gap).
+          const jumps = [];
+          let before = 'j-tool-tip';
+          for (const s of samples) {
+            const now = s.mounts?.get('m-tool') ?? 'j-tool-tip';
+            const a = s.values.get('j-turn')?.angle ?? 0;
+            if (now !== before && Math.abs(a) > 1e-6) {
+              const [p, q] = [toolAt(before, a), toolAt(now, a)];
+              const mm = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+              jumps.push({ tick: s.tick, mount: 'm-tool', from: before, to: now, mm, rad: 0 });
+            }
+            before = now;
+          }
+          return { status: 'ok', samples: samples.length, hits, unchecked: [], jumps };
+        },
+        draw: (values, mounts) => {
           const a = values.get('j-turn')?.angle ?? 0;
+          const tool = toolAt(mounts?.get('m-tool') ?? 'j-tool-tip', a);
           return [
             {
               mesh: armBase,
@@ -143,9 +232,75 @@ const armView: CharacterPropView =
                 scale: [1, 1, 1],
               }),
             },
+            {
+              mesh: armTool,
+              matrix: composeMat4({ translation: tool, rotation: [0, 0, 0, 1], scale: [1, 1, 1] }),
+            },
           ];
         },
       };
+
+// WM4: a fake watch movement: a balance, a pallet fork and an escape wheel (a continuous joint,
+// no limits), with a seconds hand that follows the escape wheel (1/12, as a 20-tooth wheel at
+// 28,800 beats per hour turns 12 times a minute) and keeps within ±180°.
+const watchChoice: CharacterPropChoice = {
+  artifactId: 'cad-watch',
+  versionId: 'v-watch-1',
+  contentHash: 'e'.repeat(64),
+  label: 'Watch movement — v1',
+};
+const watchJoints = [
+  {
+    id: 'j-balance',
+    name: 'Balance',
+    values: [{ key: 'angle' as const, saved: 0, min: -2 * Math.PI, max: 2 * Math.PI }],
+  },
+  {
+    id: 'j-fork',
+    name: 'Fork',
+    values: [{ key: 'angle' as const, saved: 0, min: -0.5, max: 0.5 }],
+  },
+  { id: 'j-escape', name: 'Escape wheel', values: [{ key: 'angle' as const, saved: 0 }] },
+];
+const turnedAbout = (centre: [number, number, number], a: number) =>
+  composeMat4({
+    translation: [
+      centre[0] - centre[0] * Math.cos(a) + centre[1] * Math.sin(a),
+      centre[1] - centre[0] * Math.sin(a) - centre[1] * Math.cos(a),
+      0,
+    ],
+    rotation: [0, 0, Math.sin(a / 2), Math.cos(a / 2)],
+    scale: [1, 1, 1],
+  });
+const watchMeshes = {
+  balance: box([-50, -4, 0], [50, 4, 4], '#c8a040'),
+  fork: box([60, -2, 0], [100, 2, 3], '#b03030'),
+  escape: box([110, -15, 0], [140, 15, 3], '#4060c0'),
+  hand: box([-2, 0, 10], [2, 60, 11], '#202020'),
+};
+const watchView: CharacterPropView = {
+  status: 'ready',
+  joints: watchJoints,
+  // The seconds hand (`j-hand`, following the escape wheel at −1/12) keeps within ±180°.
+  // MR4: a form with the escape wheel turned 2,200°, where the hand would be past its limits.
+  forms: [
+    { id: 'f-rest', name: 'At rest', values: { 'j-escape': { angle: 0 } } },
+    { id: 'f-far', name: 'Turned far', values: { 'j-escape': { angle: (2200 * Math.PI) / 180 } } },
+  ],
+  limitViolation: (values) =>
+    Math.abs((values.get('j-escape')?.angle ?? 0) / 12) > Math.PI
+      ? { joint: 'j-hand', key: 'angle' }
+      : undefined,
+  draw: (values) => {
+    const a = (j: string) => values.get(j)?.angle ?? 0;
+    return [
+      { mesh: watchMeshes.balance, matrix: turnedAbout([0, 0, 0], a('j-balance')) },
+      { mesh: watchMeshes.fork, matrix: turnedAbout([80, 0, 0], a('j-fork')) },
+      { mesh: watchMeshes.escape, matrix: turnedAbout([125, 0, 0], a('j-escape')) },
+      { mesh: watchMeshes.hand, matrix: turnedAbout([0, 0, 0], -a('j-escape') / 12) },
+    ];
+  },
+};
 
 function App() {
   const [shown, setShown] = useState(initial);
@@ -212,10 +367,18 @@ function App() {
             props: new Map(
               shown.session.content.props.map((p) => [
                 p.id,
-                late ? ({ status: 'pending' } as const) : armView,
+                late
+                  ? ({ status: 'pending' } as const)
+                  : p.source.artifactId === watchChoice.artifactId
+                    ? watchView
+                    : armView,
               ]),
             ),
-            propChoices: [armChoice],
+            propChoices: [armChoice, armChoice2, watchChoice],
+            onPreparePropVersion: async (_id: string, c: CharacterPropChoice) =>
+              c.artifactId === watchChoice.artifactId
+                ? { joints: watchJoints, followers: [] }
+                : armJoints(c.contentHash === armChoice2.contentHash ? Math.PI / 2 : Math.PI),
             onAddProp: (c: CharacterPropChoice) => {
               const doc = shown.session.content;
               shown.session.execute(
@@ -223,8 +386,11 @@ function App() {
                   {
                     type: 'addProp',
                     prop: {
-                      id: freshCharacterId(doc, 'prop-arm'),
-                      name: 'Robot arm',
+                      id: freshCharacterId(
+                        doc,
+                        c.artifactId === watchChoice.artifactId ? 'prop-watch' : 'prop-arm',
+                      ),
+                      name: c.label.replace(/ — .*$/, ''),
                       source: {
                         kind: 'cad',
                         artifactId: c.artifactId,
@@ -244,14 +410,21 @@ function App() {
         : {})}
       {...(params.get('edit')
         ? {
-            onMeshAsset: async ({ ref, bytes }: { ref: { id: string }; bytes: Uint8Array }) => {
+            onMeshAsset: async (
+              { ref, bytes }: { ref: { id: string }; bytes: Uint8Array },
+              more: readonly { ref: { id: string }; bytes: Uint8Array }[] = [],
+            ) => {
               if (params.get('edit') === 'slow') await new Promise((r) => setTimeout(r, 300));
               if (params.get('edit') === 'refuse') throw new Error('asset-store-full');
               if (params.get('edit') === 'revoke') {
                 setRevoked(true);
                 await new Promise((r) => setTimeout(r, 100));
               }
-              setShown((s) => ({ ...s, assets: new Map(s.assets).set(ref.id, bytes) }));
+              setShown((s) => {
+                const assets = new Map(s.assets).set(ref.id, bytes);
+                for (const m of more) assets.set(m.ref.id, m.bytes);
+                return { ...s, assets };
+              });
             },
           }
         : {})}
@@ -260,6 +433,16 @@ function App() {
         // For the browser tests: the exported bytes, as the Host would save them.
         Object.assign(window, {
           characterExport: { name: file.name, bytes: [...file.bytes], losses: file.losses },
+        })
+      }
+      onExportMedia={async (file) =>
+        // C8: the exported file's bytes, for the browser tests.
+        Object.assign(window, {
+          characterMedia: {
+            name: file.name,
+            type: file.type,
+            bytes: [...new Uint8Array(await file.data.arrayBuffer())],
+          },
         })
       }
       onImport={async (file) => {

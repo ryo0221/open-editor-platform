@@ -154,7 +154,9 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
     analyzeContinuity: (request, edge) => port.analyzeContinuity(request, edge),
     analyzeCurvature: (request) => port.analyzeCurvature(request),
     analyzeComb: (request, edge) => port.analyzeComb(request, edge),
-    importStep: (profile, requestId, bytes) => port.importStep(profile, requestId, bytes),
+    analyzeGapFlush: (request, edges) => port.analyzeGapFlush(request, edges),
+    importStep: (profile, requestId, bytes, options) =>
+      port.importStep(profile, requestId, bytes, options),
     ...(options.assets ? { assets: options.assets } : {}),
     ...(options.admission ? { admission: options.admission } : {}),
     ...(options.build ? { currentKernel: { id: current.id, buildHash: current.buildHash } } : {}),
@@ -175,8 +177,8 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
     exportBrep: (request) => port.exportBrep(request),
     exportAssemblyStep: (profile, requestId, plan, breps) =>
       port.exportAssemblyStep(profile, requestId, plan, breps),
-    importStepAssembly: (profile, requestId, bytes) =>
-      port.importStepAssembly(profile, requestId, bytes),
+    importStepAssembly: (profile, requestId, bytes, options) =>
+      port.importStepAssembly(profile, requestId, bytes, options),
     ...(options.parts ? { store: options.parts } : {}),
     ...(options.partSource ? { source: options.partSource } : {}),
   });

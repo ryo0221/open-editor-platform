@@ -7,12 +7,16 @@ import type {
 import { BimContext, deriveBim, loopExtreme, type BimDerived, type BimShape } from './derive';
 import { left } from './geometry';
 import type { BimDocument, BimLoop, BimType, BimWall, Vec2 } from './model';
+import { bimLimits } from './model';
 import {
   bimProfileLoops,
+  bimSectionAxes,
+  type BimSectionAxes,
   bimRoofPlanes,
+  bimSlabPlanes,
   bimWallAxis,
   bimWallOpeningLoop,
-  profileHeight,
+  bimWallOpeningRise,
 } from './solids';
 
 /**
@@ -60,6 +64,20 @@ const flat = (z: number) => ({
   x: [1, 0, 0] as GeometryVec3,
   z: up,
 });
+/** LR3: the angle between a spiral ramp's sections (5°). */
+export const bimRampStepRad = Math.PI / 36;
+/** TW2: a section's turn onto its axes, row-major: the columns are x, y and z. */
+const axesTurn = ({ x, y, z }: Pick<BimSectionAxes, 'x' | 'y' | 'z'>) => [
+  x[0],
+  y[0],
+  z[0],
+  x[1],
+  y[1],
+  z[1],
+  x[2],
+  y[2],
+  z[2],
+];
 const loop = (l: BimLoop | Vec2[]): GeometryLoop => l.map((v) => [...v] as GeometryLoop[number]);
 /** A turn about +z by `angle`, row-major. */
 const turn = (angle: number) => {
@@ -99,33 +117,91 @@ export function bimGeometry(doc: BimDocument, derived: BimDerived = deriveBim(do
     switch (s.kind) {
       case 'wall': {
         const prism = idOf(e.id, 'prism');
-        nodes[prism] = {
-          op: 'prism',
-          frame: flat(s.zBase),
-          outer: loop(s.footprint),
-          vector: [0, 0, s.zTop - s.zBase],
-        };
+        // LR2: a leaning wall is ruled between its base and top footprints.
+        nodes[prism] = s.footprintTop
+          ? {
+              op: 'loft',
+              sections: [
+                { frame: flat(s.zBase), outer: loop(s.footprint) },
+                { frame: flat(s.zTop), outer: loop(s.footprintTop) },
+              ],
+            }
+          : {
+              op: 'prism',
+              frame: flat(s.zBase),
+              outer: loop(s.footprint),
+              vector: [0, 0, s.zTop - s.zBase],
+            };
         const gross = s.clipBy ? clip(prism, s.clipBy, e.id) : prism;
         if (!gross) continue; // the roof failed and is reported
+        const wall = e as BimWall;
         const tools = s.openings.map((o) => {
           const node = idOf(e.id, `opening:${o.elementId}`);
-          nodes[node] = {
-            op: 'prism',
-            frame: flat(s.zBase + o.sillMm),
-            outer: loop(bimWallOpeningLoop(ctx, e as BimWall, o.alongMm, o.widthMm)),
-            vector: [0, 0, o.heightMm],
-          };
+          // FU3a: through a leaning wall, ruled between the plan regions at its sill and head.
+          const [z0, z1] = bimWallOpeningRise(wall, o.sillMm, o.heightMm);
+          const at = (rise: number) =>
+            loop(bimWallOpeningLoop(ctx, wall, o.alongMm, o.widthMm, rise));
+          // LS2: an upright wall ruled for its joins cuts its openings upright.
+          nodes[node] = wall.lean
+            ? {
+                op: 'loft',
+                sections: [
+                  { frame: flat(s.zBase + z0), outer: at(z0) },
+                  { frame: flat(s.zBase + z1), outer: at(z1) },
+                ],
+              }
+            : {
+                op: 'prism',
+                frame: flat(s.zBase + o.sillMm),
+                outer: at(0),
+                vector: [0, 0, o.heightMm],
+              };
           return node;
         });
         if (tools.length)
           nodes[idOf(e.id, 'solid')] = { op: 'boolean', kind: 'cut', target: gross, tools };
+        // The uncut solid for the kernel to measure the gross volume of: a wall a roof clips, or
+        // (LS-U1) one ruled only to within 1 mm (Codex).
+        const measured = s.clipBy || derived.quantities.get(e.id)?.source === 'kernel';
         elements.set(e.id, {
           node: tools.length ? idOf(e.id, 'solid') : gross,
-          ...(s.clipBy ? { gross } : {}),
+          ...(measured ? { gross } : {}),
         });
         break;
       }
-      case 'slab':
+      case 'slab': {
+        if (s.slope) {
+          // TW5: an upright prism over the slope's whole rise, cut by the top and bottom planes.
+          const { top, bottom, zLow, zHigh } = bimSlabPlanes(s);
+          // 10 mm to spare each way, kept within the coordinate limit (derive checks the rise).
+          const z0 = Math.max(zLow - (s.zTop - s.zBottom) - 10, -bimLimits.coordinateMm);
+          const z1 = Math.min(zHigh + 10, bimLimits.coordinateMm);
+          const prism = idOf(e.id, 'prism');
+          nodes[prism] = {
+            op: 'prism',
+            frame: flat(z0),
+            outer: loop(s.boundary),
+            ...(s.holes.length ? { holes: s.holes.map(loop) } : {}),
+            vector: [0, 0, z1 - z0],
+          };
+          const below = idOf(e.id, 'top');
+          nodes[below] = {
+            op: 'halfSpace',
+            input: prism,
+            origin: top.p,
+            normal: top.n,
+            keep: 'below',
+          };
+          nodes[idOf(e.id, 'solid')] = {
+            op: 'halfSpace',
+            input: below,
+            origin: bottom.p,
+            normal: bottom.n,
+            keep: 'above',
+          };
+          elements.set(e.id, { node: idOf(e.id, 'solid') });
+          break;
+        }
         nodes[idOf(e.id, 'solid')] = {
           op: 'prism',
           frame: flat(s.zBottom),
@@ -135,11 +211,13 @@ export function bimGeometry(doc: BimDocument, derived: BimDerived = deriveBim(do
         };
         elements.set(e.id, { node: idOf(e.id, 'solid') });
         break;
+      }
       case 'space':
         nodes[idOf(e.id, 'solid')] = {
           op: 'prism',
           frame: flat(s.zBase),
           outer: loop(s.boundary),
+          ...(s.holes.length ? { holes: s.holes.map(loop) } : {}),
           vector: [0, 0, s.zTop - s.zBase],
         };
         elements.set(e.id, { node: idOf(e.id, 'solid') });
@@ -211,11 +289,21 @@ export function bimGeometry(doc: BimDocument, derived: BimDerived = deriveBim(do
           outer: loop(outer),
           ...(holes.length ? { holes: holes.map(loop) } : {}),
           vector: [0, 0, s.zTop - s.zBase],
+          ...(s.topScale !== undefined ? { endScale: s.topScale } : {}),
         };
-        const placement: BimPlacement = {
+        let placement: BimPlacement = {
           rotation: turn(s.rotationRad),
           translation: [s.at[0], s.at[1], s.zBase],
         };
+        if (s.topAt) {
+          // TW2: the same section along the leaning axis, its ends square to the axis.
+          const axes = bimSectionAxes(s);
+          nodes[base] = {
+            ...(nodes[base] as Extract<GeometryOp, { op: 'prism' }>),
+            vector: [0, 0, axes.length],
+          };
+          placement = { rotation: axesTurn(axes), translation: axes.origin };
+        }
         if (!s.clipBy) {
           elements.set(e.id, { node: base, placement });
           break;
@@ -229,25 +317,106 @@ export function bimGeometry(doc: BimDocument, derived: BimDerived = deriveBim(do
       }
       case 'beam': {
         const { outer, holes } = bimProfileLoops(s.profile);
-        const d: Vec2 = [s.end[0] - s.start[0], s.end[1] - s.start[1]];
-        const len = Math.hypot(...d);
-        const u: Vec2 = [d[0] / len, d[1] / len];
-        const n = left(u);
         // The profile across the beam (x to the left, y up), swept along it from its start.
+        const axes = bimSectionAxes(s);
         const base = idOf(e.id, 'base');
         nodes[base] = {
           op: 'prism',
           frame: flat(0),
           outer: loop(outer),
           ...(holes.length ? { holes: holes.map(loop) } : {}),
-          vector: [0, 0, len],
+          vector: [0, 0, axes.length],
         };
         elements.set(e.id, {
           node: base,
-          placement: {
-            rotation: [n[0], 0, u[0], n[1], 0, u[1], 0, 1, 0],
-            translation: [s.start[0], s.start[1], s.zTop - profileHeight(s.profile) / 2],
-          },
+          placement: { rotation: axesTurn(axes), translation: axes.origin },
+        });
+        break;
+      }
+      case 'member': {
+        const { outer, holes } = bimProfileLoops(s.profile);
+        const axes = bimSectionAxes(s);
+        const base = idOf(e.id, 'base');
+        nodes[base] = {
+          op: 'prism',
+          frame: flat(0),
+          outer: loop(outer),
+          ...(holes.length ? { holes: holes.map(loop) } : {}),
+          vector: [0, 0, axes.length],
+        };
+        elements.set(e.id, {
+          node: base,
+          placement: { rotation: axesTurn(axes), translation: axes.origin },
+        });
+        break;
+      }
+      case 'ramp':
+      case 'railing': {
+        // LR3: radial rectangles every 5° (at least 8 steps), lofted smoothly. Each section's
+        // plane holds the radius and the vertical: x out along the radius, y up.
+        const steps = Math.max(8, Math.ceil(Math.abs(s.sweep) / bimRampStepRad));
+        const base = idOf(e.id, 'base');
+        nodes[base] = {
+          op: 'loft',
+          sections: Array.from({ length: steps + 1 }, (_, i) => {
+            const t = i / steps;
+            const a = s.startAngle + t * s.sweep;
+            const z = s.zStart + t * (s.zEnd - s.zStart);
+            const [c, n] = [Math.cos(a), Math.sin(a)];
+            return {
+              frame: { origin: [0, 0, 0], x: [c, n, 0], z: [n, -c, 0] },
+              outer: [
+                [s.innerRadius, z - s.thickness],
+                [s.outerRadius, z - s.thickness],
+                [s.outerRadius, z],
+                [s.innerRadius, z],
+              ],
+            };
+          }),
+        };
+        // LS4: openings, upright prisms through the whole rise, in the ramp's frame (its centre).
+        let node = base;
+        if (s.kind === 'ramp' && s.openings?.length) {
+          const z0 = Math.max(
+            Math.min(s.zStart, s.zEnd) - s.thickness - 10,
+            -bimLimits.coordinateMm,
+          );
+          const z1 = Math.min(Math.max(s.zStart, s.zEnd) + 10, bimLimits.coordinateMm);
+          const tools = s.openings.map((o, i) => {
+            const tool = idOf(e.id, `opening${i}`);
+            nodes[tool] = {
+              op: 'prism',
+              frame: flat(z0),
+              outer: o.map((v) => {
+                const p = [v[0] - s.center[0], v[1] - s.center[1]];
+                return (v[2] ? [p[0], p[1], v[2]] : p) as GeometryLoop[number];
+              }),
+              vector: [0, 0, z1 - z0],
+            };
+            return tool;
+          });
+          node = idOf(e.id, 'solid');
+          nodes[node] = { op: 'boolean', kind: 'cut', target: base, tools };
+        }
+        elements.set(e.id, {
+          node,
+          placement: { rotation: turn(0), translation: [s.center[0], s.center[1], 0] },
+        });
+        break;
+      }
+      case 'stair': {
+        // LS6: its side in the upright plane along the flight, swept across its width; placed at
+        // its start, turned to its direction.
+        const base = idOf(e.id, 'base');
+        nodes[base] = {
+          op: 'prism',
+          frame: { origin: [0, s.width / 2, 0], x: [1, 0, 0], z: [0, -1, 0] },
+          outer: s.profile.map((p) => [p[0], p[1]] as GeometryLoop[number]),
+          vector: [0, -s.width, 0],
+        };
+        elements.set(e.id, {
+          node: base,
+          placement: { rotation: turn(s.directionRad), translation: [s.at[0], s.at[1], s.zBase] },
         });
         break;
       }
@@ -283,28 +452,54 @@ export function bimGeometry(doc: BimDocument, derived: BimDerived = deriveBim(do
     const origin: Vec2 = e.flipFacing
       ? [p[0] + tangent[0] * t.widthMm, p[1] + tangent[1] * t.widthMm]
       : p;
-    const mid = (a.leftOff + a.rightOff) / 2;
+    // FU3a: in a leaning wall the panel leans with it, its sill and height measured along the
+    // face from the middle of the wall at the base. Its ends stay level like the ends of the
+    // opening's cut, so it fits inside the cut (Codex): a prism from a level section, 50 mm thick
+    // square to the face, swept up the face.
+    const lean = host.lean ?? 0;
+    const mid = (a.leftOff + a.rightOff) / 2 / Math.cos(lean);
     const nn = left(tangent);
+    const [c, sn] = [Math.cos(lean), Math.sin(lean)];
+    const sill = e.kind === 'window' ? e.sillMm : 0;
+    const half = bimPanelMm / 2 / c;
+    // In the panel's own frame y is left of x: the wall's left, or its right when flipped.
+    const side = e.flipFacing ? -1 : 1;
     const base = idOf(e.id, 'base');
+    if (lean && a.arc) {
+      // On a cone the opening keeps its angles as the radius changes (Codex): the panel is the
+      // band about the wall's middle between them, ruled from the sill to the head like the cut.
+      const [z0, z1] = bimWallOpeningRise(host, sill, t.heightMm);
+      const at = (rise: number) =>
+        loop(bimWallOpeningLoop(ctx, host, e.alongMm, t.widthMm, rise, bimPanelMm / 2));
+      nodes[base] = {
+        op: 'loft',
+        sections: [
+          { frame: flat(hs.zBase + z0), outer: at(z0) },
+          { frame: flat(hs.zBase + z1), outer: at(z1) },
+        ],
+      };
+      elements.set(e.id, { node: base });
+      continue;
+    }
     nodes[base] = {
       op: 'prism',
       frame: flat(0),
       outer: [
-        [0, -bimPanelMm / 2],
-        [t.widthMm, -bimPanelMm / 2],
-        [t.widthMm, bimPanelMm / 2],
-        [0, bimPanelMm / 2],
+        [0, -half],
+        [t.widthMm, -half],
+        [t.widthMm, half],
+        [0, half],
       ],
-      vector: [0, 0, t.heightMm],
+      vector: [0, -side * sn * t.heightMm, c * t.heightMm],
     };
     elements.set(e.id, {
       node: base,
       placement: {
         rotation: turn(Math.atan2(x[1], x[0])),
         translation: [
-          origin[0] + nn[0] * mid,
-          origin[1] + nn[1] * mid,
-          hs.zBase + (e.kind === 'window' ? e.sillMm : 0),
+          origin[0] + nn[0] * (mid - sn * sill),
+          origin[1] + nn[1] * (mid - sn * sill),
+          hs.zBase + c * sill,
         ],
       },
     });

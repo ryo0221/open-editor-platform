@@ -58,6 +58,8 @@ import {
 import { createDesign, isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { emptyCad, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
 import { bimStarter, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
+import { isSimulationDocument, type SimulationDocument } from '@editor-platform/simulation-core';
+import { newSimulation, type SimulationSourceChoice } from './simulation/source';
 import {
   isCharacterDocument,
   validateCharacter,
@@ -65,6 +67,7 @@ import {
 } from '@editor-platform/character-core';
 import type { CadResource } from './cad/resources';
 import type { CadPartRecord } from './cad/parts';
+import type { BimPartRecord } from './character/parts';
 export { isCadDocument };
 import cadKernelBuild, { kernels as cadKernelCatalog } from 'virtual:cad-kernel-build';
 import {
@@ -113,7 +116,8 @@ export type Content =
   | ScheduleDocument
   | CadDocument
   | BimDocument
-  | CharacterDocument;
+  | CharacterDocument
+  | SimulationDocument;
 export type Kind =
   | 'fiction-map'
   | 'estimate'
@@ -132,7 +136,8 @@ export type Kind =
   | 'schedule'
   | 'cad'
   | 'bim'
-  | 'character';
+  | 'character'
+  | 'simulation';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
@@ -144,6 +149,16 @@ export interface StoredArtifact extends Artifact<Content> {
   cadResources?: CadResource[];
   /** R2b part versions (content by hash) placed by the draft and versions, nested ones included. */
   cadParts?: CadPartRecord[];
+  /**
+   * R3e-4: the CAD versions a structural analysis's draft and versions analyse (content by hash),
+   * so the record evaluates on its own, wherever the CAD Artifact goes.
+   */
+  simulationSources?: CadPartRecord[];
+  /**
+   * C8p: a character's BIM versions placed as props (content by hash); the CAD versions they
+   * place are in `cadParts`.
+   */
+  bimParts?: BimPartRecord[];
   geoDataInputs?: ReferenceSnapshot[];
   /** Reference Host conversion receipt: an immutable baseline for explicit three-way review. */
   designReactConversion?: { sourceArtifactId: string; sourceHash: string; basis: ReactUiDocument };
@@ -208,6 +223,11 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     icon: '☺',
     description: 'Import, view and play a rigged glTF or VRM character',
   },
+  simulation: {
+    label: 'Structural analysis',
+    icon: 'σ',
+    description: 'Load a saved 3D CAD part and solve it for displacement and stress',
+  },
 };
 /**
  * The Host-supplied CAD kernel build (the custom development OpenCascade.js while D0 is open).
@@ -223,13 +243,24 @@ export const cadKernelProfile = {
 };
 export const creatableKinds = (Object.keys(kinds) as Kind[]).filter(
   // Both 3D domains evaluate with the Host's kernel build.
-  (k) => (k !== 'cad' && k !== 'bim') || !!cadKernel,
+  (k) => (k !== 'cad' && k !== 'bim' && k !== 'simulation') || !!cadKernel,
 );
 export function makeArtifact(
   kind: Kind,
   count: number,
   graphTemplate: GraphTemplateId = 'relations',
+  /** A structural analysis needs the saved CAD version and solid body it analyses. */
+  simulationSource?: SimulationSourceChoice,
 ): StoredArtifact {
+  if (kind === 'simulation') {
+    if (!simulationSource) throw new Error('Choose a saved 3D CAD version to analyse');
+    const { doc, retained } = newSimulation(simulationSource, `${kinds[kind].label} ${count}`);
+    return {
+      ...createArtifact<Content>(kind, doc.name, doc),
+      annotations: [],
+      simulationSources: [retained],
+    };
+  }
   const content: Content =
     kind === 'fiction-map'
       ? createFictionMap()
@@ -358,6 +389,7 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'schedule') return isSchedule(content);
   if (kind === 'cad') return isCadDocument(content);
   if (kind === 'bim') return isBimDocument(content);
+  if (kind === 'simulation') return isSimulationDocument(content);
   if (kind === 'character')
     return isCharacterDocument(content) && validateCharacter(content).length === 0;
   return kind === 'document'

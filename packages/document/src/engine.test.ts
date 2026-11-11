@@ -228,4 +228,69 @@ describe('document engine boundary', () => {
     });
     expect(contentToNode(nodeToContent(s.doc, base)).eq(s.doc)).toBe(true);
   });
+  it('#801 writes no read defaults into blocks that did not have them', () => {
+    const plain: DocumentContent = {
+      schemaVersion: 2,
+      blocks: [
+        { id: 'b1', type: 'paragraph', text: 'こんにちは' },
+        { id: 'h1', type: 'heading', text: '見出し' },
+        { id: 'empty', type: 'paragraph', text: '' },
+      ],
+    };
+    expect(nodeToContent(contentToNode(plain), plain)).toEqual(plain);
+    const v1: DocumentContent = { schemaVersion: 1, blocks: plain.blocks };
+    expect(nodeToContent(contentToNode(v1), v1)).toEqual(v1);
+    const explicit: DocumentContent = {
+      schemaVersion: 2,
+      blocks: [
+        {
+          id: 'b1',
+          type: 'paragraph',
+          text: 'a',
+          rich: [{ text: 'a' }],
+          align: 'left',
+          indent: 0,
+        },
+        { id: 'h1', type: 'heading', text: 'b', level: 1 },
+      ],
+    };
+    expect(nodeToContent(contentToNode(explicit), explicit)).toEqual(explicit);
+    // A block the source did not have, or a retyped one, still writes every field.
+    expect(nodeToContent(contentToNode(explicit), { schemaVersion: 2, blocks: [] }).blocks).toEqual(
+      [
+        explicit.blocks[0],
+        { ...explicit.blocks[1], rich: [{ text: 'b' }], align: 'left', indent: 0 },
+      ],
+    );
+    const promoted = nodeToContent(
+      contentToNode({
+        schemaVersion: 2,
+        blocks: [{ id: 'b1', type: 'heading', text: 'こんにちは' }],
+      }),
+      plain,
+    );
+    expect(promoted.blocks[0]).toMatchObject({
+      type: 'heading',
+      level: 1,
+      align: 'left',
+      indent: 0,
+    });
+    // An edit writes only what it changed; bold needs rich, which moves version 1 to 2.
+    let s = state(v1);
+    s = s.apply(s.tr.setNodeMarkup(0, undefined, { ...s.doc.firstChild!.attrs, align: 'center' }));
+    expect(nodeToContent(s.doc, v1).blocks[0]).toEqual({
+      id: 'b1',
+      type: 'paragraph',
+      text: 'こんにちは',
+      align: 'center',
+    });
+    expect(nodeToContent(s.doc, v1).schemaVersion).toBe(1);
+    s = s.apply(s.tr.setSelection(TextSelection.create(s.doc, 1, 3)));
+    toggleMark(documentSchema.marks.bold)(s, (tr) => (s = s.apply(tr)));
+    const bold = nodeToContent(s.doc, v1);
+    expect(bold.schemaVersion).toBe(2);
+    expect(bold.blocks[0].rich).toEqual([{ text: 'こん', bold: true }, { text: 'にちは' }]);
+    expect(bold.blocks[1]).toEqual(v1.blocks[1]);
+    expect(contentToNode(bold).eq(s.doc)).toBe(true);
+  });
 });

@@ -5,7 +5,6 @@ import {
   contentHash,
   serializeArtifact,
   type Artifact,
-  type StorageAdapter,
 } from '@editor-platform/artifact-core';
 import {
   sameLocalRevision,
@@ -15,14 +14,14 @@ import {
 import {
   ArtifactEditor,
   loadHostArtifact,
-  type EditorHostAdapter,
+  type HostArtifactStorage,
+  type HostSaveContext,
 } from '@editor-platform/editor-host';
 import {
   isDocument,
   resolveDocumentAddress,
   type DocumentContent,
 } from '@editor-platform/document/model';
-import { documentTextAccess } from '@editor-platform/document/text';
 import { isDesignWithPaths, type DesignContent } from '@editor-platform/design/model';
 import type { StructuredData } from '@editor-platform/structured-data/model';
 import type { CreativeDesignAddress } from '@editor-platform/design/creative-proposal-diff';
@@ -40,207 +39,37 @@ import {
   type WorldContext,
   type WorldReference,
 } from './world-context';
-import {
-  readOccurrenceLinks,
-  readStoryBinding,
-  type OccurrenceLink,
-  type StoryBinding,
-} from './story-links';
-import { readCreativeMapLinks, type CreativeMapLinks } from './map-links';
 import { CreativeMapLocations } from './map-locations';
 import { characterMode } from '../character-mode';
 import { settingMode } from '../setting-mode';
 import { projectCreativeLayerReference, type CreativeLayerRequest } from '../generation';
 
-export interface NativeReference {
-  artifactId: string;
-  versionId: string;
-  elementId: string;
-}
-export interface SceneItemReference {
-  mode: 'character' | 'setting';
-  itemId: string;
-  source: NativeReference;
-  artwork: NativeReference;
-}
-/** Flat Host associations, not a Story Graph or another source record. */
-export interface CreativeScene {
-  id: string;
-  kind: 'document' | 'design';
-  origin: NativeReference;
-  members: string[];
-  items: SceneItemReference[];
-}
-export interface SceneReturn {
-  sceneId: string;
-  address: ElementAddress;
-  versionId: string;
-  /** v2 only: the occurrence the author came from, so a shared region is not confused. */
-  occurrenceLinkId?: string;
-}
-export interface CreativeWorkspaceLinksV1 {
-  schemaVersion: 1;
-  scenes: CreativeScene[];
-  world?: WorldContexts;
-  mapLocations?: CreativeMapLinks;
-  returnTo?: SceneReturn;
-}
-/** Story Timeline v2 (t0-contract.md §3, §4.2). `scenes` keeps the v1 meaning. */
-export interface CreativeWorkspaceLinksV2 {
-  schemaVersion: 2;
-  scenes: CreativeScene[];
-  world?: WorldContexts;
-  mapLocations?: CreativeMapLinks;
-  returnTo?: SceneReturn;
-  story: StoryBinding;
-  occurrenceLinks: OccurrenceLink[];
-}
-export type CreativeWorkspaceLinks = CreativeWorkspaceLinksV1 | CreativeWorkspaceLinksV2;
+export * from './links';
+import {
+  readWorkspaceLinks,
+  type NativeReference,
+  type SceneItemReference,
+  type CreativeScene,
+  type SceneReturn,
+  type CreativeWorkspaceLinks,
+} from './links';
+
 export interface CreativeWorkspaceStorage {
-  artifacts: StorageAdapter<Artifact<unknown>>;
+  artifacts: HostArtifactStorage;
   creative(mode: 'character' | 'setting'): CreativeStorage;
   readLinks(): Promise<unknown>;
   /** Trusted store must compare expected and write atomically; no cross-native-store guarantee. */
   writeLinks(links: CreativeWorkspaceLinks, expected?: CreativeWorkspaceLinks): Promise<void>;
 }
-const text = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && v.length <= 4096;
-const obj = (v: unknown, allowed: string[]) =>
-  !!v &&
-  typeof v === 'object' &&
-  !Array.isArray(v) &&
-  Object.keys(v).every((k) => allowed.includes(k));
-const native = (v: NativeReference) =>
-  obj(v, ['artifactId', 'versionId', 'elementId']) &&
-  text(v.artifactId) &&
-  text(v.versionId) &&
-  text(v.elementId);
-/**
- * Reads links schema 1 and 2. Schema 2 adds the Story binding and occurrence links; the v1
- * reader shape is unchanged and still refuses every v2 key. Unknown keys or versions are
- * refused, never dropped.
- */
-export function readWorkspaceLinks(raw: unknown): CreativeWorkspaceLinks {
-  const v = raw as CreativeWorkspaceLinks;
-  // A later schema is named and refused as is: never read as an older one (TL23).
-  const version = (v as { schemaVersion?: unknown } | null)?.schemaVersion;
-  if (typeof version === 'number' && Number.isInteger(version) && version > 2)
-    throw Error(
-      `Scene参照表の版 ${version} にはこの画面は対応していません。保存データは変えずに保持しています。`,
-    );
-  const v2 = !!v && typeof v === 'object' && (v as { schemaVersion?: unknown }).schemaVersion === 2;
-  if (
-    !obj(
-      v,
-      v2
-        ? [
-            'schemaVersion',
-            'scenes',
-            'returnTo',
-            'world',
-            'story',
-            'occurrenceLinks',
-            'mapLocations',
-          ]
-        : ['schemaVersion', 'scenes', 'returnTo', 'world', 'mapLocations'],
-    ) ||
-    (v.schemaVersion !== 1 && !v2) ||
-    !Array.isArray(v.scenes) ||
-    v.scenes.length > 256 ||
-    v.scenes.some(
-      (s) =>
-        !obj(s, ['id', 'kind', 'origin', 'members', 'items']) ||
-        !text(s.id) ||
-        !['document', 'design'].includes(s.kind) ||
-        !native(s.origin) ||
-        !Array.isArray(s.members) ||
-        s.members.length > 1024 ||
-        !s.members.every(text) ||
-        new Set(s.members).size !== s.members.length ||
-        !Array.isArray(s.items) ||
-        s.items.length > 256 ||
-        s.items.some(
-          (i) =>
-            !obj(i, ['mode', 'itemId', 'source', 'artwork']) ||
-            !['character', 'setting'].includes(i.mode) ||
-            !text(i.itemId) ||
-            !native(i.source) ||
-            !native(i.artwork),
-        ) ||
-        new Set(s.items.map((i) => JSON.stringify([i.mode, i.itemId]))).size !== s.items.length,
-    ) ||
-    new Set(v.scenes.map((s) => s.id)).size !== v.scenes.length
-  )
-    throw Error('Scene参照表が不正です。保存データは保持しています。');
-  if (v.returnTo !== undefined) {
-    const r = v.returnTo,
-      a = r?.address,
-      region = a?.region;
-    if (
-      !obj(
-        r,
-        v2
-          ? ['sceneId', 'address', 'versionId', 'occurrenceLinkId']
-          : ['sceneId', 'address', 'versionId'],
-      ) ||
-      !v.scenes.some((s) => s.id === r.sceneId) ||
-      !text(r.versionId) ||
-      !obj(a, ['artifactId', 'elementId', 'region']) ||
-      !text(a.artifactId) ||
-      !text(a.elementId) ||
-      (region !== undefined &&
-        (!obj(region, ['type', 'start', 'end']) ||
-          region.type !== 'text' ||
-          !Number.isSafeInteger(region.start) ||
-          !Number.isSafeInteger(region.end) ||
-          region.start < 0 ||
-          region.end < region.start))
-    )
-      throw Error('Scene戻り先が不正です。');
-  }
-  if (v.world !== undefined) readWorldContexts(v.world);
-  if (v.mapLocations !== undefined) {
-    const maps = readCreativeMapLinks(v.mapLocations);
-    if (
-      maps.locations.some(
-        (r) =>
-          r.namespace !== v.world?.namespace ||
-          (r.sceneId !== undefined && !v.scenes.some((s) => s.id === r.sceneId)),
-      )
-    )
-      throw Error('地図参照の作品またはSceneが一致しません。');
-  }
-  if (v.schemaVersion === 2) {
-    if (!Object.hasOwn(v, 'story') || !Object.hasOwn(v, 'occurrenceLinks'))
-      throw Error('物語の対応表が不正です（v2にはStoryのbindingと提示位置の対応が必要です）。');
-    const story = readStoryBinding(v.story);
-    const links = readOccurrenceLinks(v.occurrenceLinks, story, v.scenes);
-    const id = v.returnTo?.occurrenceLinkId;
-    if (
-      id !== undefined &&
-      !links.some((l) => l.id === id && l.regions.some((g) => g.sceneId === v.returnTo!.sceneId))
-    )
-      throw Error('Scene戻り先の提示位置が対応表にありません。');
-  }
-  return clone(v);
-}
-const capabilities = {
-  undo: true,
-  nativeJson: true,
-  formats: [],
-  preview: 'none',
-  shared: false,
-} as const;
-export const workspaceDocumentAdapter: EditorHostAdapter<DocumentContent> = {
-  kind: 'document',
-  validate: isDocument,
-  capabilities,
-  text: documentTextAccess,
-};
-export const workspaceComicAdapter: EditorHostAdapter<DesignContent> = {
-  kind: 'design',
-  validate: isDesignWithPaths,
-  capabilities,
-};
+import {
+  workspaceDocumentAdapter,
+  workspaceComicAdapter,
+  captureWorkspaceDocumentAdapter,
+  type CreativeWorkspaceOptions,
+} from './native-adapters';
+export type { CreativeWorkspaceOptions } from './native-adapters';
+export { workspaceDocumentAdapter, workspaceComicAdapter } from './native-adapters';
+
 export type ReferenceView = {
   reference: SceneItemReference;
   state: 'current' | 'stale' | 'missing' | 'forbidden' | 'invalid';
@@ -297,9 +126,9 @@ function roleStorage(
       async list() {
         return (await artifacts.list()).filter((a) => mayRead(a.id));
       },
-      async put(a) {
+      async put(a, context) {
         check(a.id);
-        await artifacts.put(a);
+        await artifacts.put(a, context);
       },
       async remove(id) {
         check(id);
@@ -319,6 +148,7 @@ function roleStorage(
 
 /** Trusted consuming-Host coordination over retained native Editors; never another history. */
 export class CreativeWorkspace {
+  private readonly documentAdapter: typeof workspaceDocumentAdapter;
   readonly sessionId = newId('creative-workspace');
   readonly maps: CreativeMapLocations;
   private links: CreativeWorkspaceLinks;
@@ -477,19 +307,19 @@ export class CreativeWorkspace {
     if (pending) return check(await pending);
     const writable = () => this.mayEdit() && this.mayRead(a.id);
     const store = {
-      put: async (value: Artifact<unknown>) => {
+      put: async (value: Artifact<unknown>, context?: HostSaveContext) => {
         if (!writable()) throw Error('資料の編集権限がありません。');
-        await this.io.artifacts.put(value);
+        await this.io.artifacts.put(value, context);
       },
     };
     const opening = (async () => {
       if (kind === 'document') {
-        const native = await loadHostArtifact(serializeArtifact(a), workspaceDocumentAdapter);
+        const native = await loadHostArtifact(serializeArtifact(a), this.documentAdapter);
         const found = this.knownNativeSession(a.id);
         if (found) return check(found);
         const editor = new ArtifactEditor<DocumentContent>(
           native,
-          workspaceDocumentAdapter,
+          this.documentAdapter,
           store,
           writable,
         );
@@ -564,7 +394,9 @@ export class CreativeWorkspace {
       mode: SceneItemReference['mode'],
       itemId: string,
     ) => boolean = () => false,
+    options: CreativeWorkspaceOptions = {},
   ) {
+    this.documentAdapter = captureWorkspaceDocumentAdapter(options.documentAdapter);
     this.links = readWorkspaceLinks(links);
     this.maps = new CreativeMapLocations(this, (value, validate) =>
       this.write({ ...this.links, mapLocations: value }, validate),
@@ -575,6 +407,7 @@ export class CreativeWorkspace {
     mayEdit = () => true,
     mayRead = (_id: string) => true,
     mayEditShared: (mode: SceneItemReference['mode'], itemId: string) => boolean = () => false,
+    options: CreativeWorkspaceOptions = {},
   ) {
     const links = readWorkspaceLinks(await io.readLinks());
     const failures: Partial<Record<'character' | 'setting', string>> = {};
@@ -612,6 +445,7 @@ export class CreativeWorkspace {
       mayEdit,
       mayRead,
       mayEditShared,
+      options,
     );
     workspace.unavailable = failures;
     return workspace;

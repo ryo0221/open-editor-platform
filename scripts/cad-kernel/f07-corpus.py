@@ -89,7 +89,8 @@ torus = BRepPrimAPI_MakeTorus(30, 10).Shape()
 sphere = BRepPrimAPI_MakeSphere(gp_Pnt(30, 0, 0), 12).Shape()
 write("normal-analytic.step", [BRepAlgoAPI_Fuse(torus, sphere).Shape()])
 write("normal-ap203.step", [plate()], schema="AP203")
-write("reject-ap242.step", [plate()], schema="AP242DIS")
+# #811: a single part as AP242 imports as one body, as AP214 does.
+write("normal-ap242.step", [plate()], schema="AP242DIS")
 write("reject-unit-mile.step", [BRepPrimAPI_MakeBox(10, 10, 10).Shape()], unit="MI")
 
 def faces_of(shape):
@@ -117,7 +118,7 @@ write("sheet-open-box.step", [shell])
 
 # STEP keeps no per-entity tolerance: a reader derives it from how well the geometry meets. One
 # vertex moved 0.005 mm off its edges' lines makes the reader widen that vertex's tolerance.
-loose = write("reject-tolerance-gap.step", [BRepPrimAPI_MakeBox(10, 10, 10).Shape()])
+loose = write("loose-tolerance-gap.step", [BRepPrimAPI_MakeBox(10, 10, 10).Shape()])
 points = set(re.findall(r"VERTEX_POINT\('',#(\d+)\)", loose))
 vertex = next(
     n for n in points if re.search(rf"^#{n} = CARTESIAN_POINT\('',\(0\.,0\.,10\.\)\);", loose, re.M)
@@ -128,7 +129,12 @@ loose = re.sub(
     loose,
     flags=re.M,
 )
-open(os.path.join(out, "reject-tolerance-gap.step"), "w", encoding="latin-1", newline="\n").write(loose)
+open(os.path.join(out, "loose-tolerance-gap.step"), "w", encoding="latin-1", newline="\n").write(loose)
+# #820: kept as read up to 1 mm; the same vertex moved 2 mm is past the import limit.
+wide = loose.replace(
+    f"#{vertex} = CARTESIAN_POINT('',(5.E-03,0.,10.));", f"#{vertex} = CARTESIAN_POINT('',(2.,0.,10.));"
+).replace("loose-tolerance-gap.step", "reject-tolerance-wide.step")
+open(os.path.join(out, "reject-tolerance-wide.step"), "w", encoding="latin-1", newline="\n").write(wide)
 
 
 def xcaf(name, build):
@@ -177,6 +183,37 @@ def with_entity(name, entity):
 
 with_entity("reject-external-reference.step", "DOCUMENT_FILE('bolt','bolt.step','',$,'','')")
 with_entity("reject-pmi-dimension.step", "DIMENSIONAL_SIZE($,'thickness')")
+
+
+def millimetre_plate(name):
+    """The plate with its mm unit written as CONVERSION_BASED_UNIT('MILLIMETRE') of 1 SI mm, as
+    CAx writers do (#810): a text edit that keeps every other entity and the geometry."""
+    last = max(int(n) for n in re.findall(r"^#(\d+)\s*=", plate_text, re.M))
+    si = "( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) )"
+    unit = re.search(r"^#(\d+) = " + re.escape(si) + ";$", plate_text, re.M).group(1)
+    converted = (
+        f"( CONVERSION_BASED_UNIT('MILLIMETRE',#{last + 1}) LENGTH_UNIT() NAMED_UNIT(#{last + 3}) )"
+    )
+    text = plate_text.replace(f"#{unit} = {si};", f"#{unit} = {converted};", 1)
+    data_end = text.rindex("ENDSEC;")
+    text = (
+        text[:data_end]
+        + f"#{last + 1} = LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.),#{last + 2});\n"
+        + f"#{last + 2} = {si};\n"
+        + f"#{last + 3} = DIMENSIONAL_EXPONENTS(1.,0.,0.,0.,0.,0.,0.);\n"
+        + text[data_end:]
+    ).replace("normal-mm-plate.step", name)
+    open(os.path.join(out, name), "w", encoding="latin-1", newline="\n").write(text)
+
+
+millimetre_plate("normal-millimetre-plate.step")
+# #811: a protocol the import does not read (AP209, structural analysis), as a text edit.
+open(os.path.join(out, "reject-ap209.step"), "w", encoding="latin-1", newline="\n").write(
+    plate_text.replace(
+        "FILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));",
+        "FILE_SCHEMA(('STRUCTURAL_ANALYSIS_DESIGN'));",
+    ).replace("normal-mm-plate.step", "reject-ap209.step")
+)
 open(os.path.join(out, "reject-truncated.step"), "w", encoding="latin-1", newline="\n").write(
     plate_text[: len(plate_text) // 2]
 )

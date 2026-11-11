@@ -3,6 +3,9 @@ import {
   f31BoxBuilding,
   f33Types,
   f39Roofs,
+  f54LeanRoofs,
+  loopArea,
+  type BimLoop,
   type BimDocument,
   type BimElement,
   type BimProfile,
@@ -44,8 +47,10 @@ export const hollow: BimIfcPartMesh = {
 };
 /** What each solid part mesh holds: its volume and its faceted solids (outer and cavity). */
 export const solidParts = new Map([
-  [cube, { volume: 1e9, breps: 1 }],
-  [hollow, { volume: 1e9 - 125e6, breps: 2 }],
+  // TW0a: a body without a cavity is a triangulated face set; one with a cavity stays CSG of
+  // faceted BReps (an IfcBooleanResult cannot take a face set).
+  [cube, { volume: 1e9, faceSets: 1, breps: 0 }],
+  [hollow, { volume: 1e9 - 125e6, faceSets: 0, breps: 2 }],
 ]);
 export const sheet: BimIfcPartMesh = {
   kind: 'sheet',
@@ -111,6 +116,15 @@ export function f35Export() {
       { name: 'Cover', type: 'length' },
     ],
   });
+  // TW1: the hall goes round a core, one side of it an arc.
+  element<Extract<BimElement, { kind: 'space' }>>(doc, 'sp-hall').holes = [
+    [
+      [4400, 3400],
+      [5600, 3400, 0.4],
+      [5600, 4600],
+      [4400, 4600],
+    ],
+  ];
   const south = element<BimWall>(doc, 'w-south');
   south.common = { isExternal: true, loadBearing: true, reference: 'EW-1' };
   south.properties = { 'ps-fire': { Rating: 'EI60', Minutes: 60, Tested: true, Cover: 30 } };
@@ -264,6 +278,51 @@ export function f39Export(form: 'gable' | 'hip') {
       ];
       kernelQuantities.set(e.id, { netVolume: volumeUnderRoof(square, s.zBase, s.zTop, roof) });
     }
+  }
+  return { doc, options: { ...opts, kernelQuantities } };
+}
+
+/**
+ * F54 (LS1) with what a kernel measures for its leaning walls under the roofs: the ruled solid's
+ * area at each height (its footprint between base and top, cut where the roof is lower), by
+ * Simpson's rule — exact for the flat roof (the area is quadratic in z), to 1e-9 for the mono.
+ */
+export function f54Export() {
+  const doc = f54LeanRoofs();
+  const d = deriveBim(doc);
+  const kernelQuantities = new Map<string, Record<string, number>>();
+  const between = (a: BimLoop, b: BimLoop, t: number): BimLoop =>
+    a.map((v, i) => {
+      const w = b[i]!;
+      const p: [number, number] = [v[0] + (w[0] - v[0]) * t, v[1] + (w[1] - v[1]) * t];
+      return v[2] === undefined ? p : [...p, v[2]];
+    }) as BimLoop;
+  for (const e of doc.elements) {
+    const s = d.shapes.get(e.id)!;
+    if (s.kind !== 'wall' || !s.clipBy || !s.footprintTop) continue;
+    const roof = d.shapes.get(s.clipBy) as Extract<BimShape, { kind: 'roof' }>;
+    const f = roof.faces[0]!;
+    const h = (p: Vec2) =>
+      roof.zBase +
+      f.slope * ((p[0] - f.origin[0]) * f.direction[0] + (p[1] - f.origin[1]) * f.direction[1]);
+    const area = (z: number) => {
+      const loop = between(s.footprint, s.footprintTop!, (z - s.zBase) / (s.zTop - s.zBase));
+      if (f.slope === 0) return z <= roof.zBase ? Math.abs(loopArea(loop)) : 0;
+      const poly = keepWhere(
+        loop.map((v) => [v[0], v[1]] as Vec2),
+        (p) => h(p) - z,
+      );
+      return Math.abs(polygonArea(poly));
+    };
+    const top = f.slope === 0 ? Math.min(s.zTop, roof.zBase) : s.zTop;
+    const n = f.slope === 0 ? 2 : 20000;
+    const dz = (top - s.zBase) / n;
+    let v = 0;
+    for (let i = 0; i < n; i += 2) {
+      const z = s.zBase + i * dz;
+      v += (dz / 3) * (area(z) + 4 * area(z + dz) + area(z + 2 * dz));
+    }
+    kernelQuantities.set(e.id, { grossVolume: v, netVolume: v });
   }
   return { doc, options: { ...opts, kernelQuantities } };
 }

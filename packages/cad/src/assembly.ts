@@ -4,14 +4,21 @@
  * React-free; the Surface reads it beside the controller.
  */
 import {
+  applyCadOperation,
   assemblyStepPlan,
   assertCad,
   bomCsv,
+  bodyPartContent,
+  identityPose,
+  poseOf,
+  makePartRemoval,
   bomRows,
   cadAssemblyLimits,
   cadAssetMediaTypes,
   cadContentHash,
   cadLimits,
+  currentConfigurationValues,
+  currentMounts,
   expandAssembly,
   identityQuaternion,
   occurrenceAccess,
@@ -35,9 +42,22 @@ import {
   type CadComponentPattern,
   type CadDocument,
   type CadEvaluateRequest,
+  type CadInterferenceAllowance,
+  type CadInterferenceMesh,
+  type CadInterferenceReport,
+  type CadResolvedJointValues,
+  type CadSweepReport,
   type CadEvaluation,
   type CadJointType,
   type CadJointValueKey,
+  type CadJointCoupling,
+  type CadJointValues,
+  type CadJoint,
+  type CadGearMesh,
+  checkGearMesh,
+  coupledJointValues,
+  inactiveJointIds,
+  isJointAngleKey,
   type CadOperation,
   type CadPartDef,
   type CadPatternLayout,
@@ -53,13 +73,19 @@ import {
 import {
   assemblyStepReport,
   CadExportError,
+  displayDeflectionMm,
+  writeGlb,
   type CadBrepExport,
   type CadMesh,
   type CadStepAssemblyImportReport,
   type CadStepAssemblyImportResult,
+  type CadStepImportOptions,
+  type CadStepPmiReport,
   type CadStepAssemblyResult,
 } from '@editor-platform/cad-kernel-occt';
-import { describeAssemblyCode } from './assembly-messages';
+import { assemblyGlbBodies } from './assembly-glb';
+import { describeAssemblyCode, describeGearMeshProblem } from './assembly-messages';
+import { CadInterferenceJobs, type CadInterferenceRequest } from './interference-job';
 import {
   cadBudgets,
   describeCode,
@@ -71,7 +97,10 @@ import {
   connectorFromPick,
   dragMotion,
   jointMoveFrames,
+  jointFollowerSteps,
+  followerMotions,
   jointMoves,
+  keptOffset,
   newJoint,
   originChoice,
   type CadConnectorChoice,
@@ -140,6 +169,14 @@ export interface CadPartSourceHost {
   checkAccess(artifactId: string): boolean;
   /** Opens the part's Artifact, where it is edited and a new version saved. */
   open?(artifactId: string, versionId: string): void;
+  /**
+   * CR3e "Make part": a new `cad` Artifact named `name` with `content` as its first saved
+   * version, readable through `readVersion` once this resolves.
+   */
+  createPart?(
+    name: string,
+    content: CadDocument,
+  ): Promise<{ artifactId: string; versionId: string; contentHash: string }>;
 }
 /**
  * The Host's retained closure (R2b-U3): versions by content hash, kept in the saved record and
@@ -245,6 +282,8 @@ export interface CadAssemblySnapshot {
   simplified: ReadonlySet<string>;
   /** Inserting parts is offered: edit authority, a part source and a closure store. */
   canInsert: boolean;
+  /** CR3e: a body can be made a part (inserting is offered and the Host creates Artifacts). */
+  canMakePart: boolean;
   /** The selected direct component (Surface state, never content). */
   selected: string | undefined;
   /** Placement fields typed and not applied, by component (Surface state, never content). */
@@ -255,6 +294,12 @@ export interface CadAssemblySnapshot {
   selectedPattern: string | undefined;
   /** Joint value fields typed and not applied, by joint (Surface state, never content). */
   jointDrafts: ReadonlyMap<string, CadPlacementDraft>;
+  /**
+   * MR1b: range and coupling fields typed and not applied, by `range|coupling:<joint>:<value>`
+   * (Surface state, never content). Kept while another value or joint is inspected; dropped when
+   * what they were typed over changes.
+   */
+  entryDrafts: ReadonlyMap<string, CadEntryDraft>;
   /** A part version update being previewed (R2b-2b, Surface state, never content). */
   update: CadPartUpdateView | undefined;
   /** A joint being made (R2b-2c, Surface state, never content). */
@@ -268,6 +313,8 @@ export interface CadAssemblySnapshot {
   progress: CadPartProgress | undefined;
   /** R2b-5: a STEP assembly read and not yet placed (Surface state, never content). */
   stepImport: CadStepAssemblyImportPreview | undefined;
+  /** MR3: the occurrences of the interference finding shown in the view (Surface state). */
+  highlighted: readonly string[][] | undefined;
 }
 /** R2b-5: what a read STEP assembly becomes, before anything is stored. */
 export interface CadStepAssemblyImportPreview {
@@ -289,6 +336,11 @@ export interface CadJointCreation {
   child?: CadConnectorChoice;
   type: CadJointType;
   flip: boolean;
+  /**
+   * CR3e-2: the child stays where it stands at the joint's zero: the parent connector takes the
+   * offset that lays it on the child's (a door hung on its own hinge edge across the gap).
+   */
+  keep: boolean;
   status: 'idle' | 'preparing' | 'ready' | 'broken' | 'refused';
   /** The candidate with the joint, and its evaluation, while a preview is shown. */
   preview?: { content: CadDocument; evaluation: CadEvaluation };
@@ -326,6 +378,26 @@ export interface CadPlacementDraft {
   fields: string[];
   shown: string[];
 }
+/** MR1b: an entry typed over `stored` (the canonical JSON of the range or coupling it edits). */
+export interface CadEntryDraft extends CadPlacementDraft {
+  stored: string;
+}
+/** The stored range or coupling an entry draft edits, as its canonical JSON (`null` when none). */
+export function entryStored(joint: CadJoint | undefined, key: string) {
+  const { kind, of } = parseEntryDraftKey(key);
+  const found =
+    kind === 'range'
+      ? joint?.limits.find((l) => l.of === of)
+      : joint?.couplings?.find((c) => c.of === of);
+  return JSON.stringify(found ?? null);
+}
+/** An entry draft's key: structured, since a joint ID may hold any character (`:` too). */
+export const entryDraftKey = (kind: 'range' | 'coupling', jointId: string, of: string) =>
+  JSON.stringify([kind, jointId, of]);
+export function parseEntryDraftKey(key: string) {
+  const [kind, jointId, of] = JSON.parse(key) as ['range' | 'coupling', string, string];
+  return { kind, jointId, of };
+}
 export interface CadAssemblyOptions {
   controller: CadController;
   port: CadAssemblyPort;
@@ -333,6 +405,8 @@ export interface CadAssemblyOptions {
   store?: CadPartStore;
   /** Main-thread bytes for part meshes beside the editor's own (CAD26 budget). */
   mainBytes?: number;
+  /** MR3: starts the interference worker (tests run the check on the main thread). */
+  interferenceWorker?: () => Worker;
   /** R2b-5: a version's active bodies as one BRep, from its exact build (CatalogKernelPort). */
   exportBrep?(request: CadEvaluateRequest): Promise<{
     evaluation: CadEvaluation;
@@ -343,6 +417,7 @@ export interface CadAssemblyOptions {
     profile: CadDocument['kernelProfile'],
     requestId: string,
     bytes: Uint8Array,
+    options?: CadStepImportOptions,
   ): Promise<CadStepAssemblyImportResult>;
   /** R2b-5: the assembly's STEP AP242 from its plan and the products' BReps. */
   exportAssemblyStep?(
@@ -379,6 +454,7 @@ export class CadAssembly {
   private selectedJoint: string | undefined;
   private selectedPattern: string | undefined;
   private readonly jointDrafts = new Map<string, CadPlacementDraft>();
+  private readonly entryDrafts = new Map<string, CadEntryDraft>();
   private update: CadPartUpdateView | undefined;
   /** Bumped per update preparation and on cancel: a late step of an older one stops. */
   private updateRun = 0;
@@ -386,6 +462,8 @@ export class CadAssembly {
   /** Bumped per joint preview and on cancel, like `updateRun`. */
   private jointRun = 0;
   private dragging: CadAssemblySnapshot['dragging'];
+  private highlighted: string[][] | undefined;
+  private interferenceJobs: CadInterferenceJobs | undefined;
   /** Contents evaluated again since the last access change for a part reported revoked. */
   private readonly rechecked = new Set<string>();
   private snapshot: CadAssemblySnapshot;
@@ -418,6 +496,7 @@ export class CadAssembly {
       inserting: this.inserting,
       simplified: new Set(this.simplified),
       canInsert: !!source && !!store && !s.readOnly && !s.busy && !this.inserting,
+      canMakePart: !!source?.createPart && !!store && !s.readOnly && !s.busy && !this.inserting,
       selected: s.content.components.some((c) => c.id === this.selected)
         ? this.selected
         : undefined,
@@ -426,6 +505,7 @@ export class CadAssembly {
         ? this.selectedJoint
         : undefined,
       jointDrafts: new Map(this.jointDrafts),
+      entryDrafts: new Map(this.entryDrafts),
       selectedPattern: s.content.componentPatterns.some((p) => p.id === this.selectedPattern)
         ? this.selectedPattern
         : undefined,
@@ -433,6 +513,7 @@ export class CadAssembly {
       creating: this.creating,
       dragging: this.dragging,
       progress: this.partsLeft(),
+      highlighted: this.highlighted,
       stepImport: this.stepImport && {
         fileName: this.stepImport.fileName,
         report: this.stepImport.result.report,
@@ -721,6 +802,11 @@ export class CadAssembly {
       )
         this.jointDrafts.delete(id);
     }
+    for (const [key, draft] of this.entryDrafts) {
+      const { jointId } = parseEntryDraftKey(key);
+      const joint = s.content.joints.find((j) => j.id === jointId);
+      if (!joint || entryStored(joint, key) !== draft.stored) this.entryDrafts.delete(key);
+    }
     const versions = this.versions(s.evaluation);
     // History returned to a result whose pending versions were left: they evaluate again.
     if (s.evaluation?.status === 'ok' && s.evaluation.contentHash === s.contentHash && !s.busy)
@@ -860,11 +946,107 @@ export class CadAssembly {
     }
   }
   /**
+   * CR3e "Make part": the body's closure becomes the first version of a new `cad` Artifact (the
+   * Host's `createPart`), and in one edit the body, and what only it needed, is replaced by a
+   * component placing that version at the origin, where the body stood. The part is evaluated
+   * before the Artifact is made, so a body that cannot stand alone makes none.
+   */
+  async makePart(bodyId: string): Promise<boolean> {
+    const { controller, source, store, port } = this.options;
+    if (this.inserting) return this.refuse('part-insert-busy');
+    if (!source?.createPart || !store) return this.refuse('make-part-unavailable');
+    if (controller.getSnapshot().readOnly || !controller.editable)
+      return this.refuse('permission-denied');
+    const content = controller.getSnapshot().content;
+    const body = content.bodies.find((b) => b.id === bodyId);
+    if (!body) return this.refuse('target-missing');
+    let part: CadDocument;
+    try {
+      makePartRemoval(content, bodyId);
+      part = bodyPartContent(content, bodyId);
+    } catch (e) {
+      return this.refuse(e instanceof Error ? e.message : 'make-part-invalid');
+    }
+    const hash = cadContentHash(part);
+    const partId = controller.newId('part');
+    const component: CadComponent = {
+      id: controller.newId('component'),
+      // Within the name limit with its suffix (a body's name may use all of it).
+      name: `${[...body.name].slice(0, cadLimits.nameCodePoints - 2).join('')} 1`,
+      partId,
+      placement: { translation: position(0, 0, 0), rotation: identityQuaternion() },
+      bom: 'include',
+    };
+    const edit = (source: CadPartDef['source'], boundsMm: [Vec3, Vec3]) =>
+      ({
+        type: 'makePart',
+        bodyId,
+        part: { id: partId, name: body.name, source, hint: { boundsMm } },
+        component,
+      }) as const;
+    // Everything the edit would be refused for is checked before an Artifact is made: the
+    // document it leaves (counts, names) and the assembly's expansion with the part.
+    try {
+      const candidate = applyCadOperation(
+        content,
+        edit({ kind: 'version', artifactId: 'pending', versionId: 'pending', contentHash: hash }, [
+          [0, 0, 0],
+          [0, 0, 0],
+        ]),
+      );
+      const limit = expandAssembly(candidate, (h) => (h === hash ? part : this.lookup(h))).limit;
+      if (limit) return this.refuse(limit);
+    } catch (e) {
+      return this.refuse(e instanceof Error ? e.message : 'make-part-invalid');
+    }
+    this.inserting = true;
+    this.emit();
+    try {
+      const own = await port.evaluateVersion(part, content.kernelProfile, {
+        requestId: `cad-make-part-${hash}`,
+        hash,
+      });
+      if (own.state !== 'available') return this.refuse(own.code ?? 'part-invalid');
+      const bounds = unionAll(own.bodies) ?? [
+        [0, 0, 0],
+        [0, 0, 0],
+      ];
+      if (controller.getSnapshot().content !== content) return this.refuse('make-part-changed');
+      // Authority is read again before anything is stored: it may be revoked while evaluating.
+      if (!controller.editable) return this.refuse('permission-denied');
+      let made: Awaited<ReturnType<NonNullable<CadPartSourceHost['createPart']>>>;
+      try {
+        made = await source.createPart(body.name, part);
+      } catch (e) {
+        return this.refuse(e instanceof Error && e.message ? e.message : 'make-part-create-failed');
+      }
+      if (made.contentHash !== hash) return this.refuse('part-source-mismatch');
+      if (!controller.editable) return this.refuse('permission-denied');
+      try {
+        await store.stage([part], []);
+      } catch (e) {
+        return this.refuse(e instanceof Error && e.message ? e.message : 'part-stage-failed');
+      }
+      if (controller.getSnapshot().content !== content) return this.refuse('make-part-stale');
+      const applied = await controller.run(edit({ kind: 'version', ...made }, bounds));
+      if (applied) this.selected = component.id;
+      return applied;
+    } finally {
+      this.inserting = false;
+      this.emit();
+    }
+  }
+  /**
    * R2b-5: reads a STEP assembly with the document's exact build into its preview. Only an empty
    * document takes one: the import makes it the new assembly (R2b-U7). Nothing is stored and the
    * content does not change until `adoptStepImport`.
    */
-  async prepareStepImport(fileName: string, bytes: Uint8Array): Promise<boolean> {
+  async prepareStepImport(
+    fileName: string,
+    bytes: Uint8Array,
+    /** PMI-1: as `CadController.prepareStepImport`. */
+    options: { pmi?: 'discard'; onPmi?: (report: CadStepPmiReport) => void } = {},
+  ): Promise<boolean> {
     const { controller, store, importStepAssembly } = this.options;
     this.stepImport = undefined;
     const s = controller.getSnapshot();
@@ -883,7 +1065,17 @@ export class CadAssembly {
         content.kernelProfile,
         controller.newId('import'),
         bytes,
+        options.pmi ? { pmi: options.pmi } : {},
       );
+      if (
+        result.status !== 'ok' &&
+        result.code === 'step-pmi-partial' &&
+        result.pmi &&
+        options.onPmi
+      ) {
+        options.onPmi(result.pmi);
+        return false;
+      }
       if (result.status !== 'ok') {
         controller.report(
           `${describeCode(result.code)}${result.detail ? `（${result.detail}）` : ''}`,
@@ -924,7 +1116,7 @@ export class CadAssembly {
       return this.refuse('step-assembly-not-empty');
     const { read, report, breps } = pending.result;
     const ref = (kind: CadAssetRef['kind'], sha256: string, byteLength: number): CadAssetRef => ({
-      id: kind === 'source-step' ? 'source' : 'brep',
+      id: kind === 'source-step' ? 'source' : kind === 'pmi' ? 'pmi' : 'brep',
       kind,
       sha256,
       byteLength,
@@ -934,10 +1126,12 @@ export class CadAssembly {
     const brepRefs = read.shapes.map((x) =>
       ref('normalized-brep', x.brep.sha256, x.brep.byteLength),
     );
+    // PMI-2: a shape's kept PMI is its part version's `pmi` asset.
+    const pmiRefs = read.shapes.map((x) => x.pmi && ref('pmi', x.pmi.sha256, x.pmi.byteLength));
     const plan = stepImportPlan(
       content.kernelProfile,
       read,
-      { source, breps: brepRefs },
+      { source, breps: brepRefs, pmis: pmiRefs },
       { sourceUnit: report.sourceUnit, scaleToMm: report.scaleToMm },
       (prefix) => controller.newId(prefix),
     );
@@ -951,6 +1145,13 @@ export class CadAssembly {
         if (!assets.some((a) => a.ref.sha256 === r.sha256))
           assets.push({ ref: r, bytes: breps[i]! });
       });
+      pmiRefs.forEach((r, i) => {
+        const bytes = pending.result.pmis?.[i];
+        if (r && bytes && !assets.some((a) => a.ref.sha256 === r.sha256))
+          assets.push({ ref: r, bytes });
+      });
+      // PMI-5a: the PMI of particular instances is the assembly document's own asset.
+      if (plan.assemblyPmi) assets.push(plan.assemblyPmi);
       try {
         await store.stage(plan.versions, assets);
       } catch (e) {
@@ -967,6 +1168,7 @@ export class CadAssembly {
         type: 'insertComponents',
         parts: plan.parts,
         components: plan.components,
+        ...(plan.assemblyPmi && { assemblyPmi: plan.assemblyPmi.ref }),
       });
     } finally {
       this.inserting = false;
@@ -1261,6 +1463,7 @@ export class CadAssembly {
       step: 'parent',
       type: 'revolute',
       flip: false,
+      keep: false,
       status: 'idle',
       jointId: this.options.controller.newId('joint'),
     };
@@ -1335,6 +1538,14 @@ export class CadAssembly {
     if (c.step === 'type') void this.previewJoint();
     else this.emit();
   }
+  /** CR3e-2: keeps the child where it stands at the joint's zero (`CadJointCreation.keep`). */
+  setJointKeep(keep: boolean) {
+    const c = this.creating;
+    if (!c || c.keep === keep) return;
+    this.creating = { ...c, keep };
+    if (c.step === 'type') void this.previewJoint();
+    else this.emit();
+  }
   /** Prepares the joint as the candidate edit: its poses solved, shown before Apply. */
   private async previewJoint() {
     const c = this.creating;
@@ -1345,10 +1556,42 @@ export class CadAssembly {
     const joint = newJoint(content, c.jointId, c.parent, c.child, c.type, c.flip);
     this.creating = { ...c, status: 'preparing', preview: undefined, message: undefined };
     this.emit();
-    const prepared = await controller.prepareEdit({ type: 'insertJoint', joint });
+    // MR7: a part another joint already places gets this one as a candidate of its mount (the
+    // joint in effect stays, so nothing moves).
+    const mount = content.mounts?.find((m) => m.component === joint.child.componentId);
+    const placed = content.joints.some((j) => j.child.componentId === joint.child.componentId);
+    const edit: Parameters<typeof controller.prepareEdit>[0] = placed
+      ? {
+          type: 'insertMountJoint',
+          joint,
+          mount: mount
+            ? { id: mount.id }
+            : {
+                id: controller.newId('mount'),
+                name:
+                  content.components.find((x) => x.id === joint.child.componentId)?.name ?? 'Mount',
+              },
+        }
+      : { type: 'insertJoint', joint };
+    let prepared = await controller.prepareEdit(edit);
     if (run !== this.jointRun) {
       if (prepared && this.creating?.status !== 'preparing') controller.cancelEdit();
       return false;
+    }
+    // Keep: the parent connector's offset from the frames the first solve read, then solved again.
+    const solved =
+      prepared?.evaluation.status === 'ok'
+        ? prepared.evaluation.assembly?.joints?.[joint.id]
+        : undefined;
+    if (c.keep && solved?.status === 'solved') {
+      const stood = poseOf(content.solvedPoses, joint.child.componentId) ?? identityPose();
+      joint.parent.offset = keptOffset(solved, stood);
+      // The edit holds this joint, its offset now kept: a mount's candidate or a joint alike.
+      prepared = await controller.prepareEdit(edit);
+      if (run !== this.jointRun) {
+        if (prepared && this.creating?.status !== 'preparing') controller.cancelEdit();
+        return false;
+      }
     }
     const now = this.creating!;
     if (!prepared) {
@@ -1399,12 +1642,23 @@ export class CadAssembly {
     const solution = evaluated.assembly?.joints?.[joint.id];
     const shown = evaluated.assembly?.poses?.[joint.child.componentId];
     if (solution?.status !== 'solved' || !shown) return undefined;
+    // MR7: a mount's candidate not in effect is solved for its frame but places nothing.
+    if (inactiveJointIds(s.content).has(joint.id)) return undefined;
     const content = s.content;
     let drag: CadJointDrag | undefined;
     let values: Partial<Record<CadJointValueKey, number>> | undefined;
+    const followerSteps = jointFollowerSteps(content, joint);
+    const solved = {
+      poses: evaluated.assembly?.poses ?? {},
+      joints: evaluated.assembly?.joints ?? {},
+    };
     return {
       moves: jointMoves(content, joint),
       frames: jointMoveFrames(content, joint),
+      // MR1: a coupled follower moves with the drag, as the committed values will place it.
+      followers: followerSteps,
+      followerMotions: () =>
+        values ? followerMotions(content, joint, solved, followerSteps, values) : new Map(),
       start: (ray, grab, alternate) => {
         if (controller.getSnapshot().busy) return 'joint-drag-busy';
         if (controller.getSnapshot().content !== content) return 'joint-drag-changed';
@@ -1620,6 +1874,67 @@ export class CadAssembly {
       throw error;
     }
   }
+  /**
+   * MR6 (docs/cad/mecha-design.md): GLB of the confirmed assembly as it is shown: every placed
+   * part's active bodies, their display meshes at the occurrence's pose (one node each, named by
+   * its path), then the assembly's own bodies. Refuses while a part is evaluating or cannot be
+   * read, as STEP does; image maps of placed parts are named as losses.
+   */
+  async exportGlb(): Promise<CadMeshExport | undefined> {
+    const { controller } = this.options;
+    const refuse = (code: string) => {
+      controller.report(describeCode(code), code);
+      return undefined;
+    };
+    const shown = controller.getSnapshot();
+    const { content, contentHash, evaluation } = shown;
+    if (shown.reference) return refuse('kernel-reference-only');
+    if (shown.geometryState !== 'ready' || evaluation?.status !== 'ok' || shown.busy)
+      return refuse('export-busy');
+    if (evaluation.assembly?.poseMismatch?.length) return refuse('assembly-pose-mismatch');
+    if (this.partsLeft()) return refuse('step-parts-pending');
+    const versions = this.versions(evaluation);
+    const { occurrences, limit } = expandAssembly(content, this.lookup);
+    if (limit) return refuse(limit);
+    const allowed = occurrenceAccess(occurrences, this.access);
+    if (
+      occurrences.some(
+        (o, i) => !allowed[i] || versions?.[o.part.source.contentHash]?.state !== 'available',
+      )
+    )
+      return refuse('glb-part-unavailable');
+    const own =
+      shown.meshes?.current && !shown.meshes.preview
+        ? { content, meshes: shown.meshes.meshes }
+        : undefined;
+    // The assembly's own bodies are written from confirmed meshes only (not a preview).
+    if (!own && content.bodies.some((b) => b.state === 'active')) return refuse('export-busy');
+    const r = assemblyGlbBodies(occurrences, (h) => this.meshes(h), own);
+    if (r.status !== 'ok') return refuse('glb-part-unavailable');
+    if (!r.bodies.length) return refuse('export-no-shape');
+    // The file's chord error is bounded by its coarsest body's display deflection.
+    const deflectionMm = Math.max(
+      ...r.bodies.map(({ mesh }) => {
+        const min = [Infinity, Infinity, Infinity];
+        const max = [-Infinity, -Infinity, -Infinity];
+        for (let i = 0; i < mesh.positions.length; i++) {
+          min[i % 3] = Math.min(min[i % 3]!, mesh.positions[i]!);
+          max[i % 3] = Math.max(max[i % 3]!, mesh.positions[i]!);
+        }
+        return displayDeflectionMm([min, max] as [Vec3, Vec3]);
+      }),
+    );
+    try {
+      return writeGlb(
+        r.bodies,
+        { sourceContentHash: contentHash, buildHash: evaluation.buildHash, deflectionMm },
+        r.losses,
+      );
+    } catch (error) {
+      if (error instanceof CadExportError) return refuse(error.code);
+      throw error;
+    }
+  }
   /** Counts a component (and what it places) in the BOM, or leaves it out (one edit). */
   setComponentBom(componentId: string, bom: CadComponent['bom']) {
     return this.options.controller.run({ type: 'setComponentBom', componentId, bom });
@@ -1669,6 +1984,12 @@ export class CadAssembly {
     else this.jointDrafts.set(jointId, draft);
     this.emit();
   }
+  /** Keeps (or, unchanged from what was shown, drops) a range or coupling entry (MR1b). */
+  setEntryDraft(key: string, draft: CadEntryDraft | undefined) {
+    if (!draft || draft.fields.every((v, i) => v === draft.shown[i])) this.entryDrafts.delete(key);
+    else this.entryDrafts.set(key, draft);
+    this.emit();
+  }
   /** Applies a joint's value entry as one edit (its subtree is solved in the same edit). */
   applyJointDraft(jointId: string) {
     const draft = this.jointDrafts.get(jointId);
@@ -1685,8 +2006,290 @@ export class CadAssembly {
     });
   }
   /** Deletes a joint: its child stays where it stands, fixed there. */
+  /**
+   * CR3e-2: one value's range (radians for an angle, mm otherwise), or none with `range`
+   * undefined, as one edit. A range the current value lies outside is refused (`joint-limit`).
+   */
+  setJointLimit(jointId: string, of: CadJointValueKey, range: [number, number] | undefined) {
+    const { controller } = this.options;
+    const joint = controller.getSnapshot().content.joints.find((j) => j.id === jointId);
+    if (!joint) return Promise.resolve(this.refuse('target-missing'));
+    const was = joint.limits.find((l) => l.of === of);
+    // The same range (typed in another form, `0.0` for `0`) is no edit: the entry is resolved.
+    if (range ? was?.min === range[0] && was.max === range[1] : !was) {
+      this.setEntryDraft(entryDraftKey('range', jointId, of), undefined);
+      return Promise.resolve(true);
+    }
+    const limits = joint.limits.filter((l) => l.of !== of);
+    if (range) limits.push({ of, min: range[0], max: range[1] });
+    return controller.run({ type: 'updateJoint', joint: { ...joint, limits } });
+  }
+  /**
+   * WM2: two gears in mesh, each turned by a revolute joint, as one edit: the driven joint's
+   * angle follows the driver's by the teeth, turned less than half a pitch so a tooth faces a gap.
+   * Refused with the first problem when the gears do not fit where the joints solve now.
+   */
+  insertGearMesh(mesh: Omit<CadGearMesh, 'id'>) {
+    const { controller } = this.options;
+    const snapshot = controller.getSnapshot();
+    const doc = snapshot.content;
+    const solved = snapshot.evaluation?.status === 'ok' ? snapshot.evaluation.assembly : undefined;
+    if (!solved?.joints || !solved.poses) return Promise.resolve(this.refuse('gear-mesh-unsolved'));
+    const check = checkGearMesh(
+      doc,
+      mesh,
+      { poses: solved.poses, joints: solved.joints },
+      this.lookup,
+    );
+    if (check.status !== 'ok') {
+      controller.report(describeGearMeshProblem(check.problems[0]!));
+      return Promise.resolve(false);
+    }
+    const { ratio, offset } = check.coupling;
+    return controller.run({
+      type: 'insertGearMesh',
+      mesh: { ...mesh, id: controller.newId('mesh') },
+      coupling: { ratio, offset },
+    });
+  }
+  /** WM2: the mesh removed, as one edit; the driven joint keeps the angle it has now. */
+  removeGearMesh(meshId: string) {
+    const { controller } = this.options;
+    const doc = controller.getSnapshot().content;
+    const mesh = doc.gearMeshes?.find((m) => m.id === meshId);
+    if (!mesh) return Promise.resolve(this.refuse('target-missing'));
+    const angle = coupledJointValues(doc, parameterValues(doc)).get(mesh.driven.joint)?.angle ?? 0;
+    return controller.run({ type: 'removeGearMesh', meshId, angle });
+  }
+  /**
+   * WM2: the mesh's coupling given again where the gears stand (after a version with other
+   * teeth), as one edit; refused with the first problem when they no longer fit.
+   */
+  updateGearMesh(meshId: string) {
+    const { controller } = this.options;
+    const snapshot = controller.getSnapshot();
+    const doc = snapshot.content;
+    const mesh = doc.gearMeshes?.find((m) => m.id === meshId);
+    if (!mesh) return Promise.resolve(this.refuse('target-missing'));
+    const solved = snapshot.evaluation?.status === 'ok' ? snapshot.evaluation.assembly : undefined;
+    if (!solved?.joints || !solved.poses) return Promise.resolve(this.refuse('gear-mesh-unsolved'));
+    const check = checkGearMesh(
+      doc,
+      mesh,
+      { poses: solved.poses, joints: solved.joints },
+      this.lookup,
+    );
+    if (check.status !== 'ok') {
+      controller.report(describeGearMeshProblem(check.problems[0]!));
+      return Promise.resolve(false);
+    }
+    const { ratio, offset } = check.coupling;
+    return controller.run({ type: 'updateGearMesh', meshId, coupling: { ratio, offset } });
+  }
+  /**
+   * WM2: a revolute joint that turns on and on (`continuous`), or one that keeps one turn, as
+   * one edit. Validation refuses it on a joint with a range, and turning it off while the
+   * angle (or a value following it) is past one turn.
+   */
+  setJointContinuous(jointId: string, on: boolean) {
+    const { controller } = this.options;
+    const joint = controller.getSnapshot().content.joints.find((j) => j.id === jointId);
+    if (!joint) return Promise.resolve(this.refuse('target-missing'));
+    if (!!joint.continuous === on) return Promise.resolve(true);
+    const next: CadJoint = { ...joint };
+    if (on) next.continuous = true;
+    else delete next.continuous;
+    return controller.run({ type: 'updateJoint', joint: next });
+  }
+  /**
+   * MR1: makes one value follow another joint's (`ratio × from + offset`, offset in rad or mm),
+   * or, with `coupling` undefined, stores it again as its current value, as one edit. The
+   * followed value leaves `values`; validation refuses a cycle, a kind mismatch or a range.
+   */
+  setJointCoupling(
+    jointId: string,
+    of: CadJointValueKey,
+    coupling: Omit<CadJointCoupling, 'of'> | undefined,
+  ) {
+    const { controller } = this.options;
+    const doc = controller.getSnapshot().content;
+    const joint = doc.joints.find((j) => j.id === jointId);
+    if (!joint) return Promise.resolve(this.refuse('target-missing'));
+    const was = joint.couplings?.find((c) => c.of === of);
+    // The same coupling again is no edit: the entry is resolved.
+    if (
+      coupling &&
+      was &&
+      was.from.joint === coupling.from.joint &&
+      was.from.of === coupling.from.of &&
+      was.ratio === coupling.ratio &&
+      was.offset === coupling.offset
+    ) {
+      this.setEntryDraft(entryDraftKey('coupling', jointId, of), undefined);
+      return Promise.resolve(true);
+    }
+    const others = (joint.couplings ?? []).filter((c) => c.of !== of);
+    const values: CadJointValues = { ...joint.values };
+    if (coupling) delete values[of];
+    else {
+      if (!joint.couplings?.some((c) => c.of === of)) return Promise.resolve(false);
+      const now = coupledJointValues(doc, parameterValues(doc)).get(joint.id)?.[of] ?? 0;
+      (values as Record<string, unknown>)[of] = isJointAngleKey(of) ? { literalRad: now } : mm(now);
+    }
+    const couplings = coupling ? [...others, { of, ...coupling }] : others;
+    const { couplings: _drop, ...rest } = joint;
+    const next: CadJoint = { ...rest, values, ...(couplings.length ? { couplings } : {}) };
+    return controller.run({ type: 'updateJoint', joint: next });
+  }
   removeJoint(jointId: string) {
     return this.options.controller.run({ type: 'deleteClosure', ids: [jointId], cascade: false });
+  }
+  /** MR7: another candidate places the mounted part (one edit, one Undo). */
+  setMount(mountId: string, jointId: string) {
+    return this.options.controller.run({ type: 'setMount', mountId, jointId });
+  }
+  /** MR7: the mount removed with its candidates not in effect (refused if one is still used). */
+  removeMount(mountId: string) {
+    return this.options.controller.run({ type: 'removeMount', mountId });
+  }
+  /** MR2: the current joint values saved as a new form (one edit). */
+  saveForm(name: string) {
+    const { controller } = this.options;
+    const doc = controller.getSnapshot().content;
+    return controller.run({
+      type: 'insertConfiguration',
+      configuration: {
+        id: controller.newId('form'),
+        name,
+        values: currentConfigurationValues(doc),
+        // MR7: which candidate places each mounted part.
+        ...(doc.mounts ? { mounts: currentMounts(doc)! } : {}),
+      },
+    });
+  }
+  /** MR2: every moving joint set to a form's values (one edit; a stale form is refused). */
+  recallForm(id: string) {
+    return this.options.controller.run({ type: 'recallConfiguration', id });
+  }
+  /** MR2: a form's values replaced by the current ones (mends a stale form). */
+  overwriteForm(id: string) {
+    const { controller } = this.options;
+    const doc = controller.getSnapshot().content;
+    const values = currentConfigurationValues(doc);
+    const mounts = currentMounts(doc);
+    return controller.run({
+      type: 'overwriteConfiguration',
+      id,
+      values,
+      ...(mounts ? { mounts } : {}),
+    });
+  }
+  renameForm(id: string, name: string) {
+    return this.options.controller.run({ type: 'renameConfiguration', id, name });
+  }
+  removeForm(id: string) {
+    return this.options.controller.run({ type: 'removeConfiguration', id });
+  }
+  /**
+   * MR3: the interference of the current content in its current pose, or in a form's, checked
+   * off the main thread on the part meshes at hand (their tessellation is the precision). Needs
+   * the current evaluation (its joint solutions place the joint spheres and the forms' poses).
+   */
+  async checkInterference(
+    formId?: string,
+  ): Promise<{ content: CadDocument; report: CadInterferenceReport } | { error: string }> {
+    const content = this.options.controller.getSnapshot().content;
+    const form = formId ? content.configurations?.find((f) => f.id === formId) : undefined;
+    if (formId && !form) return { error: 'target-missing' };
+    const r = await this.runInterference(form ? { form } : {});
+    return 'error' in r ? r : { content: r.content, report: r.report as CadInterferenceReport };
+  }
+  /**
+   * MR5: the interference at each sampled time of a motion (joint values in radians and mm by
+   * joint ID), checked off the main thread like `checkInterference`.
+   */
+  async checkInterferenceAlong(
+    samples: {
+      tick: number;
+      values: Record<string, CadResolvedJointValues>;
+      /** MR7: each mount's joint in effect then (the document's own where left out). */
+      mounts?: Record<string, string>;
+    }[],
+  ): Promise<{ content: CadDocument; report: CadSweepReport } | { error: string }> {
+    const r = await this.runInterference({ samples });
+    return 'error' in r ? r : { content: r.content, report: r.report as CadSweepReport };
+  }
+  private async runInterference(
+    target: Pick<CadInterferenceRequest, 'form' | 'samples'>,
+  ): Promise<
+    { content: CadDocument; report: CadInterferenceReport | CadSweepReport } | { error: string }
+  > {
+    const { controller } = this.options;
+    const s = controller.getSnapshot();
+    const evaluated = s.evaluation?.status === 'ok' ? s.evaluation : undefined;
+    if (s.busy || !evaluated || this.creating) return { error: 'interference-not-ready' };
+    const content = s.content;
+    const parts: Record<string, CadDocument> = {};
+    const lookup = (hash: string) => {
+      const doc = this.lookup(hash);
+      if (doc) parts[hash] = doc;
+      return doc;
+    };
+    const { occurrences, limit } = expandAssembly(content, lookup);
+    if (limit) return { error: limit };
+    // A version is checked on its meshes only where every occurrence of it may be read.
+    const allowed = occurrenceAccess(occurrences, this.access);
+    const revoked = new Set(
+      occurrences.filter((_, i) => !allowed[i]).map((o) => o.part.source.contentHash),
+    );
+    const plain = (list: readonly CadMesh[]): CadInterferenceMesh[] =>
+      // The LOD and before-failure markers decide which meshes are checked (cad-core).
+      list.map(({ bodyId, origin, positions, indices, lod, beforeFailure }) => ({
+        bodyId,
+        origin,
+        positions,
+        indices,
+        ...(lod ? { lod } : {}),
+        ...(beforeFailure !== undefined ? { beforeFailure } : {}),
+      }));
+    const meshes: Record<string, CadInterferenceMesh[]> = {};
+    for (const o of occurrences) {
+      const hash = o.part.source.contentHash;
+      if (revoked.has(hash) || meshes[hash]) continue;
+      const found = this.meshes(hash) ?? this.coarseMeshes(hash);
+      if (found) meshes[hash] = plain(found);
+    }
+    const own = s.meshes?.current && !s.meshes.preview ? plain(s.meshes.meshes) : undefined;
+    this.interferenceJobs ??= new CadInterferenceJobs(this.options.interferenceWorker);
+    try {
+      const report = await this.interferenceJobs.run({
+        doc: content,
+        parts,
+        meshes,
+        ...(own?.length ? { ownMeshes: own } : {}),
+        joints: evaluated.assembly?.joints ?? {},
+        ...target,
+      });
+      return { content, report };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+  /** MR3: an explicit allowance for a pair, whole or near a joint (one edit). */
+  allowInterference(a: string[], b: string[], region: CadInterferenceAllowance['region']) {
+    const { controller } = this.options;
+    return controller.run({
+      type: 'insertInterferenceAllowance',
+      allowance: { id: controller.newId('allow'), a, b, region },
+    });
+  }
+  removeInterferenceAllowance(id: string) {
+    return this.options.controller.run({ type: 'removeInterferenceAllowance', id });
+  }
+  /** MR3: shows a finding's occurrences selected in the view, or none. */
+  highlightInterference(paths: string[][] | undefined) {
+    this.highlighted = paths;
+    this.emit();
   }
   /** Adopts the poses the joints solve to, after stored ones were found not to match (one edit). */
   solvePoses() {
@@ -1703,5 +2306,6 @@ export class CadAssembly {
     this.unsubscribeSource?.();
     this.meshStore.clear();
     this.coarseStore.clear();
+    this.interferenceJobs?.dispose();
   }
 }

@@ -2,6 +2,7 @@ import {
   characterIds,
   freshCharacterId,
   ikChainBones,
+  ikChainProblem,
   ikPoseRotations,
   poseAt,
   type CharacterBone,
@@ -64,6 +65,12 @@ export function IkInspector({
       {chains.map((c) => (
         <fieldset key={c.id} className="character-fields" aria-label={`IK chain ${c.name}`}>
           <legend>{c.name}</legend>
+          {ikChainProblem(skeleton, c) && (
+            <p className="character-hint" data-testid={`ik-problem-${c.id}`}>
+              A bone of this chain is scaled unevenly, so its lengths change as it turns: the
+              solution is approximate.
+            </p>
+          )}
           <label className="character-field character-name-field">
             <input
               type="checkbox"

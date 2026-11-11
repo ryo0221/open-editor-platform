@@ -9,8 +9,9 @@ import {
   isCadDocument,
   type CadDocument,
 } from '@editor-platform/cad-core';
+import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
 import type { CadPartSourceHost, CadPartStore } from '@editor-platform/cad';
-import type { StoredArtifact } from '../model';
+import type { Content, StoredArtifact } from '../model';
 import { decodeBytes } from './resources';
 
 /** One retained version: its content and the hash it is named by. */
@@ -127,6 +128,8 @@ export function createCadPartSource(options: {
   records(): StoredArtifact[];
   currentId: string;
   open(artifactId: string): void;
+  /** CR3e: stores a new `cad` record (with one saved version) beside the current one. */
+  create?(record: StoredArtifact): Promise<void>;
 }): CadPartSourceHost {
   const find = (id: string) => options.records().find((r) => r.id === id && r.kind === 'cad');
   return {
@@ -186,5 +189,28 @@ export function createCadPartSource(options: {
     // closure an assembly retains (R2b-U3).
     checkAccess: () => true,
     open: (artifactId) => options.open(artifactId),
+    ...(options.create && {
+      async createPart(name, content) {
+        const record = await cadPartArtifact(name, content);
+        await options.create!(record);
+        const version = record.versions[0]!;
+        return {
+          artifactId: record.id,
+          versionId: version.versionId,
+          contentHash: version.contentHash,
+        };
+      },
+    }),
   };
+}
+
+/**
+ * CR3e "Make part": a new `cad` record whose draft and first saved version are `content`
+ * (a body's closure, which names no assets and places no parts).
+ */
+export async function cadPartArtifact(name: string, content: CadDocument): Promise<StoredArtifact> {
+  if (content.assets.length || content.parts.length) throw new Error('part-invalid');
+  const created = createArtifact<Content>('cad', name, content as unknown as Content);
+  const saved = await commitVersion(created, null, 'Make part');
+  return { ...saved, annotations: [] };
 }

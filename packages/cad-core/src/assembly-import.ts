@@ -11,7 +11,10 @@ import {
   type CadPartDef,
   type CadSolvedPose,
 } from './assembly';
+import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex } from '@noble/hashes/utils';
 import {
+  cadAssetMediaTypes,
   cadLimits,
   emptyCad,
   position,
@@ -23,6 +26,7 @@ import {
   type Vec3,
 } from './model';
 import { applyCadOperation, cadContentHash } from './operations';
+import type { CadPmiAsset, CadPmiTarget } from './pmi';
 
 /**
  * Import limits (上限): every flattened instance becomes a direct component; the file's tree is
@@ -50,11 +54,21 @@ export interface CadStepAssemblyRead {
     /** The normalized BRep's `sha256:<hex>` and size. */
     brep: { sha256: string; byteLength: number };
     boundsMm: [Vec3, Vec3];
+    /** #820: the shape's largest tolerance, when above the standard result limit. */
+    maxToleranceMm?: number;
+    /** PMI-2: the shape's `pmi` asset, when the import kept PMI on it. */
+    pmi?: { sha256: string; byteLength: number };
   }[];
   /** Every instance, flattened: its shape, its path of names in the file and its pose. */
   instances: { shape: number; path: string[]; pose: CadSolvedPose }[];
   /** Products with no solid or sheet, left out. */
   skipped: string[];
+  /**
+   * PMI-5a: the PMI the file gives particular instances (through assembly paths), as the
+   * `assembly-pmi` asset with each target's `component` the instance's index in `instances`
+   * (`"0"`, `"1"`, …); `stepImportPlan` names the components.
+   */
+  assemblyPmi?: CadPmiAsset;
 }
 
 /**
@@ -75,15 +89,16 @@ export const stepName = (value: string, fallback: string, suffix = '') =>
 export function importedPartDocument(
   kernel: Pick<CadKernelProfile, 'id' | 'buildHash'>,
   shape: CadStepAssemblyRead['shapes'][number],
-  assets: { source: CadAssetRef; brep: CadAssetRef },
+  assets: { source: CadAssetRef; brep: CadAssetRef; pmi?: CadAssetRef },
   conversion: { sourceUnit: CadLengthUnit; scaleToMm: number },
 ): CadDocument {
   const name = stepName(shape.name, 'STEP');
   const source = { ...assets.source, id: 'source' };
   const brep = { ...assets.brep, id: 'brep' };
+  const pmi = assets.pmi && { ...assets.pmi, id: 'pmi' };
   let doc = applyCadOperation(emptyCad(kernel), {
     type: 'insertImportedBody',
-    assets: [source, brep],
+    assets: pmi ? [source, brep, pmi] : [source, brep],
     feature: {
       id: 'imported',
       name,
@@ -96,6 +111,8 @@ export function importedPartDocument(
         importer: { id: kernel.id, buildHash: kernel.buildHash },
         sourceUnit: conversion.sourceUnit,
         scaleToMm: conversion.scaleToMm,
+        ...(shape.maxToleranceMm !== undefined && { maxToleranceMm: shape.maxToleranceMm }),
+        ...(pmi && { pmiAssetId: pmi.id }),
       },
     },
     body: {
@@ -121,8 +138,16 @@ export type CadStepImportPlan =
       versions: CadDocument[];
       parts: CadPartDef[];
       components: CadComponent[];
+      /**
+       * PMI-5a: `read.assemblyPmi` with its targets on the components, as the asset the
+       * Surface stores and `insertComponents` names.
+       */
+      assemblyPmi?: { ref: CadAssetRef; bytes: Uint8Array };
     }
-  | { status: 'refused'; code: 'step-instance-limit' | 'step-assembly-empty' };
+  | {
+      status: 'refused';
+      code: 'step-instance-limit' | 'step-assembly-empty' | 'step-assembly-pmi';
+    };
 
 /**
  * The edit that places `read` in an empty document: one imported part per shape and one fixed
@@ -131,7 +156,8 @@ export type CadStepImportPlan =
 export function stepImportPlan(
   kernel: Pick<CadKernelProfile, 'id' | 'buildHash'>,
   read: CadStepAssemblyRead,
-  assets: { source: CadAssetRef; breps: CadAssetRef[] },
+  /** `pmis[i]`: shape i's `pmi` asset, when it keeps PMI (PMI-2). */
+  assets: { source: CadAssetRef; breps: CadAssetRef[]; pmis?: (CadAssetRef | undefined)[] },
   conversion: { sourceUnit: CadLengthUnit; scaleToMm: number },
   newId: (prefix: string) => string,
 ): CadStepImportPlan {
@@ -146,7 +172,7 @@ export function stepImportPlan(
     const doc = importedPartDocument(
       kernel,
       shape,
-      { source: assets.source, brep: assets.breps[i]! },
+      { source: assets.source, brep: assets.breps[i]!, pmi: assets.pmis?.[i] },
       conversion,
     );
     const contentHash = cadContentHash(doc);
@@ -185,5 +211,43 @@ export function stepImportPlan(
       bom: 'include',
     };
   });
-  return { status: 'ok', versions, parts, components };
+  let assemblyPmi: CadPmiAsset | undefined;
+  if (read.assemblyPmi) {
+    // Every target names one instance by its index; anything else is refused, never guessed.
+    let wrong = false;
+    const on = (t: CadPmiTarget): CadPmiTarget => {
+      const i = /^(0|[1-9]\d*)$/.test(t.component ?? '') ? Number(t.component) : -1;
+      const component = components[i];
+      if (!component) wrong = true;
+      return { ...t, component: component?.id ?? '' };
+    };
+    assemblyPmi = {
+      ...read.assemblyPmi,
+      items: read.assemblyPmi.items.map((item) =>
+        item.kind === 'dimension' && item.targets2
+          ? { ...item, targets: item.targets.map(on), targets2: item.targets2.map(on) }
+          : { ...item, targets: item.targets.map(on) },
+      ),
+    };
+    if (wrong) return { status: 'refused', code: 'step-assembly-pmi' };
+  }
+  const bytes = assemblyPmi && new TextEncoder().encode(JSON.stringify(assemblyPmi));
+  return {
+    status: 'ok',
+    versions,
+    parts,
+    components,
+    ...(bytes && {
+      assemblyPmi: {
+        ref: {
+          id: 'assembly-pmi',
+          kind: 'assembly-pmi',
+          sha256: `sha256:${bytesToHex(sha256(bytes))}`,
+          byteLength: bytes.byteLength,
+          mediaType: cadAssetMediaTypes['assembly-pmi'],
+        },
+        bytes,
+      },
+    }),
+  };
 }

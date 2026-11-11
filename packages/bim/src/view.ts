@@ -16,7 +16,7 @@ import type {
   ViewSolidMesh,
   ViewTextureSet,
 } from '@editor-platform/geometry-view';
-import type { BimEvaluation } from './evaluate';
+import type { BimElementResult, BimEvaluation } from './evaluate';
 import { partFaceBodies, type BimPartStatus } from './parts';
 
 /** Display colour and opacity by element kind. */
@@ -25,6 +25,10 @@ export const bimKindStyle: Record<BimElementKind, { color: string; opacity: numb
   slab: { color: '#a8a29e', opacity: 1 },
   column: { color: '#94a3b8', opacity: 1 },
   beam: { color: '#7c8ea3', opacity: 1 },
+  member: { color: '#64748b', opacity: 1 },
+  ramp: { color: '#a8a29e', opacity: 1 },
+  railing: { color: '#78716c', opacity: 1 },
+  stair: { color: '#a8a29e', opacity: 1 },
   opening: { color: '#ffffff', opacity: 0 },
   door: { color: '#b45309', opacity: 1 },
   window: { color: '#38bdf8', opacity: 0.55 },
@@ -134,8 +138,17 @@ export function bimLastLayerFaces(ctx: BimContext, el: BimElement, mesh: Geometr
     } else left = [-axis.x[1], axis.x[0]];
     // A side face is vertical (a top cut by a sloping roof stays with the edges) and square to
     // the axis: an end moved by an oblique butt join may still look partly left (Codex).
-    const along = n[0] * left[1] - n[1] * left[0];
-    return Math.abs(n[2]) < 0.1 && Math.abs(along) < 0.1 && n[0] * left[0] + n[1] * left[1] > 0.7;
+    // LR2: a wall leaning right by `lean` turns its left face up by as much (Codex).
+    const lean = el.kind === 'wall' ? (el.lean ?? 0) : 0;
+    const h = Math.hypot(n[0], n[1]);
+    if (!(h > 0)) return false;
+    const tilt = Math.atan2(n[2], h);
+    const along = (n[0] * left[1] - n[1] * left[0]) / h;
+    return (
+      Math.abs(tilt - lean) < 0.1 &&
+      Math.abs(along) < 0.1 &&
+      (n[0] * left[0] + n[1] * left[1]) / h > 0.7
+    );
   });
 }
 
@@ -212,6 +225,11 @@ export interface BimViewOptions {
   parts?: ReadonlyMap<string, BimPartStatus>;
   /** #662: a material's texture set as the view draws it (its decoded images). */
   textures?: (set: GeometryTextureSet) => ViewTextureSet | undefined;
+  /**
+   * TW0b: a working plan's lower limit (mm): elements wholly below it are left out, so they are
+   * neither drawn nor picked. An element reaching above it is drawn whole.
+   */
+  belowMm?: number;
 }
 
 /**
@@ -231,6 +249,10 @@ export function bimViewSolids(
   for (const el of doc.elements) {
     if (options.hiddenKinds?.has(el.kind)) continue;
     const r = evaluation.elements.get(el.id);
+    if (options.belowMm !== undefined && r) {
+      const top = elementBounds(doc, el.id, r)?.[1][2];
+      if (top !== undefined && top < options.belowMm) continue;
+    }
     if (el.kind === 'part' && r?.status === 'error' && r.placement) {
       // Still being read, or unavailable: the bounds the Host reported for the version.
       const type = doc.types.find((t) => t.id === el.typeId);
@@ -364,33 +386,77 @@ export function partBodyMeshes(
   return out;
 }
 
-/** World bounds of every evaluated element and part box, for framing the camera. */
+/** An element's placed bounds in the building (a part without its shape: its type's bounds). */
+function elementBounds(
+  doc: BimDocument | undefined,
+  id: string,
+  r: BimElementResult,
+): [number[], number[]] | undefined {
+  let bounds: [number[], number[]] | undefined;
+  if (r.status === 'ok') bounds = r.measure.bounds;
+  // A part drawn as its type's bounds (its shape is not read) is framed as that box.
+  else if (r.placement && doc) {
+    const el = doc.elements.find((e) => e.id === id);
+    const type = el?.kind === 'part' ? doc.types.find((t) => t.id === el.typeId) : undefined;
+    if (type?.kind === 'part') bounds = [type.hintBounds.min, type.hintBounds.max];
+  }
+  if (!bounds) return undefined;
+  const m = placementMatrix(r.placement);
+  const [a, b] = bounds;
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (let c = 0; c < 8; c++) {
+    const p = [c & 1 ? b[0] : a[0], c & 2 ? b[1] : a[1], c & 4 ? b[2] : a[2]];
+    for (let i = 0; i < 3; i++) {
+      const w = m[i]! * p[0]! + m[4 + i]! * p[1]! + m[8 + i]! * p[2]! + m[12 + i]!;
+      lo[i] = Math.min(lo[i]!, w);
+      hi[i] = Math.max(hi[i]!, w);
+    }
+  }
+  return [lo, hi];
+}
+
+/**
+ * The elements a selection frames: each selected element, a hosted one (a door, a window, an
+ * opening) by its host.
+ */
+export function bimViewFramed(doc: BimDocument | undefined, ids: readonly string[]): Set<string> {
+  const wanted = new Set<string>();
+  for (const id of ids) {
+    const el = doc?.elements.find((e) => e.id === id);
+    wanted.add(el && 'hostId' in el ? el.hostId : id);
+  }
+  return wanted;
+}
+/**
+ * World bounds of every evaluated element and part box, for framing the camera. FU1: of the
+ * elements `ids` only, when given; an opening (which has no shape of its own) stands for its host
+ * wall. FU7: a door or window frames its own panel, the host only while the panel has no shape.
+ */
 export function bimViewBounds(
   evaluation: Extract<BimEvaluation, { status: 'ok' }> | undefined,
   doc?: BimDocument,
+  ids?: readonly string[],
 ): [[number, number, number], [number, number, number]] | undefined {
   if (!evaluation) return undefined;
+  let wanted: Set<string> | undefined;
+  if (ids) {
+    wanted = new Set();
+    for (const id of ids) {
+      const r = evaluation.elements.get(id);
+      if (r && elementBounds(doc, id, r)) wanted.add(id);
+      else for (const framed of bimViewFramed(doc, [id])) wanted.add(framed);
+    }
+  }
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
   for (const [id, r] of evaluation.elements) {
-    let bounds: [number[], number[]] | undefined;
-    if (r.status === 'ok') bounds = r.measure.bounds;
-    // A part drawn as its type's bounds (its shape is not read) is framed as that box.
-    else if (r.placement && doc) {
-      const el = doc.elements.find((e) => e.id === id);
-      const type = el?.kind === 'part' ? doc.types.find((t) => t.id === el.typeId) : undefined;
-      if (type?.kind === 'part') bounds = [type.hintBounds.min, type.hintBounds.max];
-    }
-    if (!bounds) continue;
-    const m = placementMatrix(r.placement);
-    const [a, b] = bounds;
-    for (let c = 0; c < 8; c++) {
-      const p = [c & 1 ? b[0] : a[0], c & 2 ? b[1] : a[1], c & 4 ? b[2] : a[2]];
-      for (let i = 0; i < 3; i++) {
-        const w = m[i]! * p[0]! + m[4 + i]! * p[1]! + m[8 + i]! * p[2]! + m[12 + i]!;
-        lo[i] = Math.min(lo[i]!, w);
-        hi[i] = Math.max(hi[i]!, w);
-      }
+    if (wanted && !wanted.has(id)) continue;
+    const b = elementBounds(doc, id, r);
+    if (!b) continue;
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(lo[i]!, b[0][i]!);
+      hi[i] = Math.max(hi[i]!, b[1][i]!);
     }
   }
   return lo[0] === Infinity
@@ -412,9 +478,15 @@ export function bimElementLevel(doc: BimDocument, id: string, seen = 0): string 
     case 'slab':
     case 'beam':
       return el.top.level;
+    case 'member':
+      return el.start.height.level;
+    case 'ramp':
+    case 'stair':
+      return el.base.level;
     case 'opening':
     case 'door':
     case 'window':
+    case 'railing':
       return bimElementLevel(doc, el.hostId, seen + 1);
   }
 }

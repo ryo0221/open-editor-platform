@@ -37,6 +37,8 @@ preview幅は390/1024/1400px。Save version、History、native JSONは既存Arti
 pureは`@editor-platform/react-ui-core`、通常Viewは`@editor-platform/react-ui`、
 別originでのHost rendererは`@editor-platform/react-ui-preview`の公開entrypointを使う。
 ReactUiSurfaceへcontent/readOnly/execute/select/runtimeを渡し、既存EditorSessionのcommand経路へ接続する。
+書き出し先を持たないHostは`exports={false}`でExportボタンを出さない。一部だけなら
+`exports={['composition']}`のように`'tsx' | 'composition' | 'screen-proposal'`を選ぶ（既定は全部）。
 contentはReactのstate snapshotとして更新ごとに新しい参照を渡す。Surfaceはその公開snapshotを
 検査・所有して表示とpreview requestに使い、状態表示だけの変更では構成を作り直さない。
 元部品関数をEditorのmain frameへ渡さない。

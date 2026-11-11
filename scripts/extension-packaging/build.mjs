@@ -37,9 +37,11 @@ if (!['baseline', 'readonly-domains', 'controlled-animation'].includes(profile))
 const names = [
   'artifact-core',
   'editor-core',
+  'editor-host',
   'reuse-core',
   'extension-contract',
   'extension-runtime',
+  'geometry-core',
   'animation-core',
   'animation-player',
   'extension-sample',
@@ -58,6 +60,9 @@ const manifests = new Map(
   await Promise.all(
     names.map(async (name) => {
       let manifest = JSON.parse(source.read(`packages/${name}/package.json`).toString());
+      // A string `exports` is the root entrypoint only; normalize it to the object form.
+      if (typeof manifest.exports === 'string')
+        manifest = { ...manifest, exports: { '.': manifest.exports } };
       if (scopes[name]) {
         const scoped = scopePackage(source, `packages/${name}`, manifest, scopes[name]);
         manifest = scoped.manifest;

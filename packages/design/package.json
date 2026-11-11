@@ -16,7 +16,8 @@
     "./division": "./src/division.ts",
     "./page-proposals": "./src/page-proposals.ts",
     "./manga-proposal-diff": "./src/manga-proposal-diff.ts",
-    "./creative-proposal-diff": "./src/creative-proposal-diff.ts"
+    "./creative-proposal-diff": "./src/creative-proposal-diff.ts",
+    "./native-host": "./src/native-host.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

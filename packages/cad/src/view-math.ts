@@ -118,3 +118,26 @@ export function compareSizes(a: Bounds, b: Bounds) {
     return { axis: 'XYZ'[i] as 'X' | 'Y' | 'Z', a: sa, b: sb, difference: sa - sb };
   });
 }
+
+/**
+ * WM3: the grid for what the camera shows. Zoomed in on a part much smaller than the model (a
+ * 0.05 mm watch spring on a 30 mm plate), the model's grid has no line on screen, so a finer
+ * grid of about ten cells across the view is drawn around the point looked at. Zoomed out, the
+ * model's grid stays.
+ */
+export function gridForView(
+  model: typeof defaultGrid,
+  viewSpanMm: number,
+  target: [number, number],
+): typeof defaultGrid {
+  if (!(viewSpanMm > 0) || !Number.isFinite(viewSpanMm)) return model;
+  const step = niceStep(viewSpanMm / 10);
+  if (step >= model.step) return model;
+  const snap = (v: number) => Math.round(v / step) * step;
+  return { step, divisions: 40, center: [snap(target[0]), snap(target[1])] };
+}
+
+/** WM3: the perspective depth range around a camera `distance` from what it looks at. */
+export function depthRange(distance: number, modelRadius: number): { near: number; far: number } {
+  return { near: distance / 1000, far: Math.max(distance * 100, (distance + modelRadius) * 2) };
+}

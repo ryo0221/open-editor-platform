@@ -11,7 +11,9 @@ import {
   Matrix4,
   Mesh,
   MOUSE,
+  MeshMatcapMaterial,
   MeshStandardMaterial,
+  CanvasTexture,
   Object3D,
   PerspectiveCamera,
   RepeatWrapping,
@@ -65,6 +67,7 @@ export class CharacterViewport {
     { geometry: BufferGeometry; material: MeshStandardMaterial }
   >();
   private readonly propMeshes: Mesh[] = [];
+  private readonly lights: Object3D[];
 
   constructor(
     private readonly host: HTMLElement,
@@ -84,7 +87,8 @@ export class CharacterViewport {
     sun.position.set(0.4, -0.8, 1);
     const fill = new DirectionalLight('#ffffff', 0.6);
     fill.position.set(-0.6, 0.7, 0.4);
-    this.scene.add(new AmbientLight('#ffffff', 0.9), sun, fill, this.group, this.propGroup);
+    this.lights = [new AmbientLight('#ffffff', 0.9), sun, fill];
+    this.scene.add(...this.lights, this.group, this.propGroup);
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.addEventListener('change', () => this.request());
     this.controls.addEventListener('start', () => (this.moved = true));
@@ -117,6 +121,12 @@ export class CharacterViewport {
     /** C3: the same parts with edited meshes keep the camera (a mesh edit is not a new model). */
     keepCamera = false,
   ) {
+    // C8: an export draws the meshes it started with; a new display (a subdivision finishing,
+    // say) is built when it ends.
+    if (this.capture) {
+      this.capture.deferred = [doc, meshes, images, keepCamera];
+      return;
+    }
     this.clear();
     const materials = new Map(
       doc.materials.map((m) => {
@@ -163,6 +173,9 @@ export class CharacterViewport {
       geometry.setAttribute('position', new BufferAttribute(d.positions.slice(), 3));
       geometry.setAttribute('normal', new BufferAttribute(d.normals.slice(), 3));
       if (d.uvs) geometry.setAttribute('uv', new BufferAttribute(d.uvs, 2));
+      // C7d: the frame a baked normal map was made in (Three would otherwise derive its own).
+      if (prepared.tangents)
+        geometry.setAttribute('tangent', new BufferAttribute(prepared.tangents.slice(), 4));
       geometry.setIndex(new BufferAttribute(d.indices.slice(), 1));
       this.mirrored.set(part.id, new Uint8Array(d.indices.length / 3));
       for (const [start, count, slot] of d.groups) geometry.addGroup(start, count, slot);
@@ -180,6 +193,14 @@ export class CharacterViewport {
 
   /** Poses every part (and prop) to a frame and draws it. The first frame fits the camera. */
   draw(frame: readonly PartFrame[], props: readonly PropFrame[] = []) {
+    // An export is drawing its own frames: the caller draws again after `endCapture`.
+    if (this.capture) return;
+    this.pose(frame, props);
+    // Fitting waits for something visible: a model that starts hidden is framed when shown.
+    if (!this.fitted) this.fitted = this.fit(frame, props);
+    this.request();
+  }
+  private pose(frame: readonly PartFrame[], props: readonly PropFrame[]) {
     this.drawProps(props);
     for (const p of frame) {
       const mesh = this.meshes.get(p.partId);
@@ -188,6 +209,9 @@ export class CharacterViewport {
       const g = mesh.geometry;
       (g.getAttribute('position') as BufferAttribute).copyArray(p.positions).needsUpdate = true;
       (g.getAttribute('normal') as BufferAttribute).copyArray(p.normals).needsUpdate = true;
+      const tangent = g.getAttribute('tangent') as BufferAttribute | undefined;
+      if (tangent && p.tangents?.length === tangent.array.length)
+        tangent.copyArray(p.tangents).needsUpdate = true;
       // Wind the triangles whose mirroring changed the other way (in place, one buffer per part).
       const wound = this.mirrored.get(p.partId);
       if (wound && wound.length === p.flipped.length) {
@@ -204,10 +228,100 @@ export class CharacterViewport {
       }
       g.computeBoundingSphere();
     }
-    // Fitting waits for something visible: a model that starts hidden is framed when shown.
-    if (!this.fitted) this.fitted = this.fit(frame, props);
-    this.request();
   }
+
+  /**
+   * C8: draws frames for an export at `width × height` (device pixels), through a copy of the
+   * view's camera with the output's aspect (the vertical field of view kept). The view stops
+   * drawing on its own meanwhile, and shows the exported frames letterboxed; the grid, the
+   * edit overlay and the sculpt surface are left out. `endCapture` restores the view.
+   */
+  beginCapture(width: number, height: number) {
+    if (this.capture) throw new Error('A capture is already running.');
+    const canvas = this.renderer.domElement;
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(width, height, false);
+    const gl = this.renderer.getContext();
+    const camera = this.camera.clone();
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    const hidden = [this.grid, this.overlay, this.sculpt].filter(
+      (o): o is Object3D => !!o && o.visible,
+    );
+    this.capture = { camera, hidden, lights: this.lights };
+    for (const o of hidden) o.visible = false;
+    canvas.classList.add('character-canvas-capturing');
+    if (
+      gl.drawingBufferWidth !== width ||
+      gl.drawingBufferHeight !== height ||
+      gl.isContextLost()
+    ) {
+      this.endCapture();
+      throw new CaptureUnsupported(
+        `This browser can draw at most ${gl.drawingBufferWidth} × ${gl.drawingBufferHeight} here.`,
+      );
+    }
+  }
+  /**
+   * C8b: poses and draws one exported frame and returns the canvas holding it, for the caller
+   * to take (`new VideoFrame(canvas)`) before anything draws again.
+   */
+  captureCanvas(frame: readonly PartFrame[], props: readonly PropFrame[] = []): HTMLCanvasElement {
+    const capture = this.capture;
+    if (!capture) throw new Error('No capture is running.');
+    if (this.renderer.getContext().isContextLost()) throw contextLost();
+    this.pose(frame, props);
+    this.renderCapture(capture);
+    if (this.renderer.getContext().isContextLost()) throw contextLost();
+    return this.renderer.domElement;
+  }
+  /** Poses and draws one exported frame; resolves with it as PNG bytes. */
+  async captureFrame(
+    frame: readonly PartFrame[],
+    props: readonly PropFrame[] = [],
+  ): Promise<Uint8Array> {
+    const capture = this.capture;
+    if (!capture) throw new Error('No capture is running.');
+    this.pose(frame, props);
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) throw contextLost();
+    this.renderCapture(capture);
+    // toBlob takes the canvas as it is now (the drawing buffer is preserved).
+    const blob = await new Promise<Blob | null>((resolve) =>
+      this.renderer.domElement.toBlob(resolve, 'image/png'),
+    );
+    // A lost context still hands over a PNG, of the cleared canvas: never keep it.
+    if (gl.isContextLost()) throw contextLost();
+    if (!blob) throw new CaptureUnsupported('The frame could not be read from the view.');
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  /** Draws only the parts and props: anything added to the scene since the capture began is left out. */
+  private renderCapture(capture: NonNullable<typeof this.capture>) {
+    const shown = new Set<Object3D>([this.group, this.propGroup, ...capture.lights]);
+    const off = this.scene.children.filter((o) => !shown.has(o) && o.visible);
+    for (const o of off) o.visible = false;
+    this.renderer.render(this.scene, capture.camera);
+    for (const o of off) o.visible = true;
+  }
+  endCapture() {
+    const capture = this.capture;
+    if (!capture) return;
+    this.capture = undefined;
+    for (const o of capture.hidden) o.visible = true;
+    if (capture.deferred) this.show(...capture.deferred);
+    this.renderer.domElement.classList.remove('character-canvas-capturing');
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.layout();
+  }
+  private capture:
+    | {
+        camera: PerspectiveCamera;
+        hidden: Object3D[];
+        lights: Object3D[];
+        /** The last `show` asked for while capturing. */
+        deferred?: Parameters<CharacterViewport['show']>;
+      }
+    | undefined;
   private drawProps(props: readonly PropFrame[]) {
     const used = new Set<CharacterPropMesh>();
     let n = 0;
@@ -344,6 +458,120 @@ export class CharacterViewport {
   }
   private overlay: Object3D | undefined;
 
+  /**
+   * C7b: the multires surface being sculpted, drawn in place of its part (the Surface hides the
+   * part). The buffers share the given arrays: after a dab, `updateSculpt` uploads the range.
+   * C7c: `mask` (0–1 per vertex, shared too) darkens held vertices; `matcap` shades the surface
+   * with a clay matcap instead of the lit material.
+   */
+  setSculpt(
+    sculpt: {
+      positions: Float32Array;
+      normals: Float32Array;
+      triangles: Uint32Array;
+      /** Mesh space to character space (column-major). */
+      matrix: number[];
+      mask?: Float32Array;
+      matcap?: boolean;
+    } | null,
+  ) {
+    if (this.sculpt) {
+      this.sculpt.geometry.dispose();
+      (this.sculpt.material as MeshStandardMaterial).dispose();
+      this.sculpt.removeFromParent();
+      this.sculpt = undefined;
+    }
+    this.sculptMask = sculpt?.mask;
+    if (sculpt) {
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(sculpt.positions, 3));
+      g.setAttribute('normal', new BufferAttribute(sculpt.normals, 3));
+      const colors = new Float32Array(sculpt.positions.length).fill(1);
+      g.setAttribute('color', new BufferAttribute(colors, 3));
+      g.setIndex(new BufferAttribute(sculpt.triangles, 1));
+      g.computeBoundingSphere();
+      const material = sculpt.matcap
+        ? new MeshMatcapMaterial({ matcap: this.clay(), vertexColors: true })
+        : new MeshStandardMaterial({
+            color: '#c9c4bc',
+            roughness: 0.55,
+            metalness: 0,
+            vertexColors: true,
+          });
+      const mesh = new Mesh(g, material);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.fromArray(sculpt.matrix);
+      mesh.frustumCulled = false;
+      this.sculpt = mesh;
+      this.scene.add(mesh);
+      this.maskColors(0, sculpt.positions.length / 3 - 1);
+    }
+    this.request();
+  }
+  /** Held vertices drawn darker and blue (C7c), white elsewhere (the material's own colour). */
+  private maskColors(first: number, last: number) {
+    const a = this.sculpt?.geometry.getAttribute('color') as BufferAttribute | undefined;
+    const m = this.sculptMask;
+    if (!a) return;
+    const c = a.array as Float32Array;
+    for (let v = first; v <= last; v++) {
+      const t = m ? 0.65 * Math.min(Math.max(m[v] ?? 0, 0), 1) : 0;
+      c[3 * v] = 1 - t * 0.75;
+      c[3 * v + 1] = 1 - t * 0.6;
+      c[3 * v + 2] = 1 - t * 0.2;
+    }
+  }
+  /** A clay matcap, drawn once: warm grey, lit from the upper left, darker at the rim. */
+  private clay(): CanvasTexture {
+    if (this.clayTexture) return this.clayTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const g = ctx.createRadialGradient(96, 84, 8, 128, 128, 128);
+    g.addColorStop(0, '#f4efe8');
+    g.addColorStop(0.45, '#c2b8ab');
+    g.addColorStop(0.85, '#6e655c');
+    g.addColorStop(1, '#3b3631');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    const t = new CanvasTexture(canvas);
+    t.colorSpace = SRGBColorSpace;
+    this.clayTexture = t;
+    return t;
+  }
+  private clayTexture: CanvasTexture | undefined;
+  private sculptMask: Float32Array | undefined;
+  /** Uploads vertices `first`…`last` of the sculpted surface after a dab (and their mask). */
+  updateSculpt(first: number, last: number) {
+    const g = this.sculpt?.geometry;
+    if (!g || last < first) return;
+    this.maskColors(first, last);
+    for (const name of ['position', 'normal', 'color']) {
+      const a = g.getAttribute(name) as BufferAttribute;
+      // Added to the ranges still waiting for the next frame (three clears them on upload).
+      a.addUpdateRange(3 * first, 3 * (last - first + 1));
+      a.needsUpdate = true;
+    }
+    this.request();
+  }
+  private sculpt: Mesh | undefined;
+  /** The ray (character space, unit direction) through canvas pixels `x, y`. */
+  ray(x: number, y: number): { origin: [number, number, number]; dir: [number, number, number] } {
+    const a = this.unproject(x, y, -1),
+      b = this.unproject(x, y, 1);
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const l = Math.hypot(d[0]!, d[1]!, d[2]!) || 1;
+    return { origin: a, dir: [d[0]! / l, d[1]! / l, d[2]! / l] };
+  }
+
+  /**
+   * C8c: what a path-traced still draws: the parts and props as they are now, and the view's
+   * camera (the grid, the overlays and the sculpt surface are left out).
+   */
+  pathSource(): { roots: Object3D[]; camera: PerspectiveCamera } {
+    return { roots: [this.group, this.propGroup], camera: this.camera };
+  }
+
   /** Fits the camera again on the next frame with something visible (a new document). */
   refit() {
     this.fitted = false;
@@ -384,6 +612,7 @@ export class CharacterViewport {
     for (const t of this.textures.splice(0)) t.dispose();
   }
   private layout() {
+    if (this.capture) return;
     const w = Math.max(this.host.clientWidth, 1),
       h = Math.max(this.host.clientHeight, 1);
     this.renderer.setSize(w, h, false);
@@ -392,7 +621,7 @@ export class CharacterViewport {
     this.request();
   }
   private request() {
-    if (this.frame) return;
+    if (this.frame || this.capture) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       this.renderer.render(this.scene, this.camera);
@@ -406,6 +635,9 @@ export class CharacterViewport {
     return () => void this.rendered.delete(f);
   }
   dispose() {
+    this.endCapture();
+    this.setSculpt(null);
+    this.clayTexture?.dispose();
     cancelAnimationFrame(this.frame);
     this.rendered.clear();
     this.resize.disconnect();
@@ -416,6 +648,13 @@ export class CharacterViewport {
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
+}
+
+/** The view cannot draw an exported frame (size beyond the browser's, or no pixels back). */
+const contextLost = () =>
+  new CaptureUnsupported('The graphics context was lost during the export; nothing was saved.');
+export class CaptureUnsupported extends Error {
+  override name = 'CaptureUnsupported';
 }
 
 type Box = [[number, number, number], [number, number, number]];

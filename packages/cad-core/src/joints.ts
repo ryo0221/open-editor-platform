@@ -25,6 +25,7 @@ import {
   type ParameterValues,
 } from './graph';
 import type { Angle, CadDocument, Length, Position3, Quaternion } from './model';
+import { activeJoints, inactiveJointIds, type CadMountChoice } from './mounts';
 import type { CadReferenceProblem, CadTopologyRef } from './topology';
 
 /** The part's origin (its document's axes), or a face, edge or vertex of an active body's result. */
@@ -43,15 +44,50 @@ export interface CadConnector {
   /** Moves the connector in its own frame, after `flip`. */
   offset: { translation: Position3; rotation: Quaternion };
 }
-export type CadJointType = 'fastened' | 'revolute' | 'slider' | 'cylindrical' | 'planar';
-export type CadJointValueKey = 'angle' | 'distance' | 'u' | 'v';
+export type CadJointType =
+  | 'fastened'
+  | 'revolute'
+  | 'slider'
+  | 'cylindrical'
+  | 'planar'
+  /** MR1: three turns, about the connector's z, then the turned y, then the turned x. */
+  | 'spherical'
+  /** MR1: two turns, about the connector's z, then the turned x. */
+  | 'universal';
+export type CadJointValueKey = 'angle' | 'angle2' | 'angle3' | 'distance' | 'u' | 'v';
 export interface CadJointValues {
   angle?: Angle;
+  angle2?: Angle;
+  angle3?: Angle;
   distance?: Length;
   u?: Length;
   v?: Length;
 }
-/** Bounds of one value: radians for `angle`, millimetres otherwise. */
+/** The values that are angles (radians); the others are lengths (millimetres). */
+export const cadJointAngleKeys: ReadonlySet<CadJointValueKey> = new Set([
+  'angle',
+  'angle2',
+  'angle3',
+]);
+export const isJointAngleKey = (key: CadJointValueKey) => cadJointAngleKeys.has(key);
+/** The values a joint stores itself: its type's, less those that follow another joint (MR1). */
+export function ownJointValueKeys(joint: Pick<CadJoint, 'type' | 'couplings'>): CadJointValueKey[] {
+  const coupled = new Set((joint.couplings ?? []).map((c) => c.of));
+  return cadJointValueKeys[joint.type].filter((k) => !coupled.has(k));
+}
+/**
+ * MR1 (docs/cad/mecha-design.md): one value of a joint that follows another joint's value,
+ * `value = ratio × from + offset` (left and right wings, a piston that follows a knee). The
+ * followed value is not stored in the joint's `values`; both values are of the same kind
+ * (angle to angle, length to length), and `offset` is in that kind's unit (rad or mm).
+ */
+export interface CadJointCoupling {
+  of: CadJointValueKey;
+  from: { joint: string; of: CadJointValueKey };
+  ratio: number;
+  offset: number;
+}
+/** Bounds of one value: radians for an angle, millimetres otherwise. */
 export interface CadJointLimit {
   of: CadJointValueKey;
   min: number;
@@ -64,9 +100,17 @@ export interface CadJoint {
   parent: CadConnector;
   /** The direct component it moves (a sub-assembly moves as one rigid body). */
   child: { componentId: string; connector: CadConnector };
-  /** Exactly the values its type reads (`cadJointValueKeys`). */
+  /** Exactly the values its type reads (`cadJointValueKeys`), less the coupled ones. */
   values: CadJointValues;
   limits: CadJointLimit[];
+  /** MR1: values that follow another joint's value; absent when there are none. */
+  couplings?: CadJointCoupling[];
+  /**
+   * WM2 (docs/cad/watch-design.md): a revolute joint that turns any number of times (a watch
+   * wheel). Its angle, and a value that follows it, keep the turns they reach (never wrapped
+   * to one turn) within `cadJointLimits.continuousRad`; it has no `limits`. Absent otherwise.
+   */
+  continuous?: true;
 }
 
 /** The values each joint type reads, in the order its transform applies them. */
@@ -77,6 +121,8 @@ export const cadJointValueKeys: Readonly<Record<CadJointType, readonly CadJointV
     slider: ['distance'],
     cylindrical: ['distance', 'angle'],
     planar: ['u', 'v', 'angle'],
+    spherical: ['angle', 'angle2', 'angle3'],
+    universal: ['angle', 'angle2'],
   });
 export const cadJointTypes = Object.keys(cadJointValueKeys) as CadJointType[];
 /** Safety limits (docs/cad/r2b-assembly.md, 上限). Not performance claims. */
@@ -88,6 +134,12 @@ export const cadJointLimits = Object.freeze({
   path: 8,
   /** A joint angle and its limits stay within one turn either way. */
   angleRad: 2 * Math.PI,
+  /** WM2: the angle of a continuous joint, and a value following it, stays within this (rad). */
+  continuousRad: 1_000_000,
+  /** MR1: a coupling's ratio stays within this either way. */
+  couplingRatio: 1_000,
+  /** A joint length and its limits stay within this either way (mm). */
+  lengthMm: 1_000_000,
 });
 
 /**
@@ -116,15 +168,97 @@ export function invertPose(p: CadSolvedPose): CadSolvedPose {
   return { translationMm: [-t[0], -t[1], -t[2]], rotation };
 }
 const turnZ = (angle: number): Quaternion => [0, 0, Math.sin(angle / 2), Math.cos(angle / 2)];
+const turnY = (angle: number): Quaternion => [0, Math.sin(angle / 2), 0, Math.cos(angle / 2)];
+const turnX = (angle: number): Quaternion => [Math.sin(angle / 2), 0, 0, Math.cos(angle / 2)];
+/** `a ∘ b`: turn by `b` in `a`'s turned axes (intrinsic order). */
+const mulQ = (a: Quaternion, b: Quaternion): Quaternion => {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+};
+/**
+ * The safety bound a joint's value keeps either way: one turn for an angle (WM2: `continuousRad`
+ * for a continuous joint's), `lengthMm` for a length.
+ */
+export const jointSafetyBound = (joint: Pick<CadJoint, 'continuous'>, key: CadJointValueKey) =>
+  isJointAngleKey(key)
+    ? joint.continuous
+      ? cadJointLimits.continuousRad
+      : cadJointLimits.angleRad
+    : cadJointLimits.lengthMm;
 /** Each value a joint type reads, resolved (rad for angle, mm otherwise). */
 export function jointValues(joint: Pick<CadJoint, 'type' | 'values'>, params: ParameterValues) {
   const out: Partial<Record<CadJointValueKey, number>> = {};
   for (const key of cadJointValueKeys[joint.type]) {
     const v = joint.values[key];
     if (!v) continue;
-    out[key] =
-      key === 'angle' ? resolveAngle(v as Angle, params) : resolveLength(v as Length, params);
+    out[key] = isJointAngleKey(key)
+      ? resolveAngle(v as Angle, params)
+      : resolveLength(v as Length, params);
   }
+  return out;
+}
+export type CadResolvedJointValues = Partial<Record<CadJointValueKey, number>>;
+/**
+ * Every joint's resolved values with its couplings applied (MR1): its own values, then
+ * `overrides` (keyed values, a drag), then each coupled value from the value it follows.
+ * A coupled value is never taken from `overrides`: it always follows. Validation keeps the
+ * couplings acyclic; a value that follows a missing joint or value is left out.
+ */
+export function coupledJointValues(
+  doc: Pick<CadDocument, 'joints'>,
+  params: ParameterValues,
+  overrides?: ReadonlyMap<string, CadResolvedJointValues>,
+): Map<string, CadResolvedJointValues> {
+  const byId = new Map(doc.joints.map((j) => [j.id, j]));
+  const out = new Map<string, CadResolvedJointValues>();
+  const visiting = new Set<string>();
+  const resolve = (id: string): CadResolvedJointValues | undefined => {
+    const done = out.get(id);
+    if (done) return done;
+    const joint = byId.get(id);
+    if (!joint || visiting.has(id)) return undefined;
+    visiting.add(id);
+    const coupled = new Set((joint.couplings ?? []).map((c) => c.of));
+    const values: CadResolvedJointValues = { ...jointValues(joint, params) };
+    for (const [k, v] of Object.entries(overrides?.get(id) ?? {}))
+      if (!coupled.has(k as CadJointValueKey)) values[k as CadJointValueKey] = v;
+    for (const c of joint.couplings ?? []) {
+      const from = resolve(c.from.joint)?.[c.from.of];
+      if (from !== undefined) values[c.of] = c.ratio * from + c.offset;
+    }
+    visiting.delete(id);
+    out.set(id, values);
+    return values;
+  };
+  for (const j of doc.joints) resolve(j.id);
+  return out;
+}
+/**
+ * Each resolved value outside its joint's limits or the safety bounds every joint value keeps
+ * (`jointSafetyBound`: one turn either way for an angle unless the joint is continuous, `lengthMm`
+ * for a length), a coupled value too, by joint and
+ * value. A key that drives a follower past them is refused like a key past its own limits.
+ */
+export function jointLimitViolations(
+  doc: Pick<CadDocument, 'joints'>,
+  values: ReadonlyMap<string, CadResolvedJointValues>,
+): { joint: string; of: CadJointValueKey; value: number }[] {
+  const out: { joint: string; of: CadJointValueKey; value: number }[] = [];
+  for (const j of doc.joints)
+    for (const of of cadJointValueKeys[j.type]) {
+      const value = values.get(j.id)?.[of];
+      if (value === undefined) continue;
+      const l = j.limits.find((x) => x.of === of);
+      const bound = jointSafetyBound(j, of);
+      if (!(Math.abs(value) <= bound) || (l && !(value >= l.min && value <= l.max)))
+        out.push({ joint: j.id, of, value });
+    }
   return out;
 }
 /** The joint's own motion between the two connector frames, from resolved values. */
@@ -132,7 +266,9 @@ export function jointMotion(
   type: CadJointType,
   v: Partial<Record<CadJointValueKey, number>>,
 ): CadSolvedPose {
-  const angle = v.angle ?? 0;
+  // WM2: a continuous joint's many turns; the pose reads the angle within one turn.
+  const turns = v.angle ?? 0;
+  const angle = Math.abs(turns) > 2 * Math.PI ? turns % (2 * Math.PI) : turns;
   switch (type) {
     case 'fastened':
       return identityPose();
@@ -144,6 +280,13 @@ export function jointMotion(
       return { translationMm: [0, 0, v.distance ?? 0], rotation: turnZ(angle) };
     case 'planar':
       return { translationMm: [v.u ?? 0, v.v ?? 0, 0], rotation: turnZ(angle) };
+    case 'spherical':
+      return {
+        translationMm: [0, 0, 0],
+        rotation: mulQ(mulQ(turnZ(angle), turnY(v.angle2 ?? 0)), turnX(v.angle3 ?? 0)),
+      };
+    case 'universal':
+      return { translationMm: [0, 0, 0], rotation: mulQ(turnZ(angle), turnX(v.angle2 ?? 0)) };
   }
 }
 /** A connector's frame after `flip` and `offset`, in the coordinates `frame` is in. */
@@ -339,6 +482,10 @@ export function solveJoints(
   };
   const isPose = (x: CadSolvedPose | CadJointProblem | 'unavailable'): x is CadSolvedPose =>
     typeof x === 'object' && 'rotation' in x;
+  const resolved = coupledJointValues(doc, params);
+  // MR7: a mount candidate not in effect is solved for its connector frames (to switch to it
+  // later) but places nothing.
+  const off = inactiveJointIds(doc);
   // Validation keeps the joints a tree, so each round solves at least one child until done.
   let pending = [...doc.joints];
   while (pending.length) {
@@ -372,14 +519,15 @@ export function solveJoints(
         joints[joint.id] = problems.length
           ? { status: 'broken', problems }
           : { status: 'unavailable', ...(isPose(world) ? { parent: world } : {}) };
-        poses[child] = stored;
+        if (!off.has(joint.id)) poses[child] = stored;
         continue;
       }
       const pose = composePoses(
-        composePoses(world, jointMotion(joint.type, jointValues(joint, params))),
+        composePoses(world, jointMotion(joint.type, resolved.get(joint.id) ?? {})),
         invertPose(own),
       );
       joints[joint.id] = { status: 'solved', parent: world, child: own };
+      if (off.has(joint.id)) continue;
       poses[child] = pose;
       if (posesDiffer(pose, stored)) mismatch.push(joint.id);
     }
@@ -411,11 +559,16 @@ export function posesForJointValues(
   solved: { poses: Record<string, CadSolvedPose>; joints: Record<string, CadJointSolution> },
   values: ReadonlyMap<string, Partial<Record<CadJointValueKey, number>>>,
   params: ParameterValues = parameterValues(doc),
+  /** MR7: the candidate in effect for each mount (the document's own where not given). */
+  mounts?: CadMountChoice,
 ): Record<string, CadSolvedPose> {
   const poses: Record<string, CadSolvedPose> = { ...solved.poses };
+  // A keyed driver moves its followers too (MR1 couplings).
+  const resolved = coupledJointValues(doc, params, values);
   const moved = new Set<string>();
-  const children = new Set(doc.joints.map((j) => j.child.componentId));
-  let pending = [...doc.joints];
+  const active = activeJoints(doc, mounts);
+  const children = new Set(active.map((j) => j.child.componentId));
+  let pending = [...active];
   while (pending.length) {
     const later: CadJoint[] = [];
     for (const joint of pending) {
@@ -436,7 +589,7 @@ export function posesForJointValues(
       if (!before || !after) continue;
       // The parent connector relative to the component it lies on, then where that is now.
       const parent = composePoses(after, composePoses(invertPose(before), solution.parent));
-      const own = { ...jointValues(joint, params), ...values.get(joint.id) };
+      const own = resolved.get(joint.id) ?? {};
       poses[child] = composePoses(
         composePoses(parent, jointMotion(joint.type, own)),
         invertPose(solution.child),
@@ -448,5 +601,5 @@ export function posesForJointValues(
   return poses;
 }
 /** Components a joint moves directly (its children), by component ID. */
-export const jointChildren = (doc: Pick<CadDocument, 'joints'>) =>
-  new Map(doc.joints.map((j) => [j.child.componentId, j]));
+export const jointChildren = (doc: Pick<CadDocument, 'joints' | 'mounts'>) =>
+  new Map(activeJoints(doc).map((j) => [j.child.componentId, j]));

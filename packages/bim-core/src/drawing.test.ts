@@ -18,8 +18,9 @@ import {
   type BimDrawing,
 } from './drawing';
 import { bimContentHash } from './operations';
+import { validateBim } from './validation';
 import { deriveBim } from './derive';
-import { f31BoxBuilding, f39Roofs } from './fixtures';
+import { f31BoxBuilding, f39Roofs, f48Ramp, f52LeanOpenings } from './fixtures';
 import type { BimView } from './model';
 
 /** The pure half of R2c-5: view frames, symbols and annotations by rule, cut loops and SVG. */
@@ -115,6 +116,18 @@ describe('bim drawings, pure (R2c-5)', () => {
     expect(bimOutsideFrame(frame, bimElementBox(doc, derived, 'r-roof')!)).toBe(true);
   });
 
+  it('boxes a sloped slab from its lowest bottom to its highest top (TW5)', () => {
+    const doc = f48Ramp();
+    const derived = deriveBim(doc);
+    const [lo, hi] = bimElementBox(doc, derived, 's-ramp')!;
+    expect(lo[2]).toBeCloseTo(0, 9);
+    expect(hi[2]).toBeCloseTo(3000, 9);
+    // The half-round one falls from L1 to 1,000 mm lower at the arc's crown.
+    const [hlo, hhi] = bimElementBox(doc, derived, 's-half')!;
+    expect(hlo[2]).toBeCloseTo(1800, 9);
+    expect(hhi[2]).toBeCloseTo(3000, 9);
+  });
+
   it('leaves out the symbols of an opening the roof has clipped its wall away from', () => {
     const doc = f39Roofs('gable');
     const win = doc.elements.find((e) => e.id === 'win-n2')!;
@@ -163,6 +176,143 @@ describe('bim drawings, pure (R2c-5)', () => {
       (i) => i.type === 'text' && i.cls === 'space-area',
     );
     expect(area).toMatchObject({ text: '76.44 m²' });
+  });
+
+  it('labels a room round a core off the core, and leaves the core out of its area (TW1)', () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall')!;
+    if (hall.kind !== 'space') throw new Error();
+    // A core in the middle of the 9,800 × 7,800 hall, where the centroid label used to go.
+    hall.holes = [
+      [
+        [3000, 2000],
+        [7000, 2000],
+        [7000, 6000],
+        [3000, 6000],
+      ],
+    ];
+    const items = bimDrawingSymbols(doc, plan);
+    const name = items.find((i) => i.type === 'text' && i.cls === 'space-name')!;
+    if (name.type !== 'text') throw new Error();
+    const [x, y] = name.at;
+    const inCore = x > 3000 && x < 7000 && y > 2000 && y < 6000;
+    const inHall = x > 100 && x < 9900 && y > 100 && y < 7900;
+    expect(inHall && !inCore).toBe(true);
+    // Far from every edge: the best is about 1,450 mm (half the 2,900 mm band west of the core).
+    const core = Math.hypot(Math.max(3000 - x, 0, x - 7000), Math.max(2000 - y, 0, y - 6000));
+    const clear = Math.min(x - 100, 9900 - x, y - 100, 7900 - y, core);
+    expect(clear).toBeGreaterThan(1400);
+    const area = items.find((i) => i.type === 'text' && i.cls === 'space-area');
+    expect(area).toMatchObject({ text: '60.44 m²' });
+    // The same rings give the same point.
+    expect(
+      bimDrawingSymbols(doc, plan).find((i) => i.type === 'text' && i.cls === 'space-name'),
+    ).toEqual(name);
+  });
+
+  it('keeps the label off a core whose side is an arc, sampled along the arc (TW1)', () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall')!;
+    if (hall.kind !== 'space') throw new Error();
+    // A D-shaped core: straight at x 3,000, a half circle of radius 3,500 mm out to x 6,500.
+    // Taken as its chord, the core would leave its label at about (6,450, 4,000), inside it.
+    hall.holes = [
+      [
+        [3000, 7500],
+        [3000, 500, 1],
+      ],
+    ];
+    const name = bimDrawingSymbols(doc, plan).find(
+      (i) => i.type === 'text' && i.cls === 'space-name',
+    )!;
+    if (name.type !== 'text') throw new Error();
+    const [x, y] = name.at;
+    expect(x > 3000 && Math.hypot(x - 3000, y - 4000) < 3500).toBe(false);
+    expect(x).toBeGreaterThan(6500);
+  });
+
+  it('keeps the label out of a curved core in a narrow ring, judged on the true arcs (TW1)', () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall')!;
+    if (hall.kind !== 'space') throw new Error();
+    // A ring 1,500 mm wide at a radius of 200 m: sampled chords of the core cut into the room.
+    hall.boundary = [
+      [200_000, 0, 1],
+      [-200_000, 0, 1],
+    ];
+    hall.holes = [
+      [
+        [198_500, 0, 1],
+        [-198_500, 0, 1],
+      ],
+    ];
+    const name = bimDrawingSymbols(doc, plan).find(
+      (i) => i.type === 'text' && i.cls === 'space-name' && i.id === 'sp-hall',
+    );
+    if (name?.type !== 'text') throw new Error('no label');
+    const r = Math.hypot(...name.at);
+    expect(r).toBeGreaterThan(198_500);
+    expect(r).toBeLessThan(200_000);
+  });
+
+  it('keeps the label out of a round core whose two halves meet across its centre (TW1)', () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall')!;
+    if (hall.kind !== 'space') throw new Error();
+    hall.boundary = [
+      [-10_000, -10_000],
+      [10_000, -10_000],
+      [10_000, 10_000],
+      [-10_000, 10_000],
+    ];
+    // Two half circles: the centre lies on both arcs' chords, where sides cannot be told.
+    hall.holes = [
+      [
+        [9000, 0, 1],
+        [-9000, 0, 1],
+      ],
+    ];
+    const name = bimDrawingSymbols(doc, plan).find(
+      (i) => i.type === 'text' && i.cls === 'space-name' && i.id === 'sp-hall',
+    );
+    if (name?.type !== 'text') throw new Error('no label');
+    expect(Math.hypot(...name.at)).toBeGreaterThan(9000);
+  });
+
+  it('labels a room with the most holes of the most arc vertices without overflowing (TW1)', () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall')!;
+    if (hall.kind !== 'space') throw new Error();
+    hall.boundary = [
+      [0, 0],
+      [80_000, 0],
+      [80_000, 80_000],
+      [0, 80_000],
+    ];
+    // 16 round holes, each 1,024 short arcs (the vertex limit), in a 4 × 4 array.
+    hall.holes = Array.from({ length: 16 }, (_, h) => {
+      const cx = 10_000 + (h % 4) * 20_000;
+      const cy = 10_000 + Math.floor(h / 4) * 20_000;
+      return Array.from({ length: 1024 }, (_, k) => {
+        const a = (k * 2 * Math.PI) / 1024;
+        return [cx + 3000 * Math.cos(a), cy + 3000 * Math.sin(a), Math.tan(Math.PI / 1024 / 4)];
+      });
+    });
+    // Only the label is under test: the model is derived without the holes, whose pairwise
+    // checks over 16 × 1,024 arcs take seconds.
+    const derived = deriveBim({
+      ...doc,
+      elements: doc.elements.map((e) => (e === hall ? { ...hall, holes: undefined } : e)),
+    });
+    const name = bimDrawingSymbols(doc, plan, derived).find(
+      (i) => i.type === 'text' && i.cls === 'space-name' && i.id === 'sp-hall',
+    );
+    if (name?.type !== 'text') throw new Error('no label');
+    const [x, y] = name.at;
+    for (let h = 0; h < 16; h++)
+      expect(
+        Math.hypot(x - (10_000 + (h % 4) * 20_000), y - (10_000 + Math.floor(h / 4) * 20_000)),
+      ).toBeGreaterThan(3000);
   });
 
   it('labels a concave room inside it, not at a centroid in the next room', () => {
@@ -230,6 +380,37 @@ describe('bim drawings, pure (R2c-5)', () => {
     expect(bimPlacedPoint(local.origin, placement)).toEqual([1018000, -1000, 0]);
   });
 
+  it('draws doors and windows of a leaning wall where the cut meets it (FU3c)', () => {
+    // w-free leans 15° to its right: at the 1,200 mm cut its faces have moved 1,200·tan 15°
+    // to the right (−y) and stand 200 ÷ cos 15° apart.
+    const doc = f52LeanOpenings();
+    const view: BimView = { ...plan, level: 'l-gl', cutHeightMm: 1200 };
+    const items = bimDrawingSymbols(doc, view);
+    const shift = 1200 * Math.tan(Math.PI / 12);
+    const half = 100 / Math.cos(Math.PI / 12);
+    const marks = items.filter((i) => i.cls === 'window-mark' && 'id' in i && i.id === 'win-free');
+    expect(marks).toHaveLength(3);
+    const ys = marks.map((m) => {
+      if (m.type !== 'line') throw new Error();
+      expect(m.a[1]).toBeCloseTo(m.b[1], 9);
+      expect([m.a[0], m.b[0]].sort((a, b) => a - b)).toEqual([800, 2600]);
+      return m.a[1];
+    });
+    ys.sort((a, b) => a - b);
+    expect(ys[0]).toBeCloseTo(-shift - half, 6);
+    expect(ys[1]).toBeCloseTo(-shift, 6);
+    expect(ys[2]).toBeCloseTo(-shift + half, 6);
+    // The door leaf turns on a face at the cut height too.
+    const leaf = items.find((i) => i.cls === 'door-leaf' && 'id' in i && i.id === 'door-free');
+    if (leaf?.type !== 'line') throw new Error();
+    expect(leaf.a[1]).toBeCloseTo(-shift + half, 6);
+    // Above the window's head (2,400 mm along the face, 2,318 mm high) it is not drawn.
+    const high = bimDrawingSymbols(doc, { ...view, cutHeightMm: 2350 });
+    expect(high.some((i) => i.cls === 'window-mark' && 'id' in i && i.id === 'win-free')).toBe(
+      false,
+    );
+  });
+
   it('draws a window in an arc wall on the wall faces, about its centre', () => {
     // A 200 mm wall on a half circle of 2,000 mm radius, a 1,800 mm window 1,000 mm along it.
     const doc = f31BoxBuilding();
@@ -266,6 +447,29 @@ describe('bim drawings, pure (R2c-5)', () => {
     expect(
       marks.map((m) => (m.type === 'arc' ? Math.round(m.radius * 1e6) / 1e6 : 0)).sort(),
     ).toEqual([1900, 2000, 2100]);
+  });
+
+  it('draws grid bubbles at the ends each axis names (TW0e)', () => {
+    const doc = f31BoxBuilding();
+    doc.grids = [
+      { id: 'g-1', label: '1', start: [0, 0], end: [10000, 0] },
+      { id: 'g-2', label: '2', start: [0, 4000], end: [10000, 4000], bubbles: 'start' },
+      { id: 'g-3', label: '3', start: [0, 8000], end: [10000, 8000], bubbles: 'end' },
+      { id: 'g-a', label: 'A', start: [0, 0], end: [0, 8000], bubbles: 'none' },
+    ];
+    const bubbles = bimDrawingSymbols(doc, plan)
+      .filter((i) => i.type === 'circle' && i.cls === 'grid-bubble')
+      .map((i) => (i.type === 'circle' ? [Math.sign(i.center[0]), i.center[1]] : []));
+    // Bubbles sit past the ends: −x past a start at x 0, +x past an end at x 10,000.
+    expect(bubbles).toEqual([
+      [-1, 0],
+      [1, 0],
+      [-1, 4000],
+      [1, 8000],
+    ]);
+    // Another value is refused.
+    doc.grids[0]!.bubbles = 'left' as never;
+    expect(validateBim(doc).map((d) => d.code)).toContain('grid');
   });
 
   it('marks the levels and the axes a section crosses', () => {

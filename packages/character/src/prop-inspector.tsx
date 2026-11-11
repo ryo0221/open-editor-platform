@@ -1,6 +1,7 @@
 import { Trash2 } from 'lucide-react';
 import {
   eulerXyzToQuat,
+  isCharacterJointAngle,
   quatToEulerXyz,
   type CharacterJointValueKey,
   type CharacterProp,
@@ -18,6 +19,8 @@ const round = (x: number, digits: number) => {
 };
 const valueLabels: Record<CharacterJointValueKey, string> = {
   angle: 'Angle',
+  angle2: 'Angle 2',
+  angle3: 'Angle 3',
   distance: 'Distance',
   u: 'U',
   v: 'V',
@@ -38,8 +41,11 @@ export function PropInspector({
   canKey,
   reason,
   readOnly,
+  placement,
+  placementKeyed,
   onKey,
   onPlace,
+  onKeyPlacement,
   onRemove,
 }: {
   prop: CharacterProp;
@@ -52,20 +58,42 @@ export function PropInspector({
   canKey: boolean;
   reason: string;
   readOnly: boolean;
+  /** MR4: where the prop is at the playhead (its keyed placement, else its own). */
+  placement: CharacterProp['placement'];
+  /** MR4: the chosen action keys this prop's placement: a change keys it at the playhead. */
+  placementKeyed: boolean;
   /** False when refused, so a pending value is not lost by a save. */
   onKey(joint: string, key: CharacterJointValueKey, value: number): boolean | void;
   onPlace(placement: CharacterProp['placement']): boolean | void;
+  /** MR4: keys the placement (translation and rotation) at the playhead. */
+  onKeyPlacement(
+    placement: CharacterProp['placement'],
+    only?: 'translation' | 'rotation',
+  ): boolean | void;
   onRemove(): void;
 }) {
-  const euler = quatToEulerXyz(prop.placement.rotation).map((x) => round(x, 2)) as Vec3;
-  const at = prop.placement.translation.map((x) => round(x, 2)) as Vec3;
+  const euler = quatToEulerXyz(placement.rotation).map((x) => round(x, 2)) as Vec3;
+  const at = placement.translation.map((x) => round(x, 2)) as Vec3;
+  // A keyed placement is changed by keys only, and only while keys can be set.
+  const placeLocked = readOnly || (placementKeyed && !canKey);
+  // A field keys only what it changes; "Key placement" keys both.
+  const put = (next: CharacterProp['placement'], only: 'translation' | 'rotation') =>
+    placementKeyed ? onKeyPlacement(next, only) : onPlace(next);
   return (
     <>
       <Section title={`Prop · ${prop.name}`}>
         <p className="character-hint">
-          Version {prop.source.versionId} of a CAD Artifact, fixed by its content hash.
+          Version {prop.source.versionId} of a{' '}
+          {prop.source.kind === 'bim' ? 'building' : 'CAD Artifact'}, fixed by its content hash.
         </p>
-        <fieldset className="character-fields" aria-label="Prop position" disabled={readOnly}>
+        {placementKeyed && (
+          <p className="character-hint" data-testid="character-prop-placement-keyed">
+            {canKey
+              ? `The action keys this prop's placement: a change keys it at ${formatTicks(tick)}.`
+              : `The action keys this prop's placement. ${reason}`}
+          </p>
+        )}
+        <fieldset className="character-fields" aria-label="Prop position" disabled={placeLocked}>
           <legend>Position</legend>
           {(['X', 'Y', 'Z'] as const).map((axis, k) => (
             <Field
@@ -73,16 +101,16 @@ export function PropInspector({
               label={`Prop position ${axis}`}
               unit="mm"
               value={at[k]!}
-              disabled={readOnly}
+              disabled={placeLocked}
               onCommit={(v) => {
-                const next = [...prop.placement.translation] as Vec3;
+                const next = [...placement.translation] as Vec3;
                 next[k] = v;
-                return onPlace({ translation: next, rotation: prop.placement.rotation });
+                return put({ translation: next, rotation: placement.rotation }, 'translation');
               }}
             />
           ))}
         </fieldset>
-        <fieldset className="character-fields" aria-label="Prop rotation" disabled={readOnly}>
+        <fieldset className="character-fields" aria-label="Prop rotation" disabled={placeLocked}>
           <legend>Rotation</legend>
           {(['X', 'Y', 'Z'] as const).map((axis, k) => (
             <Field
@@ -90,18 +118,26 @@ export function PropInspector({
               label={`Prop rotation ${axis}`}
               unit="°"
               value={euler[k]!}
-              disabled={readOnly}
+              disabled={placeLocked}
               onCommit={(v) => {
                 const next = [...euler] as Vec3;
                 next[k] = v;
-                return onPlace({
-                  translation: prop.placement.translation,
-                  rotation: eulerXyzToQuat(next),
-                });
+                return put(
+                  { translation: placement.translation, rotation: eulerXyzToQuat(next) },
+                  'rotation',
+                );
               }}
             />
           ))}
         </fieldset>
+        <button
+          type="button"
+          disabled={!canKey}
+          title={canKey ? undefined : reason}
+          onClick={() => onKeyPlacement(placement)}
+        >
+          Key placement
+        </button>
         <IconButton
           icon={Trash2}
           label="Remove prop"
@@ -134,7 +170,7 @@ export function PropInspector({
                   <legend>{j.name}</legend>
                   {j.values.map((v) => {
                     const now = values.get(j.id)?.[v.key] ?? v.saved;
-                    const angle = v.key === 'angle';
+                    const angle = isCharacterJointAngle(v.key);
                     return (
                       <Field
                         key={v.key}

@@ -24,12 +24,12 @@ Portions of this software are copyright © 2006 The FreeType Project (www.freety
 Changes made for this build:
 
 - OpenCascade.js applies two source patches to OCCT before compiling it (`standard_time.patch`, `using-statements.patch`, in `opencascade.js-src.tar.gz` under `opencascade.js/src/patches`).
-- EditorPlatform restores the destructor of the value classes it binds (`patch-destructors.py`) and adds `OCJS.releaseException` and `OCJS.heapAllocatedBytes` (`opencascade.d0-leakcheck.yml`). Only the bindings listed in that file are linked, and Wasm memory is capped at 512 MiB.
+- EditorPlatform restores the destructor of the value classes it binds (`patch-destructors.py`) and adds helper functions to `OCJS` (`opencascade.d0-leakcheck.yml`), among them `OCJS.pmiJson`, which reads the GD&T and saved views of an XDE document. Only the bindings listed in that file are linked, and Wasm memory is capped at 512 MiB.
 
 Corresponding source and rebuilding:
 
 - `source/` next to this notice holds the unmodified OCCT archive (`occt-bb368e2.tar.gz`), the OpenCascade.js generator and patches (`opencascade.js-src.tar.gz`), the EditorPlatform build inputs (`editor-platform-cad-kernel/`), the Emscripten version and the pinned build image digest (`image.txt`). `source/SHA256SUMS` lists every file.
-- `editor-platform-cad-kernel/build.sh <dir>` rebuilds the kernel in that image. Two clean builds produce byte-identical Wasm, loader and type files.
+- `editor-platform-cad-kernel/build.sh <dir>` rebuilds the kernel in that image. It links the objects in name order (`sort-link-order.py`), so the result does not depend on the order of the files on disk.
 - To use a modified kernel, rebuild it, put the new `.js` and `.wasm` in the kernel directory the Host serves (`CAD_OCCT_DIST` for the development Hosts) and set `wasmSha256` in `build.mjs` to the new Wasm hash. The Host refuses a Wasm whose hash differs from `build.mjs`; documents record the build they were made with and show the build mismatch instead of silently re-evaluating.
 
 The full license texts follow.

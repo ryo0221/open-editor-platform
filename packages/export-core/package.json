@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
-    "color-name": "2.0.0"
+    "color-name": "2.0.0",
+    "@types/color-name": "2.0.0"
   }
 }

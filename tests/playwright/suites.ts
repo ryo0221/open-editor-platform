@@ -494,14 +494,22 @@ export const suites: Record<string, () => Suite> = {
   'creative-production': () => ({
     outputDir: '/tmp/editor-platform-creative-production-results',
     use: { baseURL: 'http://127.0.0.1:5173' },
-    projects: editorProjects(/creative-production.spec.ts$/, /creative-production.spec.ts$/, true),
+    projects: editorProjects(
+      /creative-(production|host-navigation).spec.ts$/,
+      /creative-(production|host-navigation).spec.ts$/,
+      true,
+    ),
     webServer: [server.dev],
   }),
 
   'creative-production-preview': () => ({
     outputDir: '/tmp/editor-platform-creative-production-preview-results',
     use: { baseURL: 'http://127.0.0.1:4173' },
-    projects: editorProjects(/creative-production.spec.ts$/, /creative-production.spec.ts$/, true),
+    projects: editorProjects(
+      /creative-(production|host-navigation).spec.ts$/,
+      /creative-(production|host-navigation).spec.ts$/,
+      true,
+    ),
     webServer: [server.preview],
   }),
 

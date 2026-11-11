@@ -1,9 +1,19 @@
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { geometryTextureRoles } from '@editor-platform/geometry-core';
-import type { EpmMesh } from '@editor-platform/geometry-mesh';
+import {
+  multiresChunkCorners,
+  multiresChunkCount,
+  multiresGridSize,
+  multiresTopology,
+  multiresVertexCount,
+  type EpmMesh,
+  type MultiresChunk,
+} from '@editor-platform/geometry-mesh';
 import {
   characterAssetMediaTypes,
   characterJointValueKeys,
+  isCharacterJointAngle,
+  type CharacterJointValueKey,
   characterLimits,
   characterTolerance,
   CharacterValidationError,
@@ -193,8 +203,33 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
       part,
       p,
       ['id', 'name', 'parentId', 'transform', 'mesh', 'materials', 'visible'],
-      ['subdivision'],
+      ['subdivision', 'multires'],
     );
+    if (part.multires !== undefined) {
+      const mr = part.multires as Rec;
+      if (!record(mr)) add('multires', `${p}.multires`);
+      else {
+        keys(mr, `${p}.multires`, ['level', 'topology', 'chunks']);
+        if (
+          !Number.isInteger(mr.level) ||
+          (mr.level as number) < 1 ||
+          (mr.level as number) > characterLimits.multiresLevels
+        )
+          add('multires-level', `${p}.multires.level`);
+        if (typeof mr.topology !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(mr.topology))
+          add('sha256', `${p}.multires.topology`);
+        if (
+          !Array.isArray(mr.chunks) ||
+          mr.chunks.length === 0 ||
+          mr.chunks.length > characterLimits.assets
+        )
+          add('multires-chunks', `${p}.multires.chunks`);
+        else
+          mr.chunks.forEach((id: unknown, k: number) => {
+            if (assetKind(id) !== 'mesh-mres') add('multires-asset', `${p}.multires.chunks[${k}]`);
+          });
+      }
+    }
     if (part.subdivision !== undefined) {
       const sd = part.subdivision as Rec;
       const level = (x: unknown) =>
@@ -286,6 +321,13 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
   const morphs = list('morphs', characterLimits.morphs);
   const props = list('props', characterLimits.props);
   const actions = list('actions', characterLimits.actions);
+  const bimProps = new Set(
+    props.flatMap((p) =>
+      record(p) && record(p.source) && p.source.kind === 'bim' && typeof p.id === 'string'
+        ? [p.id]
+        : [],
+    ),
+  );
   props.forEach((prop, i) => {
     const p = `$.props[${i}]`;
     keys(prop, p, ['id', 'name', 'source', 'placement', 'visible']);
@@ -297,7 +339,7 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
     else {
       keys(s, `${p}.source`, ['kind', 'artifactId', 'versionId', 'contentHash']);
       if (
-        s.kind !== 'cad' ||
+        (s.kind !== 'cad' && s.kind !== 'bim') ||
         !characterId(s.artifactId) ||
         !characterId(s.versionId) ||
         typeof s.contentHash !== 'string' ||
@@ -422,7 +464,11 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
         keys(
           target,
           `${q}.target`,
-          k === 'prop-joint' ? ['kind', 'id', 'joint', 'property'] : ['kind', 'id', 'property'],
+          k === 'prop-joint'
+            ? ['kind', 'id', 'joint', 'property']
+            : k === 'prop-mount'
+              ? ['kind', 'id', 'mount', 'property']
+              : ['kind', 'id', 'property'],
         );
         if (
           (k === 'part' || k === 'bone') &&
@@ -430,18 +476,25 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
         )
           size = prop === 'rotation' ? 4 : 3;
         else if (k === 'morph' && prop === 'weight') size = 1;
+        else if (k === 'prop' && (prop === 'translation' || prop === 'rotation'))
+          size = prop === 'rotation' ? 4 : 3;
         else if (
           k === 'prop-joint' &&
           (characterJointValueKeys as readonly unknown[]).includes(prop) &&
           characterId(target.joint)
         )
           size = 1;
+        // MR7: a mount's joint in effect, a joint ID per key.
+        else if (k === 'prop-mount' && prop === 'joint' && characterId(target.mount)) size = -1;
         else add('target', `${q}.target`);
-        if (size && kindOf(target.id) !== (k === 'prop-joint' ? 'prop' : k))
-          add('target-id', `${q}.target.id`);
+        const ofProp = k === 'prop-joint' || k === 'prop-mount';
+        if (size && kindOf(target.id) !== (ofProp ? 'prop' : k)) add('target-id', `${q}.target.id`);
+        // C8p: a building's elements have no joints to key.
+        else if (size && ofProp && bimProps.has(target.id as string))
+          add('prop-joint-unsupported', `${q}.target`);
         else if (size) {
           // Only a well-formed target names a channel; others are already reported above.
-          const key = JSON.stringify([k, target.id, target.joint ?? null, prop]);
+          const key = JSON.stringify([k, target.id, target.joint ?? target.mount ?? null, prop]);
           if (targets.has(key)) add('duplicate-target', `${q}.target`);
           targets.add(key);
         }
@@ -458,8 +511,17 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
           add('tick', `${r}.tick`);
         else if ((key.tick as number) <= last) add('key-order', `${r}.tick`);
         else last = key.tick as number;
-        if (size === 1 ? !finite(key.value) : size && !tuple(key.value, size))
+        if (
+          size === -1
+            ? !characterId(key.value)
+            : size === 1
+              ? !finite(key.value)
+              : size && !tuple(key.value, size)
+        )
           add('value', `${r}.value`);
+        // MR7: a mount key holds its joint until the next key; it never blends.
+        else if (size === -1 && (!record(key.easing) || key.easing.type !== 'hold'))
+          add('mount-easing', `${r}.easing`);
         // A keyed morph weight has the same bound as the weight used without an action.
         else if (
           record(target) &&
@@ -471,9 +533,12 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
           record(target) &&
           target.kind === 'prop-joint' &&
           Math.abs(key.value as number) >
-            (target.property === 'angle' ? 2 * Math.PI : characterLimits.jointTravelMm)
+            (isCharacterJointAngle(target.property as CharacterJointValueKey)
+              ? characterLimits.jointTurnRad
+              : characterLimits.jointTravelMm)
         )
-          // CAD keeps a joint angle within one turn either way (cadJointLimits.angleRad).
+          // WM2: a CAD continuous joint turns on and on; a joint that keeps one turn bounds its
+          // keys through its version's limits (one turn either way).
           add('joint-value', `${r}.value`);
         else if (
           size === 4 &&
@@ -523,18 +588,53 @@ export function assertCharacterDocument(value: unknown): asserts value is Charac
 /**
  * The checks that need the decoded mesh assets: every part's slots cover its faces, every bone a
  * skin's mesh weights names has an inverse bind in that skin, and a part's morphs are exactly its
- * mesh's. `meshes` maps asset IDs to decoded meshes (a missing one is reported).
+ * mesh's. `meshes` maps asset IDs to decoded meshes (a missing one is reported). With
+ * `multires` (decoded chunks by asset ID), each part's multires chunks are checked too.
  */
 export function checkCharacterMeshes(
   doc: CharacterDocument,
   meshes: ReadonlyMap<string, EpmMesh>,
+  multires?: ReadonlyMap<string, MultiresChunk>,
 ): CharacterDiagnostic[] {
   const out: CharacterDiagnostic[] = [];
   const add = (code: string, path: string) => out.push({ code, path, message: code });
+  let multiresVertices = 0;
   doc.parts.forEach((part, i) => {
     const p = `$.parts[${i}]`;
     const mesh = meshes.get(part.mesh);
     if (!mesh) return add('mesh-missing', `${p}.mesh`);
+    if (part.multires) {
+      // C7a: the grids hang from the cage's faces, chunk after chunk in corner order.
+      const mr = part.multires;
+      const corners = mesh.faceIndices.length;
+      if (multiresTopology(mesh) !== mr.topology) add('multires-topology', `${p}.multires`);
+      else if (mr.chunks.length !== multiresChunkCount(corners, mr.level))
+        add('multires-chunks', `${p}.multires.chunks`);
+      else {
+        const per = multiresChunkCorners(mr.level);
+        const G = multiresGridSize(mr.level);
+        // Without the chunks (a caller that only reads the cage) only their count is checked.
+        mr.chunks.forEach((id, k) => {
+          if (!multires) return;
+          const chunk = multires.get(id);
+          if (!chunk) return add('multires-missing', `${p}.multires.chunks[${k}]`);
+          const n = Math.min(per, corners - k * per);
+          if (
+            chunk.level !== mr.level ||
+            chunk.firstCorner !== k * per ||
+            chunk.displacements.length !== 3 * n * G * G
+          )
+            add('multires-chunk', `${p}.multires.chunks[${k}]`);
+        });
+        try {
+          const v = multiresVertexCount(mesh, mr.level);
+          multiresVertices += v;
+          if (v > characterLimits.multiresVertices) add('multires-vertices', `${p}.multires`);
+        } catch {
+          add('multires-topology', `${p}.multires`);
+        }
+      }
+    }
     let slots = 0;
     for (const s of mesh.faceMaterials) slots = Math.max(slots, s + 1);
     if (slots > part.materials.length) add('material-slots', `${p}.materials`);
@@ -550,5 +650,7 @@ export function checkCharacterMeshes(
     if (morphs.length !== own.length || morphs.some((m, k) => m !== own[k]))
       add('morph-mismatch', `${p}.mesh`);
   });
+  if (multiresVertices > characterLimits.multiresDocumentVertices)
+    add('multires-vertices', '$.parts');
   return out;
 }

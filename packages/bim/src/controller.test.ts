@@ -6,7 +6,7 @@ import { EditorSession } from '@editor-platform/editor-core';
 import type { OcModule } from '@editor-platform/geometry-kernel-occt';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { cadKernelBuild } from '../../../scripts/cad-kernel/build.mjs';
-import { BimController } from './controller';
+import { BimController, bimCurrentKernelQuantities } from './controller';
 import { bimDirectKernel, type BimKernel } from './evaluate';
 import { createBimKernelHost } from './kernel-host';
 import type { BimWorkerResponse } from './protocol';
@@ -101,6 +101,15 @@ describe.skipIf(!dist)(
       const shared = solids.find((s) => s.instances.some((i) => i.path[0] === 'win-n1'))!;
       expect(shared.instances).toHaveLength(windows.length);
       expect(shared.instances.find((i) => i.path[0] === 'win-n1')!.selected).toBe(true);
+      // TW0b: a working plan's lower limit leaves out what lies wholly below it (the 1F
+      // windows, up to 2,400 mm) and draws whole what reaches above it (the 6,000 mm walls).
+      const paths = (belowMm: number) =>
+        bimViewSolids(c.state.content, c.state.evaluation, { selection: new Set(), belowMm })
+          .flatMap((s) => s.instances.map((i) => i.path[0]))
+          .sort();
+      expect(paths(3000)).not.toContain('win-n1');
+      expect(paths(3000)).toContain('w-north');
+      expect(paths(2400)).toContain('win-n1');
       const t = c.state.content.types.find((x) => x.id === 't-window-1800')!;
       c.apply({ type: 'update', collection: 'types', entity: { ...t, widthMm: 1200 } as typeof t });
       await settled(c);
@@ -284,3 +293,20 @@ describe.skipIf(!dist)(
     });
   },
 );
+
+describe('kernel quantities of the current content (TW3)', () => {
+  it('gives the measured values only while the evaluation is of the current content', () => {
+    const kernelQuantities = new Map([['w-east', { netVolume: 1 }]]);
+    const evaluation = { kernelQuantities } as unknown as Parameters<
+      typeof bimCurrentKernelQuantities
+    >[0]['evaluation'];
+    expect(bimCurrentKernelQuantities({ hash: 'a', evaluatedHash: 'a', evaluation })).toBe(
+      kernelQuantities,
+    );
+    // An edit: the old measurement stays adopted while the new evaluation runs.
+    expect(bimCurrentKernelQuantities({ hash: 'b', evaluatedHash: 'a', evaluation })).toBe(
+      undefined,
+    );
+    expect(bimCurrentKernelQuantities({ hash: 'b' })).toBe(undefined);
+  });
+});

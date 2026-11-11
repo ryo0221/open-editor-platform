@@ -48,6 +48,8 @@
     "prosemirror-transform": "1.12.2",
     "@editor-platform/bim": "*",
     "@editor-platform/bim-core": "*",
+    "@editor-platform/simulation": "*",
+    "@editor-platform/simulation-core": "*",
     "@editor-platform/cad": "*",
     "@editor-platform/character": "*",
     "@editor-platform/character-core": "*",

@@ -7,9 +7,11 @@ import {
   contentHash,
   serializeArtifact,
   updateDraft,
+  deepFreeze,
   type Artifact,
-  type StorageAdapter,
 } from '@editor-platform/artifact-core';
+import type { HostArtifactStorage, HostSaveContext } from './save-context';
+export type { HostArtifactStorage, HostSaveContext } from './save-context';
 import {
   command,
   EditorSession,
@@ -24,6 +26,8 @@ import {
   type Selection,
 } from '@editor-platform/editor-core';
 export * from './access';
+import type { HostNativeAccess } from './native-access';
+export * from './native-access';
 
 export type HostErrorCode =
   | 'closed'
@@ -83,6 +87,8 @@ export interface EditorHostAdapter<T> {
   export?(format: string, content: T, signal: AbortSignal): Promise<unknown>;
   /** Optional plain text read; Editors without it reject readText with `unsupported`. */
   text?: HostTextAccess<T>;
+  /** Domain-owned exact element projection and optional native text commands. */
+  native?: HostNativeAccess<T>;
   /** Optional: stable IDs of the elements whose content differs between two contents. With it
    * an accepted proposal names the elements it changed (see `changedElementsFromDiff`). */
   changedElements?(before: T, after: T): string[];
@@ -119,6 +125,7 @@ export interface HostSaveResult<T> {
   revision: LocalDraftRevision;
   artifact: Artifact<T>;
   dirty: boolean;
+  saveContext: HostSaveContext;
 }
 /** Sent only after StorageAdapter.put succeeds; never for a requested or failed save. */
 export interface HostSavedEvent {
@@ -136,6 +143,8 @@ export interface HostSavedEvent {
   baseVersionId?: string | null;
   /** Proposal ancestry of the captured native history, not later edits or a save receipt itself. */
   proposalTransactions?: readonly string[];
+  /** Same captured context passed to storage; notification alone is not durable evidence. */
+  saveContext: HostSaveContext;
 }
 export interface HostSavedContent<T> {
   artifactId: string;
@@ -303,6 +312,7 @@ export class ArtifactEditor<T> {
     proposalTransactions: readonly string[];
     committed: boolean;
     author: string | null;
+    context?: HostSaveContext;
   };
   private saving = false;
   private closed = false;
@@ -327,7 +337,7 @@ export class ArtifactEditor<T> {
   constructor(
     artifact: Artifact<T>,
     private readonly adapter: EditorHostAdapter<T>,
-    private readonly storage: Pick<StorageAdapter<Artifact<T>>, 'put'>,
+    private readonly storage: Pick<HostArtifactStorage<T>, 'put'>,
     /** Current trusted Host permission, checked again at each mutation boundary. */
     private readonly mayEdit: () => boolean = () => true,
     private readonly onObserverError: (error: unknown) => void = () => {},
@@ -390,11 +400,11 @@ export class ArtifactEditor<T> {
   private notify() {
     this.emit(this.listeners, undefined);
   }
-  private emit<E>(listeners: Set<(event: E) => void>, event: E) {
+  private emit<E>(listeners: Set<(event: E) => void>, event: E, copy: (event: E) => E = clone) {
     for (const listener of [...listeners]) {
       if (!listeners.has(listener)) continue;
       try {
-        listener(clone(event));
+        listener(copy(event));
       } catch (error) {
         try {
           this.onObserverError(error);
@@ -855,10 +865,11 @@ export class ArtifactEditor<T> {
       }
       let captured = updateDraft(this.persisted, content);
       if (committed) captured = await commitVersion(captured, author, 'Host save');
+      const capturedBase = this.persisted.draft.baseVersionId ?? baseVersionId;
       return await this.persistSave({
         artifact: captured,
         revision,
-        baseVersionId: this.persisted.draft.baseVersionId ?? baseVersionId,
+        baseVersionId: capturedBase,
         proposalTransactions,
         committed,
         author,
@@ -879,32 +890,53 @@ export class ArtifactEditor<T> {
     captured: NonNullable<ArtifactEditor<T>['retrySave']>,
   ): Promise<HostSaveResult<T>> {
     serializeHostNativeArtifact(captured.artifact);
+    const context = (captured.context ??= deepFreeze({
+      schemaVersion: 1 as const,
+      artifactId: captured.artifact.id,
+      kind: captured.artifact.kind,
+      revision: clone(captured.revision),
+      baseVersionId: captured.baseVersionId,
+      versionId: captured.artifact.draft.baseVersionId,
+      // commitVersion already hashed this exact immutable content. A draft-only
+      // write needs its own hash and must not inherit the old base version's hash.
+      contentHash: captured.committed
+        ? captured.artifact.versions.at(-1)!.contentHash
+        : await contentHash(captured.artifact.draft.content),
+      committed: captured.committed,
+      proposalTransactions: [...captured.proposalTransactions],
+    }));
     await this.adapter.preflight?.(captured.artifact);
     this.requireEdit();
     // Keep the exact candidate if put fails or its response is lost. Retrying it
     // must not allocate another immutable version or erase that possible save.
     this.retrySave = captured;
-    await this.storage.put(clone(captured.artifact));
+    await this.storage.put(clone(captured.artifact), context);
     this.persisted = clone(captured.artifact);
     this.savedRevision = captured.revision;
     this.retrySave = undefined;
-    this.emit(this.savedListeners, {
-      artifactId: this.id,
-      kind: this.adapter.kind,
-      versionId: captured.artifact.draft.baseVersionId,
-      committed: captured.committed,
-      revision: captured.revision,
-      currentRevision: this.session.revision,
-      dirty: this.snapshot.dirty,
-      baseVersionId: captured.baseVersionId,
-      proposalTransactions: captured.proposalTransactions,
-    });
+    this.emit(
+      this.savedListeners,
+      {
+        artifactId: this.id,
+        kind: this.adapter.kind,
+        versionId: captured.artifact.draft.baseVersionId,
+        committed: captured.committed,
+        revision: captured.revision,
+        currentRevision: this.session.revision,
+        dirty: this.snapshot.dirty,
+        baseVersionId: captured.baseVersionId,
+        proposalTransactions: captured.proposalTransactions,
+        saveContext: context,
+      },
+      (event) => ({ ...clone(event), saveContext: context }),
+    );
     return {
       artifactId: this.id,
       kind: this.adapter.kind,
       revision: captured.revision,
       artifact: clone(captured.artifact),
       dirty: this.snapshot.dirty,
+      saveContext: context,
     };
   }
   async export(format: string, signal: AbortSignal = new AbortController().signal) {
@@ -948,3 +980,5 @@ export class ArtifactEditor<T> {
   }
 }
 export * from './proposal';
+
+export * from './text-operations';

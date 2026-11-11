@@ -1,0 +1,114 @@
+{
+  "items": [
+    {
+      "kind": "geometric-tolerance",
+      "type": "Flatness",
+      "value": 0.03,
+      "targets": [
+        {
+          "instance": 3,
+          "part": "block",
+          "centroid": [
+            110,
+            10,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "geometric-tolerance",
+      "type": "Flatness",
+      "value": 0.04,
+      "targets": [
+        {
+          "instance": 2,
+          "part": "plate",
+          "centroid": [
+            40,
+            25,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "dimension",
+      "type": "Location_LinearDistance",
+      "values": [
+        5
+      ],
+      "targets": [
+        {
+          "instance": 2,
+          "part": "plate",
+          "centroid": [
+            40,
+            25,
+            5
+          ]
+        }
+      ],
+      "targets2": [
+        {
+          "instance": 3,
+          "part": "block",
+          "centroid": [
+            110,
+            10,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "geometric-tolerance",
+      "type": "Flatness",
+      "value": 0.05,
+      "targets": [
+        {
+          "instance": 3,
+          "part": "block",
+          "centroid": [
+            110,
+            10,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "geometric-tolerance",
+      "type": "Parallelism",
+      "value": 0.02,
+      "targets": [
+        {
+          "instance": 2,
+          "part": "plate",
+          "centroid": [
+            40,
+            25,
+            5
+          ]
+        }
+      ]
+    }
+  ],
+  "datums": [
+    {
+      "kind": "datum",
+      "name": "A",
+      "targets": [
+        {
+          "instance": 3,
+          "part": "block",
+          "centroid": [
+            110,
+            10,
+            10
+          ]
+        }
+      ]
+    }
+  ]
+}

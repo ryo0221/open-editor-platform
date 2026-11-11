@@ -7,8 +7,12 @@ import { parameterValues } from './graph';
 import { fixtureComponent, fixturePart, fixtureVersion } from './assembly-fixtures';
 import { f20TopFace, f20TopFrame, r2bJoints } from './joints-fixtures';
 import {
+  cadJointLimits,
   connectorRefKey,
+  coupledJointValues,
   invertPose,
+  jointLimitViolations,
+  jointMotion,
   posesForJointValues,
   previewJointPose,
   solveJoints,
@@ -517,5 +521,80 @@ describe('joints (R2b-2, CAD47)', () => {
     // Its own parts are still shown; the version that matches is available.
     expect((await evaluate(outer(sub)))[f.plate.contentHash]?.state).toBe('available');
     expect((await evaluate(outer(good)))[good.contentHash]?.state).toBe('available');
+  });
+});
+
+describe('WM2a continuous revolute joints (ST-442, TS-1886)', () => {
+  // j-turn drives a revolute j-plane (the wheel it meshes with) at −3 ×, like 48 → 16 teeth.
+  const watchDoc = (turns: number, follower: { continuous?: true } = { continuous: true }) => {
+    const doc = structuredClone(r2bJoints().assembly);
+    const driver = doc.joints.find((j) => j.id === 'j-turn')!;
+    driver.limits = [];
+    driver.continuous = true;
+    driver.values = { angle: { literalRad: turns * 2 * Math.PI } };
+    const wheel = doc.joints.find((j) => j.id === 'j-plane')!;
+    wheel.type = 'revolute';
+    wheel.values = {};
+    wheel.couplings = [
+      { of: 'angle', from: { joint: 'j-turn', of: 'angle' }, ratio: -3, offset: 0 },
+    ];
+    Object.assign(wheel, follower);
+    return doc;
+  };
+  const errors = (doc: unknown) =>
+    validateCad(doc)
+      .filter((d) => d.severity === 'error')
+      .map((d) => [d.code, d.path]);
+
+  it('keeps the turns a continuous joint and its followers reach, within the safety bound', () => {
+    const doc = watchDoc(10.25);
+    expect(errors(doc)).toEqual([]);
+    const values = coupledJointValues(doc, parameterValues(doc));
+    // Never wrapped: the follower's angle is the ratio times the driver's whole turns.
+    expect(values.get('j-turn')!.angle).toBeCloseTo(20.5 * Math.PI, 12);
+    expect(values.get('j-plane')!.angle).toBeCloseTo(-61.5 * Math.PI, 12);
+    expect(jointLimitViolations(doc, values)).toEqual([]);
+    // Past the bound is refused, in validation and in the violations a key or drag is checked by.
+    const far = watchDoc(1_000_000 / (2 * Math.PI) + 1);
+    expect(errors(far).map(([c]) => c)).toContain('angle-range');
+    const over = new Map(values);
+    over.set('j-turn', { angle: cadJointLimits.continuousRad + 1 });
+    expect(jointLimitViolations(doc, over).map((v) => v.joint)).toEqual(['j-turn']);
+  });
+
+  it('poses a turned joint by its angle within one turn, so phases hold after many turns', () => {
+    for (const turns of [10.25, -37.4, 12_345.678]) {
+      const many = jointMotion('revolute', { angle: turns * 2 * Math.PI });
+      const once = jointMotion('revolute', { angle: (turns % 1) * 2 * Math.PI });
+      near(
+        { translationMm: [0, 0, 0], rotation: many.rotation },
+        { translationMm: [0, 0, 0], rotation: once.rotation },
+      );
+      // The follower at −3 × lies where −3 × the fractional turn puts it.
+      const wheel = jointMotion('revolute', { angle: -3 * turns * 2 * Math.PI });
+      const expected = jointMotion('revolute', { angle: ((-3 * turns) % 1) * 2 * Math.PI });
+      near(
+        { translationMm: [0, 0, 0], rotation: wheel.rotation },
+        { translationMm: [0, 0, 0], rotation: expected.rotation },
+      );
+    }
+  });
+
+  it('refuses a continuous joint that is not revolute, has a range, or a one-turn follower past it', () => {
+    const slider = structuredClone(r2bJoints().assembly);
+    (slider.joints.find((j) => j.id === 'j-slide') as { continuous?: true }).continuous = true;
+    expect(errors(slider)).toContainEqual(['joint-continuous', '$.joints[1].continuous']);
+    const ranged = watchDoc(0.25);
+    ranged.joints[0]!.limits = [{ of: 'angle', min: -1, max: 1 }];
+    expect(errors(ranged)).toContainEqual(['joint-continuous-limits', '$.joints[0].limits']);
+    const flag = watchDoc(0.25);
+    (flag.joints[0] as unknown as { continuous: boolean }).continuous = false;
+    expect(errors(flag).map(([c]) => c)).toContain('joint-continuous');
+    // A one-turn joint past one turn is refused as before; a follower that keeps one turn too.
+    const once = watchDoc(0.25);
+    delete once.joints[0]!.continuous;
+    once.joints[0]!.values = { angle: { literalRad: 7 } };
+    expect(errors(once)).toContainEqual(['angle-range', '$.joints[0].values.angle']);
+    expect(errors(watchDoc(2, {})).map(([c]) => c)).toContain('coupling-range');
   });
 });

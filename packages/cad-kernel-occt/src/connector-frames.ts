@@ -3,7 +3,8 @@
  * from a face, edge or vertex of an evaluated body, from its exact geometry. A planar face gives
  * its centroid and outward normal; a cylindrical or conical face its axis (through the centroid's
  * foot on it); a circular edge its centre and the normal of its plane; a vertex its point with
- * the part's axes. x follows the sketch attachment rule. Anything else is `unsupported`.
+ * the part's axes. CR3e-2: a straight edge (a door's hinge line) its midpoint, z along it. x
+ * follows the sketch attachment rule. Anything else is `unsupported`.
  */
 import {
   attachFrame,
@@ -113,7 +114,7 @@ export function connectorFrame(
   const handle = own(oc.BRep_Tool.Curve_2(table.edge(r.index), 0, 0));
   if (handle.IsNull()) return { status: 'unsupported' };
   const curve = handle.get();
-  if (typeName(curve) !== 'Geom_Circle') return { status: 'unsupported' };
+  if (typeName(curve) !== 'Geom_Circle') return straightFrame(oc, own, table.edge(r.index), curve);
   const d1 = (u: number) => {
     const p = own(new oc.gp_Pnt_1());
     const v = own(new oc.gp_Vec_1());
@@ -128,4 +129,51 @@ export function connectorFrame(
     [(a.p[0] + c.p[0]) / 2, (a.p[1] + c.p[1]) / 2, (a.p[2] + c.p[2]) / 2],
     unit(cross(a.v, b.v)),
   );
+}
+
+/** How far from its chord a straight edge's curve may run (mm): a line, or a spline lying on one. */
+export const straightEdgeToleranceMm = 1e-4;
+
+/**
+ * CR3e-2: a straight edge's frame (a hinge axis): the midpoint between its ends, z from the end at
+ * the curve's lower parameter to the other. Any curve type counts when 17 points along it lie
+ * within `straightEdgeToleranceMm` of the chord (a trimmed sheet's border is often a spline).
+ */
+function straightFrame(
+  oc: OcModule,
+  own: <T>(value: T) => T,
+  edge: unknown,
+  curve: { D0(u: number, p: unknown): void },
+): CadConnectorFrame {
+  const first = own(new oc.TopoDS_Vertex());
+  const last = own(new oc.TopoDS_Vertex());
+  oc.TopExp.Vertices_1(edge, first, last, false);
+  let [t0, t1] = [first, last].map((v) => oc.BRep_Tool.Parameter_2(v, edge) as number) as [
+    number,
+    number,
+  ];
+  if (t1 < t0) [t0, t1] = [t1, t0];
+  const p = own(new oc.gp_Pnt_1());
+  const at = (t: number): Vec3 => {
+    curve.D0(t, p);
+    return xyz(p);
+  };
+  const a = at(t0);
+  const b = at(t1);
+  const d: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const length = Math.hypot(...d);
+  if (!(length > straightEdgeToleranceMm)) return { status: 'unsupported' };
+  const z: Vec3 = [d[0] / length, d[1] / length, d[2] / length];
+  for (let i = 1; i < 16; i++) {
+    const q = at(t0 + ((t1 - t0) * i) / 16);
+    const o: Vec3 = [q[0] - a[0], q[1] - a[1], q[2] - a[2]];
+    const k = o[0] * z[0] + o[1] * z[1] + o[2] * z[2];
+    if (Math.hypot(o[0] - k * z[0], o[1] - k * z[1], o[2] - k * z[2]) > straightEdgeToleranceMm)
+      return { status: 'unsupported' };
+  }
+  const origin: Vec3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  return {
+    status: 'resolved',
+    frame: { translationMm: origin, rotation: attachFrame(origin, z, 0).orientation },
+  };
 }

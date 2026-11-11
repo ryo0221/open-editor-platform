@@ -6,6 +6,7 @@
   "exports": "./src/index.ts",
   "dependencies": {
     "@editor-platform/artifact-core": "*",
-    "@editor-platform/editor-core": "*"
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/extension-contract": "*"
   }
 }

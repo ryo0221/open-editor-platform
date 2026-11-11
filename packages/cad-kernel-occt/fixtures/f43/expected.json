@@ -1,0 +1,58 @@
+{
+  "dimensions": [
+    {
+      "type": "Location_LinearDistance",
+      "value": 5.0,
+      "lower": null,
+      "upper": null,
+      "targets": [
+        "bottom",
+        "top"
+      ]
+    },
+    {
+      "type": "Size_Diameter",
+      "value": 10.0,
+      "lower": -0.05,
+      "upper": 0.05,
+      "targets": [
+        "hole"
+      ]
+    }
+  ],
+  "tolerances": [
+    {
+      "type": "Flatness",
+      "value": 0.02,
+      "target": "top",
+      "datums": []
+    },
+    {
+      "type": "Parallelism",
+      "value": 0.05,
+      "target": "top",
+      "datums": [
+        "A"
+      ]
+    },
+    {
+      "type": "Position",
+      "value": 0.1,
+      "target": "hole",
+      "datums": [
+        "A",
+        "B"
+      ]
+    }
+  ],
+  "datums": [
+    {
+      "name": "A",
+      "target": "bottom"
+    },
+    {
+      "name": "B",
+      "target": "side"
+    }
+  ]
+}

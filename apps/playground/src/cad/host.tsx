@@ -23,6 +23,7 @@ export default function CadHost({
   persist,
   record,
   persistRecord,
+  createRecord,
   records,
   openArtifact,
 }: {
@@ -35,6 +36,8 @@ export default function CadHost({
   record(): StoredArtifact | undefined;
   /** Saves a record; resolves false when local storage refused it. */
   persistRecord(record: StoredArtifact): Promise<boolean>;
+  /** CR3e: stores a new record (a part made from a body); resolves false when refused. */
+  createRecord?(record: StoredArtifact): Promise<boolean>;
   /** Every local record: the saved versions of other CAD Artifacts are the parts (R2b). */
   records(): StoredArtifact[];
   /** Opens another Artifact (a part, to edit it and save a new version). */
@@ -46,8 +49,8 @@ export default function CadHost({
   const persistRef = useRef(persist);
   persistRef.current = persist;
   const applied = useRef<string | undefined>(undefined);
-  const storage = useRef({ record, persistRecord, records, openArtifact });
-  storage.current = { record, persistRecord, records, openArtifact };
+  const storage = useRef({ record, persistRecord, createRecord, records, openArtifact });
+  storage.current = { record, persistRecord, createRecord, records, openArtifact };
   const binding = useMemo(() => {
     const assets = createCadAssetStore({
       record: () => storage.current.record(),
@@ -76,6 +79,13 @@ export default function CadHost({
         records: () => storage.current.records(),
         currentId: artifact.id,
         open: (id) => storage.current.openArtifact(id),
+        create: async (part) => {
+          const create = storage.current.createRecord;
+          if (!create) throw new Error('make-part-unavailable');
+          // The Host's own authority check, at the boundary that stores the new record.
+          if (access.current.readOnly) throw new Error('permission-denied');
+          if (!(await create(part))) throw new Error('（ブラウザへの保存に失敗しました）');
+        },
       }),
       // Each edit must leave a native file the Playground can import again (CAD23). The latest
       // record already holds a version whose save is still being written.

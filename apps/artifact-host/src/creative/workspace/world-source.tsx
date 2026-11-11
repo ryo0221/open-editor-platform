@@ -11,13 +11,16 @@ import { DesignSurface } from '@editor-platform/design';
 import { guardDesignCommand, type DesignContent } from '@editor-platform/design/model';
 import type { CreativeWorkspace } from './model';
 import type { WorldReference } from './world-context';
+import { useCreativeNavigationState, type CreativeNavigationState } from '../navigation-state';
 
 export function WorldSourceEditor({
   workspace,
   editor,
   reference,
   leave,
+  onNavigationStateChange,
 }: {
+  onNavigationStateChange?(state: CreativeNavigationState): void;
   workspace: CreativeWorkspace;
   editor: Awaited<ReturnType<CreativeWorkspace['openWorldSource']>>;
   reference: WorldReference;
@@ -56,7 +59,11 @@ export function WorldSourceEditor({
       }),
     [editor],
   );
-  const dirty = editor.snapshot.dirty || state.dirty || state.composing || state.settling;
+  const dirty = editor.snapshot.dirty || !!state.dirty || !!state.composing || !!state.settling;
+  useCreativeNavigationState(
+    { dirty, busy: busy || editor.snapshot.saving },
+    onNavigationStateChange,
+  );
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
       if (dirty) {

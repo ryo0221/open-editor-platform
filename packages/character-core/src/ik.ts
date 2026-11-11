@@ -99,18 +99,31 @@ function solveChain(
   /** Two bones: bend the other way (away from the pole or the current middle joint). */
   flip: boolean,
 ) {
-  const W = world(bones);
-  const joints = [...chainBones, tip].map((b) => head(W.get(b.id)!));
+  // #752: solved in the space of the chain's base (the top bone's parent, or the skeleton's
+  // base for a root). A non-uniform scale above the chain is then outside it: as long as the
+  // chain's own bones scale uniformly, its lengths are rigid there and a turn stays a rotation.
+  const top = chainBones[0]!;
+  const W0 = world(bones);
+  const topWorld = W0.get(top.id)!;
+  const base = top.parentId
+    ? W0.get(top.parentId)!
+    : multiplyMat4(topWorld, invertMat4(composeMat4(bones.get(top.id)!)) ?? topWorld);
+  const toBase = invertMat4(base);
+  if (!toBase) return;
+  const inBase = (m: Mat4) => multiplyMat4(toBase, m);
+  const point = (v: Vec3): Vec3 =>
+    head(inBase(composeMat4({ translation: v, rotation: [0, 0, 0, 1], scale: [1, 1, 1] })));
+  const joints = [...chainBones, tip].map((b) => head(inBase(W0.get(b.id)!)));
+  const target = point(chain.target);
+  const pole = chain.pole ? point(chain.pole) : null;
   const want =
-    chainBones.length === 2
-      ? twoBone(joints, chain.target, chain.pole, flip)
-      : fabrik(joints, chain.target, chain.pole);
+    chainBones.length === 2 ? twoBone(joints, target, pole, flip) : fabrik(joints, target, pole);
   // Turn each bone, top down, so its next joint points where the solution put it.
   chainBones.forEach((bone, i) => {
     const now = world(bones);
-    const m = now.get(bone.id)!;
+    const m = inBase(now.get(bone.id)!);
     const from = head(m);
-    const next = head(now.get(i + 1 < chainBones.length ? chainBones[i + 1]!.id : tip.id)!);
+    const next = head(inBase(now.get(i + 1 < chainBones.length ? chainBones[i + 1]!.id : tip.id)!));
     const q = fromTo(sub(next, from), sub(want[i + 1]!, from));
     if (!q) return;
     const turned = composeMat4({ translation: [0, 0, 0], rotation: q, scale: [1, 1, 1] });
@@ -118,10 +131,11 @@ function solveChain(
     linear[12] = m[12]!;
     linear[13] = m[13]!;
     linear[14] = m[14]!;
-    const parent = bone.parentId ? now.get(bone.parentId) : undefined;
-    // The skeleton's base: the parent's world, or (for a root) its world without its local.
-    const base = parent ?? multiplyMat4(m, invertMat4(composeMat4(bones.get(bone.id)!)) ?? m);
-    const inv = invertMat4(base);
+    // The parent in the base's space: the base itself (identity) for the top bone.
+    const inv =
+      i === 0
+        ? composeMat4({ translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] })
+        : invertMat4(inBase(now.get(bone.parentId!)!));
     // Decomposed with the bone's own scale signs, so the rotation fits the scale it keeps.
     const signs = bones.get(bone.id)!.scale.map((x) => (x < 0 ? -1 : 1));
     const local = inv && decomposeMat4(multiplyMat4(inv, linear), signs);
@@ -130,6 +144,23 @@ function solveChain(
     if (bone.limits) rotation = clampRotation(rotation, bone.limits.min, bone.limits.max);
     bones.set(bone.id, { ...bones.get(bone.id)!, rotation });
   });
+}
+
+/**
+ * #752: why a chain's solution is only approximate: one of the bones it turns is scaled
+ * unevenly (its lengths then change as it turns). Scale above the chain is solved exactly.
+ */
+export function ikChainProblem(
+  skeleton: CharacterSkeleton,
+  chain: Pick<CharacterIkChain, 'tipBoneId' | 'length'>,
+): 'ik-chain-scaled' | undefined {
+  const found = ikChainBones(skeleton, chain);
+  if (!found) return undefined;
+  const uneven = (s: Vec3) => {
+    const a = s.map(Math.abs);
+    return Math.max(...a) - Math.min(...a) > 1e-9 * Math.max(...a, 1);
+  };
+  return found.bones.some((b) => uneven(b.rest.scale)) ? 'ik-chain-scaled' : undefined;
 }
 
 /** Two bones, exactly: the middle joint in the plane of root, target and pole (or as it was). */

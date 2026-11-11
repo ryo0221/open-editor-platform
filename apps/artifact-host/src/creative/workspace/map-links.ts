@@ -2,7 +2,7 @@ import { clone, canonicalJson } from '@editor-platform/artifact-core';
 import { validateFictionMap } from '@editor-platform/fiction-map/model';
 import { renderFictionMapSvg } from '@editor-platform/fiction-map/render';
 import type { FictionMapOutputView } from '@editor-platform/fiction-map/render';
-import type { NativeReference } from './model';
+import type { NativeReference } from './links';
 
 /** Host references only. Geometry, LO text, selected artwork and story time keep their existing owners. */
 export interface CreativeMapLocation {

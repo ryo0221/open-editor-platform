@@ -13,15 +13,21 @@ import {
   type CadPartSource,
 } from './assembly';
 import { lengthParameters, parameterValues } from './graph';
-import type { CadDocument } from './model';
+import type { CadAssetRef, CadDocument } from './model';
 
 export type CadAssemblyOperation =
   /**
    * New part definitions (one per version, `parts` may be empty when the version is already
    * defined) and the components placing them, in one edit. The Host keeps the versions' closure
-   * before the edit names them.
+   * before the edit names them. PMI-5a: a STEP import also gives the `assembly-pmi` asset with
+   * the PMI of particular instances (stored by the Host first, as the parts' assets are).
    */
-  | { type: 'insertComponents'; parts: CadPartDef[]; components: CadComponent[] }
+  | {
+      type: 'insertComponents';
+      parts: CadPartDef[];
+      components: CadComponent[];
+      assemblyPmi?: CadAssetRef;
+    }
   | { type: 'setComponentPlacement'; componentId: string; placement: CadComponentPlacement }
   | ({ type: 'setPartProperties' } & CadPartProperties)
   /** R2b-3: whether a component (and what it places) is counted in the BOM. */
@@ -54,6 +60,14 @@ export function applyAssemblyOperation(next: CadDocument, op: CadAssemblyOperati
       if (!op.components.length) fail('insert-components-empty');
       next.parts.push(...op.parts);
       next.components.push(...op.components);
+      if (op.assemblyPmi) {
+        // One asset per document: an import goes into an empty one.
+        if (op.assemblyPmi.kind !== 'assembly-pmi') fail('assembly-pmi-kind');
+        if (next.assemblyPmiAssetId !== undefined) fail('assembly-pmi-exists');
+        if (next.assets.some((a) => a.id === op.assemblyPmi!.id)) fail('asset-conflict');
+        next.assets.push(op.assemblyPmi);
+        next.assemblyPmiAssetId = op.assemblyPmi.id;
+      }
       return next;
     case 'setComponentPlacement': {
       const c = next.components.find((x) => x.id === op.componentId) ?? fail('target-missing');

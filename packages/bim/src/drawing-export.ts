@@ -20,6 +20,16 @@ export function bimPngSize(paperMm: [number, number], options = bimPngExport): [
   return [Math.max(1, Math.round(px[0]! * fit)), Math.max(1, Math.round(px[1]! * fit))];
 }
 
+/**
+ * The resolution (dpi on paper) a PNG of this paper gets when its side would pass `maxSidePx`, or
+ * `undefined` when it gets the full `dpi` (TW0c): the export then says the PNG was made coarser.
+ */
+export function bimPngReducedDpi(paperMm: [number, number], options = bimPngExport) {
+  const longest = (Math.max(...paperMm) / 25.4) * options.dpi;
+  if (longest <= options.maxSidePx) return undefined;
+  return Math.floor((options.dpi * options.maxSidePx) / longest);
+}
+
 /** The drawing on a white background as a PNG. */
 export async function bimSvgToPng(svg: string): Promise<Blob> {
   const [w, h] = bimPngSize(bimSvgPaperMm(svg));

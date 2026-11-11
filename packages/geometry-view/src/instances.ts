@@ -29,7 +29,12 @@ import {
   viewTextureBytes,
   type ViewTextureSet,
 } from './textures';
-import { geometryDefaultFinish, type GeometryVec3 as Vec3 } from '@editor-platform/geometry-core';
+import {
+  geometryDefaultFinish,
+  type GeometryEmission,
+  type GeometryLight,
+  type GeometryVec3 as Vec3,
+} from '@editor-platform/geometry-core';
 
 /** A triangle mesh in its solid's frame: positions relative to `origin` (mm). */
 export interface ViewMesh {
@@ -54,6 +59,10 @@ export interface ViewSolidMesh<M extends ViewMesh = ViewMesh> {
   /** #661: the finish (0–1 each); the default finish when absent. */
   roughness?: number;
   metalness?: number;
+  /** CR6a: the light it gives off and lets through. */
+  emission?: GeometryEmission;
+  transmission?: number;
+  ior?: number;
   /** #662: image maps, drawn where the mesh has texture coordinates. */
   textures?: ViewTextureSet;
   sheet: boolean;
@@ -348,8 +357,16 @@ export function disposeInstances(group: Group) {
   });
   group.clear();
 }
-/** A look's finish: the default finish where it names none (#661). */
-export const finishOf = (look: { roughness?: number; metalness?: number } | undefined) => ({
+/**
+ * A look's finish: the default finish where it names none (#661), with (CR6a) the light it gives
+ * off and lets through where it names some.
+ */
+export const finishOf = (
+  look: ({ roughness?: number; metalness?: number } & GeometryLight) | undefined,
+) => ({
   roughness: look?.roughness ?? geometryDefaultFinish.roughness,
   metalness: look?.metalness ?? geometryDefaultFinish.metalness,
+  ...(look?.emission ? { emission: look.emission } : {}),
+  ...(look?.transmission !== undefined ? { transmission: look.transmission } : {}),
+  ...(look?.ior !== undefined ? { ior: look.ior } : {}),
 });

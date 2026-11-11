@@ -256,6 +256,51 @@ describe('GLB textures (#663)', () => {
     mesh.uvs = new Float32Array((mesh.positions.length / 3) * 2).map((_, i) => i * 10);
     return mesh;
   };
+  it('writes a lamp’s light and a lens’s transmission with their glTF extensions (CR6a, TS-1591)', () => {
+    const { bytes } = writeGlb(
+      [
+        {
+          ...body(box([2, 2, 2], [0, 0, 0])),
+          name: 'Bulb',
+          appearance: { color: '#ffffff', opacity: 1, emission: { color: '#ff0000', strength: 6 } },
+        },
+        {
+          ...body(box([2, 2, 2], [0, 0, 0])),
+          name: 'Lens',
+          appearance: { color: '#ffffff', opacity: 1, transmission: 1, ior: 1.49 },
+        },
+        {
+          ...body(box([2, 2, 2], [0, 0, 0])),
+          name: 'Dim',
+          appearance: { color: '#ffffff', opacity: 1, emission: { color: '#ffffff', strength: 1 } },
+        },
+        { ...body(box([2, 2, 2], [0, 0, 0])), name: 'Plain' },
+      ],
+      meta,
+    );
+    const json = glbJson(bytes);
+    const [bulb, lens, dim, plain] = json.materials;
+    expect(bulb.emissiveFactor).toEqual([1, 0, 0]);
+    expect(bulb.extensions).toEqual({ KHR_materials_emissive_strength: { emissiveStrength: 6 } });
+    expect(lens.extensions).toEqual({
+      KHR_materials_transmission: { transmissionFactor: 1 },
+      KHR_materials_ior: { ior: 1.49 },
+    });
+    expect(lens.emissiveFactor).toBeUndefined();
+    // Strength 1 is the colour as is: no extension.
+    expect(dim.emissiveFactor).toEqual([1, 1, 1]);
+    expect(dim.extensions).toBeUndefined();
+    expect(plain.extensions).toBeUndefined();
+    expect(json.extensionsUsed).toEqual([
+      'KHR_materials_emissive_strength',
+      'KHR_materials_ior',
+      'KHR_materials_transmission',
+    ]);
+    // A file without them names no extension.
+    expect(glbJson(writeGlb([body(box([2, 2, 2], [0, 0, 0]))], meta).bytes).extensionsUsed).toBe(
+      undefined,
+    );
+  });
   it('writes the finish, the maps with their images once each, and turned coordinates', () => {
     const textures = {
       color: jpeg,

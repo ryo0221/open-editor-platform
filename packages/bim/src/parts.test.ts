@@ -263,6 +263,10 @@ describe('bim part types (R2c-3c-3b)', () => {
     // The box of the part whose shape is not read is in the framing.
     expect(bimViewBounds(evaluation, doc)![1][0]).toBe(5100);
     expect(bimViewBounds(evaluation)![1][0]).toBe(100);
+    // FU1: the selection's bounds only.
+    expect(bimViewBounds(evaluation, doc, ['p-2'])![0][0]).toBe(5000);
+    expect(bimViewBounds(evaluation, doc, ['p-1'])![1][0]).toBe(100);
+    expect(bimViewBounds(evaluation, doc, ['nothing'])).toBeUndefined();
   });
 
   it('colours a part body by body from its CAD looks, and keeps the part colour without them (OH-U1)', () => {

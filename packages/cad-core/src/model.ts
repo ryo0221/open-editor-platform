@@ -10,10 +10,20 @@ import type {
   CadPartProperties,
   CadSolvedPose,
 } from './assembly';
-import type { GeometryNormalConvention, GeometryTextureRole } from '@editor-platform/geometry-core';
+import type {
+  GeometryEmission,
+  GeometryNormalConvention,
+  GeometryTextureRole,
+} from '@editor-platform/geometry-core';
+import type { CadConfiguration } from './configurations';
+import type { CadMount } from './mounts';
+import type { CadGearMesh } from './gear-mesh';
+import type { CadInterferenceAllowance } from './interference';
 import type { CadExpression, CadParameterType } from './expression';
 import type { CadSketch, CadSketchRegion } from './sketch';
 import type { CadTopologyRef } from './topology';
+import type { CadProfileKind } from './profile-section';
+import type { CadSpurGearArgs } from './gear';
 
 export type Length =
   | { literalMm: number }
@@ -139,6 +149,12 @@ export type CadFeature =
       args: { radius: Length; origin: Position3; orientation: Quaternion };
     })
   | (FeatureBase & {
+      /** WM1a (docs/cad/watch-design.md): an external involute spur gear (`gear.ts`). */
+      type: 'spurGear';
+      inputFeatureIds: [];
+      args: CadSpurGearArgs;
+    })
+  | (FeatureBase & {
       type: 'extrude';
       inputFeatureIds: [];
       args: CadSweepSource & { distance: Length; direction: 1 | -1 };
@@ -213,6 +229,28 @@ export type CadFeature =
     })
   | (FeatureBase & {
       /**
+       * CR4d: a sheet: a section of a kind (`profile-section.ts`: hat, Z, channel or flat, by its
+       * dimensions) carried along `path` (an open chain). Its height points along the path
+       * sketch's normal (`normal`), across the path in the sketch's plane (`inPlane`), or along
+       * a unit vector square to a straight path; `flip` turns it the other way.
+       */
+      type: 'profileSweep';
+      inputFeatureIds: [];
+      args: {
+        path: CadSketchPath;
+        profile: {
+          kind: CadProfileKind;
+          height: Length;
+          width: Length;
+          flange: Length;
+          radius: Length;
+        };
+        up: 'normal' | 'inPlane' | Vec3;
+        flip: boolean;
+      };
+    })
+  | (FeatureBase & {
+      /**
        * R2a-2c: a sheet of one face spanning 3 or 4 curves that close a loop in order (Coons
        * patch). The face is `surface`; each boundary edge is named by the curve it comes from.
        */
@@ -222,12 +260,33 @@ export type CadFeature =
     })
   | (FeatureBase & {
       /**
+       * CR1d (docs/cad/car-design.md, CR1の分け方): a sheet of one face through a network of
+       * curves (Gordon surface): 2–16 `u` curves (e.g. sections) crossed by 2–16 `v` curves (e.g.
+       * character lines), each pair meeting within `toleranceMm`. The face is `surface`; its
+       * boundary edges are named by the first and last curves of each way.
+       */
+      type: 'curveNetwork';
+      inputFeatureIds: [];
+      args: { u: CadCurveSource[]; v: CadCurveSource[]; toleranceMm: number };
+    })
+  | (FeatureBase & {
+      /**
+       * CR2b: another sheet's result moved `distance` (0.01–100 mm) along its normal (`front`) or
+       * against it (`back`), as a new sheet: an inner panel, a glass or a lamp's outer lens. The
+       * source is read, never consumed.
+       */
+      type: 'offsetSurface';
+      inputFeatureIds: [];
+      args: { source: { featureId: string }; distance: Length; side: 'front' | 'back' };
+    })
+  | (FeatureBase & {
+      /**
        * R2a-2c: a sheet of one face filling 3–16 curves that close a loop in order, touching each
        * (`G0`) or also meeting the face beside a referenced edge tangentially (`G1`).
        */
       type: 'fill';
       inputFeatureIds: [];
-      args: { boundary: { curve: CadCurveSource; continuity: 'G0' | 'G1' }[] };
+      args: { boundary: { curve: CadCurveSource; continuity: 'G0' | 'G1' | 'G2' }[] };
     })
   | (FeatureBase & {
       /**
@@ -236,7 +295,111 @@ export type CadFeature =
        */
       type: 'trim';
       inputFeatureIds: [string];
-      args: { tool: CadTrimTool; keep: 'inside' | 'outside' | 'front' | 'back' };
+      args: {
+        tool: CadTrimTool;
+        keep: 'inside' | 'outside' | 'front' | 'back';
+        /**
+         * CR3b: with a sketch chain, the cut runs `gap / 2` (0.5–10 mm gaps) off the chain into
+         * the kept side, the chain offset in its plane (`sketchOffset`): a panel's gap.
+         */
+        gap?: Length;
+        /**
+         * CR3c: more closed chains of the tool's sketch, cut at once with its own chain (a row of
+         * windows). `inside` keeps what any chain holds, `outside` what none holds.
+         */
+        chains?: string[][];
+        /**
+         * CR3c: a sketch chain that cuts nothing is refused (`trim-no-cut`, naming the chain), or
+         * with `skip` left out of the cut, as long as one chain still cuts.
+         */
+        ifMissed?: 'skip';
+      };
+    })
+  | (FeatureBase & {
+      /**
+       * CR3b: a panel cut out of another sheet's result along a sketch's closed chain: the
+       * pieces `inside` (or `outside`) the chain moved `gap / 2` into them, as a new sheet. The
+       * source is read, never consumed; a `trim` of the source with the same chain, the other
+       * side kept and the same gap, leaves the gap between them.
+       */
+      type: 'panel';
+      inputFeatureIds: [];
+      args: {
+        source: { featureId: string };
+        tool: CadSketchPath;
+        keep: 'inside' | 'outside';
+        gap: Length;
+      };
+    })
+  | (FeatureBase & {
+      /**
+       * CR2a: a sheet's faces divided along a sketch's chain carried along the sketch's normal,
+       * every piece kept: `left`/`right` of an open chain (looking down the normal), `inside`/
+       * `outside` of a closed one. The dividing edges are named by the chain's elements.
+       */
+      type: 'split';
+      inputFeatureIds: [string];
+      args: { tool: CadSketchPath };
+    })
+  | (FeatureBase & {
+      /**
+       * CR6d: a round groove (a seat's stitch line, a tyre's tread) cut into a solid: the chain a
+       * sketch draws is projected along the sketch's normal onto the solid's nearest faces, and a
+       * tube of `radius` (0.1–10 mm) swept along it is cut away, so the groove is a half round
+       * `radius` deep and twice as wide.
+       */
+      type: 'groove';
+      inputFeatureIds: [string];
+      args: { tool: CadSketchPath; radius: Length };
+    })
+  | (FeatureBase & {
+      /**
+       * CR2c: a press line. The sheet is divided along a sketch's chain (as `split`), the pieces on
+       * `side` moved `depth` (0.1–20 mm) along their normal (`front`) or against it (`back`), a
+       * wall run between the two edges of the line, and both edges of the wall rounded by
+       * `radius`.
+       */
+      type: 'pressLine';
+      inputFeatureIds: [string];
+      args: {
+        tool: CadSketchPath;
+        side: 'left' | 'right' | 'inside' | 'outside';
+        depth: Length;
+        toward: 'front' | 'back';
+        radius: Length;
+      };
+    })
+  | (FeatureBase & {
+      /**
+       * CR2d: a flare. The sheet is divided along a sketch's open chain (as `split`); the pieces
+       * on the side of `arch` (a free edge of the sheet, a wheel arch) are replaced by a fill
+       * whose arch is moved `height` (1–100 mm) out along their normal, meeting the pieces that
+       * stay G1 or G2 along the chain.
+       */
+      type: 'flare';
+      inputFeatureIds: [string];
+      args: {
+        tool: CadSketchPath;
+        arch: CadTopologyRef;
+        height: Length;
+        continuity: 'G1' | 'G2';
+      };
+    })
+  | (FeatureBase & {
+      /**
+       * CR4c: a flange. Along each of 1–256 free edges of the sheet, a strip `width` (1–200 mm)
+       * wide leaves the edge at `angle` (0–180°) from the sheet's tangent plane, turning to its
+       * `toward` side (90° is square to the sheet), its ends square to the edge; the strips are
+       * joined to the sheet as one body.
+       */
+      type: 'flange';
+      inputFeatureIds: [string];
+      args: {
+        edges: CadTopologyRef[];
+        width: Length;
+        angle: Angle;
+        toward: 'front' | 'back';
+      };
     })
   | (FeatureBase & {
       /**
@@ -272,10 +435,20 @@ export type CadFeature =
       args: { mode: 'union' | 'cut' | 'common' };
     })
   | (FeatureBase & {
-      /** Constant-radius fillet of 1–256 edges of the input's output. */
+      /**
+       * Fillet of 1–256 edges of the input's output: a solid's edges, or (CR1e) a sheet's edges
+       * between two of its faces. `radius` alone is constant. With `radiusEnd` the radius runs
+       * from `radius` at each edge's start to `radiusEnd` at its end, linearly, or through `radii`
+       * between (1–6 points, `at` in (0, 1) along the edge, increasing): 2–8 radii in all.
+       */
       type: 'fillet';
       inputFeatureIds: [string];
-      args: { edges: CadTopologyRef[]; radius: Length };
+      args: {
+        edges: CadTopologyRef[];
+        radius: Length;
+        radiusEnd?: Length;
+        radii?: { at: number; radius: Length }[];
+      };
     })
   | (FeatureBase & {
       /**
@@ -319,6 +492,16 @@ export type CadFeature =
     })
   | (FeatureBase & {
       /**
+       * CR4b (docs/cad/car-design.md): the reflection of feature `source` (a sheet or a solid) in a
+       * plane (a point and unit normal), as a new body. Like `offsetSurface`, it reads the source
+       * without consuming it, so a left part and its right copy are two bodies of one feature.
+       */
+      type: 'mirrorCopy';
+      inputFeatureIds: [];
+      args: { source: { featureId: string }; plane: { origin: Position3; normal: Vec3 } };
+    })
+  | (FeatureBase & {
+      /**
        * Tilts 1–256 faces by `angle` (0, π/4] about where they meet the plane through the
        * `neutral` face normal to `direction` (the unit pull direction, world axes).
        */
@@ -343,12 +526,34 @@ export type CadFeature =
         sourceUnit: CadLengthUnit;
         /** `cadLengthUnits[sourceUnit]`: mm per source unit, applied once by the reader. */
         scaleToMm: number;
+        /**
+         * #820: the largest tolerance the reader found, recorded when it is above the standard
+         * result limit (`cadTolerance`), up to `cadImportToleranceMm`. The shape is kept as read
+         * (no healing): its body can be placed, measured and exported, but no feature takes it
+         * as input while this is above the document's result limit (`input-tolerance`).
+         */
+        maxToleranceMm?: number;
+        /**
+         * PMI-2: the `pmi` asset of the semantic PMI the import kept for this body (targets are
+         * sub-shapes of the BRep). Absent when the file had none or none was kept.
+         */
+        pmiAssetId?: string;
       };
     });
 export type CadFeatureType = CadFeature['type'];
 /** Unit vectors in world axes. */
 export type CadPatternLayout =
-  | { type: 'linear'; direction: Vec3; count: Count; spacing: Length }
+  | {
+      type: 'linear';
+      direction: Vec3;
+      count: Count;
+      spacing: Length;
+      /**
+       * CR6d: the row repeated `count` times `spacing` apart along a second direction, a grid of
+       * copies (a lamp lens's cuts). Copy `row × count + i` is copy i of row `row`.
+       */
+      rows?: { direction: Vec3; count: Count; spacing: Length };
+    }
   | { type: 'circular'; axisOrigin: Position3; axisDirection: Vec3; count: Count; angle: Angle };
 /**
  * K5a (docs/cad/complex-models.md): copies at `count` equal distances along a sketch's open chain
@@ -369,6 +574,13 @@ export interface CadAppearance {
   metalness?: number;
   /** #661: the library preset these values were copied from (`geometryMaterialPresets`). */
   material?: string;
+  /**
+   * CR6a (docs/cad/car-design.md): the light the surface gives off (a lamp), and how much light
+   * passes through it with its index of refraction (a clear lens). Absent: none, opaque, 1.5.
+   */
+  emission?: GeometryEmission;
+  transmission?: number;
+  ior?: number;
   /**
    * #662: image maps over the look, each a texture asset of the content. As in glTF, the
    * colour, roughness and metalness multiply the maps.
@@ -420,6 +632,41 @@ export interface CadNamedView {
   camera: CadCamera;
   projection: CadProjection;
 }
+/** CR4e: one face of a body's final shape, a flange a spot weld joins. */
+export interface CadSpotWeldFlange {
+  bodyId: string;
+  /** A face of the body's final shape, made on one of its features (resolved on the final). */
+  face: CadTopologyRef;
+}
+/**
+ * CR4e (docs/cad/car-design.md, W3): a row of spot welds along two overlapping flanges. Not a
+ * feature: it changes no shape, and its points are made again from the flanges at each
+ * evaluation, `pitchMm` apart along the first flange's centre line and at least
+ * `endDistanceMm` from its ends. A point further than `maxGapMm` from either flange is counted
+ * as too far. CR5 turns the points into the analysis's joints.
+ */
+export interface CadSpotWeld {
+  id: string;
+  name: string;
+  flanges: [CadSpotWeldFlange, CadSpotWeldFlange];
+  pitchMm: number;
+  endDistanceMm: number;
+  /** The largest distance from a point to either flange (default: two 0.8 mm sheets + 0.5 mm). */
+  maxGapMm: number;
+}
+/** CR4e: limits and defaults of spot welds (docs/cad/r2a-freeform.md, CR4e). */
+export const cadSpotWeldLimits = Object.freeze({
+  spotWelds: 256,
+  pitchMm: [10, 200] as const,
+  defaultPitchMm: 40,
+  endDistanceMm: [0, 100] as const,
+  defaultEndDistanceMm: 10,
+  maxGapMm: [0.1, 20] as const,
+  defaultMaxGapMm: 2.1,
+  /** Points of one row, and of all rows of a document. */
+  pointsPerWeld: 1_000,
+  points: 8_000,
+});
 /** Length units a STEP file may declare, as mm per unit. Anything else is refused as unknown. */
 export const cadLengthUnits = Object.freeze({
   um: 0.001,
@@ -443,11 +690,21 @@ export interface CadAssetRef {
   mediaType: string;
 }
 /** #662: a texture image is a PNG or a JPEG asset, one kind each. */
-export type CadAssetKind = 'source-step' | 'normalized-brep' | 'texture-png' | 'texture-jpeg';
+/** PMI-2: `pmi` is the semantic PMI an import kept (`CadPmiAsset`, docs/cad/pmi.md). */
+export type CadAssetKind =
+  | 'source-step'
+  | 'normalized-brep'
+  | 'pmi'
+  /** PMI-5: an assembly's PMI of particular instances (`CadPmiAsset`, targets with `component`). */
+  | 'assembly-pmi'
+  | 'texture-png'
+  | 'texture-jpeg';
 /** One media type per kind; the BRep is OCCT's text format (`BRepTools::Write`). */
 export const cadAssetMediaTypes: Readonly<Record<CadAssetKind, string>> = Object.freeze({
   'source-step': 'model/step',
   'normalized-brep': 'model/x-occt-brep',
+  pmi: 'application/json',
+  'assembly-pmi': 'application/json',
   'texture-png': 'image/png',
   'texture-jpeg': 'image/jpeg',
 });
@@ -480,6 +737,21 @@ export interface CadDocument {
   joints: CadJoint[];
   /** Last solved pose of every component, by component ID (R2b-U5). */
   solvedPoses: Record<string, CadSolvedPose>;
+  /**
+   * PMI-5 (docs/cad/pmi.md, 組立経路の参照): the `assembly-pmi` asset with the PMI a STEP file
+   * gave particular instances through assembly paths. Only in an assembly.
+   */
+  assemblyPmiAssetId?: string;
+  /** CR4e: spot welds between bodies' flanges (none when absent). */
+  spotWelds?: CadSpotWeld[];
+  /** MR2 (docs/cad/mecha-design.md): named sets of joint values, 1–32 when present. */
+  configurations?: CadConfiguration[];
+  /** MR3 (docs/cad/mecha-design.md): explicit interference allowances, 1–256 when present. */
+  interferenceAllowances?: CadInterferenceAllowance[];
+  /** MR7 (docs/cad/mecha-design.md): components with candidate joints, 1–64 when present. */
+  mounts?: CadMount[];
+  /** WM2 (docs/cad/watch-design.md): spur gears in mesh, 1–256 when present. */
+  gearMeshes?: CadGearMesh[];
 }
 export interface CadDiagnostic {
   code: string;
@@ -525,6 +797,12 @@ export const cadLimits = Object.freeze({
   /** D2 asset limits per document (model.md); the Host's total admission comes first. */
   assets: 128,
   stepBytes: 16 * 1024 * 1024,
+  /**
+   * WM5c (docs/cad/watch-design.md): an assembly written as STEP AP242. Larger than what is read
+   * (`stepBytes`): a watch's 17 parts with their gears write about 16 MiB, so the written file
+   * may not be read back here.
+   */
+  stepExportBytes: 64 * 1024 * 1024,
   brepBytes: 32 * 1024 * 1024,
   assetBytes: 64 * 1024 * 1024,
 });
@@ -532,10 +810,34 @@ export const cadLimits = Object.freeze({
 export const cadBooleanTools = 256;
 /** Faces one shell leaves open (docs/cad/r1-modeling.md, 詳細feature). */
 export const cadShellOpenFaces = 64;
+/** CR1e: radii a varying fillet gives along an edge, its two ends included. */
+export const cadFilletRadii = [2, 8] as const;
+/** CR2b: the largest offset of a surface (mm). */
+export const cadOffsetSurfaceMaxMm = 100;
+/** CR3b: a panel's gap (mm), and the gap a new panel takes. */
+export const cadPanelGapMm = [0.5, 10] as const;
+export const cadPanelGapDefaultMm = 3.5;
+/** CR3c: the most closed chains one trim cuts at once (its tool's chain and `chains`). */
+export const cadTrimChains = 32;
+/** CR2d: a flare's height (mm). */
+export const cadFlareHeightMm = [1, 100] as const;
+/** CR2d: profiles across a flare's fill, the ramps included (a Gordon surface's v-curves). */
+export const cadFlareProfiles = 32;
+/** CR4c: a flange's width (mm). */
+export const cadFlangeWidthMm = [1, 200] as const;
+/** CR2c: a press line's depth (mm). */
+export const cadPressLineDepthMm = [0.1, 20] as const;
+/** CR6d: a groove's radius (mm). */
+export const cadGrooveRadiusMm = [0.1, 10] as const;
 /** Sections of one loft (docs/cad/r1-modeling.md, 上限). */
 export const cadLoftSections = 32;
 /** Curves of a boundary surface and of a fill (docs/cad/r2a-freeform.md, 上限). */
 export const cadBoundaryCurves = Object.freeze({ surface: [3, 4], fill: [3, 16] } as const);
+/** CR1d: curves each way of a curve network, and the meeting tolerance (mm). */
+export const cadCurveNetwork = Object.freeze({
+  curves: [2, 16] as const,
+  toleranceMm: [0.0001, 1] as const,
+});
 /** Sheets one sew joins, and its joining distance in mm (docs/cad/r2a-freeform.md, 上限). */
 export const cadSewInputs = 64;
 export const cadSewToleranceMm = Object.freeze([0.000001, 0.0001] as const);
@@ -548,6 +850,11 @@ export const cadTolerance = Object.freeze({
   angularToleranceRad: 0.000000001,
   maxResultLinearToleranceMm: 0.0001,
 });
+/**
+ * #820: the largest shape tolerance a STEP import keeps as read (mm). Shapes from other CAD
+ * systems carry their own precision (0.001–0.1 mm is common); above this the import refuses.
+ */
+export const cadImportToleranceMm = 1;
 /**
  * The named tolerance sets a document chooses from (docs/cad/complex-models.md, K2, CM-U2):
  * `standard`, and `large` for assemblies tens of metres long. Chosen when a document is made or

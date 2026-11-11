@@ -15,6 +15,8 @@ export const jointTypeLabel: Record<CadJointType, string> = {
   slider: 'Slider',
   cylindrical: 'Cylindrical',
   planar: 'Planar',
+  spherical: 'Spherical',
+  universal: 'Universal',
 };
 const statusText: Record<CadJointCreation['status'], string> = {
   idle: '',
@@ -103,6 +105,11 @@ export function JointCreator({
       </p>
       <Side title="Parent" choice={parent} onAgain={() => assembly.pickAgain('parent')} />
       <Side title="Child" choice={child} onAgain={() => assembly.pickAgain('child')} />
+      {child?.componentId && doc.joints.some((j) => j.child.componentId === child.componentId) && (
+        <p className="cad-muted" data-testid="cad-joint-mount-note">
+          この部品はもう別のjointで置かれています。新しいjointは取り付け先の候補（Mounts）として足し、今の取り付け先はそのままです。
+        </p>
+      )}
       {step !== 'type' && (
         <>
           <p {...notice}>
@@ -140,6 +147,14 @@ export function JointCreator({
           onChange={(e) => assembly.setJointFlip(e.target.checked)}
         />
         <span>Flip child (face to face)</span>
+      </label>
+      <label className="cad-check">
+        <input
+          type="checkbox"
+          checked={creating.keep}
+          onChange={(e) => assembly.setJointKeep(e.target.checked)}
+        />
+        <span>Keep child where it stands (hinge on its own edge)</span>
       </label>
       {statusText[status] && (
         <p

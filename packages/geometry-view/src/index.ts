@@ -14,7 +14,13 @@ export {
   type ViewSolidMesh,
   viewLod,
 } from './instances';
-export { setViewFinish, ViewLighting, type ViewLightingOptions } from './lighting';
+export {
+  setViewFinish,
+  setViewLight,
+  viewTransmissionFade,
+  ViewLighting,
+  type ViewLightingOptions,
+} from './lighting';
 export {
   disposeViewTextures,
   setViewTextures,
@@ -55,3 +61,27 @@ export {
   type PathRenderSource,
 } from './path-render';
 export { PathRenderDialog } from './path-render-panel';
+export {
+  draftColor,
+  draftSummary,
+  partCheckColors,
+  partCheckColorsOf,
+  partCheckLimits,
+  partDraft,
+  partThickness,
+  thicknessColor,
+  type DraftSummary,
+  type PartCheckMesh,
+  type ThicknessResult,
+} from './part-checks';
+export {
+  rayDiagramLimits,
+  rayDiagramSegments,
+  rayFanDirections,
+  traceRayFan,
+  type RayDiagramBody,
+  type RayEnd,
+  type RayFan,
+  type RaySurface,
+  type TracedRay,
+} from './ray-diagram';

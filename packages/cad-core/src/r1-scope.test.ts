@@ -30,9 +30,10 @@ describe('R1 scope: later capabilities are refused (CAD38)', () => {
       `length@$.features[${at}].args.radius`,
     ],
     [
-      'a fillet with radii along its edges (variable R)',
+      // CR1e admits radii along an edge (docs/cad/car-design.md), but only with an end radius.
+      'a fillet with radii along its edges but no end radius (variable R)',
       changed(fillet, (d) => (d.features[at].args.radii = [mm(3), mm(5)])),
-      `unknown-field@$.features[${at}].args.radii`,
+      `fillet-radii-end@$.features[${at}].args.radii`,
     ],
     [
       'a sweep guide curve',

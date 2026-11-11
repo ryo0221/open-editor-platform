@@ -1,4 +1,5 @@
 import { EditorSession } from '@editor-platform/editor-core';
+import type { GeometryOp } from '@editor-platform/geometry-core';
 import { describe, expect, it } from 'vitest';
 import {
   applyBimOperation,
@@ -15,12 +16,30 @@ import {
   f33Types,
   f37Office,
   f39Roofs,
+  f40Lattice,
+  f47Taper,
+  f48Ramp,
+  f49Pipes,
+  f50Lean,
+  f51Ramps,
+  f52LeanOpenings,
+  f54LeanJoins,
+  f54LeanRoofs,
+  f55RampOpenings,
+  f55Stairs,
+  bimGeometry,
+  bimProfileLoops,
+  bimSchedule,
+  bimSectionAxes,
+  entityReferences,
+  profileArea,
   loopArea,
   proposeJoins,
   sub,
   validateBim,
   type BimDocument,
   type BimElement,
+  type BimLoop,
   type BimOperation,
   type BimShape,
   type BimWall,
@@ -126,6 +145,14 @@ describe('bim-core document (CAD61)', () => {
     const near = f31BoxBuilding();
     near.levels[1].elevationMm = 500;
     expect(codes(near)).toContain('level-spacing');
+    // TW0d: a 340 m storey (a tower's first deck) is valid; more than 1,000 m is not.
+    const deck = f31BoxBuilding();
+    deck.levels[2].elevationMm = 343_000;
+    expect(codes(deck)).not.toContain('level-spacing');
+    const wide = f31BoxBuilding();
+    wide.levels[0].elevationMm = -1_000_000;
+    wide.levels[1].elevationMm = 3_000;
+    expect(codes(wide)).toContain('level-spacing');
     const many = emptyBim();
     many.levels = Array.from({ length: 65 }, (_, i) => ({
       id: `l${i}`,
@@ -735,6 +762,30 @@ describe('openings (CAD62)', () => {
     doc.elements.push(opening('o3', 9500));
     expect(codes(doc)).toEqual(['opening-outside-host']);
   });
+  it("leaves a space's holes out of its area and volume, and refuses escaping ones (TW1)", () => {
+    const doc = f31BoxBuilding();
+    const hall = doc.elements.find((e) => e.id === 'sp-hall') as Extract<
+      BimElement,
+      { kind: 'space' }
+    >;
+    const square = (x: number, y: number, side: number): BimLoop => [
+      [x, y],
+      [x + side, y],
+      [x + side, y + side],
+      [x, y + side],
+    ];
+    hall.holes = [square(4000, 3000, 2000)];
+    expect(errors(doc)).toEqual([]);
+    close(q(doc, 'sp-hall').netFloorArea, 9800 * 7800 - 2000 * 2000);
+    close(q(doc, 'sp-hall').netVolume, (9800 * 7800 - 2000 * 2000) * 3000);
+    expect(shape(doc, 'sp-hall', 'space').holes).toHaveLength(1);
+    hall.holes.push(square(5000, 4000, 2000));
+    expect(codes(doc)).toEqual(['hole-overlap']);
+    hall.holes = [square(9000, 3000, 2000)];
+    expect(codes(doc)).toEqual(['hole-outside']);
+    hall.holes = Array.from({ length: 17 }, (_, i) => square(200 + i * 500, 200, 100));
+    expect(codes(doc)).toEqual(['holes']);
+  });
   it('checks slab openings against the exact arcs', () => {
     const doc = f31BoxBuilding();
     element<Extract<BimElement, { kind: 'slab' }>>(doc, 's-1f').boundary = [
@@ -1039,6 +1090,477 @@ describe('properties (R2c-U8)', () => {
   });
 });
 
+describe('inclined members (TW2, F40)', () => {
+  const doc = f40Lattice();
+  const box = 300 * 300 - 276 * 276;
+  const round = Math.PI * 200 * 200;
+  it('validates the leaning column, the sloping beam and the members', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+  });
+  it('refuses bad member ends, keys and types', () => {
+    const bad = structuredClone(doc);
+    const m = element<Extract<BimElement, { kind: 'member' }>>(bad, 'm-diag');
+    (m.start as unknown as Record<string, unknown>).extra = 1;
+    expect(codes(bad)).toContain('member-end');
+    const wrongType = structuredClone(doc);
+    element<Extract<BimElement, { kind: 'member' }>>(wrongType, 'm-diag').typeId = 't-column-600';
+    expect(codes(wrongType).length).toBeGreaterThan(0);
+    const extraKey = structuredClone(doc);
+    (element(extraKey, 'm-vert') as unknown as Record<string, unknown>).base = {
+      level: 'l-gl',
+      offsetMm: 0,
+    };
+    expect(codes(extraKey).length).toBeGreaterThan(0);
+    const column = structuredClone(doc);
+    (element(column, 'c-lean') as unknown as Record<string, unknown>).topAt = { xy: [1, 2, 3] };
+    expect(codes(column).length).toBeGreaterThan(0);
+    const beam = structuredClone(doc);
+    (element(beam, 'b-slope') as unknown as Record<string, unknown>).endTop = {
+      level: 'l-x',
+      offsetMm: 0,
+    };
+    expect(codes(beam).length).toBeGreaterThan(0);
+  });
+  it('refuses a member of zero length, and keeps horizontal ones', () => {
+    const zero = structuredClone(doc);
+    const m = element<Extract<BimElement, { kind: 'member' }>>(zero, 'm-diag');
+    m.end = structuredClone(m.start);
+    expect(deriveBim(zero).diagnostics.map((d) => d.code)).toContain('member-degenerate');
+    expect(deriveBim(doc).shapes.get('m-flat')!.kind).toBe('member');
+  });
+  it('computes lengths and volumes along the axes', () => {
+    close(profileArea({ shape: 'box', depthMm: 300, widthMm: 300, wallMm: 12 }), box);
+    const lean = q(doc, 'c-lean');
+    close(lean.length, Math.hypot(2000, 6000));
+    close(lean.netVolume, 600 * 600 * Math.hypot(2000, 6000));
+    const slope = q(doc, 'b-slope');
+    close(slope.length, Math.hypot(6000, 1500));
+    close(slope.netVolume, 400 * 700 * Math.hypot(6000, 1500));
+    const diag = q(doc, 'm-diag');
+    close(diag.length, Math.hypot(4000, 3000, 6000));
+    close(diag.crossSectionArea, box);
+    close(diag.netVolume, box * Math.hypot(4000, 3000, 6000), 1e-3);
+    close(q(doc, 'm-vert').netVolume, round * 6000, 1e-3);
+    close(q(doc, 'm-flat').length, 6000);
+    close(q(doc, 'm-grid').length, Math.hypot(2000, 3000, 6000));
+    expect(shape(doc, 'm-grid', 'member').start).toEqual([10000, 0, 0]);
+    // A level column and a level beam keep their shapes as before.
+    const level = structuredClone(doc);
+    delete element<Extract<BimElement, { kind: 'column' }>>(level, 'c-lean').topAt;
+    delete element<Extract<BimElement, { kind: 'beam' }>>(level, 'b-slope').endTop;
+    expect(shape(level, 'c-lean', 'column').topAt).toBeUndefined();
+    expect(shape(level, 'b-slope', 'beam').zTopEnd).toBeUndefined();
+  });
+  it('places sections on orthonormal axes', () => {
+    const derived = deriveBim(doc);
+    const d3 = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+    for (const id of ['c-lean', 'b-slope', 'm-diag', 'm-vert', 'm-flat', 'm-grid']) {
+      const s = derived.shapes.get(id)! as Extract<
+        BimShape,
+        { kind: 'column' | 'beam' | 'member' }
+      >;
+      const a = bimSectionAxes(s);
+      for (const v of [a.x, a.y, a.z]) close(d3(v, v), 1);
+      close(d3(a.x, a.y), 0);
+      close(d3(a.y, a.z), 0);
+      close(d3(a.x, a.z), 0);
+    }
+    const flat = bimSectionAxes(shape(doc, 'm-flat', 'member'));
+    // A horizontal member: width level, depth upright.
+    close(flat.x[2], 0);
+    close(flat.y[2], 1);
+    const beam = bimSectionAxes(shape(doc, 'b-slope', 'beam'));
+    close(beam.origin[2], 6000 - 350);
+    close(beam.length, Math.hypot(6000, 1500));
+    close(beam.x[2], 0);
+    const diag = bimSectionAxes(shape(doc, 'm-diag', 'member'));
+    // Turned 0.3 rad about the axis from the level direction square to it.
+    const lv = [-diag.z[1], diag.z[0], 0];
+    const n = Math.hypot(lv[0]!, lv[1]!);
+    close(d3(diag.x, [lv[0]! / n, lv[1]! / n, 0]), Math.cos(0.3));
+    expect(diag.x[2]).toBeGreaterThan(0);
+  });
+});
+
+describe('tapered columns (TW5, F47)', () => {
+  const doc = f47Taper();
+  // Similar sections scaled linearly by k: V = A·L·(1 + k + k²)/3.
+  const frustum = (a: number, l: number, k: number) => (a * l * (1 + k + k * k)) / 3;
+  it('validates them and refuses a top scale out of 0.1–1', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    // A value that is no number at all is refused as such (`number`) first.
+    for (const bad of [0.05, 1.2, '0.5']) {
+      const d = structuredClone(doc);
+      (element(d, 'c-square') as unknown as Record<string, unknown>).topScale = bad;
+      expect(codes(d), String(bad)).toContain('column-scale');
+    }
+  });
+  it('computes the volume of the scaled section along the axis', () => {
+    close(q(doc, 'c-square').netVolume, frustum(600 * 600, 6000, 0.5));
+    close(q(doc, 'c-square').crossSectionArea, 600 * 600);
+    close(q(doc, 'c-round').netVolume, frustum(Math.PI * 600 * 600, 6000, 0.25));
+    close(q(doc, 'c-box').netVolume, frustum(800 * 800 - 720 * 720, 6000, 0.75));
+    const L = Math.hypot(1500, 6000);
+    close(q(doc, 'c-lean').length, L);
+    close(q(doc, 'c-lean').netVolume, frustum(600 * 600, L, 0.6));
+    expect(shape(doc, 'c-lean', 'column')).toMatchObject({ topScale: 0.6, topAt: [1500, 4000] });
+    // A top scale of 1 is no taper.
+    const one = structuredClone(doc);
+    element<Extract<BimElement, { kind: 'column' }>>(one, 'c-square').topScale = 1;
+    expect(shape(one, 'c-square', 'column').topScale).toBeUndefined();
+    close(q(one, 'c-square').netVolume, 600 * 600 * 6000);
+  });
+});
+
+describe('steel pipes (#936, F49)', () => {
+  const doc = f49Pipes();
+  const ring = (d: number, t: number) => (Math.PI * (d * d - (d - 2 * t) * (d - 2 * t))) / 4;
+  it('validates them and refuses a wall of half the diameter or more', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    for (const wall of [300, 400]) {
+      const d = structuredClone(doc);
+      (d.types.find((t) => t.id === 't-column-pipe') as { profile: object }).profile = {
+        shape: 'pipe',
+        diameterMm: 600,
+        wallMm: wall,
+      };
+      expect(codes(d), String(wall)).toContain('profile-proportion');
+    }
+    const missing = structuredClone(doc);
+    (missing.types.find((t) => t.id === 't-member-pipe') as { profile: object }).profile = {
+      shape: 'pipe',
+      diameterMm: 300,
+    };
+    expect(codes(missing).length).toBeGreaterThan(0);
+  });
+  it('gives the ring area and volume, a tapered one with its wall scaled too', () => {
+    close(q(doc, 'c-pipe').crossSectionArea, ring(600, 25));
+    close(q(doc, 'c-pipe').netVolume, ring(600, 25) * 6000);
+    // Every size scales by k, so the area by k²: V = A·L·(1 + k + k²)/3.
+    close(q(doc, 'c-pipe-taper').netVolume, (ring(600, 25) * 6000 * (1 + 0.5 + 0.25)) / 3);
+    close(q(doc, 'm-pipe').netVolume, ring(300, 12) * Math.hypot(6000, 6000));
+    expect(q(doc, 'b-pipe').netVolume).toBeGreaterThan(0);
+  });
+  it('makes the section an outer circle with a circular hole', () => {
+    const { outer, holes } = bimProfileLoops({ shape: 'pipe', diameterMm: 600, wallMm: 25 });
+    expect(outer).toEqual([
+      [300, 0, 1],
+      [-300, 0, 1],
+    ]);
+    expect(holes).toEqual([
+      [
+        [275, 0, 1],
+        [-275, 0, 1],
+      ],
+    ]);
+  });
+});
+
+describe('leaning walls (LR2, F50)', () => {
+  const doc = f50Lean();
+  type Wall = Extract<BimElement, { kind: 'wall' }>;
+  const h = 4000;
+  it('validates them and refuses a lean past 60°', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    for (const bad of [1.2, -1.1, '0.2']) {
+      const d = structuredClone(doc);
+      (element(d, 'w-free') as unknown as Record<string, unknown>).lean = bad;
+      expect(codes(d), String(bad)).toContain('wall-lean');
+    }
+    // LS1: a roof cuts a leaning wall (F54); its volume is then the kernel's.
+    const roofed = f54LeanRoofs();
+    expect(errors(roofed)).toEqual([]);
+    const derived = deriveBim(roofed);
+    expect(derived.diagnostics).toEqual([]);
+    for (const id of ['w-sq-1', 'w-ring-1']) {
+      const s = derived.shapes.get(id);
+      expect(s?.kind === 'wall' && s.footprintTop && s.clipBy).toBeTruthy();
+      expect(derived.quantities.get(id)?.source).toBe('kernel');
+    }
+    const graph = bimGeometry(roofed, derived);
+    // The ruled loft, cut once by the mono roof's one plane.
+    const sq = graph.elements.get('w-sq-1')!;
+    expect(graph.graph.nodes[sq.node]).toMatchObject({ op: 'halfSpace', keep: 'below' });
+    // LS2: an upright wall joined to a leaning one is ruled too (more in F54's joins).
+    const mixed = structuredClone(doc);
+    delete element<Wall>(mixed, 'w-l-2').lean;
+    expect(deriveBim(mixed).diagnostics).toEqual([]);
+    expect(shape(mixed, 'w-l-2', 'wall').footprintTop).toBeDefined();
+    // A straight wall butting a leaning arc: the arc's end angle would change with the height.
+    const arc = structuredClone(doc);
+    arc.elements.push({
+      ...element<Wall>(arc, 'w-free'),
+      id: 'w-stub',
+      start: { xy: [30000, 0] },
+      end: { xy: [25000, 0] },
+      lean: 0.3,
+    });
+    arc.joins.push({
+      id: 'j-stub',
+      walls: ['w-stub', 'w-ring-1'],
+      kind: 'butt',
+      through: 'w-ring-1',
+    });
+    expect(deriveBim(arc).diagnostics.map((d) => d.code)).toContain('wall-lean-join');
+    // A T found at the base whose stop leans off the through wall's end by the top.
+    const offEnd = structuredClone(doc);
+    offEnd.elements.push({
+      ...element<Wall>(offEnd, 'w-free'),
+      id: 'w-tee',
+      start: { xy: [5000, 0] },
+      end: { xy: [5000, 4000] },
+      lean: 0.6,
+    });
+    offEnd.joins.push({ id: 'j-tee', walls: ['w-free', 'w-tee'], kind: 'butt', through: 'w-free' });
+    expect(deriveBim(offEnd).diagnostics.map((d) => [d.code, d.id])).toContainEqual([
+      'wall-lean-join',
+      'w-tee',
+    ]);
+    // A join that trims a short wall past its other end at the top only.
+    const inverts = structuredClone(doc);
+    element<Wall>(inverts, 'w-l-1').start = { xy: [17000, 10000] };
+    element<Wall>(inverts, 'w-l-2').lean = -0.6;
+    expect(deriveBim(inverts).diagnostics.map((d) => [d.code, d.id])).toContainEqual([
+      'join-failed',
+      'w-l-1',
+    ]);
+    // Upright (0) is no lean.
+    const zero = structuredClone(doc);
+    element<Wall>(zero, 'w-free').lean = 0;
+    expect(shape(zero, 'w-free', 'wall').footprintTop).toBeUndefined();
+  });
+  it('moves the top across by height × tan, with the thickness square to the faces', () => {
+    const t = Math.PI / 12;
+    const free = shape(doc, 'w-free', 'wall');
+    expect(free.lean).toBe(t);
+    // Right of travel along +x is −y; the horizontal width is 200 / cos.
+    const ys = (l: BimLoop) => l.map((v) => v[1]).sort((a, b) => a - b);
+    const w = 200 / Math.cos(t);
+    close(ys(free.footprint)[0]!, -w / 2);
+    close(ys(free.footprintTop!)[0]!, -w / 2 - h * Math.tan(t));
+    close(q(doc, 'w-free').netVolume, 6000 * w * h);
+    close(q(doc, 'w-free').width, 200);
+    close(q(doc, 'w-free').grossSideArea, (6000 * h) / Math.cos(t));
+    // The mitred square leaning out: each side's centreline is 6,000 + 2·z·tan 0.2 long at z,
+    // so its side area is its length at mid-height × the slant height.
+    close(q(doc, 'w-sq-1').grossSideArea, ((6000 + h * Math.tan(0.2)) * h) / Math.cos(0.2), 1e-3);
+    // The ring's quarter cones: a quarter of the circumference at mid-height × the slant.
+    close(
+      q(doc, 'w-ring-1').grossSideArea,
+      ((Math.PI / 2) * (5000 + (h / 2) * Math.tan(0.3)) * h) / Math.cos(0.3),
+      1e-3,
+    );
+  });
+  it('gives the cone and the frustum their exact volumes', () => {
+    // The ring: an annulus 2πr·w at radius r = 5,000 + z·tan 0.3.
+    const w = 80 / Math.cos(0.3);
+    const ring = [1, 2, 3, 4].reduce((n, i) => n + q(doc, `w-ring-${i}`).netVolume!, 0);
+    close(ring, 2 * Math.PI * w * h * (5000 + (h * Math.tan(0.3)) / 2), 1e-3);
+    // Each quarter's arcs keep their centre and angles (the square ends stay radial).
+    const r1 = shape(doc, 'w-ring-1', 'wall');
+    expect(r1.footprintTop!.map((v) => !!v[2])).toEqual(r1.footprint.map((v) => !!v[2]));
+    // The square: a ring 8·a·w at half side a = 3,000 + z·tan 0.2.
+    const ws = 200 / Math.cos(0.2);
+    const sq = [1, 2, 3, 4].reduce((n, i) => n + q(doc, `w-sq-${i}`).netVolume!, 0);
+    close(sq, 8 * ws * h * (3000 + (h * Math.tan(0.2)) / 2), 1e-3);
+  });
+});
+
+describe('leaning walls joined to upright walls (LS2, F54)', () => {
+  type Wall = Extract<BimElement, { kind: 'wall' }>;
+  const t = Math.tan(0.2);
+  // The leaning wall's north face: 100 ÷ cos 0.2 north of its axis at the base, then south.
+  const face = (z: number) => 100 / Math.cos(0.2) - z * t;
+
+  it('rules each upright wall between its ends at the base and the top, exactly', () => {
+    const doc = f54LeanJoins();
+    expect(errors(doc)).toEqual([]);
+    const d = deriveBim(doc);
+    expect(d.diagnostics).toEqual([]);
+    for (const id of ['w-up-m', 'w-up-t', 'w-up-l']) {
+      const s = shape(doc, id, 'wall');
+      expect(s.lean).toBeUndefined();
+      // Its end on the leaning face (the mitre's inner corner too), lower down the wall at the top.
+      const ys = (l: BimLoop) => l.map((v) => v[1]).filter((y) => y < 1000);
+      for (const y of ys(s.footprint)) expect(Math.abs(y)).toBeCloseTo(face(0), 6);
+      expect(Math.max(...ys(s.footprintTop!))).toBeCloseTo(face(4000), 6);
+      expect(d.quantities.get(id)?.source).toBe('analytic');
+    }
+    // The T: 200 wide, from the face up to y = 5,000, less its window.
+    const q = d.quantities.get('w-up-t')!.values;
+    expect(q.grossVolume).toBeCloseTo(200 * 4000 * (5000 - face(2000)), 0);
+    expect(q.netVolume).toBeCloseTo(q.grossVolume! - 1800 * 200 * 1500, 0);
+    // The T's window is cut from its ruled solid.
+    const g = bimGeometry(doc, d);
+    expect(g.graph.nodes[g.elements.get('w-up-t')!.node]).toMatchObject({ op: 'boolean' });
+  });
+
+  it('keeps an opening out of the join at every height of it', () => {
+    const doc = f54LeanJoins();
+    // At the base the join reaches 102 mm along the T; above, less.
+    element<Extract<BimElement, { kind: 'window' }>>(doc, 'win-t').alongMm = 50;
+    element<Extract<BimElement, { kind: 'window' }>>(doc, 'win-t').sillMm = 0;
+    expect(deriveBim(doc).diagnostics.map((x) => [x.code, x.id])).toContainEqual([
+      'opening-in-join',
+      'win-t',
+    ]);
+  });
+
+  it('joins a cone to an upright wall within 1 mm, measured by the kernel (LS-U1)', () => {
+    const lean = f50Lean();
+    const ring = element<Wall>(lean, 'w-ring-1');
+    const up: Wall = {
+      ...ring,
+      id: 'w-up',
+      typeId: 't-wall-200',
+      start: { xy: [20000, 5000] },
+      end: { xy: [20000, 9000] },
+    };
+    delete up.bulge;
+    delete up.lean;
+    lean.elements = [ring, up];
+    lean.joins = [{ id: 'j', walls: ['w-ring-1', 'w-up'], kind: 'butt', through: 'w-ring-1' }];
+    const d = deriveBim(lean);
+    expect(d.diagnostics).toEqual([]);
+    // A plane meets a cone in a curve: ruled to within 1 mm, not exactly.
+    for (const id of ['w-ring-1', 'w-up']) expect(d.quantities.get(id)?.source).toBe('kernel');
+    // Its uncut solid is measured for the gross volume too (Codex).
+    for (const id of ['w-ring-1', 'w-up'])
+      expect(bimGeometry(lean, d).elements.get(id)?.gross).toBeDefined();
+    // An upright arc of 8,000 mm whose end follows a straight wall leaning 0.1 rad: 2.5 mm off.
+    const far = f54LeanJoins();
+    const base = element<Wall>(far, 'w-lean');
+    far.elements = [
+      {
+        ...base,
+        id: 'w-arc',
+        start: { xy: [8000, 0] },
+        end: { xy: [0, 8000] },
+        bulge: Math.tan(Math.PI / 8),
+        lean: undefined,
+      },
+      { ...base, id: 'w-st', start: { xy: [0, 8000] }, end: { xy: [0, 12000] }, lean: 0.1 },
+    ] as Wall[];
+    far.joins = [{ id: 'j', walls: ['w-arc', 'w-st'], kind: 'butt', through: 'w-st' }];
+    expect(deriveBim(far).diagnostics.map((x) => [x.code, x.id])).toContainEqual([
+      'wall-lean-join',
+      'w-arc',
+    ]);
+    // An upright half circle whose end follows a through wall leaning −0.03 rad: its top
+    // footprint's arcs pass a half circle (|bulge| > 1), which no loft takes (Codex).
+    const half = f54LeanJoins();
+    const hb = element<Wall>(half, 'w-lean');
+    half.elements = [
+      {
+        ...hb,
+        id: 'w-half',
+        start: { xy: [8000, 0] },
+        end: { xy: [-8000, 0] },
+        bulge: 1,
+        lean: undefined,
+      },
+      { ...hb, id: 'w-through', start: { xy: [-8000, 0] }, end: { xy: [-12000, 0] }, lean: -0.03 },
+    ] as Wall[];
+    half.joins = [{ id: 'j', walls: ['w-half', 'w-through'], kind: 'butt', through: 'w-through' }];
+    expect(deriveBim(half).diagnostics.map((x) => [x.code, x.id])).toContainEqual([
+      'join-failed',
+      'w-half',
+    ]);
+    // An upright through wall 4,000 mm high and a 1,000 mm stop leaning 0.2 rad 500 mm from
+    // its end: the stop's contact stays on it over its own height; the stop's extension above
+    // it is not asked (Codex).
+    const low = f54LeanJoins();
+    const lb = element<Wall>(low, 'w-lean');
+    low.elements = [
+      { ...lb, id: 'w-up', lean: undefined },
+      {
+        ...lb,
+        id: 'w-stop',
+        start: { xy: [7500, 0] },
+        end: { xy: [7500, 5000] },
+        top: { level: 'l-gl', offsetMm: 1000 },
+      },
+    ] as Wall[];
+    low.joins = [{ id: 'j', walls: ['w-up', 'w-stop'], kind: 'butt', through: 'w-up' }];
+    expect(deriveBim(low).diagnostics).toEqual([]);
+  });
+});
+
+describe('sloped slabs (TW5, F48)', () => {
+  const doc = f48Ramp();
+  type Slab = Extract<BimElement, { kind: 'slab' }>;
+  it('validates them and refuses a slope on no straight edge', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    for (const edge of [4, -1, 0.5, '1']) {
+      const d = structuredClone(doc);
+      (element<Slab>(d, 's-ramp').slope as unknown as Record<string, unknown>).edge = edge;
+      expect(codes(d), String(edge)).toContain('slab-slope');
+    }
+    // The half-round slab's edge 0 is its arc.
+    const arc = structuredClone(doc);
+    element<Slab>(arc, 's-half').slope!.edge = 0;
+    expect(codes(arc)).toContain('slab-slope');
+    const extra = structuredClone(doc);
+    (element<Slab>(extra, 's-ramp').slope as unknown as Record<string, unknown>).grade = 1;
+    expect(codes(extra)).toContain('slab-slope');
+  });
+  it('rises square to its edge to the farthest point, exact on arcs', () => {
+    const ramp = shape(doc, 's-ramp', 'slab');
+    expect(ramp.slope!.origin).toEqual([0, 3000]);
+    close(ramp.slope!.direction[0], 1);
+    close(ramp.slope!.direction[1], 0);
+    close(ramp.slope!.grade, 2800 / 12000);
+    close(ramp.zTop, 200);
+    close(ramp.zBottom, 0);
+    const half = shape(doc, 's-half', 'slab');
+    close(half.slope!.direction[0], 0);
+    close(half.slope!.direction[1], 1);
+    close(half.slope!.grade, -1000 / 3000);
+    // Plan areas and the vertical thickness; the top face's own area over the cosine.
+    // The hole and the opening come off the plan area.
+    const area = 12000 * 3000 - 2000 * 1000 - 1000 * 1000;
+    close(q(doc, 's-ramp').netArea, area);
+    close(q(doc, 's-ramp').netVolume, area * 200);
+    close(q(doc, 's-ramp').slopedArea, area * Math.hypot(1, 2800 / 12000));
+    close(q(doc, 's-half').netVolume, ((Math.PI * 3000 * 3000) / 2) * 200);
+    // An end top at the same height is no slope.
+    const flat = structuredClone(doc);
+    element<Slab>(flat, 's-ramp').slope!.endTop = { level: 'l-gl', offsetMm: 200 };
+    expect(shape(flat, 's-ramp', 'slab').slope).toBeUndefined();
+    expect(q(flat, 's-ramp').slopedArea).toBeUndefined();
+  });
+  it('keeps the plane within the limit behind the edge of a concave boundary', () => {
+    const d = structuredClone(doc);
+    const ramp = element<Slab>(d, 's-ramp');
+    // Reaches 100 mm behind edge 0's line, 100 mm ahead of it: 2,700 km at the far corner.
+    ramp.boundary = [
+      [0, 0],
+      [100, 0],
+      [100, 100],
+      [-100, 100],
+      [-100, -100],
+      [0, -100],
+    ];
+    ramp.holes = [];
+    d.elements = d.elements.filter((e) => e.id !== 'o-ramp');
+    ramp.top = { level: 'l-gl', offsetMm: 900_000 };
+    ramp.slope = { edge: 0, endTop: { level: 'l-gl', offsetMm: -900_000 } };
+    expect(deriveBim(d).diagnostics.map((x) => x.code)).toContain('coordinate');
+    ramp.slope.endTop.offsetMm = 899_000;
+    expect(deriveBim(d).diagnostics).toEqual([]);
+  });
+  it('keeps the level its end top names', () => {
+    const d = structuredClone(doc);
+    element<Slab>(d, 's-half').slope!.endTop = { level: 'l-missing', offsetMm: 0 };
+    expect(codes(d)).toContain('reference-missing');
+  });
+});
+
 describe('domain boundary (CAD60)', () => {
   it('imports no CAD package', async () => {
     const { readdirSync, readFileSync } = await import('node:fs');
@@ -1049,5 +1571,676 @@ describe('domain boundary (CAD60)', () => {
     expect(Object.keys(pkg.dependencies).filter((d) => d.includes('/cad'))).toEqual([]);
     for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts')))
       expect(readFileSync(new URL(f, dir), 'utf8')).not.toMatch(/from '@editor-platform\/cad/);
+  });
+});
+
+describe('openings in leaning walls (FU3a, F52)', () => {
+  const doc = f52LeanOpenings();
+  it('places windows, doors and openings, their sills and heights along the face', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    // The free wall leans 15°: its face is 4,000 ÷ cos 15° ≈ 4,141 mm high. A window up to
+    // 4,100 mm along it fits (higher than the wall stands), one up to 4,200 does not.
+    const at = (sill: number) => {
+      const d = structuredClone(doc);
+      const w = d.elements.find((e) => e.id === 'win-free') as Extract<
+        BimElement,
+        { kind: 'window' }
+      >;
+      w.sillMm = sill;
+      return deriveBim(d).diagnostics.map((x) => [x.code, x.id]);
+    };
+    expect(at(2600)).toEqual([]);
+    expect(at(2700)).toEqual([['opening-outside-host', 'win-free']]);
+  });
+  it('keeps an opening out of a join at its sill and head, where the join has moved (Codex)', () => {
+    // The square leaning in: its mitred ends reach further into each wall as it rises.
+    const d = f50Lean();
+    for (const e of d.elements) if (e.id.startsWith('w-sq-')) (e as BimWall).lean = -0.2;
+    d.elements.push({
+      id: 'o-end',
+      kind: 'opening',
+      hostId: 'w-sq-1',
+      wall: { alongMm: 150, sillMm: 2000, widthMm: 1000, heightMm: 1000 },
+    });
+    expect(deriveBim(d).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['opening-in-join', 'o-end'],
+    ]);
+    // Clear of the join at the base, and at the sill and head too a little further along.
+    (d.elements.at(-1) as { wall: { alongMm: number } }).wall.alongMm = 1200;
+    expect(deriveBim(d).diagnostics).toEqual([]);
+  });
+  it('keeps an opening out of the span a leaning T-join sweeps between its sill and head (Codex)', () => {
+    // The stopping wall leans further than the through wall, so its contact crosses the opening
+    // between the sill and the head while lying clear of it at both.
+    const d = f50Lean();
+    const base = d.elements.find((e) => e.id === 'w-l-1') as BimWall;
+    d.elements = [
+      { ...base, id: 'w-t-1', start: { xy: [0, 0] }, end: { xy: [10000, 0] }, lean: 0.1 },
+      { ...base, id: 'w-t-2', start: { xy: [2000, 0] }, end: { xy: [2000, 6000] }, lean: 0.6 },
+    ];
+    d.joins = [{ id: 'j-t', walls: ['w-t-1', 'w-t-2'], kind: 'butt', through: 'w-t-1' }];
+    d.elements.push({
+      id: 'o-t',
+      kind: 'opening',
+      hostId: 'w-t-1',
+      wall: { alongMm: 3000, sillMm: 500, widthMm: 400, heightMm: 3000 },
+    });
+    expect(deriveBim(d).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['opening-in-join', 'o-t'],
+    ]);
+    // Moved past where the contact reaches at the head, it is accepted.
+    (d.elements.at(-1) as { wall: { alongMm: number } }).wall.alongMm = 6000;
+    expect(deriveBim(d).diagnostics).toEqual([]);
+    // Over the join at the base but high up, where the contact has moved away, too (Codex).
+    (d.elements.at(-1) as { wall: object }).wall = {
+      alongMm: 1900,
+      sillMm: 2000,
+      widthMm: 200,
+      heightMm: 1000,
+    };
+    expect(deriveBim(d).diagnostics).toEqual([]);
+  });
+  it('counts a shorter stopping wall only up to its top (Codex)', () => {
+    const d = f50Lean();
+    const base = d.elements.find((e) => e.id === 'w-l-1') as BimWall;
+    d.elements = [
+      { ...base, id: 'w-t-1', start: { xy: [0, 0] }, end: { xy: [10000, 0] }, lean: 0.1 },
+      {
+        ...base,
+        id: 'w-t-2',
+        start: { xy: [2000, 0] },
+        end: { xy: [2000, 6000] },
+        lean: 0.6,
+        top: { level: 'l-gl', offsetMm: 1000 },
+      },
+    ];
+    d.joins = [{ id: 'j-t', walls: ['w-t-1', 'w-t-2'], kind: 'butt', through: 'w-t-1' }];
+    expect(deriveBim(d).diagnostics).toEqual([]);
+    const opening = (wall: {
+      alongMm: number;
+      sillMm: number;
+      widthMm: number;
+      heightMm: number;
+    }) => ({
+      id: 'o-s',
+      kind: 'opening' as const,
+      hostId: 'w-t-1',
+      wall,
+    });
+    // Wholly above the short wall: clear.
+    d.elements.push(opening({ alongMm: 3400, widthMm: 300, sillMm: 2500, heightMm: 500 }));
+    expect(deriveBim(d).diagnostics).toEqual([]);
+    // Reaching down into it where it meets the through wall: refused.
+    d.elements[2] = opening({ alongMm: 1900, widthMm: 300, sillMm: 0, heightMm: 3000 });
+    expect(deriveBim(d).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['opening-in-join', 'o-s'],
+    ]);
+  });
+  it('sweeps each T-join with itself when two cross between heights (Codex)', () => {
+    const d = f50Lean();
+    const base = d.elements.find((e) => e.id === 'w-l-1') as BimWall;
+    d.elements = [
+      { ...base, id: 'w-t-1', start: { xy: [0, 0] }, end: { xy: [20000, 0] }, lean: 0.1 },
+      { ...base, id: 'w-t-2', start: { xy: [6000, 0] }, end: { xy: [6000, 6000] }, lean: 1 },
+      { ...base, id: 'w-t-3', start: { xy: [6800, 0] }, end: { xy: [6800, 6000] }, lean: -1 },
+    ];
+    d.joins = [
+      { id: 'j-2', walls: ['w-t-1', 'w-t-2'], kind: 'butt', through: 'w-t-1' },
+      { id: 'j-3', walls: ['w-t-1', 'w-t-3'], kind: 'butt', through: 'w-t-1' },
+    ];
+    d.elements.push({
+      id: 'o-x',
+      kind: 'opening',
+      hostId: 'w-t-1',
+      wall: { alongMm: 6300, sillMm: 0, widthMm: 200, heightMm: 4000 / Math.cos(0.1) },
+    });
+    expect(deriveBim(d).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['opening-in-join', 'o-x'],
+    ]);
+  });
+  it('keeps a panel in a leaning arc wall between the angles of its cut (Codex)', () => {
+    // The ring leaning in hard: its radius shrinks up the wall, the opening keeps its angles.
+    const d = f50Lean();
+    d.types.push({ id: 't-window-900', kind: 'window', name: 'W', widthMm: 900, heightMm: 1500 });
+    const ring = { ...(d.elements.find((e) => e.id === 'w-ring-1') as BimWall) };
+    d.elements = [{ ...ring, typeId: 't-wall-200', lean: -0.6 }];
+    d.joins = [];
+    d.elements.push({
+      id: 'win-ring',
+      kind: 'window',
+      typeId: 't-window-900',
+      hostId: 'w-ring-1',
+      alongMm: 1000,
+      sillMm: 1000,
+      flipFacing: false,
+    });
+    expect(deriveBim(d).diagnostics).toEqual([]);
+    const g = bimGeometry(d);
+    type Loft = Extract<GeometryOp, { op: 'loft' }>;
+    const cut = g.graph.nodes['w-ring-1\u0000opening:win-ring'] as Loft;
+    const panel = g.graph.nodes['win-ring\u0000base'] as Loft;
+    expect(panel.op).toBe('loft');
+    expect(g.elements.get('win-ring')!.placement).toBeUndefined();
+    const polar = (v: readonly number[]) => [
+      Math.atan2(v[1]! - 0, v[0]! - 20000),
+      Math.hypot(v[0]! - 20000, v[1]!),
+    ];
+    for (const k of [0, 1]) {
+      expect(panel.sections[k]!.frame.origin[2]).toBe(cut.sections[k]!.frame.origin[2]);
+      const c = cut.sections[k]!.outer.map(polar);
+      const p = panel.sections[k]!.outer.map(polar);
+      const [lo, hi] = [Math.min(...c.map((x) => x[0]!)), Math.max(...c.map((x) => x[0]!))];
+      const [rIn, rOut] = [Math.min(...c.map((x) => x[1]!)), Math.max(...c.map((x) => x[1]!))];
+      for (const [ang, r] of p) {
+        expect(ang!).toBeGreaterThanOrEqual(lo - 1e-9);
+        expect(ang!).toBeLessThanOrEqual(hi + 1e-9);
+        expect(r!).toBeGreaterThan(rIn);
+        expect(r!).toBeLessThan(rOut);
+      }
+      // 50 mm thick square to the face.
+      const rs = p.map((x) => x[1]!);
+      close(Math.max(...rs) - Math.min(...rs), 50 / Math.cos(0.6));
+    }
+  });
+  it('takes the openings out of the face area and the volume, exactly on the cone', () => {
+    const base = f50Lean();
+    const free = q(doc, 'w-free');
+    close(free.openingArea!, 1800 * 1500 + 900 * 2100);
+    close(free.netSideArea!, q(base, 'w-free').grossSideArea! - free.openingArea!, 1e-6);
+    // Square to the faces the cut is the wall's 200 mm thick.
+    close(free.netVolume!, q(base, 'w-free').netVolume! - 200 * (1800 * 1500 + 900 * 2100), 1e-3);
+    // The ring's opening: 1,500 mm of the axis at the base (radius 5,000) is 0.3 rad, taken at
+    // the radius where its middle stands, 2,000 mm up the face.
+    const ring = q(doc, 'w-ring-1');
+    const mid = 5000 + 2000 * Math.cos(0.3) * Math.tan(0.3);
+    close(ring.netVolume!, q(base, 'w-ring-1').netVolume! - (1500 / 5000) * 80 * mid * 2000, 1e-3);
+  });
+  it('cuts each with a loft between its plan regions at the sill and the head', () => {
+    const g = bimGeometry(doc);
+    const node = g.graph.nodes['w-free\u0000opening:win-free'] as Extract<
+      GeometryOp,
+      { op: 'loft' }
+    >;
+    expect(node.op).toBe('loft');
+    const lean = Math.PI / 12;
+    const [z0, z1] = [900 * Math.cos(lean), 2400 * Math.cos(lean)];
+    expect(node.sections.map((s) => s.frame.origin[2])).toEqual([z0, z1]);
+    // The free wall runs along +x and leans to −y: each region is the base one moved by
+    // rise·tan(lean), 200 ÷ cos(lean) + 20 mm across.
+    for (const [k, z] of [z0, z1].entries()) {
+      const ys = node.sections[k]!.outer.map((v) => v[1]);
+      close(Math.min(...ys), -100 / Math.cos(lean) - 10 - z * Math.tan(lean));
+      close(Math.max(...ys), 100 / Math.cos(lean) + 10 - z * Math.tan(lean));
+      expect(node.sections[k]!.outer.map((v) => v[0])).toEqual([800, 2600, 2600, 800]);
+    }
+    expect(g.graph.nodes['w-ring-1\u0000opening:o-ring']!.op).toBe('loft');
+    // The window's panel leans with the wall, its sill 900 mm up the face, and fits inside the
+    // cut: its ends level with the cut's, every corner within the cut's region at its height
+    // (Codex), 50 mm thick square to the face.
+    const panel = g.elements.get('win-free')!.placement!;
+    const prism = g.graph.nodes['win-free\u0000base'] as Extract<GeometryOp, { op: 'prism' }>;
+    const r = panel.rotation;
+    const corners = prism.outer.flatMap(([u, v]) =>
+      [0, 1].map((k) => {
+        const l = [u + prism.vector[0] * k, v + prism.vector[1] * k, prism.vector[2] * k];
+        return [0, 1, 2].map(
+          (i) =>
+            r[i * 3]! * l[0]! +
+            r[i * 3 + 1]! * l[1]! +
+            r[i * 3 + 2]! * l[2]! +
+            panel.translation[i]!,
+        );
+      }),
+    );
+    const zs = corners.map((c) => c[2]!);
+    close(Math.min(...zs), z0);
+    close(Math.max(...zs), z1);
+    for (const [x, y, z] of corners) {
+      expect(x!).toBeGreaterThanOrEqual(800 - 1e-6);
+      expect(x!).toBeLessThanOrEqual(2600 + 1e-6);
+      const centre = -z! * Math.tan(lean);
+      expect(Math.abs(y! - centre)).toBeLessThanOrEqual(25 / Math.cos(lean) + 1e-6);
+    }
+    close(panel.translation[2], 900 * Math.cos(lean));
+    close(panel.translation[1], -900 * Math.sin(lean));
+  });
+});
+
+describe('openings in ramps (LS4, F55)', () => {
+  type Opening = Extract<BimElement, { kind: 'opening' }>;
+  const square = (x: number, y: number, side: number): BimLoop => [
+    [x - side / 2, y - side / 2],
+    [x + side / 2, y - side / 2],
+    [x + side / 2, y + side / 2],
+    [x - side / 2, y + side / 2],
+  ];
+  const codesOf = (doc: BimDocument) => deriveBim(doc).diagnostics.map((d) => [d.code, d.id]);
+
+  it('cuts each opening through every turn over it, from the exact volume', () => {
+    const doc = f55RampOpenings();
+    expect(errors(doc)).toEqual([]);
+    const d = deriveBim(doc);
+    expect(d.diagnostics).toEqual([]);
+    const plain = deriveBim(f51Ramps());
+    // The north square is over two turns (90° and 450° of 0–540°), the south one over one.
+    const v = (x: ReturnType<typeof deriveBim>, id: string) => x.quantities.get(id)!.values;
+    expect(v(d, 'r-spiral').openingArea).toBeCloseTo(3e6, 6);
+    expect(v(d, 'r-spiral').netVolume).toBeCloseTo(v(plain, 'r-spiral').netVolume! - 3e6 * 200, 3);
+    expect(v(d, 'r-spiral').grossVolume).toBeCloseTo(v(plain, 'r-spiral').netVolume!, 3);
+    expect(v(d, 'r-quarter').netVolume).toBeCloseTo(
+      v(plain, 'r-quarter').netVolume! - 800 * 800 * 200,
+      3,
+    );
+    expect(shape(doc, 'r-spiral', 'ramp').openings).toHaveLength(2);
+    // Cut upright in the ramp's frame (its centre).
+    const g = bimGeometry(doc, d);
+    const el = g.elements.get('r-quarter')!;
+    expect(g.graph.nodes[el.node]).toMatchObject({ op: 'boolean', kind: 'cut' });
+    expect(el.placement?.translation).toEqual([20000, 0, 0]);
+  });
+
+  it("takes each opening's patch of the helicoid from the walking surface (Codex)", () => {
+    const d = deriveBim(f55RampOpenings());
+    const plain = deriveBim(f51Ramps());
+    const v = (x: ReturnType<typeof deriveBim>, id: string) => x.quantities.get(id)!.values;
+    expect(v(d, 'r-quarter').grossTopArea).toBeCloseTo(v(plain, 'r-quarter').topArea!, 6);
+    // The 800 mm square at 45° round (20,000, 0): √(1 + p²/ρ²) summed over a fine grid.
+    const p = 1000 / (Math.PI / 2);
+    const c = 3750 * Math.SQRT1_2;
+    const n = 400;
+    let grid = 0;
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        const x = c - 400 + ((i + 0.5) * 800) / n;
+        const y = c - 400 + ((j + 0.5) * 800) / n;
+        grid += Math.sqrt(1 + (p * p) / (x * x + y * y)) * (800 / n) ** 2;
+      }
+    const removed = v(plain, 'r-quarter').topArea! - v(d, 'r-quarter').topArea!;
+    expect(Math.abs(removed / grid - 1)).toBeLessThan(1e-6);
+    expect(removed).toBeGreaterThan(800 * 800);
+    // The spiral's north square comes off two turns, its south one off one.
+    const spiral = v(plain, 'r-spiral').topArea! - v(d, 'r-spiral').topArea!;
+    expect(spiral).toBeGreaterThan(3e6);
+    // The schedule sums the net walking surface.
+    const row = bimSchedule(f55RampOpenings(), d).rows.find((r) => r.kind === 'ramp')!;
+    expect(row.areaMm2).toBeCloseTo(v(d, 'r-spiral').topArea! + v(d, 'r-quarter').topArea!, 3);
+  });
+
+  it('refuses a round opening reaching past the edge between samples, and a rise too tall to cut (Codex)', () => {
+    // A 500 mm circle 4,500.1 mm out at 91.4°: its furthest point 5,000.1 mm from the centre.
+    const a = Math.PI / 2 + Math.PI / 128;
+    const [cx, cy] = [4500.1 * Math.cos(a), 4500.1 * Math.sin(a)];
+    const circle: BimLoop = [
+      [cx + 500, cy, 1],
+      [cx - 500, cy, Math.tan(Math.PI / 8)],
+      [cx, cy - 500, Math.tan(Math.PI / 8)],
+    ];
+    const doc = f51Ramps();
+    doc.elements.push({
+      id: 'o-round',
+      kind: 'opening',
+      hostId: 'r-spiral',
+      slab: { boundary: circle },
+    });
+    expect(codesOf(doc)).toContainEqual(['opening-outside-host', 'r-spiral']);
+    // 1 mm further in it fits.
+    const inside = f51Ramps();
+    inside.elements.push({
+      id: 'o-round',
+      kind: 'opening',
+      hostId: 'r-spiral',
+      slab: {
+        boundary: circle.map((q) => [q[0] - Math.cos(a), q[1] - Math.sin(a), q[2]] as never),
+      },
+    });
+    expect(codesOf(inside)).toEqual([]);
+    // From −600 m to +600 m: one prism through the rise would pass the coordinate limit.
+    const tall = f55RampOpenings();
+    tall.levels = [
+      { id: 'l-gl', name: 'GL', elevationMm: -600_000 },
+      { id: 'l-0', name: '0', elevationMm: 0 },
+      { id: 'l-1', name: 'L1', elevationMm: 600_000 },
+    ];
+    expect(codesOf(tall)).toContainEqual(['coordinate', 'r-spiral']);
+  });
+
+  it('refuses an opening off the ramp, across its start, round its centre or overlapping', () => {
+    const at = (boundary: BimLoop, host = 'r-spiral') => {
+      const doc = f51Ramps();
+      doc.elements.push({ id: 'o-x', kind: 'opening', hostId: host, slab: { boundary } });
+      return doc;
+    };
+    // Inside the inner radius; past the outer; across the start (0°); round the centre.
+    // Like a slab's, the host fails, at the opening's boundary.
+    for (const loop of [
+      square(0, 1500, 600),
+      square(0, 4800, 600),
+      square(3500, 0, 600),
+      Array.from({ length: 8 }, (_, k): [number, number] => [
+        4000 * Math.cos((k * Math.PI) / 4),
+        4000 * Math.sin((k * Math.PI) / 4),
+      ]),
+    ])
+      expect(codesOf(at(loop))).toContainEqual(['opening-outside-host', 'r-spiral']);
+    // The quarter ramp covers 0–90° round (20,000, 0): its west is off it.
+    expect(codesOf(at(square(16000, 0, 600), 'r-quarter'))).toContainEqual([
+      'opening-outside-host',
+      'r-quarter',
+    ]);
+    const two = f55RampOpenings();
+    (two.elements.find((e) => e.id === 'o-south') as Opening).hostId = 'r-spiral';
+    two.elements.push({
+      id: 'o-y',
+      kind: 'opening',
+      hostId: 'r-spiral',
+      slab: { boundary: square(300, -3500, 1000) },
+    });
+    expect(codesOf(two)).toContainEqual(['opening-overlap', 'r-spiral']);
+    // A ramp is not a wall's host.
+    const wallOpening = f51Ramps();
+    wallOpening.elements.push({
+      id: 'o-w',
+      kind: 'opening',
+      hostId: 'r-spiral',
+      wall: { alongMm: 0, sillMm: 0, widthMm: 900, heightMm: 2000 },
+    });
+    expect(errors(wallOpening).map((x) => x.code)).toContain('host-kind');
+  });
+});
+
+describe('straight stairs (LS6, F55)', () => {
+  type Stair = Extract<BimElement, { kind: 'stair' }>;
+  /** The side's area by hand: the steps less what lies below the waist's underside. */
+  const sideArea = (n: number, r: number, t: number, w: number) => {
+    const m = r / t;
+    const drop = w * Math.hypot(1, m);
+    const run = (n - 1) * t;
+    const foot = (drop - r) / m;
+    return (t * r * n * (n - 1)) / 2 - (m * (run - foot) ** 2) / 2;
+  };
+
+  it("derives each flight's side, its exact volume and its treads", () => {
+    const doc = f55Stairs();
+    expect(errors(doc)).toEqual([]);
+    const d = deriveBim(doc);
+    expect(d.diagnostics).toEqual([]);
+    for (const [id, n, h, t, w, width] of [
+      ['st-main', 17, 3000, 260, 150, 1200],
+      ['st-north', 10, 1800, 280, 200, 1000],
+    ] as const) {
+      const v = d.quantities.get(id)!.values;
+      close(v.netVolume!, sideArea(n, h / n, t, w) * width, 1e-3);
+      expect(v.treadArea).toBeCloseTo((n - 1) * t * width, 9);
+      expect(v.riserHeight).toBeCloseTo(h / n, 12);
+      expect(v.numberOfRisers).toBe(n);
+      expect(v.length).toBe((n - 1) * t);
+    }
+    // The main flight: its underside reaches the floor 7 mm past the first riser and the end
+    // 181 mm below the last tread; the steps come back down to the first riser's top.
+    const main = shape(doc, 'st-main', 'stair');
+    const [r, m] = [3000 / 17, 3000 / 17 / 260];
+    const drop = 150 * Math.hypot(1, m);
+    expect(main.profile[0]).toEqual([0, 0]);
+    expect(main.profile[1]![0]).toBeCloseTo((drop - r) / m, 9);
+    expect(main.profile[2]![1]).toBeCloseTo(3000 - drop, 9);
+    expect(main.profile[3]).toEqual([16 * 260, 16 * r]);
+    expect(main.profile.at(-1)).toEqual([0, r]);
+    expect(main.profile).toHaveLength(3 + 2 * 16);
+    // Built as one prism of the side swept across, placed at the start and turned.
+    const g = bimGeometry(doc, d);
+    const el = g.elements.get('st-north')!;
+    expect(g.graph.nodes[el.node]).toMatchObject({ op: 'prism', vector: [0, -1000, 0] });
+    expect(el.placement?.translation).toEqual([6000, 0, 0]);
+    const rows = bimSchedule(doc, d).rows.filter((r) => r.kind === 'stair');
+    expect(rows.reduce((n, r) => n + r.count, 0)).toBe(2);
+    // With their runs (Codex): 16 × 260 and 9 × 280 mm.
+    expect(rows.reduce((n, r) => n + (r.lengthMm ?? 0), 0)).toBeCloseTo(4160 + 2520, 9);
+  });
+
+  it('refuses risers, treads and step counts out of range, and a waist that leaves no flight', () => {
+    const edit = (f: (s: Stair) => void) => {
+      const doc = f55Stairs();
+      f(element<Stair>(doc, 'st-main'));
+      return doc;
+    };
+    for (const n of [1, 51, 2.5])
+      expect(codes(edit((s) => (s.risers = n)))).toContain('stair-risers');
+    for (const t of [149, 501])
+      expect(codes(edit((s) => (s.treadMm = t)))).toContain('stair-tread');
+    const codesOf = (doc: BimDocument) => deriveBim(doc).diagnostics.map((x) => [x.code, x.id]);
+    // 3,000 mm in 12 risers is 250 mm (on a 200 mm waist), in 11 more than 250.
+    const steep = (n: number) =>
+      edit((s) => {
+        s.risers = n;
+        s.typeId = 't-slab-200';
+      });
+    expect(codesOf(steep(12))).toEqual([]);
+    expect(codesOf(steep(11))).toEqual([['stair-riser', 'st-main']]);
+    expect(codesOf(edit((s) => (s.top = { level: 'l-gl', offsetMm: 80 })))).toEqual([
+      ['stair-riser', 'st-main'],
+    ]);
+    // A waist thinner than a riser square to the pitch would cut each step's inner corner.
+    expect(codesOf(edit((s) => (s.typeId = 't-waist-100')))).toEqual([['stair-shape', 'st-main']]);
+    // Two 50 mm risers on a 200 mm waist: its underside never leaves the floor before the top.
+    expect(
+      codesOf(
+        edit((s) => {
+          s.risers = 2;
+          s.typeId = 't-slab-200';
+          s.top = { level: 'l-gl', offsetMm: 100 };
+        }),
+      ),
+    ).toEqual([['stair-shape', 'st-main']]);
+    expect(codes(edit((s) => (s.typeId = 't-wall-200')))).toContain('type-kind');
+    // A waist whose underside passes through every inner corner (a drop of exactly one riser:
+    // 15 risers of 200 mm, 200 mm treads, 200/√2 thick) is no simple outline (Codex).
+    const touching = (waist: number) => {
+      const doc = edit((s) => {
+        s.risers = 15;
+        s.treadMm = 200;
+        s.typeId = 't-touch';
+      });
+      doc.types.push({
+        id: 't-touch',
+        kind: 'slab',
+        name: 'Touching',
+        layers: [{ materialId: doc.materials[0]!.id, thicknessMm: waist }],
+      });
+      return codesOf(doc);
+    };
+    expect(touching(200 / Math.SQRT2)).toEqual([['stair-shape', 'st-main']]);
+    expect(touching(200 / Math.SQRT2 + 1)).toEqual([]);
+  });
+});
+
+describe('railings along ramps (LS5, F55)', () => {
+  type Railing = Extract<BimElement, { kind: 'railing' }>;
+  it('stands a band on the ramp edge, its volume exact, scheduled with the ramps', () => {
+    const doc = f55RampOpenings();
+    expect(errors(doc)).toEqual([]);
+    const d = deriveBim(doc);
+    expect(d.diagnostics).toEqual([]);
+    const out = shape(doc, 'rail-out', 'railing');
+    expect(out).toMatchObject({
+      center: [0, 0],
+      innerRadius: 4950,
+      outerRadius: 5000,
+      startAngle: 0,
+      zStart: 1100,
+      zEnd: 5100,
+      thickness: 1100,
+    });
+    expect(shape(doc, 'rail-in', 'railing')).toMatchObject({
+      innerRadius: 2000,
+      outerRadius: 2050,
+    });
+    // The clockwise quarter: its sweep, round its own centre.
+    expect(shape(doc, 'rail-quarter', 'railing')).toMatchObject({
+      center: [20000, 0],
+      innerRadius: 4450,
+      sweep: -Math.PI / 2,
+    });
+    const v = q(doc, 'rail-out');
+    close(v.netVolume!, ((3 * Math.PI) / 2) * (5000 ** 2 - 4950 ** 2) * 1100, 1e-3);
+    close(v.length!, 3 * Math.PI * Math.hypot(4975, 4000 / (3 * Math.PI)), 1e-6);
+    // Its faces are cylinders' strips: sweep × mean radius × height, less than length × height
+    // (Codex).
+    close(v.sideArea!, 3 * Math.PI * 4975 * 1100, 1e-9);
+    expect(v.sideArea!).toBeLessThan(v.length! * 1100 - 1);
+    // Built as the ramp is: radial sections lofted, about the ramp's centre.
+    const g = bimGeometry(doc, d);
+    const el = g.elements.get('rail-out')!;
+    expect(g.graph.nodes[el.node]).toMatchObject({ op: 'loft' });
+    expect(el.placement?.translation).toEqual([0, 0, 0]);
+    const rows = bimSchedule(doc, d).rows.filter((r) => r.kind === 'railing');
+    expect(rows.map((r) => [r.level, r.count, r.missing])).toEqual([['l-gl', 3, 0]]);
+    // Deleting the ramp takes its railings.
+    const next = applyBimOperation(doc, { type: 'delete', ids: ['r-spiral'], cascade: true });
+    expect(next.elements.some((e) => e.id === 'rail-in' || e.id === 'rail-out')).toBe(false);
+  });
+
+  it('refuses a host that is not a ramp, a bad side or height, and a band as wide as the ramp', () => {
+    const edit = (f: (r: Railing, doc: BimDocument) => void) => {
+      const doc = f55RampOpenings();
+      f(element<Railing>(doc, 'rail-in'), doc);
+      return doc;
+    };
+    expect(codes(edit((r) => (r.hostId = 'o-north')))).toContain('host-kind');
+    expect(codes(edit((r) => ((r as { side: string }).side = 'top')))).toContain('railing-side');
+    expect(codes(edit((r) => (r.heightMm = 0)))).not.toEqual([]);
+    expect(codes(edit((r) => (r.heightMm = 3001)))).not.toEqual([]);
+    expect(codes(edit((r) => (r.typeId = 't-slab-200')))).toContain('type-kind');
+    const wide = edit((r, doc) => {
+      r.hostId = 'r-quarter';
+      doc.elements = doc.elements.filter((e) => e.id !== 'o-quarter');
+      element<Extract<BimElement, { kind: 'ramp' }>>(doc, 'r-quarter').outerRadiusMm = 3040;
+    });
+    // Over 1.5 turns rising 750 mm, 500 mm a turn: a 1,100 mm railing meets the turn above
+    // (Codex); up to the turn's underside (500 − 200) it fits.
+    const low = edit((_, doc) => {
+      element<Extract<BimElement, { kind: 'ramp' }>>(doc, 'r-spiral').top = {
+        level: 'l-gl',
+        offsetMm: 750,
+      };
+    });
+    expect(deriveBim(low).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['railing-shape', 'rail-in'],
+      ['railing-shape', 'rail-out'],
+    ]);
+    for (const r of low.elements)
+      if (r.kind === 'railing' && r.hostId === 'r-spiral') r.heightMm = 290;
+    expect(deriveBim(low).diagnostics).toEqual([]);
+    // Validation passes; the 40 mm ring cannot take a 50 mm band, on either side.
+    expect(
+      validateBim(wide).filter((x) => x.code !== 'railing-shape' && x.severity === 'error'),
+    ).toEqual([]);
+    expect(deriveBim(wide).diagnostics.map((x) => [x.code, x.id])).toEqual([
+      ['railing-shape', 'rail-in'],
+      ['railing-shape', 'rail-quarter'],
+    ]);
+  });
+});
+
+describe('spiral ramps (LR3, F51)', () => {
+  const doc = f51Ramps();
+  type Ramp = Extract<BimElement, { kind: 'ramp' }>;
+  const ramp = (d: BimDocument, id: string) => element<Ramp>(d, id);
+  it('validates them and refuses bad radii, no turn, past 3 turns and a ramp that meets itself', () => {
+    expect(errors(doc)).toEqual([]);
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    const bad = (edit: (r: Ramp) => void) => {
+      const d = structuredClone(doc);
+      edit(ramp(d, 'r-spiral'));
+      return [...codes(d), ...deriveBim(d).diagnostics.map((x) => x.code)];
+    };
+    expect(bad((r) => (r.outerRadiusMm = 2000))).toContain('ramp-shape');
+    expect(bad((r) => (r.innerRadiusMm = 0))).toContain('dimension');
+    expect(bad((r) => (r.sweepRad = 0))).toContain('ramp-shape');
+    expect(bad((r) => (r.sweepRad = 6 * Math.PI + 0.01))).toContain('angle');
+    // 3 turns rising 600 mm: 200 mm a turn, no more than the slab's 200 mm.
+    expect(
+      bad((r) => {
+        r.sweepRad = 6 * Math.PI;
+        r.top = { level: 'l-gl', offsetMm: 600 };
+      }),
+    ).toContain('ramp-shape');
+    // One turn rising 100 mm: its end over its start, overlapping by 100 mm.
+    expect(
+      bad((r) => {
+        r.sweepRad = 2 * Math.PI;
+        r.top = { level: 'l-gl', offsetMm: 100 };
+      }),
+    ).toContain('ramp-shape');
+    // Less than one turn never meets itself, however flat.
+    expect(
+      bad((r) => {
+        r.sweepRad = 2 * Math.PI - 0.01;
+        r.top = { level: 'l-gl', offsetMm: 0 };
+      }),
+    ).toEqual([]);
+    // A level the ramp uses cannot go while it stands.
+    const refs = entityReferences('elements', ramp(doc, 'r-spiral'));
+    expect(refs).toEqual(expect.arrayContaining(['t-slab-200', 'l-gl', 'l-1']));
+  });
+  it('gives the ring sector, the helicoid top and the centreline their exact values', () => {
+    const v = q(doc, 'r-spiral');
+    const sweep = 3 * Math.PI;
+    const p = 4000 / sweep;
+    close(v.planArea!, (sweep / 2) * (5000 ** 2 - 2000 ** 2), 1e-3);
+    close(v.netVolume!, v.planArea! * 200, 1);
+    close(v.length!, sweep * Math.hypot(3500, p), 1e-6);
+    close(v.ringWidth!, 3000);
+    close(v.rise!, 4000);
+    // The top by Simpson's rule over the radius (many strips) against the closed form.
+    let top = 0;
+    const n = 2000;
+    for (let i = 0; i <= n; i++) {
+      const rho = 2000 + (3000 * i) / n;
+      const w = i === 0 || i === n ? 1 : i % 2 ? 4 : 2;
+      top += w * Math.hypot(rho, p);
+    }
+    top *= ((3000 / n) * sweep) / 3;
+    expect(Math.abs(v.topArea! / top - 1)).toBeLessThan(1e-9);
+    // Clockwise and going down: positive areas and length, a negative rise.
+    const quarter = q(doc, 'r-quarter');
+    close(quarter.planArea!, (Math.PI / 4) * (4500 ** 2 - 3000 ** 2), 1e-3);
+    const down = q(doc, 'r-down');
+    close(down.rise!, -2000);
+    close(down.length!, Math.PI * Math.hypot(2000, 2000 / Math.PI), 1e-6);
+    expect(shape(doc, 'r-quarter', 'ramp')).toMatchObject({
+      center: [20000, 0],
+      sweep: -Math.PI / 2,
+      zStart: 0,
+      zEnd: 1000,
+      thickness: 200,
+    });
+  });
+  it('builds a smooth loft of radial sections every 5°', () => {
+    const g = bimGeometry(doc);
+    const node = g.graph.nodes[g.elements.get('r-spiral')!.node] as Extract<
+      GeometryOp,
+      { op: 'loft' }
+    >;
+    expect(node.op).toBe('loft');
+    // 540° in 5° steps.
+    expect(node.sections.length).toBe(109);
+    expect(node.ruled).toBeUndefined();
+    const last = node.sections.at(-1)!;
+    expect(last.outer.map((v) => v[1])).toEqual([3800, 3800, 4000, 4000]);
+    // A quarter turn still takes 8 steps.
+    const quarter = g.graph.nodes[g.elements.get('r-quarter')!.node] as typeof node;
+    expect(quarter.sections.length).toBe(19);
+    const quick = g.graph.nodes[g.elements.get('r-down')!.node] as typeof node;
+    expect(quick.sections.length).toBe(37);
+  });
+  it('lists ramps in the schedule by their walking surface and centreline', () => {
+    const rows = bimSchedule(doc, deriveBim(doc)).rows.filter((r) => r.kind === 'ramp');
+    expect(rows.map((r) => [r.levelName, r.count])).toEqual([
+      ['GL', 2],
+      ['L1', 1],
+    ]);
+    close(rows[0]!.areaMm2!, q(doc, 'r-spiral').topArea! + q(doc, 'r-quarter').topArea!, 1e-3);
+    close(rows[0]!.lengthMm!, q(doc, 'r-spiral').length! + q(doc, 'r-quarter').length!, 1e-6);
   });
 });

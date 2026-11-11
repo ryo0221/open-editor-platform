@@ -380,6 +380,33 @@ See [the contract](structured-graph-contract.md) for limits and ID mapping, and
 [verification](verification/open-issue-3/README.md) for measured functional coverage.
 Graph has no shared/annotation/template/reuse/Office/React-export registration.
 Consumers must not route remote content through the local Graph/Data session history.
+For Host-owned creation with protected initial values, use `createDataRows(rows,
+read)` from `@editor-platform/structured-data/session`, then execute it through
+`guardDataCommand(cmd, writable, readTarget)` or `new DataSession(data, readTarget)`.
+The executor must supply its own current Host source via `readTarget`; a missing
+or different target is refused even when the dataset contents are identical.
+The trusted `read` callback supplies a nonempty
+dataset ID, revision, current content, current read-only status and an explicit
+`initialReadOnlyColumns` allowlist. The command captures exactly the new rows and
+checks the entire dataset/schema/revision/policy again on execution. Required cells,
+duplicate IDs and unknown/computed fields are rejected. Existing rows, schema and
+formula values gain no exception. Ordinary insertion, imported command names and
+copies of the command do not receive creation privileges.
+
+This is a local command capability, not a wire authorization credential. The Host
+owns ID allocation, field policy and trusted persistence validation, including
+permission revocation, stale writes and retries. Preparation does not reserve IDs
+or persist anything. An applied creation is one normal local history edit; Undo
+removes it and Redo restores the same IDs without calling the allocator again.
+The Host must enforce current permissions and dataset identity on history actions
+and validate persistence independently. Pass the current Host authorization check as
+the optional candidate validator to `undo`, `redo`, `undoView` or `redoView`; throwing
+rejects the history change without changing content, revision or either history stack.
+`DataSession.readOnly` also blocks all four entrypoints. The creation source callback
+is not a history authorization callback. Use a session-bound revision (for example,
+`canonicalJson(session.revision)`) so equal datasets in different Sessions cannot
+share a creation source. Cross-client ID reservations and shared
+operations are not supplied by this helper.
 
 ## Shared mode (#5)
 
@@ -633,8 +660,18 @@ commit refusal; it does not roll them back.
 
 `@editor-platform/reference-artifact-host/creative/workspace`の`TimelineWorkbench`はowner別ArtifactEditorを保持し、`TimelineAnalysisHost`は保存版・実draft候補・確認済み差替表を読取専用で評価します。nativeの編集確定と診断は別入口です。権限/source失効の通知、結果の`current()`、未対応能力の拒否、二段階保存と復旧の接続はTimelineのHost契約を参照してください。最終差分の受入は検証記録に限定します。
 
+NodeのHostで表・対応表を読む場合は、`@editor-platform/reference-artifact-host/creative/timeline/table`の`readTimelineTable`/`isTimelineRole`、`@editor-platform/reference-artifact-host/creative/workspace/links`の`readWorkspaceLinks`を使います。Story bindingだけの検証には`creative/workspace/story-links`の`readStoryBinding`/`readOccurrenceLinks`も使えます。既存readerへのpublic subpathで、React・DOM・CSSを読み込みません。`readWorkspaceLinks`はWorld・地図・Scene・Storyの対応も従来と同じ検証へ通し、未知のkey/版を捨てません。画面もexportする`creative/workspace`の代わりに使い、参照版・hash・権限の検証は引き続きHostで行います。
+
 ### 物語ボードの参照Host
 
 `@editor-platform/reference-artifact-host/creative/workspace`の`mountStoryBoard({ artifacts, settingsId, namespace, linksKey, mayRead, mayEdit })`は、既存の表示設定Dataを明示IDで開きます。root要素とローカルStory linksが必要です。返る`permissionsChanged()`/`sourcesChanged()`をtrusted Hostから呼び、古い非同期open/投影を失効させてください。`StoryBoardHost`へ`StoryBoardController`を注入して自分の入口へ組み込むこともできます。Editorごとのnativeモデル/Sessionを使い、新しいEditor kindや共通Contentは持ちません。
 
 設定schema・採用版/固定版の読取・保存/失敗/取消/権限と画面契約・操作・最終検証。通常Whiteboard exportへの連動panel画像出力、shared、日内精度、経路推定は対象外です。
+
+Creative制作Hostの埋め込みでは、任意の`onNavigationStateChange({ dirty, busy })`で未確定入力・native変更・処理待ちをconsumerのrouterへ通知できます。Productionは子の人物/舞台Host・地図・元資料Editorも集約します。通知は確定・保存・Undoを行わず、移動確認はconsumerが所有します。`CreativeProductionHost`の`initialSceneId`はmount時の明示指定で、保存済みreturnToより優先し、存在しないIDは拒否します。切替前に移動ガードを通し、新しいviewを開いてください。`title`は任意见出しです。従来の引数なし呼出も維持します。
+
+Nodeのtrusted Hostから制作データを検証する場合は、`creative/project`の既存`readCreativeMapping`、`creative/source-readers`の`projectCharacterCards`/`settingSourceCards`、`creative/workspace/world-context`の`readWorldReference`、`creative/timeline/refs`の`verifyNewReferences`をpublic subpathから使えます。React/DOM/CSSを読み込みません。同期の構造読取と、native version/hash・権限を確かめる非同期参照検証は別です。`verifyNewReferences`のreceiptは既存native commandと組み合わせ、consumerのrevision/権限のcommit直前再確認を省略しないでください。検証範囲を参照してください。
+
+`FictionMapArtifactSurface`は任意のowner専用`inputs: EditorInputs`を受け取れます。親Hostは同じregistryのdirty/composing/settlingを観測し、未確定入力を通知できます。別owner間でregistryを共有せず、省略時は従来どおりsurface自身が所有します。状態の通知・離脱確認・beforeunloadでflushやnative commandを実行しないでください。
+
+World接続欄の未確定入力はHost UI状態として保持し、明示選択後の参照draftとは区別します。Creative制作Hostの通知は、これらの入力・compositionとWorld/地図/設定画参照の保存待ちも含みます。参照保存のbusy通知を受けるconsumerは外側の離脱を確認します。Host内では、保存対象contextと独立したScene表示の切替を維持します。

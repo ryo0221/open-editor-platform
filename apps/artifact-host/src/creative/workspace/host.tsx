@@ -25,13 +25,20 @@ import {
 } from '@editor-platform/design/model';
 import type { CreativeLayerConnection } from '../generation';
 import { CreativeHost } from '../host';
+import { useCreativeNavigationState, type CreativeNavigationState } from '../navigation-state';
 import {
   CreativeWorkspace,
   type CreativeScene,
   type SceneItemReference,
   type ReferenceView,
 } from './model';
-import { WorldPane, type WorldDrafts } from './world-pane';
+import {
+  WorldPane,
+  emptyWorldForm,
+  hasWorldFormInput,
+  type WorldFormInput,
+  type WorldDrafts,
+} from './world-pane';
 import { WorldSourceEditor } from './world-source';
 import { MapLocationsPane } from './map-pane';
 import { MapLocationEditor } from './map-editor';
@@ -46,7 +53,11 @@ function References({
   open,
   changed,
   fail,
+  busy,
+  changeBusy,
 }: {
+  busy: boolean;
+  changeBusy(value: boolean): void;
   workspace: CreativeWorkspace;
   scene: CreativeScene;
   revision: number;
@@ -147,8 +158,10 @@ function References({
               </button>
               {v.state === 'stale' && (
                 <button
-                  disabled={!workspace.canUpdateReferences(v.reference.mode)}
+                  disabled={busy || !workspace.canUpdateReferences(v.reference.mode)}
                   onClick={async () => {
+                    if (busy) return;
+                    changeBusy(true);
                     try {
                       await workspace.refreshReference(
                         scene.id,
@@ -159,6 +172,8 @@ function References({
                       changed();
                     } catch (e) {
                       fail(e);
+                    } finally {
+                      changeBusy(false);
                     }
                   }}
                 >
@@ -185,24 +200,49 @@ function download(value: string, name: string) {
 export function CreativeProductionHost({
   workspace,
   generation,
+  initialSceneId,
+  title,
+  onNavigationStateChange,
 }: {
   workspace: CreativeWorkspace;
   generation?: CreativeLayerConnection;
+  initialSceneId?: string;
+  title?: string;
+  onNavigationStateChange?(state: CreativeNavigationState): void;
 }) {
+  if (
+    initialSceneId !== undefined &&
+    !workspace.mapping.scenes.some((s) => s.id === initialSceneId)
+  )
+    return <p role="status">指定されたSceneを開けません。明示したIDを確認してください。</p>;
   if (!workspace.mapping.scenes.length)
     return <p role="status">Scene対応がありません。Hostで既存原稿のSceneを登録してください。</p>;
   return (
-    <ProductionEditor key={workspace.sessionId} workspace={workspace} generation={generation} />
+    <ProductionEditor
+      key={workspace.sessionId}
+      workspace={workspace}
+      generation={generation}
+      initialSceneId={initialSceneId}
+      title={title}
+      onNavigationStateChange={onNavigationStateChange}
+    />
   );
 }
 function ProductionEditor({
   workspace,
   generation,
+  initialSceneId,
+  title,
+  onNavigationStateChange,
 }: {
   workspace: CreativeWorkspace;
   generation?: CreativeLayerConnection;
+  initialSceneId?: string;
+  title?: string;
+  onNavigationStateChange?(state: CreativeNavigationState): void;
 }) {
   const [drafts, setDrafts] = useState<WorldDrafts>({});
+  const [worldForms, setWorldForms] = useState<Record<string, WorldFormInput>>({});
   const [worldSource, setWorldSource] = useState<{
     reference: WorldReference;
     editor: Awaited<ReturnType<CreativeWorkspace['openWorldSource']>>;
@@ -214,7 +254,7 @@ function ProductionEditor({
   }>();
   const [revision, refresh] = useReducer((n: number) => n + 1, 0);
   const [sceneId, setSceneId] = useState(
-    workspace.mapping.returnTo?.sceneId ?? workspace.mapping.scenes[0]?.id ?? '',
+    initialSceneId ?? workspace.mapping.returnTo?.sceneId ?? workspace.mapping.scenes[0]?.id ?? '',
   );
   const [editor, setEditor] = useState<Awaited<ReturnType<CreativeWorkspace['openScene']>>>();
   const [focus, setFocus] = useState<ElementAddress>();
@@ -226,6 +266,19 @@ function ProductionEditor({
   latestRoute.current = route;
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [referenceBusy, setReferenceBusy] = useState(false);
+  const [drillNavigation, setDrillNavigation] = useState<CreativeNavigationState>({
+    dirty: false,
+    busy: false,
+  });
+  const [mapNavigation, setMapNavigation] = useState<CreativeNavigationState>({
+    dirty: false,
+    busy: false,
+  });
+  const [worldNavigation, setWorldNavigation] = useState<CreativeNavigationState>({
+    dirty: false,
+    busy: false,
+  });
   const [documentWorkspace, setDocumentWorkspace] = useState<'novel' | 'document'>('novel');
   const [designWorkspace, setDesignWorkspace] = useState<'manga' | 'design'>('manga');
   const [inputs] = useState(() => new EditorInputs());
@@ -235,7 +288,21 @@ function ProductionEditor({
     generation?.world?.getSnapshot ?? (() => 0),
     () => 0,
   );
+  const projectDirty = (['character', 'setting'] as const).some((mode) => {
+    if (!workspace.modeAvailable(mode)) return false;
+    const p = workspace.project(mode);
+    return (
+      p.mappingDirty ||
+      p.source.snapshot.dirty ||
+      [...p.designs.values()].some((e) => e.snapshot.dirty)
+    );
+  });
   const dirty =
+    projectDirty ||
+    Object.values(worldForms).some(hasWorldFormInput) ||
+    drillNavigation.dirty ||
+    mapNavigation.dirty ||
+    worldNavigation.dirty ||
     !!generation?.world?.pending ||
     Object.keys(drafts).length > 0 ||
     workspace.hasUnsavedWorldSources ||
@@ -244,15 +311,36 @@ function ProductionEditor({
     !!inputState.composing ||
     !!inputState.settling;
   useEffect(() => {
+    const releases = [worldSource?.editor, mapVisit?.editor].flatMap((e) =>
+      e ? [e.attach(refresh)] : [],
+    );
+    return () => releases.forEach((release) => release());
+  }, [worldSource?.editor, mapVisit?.editor]);
+  useCreativeNavigationState(
+    {
+      dirty,
+      busy:
+        busy ||
+        referenceBusy ||
+        drillNavigation.busy ||
+        mapNavigation.busy ||
+        worldNavigation.busy ||
+        !!generation?.world?.pending ||
+        !!worldSource?.editor.snapshot.saving ||
+        !!mapVisit?.editor.snapshot.saving,
+    },
+    onNavigationStateChange,
+  );
+  useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      if (dirty) {
+      if (dirty || busy || referenceBusy) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [dirty]);
+  }, [dirty, busy, referenceBusy]);
   const fail = useCallback(
     (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
     [],
@@ -294,7 +382,7 @@ function ProductionEditor({
     }
   };
   useEffect(() => {
-    if (workspace.mapping.returnTo)
+    if (initialSceneId === undefined && workspace.mapping.returnTo)
       void workspace
         .returnToScene()
         .then((result) => activate(result.scene.id, result.address), fail);
@@ -328,6 +416,8 @@ function ProductionEditor({
     [workspace, editor],
   );
   const open = async (ref: SceneItemReference, artwork = false) => {
+    if (busy) return;
+    setBusy(true);
     try {
       inputs.flush();
       await generation?.world?.assertSettled();
@@ -340,6 +430,8 @@ function ProductionEditor({
       refresh();
     } catch (e) {
       fail(e);
+    } finally {
+      setBusy(false);
     }
   };
   const leave = async () => {
@@ -437,26 +529,38 @@ function ProductionEditor({
         : []),
     ]);
   const mapLocation = async (reference: CreativeMapLocation, check = () => {}) => {
-    const capturedRoute = route,
-      capturedOrigin = mapOriginStamp();
-    if (mapVisit && canonicalJson(workspace.mapping.returnTo) !== canonicalJson(mapVisit.returnTo))
-      throw Error('戻り先ticketが変わりました。別Sceneへ付け替えません。');
-    flushMapOrigin();
-    await generation?.world?.assertSettled();
-    const target = await workspace.maps.editLocation(reference);
-    if (!drill && !mapVisit) await workspace.captureReturn(sceneId);
-    if (latestRoute.current !== capturedRoute || mapOriginStamp() !== capturedOrigin)
-      throw Error('移動先が変わりました。古い場所へ移動しません。');
-    if (mapVisit && canonicalJson(workspace.mapping.returnTo) !== canonicalJson(mapVisit.returnTo))
-      throw Error('戻り先ticketが変わりました。別Sceneへ付け替えません。');
-    flushMapOrigin();
-    check();
-    setActiveItemId(reference.itemId);
-    setArtworkFocus(true);
-    setDrill(target);
-    setMapVisit(undefined);
-    setError('');
-    refresh();
+    if (busy) throw Error('処理中です。完了してから移動してください。');
+    setBusy(true);
+    try {
+      const capturedRoute = route,
+        capturedOrigin = mapOriginStamp();
+      if (
+        mapVisit &&
+        canonicalJson(workspace.mapping.returnTo) !== canonicalJson(mapVisit.returnTo)
+      )
+        throw Error('戻り先ticketが変わりました。別Sceneへ付け替えません。');
+      flushMapOrigin();
+      await generation?.world?.assertSettled();
+      const target = await workspace.maps.editLocation(reference);
+      if (!drill && !mapVisit) await workspace.captureReturn(sceneId);
+      if (latestRoute.current !== capturedRoute || mapOriginStamp() !== capturedOrigin)
+        throw Error('移動先が変わりました。古い場所へ移動しません。');
+      if (
+        mapVisit &&
+        canonicalJson(workspace.mapping.returnTo) !== canonicalJson(mapVisit.returnTo)
+      )
+        throw Error('戻り先ticketが変わりました。別Sceneへ付け替えません。');
+      flushMapOrigin();
+      check();
+      setActiveItemId(reference.itemId);
+      setArtworkFocus(true);
+      setDrill(target);
+      setMapVisit(undefined);
+      setError('');
+      refresh();
+    } finally {
+      setBusy(false);
+    }
   };
   const worldPane = (targetItemId = activeItemId) => (
     <>
@@ -471,6 +575,15 @@ function ProductionEditor({
           key={id}
           workspace={workspace}
           contextId={id}
+          form={worldForms[id]}
+          changeForm={(patch) =>
+            setWorldForms((current) => ({
+              ...current,
+              [id]: { ...emptyWorldForm(), ...current[id], ...patch },
+            }))
+          }
+          busy={referenceBusy}
+          changeBusy={setReferenceBusy}
           generationConnected={!!generation?.world}
           drafts={drafts}
           stage={(id, value, completed) =>
@@ -489,6 +602,8 @@ function ProductionEditor({
         />
       ))}
       <MapLocationsPane
+        busy={referenceBusy}
+        changeBusy={setReferenceBusy}
         key={'map:' + sceneId + ':' + (drill?.mode ?? '') + ':' + targetItemId}
         workspace={workspace}
         sceneId={sceneId}
@@ -506,6 +621,8 @@ function ProductionEditor({
     <>
       {worldPane()}
       <References
+        busy={referenceBusy}
+        changeBusy={setReferenceBusy}
         workspace={workspace}
         scene={scene}
         revision={revision}
@@ -529,7 +646,7 @@ function ProductionEditor({
         <header>
           <div>
             <a href="/">Editor Platform</a>
-            <h1>港町の物語 · 小説と漫画</h1>
+            <h1>{title ?? '港町の物語 · 小説と漫画'}</h1>
           </div>
           <div>
             <button
@@ -662,6 +779,7 @@ function ProductionEditor({
             <CreativeHost
               worldContext={worldPane}
               onActiveItem={setActiveItemId}
+              onNavigationStateChange={setDrillNavigation}
               generation={generation ? { ...generation, sceneId } : undefined}
               key={`character:${drill.itemId}`}
               project={workspace.characters}
@@ -674,6 +792,7 @@ function ProductionEditor({
             <CreativeHost
               worldContext={worldPane}
               onActiveItem={setActiveItemId}
+              onNavigationStateChange={setDrillNavigation}
               generation={generation ? { ...generation, sceneId } : undefined}
               key={`setting:${drill.itemId}`}
               project={workspace.settings}
@@ -687,6 +806,7 @@ function ProductionEditor({
       )}
       {mapVisit && (
         <MapLocationEditor
+          onNavigationStateChange={setMapNavigation}
           workspace={workspace}
           reference={mapVisit.reference}
           editor={mapVisit.editor}
@@ -707,6 +827,7 @@ function ProductionEditor({
       )}
       {worldSource && (
         <WorldSourceEditor
+          onNavigationStateChange={setWorldNavigation}
           key={worldSource.editor.id}
           workspace={workspace}
           editor={worldSource.editor}

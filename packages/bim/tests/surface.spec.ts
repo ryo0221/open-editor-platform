@@ -880,3 +880,17 @@ test('adds a plan and a section, opens their drawings, and writes SVG and PNG', 
   await expect(drawingState).toHaveText('Drawing up to date', { timeout: 60_000 });
   await page.screenshot({ path: test.info().outputPath('bim-section.png') });
 });
+
+test('#801 the Host chooses the layout breakpoint for a narrow region', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.setViewportSize({ width: 1000, height: 800 });
+  const more = page.getByRole('button', { name: 'More editor tools', exact: true });
+  await page.goto('/?fixture=box');
+  await ready(page);
+  // Default breakpoint (1100px): the toolbar folds into More editor tools.
+  await expect(more).toBeVisible();
+  await page.goto('/?fixture=box&compact=600');
+  await ready(page);
+  await expect(more).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+});

@@ -95,7 +95,7 @@ export function jointsReading(
     patterns: ReadonlySet<string>;
   },
 ) {
-  return doc.joints
+  const direct = doc.joints
     .filter((j) => {
       if (roots.has(j.id)) return true;
       const [first] = j.parent.componentPath;
@@ -117,4 +117,15 @@ export function jointsReading(
       return lengths.some((l) => l && lengthParameters(l).some((p) => removed.parameters.has(p)));
     })
     .map((j) => j.id);
+  // MR1: a joint whose value follows a removed joint goes with it.
+  const out = new Set(direct);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const j of doc.joints)
+      if (!out.has(j.id) && (j.couplings ?? []).some((c) => out.has(c.from.joint))) {
+        out.add(j.id);
+        grew = true;
+      }
+  }
+  return doc.joints.filter((j) => out.has(j.id)).map((j) => j.id);
 }

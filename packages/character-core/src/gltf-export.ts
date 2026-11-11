@@ -1,5 +1,6 @@
 import {
   cornerNormals,
+  cornerTangents,
   fourInfluences,
   triangulateFace,
   type EpmMesh,
@@ -206,6 +207,8 @@ export function exportGlb(
     nodes.push({ name: p.name, ...trs(p.transform), extras: { ep_id: p.id } });
     hang(partParent(p.parentId), partNode.get(p.id)!);
     if (!p.visible) w.loss('hidden-part');
+    // C7a: the sculpted detail is not geometry in the file (C7d bakes it to a normal map).
+    if (p.multires) w.loss('multires');
     if (p.subdivision && (p.subdivision.levels > 0 || p.subdivision.renderLevels > 0))
       w.loss('subdivision');
   }
@@ -314,6 +317,9 @@ export function exportGlb(
           const id = p.materials[slot];
           return id === undefined ? undefined : materialIndex.get(id);
         },
+        // C7d: tangents where a material of the part has a normal map (a baked one needs the
+        // frame it was baked in; the formula is the bake's).
+        p.materials.some((id) => !!doc.materials.find((m) => m.id === id)?.maps.normal),
       ),
     );
   }
@@ -356,6 +362,7 @@ function meshOut(
   mesh: EpmMesh,
   joints: string[] | undefined,
   material: (slot: number) => number | undefined,
+  withTangents = false,
 ): J {
   if (!mesh.faceSizes.length) fail('document', `part ${name}: its mesh has no faces`);
   const normals = cornerNormals(mesh);
@@ -400,6 +407,17 @@ function meshOut(
     NORMAL: w.accessor(nor, 'VEC3', ARRAY_BUFFER),
   };
   if (uv) attributes.TEXCOORD_0 = w.accessor(uv, 'VEC2', ARRAY_BUFFER);
+  const tangents = withTangents && uv ? cornerTangents(mesh, normals) : undefined;
+  if (tangents) {
+    const tan = new Float32Array(4 * n);
+    sourceCorner.forEach((c, i) => {
+      const d = vecOut(tangents, 4 * c);
+      // A rotation into glTF's axes: the handedness stays; the UV flip is matched by the image
+      // rows (the bake writes v = 1 at the top, as glTF reads it).
+      tan.set([d[0], d[1], d[2], tangents[4 * c + 3]], 4 * i);
+    });
+    attributes.TANGENT = w.accessor(tan, 'VEC4', ARRAY_BUFFER);
+  }
   if (mesh.weights && joints) {
     const four = fourInfluences(mesh);
     const jointOf = mesh.boneIds.map((id) => joints.indexOf(id));
@@ -545,7 +563,8 @@ function animationOut(
     props = 0;
   for (const track of action.tracks) {
     const t = track.target;
-    if (t.kind === 'prop-joint') {
+    // Props are not written (C2b), so neither are their joints' nor placements' tracks (MR4).
+    if (t.kind === 'prop-joint' || t.kind === 'prop-mount' || t.kind === 'prop') {
       props++;
       continue;
     }

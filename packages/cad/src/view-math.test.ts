@@ -3,6 +3,8 @@ import type { CadCamera, CadNamedView } from '@editor-platform/cad-core';
 import {
   compareSizes,
   defaultGrid,
+  depthRange,
+  gridForView,
   gridFor,
   initialView,
   niceStep,
@@ -125,5 +127,24 @@ describe('viewport math', () => {
       { axis: 'Z', a: 2500, b: 1800, difference: 700 },
     ]);
     expect(compareSizes(route(2000), equipment)[0]!.difference).toBe(400);
+  });
+});
+
+describe('watch-sized views (WM3, TS-1891)', () => {
+  const plate = { step: 5, divisions: 12, center: [0, 0] as [number, number] };
+  it('refines the grid around the point looked at when zoomed in on a small part', () => {
+    expect(gridForView(plate, 0.1, [12.0234, 8.0011])).toEqual({
+      step: 0.01,
+      divisions: 40,
+      center: [12.02, 8],
+    });
+    // Zoomed out, the model's grid stays.
+    expect(gridForView(plate, 80, [0, 0])).toBe(plate);
+    expect(gridForView(plate, Number.NaN, [0, 0])).toBe(plate);
+  });
+  it('keeps the near plane in front of a part a tenth of a millimetre away', () => {
+    expect(depthRange(0.15, 21)).toEqual({ near: 0.00015, far: 42.3 });
+    expect(depthRange(60, 21).near).toBeCloseTo(0.06, 9);
+    expect(depthRange(60, 21).far).toBe(6000);
   });
 });

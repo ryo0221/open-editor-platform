@@ -71,11 +71,13 @@ const operationKeys: Record<
   },
   detailBody: {
     required: ['type', 'bodyId', 'feature', 'placementFeatureId'],
+    optional: ['panel'],
     ids: ['bodyId', 'placementFeatureId'],
   },
   rebindReferences: { required: ['type', 'bindings'], optional: ['edit'], ids: [] },
   deleteClosure: { required: ['type', 'ids', 'cascade'], ids: [] },
   duplicateClosure: { required: ['type', 'bodyIds', 'idMap'], ids: [] },
+  makePart: { required: ['type', 'bodyId', 'part', 'component'], ids: ['bodyId'] },
   rename: { required: ['type', 'targetId', 'name'], ids: ['targetId'] },
   setAppearance: {
     required: ['type', 'bodyId', 'appearance'],
@@ -83,6 +85,8 @@ const operationKeys: Record<
     ids: ['bodyId'],
   },
   saveNamedView: { required: ['type', 'view'], ids: [] },
+  setSpotWeld: { required: ['type', 'weld'], ids: [] },
+  removeSpotWeld: { required: ['type', 'id'], ids: ['id'] },
   reorderFeatures: { required: ['type', 'featureIds'], ids: [] },
   setKernelBuild: { required: ['type', 'kernelId', 'buildHash'], ids: ['kernelId'] },
   setToleranceSet: { required: ['type', 'set'], ids: [] },
@@ -102,6 +106,19 @@ const operationKeys: Record<
   setJointValues: { required: ['type', 'jointId', 'values'], ids: ['jointId'] },
   solveAssemblyPoses: { required: ['type'], ids: [] },
   withSolvedPoses: { required: ['type', 'edit', 'poses'], ids: [] },
+  insertConfiguration: { required: ['type', 'configuration'], ids: [] },
+  overwriteConfiguration: { required: ['type', 'id', 'values'], optional: ['mounts'], ids: ['id'] },
+  renameConfiguration: { required: ['type', 'id', 'name'], ids: ['id'] },
+  removeConfiguration: { required: ['type', 'id'], ids: ['id'] },
+  recallConfiguration: { required: ['type', 'id'], ids: ['id'] },
+  insertInterferenceAllowance: { required: ['type', 'allowance'], ids: [] },
+  removeInterferenceAllowance: { required: ['type', 'id'], ids: ['id'] },
+  setMount: { required: ['type', 'mountId', 'jointId'], ids: ['mountId', 'jointId'] },
+  insertMountJoint: { required: ['type', 'joint', 'mount'], ids: [] },
+  removeMount: { required: ['type', 'mountId'], ids: ['mountId'] },
+  insertGearMesh: { required: ['type', 'mesh', 'coupling'], ids: [] },
+  removeGearMesh: { required: ['type', 'meshId', 'angle'], ids: ['meshId'] },
+  updateGearMesh: { required: ['type', 'meshId', 'coupling'], ids: ['meshId'] },
 };
 const idList = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every(cadId);
 
@@ -144,7 +161,9 @@ export function assertCadOperation(op: unknown): asserts op is CadOperation {
                     typeof op.toleranceMm === 'number' &&
                     typeof op.solid === 'boolean'
                   : op.type === 'detailBody'
-                    ? record(op.feature)
+                    ? record(op.feature) &&
+                      (op.panel === undefined ||
+                        (record(op.panel) && record(op.panel.feature) && record(op.panel.body)))
                     : op.type === 'rebindReferences'
                       ? Array.isArray(op.bindings) &&
                         op.bindings.length > 0 &&
@@ -167,65 +186,138 @@ export function assertCadOperation(op: unknown): asserts op is CadOperation {
                           (assertCadOperation(op.edit), true)
                         : op.type === 'insertJoint' || op.type === 'updateJoint'
                           ? record(op.joint)
-                          : op.type === 'setJointValues'
-                            ? record(op.values)
-                            : op.type === 'solveAssemblyPoses'
+                          : op.type === 'insertMountJoint'
+                            ? record(op.joint) &&
+                              record(op.mount) &&
+                              cadId(op.mount.id) &&
+                              (op.mount.name === undefined || typeof op.mount.name === 'string')
+                            : op.type === 'setMount' || op.type === 'removeMount'
                               ? true
-                              : op.type === 'deleteClosure'
-                                ? idList(op.ids) && typeof op.cascade === 'boolean'
-                                : op.type === 'duplicateClosure'
-                                  ? idList(op.bodyIds) && record(op.idMap)
-                                  : op.type === 'rename'
-                                    ? typeof op.name === 'string'
-                                    : op.type === 'setAppearance'
-                                      ? record(op.appearance) &&
-                                        (op.assets === undefined || Array.isArray(op.assets))
-                                      : op.type === 'saveNamedView'
-                                        ? record(op.view)
-                                        : op.type === 'reorderFeatures'
-                                          ? idList(op.featureIds)
-                                          : op.type === 'setKernelBuild'
-                                            ? typeof op.buildHash === 'string'
-                                            : op.type === 'setToleranceSet'
-                                              ? typeof op.set === 'string'
-                                              : op.type === 'insertImportedBody'
-                                                ? Array.isArray(op.assets) &&
-                                                  record(op.feature) &&
-                                                  record(op.body)
-                                                : op.type === 'insertComponents'
-                                                  ? Array.isArray(op.parts) &&
-                                                    Array.isArray(op.components) &&
-                                                    op.components.length > 0
-                                                  : op.type === 'setComponentPlacement'
-                                                    ? record(op.placement)
-                                                    : op.type === 'replacePartSources'
-                                                      ? Array.isArray(op.parts) &&
-                                                        op.parts.length > 0 &&
-                                                        op.parts.every(
-                                                          (p) =>
-                                                            record(p) &&
-                                                            cadId(p.partId) &&
-                                                            record(p.source) &&
-                                                            record(p.hint),
-                                                        )
-                                                      : op.type === 'insertComponentPattern' ||
-                                                          op.type === 'updateComponentPattern'
-                                                        ? record(op.pattern)
-                                                        : op.type === 'setComponentBom'
-                                                          ? op.bom === 'include' ||
-                                                            op.bom === 'exclude'
-                                                          : op.type === 'setPartProperties'
-                                                            ? typeof op.partNumber === 'string' &&
-                                                              typeof op.description === 'string'
-                                                            : op.type === 'updateFeature'
-                                                              ? record(op.args)
-                                                              : op.type === 'updateSketch'
-                                                                ? record(op.plane) &&
-                                                                  Array.isArray(op.entities) &&
-                                                                  Array.isArray(op.constraints) &&
-                                                                  record(op.solved)
-                                                                : record(op.plane) &&
-                                                                  record(op.shape);
+                              : op.type === 'insertGearMesh' || op.type === 'updateGearMesh'
+                                ? (op.type !== 'insertGearMesh' || record(op.mesh)) &&
+                                  record(op.coupling) &&
+                                  Number.isFinite(op.coupling.ratio) &&
+                                  Number.isFinite(op.coupling.offset)
+                                : op.type === 'removeGearMesh'
+                                  ? Number.isFinite(op.angle)
+                                  : op.type === 'setJointValues' ||
+                                      op.type === 'overwriteConfiguration'
+                                    ? record(op.values) &&
+                                      (op.type !== 'overwriteConfiguration' ||
+                                        op.mounts === undefined ||
+                                        record(op.mounts))
+                                    : op.type === 'insertConfiguration'
+                                      ? record(op.configuration)
+                                      : op.type === 'insertInterferenceAllowance'
+                                        ? record(op.allowance)
+                                        : op.type === 'renameConfiguration'
+                                          ? typeof op.name === 'string'
+                                          : op.type === 'removeConfiguration' ||
+                                              op.type === 'recallConfiguration' ||
+                                              op.type === 'removeInterferenceAllowance'
+                                            ? true
+                                            : op.type === 'solveAssemblyPoses'
+                                              ? true
+                                              : op.type === 'deleteClosure'
+                                                ? idList(op.ids) && typeof op.cascade === 'boolean'
+                                                : op.type === 'duplicateClosure'
+                                                  ? idList(op.bodyIds) && record(op.idMap)
+                                                  : op.type === 'makePart'
+                                                    ? record(op.part) && record(op.component)
+                                                    : op.type === 'rename'
+                                                      ? typeof op.name === 'string'
+                                                      : op.type === 'setAppearance'
+                                                        ? record(op.appearance) &&
+                                                          (op.assets === undefined ||
+                                                            Array.isArray(op.assets))
+                                                        : op.type === 'saveNamedView'
+                                                          ? record(op.view)
+                                                          : op.type === 'setSpotWeld'
+                                                            ? record(op.weld)
+                                                            : op.type === 'removeSpotWeld'
+                                                              ? true
+                                                              : op.type === 'reorderFeatures'
+                                                                ? idList(op.featureIds)
+                                                                : op.type === 'setKernelBuild'
+                                                                  ? typeof op.buildHash === 'string'
+                                                                  : op.type === 'setToleranceSet'
+                                                                    ? typeof op.set === 'string'
+                                                                    : op.type ===
+                                                                        'insertImportedBody'
+                                                                      ? Array.isArray(op.assets) &&
+                                                                        record(op.feature) &&
+                                                                        record(op.body)
+                                                                      : op.type ===
+                                                                          'insertComponents'
+                                                                        ? Array.isArray(op.parts) &&
+                                                                          Array.isArray(
+                                                                            op.components,
+                                                                          ) &&
+                                                                          op.components.length >
+                                                                            0 &&
+                                                                          (op.assemblyPmi ===
+                                                                            undefined ||
+                                                                            record(op.assemblyPmi))
+                                                                        : op.type ===
+                                                                            'setComponentPlacement'
+                                                                          ? record(op.placement)
+                                                                          : op.type ===
+                                                                              'replacePartSources'
+                                                                            ? Array.isArray(
+                                                                                op.parts,
+                                                                              ) &&
+                                                                              op.parts.length > 0 &&
+                                                                              op.parts.every(
+                                                                                (p) =>
+                                                                                  record(p) &&
+                                                                                  cadId(p.partId) &&
+                                                                                  record(
+                                                                                    p.source,
+                                                                                  ) &&
+                                                                                  record(p.hint),
+                                                                              )
+                                                                            : op.type ===
+                                                                                  'insertComponentPattern' ||
+                                                                                op.type ===
+                                                                                  'updateComponentPattern'
+                                                                              ? record(op.pattern)
+                                                                              : op.type ===
+                                                                                  'setComponentBom'
+                                                                                ? op.bom ===
+                                                                                    'include' ||
+                                                                                  op.bom ===
+                                                                                    'exclude'
+                                                                                : op.type ===
+                                                                                    'setPartProperties'
+                                                                                  ? typeof op.partNumber ===
+                                                                                      'string' &&
+                                                                                    typeof op.description ===
+                                                                                      'string'
+                                                                                  : op.type ===
+                                                                                      'updateFeature'
+                                                                                    ? record(
+                                                                                        op.args,
+                                                                                      )
+                                                                                    : op.type ===
+                                                                                        'updateSketch'
+                                                                                      ? record(
+                                                                                          op.plane,
+                                                                                        ) &&
+                                                                                        Array.isArray(
+                                                                                          op.entities,
+                                                                                        ) &&
+                                                                                        Array.isArray(
+                                                                                          op.constraints,
+                                                                                        ) &&
+                                                                                        record(
+                                                                                          op.solved,
+                                                                                        )
+                                                                                      : record(
+                                                                                          op.plane,
+                                                                                        ) &&
+                                                                                        record(
+                                                                                          op.shape,
+                                                                                        );
   if (!ok) throw new Error('operation-schema');
 }
 
@@ -248,9 +340,12 @@ const labels: Record<CadOperationType, string> = {
   booleanBodies: 'Combine bodies',
   deleteClosure: 'Delete',
   duplicateClosure: 'Duplicate',
+  makePart: 'Make part',
   rename: 'Rename',
   setAppearance: 'Change appearance',
   saveNamedView: 'Save view',
+  setSpotWeld: 'Spot welds',
+  removeSpotWeld: 'Remove spot welds',
   reorderFeatures: 'Reorder features',
   setKernelBuild: 'Change kernel build',
   setToleranceSet: 'Change tolerance set',
@@ -272,6 +367,19 @@ const labels: Record<CadOperationType, string> = {
   setJointValues: 'Move joint',
   solveAssemblyPoses: 'Solve poses again',
   withSolvedPoses: 'Edit',
+  insertConfiguration: 'Save form',
+  overwriteConfiguration: 'Overwrite form',
+  renameConfiguration: 'Rename form',
+  removeConfiguration: 'Delete form',
+  recallConfiguration: 'Recall form',
+  insertInterferenceAllowance: 'Allow overlap',
+  removeInterferenceAllowance: 'Remove allowance',
+  setMount: 'Switch mount',
+  insertMountJoint: 'Add mount',
+  removeMount: 'Remove mount',
+  insertGearMesh: 'Mesh gears',
+  removeGearMesh: 'Remove gear mesh',
+  updateGearMesh: 'Mesh gears again',
 };
 
 /**

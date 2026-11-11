@@ -573,8 +573,52 @@ function listItems(node: PMNode): DocumentListItem[] {
   });
   return items;
 }
+const plainRich = (rich: InlineSpan[]) => rich.every((span) => Object.keys(span).length === 1);
+/** An existing paragraph/heading that omitted `rich`, `align`, `indent` or `level` reads them
+ * as their defaults (see blockNode). Keep omitting them while they still hold those values, so
+ * opening and saving unchanged content adds nothing (#801). New or retyped blocks still write
+ * every field, as before, for readers that expect them. */
+function textBlockFields(
+  n: PMNode,
+  rich: InlineSpan[],
+  type: DocumentBlock['type'],
+  before: DocumentBlock | undefined,
+) {
+  const sparse = before?.type === type ? before : undefined;
+  const kept = (field: 'align' | 'indent' | 'level', value: unknown, fallback: unknown) =>
+    value === fallback && sparse && !(field in sparse) ? {} : { [field]: value };
+  return {
+    ...(plainRich(rich) && sparse && !('rich' in sparse) ? {} : { rich }),
+    ...kept('align', n.attrs.align, 'left'),
+    ...kept('indent', n.attrs.indent, 0),
+    ...(type === 'heading' ? kept('level', n.attrs.level, 1) : {}),
+  };
+}
+/** Version 1 rewrites paragraph/heading `rich` from `text` (migrateDocument). Keep a version-1
+ * source at 1 only while no such block needs its own `rich`. */
+export function projectedSchemaVersion(
+  base: DocumentContent,
+  blocks: DocumentBlock[],
+): DocumentContent['schemaVersion'] {
+  return base.schemaVersion === 1 &&
+    !blocks.some((b) => (b.type === 'paragraph' || b.type === 'heading') && b.rich)
+    ? 1
+    : 2;
+}
+const frozenSourceIndexes = new WeakMap<readonly DocumentBlock[], Map<string, DocumentBlock>>();
+/** The local view projects one child at a time against the same frozen basis; index it once
+ * per basis instead of once per child. A mutable array is indexed per call. */
+function sourceBlockIndex(blocks: readonly DocumentBlock[]) {
+  const cached = frozenSourceIndexes.get(blocks);
+  if (cached) return cached;
+  const index = new Map(blocks.map((b) => [b.id, b]));
+  if (Object.isFrozen(blocks)) frozenSourceIndexes.set(blocks, index);
+  return index;
+}
 export function nodeToContent(node: PMNode, base: DocumentContent): DocumentContent {
   const blocks: DocumentBlock[] = [];
+  let previous: Map<string, DocumentBlock> | undefined;
+  const sourceBlock = (id: string) => (previous ??= sourceBlockIndex(base.blocks ?? [])).get(id);
   node.forEach((n) => {
     const id = n.attrs.id ?? newId('block');
     if (n.type.name === 'embedded') {
@@ -668,21 +712,21 @@ export function nodeToContent(node: PMNode, base: DocumentContent): DocumentCont
       return;
     }
     const rich = spansFromNode(n);
+    const type =
+      n.type.name === 'heading' ? 'heading' : n.type.name === 'code_block' ? 'code' : 'paragraph';
     blocks.push({
       id,
-      type:
-        n.type.name === 'heading' ? 'heading' : n.type.name === 'code_block' ? 'code' : 'paragraph',
+      type,
       text: n.textBetween(0, n.content.size, '\n', '\n'),
       ...(n.attrs.style ? { style: { ...n.attrs.style } } : {}),
       ...(n.attrs.styleName ? { styleName: n.attrs.styleName } : {}),
       ...(n.attrs.hidden ? { hidden: true } : {}),
       ...(n.type.name === 'code_block'
         ? { language: n.attrs.language }
-        : { rich, align: n.attrs.align, indent: n.attrs.indent }),
-      ...(n.type.name === 'heading' ? { level: n.attrs.level } : {}),
+        : textBlockFields(n, rich, type, sourceBlock(id))),
     });
   });
-  return { ...base, schemaVersion: 2, blocks };
+  return { ...base, schemaVersion: projectedSchemaVersion(base, blocks), blocks };
 }
 export const stableIds = new Plugin({
   appendTransaction(transactions, _old, state) {

@@ -400,5 +400,195 @@ describe.skipIf(!dist)(
       const refused = importStepAssembly(oc, new TextEncoder().encode(external), buildHash);
       expect(refused).toMatchObject({ status: 'rejected', code: 'step-external-reference' });
     }, 300_000);
+
+    it('keeps the PMI of a part on that part and refuses a dimension across two parts unless agreed (PMI-2, CAD81)', () => {
+      const file = new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/pmi-assembly.step', import.meta.url)),
+      );
+      // The distance from the plate's top to the block's top is on two parts: not kept.
+      const refused = importStepAssembly(oc, file, buildHash);
+      if (refused.status !== 'rejected' || !refused.pmi) throw new Error(JSON.stringify(refused));
+      expect(refused).toMatchObject({ code: 'step-pmi-partial', detail: 'not-kept' });
+      const result = importStepAssembly(oc, file, buildHash, { pmi: 'discard' });
+      if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail}`);
+      expect(result.report.losses).toContain('pmi');
+      expect(result.report.pmi).toMatchObject({
+        lossless: false,
+        kept: {
+          dimension: 2,
+          'geometric-tolerance': 1,
+          datum: 2,
+          'datum-target': 0,
+          callout: 0,
+          view: 0,
+        },
+      });
+      const plate = result.read.shapes.findIndex((s) => s.pmi);
+      expect(result.read.shapes.filter((s) => s.pmi)).toHaveLength(1);
+      // The plate is one part placed twice; its asset is shared by both instances.
+      expect(result.read.instances.filter((i) => i.shape === plate)).toHaveLength(2);
+      const bytes = result.pmis?.[plate];
+      if (!bytes) throw new Error('no pmi bytes');
+      expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(
+        result.read.shapes[plate].pmi!.sha256,
+      );
+      const asset = JSON.parse(new TextDecoder().decode(bytes)) as {
+        items: { kind: string; type?: string; references?: { datums: string[] }[] }[];
+      };
+      expect(asset.items.map((i) => i.kind)).toEqual([
+        'datum',
+        'datum',
+        'dimension',
+        'dimension',
+        'geometric-tolerance',
+      ]);
+      expect(asset.items[4]).toMatchObject({
+        type: 'Position',
+        references: [{ datums: ['pmi-1'] }, { datums: ['pmi-2'] }],
+      });
+    }, 300_000);
+
+    it('keeps the PMI through assembly paths on the instances they name (PMI-5a, CAD86, TS-1437)', () => {
+      const file = new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/pmi-path.step', import.meta.url)),
+      );
+      const expected = JSON.parse(
+        readFileSync(new URL('../fixtures/f43/path.json', import.meta.url), 'utf8'),
+      ) as {
+        items: {
+          kind: string;
+          type: string;
+          value?: number;
+          values?: number[];
+          targets: { instance: number; part: string; centroid: number[] }[];
+          targets2?: { instance: number; part: string; centroid: number[] }[];
+        }[];
+        datums: { kind: 'datum'; name: string; targets: unknown[] }[];
+      };
+      // F43's distance across two parts is still not kept (no path): refused unless agreed.
+      const refused = importStepAssembly(oc, file, buildHash);
+      expect(refused).toMatchObject({ status: 'rejected', code: 'step-pmi-partial' });
+      const result = importStepAssembly(oc, file, buildHash, { pmi: 'discard' });
+      if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail}`);
+      const report = result.report.pmi!;
+      // The paths' four tolerances, one distance and the block's datum, on top of F43's part PMI
+      // (the plate's datum A copied for the parallelism is not counted again).
+      expect(report.kept).toMatchObject({ dimension: 3, 'geometric-tolerance': 5, datum: 3 });
+      expect(report.pathProblems).toBeUndefined();
+      const rows = (axis: string) =>
+        report.axes.filter((a) => a.axis === axis).map((a) => [a.family, a.inFile, a.read]);
+      expect(rows('path')).toEqual([
+        ['component-path', 2, 2],
+        ['dimension', 1, 1],
+        ['geometric-tolerance', 4, 4],
+        ['datum', 1, 1],
+      ]);
+      // Every item is read (the across-parts distance by the kernel's reader, not kept).
+      expect(rows('semantic')).toEqual(
+        expect.arrayContaining([
+          ['dimension', 4, 4],
+          ['geometric-tolerance', 5, 5],
+          ['datum', 3, 3],
+          ['datum-system', 2, 2],
+        ]),
+      );
+      expect(report.complete).toBe(true);
+      expect(report.lossless).toBe(false);
+      const asset = result.read.assemblyPmi!;
+      expect(asset.items.map((i) => i.kind)).toEqual([
+        'datum',
+        'geometric-tolerance',
+        'geometric-tolerance',
+        'dimension',
+        'geometric-tolerance',
+        'datum',
+        'geometric-tolerance',
+      ]);
+      // The parallelism references the plate's own A on its instance, never the block's A.
+      const [blockA, , , , , plateA, parallelism] = asset.items;
+      expect(parallelism).toMatchObject({ references: [{ datums: [plateA!.id] }] });
+      expect(plateA!.id).not.toBe(blockA!.id);
+      const partAsset = JSON.parse(
+        new TextDecoder().decode(result.pmis![result.read.instances[1]!.shape]!),
+      ) as { items: { kind: string; name?: string; targets: object[] }[] };
+      const partA = partAsset.items.find((i) => i.kind === 'datum' && i.name === 'A')!;
+      expect(plateA).toMatchObject({
+        name: 'A',
+        targets: partA.targets.map((t) => ({ ...t, component: '1' })),
+      });
+      // Instances in the file's order: the plates (1, 2), then the block (3).
+      expect(result.read.instances.map((i) => i.path.join(' / '))).toHaveLength(3);
+      const plate = result.read.instances[0]!.shape;
+      expect(result.read.instances[1]!.shape).toBe(plate);
+      const block = result.read.instances[2]!.shape;
+      // Each face's centroid in its part, from the part's BRep.
+      const owned: { delete(): void }[] = [];
+      const own = <T>(x: T) => (owned.push(x as never), x);
+      const centroid = (shape: number, index: number) => {
+        oc.FS.writeFile('/f46.brep', result.breps[shape]!);
+        const body = own(new oc.TopoDS_Shape());
+        oc.BRepTools.Read_2(
+          body,
+          '/f46.brep',
+          own(new oc.BRep_Builder()),
+          own(new oc.Message_ProgressRange_1()),
+        );
+        oc.FS.unlink('/f46.brep');
+        const map = own(new oc.TopTools_IndexedMapOfShape_1());
+        oc.TopExp.MapShapes_1(body, oc.TopAbs_ShapeEnum.TopAbs_FACE, map);
+        const props = own(new oc.GProp_GProps_1());
+        oc.BRepGProp.SurfaceProperties_1(map.FindKey(index), props, false, false);
+        const c = own(props.CentreOfMass());
+        return [c.X(), c.Y(), c.Z()].map((v) => Math.round(v * 1e6) / 1e6 + 0);
+      };
+      try {
+        const where = (t: { shape: string; index: number; component?: string }) => {
+          expect(t.shape).toBe('face');
+          const instance = Number(t.component);
+          const shape = result.read.instances[instance]!.shape;
+          return {
+            instance: instance + 1,
+            part: shape === block ? 'block' : shape === plate ? 'plate' : '?',
+            centroid: centroid(shape, t.index),
+          };
+        };
+        expect(
+          asset.items
+            .filter((i) => i.kind !== 'datum')
+            .map((i) => ({
+              kind: i.kind,
+              type: 'type' in i ? i.type : undefined,
+              ...(i.kind === 'geometric-tolerance' ? { value: i.value } : {}),
+              ...(i.kind === 'dimension' ? { values: i.values } : {}),
+              targets: i.targets.map(where),
+              ...(i.kind === 'dimension' && i.targets2 ? { targets2: i.targets2.map(where) } : {}),
+            })),
+        ).toEqual(expected.items);
+        expect({ ...blockA!, id: undefined, targets: blockA!.targets.map(where) }).toEqual({
+          ...expected.datums[0],
+          id: undefined,
+        });
+      } finally {
+        for (const x of owned.reverse()) x.delete();
+      }
+      // Never on the first plate: the item names the second instance only.
+      expect(
+        asset.items
+          .flatMap((i) => [...i.targets, ...(i.kind === 'dimension' ? (i.targets2 ?? []) : [])])
+          .some((t) => t.component === '0'),
+      ).toBe(false);
+      // F43's part PMI stays on the plate's part version, as before.
+      expect(result.read.shapes.filter((x) => x.pmi)).toHaveLength(1);
+      // The kernel's model numbers entities by rank, not by `#id`: the same file with other ids
+      // (a name's `#1` changes too, harmlessly) keeps the same items on the same faces.
+      const renumbered = new TextEncoder().encode(
+        new TextDecoder('latin1')
+          .decode(file)
+          .replace(/#(\d+)/g, (_, n: string) => `#${Number(n) * 3 + 1000}`),
+      );
+      const again = importStepAssembly(oc, renumbered, buildHash, { pmi: 'discard' });
+      if (again.status !== 'ok') throw new Error(`${again.code} ${again.detail}`);
+      expect(again.read.assemblyPmi).toEqual(asset);
+    }, 300_000);
   },
 );

@@ -10,6 +10,7 @@ import {
   cadLengthUnits,
   cadLimits,
   cadStepImportLimits,
+  cadImportToleranceMm,
   cadTolerance,
   stepName,
   type CadBodyKind,
@@ -23,7 +24,23 @@ import { bytesToHex } from '@noble/hashes/utils';
 import { decodeKernelException, type OcModule } from '@editor-platform/geometry-kernel-occt';
 import { shapeMetrics } from './metrics';
 import { sheetTopology } from './sheet-topology';
-import { scanStep, type CadStepImportCode, type CadStepLoss } from './step-import';
+import {
+  pmiKept,
+  pmiReadable,
+  scanStep,
+  type CadStepImportCode,
+  type CadStepImportOptions,
+  type CadStepLoss,
+  writtenTolerance,
+} from './step-import';
+import type { CadStepPmiReport } from './step-pmi';
+import type { PmiProduct } from './step-pmi-keep';
+import {
+  assemblyPmiWithinLimits,
+  keepAssemblyPmi,
+  withPathPmi,
+  type PmiPlacement,
+} from './step-pmi-assembly';
 
 /** Preflight report of a STEP assembly import: what was read and what is not kept. */
 export interface CadStepAssemblyImportReport {
@@ -42,6 +59,8 @@ export interface CadStepAssemblyImportReport {
   depth: number;
   healing: 'none';
   losses: (CadStepLoss | 'nesting')[];
+  /** PMI-1/PMI-2: the file's PMI, read, compared and what of it is kept; absent without PMI. */
+  pmi?: CadStepPmiReport;
 }
 export type CadStepAssemblyImportCode =
   | CadStepImportCode
@@ -60,8 +79,16 @@ export type CadStepAssemblyImportResult =
       report: CadStepAssemblyImportReport;
       /** Each shape's normalized BRep, in `read.shapes` order. */
       breps: Uint8Array[];
+      /** PMI-2: each shape's `pmi` asset bytes, where the shape keeps PMI (`shapes[i].pmi`). */
+      pmis?: (Uint8Array | undefined)[];
     }
-  | { status: 'rejected'; code: CadStepAssemblyImportCode; detail?: string };
+  | {
+      status: 'rejected';
+      code: CadStepAssemblyImportCode;
+      detail?: string;
+      /** `step-pmi-partial`: what the file's PMI holds and what of it was read. */
+      pmi?: CadStepPmiReport;
+    };
 
 /** The entities whose names the assembly reader is given as placeholders. */
 export type CadStepNamed = 'PRODUCT' | 'NEXT_ASSEMBLY_USAGE_OCCURRENCE';
@@ -173,6 +200,7 @@ export function importStepAssembly(
   oc: OcModule,
   bytes: Uint8Array,
   importerBuildHash: string,
+  options: CadStepImportOptions = {},
 ): CadStepAssemblyImportResult {
   const owned = new Set<{ delete(): void; isDeleted?(): boolean }>();
   const own = <T>(value: T): T => (owned.add(value as never), value);
@@ -192,19 +220,30 @@ export function importStepAssembly(
     const usageNames = new Map(scan.usages.map((u) => [u.entity, u.name]));
     const named: (typeof scan.products)[number][] = [];
     const usages: string[] = [];
+    /** PMI-5a: the usage entity of each placeholder, as `usages`. */
+    const usageEntities: number[] = [];
     oc.FS.writeFile(
       paths.step,
       renameEntities(bytes, (type, entity) => {
         if (type === 'NEXT_ASSEMBLY_USAGE_OCCURRENCE') {
           const name = usageNames.get(entity);
-          return name === undefined ? undefined : `'${usagePlaceholder}${usages.push(name) - 1}'`;
+          if (name === undefined) return undefined;
+          usageEntities.push(entity);
+          return `'${usagePlaceholder}${usages.push(name) - 1}'`;
         }
         const product = byEntity.get(entity);
         return product && `'${placeholder}${named.push(product) - 1}'`;
       }),
     );
+    // Only PRODUCT and usage names differ in the copy, so its PMI is the file's.
+    // PMI-2: one read in GD&T and view mode, so the PMI's targets are the bodies' sub-shapes.
+    const withPmi = pmiReadable(oc, scan);
     const reader = own(new oc.STEPCAFControl_Reader_1());
     reader.SetNameMode(true);
+    if (withPmi) {
+      reader.SetGDTMode(true);
+      reader.SetViewMode(true);
+    }
     if (reader.ReadFile(paths.step) !== oc.IFSelect_ReturnStatus.IFSelect_RetDone)
       reject('step-unreadable', 'read');
     const text = (s: string) => own(new oc.TCollection_ExtendedString_2(s, false));
@@ -237,6 +276,8 @@ export function importStepAssembly(
     const read: CadStepAssemblyRead = { shapes: [], instances: [], skipped: [] };
     const breps: Uint8Array[] = [];
     const split: CadStepAssemblyImportReport['split'] = [];
+    /** PMI-2: each leaf product by label entry, with the bodies made of it. */
+    const pmiProducts = new Map<string, PmiProduct>();
     /** Each leaf product read so far: its prototype shape and its shapes' indices. */
     const products: { shape: { IsSame(o: unknown): boolean }; shapes: number[] }[] = [];
     let depth = 0;
@@ -252,13 +293,19 @@ export function importStepAssembly(
       const kind: CadBodyKind = solids.length ? 'solid' : 'sheet';
       const found = solids.length ? solids : collect(prototype, 'TopAbs_SHELL', 'TopAbs_SOLID');
       const product = { id, name: given, description };
+      const bodies: unknown[] = [];
       const shapes = found.map((shape, i) => {
         const one = own(kind === 'solid' ? oc.TopoDS.Solid_1(shape) : oc.TopoDS.Shell_1(shape));
-        const bounds = check(one, kind);
+        bodies.push(one);
+        const { bounds, tolerance: measured } = check(one, kind);
         if (!oc.BRepTools.Write_3(one, paths.brep, own(new oc.Message_ProgressRange_1())))
           reject('kernel-failure', 'brep-write');
         const brep = oc.FS.readFile(paths.brep) as Uint8Array;
         if (brep.byteLength > cadLimits.brepBytes) reject('step-too-large', 'brep');
+        // As written: the writer's rounding can raise a tolerance just above the measured one.
+        const tolerance = Math.max(measured, writtenTolerance(oc, own, paths.brep));
+        if (!(tolerance <= cadImportToleranceMm))
+          reject('step-tolerance-unsupported', String(tolerance));
         breps.push(brep);
         read.shapes.push({
           name: stepName(name, 'STEP', found.length > 1 ? ` (${i + 1})` : ''),
@@ -266,11 +313,17 @@ export function importStepAssembly(
           kind,
           brep: { sha256: `sha256:${bytesToHex(sha256(brep))}`, byteLength: brep.byteLength },
           boundsMm: bounds,
+          ...(tolerance > cadTolerance.maxResultLinearToleranceMm && { maxToleranceMm: tolerance }),
         });
         return read.shapes.length - 1;
       });
       if (!shapes.length) read.skipped.push(name);
       if (shapes.length > 1) split.push({ name, count: shapes.length });
+      if (withPmi)
+        pmiProducts.set(own(oc.OCJS.labelEntry(label)).ToCString() as string, {
+          shape: prototype,
+          bodies: shapes.map((index, i) => ({ index, shape: bodies[i] })),
+        });
       products.push({ shape: prototype, shapes });
       return shapes;
     };
@@ -283,7 +336,10 @@ export function importStepAssembly(
       return found;
     };
     /** A shape as the single import accepts it: valid, within tolerance and range. */
-    const check = (shape: unknown, kind: CadBodyKind): [Vec3, Vec3] => {
+    const check = (
+      shape: unknown,
+      kind: CadBodyKind,
+    ): { bounds: [Vec3, Vec3]; tolerance: number } => {
       const sheet = kind === 'sheet' ? sheetTopology(oc, shape, own) : undefined;
       if (sheet && !sheet.connected) reject('step-multiple-shells', 'faces');
       if (!own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2())
@@ -293,7 +349,8 @@ export function importStepAssembly(
         1,
         oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
       );
-      if (tolerance > cadTolerance.maxResultLinearToleranceMm)
+      // #820: kept as read up to the import limit; recorded on the part above the standard one.
+      if (!(tolerance <= cadImportToleranceMm))
         reject('step-tolerance-unsupported', String(tolerance));
       if (!sheet && !(shapeMetrics(oc, shape, own, true).volumeMm3! > 0))
         reject('step-invalid-solid', 'volume');
@@ -306,10 +363,26 @@ export function importStepAssembly(
       ];
       if (bounds.flat().some((v) => !(Math.abs(v) <= cadLimits.coordinateMm)))
         reject('step-coordinate-range');
-      return bounds;
+      return { bounds, tolerance };
     };
-    /** Places `label` (a product) at `trsf`, reached through `path`. */
-    const place = (label: unknown, trsf: unknown, path: string[], level: number) => {
+    /** PMI-5a: each leaf placement with its usages from the free shape (`withPmi`). */
+    const placements: PmiPlacement[] = [];
+    const entryOf = (label: unknown) => own(oc.OCJS.labelEntry(label)).ToCString() as string;
+    /** A component's `NEXT_ASSEMBLY_USAGE_OCCURRENCE`, by its placeholder (0 when unknown). */
+    const usageOf = (label: unknown) => {
+      const name = nameOf(label);
+      return name.startsWith(usagePlaceholder)
+        ? (usageEntities[Number(name.slice(usagePlaceholder.length))] ?? 0)
+        : 0;
+    };
+    /** Places `label` (a product) at `trsf`, reached through `path` (usages `chain`). */
+    const place = (
+      label: unknown,
+      trsf: unknown,
+      path: string[],
+      level: number,
+      chain: number[] = [],
+    ) => {
       if (level > cadStepImportLimits.depth)
         reject('step-depth-limit', String(cadStepImportLimits.depth));
       depth = Math.max(depth, level);
@@ -323,7 +396,13 @@ export function importStepAssembly(
           const local = own(own(oc.XCAFDoc_ShapeTool.GetLocation(component)).Transformation());
           const total = own((trsf as { Multiplied(t: unknown): unknown }).Multiplied(local));
           const name = usageName(component) || productName(referred);
-          place(referred, total, [...path, name], level + 1);
+          place(
+            referred,
+            total,
+            [...path, name],
+            level + 1,
+            withPmi ? [...chain, usageOf(component)] : chain,
+          );
         }
         return;
       }
@@ -343,7 +422,14 @@ export function importStepAssembly(
       const q = own(t.GetRotation_2());
       const n = Math.hypot(q.X(), q.Y(), q.Z(), q.W());
       const rotation: Quaternion = [q.X() / n, q.Y() / n, q.Z() / n, q.W() / n];
+      const placement: PmiPlacement = {
+        chain,
+        product: withPmi ? entryOf(label) : '',
+        instances: [],
+      };
+      if (withPmi) placements.push(placement);
       for (const shape of shapes) {
+        placement.instances.push({ shape, instance: read.instances.length });
         read.instances.push({ shape, path, pose: { translationMm: translation, rotation } });
         // Refused while reading: the file is never imported in part.
         if (read.instances.length > cadStepImportLimits.components)
@@ -357,12 +443,46 @@ export function importStepAssembly(
       place(label, own(new oc.gp_Trsf_1()), [productName(label)], 0);
     }
     if (!read.instances.length) reject('step-assembly-empty');
-    const losses: CadStepAssemblyImportReport['losses'] = [...scan.losses];
+    // PMI-5a: the items through assembly paths, on the instances they name (`assembly-pmi`).
+    const path =
+      withPmi && scan.pmiPath && typeof oc.OCJS?.pmiEntityShapes === 'function'
+        ? keepAssemblyPmi(
+            oc,
+            own,
+            reader,
+            doc,
+            scan.pmiPath,
+            placements,
+            pmiProducts,
+            new Map(
+              scan.pmiSemantics!.entities['geometric-tolerance'].map((t, i) => [
+                t,
+                scan.pmiSemantics!.tolerances[i]!.systems,
+              ]),
+            ),
+            (datum) => scan.pmiPath!.datumFeatures.get(datum) ?? 0,
+          )
+        : undefined;
+    if (path?.asset && !assemblyPmiWithinLimits(path.asset)) reject('step-too-large', 'pmi');
+    const pmi = withPmi
+      ? pmiKept(oc, own, scan, doc, pmiProducts, options, (r) => (path ? withPathPmi(r, path) : r))
+      : undefined;
+    if (path?.asset) read.assemblyPmi = path.asset;
+    const pmis = read.shapes.map((shape, i) => {
+      const asset = pmi?.assets.get(i);
+      if (asset) shape.pmi = { sha256: asset.sha256, byteLength: asset.byteLength };
+      return asset?.bytes;
+    });
+    // PMI-2: PMI is a loss unless all of it is kept.
+    const losses: CadStepAssemblyImportReport['losses'] = pmi?.report.lossless
+      ? scan.losses.filter((l) => l !== 'pmi')
+      : [...scan.losses];
     if (depth > 1) losses.push('nesting');
     return {
       status: 'ok',
       read,
       breps,
+      pmis,
       report: {
         source: {
           sha256: `sha256:${bytesToHex(sha256(bytes))}`,
@@ -377,6 +497,7 @@ export function importStepAssembly(
         depth,
         healing: 'none',
         losses,
+        ...(pmi ? { pmi: pmi.report } : {}),
       },
     };
   } catch (error) {
@@ -392,6 +513,7 @@ export function importStepAssembly(
         status: 'rejected',
         code: error.code as CadStepAssemblyImportCode,
         ...('detail' in error && typeof error.detail === 'string' ? { detail: error.detail } : {}),
+        ...('pmi' in error && error.pmi ? { pmi: error.pmi as CadStepPmiReport } : {}),
       };
     const decoded = decodeKernelException(oc, error);
     return typeof error === 'number'

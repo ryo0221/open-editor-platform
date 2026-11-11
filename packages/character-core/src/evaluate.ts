@@ -23,6 +23,13 @@ export interface CharacterPose {
    * absent: it keeps the value its version saved.
    */
   joints: Map<string, Map<string, Partial<Record<CharacterJointValueKey, number>>>>;
+  /** MR4: each prop's placement: its own, or its keyed one. */
+  props: Map<string, { translation: Vec3; rotation: Quat }>;
+  /**
+   * MR7: the keyed joint in effect of props' mounts, by prop ID then mount ID. A mount absent,
+   * or before its first key, keeps the version's own choice.
+   */
+  mounts: Map<string, Map<string, string>>;
 }
 
 /** The rest pose, then every track of `action` sampled at `tick` (clamped to the action). */
@@ -38,6 +45,13 @@ export function poseAt(
     ),
     morphs: new Map(doc.morphs.map((m) => [m.id, m.weight])),
     joints: new Map(),
+    mounts: new Map(),
+    props: new Map(
+      doc.props.map((p) => [
+        p.id,
+        { translation: [...p.placement.translation], rotation: [...p.placement.rotation] },
+      ]),
+    ),
   };
   if (!action) return pose;
   const t = Math.min(Math.max(tick, 0), action.duration);
@@ -53,6 +67,21 @@ export function poseAt(
       const values = joints.get(target.joint) ?? {};
       values[target.property] = sampleNumber(track.keys, t);
       joints.set(target.joint, values);
+      continue;
+    }
+    if (target.kind === 'prop-mount') {
+      const joint = sampleHeld(track.keys, t);
+      if (joint === undefined) continue;
+      let mounts = pose.mounts.get(target.id);
+      if (!mounts) pose.mounts.set(target.id, (mounts = new Map()));
+      mounts.set(target.mount, joint);
+      continue;
+    }
+    if (target.kind === 'prop') {
+      const placement = pose.props.get(target.id);
+      if (!placement) continue;
+      if (target.property === 'rotation') placement.rotation = sampleQuat(track.keys, t);
+      else placement.translation = sampleVec3(track.keys, t);
       continue;
     }
     const map = target.kind === 'part' ? pose.parts : pose.bones;
@@ -88,6 +117,15 @@ function segment(
   }
   const last = keys[keys.length - 1];
   return [last, last, 0];
+}
+/** MR7: the value of the last key at or before `tick` (a mount's joint), none before the first. */
+export function sampleHeld(keys: readonly CharacterKey[], tick: number): string | undefined {
+  let held: string | undefined;
+  for (const k of keys) {
+    if (k.tick > tick) break;
+    held = k.value as string;
+  }
+  return held;
 }
 export function sampleNumber(keys: readonly CharacterKey[], tick: number): number {
   const [a, b, t] = segment(keys, tick);

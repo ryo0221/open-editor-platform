@@ -4,12 +4,11 @@ import { BimController, BimSurface, WorkerBimKernel } from '@editor-platform/bim
 import '@editor-platform/bim/style.css';
 import KernelWorker from '@editor-platform/bim/worker?worker';
 import type { BimDocument } from '@editor-platform/bim-core';
-import { WorkerKernelPort } from '@editor-platform/cad-kernel-occt';
-import CadKernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
 import { createCadAssetStore, portableCadRecord } from '../cad/resources';
-import { createBimPartSource, portableBimRecord, type BimPartKernel } from './parts';
+import { createBimPartSource, portableBimRecord } from './parts';
+import { partKernel } from './part-kernel';
 
 /**
  * Playground binding for the building Surface. An edit is one session command applied at once;
@@ -113,34 +112,4 @@ export default function BimHost({
       })}
     />
   );
-}
-
-/** A CAD kernel Worker for part shapes, started on first use; one export at a time. */
-function partKernel(build: NonNullable<typeof cadKernel>): BimPartKernel & { dispose(): void } {
-  let port: WorkerKernelPort | undefined;
-  let queue: Promise<unknown> = Promise.resolve();
-  let n = 0;
-  return {
-    buildHash: build.buildHash,
-    exportBrep(document, contentHash) {
-      port ??= new WorkerKernelPort({ spawn: () => new CadKernelWorker() as never, build });
-      const p = port;
-      // The port's export slot keeps only the newest waiting export: send them one by one.
-      const job = queue.then(async () => {
-        const { evaluation, brep } = await p.exportBrep({
-          requestId: `bim-part-${++n}`,
-          generation: n,
-          baseHash: '',
-          candidateHash: contentHash,
-          document,
-        });
-        if (evaluation.status !== 'ok') throw new Error(evaluation.code);
-        if (!brep) throw new Error('brep-unavailable');
-        return brep;
-      });
-      queue = job.catch(() => undefined);
-      return job;
-    },
-    dispose: () => port?.dispose(),
-  };
 }

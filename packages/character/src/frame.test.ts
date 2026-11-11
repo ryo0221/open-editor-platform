@@ -8,7 +8,13 @@ import {
   worldMatrices,
 } from '@editor-platform/character-core';
 import { testGltf } from '@editor-platform/character-core/gltf-fixtures';
-import { cornerNormals } from '@editor-platform/geometry-mesh';
+import {
+  cornerNormals,
+  cornerTangents,
+  editInput,
+  meshEdges,
+  unwrapMesh,
+} from '@editor-platform/geometry-mesh';
 import { checkCharacterAssets, decodeCharacterAssets, readCharacterAssets } from './assets';
 import { characterFrame, frameBounds, prepareMesh } from './frame';
 import { advance, choose, formatTicks, pause, play, restPlayback, seek, stop } from './playback';
@@ -67,6 +73,77 @@ describe('character frame', () => {
       const e = [n0[0] / 2, n0[1], n0[2]];
       const len = Math.hypot(...e);
       for (let k = 0; k < 3; k++) expect(frame.normals[3 * c + k]).toBeCloseTo(e[k] / len, 5);
+    }
+  });
+  it("carries the baked normal map's tangents through the pose (C7d, TS-1284)", () => {
+    const f = blockyFigure();
+    const input = editInput(f.meshes.get('mesh-body')!);
+    const mesh = unwrapMesh(input, meshEdges(input.mesh, input.topology));
+    const meshes = new Map([['mesh-body', mesh]]);
+    const p = prepareMesh(mesh);
+    // The frame the bake and the GLB use.
+    expect(p.tangents).toEqual(cornerTangents(mesh, p.display.normals));
+    expect(prepareMesh(f.meshes.get('mesh-body')!).tangents).toBeUndefined();
+    const doc = structuredClone(f.doc);
+    doc.skins = [];
+    const rest = characterFrame(doc, prepared(meshes), null, 0)[0].tangents!;
+    for (let i = 0; i < rest.length; i++) expect(rest[i]).toBeCloseTo(p.tangents![i], 5);
+    // A non-uniform scale: still unit and perpendicular to the normal.
+    doc.parts[0].transform.scale = [2, 1, 1];
+    const scaled = characterFrame(doc, prepared(meshes), null, 0)[0];
+    for (let c = 0; c < scaled.tangents!.length / 4; c++) {
+      const t = scaled.tangents!.subarray(4 * c, 4 * c + 3);
+      const n = scaled.normals.subarray(3 * c, 3 * c + 3);
+      expect(Math.hypot(t[0], t[1], t[2])).toBeCloseTo(1, 5);
+      expect(t[0] * n[0] + t[1] * n[1] + t[2] * n[2]).toBeCloseTo(0, 4);
+    }
+    // A morph that turns a face: its tangents come from the morphed shape, as its normals do.
+    const turned = structuredClone(doc);
+    turned.parts[0].transform.scale = [1, 1, 1];
+    const deltas = new Float32Array(mesh.positions.length);
+    for (let v = 0; v < deltas.length / 3; v++) {
+      // Rotate every vertex 90° about z (x, y) → (−y, x).
+      const x = mesh.positions[3 * v],
+        y = mesh.positions[3 * v + 1];
+      deltas[3 * v] = -y - x;
+      deltas[3 * v + 1] = x - y;
+    }
+    const morphMesh = { ...mesh, morphs: [{ id: 'turn', deltas }] };
+    turned.actions = [
+      {
+        id: 'turn',
+        name: 'Turn',
+        duration: 240000,
+        frameRate: { numerator: 30, denominator: 1 },
+        tracks: [
+          {
+            id: 'turn-track',
+            target: { kind: 'morph', id: 'turn', property: 'weight' },
+            keys: [{ id: 'turn-0', tick: 0, value: 1, easing: { type: 'hold' } }],
+          },
+        ],
+      },
+    ] as typeof turned.actions;
+    const posed = characterFrame(
+      turned,
+      prepared(new Map([['mesh-body', morphMesh]])),
+      turned.actions[0]!,
+      0,
+    )[0];
+    for (let c = 0; c < posed.tangents!.length / 4; c++) {
+      const t = posed.tangents!.subarray(4 * c, 4 * c + 3);
+      const r = p.tangents!.subarray(4 * c, 4 * c + 3);
+      // The rest tangent turned by the same 90°.
+      expect(t[0]).toBeCloseTo(-r[1], 4);
+      expect(t[1]).toBeCloseTo(r[0], 4);
+      expect(t[2]).toBeCloseTo(r[2], 4);
+    }
+    // A mirror flips the handedness, so the bitangent (normal × tangent × w) stays M × bitangent.
+    doc.parts[0].transform.scale = [-1, 1, 1];
+    const mirrored = characterFrame(doc, prepared(meshes), null, 0)[0].tangents!;
+    for (let c = 0; c < mirrored.length / 4; c++) {
+      expect(mirrored[4 * c]).toBeCloseTo(-p.tangents![4 * c], 5);
+      expect(mirrored[4 * c + 3]).toBe(-p.tangents![4 * c + 3]);
     }
   });
   it('marks parts drawn through a mirroring matrix, so the view winds them the other way', () => {

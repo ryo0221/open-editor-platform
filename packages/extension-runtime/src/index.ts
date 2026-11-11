@@ -4,10 +4,20 @@ import {
   PERMISSIONS,
   type ExtensionDefinition,
   type ExtensionManifest,
+  type OperationDeclaration,
   type HostAdapter,
   type Permission,
   type ScopedHost,
 } from '@editor-platform/extension-contract';
+import { canonicalJson } from '@editor-platform/artifact-core';
+import type { LocalCommandContext } from '@editor-platform/editor-core';
+import { operationInputProblems, parseAddons } from './operations';
+
+export {
+  OPERATION_LIMITS,
+  operationDeclarationProblems,
+  operationInputProblems,
+} from './operations';
 
 export function parseManifest(input: unknown): ExtensionManifest {
   if (!input || typeof input !== 'object') throw new Error('Invalid manifest');
@@ -40,6 +50,8 @@ export function parseManifest(input: unknown): ExtensionManifest {
     !m.licenseNotices.every((v) => typeof v === 'string' && v.length <= 4096)
   )
     throw new Error('Invalid license notices');
+  // Optional add-ons are exact-version opt-ins; an absent field stays absent (unchanged canonical form).
+  const addons = m.addons === undefined ? undefined : parseAddons(m.addons);
   // Copy only defined data fields; never preserve arbitrary manifest properties.
   return Object.freeze({
     contractVersion: CONTRACT_VERSION,
@@ -51,6 +63,7 @@ export function parseManifest(input: unknown): ExtensionManifest {
     capabilities: Object.freeze([...(m.capabilities as ExtensionManifest['capabilities'])]),
     permissions: Object.freeze([...(m.permissions as ExtensionManifest['permissions'])]),
     licenseNotices: Object.freeze([...m.licenseNotices]),
+    ...(addons ? { addons } : {}),
   });
 }
 export interface Admission {
@@ -58,11 +71,37 @@ export interface Admission {
   /** Verified externally before importing executable code. Not a manifest self-assertion. */
   verifiedPackageHash: string;
   replace?: boolean;
+  /** Live Host-owned pin verification, including retained operations. */
+  assertTrusted?: () => void;
 }
 export interface ExtensionHandle<T> {
   api: ScopedHost<T>;
   mount(container: HTMLElement): void;
   close(): void;
+  /** Present only when the manifest declares `operations@0-draft`. */
+  operations?: ExtensionOperations<T>;
+}
+export type OperationRef = Readonly<{ id: string; version: string }>;
+/** One operation checked against the current content, not yet in session history. */
+export interface PreparedOperation<T> {
+  /** Detached, frozen content the operation was built from. */
+  readonly base: T;
+  /** Detached, frozen result that passed the package validator. */
+  readonly candidate: T;
+  /**
+   * Records exactly `candidate` through the Host's canonical execute path, once. The executed
+   * command never calls the package again: its apply throws (leaving history untouched) unless
+   * the content it receives still equals `base`. The Host passes its own context (for example
+   * `origin: 'proposal'` with a Host-issued transaction id).
+   */
+  commit(context?: LocalCommandContext): void;
+}
+export interface ExtensionOperations<T> {
+  readonly declarations: readonly OperationDeclaration[];
+  /** Schema problems first, then the package's own checks against the current content. */
+  check(operation: OperationRef, input: unknown): readonly string[];
+  /** Throws with the problems, or when the result fails the package validator. */
+  prepare(operation: OperationRef, input: unknown): PreparedOperation<T>;
 }
 export interface Registration<T> {
   readonly manifest: ExtensionManifest;
@@ -101,6 +140,20 @@ export class ExtensionRegistry {
     if (typeof definition.validate !== 'function') throw new Error('Missing domain validator');
     if (manifest.capabilities.includes('surface') !== (typeof definition.mount === 'function'))
       throw new Error('Surface capability/adapter mismatch');
+    const operationsAdapter = definition.operations;
+    if (
+      !!manifest.addons?.operations !==
+      (!!operationsAdapter &&
+        typeof operationsAdapter.checkInput === 'function' &&
+        typeof operationsAdapter.command === 'function')
+    )
+      throw new Error('Operations add-on/adapter mismatch');
+    if (operationsAdapter && !manifest.capabilities.includes('local-edit'))
+      throw new Error('Operations require local-edit');
+    const checkInput = operationsAdapter?.checkInput,
+      makeCommand = operationsAdapter?.command;
+    const trusted = admission.assertTrusted;
+    trusted?.();
     const previous = this.entries.get(manifest.id);
     if (previous) {
       if (!admission.replace) throw new Error('Already installed; explicit replacement required');
@@ -112,19 +165,15 @@ export class ExtensionRegistry {
       if (previous.manifest.artifactKind !== manifest.artifactKind)
         throw new Error('Artifact kind cannot change during replacement');
     }
-    for (const entry of this.entries.values()) {
-      if (
-        entry.manifest.id !== manifest.id &&
-        entry.manifest.artifactKind === manifest.artifactKind
-      )
-        throw new Error('Artifact kind already registered');
-    }
+    // Entries are keyed by Editor/package id. Several Editors may serve one artifactKind; the
+    // Host chooses explicitly which Registration opens an artifact. kind/schema is checked at open.
     const validate = definition.validate;
     const mountSurface = definition.mount;
     let active = true;
     const closers = new Set<() => void>();
     const assertActive = () => {
       if (!active) throw new Error('Registration revoked');
+      trusted?.();
     };
     const entry = {
       manifest,
@@ -234,6 +283,74 @@ export class ExtensionRegistry {
             host.select([...ids]);
           },
         });
+        const declarations = manifest.addons?.operations?.declarations;
+        const check = (operation: OperationRef, input: unknown, content: T): string[] => {
+          const problems = operationInputProblems(declarations!, operation, input);
+          if (problems.length) return problems;
+          const own = checkInput!.call(
+            operationsAdapter,
+            operation.id,
+            structuredClone(input),
+            structuredClone(content),
+          );
+          if (!Array.isArray(own) || !own.every((p) => typeof p === 'string'))
+            throw new Error('Invalid operation check result');
+          return [...own];
+        };
+        const operations: ExtensionOperations<T> | undefined = declarations
+          ? Object.freeze({
+              declarations,
+              check: (operation: OperationRef, input: unknown) => {
+                requireCapability('local-edit');
+                return Object.freeze(check(operation, input, snapshot()));
+              },
+              prepare: (operation: OperationRef, input: unknown): PreparedOperation<T> => {
+                edit();
+                const base = snapshot();
+                const problems = check(operation, input, base);
+                if (problems.length)
+                  throw new Error(`Operation input refused: ${problems.join('; ')}`);
+                const cmd = makeCommand!.call(
+                  operationsAdapter,
+                  operation.id,
+                  structuredClone(input),
+                  structuredClone(base),
+                );
+                if (!cmd || typeof cmd.apply !== 'function')
+                  throw new Error('Invalid operation command');
+                // The package's apply runs once, on a private copy. Only its checked result is kept.
+                const result = structuredClone(cmd.apply(structuredClone(base)));
+                if (!validate(result)) throw new Error('Invalid domain content');
+                const frozenBase = deepFreeze(structuredClone(base));
+                const candidate = deepFreeze(result);
+                const baseJson = canonicalJson(frozenBase);
+                // Single use: the first commit attempt consumes the prepared operation before the Host
+                // executes, so a synchronous Host notification cannot re-enter and commit it twice. A failed
+                // attempt (stale base, revoked access) is not retried; the Host prepares again.
+                let used = false;
+                return Object.freeze({
+                  base: frozenBase,
+                  candidate,
+                  commit: (context?: LocalCommandContext) => {
+                    edit();
+                    if (used) throw new Error('Operation already committed');
+                    used = true;
+                    host.execute({
+                      type: String(cmd.type),
+                      label: String(cmd.label),
+                      ...(context ? { context: { ...context, mergeKey: undefined } } : {}),
+                      apply: (content: T) => {
+                        edit();
+                        if (canonicalJson(content) !== baseJson)
+                          throw new Error('Operation base changed');
+                        return structuredClone(candidate) as T;
+                      },
+                    });
+                  },
+                });
+              },
+            })
+          : undefined;
         snapshot();
         const close = () => {
           if (closed) return;
@@ -247,6 +364,7 @@ export class ExtensionRegistry {
         return Object.freeze({
           api,
           close,
+          ...(operations ? { operations } : {}),
           mount: (container: HTMLElement) => {
             requireCapability('surface');
             guard('artifact:read');
@@ -265,4 +383,11 @@ export class ExtensionRegistry {
       },
     });
   }
+}
+function deepFreeze<V>(value: V): V {
+  if (value && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }

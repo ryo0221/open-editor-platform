@@ -46,6 +46,7 @@ import {
 import { NativeGraphSurface, relationProfile } from '@editor-platform/structured-graph';
 import type { BimDocument } from '@editor-platform/bim-core';
 import type { CharacterDocument } from '@editor-platform/character-core';
+import type { SimulationDocument } from '@editor-platform/simulation-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
@@ -73,7 +74,11 @@ import {
   type ReviewVisibleSource,
 } from '@editor-platform/review-surfaces';
 import { isDesign, isDesignWithPaths } from '@editor-platform/design';
-import { ReactUiSurface } from '@editor-platform/react-ui';
+import {
+  ReactUiSurface,
+  reactUiExportKinds,
+  type ReactUiExportKind,
+} from '@editor-platform/react-ui';
 import type { ReactUiDocument } from '@editor-platform/react-ui-core';
 import { reuseHash } from '@editor-platform/reuse-core';
 import type { InputValue, PrivateViewSettings } from '@editor-platform/templates';
@@ -159,6 +164,7 @@ const CadHost = lazy(() => import('../cad/host'));
 // The building Surface and its kernel Worker load only when a building opens.
 const BimHost = lazy(() => import('../bim/host'));
 const CharacterHost = lazy(() => import('../character/host'));
+const SimulationHost = lazy(() => import('../simulation/host'));
 
 export function checkedContent(content: unknown, kind: string | undefined) {
   return {
@@ -191,6 +197,10 @@ export function checkedContent(content: unknown, kind: string | undefined) {
     character:
       kind === 'character' && validContent('character', content)
         ? (content as CharacterDocument)
+        : undefined,
+    simulation:
+      kind === 'simulation' && validContent('simulation', content)
+        ? (content as SimulationDocument)
         : undefined,
   };
 }
@@ -765,9 +775,21 @@ function SlideHost({
   );
 }
 
+/** `?react-ui-exports=none` or a comma list (`tsx,composition`) stands in for a Host
+ * without every export destination (#801). Absent, every export is shown. */
+function playgroundReactUiExports(): false | ReactUiExportKind[] | undefined {
+  const value = new URLSearchParams(location.search).get('react-ui-exports');
+  if (value === null) return undefined;
+  if (value === 'none') return false;
+  return value
+    .split(',')
+    .filter((kind): kind is ReactUiExportKind => reactUiExportKinds.includes(kind as never));
+}
 function ReactUiHost({ host, content }: { host: SurfaceHost; content: ReactUiDocument }) {
+  const exports = useMemo(playgroundReactUiExports, []);
   return (
     <ReactUiSurface
+      exports={exports}
       screenReferences={[
         { namespace: 'reference-host', screenId: host.active.id, stateId: 'draft' },
       ]}
@@ -944,6 +966,11 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
             }}
             record={() => latestRecord(host)}
             persistRecord={async (record) => (await host.persist(record)) !== false}
+            createRecord={async (record) => {
+              // CR3e: a part made from a body is a new Artifact beside this one, not opened.
+              host.sessions.current.set(record.id, createLocalSession(record.draft.content));
+              return (await host.persist(record)) !== false;
+            }}
             records={() => host.recordsRef.current}
             openArtifact={(id) => host.activate(id)}
           />
@@ -983,6 +1010,25 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
             persistRecord={async (record) => (await host.persist(record)) !== false}
             records={() => host.recordsRef.current}
             history={host.history}
+          />
+        </Suspense>
+      )}
+      {rendered.simulation && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Structural analysis…</p>}>
+          <SimulationHost
+            key={active.id}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<SimulationDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            record={() => latestRecord(host)}
+            records={() => host.recordsRef.current}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
           />
         </Suspense>
       )}

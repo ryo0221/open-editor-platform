@@ -408,7 +408,13 @@ export class TimelineWorkbench {
       const durable = await this.storage.get(id);
       if (!access()) return undefined;
       if (durable && durable.id !== id) throw Error('保存先のArtifact IDが一致しません。');
+      if (
+        durable &&
+        new Set(durable.versions.map((v) => v.versionId)).size !== durable.versions.length
+      )
+        throw Error('保存版のIDが重複しています。');
       const a = o.editor.artifact as Artifact<unknown>;
+      if (durable && durable.kind !== a.kind) throw Error('保存先のArtifact kindが一致しません。');
       const versions = new Map(a.versions.map((v) => [v.versionId, v]));
       for (const v of durable?.versions ?? []) {
         const known = versions.get(v.versionId);

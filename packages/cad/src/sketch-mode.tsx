@@ -13,6 +13,7 @@ import {
   combScale,
   combTip,
   formatExpression,
+  sketchOffsetChain,
   splineComb,
   splinePoints,
   splineThrough,
@@ -48,7 +49,11 @@ const radiusOf = (s: CadSketch, e: Extract<CadSketchEntity, { type: 'circle' | '
 const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
 /** The u/v box the drawing covers, at least 200 mm across, with a margin. */
-function fitBox(s: CadSketch): [number, number, number, number] {
+/**
+ * The view round the sketch's elements. On entering, at least 200 mm across (a drawing area for
+ * a new sketch); `Fit sketch` (`floor` 0.5 mm) fits even a watch bridge of a few millimetres (WM5c).
+ */
+function fitBox(s: CadSketch, floor = 200): [number, number, number, number] {
   const pts: Pt[] = [];
   for (const e of s.entities) {
     if (e.type === 'point') pts.push(at(s, e.id));
@@ -77,7 +82,7 @@ function fitBox(s: CadSketch): [number, number, number, number] {
   const us = pts.map((p) => p[0]);
   const vs = pts.map((p) => p[1]);
   const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)];
-  const span = Math.max(200, (u1 - u0) * 1.3, (v1 - v0) * 1.3);
+  const span = Math.max(floor, (u1 - u0) * 1.3, (v1 - v0) * 1.3);
   return [(u0 + u1) / 2 - span / 2, (v0 + v1) / 2 - span / 2, span, span];
 }
 
@@ -467,7 +472,7 @@ export function SketchCanvas({
         {preview}
       </svg>
       <div className="cad-sketch-view-tools">
-        <IconButton icon={Scan} label="Fit sketch" onClick={() => setBox(fitBox(sketch))} />
+        <IconButton icon={Scan} label="Fit sketch" onClick={() => setBox(fitBox(sketch, 0.5))} />
       </div>
     </div>
   );
@@ -704,6 +709,9 @@ export function SketchPanel({
   };
   const heading = useRef<HTMLHeadingElement>(null);
   const available = useMemo(() => offers(sketch, selected), [sketch, selected]);
+  // CR3a: a selection that is one chain (or one circle or closed spline) can be offset.
+  const [offset, setOffset] = useState('5');
+  const offsettable = useMemo(() => !!sketchOffsetChain(sketch, selected), [sketch, selected]);
   const problem = new Set(view.problem?.elements ?? []);
   const extrudable = Number(distance) > 0 && Number.isFinite(Number(distance));
   return (
@@ -769,6 +777,29 @@ export function SketchPanel({
           </span>
         )}
       </div>
+      {offsettable && (
+        <div className="cad-row" role="group" aria-label="Offset">
+          <label>
+            Offset distance (mm){' '}
+            <input
+              type="number"
+              step="any"
+              value={offset}
+              onChange={(e) => setOffset(e.target.value)}
+              title="Left of an open chain as its first selected element runs, out of a closed one; negative for the other side (0.1–200 mm)"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const ids = controller.sketchOffset(selected, Number(offset));
+              if (ids) onSelect(ids);
+            }}
+          >
+            Offset
+          </button>
+        </div>
+      )}
       {selected.length > 0 && (
         <div className="cad-row">
           <button

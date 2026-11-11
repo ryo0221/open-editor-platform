@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./weights": "./src/weights-entry.ts",
+    "./bake": "./src/bake-entry.ts",
     "./style.css": "./src/style.css"
   },
   "dependencies": {
@@ -14,11 +15,14 @@
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/geometry-mesh": "*",
+    "@editor-platform/geometry-view": "*",
+    "fflate": "0.8.3",
     "lucide-react": "1.51.0",
     "react": "19.1.1",
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@editor-platform/video-metadata": "*",
     "@types/three": "0.186.0",
     "react-dom": "19.1.1"
   }

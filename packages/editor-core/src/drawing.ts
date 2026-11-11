@@ -505,10 +505,27 @@ export interface DrawingRenderOptions {
   /** Screen rendering may omit lines outside the existing clip, retaining font overscan.
    * Native text/layout and the default export primitives always retain the full content. */
   visibleTextOnly?: boolean;
+  /**
+   * Screen pixels per drawing unit, for screen rendering only (#124). Detail that would paint
+   * under half a pixel is left out: text whose largest font is that small, and painted
+   * drawings whose box is that small both ways. Omitted, every detail is kept (exports).
+   */
+  screenScale?: number;
+}
+/** Below this many screen pixels, text or a whole drawing is too small to see. */
+const hiddenBelowPixels = 0.5;
+function largestFont(d: Drawing) {
+  const s = d.typography ?? {};
+  return Math.max(
+    s.fontSize ?? (d.kind === 'text' ? 28 : 18),
+    ...(d.runs ?? []).map((run) => run.style?.fontSize ?? 0),
+  );
 }
 export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
+  if (options.screenScale !== undefined && largestFont(d) * options.screenScale < hiddenBelowPixels)
+    return [];
   const { fontSize: font, lines, startY: start, x } = layoutDrawingText(d);
   const margin = 4 * lines.reduce((size, line) => Math.max(size, line.ascent), font);
   let offset = 0;
@@ -564,7 +581,7 @@ export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): 
   return s.overflow === 'expand'
     ? [text]
     : [
-        p('defs', {}, [p('clipPath', { id: `text-${d.id}` }, [p('rect', { ...b })])]),
+        p('clipPath', { id: `text-${d.id}` }, [p('rect', { ...b })]),
         p('g', { 'clip-path': `url(#text-${d.id})` }, [text]),
       ];
 }
@@ -688,12 +705,84 @@ function fittedImageSource(src: string, imageFit: Drawing['imageFit']): string {
     return src;
   }
 }
+/**
+ * Where a drawing can paint, conservatively, or undefined when that is not known cheaply.
+ * Text, images and vectors are already clipped to their own box; shapes add their stroke,
+ * including the longest miter that SVG's default limit allows.
+ * Lines, arrowheads, clouds, expanded text, tables, charts, groups and freehand are unknown.
+ */
+function paintExtent(d: Drawing): Bounds | undefined {
+  if (d.path || d.polygon || d.points) return undefined;
+  // Expanded text paints past its box, and an empty list item still paints its bullet.
+  if (d.typography?.overflow === 'expand') return undefined;
+  // Arrowheads have a fixed size, so they can reach past any box, whatever the outline.
+  if (d.arrowhead && d.arrowhead !== 'none') return undefined;
+  const b = d.bounds;
+  let pad = 0;
+  if (d.kind === 'shape' && !d.vector) {
+    const kind = d.shape ?? 'rectangle';
+    // Every other outline stays on or inside its box; the cloud's curves bulge past it.
+    if (['line', 'arrow', 'double-arrow', 'elbow', 'curve', 'cloud'].includes(kind))
+      return undefined;
+    // Paths keep SVG's default miter joins (limit 4), so a sharp corner can reach twice the
+    // stroke width past its vertex; half the stroke alone is not enough for triangles or stars.
+    pad = (d.strokeWidth ?? 1) * 2 + 1;
+  } else if (d.kind !== 'text' && d.kind !== 'image' && !(d.kind === 'shape' && d.vector))
+    return undefined;
+  const angle = ((d.rotation ?? 0) * Math.PI) / 180,
+    cos = Math.abs(Math.cos(angle)),
+    sin = Math.abs(Math.sin(angle));
+  const w = b.width + pad * 2,
+    h = b.height + pad * 2;
+  // Rotation and flips turn about the box centre, so the extent stays centred there.
+  const rw = w * cos + h * sin,
+    rh = w * sin + h * cos;
+  return {
+    x: b.x + b.width / 2 - rw / 2,
+    y: b.y + b.height / 2 - rh / 2,
+    width: rw,
+    height: rh,
+  };
+}
+/**
+ * A plain, upright frame clip that contains all the drawing can paint removes nothing, so it
+ * is left out (#124: each clipping frame otherwise repeats its clip for every descendant,
+ * which dominates large screens). Shaped, rotated or flipped clips are always kept.
+ */
+function cutsNothing(d: Drawing, clip: NonNullable<Drawing['clipBounds']>[number]): boolean {
+  if (clip.shape || clip.polygon || clip.rotation || clip.flipX || clip.flipY) return false;
+  const e = paintExtent(d);
+  return (
+    !!e &&
+    e.x >= clip.x &&
+    e.y >= clip.y &&
+    e.x + e.width <= clip.x + clip.width &&
+    e.y + e.height <= clip.y + clip.height
+  );
+}
+/**
+ * A painted drawing whose whole paint extent is under half a screen pixel both ways. The extent
+ * is the conservative one used for frame clips, so expanded text, arrowheads, lines, clouds and
+ * other drawings that may paint past their box are never left out. Transparent, unstroked boxes
+ * are kept: they paint nothing and only serve hit testing.
+ */
+function tooSmallToSee(d: Drawing, scale: number) {
+  if (d.fill === 'transparent' && (!d.stroke || d.stroke === 'none')) return false;
+  const pad = d.path ? (d.strokeWidth ?? 2) : 0,
+    box = d.path ? d.path.paintBounds : paintExtent(d);
+  return (
+    !!box &&
+    (box.width + pad) * scale < hiddenBelowPixels &&
+    (box.height + pad) * scale < hiddenBelowPixels
+  );
+}
 export function drawingPrimitives(
   d: Drawing,
   resourceId = newId('graphic'),
   options: DrawingRenderOptions = {},
 ): SvgPrimitive[] {
   if (d.hidden) return [];
+  if (options.screenScale !== undefined && tooSmallToSee(d, options.screenScale)) return [];
   // Every resource below, including ancestor frame clips, uses this occurrence ID.
   // The same native drawing can coexist in the canvas and before/after comparisons.
   d = { ...d, id: resourceId };
@@ -704,7 +793,7 @@ export function drawingPrimitives(
     if (!d.src) return [];
     const crop = d.crop ?? { x: 0, y: 0, scale: 1 };
     nodes = [
-      p('defs', {}, [p('clipPath', { id: `image-${d.id}` }, [p('rect', { ...b })])]),
+      p('clipPath', { id: `image-${d.id}` }, [p('rect', { ...b })]),
       p('g', { 'clip-path': `url(#image-${d.id})` }, [
         p('image', {
           x: b.x + crop.x,
@@ -822,10 +911,8 @@ export function drawingPrimitives(
             'data-vector-license': d.vector.provenance.license,
           },
           [
-            p('defs', {}, [
-              p('clipPath', { id: `vector-${d.id}`, clipPathUnits: 'userSpaceOnUse' }, [
-                p('rect', { x: v.x, y: v.y, width: v.width, height: v.height }),
-              ]),
+            p('clipPath', { id: `vector-${d.id}`, clipPathUnits: 'userSpaceOnUse' }, [
+              p('rect', { x: v.x, y: v.y, width: v.width, height: v.height }),
             ]),
             p(
               'g',
@@ -861,42 +948,43 @@ export function drawingPrimitives(
     ),
   ];
   return (d.clipBounds ?? []).reduce<SvgPrimitive[]>(
-    (children, clip, i) => [
-      p('defs', {}, [
-        p(
-          'clipPath',
-          {
-            id: `frame-${d.id}-${i}`,
-            ...(clip.shape || clip.polygon
-              ? {
-                  transform: `translate(${clip.x + clip.width / 2} ${clip.y + clip.height / 2}) rotate(${clip.rotation ?? 0}) scale(${clip.flipX ? -1 : 1} ${clip.flipY ? -1 : 1}) translate(${-clip.x - clip.width / 2} ${-clip.y - clip.height / 2})`,
-                }
-              : {}),
-          },
-          [
-            ...(clip.polygon
-              ? [p('path', { d: polygonOutline(clip.polygon, clip), fill: '#000' })]
-              : clip.shape
-                ? shapePrimitives(
-                    clip.shape,
-                    { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
-                    { radius: clip.radius, stroke: 'none', strokeWidth: 0 },
-                    '#000',
-                  )
-                : [
-                    p('rect', {
-                      x: clip.x,
-                      y: clip.y,
-                      width: clip.width,
-                      height: clip.height,
-                      transform: `rotate(${clip.rotation ?? 0} ${clip.x + clip.width / 2} ${clip.y + clip.height / 2})`,
-                    }),
-                  ]),
+    (children, clip, i) =>
+      cutsNothing(d, clip)
+        ? children
+        : [
+            p(
+              'clipPath',
+              {
+                id: `frame-${d.id}-${i}`,
+                ...(clip.shape || clip.polygon
+                  ? {
+                      transform: `translate(${clip.x + clip.width / 2} ${clip.y + clip.height / 2}) rotate(${clip.rotation ?? 0}) scale(${clip.flipX ? -1 : 1} ${clip.flipY ? -1 : 1}) translate(${-clip.x - clip.width / 2} ${-clip.y - clip.height / 2})`,
+                    }
+                  : {}),
+              },
+              [
+                ...(clip.polygon
+                  ? [p('path', { d: polygonOutline(clip.polygon, clip), fill: '#000' })]
+                  : clip.shape
+                    ? shapePrimitives(
+                        clip.shape,
+                        { x: clip.x, y: clip.y, width: clip.width, height: clip.height },
+                        { radius: clip.radius, stroke: 'none', strokeWidth: 0 },
+                        '#000',
+                      )
+                    : [
+                        p('rect', {
+                          x: clip.x,
+                          y: clip.y,
+                          width: clip.width,
+                          height: clip.height,
+                          transform: `rotate(${clip.rotation ?? 0} ${clip.x + clip.width / 2} ${clip.y + clip.height / 2})`,
+                        }),
+                      ]),
+              ],
+            ),
+            p('g', { 'clip-path': `url(#frame-${d.id}-${i})` }, children),
           ],
-        ),
-      ]),
-      p('g', { 'clip-path': `url(#frame-${d.id}-${i})` }, children),
-    ],
     rendered,
   );
 }

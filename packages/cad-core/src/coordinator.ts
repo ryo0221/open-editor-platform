@@ -11,7 +11,8 @@ import { applyCadOperation, cadContentHash, type CadOperation } from './operatio
 import { poseOf, posesDiffer, stepPose } from './assembly';
 import {
   jointRefPath,
-  jointValues,
+  coupledJointValues,
+  type CadResolvedJointValues,
   placeHint,
   type CadConnectorFrame,
   type CadJoint,
@@ -19,6 +20,7 @@ import {
 import { parameterValues, resolvePosition, type ParameterValues } from './graph';
 import type { CadReferenceProblem, CadTopoName, CadTopologyRef } from './topology';
 import { assertCad } from './validation';
+import { inactiveJointIds } from './mounts';
 
 export interface CadSolidEvaluation {
   kind: 'solid';
@@ -38,6 +40,14 @@ export interface CadSheetEvaluation {
   freeEdgeLengthMm: number;
 }
 export type CadBodyEvaluation = CadSolidEvaluation | CadSheetEvaluation;
+/**
+ * CR4e: one spot weld row as this evaluation made it from its flanges: its points (x, y, z on
+ * the first flange) and each one's distance to the second flange, with how many are further
+ * than the row's `maxGapMm`; or why it has none.
+ */
+export type CadSpotWeldPoints =
+  | { id: string; status: 'ok'; points: number[]; gaps: number[]; tooFar: number; lengthMm: number }
+  | { id: string; status: 'error'; code: string };
 /** Kernel output for one exact document. Meshes/pick tables travel beside it, keyed by the same hash. */
 export type CadEvaluation =
   | {
@@ -57,6 +67,8 @@ export type CadEvaluation =
       assembly?: CadAssemblyEvaluation;
       /** R2b-2: the frame of each reference the request's `connectors` named, in order. */
       connectors?: CadConnectorFrame[];
+      /** CR4e: the document's spot weld rows, in order (display only: not in the digest). */
+      spotWelds?: CadSpotWeldPoints[];
     }
   | {
       status: 'error';
@@ -379,17 +391,33 @@ export class CadCoordinator {
         const solvedBefore = current?.status === 'ok' ? current.assembly?.joints : undefined;
         const was = parameterValues(before);
         const now = parameterValues(candidate);
-        const inputs = (j: CadJoint, params: ParameterValues) =>
+        // Coupled values too (MR1): a follower moves when the value it follows changes.
+        const valuesWas = coupledJointValues(before, was);
+        const valuesNow = coupledJointValues(candidate, now);
+        const inputs = (
+          j: CadJoint,
+          params: ParameterValues,
+          values: ReadonlyMap<string, CadResolvedJointValues>,
+        ) =>
           canonicalJson([
-            jointValues(j, params),
+            values.get(j.id) ?? {},
             resolvePosition(j.parent.offset.translation, params),
             resolvePosition(j.child.connector.offset.translation, params),
           ]);
+        // MR7: a candidate put in effect (a mount switch, a form recalled) places its child anew.
+        const offBefore = inactiveJointIds(before);
+        const offNow = inactiveJointIds(candidate);
         const moved = candidate.joints.some((j) => {
           const solution = assembly.joints![j.id];
           if (solution?.status !== 'unavailable') return false;
+          if (offNow.has(j.id)) return false;
+          if (offBefore.has(j.id)) return true;
           const b = before.joints.find((x) => x.id === j.id);
-          if (!b || canonicalJson(b) !== canonicalJson(j) || inputs(b, was) !== inputs(j, now))
+          if (
+            !b ||
+            canonicalJson(b) !== canonicalJson(j) ||
+            inputs(b, was, valuesWas) !== inputs(j, now, valuesNow)
+          )
             return true;
           // Its child stays at its stored pose, whatever poses the edit itself supplies.
           const kept = poseOf(before.solvedPoses, j.child.componentId);

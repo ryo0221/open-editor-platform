@@ -19,6 +19,7 @@ import {
   PerspectiveCamera,
   Plane,
   Points,
+  DataTexture,
   PointsMaterial,
   Raycaster,
   Scene,
@@ -41,11 +42,13 @@ import {
   type ViewTextureSet,
   type PathRenderSource,
 } from '@editor-platform/geometry-view';
+import type { GeometryEmission } from '@editor-platform/geometry-core';
 import {
   combTip,
   curvatureColor,
   type CadCamera,
   type CadCombSample,
+  type CadGapFlushSample,
   type CadProjection,
   poseMatrix,
   type CadSolvedPose,
@@ -55,7 +58,9 @@ import {
 import type { CadMesh } from '@editor-platform/cad-kernel-occt';
 import {
   defaultGrid,
+  depthRange,
   gridFor,
+  gridForView,
   orbitRotateSpeed,
   standardViews,
   viewOf,
@@ -84,6 +89,10 @@ export interface ViewportBody {
   /** #661: the finish (0–1 each); the default finish when absent. */
   roughness?: number;
   metalness?: number;
+  /** CR6a: the light it gives off and lets through. */
+  emission?: GeometryEmission;
+  transmission?: number;
+  ior?: number;
   /** #662: image maps, drawn where the mesh has texture coordinates. */
   textures?: ViewTextureSet;
   selected: boolean;
@@ -91,8 +100,28 @@ export interface ViewportBody {
   sheet?: boolean;
   /** The picked face or edge of this body (pick ids of `mesh`), drawn highlighted. */
   highlight?: CadTopologyPick;
+  /**
+   * R3e-4b: more faces or edges of this body drawn over it in their own colours (an analysis's
+   * load and constraint targets); display only, never picked.
+   */
+  marks?: { pick: CadTopologyPick; color: string }[];
+  /**
+   * R3j-6a: the topology tool's rays pass through this body (a faint body the analysis does not
+   * include), so a face behind it can be picked.
+   */
+  topologyTransparent?: boolean;
+  /**
+   * PMI-3a: presentation lines drawn with the body (segments relative to `mesh.origin`, as the
+   * mesh's positions are); display only, never picked.
+   */
+  annotations?: { segments: Float32Array; color: string }[];
   /** One curvature value per node of `mesh`, for the curvature shading (NaN: none there). */
   curvature?: Float32Array;
+  /**
+   * R3e-4c: one linear RGB colour (0–1) per node of `mesh`, drawn instead of `color` (an
+   * analysis result's colour map); display only, in every shading but zebra.
+   */
+  colors?: Float32Array;
 }
 /** Opacity of a failed body's shape before the failure (U4): a reference, never picked. */
 const beforeFailureOpacity = 0.3;
@@ -225,6 +254,13 @@ export interface CadJointDragTool {
    * (R2b-3: a pattern copy turns about its own place); `moves` by the motion itself otherwise.
    */
   frames?: ReadonlyMap<string, CadSolvedPose>;
+  /**
+   * MR1: what the joint's coupled followers move, by first path step (some also in `frames`:
+   * their own motion wins); `followerMotions` gives each step's motion for the last `move`.
+   */
+  followers?: ReadonlySet<string>;
+  /** Each follower step's motion since the start, in assembly coordinates. */
+  followerMotions?(): ReadonlyMap<string, CadSolvedPose>;
   /** Starts at the grabbed point (Shift: the other freedom), or says why it cannot. */
   start(ray: CadDragRay, grab: Vec3, alternate: boolean): string | undefined;
   /** The child's motion since the start, in assembly coordinates; undefined keeps the last. */
@@ -235,7 +271,8 @@ export interface CadJointDragTool {
   onRefused(reason: string): void;
 }
 /** What a joint drag shows moving, by first path step. */
-const posed = (tool: CadJointDragTool) => (tool.frames ? new Set(tool.frames.keys()) : tool.moves);
+const posed = (tool: CadJointDragTool) =>
+  new Set([...(tool.frames ? tool.frames.keys() : tool.moves), ...(tool.followers ?? [])]);
 /** Axes drawn at a connector frame, as a share of the shown parts' size. */
 const frameMarkShare = 0.08;
 
@@ -260,6 +297,12 @@ export class CadViewport {
   private grid: GridHelper;
   private axes: AxesHelper;
   private gridKey = '';
+  /** WM3: the grid sized to the shown model, before the view refines it. */
+  private modelGrid = defaultGrid;
+  /** WM3: half the diagonal of the shown model, for the depth range as the camera moves. */
+  private modelRadius = 50;
+  /** WM3: the selected bodies, for Zoom to selection. */
+  private selectedBodies = new Set<string>();
   private gridVisible = true;
   private readonly bodies = new Group();
   /** Placed parts of an assembly (R2b), instanced per version. */
@@ -268,6 +311,12 @@ export class CadViewport {
   private readonly marks = new Group();
   /** The curvature comb drawn over the shape. */
   private readonly combs = new Group();
+  /** CR3d: the gap and flush samples drawn over the shape. */
+  private readonly gapFlushes = new Group();
+  /** CR4e: spot weld points. */
+  private readonly spotWelds = new Group();
+  /** CR6c: the ray diagram's lines. */
+  private readonly rays = new Group();
   private shading: CadShading = { mode: 'shaded' };
   /** Standard or realistic lighting (#665); the analysis shadings always use the standard. */
   private readonly lighting: ViewLighting;
@@ -357,6 +406,9 @@ export class CadViewport {
       this.marks,
       this.jointMarks,
       this.combs,
+      this.gapFlushes,
+      this.spotWelds,
+      this.rays,
     );
     this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0.6 });
     this.controls = this.makeControls();
@@ -473,7 +525,35 @@ export class CadViewport {
   }
   /** Sizes the grid to the shown model, replacing it only when its cells change. */
   private fitGrid(bounds: Bounds | undefined) {
-    const spec = bounds ? gridFor(bounds) : defaultGrid;
+    this.modelGrid = bounds ? gridFor(bounds) : defaultGrid;
+    if (bounds)
+      this.modelRadius =
+        Math.hypot(...bounds[1].map((v, i) => v - bounds[0][i]!)) / 2 || this.modelRadius;
+    this.viewGrid();
+  }
+  /** WM3: refines the grid to the view (zoomed in on a small part) and the depth range. */
+  private viewGrid() {
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const span =
+      this.camera === this.perspective
+        ? 2 * distance * Math.tan((this.perspective.fov * Math.PI) / 360)
+        : (this.orthographic.top - this.orthographic.bottom) / this.orthographic.zoom;
+    this.setGridSpec(
+      gridForView(this.modelGrid, span, [this.controls.target.x, this.controls.target.y]),
+    );
+  }
+  private followDepth() {
+    if (this.camera !== this.perspective) return;
+    const { near, far } = depthRange(
+      this.camera.position.distanceTo(this.controls.target),
+      this.modelRadius,
+    );
+    if (near === this.perspective.near && far === this.perspective.far) return;
+    this.perspective.near = near;
+    this.perspective.far = far;
+    this.perspective.updateProjectionMatrix();
+  }
+  private setGridSpec(spec: typeof defaultGrid) {
     const key = JSON.stringify(spec);
     if (key === this.gridKey) return;
     this.gridKey = key;
@@ -498,9 +578,14 @@ export class CadViewport {
   private makeControls() {
     const controls = new OrbitControls(this.camera, this.renderer.domElement);
     controls.rotateSpeed = orbitRotateSpeed;
+    // WM3: the wheel zooms toward the point under the cursor, so a small part off the centre
+    // can be reached without panning to it first.
+    controls.zoomToCursor = true;
     // Rebuilt controls (a view with another camera or up) keep the Move tool's orbit-off state.
     controls.enableRotate = !this.moveTool;
     controls.addEventListener('change', () => {
+      this.followDepth();
+      this.viewGrid();
       this.render();
       this.scheduleLevels();
     });
@@ -688,14 +773,33 @@ export class CadViewport {
     );
     // A copy's motion is the drag's seen from its own frame: C·D·C⁻¹.
     const frames = drag.tool.frames;
-    const deltas = frames
-      ? new Map(
-          [...frames].map(([step, f]) => {
-            const c = new Matrix4().fromArray(poseMatrix(f));
-            return [step, c.clone().multiply(delta).multiply(c.invert())] as const;
-          }),
-        )
-      : delta;
+    const followers = drag.tool.followers?.size ? drag.tool.followerMotions?.() : undefined;
+    const matrix = (p: CadSolvedPose) =>
+      new Matrix4().compose(
+        new Vector3(...p.translationMm),
+        new Quaternion(...p.rotation),
+        new Vector3(1, 1, 1),
+      );
+    const deltas =
+      frames || followers
+        ? new Map<string, Matrix4>([
+            ...(frames
+              ? [...frames].map(([step, f]) => {
+                  const c = new Matrix4().fromArray(poseMatrix(f));
+                  return [step, c.clone().multiply(delta).multiply(c.invert())] as const;
+                })
+              : [...drag.tool.moves].map((step) => [step, delta] as const)),
+            // MR1: coupled followers move by their own motion, in place of the drag's rigid one;
+            // one not yet given keeps the drag's motion, or stays put outside the drag.
+            ...[...(drag.tool.followers ?? [])].flatMap((step) => {
+              const motion = followers?.get(step);
+              if (motion) return [[step, matrix(motion)] as const];
+              return frames?.has(step) || drag.tool.moves.has(step)
+                ? []
+                : [[step, new Matrix4()] as const];
+            }),
+          ])
+        : delta;
     this.partsPose = { moves: posed(drag.tool), delta: deltas, key: drag.key };
     poseParts(this.parts, this.partsPose.moves, deltas);
     this.lighting.invalidate();
@@ -867,7 +971,7 @@ export class CadViewport {
    * hides (nearest on screen, then nearest to the camera).
    */
   private pickTopology(e: PointerEvent): CadTopologyPick | null {
-    const solids = this.solids();
+    const solids = this.solids().filter((c) => !c.userData.topologyTransparent);
     const ray = this.ray(e);
     const hit = this.hits(ray, solids)[0];
     if (this.topologyTool === 'face') {
@@ -1084,7 +1188,7 @@ export class CadViewport {
     }
   }
   /** The picked face's triangles or the picked edge's segments, drawn over the shape. */
-  private highlighted(mesh: CadMesh, pick: CadTopologyPick) {
+  private highlighted(mesh: CadMesh, pick: CadTopologyPick, color?: string) {
     const geometry = new BufferGeometry();
     let object: Mesh | LineSegments;
     if (pick.kind === 'face') {
@@ -1101,7 +1205,7 @@ export class CadViewport {
       object = new Mesh(
         geometry,
         new MeshBasicMaterial({
-          color: '#2563eb',
+          color: color ?? '#2563eb',
           transparent: true,
           opacity: 0.45,
           depthTest: false,
@@ -1116,7 +1220,7 @@ export class CadViewport {
       geometry.setAttribute('position', new BufferAttribute(new Float32Array(points), 3));
       object = new LineSegments(
         geometry,
-        new LineBasicMaterial({ color: '#f97316', depthTest: false }),
+        new LineBasicMaterial({ color: color ?? '#f97316', depthTest: false }),
       );
     }
     object.renderOrder = 1;
@@ -1160,9 +1264,11 @@ export class CadViewport {
     this.clear();
     this.lighting.invalidate();
     this.pickable = current;
+    this.selectedBodies = new Set(bodies.filter((b) => b.selected).map((b) => b.mesh.bodyId));
     const shading = this.shading;
     for (const body of bodies) {
-      const { mesh, color, opacity: native, selected, sheet, highlight, curvature } = body;
+      const { mesh, color, opacity: native, selected, sheet, highlight, curvature, marks } = body;
+      const { annotations } = body;
       // Stale dimming multiplies the native opacity instead of replacing it.
       const opacity = native * (dim ? 0.35 : 1) * (mesh.beforeFailure ? beforeFailureOpacity : 1);
       const geometry = new BufferGeometry();
@@ -1170,13 +1276,14 @@ export class CadViewport {
       geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
       if (mesh.uvs) geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
       geometry.setIndex(new BufferAttribute(mesh.indices, 1));
-      const colored = shading.mode === 'curvature' && !!curvature;
-      if (colored) {
+      const curved = shading.mode === 'curvature' && !!curvature;
+      const colored = curved || !!body.colors;
+      if (curved) {
         const colors = new Float32Array(mesh.positions.length);
         for (let i = 0; i < curvature.length; i++)
           colors.set(curvatureColor(curvature[i]!, shading.range), i * 3);
         geometry.setAttribute('color', new BufferAttribute(colors, 3));
-      }
+      } else if (body.colors) geometry.setAttribute('color', new BufferAttribute(body.colors, 3));
       const offset = { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 };
       const zebra =
         shading.mode === 'zebra' && (!shading.selectedOnly || selected)
@@ -1209,9 +1316,6 @@ export class CadViewport {
           transparent: opacity < 1,
           opacity,
           depthWrite: opacity >= 1,
-          // A light tint only: the outline marks the selection, the body keeps its own colour.
-          emissive: selected ? new Color('#2563eb') : new Color('#000000'),
-          emissiveIntensity: selected ? 0.12 : 0,
           ...offset,
         });
       // Not the model's look: a path-traced render refuses it (#664).
@@ -1219,12 +1323,19 @@ export class CadViewport {
       // The analysis shadings read the shape alone: every body in the default finish.
       if (material instanceof MeshStandardMaterial) {
         setViewFinish(material, colored ? undefined : body);
+        // A light tint only: the outline marks the selection, the body keeps its own colour.
+        // It is drawn over the look's own light (CR6a), which the path tracer keeps.
+        if (selected) {
+          material.emissive.set('#2563eb');
+          material.emissiveIntensity = 0.12;
+        }
         // The image maps are the look, not the shape: the curvature shading leaves them out,
         // and a mesh made without texture coordinates draws without them.
         if (!colored && mesh.uvs) setViewTextures(material, body.textures);
       }
       const solid = new Mesh(geometry, material);
       solid.userData.bodyId = mesh.bodyId;
+      if (body.topologyTransparent) solid.userData.topologyTransparent = true;
       // The back of a sheet: the same triangles seen from behind, darker so the sides differ.
       const back =
         sheet && !zebra
@@ -1268,6 +1379,20 @@ export class CadViewport {
         if (mesh.beforeFailure) object.userData.beforeFailure = true;
       }
       this.bodies.add(...drawn);
+      for (const m of marks ?? []) this.bodies.add(this.highlighted(mesh, m.pick, m.color));
+      for (const a of annotations ?? []) {
+        const geometry = new BufferGeometry();
+        geometry.setAttribute('position', new BufferAttribute(a.segments, 3));
+        const lines = new LineSegments(geometry, new LineBasicMaterial({ color: a.color }));
+        lines.position.set(...mesh.origin);
+        // Moved with the body by a Move drag, never picked (`highlight` keeps picks off it).
+        lines.userData.bodyId = mesh.bodyId;
+        lines.userData.origin = mesh.origin;
+        lines.userData.highlight = true;
+        // Over the faces they stand on, as the body's edges are.
+        lines.renderOrder = 1;
+        this.bodies.add(lines);
+      }
       if (highlight) this.bodies.add(this.highlighted(mesh, highlight));
     }
     const budget = this.gpuBudget ?? cadBudgets.gpuBytes;
@@ -1348,15 +1473,179 @@ export class CadViewport {
     }
     this.render();
   }
-  private clearComb() {
-    for (const child of [...this.combs.children]) {
-      this.combs.remove(child);
-      if (child instanceof LineSegments) {
+  /**
+   * CR6c: draws a ray diagram over the shape: line segments (pairs of model points, mm), each
+   * ray's path in its colour (linear RGB per point). Undefined clears it.
+   */
+  showRays(rays: { segments: Float64Array; colors: Float32Array } | undefined) {
+    this.clearComb(this.rays);
+    if (rays?.segments.length) {
+      // Relative to the first point, as the bodies are, taken off in doubles before the Float32
+      // rounding.
+      const origin = [rays.segments[0]!, rays.segments[1]!, rays.segments[2]!] as Vec3;
+      const local = Float32Array.from(rays.segments, (v, i) => v - origin[i % 3]!);
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(local, 3));
+      geometry.setAttribute('color', new BufferAttribute(rays.colors, 3));
+      const line = new LineSegments(
+        geometry,
+        new LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }),
+      );
+      line.renderOrder = 2;
+      line.position.set(...origin);
+      this.rays.add(line);
+    }
+    this.render();
+  }
+  /**
+   * CR3d: draws the gap and flush samples (model space): a line along the first edge through the
+   * samples, coloured from blue at the smallest gap to red at the largest, and a thin grey line
+   * from each sample to its nearest point on the second edge. Undefined clears it.
+   */
+  showGapFlush(samples: readonly CadGapFlushSample[] | undefined) {
+    this.clearComb(this.gapFlushes);
+    if (samples?.length) {
+      const origin = samples[0]!.at;
+      const local = (p: Vec3) => p.map((v, i) => v - origin[i]!);
+      const gaps = samples.map((x) => x.gapMm);
+      const [lo, hi] = [Math.min(...gaps), Math.max(...gaps)];
+      const colour = (gap: number) => {
+        const t = hi > lo ? (gap - lo) / (hi - lo) : 0;
+        return new Color().setHSL((2 / 3) * (1 - t), 0.85, 0.5).toArray();
+      };
+      const along = new BufferGeometry();
+      const pairs = samples.slice(1).map((x, i) => [samples[i]!, x] as const);
+      along.setAttribute(
+        'position',
+        new BufferAttribute(
+          new Float32Array(pairs.flatMap(([a, b]) => [...local(a.at), ...local(b.at)])),
+          3,
+        ),
+      );
+      along.setAttribute(
+        'color',
+        new BufferAttribute(
+          new Float32Array(pairs.flatMap(([a, b]) => [...colour(a.gapMm), ...colour(b.gapMm)])),
+          3,
+        ),
+      );
+      const across = new BufferGeometry();
+      across.setAttribute(
+        'position',
+        new BufferAttribute(
+          new Float32Array(samples.flatMap((x) => [...local(x.at), ...local(x.to)])),
+          3,
+        ),
+      );
+      for (const line of [
+        new LineSegments(
+          along,
+          new LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }),
+        ),
+        new LineSegments(
+          across,
+          new LineBasicMaterial({
+            color: '#6b7280',
+            depthTest: false,
+            transparent: true,
+            opacity: 0.6,
+          }),
+        ),
+      ]) {
+        line.renderOrder = 2;
+        line.position.set(...origin);
+        this.gapFlushes.add(line);
+      }
+    }
+    this.render();
+  }
+  /**
+   * CR4e: draws spot weld points (model space) as small rings facing the screen: green, or red
+   * where a point is further than its row's largest gap from the second flange. Undefined clears
+   * them.
+   */
+  showSpotWelds(
+    rows: readonly { points: readonly number[]; far: readonly boolean[] }[] | undefined,
+  ) {
+    this.clearComb(this.spotWelds);
+    const points = rows?.flatMap((r) => [...r.points]) ?? [];
+    if (points.length) {
+      const origin = [points[0]!, points[1]!, points[2]!] as const;
+      const geometry = new BufferGeometry();
+      geometry.setAttribute(
+        'position',
+        new BufferAttribute(new Float32Array(points.map((v, i) => v - origin[i % 3]!)), 3),
+      );
+      const [ok, far] = [new Color('#16a34a'), new Color('#dc2626')];
+      geometry.setAttribute(
+        'color',
+        new BufferAttribute(
+          new Float32Array(rows!.flatMap((r) => r.far.flatMap((f) => (f ? far : ok).toArray()))),
+          3,
+        ),
+      );
+      // A 16 px ring, transparent inside.
+      const n = 16;
+      const ring = new Uint8Array(4 * n * n);
+      for (let y = 0; y < n; y++)
+        for (let x = 0; x < n; x++) {
+          const r = Math.hypot(x + 0.5 - n / 2, y + 0.5 - n / 2);
+          ring.set(
+            [255, 255, 255, r <= n / 2 - 0.5 && r >= n / 2 - 3.5 ? 255 : 0],
+            4 * (y * n + x),
+          );
+        }
+      const map = new DataTexture(ring, n, n);
+      map.needsUpdate = true;
+      const dots = new Points(
+        geometry,
+        new PointsMaterial({
+          size: 12,
+          sizeAttenuation: false,
+          map,
+          vertexColors: true,
+          transparent: true,
+          alphaTest: 0.5,
+          depthTest: false,
+        }),
+      );
+      dots.renderOrder = 3;
+      dots.position.set(...origin);
+      this.spotWelds.add(dots);
+    }
+    this.render();
+  }
+  private clearComb(group = this.combs) {
+    for (const child of [...group.children]) {
+      group.remove(child);
+      if (child instanceof LineSegments || child instanceof Points) {
         child.geometry.dispose();
         disposeViewTextures(child.material);
         (child.material as { dispose(): void }).dispose();
       }
     }
+  }
+  /** WM3: whether anything selected is shown, for Zoom to selection. */
+  hasSelection() {
+    return !this.selectionBox().isEmpty();
+  }
+  private selectionBox() {
+    const box = new Box3();
+    for (const child of this.bodies.children)
+      if (child instanceof Mesh && this.selectedBodies.has(child.userData.bodyId as string))
+        box.union(new Box3().setFromObject(child));
+    const m = new Matrix4();
+    for (const part of this.lastParts)
+      for (const instance of part.instances) {
+        if (!instance.selected) continue;
+        const [min, max] = part.bounds;
+        box.union(
+          new Box3(new Vector3(...min), new Vector3(...max)).applyMatrix4(
+            m.fromArray(instance.matrix),
+          ),
+        );
+      }
+    return box;
   }
   /** Shows a saved camera. Opening with it replaces the first automatic fit. */
   setView({ camera, projection }: CadViewportView) {
@@ -1367,8 +1656,7 @@ export class CadViewport {
     if (projection.type === 'perspective') {
       this.use(this.perspective);
       this.perspective.fov = (projection.fovRad * 180) / Math.PI;
-      this.perspective.near = distance / 1000;
-      this.perspective.far = distance * 100;
+      Object.assign(this.perspective, depthRange(distance, this.modelRadius));
     } else {
       this.use(this.orthographic);
       this.orthographicSpan = projection.spanMm;
@@ -1386,6 +1674,19 @@ export class CadViewport {
     this.controls.target.copy(target);
     this.controls.update();
     this.render();
+  }
+  /**
+   * PMI-3b: the middle of a body's shown mesh (world mm) and the viewport's width / height, to
+   * aim a saved PMI view; undefined while the body is not shown.
+   */
+  bodyFrame(bodyId: string): { center: Vec3; aspect: number } | undefined {
+    const box = new Box3();
+    for (const child of this.bodies.children)
+      if (child instanceof Mesh && child.userData.bodyId === bodyId && !child.userData.highlight)
+        box.expandByObject(child);
+    if (box.isEmpty()) return undefined;
+    const { clientWidth: w, clientHeight: h } = this.host;
+    return { center: box.getCenter(new Vector3()).toArray() as Vec3, aspect: w && h ? w / h : 1 };
   }
   /** The camera as it is now, for Save view. */
   currentView(): CadViewportView {
@@ -1512,10 +1813,21 @@ export class CadViewport {
    * Fits the shown bodies. `reset` also returns to the perspective three-quarter view; `view`
    * looks from one of the standard views instead (camera only: nothing is stored).
    */
-  fit({ reset = false, view }: { reset?: boolean; view?: CadStandardView } = {}) {
+  fit({
+    reset = false,
+    view,
+    selection = false,
+  }: {
+    reset?: boolean;
+    view?: CadStandardView;
+    /** WM3: frame the selected bodies and part instances only (Zoom to selection). */
+    selection?: boolean;
+  } = {}) {
     // Nothing shown: keep the camera as it is, so a later fit starts from a set-up one.
-    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const whole = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const box = selection ? this.selectionBox() : whole;
     if (box.isEmpty()) return;
+    this.modelRadius = whole.getSize(new Vector3()).length() / 2 || this.modelRadius;
     const standard = view ? standardViews[view] : undefined;
     if (standard) this.use(standard.orthographic ? this.orthographic : this.perspective);
     else if (reset) this.use(this.perspective);
@@ -1537,18 +1849,20 @@ export class CadViewport {
     this.orbit();
     this.camera.position.copy(center.clone().addScaledVector(direction, distance));
     if (this.camera === this.perspective) {
-      this.perspective.near = distance / 1000;
-      this.perspective.far = distance * 100;
+      Object.assign(this.perspective, depthRange(distance, this.modelRadius));
     } else {
       this.orthographicSpan = (radius * 2.2) / Math.min(1, aspect);
       this.orthographic.zoom = 1;
-      this.orthographic.near = distance - radius * 2;
-      this.orthographic.far = distance + radius * 2;
+      // The depth covers the whole model, also when framing a small selection in it.
+      const depth = Math.max(radius, this.modelRadius) * 2;
+      this.orthographic.near = distance - depth;
+      this.orthographic.far = distance + depth;
       this.frameOrthographic();
     }
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(center);
     this.controls.update();
+    this.viewGrid();
     this.render();
     this.scheduleLevels();
   }
@@ -1591,6 +1905,9 @@ export class CadViewport {
     this.clearMarks();
     this.showJointMarks({ frames: [], points: [] });
     this.clearComb();
+    this.clearComb(this.gapFlushes);
+    this.clearComb(this.spotWelds);
+    this.clearComb(this.rays);
     this.lighting.dispose();
     this.grid.dispose();
     this.axes.dispose();

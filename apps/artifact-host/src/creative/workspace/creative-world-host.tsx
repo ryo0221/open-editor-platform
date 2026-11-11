@@ -5,7 +5,13 @@ import { CreativeHost } from '../host';
 import type { CreativeLayerConnection } from '../generation';
 import type { CreativeWorkspace } from './model';
 import type { WorldReference } from './world-context';
-import { WorldPane, type WorldDrafts } from './world-pane';
+import {
+  WorldPane,
+  emptyWorldForm,
+  hasWorldFormInput,
+  type WorldFormInput,
+  type WorldDrafts,
+} from './world-pane';
 import { WorldSourceEditor } from './world-source';
 import { MapLocationsPane } from './map-pane';
 import { MapLocationEditor } from './map-editor';
@@ -35,6 +41,7 @@ function WorldCreativeEditor<T>({
   generation?: CreativeLayerConnection;
 }) {
   const [drafts, setDrafts] = useState<WorldDrafts>({});
+  const [worldForms, setWorldForms] = useState<Record<string, WorldFormInput>>({});
   const [revision, refresh] = useReducer((n) => n + 1, 0);
   const [source, setSource] = useState<{
     reference: WorldReference;
@@ -48,6 +55,7 @@ function WorldCreativeEditor<T>({
   const [locationItemId, setLocationItemId] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [referenceBusy, setReferenceBusy] = useState(false);
   const [itemId, setItemId] = useState(project.cards[0]?.id ?? '');
   const route = JSON.stringify([
     workspace.sessionId,
@@ -67,14 +75,21 @@ function WorldCreativeEditor<T>({
   const recordPending = !!generation?.world?.pending;
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      if (recordPending || Object.keys(drafts).length || workspace.hasUnsavedWorldSources) {
+      if (
+        busy ||
+        referenceBusy ||
+        recordPending ||
+        Object.keys(drafts).length ||
+        Object.values(worldForms).some(hasWorldFormInput) ||
+        workspace.hasUnsavedWorldSources
+      ) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [workspace, drafts, recordPending]);
+  }, [workspace, drafts, recordPending, worldForms, busy, referenceBusy]);
   const open = async (reference: WorldReference) => {
     if (busy) return;
     setBusy(true);
@@ -183,6 +198,15 @@ function WorldCreativeEditor<T>({
             key={id}
             workspace={workspace}
             contextId={id}
+            busy={referenceBusy}
+            changeBusy={setReferenceBusy}
+            form={worldForms[id]}
+            changeForm={(patch) =>
+              setWorldForms((current) => ({
+                ...current,
+                [id]: { ...emptyWorldForm(), ...current[id], ...patch },
+              }))
+            }
             generationConnected={!!generation?.world}
             revision={revision}
             drafts={drafts}
@@ -201,6 +225,8 @@ function WorldCreativeEditor<T>({
           />
         ))}
       <MapLocationsPane
+        busy={referenceBusy}
+        changeBusy={setReferenceBusy}
         key={'map:' + mode + ':' + activeItemId}
         workspace={workspace}
         itemId={mode === 'setting' ? activeItemId : undefined}

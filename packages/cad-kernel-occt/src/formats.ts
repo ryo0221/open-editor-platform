@@ -4,8 +4,9 @@ import type {
   CadStepPlan,
   CadToleranceSet,
 } from '@editor-platform/cad-core';
-import { geometryDefaultFinish } from '@editor-platform/geometry-core';
+import { geometryDefaultFinish, geometryLightLimits } from '@editor-platform/geometry-core';
 import type { CadMesh } from './protocol';
+import type { CadStepPmiWritten } from './step-pmi-write';
 
 /** An image to embed in a file, as the document stores it. */
 export interface CadExportImage {
@@ -365,6 +366,15 @@ export function writeGlb(
       type: 'SCALAR',
     });
     const opaque = appearance.opacity >= 1;
+    const lit =
+      appearance.emission && appearance.emission.strength > 0 ? appearance.emission : undefined;
+    const extensions: Record<string, object> = {};
+    if (lit && lit.strength !== 1)
+      extensions.KHR_materials_emissive_strength = { emissiveStrength: lit.strength };
+    if (appearance.transmission) {
+      extensions.KHR_materials_transmission = { transmissionFactor: appearance.transmission };
+      extensions.KHR_materials_ior = { ior: appearance.ior ?? geometryLightLimits.defaultIor };
+    }
     materials.push({
       name,
       pbrMetallicRoughness: {
@@ -379,6 +389,10 @@ export function writeGlb(
       ...(textured && set.normal ? { normalTexture: texture(set.normal) } : {}),
       ...(textured && set.occlusion ? { occlusionTexture: texture(set.occlusion) } : {}),
       ...(opaque ? {} : { alphaMode: 'BLEND' }),
+      // CR6a: a lamp's light (strengths other than 1 in KHR_materials_emissive_strength) and a
+      // lens's transmission (KHR_materials_transmission, KHR_materials_ior).
+      ...(lit ? { emissiveFactor: rgb(lit.color) } : {}),
+      ...(Object.keys(extensions).length ? { extensions } : {}),
       // A sheet has no inside: both sides are visible.
       ...(kind === 'sheet' ? { doubleSided: true } : {}),
     });
@@ -386,8 +400,14 @@ export function writeGlb(
     // Positions stay relative to the body's box centre (float32 precision); the node places them.
     nodes.push({ name, mesh: i, translation: toGltf(...mesh.origin, 1 / 1000) });
   }
+  const extensionsUsed = [
+    ...new Set(
+      materials.flatMap((m) => Object.keys((m as { extensions?: object }).extensions ?? {})),
+    ),
+  ].sort();
   const json = {
     asset: { version: '2.0', generator: 'EditorPlatform CAD' },
+    ...(extensionsUsed.length ? { extensionsUsed } : {}),
     extras: { sourceContentHash: report.sourceContentHash, buildHash: report.buildHash },
     scene: 0,
     scenes: [{ nodes: nodes.map((_, i) => i) }],
@@ -488,10 +508,14 @@ export function stepReport(
   bytes: Uint8Array,
   bodies: number,
   meta: { sourceContentHash: string; buildHash: string },
+  /** PMI-4b/4c: what the file carries of the bodies' PMI (the evaluation's count). */
+  pmi?: CadStepPmiWritten,
 ): CadExportReport {
   const head = new TextDecoder().decode(bytes.subarray(0, 64));
   if (!head.startsWith('ISO-10303-21;')) throw new CadExportError('step-invalid');
   const note = readToleranceNote(bytes);
+  const w = pmi?.written;
+  const written = w ? w.dimension + w['geometric-tolerance'] + w.datum + w['datum-target'] : 0;
   return {
     ...meta,
     format: 'step',
@@ -499,9 +523,14 @@ export function stepReport(
     bodies,
     transforms: [],
     losses: [
-      bodies > 1
-        ? `Feature history, parameters, body names, colours, materials, textures and named views are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP214), side by side without an assembly structure.`
-        : 'Feature history, parameters, the body name, colour, material, textures and named views are not written: the body is its solids, or one surface (shell), with exact surfaces (AP214).',
+      written
+        ? bodies > 1
+          ? `Feature history, parameters, body names, colours, materials and textures are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP242), side by side without an assembly structure.`
+          : 'Feature history, parameters, the body name, colour, material and textures are not written: the body is its solids, or one surface (shell), with exact surfaces (AP242).'
+        : bodies > 1
+          ? `Feature history, parameters, body names, colours, materials, textures, named views and PMI (dimensions, tolerances, datums; also when the bodies were imported with it) are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP214), side by side without an assembly structure.`
+          : 'Feature history, parameters, the body name, colour, material, textures, named views and PMI (dimensions, tolerances, datums; also when the body was imported with it) are not written: the body is its solids, or one surface (shell), with exact surfaces (AP214).',
+      ...(pmi ? stepPmiLines(pmi, written) : []),
       ...(note
         ? [
             `The tolerance set (${note.toleranceSet}) is written only as a note in the file header; the largest tolerance in the shapes is ${note.maxToleranceMm} mm.`,
@@ -510,6 +539,45 @@ export function stepReport(
     ],
     ...note,
   };
+}
+
+/** PMI-4b/4c: the report's lines on the PMI a part's STEP file carries and what it leaves out. */
+function stepPmiLines(pmi: CadStepPmiWritten, written: number): string[] {
+  const n = (count: number, one: string, many = `${one}s`) =>
+    `${count} ${count === 1 ? one : many}`;
+  const w = pmi.written;
+  return [
+    ...(written
+      ? [
+          `PMI is written as semantic GD&T (AP242) on the faces, edges and vertices it was imported on: ${n(w.dimension, 'dimension')}, ${n(w['geometric-tolerance'], 'geometric tolerance')}, ${n(w.datum, 'datum')}${pmi.presented ? `; ${pmi.presented} of them with their presentation lines` : ''}.`,
+        ]
+      : []),
+    ...(pmi.stale
+      ? [
+          `${n(pmi.stale, 'PMI item is', 'PMI items are')} not written: stale on the shape as it is now (a change of a face, edge or datum it depends on, or several imports with PMI in one body).`,
+        ]
+      : []),
+    ...(pmi.unwritable
+      ? [
+          `${n(pmi.unwritable, 'current PMI item is', 'current PMI items are')} not written: datum targets (their target geometry is not kept), datums that stand only on them, datums whose name another body in the file already uses, dimensions along a path, tolerances that reference a datum not written, or values and modifiers the writer has no form for.`,
+        ]
+      : []),
+    ...(pmi.presentationLost
+      ? [
+          `The presentation lines of ${n(pmi.presentationLost, 'written PMI item are', 'written PMI items are')} not written: the body is not placed along one path from its import (a pattern's copy), or a line has no length.`,
+        ]
+      : []),
+    ...(pmi.views
+      ? [
+          `${n(pmi.views, 'saved view of the PMI is', 'saved views of the PMI are')} not written (the writer writes no views).`,
+        ]
+      : []),
+    ...(pmi.unsupportedBuild
+      ? [
+          `${n(pmi.unsupportedBuild, 'PMI item is', 'PMI items are')} not written: the build this document is evaluated with has no PMI writer.`,
+        ]
+      : []),
+  ];
 }
 
 /**

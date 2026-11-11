@@ -21,11 +21,12 @@ import {
   type CharacterSkin,
   type CharacterSubdivision,
   type CharacterKey,
+  type CharacterTrack,
+  type CharacterKeyValue,
   type CharacterTrackTarget,
-  type Quat,
-  type Vec3,
 } from './model';
 import { validateCharacter } from './validation';
+import type { PropTransformKey } from './prop-transform';
 import { applyRigOperation, characterRigOperationTypes, type CharacterRigOperation } from './rig';
 
 /** The SHA-256 (hex) of a document's canonical JSON, the base an operation is prepared against. */
@@ -53,6 +54,32 @@ export type CharacterOperation =
   | { type: 'setPropPlacement'; id: string; placement: CharacterProp['placement'] }
   | { type: 'setPropVisible'; id: string; visible: boolean }
   /**
+   * MR4: points a prop at another version of its Artifact, keeping its ID, placement and tracks.
+   * The Host first checks the tracks against the new version (`prop-source-incompatible`).
+   */
+  /**
+   * MR4: points a prop at another version of its Artifact. `dropTracks` removes, in the same
+   * edit, the prop's joint tracks the new version cannot play (the Host checked them).
+   */
+  | {
+      type: 'setPropSource';
+      id: string;
+      source: CharacterProp['source'];
+      dropTracks?: { actionId: string; trackId: string }[];
+    }
+  /**
+   * MR4: puts a transform's keys (`propTransformKeys`) into an action in one edit: the keys of
+   * the same targets within [from, to] are replaced, keys outside it are kept.
+   */
+  | {
+      type: 'putPropTransform';
+      actionId: string;
+      propId: string;
+      from: number;
+      to: number;
+      keys: (PropTransformKey & { trackId: string; keyId: string })[];
+    }
+  /**
    * Keys `target` at `tick` in an action: replaces the value of a key already at that tick, or
    * inserts one (`keyId`), in the target's track or a new one (`trackId`). Easing is kept on a
    * replaced key unless given.
@@ -62,7 +89,7 @@ export type CharacterOperation =
       actionId: string;
       target: CharacterTrackTarget;
       tick: number;
-      value: number | Vec3 | Quat;
+      value: CharacterKeyValue;
       easing?: Easing;
       trackId: string;
       keyId: string;
@@ -77,7 +104,7 @@ export type CharacterOperation =
       keys: {
         target: CharacterTrackTarget;
         tick: number;
-        value: number | Vec3 | Quat;
+        value: CharacterKeyValue;
         trackId: string;
         keyId: string;
       }[];
@@ -104,6 +131,17 @@ export type CharacterOperation =
   | { type: 'setPartMesh'; id: string; asset: CharacterAssetRef }
   | { type: 'setPartSubdivision'; id: string; subdivision: CharacterSubdivision | null }
   /**
+   * C7a: sets a part's multires (its chunk assets staged with the Host first, `assets` naming
+   * each chunk's ref) or removes it with `multires: null`. Chunks with the same bytes as ones
+   * already named are reused; refs nothing names any more are dropped.
+   */
+  | {
+      type: 'setPartMultires';
+      id: string;
+      multires: { level: number; topology: string } | null;
+      assets: CharacterAssetRef[];
+    }
+  /**
    * C4: sets one map of a material to an image asset (PNG or JPEG, staged with the Host first),
    * or clears it with `asset: null`. Refs nothing names any more are dropped.
    */
@@ -112,6 +150,18 @@ export type CharacterOperation =
       id: string;
       role: GeometryTextureRole;
       asset: CharacterAssetRef | null;
+    }
+  /**
+   * C7d: a baked normal map (a PNG staged with the Host first) on every material of a part, or
+   * cleared with `asset: null`. `copies` first gives the part its own copy of materials it
+   * shares with other parts (`from` → a new material `id` named `name`), so the map does not
+   * land on them. Refs nothing names any more are dropped.
+   */
+  | {
+      type: 'setPartNormalMap';
+      id: string;
+      asset: CharacterAssetRef | null;
+      copies: { from: string; id: string; name: string }[];
     }
   /**
    * C3: removes a part with its morphs, skins and the tracks that drive them. Refused while a
@@ -194,7 +244,11 @@ export function applyCharacterOperation(
       JSON.stringify([
         k.target.kind,
         k.target.id,
-        k.target.kind === 'prop-joint' ? k.target.joint : null,
+        k.target.kind === 'prop-joint'
+          ? k.target.joint
+          : k.target.kind === 'prop-mount'
+            ? k.target.mount
+            : null,
         k.target.property,
       ]),
     );
@@ -208,7 +262,70 @@ export function applyCharacterOperation(
     if (!next.props.some((p) => p.id === op.id)) missing();
     next.props = next.props.filter((p) => p.id !== op.id);
     for (const a of next.actions)
-      a.tracks = a.tracks.filter((t) => !(t.target.kind === 'prop-joint' && t.target.id === op.id));
+      a.tracks = a.tracks.filter(
+        (t) =>
+          !(
+            (t.target.kind === 'prop-joint' ||
+              t.target.kind === 'prop-mount' ||
+              t.target.kind === 'prop') &&
+            t.target.id === op.id
+          ),
+      );
+  } else if (op.type === 'setPropSource') {
+    const prop = next.props.find((p) => p.id === op.id);
+    if (!prop) missing();
+    if (op.source.kind !== prop!.source.kind || op.source.artifactId !== prop!.source.artifactId)
+      fail('prop-source', 'a prop changes version within its own Artifact only');
+    prop!.source = structuredClone(op.source);
+    for (const d of op.dropTracks ?? []) {
+      const action = next.actions.find((x) => x.id === d.actionId);
+      const at = action?.tracks.findIndex(
+        (t) =>
+          t.id === d.trackId &&
+          (t.target.kind === 'prop-joint' || t.target.kind === 'prop-mount') &&
+          t.target.id === op.id,
+      );
+      if (!action || at === undefined || at < 0)
+        fail('prop-source', 'dropTracks names joint and mount tracks of this prop only');
+      action!.tracks.splice(at!, 1);
+    }
+  } else if (op.type === 'putPropTransform') {
+    const action = next.actions.find((a) => a.id === op.actionId);
+    if (!action || !next.props.some((p) => p.id === op.propId)) missing();
+    if (!op.keys.length || op.from > op.to || op.from < 0 || op.to > action!.duration)
+      fail('keys', 'putPropTransform needs keys within the action');
+    const channel = propJointChannel;
+    const targets = new Set<string | undefined>();
+    for (const k of op.keys) {
+      if (
+        (k.target.kind !== 'prop-joint' && k.target.kind !== 'prop-mount') ||
+        k.target.id !== op.propId
+      )
+        fail('keys', 'putPropTransform keys one prop’s joints and mounts');
+      if (k.tick < op.from || k.tick > op.to) fail('keys', 'a key lies outside the transform');
+      targets.add(channel(k.target));
+    }
+    // The old keys of these joints in the span go; a track of theirs left empty is removed.
+    const touched = (t: CharacterTrack) =>
+      channel(t.target) !== undefined && targets.has(channel(t.target));
+    for (const t of action!.tracks)
+      if (touched(t)) t.keys = t.keys.filter((k) => k.tick < op.from || k.tick > op.to);
+    action!.tracks = action!.tracks.filter((t) => !touched(t) || t.keys.length);
+    for (const k of op.keys)
+      editKeys(
+        action!,
+        {
+          type: 'setKey',
+          actionId: op.actionId,
+          target: k.target,
+          tick: k.tick,
+          value: k.value,
+          easing: k.easing,
+          trackId: k.trackId,
+          keyId: k.keyId,
+        },
+        missing,
+      );
   } else if (op.type === 'setPropPlacement' || op.type === 'setPropVisible') {
     const prop = next.props.find((p) => p.id === op.id);
     if (!prop) missing();
@@ -254,11 +371,44 @@ export function applyCharacterOperation(
     if (!part) missing();
     if (op.subdivision) part!.subdivision = structuredClone(op.subdivision);
     else delete part!.subdivision;
+  } else if (op.type === 'setPartMultires') {
+    const part = next.parts.find((p) => p.id === op.id);
+    if (!part) missing();
+    if (op.multires) {
+      if (op.assets.length === 0) fail('multires-chunks', 'a multires needs its chunks');
+      if (op.assets.some((a) => a.kind !== 'mesh-mres'))
+        fail('multires-asset', 'a chunk must be a mesh-mres asset');
+      part!.multires = {
+        level: op.multires.level,
+        topology: op.multires.topology,
+        chunks: op.assets.map((a) => nameAsset(next, a)),
+      };
+    } else delete part!.multires;
+    pruneAssetRefs(next);
   } else if (op.type === 'setMaterialMap') {
     const material = next.materials.find((m) => m.id === op.id);
     if (!material) missing();
     if (op.asset) material!.maps[op.role] = nameAsset(next, op.asset);
     else delete material!.maps[op.role];
+    pruneAssetRefs(next);
+  } else if (op.type === 'setPartNormalMap') {
+    const part = next.parts.find((p) => p.id === op.id);
+    if (!part) missing();
+    if (op.asset && op.asset.kind !== 'texture-png' && op.asset.kind !== 'texture-jpeg')
+      fail('asset-kind', 'a normal map is a PNG or JPEG image');
+    for (const c of op.copies) {
+      const from = next.materials.find((m) => m.id === c.from);
+      if (!from || !part!.materials.includes(c.from))
+        fail('missing-target', `material ${c.from} is not one of the part's`);
+      next.materials.push({ ...structuredClone(from!), id: c.id, name: c.name });
+      part!.materials = part!.materials.map((id) => (id === c.from ? c.id : id));
+    }
+    const named = op.asset ? nameAsset(next, op.asset) : undefined;
+    for (const id of new Set(part!.materials)) {
+      const m = next.materials.find((x) => x.id === id)!;
+      if (named) m.maps.normal = named;
+      else delete m.maps.normal;
+    }
     pruneAssetRefs(next);
   } else if (op.type === 'addMorph') {
     const part = next.parts.find((p) => p.id === op.morph.partId);
@@ -344,7 +494,10 @@ function nameAsset(doc: CharacterDocument, asset: CharacterAssetRef): string {
 /** Drops asset refs no part or material names (their bytes stay with the Host for Undo). */
 function pruneAssetRefs(doc: CharacterDocument) {
   const named = new Set<string>();
-  for (const p of doc.parts) named.add(p.mesh);
+  for (const p of doc.parts) {
+    named.add(p.mesh);
+    for (const id of p.multires?.chunks ?? []) named.add(id);
+  }
   for (const m of doc.materials) for (const id of Object.values(m.maps)) if (id) named.add(id);
   doc.assets = doc.assets.filter((a) => named.has(a.id));
 }
@@ -353,6 +506,18 @@ type KeyOperation = Extract<
   CharacterOperation,
   { type: 'setKey' | 'moveKeys' | 'deleteKeys' | 'setKeyEasing' }
 >;
+/**
+ * The identity of a prop joint value (MR4) or mount (MR7) a track keys, as a fixed-order tuple:
+ * IDs may hold spaces, so they are never joined into one string; the target's kind leads, so a
+ * joint and a mount never share one. Undefined for any other target.
+ */
+export const propJointChannel = (t: CharacterTrackTarget) =>
+  t.kind === 'prop-joint'
+    ? JSON.stringify([t.kind, t.id, t.joint, t.property])
+    : t.kind === 'prop-mount'
+      ? JSON.stringify([t.kind, t.id, t.mount])
+      : undefined;
+
 const fail = (code: string, message = code): never => {
   throw new CharacterValidationError([{ code, path: '$', message }]);
 };
@@ -372,7 +537,8 @@ function editKeys(
       t.kind === op.target.kind &&
       t.id === op.target.id &&
       t.property === op.target.property &&
-      (t.kind !== 'prop-joint' || op.target.kind !== 'prop-joint' || t.joint === op.target.joint);
+      (t.kind !== 'prop-joint' || op.target.kind !== 'prop-joint' || t.joint === op.target.joint) &&
+      (t.kind !== 'prop-mount' || op.target.kind !== 'prop-mount' || t.mount === op.target.mount);
     let track = action.tracks.find((t) => same(t.target));
     if (!track) {
       track = { id: op.trackId, target: structuredClone(op.target), keys: [] };
@@ -388,7 +554,10 @@ function editKeys(
         id: op.keyId,
         tick: op.tick,
         value,
-        easing: structuredClone(op.easing ?? { type: 'linear' }),
+        // MR7: a mount key only holds.
+        easing: structuredClone(
+          op.easing ?? (op.target.kind === 'prop-mount' ? { type: 'hold' } : { type: 'linear' }),
+        ),
       };
       track.keys.splice(
         track.keys.findIndex((k) => k.tick > op.tick) === -1
@@ -483,6 +652,8 @@ const labels: Record<CharacterOperationType, string> = {
   addProp: 'Add prop',
   removeProp: 'Remove prop',
   setPropPlacement: 'Move prop',
+  setPropSource: 'Update prop version',
+  putPropTransform: 'Make transform',
   setPropVisible: 'Show or hide prop',
   setKey: 'Set key',
   setKeys: 'Set keys',
@@ -492,7 +663,9 @@ const labels: Record<CharacterOperationType, string> = {
   addPart: 'Add part',
   setPartMesh: 'Edit mesh',
   setPartSubdivision: 'Set subdivision',
+  setPartMultires: 'Set multires',
   setMaterialMap: 'Set material image',
+  setPartNormalMap: 'Bake normal map',
   removePart: 'Remove part',
   addSkeleton: 'Add skeleton',
   removeSkeleton: 'Remove skeleton',

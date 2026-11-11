@@ -11,6 +11,34 @@ import {
 } from './world-context';
 
 export type WorldDrafts = Record<string, WorldContext>;
+/** Unsaved Host form values only; native bodies and adopted references stay in their owners. */
+export interface WorldFormInput {
+  namespace: string;
+  artifactId: string;
+  versionId: string;
+  hash: string;
+  elements: string;
+  refId: string;
+  role: WorldRole;
+  composing: boolean;
+}
+export const emptyWorldForm = (): WorldFormInput => ({
+  namespace: '',
+  artifactId: '',
+  versionId: '',
+  hash: '',
+  elements: '',
+  refId: '',
+  role: 'facts',
+  composing: false,
+});
+export const hasWorldFormInput = (form?: WorldFormInput) =>
+  !!form &&
+  (form.composing ||
+    form.role !== 'facts' ||
+    [form.namespace, form.artifactId, form.versionId, form.hash, form.elements, form.refId].some(
+      (value) => value.length > 0,
+    ));
 const labels: Record<WorldRole, string> = {
   facts: '世界の固定事実',
   identity: '人物・場所の同一性',
@@ -31,6 +59,10 @@ export function WorldPane({
   fail,
   revision,
   generationConnected = false,
+  form: providedForm,
+  changeForm,
+  busy: providedBusy,
+  changeBusy,
 }: {
   workspace: CreativeWorkspace;
   contextId: string;
@@ -41,19 +73,36 @@ export function WorldPane({
   fail(e: unknown): void;
   revision: number;
   generationConnected?: boolean;
+  form?: WorldFormInput;
+  changeForm?(patch: Partial<WorldFormInput>): void;
+  busy?: boolean;
+  changeBusy?(value: boolean): void;
 }) {
   const adopted = workspace.mapping.world?.contexts.find((c) => c.id === contextId);
   const draft = drafts[contextId];
   const context = draft ?? adopted;
   const [loaded, setLoaded] = useState<{ key: string; views: WorldReferenceView[] }>();
-  const [busy, setBusy] = useState(false);
-  const [namespace, setNamespace] = useState('');
-  const [artifactId, setArtifactId] = useState(''),
-    [versionId, setVersionId] = useState(''),
-    [hash, setHash] = useState(''),
-    [elements, setElements] = useState(''),
-    [refId, setRefId] = useState(''),
-    [role, setRole] = useState<WorldRole>('facts');
+  const [localBusy, setLocalBusy] = useState(false);
+  const busy = providedBusy ?? localBusy;
+  const setBusy = changeBusy ?? setLocalBusy;
+  const [localForm, setLocalForm] = useState(emptyWorldForm);
+  const form = providedForm ?? localForm;
+  const updateForm = (patch: Partial<WorldFormInput>) => {
+    if (changeForm) changeForm(patch);
+    else setLocalForm((current) => ({ ...current, ...patch }));
+  };
+  const { namespace, artifactId, versionId, hash, elements, refId, role } = form;
+  const dirty = hasWorldFormInput(form);
+  useEffect(() => {
+    const guard = (e: BeforeUnloadEvent) => {
+      if (dirty || busy) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [dirty, busy]);
   const key = canonicalJson([context, revision]);
   useEffect(() => {
     let live = true;
@@ -75,7 +124,12 @@ export function WorldPane({
   };
   return (
     <Section title={contextId === 'work' ? '作品設定' : 'この制作の前提'}>
-      <div className="production-references world-context" data-world-context={contextId}>
+      <div
+        className="production-references world-context"
+        data-world-context={contextId}
+        onCompositionStart={() => updateForm({ composing: true })}
+        onCompositionEnd={() => updateForm({ composing: false })}
+      >
         {generationConnected ? (
           <p>
             World対応の清書が接続されています。設定画の「生成レイヤー」から前提を確認して依頼・採用してください。漫画ページへの直接生成は行いません。
@@ -93,7 +147,11 @@ export function WorldPane({
           <div>
             <label>
               作品namespace
-              <input value={namespace} onChange={(e) => setNamespace(e.target.value)} />
+              <input
+                disabled={busy || !workspace.canEditWorld}
+                value={namespace}
+                onChange={(e) => updateForm({ namespace: e.target.value })}
+              />
             </label>
             <button
               disabled={busy || !namespace.trim() || !workspace.canEditWorld}
@@ -104,6 +162,7 @@ export function WorldPane({
                     namespace,
                     contexts: [{ id: 'work', revision: 0, references: [] }],
                   });
+                  updateForm({ namespace: '', composing: false });
                   changed();
                 } catch (e) {
                   fail(e);
@@ -246,11 +305,14 @@ export function WorldPane({
               </p>
               <label>
                 参照ID
-                <input value={refId} onChange={(e) => setRefId(e.target.value)} />
+                <input value={refId} onChange={(e) => updateForm({ refId: e.target.value })} />
               </label>
               <label>
                 role
-                <select value={role} onChange={(e) => setRole(e.target.value as WorldRole)}>
+                <select
+                  value={role}
+                  onChange={(e) => updateForm({ role: e.target.value as WorldRole })}
+                >
                   {worldRoles.map((r) => (
                     <option key={r} value={r}>
                       {labels[r]}
@@ -260,19 +322,28 @@ export function WorldPane({
               </label>
               <label>
                 Artifact ID
-                <input value={artifactId} onChange={(e) => setArtifactId(e.target.value)} />
+                <input
+                  value={artifactId}
+                  onChange={(e) => updateForm({ artifactId: e.target.value })}
+                />
               </label>
               <label>
                 保存版ID
-                <input value={versionId} onChange={(e) => setVersionId(e.target.value)} />
+                <input
+                  value={versionId}
+                  onChange={(e) => updateForm({ versionId: e.target.value })}
+                />
               </label>
               <label>
                 保存版hash
-                <input value={hash} onChange={(e) => setHash(e.target.value)} />
+                <input value={hash} onChange={(e) => updateForm({ hash: e.target.value })} />
               </label>
               <label>
                 {role === 'sample' ? 'root Frame ID' : 'root block IDs（カンマ区切り）'}
-                <input value={elements} onChange={(e) => setElements(e.target.value)} />
+                <input
+                  value={elements}
+                  onChange={(e) => updateForm({ elements: e.target.value })}
+                />
               </label>
               <button
                 disabled={
@@ -284,7 +355,7 @@ export function WorldPane({
                   !hash ||
                   !elements
                 }
-                onClick={() =>
+                onClick={() => {
                   stage(contextId, {
                     ...context,
                     references: [
@@ -306,10 +377,14 @@ export function WorldPane({
                               },
                       },
                     ],
-                  })
-                }
+                  });
+                  updateForm(emptyWorldForm());
+                }}
               >
                 資料接続を選択
+              </button>
+              <button disabled={busy || !dirty} onClick={() => updateForm(emptyWorldForm())}>
+                未確定の資料接続を取り消す
               </button>
             </details>
           </>

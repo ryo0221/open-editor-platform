@@ -182,6 +182,10 @@ describe('pattern and mirror (R1c, CAD32)', () => {
       ['copy:c:3', 'side'],
       ['mirror:n', '+x'],
     ]);
+    // A grid's later row keeps its `:row<r>` (CR6d).
+    expect(remapTopoName([['copy:cuts:0:row1', 'surface']], { cuts: 'cuts-2' })).toEqual([
+      ['copy:cuts-2:0:row1', 'surface'],
+    ]);
   });
 });
 

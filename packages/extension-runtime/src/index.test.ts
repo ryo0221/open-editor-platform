@@ -390,16 +390,19 @@ describe('draft extension boundary', () => {
       registration.open({ ...host, read: () => ({ id: 'counter', value: NaN }) }),
     ).toThrow('Invalid domain');
   });
-  it('uses immutable manifest snapshot and denies duplicate kind', () => {
-    const { registry, definition, registration } = fixture();
+  it('uses immutable manifest snapshot and keeps Editors for one kind independent', () => {
+    const { registry, definition, registration, host } = fixture();
     definition.manifest.version = '8.0.0';
     expect(registration.manifest.version).toBe('0.0.1');
-    expect(() =>
-      registry.install(
-        { ...definition, manifest: { ...definition.manifest, id: 'different' } },
-        admission,
-      ),
-    ).toThrow('kind already');
+    const other = registry.install(
+      { ...definition, manifest: { ...definition.manifest, version: '0.0.1', id: 'different' } },
+      admission,
+    );
+    const otherHandle = other.open(host);
+    registration.uninstall();
+    expect(otherHandle.api.read()).toEqual(host.read());
+    other.uninstall();
+    expect(() => otherHandle.api.read()).toThrow('revoked');
   });
   it('revokes all handles even when one cleanup throws', () => {
     const { host } = fixture();

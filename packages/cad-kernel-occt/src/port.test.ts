@@ -420,7 +420,12 @@ describe('evaluation memory past one port (#589)', () => {
   it('a port mounted again for the same content answers without a Worker job', async () => {
     const memory = new CadEvaluationMemory();
     const first = fakeWorkers();
-    const before = new WorkerKernelPort({ spawn: first.spawn, build, timers: manualTimers(), memory });
+    const before = new WorkerKernelPort({
+      spawn: first.spawn,
+      build,
+      timers: manualTimers(),
+      memory,
+    });
     const evaluated = before.evaluate(plate('a'));
     first.workers[0].send({ type: 'ready', buildHash: build.buildHash });
     await flush();

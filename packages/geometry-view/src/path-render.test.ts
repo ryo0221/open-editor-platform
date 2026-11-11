@@ -6,6 +6,7 @@ import {
   LineSegments,
   Matrix4,
   Mesh,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   OrthographicCamera,
   PerspectiveCamera,
@@ -88,6 +89,51 @@ describe('path render scene', () => {
     expect(meshes[0].geometry).toBe(box.geometry);
     // The view's own material is untouched.
     expect(material.emissiveIntensity).toBe(0.12);
+  });
+
+  it('draws a look’s light as light and its transmission refracted (CR6a, TS-1592)', () => {
+    const lamp = setViewFinish(new MeshStandardMaterial(), {
+      emission: { color: '#ff0000', strength: 6 },
+    });
+    // The view caps the glow at 1 and the selection tint is drawn over it.
+    expect([lamp.emissive.getHexString(), lamp.emissiveIntensity]).toEqual(['ff0000', 1]);
+    lamp.emissive.set('#2563eb');
+    lamp.emissiveIntensity = 0.12;
+    const lens = setViewFinish(new MeshStandardMaterial({ opacity: 1 }), {
+      roughness: 0.02,
+      metalness: 0,
+      transmission: 1,
+      ior: 1.49,
+    });
+    // The view's stand-in: a lower opacity, drawn see-through.
+    expect([lens.opacity, lens.transparent, lens.depthWrite]).toEqual([0.25, true, false]);
+    const plain = setViewFinish(new MeshStandardMaterial(), { roughness: 0.5, metalness: 0 });
+    const root = new Group();
+    root.add(
+      new Mesh(new BoxGeometry(1, 1, 1), lamp),
+      new Mesh(new BoxGeometry(1, 1, 1), lens),
+      new Mesh(new BoxGeometry(1, 1, 1), plain),
+    );
+    const [lit, clear, other] = pathRenderScene([root]).children as Mesh[];
+    const litCopy = lit!.material as MeshStandardMaterial;
+    expect([litCopy.emissive.getHexString(), litCopy.emissiveIntensity]).toEqual(['ff0000', 6]);
+    const clearCopy = clear!.material as MeshPhysicalMaterial;
+    expect(clearCopy.isMeshPhysicalMaterial).toBe(true);
+    expect([clearCopy.transmission, clearCopy.ior, clearCopy.opacity]).toEqual([1, 1.49, 1]);
+    expect([clearCopy.transparent, clearCopy.roughness]).toEqual([false, 0.02]);
+    expect((other!.material as MeshPhysicalMaterial).isMeshPhysicalMaterial).toBeUndefined();
+    expect((other!.material as MeshStandardMaterial).emissiveIntensity).toBe(0);
+    // A look set again without light drops it, and setting one twice does not compound.
+    setViewFinish(lamp, { roughness: 0.5, metalness: 0 });
+    expect(lamp.userData.emission).toBeUndefined();
+    expect([lamp.emissive.getHexString(), lamp.emissiveIntensity]).toEqual(['000000', 0]);
+    setViewFinish(lens, { transmission: 1 });
+    expect([lens.opacity, lens.transparent]).toEqual([0.25, true]);
+    setViewFinish(lens, { transmission: 0.5 });
+    expect(lens.opacity).toBeCloseTo(0.625, 6);
+    setViewFinish(lens, undefined);
+    expect([lens.opacity, lens.transparent, lens.depthWrite]).toEqual([1, false, true]);
+    expect(lens.userData.opacity).toBeUndefined();
   });
 
   it('refuses an analysis shading, which has no model colour', () => {

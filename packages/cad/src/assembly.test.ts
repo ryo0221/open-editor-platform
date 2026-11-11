@@ -9,6 +9,9 @@ import {
   fixtureKernel,
   mm,
   r2bParts,
+  f26Panel,
+  fixtureComponent,
+  fixturePart,
   type CadDocument,
   type CadEvaluateRequest,
   type CadEvaluation,
@@ -64,6 +67,12 @@ function setup(
     importStepAssembly?: CadAssemblyOptions['importStepAssembly'];
     /** Runs while the Host stores staged versions and assets. */
     onStage?: () => Promise<void>;
+    /** CR3e: the Host makes a new Artifact with a first version. */
+    createPart?: CadPartSourceHost['createPart'];
+    /** The Host's edit authority (always granted by default). */
+    canEdit?: () => boolean;
+    /** Runs while a version's own job evaluates. */
+    onPartJob?: () => void;
   } = {},
 ) {
   const fixture = r2bParts();
@@ -111,6 +120,7 @@ function setup(
     },
     evaluatePart: async (request, assembly) => {
       jobs.push(`part:${request.candidateHash.slice(0, 6)}`);
+      options.onPartJob?.();
       if (options.failOnce?.delete(request.candidateHash))
         return {
           status: 'error',
@@ -174,6 +184,7 @@ function setup(
       return { content: v.content, contentHash: v.contentHash, closure, assets };
     },
     checkAccess: (id) => access.has(id),
+    ...(options.createPart ? { createPart: options.createPart } : {}),
   };
   const port = new CadAssemblyPort({
     kernel,
@@ -185,7 +196,7 @@ function setup(
   const controller = new CadController({
     session,
     kernel: port,
-    canEdit: () => true,
+    canEdit: options.canEdit ?? (() => true),
     permissionGeneration: () => 0,
     ...(options.importStepAssembly
       ? {
@@ -909,17 +920,23 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
       instances: 2 + 4,
       sourceContentHash: controller.getSnapshot().contentHash,
     });
-    // STL and GLB stay refused for an assembly.
+    // STL stays refused for an assembly.
     expect(await controller.exportMesh('stl')).toBeUndefined();
     expect(controller.getSnapshot().diagnostic?.message).toBe(
       describeCode('assembly-export-unsupported'),
     );
+    // MR6 (TS-1716): GLB reaches the writer once every part has arrived; this kernel double's
+    // meshes have no triangles, so the writer refuses them (a real file: the M2 demo, TS-1716).
+    expect(await assembly.exportGlb()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('mesh-empty');
     // A part the Host no longer lets this user read is not written, before any evaluation.
     access.delete('shaft');
     expect(await assembly.exportStep('Cart')).toBeUndefined();
     expect(controller.getSnapshot().diagnostic?.message).toBe(
       describeCode('step-part-unavailable'),
     );
+    expect(await assembly.exportGlb()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.message).toBe(describeCode('glb-part-unavailable'));
     expect(written).toHaveLength(1);
   });
 });
@@ -1004,6 +1021,31 @@ describe('STEP AP242 assembly import into an empty document (R2b-5, R2b-U7)', ()
     expect(reads).toEqual([3, 3]);
   });
 
+  it('stores the kept PMI of a part with its part document (PMI-2)', async () => {
+    const withPmi = () => {
+      const r = result(2);
+      return {
+        ...r,
+        read: {
+          ...r.read,
+          shapes: r.read.shapes.map((s) => ({ ...s, pmi: { sha256: sha('e'), byteLength: 3 } })),
+        },
+        pmis: [new Uint8Array([7, 7, 7])],
+      };
+    };
+    const { controller, assembly, session, stages, kept } = setup({
+      importStepAssembly: async () => withPmi(),
+    });
+    await controller.refresh();
+    await assembly.prepareStepImport('cart.step', new Uint8Array(3));
+    expect(await assembly.adoptStepImport()).toBe(true);
+    expect(stages).toEqual([[1, 3]]);
+    const part = kept.get(session.content.parts[0]!.source.contentHash)!;
+    const pmi = part.assets.find((a) => a.kind === 'pmi');
+    expect(pmi).toMatchObject({ sha256: sha('e'), byteLength: 3, mediaType: 'application/json' });
+    expect(part.features[0]).toMatchObject({ type: 'imported', args: { pmiAssetId: pmi!.id } });
+  });
+
   it('goes to the assembly import when the single import finds assembly usages', async () => {
     const { controller, assembly } = setup({ importStepAssembly: async () => result(2) });
     await controller.refresh();
@@ -1066,5 +1108,146 @@ describe('STEP AP242 assembly import into an empty document (R2b-5, R2b-U7)', ()
       describeCode('step-import-unavailable'),
     );
     expect([...stages, ...empty.stages, ...plain.stages]).toEqual([]);
+  });
+});
+
+describe('Make part (CR3e)', () => {
+  it('makes a body a part of its own Artifact and places it where the body stood, in one edit', async () => {
+    // TS-1516, ST-257.
+    const made: [string, CadDocument][] = [];
+    const { controller, assembly, kept, session } = setup({
+      doc: f26Panel(),
+      createPart: async (name, content) => {
+        made.push([name, content]);
+        return { artifactId: 'door-art', versionId: 'v1', contentHash: cadContentHash(content) };
+      },
+    });
+    await controller.refresh();
+    expect(assembly.getSnapshot().canMakePart).toBe(true);
+    expect(await assembly.makePart('door-body')).toBe(true);
+    expect(made.map(([n, c]) => [n, c.bodies.map((b) => b.id)])).toEqual([
+      ['door-body', ['door-body']],
+    ]);
+    const doc = controller.getSnapshot().content;
+    expect(doc.bodies.map((b) => b.id)).toEqual(['panel-body']);
+    expect(doc.parts.map((p) => [p.name, p.source])).toEqual([
+      [
+        'door-body',
+        {
+          kind: 'version',
+          artifactId: 'door-art',
+          versionId: 'v1',
+          contentHash: cadContentHash(made[0]![1]),
+        },
+      ],
+    ]);
+    expect(doc.components.map((c) => [c.name, c.placement?.translation])).toEqual([
+      ['door-body 1', [mm(0), mm(0), mm(0)]],
+    ]);
+    // The version is kept before the edit names it; one Undo brings the body back.
+    expect(kept.has(cadContentHash(made[0]![1]))).toBe(true);
+    expect(assembly.getSnapshot().selected).toBe(doc.components[0]!.id);
+    session.undo();
+    await controller.sync();
+    expect(controller.getSnapshot().content.bodies.map((b) => b.id)).toEqual([
+      'panel-body',
+      'door-body',
+    ]);
+  });
+
+  it('refuses without a Host that makes Artifacts, and makes none when the edit cannot be made', async () => {
+    // TS-1517, ST-257.
+    const bare = setup({ doc: f26Panel() });
+    await bare.controller.refresh();
+    expect(bare.assembly.getSnapshot().canMakePart).toBe(false);
+    expect(await bare.assembly.makePart('door-body')).toBe(false);
+    expect(bare.controller.getSnapshot().diagnostic?.message).toBe(
+      describeCode('make-part-unavailable'),
+    );
+    const doc = f26Panel();
+    const door = doc.features.find((f) => f.id === 'door')!;
+    doc.features.push({
+      ...door,
+      id: 'door-again',
+      args: { ...door.args, source: { featureId: 'door-body-placement' } },
+    } as typeof door);
+    let calls = 0;
+    const held = setup({
+      doc,
+      createPart: async (_, content) => {
+        calls++;
+        return { artifactId: 'x', versionId: 'v1', contentHash: cadContentHash(content) };
+      },
+    });
+    expect(await held.assembly.makePart('door-body')).toBe(false);
+    expect(held.controller.getSnapshot().diagnostic?.message).toBe(
+      describeCode('make-part-has-dependents'),
+    );
+    expect(calls).toBe(0);
+  });
+
+  it('reads authority again before making the Artifact and keeps the component name in the limit', async () => {
+    // TS-1517, ST-257 (Codex on #953).
+    let editable = true;
+    let calls = 0;
+    const revoked = setup({
+      doc: f26Panel(),
+      canEdit: () => editable,
+      onPartJob: () => void (editable = false),
+      createPart: async (_, content) => {
+        calls++;
+        return { artifactId: 'x', versionId: 'v1', contentHash: cadContentHash(content) };
+      },
+    });
+    expect(await revoked.assembly.makePart('door-body')).toBe(false);
+    expect(revoked.controller.getSnapshot().diagnostic?.message).toBe(
+      describeCode('permission-denied'),
+    );
+    expect(calls).toBe(0);
+    // A body named with all 256 code points: the component's ` 1` still fits.
+    const doc = f26Panel();
+    doc.bodies[1]!.name = 'ド'.repeat(256);
+    const long = setup({
+      doc,
+      createPart: async (_, content) => ({
+        artifactId: 'x',
+        versionId: 'v1',
+        contentHash: cadContentHash(content),
+      }),
+    });
+    await long.controller.refresh();
+    expect(await long.assembly.makePart('door-body')).toBe(true);
+    const [component] = long.controller.getSnapshot().content.components;
+    expect([...component!.name]).toHaveLength(256);
+    expect(component!.name.endsWith('ド 1')).toBe(true);
+  });
+
+  it('makes no Artifact when the replaced document would pass the component limit', async () => {
+    // TS-1517, ST-257 (Codex on #953): the edit's own refusals are checked before creating.
+    const plate = r2bParts().plate;
+    const doc = f26Panel();
+    doc.parts = [fixturePart('p', 'Plate', plate)];
+    doc.components = Array.from({ length: 1_024 }, (_, i) =>
+      fixtureComponent(`c${i}`, 'p', [i * 200, 0, 0]),
+    );
+    doc.solvedPoses = Object.fromEntries(
+      doc.components.map((c, i) => [
+        c.id,
+        { translationMm: [i * 200, 0, 0], rotation: [0, 0, 0, 1] },
+      ]),
+    );
+    let calls = 0;
+    const full = setup({
+      doc,
+      createPart: async (_, content) => {
+        calls++;
+        return { artifactId: 'x', versionId: 'v1', contentHash: cadContentHash(content) };
+      },
+    });
+    expect(await full.assembly.makePart('door-body')).toBe(false);
+    expect(full.controller.getSnapshot().diagnostic?.message).toBe(
+      describeCode('limit-components'),
+    );
+    expect(calls).toBe(0);
   });
 });

@@ -190,12 +190,15 @@ test('an insertion adopts the previewed bounds even if its caller later mutates 
     () => true,
   );
   const preview = previewProposedCommands(content, proposal);
-  expect(preview.content.elements.find((element) => element.name === 'Reviewed insertion')!.bounds)
-    .toEqual(expected);
+  expect(
+    preview.content.elements.find((element) => element.name === 'Reviewed insertion')!.bounds,
+  ).toEqual(expected);
   Object.assign(input.operations[0].bounds, { x: 900, y: 800, width: 90, height: 80 });
   local.executeView(proposal.commands[0] as EditorCommand<Content>);
   expect(local.content).toEqual(preview.content);
-  expect((local.content as typeof content).elements.find(
-    (element) => element.name === 'Reviewed insertion',
-  )!.bounds).toEqual(expected);
+  expect(
+    (local.content as typeof content).elements.find(
+      (element) => element.name === 'Reviewed insertion',
+    )!.bounds,
+  ).toEqual(expected);
 });

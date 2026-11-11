@@ -7,7 +7,8 @@ import {
   type ChangeEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { FileDown, FileUp, Pause, Play, Redo2, Square, Undo2 } from 'lucide-react';
+import { Aperture, FileDown, FileUp, Pause, Play, Redo2, Square, Undo2 } from 'lucide-react';
+import { PathRenderDialog } from '@editor-platform/geometry-view';
 import {
   applyCharacterOperation,
   characterContentHash,
@@ -24,19 +25,31 @@ import {
   characterMorphedMesh,
   characterMorphShape,
   characterMorphRemove,
+  characterMultiresAdd,
+  characterMultiresDisplacements,
+  characterNormalBake,
+  characterSharedMaterials,
+  characterMultiresRaise,
+  characterMultiresRemove,
+  characterMultiresSet,
   characterSkinWeights,
   characterWeightBones,
   freshCharacterId,
   identityTransform,
+  invertMat4,
   poseAt,
   restMatrices,
+  transformPoint,
   worldMatrices,
   type CharacterAssetRef,
+  type CharacterAction,
   type CharacterDocument,
   type CharacterJointValueKey,
   type CharacterKeyAddress,
   type CharacterOperation,
+  type CharacterProp,
   type CharacterTrackTarget,
+  type Quat,
   type Vec3,
   exportGlb,
   GltfExportError,
@@ -74,14 +87,29 @@ import {
   type WeightBrush,
 } from './weight-paint';
 import { PropInspector } from './prop-inspector';
+import { PropTransformPanel, type MadeTransform } from './prop-transform-panel';
+import { EscapementPanel } from './escapement-panel';
+import { followerViolation } from './follower-limits';
+import { PropVersionUpdate } from './prop-version';
+import { PropSweepPanel, type PropSweepResult } from './prop-sweep';
 import {
+  instanceBounds,
   missingJoints,
   propFrames,
+  unionBounds,
   type CharacterPropChoice,
+  type CharacterPropVersionJoints,
   type CharacterPropView,
+  type PropBounds,
   type PropFrame,
 } from './props';
-import { characterFrame, prepareMesh, type PartFrame, type PreparedMesh } from './frame';
+import {
+  characterFrame,
+  frameBounds,
+  prepareMesh,
+  type PartFrame,
+  type PreparedMesh,
+} from './frame';
 import {
   advance,
   choose,
@@ -94,10 +122,26 @@ import {
   ticksPerSecond,
   type Playback,
 } from './playback';
-import { CharacterViewport, type CharacterImages } from './viewport';
+import { CaptureUnsupported, CharacterViewport, type CharacterImages } from './viewport';
 import {
+  MultiresControls,
+  SculptInspector,
+  buildSculpt,
+  defaultSculptTool,
+  sculptKey,
+  type SculptSession,
+  type SculptTool,
+} from './sculpt-mode';
+import {
+  BakeError,
   MeshEditError,
+  MultiresAssetError,
   boneWeightsOf,
+  multiresBase,
+  multiresDisplacementsFrom,
+  multiresDisplayVertices,
+  sculptSegment,
+  sculptTriangles,
   cornerNormals,
   paintWeights,
   subdividedFaceCount,
@@ -132,7 +176,19 @@ import { cageOverlay, disposeOverlay } from './mesh-overlay';
 import { gizmoHandles, type GizmoAxis } from './gizmo';
 import { MeshGizmo } from './gizmo-view';
 import { SubdivisionJobs } from './subdivision-job';
+import { BakeJobs, type BakeRun } from './bake-job';
+import { NormalBakeControls, type BakeReport } from './bake-controls';
 import { MaterialMaps } from './material-maps';
+import { VideoControls, type VideoKind, type VideoReport } from './video-controls';
+import { browserVideoEncoding, exportMp4 } from './video-encode';
+import {
+  exportPngSequence,
+  videoFileName,
+  videoFrameCount,
+  VideoExportError,
+  videoSettingsProblems,
+  type VideoSettings,
+} from './video-export';
 
 /** A part's smoothed display mesh, per cage and level (C3i). */
 type Smoothed =
@@ -161,6 +217,11 @@ export interface CharacterSurfaceProps {
    * assets) and hands the file to the Host to save; what glTF cannot hold is listed beside it.
    */
   onExport?(file: { name: string; bytes: Uint8Array; losses: string[] }): void;
+  /**
+   * C8: offered as "Video" in the Inspector when given. The Surface draws the frames of an
+   * action (the view's camera, a chosen size and frame rate) and hands the file to the Host.
+   */
+  onExportMedia?(file: { name: string; type: string; data: Blob }): void;
   /** The Host's refusal of the last import, shown as an alert. */
   importError?: string;
   report?: CharacterImportReport;
@@ -188,13 +249,31 @@ export interface CharacterSurfaceProps {
   props?: ReadonlyMap<string, CharacterPropView>;
   /** Saved versions offered as props; with `onAddProp`, shown as "Add prop". */
   propChoices?: readonly CharacterPropChoice[];
-  /** The Host keeps the version with the character, then adds the prop as one edit. */
-  onAddProp?(choice: CharacterPropChoice): void;
+  /**
+   * The Host keeps the version with the character, then adds the prop as one edit. `beside` is
+   * the box around what is shown (the character's parts and the visible props, mm), for placing
+   * the new prop next to it (#718, `besidePlacement`); undefined when nothing is shown.
+   */
+  onAddProp?(choice: CharacterPropChoice, beside: PropBounds | undefined): void;
+  /**
+   * MR4: the Host keeps another version of a prop's Artifact with the character and reads its
+   * joints, before the prop is pointed at it (`setPropSource`). Rejects with a reason.
+   */
+  onPreparePropVersion?(
+    propId: string,
+    choice: CharacterPropChoice,
+  ): Promise<CharacterPropVersionJoints>;
+  /** #718: the Host is measuring a version to place it; "Add prop" waits meanwhile. */
+  placingProp?: boolean;
   /**
    * C3: keeps a new mesh asset's bytes (saved) before the content names them; resolves when
    * kept, rejects to refuse. With it, parts can be added and their meshes edited.
    */
-  onMeshAsset?(asset: { ref: CharacterAssetRef; bytes: Uint8Array }): Promise<void>;
+  onMeshAsset?(
+    asset: { ref: CharacterAssetRef; bytes: Uint8Array },
+    /** C7b: more assets of the same edit (a multires' chunks), kept together. */
+    more?: readonly { ref: CharacterAssetRef; bytes: Uint8Array }[],
+  ): Promise<void>;
   /** Host history; without it the Surface shows its own Undo and Redo over the session. */
   onUndo?(): void;
   onRedo?(): void;
@@ -296,7 +375,11 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const [painting, setPainting] = useState(false);
   const paintSkin = part ? doc.skins.find((k) => k.partId === part.id) : undefined;
   const paintOn = painting && !!paintSkin && !!props.onMeshAsset && !readOnly && !meshEditing;
-  const restView = meshEditing || paintOn;
+  // C7b sculpting: on a part with a multires, in the rest pose (as weight painting).
+  const [sculpting, setSculpting] = useState(false);
+  const sculptOn =
+    sculpting && !!part?.multires && !!props.onMeshAsset && !readOnly && !meshEditing && !paintOn;
+  const restView = meshEditing || paintOn || sculptOn;
   // C5d: an IK handle being dragged, previewed as the edit its drop would make.
   const [ikDrag, setIkDrag] = useState<{ handle: ShownIkHandle; point: Vec3 }>();
   /** C6a: a morph weight slider being dragged; previewed as the edit it makes when let go. */
@@ -551,10 +634,137 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   );
   const onFrame = useRef(props.onFrame);
   onFrame.current = props.onFrame;
+  // C7b: the part being sculpted is drawn as its multires surface instead.
+  const sculptedPart = sculptOn && part ? part.id : undefined;
   useEffect(() => {
-    viewport.current?.draw(frame, shownProps);
+    const drawn = sculptedPart
+      ? frame.map((p) => (p.partId === sculptedPart ? { ...p, visible: false } : p))
+      : frame;
+    viewport.current?.draw(drawn, shownProps);
+    lastDrawn.current = { frame: drawn, props: shownProps };
     onFrame.current?.(frame, playback, shownProps, probe);
-  }, [frame, shownProps, images, prepared]);
+  }, [frame, shownProps, images, prepared, sculptedPart]);
+  const lastDrawn = useRef<{ frame: readonly PartFrame[]; props: readonly PropFrame[] }>({
+    frame: [],
+    props: [],
+  });
+
+  // C8: frame sequence export. The frames are the view's (its camera, materials and props) at
+  // fixed ticks of the chosen action; nothing is edited.
+  const [videoRun, setVideoRun] = useState<{ done: number; total: number; kind: VideoKind }>();
+  const [videoReport, setVideoReport] = useState<VideoReport>();
+  /** C8c: the path-traced still's dialog is open (modal, so nothing edits behind it). */
+  const [rendering, setRendering] = useState(false);
+  const videoAbort = useRef<AbortController>(undefined);
+  // The session and revision now, read by a running export: a change made meanwhile (by the
+  // Host, say) stops it rather than mixing two documents' frames.
+  const liveRevision = useRef({ session, sequence });
+  liveRevision.current = { session, sequence };
+  useEffect(() => () => videoAbort.current?.abort(), []);
+  const videoDisabled = !shown
+    ? 'Assets do not match: nothing can be drawn.'
+    : failure
+      ? 'The view is unavailable.'
+      : restView
+        ? 'Leave the edit mode to export.'
+        : propsNotReady(doc, views);
+  const exportFrames = async (settings: VideoSettings, kind: VideoKind) => {
+    const view = viewport.current;
+    if (!view || busy || videoAbort.current) return;
+    const shownDoc = display.doc;
+    const meshes = display.meshes;
+    const chosen = shownDoc.actions.find((a) => a.id === settings.actionId) ?? null;
+    const docAction = doc.actions.find((a) => a.id === settings.actionId) ?? null;
+    const abort = new AbortController();
+    videoAbort.current = abort;
+    const from = liveRevision.current;
+    setPlayback(pause);
+    setBusy(true);
+    setVideoReport(undefined);
+    setVideoRun({ done: 0, total: 0, kind });
+    const begin = (w: number, h: number) => {
+      try {
+        view.beginCapture(w, h);
+      } catch (e) {
+        if (e instanceof CaptureUnsupported)
+          throw new VideoExportError('video-render-unsupported', e.message);
+        throw e;
+      }
+    };
+    const frameAt = (tick: number) => {
+      const now = liveRevision.current;
+      if (now.session !== from.session || now.sequence !== from.sequence)
+        throw new VideoExportError(
+          'video-changed',
+          'The document changed during the export; nothing was saved.',
+        );
+      return [
+        characterFrame(shownDoc, meshes, chosen, tick, true),
+        propFrames(doc, views, poseAt(doc, docAction, tick)),
+      ] as const;
+    };
+    const progress = (done: number, total: number) => setVideoRun({ done, total, kind });
+    try {
+      const data =
+        kind === 'png'
+          ? await exportPngSequence(
+              doc,
+              settings,
+              {
+                begin,
+                png: (tick) => view.captureFrame(...frameAt(tick)),
+                end: () => view.endCapture(),
+              },
+              progress,
+              abort.signal,
+            )
+          : await exportMp4(
+              doc,
+              settings,
+              {
+                begin,
+                frame: async (tick, timestamp, duration) =>
+                  new VideoFrame(view.captureCanvas(...frameAt(tick)), {
+                    timestamp,
+                    duration,
+                    alpha: 'discard',
+                  }),
+                end: () => view.endCapture(),
+              },
+              browserVideoEncoding(),
+              progress,
+              abort.signal,
+            );
+      // A change after the last frame (while the encoder flushed) still voids the export.
+      const now = liveRevision.current;
+      if (now.session !== from.session || now.sequence !== from.sequence)
+        throw new VideoExportError(
+          'video-changed',
+          'The document changed during the export; nothing was saved.',
+        );
+      const name = videoFileName(doc, settings.actionId, kind === 'png' ? 'zip' : 'mp4');
+      props.onExportMedia?.({ name, type: data.type, data });
+      setVideoReport({
+        name,
+        frames: videoFrameCount(settings),
+        width: settings.width,
+        height: settings.height,
+        fps: settings.fps,
+      });
+    } catch (e) {
+      if (e instanceof VideoExportError && e.code === 'video-cancelled')
+        setVideoReport({ cancelled: true });
+      else if (e instanceof VideoExportError || e instanceof CaptureUnsupported)
+        setVideoReport({ error: e.message });
+      else throw e;
+    } finally {
+      videoAbort.current = undefined;
+      setVideoRun(undefined);
+      setBusy(false);
+      // The view drew the export's frames: back to the playhead's.
+      view.draw(lastDrawn.current.frame, lastDrawn.current.props);
+    }
+  };
 
   // Real-time playback; the playhead is view state, never an edit.
   useEffect(() => {
@@ -595,6 +805,11 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   /** One operation as one session edit; a refusal is shown and changes nothing. */
   const edit = (op: CharacterOperation) => {
     let done = false;
+    // C8: an export draws the document as it was when it started.
+    if (videoAbort.current) {
+      setEditError('video-export-running');
+      return false;
+    }
     try {
       props.admit?.(applyCharacterOperation(session.content, op));
       session.execute(
@@ -738,13 +953,13 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const [paintPreview, setPaintPreview] = useState<EpmMesh>();
   const [paintPointer, setPaintPointer] = useState<[number, number]>();
   useEffect(() => {
-    viewport.current?.setPaintButtons(paintOn);
+    viewport.current?.setPaintButtons(paintOn || sculptOn);
     if (!paintOn) {
       stroke.current = undefined;
       setPaintPreview(undefined);
       setPaintPointer(undefined);
     }
-  }, [paintOn]);
+  }, [paintOn, sculptOn]);
   const paintDots = weightDotLimit >= (cage ? cage.positions.length / 3 : 0);
   const weightPoints = (): ShownWeight[] => {
     const view = viewport.current;
@@ -780,8 +995,403 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
       setEditError(e instanceof Error ? e.message : String(e));
     }
   };
+
+  // ---- C7b: sculpting a multires (a stroke is one edit) ----
+  const [sculptTool, setSculptTool] = useState<SculptTool>(defaultSculptTool);
+  // The surface being sculpted, kept across its own strokes (their edits name the chunks it
+  // already has); another cage or other chunks (an Undo) build it again.
+  const sculptKept = useRef<SculptSession>(undefined);
+  const sculptMaskKept = useRef<{ partId: string; mask: Float32Array }>(undefined);
+  // C7c: the level shown; below the top the surface is a view and brushes are off.
+  const [sculptDisplayChosen, setSculptDisplay] = useState<number>();
+  const [sculptBuilt, setSculptBuilt] = useState(0);
+  const [sculptFailure, setSculptFailure] = useState<string>();
+  const sculptSession = useMemo(() => {
+    if (!sculptOn || !part?.multires || !cage || !cageSha) return undefined;
+    const key = sculptKey(cageSha, part.multires);
+    const kept = sculptKept.current;
+    if (kept && kept.partId === part.id && kept.key === key) return kept;
+    try {
+      const built = buildSculpt(part.id, key, cage, part.multires, decoded.multires);
+      // C7c: the mask outlives a rebuild (an Undo) of the same part and level.
+      const mask = sculptMaskKept.current;
+      if (mask && mask.partId === part.id && mask.mask.length === built.mask.length)
+        built.mask = mask.mask;
+      sculptMaskKept.current = { partId: part.id, mask: built.mask };
+      sculptKept.current = built;
+      return built;
+    } catch (e) {
+      if (!(e instanceof MeshEditError || e instanceof MultiresAssetError || e instanceof Error))
+        throw e;
+      return { failure: e.message };
+    }
+    // sculptBuilt: a cancelled stroke asks for a fresh surface.
+  }, [sculptOn, part, cage, cageSha, decoded, sculptBuilt]);
+  const sculpted = sculptSession && 'surface' in sculptSession ? sculptSession : undefined;
+  useEffect(() => {
+    setSculptFailure(
+      sculptSession && 'failure' in sculptSession ? sculptSession.failure : undefined,
+    );
+  }, [sculptSession]);
+  useEffect(() => {
+    if (!sculptOn) {
+      sculptKept.current = undefined;
+      setSculptDisplay(undefined);
+    }
+  }, [sculptOn]);
+  const sculptLevel = part?.multires?.level ?? 1;
+  const sculptDisplay = Math.min(sculptDisplayChosen ?? sculptLevel, sculptLevel);
+  /** The surface as shown: the top level itself, or a lower level's quads at its grid points. */
+  const sculptTop = useMemo(
+    () =>
+      sculpted && {
+        positions: sculpted.surface.positions,
+        normals: sculpted.surface.normals,
+        triangles: sculpted.triangles,
+        mask: sculpted.mask,
+      },
+    [sculpted],
+  );
+  const sculptLower = useMemo(() => {
+    if (!sculpted || !cage || sculptDisplay >= sculpted.base.level) return undefined;
+    try {
+      const lower = multiresBase(cage, sculptDisplay);
+      const map = multiresDisplayVertices(sculpted.base, lower);
+      const gather = (from: Float32Array, n: number) => {
+        const out = new Float32Array(n * map.length);
+        map.forEach((t, v) => out.set(from.subarray(n * t, n * t + n), n * v));
+        return out;
+      };
+      return {
+        positions: gather(sculpted.surface.positions, 3),
+        normals: gather(sculpted.surface.normals, 3),
+        triangles: sculptTriangles(lower.quads),
+        mask: gather(sculpted.mask, 1),
+      };
+    } catch {
+      return undefined;
+    }
+    // sculptBuilt: a stroke changed the positions in place.
+  }, [sculpted, cage, sculptDisplay, sculptBuilt]);
+  const sculptShown = sculpted && sculptDisplay < sculpted.base.level ? sculptLower : sculptTop;
+  /** Mesh space to character space for the sculpted part: a skinned one is drawn where it is bound. */
+  const sculptMatrix = useMemo(() => {
+    if (!sculpted) return identity;
+    if (doc.skins.some((k) => k.partId === sculpted.partId)) return identity;
+    return restMatrices(doc).parts.get(sculpted.partId) ?? identity;
+  }, [sculpted, doc]);
+  // A hidden part stays hidden while it is sculpted: nothing is drawn and the brushes are off.
+  const sculptVisible = !!sculpted && doc.parts.some((p) => p.id === sculpted.partId && p.visible);
+  useEffect(() => {
+    const view = viewport.current;
+    if (!view || !sculptShown || !sculptVisible) return;
+    view.setSculpt({ ...sculptShown, matrix: sculptMatrix, matcap: sculptTool.matcap });
+    return () => view.setSculpt(null);
+  }, [sculptShown, sculptMatrix, viewReady, sculptTool.matcap, sculptVisible]);
+  const sculptStroke = useRef<{
+    pointerId: number;
+    session: EditorSession<CharacterDocument>;
+    base: string;
+    sculpt: SculptSession;
+    invert: boolean;
+    last?: Vec3;
+    /** C7c Grab: what it holds, the pointer's depth and where (mesh space) it took hold. */
+    grab?: { move(delta: Vec3): { first: number; last: number }; depth: number; from: Vec3 };
+  }>(undefined);
+  /** Where the brush lands at canvas pixels x, y (mesh space) and its radius there (mm). */
+  const sculptHit = (
+    x: number,
+    y: number,
+  ): { at: Vec3; radius: number; depth: number } | undefined => {
+    const view = viewport.current;
+    const s = sculptStroke.current?.sculpt ?? sculpted;
+    if (!view || !s) return undefined;
+    const inv = invertMat4(sculptMatrix);
+    if (!inv) return undefined;
+    const ray = view.ray(x, y);
+    const o = transformPoint(inv, ray.origin);
+    const tip = transformPoint(inv, [
+      ray.origin[0] + ray.dir[0],
+      ray.origin[1] + ray.dir[1],
+      ray.origin[2] + ray.dir[2],
+    ]);
+    const d: Vec3 = [tip[0] - o[0], tip[1] - o[1], tip[2] - o[2]];
+    const l = Math.hypot(...d) || 1;
+    const v = s.surface.raycast(o, [d[0] / l, d[1] / l, d[2] / l]);
+    if (v === undefined) return undefined;
+    const P = s.surface.positions;
+    const at: Vec3 = [P[3 * v]!, P[3 * v + 1]!, P[3 * v + 2]!];
+    // The radius in pixels, as millimetres at the depth of the point hit.
+    const world = transformPoint(sculptMatrix, at);
+    const depth = view.project(Float32Array.from(world), identity)[0]![2];
+    const a = view.unproject(x, y, depth),
+      b = view.unproject(x + sculptTool.radius, y, depth);
+    const scale = Math.hypot(sculptMatrix[0]!, sculptMatrix[1]!, sculptMatrix[2]!) || 1;
+    const radius = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / scale;
+    return radius > 0 ? { at, radius, depth } : undefined;
+  };
+  /** Canvas pixels x, y at `depth`, in the sculpted part's mesh space. */
+  const sculptAtDepth = (x: number, y: number, depth: number): Vec3 | undefined => {
+    const view = viewport.current;
+    const inv = invertMat4(sculptMatrix);
+    if (!view || !inv) return undefined;
+    return transformPoint(inv, view.unproject(x, y, depth));
+  };
+  const sculptDab = (x: number, y: number) => {
+    const st = sculptStroke.current;
+    const view = viewport.current;
+    if (!st || !view) return;
+    if (st.grab) {
+      const to = sculptAtDepth(x, y, st.grab.depth);
+      if (!to) return;
+      const f = st.grab.from;
+      const change = st.grab.move([to[0] - f[0], to[1] - f[1], to[2] - f[2]]);
+      view.updateSculpt(change.first, change.last);
+      return;
+    }
+    const hit = sculptHit(x, y);
+    if (!hit) {
+      st.last = undefined;
+      return;
+    }
+    const kind = sculptTool.kind;
+    if (kind === 'grab') {
+      // Takes hold where the drag first meets the surface.
+      const g = st.sculpt.surface.grab(hit.at, hit.radius, st.sculpt.mask, sculptTool.symmetry);
+      st.grab = { move: g.move, depth: hit.depth, from: sculptAtDepth(x, y, hit.depth) ?? hit.at };
+      return;
+    }
+    if (kind === 'mask') {
+      const surface = st.sculpt.surface;
+      const from = st.last ?? hit.at;
+      const len = Math.hypot(hit.at[0] - from[0], hit.at[1] - from[1], hit.at[2] - from[2]);
+      const steps = Math.max(1, Math.ceil(len / (hit.radius / 4)));
+      let first = Infinity,
+        last = -1;
+      for (let k = 1; k <= steps; k++) {
+        const t = k / steps;
+        const c = surface.maskDab(
+          st.sculpt.mask,
+          [
+            from[0] + (hit.at[0] - from[0]) * t,
+            from[1] + (hit.at[1] - from[1]) * t,
+            from[2] + (hit.at[2] - from[2]) * t,
+          ],
+          hit.radius,
+          sculptTool.strength,
+          st.invert,
+          sculptTool.symmetry,
+        );
+        if (c.last >= 0) {
+          first = Math.min(first, c.first);
+          last = Math.max(last, c.last);
+        }
+      }
+      st.last = hit.at;
+      if (last >= 0) view.updateSculpt(first, last);
+      return;
+    }
+    const change = sculptSegment(
+      st.sculpt.surface,
+      st.last ?? hit.at,
+      hit.at,
+      {
+        kind,
+        radius: hit.radius,
+        strength: sculptTool.strength,
+        invert: st.invert,
+        symmetry: sculptTool.symmetry,
+      },
+      st.sculpt.mask,
+    );
+    st.last = hit.at;
+    view.updateSculpt(change.first, change.last);
+  };
+  const startSculpt = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (sculptStroke.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (
+      e.button !== 0 ||
+      busy ||
+      !sculpted ||
+      !sculptVisible ||
+      sculptDisplay < sculpted.base.level
+    )
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.focus({ preventScroll: true });
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    sculpted.surface.refresh();
+    sculptStroke.current = {
+      pointerId: e.pointerId,
+      session,
+      base: characterContentHash(session.content),
+      sculpt: sculpted,
+      invert: e.shiftKey,
+    };
+    const [x, y] = local(e);
+    setPaintPointer([x, y]);
+    sculptDab(x, y);
+  };
+  const endSculpt = (e: ReactPointerEvent<HTMLDivElement>, cancel: boolean) => {
+    const st = sculptStroke.current;
+    if (!st || st.pointerId !== e.pointerId) return;
+    sculptStroke.current = undefined;
+    const touched = st.sculpt.surface.takeTouched();
+    const rebuild = () => {
+      sculptKept.current = undefined;
+      setSculptBuilt((n) => n + 1);
+    };
+    if (!touched.size) return;
+    const base = session.content;
+    const target = base.parts.find((p) => p.id === st.sculpt.partId);
+    const mesh = target ? decoded.meshes.get(target.mesh) : undefined;
+    if (
+      cancel ||
+      currentSession.current !== st.session ||
+      characterContentHash(base) !== st.base ||
+      !target?.multires ||
+      !mesh
+    ) {
+      if (!cancel) setEditError('character-base-mismatch');
+      return rebuild();
+    }
+    let next: Float32Array;
+    let made: ReturnType<typeof characterMultiresSet>;
+    try {
+      const corners = new Set<number>();
+      next = multiresDisplacementsFrom(
+        st.sculpt.base,
+        st.sculpt.frames,
+        st.sculpt.surface.positions,
+        st.sculpt.displacements.slice(),
+        touched,
+        corners,
+      );
+      // Only the chunks the stroke reached are encoded again (C7f).
+      made = characterMultiresSet(base, target.id, mesh, target.multires.level, next, corners);
+    } catch (x) {
+      setEditError(x instanceof Error ? x.message : String(x));
+      return rebuild();
+    }
+    const sha = base.assets.find((a) => a.id === target.mesh)?.sha256 ?? '';
+    void commitAssets(made.assets, made.op, st.base).then((ok) => {
+      if (!ok) return rebuild();
+      // The surface already is the new shape: keep it under the chunks the edit named.
+      const after = session.content.parts.find((p) => p.id === target.id)?.multires;
+      if (!after) return rebuild();
+      st.sculpt.displacements = next;
+      st.sculpt.key = sculptKey(sha, after);
+      sculptKept.current = st.sculpt;
+      setSculptBuilt((n) => n + 1);
+    });
+  };
+  /** C7c: inverts or clears the mask (a view state: no edit). */
+  const changeSculptMask = (action: 'invert' | 'clear') => {
+    const s = sculpted;
+    if (!s) return;
+    for (let v = 0; v < s.mask.length; v++) s.mask[v] = action === 'clear' ? 0 : 1 - s.mask[v]!;
+    viewport.current?.updateSculpt(0, s.mask.length - 1);
+  };
+  const addMultires = (level: number) => {
+    if (!part || !cage) return;
+    let made: ReturnType<typeof characterMultiresAdd>;
+    try {
+      made = characterMultiresAdd(doc, part.id, cage, level);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    void commitAssets(made.assets, made.op, characterContentHash(session.content));
+  };
+  // ---- C7d: baking the multires into a normal map (in a worker; one at a time) ----
+  const bakeJobs = useRef<BakeJobs>(undefined);
+  const bakeRun = useRef<BakeRun>(undefined);
+  const [bakeProgress, setBakeProgress] = useState<{ rows: number; size: number }>();
+  const [bakeReport, setBakeReport] = useState<{ partId: string; report: BakeReport }>();
+  useEffect(() => {
+    const j = new BakeJobs();
+    bakeJobs.current = j;
+    return () => {
+      bakeRun.current?.cancel();
+      j.dispose();
+      if (bakeJobs.current === j) bakeJobs.current = undefined;
+    };
+  }, []);
+  // Another part chosen: its bake (if any) stops.
+  useEffect(() => () => bakeRun.current?.cancel(), [part?.id]);
+  const bakeNormal = (size: number, copyShared: boolean) => {
+    if (!part?.multires || !cage || bakeRun.current || !bakeJobs.current) return;
+    const base = characterContentHash(session.content);
+    const partId = part.id;
+    const subdivided = !!part.subdivision;
+    let displacements: Float32Array;
+    try {
+      displacements = characterMultiresDisplacements(part.multires, cage, decoded.multires);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setBakeReport(undefined);
+    setBakeProgress({ rows: 0, size });
+    const run = bakeJobs.current.run(
+      { cage, level: part.multires.level, displacements, size },
+      (rows, total) => setBakeProgress({ rows, size: total }),
+    );
+    bakeRun.current = run;
+    run.done
+      .then(async (done) => {
+        let e: ReturnType<typeof characterNormalBake>;
+        try {
+          e = characterNormalBake(session.content, partId, done.png, copyShared);
+        } catch (x) {
+          setEditError(x instanceof Error ? x.message : String(x));
+          return;
+        }
+        // Refused (base mismatch) when the document changed while it baked.
+        if (await commitAsset({ ref: e.ref, bytes: e.bytes }, e.op, base))
+          setBakeReport({
+            partId,
+            report: { size: done.size, covered: done.covered, missed: done.missed, subdivided },
+          });
+      })
+      .catch((x: unknown) => {
+        if (x instanceof BakeError) {
+          if (x.problem === 'cancelled') return;
+          setEditError(
+            x.problem === 'uv'
+              ? 'Unwrap the part first: its cage has no UVs to bake into.'
+              : x.problem === 'uv-range'
+                ? `The UVs of ${x.faces.length} faces lie outside the 0–1 square (faces ${x.faces.slice(0, 8).join(', ')}${x.faces.length > 8 ? ', …' : ''}). A normal map covers that square once: unwrap again.`
+                : x.problem === 'uv-overlap'
+                  ? `The UVs of ${x.faces.length} faces overlap (faces ${x.faces.slice(0, 8).join(', ')}${x.faces.length > 8 ? ', …' : ''}). Unwrap again so no face lies on another.`
+                  : `Cannot bake: ${x.detail}`,
+          );
+        } else setEditError(x instanceof Error ? x.message : String(x));
+      })
+      .finally(() => {
+        if (bakeRun.current === run) bakeRun.current = undefined;
+        setBakeProgress(undefined);
+      });
+  };
+  const raiseMultires = () => {
+    if (!part || !cage) return;
+    let made: ReturnType<typeof characterMultiresRaise>;
+    try {
+      made = characterMultiresRaise(doc, part.id, cage, decoded.multires);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    void commitAssets(made.assets, made.op, characterContentHash(session.content));
+  };
   /** A left-button drag on the view paints (the view turns with the other buttons). */
   const startStroke = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (sculptOn) return startSculpt(e);
     if (!paintOn) return;
     // Another finger during a stroke neither replaces it nor turns the view under it.
     if (stroke.current) {
@@ -814,6 +1424,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     dab(x, y);
   };
   const endStroke = (e: ReactPointerEvent<HTMLDivElement>, cancel: boolean) => {
+    if (sculptStroke.current) return endSculpt(e, cancel);
     const s = stroke.current;
     if (!s || s.pointerId !== e.pointerId) return;
     stroke.current = undefined;
@@ -1060,11 +1671,29 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
    * One new asset (a mesh or an image) as one edit: the Host keeps the bytes first; the edit then applies only
    * to the document it was made from (an edit or Undo meanwhile refuses it).
    */
-  const commitAsset = async (
-    asset: { ref: CharacterAssetRef; bytes: Uint8Array },
+  /**
+   * C7b: several new assets of one edit (a multires' chunks): those the document does not
+   * already name are kept by the Host in one call, then the edit applies as `commitAsset`'s.
+   */
+  const commitAssets = async (
+    assets: readonly { ref: CharacterAssetRef; bytes: Uint8Array }[],
     op: CharacterOperation,
     base: string,
   ) => {
+    const named = new Set(session.content.assets.map((a) => `${a.kind} ${a.sha256}`));
+    const fresh = assets.filter((a) => !named.has(`${a.ref.kind} ${a.ref.sha256}`));
+    return commitAsset(fresh, op, base);
+  };
+  const commitAsset = async (
+    asset:
+      | { ref: CharacterAssetRef; bytes: Uint8Array }
+      | readonly { ref: CharacterAssetRef; bytes: Uint8Array }[],
+    op: CharacterOperation,
+    base: string,
+  ) => {
+    const list = Array.isArray(asset)
+      ? asset
+      : [asset as { ref: CharacterAssetRef; bytes: Uint8Array }];
     if (!props.onMeshAsset || !canEdit()) {
       setEditError('permission-denied');
       return false;
@@ -1074,10 +1703,10 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     try {
       // Admitted by the Host like any edit, before it keeps the bytes.
       props.admit?.(applyCharacterOperation(session.content, op));
-      await props.onMeshAsset(asset);
+      if (list.length) await props.onMeshAsset(list[0]!, list.slice(1));
       // The Host may have shown another document while it kept the bytes.
       if (currentSession.current !== from) throw new Error('character-base-mismatch');
-      staged.current.set(asset.ref.sha256, asset.bytes);
+      for (const a of list) staged.current.set(a.ref.sha256, a.bytes);
       setStagedCount((n) => n + 1);
       session.execute(characterEditorCommand(op, { expectedHash: base, canEdit }));
       keepHistoryBudget();
@@ -1197,6 +1826,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     setPartId(id);
     setEditing(false);
     setPainting(false);
+    setSculpting(false);
     setSelection((s) => emptySelection(s.mode));
     if (id) {
       setBoneIdState(undefined);
@@ -1293,6 +1923,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     const track = action?.tracks.find((t) => JSON.stringify(t.target) === JSON.stringify(target));
     const key = track?.keys.find((k) => k.tick === playback.tick);
     if (!key) return false;
+    if (typeof key.value === 'string') return false;
     const a = ([] as number[]).concat(key.value),
       b = ([] as number[]).concat(value);
     return a.length === b.length && a.every((x, i) => Math.abs(x - b[i]!) < 1e-9);
@@ -1320,10 +1951,25 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
       view?.status === 'ready'
         ? view.joints.find((j) => j.id === joint)?.values.find((v) => v.key === key)
         : undefined;
+    // MR1: a value that follows another joint is not listed, and is never keyed directly.
+    if (view?.status === 'ready' && view.limitViolation && !bound) {
+      setEditError(`joint-coupled: ${joint} ${key}`);
+      return false;
+    }
     // The version's own limits hold for keys too: a value past them is refused, not clamped.
     if (bound && ((bound.min ?? -Infinity) > value || (bound.max ?? Infinity) < value)) {
       setEditError(`joint-limit: ${joint} ${key}`);
       return false;
+    }
+    // A value that follows this one (MR1 coupling) holds its own limits too.
+    if (view?.status === 'ready' && view.limitViolation) {
+      const now = new Map(pose.joints.get(prop.id) ?? new Map());
+      now.set(joint, { ...now.get(joint), [key]: value });
+      const past = view.limitViolation(now);
+      if (past) {
+        setEditError(`joint-limit: ${past.joint} ${past.key}`);
+        return false;
+      }
     }
     if (keyedAlready({ kind: 'prop-joint', id: prop.id, joint, property: key }, value)) return true;
     const taken = characterIds(doc);
@@ -1336,6 +1982,63 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
       value,
       trackId,
       keyId: freshCharacterId(doc, `${trackId}#${playback.tick}`, taken),
+    });
+  };
+  /** MR5: the last check along the action of each prop, by prop ID. */
+  const [sweeps, setSweeps] = useState<ReadonlyMap<string, PropSweepResult>>(new Map());
+  /** MR4: keys a prop's translation and rotation (or `only` one) at the playhead, as one edit. */
+  const keyPlacement = (
+    placement: CharacterProp['placement'],
+    only?: 'translation' | 'rotation',
+  ): boolean => {
+    if (!action || !prop) return false;
+    const taken = characterIds(doc);
+    const keys = (only ? [only] : (['translation', 'rotation'] as const))
+      .filter(
+        (property) => !keyedAlready({ kind: 'prop', id: prop.id, property }, placement[property]),
+      )
+      .map((property) => {
+        const trackId = freshCharacterId(doc, `${action.id}/${prop.id}/${property}`, taken);
+        taken.add(trackId);
+        const keyId = freshCharacterId(doc, `${trackId}#${playback.tick}`, taken);
+        taken.add(keyId);
+        return {
+          target: { kind: 'prop' as const, id: prop.id, property },
+          tick: playback.tick,
+          value: [...placement[property]] as Vec3 | Quat,
+          trackId,
+          keyId,
+        };
+      });
+    if (!keys.length) return true;
+    return edit({ type: 'setKeys', actionId: action.id, keys });
+  };
+  /** MR4: the transform's keys, put in the action as one edit (the panel confirmed a replace). */
+  const makeTransform = (made: MadeTransform): boolean => {
+    if (!action || !prop) return false;
+    // As a key that drives a follower past its limits is refused (keyJoint), so is a motion.
+    const past = followerViolation(made, readyView(views.get(prop.id))?.limitViolation);
+    if (past) {
+      setEditError(`joint-limit: ${past.joint} ${past.key}`);
+      return false;
+    }
+    const taken = characterIds(doc);
+    const fresh = (base: string) => {
+      const id = freshCharacterId(doc, base, taken);
+      taken.add(id);
+      return id;
+    };
+    return edit({
+      type: 'putPropTransform',
+      actionId: action.id,
+      propId: prop.id,
+      from: made.from,
+      to: made.to,
+      keys: made.keys.map((k) => {
+        const name = k.target.kind === 'prop-joint' ? k.target.joint : k.target.mount;
+        const trackId = fresh(`${action.id}/${prop.id}/${name}/${k.target.property}`);
+        return { ...k, trackId, keyId: fresh(`${trackId}#${k.tick}`) };
+      }),
     });
   };
   // C5d: a solving chain's handle is its target (a rig edit moves it); a free chain's is its
@@ -1378,6 +2081,10 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
       setEditError('permission-denied');
       return;
     }
+    if (videoAbort.current) {
+      setEditError('video-export-running');
+      return;
+    }
     const own = direction === 'undo' ? props.onUndo : props.onRedo;
     if (own) own();
     else if (direction === 'undo' ? session.canUndo : session.canRedo) {
@@ -1402,18 +2109,44 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 <IconButton
                   icon={Undo2}
                   label="Undo"
-                  disabled={readOnly || !session.canUndo}
-                  reason={readOnly ? 'Read only' : 'Nothing to undo'}
+                  disabled={readOnly || !session.canUndo || !!videoRun}
+                  reason={
+                    readOnly
+                      ? 'Read only'
+                      : videoRun
+                        ? 'A video export is running'
+                        : 'Nothing to undo'
+                  }
                   onClick={() => history('undo')}
                 />
                 <IconButton
                   icon={Redo2}
                   label="Redo"
-                  disabled={readOnly || !session.canRedo}
-                  reason={readOnly ? 'Read only' : 'Nothing to redo'}
+                  disabled={readOnly || !session.canRedo || !!videoRun}
+                  reason={
+                    readOnly
+                      ? 'Read only'
+                      : videoRun
+                        ? 'A video export is running'
+                        : 'Nothing to redo'
+                  }
                   onClick={() => history('redo')}
                 />
               </>
+            )}
+            {props.onExportMedia && (
+              <IconButton
+                icon={Aperture}
+                label="Render image"
+                reason={
+                  videoDisabled ?? (busy ? 'Another job is running' : 'Path-traced still image')
+                }
+                disabled={busy || !!videoDisabled}
+                onClick={() => {
+                  setPlayback(pause);
+                  setRendering(true);
+                }}
+              />
             )}
             {props.onExport && (
               <IconButton
@@ -1429,8 +2162,8 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 <IconButton
                   icon={FileUp}
                   label="Import glTF or VRM"
-                  disabled={readOnly}
-                  reason="Read only"
+                  disabled={readOnly || !!videoRun}
+                  reason={readOnly ? 'Read only' : 'A video export is running'}
                   onClick={() => file.current?.click()}
                 />
               </>
@@ -1526,8 +2259,8 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 >
                   <option value="">
                     {props.propChoices?.length
-                      ? 'Choose a saved CAD version'
-                      : 'No saved CAD versions'}
+                      ? 'Choose a saved CAD or building version'
+                      : 'No saved CAD or building versions'}
                   </option>
                   {(props.propChoices ?? []).map((c) => (
                     <option key={choiceKey(c)} value={choiceKey(c)}>
@@ -1537,15 +2270,29 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 </select>
                 <button
                   type="button"
-                  disabled={!choice}
+                  disabled={!choice || !!props.placingProp}
                   onClick={() => {
                     const c = props.propChoices?.find((x) => choiceKey(x) === choice);
-                    if (c) props.onAddProp?.(c);
+                    if (c)
+                      props.onAddProp?.(
+                        c,
+                        shownProps
+                          .filter((p) => p.visible)
+                          .reduce(
+                            (b, p) => unionBounds(b, instanceBounds(p.instances)),
+                            frameBounds(frame),
+                          ),
+                      );
                     setChoice('');
                   }}
                 >
                   Add prop
                 </button>
+                {props.placingProp && (
+                  <span className="character-prop-state" role="status">
+                    Measuring the version to place it beside the character…
+                  </span>
+                )}
               </div>
             )}
             {allBones.length > 0 && (
@@ -1586,7 +2333,21 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 onDone={() => setPainting(false)}
               />
             )}
-            {part && !meshEditing && !paintOn && (
+            {part && sculptOn && part.multires && (
+              <SculptInspector
+                partName={part.name}
+                level={part.multires.level}
+                vertices={sculpted ? sculpted.surface.vertexCount : 0}
+                display={sculptDisplay}
+                tool={sculptTool}
+                busy={busy}
+                onTool={setSculptTool}
+                onDisplay={setSculptDisplay}
+                onMask={changeSculptMask}
+                onDone={() => setSculpting(false)}
+              />
+            )}
+            {part && !meshEditing && !paintOn && !sculptOn && (
               <Section title={part.name}>
                 <dl className="character-facts">
                   <dt>Vertices</dt>
@@ -1678,6 +2439,37 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                     >
                       Edit mesh
                     </button>
+                    <MultiresControls
+                      multires={part.multires}
+                      busy={busy}
+                      disabled={!cage || playback.playing}
+                      onAdd={addMultires}
+                      onSculpt={() => {
+                        setPlayback(pause);
+                        setSculpting(true);
+                      }}
+                      onRaise={raiseMultires}
+                      onRemove={() => {
+                        try {
+                          edit(characterMultiresRemove(doc, part.id));
+                        } catch (e) {
+                          setEditError(e instanceof Error ? e.message : String(e));
+                        }
+                      }}
+                    />
+                    {part.multires && (
+                      <NormalBakeControls
+                        shared={characterSharedMaterials(doc, part.id).map(
+                          (id) => doc.materials.find((m) => m.id === id)?.name ?? id,
+                        )}
+                        busy={busy}
+                        disabled={!cage || playback.playing}
+                        running={bakeProgress}
+                        report={bakeReport?.partId === part.id ? bakeReport.report : undefined}
+                        onBake={bakeNormal}
+                        onCancel={() => bakeRun.current?.cancel()}
+                      />
+                    )}
                     <button
                       type="button"
                       disabled={busy}
@@ -1727,7 +2519,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                   : {})}
               />
             )}
-            {part && !meshEditing && !paintOn && (
+            {part && !meshEditing && !paintOn && !sculptOn && (
               <MorphInspector
                 key={`morphs-${part.id}`}
                 partName={part.name}
@@ -1851,12 +2643,134 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                       ? 'Choose an action to key the joints.'
                       : 'Pause to key the joints.'
                 }
+                placement={pose.props.get(prop.id) ?? prop.placement}
+                placementKeyed={
+                  !!action?.tracks.some((t) => t.target.kind === 'prop' && t.target.id === prop.id)
+                }
                 onKey={keyJoint}
                 onPlace={(placement) => edit({ type: 'setPropPlacement', id: prop.id, placement })}
+                onKeyPlacement={keyPlacement}
                 onRemove={() => {
                   if (edit({ type: 'removeProp', id: prop.id })) setPropId(undefined);
                 }}
               />
+            )}
+            {prop && props.onPreparePropVersion && (
+              <PropVersionUpdate
+                key={`version ${prop.id}@${prop.source.contentHash}`}
+                doc={doc}
+                prop={prop}
+                choices={(props.propChoices ?? []).filter(
+                  (c) =>
+                    (c.kind ?? 'cad') === prop.source.kind &&
+                    c.artifactId === prop.source.artifactId &&
+                    c.contentHash !== prop.source.contentHash,
+                )}
+                readOnly={readOnly}
+                onPrepare={(c) => props.onPreparePropVersion!(prop.id, c)}
+                onUpdate={(c, drop) =>
+                  edit({
+                    type: 'setPropSource',
+                    id: prop.id,
+                    source: {
+                      kind: prop.source.kind,
+                      artifactId: c.artifactId,
+                      versionId: c.versionId,
+                      contentHash: c.contentHash,
+                    },
+                    ...(drop.length
+                      ? {
+                          dropTracks: drop.map((d) => ({
+                            actionId: d.actionId,
+                            trackId: d.trackId,
+                          })),
+                        }
+                      : {}),
+                  })
+                }
+              />
+            )}
+            {prop && readyView(views.get(prop.id))?.checkInterferenceAlong && (
+              <PropSweepPanel
+                key={`sweep ${prop.id}`}
+                doc={doc}
+                prop={prop}
+                action={action ?? undefined}
+                result={sweeps.get(prop.id)}
+                check={(samples) => readyView(views.get(prop.id))!.checkInterferenceAlong!(samples)}
+                onResult={(r) =>
+                  setSweeps((m) => {
+                    const next = new Map(m);
+                    if (r) next.set(prop.id, r);
+                    else next.delete(prop.id);
+                    return next;
+                  })
+                }
+                onSeek={(t) => setPlayback((p) => seek(pause(p), action, t))}
+                mountName={(m) =>
+                  readyView(views.get(prop.id))?.mounts?.find((x) => x.id === m)?.name ?? m
+                }
+                jointName={(m, j) =>
+                  readyView(views.get(prop.id))
+                    ?.mounts?.find((x) => x.id === m)
+                    ?.joints.find((x) => x.id === j)?.name ?? j
+                }
+              />
+            )}
+            {prop && !!readyView(views.get(prop.id))?.forms?.length && (
+              <PropTransformPanel
+                key={`transform ${prop.id}@${prop.source.contentHash}`}
+                propId={prop.id}
+                joints={readyView(views.get(prop.id))?.joints ?? []}
+                forms={readyView(views.get(prop.id))?.forms ?? []}
+                mounts={readyView(views.get(prop.id))?.mounts}
+                action={action ?? undefined}
+                canKey={!readOnly && !!action && !playback.playing}
+                reason={
+                  readOnly
+                    ? 'Read only.'
+                    : !action
+                      ? 'Choose an action to make a transform.'
+                      : 'Pause to make a transform.'
+                }
+                onMake={makeTransform}
+              />
+            )}
+            {prop &&
+              (readyView(views.get(prop.id))?.joints ?? []).filter((j) =>
+                j.values.some((v) => v.key === 'angle'),
+              ).length >= 3 && (
+                <EscapementPanel
+                  key={`escapement ${prop.id}@${prop.source.contentHash}`}
+                  propId={prop.id}
+                  joints={readyView(views.get(prop.id))?.joints ?? []}
+                  limitViolation={readyView(views.get(prop.id))?.limitViolation}
+                  action={action ?? undefined}
+                  canKey={!readOnly && !!action && !playback.playing}
+                  reason={
+                    readOnly
+                      ? 'Read only.'
+                      : !action
+                        ? 'Choose an action to make an escapement.'
+                        : 'Pause to make an escapement.'
+                  }
+                  onMake={makeTransform}
+                />
+              )}
+            {props.onExportMedia && (
+              <Section title="Video">
+                <VideoControls
+                  actions={doc.actions}
+                  actionId={playback.actionId}
+                  busy={busy}
+                  disabled={videoDisabled}
+                  problems={(s) => videoSettingsProblems(doc, s)}
+                  running={videoRun}
+                  report={videoReport}
+                  onExport={(s, kind) => void exportFrames(s, kind)}
+                  onCancel={() => videoAbort.current?.abort()}
+                />
+              </Section>
             )}
             <Section title="Model">
               <dl className="character-facts">
@@ -1938,6 +2852,11 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
             onPointerDownCapture={startStroke}
             onPointerDown={(e) => e.currentTarget.focus({ preventScroll: true })}
             onPointerMove={(e) => {
+              if (sculptOn) {
+                const [x, y] = local(e);
+                setPaintPointer([x, y]);
+                if (sculptStroke.current?.pointerId === e.pointerId) sculptDab(x, y);
+              }
               if (paintOn) {
                 const [x, y] = local(e);
                 setPaintPointer([x, y]);
@@ -1950,7 +2869,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
             onPointerUp={(e) => endStroke(e, false)}
             onPointerCancel={(e) => endStroke(e, true)}
             onPointerLeave={() => {
-              if (!stroke.current) setPaintPointer(undefined);
+              if (!stroke.current && !sculptStroke.current) setPaintPointer(undefined);
             }}
           >
             <div ref={host} className="character-canvas-host" />
@@ -1961,6 +2880,27 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 pointer={paintPointer}
                 subscribe={subscribeView}
               />
+            )}
+            {sculptOn &&
+              paintPointer &&
+              sculpted &&
+              sculptVisible &&
+              sculptDisplay >= sculptLevel && (
+                <div
+                  className="character-brush-ring"
+                  aria-hidden="true"
+                  style={{
+                    left: paintPointer[0] - sculptTool.radius,
+                    top: paintPointer[1] - sculptTool.radius,
+                    width: 2 * sculptTool.radius,
+                    height: 2 * sculptTool.radius,
+                  }}
+                />
+              )}
+            {sculptOn && sculptFailure && (
+              <div className="character-viewport-note" role="alert">
+                Cannot sculpt: {sculptFailure}
+              </div>
             )}
             {paintOn && !paintDots && shown && !failure && (
               <div className="character-viewport-note" role="status">
@@ -2095,6 +3035,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
             <DopeSheet
               doc={doc}
               action={action}
+              marks={overlapMarks(doc, action, sweeps)}
               tick={playback.tick}
               frame={frameTicks}
               selected={liveKeys}
@@ -2116,6 +3057,9 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                   ? view.joints.find((j) => j.id === joint)?.name
                   : undefined;
               }}
+              mountName={(id, mount) =>
+                readyView(views.get(id))?.mounts?.find((m) => m.id === mount)?.name
+              }
             />
           )}
         </div>
@@ -2130,8 +3074,18 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
           onChange={(e: ChangeEvent<HTMLInputElement>) => {
             const f = e.target.files?.[0];
             e.target.value = '';
-            if (f) props.onImport?.(f);
+            if (f && !videoAbort.current) props.onImport?.(f);
           }}
+        />
+      )}
+      {rendering && (
+        <PathRenderDialog
+          name={videoFileName(doc, playback.actionId ?? '', 'png').replace(/\.png$/, '')}
+          source={() => viewport.current?.pathSource()}
+          onSavePng={(png, fileName) =>
+            props.onExportMedia?.({ name: fileName, type: 'image/png', data: png })
+          }
+          onClose={() => setRendering(false)}
         />
       )}
     </div>
@@ -2141,6 +3095,29 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
 const identityMatrix = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const choiceKey = (c: CharacterPropChoice) => `${c.artifactId} ${c.versionId}`;
 const noViews: ReadonlyMap<string, CharacterPropView> = new Map();
+const readyView = (v: CharacterPropView | undefined) => (v?.status === 'ready' ? v : undefined);
+/** MR5: the times props overlap at in this action, from checks still current. */
+function overlapMarks(
+  doc: CharacterDocument,
+  action: CharacterAction,
+  sweeps: ReadonlyMap<string, PropSweepResult>,
+) {
+  const ticks = new Set<number>();
+  let jumps = false;
+  for (const [propId, r] of sweeps) {
+    const prop = doc.props.find((p) => p.id === propId);
+    if (r.action !== action || prop?.source.contentHash !== r.contentHash) continue;
+    if (r.sweep.status !== 'ok') continue;
+    for (const h of r.sweep.hits) ticks.add(h.tick);
+    // MR7: a switch that moves its part is marked with the overlaps.
+    for (const j of r.sweep.jumps ?? []) {
+      ticks.add(j.tick);
+      jumps = true;
+    }
+  }
+  const label = jumps ? 'Overlaps and jumps' : 'Overlaps';
+  return ticks.size ? { label, ticks: [...ticks].sort((a, b) => a - b) } : undefined;
+}
 const noValues: ReadonlyMap<string, Partial<Record<CharacterJointValueKey, number>>> = new Map();
 
 function frameStep(key: string, rate: { numerator: number; denominator: number }): number {
@@ -2186,4 +3163,22 @@ function useDecodedImages(
     };
   }, [images]);
   return decoded;
+}
+
+/**
+ * Why the visible props keep an export off: one still being evaluated would be left out of
+ * every frame, and one that failed would be missing silently.
+ */
+function propsNotReady(
+  doc: CharacterDocument,
+  views: ReadonlyMap<string, CharacterPropView>,
+): string | undefined {
+  for (const prop of doc.props) {
+    if (!prop.visible) continue;
+    const view = views.get(prop.id);
+    if (view?.status === 'failed')
+      return `The prop ${prop.name} could not be shown (${view.message}).`;
+    if (view?.status !== 'ready') return 'Wait for the props to be shown.';
+  }
+  return undefined;
 }

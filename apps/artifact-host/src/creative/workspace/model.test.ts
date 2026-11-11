@@ -1,7 +1,10 @@
+import { workspaceDocumentAdapter } from './native-adapters';
+import { documentChangedElementIds } from '@editor-platform/document/proposal-diff';
+import type { ArtifactEditor, HostSavedEvent, HostSaveContext } from '@editor-platform/editor-host';
 import { describe, it, expect, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { clone, MemoryStorage, type Artifact } from '@editor-platform/artifact-core';
+import { clone, contentHash, MemoryStorage, type Artifact } from '@editor-platform/artifact-core';
 import { documentTextEditCommand } from '@editor-platform/document/text';
 import { updateElement, updateComponentPart, insertElement } from '@editor-platform/design/model';
 import { insertDesignPage, insertDesignPanel } from '@editor-platform/design/pagination';
@@ -276,7 +279,10 @@ describe('Creative D3a reference contract', () => {
   });
   it('keeps failed mapping writes retryable and rejects invalid metadata or copied prose', async () => {
     const f = await fixture();
-    await f.w.characters.save({ reuseSavedVersions: false });
+    f.w.characters
+      .editor(f.w.characters.cards[0])!
+      .execute(updateComponentPart('component-character', 'hair-front', { fill: '#123456' }));
+    await f.w.characters.save();
     const old = f.w.item('SC-01', 'character', 'CH-01');
     f.setFail(true);
     await expect(f.w.refreshReference('SC-01', 'character', 'CH-01', old)).rejects.toThrow(
@@ -367,7 +373,17 @@ it('rejects a stale client calculation revision and leaves source/manuscript unt
 });
 it('keeps the manuscript usable when a creative artifact is missing after reload', async () => {
   const f = await fixture();
+  f.w.characters
+    .editor(f.w.characters.cards[1])!
+    .execute(updateComponentPart('component-character', 'hair-front', { fill: '#123456' }));
   await f.w.characters.save();
+  expect((await f.w.readReference('SC-01', 'character', 'CH-02')).state).toBe('stale');
+  await f.w.refreshReference(
+    'SC-01',
+    'character',
+    'CH-02',
+    f.w.item('SC-01', 'character', 'CH-02'),
+  );
   const old = f.w.item('SC-01', 'character', 'CH-01');
   await f.artifacts.remove(old.artwork.artifactId);
   const opened = await f.open();
@@ -577,4 +593,172 @@ it('resolves newly created comic descendants to their native page Scene and reje
   const other = new CreativeWorkspace(f.io, ambiguous, w.characters, w.settings);
   await other.openScene('SC-03');
   expect(() => other.sceneForAddress(address)).toThrow(/曖昧/);
+});
+
+describe('Host Document adapter initialization', () => {
+  const adapter = {
+    ...workspaceDocumentAdapter,
+    capabilities: { ...workspaceDocumentAdapter.capabilities, proposals: true },
+    changedElements: documentChangedElementIds,
+  };
+  async function opened() {
+    const f = await fixture();
+    const w = await CreativeWorkspace.open(
+      f.io,
+      () => f.access.write,
+      (id) => id !== f.access.blocked,
+      undefined,
+      { documentAdapter: adapter },
+    );
+    const e = (await w.openScene('SC-01')) as ArtifactEditor<DocumentContent>;
+    const propose = (id: string) =>
+      e.propose({
+        id,
+        summary: id,
+        baseLocalRevision: e.revision,
+        commands: [
+          documentTextEditCommand(e.content, [
+            { segmentId: 'port-text', start: 0, end: 0, expected: '', text: '案' },
+          ]),
+        ],
+      });
+    return { ...f, w, e, propose };
+  }
+  it('forwards the captured context through Document, Comic and role storage to the consuming Host', async () => {
+    const f = await fixture();
+    const contexts: HostSaveContext[] = [];
+    const put = f.artifacts.put.bind(f.artifacts);
+    f.artifacts.put = async (value, context?: HostSaveContext) => {
+      if (context) contexts.push(context);
+      await put(value);
+    };
+    const w = await f.open();
+    for (const editor of [
+      await w.openScene('SC-01'),
+      await w.openScene('SC-03'),
+      w.characters.source,
+    ]) {
+      const result = await editor.save({ commitVersion: true });
+      expect(contexts.at(-1)).toBe(result.saveContext);
+      expect(result.saveContext.artifactId).toBe(editor.id);
+      expect(result.saveContext.contentHash).toBe(
+        (await f.artifacts.get(editor.id))!.versions.at(-1)!.contentHash,
+      );
+    }
+    expect(contexts.map((c) => c.kind)).toEqual(['document', 'design', 'data']);
+  });
+  it('shares concurrent openings and preserves apply / save / Undo receipts', async () => {
+    const { w, e, propose, artifacts } = await opened();
+    expect(await Promise.all([w.openScene('SC-01'), w.openScene('SC-02')])).toEqual([e, e]);
+    const saved: HostSavedEvent[] = [];
+    e.onSaved((event) => saved.push(event));
+    const original = e.content;
+    const review = propose('accept');
+    expect(e.content).toEqual(original);
+    expect(review.preview.content).not.toEqual(original);
+    e.acceptProposal(review.id);
+    expect(e.proposalTransactions).toHaveLength(1);
+    e.undo();
+    expect(e.content).toEqual(original);
+    expect(e.proposalTransactions).toHaveLength(0);
+    e.redo();
+    const transactions = e.proposalTransactions;
+    const put = artifacts.put.bind(artifacts);
+    artifacts.put = async () => {
+      throw Error('save failed');
+    };
+    await expect(w.saveScene('SC-01')).rejects.toThrow('save failed');
+    expect(saved).toHaveLength(0);
+    expect(e.snapshot.dirty).toBe(true);
+    artifacts.put = put;
+    await w.saveScene('SC-01');
+    expect(saved[0]).toMatchObject({ committed: true, proposalTransactions: transactions });
+    expect(e.readSaved(saved[0].versionId!).content).toEqual(e.content);
+    expect(e.readSaved(saved[0].versionId!).contentHash).toBe(
+      (await artifacts.get(e.id))!.versions.at(-1)!.contentHash,
+    );
+  });
+  it('keeps reject, stale, readonly and input boundaries in the retained editor', async () => {
+    const { e, propose, access } = await opened();
+    const original = e.content;
+    e.rejectProposal(propose('reject').id);
+    expect(e.content).toEqual(original);
+    propose('stale');
+    e.execute(
+      documentTextEditCommand(e.content, [
+        { segmentId: 'port-text', start: 0, end: 0, expected: '', text: '別' },
+      ]),
+    );
+    expect(() => e.acceptProposal('stale')).toThrow();
+    propose('pending');
+    access.write = false;
+    expect(() => e.acceptProposal('pending')).toThrow();
+    access.write = true;
+    const release = e.registerInputBoundary(() => {
+      throw Error('input pending');
+    });
+    expect(() => e.acceptProposal('pending')).toThrow('input pending');
+    release();
+    expect(e.acceptProposal('pending').outcome).toBe('accepted');
+  });
+  it('keeps Setting validator/session and freezes only the per-workspace adapter copy', async () => {
+    const { w, e } = await opened();
+    expect(w.settings.source).not.toBe(e);
+    expect(w.settings.source.capabilities.proposals).toBe(true);
+    const source = w.settings.source.artifact;
+    const version = source.versions.find((v) => v.versionId === source.draft.baseVersionId)!;
+    const openedSource = await w.openWorldSource({
+      id: 'setting',
+      namespace: 'test',
+      role: 'facts',
+      required: true,
+      artifactId: source.id,
+      versionId: version.versionId,
+      contentHash: version.contentHash,
+      selector: { type: 'document-blocks', blockIds: [source.draft.content.blocks[0].id] },
+    });
+    expect(openedSource).toBe(w.settings.source);
+    expect(workspaceDocumentAdapter.capabilities.proposals).toBeUndefined();
+  });
+  it.each([
+    { kind: 'data' },
+    { capabilities: { ...adapter.capabilities, shared: true } },
+    { capabilities: { ...adapter.capabilities, proposals: 'yes' } },
+    { changedElements: undefined },
+  ])('rejects incorrect adapter declarations %j', async (overrides) => {
+    const { io } = await fixture();
+    await expect(
+      CreativeWorkspace.open(io, undefined, undefined, undefined, {
+        documentAdapter: { ...adapter, ...overrides } as never,
+      }),
+    ).rejects.toThrow(/adapter/);
+  });
+});
+
+it('captures the injected adapter independently and preserves native validation even with a permissive Host predicate', async () => {
+  const { io, artifacts } = await fixture();
+  const adapter = {
+    ...workspaceDocumentAdapter,
+    capabilities: { ...workspaceDocumentAdapter.capabilities, proposals: true },
+    changedElements: documentChangedElementIds,
+    validate: (_: unknown): _ is DocumentContent => true,
+  };
+  const w = await CreativeWorkspace.open(io, undefined, undefined, undefined, {
+    documentAdapter: adapter,
+  });
+  adapter.capabilities.proposals = false;
+  const e = await w.openScene('SC-01');
+  expect(e.capabilities.proposals).toBe(true);
+  const a = (await artifacts.get(e.id))!;
+  a.versions.push({
+    ...a.versions[0],
+    versionId: 'invalid-retained',
+    content: { invalid: true },
+    contentHash: await contentHash({ invalid: true }),
+  });
+  await artifacts.put(a);
+  const reopened = await CreativeWorkspace.open(io, undefined, undefined, undefined, {
+    documentAdapter: adapter,
+  });
+  await expect(reopened.openScene('SC-01')).rejects.toThrow();
 });

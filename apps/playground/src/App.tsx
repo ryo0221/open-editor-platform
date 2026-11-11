@@ -25,11 +25,13 @@ import {
   portableCadRecord,
   validateCadRecord,
 } from './cad/resources';
+import { mergeSimulationSources, portableSimulationRecord } from './simulation/source';
 import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
 import { assertCharacterHistoryFits } from './character/import-fit';
 import type { CharacterDocument } from '@editor-platform/character-core';
 import { assertCadContentFits } from './cad/native-size';
 import { mergeCadParts } from './cad/parts';
+import { mergeBimParts } from './character/parts';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { artifactReferenceItems, captureArtifactReferences } from './artifact-references';
@@ -121,6 +123,7 @@ import {
   type Kind,
   type StoredArtifact,
 } from './model';
+import type { SimulationSourceChoice } from './simulation/source';
 import { hasSlideAnimations } from '@editor-platform/slide';
 import {
   type ArtifactMenuAction,
@@ -724,16 +727,21 @@ export default function App({
     request.pending = task;
     return task;
   }
-  function create(nextKind: Kind) {
+  function create(nextKind: Kind, simulationSource?: SimulationSourceChoice) {
     if (!flushInputs()) return;
     if (shared) {
       setError('Leave the shared session before creating another artifact.');
+      return;
+    }
+    if (nextKind === 'simulation' && !simulationSource) {
+      setError('Choose the saved 3D CAD part to analyse in the library, then create the analysis.');
       return;
     }
     const a = makeArtifact(
       nextKind,
       records.filter((r) => r.kind === nextKind).length + 1,
       nextKind === 'structured-graph' ? graphTemplate : undefined,
+      simulationSource,
     );
     sessions.current.set(a.id, createLocalSession(a.draft.content));
     persist(a);
@@ -934,6 +942,8 @@ export default function App({
         // CAD assets staged while the version was saved stay: the record only gains them.
         ...mergeCadResources(saved, latest),
         ...mergeCadParts(saved, latest),
+        ...mergeBimParts(saved, latest),
+        ...mergeSimulationSources(saved, latest),
         draft: { ...latest.draft, baseVersionId: committed.draft.baseVersionId },
       };
       // A rejected capacity candidate must not enter local immutable history.
@@ -1170,7 +1180,9 @@ export default function App({
         assertBimNativeFits(exported, 'export');
         downloadText(
           `${current.name}.artifact.json`,
-          serializeArtifact(portableBimRecord(portableCadRecord(exported))),
+          serializeArtifact(
+            portableSimulationRecord(portableBimRecord(portableCadRecord(exported))),
+          ),
           'application/json',
         );
       } catch (e) {
@@ -1758,7 +1770,8 @@ export default function App({
                           active.kind !== 'geo' &&
                           active.kind !== 'cad' &&
                           active.kind !== 'bim' &&
-                          active.kind !== 'character' && (
+                          active.kind !== 'character' &&
+                          active.kind !== 'simulation' && (
                             <CommentsInspector
                               active={active}
                               content={content}

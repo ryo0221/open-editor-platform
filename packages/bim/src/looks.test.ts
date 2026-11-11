@@ -1,6 +1,13 @@
-import { BimContext, f31BoxBuilding } from '@editor-platform/bim-core';
+import { BimContext, f31BoxBuilding, f51Ramps } from '@editor-platform/bim-core';
 import { describe, expect, it } from 'vitest';
-import { bimElementFaceLooks, bimElementLooks, bimKindStyle, bimLastLayerFaces } from './view';
+import {
+  bimElementFaceLooks,
+  bimElementLevel,
+  bimElementLooks,
+  bimKindStyle,
+  bimLastLayerFaces,
+  bimViewBounds,
+} from './view';
 
 describe('element looks (#661)', () => {
   it('keeps the kind colour while the type’s material has no appearance', () => {
@@ -89,6 +96,29 @@ describe('the two faces of a layered element (#662, 2c)', () => {
     expect(bimLastLayerFaces(new BimContext(doc), wall, mesh)).toEqual([true, false, false]);
   });
 
+  it('finds the last layer on a leaning wall’s left face (LR2, Codex)', () => {
+    const doc = f31BoxBuilding();
+    const wall = doc.elements.find((e) => e.id === 'w-south')!;
+    if (wall.kind !== 'wall') throw new Error('not a wall');
+    // Leaning 15° to its right (−y): its left face looks +y and 15° up.
+    wall.lean = (15 * Math.PI) / 180;
+    const [c, s] = [Math.cos(wall.lean), Math.sin(wall.lean)];
+    // The tilted left face, an upright +y face, and the right face looking −y and down.
+    const positions = new Float32Array([
+      ...[0, 0, 0, 0, -s, c, 1, 0, 0],
+      ...[0, 0, 0, 0, 0, 1, 1, 0, 0],
+      ...[0, 0, 0, 1, 0, 0, 0, -s, c],
+    ]);
+    const mesh = {
+      positions,
+      normals: new Float32Array(positions.length),
+      uvs: new Float32Array((positions.length / 3) * 2),
+      indices: new Uint32Array([0, 1, 2, 3, 4, 5, 6, 7, 8]),
+      faceIndices: new Uint32Array([0, 1, 2]),
+    };
+    expect(bimLastLayerFaces(new BimContext(doc), wall, mesh)).toEqual([true, false, false]);
+  });
+
   it('keeps an oblique joined end with the first layer (Codex)', () => {
     const doc = f31BoxBuilding();
     const wall = doc.elements.find((e) => e.id === 'w-south')!;
@@ -105,5 +135,74 @@ describe('the two faces of a layered element (#662, 2c)', () => {
       faceIndices: new Uint32Array([0, 1]),
     };
     expect(bimLastLayerFaces(new BimContext(doc), wall, mesh)).toEqual([true, false]);
+  });
+});
+
+describe('the level an element is listed on (LR3)', () => {
+  it('lists a ramp on its base level', () => {
+    const doc = f51Ramps();
+    expect(doc.elements.map((e) => bimElementLevel(doc, e.id))).toEqual(['l-gl', 'l-gl', 'l-1']);
+  });
+});
+
+describe('zoom to selection (FU1)', () => {
+  it('frames a door by its host wall', () => {
+    const doc = f31BoxBuilding();
+    const box = (x: number) => ({
+      status: 'ok',
+      measure: {
+        bounds: [
+          [x, 0, 0],
+          [x + 10, 10, 10],
+        ],
+      },
+    });
+    const evaluation = {
+      status: 'ok',
+      elements: new Map([
+        ['w-south', box(0)],
+        ['w-north', box(1000)],
+      ]),
+    } as unknown as Parameters<typeof bimViewBounds>[0];
+    expect(bimViewBounds(evaluation, doc, ['d-entrance'])).toEqual([
+      [0, 0, 0],
+      [10, 10, 10],
+    ]);
+    expect(bimViewBounds(evaluation, doc, ['w-north', 'd-entrance'])![1][0]).toBe(1010);
+  });
+
+  it('frames a door by its own panel once it has a shape (FU7)', () => {
+    const doc = f31BoxBuilding();
+    const box = (x: number, w = 10) => ({
+      status: 'ok',
+      measure: {
+        bounds: [
+          [x, 0, 0],
+          [x + w, 10, 10],
+        ],
+      },
+    });
+    const evaluation = {
+      status: 'ok',
+      elements: new Map([
+        ['w-south', box(0, 10000)],
+        ['d-entrance', box(4000, 900)],
+      ]),
+    } as unknown as Parameters<typeof bimViewBounds>[0];
+    expect(bimViewBounds(evaluation, doc, ['d-entrance'])).toEqual([
+      [4000, 0, 0],
+      [4900, 10, 10],
+    ]);
+    // With its wall selected too: both.
+    expect(bimViewBounds(evaluation, doc, ['d-entrance', 'w-south'])![1][0]).toBe(10000);
+    // A failed panel: its wall, as before.
+    const failed = {
+      status: 'ok',
+      elements: new Map<string, unknown>([
+        ['w-south', box(0, 10000)],
+        ['d-entrance', { status: 'error' }],
+      ]),
+    } as unknown as Parameters<typeof bimViewBounds>[0];
+    expect(bimViewBounds(failed, doc, ['d-entrance'])![1][0]).toBe(10000);
   });
 });

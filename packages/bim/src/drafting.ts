@@ -3,9 +3,12 @@ import {
   arcOf,
   arcPoint,
   BimContext,
+  bimLimits,
   bimWallAxis,
+  deriveBim,
   distance,
   dot,
+  left,
   lineIntersection,
   proposeJoins,
   sub,
@@ -16,6 +19,7 @@ import {
   type BimOperation,
   type BimPoint,
   type BimTop,
+  type BimType,
   type BimWall,
   type BimWallJoin,
   type Vec2,
@@ -34,6 +38,9 @@ export type BimDraftTool =
   | 'space'
   | 'column'
   | 'beam'
+  | 'member'
+  | 'ramp'
+  | 'stair'
   | 'door'
   | 'window'
   | 'opening'
@@ -48,6 +55,9 @@ export const bimToolPoints: Record<Exclude<BimDraftTool, 'select'>, 'one' | 'two
   space: 'loop',
   column: 'one',
   beam: 'two',
+  member: 'two',
+  ramp: 'one',
+  stair: 'two',
   door: 'one',
   window: 'one',
   opening: 'one',
@@ -69,6 +79,12 @@ export const bimDraftDefaults = Object.freeze({
   openingMm: { widthMm: 1000, heightMm: 2100 },
   /** Sill of a new window. */
   sillMm: 900,
+  /** LR3: a new spiral ramp's radii, around a 3 m core with a 2 m way. */
+  ramp: { innerRadiusMm: 1500, outerRadiusMm: 3500 },
+  /** LS5: a new railing's height above its ramp. */
+  railingHeightMm: 1100,
+  /** LS6: a new stair's width and the riser it aims for (the storey's height in equal steps). */
+  stair: { widthMm: 1200, riserMm: 180 },
 });
 
 /** A snapped plan point: a grid intersection keeps its grid reference, so it follows the axes. */
@@ -180,6 +196,29 @@ const freeName = (doc: BimDocument, base: (n: number) => string, first = 1) => {
   while (names.has(base(n))) n++;
   return base(n);
 };
+
+/** The working plan's own lower limit when its level is the lowest (TW0b): 1 m below it. */
+export const bimWorkingPlanBelowLowestMm = 1_000;
+/**
+ * The working plan of a level (TW0b): cut `cutMm` above it (default 1,200 mm) and seeing
+ * `depthMm` down from the cut, as a drawing's plan does. The default depth reaches the level
+ * below, or 1 m below the lowest level, so a high level does not show the whole building under it.
+ */
+export function bimWorkingPlan(
+  doc: Pick<BimDocument, 'levels'>,
+  level: string,
+  set: { cutMm?: number; depthMm?: number } = {},
+): { elevationMm: number; cutMm: number; depthMm: number } | undefined {
+  const l = doc.levels.find((x) => x.id === level);
+  if (!l) return undefined;
+  const cutMm = set.cutMm ?? bimViewDefaults.cutHeightMm;
+  const below = Math.max(
+    -Infinity,
+    ...doc.levels.filter((x) => x.elevationMm < l.elevationMm).map((x) => x.elevationMm),
+  );
+  const reach = below === -Infinity ? bimWorkingPlanBelowLowestMm : l.elevationMm - below;
+  return { elevationMm: l.elevationMm, cutMm, depthMm: set.depthMm ?? cutMm + reach };
+}
 
 /** A plan of a level, named after it. */
 export function draftPlanView(doc: BimDocument, level: string): BimOperation {
@@ -403,6 +442,124 @@ export function draftColumn(
   };
 }
 
+/**
+ * LR3c: a spiral ramp around the clicked centre: one turn counter-clockwise from the east, its
+ * top rising from this level to the one above (or a storey's height), the first slab type.
+ */
+export function draftRamp(
+  doc: BimDocument,
+  level: string,
+  center: BimSnap,
+  typeId?: string,
+): BimOperation {
+  const top = storeyTop(doc, level);
+  return {
+    type: 'insert',
+    entities: {
+      elements: [
+        {
+          id: bimNewId(doc, 'r'),
+          kind: 'ramp',
+          typeId: typeOf(doc, 'slab', typeId).id,
+          center: center.point,
+          ...bimDraftDefaults.ramp,
+          startAngleRad: 0,
+          sweepRad: 2 * Math.PI,
+          base: { level, offsetMm: 0 },
+          top: 'level' in top ? top : { level, offsetMm: top.heightMm },
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * LS5: a railing along a ramp's inner or outer edge, of the thinnest wall type (or `typeId`),
+ * `bimDraftDefaults.railingHeightMm` high.
+ */
+export function draftRailing(
+  doc: BimDocument,
+  hostId: string,
+  side: 'inner' | 'outer',
+  typeId?: string,
+): BimOperation {
+  type Layered = Extract<BimType, { layers: unknown }>;
+  const walls = doc.types.filter((t): t is Layered => t.kind === 'wall');
+  const width = (t: Layered) => t.layers.reduce((n, l) => n + l.thicknessMm, 0);
+  const thinnest = walls.reduce<Layered | undefined>(
+    (a, t) => (!a || width(t) < width(a) ? t : a),
+    undefined,
+  );
+  return {
+    type: 'insert',
+    entities: {
+      elements: [
+        {
+          id: bimNewId(doc, 'rail'),
+          kind: 'railing',
+          typeId: typeId ? typeOf(doc, 'wall', typeId).id : (thinnest ?? typeOf(doc, 'wall')).id,
+          hostId,
+          side,
+          heightMm: bimDraftDefaults.railingHeightMm,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * LS6: a straight stair from `a` up towards `b`, from this level to the one above (or a
+ * storey's height): equal risers near `bimDraftDefaults.stair.riserMm`, its treads sharing the
+ * run between the two points (within the limits), the first slab type for its waist.
+ */
+export function draftStair(
+  doc: BimDocument,
+  level: string,
+  a: BimSnap,
+  b: BimSnap,
+  typeId?: string,
+): BimOperation {
+  const run = distance(a.xy, b.xy);
+  if (run < 1) throw new Error('stair-too-short');
+  const top = storeyTop(doc, level);
+  const here = doc.levels.find((l) => l.id === level)!.elevationMm;
+  const height =
+    'level' in top
+      ? doc.levels.find((l) => l.id === top.level)!.elevationMm + top.offsetMm - here
+      : top.heightMm;
+  const { riserMm, treadMm, risers: n } = bimLimits.stair;
+  const clamp = (v: number, [lo, hi]: readonly number[]) => Math.min(hi!, Math.max(lo!, v));
+  // As many risers as keep each within its limits, nearest the aim.
+  const risers = clamp(
+    clamp(Math.round(height / bimDraftDefaults.stair.riserMm), [
+      Math.ceil(height / riserMm[1]),
+      Math.floor(height / riserMm[0]),
+    ]),
+    n,
+  );
+  // The last riser rises to the floor above: the run has one tread fewer than risers.
+  const tread = clamp(Math.round(run / (risers - 1)), treadMm);
+  return {
+    type: 'insert',
+    entities: {
+      elements: [
+        {
+          id: bimNewId(doc, 'st'),
+          kind: 'stair',
+          typeId: typeOf(doc, 'slab', typeId).id,
+          start: a.point,
+          directionRad: Math.atan2(b.xy[1] - a.xy[1], b.xy[0] - a.xy[0]),
+          widthMm: bimDraftDefaults.stair.widthMm,
+          risers,
+          treadMm: tread,
+          base: { level, offsetMm: 0 },
+          top: 'level' in top ? top : { level, offsetMm: top.heightMm },
+        },
+      ],
+    },
+  };
+}
+
 /** A part (a CAD version's shape) standing on the level, unturned. */
 export function draftPart(
   doc: BimDocument,
@@ -453,9 +610,74 @@ export function draftBeam(
   };
 }
 
-/** The straight or arc wall on the level whose body `p` is in or nearest to, within `reachMm`. */
+/**
+ * TW2: the member type a new document gets when it has none: a steel tube 300, hollow with a
+ * 12 mm wall since #936.
+ */
+export const bimDefaultMember = Object.freeze({
+  name: 'Steel pipe 300x12',
+  diameterMm: 300,
+  wallMm: 12,
+});
+
+/**
+ * TW2: a brace from `a` at the level to `b` at the level above (or one storey up when there is
+ * none), the first member type's section. A document without a member type gets one (and a
+ * steel material when it has no metal), in the same operation, so it is one Undo step. The
+ * heights are changed afterwards in the Inspector.
+ */
+export function draftMember(
+  doc: BimDocument,
+  level: string,
+  a: BimSnap,
+  b: BimSnap,
+  typeId?: string,
+): BimOperation {
+  if (distance(a.xy, b.xy) < 1) throw new Error('member-too-short');
+  const top = storeyTop(doc, level);
+  const endHeight = 'level' in top ? top : { level, offsetMm: top.heightMm };
+  const entities: Extract<BimOperation, { type: 'insert' }>['entities'] = {};
+  let type = typeId ? typeOf(doc, 'member', typeId) : doc.types.find((t) => t.kind === 'member');
+  if (!type) {
+    let material = doc.materials.find((m) => m.category === 'metal');
+    if (!material) {
+      material = { id: bimNewId(doc, 'm-steel'), name: 'Steel', category: 'metal' };
+      entities.materials = [material];
+    }
+    type = {
+      id: bimNewId(doc, 't-member'),
+      kind: 'member',
+      name: bimDefaultMember.name,
+      profile: {
+        shape: 'pipe',
+        diameterMm: bimDefaultMember.diameterMm,
+        wallMm: bimDefaultMember.wallMm,
+      },
+      materialId: material.id,
+    };
+    entities.types = [type];
+  }
+  entities.elements = [
+    {
+      id: bimNewId(doc, 'm'),
+      kind: 'member',
+      typeId: type.id,
+      start: { at: a.point, height: { level, offsetMm: 0 } },
+      end: { at: b.point, height: endHeight },
+      rotationRad: 0,
+    },
+  ];
+  return { type: 'insert', entities };
+}
+
+/**
+ * The straight or arc wall on the level whose body `p` is in or nearest to, within `reachMm`.
+ * FU3c: a leaning wall's body in plan runs from its axis at the base to the axis moved to its
+ * right by its height × tan(lean) at the top (an arc's radially); a point over it is on it.
+ */
 export function bimWallAt(doc: BimDocument, level: string, p: Vec2, reachMm = 300) {
   const ctx = new BimContext(doc);
+  let derived: ReturnType<typeof deriveBim> | undefined;
   let best: { wall: BimWall; alongMm: number; lengthMm: number; d: number } | undefined;
   for (const e of doc.elements) {
     if (e.kind !== 'wall' || e.base.level !== level) continue;
@@ -479,7 +701,20 @@ export function bimWallAt(doc: BimDocument, level: string, p: Vec2, reachMm = 30
       along = t <= Math.abs(sweep) ? t * radius : t - Math.abs(sweep) < turn - t ? axis.length : 0;
     }
     along = Math.min(Math.max(along, 0), axis.length);
-    const d = distance(axis.at(along)[0], p);
+    const [q, tangent] = axis.at(along);
+    let d = distance(q, p);
+    if (e.lean) {
+      derived ??= deriveBim(doc);
+      const shape = derived.shapes.get(e.id);
+      if (shape?.kind === 'wall') {
+        // Across to the left of the axis, measured against the band the lean sweeps.
+        const n = left(tangent);
+        const across = dot(sub(p, q), n);
+        const top = -(shape.zTop - shape.zBase) * Math.tan(e.lean);
+        const off = Math.min(Math.max(across, Math.min(0, top)), Math.max(0, top));
+        d = distance([q[0] + n[0] * off, q[1] + n[1] * off], p);
+      }
+    }
     if (d <= reachMm && (!best || d < best.d))
       best = { wall: e, alongMm: along, lengthMm: axis.length, d };
   }

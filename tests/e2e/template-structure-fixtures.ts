@@ -10,6 +10,7 @@ function nativeContent(content: Content): NativeContent {
     'rootCompositionId' in content ||
     'lanes' in content ||
     'kernelProfile' in content ||
+    'studies' in content ||
     'axes' in content
   )
     throw new Error('Expected native content');

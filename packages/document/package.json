@@ -10,7 +10,8 @@
     "./proposal-diff": "./src/proposal-diff.ts",
     "./text": "./src/text-access.ts",
     "./sequence": "./src/sequence.ts",
-    "./manuscript": "./src/manuscript.ts"
+    "./manuscript": "./src/manuscript.ts",
+    "./native-host": "./src/native-host.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
@@ -32,7 +33,8 @@
     "prosemirror-tables": "1.8.5",
     "prosemirror-transform": "1.12.2",
     "prosemirror-view": "1.42.6",
-    "@editor-platform/artifact-references": "*"
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/editor-host": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1",

@@ -57,6 +57,8 @@
 
 通常PlaygroundのDesignで線・画像を編集する: [ペン入力・提案の比較と採用](playground-inking.md) / [限定PNG編集](design-raster-editing.md)。人物・動物別の生成presetや作品制作Hostはこの汎用契約に含めません。
 
+CAD部品の構造・熱の解析（荷重・拘束の引き継ぎ、meshing、線形静解析）: R3の設計差分・ADR 020。
+
 キャラクター・3Dアニメーション（モデリング・リグ・キーフレーム）: [Characterの設計](character/README.md)・ADR 019。
 
 キャラクター・舞台設計モード: D0設計提案。CH/LO正本、Host参照、部位レイヤー、proposal差分とprovenanceの依存関係を整理しています。
@@ -76,3 +78,5 @@ Setting Mode（D2a）: 世界の覚え書きのLO見出しを正本とする舞�
 物語タイムラインの診断根拠・例外・変更影響: 既存reader/resolverの責務、保存後の例外照合、facet伝播を整理した採用済み設計です。#693の実装・検証記録と最終受入・main反映を参照してください。
 
 物語ボードの使い方: 一枚のWhiteboardで人物別Timeline・固定地図・カード・自由メモを確認します。共通時点、人物/場所/筋の表示条件、owner別保存と元資料往復に対応。Hostへの組み込みは契約、受入範囲は最終検証。
+
+Native要素の読取と本文提案: domain adapter契約。

@@ -9,7 +9,7 @@
 import { contentHash, type Artifact } from '@editor-platform/artifact-core';
 import { isDocument } from '@editor-platform/document/model';
 import type { StructuredData } from '@editor-platform/structured-data/model';
-import { settingSourceCards } from '../setting-source';
+import { settingSourceCards } from '../setting-source-read';
 import { TimelineEditError, type TimelineRowInput } from './edit-error';
 import { readTimelineTable, type TimelineRole } from './table';
 import { TL1_ROLES } from './tl1-schema';

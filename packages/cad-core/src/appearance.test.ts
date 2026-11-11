@@ -44,6 +44,41 @@ describe('body appearance and materials (#661)', () => {
     expect(validateCadAppearance({ color: '#9aa4b1', opacity: 1 })).toEqual([]);
   });
 
+  it('accepts a lamp’s light and a lens’s transmission, and refuses them out of range (CR6a, TS-1591)', () => {
+    const doc = f02Plate();
+    const lens = geometryMaterialPreset('lamp-lens')!;
+    const red = geometryMaterialPreset('lamp-red')!;
+    doc.bodies[0]!.appearance = {
+      color: lens.color,
+      opacity: 1,
+      transmission: lens.transmission!,
+      ior: lens.ior!,
+      material: 'lamp-lens',
+    };
+    expect(codes(doc)).toEqual([]);
+    doc.bodies[0]!.appearance = { color: red.color, opacity: 1, emission: { ...red.emission! } };
+    expect(codes(doc)).toEqual([]);
+    const code = (patch: object) =>
+      validateCadAppearance({ color: '#ffffff', opacity: 1, ...patch }).map((d) => [
+        d.code,
+        d.path,
+      ]);
+    expect(code({ emission: { color: '#ff0000', strength: 51 } })).toEqual([
+      ['appearance-emission', '$.emission'],
+    ]);
+    expect(code({ emission: { color: 'red', strength: 1 } })[0]?.[0]).toBe('appearance-emission');
+    expect(code({ emission: { color: '#ff0000', strength: 1, x: 1 } })[0]?.[0]).toBe(
+      'appearance-emission',
+    );
+    expect(code({ emission: null })[0]?.[0]).toBe('appearance-emission');
+    expect(code({ transmission: 1.2 })).toEqual([['appearance-transmission', '$.transmission']]);
+    expect(code({ ior: 0.9 })).toEqual([['appearance-ior', '$.ior']]);
+    expect(code({ ior: 2.6 })[0]?.[0]).toBe('appearance-ior');
+    expect(code({ transmission: 0, ior: 1, emission: { color: '#000000', strength: 0 } })).toEqual(
+      [],
+    );
+  });
+
   it('setAppearance changes one body’s look and nothing else', () => {
     const doc = f02Plate();
     const id = bodyId(doc);

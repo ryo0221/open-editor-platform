@@ -2,6 +2,7 @@
  * Validation of the R2b assembly fields (docs/cad/r2b-assembly.md, Assemblyの形式), run by
  * `validateCad` after the parameters: what can be checked without a kernel or the closure.
  */
+import { mountedJoints } from './mounts';
 import { cadAssemblyLimits, copyStep, posesDiffer, type CadSolvedPose } from './assembly';
 import { validateJoints, type JointCheck } from './joints-validation';
 import type { Quaternion, Vec3 } from './model';
@@ -184,6 +185,7 @@ export function validateAssembly(c: AssemblyCheck, value: Rec) {
     copies,
     unplaced,
     ownResults: results,
+    mounted: mountedJoints(value.mounts),
   });
 
   const poses = value.solvedPoses;

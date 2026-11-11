@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { viewTextureImageTools } from '@editor-platform/geometry-view';
 import {
   applyCadOperation,
+  bodyPartContent,
+  cadContentHash,
   CadAssemblyPort,
   emptyCad,
   f02Plate,
@@ -12,6 +14,9 @@ import {
   f17Sheets,
   f18Hood,
   f18Seams,
+  f26Panel,
+  f28B2Car,
+  cadToleranceSets,
   f17Surfaces,
   f12Fillet,
   f12Holes,
@@ -24,6 +29,12 @@ import {
   fixtureComponent,
   r2bBom,
   r2bJoints,
+  m1InterferenceCases,
+  m1Robot,
+  tr01Robot,
+  mr1ArmWings,
+  mr2ArmWingsForms,
+  mr7ToolMount,
   r2bParts,
   r2bVersions,
   type CadDocument,
@@ -46,7 +57,7 @@ import {
 } from '../src';
 import { cadPerf } from './perf';
 
-// Standalone host: ?fixture=plate|hub|holes|fillet|bracket|sections|chains|tube|hood|seam|r2b|r2b-joints|r2b-versions|r2b-authoring|r2b-bom|r2b-scale, ?persist=1 (the last applied content is kept
+// Standalone host: ?fixture=plate|hub|holes|fillet|bracket|sections|chains|tube|hood|seam|panel|r2b|r2b-joints|r2b-versions|r2b-authoring|r2b-bom|r2b-scale|panel-part|b2-door|mr1-arm|mr2-forms|mr7-tool|m1-robot|tr01-robot|m1-cases, ?persist=1 (the last applied content is kept
 // in sessionStorage and opened again on reload), ?view=side|far|plan (plate with a saved view), ?readonly=1,
 // ?kernel=missing, ?kernel=reference (an earlier build this Host shows only through an approved
 // substitute), ?pair=1 (two Surfaces).
@@ -114,18 +125,68 @@ const r2bAuthoring = (kernel: Parameters<typeof r2bParts>[0]) => {
   });
   return { ...f, assembly };
 };
+// ?fixture=panel-part: CR3e-2, the F26 panel with its door made a part (Make part), the door
+// placed at the origin where it was cut out, with no joint yet.
+const panelPart = (kernel: { id: string; buildHash: string }): ReturnType<typeof r2bParts> => {
+  const doc: CadDocument = {
+    ...f26Panel(),
+    kernelProfile: { ...f26Panel().kernelProfile, id: kernel.id, buildHash: kernel.buildHash },
+  };
+  const door = bodyPartContent(doc, 'door-body');
+  const hash = cadContentHash(door);
+  const assembly = applyCadOperation(doc, {
+    type: 'makePart',
+    bodyId: 'door-body',
+    part: {
+      id: 'part-door',
+      name: 'Door',
+      source: { kind: 'version', artifactId: 'door', versionId: 'v1', contentHash: hash },
+      hint: {
+        boundsMm: [
+          [41.75, -38.25, 0],
+          [58.25, -21.75, 0],
+        ],
+      },
+    },
+    component: fixtureComponent('c-door', 'part-door', [0, 0, 0]),
+  });
+  // Only the assembly and its closure are read for this fixture.
+  return { assembly, closure: new Map([[hash, door]]) } as unknown as ReturnType<typeof r2bParts>;
+};
+// ?fixture=mr1-arm: MR1 (docs/cad/mecha-design.md), a spherical shoulder, a revolute elbow (0–150°),
+// a universal wrist and two wings whose right angle follows the left one mirrored.
+// ?fixture=mr2-forms: the same with two forms, Stand (current) and Flight (MR2).
+// ?fixture=m1-robot: the M1 sample robot of boxes (Stand and Flight, pins allowed at the joints).
+// ?fixture=tr01-robot: the M2 sample TR-01 (MR6): a head that slides into the chest, wing tips
+// that slide out, the shield turning round the forearm.
+// ?fixture=m1-cases: the M1 interference cases (c)–(e) on a see-through torso (MR3).
+// ?fixture=mr7-tool: mr1-arm with a tool in the hand that may mount on the back instead (MR7).
 const r2bFixture =
-  params.get('fixture') === 'r2b-joints'
-    ? r2bJoints
-    : params.get('fixture') === 'r2b-versions'
-      ? r2bVersions
-      : params.get('fixture') === 'r2b-authoring'
-        ? r2bAuthoring
-        : params.get('fixture') === 'r2b-bom'
-          ? r2bBom
-          : params.get('fixture') === 'r2b-scale'
-            ? r2bScale
-            : r2bParts;
+  params.get('fixture') === 'panel-part'
+    ? panelPart
+    : params.get('fixture') === 'mr7-tool'
+      ? mr7ToolMount
+      : params.get('fixture') === 'mr1-arm'
+        ? mr1ArmWings
+        : params.get('fixture') === 'm1-robot'
+          ? m1Robot
+          : params.get('fixture') === 'tr01-robot'
+            ? tr01Robot
+            : params.get('fixture') === 'm1-cases'
+              ? m1InterferenceCases
+              : params.get('fixture') === 'mr2-forms'
+                ? mr2ArmWingsForms
+                : params.get('fixture') === 'r2b-joints'
+                  ? r2bJoints
+                  : params.get('fixture') === 'r2b-versions'
+                    ? r2bVersions
+                    : params.get('fixture') === 'r2b-authoring'
+                      ? r2bAuthoring
+                      : params.get('fixture') === 'r2b-bom'
+                        ? r2bBom
+                        : params.get('fixture') === 'r2b-scale'
+                          ? r2bScale
+                          : r2bParts;
 const r2b = r2bFixture({ id: fixtureKernel.id, buildHash });
 const offered =
   'bases' in r2b
@@ -196,6 +257,15 @@ const seam = (): CadDocument => ({
   ...f18Seams({ kind: 'tangent' }),
   kernelProfile: empty.kernelProfile,
 });
+// ?fixture=b2-door: CR3f, the B1 car (F25) with the F28 door cut out of its skin, every gap
+// reading the parameter "Panel gap".
+const b2Door = (): CadDocument => ({
+  ...f28B2Car({ upTo: 'door' }),
+  // F25's large tolerance set, on this host's kernel.
+  kernelProfile: { ...empty.kernelProfile, ...cadToleranceSets.large },
+});
+// ?fixture=panel: the F26 door cut out of a flat panel with a 3.5 mm gap (CR3d).
+const panelDoor = (): CadDocument => ({ ...f26Panel(), kernelProfile: empty.kernelProfile });
 // ?fixture=chains: the F17 surface loft's squares and surface sweep's chains without features (R2a-2b).
 const chains = (): CadDocument => ({
   ...empty,
@@ -210,7 +280,14 @@ const assemblyFixture =
   fixture === 'r2b-versions' ||
   fixture === 'r2b-authoring' ||
   fixture === 'r2b-bom' ||
-  fixture === 'r2b-scale';
+  fixture === 'r2b-scale' ||
+  fixture === 'panel-part' ||
+  fixture === 'mr1-arm' ||
+  fixture === 'mr2-forms' ||
+  fixture === 'mr7-tool' ||
+  fixture === 'm1-robot' ||
+  fixture === 'tr01-robot' ||
+  fixture === 'm1-cases';
 const initial: CadDocument =
   fixture === 'plate'
     ? { ...f02Plate('center'), kernelProfile: empty.kernelProfile }
@@ -234,9 +311,13 @@ const initial: CadDocument =
                       ? hood()
                       : fixture === 'seam'
                         ? seam()
-                        : assemblyFixture
-                          ? r2b.assembly
-                          : empty;
+                        : fixture === 'panel'
+                          ? panelDoor()
+                          : fixture === 'b2-door'
+                            ? b2Door()
+                            : assemblyFixture
+                              ? r2b.assembly
+                              : empty;
 const persist = params.get('persist') === '1';
 const stored = (() => {
   try {
@@ -361,6 +442,7 @@ function mount() {
     analyzeContinuity: (request, edge) => port.analyzeContinuity(request, edge),
     analyzeCurvature: (request) => port.analyzeCurvature(request),
     analyzeComb: (request, edge) => port.analyzeComb(request, edge),
+    analyzeGapFlush: (request, edges) => port.analyzeGapFlush(request, edges),
     canEdit: () => params.get('readonly') !== '1',
     currentKernel: { id: build.id, buildHash: build.buildHash },
     permissionGeneration: () => 1,
@@ -395,6 +477,8 @@ const cad: (typeof surfaces)[0] & { setGpuBytes?(bytes: number | undefined): voi
 Object.assign(window, { cad });
 // The first Surface's field buffers, as a Host registry holds them (Sketch mode's entries flush it).
 const inputs = new EditorInputs();
+// window.cadInputs: the same registry, for a test of the save/export boundary.
+Object.assign(window, { cadInputs: inputs });
 // ?statusRole=none: the Host shows its own role=status and the Surface's notices drop the role (#563).
 const hostStatus = params.get('statusRole') === 'none';
 function First() {

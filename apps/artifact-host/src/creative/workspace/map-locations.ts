@@ -5,7 +5,11 @@ import {
   serializeArtifact,
   type Artifact,
 } from '@editor-platform/artifact-core';
-import { ArtifactEditor, loadHostArtifact } from '@editor-platform/editor-host';
+import {
+  ArtifactEditor,
+  loadHostArtifact,
+  type HostSaveContext,
+} from '@editor-platform/editor-host';
 import {
   parseFictionMapArtifact,
   fictionMapHostAdapter,
@@ -289,7 +293,7 @@ export class CreativeMapLocations {
         map,
         fictionMapHostAdapter,
         {
-          put: async (value: Artifact<FictionMapContent>) => {
+          put: async (value: Artifact<FictionMapContent>, context?: HostSaveContext) => {
             this.writable(id);
             const stored = await this.artifact(id);
             this.writable(id);
@@ -306,7 +310,7 @@ export class CreativeMapLocations {
             if (canonicalJson(stored) !== canonicalJson(baseline))
               throw Error('地図保存が競合しています。未保存編集を保持します。');
             attempted = clone(value);
-            await this.workspace.io.artifacts.put(value);
+            await this.workspace.io.artifacts.put(value, context);
             baseline = clone(value);
             attempted = undefined;
           },

@@ -1,6 +1,7 @@
 import {
   add,
   arcOf,
+  arcPoint,
   cross,
   distance,
   dot,
@@ -37,6 +38,7 @@ import {
   type BimWall,
   type BimWallJoin,
   type Vec2,
+  type Vec3,
 } from './model';
 
 /**
@@ -61,8 +63,25 @@ export type BimShape =
       zTop: number;
       openings: BimWallOpeningShape[];
       clipBy?: string;
+      /**
+       * LR2: a leaning wall: its angle and its footprint at `zTop` (the same vertices and arcs
+       * as `footprint`); the solid is ruled between the two.
+       */
+      lean?: number;
+      footprintTop?: BimLoop;
     }
-  | { kind: 'slab'; boundary: BimLoop; holes: BimLoop[]; zBottom: number; zTop: number }
+  | {
+      kind: 'slab';
+      boundary: BimLoop;
+      holes: BimLoop[];
+      zBottom: number;
+      zTop: number;
+      /**
+       * TW5: a sloped top through `origin` at `zTop`, rising by `grade` per mm along the plan unit
+       * `direction`; the bottom `zTop - zBottom` below it everywhere.
+       */
+      slope?: { origin: Vec2; direction: Vec2; grade: number };
+    }
   | {
       kind: 'column';
       at: Vec2;
@@ -71,8 +90,77 @@ export type BimShape =
       zBase: number;
       zTop: number;
       clipBy?: string;
+      /** TW2: plan position of the top of a leaning column. Absent: straight above `at`. */
+      topAt?: Vec2;
+      /** TW5: the top section's scale (under 1). Absent: the same section. */
+      topScale?: number;
     }
-  | { kind: 'beam'; start: Vec2; end: Vec2; zTop: number; profile: BimProfile }
+  | {
+      kind: 'beam';
+      start: Vec2;
+      end: Vec2;
+      zTop: number;
+      profile: BimProfile;
+      /** TW2: top height at the end of a sloping beam. Absent: level at `zTop`. */
+      zTopEnd?: number;
+    }
+  | {
+      /** TW2: the member's axis from `start` to `end` (x, y, z), its section centred on it. */
+      kind: 'member';
+      start: Vec3;
+      end: Vec3;
+      rotationRad: number;
+      profile: BimProfile;
+    }
+  | {
+      /**
+       * LR3: a spiral ramp. Its top at angle `startAngle + t·sweep` (t from 0 to 1) is at
+       * `zStart + t·(zEnd − zStart)` across the ring, and it is `thickness` deep vertically.
+       */
+      kind: 'ramp';
+      center: Vec2;
+      innerRadius: number;
+      outerRadius: number;
+      startAngle: number;
+      sweep: number;
+      zStart: number;
+      zEnd: number;
+      thickness: number;
+      /** LS4: plan regions cut upright through every turn over them (counter-clockwise). */
+      openings?: BimLoop[];
+    }
+  | {
+      /**
+       * LS5: a railing along a ramp's edge: as a ramp's shape, the band between the radii,
+       * its top `thickness` (the railing's height) above the ramp's top.
+       */
+      kind: 'railing';
+      center: Vec2;
+      innerRadius: number;
+      outerRadius: number;
+      startAngle: number;
+      sweep: number;
+      zStart: number;
+      zEnd: number;
+      thickness: number;
+    }
+  | {
+      /**
+       * LS6: a straight flight. `profile` is its side, counter-clockwise in (along the flight
+       * from `at`, up from `zBase`); the solid is it swept `width` across, centred on the line
+       * from `at` along `directionRad`.
+       */
+      kind: 'stair';
+      at: Vec2;
+      directionRad: number;
+      zBase: number;
+      width: number;
+      profile: Vec2[];
+      risers: number;
+      riser: number;
+      tread: number;
+      waist: number;
+    }
   | {
       kind: 'roof';
       form: BimRoofShape['form'];
@@ -83,7 +171,7 @@ export type BimShape =
       faces: BimRoofFace[];
       thicknessMm: number;
     }
-  | { kind: 'space'; boundary: BimLoop; zBase: number; zTop: number }
+  | { kind: 'space'; boundary: BimLoop; holes: BimLoop[]; zBase: number; zTop: number }
   | { kind: 'part'; at: Vec2; rotationRad: number; zBase: number }
   /** Openings, doors and windows: their shape is a void in the host. */
   | { kind: 'void'; hostId: string };
@@ -125,6 +213,10 @@ export const profileArea = (p: BimProfile): number => {
       return p.thicknessMm * (p.widthMm + p.depthMm - p.thicknessMm);
     case 'box':
       return p.widthMm * p.depthMm - (p.widthMm - 2 * p.wallMm) * (p.depthMm - 2 * p.wallMm);
+    case 'pipe': {
+      const inner = p.diameterMm - 2 * p.wallMm;
+      return (Math.PI * (p.diameterMm * p.diameterMm - inner * inner)) / 4;
+    }
   }
 };
 export const layersThickness = (t: BimType) =>
@@ -231,24 +323,49 @@ interface WallFrame {
   /** Face points at each end: [left, right]. */
   ends: { start: [Vec2, Vec2]; end: [Vec2, Vec2] };
   /** Axial extents near each end that joins changed; openings must stay out of them. */
-  zones: { start: number; end: number; spans: [number, number][] };
+  /** `heights`: each span's stopping wall from its base to its top (FU3a), in the same order. */
+  zones: { start: number; end: number; spans: [number, number][]; heights: [number, number][] };
   arc?: ReturnType<typeof arcOf>;
+  /** LR2: the wall's lean (rad); 0 when upright. */
+  lean: number;
 }
 
-function wallFrame(ctx: BimContext, wall: BimWall, path: string): WallFrame {
-  const s = ctx.point(wall.start, `${path}.start`);
-  const e = ctx.point(wall.end, `${path}.end`);
+/**
+ * A wall's frame: its axis and faces in plan. LR2: a leaning wall's at height `z` (its base by
+ * default): the axis moved to the right by (z − base)·tan(lean), an arc's radially (its centre
+ * and angles kept), and the faces as far apart as the thickness square to them, ÷ cos(lean).
+ */
+function wallFrame(ctx: BimContext, wall: BimWall, path: string, z?: number): WallFrame {
+  let s = ctx.point(wall.start, `${path}.start`);
+  let e = ctx.point(wall.end, `${path}.end`);
   if (distance(s, e) < bimTolerance) throw new DeriveError('wall-degenerate', path);
+  const lean = wall.lean ?? 0;
   const thickness = layersThickness(ctx.types.get(wall.typeId)!);
+  const width = thickness / Math.cos(lean);
   const [leftOff, rightOff] =
     wall.location === 'center'
-      ? [thickness / 2, -thickness / 2]
+      ? [width / 2, -width / 2]
       : wall.location === 'left'
-        ? [0, -thickness]
-        : [thickness, 0];
+        ? [0, -width]
+        : [width, 0];
   const zBase = ctx.height(wall.base, `${path}.base`);
   const zTop = ctx.top(zBase, wall.top, `${path}.top`);
   if (zTop <= zBase + bimTolerance) throw new DeriveError('level-order', `${path}.top`);
+  if (lean && z !== undefined && z !== zBase) {
+    const d = (z - zBase) * Math.tan(lean);
+    if (!wall.bulge) {
+      const right = scale(left(unit(sub(e, s))), -d);
+      s = add(s, right);
+      e = add(e, right);
+    } else {
+      // Right of travel is away from the centre on a counter-clockwise arc.
+      const arc = arcOf(s, e, wall.bulge);
+      const r = arc.radius + Math.sign(arc.sweep) * d;
+      if (!(r > bimTolerance)) throw new DeriveError('wall-degenerate', path);
+      const radial = (p: Vec2) => add(arc.center, scale(unit(sub(p, arc.center)), r));
+      [s, e] = [radial(s), radial(e)];
+    }
+  }
   const u = unit(sub(e, s));
   const n = left(u);
   const at = (p: Vec2): [Vec2, Vec2] => [add(p, scale(n, leftOff)), add(p, scale(n, rightOff))];
@@ -266,7 +383,8 @@ function wallFrame(ctx: BimContext, wall: BimWall, path: string): WallFrame {
     zBase,
     zTop,
     ends: { start: at(s), end: at(e) },
-    zones: { start: 0, end: 0, spans: [] },
+    zones: { start: 0, end: 0, spans: [], heights: [] },
+    lean,
   };
   if (wall.bulge) {
     const arc = arcOf(s, e, wall.bulge);
@@ -379,27 +497,40 @@ function meetFaces(f: WallFrame, end: WallEnd, other: FaceCurve, path: string) {
   }) as [Vec2, Vec2];
 }
 
+/** How a join met its walls: an L (which ends) or a T (which wall stops, at which end). */
+type JoinFit =
+  | { kind: 'L'; ea: WallEnd; eb: WallEnd }
+  | { kind: 'T'; through: string; stop: string; end: WallEnd };
+
 function applyJoin(
   frames: Map<string, WallFrame>,
   join: BimWallJoin,
   path: string,
   used: Set<string>,
   points: { p: Vec2; lo: number; hi: number }[],
-) {
+  /** LR2: the fit found at the base, for leaning walls taken at another height. */
+  fit?: JoinFit,
+): JoinFit {
   const [a, b] = join.walls.map((id) => frames.get(id)!) as [WallFrame, WallFrame];
   const ends = ['start', 'end'] as const;
   // L: an end of each wall at the same point. T: an end of one wall inside the other's axis.
-  let shape: { kind: 'L'; ea: 'start' | 'end'; eb: 'start' | 'end' } | undefined;
-  for (const ea of ends)
-    for (const eb of ends)
-      if (distance(endPoint(a, ea), endPoint(b, eb)) <= bimTolerance) shape = { kind: 'L', ea, eb };
+  let shape: { kind: 'L'; ea: 'start' | 'end'; eb: 'start' | 'end' } | undefined =
+    fit?.kind === 'L' ? fit : undefined;
+  if (!fit)
+    for (const ea of ends)
+      for (const eb of ends)
+        if (distance(endPoint(a, ea), endPoint(b, eb)) <= bimTolerance)
+          shape = { kind: 'L', ea, eb };
   // An arc wall joins only at an end, by its tangent there (OH-U3): no T.
   if ((a.arc || b.arc) && !shape) throw new DeriveError('join-unsupported', path);
   const ua = endAxis(a, shape?.ea).u;
   const ub = endAxis(b, shape?.eb).u;
   if (Math.abs(cross(ua, ub)) < 1e-9) throw new DeriveError('join-failed', path);
-  let tee: { through: WallFrame; stop: WallFrame; end: 'start' | 'end' } | undefined;
-  if (!shape)
+  let tee: { through: WallFrame; stop: WallFrame; end: 'start' | 'end' } | undefined =
+    fit?.kind === 'T'
+      ? { through: frames.get(fit.through)!, stop: frames.get(fit.stop)!, end: fit.end }
+      : undefined;
+  if (!shape && !tee)
     for (const [through, stop] of [
       [a, b],
       [b, a],
@@ -437,7 +568,7 @@ function applyJoin(
     claim(`${tee.stop.wall.id}:${tee.end}`);
     claimPoint(endPoint(tee.stop, tee.end), [a, b]);
     butt(tee.through, tee.stop, tee.end, undefined, path);
-    return;
+    return { kind: 'T', through: tee.through.wall.id, stop: tee.stop.wall.id, end: tee.end };
   }
   const { ea, eb } = shape!;
   claim(`${a.wall.id}:${ea}`);
@@ -478,7 +609,7 @@ function applyJoin(
       set(a, ea, ia);
       set(b, eb, ib);
     }
-    return;
+    return shape!;
   }
   const through = join.through === b.wall.id ? b : a;
   if (join.through !== undefined && join.through !== a.wall.id && join.through !== b.wall.id)
@@ -487,6 +618,7 @@ function applyJoin(
   const throughEnd = through === a ? ea : eb;
   const stopEnd = through === a ? eb : ea;
   butt(through, stop, stopEnd, throughEnd, path);
+  return shape!;
 }
 
 /** `stop` ends at the face of `through` facing it; an L's through wall runs to stop's far face. */
@@ -522,6 +654,65 @@ function butt(
   // The stopping wall meets the through wall over this stretch of its axis.
   const ts = stop.ends[stopEnd].map((p) => axial(through, p));
   through.zones.spans.push([Math.min(...ts), Math.max(...ts)]);
+  through.zones.heights.push([stop.zBase, stop.zTop]);
+}
+
+/**
+ * LR2: whether a leaning wall's base and top footprints have the same edges (straight or arc,
+ * in the same order) and every arc keeps its angles about the wall's centre, so the ruled
+ * solid between them is what its faces are (planes and cones), and Simpson's rule exact.
+ */
+function leanRuled(f: WallFrame, base: BimLoop, top: BimLoop) {
+  if (base.length !== top.length) return false;
+  return base.every((v, i) => {
+    const w = top[i]!;
+    if (!!v[2] !== !!w[2]) return false;
+    if (!v[2]) return true;
+    if (Math.abs(v[2] - w[2]!) > 1e-9) return false;
+    const c = f.arc!.center;
+    const a = Math.atan2(v[1] - c[1], v[0] - c[0]);
+    const b = Math.atan2(w[1] - c[1], w[0] - c[0]);
+    return Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))) <= 1e-9;
+  });
+}
+/**
+ * LS-U1: whether the footprint solved at mid-height is within 1 mm (`within`) of the ruled solid's
+ * there:
+ * its vertices and its edges' middles (an arc's on the arc) halfway between the base's and the
+ * top's.
+ */
+function nearRuled(base: BimLoop, mid: BimLoop, top: BimLoop, within = 1) {
+  if (base.length !== mid.length || top.length !== mid.length) return false;
+  const middle = (l: BimLoop, i: number): Vec2 => {
+    const v = l[i]!;
+    const w = l[(i + 1) % l.length]!;
+    return v[2]
+      ? arcPoint(arcOf([v[0], v[1]], [w[0], w[1]], v[2]), 0.5)
+      : [(v[0] + w[0]) / 2, (v[1] + w[1]) / 2];
+  };
+  const near = (p: Vec2, a: Vec2, b: Vec2) =>
+    Math.hypot(p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2) <= within;
+  return mid.every(
+    (v, i) =>
+      near([v[0], v[1]], [base[i]![0], base[i]![1]], [top[i]![0], top[i]![1]]) &&
+      near(middle(mid, i), middle(base, i), middle(top, i)),
+  );
+}
+const loopsEqual = (a: BimLoop, b: BimLoop) =>
+  a.length === b.length &&
+  a.every(
+    (v, i) =>
+      Math.abs(v[0] - b[i]![0]) <= 1e-9 &&
+      Math.abs(v[1] - b[i]![1]) <= 1e-9 &&
+      Math.abs((v[2] ?? 0) - (b[i]![2] ?? 0)) <= 1e-12,
+  );
+/** LR2: the loop whose vertices are `t` of the way from `a`'s to `b`'s, with `a`'s arcs. */
+function loopBetween(a: BimLoop, b: BimLoop, t: number): BimLoop {
+  return a.map((v, i) => {
+    const w = b[i]!;
+    const p: Vec2 = [v[0] + (w[0] - v[0]) * t, v[1] + (w[1] - v[1]) * t];
+    return v[2] ? [p[0], p[1], v[2]] : p;
+  });
 }
 
 function wallFootprint(f: WallFrame): BimLoop {
@@ -558,14 +749,22 @@ export function reverseLoop(loop: BimLoop): BimLoop {
   });
 }
 
-/** Area of an opening's plan cut through a wall, exact for arc walls. */
-function openingPlanArea(f: WallFrame, widthMm: number) {
-  if (!f.arc) return widthMm * f.thickness;
+/** FU3a: the heights above a wall's base of an opening's sill and head, measured along the face. */
+const bimWallOpeningRiseOf = (lean: number, sillMm: number, heightMm: number) =>
+  [sillMm * Math.cos(lean), (sillMm + heightMm) * Math.cos(lean)] as const;
+
+/**
+ * Volume an opening cuts from a wall, exact for arc walls. FU3a: through a leaning wall the cut
+ * is as thick as the wall square to its faces; on a cone its plan area grows in step with the
+ * height, so the area at its middle height times the height is exact.
+ */
+function openingVolume(f: WallFrame, o: BimWallOpeningShape) {
+  if (!f.arc) return o.widthMm * f.thickness * o.heightMm;
   const towardCenter = Math.sign(f.arc.sweep);
-  const r1 = f.arc.radius - towardCenter * f.leftOff;
-  const r2 = f.arc.radius - towardCenter * f.rightOff;
-  const angle = widthMm / f.arc.radius;
-  return (angle * Math.abs(r1 * r1 - r2 * r2)) / 2;
+  const rise = (o.sillMm + o.heightMm / 2) * Math.cos(f.lean);
+  const mid =
+    f.arc.radius + towardCenter * (rise * Math.tan(f.lean) - (f.leftOff + f.rightOff) / 2);
+  return (o.widthMm / f.arc.radius) * f.thickness * mid * o.heightMm;
 }
 
 const loopPolygon = (loop: BimLoop) => sampleLoop(loop);
@@ -596,25 +795,116 @@ export function deriveBim(doc: BimDocument): BimDerived {
       }
   const used = new Set<string>();
   const points: { p: Vec2; lo: number; hi: number }[] = [];
+  /** LR2: the joins applied, by wall, to solve a leaning wall's again at other heights. */
+  const joinsOf = new Map<string, { join: BimWallJoin; path: string; fit: JoinFit }[]>();
+  /**
+   * LS2: the walls whose plan changes with height: the leaning ones and the upright ones joined
+   * to them (an upright wall's faces stay; its ends follow the leaning faces they meet).
+   */
+  const moving = new Set<string>();
   doc.joins.forEach((j, i) => {
     if (!j.walls.every((w) => frames.has(w))) return;
+    const path = `$.joins[${i}]`;
     try {
-      applyJoin(frames, j, `$.joins[${i}]`, used, points);
+      const fit = applyJoin(frames, j, path, used, points);
+      for (const w of j.walls) joinsOf.set(w, [...(joinsOf.get(w) ?? []), { join: j, path, fit }]);
+      if (j.walls.some((w) => frames.get(w)!.lean !== 0)) for (const w of j.walls) moving.add(w);
     } catch (err) {
-      fail(err, j.id, `$.joins[${i}]`);
+      fail(err, j.id, path);
     }
   });
+  for (const f of frames.values()) if (f.lean) moving.add(f.wall.id);
+  /**
+   * LR2: a leaning wall's footprint at height z: its joins solved again with it and the walls
+   * it joins taken at z.
+   */
+  const footprintAt = (f: WallFrame, z: number) => {
+    const at = new Map<string, WallFrame>();
+    const frameAt = (id: string) => {
+      const w = frames.get(id)!;
+      at.set(id, wallFrame(ctx, w.wall, w.path, z));
+    };
+    frameAt(f.wall.id);
+    const joins = joinsOf.get(f.wall.id) ?? [];
+    for (const { join } of joins) for (const w of join.walls) if (!at.has(w)) frameAt(w);
+    for (const { join, path, fit } of joins) {
+      applyJoin(at, join, path, new Set(), [], fit);
+      // A T found at the base must still meet the through wall at z: the stop's face points
+      // within the through wall's length there, not off its end. Only where the stop is: a
+      // taller through wall's top does not ask a lower stop's extension (Codex).
+      const stopped = frames.get(fit.kind === 'T' ? fit.stop : f.wall.id)!;
+      if (
+        fit.kind === 'T' &&
+        z >= stopped.zBase - bimTolerance &&
+        z <= stopped.zTop + bimTolerance
+      ) {
+        const through = at.get(fit.through)!;
+        const stop = at.get(fit.stop)!;
+        if (
+          stop.ends[fit.end].some((p) => {
+            const t = axial(through, p);
+            return t < -bimTolerance || t > through.length + bimTolerance;
+          })
+        )
+          throw new DeriveError('wall-lean-join', path);
+      }
+    }
+    const frame = at.get(f.wall.id)!;
+    // Each face keeps a positive length at z too: a join may not trim it past its other end.
+    if (
+      [0, 1].some(
+        (k) => axial(frame, frame.ends.end[k]) - axial(frame, frame.ends.start[k]) <= bimTolerance,
+      )
+    )
+      throw new DeriveError('join-failed', f.path);
+    return { frame, footprint: wallFootprint(frame) };
+  };
   const footprints = new Map<string, BimLoop>();
+  /**
+   * The walls ruled between a base and a top footprint. `ruled`: its faces are what the ruled
+   * solid's are (planes, cones, cylinders kept at their angles), so Simpson's rule is exact;
+   * otherwise (LS-U1) within 1 mm of them at mid-height, and the kernel measures it.
+   */
+  const leanFootprints = new Map<string, { top: BimLoop; mid: WallFrame; ruled: boolean }>();
   for (const f of frames.values()) {
-    const fp = wallFootprint(f);
+    let fp = wallFootprint(f);
+    if (moving.has(f.wall.id)) {
+      // The base, middle and top footprints; the solid is ruled between base and top: each
+      // vertex moves straight and each face arc keeps its centre and angles (LR-U2), or LS2 the
+      // footprint solved at mid-height is within 1 mm of the ruled one's (LS-U1).
+      try {
+        const base = footprintAt(f, f.zBase);
+        const top = footprintAt(f, f.zTop);
+        const mid = footprintAt(f, (f.zBase + f.zTop) / 2);
+        // Exact when the faces keep their angles and the vertices move straight (a straight wall
+        // meeting a cone does not: its corners follow a curve).
+        const ruled =
+          leanRuled(f, base.footprint, top.footprint) &&
+          nearRuled(base.footprint, mid.footprint, top.footprint, 1e-6);
+        if (!ruled && !nearRuled(base.footprint, mid.footprint, top.footprint))
+          throw new DeriveError('wall-lean-join', f.path);
+        if (!loopWithinLimit(top.footprint)) throw new DeriveError('coordinate', f.path);
+        fp = base.footprint;
+        // An upright wall whose joins do not change with height stays a prism.
+        if (f.lean || !loopsEqual(base.footprint, top.footprint))
+          leanFootprints.set(f.wall.id, { top: top.footprint, mid: mid.frame, ruled });
+      } catch (err) {
+        fail(err, f.wall.id, f.path);
+        continue;
+      }
+    }
     // Each face must keep a positive length: a join may not trim a wall past its other end. An
     // arc wall's faces stay within a half circle (|bulge| ≤ 1), as a building's arcs do, and its
     // joined faces may not cross each other (they can meet twice, OH-U3).
     const inverted = [0, 1].some(
       (k) => axial(f, f.ends.end[k]) - axial(f, f.ends.start[k]) <= bimTolerance,
     );
-    const tooLong = fp.some((v) => Math.abs(v[2] ?? 0) > 1 + 1e-9);
-    const simple = f.arc ? loopSimple(fp) : polygonSimple(loopPolygon(fp));
+    // LR2: a leaning wall's top must stay a simple outline too (a join may not cross it there),
+    // and its arcs within a half circle (Codex: a join can open them past it at the top).
+    const top = leanFootprints.get(f.wall.id)?.top;
+    const tooLong = [fp, top ?? []].some((l) => l.some((v) => Math.abs(v[2] ?? 0) > 1 + 1e-9));
+    const isSimple = (l: BimLoop) => (f.arc ? loopSimple(l) : polygonSimple(loopPolygon(l)));
+    const simple = isSimple(fp) && (!top || isSimple(top));
     if (inverted || tooLong || !simple) {
       diagnostics.push({ code: 'join-failed', path: f.path, severity: 'error', id: f.wall.id });
       continue;
@@ -655,7 +945,8 @@ export function deriveBim(doc: BimDocument): BimDerived {
                 widthMm: t && 'widthMm' in t ? t.widthMm : 0,
                 heightMm: t && 'heightMm' in t ? t.heightMm : 0,
               };
-        const height = f.zTop - f.zBase;
+        // FU3a: a leaning wall's sill and height run along its face (FU-U4).
+        const height = (f.zTop - f.zBase) / Math.cos(f.lean);
         if (
           o.alongMm < -bimTolerance ||
           o.alongMm + o.widthMm > f.length + bimTolerance ||
@@ -665,12 +956,56 @@ export function deriveBim(doc: BimDocument): BimDerived {
           throw new DeriveError('opening-outside-host', path);
         const lo = o.alongMm;
         const hi = o.alongMm + o.widthMm;
+        // Upright, the joins are the same at every height; leaning, only where the opening is
+        // (below), not at the base (Codex). LS2: so with an upright wall joined to a leaning one.
+        const moves = moving.has(e.hostId);
         if (
-          lo < f.zones.start - bimTolerance ||
-          hi > f.length - f.zones.end + bimTolerance ||
-          f.zones.spans.some(([a, b]) => lo < b - bimTolerance && hi > a + bimTolerance)
+          !moves &&
+          (lo < f.zones.start - bimTolerance ||
+            hi > f.length - f.zones.end + bimTolerance ||
+            f.zones.spans.some(([a, b]) => lo < b - bimTolerance && hi > a + bimTolerance))
         )
           throw new DeriveError('opening-in-join', path);
+        // FU3a: a leaning wall's joins reach further in as it rises (leaning in), so the opening
+        // stays out of them over its whole height: measured on the wall at heights from its sill
+        // to its head, an arc's at the same angles. A T-join's contact moves along the wall as both
+        // lean, so between two heights its span sweeps the hull of the two (Codex).
+        if (moves) {
+          const [r0, r1] = bimWallOpeningRiseOf(f.lean, o.sillMm, o.heightMm);
+          const steps = 8;
+          // A stopping wall shorter than the opening holds it only up to its top (Codex): its
+          // ends are heights to measure at too, and its span counts only within them.
+          const z0 = f.zBase + r0;
+          const z1 = f.zBase + r1;
+          const zs = [
+            ...Array.from({ length: steps + 1 }, (_, i) => z0 + ((z1 - z0) * i) / steps),
+            ...f.zones.heights.flat().filter((z) => z > z0 && z < z1),
+          ].sort((a, b) => a - b);
+          let last: ([number, number] | undefined)[] | undefined;
+          for (const z of zs) {
+            const g = footprintAt(f, z).frame;
+            const k = f.arc && g.arc ? f.arc.radius / g.arc.radius : 1;
+            const start = Math.max(0, ...g.ends.start.map((p) => axial(g, p))) * k;
+            const end =
+              (g.length - Math.max(0, ...g.ends.end.map((p) => g.length - axial(g, p)))) * k;
+            // In the order of the joins at every height, so each is swept with itself (Codex).
+            const spans = g.zones.spans.map(([a, b], j): [number, number] | undefined => {
+              const [zb, zt] = g.zones.heights[j]!;
+              return z < zb - bimTolerance || z > zt + bimTolerance ? undefined : [a * k, b * k];
+            });
+            const swept = spans.map((s, j): [number, number] | undefined => {
+              const p = last && last.length === spans.length ? last[j] : undefined;
+              return s && p ? [Math.min(s[0], p[0]), Math.max(s[1], p[1])] : s;
+            });
+            if (
+              lo < start - bimTolerance ||
+              hi > end + bimTolerance ||
+              swept.some((s) => s && lo < s[1] - bimTolerance && hi > s[0] + bimTolerance)
+            )
+              throw new DeriveError('opening-in-join', path);
+            last = spans;
+          }
+        }
         const list = wallOpenings.get(e.hostId) ?? [];
         const clash = list.some(
           (p) =>
@@ -690,14 +1025,17 @@ export function deriveBim(doc: BimDocument): BimDerived {
     }
   }
 
-  for (const e of doc.elements) {
-    const path = pathOf(e.id);
-    try {
-      deriveElement(e, path);
-    } catch (err) {
-      fail(err, e.id, path);
+  // LS5: railings after the rest, from their host ramp's shape.
+  for (const pass of [false, true])
+    for (const e of doc.elements) {
+      if ((e.kind === 'railing') !== pass) continue;
+      const path = pathOf(e.id);
+      try {
+        deriveElement(e, path);
+      } catch (err) {
+        fail(err, e.id, path);
+      }
     }
-  }
   return { shapes, quantities, diagnostics };
 
   function deriveElement(e: BimElement, path: string) {
@@ -710,10 +1048,8 @@ export function deriveBim(doc: BimDocument): BimDerived {
         const height = f.zTop - f.zBase;
         const footArea = loopArea(footprint);
         const openingArea = openings.reduce((n, o) => n + o.widthMm * o.heightMm, 0);
-        const openingVolume = openings.reduce(
-          (n, o) => n + openingPlanArea(f, o.widthMm) * o.heightMm,
-          0,
-        );
+        const openingsVolume = openings.reduce((n, o) => n + openingVolume(f, o), 0);
+        const lean = leanFootprints.get(e.id);
         shapes.set(e.id, {
           kind: 'wall',
           footprint,
@@ -721,21 +1057,40 @@ export function deriveBim(doc: BimDocument): BimDerived {
           zTop: f.zTop,
           openings,
           ...(e.clipBy ? { clipBy: e.clipBy } : {}),
+          ...(lean ? { ...(f.lean ? { lean: f.lean } : {}), footprintTop: lean.top } : {}),
         });
+        // LR2: a leaning wall's faces run up the slope: its length at mid-height × the slant
+        // height. That length is the axis's, grown or shrunk as the joined faces are between the
+        // base and mid-height (a mitred ring that leans out is longer up the wall).
+        const faces = (w: WallFrame) =>
+          ([0, 1] as const).reduce<number>(
+            (n, k) => n + (axial(w, w.ends.end[k]) - axial(w, w.ends.start[k])) / 2,
+            0,
+          );
+        const sideArea = lean
+          ? ((f.length + faces(lean.mid) - faces(f)) * height) / Math.cos(f.lean)
+          : f.length * height;
         const values: Record<string, number> = {
           length: f.length,
           height,
           width: f.thickness,
           footprintArea: footArea,
-          grossSideArea: f.length * height,
+          grossSideArea: sideArea,
           openingArea,
-          netSideArea: f.length * height - openingArea,
+          netSideArea: sideArea - openingArea,
         };
-        if (!e.clipBy) {
-          values.grossVolume = footArea * height;
-          values.netVolume = footArea * height - openingVolume;
+        // LS-U1: a wall ruled only to within 1 mm is the kernel's to measure.
+        const measured = !e.clipBy && (!lean || lean.ruled);
+        if (measured) {
+          // LR2: the plan area changes as a square of the height; Simpson's rule is exact.
+          const volume = lean
+            ? (height / 6) *
+              (footArea + 4 * loopArea(loopBetween(footprint, lean.top, 0.5)) + loopArea(lean.top))
+            : footArea * height;
+          values.grossVolume = volume;
+          values.netVolume = volume - openingsVolume;
         }
-        quantities.set(e.id, { source: e.clipBy ? 'kernel' : 'analytic', values });
+        quantities.set(e.id, { source: measured ? 'analytic' : 'kernel', values });
         return;
       }
       case 'slab': {
@@ -749,29 +1104,54 @@ export function deriveBim(doc: BimDocument): BimDerived {
             opening: true,
           })),
         ];
-        const placed: LoopEdge[][] = [];
-        for (const v of voids) {
-          checkLoop(v.loop, v.path);
-          const edges = loopEdges(v.loop);
-          if (!loopInside(edges, outer))
-            throw new DeriveError(v.opening ? 'opening-outside-host' : 'hole-outside', v.path);
-          if (
-            placed.some((p) => loopsTouch(p, edges) || loopWithin(p, edges) || loopWithin(edges, p))
-          )
-            throw new DeriveError(v.opening ? 'opening-overlap' : 'hole-overlap', v.path);
-          placed.push(edges);
-        }
+        checkVoids(outer, voids);
         const thickness = layersThickness(ctx.types.get(e.typeId)!);
         const zTop = ctx.height(e.top, `${path}.top`);
         const gross = Math.abs(loopArea(e.boundary));
         const area = gross - voids.reduce((n, v) => n + Math.abs(loopArea(v.loop)), 0);
+        // TW5: a sloped top, square to the edge, up to the boundary's farthest point.
+        let slope: { origin: Vec2; direction: Vec2; grade: number } | undefined;
+        if (e.slope) {
+          const zEnd = ctx.height(e.slope.endTop, `${path}.slope.endTop`);
+          const a = e.boundary[e.slope.edge]!;
+          const b = e.boundary[(e.slope.edge + 1) % e.boundary.length]!;
+          const origin: Vec2 = [a[0], a[1]];
+          const normal = left(unit(sub([b[0], b[1]], origin)));
+          // How far the boundary reaches from the edge's line along d (exact on arcs).
+          const reach = (d: Vec2) => dot(sub(loopExtreme(e.boundary, scale(d, -1)), origin), d);
+          const r1 = reach(normal);
+          const r2 = reach(scale(normal, -1));
+          const direction = r1 >= r2 ? normal : scale(normal, -1);
+          const run = Math.max(r1, r2);
+          if (!(run > bimTolerance))
+            throw new DeriveError('slope-degenerate', `${path}.slope.edge`);
+          withinLimit(zEnd - thickness, `${path}.slope.endTop`);
+          if (Math.abs(zEnd - zTop) > bimTolerance) {
+            const grade = (zEnd - zTop) / run;
+            slope = { origin, direction, grade };
+            // A concave boundary may reach behind the edge's line, where the plane runs on past
+            // `top`: its heights there stay within the limit too.
+            const behind = Math.max(0, Math.min(r1, r2));
+            const zBehind = zTop - grade * behind;
+            withinLimit(zBehind, `${path}.slope.endTop`);
+            withinLimit(zBehind - thickness, `${path}.slope.endTop`);
+            // The kernel builds it from one upright prism over its whole rise (with 10 mm to
+            // spare each way), which must stay within the limit as a single extrusion too.
+            const rise = Math.max(zTop, zEnd, zBehind) - Math.min(zTop, zEnd, zBehind) + thickness;
+            if (!(rise + 20 <= bimLimits.coordinateMm))
+              throw new DeriveError('coordinate', `${path}.slope.endTop`);
+          }
+        }
         shapes.set(e.id, {
           kind: 'slab',
           boundary: ccw(e.boundary),
           holes: voids.map((v) => ccw(v.loop)),
           zBottom: withinLimit(zTop - thickness, `${path}.top`),
           zTop,
+          ...(slope ? { slope } : {}),
         });
+        // A sloped slab's areas stay in plan, and its volume is the plan area times the vertical
+        // thickness; its top face's own area is the plan area over the slope's cosine.
         quantities.set(e.id, {
           source: 'analytic',
           values: {
@@ -781,6 +1161,7 @@ export function deriveBim(doc: BimDocument): BimDerived {
             depth: thickness,
             grossVolume: gross * thickness,
             netVolume: area * thickness,
+            ...(slope ? { slopedArea: area * Math.hypot(1, slope.grade) } : {}),
           },
         });
         return;
@@ -792,6 +1173,11 @@ export function deriveBim(doc: BimDocument): BimDerived {
         if (zTop <= zBase + bimTolerance) throw new DeriveError('level-order', `${path}.top`);
         const t = ctx.types.get(e.typeId)! as Extract<BimType, { profile: unknown }>;
         planWithinLimit([at], profileReach(t.profile), `${path}.at`);
+        const topAt = e.topAt ? ctx.point(e.topAt, `${path}.topAt`) : undefined;
+        if (topAt) planWithinLimit([topAt], profileReach(t.profile), `${path}.topAt`);
+        const leans = topAt !== undefined && distance(at, topAt) > bimTolerance;
+        const k = e.topScale ?? 1;
+        const tapers = k < 1 - 1e-9;
         shapes.set(e.id, {
           kind: 'column',
           at,
@@ -800,10 +1186,15 @@ export function deriveBim(doc: BimDocument): BimDerived {
           zBase,
           zTop,
           ...(e.clipBy ? { clipBy: e.clipBy } : {}),
+          ...(leans ? { topAt } : {}),
+          ...(tapers ? { topScale: k } : {}),
         });
         const a = profileArea(t.profile);
-        const values: Record<string, number> = { length: zTop - zBase, crossSectionArea: a };
-        if (!e.clipBy) values.netVolume = a * (zTop - zBase);
+        // TW2: a leaning column's length runs along its axis.
+        const length = Math.hypot(zTop - zBase, leans ? distance(at, topAt) : 0);
+        // TW5: the base's section; similar sections scaled linearly by k hold A·L·(1 + k + k²)/3.
+        const values: Record<string, number> = { length, crossSectionArea: a };
+        if (!e.clipBy) values.netVolume = (a * length * (1 + k + k * k)) / 3;
         quantities.set(e.id, { source: e.clipBy ? 'kernel' : 'analytic', values });
         return;
       }
@@ -815,18 +1206,259 @@ export function deriveBim(doc: BimDocument): BimDerived {
         planWithinLimit([s, en], profileReach(t.profile), path);
         const zTop = ctx.height(e.top, `${path}.top`);
         withinLimit(zTop - profileDepth(t.profile), `${path}.top`);
+        const zTopEnd = e.endTop ? ctx.height(e.endTop, `${path}.endTop`) : undefined;
+        if (zTopEnd !== undefined) withinLimit(zTopEnd - profileDepth(t.profile), `${path}.endTop`);
+        const slopes = zTopEnd !== undefined && Math.abs(zTopEnd - zTop) > bimTolerance;
         shapes.set(e.id, {
           kind: 'beam',
           start: s,
           end: en,
           zTop,
           profile: t.profile,
+          ...(slopes ? { zTopEnd } : {}),
         });
         const a = profileArea(t.profile);
-        const len = distance(s, en);
+        // TW2: a sloping beam's length runs along its axis.
+        const len = Math.hypot(distance(s, en), slopes ? zTopEnd - zTop : 0);
         quantities.set(e.id, {
           source: 'analytic',
           values: { length: len, crossSectionArea: a, netVolume: a * len },
+        });
+        return;
+      }
+      case 'member': {
+        const t = ctx.types.get(e.typeId)! as Extract<BimType, { profile: unknown }>;
+        const [start, end] = (['start', 'end'] as const).map((k): Vec3 => {
+          const xy = ctx.point(e[k].at, `${path}.${k}.at`);
+          planWithinLimit([xy], profileReach(t.profile), `${path}.${k}.at`);
+          const z = ctx.height(e[k].height, `${path}.${k}.height`);
+          withinLimit(Math.abs(z) + profileReach(t.profile), `${path}.${k}.height`);
+          return [xy[0], xy[1], z];
+        });
+        const length = Math.hypot(end[0] - start[0], end[1] - start[1], end[2] - start[2]);
+        if (length < bimTolerance) throw new DeriveError('member-degenerate', path);
+        shapes.set(e.id, {
+          kind: 'member',
+          start,
+          end,
+          rotationRad: e.rotationRad,
+          profile: t.profile,
+        });
+        const a = profileArea(t.profile);
+        quantities.set(e.id, {
+          source: 'analytic',
+          values: { length, crossSectionArea: a, netVolume: a * length },
+        });
+        return;
+      }
+      case 'ramp': {
+        const center = ctx.point(e.center, `${path}.center`);
+        const [r, R] = [e.innerRadiusMm, e.outerRadiusMm];
+        planWithinLimit([center], R, `${path}.center`);
+        const thickness = layersThickness(ctx.types.get(e.typeId)!);
+        const zStart = ctx.height(e.base, `${path}.base`);
+        const zEnd = ctx.height(e.top, `${path}.top`);
+        for (const [z, k] of [
+          [zStart, 'base'],
+          [zEnd, 'top'],
+        ] as const) {
+          withinLimit(z, `${path}.${k}`);
+          withinLimit(z - thickness, `${path}.${k}`);
+        }
+        const turns = Math.abs(e.sweepRad) / (2 * Math.PI);
+        // From one turn on, a turn must rise more than the thickness, or the ramp meets itself
+        // (at one turn exactly, its end over its start).
+        if (turns >= 1 - 1e-12 && Math.abs(zEnd - zStart) / turns <= thickness + bimTolerance)
+          throw new DeriveError('ramp-shape', `${path}.top`);
+        // LS4: openings cut upright through every turn over them, each wholly on the ramp.
+        const openings = (slabOpenings.get(e.id) ?? []).map((o) => {
+          const at = `${pathOf(o.id)}.slab.boundary`;
+          checkLoop(o.loop, at);
+          return { loop: ccw(o.loop), turns: rampCover(center, r, R, e, o.loop, at) };
+        });
+        openings.forEach((o, i) => {
+          const edges = loopEdges(o.loop);
+          for (const q of openings.slice(0, i)) {
+            const other = loopEdges(q.loop);
+            if (loopsTouch(other, edges) || loopWithin(other, edges) || loopWithin(edges, other))
+              throw new DeriveError('opening-overlap', `${pathOf(slabOpenings.get(e.id)![i]!.id)}`);
+          }
+        });
+        // The kernel cuts openings with upright prisms over the whole rise (10 mm to spare each
+        // way), each a single extrusion within the limit (Codex).
+        if (
+          openings.length &&
+          !(Math.abs(zEnd - zStart) + thickness + 20 <= bimLimits.coordinateMm)
+        )
+          throw new DeriveError('coordinate', `${path}.top`);
+        shapes.set(e.id, {
+          kind: 'ramp',
+          center,
+          innerRadius: r,
+          outerRadius: R,
+          startAngle: e.startAngleRad,
+          sweep: e.sweepRad,
+          zStart,
+          zEnd,
+          thickness,
+          ...(openings.length ? { openings: openings.map((o) => o.loop) } : {}),
+        });
+        // In plan a ring sector; vertically as thick throughout, so the volume is exact. The top
+        // is a helicoid rising p per radian: its area is |sweep|·∫ √(ρ² + p²) dρ from r to R.
+        const sweep = Math.abs(e.sweepRad);
+        const p = (zEnd - zStart) / sweep;
+        const planArea = (sweep / 2) * (R * R - r * r);
+        const F = (q: number) => {
+          const h = Math.hypot(q, p);
+          return (q * h + p * p * Math.log(q + h)) / 2;
+        };
+        const rc = (r + R) / 2;
+        // LS4 (Codex): an opening takes its patch of the helicoid from each turn it passes
+        // through. Over a plan region the helicoid's area is ∬ √(ρ² + p²)/ρ dA = ∮ G(ρ) dθ, G
+        // the integral of √(s² + p²) from 0 to ρ (the region does not go round the centre).
+        const G = (q: number) => (p ? F(q) - F(0) : (q * q) / 2);
+        const patch = (loop: BimLoop) => {
+          let sum = 0;
+          for (const ed of loopEdges(loop)) {
+            const arc = ed.arc;
+            // A point of the edge at t, about the centre, and its derivative.
+            const at = (t: number): [Vec2, Vec2] => {
+              if (!arc) return [sub(add(ed.p, scale(sub(ed.q, ed.p), t)), center), sub(ed.q, ed.p)];
+              const a = arc.startAngle + arc.sweep * t;
+              const k = arc.radius * arc.sweep;
+              return [sub(arcPoint(arc, t), center), [-k * Math.sin(a), k * Math.cos(a)]];
+            };
+            const n = arc ? 64 : 16;
+            for (let k = 0; k < n; k++)
+              for (const [x, wt] of gauss5) {
+                const [q, dq] = at((k + (x + 1) / 2) / n);
+                const rr = dot(q, q);
+                // dθ = (x dy − y dx) / ρ².
+                sum += (G(Math.sqrt(rr)) * ((q[0] * dq[1] - q[1] * dq[0]) / rr) * wt) / (2 * n);
+              }
+          }
+          return Math.abs(sum);
+        };
+        const removed = openings.reduce((n, o) => n + patch(o.loop) * o.turns, 0);
+        const topArea = sweep * (F(R) - F(r));
+        quantities.set(e.id, {
+          source: 'analytic',
+          values: {
+            length: sweep * Math.hypot(rc, p),
+            ringWidth: R - r,
+            thickness,
+            rise: zEnd - zStart,
+            planArea,
+            topArea: topArea - removed,
+            // LS4: an opening takes its area × the thickness from each turn it passes through.
+            ...(openings.length
+              ? {
+                  openingArea: openings.reduce((n, o) => n + loopArea(o.loop) * o.turns, 0),
+                  grossTopArea: topArea,
+                  grossVolume: planArea * thickness,
+                }
+              : {}),
+            netVolume:
+              (planArea - openings.reduce((n, o) => n + loopArea(o.loop) * o.turns, 0)) * thickness,
+          },
+        });
+        return;
+      }
+      case 'railing': {
+        // LS5: a band along the ramp's inner or outer edge, standing on its top.
+        const host = shapes.get(e.hostId);
+        if (host?.kind !== 'ramp') throw new DeriveError('railing-host', `${path}.hostId`);
+        const t = layersThickness(ctx.types.get(e.typeId)!);
+        const [r, R] = [host.innerRadius, host.outerRadius];
+        if (t >= R - r - bimTolerance) throw new DeriveError('railing-shape', `${path}.typeId`);
+        const [r0, r1] = e.side === 'inner' ? [r, r + t] : [R - t, R];
+        const h = e.heightMm;
+        for (const z of [host.zStart, host.zEnd]) withinLimit(z + h, `${path}.heightMm`);
+        // Over a ramp of a turn or more, the railing must stay below the turn above (Codex): its
+        // top under that turn's underside, a turn's rise less the ramp's thickness higher.
+        const turns = Math.abs(host.sweep) / (2 * Math.PI);
+        const perTurn = Math.abs(host.zEnd - host.zStart) / turns;
+        if (turns >= 1 - 1e-12 && h >= perTurn - host.thickness - bimTolerance)
+          throw new DeriveError('railing-shape', `${path}.heightMm`);
+        shapes.set(e.id, {
+          kind: 'railing',
+          center: host.center,
+          innerRadius: r0,
+          outerRadius: r1,
+          startAngle: host.startAngle,
+          sweep: host.sweep,
+          zStart: host.zStart + h,
+          zEnd: host.zEnd + h,
+          thickness: h,
+        });
+        // As high throughout, so the volume is exact; the length along the band's middle.
+        const sweep = Math.abs(host.sweep);
+        const p = (host.zEnd - host.zStart) / sweep;
+        const length = sweep * Math.hypot((r0 + r1) / 2, p);
+        quantities.set(e.id, {
+          source: 'analytic',
+          values: {
+            length,
+            height: h,
+            width: t,
+            // Each face is a cylinder's strip as high throughout (Codex): sweep × radius × height,
+            // whatever the rise; the mean of the two.
+            sideArea: sweep * ((r0 + r1) / 2) * h,
+            netVolume: (sweep / 2) * (r1 * r1 - r0 * r0) * h,
+          },
+        });
+        return;
+      }
+      case 'stair': {
+        const at = ctx.point(e.start, `${path}.start`);
+        const zBase = withinLimit(ctx.height(e.base, `${path}.base`), `${path}.base`);
+        const zTop = withinLimit(ctx.height(e.top, `${path}.top`), `${path}.top`);
+        const shape = bimStairProfile(
+          e.risers,
+          (zTop - zBase) / e.risers,
+          e.treadMm,
+          layersThickness(ctx.types.get(e.typeId)!),
+        );
+        if (shape === 'riser') throw new DeriveError('stair-riser', `${path}.top`);
+        if (shape === 'waist') throw new DeriveError('stair-shape', `${path}.typeId`);
+        const d: Vec2 = [Math.cos(e.directionRad), Math.sin(e.directionRad)];
+        const run = (e.risers - 1) * e.treadMm;
+        const n: Vec2 = [-d[1], d[0]];
+        planWithinLimit(
+          [-1, 1].flatMap((k) => [
+            add(at, scale(n, (k * e.widthMm) / 2)),
+            add(add(at, scale(d, run)), scale(n, (k * e.widthMm) / 2)),
+          ]),
+          0,
+          `${path}.start`,
+        );
+        shapes.set(e.id, {
+          kind: 'stair',
+          at,
+          directionRad: e.directionRad,
+          zBase,
+          width: e.widthMm,
+          profile: shape.profile,
+          risers: e.risers,
+          riser: (zTop - zBase) / e.risers,
+          tread: e.treadMm,
+          waist: shape.waist,
+        });
+        // A prism: its side's area across its width, exact. The treads are level.
+        const side = Math.abs(loopArea(shape.profile));
+        quantities.set(e.id, {
+          source: 'analytic',
+          values: {
+            length: run,
+            flightWidth: e.widthMm,
+            height: zTop - zBase,
+            numberOfRisers: e.risers,
+            riserHeight: (zTop - zBase) / e.risers,
+            treadLength: e.treadMm,
+            treadArea: run * e.widthMm,
+            sideArea: side,
+            netVolume: side * e.widthMm,
+          },
         });
         return;
       }
@@ -891,8 +1523,21 @@ export function deriveBim(doc: BimDocument): BimDerived {
           zTop = above.elevationMm;
         }
         if (zTop <= zBase + bimTolerance) throw new DeriveError('level-order', `${path}.top`);
-        const area = Math.abs(loopArea(e.boundary));
-        shapes.set(e.id, { kind: 'space', boundary: ccw(e.boundary), zBase, zTop });
+        // TW1: holes as a slab's (inside, apart); the area and volume leave them out.
+        const holes = e.holes ?? [];
+        checkVoids(
+          loopEdges(e.boundary),
+          holes.map((h, i) => ({ loop: h, path: `${path}.holes[${i}]`, opening: false })),
+        );
+        const area =
+          Math.abs(loopArea(e.boundary)) - holes.reduce((n, h) => n + Math.abs(loopArea(h)), 0);
+        shapes.set(e.id, {
+          kind: 'space',
+          boundary: ccw(e.boundary),
+          holes: holes.map(ccw),
+          zBase,
+          zTop,
+        });
         quantities.set(e.id, {
           source: 'analytic',
           values: {
@@ -1006,9 +1651,158 @@ function planWithinLimit(points: Vec2[], pad: number, path: string) {
 }
 /** The largest distance from a section's centre to its outline. */
 const profileReach = (p: BimProfile) =>
-  p.shape === 'circle' ? p.diameterMm / 2 : Math.hypot(p.widthMm, p.depthMm) / 2;
+  'diameterMm' in p ? p.diameterMm / 2 : Math.hypot(p.widthMm, p.depthMm) / 2;
 /** A section's vertical extent when it runs horizontally (a beam). */
-const profileDepth = (p: BimProfile) => (p.shape === 'circle' ? p.diameterMm : p.depthMm);
+const profileDepth = (p: BimProfile) => ('diameterMm' in p ? p.diameterMm : p.depthMm);
+
+/**
+ * Voids of a slab or a space (holes, and a slab's openings): each a valid loop inside the
+ * outer loop, apart from the others.
+ */
+function checkVoids(
+  outer: LoopEdge[],
+  voids: readonly { loop: BimLoop; path: string; opening: boolean }[],
+) {
+  const placed: LoopEdge[][] = [];
+  for (const v of voids) {
+    checkLoop(v.loop, v.path);
+    const edges = loopEdges(v.loop);
+    if (!loopInside(edges, outer))
+      throw new DeriveError(v.opening ? 'opening-outside-host' : 'hole-outside', v.path);
+    if (placed.some((p) => loopsTouch(p, edges) || loopWithin(p, edges) || loopWithin(edges, p)))
+      throw new DeriveError(v.opening ? 'opening-overlap' : 'hole-overlap', v.path);
+    placed.push(edges);
+  }
+}
+
+/**
+ * LS4: how many turns of a spiral ramp an opening's plan region passes through. It must lie
+ * between the radii, not round the centre, and on each turn either wholly on the ramp or wholly
+ * off it (not across its start or end): else `opening-outside-host`.
+ */
+/**
+ * LS6: a straight flight's side, counter-clockwise in (along, up) from the foot of its first
+ * riser: along the floor to where the waist's underside (the line through the nosings lowered
+ * by the waist square to it) meets it, up that underside to the flight's end, up the end to the
+ * last tread, then down the steps. The last riser is the upper floor's edge. 'riser' when the
+ * risers are out of range; 'waist' when the underside would cut a step's inner corner (a waist
+ * thinner than the riser square to the pitch) or meets the floor past the end.
+ */
+export function bimStairProfile(
+  risers: number,
+  riser: number,
+  tread: number,
+  waist: number,
+): { profile: Vec2[]; waist: number } | 'riser' | 'waist' {
+  const [lo, hi] = bimLimits.stair.riserMm;
+  if (!(riser >= lo - bimTolerance && riser <= hi + bimTolerance)) return 'riser';
+  const slope = riser / tread;
+  const drop = waist * Math.hypot(1, slope);
+  const run = (risers - 1) * tread;
+  // The underside z = riser + slope·u − drop meets the floor at `foot`.
+  const foot = (drop - riser) / slope;
+  // The underside must clear the steps' inner corners (Codex): a drop of one riser passes
+  // through them all.
+  if (!(drop > riser + bimTolerance) || !(foot < run - bimTolerance)) return 'waist';
+  const profile: Vec2[] = [[0, 0]];
+  if (foot > bimTolerance) profile.push([foot, 0]);
+  const end = risers * riser - drop;
+  if (end < (risers - 1) * riser - bimTolerance) profile.push([run, end]);
+  for (let k = risers - 1; k >= 1; k--)
+    profile.push([k * tread, k * riser], [(k - 1) * tread, k * riser]);
+  return { profile, waist };
+}
+
+/** Five-point Gauss–Legendre nodes on [−1, 1] and their weights. */
+const gauss5: [number, number][] = [
+  [0, 128 / 225],
+  ...[-1, 1].flatMap((sg): [number, number][] => [
+    [(sg * Math.sqrt(5 - 2 * Math.sqrt(10 / 7))) / 3, (322 + 13 * Math.sqrt(70)) / 900],
+    [(sg * Math.sqrt(5 + 2 * Math.sqrt(10 / 7))) / 3, (322 - 13 * Math.sqrt(70)) / 900],
+  ]),
+];
+
+function rampCover(
+  center: Vec2,
+  r: number,
+  R: number,
+  ramp: { startAngleRad: number; sweepRad: number },
+  loop: BimLoop,
+  path: string,
+): number {
+  const outside = () => new DeriveError('opening-outside-host', path);
+  // The loop's points in order: each arc's samples, with (Codex) its exact nearest and furthest
+  // points from the centre and the points where a line from the centre touches it (its extreme
+  // angles round the centre) where they lie on it.
+  const pts: Vec2[] = [];
+  loop.forEach((v, i) => {
+    const w = loop[(i + 1) % loop.length]!;
+    const p: Vec2 = [v[0], v[1]];
+    pts.push(p);
+    if (!v[2]) return;
+    const arc = arcOf(p, [w[0], w[1]], v[2]);
+    const ts = Array.from({ length: 63 }, (_, k) => (k + 1) / 64);
+    const away = sub(arc.center, center);
+    const d = Math.hypot(away[0], away[1]);
+    if (d > 0) {
+      const base = Math.atan2(away[1], away[0]);
+      const extremes = [base, base + Math.PI];
+      if (d > arc.radius) {
+        const off = Math.acos(-arc.radius / d);
+        extremes.push(base + off, base - off);
+      }
+      for (const angle of extremes) {
+        // Its parameter: the turn from the arc's start in the arc's direction, over the sweep.
+        const turn = 2 * Math.PI;
+        const ahead = (((angle - arc.startAngle) % turn) + turn) % turn;
+        const t = (arc.sweep > 0 ? ahead : ahead - turn) / arc.sweep;
+        if (t > 0 && t < 1) ts.push(t);
+      }
+    }
+    for (const t of ts.sort((a, b) => a - b)) pts.push(arcPoint(arc, t));
+  });
+  // Radii: a straight edge comes nearest the centre between its ends.
+  let lo = Infinity;
+  let hi = 0;
+  loop.forEach((v, i) => {
+    const w = loop[(i + 1) % loop.length]!;
+    if (v[2]) return;
+    const d = sub([w[0], w[1]], [v[0], v[1]]);
+    const t = Math.max(0, Math.min(1, dot(sub(center, [v[0], v[1]]), d) / dot(d, d)));
+    lo = Math.min(lo, distance(center, add([v[0], v[1]], scale(d, t))));
+  });
+  for (const p of pts) {
+    const rho = distance(center, p);
+    lo = Math.min(lo, rho);
+    hi = Math.max(hi, rho);
+  }
+  if (lo < r - bimTolerance || hi > R + bimTolerance) throw outside();
+  // Angles round the centre, unwrapped along the loop; a loop round the centre is refused.
+  const angles: number[] = [];
+  for (const p of [...pts, pts[0]!]) {
+    const a = Math.atan2(p[1] - center[1], p[0] - center[0]);
+    const last = angles[angles.length - 1];
+    angles.push(last === undefined ? a : last + Math.atan2(Math.sin(a - last), Math.cos(a - last)));
+  }
+  if (Math.abs(angles[angles.length - 1]! - angles[0]!) > Math.PI) throw outside();
+  const a0 = Math.min(...angles);
+  const a1 = Math.max(...angles);
+  const from = Math.min(ramp.startAngleRad, ramp.startAngleRad + ramp.sweepRad);
+  const to = Math.max(ramp.startAngleRad, ramp.startAngleRad + ramp.sweepRad);
+  const eps = 1e-9;
+  let turns = 0;
+  for (
+    let m = Math.floor((from - a1) / (2 * Math.PI)) - 1;
+    m <= Math.ceil((to - a0) / (2 * Math.PI)) + 1;
+    m++
+  ) {
+    const [b0, b1] = [a0 + 2 * Math.PI * m, a1 + 2 * Math.PI * m];
+    if (b0 >= from - eps && b1 <= to + eps) turns++;
+    else if (b1 > from + eps && b0 < to - eps) throw outside();
+  }
+  if (!turns) throw outside();
+  return turns;
+}
 
 function checkLoop(loop: BimLoop, path: string) {
   if (!loopWithinLimit(loop)) throw new DeriveError('coordinate', path);

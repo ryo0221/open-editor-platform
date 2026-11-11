@@ -5,14 +5,17 @@ import {
   BrickWall,
   Columns3,
   DoorOpen,
+  Footprints,
   Grid3x3,
   Map as MapIcon,
   Minus,
   Package,
   Scissors,
+  Slash,
   MousePointer2,
   Spline,
   RectangleHorizontal,
+  RotateCcw,
   Square,
   SquareDashed,
   type LucideIcon,
@@ -30,11 +33,14 @@ import {
   bimWallAt,
   draftBeam,
   draftColumn,
+  draftMember,
   draftGrid,
   draftHosted,
   draftPart,
+  draftRamp,
   draftRegion,
   draftSectionView,
+  draftStair,
   draftWall,
   type BimDraftTool,
   type BimSnap,
@@ -61,6 +67,21 @@ export const bimToolInfo: Record<BimDraftTool, { label: string; icon: LucideIcon
     },
     column: { label: 'Column', icon: Columns3, hint: 'Column: click where it stands.' },
     beam: { label: 'Beam', icon: Minus, hint: 'Beam: click its two ends.' },
+    member: {
+      label: 'Member',
+      icon: Slash,
+      hint: 'Member: click its two ends. It rises from this level to the one above; set its heights in the Inspector.',
+    },
+    ramp: {
+      label: 'Ramp',
+      icon: RotateCcw,
+      hint: 'Ramp: click its centre. It turns once up to the level above; set its radii, turn and heights in the Inspector.',
+    },
+    stair: {
+      label: 'Stair',
+      icon: Footprints,
+      hint: 'Stair: click its foot, then a point up the flight. It climbs to the level above in equal risers; set its risers, tread and width in the Inspector.',
+    },
     door: { label: 'Door', icon: DoorOpen, hint: 'Door: click on a wall.' },
     window: { label: 'Window', icon: AppWindow, hint: 'Window: click on a wall.' },
     opening: { label: 'Opening', icon: RectangleHorizontal, hint: 'Opening: click on a wall.' },
@@ -224,6 +245,9 @@ export function useDraft(
       case 'part':
         run(() => draftPart(doc, level, snap, partType));
         return;
+      case 'ramp':
+        run(() => draftRamp(doc, level, snap));
+        return;
       case 'door':
       case 'window':
       case 'opening': {
@@ -235,6 +259,10 @@ export function useDraft(
       case 'grid':
         if (!last) return setPoints([snap]);
         if (run(() => draftGrid(doc, last.xy, snap.xy))) setPoints([]);
+        return;
+      case 'stair':
+        if (!last) return setPoints([snap]);
+        if (run(() => draftStair(doc, level, last, snap))) setPoints([]);
         return;
       case 'section':
         if (!last) return setPoints([snap]);
@@ -253,13 +281,18 @@ export function useDraft(
         }
       // falls through
       case 'beam':
+      case 'member':
         if (!last) return setPoints([snap]);
         if (
           run(() =>
-            tool === 'wall' ? draftWall(doc, level, last, snap) : draftBeam(doc, level, last, snap),
+            tool === 'wall'
+              ? draftWall(doc, level, last, snap)
+              : tool === 'beam'
+                ? draftBeam(doc, level, last, snap)
+                : draftMember(doc, level, last, snap),
           )
         )
-          // Walls run on from the end just drawn; a beam is one segment.
+          // Walls run on from the end just drawn; a beam or a member is one segment.
           setPoints(tool === 'wall' ? [snap] : []);
         return;
       case 'slab':

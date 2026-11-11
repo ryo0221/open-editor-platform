@@ -11,7 +11,13 @@ export function sheetTopology(
   oc: OcModule,
   shape: unknown,
   own: <T>(value: T) => T,
-): { connected: boolean; freeEdges: number; freeEdgeLengthMm: number } {
+): {
+  connected: boolean;
+  freeEdges: number;
+  freeEdgeLengthMm: number;
+  /** CR3c: each face's connected part (by the shape's face map order), numbered from 0. */
+  component: number[];
+} {
   const faces = own(new oc.TopTools_IndexedMapOfShape_1());
   oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, faces);
   const map = own(new oc.TopTools_IndexedDataMapOfShapeListOfShape_1());
@@ -49,5 +55,11 @@ export function sheetTopology(
     freeEdgeLengthMm += props.Mass();
   }
   const connected = n > 0 && parent.every((_, i) => root(i) === root(0));
-  return { connected, freeEdges, freeEdgeLengthMm };
+  const roots = new Map<number, number>();
+  const component = parent.map((_, i) => {
+    const r = root(i);
+    if (!roots.has(r)) roots.set(r, roots.size);
+    return roots.get(r)!;
+  });
+  return { connected, freeEdges, freeEdgeLengthMm, component };
 }

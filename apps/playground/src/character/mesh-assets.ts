@@ -29,21 +29,24 @@ export function characterMeshRecord(input: {
   redo: readonly CharacterDocument[];
   ref: CharacterAssetRef;
   bytes: Uint8Array;
+  /** C7b: more assets of the same edit (a multires stroke's chunks), kept in the same write. */
+  more?: readonly { ref: CharacterAssetRef; bytes: Uint8Array }[];
 }): { record: StoredArtifact; forget: number } {
-  const { record, content, undo, redo, ref, bytes } = input;
-  const resource: CadResource = {
+  const { record, content, undo, redo } = input;
+  const all = [{ ref: input.ref, bytes: input.bytes }, ...(input.more ?? [])];
+  const resources: CadResource[] = all.map(({ ref, bytes }) => ({
     kind: ref.kind as unknown as CadResource['kind'],
     sha256: ref.sha256,
     byteLength: ref.byteLength,
     mediaType: ref.mediaType,
     encoding: 'base64',
     bytes: encodeBytes(bytes),
-  };
-  const kept = record.cadResources ?? [];
-  const withNew = kept.some((r) => key(r) === key(resource)) ? kept : [...kept, resource];
-  // The native file after the edit: the draft names the new asset (its part entry is in the
+  }));
+  const withNew = [...(record.cadResources ?? [])];
+  for (const r of resources) if (!withNew.some((k) => key(k) === key(r))) withNew.push(r);
+  // The native file after the edit: the draft names the new assets (its part entry is in the
   // reserve), the versions are unchanged.
-  const draft = { ...content, assets: [...content.assets, ref] };
+  const draft = { ...content, assets: [...content.assets, ...all.map((a) => a.ref)] };
   const after = { ...record, draft: { ...record.draft, content: draft } } as StoredArtifact;
   const portable = nativeBytes(portableCadRecord({ ...after, cadResources: withNew }));
   if (portable + cadInsertReserveBytes > cadNativeFileBytes)

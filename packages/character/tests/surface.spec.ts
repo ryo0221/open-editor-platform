@@ -1,9 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
+import { unzipSync } from 'fflate';
 import type { Page } from '@playwright/test';
 // The shared fixture fails a test on any browser console error or uncaught exception.
 import { expect, test } from '../../../tests/e2e/fixtures';
 import { testGltf } from '@editor-platform/character-core/gltf-fixtures';
 import { importGltf } from '@editor-platform/character-core';
+import { inspectVideoFile } from '@editor-platform/video-metadata/file-admission';
 
 // The character Surface's test host (C1c). No kernel; software WebGL draws the view.
 type Frame = {
@@ -533,6 +537,262 @@ test("props: places a CAD version, keys its joint on the bones' timeline, plays 
   await (await tool(page, 'Undo')).click();
   await expect(jointKeys).toHaveCount(2);
   await expect.poll(async () => Object.keys((await frame(page)).props)).toEqual(['prop-arm']);
+});
+test('props: makes a transform between two forms, replaces its keys after asking, and keys where the prop is (MR4b, TS-1712)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  const transform = inspector.getByTestId('character-prop-transform');
+  const keys = page.getByRole('group', { name: 'Keys' });
+  const jointKeys = keys.getByRole('button', { name: /^Key Robot arm Turn angle at / });
+  const seek = async (tick: number) => (await tool(page, 'Time', 'slider')).fill(String(tick));
+
+  // From Folded to Open; a form that no longer fits the joints cannot be chosen.
+  await expect(
+    transform
+      .getByLabel('Transform from')
+      .getByRole('option', { name: 'Old (does not fit the joints)' }),
+  ).toHaveAttribute('disabled', '');
+  await transform.getByLabel('Transform from').selectOption({ label: 'Folded' });
+  await transform.getByLabel('Transform to').selectOption({ label: 'Open' });
+  await expect(transform.getByTestId('character-transform-joint')).toHaveText(['Turn Group 1']);
+  // A group past the action's end is refused and keys nothing.
+  await transform.getByLabel('Group 1 length (s)').fill('5');
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  await expect(transform.getByRole('alert')).toContainText('transform-time');
+  await expect(jointKeys).toHaveCount(0);
+  await transform.getByLabel('Group 1 start (s)').fill('0.25');
+  await transform.getByLabel('Group 1 length (s)').fill('0.5');
+  await transform.getByLabel('Group 1 easing').selectOption({ label: 'Linear' });
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  await expect(jointKeys).toHaveCount(2);
+  await seek(120000);
+  await expect.poll(() => linkTurn(page)).toBe(45);
+  await seek(48000);
+  await expect.poll(() => linkTurn(page)).toBe(0);
+
+  // Made again over the whole second: the two keys inside it are replaced only after asking.
+  await transform.getByLabel('Group 1 start (s)').fill('0');
+  await transform.getByLabel('Group 1 length (s)').fill('1');
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  const ask = transform.getByRole('alertdialog', { name: 'Replace keys' });
+  await expect(ask).toContainText('Replaces 2 keys of these joints between 0.00 s and 1.00 s.');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect.poll(() => linkTurn(page)).toBe(0);
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  await ask.getByRole('button', { name: 'Replace keys' }).click();
+  await expect(ask).toHaveCount(0);
+  await expect(jointKeys).toHaveCount(2);
+  await expect.poll(() => linkTurn(page)).toBe(18);
+  // One edit: Undo brings back the first transform's keys.
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(() => linkTurn(page)).toBe(0);
+  await (await tool(page, 'Redo')).click();
+  await expect.poll(() => linkTurn(page)).toBe(18);
+
+  // Keying the placement: from then on a change of position keys it at the playhead.
+  const at = async () => (await frame(page)).props['prop-arm']!.matrices[0]!.slice(12, 15);
+  await seek(0);
+  await expect(inspector.getByTestId('character-prop-placement-keyed')).toHaveCount(0);
+  await inspector.getByRole('button', { name: 'Key placement', exact: true }).click();
+  await expect(inspector.getByTestId('character-prop-placement-keyed')).toContainText(
+    'a change keys it at 0.00 s',
+  );
+  await expect(keys.getByRole('button', { name: /^Key Robot arm translation at / })).toHaveCount(1);
+  await seek(240000);
+  const z = inspector.getByLabel('Prop position Z', { exact: true });
+  await z.fill('1000');
+  await z.press('Enter');
+  await expect(keys.getByRole('button', { name: /^Key Robot arm translation at / })).toHaveCount(2);
+  await expect.poll(at).toEqual([800, 0, 1000]);
+  // Half-way it is half-way up, and the field shows where it is now.
+  await seek(120000);
+  await expect.poll(at).toEqual([800, 0, 500]);
+  await expect(z).toHaveValue('500');
+  // A rotation field keys the rotation only: the climb keeps its two keys.
+  const rotationKeys = keys.getByRole('button', { name: /^Key Robot arm rotation at / });
+  await expect(rotationKeys).toHaveCount(1);
+  const turn = inspector.getByLabel('Prop rotation Z', { exact: true });
+  await turn.fill('90');
+  await turn.press('Enter');
+  await expect(rotationKeys).toHaveCount(2);
+  await expect(keys.getByRole('button', { name: /^Key Robot arm translation at / })).toHaveCount(2);
+});
+test('props: updates to another version, refusing tracks it cannot play until they are removed (MR4c, TS-1713)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  const version = inspector.getByTestId('character-prop-version');
+  const keys = page.getByRole('group', { name: 'Keys' });
+  const jointKeys = keys.getByRole('button', { name: /^Key Robot arm Turn angle at / });
+  const choose = version.getByLabel('Update to version');
+  // Only the Artifact's other versions are offered.
+  await expect(choose.getByRole('option')).toHaveText(['—', 'Robot arm — v2']);
+
+  // Within v2's ±90° the keys play: updated at once, keys and placement kept.
+  const angle = inspector.getByLabel('Turn Angle', { exact: true });
+  await angle.fill('60');
+  await angle.press('Enter');
+  await expect(jointKeys).toHaveCount(1);
+  await choose.selectOption({ label: 'Robot arm — v2' });
+  await version.getByRole('button', { name: 'Update version' }).click();
+  await expect(choose.getByRole('option')).toHaveText(['—', 'Robot arm — v1']);
+  await expect(jointKeys).toHaveCount(1);
+  await (await tool(page, 'Undo')).click();
+  await expect(choose.getByRole('option')).toHaveText(['—', 'Robot arm — v2']);
+
+  // A key past v2's limits refuses the update and is listed; Cancel changes nothing.
+  await angle.fill('120');
+  await angle.press('Enter');
+  await choose.selectOption({ label: 'Robot arm — v2' });
+  await version.getByRole('button', { name: 'Update version' }).click();
+  const unfit = version.getByRole('alertdialog', { name: 'Unfit tracks' });
+  await expect(unfit.getByRole('alert')).toContainText('prop-source-incompatible: 1 track');
+  await expect(unfit.getByRole('listitem')).toHaveText([
+    /j-turn angle in .*: the key at 0\.00 s is past the joint's limits/,
+  ]);
+  await unfit.getByRole('button', { name: 'Cancel' }).click();
+  await expect(unfit).toHaveCount(0);
+  await expect(jointKeys).toHaveCount(1);
+  // Removing the unfit track updates in the same edit; Undo brings back both.
+  await version.getByRole('button', { name: 'Update version' }).click();
+  await unfit.getByRole('button', { name: 'Remove unfit tracks and update' }).click();
+  await expect(jointKeys).toHaveCount(0);
+  await expect(choose.getByRole('option')).toHaveText(['—', 'Robot arm — v1']);
+  await (await tool(page, 'Undo')).click();
+  await expect(jointKeys).toHaveCount(1);
+  await expect(choose.getByRole('option')).toHaveText(['—', 'Robot arm — v2']);
+});
+test('props: checks the parts along the action and marks the times they overlap (MR5, TS-1714)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  const sweep = inspector.getByTestId('character-prop-sweep');
+  const status = sweep.getByTestId('character-prop-sweep-status');
+  const angle = inspector.getByLabel('Turn Angle', { exact: true });
+  // The link turns from 0° to 150° over the second; past 100° it hits the base.
+  await angle.press('Enter');
+  await (await tool(page, 'Time', 'slider')).fill('240000');
+  await angle.fill('150');
+  await angle.press('Enter');
+  await sweep.getByRole('button', { name: 'Check along the action' }).click();
+  await expect(status).toHaveText('Overlaps at 4 of 11 times; the first at 0.70 s.');
+  await expect(sweep.getByTestId('character-prop-overlap')).toHaveText([
+    'Base and Link: 0.70 s – 1.00 s (intersect, up to 2.0 mm) Go to 0.70 s',
+  ]);
+  const marks = page.getByRole('group', { name: 'Keys' }).getByRole('button', {
+    name: /^Overlaps at /,
+  });
+  await expect(marks).toHaveCount(4);
+  // A mark or the pair's button moves the playhead there.
+  await sweep.getByRole('button', { name: 'Go to 0.70 s' }).click();
+  await expect(time(page)).toHaveText('0.70 s / 1.00 s');
+  await marks.last().click();
+  await expect(time(page)).toHaveText('1.00 s / 1.00 s');
+  // An edit of the action asks for a new check, and the marks go.
+  await angle.fill('90');
+  await angle.press('Enter');
+  await expect(status).toContainText('changed since the last check');
+  await expect(marks).toHaveCount(0);
+  await sweep.getByRole('button', { name: 'Check along the action' }).click();
+  await expect(status).toContainText('No overlap at the 11 times checked.');
+  // More than 600 times is refused before anything is checked.
+  await sweep.getByLabel('Check every (s)').fill('0.001');
+  await sweep.getByRole('button', { name: 'Check along the action' }).click();
+  await expect(sweep.getByRole('alert')).toContainText('sweep-samples: 1001 times');
+});
+test('props: a transform switches a part to another mount at a set time, checked for jumps (MR7c, TS-1719)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  const transform = inspector.getByTestId('character-prop-transform');
+  const keys = page.getByRole('group', { name: 'Keys' });
+  const mountKeys = keys.getByRole('button', { name: /^Key Robot arm Tool mount at / });
+  const seek = async (tick: number) => (await tool(page, 'Time', 'slider')).fill(String(tick));
+  const tool3 = async () =>
+    (await frame(page)).props['prop-arm']!.matrices[2]!.slice(12, 15).map(Math.round);
+
+  // From Holding (the tool at the tip) to Stowed (on the base): the mount switches too.
+  await transform.getByLabel('Transform from').selectOption({ label: 'Holding' });
+  await transform.getByLabel('Transform to').selectOption({ label: 'Stowed' });
+  await expect(transform.getByTestId('character-transform-mount')).toHaveText(
+    'Tool: Tip → Base at (s)',
+  );
+  await transform.getByLabel('Switch Tool at (s)').fill('2');
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  await expect(transform.getByRole('alert')).toContainText('transform-switch-time');
+  await transform.getByLabel('Switch Tool at (s)').fill('0.5');
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  // Held from the start in the tip, then on the base from 0.5 s.
+  await expect(mountKeys).toHaveCount(2);
+  await seek(110000);
+  await expect.poll(tool3).not.toEqual([800, 0, 200]);
+  await seek(120000);
+  await expect.poll(tool3).toEqual([800, 0, 200]);
+
+  // Switched half-way through the turn, the tool jumps: listed and marked.
+  const sweep = inspector.getByTestId('character-prop-sweep');
+  await sweep.getByRole('button', { name: 'Check along the action' }).click();
+  await expect(sweep.getByTestId('character-prop-sweep-status')).toContainText(
+    '1 mount switch moves the part.',
+  );
+  await expect(sweep.getByTestId('character-prop-jump')).toContainText(
+    'Tool: Tip → Base at 0.50 s moves the part',
+  );
+  await expect(keys.getByRole('button', { name: 'Overlaps and jumps at 0.50 s' })).toHaveCount(1);
+
+  // At the start (0°, the hand-off pose) it does not: made again with the switch left blank.
+  await transform.getByLabel('Switch Tool at (s)').fill('');
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  await transform
+    .getByRole('alertdialog', { name: 'Replace keys' })
+    .getByRole('button', { name: 'Replace keys' })
+    .click();
+  await expect(mountKeys).toHaveCount(1);
+  await sweep.getByRole('button', { name: 'Check along the action' }).click();
+  await expect(sweep.getByTestId('character-prop-sweep-status')).toHaveText(
+    'No overlap at the 11 times checked. An overlap shorter than the interval can be missed.',
+  );
+  await expect(sweep.getByTestId('character-prop-jump')).toHaveCount(0);
+
+  // A version without the mount cannot play the track: listed until removed.
+  const version = inspector.getByTestId('character-prop-version');
+  await version.getByLabel('Update to version').selectOption({ label: 'Robot arm — v2' });
+  await version.getByRole('button', { name: 'Update version' }).click();
+  const unfit = version.getByRole('alertdialog', { name: 'Unfit tracks' });
+  await expect(unfit.getByRole('listitem')).toHaveText([
+    /mount m-tool in .*: the mount is not in this version/,
+  ]);
+  await unfit.getByRole('button', { name: 'Remove unfit tracks and update' }).click();
+  await expect(mountKeys).toHaveCount(0);
 });
 test('props: a version the Host could not evaluate is listed but not drawn', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'desktop flow');
@@ -1335,4 +1595,573 @@ test('exports the figure as GLB and reads it back with the same IDs (C6d)', asyn
   await expect(back.getByRole('list', { name: 'Import losses' })).toHaveText(
     'authored-normals ×50',
   );
+});
+
+test('adds a multires to the cube and sculpts it: a stroke is one edit, Undo takes it back (C7b)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name === 'mobile', 'drags in the view beside both panels');
+  await page.goto('/?empty=1&edit=1');
+  await addCube(page);
+  let inspector = await panel(page, 'Inspector');
+  await inspector.getByLabel('Multires levels').selectOption('4');
+  await inspector.getByRole('button', { name: 'Add multires', exact: true }).click();
+  await expect(inspector.getByText('Multires level 4')).toBeVisible();
+  // A face edit of the cage is refused now; the cage keeps its faces.
+  await inspector.getByRole('button', { name: 'Sculpt', exact: true }).click();
+  await expect(inspector.getByText('Sculpt · Cube')).toBeVisible();
+  // Level 4 of a cube: 6 · 4 · 64 quads, 1,538 vertices.
+  await expect(inspector.getByText(/Level 4 · 1,538 vertices/)).toBeVisible();
+  await inspector.getByRole('button', { name: 'Inflate', exact: true }).click();
+  await inspector.getByLabel('Sculpt radius').fill('60');
+  await inspector.getByLabel('Sculpt strength').fill('100');
+  const before = await pixels(page);
+  const [cx, cy] = await page.evaluate(() => {
+    const project = (window as unknown as { characterProject(p: number[]): number[][] })
+      .characterProject;
+    return project([0, -100, 0])[0]!;
+  });
+  const region = page.getByRole('region', { name: 'Character view' });
+  const box = (await region.boundingBox())!;
+  const [x, y] = [box.x + cx!, box.y + cy!];
+  await page.mouse.move(x - 20, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 20, y, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  const sculpted = await pixels(page);
+  // One edit: Undo shows the cube as it was, Redo the stroke again.
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(() => pixels(page)).toBe(before);
+  await (await tool(page, 'Redo')).click();
+  await expect.poll(() => pixels(page)).toBe(sculpted);
+  // Hiding the part while sculpting hides the sculpted surface too.
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Show Cube').uncheck();
+  await expect.poll(() => pixels(page)).not.toBe(sculpted);
+  const hidden = await pixels(page);
+  await parts.getByLabel('Show Cube').check();
+  await expect.poll(() => pixels(page)).toBe(sculpted);
+  expect(hidden).not.toBe(before);
+  // Hidden, a drag sculpts nothing.
+  const chunks = () =>
+    page.evaluate(() =>
+      JSON.stringify(
+        (
+          window as unknown as {
+            characterSession: { content: { parts: { multires?: { chunks: string[] } }[] } };
+          }
+        ).characterSession.content.parts[0]!.multires!.chunks,
+      ),
+    );
+  const saved = await chunks();
+  await parts.getByLabel('Show Cube').uncheck();
+  await page.mouse.move(x - 20, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 20, y, { steps: 6 });
+  await page.mouse.up();
+  expect(await chunks()).toBe(saved);
+  await parts.getByLabel('Show Cube').check();
+  inspector = await panel(page, 'Inspector');
+  await inspector.getByRole('button', { name: 'Done sculpting', exact: true }).click();
+  await expect(inspector.getByText('Multires level 4')).toBeVisible();
+  // Raised and removed, each one edit.
+  await inspector.getByRole('button', { name: 'Raise level', exact: true }).click();
+  await expect(inspector.getByText('Multires level 5')).toBeVisible();
+  await inspector.getByRole('button', { name: 'Remove multires', exact: true }).click();
+  await expect(inspector.getByRole('button', { name: 'Add multires', exact: true })).toBeVisible();
+  await (await tool(page, 'Undo')).click();
+  await expect(inspector.getByText('Multires level 5')).toBeVisible();
+});
+
+test('sculpt mask, Grab, display level and matcap: the mask and the view are no edit (C7c)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name === 'mobile', 'drags in the view beside both panels');
+  await page.goto('/?empty=1&edit=1');
+  await addCube(page);
+  const inspector = await panel(page, 'Inspector');
+  await inspector.getByLabel('Multires levels').selectOption('3');
+  await inspector.getByRole('button', { name: 'Add multires', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Sculpt', exact: true }).click();
+  await expect(inspector.getByText('Sculpt · Cube')).toBeVisible();
+  const chunks = () =>
+    page.evaluate(() =>
+      JSON.stringify(
+        (
+          window as unknown as {
+            characterSession: { content: { parts: { multires?: { chunks: string[] } }[] } };
+          }
+        ).characterSession.content.parts[0]!.multires!.chunks,
+      ),
+    );
+  const saved = await chunks();
+  const [cx, cy] = await page.evaluate(() => {
+    const project = (window as unknown as { characterProject(p: number[]): number[][] })
+      .characterProject;
+    return project([0, -100, 0])[0]!;
+  });
+  const box = (await page.getByRole('region', { name: 'Character view' }).boundingBox())!;
+  const [x, y] = [box.x + cx!, box.y + cy!];
+  const drag = async (dx: number, dy: number) => {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 6 });
+    await page.mouse.up();
+  };
+  await inspector.getByLabel('Sculpt radius').fill('60');
+  await inspector.getByLabel('Sculpt strength').fill('100');
+  const before = await pixels(page);
+  // The mask is drawn on the surface, and is not an edit.
+  await inspector.getByRole('button', { name: 'Mask', exact: true }).click();
+  await drag(20, 0);
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  expect(await chunks()).toBe(saved);
+  await inspector.getByRole('button', { name: 'Clear mask', exact: true }).click();
+  await expect.poll(() => pixels(page)).toBe(before);
+  // Matcap off: the lit material instead, still no edit.
+  await inspector.getByLabel('Matcap shading').uncheck();
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  await inspector.getByLabel('Matcap shading').check();
+  await expect.poll(() => pixels(page)).toBe(before);
+  // Grab pulls the surface: one edit, one Undo.
+  await inspector.getByRole('button', { name: 'Grab', exact: true }).click();
+  await drag(0, -40);
+  await expect.poll(chunks).not.toBe(saved);
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(chunks).toBe(saved);
+  await expect.poll(() => pixels(page)).toBe(before);
+  // A lower display level is a view: the brushes are off and a drag turns the view only.
+  await inspector.getByLabel('Display level').selectOption('1');
+  await expect(inspector.getByText('Showing level 1. Sculpting works on level 3')).toBeVisible();
+  await expect(inspector.getByRole('button', { name: 'Grab', exact: true })).toBeDisabled();
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  await drag(0, -40);
+  expect(await chunks()).toBe(saved);
+  await inspector.getByLabel('Display level').selectOption('3');
+  await expect(inspector.getByRole('button', { name: 'Grab', exact: true })).toBeEnabled();
+});
+
+test('bakes the sculpted cube into a normal map on its material: one edit, Undo takes it off (C7d)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name === 'mobile', 'drags in the view beside both panels');
+  test.setTimeout(90_000);
+  await page.goto('/?empty=1&edit=1');
+  let inspector = await editCube(page);
+  await inspector.getByRole('button', { name: 'Done', exact: true }).click();
+  inspector = await panel(page, 'Inspector');
+  await inspector.getByLabel('Multires levels').selectOption('3');
+  await inspector.getByRole('button', { name: 'Add multires', exact: true }).click();
+  // No UVs yet: refused, with what to do.
+  await inspector.getByLabel('Bake size').selectOption('512');
+  await inspector.getByRole('button', { name: 'Bake normal map', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Unwrap the part first' })).toBeVisible();
+  // Seams on every edge: the cage unwraps into six islands (the multires keeps its faces).
+  await inspector.getByRole('button', { name: 'Edit mesh', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Edge', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Select all', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Mark seam', exact: true }).click();
+  await expect(page.getByTestId('uv-summary')).toHaveText(/6 islands/);
+  await inspector.getByRole('button', { name: 'Done', exact: true }).click();
+  // Sculpt a bump on the front.
+  await inspector.getByRole('button', { name: 'Sculpt', exact: true }).click();
+  await inspector.getByRole('button', { name: 'Inflate', exact: true }).click();
+  await inspector.getByLabel('Sculpt radius').fill('60');
+  await inspector.getByLabel('Sculpt strength').fill('100');
+  const [cx, cy] = await page.evaluate(() => {
+    const project = (window as unknown as { characterProject(p: number[]): number[][] })
+      .characterProject;
+    return project([0, -100, 0])[0]!;
+  });
+  const box = (await page.getByRole('region', { name: 'Character view' }).boundingBox())!;
+  const [x, y] = [box.x + cx!, box.y + cy!];
+  for (const dy of [-15, 0, 15]) {
+    await page.mouse.move(x - 30, y + dy);
+    await page.mouse.down();
+    await page.mouse.move(x + 30, y + dy, { steps: 8 });
+    await page.mouse.up();
+  }
+  await inspector.getByRole('button', { name: 'Done sculpting', exact: true }).click();
+  // The sculpt view (matcap) gives way to the part's own material: wait for the frame to settle.
+  await expect(inspector.getByRole('button', { name: 'Done sculpting', exact: true })).toHaveCount(
+    0,
+  );
+  let before = await pixels(page);
+  await expect
+    .poll(async () => {
+      const now = await pixels(page);
+      const same = now === before;
+      before = now;
+      return same;
+    })
+    .toBe(true);
+  const maps = () =>
+    page.evaluate(() =>
+      (
+        window as unknown as {
+          characterSession: { content: { materials: { maps: Record<string, string> }[] } };
+        }
+      ).characterSession.content.materials.map((m) => m.maps.normal ?? null),
+    );
+  expect(await maps()).toEqual([null]);
+  await inspector.getByLabel('Bake size').selectOption('512');
+  await inspector.getByRole('button', { name: 'Bake normal map', exact: true }).click();
+  await expect(page.getByTestId('bake-report')).toHaveText(/^Baked 512 × 512/, {
+    timeout: 60_000,
+  });
+  expect((await maps())[0]).toMatch(/normal/);
+  // The cage drawn with the map shows the bump.
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  await (await tool(page, 'Undo')).click();
+  await expect.poll(maps).toEqual([null]);
+  await expect.poll(() => pixels(page)).toBe(before);
+});
+
+/** The share of a PNG's pixels in the figure's blue (its body colour), decoded by the browser. */
+const pngBodyShare = (page: Page, png: Uint8Array) =>
+  page.evaluate(
+    async (bytes) => {
+      const image = await createImageBitmap(
+        new Blob([new Uint8Array(bytes)], { type: 'image/png' }),
+      );
+      const c = new OffscreenCanvas(image.width, image.height);
+      const g = c.getContext('2d')!;
+      g.drawImage(image, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 120 && d[i + 2] - d[i] > 60) n++;
+      return { width: image.width, height: image.height, share: n / (c.width * c.height) };
+    },
+    [...png],
+  );
+const media = (page: Page) =>
+  page.evaluate(
+    () =>
+      (window as unknown as { characterMedia?: { name: string; type: string; bytes: number[] } })
+        .characterMedia,
+  );
+
+// C8a (ST-157#2): Video exports Wave's frames as PNGs in a ZIP at the chosen size and rate (read
+// only too: nothing is edited), the view comes back as it was, and a cancel saves nothing.
+test('exports an action as a PNG sequence and cancels an export (C8a, TS-1292)', async ({
+  page,
+}) => {
+  await page.goto('/?readonly=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const inspector = await panel(page, 'Inspector');
+  // The view as it is with the Inspector open (on a phone it lays the view out again).
+  await expect
+    .poll(async () => {
+      const a = await pixels(page);
+      await page.waitForTimeout(200);
+      return a === (await pixels(page));
+    })
+    .toBe(true);
+  const before = await pixels(page);
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  await expect(video.getByLabel('Export action')).toHaveValue('wave');
+  await expect(video.getByLabel('To (s)')).toHaveValue('1');
+  await video.getByLabel('Size').selectOption('custom');
+  await video.getByLabel('Width').fill('321');
+  await expect(video.getByRole('list', { name: 'Video settings problems' })).toContainText(
+    'Width must be an even number of pixels from 16 to 4096.',
+  );
+  await expect(video.getByRole('button', { name: 'Export frames' })).toBeDisabled();
+  await video.getByLabel('Width').fill('320');
+  await video.getByLabel('Height').fill('180');
+  await video.getByLabel('To (s)').fill('0.5');
+  await expect(video).toContainText('15 frames');
+  await video.getByRole('button', { name: 'Export frames' }).click();
+  await expect(video.getByTestId('video-report')).toHaveText(
+    'Blocky figure Wave.zip: 15 frames, 320 × 180, 30 fps.',
+  );
+  const file = (await media(page))!;
+  expect(file).toMatchObject({ name: 'Blocky figure Wave.zip', type: 'application/zip' });
+  const files = unzipSync(Uint8Array.from(file.bytes));
+  const names = Object.keys(files);
+  expect(names).toHaveLength(15);
+  expect(names[0]).toBe('frame-00001.png');
+  expect(names.at(-1)).toBe('frame-00015.png');
+  const first = await pngBodyShare(page, files['frame-00001.png']!);
+  const last = await pngBodyShare(page, files['frame-00015.png']!);
+  expect(first).toMatchObject({ width: 320, height: 180 });
+  expect(first.share).toBeGreaterThan(0.01);
+  expect(last.share).toBeGreaterThan(0.01);
+  // Wave raises the arm: the frames are of different poses.
+  expect(
+    Buffer.from(files['frame-00001.png']!).equals(Buffer.from(files['frame-00015.png']!)),
+  ).toBe(false);
+  // The view draws its own playhead at its own size again.
+  await expect(page.locator('.character-canvas-capturing')).toHaveCount(0);
+  await expect.poll(() => pixels(page)).toBe(before);
+
+  // A long export at 1080p, cancelled while it runs: nothing reaches the Host.
+  await page.evaluate(
+    () => delete (window as unknown as { characterMedia?: unknown }).characterMedia,
+  );
+  await video.getByLabel('Size').selectOption('1080p');
+  await video.getByLabel('To (s)').fill('1');
+  await video.getByLabel('Frame rate').selectOption('60');
+  await video.getByRole('button', { name: 'Export frames' }).click();
+  await expect(video.getByRole('status')).toContainText('Exporting frames…');
+  await video.getByRole('button', { name: 'Cancel export' }).click();
+  await expect(video.getByTestId('video-report')).toHaveText(
+    'Export cancelled; nothing was saved.',
+  );
+  expect(await media(page)).toBeUndefined();
+  await expect.poll(() => pixels(page)).toBe(before);
+
+  // While an export runs nothing edits the document: Undo is off and an edit is refused.
+  await page.goto('/');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Show Body').uncheck();
+  await parts.getByLabel('Show Body').check();
+  const editable = (await panel(page, 'Inspector')).getByRole('group', { name: 'Video export' });
+  await editable.getByLabel('Size').selectOption('1080p');
+  await editable.getByLabel('Frame rate').selectOption('60');
+  await editable.getByRole('button', { name: 'Export frames' }).click();
+  await expect(editable.getByRole('status')).toContainText('Exporting frames…');
+  await expect(await tool(page, 'Undo')).toBeDisabled();
+  await (await panel(page, 'Parts')).getByLabel('Show Body').click();
+  await expect(page.getByRole('alert')).toContainText('video-export-running');
+  await expect((await panel(page, 'Parts')).getByLabel('Show Body')).toBeChecked();
+  await (await panel(page, 'Inspector'))
+    .getByRole('group', { name: 'Video export' })
+    .getByRole('button', { name: 'Cancel export' })
+    .click();
+  await expect(editable.getByTestId('video-report')).toHaveText(
+    'Export cancelled; nothing was saved.',
+  );
+  await expect(await tool(page, 'Undo')).toBeEnabled();
+
+  // The graphics context lost mid-export: the frames already drawn are dropped, not saved blank.
+  await page.evaluate(
+    () => delete (window as unknown as { characterMedia?: unknown }).characterMedia,
+  );
+  await editable.getByRole('button', { name: 'Export frames' }).click();
+  await expect(editable.getByRole('status')).toContainText('Exporting frames…');
+  await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas.character-canvas')!;
+    canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext();
+  });
+  await expect(editable.getByTestId('video-report')).toContainText(
+    'The graphics context was lost during the export',
+  );
+  expect(await media(page)).toBeUndefined();
+});
+
+// C8b (ST-158#2): Export video encodes Wave with H.264 (WebCodecs) into an MP4 that ffprobe and
+// the video importer read: 30 frames at 30 fps over one second, the figure in the first frame.
+test('exports an action as an H.264 MP4 that ffprobe and the importer read (C8b, TS-1294)', async ({
+  page,
+}, info) => {
+  await page.goto('/?readonly=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const inspector = await panel(page, 'Inspector');
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  await video.getByLabel('Size').selectOption('custom');
+  await video.getByLabel('Width').fill('320');
+  await video.getByLabel('Height').fill('180');
+  await video.getByRole('button', { name: 'Export video' }).click();
+  await expect(video.getByTestId('video-report')).toHaveText(
+    'Blocky figure Wave.mp4: 30 frames, 320 × 180, 30 fps.',
+  );
+  const file = (await media(page))!;
+  expect(file).toMatchObject({ name: 'Blocky figure Wave.mp4', type: 'video/mp4' });
+  const bytes = Uint8Array.from(file.bytes);
+  const set = (await inspectVideoFile(new Blob([bytes]), new AbortController().signal)).plan;
+  expect(set.streams.map((s) => s.kind)).toEqual(['video']);
+  const path = info.outputPath('wave.mp4');
+  writeFileSync(path, bytes);
+  const probe = JSON.parse(
+    execFileSync('ffprobe', [
+      '-v',
+      'error',
+      '-count_frames',
+      '-show_streams',
+      '-show_format',
+      '-of',
+      'json',
+      path,
+    ]).toString(),
+  ) as {
+    streams: {
+      codec_name: string;
+      width: number;
+      height: number;
+      nb_read_frames: string;
+      r_frame_rate: string;
+    }[];
+    format: { duration: string };
+  };
+  expect(probe.streams).toHaveLength(1);
+  expect(probe.streams[0]).toMatchObject({
+    codec_name: 'h264',
+    width: 320,
+    height: 180,
+    nb_read_frames: '30',
+    r_frame_rate: '30/1',
+  });
+  expect(Number(probe.format.duration)).toBeCloseTo(1, 3);
+  const still = info.outputPath('first.png');
+  execFileSync('ffmpeg', ['-v', 'error', '-i', path, '-frames:v', '1', '-y', still]);
+  const first = await pngBodyShare(page, readFileSync(still));
+  expect(first).toMatchObject({ width: 320, height: 180 });
+  expect(first.share).toBeGreaterThan(0.01);
+
+  // A lost graphics context mid-encode drops the video instead of encoding blank frames.
+  await page.evaluate(
+    () => delete (window as unknown as { characterMedia?: unknown }).characterMedia,
+  );
+  await video.getByLabel('Size').selectOption('1080p');
+  await video.getByLabel('Frame rate').selectOption('60');
+  await video.getByRole('button', { name: 'Export video' }).click();
+  await expect(video.getByRole('status')).toContainText('Exporting video…');
+  await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas.character-canvas')!;
+    canvas.getContext('webgl2')!.getExtension('WEBGL_lose_context')!.loseContext();
+  });
+  await expect(video.getByTestId('video-report')).toContainText(
+    'The graphics context was lost during the export',
+  );
+  expect(await media(page)).toBeUndefined();
+});
+
+// C8c (ST-160#1): Render image path traces the figure at the playhead (the dialog of CAD and the
+// building) and hands the PNG to the Host; a long render is cancelled and nothing is kept.
+test('renders a path-traced still of the figure at the playhead (C8c, TS-1298)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  // Software WebGL (no GPU) compiles the path-tracing shader for about a minute.
+  test.setTimeout(480_000);
+  await page.goto('/?readonly=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  await (await tool(page, 'Render image')).click();
+  const dialog = page.getByRole('dialog', { name: 'Render image' });
+  await dialog.getByLabel('Width (px)').fill('160');
+  await dialog.getByLabel('Height (px)').fill('100');
+  await dialog.getByLabel('Samples').fill('2');
+  await dialog.getByLabel('Time limit (s, 0 = none)').fill('0');
+  await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+  await expect(dialog.getByTestId('view-render-done')).toHaveText(
+    '160 × 100 px, 2 samples (all samples)',
+    { timeout: 400_000 },
+  );
+  await dialog.getByRole('button', { name: 'Save PNG' }).click();
+  await expect.poll(() => media(page)).toBeDefined();
+  const file = (await media(page))!;
+  expect(file).toMatchObject({ name: 'Blocky figure Wave-render.png', type: 'image/png' });
+  const png = Buffer.from(file.bytes);
+  expect(png.readUInt32BE(16)).toBe(160);
+  expect(png.readUInt32BE(20)).toBe(100);
+  expect((await pngBodyShare(page, Uint8Array.from(file.bytes))).share).toBeGreaterThan(0.01);
+  await page.evaluate(
+    () => delete (window as unknown as { characterMedia?: unknown }).characterMedia,
+  );
+  await dialog.getByLabel('Samples').fill('4096');
+  await dialog.getByRole('button', { name: 'Render again' }).click();
+  await expect(dialog.getByTestId('view-render-progress')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog.getByTestId('view-render-progress')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await media(page)).toBeUndefined();
+  await expect(viewState(page)).toHaveText('Ready');
+});
+test('props: makes a watch escapement as joint keys, replaced after asking (WM4, TS-1895)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Watch movement — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Watch movement', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  const escapement = inspector.getByTestId('character-prop-escapement');
+  const keys = page.getByRole('group', { name: 'Keys' });
+  const balanceKeys = keys.getByRole('button', { name: /^Key Watch movement Balance angle at / });
+  const seek = async (tick: number) => (await tool(page, 'Time', 'slider')).fill(String(tick));
+  // The drawn turn of the balance (0), fork (1), escape wheel (2) and seconds hand (3), in degrees.
+  const turn = async (i: number) => {
+    const m = (await frame(page)).props['prop-watch']!.matrices[i]!;
+    return Math.round((Math.atan2(m[1]!, m[0]!) * 180) / Math.PI);
+  };
+  await expect(escapement.getByLabel('Balance')).toHaveValue('j-balance');
+  await expect(escapement.getByLabel('Pallet fork')).toHaveValue('j-fork');
+  await expect(escapement.getByLabel('Escape wheel')).toHaveValue('j-escape');
+
+  // A lift angle past twice the amplitude is refused and keys nothing.
+  await escapement.getByLabel('Lift angle (°)').fill('600');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await expect(escapement.getByRole('alert')).toContainText('escapement-lift');
+  await expect(balanceKeys).toHaveCount(0);
+  // A wheel started at 2,150° drives the seconds hand past its ±180° on the way: refused.
+  await escapement.getByLabel('Lift angle (°)').fill('52');
+  await escapement.getByLabel('Escape start (°)').fill('2150');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await expect(escapement.getByRole('alert')).toContainText(
+    'escapement-follower-limit: j-hand angle follows these joints and would pass its limits at 0.',
+  );
+  await expect(balanceKeys).toHaveCount(0);
+  // The defaults over the one-second action: 8 beats at 28,800 an hour.
+  await escapement.getByLabel('Escape start (°)').fill('');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await expect(escapement.getByRole('status')).toHaveText('Made 8 beats from 0.00 s to 1.00 s.');
+  await expect(balanceKeys).toHaveCount(17);
+  // At the start the balance is at its −280° extreme, the fork on its −10° side.
+  await seek(0);
+  await expect.poll(() => turn(0)).toBe(80);
+  await expect.poll(() => turn(1)).toBe(-10);
+  // After the first beat (1/8 s) the balance is at its other extreme, the fork has switched and
+  // the escape wheel has advanced half a tooth of 20 (9°); the hand follows at 1/12.
+  await seek(30000);
+  await expect.poll(() => turn(0)).toBe(-80);
+  await expect.poll(() => turn(1)).toBe(10);
+  await expect.poll(() => turn(2)).toBe(9);
+  // At the end: 8 half teeth (72°), the hand 6° back.
+  await seek(240000);
+  await expect.poll(() => turn(2)).toBe(72);
+  await expect.poll(() => turn(3)).toBe(-6);
+
+  // Made again at 21,600 an hour: its 51 keys are replaced only after asking; one edit.
+  await escapement.getByLabel('Beats per hour').fill('21600');
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  const ask = escapement.getByRole('alertdialog', { name: 'Replace keys' });
+  await expect(ask).toContainText('Replaces 51 keys of these joints between 0.00 s and 1.00 s.');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  await expect(balanceKeys).toHaveCount(17);
+  await escapement.getByRole('button', { name: 'Make escapement' }).click();
+  await ask.getByRole('button', { name: 'Replace keys' }).click();
+  await expect(escapement.getByRole('status')).toHaveText('Made 6 beats from 0.00 s to 1.00 s.');
+  await expect(balanceKeys).toHaveCount(13);
+  // 6 half teeth: 54°.
+  await expect.poll(() => turn(2)).toBe(54);
+  await (await tool(page, 'Undo')).click();
+  await expect(balanceKeys).toHaveCount(17);
+  await expect.poll(() => turn(2)).toBe(72);
+  await (await tool(page, 'Redo')).click();
+  await expect.poll(() => turn(2)).toBe(54);
+
+  // A transform that drives the hand past its limits on the way is refused too (MR4), and keys
+  // nothing.
+  const transform = inspector.getByTestId('character-prop-transform');
+  const escapeKeys = keys.getByRole('button', {
+    name: /^Key Watch movement Escape wheel angle at /,
+  });
+  const before = await escapeKeys.count();
+  await transform.getByLabel('Transform from').selectOption({ label: 'At rest' });
+  await transform.getByLabel('Transform to').selectOption({ label: 'Turned far' });
+  await transform.getByRole('button', { name: 'Make transform' }).click();
+  const replace = transform.getByRole('alertdialog', { name: 'Replace keys' });
+  if (await replace.isVisible()) await replace.getByRole('button', { name: 'Replace keys' }).click();
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'joint-limit: j-hand angle' }),
+  ).toBeVisible();
+  await expect(escapeKeys).toHaveCount(before);
 });

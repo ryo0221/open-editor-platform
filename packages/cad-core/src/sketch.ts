@@ -88,7 +88,12 @@ export interface CadSketchRegion {
 }
 
 export const cadSketchLimits = Object.freeze({
-  sketches: 64,
+  /**
+   * CR0d (docs/cad/car-design.md, E4): 256, the feature limit, so every feature can have a sketch
+   * of its own (a car body's sections and paths). A safety limit, not a measured one: the
+   * document's 4 MiB content, 1,024 entities a sketch and the 30 s job (sliced) still bound it.
+   */
+  sketches: 256,
   entities: 1024,
   constraints: 2048,
   holes: 64,
@@ -147,7 +152,7 @@ export function splinePoints(
   return out;
 }
 /** The point of a spline at `t` (0 to the number of knot spans), as `splinePoints` samples it. */
-function splinePointAt(
+export function splinePointAt(
   poles: readonly (readonly [number, number])[],
   degree: number,
   closed: boolean,
@@ -1099,6 +1104,21 @@ export interface SketchRegionGeometry {
  * the shared end points of a chain, every hole inside the outer loop and outside the other holes.
  * Returns the loops, or the first problem as `{ code, path }` relative to the region.
  */
+/** An element's bounding box `[minU, minV, maxU, maxV]`, covering an arc between its samples. */
+function elementBox(e: Element): [number, number, number, number] {
+  if (e.type === 'circle') return [e.c[0] - e.r, e.c[1] - e.r, e.c[0] + e.r, e.c[1] + e.r];
+  const pts = sketchElementPoints(e);
+  const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [u, v] of pts) {
+    box[0] = Math.min(box[0], u);
+    box[1] = Math.min(box[1], v);
+    box[2] = Math.max(box[2], u);
+    box[3] = Math.max(box[3], v);
+  }
+  // An arc bulges at most r(1 − cos(Δ/2)) beyond the chord between two of its 64 samples.
+  const pad = e.type === 'arc' ? e.r * (1 - Math.cos(Math.abs(e.sweep) / 128)) : 0;
+  return [box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad];
+}
 export function sketchRegion(
   s: CadSketch,
   region: CadSketchRegion,
@@ -1106,12 +1126,13 @@ export function sketchRegion(
   const used = new Set<string>();
   const loops: Loop[] = [];
   const lists = [region.outer, ...region.holes];
+  const byId = new Map(s.entities.map((e) => [e.id, e] as const));
   for (const [li, ids] of lists.entries()) {
     const lp = li === 0 ? 'outer' : `holes[${li - 1}]`;
     if (!Array.isArray(ids) || !ids.length) return { code: 'region-loop', path: lp };
     const elements: Element[] = [];
     for (const [i, id] of ids.entries()) {
-      const e = s.entities.find((x) => x.id === id);
+      const e = byId.get(id);
       if (!e || e.type === 'point' || e.construction || used.has(id))
         return { code: 'region-element', path: `${lp}[${i}]` };
       used.add(id);
@@ -1142,10 +1163,20 @@ export function sketchRegion(
     if (end !== origin) return { code: 'region-open', path: lp };
     loops.push({ elements, forward });
   }
-  const all = loops.flatMap((l, li) => l.elements.map((e, i) => ({ e, li, i })));
+  const all = loops.flatMap((l, li) =>
+    l.elements.map((e, i) => ({ e, li, i, box: elementBox(e) })),
+  );
   for (let i = 0; i < all.length; i++)
     for (let j = i + 1; j < all.length; j++) {
-      const [x, y] = [all[i], all[j]];
+      const [x, y] = [all[i]!, all[j]!];
+      // WM1a: elements whose boxes are apart cannot meet (a gear has thousands of elements).
+      if (
+        x.box[0] > y.box[2] + eps ||
+        y.box[0] > x.box[2] + eps ||
+        x.box[1] > y.box[3] + eps ||
+        y.box[1] > x.box[3] + eps
+      )
+        continue;
       const hit = meets(x.e, y.e);
       const path = `${x.li === 0 ? 'outer' : `holes[${x.li - 1}]`}[${x.i}]`;
       // Only neighbours in one chain may meet, at the point they share; loops never touch.
@@ -1402,6 +1433,37 @@ export function sketchDefaultPath(
   }
   if (chain.length !== edges.length) return undefined;
   return 'code' in sketchPath(s, chain, closed) ? undefined : chain;
+}
+/**
+ * CR3c: a sketch's drawing as closed chains, one per group of joined lines, arcs and open
+ * splines (each one loop with no branch), for cutting a row of openings with one trim. Undefined
+ * when any group is not one closed chain, or there is none.
+ */
+export function sketchDefaultChains(s: CadSketch): string[][] | undefined {
+  const edges = chainEdges(s);
+  if (!edges.length) return undefined;
+  const chains: string[][] = [];
+  const used = new Set<string>();
+  for (const first of edges) {
+    if (used.has(first.id)) continue;
+    const chain = [first.id];
+    used.add(first.id);
+    let point = first.end;
+    while (point !== first.start) {
+      const next = edges.find((e) => !used.has(e.id) && (e.start === point || e.end === point));
+      if (!next) return undefined;
+      chain.push(next.id);
+      used.add(next.id);
+      point = next.start === point ? next.end : next.start;
+    }
+    const g = sketchPath(s, chain, 'allow');
+    if ('code' in g || !g.closed) return undefined;
+    chains.push(chain);
+  }
+  // A branch (three edges at a point) would leave an edge joined to a finished chain.
+  const count = new Map<string, number>();
+  for (const e of edges) for (const p of [e.start, e.end]) count.set(p, (count.get(p) ?? 0) + 1);
+  return [...count.values()].every((n) => n === 2) ? chains : undefined;
 }
 /** Points where `side` (a linear function of u/v) is extreme over the region's boundary. */
 export function regionExtremes(g: SketchRegionGeometry, normal: Pt): Pt[] {

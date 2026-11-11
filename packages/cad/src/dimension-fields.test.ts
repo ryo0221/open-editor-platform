@@ -13,3 +13,12 @@ describe('quantities for reading (ST-85#2)', () => {
     expect(fmtQuantity(-1e-13, 'mm')).toBe('0 mm');
   });
 });
+
+describe('watch-sized quantities (WM3, TS-1891)', () => {
+  it('keeps 3 significant digits below the last decimal instead of 0', () => {
+    expect(fmtQuantity(0.000125, 'mm³')).toBe('0.000125 mm³');
+    expect(fmtQuantity(-0.0001234, 'mm²')).toBe('-0.000123 mm²');
+    expect(fmtQuantity(0.0005, 'mm³')).toBe('0.001 mm³');
+    expect(fmtQuantity(0, 'mm³')).toBe('0 mm³');
+  });
+});

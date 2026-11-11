@@ -13,6 +13,8 @@ import {
   assertRequiredRelations,
 } from './session-guards';
 import { columnSchemaIntent, columnSchemaCommand } from './schema-command';
+import { rowCreationIntent, retainRowCreation, type DataRowCreationSource } from './row-creation';
+export { createDataRows, type DataRowCreationSource } from './row-creation';
 export interface DataVersionSource {
   artifact: Artifact<StructuredData>;
   revision: string;
@@ -101,9 +103,11 @@ export function assertDataIntegrity(data: unknown): asserts data is StructuredDa
 export function guardDataCommand(
   cmd: EditorCommand<StructuredData>,
   writable: () => boolean = () => true,
+  creationTarget?: () => DataRowCreationSource,
 ): EditorCommand<StructuredData> {
   const schemaIntent = columnSchemaIntent(cmd);
   const restoration = versionRestores.get(cmd);
+  const creation = rowCreationIntent(cmd);
   const guarded: EditorCommand<StructuredData> = {
     ...cmd,
     readonlyInput: cmd.readonlyInput,
@@ -111,11 +115,15 @@ export function guardDataCommand(
       if (!writable()) throw new Error('Data is read only');
       assertDataReadable(current);
       restoration?.(current);
+      creation?.checkTarget(creationTarget?.());
+      creation?.check(current);
       const retained = unresolvedReferences(current);
       // Reuse only an already certified immutable input for a command that
       // declares the existing read-only contract. Mutable callers stay isolated.
       const next = cmd.apply(cmd.readonlyInput && isDeepFrozen(current) ? current : clone(current));
       assertDataReadable(next);
+      creation?.checkTarget(creationTarget?.());
+      creation?.check(current, next);
       if (restoration) {
         restoration(current, next);
         return next;
@@ -123,13 +131,14 @@ export function guardDataCommand(
       for (const [address, value] of unresolvedReferences(next))
         if (retained.get(address) !== value)
           throw new Error('Choose an existing record in this dataset');
-      assertAddedRowDefaults(current, next);
+      assertAddedRowDefaults(current, next, creation?.permits);
       assertColumnChanges(current, next, schemaIntent);
       assertRequiredRelations(current, next);
       return next;
     },
   };
   if (restoration) versionRestores.set(guarded, restoration);
+  retainRowCreation(cmd, guarded);
   return schemaIntent
     ? columnSchemaCommand(schemaIntent.columnId, schemaIntent.kind, guarded)
     : guarded;
@@ -137,20 +146,31 @@ export function guardDataCommand(
 /** The canonical local executor shared by every Data projection and headless callers. */
 export class DataSession extends EditorSession<StructuredData> {
   readOnly = false;
-  constructor(data: StructuredData) {
+  constructor(
+    data: StructuredData,
+    private readonly creationTarget?: () => DataRowCreationSource,
+  ) {
     assertDataReadable(data);
     super(data);
   }
   override executeView(cmd: EditorCommand<StructuredData>) {
-    return super.executeView(guardDataCommand(cmd, () => !this.readOnly));
+    return super.executeView(guardDataCommand(cmd, () => !this.readOnly, this.creationTarget));
   }
-  override undo() {
+  override undo(validateCandidate?: (candidate: StructuredData) => void) {
     if (this.readOnly) throw new Error('Data is read only');
-    return super.undo();
+    return super.undo(validateCandidate);
   }
-  override redo() {
+  override redo(validateCandidate?: (candidate: StructuredData) => void) {
     if (this.readOnly) throw new Error('Data is read only');
-    return super.redo();
+    return super.redo(validateCandidate);
+  }
+  override undoView(validateCandidate?: (candidate: StructuredData) => void) {
+    if (this.readOnly) throw new Error('Data is read only');
+    return super.undoView(validateCandidate);
+  }
+  override redoView(validateCandidate?: (candidate: StructuredData) => void) {
+    if (this.readOnly) throw new Error('Data is read only');
+    return super.redoView(validateCandidate);
   }
 }
 

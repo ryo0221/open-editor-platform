@@ -17,16 +17,19 @@ import { FictionMapOutputPanel } from './output-panel';
 /** Public Artifact Host adapter over the existing ArtifactEditor Session, never a second Session. */
 export function FictionMapArtifactSurface({
   host,
+  inputs: providedInputs,
   onError = () => {},
   mayRead = () => true,
 }: {
   host: ArtifactEditor<FictionMapContent>;
+  /** Owner-specific registry for observing pending inputs without committing them. */
+  inputs?: EditorInputs;
   onError?: (message: string) => void;
   /** Live read grant for asynchronous output; the Host also masks unauthorized DOM. */
   mayRead?(): boolean;
 }) {
   const [, refresh] = useReducer((n) => n + 1, 0),
-    inputs = useMemo(() => new EditorInputs(), [host]),
+    inputs = useMemo(() => providedInputs ?? new EditorInputs(), [host, providedInputs]),
     alive = useRef(true);
   const readGrant = useRef(mayRead);
   readGrant.current = mayRead;

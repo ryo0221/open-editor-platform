@@ -15,6 +15,7 @@ export {
   type GltfImportProblem,
 } from './gltf';
 export * from './meshes';
+export * from './multires';
 export {
   exportGlb,
   gltfExportLimits,
@@ -22,3 +23,5 @@ export {
   type GltfExport,
   type GltfExportProblem,
 } from './gltf-export';
+export * from './prop-transform';
+export * from './escapement';

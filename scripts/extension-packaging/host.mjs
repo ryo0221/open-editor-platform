@@ -5,6 +5,8 @@ import { fileURLToPath, URL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import console from 'node:console';
+import { Buffer } from 'node:buffer';
+import { TextEncoder } from 'node:util';
 import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
 import { ReferenceRegistry, TOKEN } from '@editor-platform/extension-runtime/draft2';
 import { ManualClock, referenceBinding } from '@editor-platform/extension-runtime/reference';
@@ -204,6 +206,119 @@ try {
   assert.match(missing.stderr, /@editor-platform\/editor-core/);
 } finally {
   await rename(hidden, dependency);
+}
+// #500 E1: verified-package loader and ArtifactEditor binding from installed public entrypoints.
+{
+  const { CONTRACT_VERSION } = await import('@editor-platform/extension-contract');
+  const { ExtensionRegistry } = await import('@editor-platform/extension-runtime');
+  const pkgApi = await import('@editor-platform/extension-runtime/package');
+  const { artifactEditorHost } = await import('@editor-platform/extension-runtime/editor-host');
+  const { ArtifactEditor } = await import('@editor-platform/editor-host');
+  const { command } = await import('@editor-platform/editor-core');
+  const manifest = {
+    contractVersion: CONTRACT_VERSION,
+    id: 'kit.checklist-editor',
+    version: '1.0.0',
+    artifactKind: 'kit.checklist',
+    schemaVersion: 1,
+    capabilities: ['local-edit', 'persistence'],
+    permissions: ['artifact:read', 'artifact:write'],
+    licenseNotices: ['Kit fixture; no license grant.'],
+  };
+  const entry = `const manifest = ${JSON.stringify(manifest)};
+export function definition(packageHash) {
+  return { manifest: { ...manifest, packageHash }, validate: (v) => !!v && Array.isArray(v.items) };
+}`;
+  const input = () => ({
+    manifest: JSON.parse(JSON.stringify(manifest)),
+    entry: 'entry.js',
+    files: [{ path: 'entry.js', bytes: new TextEncoder().encode(entry) }],
+  });
+  const importModule = (bytes) =>
+    import(`data:text/javascript;base64,${Buffer.from(bytes).toString('base64')}`);
+  const pin = (await pkgApi.describeExtensionPackage(input())).hash;
+  const lookup = (id, version) =>
+    id === manifest.id && version === manifest.version ? pin : undefined;
+  const loaded = await pkgApi.loadVerifiedExtension(
+    await pkgApi.verifyExtensionPackage(input(), lookup),
+    { importModule },
+  );
+  // #500 E2: retained exact bytes reopen through the Host pin only; nothing else is trusted.
+  const store = await import('@editor-platform/extension-runtime/package-store');
+  const memory = store.createMemoryPackageStorage();
+  assert.equal(
+    await store.retainVerifiedPackage(memory, await pkgApi.verifyExtensionPackage(input(), lookup)),
+    'retained',
+  );
+  const restored = await store.restoreRetainedPackage(
+    memory,
+    manifest.id,
+    manifest.version,
+    lookup,
+  );
+  assert.equal(restored.manifest.packageHash, pin);
+  memory.active.get(`${manifest.id}@${manifest.version}`).files[0].bytes[0] ^= 1;
+  await assert.rejects(
+    store.restoreRetainedPackage(memory, manifest.id, manifest.version, lookup),
+    { code: 'corrupt' },
+  );
+  await assert.rejects(
+    store.removeRetainedPackage(memory, manifest.id, manifest.version, () => []),
+    { code: 'corrupt' },
+  );
+  assert.equal(
+    await store.repairRetainedPackage(memory, await pkgApi.verifyExtensionPackage(input(), lookup)),
+    'repaired',
+  );
+  await store.restoreRetainedPackage(memory, manifest.id, manifest.version, lookup);
+  const kept = store.createMemoryPackageStorage();
+  await store.retainVerifiedPackage(kept, await pkgApi.verifyExtensionPackage(input(), lookup));
+  await assert.rejects(
+    store.removeRetainedPackage(kept, manifest.id, manifest.version, () => ['saved version']),
+    { code: 'referenced', holders: ['saved version'] },
+  );
+  const registration = pkgApi.installVerifiedExtension(new ExtensionRegistry(), loaded);
+  const saved = [];
+  const editor = new ArtifactEditor(
+    createArtifact('kit.checklist', 'Kit list', { items: [] }),
+    {
+      kind: 'kit.checklist',
+      validate: (v) => !!v && Array.isArray(v.items),
+      capabilities: { undo: true, nativeJson: true, formats: [], preview: 'none', shared: false },
+    },
+    { put: async (a) => void saved.push(a) },
+  );
+  const handle = registration.open(
+    artifactEditorHost(editor, { schemaVersion: 1, allowed: () => true }),
+  );
+  handle.api.execute(command('kit.add', 'Add', (c) => ({ items: [...c.items, 'a'] })));
+  handle.api.execute(command('kit.add', 'Add', (c) => ({ items: [...c.items, 'b'] })));
+  handle.api.undo();
+  await handle.api.save();
+  assert.deepEqual(saved.at(-1).draft.content.items, ['a']);
+  registration.uninstall();
+  assert.throws(() => handle.api.read(), /revoked/);
+  // Uninstalling the Editor keeps its retained bytes; removing them is a separate Host step.
+  await store.restoreRetainedPackage(kept, manifest.id, manifest.version, lookup);
+  assert.equal(
+    await store.removeRetainedPackage(kept, manifest.id, manifest.version, () => []),
+    'removed',
+  );
+  assert.equal(await kept.removed(manifest.id, manifest.version), pin);
+  const tampered = input();
+  tampered.files[0].bytes[0] ^= 1;
+  await assert.rejects(pkgApi.verifyExtensionPackage(tampered, lookup), /Untrusted/);
+  await assert.rejects(
+    pkgApi.verifyExtensionPackage(input(), () => undefined),
+    /Untrusted/,
+  );
+  for (const name of ['/src/package.ts', '/src/editor-host.ts'])
+    await assert.rejects(import('@editor-platform/extension-runtime' + name), {
+      code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    });
+  console.log(
+    'PASS: installed /package + /package-store + /editor-host verify/retain/restore/repair/load/install/edit/undo/save/revoke/remove; tampered, corrupt retained, referenced removal, unpinned and private paths refused',
+  );
 }
 console.log('LICENSE NOTICE:', evidence.notice.trim());
 console.log('MANIFEST NOTICES:', JSON.stringify(definition.manifest.licenseNotices));

@@ -59,6 +59,15 @@ export * from './legacy';
 export * from './visual-controls';
 export * from './export';
 export type { Bounds };
+/**
+ * Screen pixels per drawing unit for the stage's drawings, rounded down to a power of two so a
+ * zoom only re-renders drawings when it crosses a step (#124). Undefined keeps every detail.
+ */
+export const CanvasDetailContext = createContext<number | undefined>(undefined);
+/** The detail scale for a zoom: the largest power of two not above it. */
+export function canvasDetailScale(zoom: number): number | undefined {
+  return zoom > 0 && Number.isFinite(zoom) ? 2 ** Math.floor(Math.log2(zoom)) : undefined;
+}
 export const CanvasPresenceContext = createContext<
   { elementId: string; name: string; clientId: string }[]
 >([]);
@@ -142,6 +151,7 @@ function sameDrawingValue(a: unknown, b: unknown): boolean {
 const DrawingContents = memo(
   function DrawingContents({ drawing }: { drawing: Drawing }) {
     const id = useId().replaceAll(':', '');
+    const screenScale = useContext(CanvasDetailContext);
     const [failedSource, setFailedSource] = useState<string>();
     if (drawing.kind === 'image' && drawing.src && failedSource === drawing.src) {
       const { x, y, width, height } = drawing.bounds;
@@ -156,7 +166,7 @@ const DrawingContents = memo(
     }
     return (
       <>
-        {drawingPrimitives(drawing, id, { visibleTextOnly: true }).map((node, index) =>
+        {drawingPrimitives(drawing, id, { visibleTextOnly: true, screenScale }).map((node, index) =>
           svgReact(node, index, () => setFailedSource(drawing.src)),
         )}
       </>
@@ -776,20 +786,22 @@ export function CanvasStage({
           <rect {...backgroundBounds} fill={background} data-space={space} />
           {view.grid && <CanvasGrid label={label} bounds={backgroundBounds} />}
           {typeof underlay === 'function' ? underlay(projected()) : underlay}
-          {rendered.map((t) => (
-            <CanvasObject
-              key={t.id}
-              target={
-                editing && t.textParts?.some((part) => part.id === editing.id)
-                  ? { ...t, editingTextId: editing.id }
-                  : t
-              }
-              preview={preview?.get(t.id)}
-              selected={selected.includes(t.id)}
-              editing={editing?.id === t.id}
-              render={render}
-            />
-          ))}
+          <CanvasDetailContext.Provider value={canvasDetailScale(view.zoom)}>
+            {rendered.map((t) => (
+              <CanvasObject
+                key={t.id}
+                target={
+                  editing && t.textParts?.some((part) => part.id === editing.id)
+                    ? { ...t, editingTextId: editing.id }
+                    : t
+                }
+                preview={preview?.get(t.id)}
+                selected={selected.includes(t.id)}
+                editing={editing?.id === t.id}
+                render={render}
+              />
+            ))}
+          </CanvasDetailContext.Provider>
           {typeof overlay === 'function' ? overlay(projected()) : overlay}
           <PresenceMarkers presences={presences} targets={targets} zoom={view.zoom} />
           {selected.length > 0 && !readOnly && !editing && inputOwner !== 'point' && (

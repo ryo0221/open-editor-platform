@@ -147,7 +147,11 @@ test('four pages: native page/panel order, proposal, save/reload, read-through P
   const pdfPending = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export PDF', exact: true }).click();
   const pdf = await pdfPending;
-  expect((await PDFDocument.load(await readFile((await pdf.path())!))).getPageCount()).toBe(4);
+  const pdfBytes = await readFile((await pdf.path())!);
+  expect((await PDFDocument.load(pdfBytes)).getPageCount()).toBe(4);
+  // #801: page objects stay outside compressed object streams for simple external counters.
+  expect(pdfBytes.toString('latin1').match(/\/Type\s*\/Page(?![a-zA-Z])/g)).toHaveLength(4);
+  expect(pdfBytes.toString('latin1')).not.toContain('/ObjStm');
   await page.screenshot({ path: info.outputPath('comic-readthrough.png'), fullPage: true });
 });
 

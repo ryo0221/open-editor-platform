@@ -1,18 +1,29 @@
 import {
+  cadSpotWeldLimits,
+  cadToleranceSets,
   emptyCad,
   identityQuaternion,
   mm,
+  cadPanelGapDefaultMm,
   position,
   type CadDocument,
   type CadFeature,
   type CadKernelProfile,
+  type CadSpotWeld,
   type CadTrimTool,
   type Length,
   type Quaternion,
+  type Vec3,
 } from './model';
+import type { CadProfileKind } from './profile-section';
 import { applyCadOperation, type CadNewBody } from './operations';
 import { parseExpression, type CadExpression } from './expression';
-import type { CadSketch, CadSketchConstraint, CadSketchRegion } from './sketch';
+import {
+  splineThrough,
+  type CadSketch,
+  type CadSketchConstraint,
+  type CadSketchRegion,
+} from './sketch';
 import { edgeName, type CadFaceName, type CadTopologyRef } from './topology';
 
 /** Placeholder evaluator identity for fixtures until the kernel gate pins a real build. */
@@ -2059,6 +2070,203 @@ export const f18SkinVolume =
   ((100 ** 2 - 98.5 ** 2) / 2) * ((Math.PI / 3) * 80 - 2 * Math.asin(15 / 100) * 30);
 
 /**
+ * R3i-5 (docs/cad/r3-analysis.md, FX7): a sports car's bonnet skin, the sample of a shell study.
+ * x runs forward from the windscreen (x = 0) to the nose (x = 1000), y across (±650) and z up.
+ * The sheet is a boundary surface of four arcs: the rear edge crowned 60 mm above its ends at
+ * z = 0, the nose 40 mm above its ends at z = −190, and each side bowed 40 mm up between them; it
+ * is thickened `thicknessMm` (default 1, aluminium sheet) downward. Body `bonnet`.
+ */
+export function sportsCarBonnet(thicknessMm = 1): CadDocument {
+  const half = 650;
+  /** The arc through three points (u, v): its centre, and the points as given. */
+  const through = (a: [number, number], m: [number, number], b: [number, number]) => {
+    const d = 2 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+    const sq = (p: [number, number]) => p[0] ** 2 + p[1] ** 2;
+    const c: [number, number] = [
+      (sq(a) * (m[1] - b[1]) + sq(m) * (b[1] - a[1]) + sq(b) * (a[1] - m[1])) / d,
+      (sq(a) * (b[0] - m[0]) + sq(m) * (a[0] - b[0]) + sq(b) * (m[0] - a[0])) / d,
+    ];
+    return c;
+  };
+  // Each arc runs counter-clockwise in its sketch from `start` over the top to `end`.
+  const arc = (
+    id: string,
+    plane: { origin: ReturnType<typeof position>; orientation: Quaternion },
+    start: [number, number],
+    top: [number, number],
+    end: [number, number],
+  ): CadSketch => {
+    const points: Record<string, [number, number]> = {
+      c: through(start, top, end),
+      s: start,
+      e: end,
+    };
+    return {
+      id,
+      name: id,
+      plane,
+      entities: [
+        ...sketchPoints(points),
+        { type: 'arc', id: 'a', center: 'c', start: 's', end: 'e', clockwise: false },
+      ],
+      constraints: [],
+      solved: points,
+    };
+  };
+  // u along Y and v along Z on x = const; u along X and v along Z on y = const.
+  const across = (x: number) => ({
+    origin: position(x, 0, 0),
+    orientation: [0.5, 0.5, 0.5, 0.5] as Quaternion,
+  });
+  const along = (y: number) => ({
+    origin: position(0, y, 0),
+    orientation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] as Quaternion,
+  });
+  const nose = -190;
+  const doc = applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    sketches: [
+      arc('rear', across(0), [half, 0], [0, 60], [-half, 0]),
+      arc('front', across(1000), [half, nose], [0, nose + 40], [-half, nose]),
+      arc('left', along(-half), [1000, nose], [500, nose / 2 + 40], [0, 0]),
+      arc('right', along(half), [1000, nose], [500, nose / 2 + 40], [0, 0]),
+    ],
+    features: [
+      {
+        id: 'skin-sheet',
+        name: 'Bonnet sheet',
+        type: 'boundarySurface',
+        inputFeatureIds: [],
+        args: {
+          curves: ['rear', 'right', 'front', 'left'].map((sketchId) => ({
+            sketchId,
+            element: 'a',
+          })),
+        },
+      },
+    ],
+    bodies: [{ ...body('bonnet', 'skin-sheet'), name: 'Bonnet' }],
+  });
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'bonnet',
+    placementFeatureId: 'skin-placement',
+    feature: {
+      id: 'skin',
+      name: 'Skin',
+      type: 'thicken',
+      inputFeatureIds: ['bonnet-placement'],
+      args: { thickness: mm(thicknessMm), side: 'back' },
+    },
+  });
+}
+
+/**
+ * R3j-6 (docs/cad/r3-analysis.md, FX9): a sports car's body as plates and mounts, the sample of a
+ * bonded study. x runs forward (0 to 2000), y across (±600) and z up. Each plate is a thin
+ * extrude, its own body: the left and right fenders (side panels 2000 × 400, 1.2 mm, their inner
+ * walls at y = ±598.8), and between them the floor (1.5 mm at z = 100), the roof (1.0 mm at
+ * z = 398, x 300–1300) and the bonnet (0.8 mm at z = 300, x 1500–2000), whose side rims lie on
+ * the fenders' inner walls. Four solid mounts (100 × 100 × 440) take the fenders' end rims at
+ * x = 0 and x = 2000. Nothing overlaps; every joint is a rim on a face, so each is offered as a
+ * bond. The roof is the first body.
+ */
+export function sportsCarBody(): CadDocument {
+  const inner = 598.8;
+  const plates: {
+    id: string;
+    name: string;
+    origin: [number, number, number];
+    size: [number, number];
+    thickness: number;
+    side?: boolean;
+  }[] = [
+    { id: 'roof', name: 'Roof', origin: [300, -inner, 398], size: [1000, 2 * inner], thickness: 1 },
+    {
+      id: 'bonnet',
+      name: 'Bonnet',
+      origin: [1500, -inner, 300],
+      size: [500, 2 * inner],
+      thickness: 0.8,
+    },
+    {
+      id: 'floor',
+      name: 'Floor',
+      origin: [0, -inner, 100],
+      size: [2000, 2 * inner],
+      thickness: 1.5,
+    },
+    // u along X and v along Z; the extrude runs along −y.
+    {
+      id: 'fender-left',
+      name: 'Left fender',
+      origin: [0, -inner, 0],
+      size: [2000, 400],
+      thickness: 1.2,
+      side: true,
+    },
+    {
+      id: 'fender-right',
+      name: 'Right fender',
+      origin: [0, 600, 0],
+      size: [2000, 400],
+      thickness: 1.2,
+      side: true,
+    },
+  ];
+  const mounts: { id: string; name: string; x: number; y: number }[] = [
+    { id: 'mount-rear-left', name: 'Rear left mount', x: -100, y: -650 },
+    { id: 'mount-rear-right', name: 'Rear right mount', x: -100, y: 550 },
+    { id: 'mount-front-left', name: 'Front left mount', x: 2000, y: -650 },
+    { id: 'mount-front-right', name: 'Front right mount', x: 2000, y: 550 },
+  ];
+  const part = (
+    id: string,
+    name: string,
+    origin: [number, number, number],
+    size: [number, number],
+    distance: number,
+    orientation: Quaternion,
+  ) => ({
+    profile: {
+      id: `${id}-profile`,
+      name: `${name} outline`,
+      plane: { origin: position(...origin), orientation },
+      shape: { type: 'rectangle' as const, width: mm(size[0]), height: mm(size[1]) },
+    },
+    feature: {
+      id: `${id}-extrude`,
+      name,
+      type: 'extrude' as const,
+      inputFeatureIds: [] as [],
+      args: { profileId: `${id}-profile`, distance: mm(distance), direction: 1 as const },
+    },
+    body: { ...body(id, `${id}-extrude`), name },
+  });
+  const parts = [
+    ...plates.map((p) =>
+      part(
+        p.id,
+        p.name,
+        p.origin,
+        p.size,
+        p.thickness,
+        p.side ? [Math.SQRT1_2, 0, 0, Math.SQRT1_2] : identityQuaternion(),
+      ),
+    ),
+    ...mounts.map((m) =>
+      part(m.id, m.name, [m.x, m.y, -20], [100, 100], 440, identityQuaternion()),
+    ),
+  ];
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    profiles: parts.map((p) => p.profile),
+    features: parts.map((p) => p.feature),
+    bodies: parts.map((p) => p.body),
+  });
+}
+
+/**
  * F18 sheets for R2a-3's refusals and exact values (docs/cad/r2a-freeform.md, CAD42). A `plate`
  * is the 40 mm square fill at z = 0 (f17Boundaries('fill')).
  * - `gap`: two 40 × 20 walls in the plane y = 0, the second `gap` mm past the first's end at
@@ -2280,5 +2488,1314 @@ export function f18Seams(
       },
     ],
     bodies: [body('surface', 'wall')],
+  });
+}
+
+/**
+ * F19 curve network for CR1d (docs/cad/car-design.md, CR1の分け方): a sphere of R = 100 about
+ * (40, 40, −60) cut by the planes y = 0, 40, 80 (`u` arcs) and x = 0, 40, 80 (`v` arcs), each
+ * arc from one side of the 80 mm square to the other over the top. The arcs cross exactly on the
+ * sphere, so a Gordon surface through them stays near it (area `f19NetworkArea`). `gap` lifts
+ * the middle `v` arc by 1 mm, so it misses the `u` arcs.
+ */
+export const f19NetworkSphere = { radius: 100, centre: [40, 40, -60] as const };
+export function f19Network(
+  kind: 'sphere' | 'gap' | 'thin' = 'sphere',
+  toleranceMm = 0.01,
+): CadDocument {
+  if (kind === 'thin') return f19ThinNetwork(toleranceMm);
+  const { radius: R, centre } = f19NetworkSphere;
+  const arc = (id: string, offset: number, across: 'x' | 'y', lift: number): CadSketch => {
+    // In its plane: u along the square's side, v up; the circle's centre is at (40, −60).
+    const d = offset - 40;
+    const r = Math.sqrt(R * R - d * d);
+    const z = centre[2] + Math.sqrt(r * r - 40 * 40) + lift;
+    const points: Record<string, [number, number]> = {
+      o: [40, centre[2] + lift],
+      a: [0, z],
+      b: [80, z],
+    };
+    return {
+      id,
+      name: id,
+      // y = offset: u → x, v → z. x = offset: u → y, v → z.
+      plane:
+        across === 'y'
+          ? {
+              origin: position(0, offset, 0),
+              orientation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] as Quaternion,
+            }
+          : { origin: position(offset, 0, 0), orientation: [0.5, 0.5, 0.5, 0.5] as Quaternion },
+      entities: [
+        ...sketchPoints(points),
+        { type: 'arc' as const, id: 'arc', center: 'o', start: 'a', end: 'b', clockwise: true },
+      ],
+      constraints: [],
+      solved: points,
+    };
+  };
+  const offsets = [0, 40, 80];
+  const sketches = [
+    ...offsets.map((y, i) => arc(`u${i}`, y, 'y', 0)),
+    ...offsets.map((x, j) => arc(`v${j}`, x, 'x', kind === 'gap' && j === 1 ? 1 : 0)),
+  ];
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches,
+    features: [
+      {
+        id: 'net',
+        name: 'Roof',
+        type: 'curveNetwork',
+        inputFeatureIds: [],
+        args: {
+          u: offsets.map((_, i) => ({ sketchId: `u${i}`, element: 'arc' })),
+          v: offsets.map((_, j) => ({ sketchId: `v${j}`, element: 'arc' })),
+          toleranceMm,
+        },
+      },
+    ],
+    bodies: [body('roof', 'net')],
+  });
+}
+
+/**
+ * F19 thin: a flat 100 × 0.02 mm strip spanned by two lines each way, its long sides closer than
+ * four times the tolerance (each border must still keep its own name).
+ */
+function f19ThinNetwork(toleranceMm: number): CadDocument {
+  const points: Record<string, [number, number]> = {
+    a: [0, 0],
+    b: [100, 0],
+    c: [100, 0.02],
+    d: [0, 0.02],
+  };
+  const sketch: CadSketch = {
+    id: 'strip',
+    name: 'strip',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(points),
+      { type: 'line', id: 'u0', start: 'a', end: 'b' },
+      { type: 'line', id: 'u1', start: 'd', end: 'c' },
+      { type: 'line', id: 'v0', start: 'a', end: 'd' },
+      { type: 'line', id: 'v1', start: 'b', end: 'c' },
+    ],
+    constraints: [],
+    solved: points,
+  };
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [sketch],
+    features: [
+      {
+        id: 'net',
+        name: 'Strip',
+        type: 'curveNetwork',
+        inputFeatureIds: [],
+        args: {
+          u: ['u0', 'u1'].map((element) => ({ sketchId: 'strip', element })),
+          v: ['v0', 'v1'].map((element) => ({ sketchId: 'strip', element })),
+          toleranceMm,
+        },
+      },
+    ],
+    bodies: [body('roof', 'net')],
+  });
+}
+
+/** The area of the F19 sphere over the 80 mm square (mm²), by Gauss–Legendre. */
+export function f19NetworkArea(): number {
+  const { radius: R, centre } = f19NetworkSphere;
+  let area = 0;
+  for (const [x, wx] of gaussPieces(0, 80, 64))
+    for (const [y, wy] of gaussPieces(0, 80, 64)) {
+      const dx = x - centre[0],
+        dy = y - centre[1];
+      area += (wx * wy * R) / Math.sqrt(R * R - dx * dx - dy * dy);
+    }
+  return area;
+}
+
+/**
+ * F20 (CR1e): an L of two walls, a sheet of lines (0, 0)–(40, 0)–(40, 40) carried up 30 mm, and
+ * a fillet of the corner between them: `constant` R 5, `linear` R 5 at the bottom to 10 at the
+ * top, `points` R 5, 9 at a quarter of the way up, 5 at the top. `free` picks the wall's top
+ * border, which has one face only.
+ */
+export function f20SheetFillet(kind: 'constant' | 'linear' | 'points' | 'free'): CadDocument {
+  const points: Record<string, [number, number]> = { p0: [0, 0], p1: [40, 0], p2: [40, 40] };
+  const chain: CadSketch = {
+    id: 'ell-sketch',
+    name: 'Ell',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(points),
+      { type: 'line', id: 'l0', start: 'p0', end: 'p1' },
+      { type: 'line', id: 'l1', start: 'p1', end: 'p2' },
+    ],
+    constraints: [],
+    solved: points,
+  };
+  const doc = applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [chain],
+    features: [
+      {
+        id: 'walls',
+        name: 'Walls',
+        type: 'extrudeSurface',
+        inputFeatureIds: [],
+        args: {
+          path: { sketchId: 'ell-sketch', elements: ['l0', 'l1'] },
+          distance: mm(30),
+          direction: 1,
+        },
+      },
+    ],
+    bodies: [body('ell', 'walls')],
+  });
+  const on = doc.bodies[0]!.resultFeatureId;
+  const corner = edgeRef(on, ['side:e:l0'], ['side:e:l1'], [40, 0, 15], 30);
+  const rim = edgeRef(on, ['side:e:l0'], ['end'], [20, 0, 30], 40);
+  const vary =
+    kind === 'linear'
+      ? { radiusEnd: mm(10) }
+      : kind === 'points'
+        ? { radiusEnd: mm(5), radii: [{ at: 0.25, radius: mm(9) }] }
+        : {};
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'ell',
+    placementFeatureId: 'fillet-placement',
+    feature: {
+      id: 'fillet',
+      name: 'Corner',
+      type: 'fillet',
+      inputFeatureIds: [on],
+      args: { edges: [kind === 'free' ? rim : corner], radius: mm(5), ...vary },
+    },
+  });
+}
+
+/**
+ * F21 (CR2b): the F17 `extrude` sheet (a 40 mm line and an r = 20 mm quarter arc carried up
+ * 30 mm) and a copy of it `distance` mm to its `side`, a second sheet body `inner`. The line's part
+ * keeps its area; the arc's grows or shrinks by π/2 × distance × 30.
+ */
+export function f21OffsetSurface(side: 'front' | 'back' = 'front', distance = 2): CadDocument {
+  const doc = f17Sheets('extrude');
+  return applyCadOperation(doc, {
+    type: 'insertFeatures',
+    parameters: [],
+    features: [
+      {
+        id: 'inner',
+        name: 'Inner',
+        type: 'offsetSurface',
+        inputFeatureIds: [],
+        args: {
+          source: { featureId: doc.bodies[0]!.resultFeatureId },
+          distance: mm(distance),
+          side,
+        },
+      },
+    ],
+    bodies: [body('inner-body', 'inner')],
+  });
+}
+
+/**
+ * F22 (CR2a): a flat 100 × 60 mm sheet (a line on the XZ plane carried 60 mm along its normal,
+ * −y) divided by a chain on the XY plane: `open` the line x = 30 upwards across it (left
+ * 30 × 60, right 70 × 60), `closed` the square 40–60 × −40…−20 inside it, `missed` a line past it.
+ * Without `split`, the panel and the chain's sketch only.
+ */
+export function f22Split(kind: 'open' | 'closed' | 'missed' | 'arc', split = true): CadDocument {
+  // `arc`: a 0.2 mm strip across a 1 m circle (two half arcs), so a sampled circle would be
+  // 0.3 mm off it (Codex on #919).
+  const strip: Record<string, [number, number]> =
+    kind === 'arc' ? { a: [999.9, 0], b: [1000.1, 0] } : { a: [0, 0], b: [100, 0] };
+  const sheet: CadSketch = {
+    id: 'edge-line',
+    name: 'Edge',
+    plane: {
+      origin: position(0, 0, 0),
+      orientation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2] as Quaternion,
+    },
+    entities: [...sketchPoints(strip), { type: 'line', id: 'l', start: 'a', end: 'b' }],
+    constraints: [],
+    solved: strip,
+  };
+  const points: Record<string, [number, number]> =
+    kind === 'arc'
+      ? { c: [0, -30], p0: [1000, -30], p1: [-1000, -30] }
+      : kind === 'closed'
+        ? { p0: [40, -40], p1: [60, -40], p2: [60, -20], p3: [40, -20] }
+        : kind === 'open'
+          ? { p0: [30, -100], p1: [30, 100] }
+          : { p0: [200, -100], p1: [200, 100] };
+  const entities: CadSketch['entities'] =
+    kind === 'arc'
+      ? [
+          { type: 'arc', id: 's0', center: 'c', start: 'p0', end: 'p1', clockwise: false },
+          { type: 'arc', id: 's1', center: 'c', start: 'p1', end: 'p0', clockwise: false },
+        ]
+      : kind === 'closed'
+        ? [
+            { type: 'line', id: 's0', start: 'p0', end: 'p1' },
+            { type: 'line', id: 's1', start: 'p1', end: 'p2' },
+            { type: 'line', id: 's2', start: 'p2', end: 'p3' },
+            { type: 'line', id: 's3', start: 'p3', end: 'p0' },
+          ]
+        : [{ type: 'line', id: 's0', start: 'p0', end: 'p1' }];
+  const cutter: CadSketch = {
+    id: 'cutter',
+    name: 'Cutter',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [...sketchPoints(points), ...entities],
+    constraints: [],
+    solved: points,
+  };
+  const doc = applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [sheet, cutter],
+    features: [
+      {
+        id: 'panel',
+        name: 'Panel',
+        type: 'extrudeSurface',
+        inputFeatureIds: [],
+        args: { path: { sketchId: 'edge-line', elements: ['l'] }, distance: mm(60), direction: 1 },
+      },
+    ],
+    bodies: [body('panel-body', 'panel')],
+  });
+  if (!split) return doc;
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'split-placement',
+    feature: {
+      id: 'split',
+      name: 'Split',
+      type: 'split',
+      inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+      args: { tool: { sketchId: 'cutter', elements: entities.map((e) => e.id) } },
+    },
+  });
+}
+
+/**
+ * F26 (CR3b): a door cut out of a panel along the F22 square (40–60 × −40…−20 on the XY plane),
+ * `gap` mm between them in one edit: the panel trimmed outside the square, the door the inside.
+ * `flat`: the F22 100 × 60 sheet in z = 0. `channel`: a U of two plates at z = ±10 joined at
+ * x = 0, so the square cuts the top (in front of the XY plane) and the bottom (behind it) along
+ * the same elements (86M2); only the trim, as the door would be two pieces.
+ */
+export function f26Panel(kind: 'flat' | 'channel' = 'flat', gap = cadPanelGapDefaultMm) {
+  let doc = f22Split('closed', false);
+  if (kind === 'channel') {
+    const pts: Record<string, [number, number]> = {
+      a: [100, 10],
+      b: [0, 10],
+      c: [0, -10],
+      d: [100, -10],
+    };
+    doc = {
+      ...doc,
+      sketches: doc.sketches.map((s) =>
+        s.id === 'edge-line'
+          ? {
+              ...s,
+              entities: [
+                ...sketchPoints(pts),
+                { type: 'line', id: 'top', start: 'a', end: 'b' },
+                { type: 'line', id: 'web', start: 'b', end: 'c' },
+                { type: 'line', id: 'bottom', start: 'c', end: 'd' },
+              ],
+              solved: pts,
+            }
+          : s,
+      ),
+      features: doc.features.map((f) =>
+        f.id === 'panel' && f.type === 'extrudeSurface'
+          ? {
+              ...f,
+              args: {
+                ...f.args,
+                path: { sketchId: 'edge-line', elements: ['top', 'web', 'bottom'] },
+              },
+            }
+          : f,
+      ),
+    };
+  }
+  const tool = { sketchId: 'cutter', elements: ['s0', 's1', 's2', 's3'] };
+  const source = doc.bodies[0]!.resultFeatureId;
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'trim-placement',
+    feature: {
+      id: 'trim',
+      name: 'Trim',
+      type: 'trim',
+      inputFeatureIds: [source],
+      args: { tool, keep: 'outside', gap: mm(gap) },
+    },
+    ...(kind === 'flat' && {
+      panel: {
+        feature: {
+          id: 'door',
+          name: 'Door',
+          type: 'panel',
+          inputFeatureIds: [],
+          args: {
+            source: { featureId: source },
+            tool: { ...tool, elements: [...tool.elements] },
+            keep: 'inside',
+            gap: mm(gap),
+          },
+        },
+        body: body('door-body', 'door'),
+      },
+    }),
+  });
+}
+
+/**
+ * F27 (CR3c): a row of windows cut out of the F22 sheet (100 × 60 in z = 0, y −60…0) by one
+ * trim, keeping the outside: three 20 mm squares at x 10–30, 40–60 and 70–90, y −40…−20, so
+ * 10 mm pillars stand between them. `missed`: a fourth square at x 200–220, off the sheet
+ * (`ifMissed` as given). `apart`: the middle window runs y −70…10, through both long sides,
+ * so the sheet falls in two. `overlap`: the middle window moved to x 25–45, y −35…−15, into the first.
+ */
+export function f27Windows(
+  kind: 'row' | 'missed' | 'apart' | 'overlap' = 'row',
+  ifMissed?: 'skip',
+): CadDocument {
+  const doc = f22Split('closed', false);
+  const boxes: [number, number, number, number][] = [
+    [10, 30, -40, -20],
+    kind === 'apart'
+      ? [40, 60, -70, 10]
+      : kind === 'overlap'
+        ? [25, 45, -35, -15]
+        : [40, 60, -40, -20],
+    [70, 90, -40, -20],
+    ...(kind === 'missed' ? [[200, 220, -40, -20] as [number, number, number, number]] : []),
+  ];
+  const solved: Record<string, [number, number]> = {};
+  const entities: CadSketch['entities'] = [];
+  const chains = boxes.map(([x0, x1, y0, y1], k) => {
+    const corner = ['a', 'b', 'c', 'd'].map((c) => `w${k}${c}`);
+    [
+      [x0, y0],
+      [x1, y0],
+      [x1, y1],
+      [x0, y1],
+    ].forEach((p, j) => (solved[corner[j]!] = p as [number, number]));
+    const lines = corner.map((start, j) => {
+      const id = `w${k}s${j}`;
+      entities.push({ type: 'line', id, start, end: corner[(j + 1) % 4]! });
+      return id;
+    });
+    return lines;
+  });
+  const windows: CadSketch = {
+    id: 'windows',
+    name: 'Windows',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [...sketchPoints(solved), ...entities],
+    constraints: [],
+    solved,
+  };
+  const withSketch = applyCadOperation(doc, {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [windows],
+    features: [],
+    bodies: [],
+  });
+  return applyCadOperation(withSketch, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'trim-placement',
+    feature: {
+      id: 'windows-trim',
+      name: 'Windows',
+      type: 'trim',
+      inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+      args: {
+        tool: { sketchId: 'windows', elements: chains[0]! },
+        keep: 'outside',
+        chains: chains.slice(1),
+        ...(ifMissed && { ifMissed }),
+      },
+    },
+  });
+}
+
+/**
+ * F47 (CR4c): flanges on the F22 panel (100 × 60 in z = 0, x 0–100, y −60–0). `start`: along its
+ * y = 0 border; `tray`: along all four borders, so neighbours meet at the corners; `arch`: along
+ * the F24 panel's half-disc arch of R 15 (a curved edge). `width` mm, `angleDeg` from the panel,
+ * turning to its `toward` side.
+ */
+export function f47Flange(
+  kind: 'start' | 'tray' | 'arch',
+  options: { width?: number; angleDeg?: number; toward?: 'front' | 'back' } = {},
+): CadDocument {
+  const doc = kind === 'arch' ? f24Flare({ flare: false }) : f22Split('open', false);
+  const on = doc.bodies[0]!.resultFeatureId;
+  const face = ['side:e:l'];
+  const edges =
+    kind === 'arch'
+      ? [
+          edgeRef(
+            on,
+            ['trim:arch:outside', 'side:e:l'],
+            ['sketch:wheel', 'cut:e:a0'],
+            [50, -50.45, 0],
+            30,
+          ),
+        ]
+      : [
+          edgeRef(on, face, ['start'], [50, 0, 0], 100),
+          ...(kind === 'tray'
+            ? [
+                edgeRef(on, face, ['edge:end:e:l'], [100, -30, 0], 60),
+                edgeRef(on, face, ['end'], [50, -60, 0], 100),
+                edgeRef(on, face, ['edge:start:e:l'], [0, -30, 0], 60),
+              ]
+            : []),
+        ];
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'flange-placement',
+    feature: {
+      id: 'flange',
+      name: 'Flange',
+      type: 'flange',
+      inputFeatureIds: [on],
+      args: {
+        edges,
+        width: mm(options.width ?? 10),
+        angle: { literalRad: ((options.angleDeg ?? 90) * Math.PI) / 180 },
+        toward: options.toward ?? 'front',
+      },
+    },
+  });
+}
+
+/**
+ * F48 (CR4d): a profile swept along a path on the XY plane: `line` from (0, 0) to (200, 0); `bend`
+ * that line then a tangent arc of R `bendRadius` (300) turning 60° left. A hat 30 high, 40 wide
+ * with 15 mm flanges and R 3 bends by default; a second sweep `closure` along the same path when
+ * given (a flipped hat, or a flat plate), each its own body.
+ */
+export function f48ProfileSweep(
+  options: {
+    path?: 'line' | 'bend';
+    bendRadius?: number;
+    kind?: CadProfileKind;
+    radius?: number;
+    up?: 'normal' | 'inPlane' | Vec3;
+    flip?: boolean;
+    closure?: 'hat' | 'flat';
+  } = {},
+): CadDocument {
+  const r = options.bendRadius ?? 300;
+  const a = Math.PI / 3;
+  const pts: Record<string, [number, number]> = {
+    p0: [0, 0],
+    p1: [200, 0],
+    ...(options.path === 'bend'
+      ? { c: [200, r], p2: [200 + r * Math.sin(a), r - r * Math.cos(a)] }
+      : {}),
+  };
+  const path: CadSketch = {
+    id: 'member-path',
+    name: 'Member path',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(pts),
+      { type: 'line', id: 'l0', start: 'p0', end: 'p1' },
+      ...(options.path === 'bend'
+        ? [
+            {
+              type: 'arc' as const,
+              id: 'a0',
+              center: 'c',
+              start: 'p1',
+              end: 'p2',
+              clockwise: false,
+            },
+          ]
+        : []),
+    ],
+    constraints: [],
+    solved: pts,
+  };
+  const elements = options.path === 'bend' ? ['l0', 'a0'] : ['l0'];
+  const sweep = (
+    id: string,
+    kind: CadProfileKind,
+    flip: boolean,
+  ): CadDocument['features'][number] => ({
+    id,
+    name: id,
+    type: 'profileSweep',
+    inputFeatureIds: [],
+    args: {
+      path: { sketchId: 'member-path', elements },
+      profile: {
+        kind,
+        height: mm(30),
+        width: mm(40),
+        flange: mm(15),
+        radius: mm(options.radius ?? 3),
+      },
+      up: options.up ?? 'normal',
+      flip,
+    },
+  });
+  const features = [sweep('member', options.kind ?? 'hat', options.flip ?? false)];
+  const bodies = [body('member-body', 'member')];
+  if (options.closure) {
+    features.push(sweep('closure', options.closure, true));
+    bodies.push(body('closure-body', 'closure'));
+  }
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [path],
+    features,
+    bodies,
+  });
+}
+
+/**
+ * F49 (CR4e): the F48 hat on a flat closure plate (or, `to: 'top'`, on a flipped hat whose top
+ * lies 30 mm below), with a spot weld row from the hat's left flange (y −35…−23, z = 0, x 0…200)
+ * to the plate (or the other hat's top). Pitch 40, 10 from the ends, 2.1 mm the largest gap by
+ * default; `both` adds a row on the right flange.
+ */
+export function f49SpotWelds(
+  options: {
+    pitchMm?: number;
+    endDistanceMm?: number;
+    maxGapMm?: number;
+    to?: 'plate' | 'top';
+    both?: boolean;
+  } = {},
+): CadDocument {
+  let doc = f48ProfileSweep({ closure: options.to === 'top' ? 'hat' : 'flat' });
+  const on = (featureId: string, side: string, centroid: [number, number, number]) =>
+    faceRef(featureId, [`side:p:${side}`, 'path:e:l0'], centroid, 200);
+  const row = (id: string, side: 'l' | 'r'): CadSpotWeld => ({
+    id,
+    name: `Spot welds ${side === 'l' ? 'left' : 'right'}`,
+    flanges: [
+      {
+        bodyId: 'member-body',
+        face: on('member', `flange:${side}`, [100, side === 'l' ? -29 : 29, 0]),
+      },
+      {
+        bodyId: 'closure-body',
+        face:
+          options.to === 'top'
+            ? on('closure', 'top', [100, 0, -30])
+            : on('closure', 'plate', [100, 0, 0]),
+      },
+    ],
+    pitchMm: options.pitchMm ?? cadSpotWeldLimits.defaultPitchMm,
+    endDistanceMm: options.endDistanceMm ?? cadSpotWeldLimits.defaultEndDistanceMm,
+    maxGapMm: options.maxGapMm ?? cadSpotWeldLimits.defaultMaxGapMm,
+  });
+  doc = applyCadOperation(doc, { type: 'setSpotWeld', weld: row('welds-l', 'l') });
+  if (options.both)
+    doc = applyCadOperation(doc, { type: 'setSpotWeld', weld: row('welds-r', 'r') });
+  return doc;
+}
+
+/**
+ * F23 (CR2c): the F22 panel with a press line along the open line or the closed square: the
+ * `side` pieces moved `depth` mm `toward` the panel's normal side, the step rounded by `radius`.
+ */
+export function f23PressLine(
+  kind: 'open' | 'closed',
+  options: {
+    side?: 'left' | 'right' | 'inside' | 'outside';
+    depth?: number;
+    radius?: number;
+    toward?: 'front' | 'back';
+  } = {},
+): CadDocument {
+  const doc = f22Split(kind, false);
+  const cutter = doc.sketches.find((s) => s.id === 'cutter')!;
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'press-placement',
+    feature: {
+      id: 'press',
+      name: 'Press line',
+      type: 'pressLine',
+      inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+      args: {
+        tool: {
+          sketchId: 'cutter',
+          elements: cutter.entities.filter((e) => e.type === 'line').map((e) => e.id),
+        },
+        side: options.side ?? (kind === 'closed' ? 'inside' : 'left'),
+        depth: mm(options.depth ?? 2),
+        toward: options.toward ?? 'front',
+        radius: mm(options.radius ?? 0.5),
+      },
+    },
+  });
+}
+
+/**
+ * F24 (CR2d): the F22 panel with a wheel arch: a half disc of radius 15 cut from its lower
+ * border at x = 50, then a flare along an arc of radius 30 round it, the arch moved `height`
+ * mm out along the panel's normal, `continuity` to the panel along the arc.
+ */
+export function f24Flare(
+  options: { height?: number; continuity?: 'G1' | 'G2'; flare?: boolean } = {},
+): CadDocument {
+  const base = f22Split('open', false);
+  const deg = (a: number): [number, number] => [
+    50 + 30 * Math.cos((a * Math.PI) / 180),
+    -60 + 30 * Math.sin((a * Math.PI) / 180),
+  ];
+  const wheelPoints: Record<string, [number, number]> = {
+    c: [50, -60],
+    w0: [65, -60],
+    w1: [35, -60],
+  };
+  const wheel: CadSketch = {
+    id: 'wheel',
+    name: 'Wheel',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(wheelPoints),
+      { type: 'arc', id: 'a0', center: 'c', start: 'w0', end: 'w1', clockwise: false },
+      { type: 'arc', id: 'a1', center: 'c', start: 'w1', end: 'w0', clockwise: false },
+    ],
+    constraints: [],
+    solved: wheelPoints,
+  };
+  const flarePoints: Record<string, [number, number]> = {
+    c: [50, -60],
+    f0: deg(-10),
+    f1: deg(190),
+  };
+  const line: CadSketch = {
+    id: 'flare-line',
+    name: 'Flare line',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(flarePoints),
+      { type: 'arc', id: 'f', center: 'c', start: 'f0', end: 'f1', clockwise: false },
+    ],
+    constraints: [],
+    solved: flarePoints,
+  };
+  let doc = applyCadOperation(base, {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [wheel, line],
+    features: [],
+    bodies: [],
+  });
+  doc = applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'arch-placement',
+    feature: {
+      id: 'arch',
+      name: 'Wheel arch',
+      type: 'trim',
+      inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+      args: { tool: { sketchId: 'wheel', elements: ['a0', 'a1'] }, keep: 'outside' },
+    },
+  });
+  if (options.flare === false) return doc;
+  const on = doc.bodies[0]!.resultFeatureId;
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'panel-body',
+    placementFeatureId: 'flare-placement',
+    feature: {
+      id: 'flare',
+      name: 'Flare',
+      type: 'flare',
+      inputFeatureIds: [on],
+      args: {
+        tool: { sketchId: 'flare-line', elements: ['f'] },
+        arch: edgeRef(
+          on,
+          ['trim:arch:outside', 'side:e:l'],
+          ['sketch:wheel', 'cut:e:a0'],
+          [50, -45, 0],
+          30,
+        ),
+        height: mm(options.height ?? 10),
+        continuity: options.continuity ?? 'G1',
+      },
+    },
+  });
+}
+
+/**
+ * F25 (CR2e, B1): the left half of a three-door hatchback's skin at a real size (4205 mm long,
+ * x forward from the tail, y across with the left side at y < 0, z up), the sample B1 is
+ * accepted on (docs/cad/car-design.md, CR2の分け方). Parameters `wheelbase` (2400) and `roof`
+ * (1335, the cabin's crown height) drive every sketch:
+ *
+ * - The skin is a curve network (CR1d): 7 sections (YZ, from the crown at y = 0 down to the
+ *   rocker) crossed by the centreline (XZ), the shoulder (XY at z = 900) and the rocker (XY at
+ *   z = 200). Every curve is a cubic spline through points (`splineThrough`), and each section
+ *   and line pass through the same points where they meet, so they still meet when a parameter
+ *   moves them: the points move linearly with the parameters, and so do the poles (each pole
+ *   coordinate is an affine length of one parameter, fixed by a `fix` constraint).
+ * - Lengthwise, the tail stays, the sections between the axles stretch with the wheelbase and
+ *   those ahead of the front axle move with it. The roof raises the cabin's crowns.
+ * - Wheel arches of R 330 trimmed out at both axles, the rear and front arches flared 25 mm out
+ *   along R 390 (CR2d, G2), a press line 2 mm deep with R 0.5 rounds along z = 760 (CR2c), and an
+ *   inner panel 20 mm inside the skin (CR2b, its own body).
+ *
+ * `upTo` stops after a stage, for the tests.
+ */
+export function f25B1Car(
+  options: {
+    upTo?: 'skin' | 'arches' | 'flares' | 'press';
+    flareContinuity?: 'G1' | 'G2';
+    wheelbase?: number;
+    roof?: number;
+  } = {},
+): CadDocument {
+  const base = { wheelbase: 2400, roof: 1335 };
+  const at = { wheelbase: options.wheelbase ?? base.wheelbase, roof: options.roof ?? base.roof };
+  const rearAxle = 955;
+  // x of a section at x0 (wheelbase 2400): affine in the wheelbase.
+  const xOf = (x0: number): [number, number] => {
+    if (x0 <= rearAxle) return [0, x0];
+    if (x0 < rearAxle + base.wheelbase) {
+      const s = (x0 - rearAxle) / base.wheelbase;
+      return [s, rearAxle];
+    }
+    return [1, x0 - base.wheelbase];
+  };
+  /** An affine length of one parameter (`scale` × it + `offset`), or a literal. */
+  const affine = (parameterId: 'wheelbase' | 'roof', scale: number, offset: number): Length =>
+    Math.abs(scale) < 1e-12 ? mm(offset) : { affine: { parameterId, scale, offsetMm: offset } };
+  // Sections: x0, half width, crown height and how much of the roof's change it takes.
+  const rows = [
+    { x0: 0, w: 700, top: 980, k: 0 },
+    { x0: 450, w: 760, top: 1120, k: 0.5 },
+    { x0: 1300, w: 800, top: 1315, k: 1 },
+    { x0: 2000, w: 810, top: 1335, k: 1 },
+    { x0: 2700, w: 805, top: 1060, k: 0.3 },
+    { x0: 3500, w: 780, top: 930, k: 0 },
+    { x0: 4205, w: 720, top: 860, k: 0 },
+  ];
+  const shoulder = 900;
+  const rocker = 200;
+  const crown = (r: (typeof rows)[number], roof: number) => r.top + r.k * (roof - base.roof);
+  // Section points (y, z) from the crown down to the rocker, at a roof height.
+  const sectionPoints = (r: (typeof rows)[number], roof: number): [number, number][] => {
+    const z = crown(r, roof);
+    return [
+      [0, z],
+      [-0.55 * r.w, 0.9 * z + 0.1 * shoulder],
+      [-r.w, shoulder],
+      [-r.w, 550],
+      [-0.92 * r.w, rocker],
+    ];
+  };
+  /**
+   * A spline sketch through points that move linearly with one parameter per coordinate: its
+   * poles at two values of each give every pole's coordinates as affine lengths.
+   */
+  const splineSketch = (
+    id: string,
+    name: string,
+    plane: CadSketch['plane'],
+    points: (p: { wheelbase: number; roof: number }) => [number, number][],
+    driver: ['wheelbase' | 'roof' | null, 'wheelbase' | 'roof' | null],
+  ): CadSketch => {
+    const poles0 = splineThrough(points(base), 3, false);
+    const bumped = (which: 'wheelbase' | 'roof') =>
+      splineThrough(points({ ...base, [which]: base[which] + 1 }), 3, false);
+    const slopes = driver.map((d) => (d ? bumped(d) : poles0));
+    const solved: Record<string, [number, number]> = {};
+    const constraints: CadSketchConstraint[] = [];
+    const now = splineThrough(points(at), 3, false);
+    poles0.forEach((p, i) => {
+      const coord = (axis: 0 | 1): Length => {
+        const d = driver[axis];
+        const slope = d ? slopes[axis]![i]![axis] - p[axis] : 0;
+        return d ? affine(d, slope, p[axis] - slope * base[d]) : mm(p[axis]);
+      };
+      solved[`p${i}`] = now[i]!;
+      constraints.push({ id: `f${i}`, type: 'fix', point: `p${i}`, at: [coord(0), coord(1)] });
+    });
+    return {
+      id,
+      name,
+      plane,
+      entities: [
+        ...Object.keys(solved).map((p) => ({ type: 'point' as const, id: p })),
+        { type: 'spline', id: 'c', poles: Object.keys(solved), degree: 3 },
+      ],
+      constraints,
+      solved,
+    };
+  };
+  const YZ: Quaternion = [0.5, 0.5, 0.5, 0.5];
+  const XZ: Quaternion = [Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+  const XY = identityQuaternion();
+  const sections = rows.map((r, j) => {
+    const [s, o] = xOf(r.x0);
+    return splineSketch(
+      `section-${j}`,
+      `Section ${j + 1}`,
+      { origin: [affine('wheelbase', s, o), mm(0), mm(0)], orientation: YZ },
+      (p) => sectionPoints(r, p.roof),
+      [null, 'roof'],
+    );
+  });
+  const xAt = (r: (typeof rows)[number], wheelbase: number) => {
+    const [s, o] = xOf(r.x0);
+    return s * wheelbase + o;
+  };
+  const lines = [
+    splineSketch(
+      'centreline',
+      'Centreline',
+      { origin: position(0, 0, 0), orientation: XZ },
+      (p) => rows.map((r) => [xAt(r, p.wheelbase), crown(r, p.roof)]),
+      ['wheelbase', 'roof'],
+    ),
+    splineSketch(
+      'shoulder',
+      'Shoulder',
+      { origin: position(0, 0, shoulder), orientation: XY },
+      (p) => rows.map((r) => [xAt(r, p.wheelbase), -r.w]),
+      ['wheelbase', null],
+    ),
+    splineSketch(
+      'rocker',
+      'Rocker',
+      { origin: position(0, 0, rocker), orientation: XY },
+      (p) => rows.map((r) => [xAt(r, p.wheelbase), -0.92 * r.w]),
+      ['wheelbase', null],
+    ),
+  ];
+  // Side sketches (XZ: u → x, v → z), carried along y onto the left side.
+  const axleX = (front: boolean): Length =>
+    front ? affine('wheelbase', 1, rearAxle) : mm(rearAxle);
+  // A circle (two arcs) or an arc round an axle at z = 300: the sketch's origin is the axle,
+  // so it moves with the wheelbase and the points stay where they are in it. The sketch is the
+  // XZ plane turned so its x runs down: an arc's angles (from straight down) then never cross
+  // a circle's start, which would split the arch on the skin in two.
+  const down: Quaternion = [0.5, 0.5, -0.5, 0.5];
+  const circleSketch = (
+    id: string,
+    name: string,
+    front: boolean,
+    r: number,
+    arc?: [number, number],
+  ): CadSketch => {
+    // `deg` from +x towards +z, as seen on the side.
+    const pt = (deg: number): [number, number] => [
+      -r * Math.sin((deg * Math.PI) / 180),
+      r * Math.cos((deg * Math.PI) / 180),
+    ];
+    const [a0, a1] = arc ?? [-20, 200];
+    const solved: Record<string, [number, number]> = { c: [0, 0], s: pt(a0), e: pt(a1) };
+    return {
+      id,
+      name,
+      plane: { origin: [axleX(front), mm(0), mm(300)], orientation: down },
+      entities: [
+        ...sketchPoints(solved),
+        ...(arc
+          ? [{ type: 'arc' as const, id: 'a', center: 'c', start: 's', end: 'e', clockwise: false }]
+          : [
+              {
+                type: 'arc' as const,
+                id: 'a0',
+                center: 'c',
+                start: 's',
+                end: 'e',
+                clockwise: false,
+              },
+              {
+                type: 'arc' as const,
+                id: 'a1',
+                center: 'c',
+                start: 'e',
+                end: 's',
+                clockwise: false,
+              },
+            ]),
+      ],
+      constraints: [],
+      solved,
+    };
+  };
+  const wheels = [
+    circleSketch('rear-wheel', 'Rear wheel', false, 330),
+    circleSketch('front-wheel', 'Front wheel', true, 330),
+  ];
+  const flareLines = [
+    circleSketch('rear-flare-line', 'Rear flare line', false, 390, [-20, 200]),
+    circleSketch('front-flare-line', 'Front flare line', true, 390, [-20, 200]),
+  ];
+  const pressPoints: Record<string, [number, number]> = {
+    a: [-100, 760],
+    b: [4305 + at.wheelbase - base.wheelbase, 760],
+  };
+  const press: CadSketch = {
+    id: 'press-line',
+    name: 'Press line',
+    plane: { origin: position(0, 0, 0), orientation: XZ },
+    entities: [
+      { type: 'point', id: 'a' },
+      { type: 'point', id: 'b' },
+      { type: 'line', id: 'l', start: 'a', end: 'b' },
+    ],
+    constraints: [
+      { id: 'fa', type: 'fix', point: 'a', at: [mm(-100), mm(760)] },
+      {
+        id: 'fb',
+        type: 'fix',
+        point: 'b',
+        at: [affine('wheelbase', 1, 4305 - base.wheelbase), mm(760)],
+      },
+    ],
+    solved: pressPoints,
+  };
+  // A car is large: the large tolerance set (results within 0.01 mm), as for buildings.
+  const empty = f01Empty();
+  empty.kernelProfile = { ...empty.kernelProfile, ...cadToleranceSets.large };
+  let doc = applyCadOperation(empty, {
+    type: 'insertFeatures',
+    parameters: [
+      { id: 'wheelbase', name: 'Wheelbase', type: 'length', value: at.wheelbase },
+      { id: 'roof', name: 'Roof height', type: 'length', value: at.roof },
+    ],
+    sketches: [...sections, ...lines, ...wheels, ...flareLines, press],
+    features: [
+      {
+        id: 'skin',
+        name: 'Skin',
+        type: 'curveNetwork',
+        inputFeatureIds: [],
+        args: {
+          u: sections.map((s) => ({ sketchId: s.id, element: 'c' })),
+          v: lines.map((s) => ({ sketchId: s.id, element: 'c' })),
+          toleranceMm: 0.1,
+        },
+      },
+    ],
+    bodies: [body('skin-body', 'skin')],
+  });
+  if (options.upTo === 'skin') return doc;
+  const detail = (feature: CadFeature) => {
+    doc = applyCadOperation(doc, {
+      type: 'detailBody',
+      bodyId: 'skin-body',
+      placementFeatureId: `${feature.id}-placement`,
+      feature: { ...feature, inputFeatureIds: [doc.bodies[0]!.resultFeatureId] } as never,
+    });
+  };
+  for (const w of wheels)
+    detail({
+      id: w.id === 'rear-wheel' ? 'rear-arch' : 'front-arch',
+      name: w.name.replace('wheel', 'arch'),
+      type: 'trim',
+      inputFeatureIds: [''],
+      args: { tool: { sketchId: w.id, elements: ['a0', 'a1'] }, keep: 'outside' },
+    } as CadFeature);
+  if (options.upTo === 'arches') return doc;
+  const skinFace: CadFaceName = ['trim:front-arch:outside', 'trim:rear-arch:outside', 'surface'];
+  for (const [i, end] of (['rear', 'front'] as const).entries()) {
+    const on = doc.bodies[0]!.resultFeatureId;
+    const kept = i ? ['flare:rear-flare'] : [];
+    const axle = rearAxle + (end === 'front' ? at.wheelbase : 0);
+    detail({
+      id: `${end}-flare`,
+      name: `${end === 'rear' ? 'Rear' : 'Front'} flare`,
+      type: 'flare',
+      inputFeatureIds: [''],
+      args: {
+        tool: { sketchId: `${end}-flare-line`, elements: ['a'] },
+        arch: edgeRef(
+          on,
+          [...kept, ...skinFace],
+          [
+            ...kept,
+            ...(end === 'front' ? [] : ['trim:front-arch:outside']),
+            `sketch:${end}-wheel`,
+            'cut:e:a0',
+          ],
+          [axle, -800, 630],
+          1270,
+        ),
+        height: mm(25),
+        continuity: options.flareContinuity ?? 'G2',
+      },
+    } as CadFeature);
+  }
+  if (options.upTo === 'flares') return doc;
+  detail({
+    id: 'press',
+    name: 'Press line',
+    type: 'pressLine',
+    inputFeatureIds: [''],
+    args: {
+      tool: { sketchId: 'press-line', elements: ['l'] },
+      side: 'left',
+      depth: mm(2),
+      toward: 'front',
+      radius: mm(0.5),
+    },
+  } as CadFeature);
+  if (options.upTo === 'press') return doc;
+  // The inner panel: the skin as it comes off the network, 20 mm inside, its own body.
+  return applyCadOperation(doc, {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [],
+    features: [
+      {
+        id: 'inner',
+        name: 'Inner panel',
+        type: 'offsetSurface',
+        inputFeatureIds: [],
+        args: { source: { featureId: 'skin' }, distance: mm(20), side: 'back' },
+      },
+    ],
+    bodies: [body('inner-body', 'inner')],
+  });
+}
+
+const box = (
+  id: string,
+  name: string,
+  size: [number, number, number],
+  at: [number, number, number],
+): CadFeature => ({
+  id,
+  name,
+  type: 'box',
+  inputFeatureIds: [],
+  args: {
+    size: [mm(size[0]), mm(size[1]), mm(size[2])],
+    origin: position(...at),
+    orientation: identityQuaternion(),
+  },
+});
+/**
+ * CR6d: a 100 × 60 × 20 mm block (z 0–20) with a round groove of `radius` along a chain a sketch
+ * draws 30 mm above it: `open` a line across the top (x 10–90 at y 30), `closed` a rectangle (x
+ * 20–80, y 10–50), `missed` a line beside the block. `grid`: a 60 × 40 × 4 mm plate with 3 × 2
+ * spheres of radius 3 (lens cuts) united on its top, 20 mm apart both ways. `steep`: the block
+ * stood up 85° about y (its top face rising 11.4 mm for each 1 mm along x), a line x −18 to −13
+ * at y 30 from a sketch at z 150 crossing only that face. `shaded`: the same with a 7 × 20 × 5 mm
+ * lid at z 130–135 over x −18 to −11 (on a post into the block), under the sketch but above the
+ * low end of the line by more than the line's middle is below the sketch. `far`: `open` moved
+ * 200 m along x, the sketch's origin left at (0, 0, 50).
+ */
+export function cr6dGroove(
+  kind:
+    | 'open'
+    | 'closed'
+    | 'missed'
+    | 'grid'
+    | 'hollow'
+    | 'overhang'
+    | 'steep'
+    | 'shaded'
+    | 'far'
+    | 'ring',
+  radius = 1,
+  options: { groove?: boolean } = {},
+): CadDocument {
+  if (kind === 'grid') {
+    const doc = applyCadOperation(f01Empty(), {
+      type: 'insertFeatures',
+      features: [
+        {
+          id: 'plate',
+          name: 'Lens',
+          type: 'box',
+          inputFeatureIds: [],
+          args: {
+            size: [mm(60), mm(40), mm(4)],
+            origin: position(0, 0, 0),
+            orientation: identityQuaternion(),
+          },
+        },
+        {
+          id: 'bump',
+          name: 'Cut',
+          type: 'sphere',
+          inputFeatureIds: [],
+          args: { radius: mm(3), origin: position(10, 10, 4), orientation: identityQuaternion() },
+        },
+      ],
+      bodies: [body('lens', 'plate'), body('cut', 'bump')],
+    });
+    return applyCadOperation(doc, {
+      type: 'patternBodies',
+      targetId: 'lens',
+      toolId: 'cut',
+      mode: 'union',
+      patternFeatureId: 'cuts',
+      placementFeatureId: 'cuts-placement',
+      layout: {
+        type: 'linear',
+        direction: [1, 0, 0],
+        count: { literal: 3 },
+        spacing: mm(20),
+        rows: { direction: [0, 1, 0], count: { literal: 2 }, spacing: mm(20) },
+      },
+    });
+  }
+  const points: Record<string, [number, number]> =
+    kind === 'closed'
+      ? { p0: [20, 10], p1: [80, 10], p2: [80, 50], p3: [20, 50] }
+      : kind === 'open' || kind === 'hollow'
+        ? { p0: [10, 30], p1: [90, 30] }
+        : kind === 'overhang'
+          ? { p0: [20, 30], p1: [80, 30] }
+          : kind === 'steep' || kind === 'shaded'
+            ? { p0: [-18, 30], p1: [-13, 30] }
+            : kind === 'far'
+              ? { p0: [200_010, 30], p1: [200_090, 30] }
+              : kind === 'ring'
+                ? // An open arc of r = 20 round to within 0.004 mm of its start.
+                  {
+                    c: [50, 30],
+                    p0: [50 + 20 * Math.cos(0.0002), 30 + 20 * Math.sin(0.0002)],
+                    p1: [70, 30],
+                  }
+                : { p0: [150, 30], p1: [200, 30] };
+  const entities: CadSketch['entities'] =
+    kind === 'closed'
+      ? [
+          { type: 'line', id: 's0', start: 'p0', end: 'p1' },
+          { type: 'line', id: 's1', start: 'p1', end: 'p2' },
+          { type: 'line', id: 's2', start: 'p2', end: 'p3' },
+          { type: 'line', id: 's3', start: 'p3', end: 'p0' },
+        ]
+      : kind === 'ring'
+        ? [{ type: 'arc', id: 's0', center: 'c', start: 'p0', end: 'p1', clockwise: false }]
+        : [{ type: 'line', id: 's0', start: 'p0', end: 'p1' }];
+  const stitch: CadSketch = {
+    id: 'stitch',
+    name: 'Stitch line',
+    plane: {
+      origin: position(0, 0, kind === 'steep' || kind === 'shaded' ? 150 : 50),
+      orientation: identityQuaternion(),
+    },
+    entities: [...sketchPoints(points), ...entities],
+    constraints: [],
+    solved: points,
+  };
+  let doc = applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [stitch],
+    features:
+      kind === 'overhang'
+        ? [
+            box('slab', 'Slab', [100, 60, 10], [0, 0, 0]),
+            box('post', 'Post', [10, 60, 20], [0, 0, 10]),
+            box('lid', 'Lid', [40, 60, 10], [0, 0, 20]),
+            {
+              id: 'block',
+              name: 'Cushion',
+              type: 'boolean',
+              inputFeatureIds: ['slab', 'post', 'lid'],
+              args: { mode: 'union' },
+            },
+          ]
+        : kind === 'steep' || kind === 'shaded'
+          ? [
+              {
+                id: kind === 'shaded' ? 'slope' : 'block',
+                name: 'Cushion',
+                type: 'box',
+                inputFeatureIds: [],
+                args: {
+                  size: [mm(100), mm(60), mm(20)],
+                  origin: position(0, 0, 0),
+                  orientation: [
+                    0,
+                    -Math.sin((42.5 * Math.PI) / 180),
+                    0,
+                    Math.cos((42.5 * Math.PI) / 180),
+                  ] as Quaternion,
+                },
+              },
+              ...(kind === 'shaded'
+                ? ([
+                    box('lid', 'Lid', [7, 20, 5], [-18, 20, 130]),
+                    box('post', 'Post', [1, 20, 55], [-12, 20, 80]),
+                    {
+                      id: 'block',
+                      name: 'Cushion',
+                      type: 'boolean',
+                      inputFeatureIds: ['slope', 'post', 'lid'],
+                      args: { mode: 'union' },
+                    },
+                  ] as CadFeature[])
+                : []),
+            ]
+          : [box('block', 'Cushion', [100, 60, 20], [kind === 'far' ? 200_000 : 0, 0, 0])],
+    bodies: [body('cushion', 'block')],
+  });
+  // `groove: false`: the block and its sketch only, for a groove made in the screen.
+  if (options.groove === false) return doc;
+  if (kind === 'hollow')
+    doc = applyCadOperation(doc, {
+      type: 'detailBody',
+      bodyId: 'cushion',
+      placementFeatureId: 'hollow-placement',
+      feature: {
+        id: 'hollow',
+        name: 'Hollow',
+        type: 'shell',
+        inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+        args: { openFaces: [], thickness: mm(2), side: 'inside' },
+      },
+    });
+  return applyCadOperation(doc, {
+    type: 'detailBody',
+    bodyId: 'cushion',
+    placementFeatureId: 'groove-placement',
+    feature: {
+      id: 'groove',
+      name: 'Groove',
+      type: 'groove',
+      inputFeatureIds: [doc.bodies[0]!.resultFeatureId],
+      args: {
+        tool: { sketchId: 'stitch', elements: entities.map((e) => e.id) },
+        radius: mm(radius),
+      },
+    },
   });
 }

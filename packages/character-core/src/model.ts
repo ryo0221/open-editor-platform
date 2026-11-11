@@ -24,10 +24,11 @@ export interface CharacterAssetRef {
   byteLength: number;
   mediaType: string;
 }
-export type CharacterAssetKind = 'mesh-epm' | 'texture-png' | 'texture-jpeg';
+export type CharacterAssetKind = 'mesh-epm' | 'mesh-mres' | 'texture-png' | 'texture-jpeg';
 export const characterAssetMediaTypes: Readonly<Record<CharacterAssetKind, string>> = Object.freeze(
   {
     'mesh-epm': 'model/x-editor-platform-mesh',
+    'mesh-mres': 'model/x-editor-platform-multires',
     'texture-png': 'image/png',
     'texture-jpeg': 'image/jpeg',
   },
@@ -62,6 +63,21 @@ export interface CharacterPart {
    * asset stays the cage either way.
    */
   subdivision?: CharacterSubdivision;
+  /**
+   * C7a: sculpted detail on the cage subdivided `level` times (geometry-mesh's multires). The
+   * cage asset stays the low-poly mesh that is skinned and exported.
+   */
+  multires?: CharacterMultires;
+}
+/**
+ * A part's multires: the displacement of every corner grid at `level`, in `mesh-mres` chunk
+ * assets in corner order, made for the cage faces whose hash is `topology`.
+ */
+export interface CharacterMultires {
+  level: number;
+  /** `multiresTopology` of the part's mesh: an edit that changes its faces is refused. */
+  topology: string;
+  chunks: string[];
 }
 export interface CharacterSubdivision {
   levels: number;
@@ -125,22 +141,30 @@ export interface CharacterMorph {
   weight: number;
 }
 
-/** A value a CAD joint reads: radians for `angle`, millimetres otherwise (cad-core's keys). */
-export type CharacterJointValueKey = 'angle' | 'distance' | 'u' | 'v';
+/**
+ * A value a CAD joint reads: radians for an angle (`angle`, and `angle2`/`angle3` of the MR1
+ * spherical and universal joints), millimetres otherwise (cad-core's keys).
+ */
+export type CharacterJointValueKey = 'angle' | 'angle2' | 'angle3' | 'distance' | 'u' | 'v';
+export const isCharacterJointAngle = (key: CharacterJointValueKey) =>
+  key === 'angle' || key === 'angle2' || key === 'angle3';
 export const characterJointValueKeys: readonly CharacterJointValueKey[] = Object.freeze([
   'angle',
+  'angle2',
+  'angle3',
   'distance',
   'u',
   'v',
 ]);
 /**
- * A CAD or BIM version shown with the character (C2b): fixed by version and content hash, as
+ * A CAD (C2b) or BIM (C8p) version shown with the character: fixed by version and content hash, as
  * a building places a part. Its shape is the Host's to evaluate; the document never holds it.
  */
 export interface CharacterProp {
   id: string;
   name: string;
-  source: { kind: 'cad'; artifactId: string; versionId: string; contentHash: string };
+  /** C8p: a BIM version (a building) too; its elements do not move, so it has no joints. */
+  source: { kind: 'cad' | 'bim'; artifactId: string; versionId: string; contentHash: string };
   /** Where the version's origin sits in the character's space (no scale: CAD is in mm too). */
   placement: { translation: Vec3; rotation: Quat };
   visible: boolean;
@@ -154,12 +178,25 @@ export type CharacterTrackTarget =
    * One value of a joint of a prop's assembly (`joint` is the CAD joint ID). The version is not
    * read here, so a joint it does not have is reported by the Host when it is shown.
    */
-  | { kind: 'prop-joint'; id: string; joint: string; property: CharacterJointValueKey };
+  | { kind: 'prop-joint'; id: string; joint: string; property: CharacterJointValueKey }
+  /** MR4: a prop's placement (flying, landing), interpolated as a part's (rotation slerped). */
+  | { kind: 'prop'; id: string; property: 'translation' | 'rotation' }
+  /**
+   * MR7: which candidate joint of a prop's mount (`mount` is the CAD mount ID) places its part.
+   * Keys hold a joint ID with `hold` easing: each from its tick until the next. Before the first
+   * key the version's own choice holds. The version is not read here, like `prop-joint`.
+   */
+  | { kind: 'prop-mount'; id: string; mount: string; property: 'joint' };
+/** What a key holds: a string only in a `prop-mount` track (MR7). */
+export type CharacterKeyValue = number | Vec3 | Quat | string;
 export interface CharacterKey {
   id: string;
   tick: number;
-  /** Vec3 for translation and scale, Quat for rotation, a number for a morph weight. */
-  value: number | Vec3 | Quat;
+  /**
+   * Vec3 for translation and scale, Quat for rotation, a number for a morph weight or a joint
+   * value, a joint ID for a `prop-mount` track (MR7) only.
+   */
+  value: CharacterKeyValue;
   /** From this key to the next, as in Animation (ADR 012). Rotation is slerped. */
   easing: Easing;
 }
@@ -204,7 +241,8 @@ export interface CharacterDocument {
 export const characterLimits = Object.freeze({
   idCodePoints: 128,
   nameCodePoints: 256,
-  assets: 1024,
+  /** C7a: raised from 1,024, since a multires is one asset per chunk. */
+  assets: 4096,
   materials: 256,
   parts: 256,
   materialSlots: 64,
@@ -220,6 +258,12 @@ export const characterLimits = Object.freeze({
   retiredIds: 65_536,
   /** The largest joint distance a key may hold, in mm (a kilometre). */
   jointTravelMm: 1_000_000,
+  /**
+   * WM2: the largest joint angle a key may hold, in radians: a CAD continuous joint's bound
+   * (`cadJointLimits.continuousRad`). A joint that keeps one turn bounds its keys by the limits
+   * its version gives (`CharacterPropJointValue.min`/`max`).
+   */
+  jointTurnRad: 1_000_000,
   actions: 512,
   tracksPerAction: 4096,
   keysPerTrack: 100_000,
@@ -230,6 +274,10 @@ export const characterLimits = Object.freeze({
   assetBytes: 64 * 1024 * 1024,
   /** C3: subdivision levels of a part (geometry-mesh's `subdivisionLimits.levels`). */
   subdivisionLevels: 4,
+  /** C7a: multires levels, and top-level vertices in one part and in the whole document. */
+  multiresLevels: 7,
+  multiresVertices: 2_100_000,
+  multiresDocumentVertices: 4_200_000,
   /** C3: the distinct asset bytes the Undo history may keep before its oldest entries go. */
   historyAssetBytes: 512 * 1024 * 1024,
 });

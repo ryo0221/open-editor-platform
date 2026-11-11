@@ -29,6 +29,7 @@ import { CreativeCanvas } from './canvas';
 import { CreativeProject } from './project';
 import { CreativeNotesField } from './notes-field';
 import type { CreativeSourceCard } from './types';
+import { useCreativeNavigationState, type CreativeNavigationState } from './navigation-state';
 import './host.css';
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -211,11 +212,13 @@ export function CreativeHost<T>({
   returnToScene,
   worldContext,
   onActiveItem,
+  onNavigationStateChange,
   canRead = () => true,
 }: {
   project: CreativeProject<T>;
   worldContext?: ReactNode | ((activeItemId: string) => ReactNode);
   onActiveItem?(itemId: string): void;
+  onNavigationStateChange?(state: CreativeNavigationState): void;
   generation?: CreativeLayerConnection;
   initialItemId?: string;
   focusArtwork?: boolean;
@@ -332,6 +335,8 @@ export function CreativeHost<T>({
     () => 0,
   );
   const dirty =
+    !!name ||
+    !!description ||
     !!generation?.world?.pending ||
     project.mappingDirty ||
     project.source.snapshot.dirty ||
@@ -339,6 +344,10 @@ export function CreativeHost<T>({
     !!inputState.dirty ||
     !!inputState.composing ||
     !!inputState.settling;
+  useCreativeNavigationState(
+    { dirty, busy: busy || project.saving || !!generation?.world?.pending },
+    onNavigationStateChange,
+  );
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
       if (dirty) {

@@ -25,14 +25,46 @@ import {
   f16Sketch,
   f16Spline,
   f17Sheets,
+  f20SheetFillet,
+  f21OffsetSurface,
+  f22Split,
+  cr6dGroove,
+  lampFixture,
+  f59Boxes,
+  f59SeatBodies,
+  f60Sizes,
+  f60Wheel,
+  f61Mirror,
+  f62Sizes,
+  f62Steering,
+  lampSizes,
+  f26Panel,
+  f27Windows,
+  f23PressLine,
+  f24Flare,
+  f47Flange,
+  f48ProfileSweep,
+  f49SpotWelds,
+  f29Biw,
+  f25B1Car,
+  bodyPartContent,
+  withMirrorCopy,
+  cadPanelGapDefaultMm,
+  f28B2Car,
+  f28Outlines,
   f17Surfaces,
   edgeRef,
   f17Boundaries,
   f17HyparArea,
   f17LoftReference,
   f18Hood,
+  f19Network,
+  f19NetworkArea,
+  f19NetworkSphere,
   f18Seams,
   cadContinuity,
+  cadGapFlush,
+  gapFlushReport,
   continuityReport,
   f18HoodArea,
   f18Sheets,
@@ -66,7 +98,14 @@ import {
   identityQuaternion,
   mm,
   position,
+  pmiAssetProblem,
+  cadPmiItemStates,
+  cadPmiTrackedIndex,
   type CadDocument,
+  type Vec3,
+  type CadPmiAsset,
+  type CadPmiItem,
+  type CadPmiTarget,
   type CadTopoName,
   type CadBodyEvaluation,
   type CadEvaluation,
@@ -78,7 +117,21 @@ import { evaluateGeometry } from '@editor-platform/geometry-kernel-occt';
 import { checkClosedMesh, stepReport, writeStl } from './formats';
 import { CadEvaluationCancelled, evaluateCad, FeatureCache, PlacementCache } from './evaluator';
 import { createKernelHost, kernelLoadMarks, loadVerifiedBuild } from './host';
-import type { CadMesh, CadWorkerRequest, CadWorkerResponse } from './protocol';
+import type {
+  CadFaceDistanceQuery,
+  CadMesh,
+  CadWorkerRequest,
+  CadWorkerResponse,
+} from './protocol';
+import { writtenTolerance, type CadStepImportOptions } from './step-import';
+import {
+  distinctDatums,
+  pmiDimensionTypes,
+  pmiToleranceTypes,
+  readPmiJson,
+  type PmiTargetJson,
+} from './step-pmi';
+import { edgeGapFlush } from './gap-flush';
 import { cadKernelBuild, cadKernelPrevious } from '../../../scripts/cad-kernel/build.mjs';
 
 /** A body evaluation read as a solid's (the tests check solids unless they say otherwise). */
@@ -2240,6 +2293,38 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
       expect(r.g2.max).toBeGreaterThan(cadContinuity.g2Relative);
       expect(r.g2.max).toBeLessThan(0.02);
     }
+    // CR1b (docs/cad/car-design.md, CR1の分け方): the same crown filled G2 to both panels
+    // meets them with their curvature: the sewn seams pass the G2 check (TS-1475, ST-243).
+    const g2Hood = f18Hood('sew');
+    const crown = g2Hood.features.find((x) => x.id === 'crown-fill')!;
+    if (crown.type !== 'fill') throw new Error('fixture');
+    crown.args.boundary[1]!.continuity = 'G2';
+    crown.args.boundary[3]!.continuity = 'G2';
+    for (const panel of ['left', 'right']) {
+      const r = await report(
+        `cr1b-hood-${panel}`,
+        g2Hood,
+        'left',
+        sortedNames([`sew:crown-placement/surface`, `sew:${panel}-placement/surface`]).join(' | '),
+      );
+      expect(r).toMatchObject({ level: 'G2', g0: { pass: true }, g1: { pass: true } });
+      // About 0.35% apart (the G1 crown above is about 1.5%).
+      expect(r.g2.max).toBeLessThan(cadContinuity.g2Relative);
+    }
+    // A G2 side beside the ruled cone asks the plate for no curvature across the rim, which it
+    // cannot close the dome with: refused on the G2 sides only, the G1 sides kept.
+    const dome = f17Boundaries('dome');
+    const cap = dome.features.find((x) => x.id === 'cap')!;
+    if (cap.type !== 'fill') throw new Error('fixture');
+    cap.args.boundary.forEach((x, i) => (x.continuity = i % 2 ? 'G2' : 'G1'));
+    expect(await evaluate('cr1b-dome-g2', dome)).toMatchObject({
+      evaluation: {
+        status: 'error',
+        code: 'fill-g2-unreached',
+        featureId: 'cap',
+        failedPaths: [1, 3].map((i) => ['boundary', i, 'continuity']),
+      },
+    });
     // A box's edge is a crease: only G0.
     const [box] = await meshesOf('r2a4-box-mesh', f02Plate());
     const crease = edgeNames(box).find((n) => n === 'side:+u | side:+v')!;
@@ -2278,7 +2363,11 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
   const analysed = async (
     id: string,
     doc: CadDocument,
-    extra: { curvature?: true; comb?: { bodyId: string; edge: number } },
+    extra: {
+      curvature?: true;
+      comb?: { bodyId: string; edge: number };
+      gapFlush?: { a: { bodyId: string; edge: number }; b: { bodyId: string; edge: number } };
+    },
   ) => {
     const document = pinned(doc);
     await handle({
@@ -2303,6 +2392,1456 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     if (index < 0) throw new Error(`${edge} not in ${JSON.stringify(edgeNames(mesh!))}`);
     return (await analysed(id, doc, { comb: { bodyId, edge: index } })).comb!;
   };
+
+  it('measures the gap and flush between a door and its panel along the facing edges (CR3d)', async () => {
+    // TS-1511, ST-256: the F26 door, 3.5 mm from the panel all round.
+    const gapFlush = async (id: string, doc: CadDocument, door = 's0', skin = 's0') => {
+      const meshes = await meshesOf(`${id}-mesh`, doc);
+      const index = (bodyId: string, name: string) => {
+        const names = edgeNames(meshes.find((m) => m.bodyId === bodyId)!);
+        const i = names.findIndex((n) => n === name);
+        if (i < 0) throw new Error(`${name} not in ${JSON.stringify(names)}`);
+        return i;
+      };
+      return (
+        await analysed(id, doc, {
+          gapFlush: {
+            a: {
+              bodyId: 'door-body',
+              edge: index('door-body', `panel:door:inside/side:e:l | sketch:cutter/cut:e:${door}`),
+            },
+            b: {
+              bodyId: 'panel-body',
+              edge: index('panel-body', `sketch:cutter/cut:e:${skin} | trim:trim:outside/side:e:l`),
+            },
+          },
+        })
+      ).gapFlush!;
+    };
+    const moved = (x: number, z: number) => {
+      const doc = f26Panel();
+      const placement = doc.features.find((f) => f.id === 'door-body-placement')!;
+      if (placement.type === 'transform') placement.args.translation = position(x, 0, z);
+      return doc;
+    };
+    const flat = await gapFlush('cr3d-flat', f26Panel());
+    if (!('samples' in flat)) throw new Error(JSON.stringify(flat));
+    // Every sample along the door's 16.5 mm edge faces the panel's 23.5 mm one.
+    expect(flat.samples).toHaveLength(cadGapFlush.samples);
+    const report = gapFlushReport(flat.samples);
+    expect(report.gap.min).toBeCloseTo(3.5, 6);
+    expect(report.gap.max).toBeCloseTo(3.5, 6);
+    expect(Math.abs(report.flush.max)).toBeLessThan(1e-6);
+    expect(flat.samples[0]!.at[1]).toBeCloseTo(-38.25, 6);
+    expect(flat.samples[0]!.to[1]).toBeCloseTo(-41.75, 6);
+    // Lifted 2 mm, the door stands 2 mm proud or sunk; the gap across stays.
+    const lifted = await gapFlush('cr3d-lifted', moved(0, 2));
+    if (!('samples' in lifted)) throw new Error(JSON.stringify(lifted));
+    const up = gapFlushReport(lifted.samples);
+    expect(up.gap.mean).toBeCloseTo(3.5, 6);
+    expect(Math.abs(up.flush.min)).toBeCloseTo(2, 6);
+    expect(Math.abs(up.flush.max)).toBeCloseTo(2, 6);
+    // Moved 10 mm along the edge, the part past the panel's edge is left out.
+    const slid = await gapFlush('cr3d-slid', moved(10, 0));
+    if (!('samples' in slid)) throw new Error(JSON.stringify(slid));
+    expect(slid.samples.length).toBeLessThan(cadGapFlush.samples);
+    expect(slid.samples.length).toBeGreaterThan(cadGapFlush.samples / 2);
+    expect(gapFlushReport(slid.samples).gap.max).toBeCloseTo(3.5, 6);
+    // Closed borders (Codex on #952): concentric circles 10 and 13.5 mm, the inner one's seam
+    // turned 0.001 rad back, measure all 50 points across the outer one's seam.
+    const kept: { delete(): void }[] = [];
+    const own = <T>(x: T) => (kept.push(x as never), x);
+    const circle = (r: number, turn: number) => {
+      const x = [Math.cos(turn), Math.sin(turn), 0];
+      const ax = own(
+        new oc.gp_Ax2_2(
+          own(new oc.gp_Pnt_3(0, 0, 0)),
+          own(new oc.gp_Dir_4(0, 0, 1)),
+          own(new oc.gp_Dir_4(...x)),
+        ),
+      );
+      return own(own(new oc.BRepBuilderAPI_MakeEdge_8(own(new oc.gp_Circ_2(ax, r)))).Edge());
+    };
+    const inner = circle(10, -0.001);
+    const disc = own(
+      own(
+        new oc.BRepBuilderAPI_MakeFace_15(
+          own(own(new oc.BRepBuilderAPI_MakeWire_2(inner)).Wire()),
+          true,
+        ),
+      ).Face(),
+    );
+    own(new oc.BRepMesh_IncrementalMesh_2(disc, 0.01, false, 0.1, false));
+    const ex = own(
+      new oc.TopExp_Explorer_2(
+        disc,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      ),
+    );
+    const border = own(oc.TopoDS.Edge_1(own(ex.Current())));
+    const rings = edgeGapFlush(oc, own, border, disc, circle(13.5, 0));
+    kept.forEach((x) => x.delete());
+    if (typeof rings === 'string') throw new Error(rings);
+    expect(rings).toHaveLength(cadGapFlush.samples);
+    for (const x of rings) expect(x.gapMm).toBeCloseTo(3.5, 6);
+    // Moved 30 mm, the edges never face each other; one body with itself is refused.
+    expect(await gapFlush('cr3d-apart', moved(30, 0))).toEqual({ code: 'gap-flush-apart' });
+    const doc = f26Panel();
+    const meshes = await meshesOf('cr3d-same-mesh', doc);
+    const door = edgeNames(meshes.find((m) => m.bodyId === 'door-body')!);
+    expect(
+      (
+        await analysed('cr3d-same', doc, {
+          gapFlush: { a: { bodyId: 'door-body', edge: 0 }, b: { bodyId: 'door-body', edge: 1 } },
+        })
+      ).gapFlush,
+    ).toEqual({ code: 'gap-flush-same-body' });
+    expect(
+      (
+        await analysed('cr3d-missing', doc, {
+          gapFlush: {
+            a: { bodyId: 'door-body', edge: door.length },
+            b: { bodyId: 'panel-body', edge: 0 },
+          },
+        })
+      ).gapFlush,
+    ).toEqual({ code: 'gap-flush-edge-missing' });
+  });
+
+  it('spans a curve network by a Gordon surface and refuses curves that miss (CR1d)', async () => {
+    // TS-1479, ST-246: three u arcs and three v arcs of one sphere make one face through them.
+    const result = await evaluate('cr1d-sphere', f19Network());
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result));
+    const roof = result.evaluation.bodies.roof;
+    if (roof?.kind !== 'sheet') throw new Error(JSON.stringify(roof));
+    expect(Math.abs(roof.areaMm2 / f19NetworkArea() - 1)).toBeLessThan(2e-3);
+    expect(roof).toMatchObject({ freeEdges: 4 });
+    const mesh = result.meshes.find((m) => m.bodyId === 'roof')!;
+    expect(faceNames(mesh)).toEqual(['surface']);
+    expect(sortedNames(edgeNames(mesh).filter((_, i) => mesh.topology.edges[i]!.boundary))).toEqual(
+      [
+        'sketch:u0/boundary:e:arc | surface',
+        'sketch:u2/boundary:e:arc | surface',
+        'sketch:v0/boundary:e:arc | surface',
+        'sketch:v2/boundary:e:arc | surface',
+      ],
+    );
+    // Every mesh node (relative to the mesh's origin) lies on the sphere to within the mesh's sag.
+    const { radius } = f19NetworkSphere;
+    const centre = f19NetworkSphere.centre.map((c, a) => c - mesh.origin[a]!);
+    let worst = 0;
+    for (let k = 0; k < mesh.positions.length; k += 3)
+      worst = Math.max(
+        worst,
+        Math.abs(
+          Math.hypot(
+            mesh.positions[k]! - centre[0],
+            mesh.positions[k + 1]! - centre[1],
+            mesh.positions[k + 2]! - centre[2],
+          ) - radius,
+        ),
+      );
+    expect(worst).toBeLessThan(0.05);
+    // A 0.02 mm strip: its long sides lie within four tolerances of each other, yet each border
+    // keeps its own curve's name (CR1d review).
+    const thin = await evaluate('cr1d-thin', f19Network('thin'));
+    if (thin.type !== 'result' || thin.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(thin));
+    const strip = thin.meshes.find((m) => m.bodyId === 'roof')!;
+    expect(
+      sortedNames(edgeNames(strip).filter((_, i) => strip.topology.edges[i]!.boundary)),
+    ).toEqual(['u0', 'u1', 'v0', 'v1'].map((e) => `sketch:strip/boundary:e:${e} | surface`));
+    // The middle v arc 1 mm up misses the u arcs: refused with both curves of the first miss.
+    expect(await evaluate('cr1d-gap', f19Network('gap'))).toMatchObject({
+      evaluation: {
+        status: 'error',
+        code: 'curve-network-gap',
+        featureId: 'net',
+      },
+    });
+  });
+
+  it('offsets a sheet along its normal into a new sheet body, either side (CR2b)', async () => {
+    // TS-1486, ST-248: the line-and-arc wall moved 2 mm each way.
+    const base = (40 + 10 * Math.PI) * 30;
+    const areas: number[] = [];
+    for (const side of ['front', 'back'] as const) {
+      const result = await evaluate(`cr2b-${side}`, f21OffsetSurface(side));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const inner = result.evaluation.bodies['inner-body'];
+      if (inner?.kind !== 'sheet') throw new Error(JSON.stringify(inner));
+      areas.push(inner.areaMm2);
+      // The source stays as it was.
+      expect(result.evaluation.bodies.surface).toMatchObject({ kind: 'sheet' });
+      const mesh = result.meshes.find((m) => m.bodyId === 'inner-body')!;
+      expect(faceNames(mesh)).toEqual(['offset/side:e:l0', 'offset/side:e:a0']);
+      // The source's named borders carry over, so each copy can be referenced (#930).
+      const from = result.meshes.find((m) => m.bodyId === 'surface')!;
+      const copied = edgeNames(from).map((n) =>
+        n!
+          .split(' | ')
+          .map((p) => `offset/${p}`)
+          .join(' | '),
+      );
+      expect(sortedNames(edgeNames(mesh))).toEqual(sortedNames(copied));
+      expect(new Set(edgeNames(mesh)).size).toBe(edgeNames(mesh).length);
+      // The line's part lies 2 mm off the plane y = 0.
+      let off = 0;
+      for (let k = 0; k < mesh.positions.length; k += 3) {
+        const x = mesh.positions[k]! + mesh.origin[0]!;
+        if (x > 1 && x < 39)
+          off = Math.max(off, Math.abs(Math.abs(mesh.positions[k + 1]! + mesh.origin[1]!) - 2));
+      }
+      expect(off).toBeLessThan(1e-6);
+    }
+    // One side's arc is r 22, the other's r 18: π/2 × 2 × 30 each way.
+    expect(areas[0]! + areas[1]!).toBeCloseTo(2 * base, 1);
+    expect(Math.abs(areas[0]! - areas[1]!)).toBeCloseTo(2 * Math.PI * 30, 1);
+    // Past the arc's radius the inner copy would turn inside out.
+    const tooFar = await evaluate(
+      'cr2b-far',
+      f21OffsetSurface(areas[0]! < areas[1]! ? 'front' : 'back', 25),
+    );
+    expect(tooFar).toMatchObject({
+      evaluation: { status: 'error', code: 'offset-failed', featureId: 'inner' },
+    });
+  });
+
+  it('splits a sheet along a sketch chain and keeps every piece by its side (CR2a)', async () => {
+    // TS-1489, ST-249: a 100 × 60 mm panel divided by an open line and by a closed square.
+    const pieces = async (kind: 'open' | 'closed' | 'arc') => {
+      const result = await evaluate(`cr2a-${kind}`, f22Split(kind));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const panel = result.evaluation.bodies['panel-body'];
+      if (panel?.kind !== 'sheet') throw new Error(JSON.stringify(panel));
+      expect(panel.areaMm2).toBeCloseTo(kind === 'arc' ? 12 : 6000, 3);
+      const mesh = result.meshes.find((m) => m.bodyId === 'panel-body')!;
+      const area = new Map<string, number>();
+      mesh.topology.faces.forEach((face, i) =>
+        area.set(faceNames(mesh)[i]!, (area.get(faceNames(mesh)[i]!) ?? 0) + face.area),
+      );
+      return { area, edges: edgeNames(mesh) };
+    };
+    const open = await pieces('open');
+    expect([...open.area.keys()].sort()).toEqual([
+      'split:split:left/side:e:l',
+      'split:split:right/side:e:l',
+    ]);
+    expect(open.area.get('split:split:left/side:e:l')).toBeCloseTo(1800, 3);
+    expect(open.area.get('split:split:right/side:e:l')).toBeCloseTo(4200, 3);
+    // The dividing edge lies between the two pieces and is named by them.
+    expect(open.edges).toContain('split:split:left/side:e:l | split:split:right/side:e:l');
+    const closed = await pieces('closed');
+    expect(closed.area.get('split:split:inside/side:e:l')).toBeCloseTo(400, 3);
+    expect(closed.area.get('split:split:outside/side:e:l')).toBeCloseTo(5600, 3);
+    expect(
+      closed.edges.filter(
+        (n) => n === 'split:split:inside/side:e:l | split:split:outside/side:e:l',
+      ),
+    ).toHaveLength(4);
+    // A 0.2 mm strip across a 1 m circle: the lens inside it is ∫(√(10⁶ − u²) − 999.9) du.
+    const arc = await pieces('arc');
+    const lens = 2 * (0.1 * Math.sqrt(200) - Math.sqrt(200) ** 3 / 6000);
+    expect(arc.area.get('split:split:inside/side:e:l')).toBeCloseTo(lens, 2);
+    expect(arc.area.get('split:split:outside/side:e:l')).toBeCloseTo(12 - lens, 2);
+    expect(await evaluate('cr2a-missed', f22Split('missed'))).toMatchObject({
+      evaluation: { status: 'error', code: 'split-missed', featureId: 'split' },
+    });
+  });
+
+  it('cuts a round groove along a line on the nearest face, and a grid of lens cuts (CR6d)', async () => {
+    // TS-1598, ST-284.
+    const run = async (
+      kind:
+        | 'open'
+        | 'closed'
+        | 'grid'
+        | 'hollow'
+        | 'overhang'
+        | 'steep'
+        | 'shaded'
+        | 'far'
+        | 'ring',
+      radius?: number,
+    ) => {
+      const result = await evaluate(`cr6d-${kind}-${radius}`, cr6dGroove(kind, radius));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const id = kind === 'grid' ? 'lens' : 'cushion';
+      return {
+        volume: solid(result.evaluation.bodies[id]).volumeMm3,
+        names: faceNames(result.meshes.find((m) => m.bodyId === id)!),
+      };
+    };
+    // A half-round of r = 1 along 80 mm of the top face (the bottom face, farther, is left).
+    const open = await run('open');
+    expect(open.volume).toBeCloseTo(120_000 - (Math.PI / 2) * 80, 1);
+    // The groove's wall along s0, and its two ends at the line's points.
+    expect(new Set(open.names.filter((n) => n?.startsWith('groove:groove:0/')))).toEqual(
+      new Set([
+        'groove:groove:0/tube:e:s0',
+        'groove:groove:0/tube:v:p0',
+        'groove:groove:0/tube:v:p1',
+      ]),
+    );
+    expect(open.names).toContain('-z');
+    // 200 m from the sketch's origin along its plane: still only the top face.
+    expect((await run('far')).volume).toBeCloseTo(120_000 - (Math.PI / 2) * 80, 1);
+    // An open arc whose ends are 0.004 mm apart is still grooved all round (126 mm).
+    expect((await run('ring')).volume).toBeCloseTo(
+      120_000 - (Math.PI / 2) * 20 * (2 * Math.PI - 0.0002),
+      1,
+    );
+    // r = 2: four times the section.
+    expect((await run('open', 2)).volume).toBeCloseTo(120_000 - 2 * Math.PI * 80, 1);
+    const closed = await run('closed');
+    // Around a closed 60 × 40 rectangle, 200 mm, a ball of r at each corner: each adds the
+    // quarter of its lower half outside both sides' tubes (π r³ / 6) less where the two tubes
+    // overlap inside the corner (an eighth of a Steinmetz solid, 2 r³ / 3).
+    expect(closed.volume).toBeCloseTo(120_000 - (Math.PI / 2) * 200 - 4 * (Math.PI / 6 - 2 / 3), 1);
+    // Each side and each corner named apart (a reference to one of them can be kept).
+    const sides = closed.names.filter((n): n is string => !!n?.startsWith('groove:groove:'));
+    expect(new Set(sides.map((n) => n.replace(/^groove:groove:\d+\//, '')))).toEqual(
+      new Set(
+        ['s0', 's1', 's2', 's3']
+          .map((e) => `tube:e:${e}`)
+          .concat(['p0', 'p1', 'p2', 'p3'].map((v) => `tube:v:${v}`)),
+      ),
+    );
+    // One face per side and per corner, each name its own.
+    expect(sides.filter((n) => n.includes('tube:e:'))).toHaveLength(4);
+    expect(new Set(sides).size).toBe(sides.length);
+    // A hollow block: only the outer face of its top is grooved, not the inner one under it.
+    const hollow = await run('hollow', 0.5);
+    expect(hollow.volume).toBeCloseTo(120_000 - 96 * 56 * 16 - (Math.PI / 2) * 0.25 * 80, 1);
+    // Under a lid over part of the line: the slab is grooved only where it is in view (x 40–80),
+    // the lid's top over x 20–40.
+    const overhang = await run('overhang');
+    expect(overhang.volume).toBeCloseTo(
+      100 * 60 * 10 + 10 * 60 * 10 + 40 * 60 * 10 - (Math.PI / 2) * (40 + 20),
+      1,
+    );
+    // A line beside the block meets nothing.
+    expect(await evaluate('cr6d-missed', cr6dGroove('missed'))).toMatchObject({
+      evaluation: { status: 'error', code: 'groove-no-hit', featureId: 'groove' },
+    });
+    // Three by two half-spheres of r = 3 on the plate's top.
+    const grid = await run('grid');
+    expect(grid.volume).toBeCloseTo(9_600 + 6 * (2 / 3) * Math.PI * 27, 1);
+    const copyNames = (names: (string | null | undefined)[]) =>
+      [
+        ...new Set(names.filter((n) => n?.startsWith('copy:cuts:')).map((n) => n!.split('/')[0])),
+      ].sort();
+    expect(copyNames(grid.names)).toEqual([
+      'copy:cuts:0',
+      'copy:cuts:0:row1',
+      'copy:cuts:1',
+      'copy:cuts:1:row1',
+      'copy:cuts:2',
+      'copy:cuts:2:row1',
+    ]);
+    // Two along each row: the sphere at (10, 30) is still copy 0 of row 1, and copy 2 is gone.
+    const narrow = structuredClone(cr6dGroove('grid'));
+    const cuts = narrow.features.find((f) => f.id === 'cuts')!;
+    if (cuts.type === 'pattern' && cuts.args.layout.type === 'linear')
+      cuts.args.layout.count = { literal: 2 };
+    const two = await evaluate('cr6d-grid-2', narrow);
+    if (two.type !== 'result' || two.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(two));
+    expect(copyNames(two.meshes.flatMap((m) => faceNames(m)))).toEqual([
+      'copy:cuts:0',
+      'copy:cuts:0:row1',
+      'copy:cuts:1',
+      'copy:cuts:1:row1',
+    ]);
+    // Up a face rising 11.4 mm for each 1 mm across the sketch: the line is kept, 5 mm across and
+    // 5 / cos 85° along the face.
+    const steep = await run('steep');
+    expect(steep.volume).toBeCloseTo(
+      120_000 - (Math.PI / 2) * (5 / Math.cos((85 * Math.PI) / 180)),
+      0,
+    );
+    // A lid over the line's low end, higher than the low end plus the middle's distance to the
+    // sketch: the curtain still reaches the sketch from there, so only the lid's top is grooved.
+    const ungrooved = await evaluate('cr6d-shaded-0', cr6dGroove('shaded', 1, { groove: false }));
+    if (ungrooved.type !== 'result' || ungrooved.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(ungrooved));
+    const shaded = await run('shaded');
+    expect(solid(ungrooved.evaluation.bodies.cushion!).volumeMm3 - shaded.volume).toBeCloseTo(
+      (Math.PI / 2) * 5,
+      1,
+    );
+  }, 120_000);
+
+  it('builds the headlamp and tail lamp samples, the lens thickness from its parameter (CR6e)', async () => {
+    // TS-1800, ST-285 (F57, F58).
+    for (const kind of ['headlamp', 'tail'] as const) {
+      const run = async (lensMm: number) => {
+        const result = await evaluate(`cr6e-${kind}-${lensMm}`, lampFixture(kind, { lensMm }));
+        if (result.type !== 'result' || result.evaluation.status !== 'ok')
+          throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+        return result.evaluation.bodies;
+      };
+      const s = lampSizes[kind];
+      const [depth, width, height] = s.housing;
+      const bodies = await run(3);
+      expect(Object.keys(bodies).sort()).toEqual(
+        ['bulb-body', 'housing', 'inner-lens', 'outer-lens', 'reflector-body'].sort(),
+      );
+      // The housing: a 2.5 mm wall, its front open (about the outer area less the front, × t).
+      const wall = solid(bodies.housing).volumeMm3;
+      const skin = 2 * depth * (width + height) + width * height;
+      expect(wall).toBeGreaterThan(skin * 2.5 * 0.9);
+      expect(wall).toBeLessThan(skin * 2.5 * 1.05);
+      // The reflector: the paraboloid's area from r0 to the rim, 8πf²/3 [(1 + (r/2f)²)^1.5].
+      const reflector = bodies['reflector-body'];
+      if (reflector?.kind !== 'sheet') throw new Error(JSON.stringify(reflector));
+      const f = s.focal;
+      const cap = (r: number) => (1 + (r / (2 * f)) ** 2) ** 1.5;
+      expect(reflector.areaMm2).toBeCloseTo(
+        ((8 * Math.PI * f * f) / 3) * (cap(s.rim) - cap(s.r0)),
+        0,
+      );
+      // The inner lens: its plate and the grid of half-sphere cuts.
+      const c = s.cuts;
+      expect(solid(bodies['inner-lens']).volumeMm3).toBeCloseTo(
+        3 * (width - 20) * (height - 10) + c.count * c.rows * (2 / 3) * Math.PI * c.radius ** 3,
+        0,
+      );
+      // The outer lens: the arc's length × the height × the thickness, from its parameter.
+      const radius = ((width / 2) ** 2 + s.bulge ** 2) / (2 * s.bulge);
+      const arc = 2 * radius * Math.asin(width / 2 / radius);
+      expect(solid(bodies['outer-lens']).volumeMm3).toBeCloseTo(arc * height * 3, -1);
+      const thicker = await run(4);
+      expect(
+        solid(thicker['outer-lens']).volumeMm3 / solid(bodies['outer-lens']).volumeMm3,
+      ).toBeCloseTo(4 / 3, 3);
+    }
+  }, 300_000);
+
+  it('builds the seat’s bodies: frame, shelled pan and back shell, grooved foam (CR6f)', async () => {
+    // TS-1803, ST-286 (F59).
+    const result = await evaluate('cr6f-seat', f59SeatBodies());
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+    const b = result.evaluation.bodies;
+    const vol = (id: string) => solid(b[id]).volumeMm3;
+    const boxVolume = (x: { size: readonly number[] }) => x.size[0]! * x.size[1]! * x.size[2]!;
+    // The frame: two plates and a 12 mm tube across between their outer faces.
+    const plates = boxVolume(f59Boxes.plateLeft) + boxVolume(f59Boxes.plateRight);
+    expect(vol('frame-body')).toBeCloseTo(plates + Math.PI * 144 * (406 - 6), 0);
+    // Two 4 mm half-round stitches along each foam: 380 mm on the cushion, 480 mm on the back.
+    const stitch = (length: number) => 2 * (Math.PI / 2) * 16 * length;
+    expect(vol('cushion')).toBeCloseTo(boxVolume(f59Boxes.cushion) - stitch(380), 0);
+    expect(vol('back')).toBeCloseTo(boxVolume(f59Boxes.back) - stitch(480), 0);
+    // The pan and back shell: 2.5 mm walls, one face open.
+    const [px, py, pz] = f59Boxes.pan.size;
+    expect(vol('pan')).toBeCloseTo(px * py * pz - (px - 5) * (py - 5) * (pz - 2.5), 0);
+    const [sx, sy, sz] = f59Boxes.backShell.size;
+    expect(vol('back-shell')).toBeCloseTo(sx * sy * sz - (sx - 2.5) * (sy - 5) * (sz - 5), 0);
+  }, 300_000);
+
+  it('builds the wheel and tyre, door mirror and steering wheel samples (CR6g)', async () => {
+    // TS-1805, ST-287 (F60–F62).
+    const bodiesOf = async (name: string, doc: Parameters<typeof evaluate>[1]) => {
+      const result = await evaluate(name, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+      return result.evaluation.bodies;
+    };
+    // Pappus: a section of area A with its centroid at radius r̄ turned once is 2π r̄ A.
+    const pappus = (pts: [number, number][]) => {
+      let moment = 0;
+      pts.forEach(([x0, y0], i) => {
+        const [x1, y1] = pts[(i + 1) % pts.length]!;
+        const cross = x0 * y1 - x1 * y0;
+        moment += ((x0 + x1) * cross) / 6;
+      });
+      return 2 * Math.PI * Math.abs(moment);
+    };
+    const s = f60Sizes;
+    const wheel = await bodiesOf('cr6g-wheel', f60Wheel());
+    expect(Object.keys(wheel).sort()).toEqual(['tyre', 'wheel']);
+    // The rim and hub, five spokes (each 125 mm long from r 60: 15 mm inside the hub and 5 mm inside
+    // the barrel, 105 mm between them), less the five lug holes.
+    const hub = Math.PI * s.hub.radius ** 2 * s.hub.width;
+    const [sx, sy, sz] = s.spoke.size;
+    const spokeOut = sy * sz * (sx - (s.spoke.from + sx - 180) - (s.hub.radius - s.spoke.from));
+    const lugs = s.lug.count * Math.PI * s.lug.radius ** 2 * s.hub.width;
+    const rim = solid(wheel.wheel).volumeMm3;
+    expect(rim).toBeGreaterThan(pappus(s.rim) + hub - lugs + s.spoke.count * spokeOut * 0.9);
+    expect(rim).toBeLessThan(pappus(s.rim) + hub - lugs + s.spoke.count * sx * sy * sz);
+    // The tyre: its section turned, less 60 slots 8 mm deep across the tread (a little less where
+    // the slots run out over the shoulders).
+    const tyre = solid(wheel.tyre).volumeMm3;
+    const slots = s.tread.slots * s.tread.depth * s.tread.width * s.tread.across;
+    expect(tyre).toBeLessThan(pappus(s.tyre));
+    expect(tyre).toBeGreaterThan(pappus(s.tyre) - slots);
+    // The mirror: a housing lofted through its sections, a glass and a mounting plate.
+    const mirror = await bodiesOf('cr6g-mirror', f61Mirror());
+    expect(Object.keys(mirror).sort()).toEqual(['glass-body', 'housing', 'mount-body']);
+    expect(solid(mirror.housing).volumeMm3).toBeGreaterThan(Math.PI * 30 * 40 * 150);
+    expect(solid(mirror.housing).volumeMm3).toBeLessThan(Math.PI * 1.1 * 70 * 1.1 * 110 * 150);
+    // The steering wheel: the rim's torus (2π R × π r²) and the hub with three lofted spokes.
+    const steering = await bodiesOf('cr6g-steering', f62Steering());
+    expect(Object.keys(steering).sort()).toEqual(['hub-body', 'rim']);
+    const { rim: ring, hub: boss } = f62Sizes;
+    expect(solid(steering.rim).volumeMm3).toBeCloseTo(
+      2 * Math.PI * ring.radius * Math.PI * ring.tube ** 2,
+      -1,
+    );
+    expect(solid(steering['hub-body']).volumeMm3).toBeGreaterThan(
+      Math.PI * boss.radius ** 2 * boss.height,
+    );
+  }, 300_000);
+
+  it('cuts a door out of a panel with the gap between them, named apart on both sides (CR3b)', async () => {
+    // TS-1504, ST-254: the F22 square as a door, 3.5 mm between it and the panel.
+    const run = async (kind: 'flat' | 'channel', gap?: number) => {
+      const result = await evaluate(`cr3b-${kind}-${gap}`, f26Panel(kind, gap));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const named = (id: string) => {
+        const mesh = result.meshes.find((m) => m.bodyId === id)!;
+        return { faces: [...new Set(faceNames(mesh))], edges: edgeNames(mesh) };
+      };
+      return {
+        bodies: result.evaluation.bodies,
+        door: kind === 'flat' ? named('door-body') : undefined,
+        skin: named('panel-body'),
+      };
+    };
+    const flat = await run('flat');
+    // The cut runs 1.75 mm off the square on each side: a 16.5 mm door in a 23.5 mm hole.
+    expect(flat.bodies['door-body']).toMatchObject({ kind: 'sheet' });
+    expect(flat.bodies['door-body']!.areaMm2).toBeCloseTo(16.5 ** 2, 3);
+    expect(flat.bodies['panel-body']!.areaMm2).toBeCloseTo(6000 - 23.5 ** 2, 3);
+    expect(flat.door!.faces).toEqual(['panel:door:inside/side:e:l']);
+    expect(flat.skin.faces).toEqual(['trim:trim:outside/side:e:l']);
+    // Both borders keep the square's element names, though they run along the offset chain.
+    for (const e of ['s0', 's1', 's2', 's3']) {
+      expect(
+        flat.door!.edges.filter(
+          (n) => n === `panel:door:inside/side:e:l | sketch:cutter/cut:e:${e}`,
+        ),
+      ).toHaveLength(1);
+      expect(
+        flat.skin.edges.filter(
+          (n) => n === `sketch:cutter/cut:e:${e} | trim:trim:outside/side:e:l`,
+        ),
+      ).toHaveLength(1);
+    }
+    const wide = await run('flat', 10);
+    expect(wide.bodies['door-body']!.areaMm2).toBeCloseTo(10 ** 2, 3);
+    // 86M2: through the top and the bottom plate, each element cuts twice, told apart by side.
+    const channel = await run('channel');
+    expect(channel.bodies['panel-body']!.areaMm2).toBeCloseTo(2 * (6000 - 23.5 ** 2) + 1200, 3);
+    for (const e of ['s0', 's1', 's2', 's3'])
+      for (const side of ['front', 'back'])
+        expect(
+          channel.skin.edges.filter((n) => n?.includes(`sketch:cutter/cut:e:${e}/at:${side}`)),
+        ).toHaveLength(1);
+    // A gap the square cannot take (its sides would cross) is refused by the offset.
+    const doc = f26Panel('flat');
+    const door = doc.features.find((f) => f.id === 'door')!;
+    if (door.type === 'panel') door.args.gap = mm(10);
+    // An 8 mm square: 5 mm in from each side crosses over.
+    const small: Record<string, [number, number]> = {
+      p0: [40, -40],
+      p1: [48, -40],
+      p2: [48, -32],
+      p3: [40, -32],
+    };
+    const tooWide = {
+      ...doc,
+      sketches: doc.sketches.map((s) => (s.id === 'cutter' ? { ...s, solved: small } : s)),
+    };
+    expect(await evaluate('cr3b-collapse', tooWide)).toMatchObject({
+      evaluation: { status: 'error', code: 'sketch-offset-self-intersects' },
+    });
+  });
+
+  it('cuts a row of windows in one trim, naming the chain that misses or splits it (CR3c)', async () => {
+    // TS-1507, ST-255: three 20 mm windows with 10 mm pillars between them.
+    const ok = async (name: string, doc: ReturnType<typeof f27Windows>) => {
+      const result = await evaluate(`cr3c-${name}`, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const mesh = result.meshes.find((m) => m.bodyId === 'panel-body')!;
+      return { body: result.evaluation.bodies['panel-body']!, edges: edgeNames(mesh) };
+    };
+    const row = await ok('row', f27Windows('row'));
+    expect(row.body).toMatchObject({ kind: 'sheet' });
+    expect(row.body.areaMm2).toBeCloseTo(6000 - 3 * 400, 3);
+    // Every window's sides are cut edges, once each, named by its own elements.
+    for (const k of [0, 1, 2])
+      for (const j of [0, 1, 2, 3])
+        expect(
+          row.edges.filter(
+            (n) => n === `sketch:windows/cut:e:w${k}s${j} | trim:windows-trim:outside/side:e:l`,
+          ),
+        ).toHaveLength(1);
+    // A window off the sheet is named; with `skip` it is left out.
+    expect(await evaluate('cr3c-missed', f27Windows('missed'))).toMatchObject({
+      evaluation: { status: 'error', code: 'trim-no-cut', failedPaths: [['chains', 2]] },
+    });
+    expect((await ok('skip', f27Windows('missed', 'skip'))).body.areaMm2).toBeCloseTo(4800, 3);
+    // 86M3: a window through both long sides parts the sheet; that window is named.
+    expect(await evaluate('cr3c-apart', f27Windows('apart'))).toMatchObject({
+      evaluation: { status: 'error', code: 'trim-disconnected', failedPaths: [['chains', 0]] },
+    });
+    // Windows that overlap make one opening; no cut edge is named inside it.
+    const overlap = await ok('overlap', f27Windows('overlap'));
+    expect(overlap.body.areaMm2).toBeCloseTo(6000 - (400 + 400 - 5 * 15) - 400, 3);
+    // Each element keeps one stretch on the border (the parts inside the other window go).
+    const cut = overlap.edges.filter((n) => n?.includes('cut:e:'));
+    expect(cut).toHaveLength(12);
+    expect(new Set(cut).size).toBe(12);
+  });
+
+  it('presses a step into a sheet along a chain, its two borders rounded (CR2c)', async () => {
+    // TS-1492, ST-250: the F22 panel with a 2 mm step, R 0.5, along the line and the square.
+    const run = async (kind: 'open' | 'closed', options?: Parameters<typeof f23PressLine>[1]) => {
+      const result = await evaluate(
+        `cr2c-${kind}-${JSON.stringify(options ?? {})}`,
+        f23PressLine(kind, options),
+      );
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const panel = result.evaluation.bodies['panel-body'];
+      if (panel?.kind !== 'sheet') throw new Error(JSON.stringify(panel));
+      const mesh = result.meshes.find((m) => m.bodyId === 'panel-body')!;
+      const names = faceNames(mesh);
+      // Each face's height range (positions are relative to the mesh's origin).
+      const z = new Map<string, [number, number]>();
+      for (let t = 0; t < mesh.indices.length / 3; t++) {
+        const name = names[mesh.faceIds[t]! - 1]!;
+        for (let k = 0; k < 3; k++) {
+          const h = mesh.positions[3 * mesh.indices[3 * t + k]! + 2]! + mesh.origin[2];
+          const [lo, hi] = z.get(name) ?? [Infinity, -Infinity];
+          z.set(name, [Math.min(lo, h), Math.max(hi, h)]);
+        }
+      }
+      return { panel, names, z, edges: edgeNames(mesh).filter((n): n is string => !!n) };
+    };
+    const open = await run('open');
+    const moved = 'press:press:moved/side:e:l';
+    const right = 'press:press:right/side:e:l';
+    const wall = `press:press/wall:(${moved} | ${right})/e:s0`;
+    expect([...open.z.keys()].sort()).toEqual(
+      [right, moved, wall, `blend:(${wall} | ${right})`, `blend:(${wall} | ${moved})`].sort(),
+    );
+    expect(open.z.get(right)).toEqual([0, 0]);
+    expect(open.z.get(moved)![0]).toBeCloseTo(2, 6);
+    expect(open.z.get(wall)![0]).toBeCloseTo(0.5, 6);
+    expect(open.z.get(wall)![1]).toBeCloseTo(1.5, 6);
+    // 29.5 × 60 moved, 69.5 × 60 kept, a 1 × 60 wall and two quarter rounds of R 0.5.
+    expect(open.panel.areaMm2).toBeCloseTo(1770 + 4170 + 60 + Math.PI * 0.5 * 60, 1);
+    // Deeper, against the normal, and around the closed square.
+    const deep = await run('open', { depth: 5, toward: 'back', side: 'right' });
+    expect(deep.z.get('press:press:moved/side:e:l')![1]).toBeCloseTo(-5, 6);
+    expect(deep.z.get('press:press:left/side:e:l')).toEqual([0, 0]);
+    const closed = await run('closed');
+    const walls = closed.names.filter((n) => n?.startsWith('press:press/wall:'));
+    // Each wall and its rounds are told apart by the square's side they run along.
+    expect(walls.map((n) => n!.slice(-2)).sort()).toEqual(['s0', 's1', 's2', 's3']);
+    expect(new Set(closed.names.filter((n) => n?.startsWith('blend:'))).size).toBe(8);
+    // The panel's four borders keep their own names through the press (Codex on #921).
+    const outside = 'press:press:outside/side:e:l';
+    const borders = closed.edges.filter(
+      (n) => n.endsWith(` | ${outside}`) && !n.includes('wall') && !n.startsWith('blend'),
+    );
+    expect(new Set(closed.edges).size).toBe(closed.edges.length);
+    expect(borders.sort()).toEqual(
+      ['start', 'end', 'edge:start:e:l', 'edge:end:e:l']
+        .map((b) => `press:press/${b} | ${outside}`)
+        .sort(),
+    );
+    expect(open.edges).toContain(`press:press/start | ${moved}`);
+    expect(open.edges).toContain(`press:press/edge:end:e:l | ${right}`);
+    // The new free edges at the open line's ends, by the border they meet: the wall's two ends
+    // and each round's two ends all have their own names, every edge name once.
+    const wallOf = `press:press/wall:(${moved} | ${right})/e:s0`;
+    for (const end of ['start', 'end'])
+      expect(open.edges).toContain(`${wallOf} | press:press:end/${end}`);
+    expect(open.edges.filter((n) => n.endsWith(' | press:press:end/start'))).toHaveLength(3);
+    expect(new Set(open.edges).size).toBe(open.edges.length);
+    expect(closed.z.get('press:press:moved/side:e:l')![0]).toBeCloseTo(2, 6);
+    expect(closed.z.get('press:press:outside/side:e:l')).toEqual([0, 0]);
+    // A rounding wider than the step cannot be made.
+    expect(await evaluate('cr2c-round', f23PressLine('open', { radius: 3 }))).toMatchObject({
+      evaluation: { status: 'error', code: 'press-line-failed', featureId: 'press' },
+    });
+  });
+
+  it('stands flanges up from a sheet’s edges and joins them to it (CR4c)', async () => {
+    // TS-1534, ST-263: the F22 panel (100 × 60 in z = 0) and the F24 arch (a half circle R 15).
+    const run = async (
+      kind: Parameters<typeof f47Flange>[0],
+      o?: Parameters<typeof f47Flange>[1],
+    ) => {
+      const id = `cr4c-${kind}-${JSON.stringify(o ?? {})}`;
+      const result = await evaluate(id, f47Flange(kind, o));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+      const panel = result.evaluation.bodies['panel-body'];
+      if (panel?.kind !== 'sheet') throw new Error(JSON.stringify(panel));
+      const mesh = result.meshes.find((m) => m.bodyId === 'panel-body')!;
+      const names = faceNames(mesh);
+      // Each face's bounds.
+      const box = new Map<string, [Vec3, Vec3]>();
+      for (let t = 0; t < mesh.indices.length / 3; t++) {
+        const name = names[mesh.faceIds[t]! - 1]!;
+        const [lo, hi] = box.get(name) ?? [
+          [Infinity, Infinity, Infinity],
+          [-Infinity, -Infinity, -Infinity],
+        ];
+        for (let k = 0; k < 3; k++)
+          for (let c = 0; c < 3; c++) {
+            const x = mesh.positions[3 * mesh.indices[3 * t + k]! + c]! + mesh.origin[c]!;
+            lo[c] = Math.min(lo[c]!, x);
+            hi[c] = Math.max(hi[c]!, x);
+          }
+        box.set(name, [lo, hi]);
+      }
+      return { panel, names, box, edges: edgeNames(mesh).filter((n): n is string => !!n) };
+    };
+    const sheet = 'flange:flange/side:e:l';
+    const wall = (k: string) => `flange:flange:wall/${k}`;
+    // One border, square to the panel: a 100 × 10 wall on y = 0.
+    const up = await run('start');
+    expect(sortedNames(up.names)).toEqual([sheet, wall('0')]);
+    expect(up.panel.areaMm2).toBeCloseTo(7000, 3);
+    const [lo, hi] = up.box.get(wall('0'))!;
+    expect(lo[1]).toBeCloseTo(0, 6);
+    expect(hi[1]).toBeCloseTo(0, 6);
+    expect(hi[2] - lo[2]).toBeCloseTo(10, 6);
+    // The panel's front is +z (its normal); `back` turns the wall the other way.
+    const front = Math.sign(hi[2] + lo[2]);
+    const back = (await run('start', { toward: 'back' })).box.get(wall('0'))!;
+    expect(Math.sign(back[0][2] + back[1][2])).toBe(-front);
+    expect(up.edges).toContain(`${sheet} | ${wall('0')}`);
+    expect(up.edges).toContain(`flange:flange:far/0 | ${wall('0')}`);
+    // 45°: half out of the panel's plane, half away from it.
+    const lean = (await run('start', { angleDeg: 45, width: 20 })).box.get(wall('0'))!;
+    expect(lean[1][1] - lean[0][1]).toBeCloseTo(20 * Math.SQRT1_2, 5);
+    expect(lean[0][1]).toBeCloseTo(0, 6);
+    expect(lean[1][2] - lean[0][2]).toBeCloseTo(20 * Math.SQRT1_2, 5);
+    // All four borders: a tray, its walls meeting at the corners.
+    const tray = await run('tray');
+    expect(tray.names).toHaveLength(5);
+    expect(tray.panel.areaMm2).toBeCloseTo(6000 + 10 * 320, 3);
+    for (const [a, b] of [
+      ['0', '1'],
+      ['1', '2'],
+      ['2', '3'],
+      ['0', '3'],
+    ])
+      expect(tray.edges).toContain(`${wall(a!)} | ${wall(b!)}`);
+    // Leaning out at 45°, the walls part at the corners: one sheet still, with gaps there.
+    const open = await run('tray', { angleDeg: 45 });
+    expect(open.names).toHaveLength(5);
+    expect(open.edges.filter((n) => n.startsWith('flange:flange:start/'))).toHaveLength(4);
+    // A curved edge: a half-cylinder wall R 15 × 5 round the arch.
+    const arch = await run('arch', { width: 5 });
+    const kept = 6000 - (Math.PI * 225) / 2;
+    expect(arch.panel.areaMm2).toBeCloseTo(kept + Math.PI * 15 * 5, 2);
+    const [alo, ahi] = arch.box.get(wall('0'))!;
+    expect(ahi[2] - alo[2]).toBeCloseTo(5, 5);
+    expect(alo[1]).toBeCloseTo(-60, 5);
+    expect(ahi[1]).toBeCloseTo(-45, 4);
+  }, 120000);
+
+  it('refuses a flange that crosses itself or the sheet (CR4c)', async () => {
+    // TS-1535: leaning 60° into the arch's hole, 20 mm wide (17.3 mm across the R 15 hole), its
+    // far side turns back; folded flat back onto the panel (180°), it lies on the panel; a tray's
+    // walls leaning in at 135° run into each other at the corners.
+    for (const doc of [
+      f47Flange('arch', { width: 20, angleDeg: 30 }),
+      f47Flange('start', { angleDeg: 180 }),
+      f47Flange('tray', { angleDeg: 135 }),
+    ])
+      expect(
+        await evaluate(`cr4c-refuse-${doc.features.at(-1)!.id}-${cadContentHash(doc)}`, doc),
+      ).toMatchObject({
+        evaluation: { status: 'error', code: 'flange-self-intersects', featureId: 'flange' },
+      });
+  }, 120000);
+
+  it('sweeps a hat, Z, channel or flat section along a path, facing hats on their flanges (CR4d)', async () => {
+    // TS-1539, ST-264: F48, a hat 30 × 40 with 15 mm flanges and R 3 bends.
+    const run = async (o: Parameters<typeof f48ProfileSweep>[0]) => {
+      const result = await evaluate(`cr4d-${JSON.stringify(o)}`, f48ProfileSweep(o));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+      const { bodies } = result.evaluation;
+      const of = (id: string) => {
+        const b = bodies[id];
+        if (b?.kind !== 'sheet') throw new Error(JSON.stringify(b));
+        return b;
+      };
+      const mesh = result.meshes.find((m) => m.bodyId === 'member-body')!;
+      return { of, names: faceNames(mesh), edges: edgeNames(mesh) };
+    };
+    const outline = 2 * 12 + 2 * 24 + 34 + 4 * ((Math.PI / 2) * 3);
+    const straight = await run({});
+    const member = straight.of('member-body');
+    expect(member.areaMm2).toBeCloseTo(200 * outline, 3);
+    const close = (a: number[], b: number[]) =>
+      a.forEach((x, i) => expect(x).toBeCloseTo(b[i]!, 6));
+    close(member.bounds[0], [0, -35, 0]);
+    close(member.bounds[1], [200, 35, 30]);
+    expect(sortedNames(straight.names)).toEqual(
+      ['bend:1', 'bend:2', 'bend:3', 'bend:4', 'flange:l', 'flange:r', 'top', 'wall:l', 'wall:r']
+        .map((x) => `side:p:${x}/path:e:l0`)
+        .sort(),
+    );
+    expect(straight.edges).toContain('edge:start:p:flange:l | side:p:flange:l/path:e:l0');
+    // Flipped, and up along the path's in-plane normal (+y).
+    close((await run({ flip: true })).of('member-body').bounds[0], [0, -35, -30]);
+    const across = (await run({ up: 'inPlane' })).of('member-body').bounds;
+    close(across[0], [0, 0, -35]);
+    close(across[1], [200, 30, 35]);
+    // A given direction on a straight path.
+    close((await run({ up: [0, 1, 0] })).of('member-body').bounds[1], [200, 30, 35]);
+    // Along a line and a 60° arc of R 300: the section turns with the path, its area the path's
+    // length times the outline's (the hat is symmetric across the path).
+    const bend = (await run({ path: 'bend' })).of('member-body');
+    expect(bend.areaMm2).toBeCloseTo((200 + 100 * Math.PI) * outline, 1);
+    // Two hats facing each other: their flanges meet in z = 0.
+    const box = await run({ closure: 'hat' });
+    close(box.of('closure-body').bounds[0], [0, -35, -30]);
+    close(box.of('closure-body').bounds[1], [200, 35, 0]);
+    // A hat on a flat closure plate the width of its flanges.
+    const flat = (await run({ closure: 'flat' })).of('closure-body');
+    expect(flat.areaMm2).toBeCloseTo(200 * 70, 6);
+    // Z and channel.
+    expect((await run({ kind: 'z', radius: 0 })).of('member-body').areaMm2).toBeCloseTo(
+      200 * (15 + 30 + 40),
+      3,
+    );
+    expect((await run({ kind: 'channel', radius: 0 })).of('member-body').areaMm2).toBeCloseTo(
+      200 * (30 + 40 + 30),
+      3,
+    );
+  }, 120000);
+
+  it('refuses a profile sweep tighter than its section, or turned by a vector along a curve (CR4d)', async () => {
+    // TS-1540: an arc of R 20 under a hat reaching 46 mm; a vector up along the bend.
+    for (const [o, code] of [
+      [{ path: 'bend', bendRadius: 20 }, 'profile-sweep-tight'],
+      [{ path: 'bend', up: [0, 0, 1] }, 'profile-up-curved'],
+      [{ up: [1, 0, 0] }, 'profile-up'],
+    ] as const)
+      expect(
+        await evaluate(
+          `cr4d-refuse-${JSON.stringify(o)}`,
+          f48ProfileSweep(o as Parameters<typeof f48ProfileSweep>[0]),
+        ),
+      ).toMatchObject({ evaluation: { status: 'error', code, featureId: 'member' } });
+  }, 120000);
+
+  it('evaluates the simplified BIW: 42 bodies, the right parts mirrored, 68 weld rows (CR4g, CR5f)', async () => {
+    // TS-1551, ST-266: F29. The side outer is trimmed (doors, arch) before its copy is mirrored:
+    // the trim names cut edges of pieces it leaves out, which a copying mirror has no image of.
+    const run = async (o: Parameters<typeof f29Biw>[0] = {}) => {
+      const result = await evaluate(`cr4g-${JSON.stringify(o)}`, f29Biw(o));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+      const welds = result.evaluation.spotWelds!.map((w, i) => {
+        if (w.status !== 'ok') throw new Error(`row ${i}: ${JSON.stringify(w)}`);
+        return w;
+      });
+      return { evaluation: result.evaluation, welds };
+    };
+    const base = await run();
+    const bodies = base.evaluation.bodies;
+    expect(Object.keys(bodies)).toHaveLength(42);
+    const kinds = Object.values(bodies).map((b) => b.kind);
+    expect(kinds.filter((k) => k === 'solid')).toHaveLength(4);
+    expect(kinds.filter((k) => k === 'sheet')).toHaveLength(38);
+    // A right part is its left part reflected in y = 0: the same area, the bounds' y negated.
+    for (const id of Object.keys(bodies).filter((k) => k.endsWith('-r'))) {
+      const [l, r] = [bodies[id.slice(0, -2)]!, bodies[id]!];
+      expect(r.areaMm2, id).toBeCloseTo(l.areaMm2, 3);
+      expect(r.bounds[0][1], id).toBeCloseTo(-l.bounds[1][1], 3);
+      expect(r.bounds[1][1], id).toBeCloseTo(-l.bounds[0][1], 3);
+    }
+    // Every row lies on its second flange: 1,543 points at a 40 mm pitch, none too far (CR5f's
+    // 14 rows joining the front and rear structures to the cabin add 146; CR5f-4's 6 rows on the
+    // rear side members' runs under the floor add 36, and their straight parts under the trunk
+    // floor, now 470 mm, carry 24 fewer; CR5f-6's longer pillars, roof rails, cross members and
+    // rear runs add 84; CR5f-7's 4 rows on the front extensions add 22).
+    const count = (w: typeof base.welds) => w.reduce((n, x) => n + x.points.length / 3, 0);
+    expect(base.welds).toHaveLength(68);
+    expect(count(base.welds)).toBe(1543);
+    expect(base.welds.slice(58, 64).map((w) => w.points.length / 3)).toEqual([7, 7, 7, 7, 7, 7]);
+    expect(base.welds.slice(64).map((w) => w.points.length / 3)).toEqual([7, 7, 4, 4]);
+    // CR5f-4: the rear side member kicks down under the trunk floor's kick and runs on under the
+    // floor pan (top z 250) to x 1260.
+    expect(bodies['rear-member']!.bounds[0][2]).toBeCloseTo(190, 3);
+    expect(bodies['rear-member']!.bounds[1][0]).toBeCloseTo(1260, 3);
+    expect(bodies['rear-member']!.bounds[1][2]).toBeCloseTo(350, 3);
+    // CR5f-7: the front extension runs from under its closure (top z 450, x 3400) down under the
+    // floor pan to the front cross member's front wall (x 2740).
+    expect(bodies['front-extension']!.bounds[0][0]).toBeCloseTo(2740, 3);
+    expect(bodies['front-extension']!.bounds[1][0]).toBeCloseTo(3400, 3);
+    expect(bodies['front-extension']!.bounds[0][2]).toBeCloseTo(190, 3);
+    expect(bodies['front-extension']!.bounds[1][2]).toBeCloseTo(450, 3);
+    // CR5f-9: the apron's lower edge is turned in to y −480, over the side member's closure.
+    expect(bodies.apron!.bounds[1][1]).toBeCloseTo(-480, 3);
+    expect(bodies.apron!.bounds[0][2]).toBeCloseTo(450, 3);
+    for (const w of base.welds) {
+      expect(w.tooFar).toBe(0);
+      w.gaps.forEach((g) => expect(g).toBeLessThan(1e-6));
+    }
+    const roof = (w: typeof base) => [w.welds[12]!, w.welds[13]!];
+    expect(roof(base).map((w) => w.points.length / 3)).toEqual([28, 28]);
+    // A wider roof flange (100): the side outers reach further in, the roof still welded.
+    const wide = await run({ flangeMm: 100 });
+    expect(wide.evaluation.bodies.side!.bounds[1][1]).toBeCloseTo(-650, 3);
+    expect(wide.evaluation.bodies['side-r']!.bounds[0][1]).toBeCloseTo(650, 3);
+    expect(base.evaluation.bodies.side!.bounds[1][1]).toBeCloseTo(-670, 3);
+    expect(wide.evaluation.geometryDigest).not.toBe(base.evaluation.geometryDigest);
+    expect(roof(wide).map((w) => w.tooFar)).toEqual([0, 0]);
+    // A narrow one (40) ends 20 mm short of the roof strip's centre line: every point too far.
+    const narrow = await run({ flangeMm: 40 });
+    expect(roof(narrow).map((w) => w.tooFar)).toEqual([28, 28]);
+    roof(narrow).forEach((w) => w.gaps.forEach((g) => expect(g).toBeCloseTo(20, 3)));
+    // A 60 mm pitch: fewer points, the shapes (and their digest) the same.
+    const coarse = await run({ pitchMm: 60 });
+    expect(count(coarse.welds)).toBeLessThan(count(base.welds));
+    expect(coarse.welds[0]!.points.length / 3).toBe(22);
+    expect(coarse.evaluation.geometryDigest).toBe(base.evaluation.geometryDigest);
+  }, 600_000);
+
+  it('places spot welds along a flange and measures each to the other flange (CR4e)', async () => {
+    // TS-1544, ST-265: F49, a hat's left flange (x 0…200, y −35…−23) on a flat closure plate.
+    const run = async (o: Parameters<typeof f49SpotWelds>[0]) => {
+      const doc = f49SpotWelds(o);
+      const result = await evaluate(`cr4e-${JSON.stringify(o)}`, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+      return { welds: result.evaluation.spotWelds!, digest: result.evaluation.geometryDigest };
+    };
+    const plate = await run({ both: true });
+    const [left, right] = plate.welds;
+    if (left?.status !== 'ok' || right?.status !== 'ok') throw new Error(JSON.stringify(plate));
+    // 200 mm: 5 points 40 apart, centred, the first 20 from the start (≥ 10 from the ends),
+    // on the flange's centre line (y = −29), each on the plate.
+    expect(left.lengthMm).toBeCloseTo(200, 6);
+    const xs = (w: typeof left) => w.points.filter((_, i) => i % 3 === 0);
+    xs(left).forEach((x, i) => expect(x).toBeCloseTo(20 + 40 * i, 6));
+    left.points.filter((_, i) => i % 3 === 1).forEach((y) => expect(y).toBeCloseTo(-29, 6));
+    left.gaps.forEach((g) => expect(g).toBeLessThan(1e-6));
+    expect(left.tooFar).toBe(0);
+    right.points.filter((_, i) => i % 3 === 1).forEach((y) => expect(y).toBeCloseTo(29, 6));
+    // A pitch of 60 and 30 from the ends: 140 mm → 3 points; the digest stays (no shape changed).
+    const coarse = await run({ both: true, pitchMm: 60, endDistanceMm: 30 });
+    const c = coarse.welds[0]!;
+    if (c.status !== 'ok') throw new Error(JSON.stringify(c));
+    expect(xs(c).map((x) => Math.round(x * 1e6) / 1e6)).toEqual([40, 100, 160]);
+    expect(coarse.digest).toBe(plate.digest);
+    // To the other hat's top, 30 mm below and 12 mm across (its edge at y −17): every point
+    // too far.
+    const top = (await run({ to: 'top' })).welds[0]!;
+    if (top.status !== 'ok') throw new Error(JSON.stringify(top));
+    top.gaps.forEach((g) => expect(g).toBeCloseTo(Math.hypot(30, 12), 1));
+    expect(top.tooFar).toBe(5);
+    // 100 from both ends of 200 mm: one point, in the middle.
+    const one = (await run({ endDistanceMm: 100 })).welds[0]!;
+    if (one.status !== 'ok') throw new Error(JSON.stringify(one));
+    expect(one.points[0]).toBeCloseTo(100, 6);
+    expect(one.gaps).toHaveLength(1);
+  }, 120000);
+
+  it('reports a spot weld whose flange is gone, and keeps the shapes (CR4e)', async () => {
+    // TS-1545: the row's first flange renamed away.
+    const doc = f49SpotWelds();
+    doc.spotWelds![0]!.flanges[0]!.face = {
+      ...doc.spotWelds![0]!.flanges[0]!.face,
+      name: [['side:p:wall:x', 'path:e:l0']],
+    };
+    const result = await evaluate('cr4e-missing', doc);
+    if (result.type !== 'result') throw new Error(JSON.stringify(result));
+    expect(result.evaluation).toMatchObject({
+      status: 'ok',
+      spotWelds: [{ id: 'welds-l', status: 'error', code: 'spot-weld-face-missing' }],
+    });
+  }, 120000);
+
+  it('flares a wheel arch out of a sheet, joining the sheet G1 or G2 (CR2d)', async () => {
+    // TS-1495, ST-251: the F22 panel (100 × 60) with a half-disc arch of R 15 at its border,
+    // flared 10 mm out along a half circle of R 30 around it.
+    const run = async (options?: Parameters<typeof f24Flare>[0]) => {
+      const id = `cr2d-${JSON.stringify(options ?? {})}`;
+      const doc = f24Flare(options);
+      const result = await evaluate(id, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const panel = result.evaluation.bodies['panel-body'];
+      if (panel?.kind !== 'sheet') throw new Error(JSON.stringify(panel));
+      const mesh = result.meshes.find((m) => m.bodyId === 'panel-body')!;
+      const names = faceNames(mesh);
+      const z = new Map<string, [number, number]>();
+      for (let t = 0; t < mesh.indices.length / 3; t++) {
+        const name = names[mesh.faceIds[t]! - 1]!;
+        for (let k = 0; k < 3; k++) {
+          const h = mesh.positions[3 * mesh.indices[3 * t + k]! + 2]! + mesh.origin[2];
+          const [lo, hi] = z.get(name) ?? [Infinity, -Infinity];
+          z.set(name, [Math.min(lo, h), Math.max(hi, h)]);
+        }
+      }
+      const seam = await continuityOf(`${id}-seam`, doc, 'panel-body', `${fill} | ${stay}`);
+      if (!('samples' in seam)) throw new Error(JSON.stringify(seam));
+      return {
+        panel,
+        names,
+        z,
+        edges: edgeNames(mesh).filter((n): n is string => !!n),
+        level: continuityReport(seam.samples).level,
+      };
+    };
+    const stay = 'flare:flare/trim:arch:outside/side:e:l';
+    const fill = 'flare:flare/surface';
+    const g1 = await run();
+    expect([...g1.z.keys()].sort()).toEqual([fill, stay]);
+    for (const h of g1.z.get(stay)!) expect(h).toBeCloseTo(0, 9);
+    expect(g1.z.get(fill)![1]).toBeCloseTo(10, 6);
+    // The panel less the half disc of R 30, and the fill: more than the flat half ring it
+    // replaces (it rises), less than that ring and a 10 mm wall around both its arcs.
+    const kept = 6000 - (Math.PI * 900) / 2;
+    const ring = (Math.PI * (900 - 225)) / 2;
+    const fillArea = g1.panel.areaMm2 - kept;
+    expect(fillArea).toBeGreaterThan(ring);
+    expect(fillArea).toBeLessThan(ring + Math.PI * 45 * 10);
+    expect(g1.level).toBe('G1');
+    // The moved arch and the two ramps are named by the edges they replace.
+    expect(g1.edges).toContain(`${fill} | flare:flare:moved/sketch:wheel/cut:e:a0`);
+    // The ramps replace pieces of one border: each is told by its end of the chain (#927).
+    for (const end of ['first', 'last'])
+      expect(
+        g1.edges.filter((n) => n === `${fill} | flare:flare:${end}/trim:arch:outside/end`),
+      ).toHaveLength(1);
+    expect(g1.edges).toContain(`${stay} | flare:flare/trim:arch:outside/start`);
+    // G2: the profiles leave the sheet with its curvature (none), and the seam holds G2.
+    const g2 = await run({ continuity: 'G2' });
+    expect(g2.level).toBe('G2');
+    expect(g2.z.get(fill)![1]).toBeCloseTo(10, 6);
+    // Higher.
+    const high = await run({ height: 25 });
+    expect(high.z.get(fill)![1]).toBeCloseTo(25, 6);
+    expect(high.level).toBe('G1');
+  }, 60000);
+
+  it('builds the B1 sample, a hatchback’s left skin, and follows its wheelbase and roof (CR2e)', async () => {
+    // TS-1498, ST-252: the curve network, both arches flared G2, the press line and the inner
+    // panel; then the wheelbase 2400 → 2500 and the roof 1335 → 1400 mm as parameters.
+    const run = async (id: string, doc: CadDocument) => {
+      const result = await evaluate(id, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result).slice(0, 2000));
+      const { bodies } = result.evaluation;
+      const skin = bodies['skin-body'];
+      const inner = bodies['inner-body'];
+      if (skin?.kind !== 'sheet' || inner?.kind !== 'sheet')
+        throw new Error(JSON.stringify(bodies));
+      const mesh = result.meshes.find((m) => m.bodyId === 'skin-body')!;
+      return { skin, inner, names: faceNames(mesh), edges: edgeNames(mesh) };
+    };
+    const doc = f25B1Car();
+    const car = await run('cr2e', doc);
+    const skin = 'trim:front-arch:outside/trim:rear-arch:outside/surface';
+    // The skin less the arches, in four pieces: below and above the press line, the two flares;
+    // the press line's wall and its two rounds.
+    expect(car.names.filter((n) => n?.startsWith('press:press:right/')).sort()).toEqual(
+      [
+        `press:press:right/flare:front-flare/flare:rear-flare/${skin}`,
+        'press:press:right/flare:front-flare/flare:rear-flare/surface',
+        'press:press:right/flare:front-flare/surface',
+      ].sort(),
+    );
+    expect(car.names).toContain(`press:press:moved/flare:front-flare/flare:rear-flare/${skin}`);
+    expect(car.names.filter((n) => n?.startsWith('blend:'))).toHaveLength(2);
+    expect(car.names.filter((n) => n?.startsWith('press:press/wall:'))).toHaveLength(1);
+    // The arches moved 25 mm out (y < 0 is out): the rear one's top was at y ≈ −806.
+    expect(car.edges.some((n) => n?.includes('flare:rear-flare:moved/'))).toBe(true);
+    const [lo, hi] = car.skin.bounds;
+    // The spline network overshoots the end sections by under a millimetre.
+    expect(Math.abs(lo[0])).toBeLessThan(2);
+    expect(Math.abs(hi[0] - 4205)).toBeLessThan(2);
+    // The crown (1335 at the cabin, its spline a little above) and the press moving the top 2 mm.
+    expect(hi[2]).toBeGreaterThan(1337);
+    expect(hi[2]).toBeLessThan(1400);
+    // The inner panel 20 mm inside: narrower and lower than the skin.
+    expect(car.inner.bounds[0][1]).toBeGreaterThan(lo[1] + 15);
+    expect(car.inner.bounds[1][2]).toBeLessThan(hi[2] - 15);
+    // A longer wheelbase and a higher roof, as an editor sets them: the network still meets,
+    // every feature still builds, the nose 100 mm further and the cabin 65 mm higher.
+    let longer = applyCadOperation(doc, {
+      type: 'setParameter',
+      parameterId: 'wheelbase',
+      value: 2500,
+    });
+    longer = applyCadOperation(longer, { type: 'setParameter', parameterId: 'roof', value: 1400 });
+    const moved = await run('cr2e-longer', longer);
+    expect(Math.abs(moved.skin.bounds[1][0] - 4305)).toBeLessThan(2);
+    expect(moved.skin.bounds[1][2]).toBeGreaterThan(hi[2] + 55);
+    expect(moved.names.sort()).toEqual(car.names.sort());
+  }, 300000);
+
+  it('measures exact distances from points to faces, past the display triangles (CR4a)', async () => {
+    // TS-1527, ST-260: F21 scaled 50×, a 2 m flat part and an r = 1 m quarter cylinder 1.5 m
+    // high, and its offset 0.3 mm behind. The display deflection is 0.1% of the 3.5 m diagonal,
+    // so the triangles lie up to about 3.5 mm off the cylinder.
+    const doc = f21OffsetSurface('back', 0.3);
+    for (const sketch of doc.sketches)
+      for (const k of Object.keys(sketch.solved))
+        sketch.solved[k] = sketch.solved[k]!.map((x) => 50 * x) as [number, number];
+    doc.parameters = doc.parameters.map((p) =>
+      p.id === 'H' ? ({ ...p, value: 1500 } as typeof p) : p,
+    );
+    const measured = async (id: string, queries: CadFaceDistanceQuery[]) => {
+      const document = pinned(doc);
+      await handle({
+        type: 'evaluate',
+        requestId: id,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(document),
+        document,
+        faceDistances: queries,
+      });
+      const result = posted.find(
+        (m) => 'requestId' in m && m.requestId === id && m.type !== 'progress',
+      )!;
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result).slice(0, 2000));
+      return { meshes: result.meshes, distances: result.faceDistances! };
+    };
+    const { meshes } = await measured('cr4a-mesh', []);
+    const [outer, inner] = ['sheet', 'inner-body'].map((id) =>
+      meshes.find((m) => m.bodyId === id || (id === 'sheet' && m.bodyId !== 'inner-body')),
+    ) as [CadMesh, CadMesh];
+    const faces = outer.topology.faces.map((_, i) => i);
+    // The inner sheet's display nodes lie on its exact surface.
+    const points = new Float64Array(inner.positions.length);
+    for (let i = 0; i < inner.positions.length; i++)
+      points[i] = inner.positions[i]! + inner.origin[i % 3]!;
+    // How far the outer display triangles stray: the cylinder part's triangle centres from the
+    // axis (x = 2000, y = 1000), against r = 1000.
+    let sag = 0;
+    for (let t = 0; t < outer.indices.length / 3; t++) {
+      const c = [0, 1, 2].map(
+        (a) =>
+          [0, 1, 2].reduce((s, k) => s + outer.positions[3 * outer.indices[3 * t + k]! + a]!, 0) /
+            3 +
+          outer.origin[a]!,
+      );
+      if (c[0]! > 2000.5) sag = Math.max(sag, 1000 - Math.hypot(c[0]! - 2000, c[1]! - 1000));
+    }
+    expect(sag).toBeGreaterThan(1);
+    // A point 100 mm past the flat part's start (x = −100) is nearest its border edge.
+    const past = Float64Array.from([-100, 0, 700]);
+    const { distances } = await measured('cr4a-measure', [
+      { bodyId: outer.bodyId, faces, points },
+      { bodyId: outer.bodyId, faces, points: past },
+      { bodyId: outer.bodyId, faces: [faces.length], points: past },
+      { bodyId: 'nope', faces: [0], points: past },
+    ]);
+    const all = distances[0]!;
+    if (!('distances' in all)) throw new Error(JSON.stringify(all));
+    expect(all.distances).toHaveLength(points.length / 3);
+    // The nodes are Float32 (relative to the mesh origin): a few µm off the inner surface.
+    for (const d of all.distances) expect(Math.abs(d - 0.3)).toBeLessThan(1e-4);
+    const edge = distances[1]!;
+    if (!('distances' in edge)) throw new Error(JSON.stringify(edge));
+    expect(edge.distances[0]).toBeCloseTo(100, 6);
+    expect(distances[2]).toEqual({ code: 'face-distance-face-missing' });
+    expect(distances[3]).toEqual({ code: 'face-distance-body-missing' });
+    // The inner triangles' centres, off the inner surface by its sag, taken onto it first
+    // (`via`, Codex on #960): 0.3 mm again.
+    const innerFaces = inner.topology.faces.map((_, i) => i);
+    const centres = new Float64Array(inner.indices.length);
+    for (let t = 0; t < inner.indices.length / 3; t++)
+      for (let a = 0; a < 3; a++)
+        centres[3 * t + a] =
+          [0, 1, 2].reduce((s, k) => s + inner.positions[3 * inner.indices[3 * t + k]! + a]!, 0) /
+            3 +
+          inner.origin[a]!;
+    const [raw, moved] = (
+      await measured('cr4a-via', [
+        { bodyId: outer.bodyId, faces, points: centres },
+        {
+          bodyId: outer.bodyId,
+          faces,
+          points: centres,
+          via: { bodyId: inner.bodyId, faces: innerFaces },
+        },
+      ])
+    ).distances;
+    if (!raw || !moved || !('distances' in raw) || !('distances' in moved))
+      throw new Error(JSON.stringify([raw, moved]));
+    expect(Math.max(...raw.distances.map((d) => Math.abs(d - 0.3)))).toBeGreaterThan(0.5);
+    for (const d of moved.distances) expect(Math.abs(d - 0.3)).toBeLessThan(1e-6);
+  }, 300000);
+
+  it('measures to a face trimmed by a circle by its exact border (Codex on #960)', async () => {
+    // F02: the r = 5 hole at (40, 25) through the 5 mm plate. The display triangulation's
+    // polygon of the hole lies inside the circle (its chords' middles at r = 4.964); a point over
+    // the hole 0.02 mm inside the circle, 0.02 mm above the top, is √(0.02² + 0.02²) from the
+    // border, all round (between the polygon and the circle the triangles alone say 0.02).
+    const document = pinned(f02Plate());
+    const points: number[] = [];
+    for (let k = 0; k < 256; k++) {
+      const a = (2 * Math.PI * k) / 256;
+      points.push(40 + 4.98 * Math.cos(a), 25 + 4.98 * Math.sin(a), 5.02);
+    }
+    points.push(40, 25, 5.02);
+    await handle({
+      type: 'evaluate',
+      requestId: 'cr4a-hole',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(document),
+      document,
+      faceDistances: [
+        { bodyId: 'plate', faces: [0, 1, 2, 3, 4, 5, 6], points: Float64Array.from(points) },
+      ],
+    });
+    const result = posted.find(
+      (m) => 'requestId' in m && m.requestId === 'cr4a-hole' && m.type !== 'progress',
+    )!;
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result).slice(0, 2000));
+    const [r] = result.faceDistances!;
+    if (!r || !('distances' in r)) throw new Error(JSON.stringify(r));
+    for (let k = 0; k < 256; k++) expect(r.distances[k]).toBeCloseTo(Math.hypot(0.02, 0.02), 6);
+    expect(r.distances[256]).toBeCloseTo(Math.hypot(5, 0.02), 6);
+    // The hole's wall, a whole cylinder with a seam: 0.3 mm inside it at every angle, the seam's
+    // included (the seam is no border).
+    const mesh = result.meshes.find((m) => m.bodyId === 'plate')!;
+    let wall = -1;
+    for (let t = 0; t < mesh.indices.length / 3 && wall < 0; t++) {
+      const v = mesh.indices[3 * t]!;
+      const [x, y] = [0, 1].map((a) => mesh.positions[3 * v + a]! + mesh.origin[a]!);
+      const z = mesh.positions[3 * v + 2]! + mesh.origin[2]!;
+      const w = mesh.indices[3 * t + 1]!;
+      const z2 = mesh.positions[3 * w + 2]! + mesh.origin[2]!;
+      if (Math.abs(Math.hypot(x! - 40, y! - 25) - 5) < 1e-3 && Math.abs(z - z2) > 1e-3)
+        wall = mesh.faceIds[t]! - mesh.faceBase - 1;
+    }
+    expect(wall).toBeGreaterThanOrEqual(0);
+    const around: number[] = [];
+    for (let k = -8; k <= 8; k++)
+      for (const base of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+        const a = base + k * 0.01;
+        around.push(40 + 4.7 * Math.cos(a), 25 + 4.7 * Math.sin(a), 2.5);
+      }
+    await handle({
+      type: 'evaluate',
+      requestId: 'cr4a-seam',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(document),
+      document,
+      faceDistances: [{ bodyId: 'plate', faces: [wall], points: Float64Array.from(around) }],
+    });
+    const seam = posted.find(
+      (m) => 'requestId' in m && m.requestId === 'cr4a-seam' && m.type !== 'progress',
+    )!;
+    if (seam.type !== 'result') throw new Error(JSON.stringify(seam).slice(0, 2000));
+    const [w] = seam.faceDistances!;
+    if (!w || !('distances' in w)) throw new Error(JSON.stringify(w));
+    for (const d of w.distances) expect(d).toBeCloseTo(0.3, 6);
+  }, 300000);
+
+  it('mirrors a trimmed sheet into a new body (CR4g)', async () => {
+    // TS-1551, ST-266: F24's panel with its wheel arch trimmed out, the trim its result.
+    const doc = withMirrorCopy(f24Flare({ flare: false }));
+    const result = await evaluate('cr4g-trimmed', doc);
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result.type === 'result' ? result.evaluation : result));
+    const [a, b] = [
+      result.evaluation.bodies['panel-body']!,
+      result.evaluation.bodies['copy-body']!,
+    ];
+    expect(b.kind).toBe('sheet');
+    expect(b.areaMm2).toBeCloseTo(a.areaMm2, 6);
+    expect(b.bounds[0][0]).toBeCloseTo(-a.bounds[1][0], 6);
+  });
+
+  it('mirrors a sheet and a solid into new bodies, the source kept and followed (CR4b)', async () => {
+    // TS-1531, ST-261: across x = 0.
+    const run = async (id: string, doc: CadDocument) => {
+      const result = await evaluate(id, doc);
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result).slice(0, 2000));
+      return result;
+    };
+    for (const [id, doc] of [
+      ['sheet', f17Sheets('extrude')],
+      ['solid', f02Plate()],
+    ] as const) {
+      const source = doc.bodies[0]!.id;
+      const { evaluation, meshes } = await run(`cr4b-${id}`, withMirrorCopy(doc));
+      if (evaluation.status !== 'ok') return;
+      const [a, b] = [evaluation.bodies[source]!, evaluation.bodies['copy-body']!];
+      expect(b.kind).toBe(a.kind);
+      expect(b.kind).toBe(id);
+      expect(b.areaMm2).toBeCloseTo(a.areaMm2, 6);
+      if (a.kind === 'solid' && b.kind === 'solid') expect(b.volumeMm3).toBeCloseTo(a.volumeMm3, 6);
+      expect(b.bounds[0][0]).toBeCloseTo(-a.bounds[1][0], 6);
+      expect(b.bounds[1][0]).toBeCloseTo(-a.bounds[0][0], 6);
+      expect(b.bounds[0].slice(1)).toEqual(a.bounds[0].slice(1).map((x) => expect.closeTo(x, 6)));
+      const names = faceNames(meshes.find((m) => m.bodyId === 'copy-body')!);
+      expect(names.every((n) => n?.startsWith('mirror:copy/'))).toBe(true);
+    }
+    // The copy follows the source: the sheet 40 mm high instead of 30.
+    const taller = withMirrorCopy(f17Sheets('extrude'));
+    taller.parameters = taller.parameters.map((p) =>
+      p.id === 'H' ? ({ ...p, value: 40 } as typeof p) : p,
+    );
+    const { evaluation } = await run('cr4b-taller', taller);
+    if (evaluation.status !== 'ok') return;
+    expect(evaluation.bodies['copy-body']!.bounds[1][2]).toBeCloseTo(40, 6);
+  }, 300000);
+
+  it('builds the B2 car sample: panels, windows, a gap that follows its parameter (CR3f)', async () => {
+    // TS-1525, ST-259: F28 on the B1 skin.
+    // The panels first: the whole sample evaluated cold in one job stops in the hatch's trim
+    // with a Wasm memory fault (#957), while the same
+    // features evaluate after the panels are cached.
+    const panels = await evaluate('cr3f-panels', f28B2Car({ upTo: 'panels' }));
+    if (panels.type !== 'result' || panels.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(panels).slice(0, 2000));
+    const full = await evaluate('cr3f-full', f28B2Car());
+    if (full.type !== 'result' || full.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(full).slice(0, 2000));
+    const bodies = full.evaluation.bodies;
+    for (const id of ['skin-body', 'door-body', 'hood-body', 'hatch-body'])
+      expect(bodies[id]?.kind).toBe('sheet');
+    // Each panel lies inside its outline, half the gap in from it (x along the car).
+    const within = (id: string, [u0, u1]: [number, number, number, number]) => {
+      const box = bodies[id]!.bounds;
+      expect(box[0][0]).toBeGreaterThan(u0 + 1);
+      expect(box[1][0]).toBeLessThan(u1 - 1);
+      expect(box[0][0]).toBeLessThan(u0 + 3);
+    };
+    within('door-body', f28Outlines.door);
+    within('hood-body', f28Outlines.hood);
+    within('hatch-body', [
+      Math.max(f28Outlines.hatch[0], bodies['skin-body']!.bounds[0][0]),
+      f28Outlines.hatch[1],
+      0,
+      0,
+    ]);
+    // The door as a part's content evaluates to the same sheet on its own.
+    const part = await evaluate('cr3f-door-part', bodyPartContent(f28B2Car(), 'door-body'));
+    if (part.type !== 'result' || part.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(part).slice(0, 2000));
+    expect(Object.keys(part.evaluation.bodies)).toEqual(['door-body']);
+    expect(part.evaluation.bodies['door-body']!.areaMm2).toBeCloseTo(
+      bodies['door-body']!.areaMm2,
+      3,
+    );
+
+    // The door's rear edge (b0s1, x = 2550) against the opening's, below the character line.
+    const gapAt = async (id: string, gap: number) => {
+      const doc = f28B2Car({ gap, upTo: 'door' });
+      const meshes = await meshesOf(`${id}-mesh`, doc);
+      const index = (bodyId: string, match: (n: string) => boolean) => {
+        const names = edgeNames(meshes.find((m) => m.bodyId === bodyId)!);
+        const i = names.findIndex((n) => !!n && match(n));
+        if (i < 0) throw new Error(`${bodyId}: ${JSON.stringify(names)}`);
+        return i;
+      };
+      const result = await analysed(id, doc, {
+        gapFlush: {
+          a: {
+            bodyId: 'door-body',
+            edge: index(
+              'door-body',
+              (n) =>
+                n.startsWith('panel:door:inside/press:press:right/') &&
+                n.endsWith('| sketch:door-line/cut:e:b0s1'),
+            ),
+          },
+          b: {
+            bodyId: 'skin-body',
+            edge: index('skin-body', (n) =>
+              n.startsWith(
+                'sketch:door-line/cut:e:b0s1 | trim:door-opening:outside/press:press:right/',
+              ),
+            ),
+          },
+        },
+      });
+      const measured = result.gapFlush!;
+      if (!('samples' in measured)) throw new Error(JSON.stringify(measured));
+      return gapFlushReport(measured.samples);
+    };
+    const standard = await gapAt('cr3f-gap', cadPanelGapDefaultMm);
+    expect(standard.gap.min).toBeGreaterThan(cadPanelGapDefaultMm - 0.05);
+    expect(standard.gap.max).toBeLessThan(cadPanelGapDefaultMm + 0.05);
+    expect(Math.abs(standard.flush.max)).toBeLessThan(0.05);
+    const wider = await gapAt('cr3f-gap-6', 6);
+    expect(wider.gap.min).toBeGreaterThan(6 - 0.05);
+    expect(wider.gap.max).toBeLessThan(6 + 0.05);
+  }, 900000);
+
+  it('fillets the corner between two faces of a sheet, constant or varying along it (CR1e)', async () => {
+    // TS-1483, ST-247: an L of two 30 mm walls, its corner edge rounded.
+    const run = async (kind: Parameters<typeof f20SheetFillet>[0]) => {
+      const result = await evaluate(`cr1e-${kind}`, f20SheetFillet(kind));
+      if (result.type !== 'result' || result.evaluation.status !== 'ok')
+        throw new Error(JSON.stringify(result));
+      const ell = result.evaluation.bodies.ell;
+      if (ell?.kind !== 'sheet') throw new Error(JSON.stringify(ell));
+      const mesh = result.meshes.find((m) => m.bodyId === 'ell')!;
+      const blend = faceNames(mesh).indexOf('blend:(side:e:l0 | side:e:l1)');
+      if (blend < 0) throw new Error(JSON.stringify(faceNames(mesh)));
+      // The radius at a height: where the blend leaves the wall y = 0, x = 40 − R (face ids
+      // count from 1).
+      const radiusAt = (z: number) => {
+        let x = Infinity;
+        for (let t = 0; t < mesh.faceIds.length; t++) {
+          if (mesh.faceIds[t] !== blend + 1) continue;
+          for (let k = 0; k < 3; k++) {
+            const i = 3 * mesh.indices[3 * t + k]!;
+            const [px, py, pz] = [0, 1, 2].map((a) => mesh.positions[i + a]! + mesh.origin[a]!);
+            if (Math.abs(py!) < 1e-6 && Math.abs(pz! - z) < 1.5) x = Math.min(x, px!);
+          }
+        }
+        return 40 - x;
+      };
+      return { ell, radiusAt };
+    };
+    const constant = await run('constant');
+    // Each wall loses 5 × 30 mm²; the quarter cylinder adds π/2 × 5 × 30.
+    expect(constant.ell.areaMm2).toBeCloseTo(2 * (1200 - 150) + (Math.PI / 2) * 150, 1);
+    expect(constant.radiusAt(0)).toBeCloseTo(5, 3);
+    expect(constant.radiusAt(30)).toBeCloseTo(5, 3);
+    const linear = await run('linear');
+    expect(linear.radiusAt(0)).toBeCloseTo(5, 2);
+    expect(linear.radiusAt(30)).toBeCloseTo(10, 2);
+    const points = await run('points');
+    // `at` is the share of the edge's length; the kernel runs a smooth law through the points,
+    // so between them the radius may swing past them a little (here up to about 9.9 mm).
+    expect(points.radiusAt(0)).toBeCloseTo(5, 2);
+    expect(Math.abs(points.radiusAt(7.5) - 9)).toBeLessThan(0.5);
+    expect(points.radiusAt(20)).toBeLessThan(points.radiusAt(12));
+    expect(Math.max(...[3, 9, 12, 15, 20, 25].map(points.radiusAt))).toBeLessThan(10.5);
+    expect(points.radiusAt(30)).toBeCloseTo(5, 2);
+    // The wall's top border has one face: refused at the reference.
+    expect(await evaluate('cr1e-free', f20SheetFillet('free'))).toMatchObject({
+      evaluation: { status: 'error', code: 'fillet-free-edge', featureId: 'fillet' },
+    });
+  });
 
   it('gives each mesh node its curvature and an edge its comb from the exact geometry (R2a-4, CAD43)', async () => {
     // A sphere: mean 1/r (convex, positive) and Gauss 1/r² at every node but the poles.
@@ -2653,6 +4192,72 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     });
   }, 300_000);
 
+  it('refuses a union OCCT could not merge, where member ends meet at one point (TW4)', async () => {
+    // Three leaning legs of a lattice tower (Ø2,300) and the two rings between their tops
+    // (Ø1,200), each ring starting and ending on a leg's axis at its top, as the tower check
+    // built them (0.1 mm): OCCT leaves overlapping members in separate solids that touch
+    // (docs/cad/bim-tower.md TW4). Rounded to whole millimetres, the same union succeeds.
+    type V = [number, number, number];
+    type Q = [number, number, number, number];
+    const members: [string, number, number, V, Q][] = [
+      [
+        'Leg 1',
+        1150,
+        50004.3,
+        [-11547, 20000, 0],
+        [0.005675889130460291, 0.0032769761173617185, 0, 0.9999785226244137],
+      ],
+      [
+        'Leg 2',
+        1150,
+        50000.4,
+        [-17320.5, 10000, 0],
+        [0.0010088385050082784, 0.001747359547306166, 0, 0.99999796448767],
+      ],
+      ['Leg 3', 1150, 50004.3, [-23094, 0, 0], [0, 0.006553952234723439, 0, 0.9999785226244137]],
+      [
+        'Ring 1',
+        600,
+        11225.3,
+        [-11219.3, 19432.4, 50000],
+        [0.6005239880459787, -0.3733241751900793, 0, 0.7071067811865476],
+      ],
+      [
+        'Ring 2',
+        600,
+        11225.3,
+        [-17145.8, 9899.1, 50000],
+        [0.6235702135844702, -0.33340694163472084, 0, 0.7071067811865476],
+      ],
+    ];
+    /** The members joined by one union, the rings' ends `trim` mm short of the leg axes. */
+    const lattice = (trim: number) => {
+      const b = cadBuilder({ id: cadKernelBuild.id, buildHash });
+      const ids = members.map(([name, radius, height, origin, q]) => {
+        const t = name.startsWith('Ring') ? trim : 0;
+        // The cylinder's axis: +Z turned by q (whose z is 0).
+        const u = [2 * q[3] * q[1], -2 * q[3] * q[0], 1 - 2 * (q[0] ** 2 + q[1] ** 2)];
+        return b.cylinder(name, {
+          radius,
+          height: height - 2 * t,
+          origin: origin.map((x, i) => x + t * u[i]!) as V,
+          orientation: q,
+        });
+      });
+      const union = b.boolean(ids[0]!, ids.slice(1), 'union', 'Lattice');
+      return { doc: b.document, union };
+    };
+    const atAxis = lattice(0);
+    expect(await evaluate('tw4-axis', atAxis.doc)).toMatchObject({
+      evaluation: { status: 'error', code: 'boolean-incomplete', featureId: atAxis.union },
+    });
+    // The rings' ends 300 mm short of the axes, still inside the legs: one solid.
+    const ok = await evaluate('tw4-inside', lattice(300).doc);
+    if (ok.type !== 'result' || ok.evaluation.status !== 'ok') throw new Error(JSON.stringify(ok));
+    expect(Object.values(ok.evaluation.bodies)).toMatchObject([{ kind: 'solid' }]);
+    expect(Object.values(ok.evaluation.bodies)[0]).not.toHaveProperty('solids');
+  }, 300_000);
+
   it('reports feature errors, a foreign build and cancellation without results', async () => {
     const disjoint = applyCadOperation(f05Dependencies(0), {
       type: 'booleanBodies',
@@ -2852,8 +4457,12 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     }
   });
 
-  const importFile = async (requestId: string, bytes: Uint8Array) => {
-    await handle({ type: 'import-step', requestId, bytes });
+  const importFile = async (
+    requestId: string,
+    bytes: Uint8Array,
+    options?: CadStepImportOptions,
+  ) => {
+    await handle({ type: 'import-step', requestId, bytes, ...(options ? { options } : {}) });
     const message = posted.find((m) => 'requestId' in m && m.requestId === requestId);
     if (message?.type !== 'import-result') throw new Error(JSON.stringify(message));
     return message.result;
@@ -2863,6 +4472,10 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
   const reference: Record<string, [string, number, number[]]> = {
     'normal-mm-plate.step': ['mm', 19607.300918, [0, 0, 0, 80, 50, 5]],
     'normal-ap203.step': ['mm', 19607.300918, [0, 0, 0, 80, 50, 5]],
+    // #811: one part written as AP242 imports as one body.
+    'normal-ap242.step': ['mm', 19607.300918, [0, 0, 0, 80, 50, 5]],
+    // #810: 1 mm written as CONVERSION_BASED_UNIT('MILLIMETRE'), as the JAMA AP242 files do.
+    'normal-millimetre-plate.step': ['mm', 19607.300918, [0, 0, 0, 80, 50, 5]],
     'normal-colour.step': ['mm', 19607.300918, [0, 0, 0, 80, 50, 5]],
     'normal-inch-block.step': ['in', 16387.064, [0, 0, 0, 50.8, 25.4, 12.7]],
     'normal-m-cone.step': ['m', 16493361.43134, [-200, -200, 0, 200, 200, 300]],
@@ -2892,16 +4505,17 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
 
   it('refuses the F07 files outside the D2 subset with their reason', async () => {
     const expected: Record<string, string> = {
-      'reject-ap242.step': 'step-schema-unsupported',
+      'reject-ap209.step': 'step-schema-unsupported',
       'reject-assembly.step': 'step-assembly',
-      'reject-pmi-dimension.step': 'step-pmi',
+      // PMI-1: read and listed, refused until the user agrees to lose it (below).
+      'reject-pmi-dimension.step': 'step-pmi-partial',
       'reject-external-reference.step': 'step-external-reference',
       'reject-not-step.step': 'step-unreadable',
       'reject-truncated.step': 'step-unreadable',
       'reject-two-shells.step': 'step-multiple-shells',
       'reject-two-solids.step': 'step-multiple-solids',
       'reject-free-face.step': 'step-not-single-solid',
-      'reject-tolerance-gap.step': 'step-tolerance-unsupported',
+      'reject-tolerance-wide.step': 'step-tolerance-unsupported',
       'reject-unit-mile.step': 'step-unit-unknown',
     };
     for (const [name, code] of Object.entries(expected))
@@ -2909,9 +4523,1154 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
         status: 'rejected',
         code,
       });
-    // The kernel's own reading of a widened tolerance, not a fixed message.
-    const gap = await importFile('gap', corpus('reject-tolerance-gap.step'));
-    expect(gap.status === 'rejected' && Number(gap.detail)).toBeGreaterThan(1e-4);
+    // The kernel's own reading of a widened tolerance, not a fixed message: past 1 mm (#820).
+    const wide = await importFile('wide', corpus('reject-tolerance-wide.step'));
+    expect(wide.status === 'rejected' && Number(wide.detail)).toBeGreaterThan(1);
+  });
+
+  it('reads F43 PMI with the XDE reader and matches the values written by another OCCT (PMI-1, CAD80)', async () => {
+    const bytes = new Uint8Array(
+      readFileSync(new URL('../fixtures/f43/pmi-plate.step', import.meta.url)),
+    );
+    const expected = JSON.parse(
+      readFileSync(new URL('../fixtures/f43/expected.json', import.meta.url), 'utf8'),
+    ) as {
+      dimensions: {
+        type: string;
+        value: number;
+        lower: number | null;
+        upper: number | null;
+        targets: string[];
+      }[];
+      tolerances: { type: string; value: number; target: string; datums: string[] }[];
+      datums: { name: string; target: string }[];
+    };
+    oc.FS.writeFile('/f43.step', bytes);
+    const json = readPmiJson(oc, '/f43.step');
+    oc.FS.unlink('/f43.step');
+    // Faces of the plate by their kind: the targets must be faces of the one product.
+    const faceOf = (t: PmiTargetJson) => {
+      expect(t.shape).toBe(oc.TopAbs_ShapeEnum.TopAbs_FACE.value);
+      expect(t.index).toBeGreaterThan(0);
+      expect(t.product).toBeDefined();
+      return t.index;
+    };
+    expect(json.dimensions).toHaveLength(expected.dimensions.length);
+    expected.dimensions.forEach((e, i) => {
+      const d = json.dimensions[i];
+      expect(d.object).toBe(true);
+      expect(pmiDimensionTypes[d.type!]).toBe(e.type);
+      expect(d.values![0]).toBeCloseTo(e.value, 9);
+      if (e.lower !== null && e.upper !== null) {
+        expect(d.plusMinus).toBe(true);
+        // OCCT 7.6 reads the lower deviation as a magnitude (`Abs` of the file's lower bound
+        // −0.05): the sign is not the reader's to give, so the comparison checks it.
+        expect(d.lowerTol).toBeCloseTo(Math.abs(e.lower), 9);
+        expect(d.upperTol).toBeCloseTo(e.upper, 9);
+      }
+      const targets = [...d.targets, ...(d.targets2 ?? [])];
+      expect(targets).toHaveLength(e.targets.length);
+      targets.forEach(faceOf);
+    });
+    // Datums by name, each on one face; tolerances reference them in compartment order. The
+    // reader gives a datum once per referencing tolerance; the same letter is the same face.
+    const datums = new Map(json.datums.map((d) => [d.label, d]));
+    expect(distinctDatums(json.datums).map((d) => d.name)).toEqual(
+      expected.datums.map((d) => d.name),
+    );
+    json.datums.forEach((d) => expect(d.targets.map(faceOf)).toHaveLength(1));
+    const faceOfDatum = (name: string) =>
+      new Set(json.datums.filter((d) => d.name === name).map((d) => d.targets[0].index));
+    expect([...faceOfDatum('A')]).toHaveLength(1);
+    expect(faceOfDatum('A')).not.toEqual(faceOfDatum('B'));
+    expect(json.tolerances).toHaveLength(expected.tolerances.length);
+    expected.tolerances.forEach((e, i) => {
+      const t = json.tolerances[i];
+      expect(t.object).toBe(true);
+      expect(pmiToleranceTypes[t.type!]).toBe(e.type);
+      expect(t.value).toBeCloseTo(e.value, 9);
+      expect(t.targets.map(faceOf)).toHaveLength(1);
+      expect(t.datums!.map((l) => datums.get(l)?.name)).toEqual(e.datums);
+    });
+    // The same face is named the same way wherever it is a target.
+    const top = json.tolerances[0].targets[0].index;
+    expect(json.tolerances[1].targets[0].index).toBe(top);
+    expect(json.views).toEqual([]);
+    // The file's text and the reader agree on every family the reader knows (PMI-U1), and
+    // PMI-2 keeps all of it: the file imports without asking, PMI is no loss.
+    const imported = await importFile('f43', bytes);
+    if (imported.status !== 'ok' || !imported.pmi) throw new Error(JSON.stringify(imported));
+    const { pmi } = imported.report;
+    expect(pmi).toMatchObject({
+      census: { dimension: 2, 'geometric-tolerance': 3, datum: 2 },
+      read: { dimensions: 2, tolerances: 3, datums: 2, views: 0 },
+      kept: {
+        dimension: 2,
+        'geometric-tolerance': 3,
+        datum: 2,
+        'datum-target': 0,
+        callout: 0,
+        view: 0,
+      },
+      complete: true,
+      lossless: true,
+    });
+    expect(imported.report.losses).not.toContain('pmi');
+    expect(pmi!.axes.every((a) => a.unread === 0)).toBe(true);
+    // Each item matched the file's meaning, datum features and datum systems included (#837).
+    expect(pmi!.axes.filter((a) => a.axis === 'semantic').map((a) => [a.family, a.read])).toEqual([
+      ['dimension', 2],
+      ['geometric-tolerance', 3],
+      ['datum', 2],
+      ['datum-system', 2],
+    ]);
+    expect(pmi!.axes).toContainEqual({
+      axis: 'target',
+      family: 'datum-feature',
+      inFile: 2,
+      read: 2,
+      unread: 0,
+    });
+    // PMI-2 (CAD80): the asset holds the items with their values, on the BRep's faces.
+    expect(imported.report.pmiAsset).toEqual({
+      sha256: `sha256:${createHash('sha256').update(imported.pmi).digest('hex')}`,
+      byteLength: imported.pmi.byteLength,
+    });
+    const asset = JSON.parse(new TextDecoder().decode(imported.pmi)) as CadPmiAsset;
+    expect(pmiAssetProblem(asset, { faces: 7, edges: 15, vertices: 10 })).toBeUndefined();
+    // Each face of the BRep by where it is: the plate is 80 × 50 × 5 with a Ø10 hole.
+    const owned: { delete(): void }[] = [];
+    const own = <T>(x: T) => (owned.push(x as never), x);
+    const faces = new Map<number, { centre: number[]; area: number }>();
+    try {
+      oc.FS.writeFile('/f43.brep', imported.brep);
+      const shape = own(new oc.TopoDS_Shape());
+      oc.BRepTools.Read_2(
+        shape,
+        '/f43.brep',
+        own(new oc.BRep_Builder()),
+        own(new oc.Message_ProgressRange_1()),
+      );
+      oc.FS.unlink('/f43.brep');
+      const map = own(new oc.TopTools_IndexedMapOfShape_1());
+      oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, map);
+      expect(map.Extent()).toBe(7);
+      for (let i = 1; i <= map.Extent(); i++) {
+        const props = own(new oc.GProp_GProps_1());
+        oc.BRepGProp.SurfaceProperties_1(map.FindKey(i), props, false, false);
+        const c = own(props.CentreOfMass());
+        faces.set(i, { centre: [c.X(), c.Y(), c.Z()], area: props.Mass() });
+      }
+    } finally {
+      for (const x of owned.reverse()) x.delete();
+    }
+    const where = (t: { shape: string; index: number }) => {
+      expect(t.shape).toBe('face');
+      const { centre, area } = faces.get(t.index)!;
+      if (Math.abs(area - Math.PI * 10 * 5) < 1e-6) return 'hole';
+      if (Math.abs(centre[2]) < 1e-9) return 'bottom';
+      if (Math.abs(centre[2] - 5) < 1e-9) return 'top';
+      return `side@${centre.map((v) => Math.round(v)).join(',')}`;
+    };
+    const items = asset.items;
+    const datumNamed = (name: string) => items.find((i) => i.kind === 'datum' && i.name === name)!;
+    expect(datumNamed('A').targets.map(where)).toEqual(['bottom']);
+    // B is the side the fixture's expected.json names `side`.
+    expect(datumNamed('B').targets.map(where)[0]).toMatch(/^side@/);
+    const dims = items.filter((i) => i.kind === 'dimension');
+    expect(dims).toEqual([
+      expect.objectContaining({ type: 'Location_LinearDistance', values: [5] }),
+      expect.objectContaining({
+        type: 'Size_Diameter',
+        values: [10],
+        deviation: { lower: -0.05, upper: 0.05 },
+      }),
+    ]);
+    expect(
+      dims.map((d) =>
+        [...d.targets, ...(d.kind === 'dimension' ? (d.targets2 ?? []) : [])].map(where),
+      ),
+    ).toEqual([['bottom', 'top'], ['hole']]);
+    const tolerances = items.filter((i) => i.kind === 'geometric-tolerance');
+    expect(
+      tolerances.map((t) => [
+        t.type,
+        t.value,
+        t.targets.map(where),
+        t.references.map((r) =>
+          r.datums.map(
+            (d) =>
+              items.find((i) => i.id === d)!.kind === 'datum' &&
+              (items.find((i) => i.id === d) as { name: string }).name,
+          ),
+        ),
+      ]),
+    ).toEqual([
+      ['Flatness', 0.02, ['top'], []],
+      ['Parallelism', 0.05, ['top'], [['A']]],
+      ['Position', 0.1, ['hole'], [['A'], ['B']]],
+    ]);
+    expect(tolerances[2]).toMatchObject({ zone: 'D' });
+  });
+
+  it.each(['pmi-presented.step', 'pmi-placeholder.step'])(
+    'keeps the presentation lines the file links to each item, however it links them (PMI-3a, CAD83, TS-1420): %s',
+    async (name) => {
+      const bytes = new Uint8Array(
+        readFileSync(new URL(`../fixtures/f43/${name}`, import.meta.url)),
+      );
+      const presented = JSON.parse(
+        readFileSync(new URL('../fixtures/f43/presented.json', import.meta.url), 'utf8'),
+      ) as { presentations: Record<string, { polylines: number[][][]; plane: unknown }> };
+      // PMI-3b keeps the saved views too: nothing is lost, so the import does not ask.
+      const imported = await importFile(name, bytes);
+      if (imported.status !== 'ok' || !imported.pmi) throw new Error(JSON.stringify(imported));
+      const pmi = imported.report.pmi!;
+      const placeholder = name === 'pmi-placeholder.step';
+      expect(pmi.kept).toEqual({
+        dimension: 2,
+        'geometric-tolerance': 2,
+        datum: 2,
+        'datum-target': 0,
+        callout: 4,
+        view: 2,
+      });
+      expect(pmi.axes.filter((a) => a.axis === 'presentation' || a.axis === 'view')).toEqual([
+        { axis: 'presentation', family: 'callout', inFile: 4, read: 4, unread: 0 },
+        // The placeholder file's diameter and position callouts each hold a placeholder too.
+        {
+          axis: 'presentation',
+          family: 'annotation',
+          inFile: placeholder ? 6 : 4,
+          read: placeholder ? 6 : 4,
+          unread: 0,
+        },
+        { axis: 'view', family: 'view', inFile: 2, read: 2, unread: 0 },
+      ]);
+      expect(pmi.lossless).toBe(true);
+      const asset = JSON.parse(new TextDecoder().decode(imported.pmi)) as CadPmiAsset;
+      expect(pmiAssetProblem(asset, { faces: 7, edges: 15, vertices: 10 })).toBeUndefined();
+      const segments = (lines: number[][][]) =>
+        lines.flatMap((line) => line.slice(1).flatMap((p, i) => [...line[i], ...p]));
+      const of = (kind: string, test: (i: CadPmiAsset['items'][number]) => boolean) =>
+        asset.items.find((i) => i.kind === kind && test(i))!;
+      const shown: [CadPmiAsset['items'][number], string][] = [
+        [
+          of('dimension', (i) => i.kind === 'dimension' && i.type === 'Location_LinearDistance'),
+          'distance',
+        ],
+        [of('dimension', (i) => i.kind === 'dimension' && i.type === 'Size_Diameter'), 'diameter'],
+        [
+          of(
+            'geometric-tolerance',
+            (i) => i.kind === 'geometric-tolerance' && i.type === 'Position',
+          ),
+          'position',
+        ],
+        [of('datum', (i) => i.kind === 'datum' && i.name === 'A'), 'datum A'],
+      ];
+      // The lines and plane (PMI-3b adds each callout's views as `ranges`).
+      for (const [item, key] of shown)
+        expect({ ...item.presentation, ranges: undefined }).toEqual({
+          segments: segments(presented.presentations[key].polylines),
+          plane: presented.presentations[key].plane,
+        });
+      // Semantic only: the flatness and datum B have no lines in the file.
+      expect(
+        of('geometric-tolerance', (i) => i.kind === 'geometric-tolerance' && i.type === 'Flatness')
+          .presentation,
+      ).toBeUndefined();
+      expect(of('datum', (i) => i.kind === 'datum' && i.name === 'B').presentation).toBeUndefined();
+    },
+  );
+
+  it('keeps the saved views that show kept items, and asks for a view it cannot keep (PMI-3b, CAD80, TS-1424)', async () => {
+    const bytes = new Uint8Array(
+      readFileSync(new URL('../fixtures/f43/pmi-presented.step', import.meta.url)),
+    );
+    const expected = JSON.parse(
+      readFileSync(new URL('../fixtures/f43/presented.json', import.meta.url), 'utf8'),
+    ) as {
+      views: {
+        name: string;
+        eye: number[];
+        direction: number[];
+        up: number[];
+        width: number;
+        height: number;
+        members: string[];
+      }[];
+    };
+    const imported = await importFile('pmi-views', bytes);
+    if (imported.status !== 'ok' || !imported.pmi) throw new Error(JSON.stringify(imported));
+    const asset = JSON.parse(new TextDecoder().decode(imported.pmi)) as CadPmiAsset;
+    expect(pmiAssetProblem(asset, { faces: 7, edges: 15, vertices: 10 })).toBeUndefined();
+    expect(
+      [...(asset.views ?? [])]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((v) => ({ name: v.name, ...v.camera })),
+    ).toEqual(
+      [...expected.views]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(({ members: _members, ...v }) => v),
+    );
+    // Each item names the views whose draughting model lists its callout.
+    const shownIn = (test: (i: CadPmiAsset['items'][number]) => boolean) =>
+      (asset.items.find(test)?.views ?? []).map(
+        (id) => asset.views!.find((v) => v.id === id)!.name,
+      );
+    expect(shownIn((i) => i.kind === 'dimension' && i.type === 'Size_Diameter')).toEqual(['Hole']);
+    expect(shownIn((i) => i.kind === 'geometric-tolerance' && i.type === 'Position')).toEqual([
+      'Hole',
+    ]);
+    expect(shownIn((i) => i.kind === 'datum' && i.name === 'A')).toEqual(['Datum A']);
+    // Each item with views keeps its lines callout by callout, each naming its own views.
+    for (const i of asset.items.filter((x) => x.views)) {
+      const ranges = i.presentation!.ranges!;
+      expect(ranges.at(-1)!.end).toBe(i.presentation!.segments.length);
+      expect(ranges.flatMap((r) => r.views).every((v) => i.views!.includes(v))).toBe(true);
+    }
+    expect(shownIn((i) => i.kind === 'dimension' && i.type === 'Location_LinearDistance')).toEqual(
+      [],
+    );
+    // A central projection is not kept: the import asks, and keeps the other view.
+    const central = new TextEncoder().encode(
+      new TextDecoder().decode(bytes).replace('.PARALLEL.', '.CENTRAL.'),
+    );
+    const asked = await importFile('pmi-views-central', central);
+    expect(asked).toMatchObject({ status: 'rejected', code: 'step-pmi-partial' });
+    const consented = await importFile('pmi-views-central-ok', central, { pmi: 'discard' });
+    if (consented.status !== 'ok' || !consented.pmi) throw new Error(JSON.stringify(consented));
+    expect(consented.report.pmi!.kept.view).toBe(1);
+    expect(consented.report.pmi!.axes.find((a) => a.axis === 'view')).toEqual({
+      axis: 'view',
+      family: 'view',
+      inFile: 2,
+      read: 1,
+      unread: 1,
+    });
+  });
+
+  it('evaluates an imported body with its pmi asset and refuses an asset that does not fit it (PMI-2, CAD82)', async () => {
+    const imported = await importFile(
+      'pmi-eval',
+      new Uint8Array(readFileSync(new URL('../fixtures/f43/pmi-plate.step', import.meta.url))),
+    );
+    if (imported.status !== 'ok' || !imported.pmi || !imported.report.pmiAsset)
+      throw new Error(JSON.stringify(imported));
+    const { report, brep } = imported;
+    const pmiRef = (bytes: Uint8Array) => ({
+      id: 'plate-pmi',
+      kind: 'pmi' as const,
+      sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+      byteLength: bytes.byteLength,
+      mediaType: 'application/json',
+    });
+    const document = (pmi: Uint8Array) =>
+      pinned(
+        applyCadOperation(f01Empty(), {
+          type: 'insertImportedBody',
+          assets: [
+            { id: 's', kind: 'source-step', ...report.source, mediaType: 'model/step' },
+            { id: 'b', kind: 'normalized-brep', ...report.brep, mediaType: 'model/x-occt-brep' },
+          ]
+            .map(({ id, kind, sha256, byteLength, mediaType }) => ({
+              id,
+              kind: kind as 'source-step' | 'normalized-brep',
+              sha256,
+              byteLength,
+              mediaType,
+            }))
+            .concat([pmiRef(pmi) as never]),
+          feature: {
+            id: 'imp',
+            name: 'plate',
+            type: 'imported',
+            inputFeatureIds: [],
+            args: {
+              kind: 'solid',
+              sourceAssetId: 's',
+              brepAssetId: 'b',
+              pmiAssetId: 'plate-pmi',
+              importer: { id: 'dev', buildHash },
+              sourceUnit: report.sourceUnit,
+              scaleToMm: report.scaleToMm,
+            },
+          },
+          body: {
+            id: 'plate',
+            name: 'plate',
+            sourceFeatureId: 'imp',
+            placementFeatureId: 'imp-placement',
+            appearance: { color: '#8899aa', opacity: 1 },
+          },
+        }),
+      );
+    const evaluate = async (requestId: string, pmi: Uint8Array) => {
+      const doc = document(pmi);
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(doc),
+        document: doc,
+        assets: { [report.brep.sha256]: brep, [pmiRef(pmi).sha256]: pmi },
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result') throw new Error(JSON.stringify(m));
+      return m.evaluation;
+    };
+    expect(await evaluate('pmi-eval-ok', imported.pmi)).toMatchObject({ status: 'ok' });
+    // PMI-2 (CAD83): the view highlights a target by the mesh's pick table, which lists the
+    // body's faces and edges in the same map order as the asset's indices.
+    const shown = posted.find(
+      (x) => 'requestId' in x && x.requestId === 'pmi-eval-ok' && x.type === 'result',
+    );
+    if (shown?.type !== 'result') throw new Error('no result');
+    const { topology } = shown.meshes[0]!;
+    const owned: { delete(): void }[] = [];
+    const own = <T>(x: T) => (owned.push(x as never), x);
+    try {
+      oc.FS.writeFile('/f43-order.brep', brep);
+      const shape = own(new oc.TopoDS_Shape());
+      oc.BRepTools.Read_2(
+        shape,
+        '/f43-order.brep',
+        own(new oc.BRep_Builder()),
+        own(new oc.Message_ProgressRange_1()),
+      );
+      oc.FS.unlink('/f43-order.brep');
+      for (const [kind, rows, props] of [
+        ['TopAbs_FACE', topology.faces, 'SurfaceProperties_1'],
+        ['TopAbs_EDGE', topology.edges, 'LinearProperties'],
+      ] as const) {
+        const map = own(new oc.TopTools_IndexedMapOfShape_1());
+        oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum[kind], map);
+        expect(rows, kind).toHaveLength(map.Extent());
+        rows.forEach((row: { centroid: number[] }, i: number) => {
+          const g = own(new oc.GProp_GProps_1());
+          if (props === 'SurfaceProperties_1')
+            oc.BRepGProp.SurfaceProperties_1(map.FindKey(i + 1), g, false, false);
+          else oc.BRepGProp.LinearProperties(map.FindKey(i + 1), g, false, false);
+          const c = own(g.CentreOfMass());
+          expect(row.centroid[0], `${kind} ${i + 1}`).toBeCloseTo(c.X(), 6);
+          expect(row.centroid[1], `${kind} ${i + 1}`).toBeCloseTo(c.Y(), 6);
+          expect(row.centroid[2], `${kind} ${i + 1}`).toBeCloseTo(c.Z(), 6);
+        });
+      }
+    } finally {
+      for (const x of owned.reverse()) x.delete();
+    }
+    // A kept shape is checked as a rebuild is: the same document without its PMI bytes, or with
+    // other bytes, is refused although the shape is cached.
+    const warm = async (requestId: string, assets: Record<string, Uint8Array>) => {
+      const doc = document(imported.pmi!);
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(doc),
+        document: doc,
+        assets,
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result') throw new Error(JSON.stringify(m));
+      return m.evaluation;
+    };
+    expect(await warm('pmi-warm-missing', { [report.brep.sha256]: brep })).toMatchObject({
+      status: 'error',
+      code: 'asset-missing',
+      featureId: 'imp',
+    });
+    expect(
+      await warm('pmi-warm-altered', {
+        [report.brep.sha256]: brep,
+        [pmiRef(imported.pmi).sha256]: new Uint8Array(imported.pmi.byteLength),
+      }),
+    ).toMatchObject({ status: 'error', code: 'asset-hash-mismatch', featureId: 'imp' });
+    const asset = JSON.parse(new TextDecoder().decode(imported.pmi)) as CadPmiAsset;
+    const bytes = (a: unknown) => new TextEncoder().encode(JSON.stringify(a));
+    // A face the body does not have, a datum the asset does not hold, and bytes that are not
+    // UTF-8 JSON are each refused on the imported feature.
+    const outside = structuredClone(asset);
+    outside.items[0].targets = [{ shape: 'face', index: 8 }];
+    const lost = structuredClone(asset);
+    lost.items = lost.items.filter((i) => i.kind !== 'datum');
+    for (const [id, pmi] of [
+      ['pmi-eval-face', bytes(outside)],
+      ['pmi-eval-datum', bytes(lost)],
+      ['pmi-eval-json', new Uint8Array([0x7b, 0xff, 0x7d])],
+    ] as const)
+      expect(await evaluate(id, pmi), id).toMatchObject({
+        status: 'error',
+        code: 'pmi-invalid',
+        featureId: 'imp',
+      });
+  });
+
+  /** PMI-4a/4b: F43's plate imported with its PMI, and the plate cut by a box. */
+  const f43 = (name: string) =>
+    new Uint8Array(readFileSync(new URL(`../fixtures/f43/${name}`, import.meta.url)));
+  const pmiPlate = async (requestId: string, bytes: Uint8Array = f43('pmi-plate.step')) => {
+    const imported = await importFile(requestId, bytes);
+    if (imported.status !== 'ok' || !imported.pmi || !imported.report.pmiAsset)
+      throw new Error(JSON.stringify(imported));
+    const { report, brep, pmi } = imported;
+    const pmiSha = `sha256:${createHash('sha256').update(pmi).digest('hex')}`;
+    const plate = applyCadOperation(f01Empty(), {
+      type: 'insertImportedBody',
+      assets: [
+        { id: 's', kind: 'source-step', ...report.source, mediaType: 'model/step' },
+        { id: 'b', kind: 'normalized-brep', ...report.brep, mediaType: 'model/x-occt-brep' },
+        {
+          id: 'p',
+          kind: 'pmi',
+          sha256: pmiSha,
+          byteLength: pmi.byteLength,
+          mediaType: 'application/json',
+        },
+      ].map(({ id, kind, sha256, byteLength, mediaType }) => ({
+        id,
+        kind: kind as 'source-step',
+        sha256,
+        byteLength,
+        mediaType,
+      })),
+      feature: {
+        id: 'imp',
+        name: 'plate',
+        type: 'imported',
+        inputFeatureIds: [],
+        args: {
+          kind: 'solid',
+          sourceAssetId: 's',
+          brepAssetId: 'b',
+          pmiAssetId: 'p',
+          importer: { id: 'dev', buildHash },
+          sourceUnit: report.sourceUnit,
+          scaleToMm: report.scaleToMm,
+        },
+      },
+      body: {
+        id: 'plate',
+        name: 'plate',
+        sourceFeatureId: 'imp',
+        placementFeatureId: 'imp-placement',
+        appearance: { color: '#8899aa', opacity: 1 },
+      },
+    });
+    /** The plate cut by a box from `from` to `to` (mm). */
+    const cut = (
+      from: [number, number, number],
+      to: [number, number, number],
+      base: CadDocument = plate,
+    ) =>
+      pinned(
+        applyCadOperation(
+          applyCadOperation(base, {
+            type: 'insertFeatures',
+            parameters: [],
+            profiles: [],
+            features: [
+              {
+                id: 'tool',
+                name: 'tool',
+                type: 'box',
+                inputFeatureIds: [],
+                args: {
+                  size: [mm(to[0] - from[0]), mm(to[1] - from[1]), mm(to[2] - from[2])],
+                  origin: position(...from),
+                  orientation: identityQuaternion(),
+                },
+              },
+            ],
+            bodies: [
+              {
+                id: 'tool-body',
+                name: 'tool',
+                sourceFeatureId: 'tool',
+                placementFeatureId: 'tool-placement',
+                appearance: { color: '#9aa4b1', opacity: 1 },
+              },
+            ],
+          }),
+          {
+            type: 'booleanBodies',
+            targetId: 'plate',
+            toolId: 'tool-body',
+            mode: 'cut',
+            booleanFeatureId: 'op',
+            placementFeatureId: 'op-placement',
+          },
+        ),
+      );
+    return { report, brep, pmi, pmiSha, plate, cut };
+  };
+
+  it('keeps the PMI of faces a cut leaves unchanged and makes the rest stale (PMI-4a, CAD84)', async () => {
+    const { report, brep, pmi, pmiSha, plate, cut } = await pmiPlate('pmi-track');
+    const run = async (requestId: string, doc: CadDocument) => {
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(doc),
+        document: doc,
+        assets: { [report.brep.sha256]: brep, [pmiSha]: pmi },
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result' || m.evaluation.status !== 'ok') throw new Error(JSON.stringify(m));
+      const mesh = m.meshes.find((x) => x.bodyId === 'plate')!;
+      return mesh;
+    };
+    const asset = JSON.parse(new TextDecoder().decode(pmi)) as CadPmiAsset;
+    /** Each item by what it is, current or why not. */
+    const label = (i: CadPmiItem) =>
+      i.kind === 'datum' ? `datum ${i.name}` : `${i.kind} ${'type' in i ? i.type : ''}`;
+    const states = (mesh: Awaited<ReturnType<typeof run>>) => {
+      expect(mesh.pmi?.map((x) => x.featureId)).toEqual(['imp']);
+      const s = cadPmiItemStates(asset, mesh.pmi![0]);
+      return Object.fromEntries(
+        asset.items.map((i) => {
+          const r = s.get(i.id)!;
+          return [label(i), r.current ? 'current' : r.reason];
+        }),
+      );
+    };
+    // The import alone: every sub-shape is its own, at its own index.
+    const alone = await run('pmi-track-alone', pinned(plate));
+    expect(Object.values(states(alone)).every((s) => s === 'current')).toBe(true);
+    const all = alone.pmi![0]!;
+    expect(all.faces).toEqual(alone.topology.faces.flatMap((_, i) => [i + 1, i]));
+    expect(all.vertices).toHaveLength(2 * alone.topology.vertices.length);
+    expect(all.edges).toHaveLength(2 * alone.topology.edges.length);
+    // F45 (a): a pocket inside the plate's thickness that splits the hole's face. The hole's
+    // diameter and position are stale; the top, bottom and side are untouched.
+    const pocket = await run('pmi-track-pocket', cut([30, 24, 1], [50, 26, 4]));
+    expect(states(pocket)).toEqual({
+      'dimension Location_LinearDistance': 'current',
+      'dimension Size_Diameter': 'target',
+      'geometric-tolerance Flatness': 'current',
+      'geometric-tolerance Parallelism': 'current',
+      'geometric-tolerance Position': 'target',
+      'datum A': 'current',
+      'datum B': 'current',
+    });
+    // F45 (b): a notch at the far corner changes the top (and the two faces there) only.
+    const notch = await run('pmi-track-notch', cut([75, 45, 3], [81, 51, 6]));
+    expect(states(notch)).toEqual({
+      'dimension Location_LinearDistance': 'target',
+      'dimension Size_Diameter': 'current',
+      'geometric-tolerance Flatness': 'target',
+      'geometric-tolerance Parallelism': 'target',
+      'geometric-tolerance Position': 'current',
+      'datum A': 'current',
+      'datum B': 'current',
+    });
+    // A current target names the body's own face: the hole, at its own place and size.
+    const diameter = asset.items.find((i) => label(i) === 'dimension Size_Diameter')!;
+    const hole = notch.topology.faces[cadPmiTrackedIndex(notch.pmi![0]!, diameter.targets[0]!)!]!;
+    expect(hole.area).toBeCloseTo(Math.PI * 10 * 5, 6);
+    expect(hole.centroid[0]).toBeCloseTo(40, 6);
+    expect(hole.centroid[1]).toBeCloseTo(25, 6);
+    // The kept shapes of an evaluation of the same document carry the same tracking.
+    const again = await run('pmi-track-notch-again', cut([75, 45, 3], [81, 51, 6]));
+    expect(again.pmi).toEqual(notch.pmi);
+    // A rigid move keeps the sub-shapes themselves: before the cut (the tool moved with it) and
+    // after it (the placement path moves the kept shape).
+    const move = (doc: CadDocument, x: number) =>
+      pinned(
+        applyCadOperation(doc, {
+          type: 'transformBody',
+          bodyId: 'plate',
+          translation: position(x, 0, 0),
+          rotation: identityQuaternion(),
+        }),
+      );
+    const states0 = states(notch);
+    const before = await run(
+      'pmi-track-moved-notch',
+      cut([175, 45, 3], [181, 51, 6], move(plate, 100)),
+    );
+    expect(states(before)).toEqual(states0);
+    const after = await run('pmi-track-notch-moved', move(cut([75, 45, 3], [81, 51, 6]), 30));
+    expect(states(after)).toEqual(states0);
+    const after2 = await run('pmi-track-notch-moved-2', move(cut([75, 45, 3], [81, 51, 6]), 60));
+    expect(states(after2)).toEqual(states0);
+  });
+
+  it('writes only the current PMI into AP242, which reads back the same (PMI-4b/4c, CAD85, TS-1431)', async () => {
+    /** Evaluates `doc` with a STEP file, and the plate's mesh. */
+    const exported = async (
+      requestId: string,
+      doc: CadDocument,
+      assets: Record<string, Uint8Array>,
+    ) => {
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(doc),
+        document: doc,
+        assets,
+        step: true,
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result' || m.evaluation.status !== 'ok' || !m.step)
+        throw new Error(JSON.stringify(m));
+      // The files the independent reader checks (scripts/cad-kernel/pmi-readback.py).
+      const dir = process.env.CAD_PMI_STEP_DIR ?? '/tmp/cad-pmi-step';
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(`${dir}/${requestId}.step`, m.step);
+      return {
+        step: m.step,
+        stepPmi: m.stepPmi,
+        mesh: m.meshes.find((x) => x.bodyId === 'plate')!,
+      };
+    };
+    /**
+     * Each item by its meaning, with its targets as the centroids of the faces, edges and
+     * vertices it names (`at` gives a target's row in the body's topology table).
+     */
+    const meaning = (
+      asset: CadPmiAsset,
+      mesh: CadMesh,
+      at: (t: CadPmiTarget) => number | undefined,
+      items = asset.items,
+    ) => {
+      const where = (list: CadPmiTarget[] = []) =>
+        list
+          .map((t) => {
+            const row = at(t);
+            const table = { face: 'faces', edge: 'edges', vertex: 'vertices' } as const;
+            const c = row === undefined ? undefined : mesh.topology[table[t.shape]][row]?.centroid;
+            return `${t.shape}@${c?.map((v) => v.toFixed(4)).join(',')}`;
+          })
+          .sort();
+      const names = new Map(
+        asset.items.flatMap((i) => (i.kind === 'datum' ? [[i.id, i.name] as const] : [])),
+      );
+      return items
+        .map((i) =>
+          JSON.stringify({
+            ...i,
+            id: undefined,
+            presentation: i.presentation && {
+              segments: i.presentation.segments.map((v) => +v.toFixed(6)),
+              plane: i.presentation.plane,
+            },
+            views: undefined,
+            targets: where(i.targets),
+            ...(i.kind === 'dimension' && i.targets2 ? { targets2: where(i.targets2) } : {}),
+            ...(i.kind === 'geometric-tolerance'
+              ? {
+                  references: i.references.map((r) => ({
+                    ...r,
+                    datums: r.datums.map((d) => names.get(d)),
+                  })),
+                }
+              : {}),
+          }),
+        )
+        .sort();
+    };
+    /** The file read back with this kernel as a new import, and its items by meaning. */
+    const readBack = async (requestId: string, step: Uint8Array) => {
+      const back = await pmiPlate(requestId, step);
+      expect(back.report.pmi, requestId).toMatchObject({ complete: true, lossless: true });
+      const asset = JSON.parse(new TextDecoder().decode(back.pmi)) as CadPmiAsset;
+      const { mesh } = await exported(`${requestId}-eval`, pinned(back.plate), {
+        [back.report.brep.sha256]: back.brep,
+        [back.pmiSha]: back.pmi,
+      });
+      return meaning(asset, mesh, (t) => t.index - 1);
+    };
+
+    for (const fixture of ['pmi-plate.step', 'pmi-presented.step']) {
+      const { report, brep, pmi, pmiSha, plate, cut } = await pmiPlate(
+        `pmi-write-${fixture}`,
+        f43(fixture),
+      );
+      const assets = { [report.brep.sha256]: brep, [pmiSha]: pmi };
+      const asset = JSON.parse(new TextDecoder().decode(pmi)) as CadPmiAsset;
+      const presentations = asset.items.filter((i) => i.presentation).length;
+      // The import alone: every item, on the same faces, edges and vertices.
+      const alone = await exported(`pmi-write-alone-${fixture}`, pinned(plate), assets);
+      expect(alone.stepPmi).toEqual({
+        written: {
+          dimension: 2,
+          'geometric-tolerance': asset.items.filter((i) => i.kind === 'geometric-tolerance').length,
+          datum: 2,
+          'datum-target': 0,
+        },
+        stale: 0,
+        unwritable: 0,
+        presented: presentations,
+        presentationLost: 0,
+        views: asset.views?.length ?? 0,
+        unsupportedBuild: 0,
+      });
+      expect(new TextDecoder().decode(alone.step)).toMatch(/AP242/);
+      expect(await readBack(`pmi-back-alone-${fixture}`, alone.step)).toEqual(
+        meaning(asset, alone.mesh, (t) => t.index - 1),
+      );
+      // F45 (b), the notch: the top and what depends on it are stale and not written; the
+      // hole's diameter and position, and both datums, are written on the faces the body has.
+      const notch = await exported(
+        `pmi-write-notch-${fixture}`,
+        cut([75, 45, 3], [81, 51, 6]),
+        assets,
+      );
+      const states = cadPmiItemStates(asset, notch.mesh.pmi![0]);
+      const kept = asset.items.filter((i) => states.get(i.id)?.current);
+      expect(
+        kept.map((i) => (i.kind === 'datum' ? i.name : 'type' in i ? i.type : 'target')).sort(),
+      ).toEqual(['A', 'B', 'Position', 'Size_Diameter']);
+      expect(notch.stepPmi?.written).toEqual({
+        dimension: 1,
+        'geometric-tolerance': 1,
+        datum: 2,
+        'datum-target': 0,
+      });
+      expect(notch.stepPmi?.stale).toBe(asset.items.length - 4);
+      expect(await readBack(`pmi-back-notch-${fixture}`, notch.step)).toEqual(
+        meaning(asset, notch.mesh, (t) => cadPmiTrackedIndex(notch.mesh.pmi![0]!, t), kept),
+      );
+      // A rigid move after the cut moves the presentation lines with the body.
+      const moved = await exported(
+        `pmi-write-moved-${fixture}`,
+        pinned(
+          applyCadOperation(cut([75, 45, 3], [81, 51, 6]), {
+            type: 'transformBody',
+            bodyId: 'plate',
+            translation: position(30, 0, 0),
+            rotation: identityQuaternion(),
+          }),
+        ),
+        assets,
+      );
+      const shift = (i: CadPmiItem): CadPmiItem =>
+        i.presentation
+          ? {
+              ...i,
+              presentation: {
+                segments: i.presentation.segments.map((v, k) => (k % 3 === 0 ? v + 30 : v)),
+                ...(i.presentation.plane && {
+                  plane: {
+                    ...i.presentation.plane,
+                    origin: [
+                      i.presentation.plane.origin[0] + 30,
+                      i.presentation.plane.origin[1],
+                      i.presentation.plane.origin[2],
+                    ],
+                  },
+                }),
+              },
+            }
+          : i;
+      expect(await readBack(`pmi-back-moved-${fixture}`, moved.step)).toEqual(
+        meaning(
+          asset,
+          moved.mesh,
+          (t) => cadPmiTrackedIndex(moved.mesh.pmi![0]!, t),
+          kept.map(shift),
+        ),
+      );
+    }
+  });
+
+  it('refuses PMI it does not keep and imports the shape only with consent, listing the loss (PMI-1, CAD81)', async () => {
+    const bytes = new Uint8Array(
+      readFileSync(new URL('../fixtures/f43/pmi-plate.step', import.meta.url)),
+    );
+    // F43 loses nothing (PMI-2), so it is never refused; its body is the plate as before.
+    const kept = await importFile('pmi-refuse', bytes, { pmi: 'refuse' });
+    if (kept.status !== 'ok') throw new Error(JSON.stringify(kept));
+    expect(kept.report.pmi).toMatchObject({ complete: true, lossless: true });
+    expect(solid(kept.report.body).volumeMm3).toBeCloseTo(19607.300918, 3);
+    // F44: a reference through an assembly path, which OCCT 7.6 does not read, is listed.
+    const path = await importFile(
+      'pmi-path',
+      new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/loss-component-path.step', import.meta.url)),
+      ),
+    );
+    if (path.status !== 'rejected' || !path.pmi) throw new Error(JSON.stringify(path));
+    expect(path.detail).toBe('unread');
+    expect(path.pmi.axes).toContainEqual({
+      axis: 'unsupported',
+      family: 'component-path',
+      inFile: 1,
+      read: 0,
+      unread: 1,
+    });
+    // With consent the shape is imported with the PMI that was verified; PMI is a loss.
+    const agreed = await importFile(
+      'pmi-path-agreed',
+      new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/loss-component-path.step', import.meta.url)),
+      ),
+      { pmi: 'discard' },
+    );
+    if (agreed.status !== 'ok') throw new Error(JSON.stringify(agreed));
+    expect(agreed.report.losses).toContain('pmi');
+    expect(agreed.report.pmi).toMatchObject({
+      lossless: false, // The plate's own items are kept; the assembly-path reference is the loss.
+      kept: {
+        dimension: 2,
+        'geometric-tolerance': 3,
+        datum: 2,
+        'datum-target': 0,
+        callout: 0,
+        view: 0,
+      },
+    });
+    expect(!!agreed.pmi).toBe(!!agreed.report.pmiAsset);
+    // A file whose PMI the reader cannot give as items is listed as not read.
+    const partial = await importFile('pmi-dim', corpus('reject-pmi-dimension.step'));
+    if (partial.status !== 'rejected' || !partial.pmi) throw new Error(JSON.stringify(partial));
+    expect(partial.detail).toBe('unread');
+    expect(partial.pmi.complete).toBe(false);
+    expect(
+      partial.pmi.axes.find((a) => a.family === 'dimension' && a.axis === 'semantic'),
+    ).toMatchObject({
+      inFile: 1,
+      unread: 1,
+    });
+  });
+
+  it('keeps a tolerance read up to 1 mm and machines the body only within the document limit (#820)', async () => {
+    const read = await importFile('loose-1', corpus('loose-tolerance-gap.step'));
+    if (read.status !== 'ok') throw new Error(JSON.stringify(read));
+    const { report, brep } = read;
+    // The reader widens the moved vertex to about 0.005 mm; the shape is kept as read.
+    expect(report.maxToleranceMm).toBeGreaterThan(
+      cadToleranceSets.standard.maxResultLinearToleranceMm,
+    );
+    expect(report.maxToleranceMm).toBeLessThan(cadToleranceSets.large.maxResultLinearToleranceMm);
+    const imported = (recorded: boolean) =>
+      pinned(
+        applyCadOperation(f01Empty(), {
+          type: 'insertImportedBody',
+          assets: [
+            { id: 's', kind: 'source-step', ...report.source, mediaType: 'model/step' },
+            { id: 'b', kind: 'normalized-brep', ...report.brep, mediaType: 'model/x-occt-brep' },
+          ].map(({ id, kind, sha256, byteLength, mediaType }) => ({
+            id,
+            kind: kind as 'source-step' | 'normalized-brep',
+            sha256,
+            byteLength,
+            mediaType,
+          })),
+          feature: {
+            id: 'imp',
+            name: 'loose',
+            type: 'imported',
+            inputFeatureIds: [],
+            args: {
+              kind: 'solid',
+              sourceAssetId: 's',
+              brepAssetId: 'b',
+              importer: { id: 'dev', buildHash },
+              sourceUnit: report.sourceUnit,
+              scaleToMm: report.scaleToMm,
+              ...(recorded && { maxToleranceMm: report.maxToleranceMm }),
+            },
+          },
+          body: {
+            id: 'loose',
+            name: 'loose',
+            sourceFeatureId: 'imp',
+            placementFeatureId: 'imp-placement',
+            appearance: { color: '#8899aa', opacity: 1 },
+          },
+        }),
+      );
+    const assets = { [report.brep.sha256]: brep };
+    const evaluate = async (requestId: string, document: CadDocument) => {
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(document),
+        document,
+        assets,
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result') throw new Error(JSON.stringify(m));
+      return m.evaluation;
+    };
+    // Recorded: the body is placed and measured as read.
+    expect(await evaluate('loose-2', imported(true))).toMatchObject({ status: 'ok' });
+    // Not recorded (a document written before #820): the standard limit still applies.
+    expect(await evaluate('loose-3', imported(false))).toMatchObject({
+      status: 'error',
+      code: 'result-tolerance',
+      featureId: 'imp',
+    });
+    // A cut with a box: refused before the Boolean while the tolerance is above the limit.
+    const cut = (document: CadDocument) =>
+      pinned(
+        applyCadOperation(
+          applyCadOperation(document, {
+            type: 'insertFeatures',
+            parameters: [],
+            profiles: [],
+            features: [
+              {
+                id: 'tool',
+                name: 'tool',
+                type: 'box',
+                inputFeatureIds: [],
+                args: {
+                  size: [mm(4), mm(4), mm(20)],
+                  origin: position(3, 3, -5),
+                  orientation: identityQuaternion(),
+                },
+              },
+            ],
+            bodies: [
+              {
+                id: 'tool-body',
+                name: 'tool',
+                sourceFeatureId: 'tool',
+                placementFeatureId: 'tool-placement',
+                appearance: { color: '#9aa4b1', opacity: 1 },
+              },
+            ],
+          }),
+          {
+            type: 'booleanBodies',
+            targetId: 'loose',
+            toolId: 'tool-body',
+            mode: 'cut',
+            booleanFeatureId: 'op',
+            placementFeatureId: 'op-placement',
+          },
+        ),
+      );
+    expect(await evaluate('loose-4', cut(imported(true)))).toMatchObject({
+      status: 'error',
+      code: 'input-tolerance',
+      featureId: 'op',
+    });
+    // Within the `large` set's limit (0.01 mm) the same cut is an ordinary Boolean.
+    const large = applyCadOperation(cut(imported(true)), { type: 'setToleranceSet', set: 'large' });
+    expect(await evaluate('loose-5', pinned(large))).toMatchObject({ status: 'ok' });
+  });
+
+  it('records the tolerance of the BRep as written, which the writer may round up (#802)', async () => {
+    // A JAMA bracket part: 0.009395402681850407 mm is written as 0.00939540268185041.
+    const read = 0.009395402681850407;
+    const owned: { delete(): void }[] = [];
+    const own = <T>(x: T) => (owned.push(x as never), x);
+    let bytes: Uint8Array;
+    let written: number;
+    try {
+      const box = own(new oc.BRepPrimAPI_MakeBox_2(10, 10, 10)).Shape();
+      own(new oc.ShapeFix_ShapeTolerance()).SetTolerance(
+        box,
+        read,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
+      const measured = own(new oc.ShapeAnalysis_ShapeTolerance()).Tolerance(
+        box,
+        1,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
+      expect(measured).toBe(read);
+      oc.BRepTools.Write_3(box, '/w.brep', own(new oc.Message_ProgressRange_1()));
+      bytes = oc.FS.readFile('/w.brep') as Uint8Array;
+      written = writtenTolerance(oc, own, '/w.brep');
+      oc.FS.unlink('/w.brep');
+    } finally {
+      for (const x of owned.reverse()) x.delete();
+    }
+    expect(written).toBeGreaterThan(read);
+    const sha = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const imported = (maxToleranceMm: number) =>
+      pinned(
+        applyCadOperation(f01Empty(), {
+          type: 'insertImportedBody',
+          assets: [
+            {
+              id: 's',
+              kind: 'source-step',
+              sha256: `sha256:${'0'.repeat(64)}`,
+              byteLength: 1,
+              mediaType: 'model/step',
+            },
+            {
+              id: 'b',
+              kind: 'normalized-brep',
+              sha256: sha,
+              byteLength: bytes.byteLength,
+              mediaType: 'model/x-occt-brep',
+            },
+          ],
+          feature: {
+            id: 'imp',
+            name: 'rounded',
+            type: 'imported',
+            inputFeatureIds: [],
+            args: {
+              kind: 'solid',
+              sourceAssetId: 's',
+              brepAssetId: 'b',
+              importer: { id: 'dev', buildHash },
+              sourceUnit: 'mm',
+              scaleToMm: 1,
+              maxToleranceMm,
+            },
+          },
+          body: {
+            id: 'rounded',
+            name: 'rounded',
+            sourceFeatureId: 'imp',
+            placementFeatureId: 'imp-placement',
+            appearance: { color: '#8899aa', opacity: 1 },
+          },
+        }),
+      );
+    const evaluate = async (requestId: string, document: CadDocument) => {
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(document),
+        document,
+        assets: { [sha]: bytes },
+      });
+      const m = posted.find(
+        (x) => 'requestId' in x && x.requestId === requestId && x.type !== 'progress',
+      );
+      if (m?.type !== 'result') throw new Error(JSON.stringify(m));
+      return m.evaluation;
+    };
+    // The tolerance measured before writing is just below the one read back: refused.
+    expect(await evaluate('rounded-1', imported(read))).toMatchObject({
+      status: 'error',
+      code: 'result-tolerance',
+      featureId: 'imp',
+    });
+    // As written, the body is placed.
+    expect(await evaluate('rounded-2', imported(written))).toMatchObject({ status: 'ok' });
   });
 
   it('evaluates an imported body from its BRep and round-trips it through STEP (CAD11, ST-29#1)', async () => {
@@ -3607,6 +6366,52 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
       expect(await run(doc, roomy)).toEqual([]);
     } finally {
       roomy.release();
+    }
+  }, 120_000);
+
+  it('builds a document once for its bodies’ analysis surfaces (CR5f-5)', async () => {
+    // TS-1587, ST-277: a run asks for each body's analysis surface in turn. With the feature
+    // cache the first request builds the document and the next builds nothing; each surface is
+    // the one a request without the cache gets, and a display evaluation after them reads no
+    // analysis triangulation (its meshes are a fresh evaluation's).
+    const document = pinned(f05Dependencies(2));
+    const hash = cadContentHash(document);
+    const surface = (bodyId: string) => ({ bodyId, deflectionMm: 0.05, clampDeflection: true });
+    const cache = new FeatureCache();
+    try {
+      const builds: string[][] = [];
+      // The active bodies (a cut's tool body is consumed).
+      const fresh = await evaluateCad(oc, document, hash);
+      if (fresh.evaluation.status !== 'ok') throw new Error(JSON.stringify(fresh.evaluation));
+      const active = Object.keys(fresh.evaluation.bodies);
+      expect(active.length).toBeGreaterThan(1);
+      for (const body of active) {
+        const built: string[] = [];
+        const cached = await evaluateCad(oc, document, hash, {
+          features: cache,
+          analysisSurface: surface(body),
+          timing: (phase, id) => void (phase === 'feature' && built.push(id)),
+        });
+        const full = await evaluateCad(oc, document, hash, { analysisSurface: surface(body) });
+        expect(cached.analysisSurface && 'surface' in cached.analysisSurface, body).toBe(true);
+        expect(cached.analysisSurface, body).toEqual(full.analysisSurface);
+        builds.push(built);
+      }
+      expect(builds[0]).toHaveLength(document.features.length);
+      for (const built of builds.slice(1)) expect(built).toEqual([]);
+      const shown = await evaluateCad(oc, document, hash, { features: cache });
+      expect(shown.evaluation).toEqual(fresh.evaluation);
+      expect(shown.meshes).toEqual(fresh.meshes);
+      // An export still builds the full graph.
+      const exported: string[] = [];
+      await evaluateCad(oc, document, hash, {
+        features: cache,
+        deflectionMm: 0.5,
+        timing: (phase, id) => void (phase === 'feature' && exported.push(id)),
+      });
+      expect(exported).toHaveLength(document.features.length);
+    } finally {
+      cache.release();
     }
   }, 120_000);
 

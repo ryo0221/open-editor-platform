@@ -1,6 +1,7 @@
 import { bimGeometry, deriveBim, type BimDocument } from '@editor-platform/bim-core';
 import {
   BimIfcExportError,
+  bimIfcImportLimits,
   writeIfc,
   type BimIfcExport,
   type BimIfcPartMesh,
@@ -42,6 +43,14 @@ export function bimIfcPartMeshFor(bounds: { min: number[]; max: number[] }) {
     ),
     angularDeflectionRad: bimIfcPartMesh.angularDeflectionRad,
   };
+}
+
+/**
+ * TW0a: the bytes over which the file cannot be imported again here (the import limit), so the
+ * Surface says so instead of silently writing a file it would refuse.
+ */
+export function bimIfcOverImportLimit(file: { bytes: Uint8Array }): number | undefined {
+  return file.bytes.length > bimIfcImportLimits.bytes ? bimIfcImportLimits.bytes : undefined;
 }
 
 /** Requests per kernel job, as the evaluator batches solids. */

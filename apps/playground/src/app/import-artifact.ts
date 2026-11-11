@@ -12,6 +12,7 @@ import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
 import { validateNativeReusableDefinitions, type Domain } from '@editor-platform/templates';
 import { artifactReferenceItems, validateArtifactReferenceHistory } from '../artifact-references';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
+import { validateSimulationSources } from '../simulation/source';
 import { validateCharacterParts } from '../character/parts';
 import type { CadPartRecord } from '../cad/parts';
 import type { CadDocument } from '@editor-platform/cad-core';
@@ -82,6 +83,9 @@ async function importedArtifact(
     // The CAD versions its props place too (C2b): a missing or altered one refuses the file.
     const parts = (value as StoredArtifact).cadParts;
     if (parts !== undefined) record.cadParts = parts;
+    // And the buildings (C8p), with the CAD versions they place in `cadParts`.
+    const buildings = (value as StoredArtifact).bimParts;
+    if (buildings !== undefined) record.bimParts = buildings;
     validateCharacterParts(record);
     await validateCadRecord(record);
   }
@@ -94,6 +98,12 @@ async function importedArtifact(
     const raw = (value as StoredArtifact).cadResources;
     if (raw !== undefined) record.cadResources = raw;
     await validateCadRecord(record);
+  }
+  if (record.kind === 'simulation') {
+    // The analysed CAD versions travel in the same file; a missing or altered one refuses it.
+    const sources = (value as StoredArtifact).simulationSources;
+    if (sources !== undefined) record.simulationSources = sources;
+    validateSimulationSources(record);
   }
   const raw = value as { annotations?: unknown };
   if (raw.annotations !== undefined) {
@@ -125,6 +135,7 @@ function hasReusableAdapter(kind: string, content: Content) {
     kind !== 'cad' &&
     kind !== 'bim' &&
     kind !== 'character' &&
+    kind !== 'simulation' &&
     kind !== 'fiction-map' &&
     !(isDeck(content) && hasSlideAnimations(content))
   );

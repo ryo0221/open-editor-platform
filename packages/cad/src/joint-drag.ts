@@ -6,8 +6,10 @@
  * turns). Values stop at the joint's limits; release rounds them and is one edit.
  */
 import {
-  cadJointLimits,
-  cadJointValueKeys,
+  jointSafetyBound,
+  coupledJointValues,
+  isJointAngleKey,
+  ownJointValueKeys,
   jointValues,
   mm,
   parameterValues,
@@ -46,7 +48,11 @@ const unit = (a: Vec3): Vec3 => {
 /** The keys one drag changes: the joint type's freedoms, the alternate one with Shift. */
 export function dragKeys(type: CadJoint['type'], alternate: boolean): CadJointValueKey[] {
   switch (type) {
+    // MR1: a spherical or universal drag turns the first angle (about the connector's z); the
+    // others are typed.
     case 'revolute':
+    case 'spherical':
+    case 'universal':
       return ['angle'];
     case 'slider':
       return ['distance'];
@@ -107,7 +113,7 @@ function onAxis(ray: CadDragRay, o: Vec3, z: Vec3): number | undefined {
  * surface). `alternate` is Shift held at the start.
  */
 export function startJointDrag(
-  doc: Pick<CadDocument, 'parameters'>,
+  doc: Pick<CadDocument, 'parameters' | 'joints'>,
   joint: CadJoint,
   solution: CadJointSolution | undefined,
   ray: CadDragRay,
@@ -117,7 +123,9 @@ export function startJointDrag(
   if (solution?.status !== 'solved') return { status: 'unsolved' };
   const keys = dragKeys(joint.type, alternate);
   if (!keys.length) return { status: 'fixed' };
-  if (keys.some((k) => jointValueBound(joint, k))) return { status: 'bound' };
+  // A value set by a parameter, or (MR1) following another joint, is not dragged.
+  const own = ownJointValueKeys(joint);
+  if (keys.some((k) => jointValueBound(joint, k) || !own.includes(k))) return { status: 'bound' };
   const { translationMm: origin, rotation } = solution.parent;
   const [x, y, z] = [
     rotateVector(rotation, [1, 0, 0]),
@@ -125,7 +133,13 @@ export function startJointDrag(
     rotateVector(rotation, [0, 0, 1]),
   ];
   const dir = unit(ray.direction);
-  const start = jointValues(joint, parameterValues(doc));
+  // MR1: its coupled values too, as the committed pose has them (only its own are released).
+  const params = parameterValues(doc);
+  const others = doc.joints.filter((j) => j.id !== joint.id);
+  const start = {
+    ...coupledJointValues({ joints: [...others, joint] }, params).get(joint.id),
+    ...jointValues(joint, params),
+  };
   // A planar joint turns about its child's connector, moved by (u, v) in the parent's plane.
   const centre =
     joint.type === 'planar' && keys[0] === 'angle'
@@ -150,12 +164,18 @@ export function startJointDrag(
   return { status: 'ok', drag };
 }
 
-/** Each value clamped to the joint's limits (and an angle to one turn either way). */
+/**
+ * Each value clamped to the joint's limits (and an angle to one turn either way, or a continuous
+ * joint's to `continuousRad`, WM2).
+ */
 export function clampJointValues(joint: CadJoint, values: Values): Values {
   const out: Values = {};
   for (const [k, v] of Object.entries(values) as [CadJointValueKey, number][]) {
     let n = v;
-    if (k === 'angle') n = Math.min(cadJointLimits.angleRad, Math.max(-cadJointLimits.angleRad, n));
+    if (isJointAngleKey(k)) {
+      const bound = jointSafetyBound(joint, k);
+      n = Math.min(bound, Math.max(-bound, n));
+    }
     const l = joint.limits.find((x) => x.of === k);
     if (l) n = Math.min(l.max, Math.max(l.min, n));
     out[k] = n;
@@ -211,21 +231,20 @@ export function releasedJointValues(
   const rounded: Values = {};
   for (const k of drag.keys) {
     const v = values[k] ?? 0;
-    rounded[k] =
-      k === 'angle'
-        ? (Math.round(((v * 180) / Math.PI) * 100) / 100 / 180) * Math.PI
-        : Math.round(v * 100) / 100;
+    rounded[k] = isJointAngleKey(k)
+      ? (Math.round(((v * 180) / Math.PI) * 100) / 100 / 180) * Math.PI
+      : Math.round(v * 100) / 100;
   }
   const clamped = clampJointValues(joint, rounded);
   const out: CadJointValues = {};
-  for (const k of cadJointValueKeys[joint.type]) {
+  for (const k of ownJointValueKeys(joint)) {
     const v = clamped[k];
     if (v === undefined) {
       if (joint.values[k]) (out as Record<string, unknown>)[k] = joint.values[k];
       continue;
     }
-    if (k === 'angle') out.angle = { literalRad: v };
-    else out[k] = mm(v);
+    if (isJointAngleKey(k)) (out as Record<string, unknown>)[k] = { literalRad: v };
+    else (out as Record<string, unknown>)[k] = mm(v);
   }
   return out;
 }

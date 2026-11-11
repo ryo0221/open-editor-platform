@@ -5,6 +5,7 @@ import {
   mm,
   resolveLength,
   sketchElement,
+  sketchWithOffset,
   solveSketch,
   splineSelfIntersects,
   splineThrough,
@@ -294,3 +295,19 @@ export function movePoint(s: CadSketch, id: string, at: [number, number]): CadSk
 
 /** A length dimension at its current value, rounded to a hundredth of a millimetre. */
 export const currentLength = (v: number) => mm(Math.round(v * 100) / 100);
+
+/**
+ * CR3a: adds the chain `ids` moved `distance` mm sideways (`sketchWithOffset`: left of an open
+ * chain as its first selected element runs, out of a closed one) as new elements without
+ * constraints, with IDs the drawing session has never used. Throws the offset's refusal. Returns
+ * the drawing and the new elements' IDs.
+ */
+export function addOffset(
+  s: CadSketch,
+  ids: readonly string[],
+  distance: number,
+  retired?: Retired,
+): { sketch: CadSketch; ids: string[] } {
+  const r = sketchWithOffset(s, ids, distance, (x, prefix) => localId(x, prefix, retired));
+  return { sketch: r.sketch, ids: r.ids };
+}

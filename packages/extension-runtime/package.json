@@ -9,12 +9,17 @@
     "./reference": "./src/draft2/reference.ts",
     "./controlled": "./src/controlled.ts",
     "./schema-experiment": "./src/schema-experiment.ts",
-    "./schema-edit-experiment": "./src/schema-edit-experiment.ts"
+    "./schema-edit-experiment": "./src/schema-edit-experiment.ts",
+    "./package": "./src/package.ts",
+    "./operations": "./src/operations.ts",
+    "./editor-host": "./src/editor-host.ts",
+    "./package-store": "./src/package-store.ts"
   },
   "dependencies": {
     "@editor-platform/extension-contract": "*",
     "@editor-platform/editor-core": "*",
-    "@editor-platform/artifact-core": "*"
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-host": "*"
   },
   "devDependencies": {
     "@editor-platform/extension-sample": "*"

@@ -465,6 +465,8 @@ describe('stored solution checks (CAD33)', () => {
       } as never;
       return codes(many);
     };
+    // TS-1473 (ST-241#1): 256 sketches, one per feature (CR0d, a car body's sections).
+    expect(cadSketchLimits.sketches).toBe(256);
     expect(sketches(cadSketchLimits.sketches)).not.toContain('limit-sketches@$.sketches');
     expect(sketches(cadSketchLimits.sketches + 1)).toContain('limit-sketches@$.sketches');
     const entities = (n: number) =>

@@ -8,6 +8,8 @@ for (const change of ['read-only', 'edit', 'uninstall'] as const) {
       if (m.type() === 'error') errors.push(m.text());
     });
     await page.goto('/');
+    // Start-up verifies and retains packages with the same digest; patch only after it finished.
+    await expect(page.getByLabel('Package retention')).toContainText('Packages:');
     await page.evaluate(() => {
       const digest = crypto.subtle.digest.bind(crypto.subtle);
       crypto.subtle.digest = async (...args) => {

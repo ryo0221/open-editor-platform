@@ -31,6 +31,12 @@ const MemoTree = memo(ReactUiTree);
 const previewHostTimeoutMs = 6000;
 const MemoInspector = memo(ReactUiInspector);
 const MemoPageInputs = memo(ReactUiPageInputs);
+export type ReactUiExportKind = 'tsx' | 'composition' | 'screen-proposal';
+export const reactUiExportKinds: readonly ReactUiExportKind[] = Object.freeze([
+  'tsx',
+  'composition',
+  'screen-proposal',
+]);
 export interface ReactUiSurfaceProps {
   content: ReactUiDocument;
   readOnly: boolean;
@@ -41,6 +47,9 @@ export interface ReactUiSurfaceProps {
   examples?: { name: string; document: ReactUiDocument }[];
   revisions?: Omit<ReactUiRevisionCandidate, 'nodeIds'>[];
   beforeExport?(): void;
+  /** Export buttons to show. `false` (or `[]`) hides them for a Host without an
+   * export destination. Defaults to every export. */
+  exports?: false | readonly ReactUiExportKind[];
   screenReferences?: ReactScreenProposal['externalReferences'];
 }
 export function ReactUiSurface({
@@ -53,8 +62,10 @@ export function ReactUiSurface({
   examples = [],
   revisions = [],
   beforeExport,
+  exports = reactUiExportKinds,
   screenReferences = [],
 }: ReactUiSurfaceProps) {
+  const shownExports = new Set<ReactUiExportKind>(exports === false ? [] : exports);
   // React content updates publish a new snapshot. Keep one admitted immutable
   // snapshot for its render/preview request, including caller-owned Undo copies.
   const inspection = useMemo(() => inspectReactUiDocument(sourceContent), [sourceContent]);
@@ -292,7 +303,9 @@ export function ReactUiSurface({
           </select>
         </label>
         <button onClick={() => setRestart((n) => n + 1)}>Restart preview</button>
-        <button onClick={() => void download()}>Export React TSX</button>
+        {shownExports.has('tsx') && (
+          <button onClick={() => void download()}>Export React TSX</button>
+        )}
       </div>
       <div className="react-ui-toolbar">
         {examples.map((example) => (
@@ -312,47 +325,51 @@ export function ReactUiSurface({
             Load example {example.name}
           </button>
         ))}
-        <button
-          onClick={() => {
-            try {
-              beforeExport?.();
-              const blob = new Blob([serializeReactUiDocument(content)], {
-                type: 'application/json',
-              });
-              const url = URL.createObjectURL(blob);
-              const anchor = document.createElement('a');
-              anchor.href = url;
-              anchor.download = 'composition.json';
-              anchor.click();
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-            } catch (error) {
-              setStatus(`Export blocked: ${String(error)}`);
-            }
-          }}
-        >
-          Export composition JSON
-        </button>
-        <button
-          disabled={!screenReferences.length}
-          onClick={() => {
-            try {
-              beforeExport?.();
-              const proposal = createReactScreenProposal(content, screenReferences);
-              const url = URL.createObjectURL(
-                new Blob([serializeReactScreenProposal(proposal)], { type: 'application/json' }),
-              );
-              const anchor = document.createElement('a');
-              anchor.href = url;
-              anchor.download = 'screen-proposal.json';
-              anchor.click();
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-            } catch (error) {
-              setStatus(`Proposal export blocked: ${String(error)}`);
-            }
-          }}
-        >
-          Export screen proposal JSON
-        </button>
+        {shownExports.has('composition') && (
+          <button
+            onClick={() => {
+              try {
+                beforeExport?.();
+                const blob = new Blob([serializeReactUiDocument(content)], {
+                  type: 'application/json',
+                });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = 'composition.json';
+                anchor.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              } catch (error) {
+                setStatus(`Export blocked: ${String(error)}`);
+              }
+            }}
+          >
+            Export composition JSON
+          </button>
+        )}
+        {shownExports.has('screen-proposal') && (
+          <button
+            disabled={!screenReferences.length}
+            onClick={() => {
+              try {
+                beforeExport?.();
+                const proposal = createReactScreenProposal(content, screenReferences);
+                const url = URL.createObjectURL(
+                  new Blob([serializeReactScreenProposal(proposal)], { type: 'application/json' }),
+                );
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = 'screen-proposal.json';
+                anchor.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              } catch (error) {
+                setStatus(`Proposal export blocked: ${String(error)}`);
+              }
+            }}
+          >
+            Export screen proposal JSON
+          </button>
+        )}
         <label>
           Import composition
           <input

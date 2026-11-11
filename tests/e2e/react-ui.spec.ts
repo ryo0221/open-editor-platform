@@ -250,3 +250,21 @@ test('W3 a preview host that never answers is named instead of loading forever',
   await expect(frame.getByText('Color study', { exact: true })).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: 'Preview ready' })).toBeVisible();
 });
+test('#801 a Host without export destinations hides the React UI export buttons', async ({
+  page,
+}) => {
+  const names = ['Export React TSX', 'Export composition JSON', 'Export screen proposal JSON'];
+  await page.goto('/?react-ui-exports=none');
+  await page.getByRole('button', { name: 'New React UI', exact: true }).click();
+  const frame = page.frameLocator('iframe[title="React component preview"]');
+  await expect(frame.getByText('Color study', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Restart preview', exact: true })).toBeVisible();
+  for (const name of names)
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  // Reload reopens the same React UI Artifact with the Host's other export choice.
+  await page.goto('/?react-ui-exports=composition');
+  await expect(frame.getByText('Color study', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: names[1], exact: true })).toBeVisible();
+  for (const name of [names[0], names[2]])
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+});

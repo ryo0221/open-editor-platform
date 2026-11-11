@@ -285,3 +285,37 @@ describe('poses and expansion (R2b-1)', () => {
     expect(cadContentHash(doc)).toMatch(/^[0-9a-f]{64}$/);
   });
 });
+
+describe('the PMI of particular instances (PMI-5a, CAD86)', () => {
+  const asset = {
+    id: 'assembly-pmi',
+    kind: 'assembly-pmi' as const,
+    sha256: `sha256:${'a'.repeat(64)}`,
+    byteLength: 100,
+    mediaType: 'application/json',
+  };
+  it('names an assembly-pmi asset of an assembly', () => {
+    const { assembly } = r2bParts();
+    const doc: CadDocument = {
+      ...assembly,
+      assets: [...assembly.assets, asset],
+      assemblyPmiAssetId: 'assembly-pmi',
+    };
+    expect(codes(doc)).toEqual([]);
+    expect(codes({ ...doc, assemblyPmiAssetId: 'gone' })).toContain(
+      'asset-missing@$.assemblyPmiAssetId',
+    );
+    expect(codes({ ...doc, assets: [...assembly.assets, { ...asset, kind: 'pmi' }] })).toContain(
+      'asset-missing@$.assemblyPmiAssetId',
+    );
+    // Without the field the asset is unreferenced, as any asset nothing reads.
+    const { assemblyPmiAssetId: _, ...without } = doc;
+    expect(codes(without)).toContain('asset-unreferenced@$.assets[0]');
+  });
+  it('is refused in a part', () => {
+    const part = f02Plate();
+    expect(
+      codes({ ...part, assets: [...part.assets, asset], assemblyPmiAssetId: 'assembly-pmi' }),
+    ).toContain('assembly-pmi-not-assembly@$.assemblyPmiAssetId');
+  });
+});

@@ -6,8 +6,8 @@ import {
 
 /**
  * A re-import replaces the model, not the props placed with it (C2b-3): the imported document
- * keeps the current props, and the joint tracks of each action the file has too (by action
- * ID). A track or key whose ID the file already uses gets a fresh one. Joint keys of actions the
+ * keeps the current props, and the joint, placement (MR4) and mount (MR7) tracks of each action the file has
+ * too (by action ID). A track or key whose ID the file already uses gets a fresh one. Joint keys of actions the
  * file does not have are named in `dropped`, for the import report.
  */
 export function carryProps(
@@ -27,7 +27,12 @@ export function carryProps(
     return { ...structuredClone(p), id };
   });
   for (const action of current.actions) {
-    const joints = action.tracks.filter((t) => t.target.kind === 'prop-joint');
+    const joints = action.tracks.filter(
+      (t) =>
+        t.target.kind === 'prop-joint' ||
+        t.target.kind === 'prop' ||
+        t.target.kind === 'prop-mount',
+    );
     if (!joints.length) continue;
     const target = doc.actions.find((a) => a.id === action.id);
     if (!target) {
@@ -35,7 +40,12 @@ export function carryProps(
       continue;
     }
     for (const t of joints) {
-      if (t.target.kind !== 'prop-joint') continue;
+      if (
+        t.target.kind !== 'prop-joint' &&
+        t.target.kind !== 'prop' &&
+        t.target.kind !== 'prop-mount'
+      )
+        continue;
       const keys = t.keys.filter((k) => k.tick <= target.duration);
       if (keys.length < t.keys.length)
         dropped.push(`Prop joint keys after the end of ${target.name}`);

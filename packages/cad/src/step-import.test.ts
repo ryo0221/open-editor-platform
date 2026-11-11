@@ -48,7 +48,7 @@ function setup({
   const staged: { ref: CadAssetRef; bytes: Uint8Array }[][] = [];
   const requests: CadEvaluateRequest[] = [];
   const assets: CadAssetStore = {
-    get: () => undefined,
+    get: (sha) => staged.flat().find((a) => a.ref.sha256 === sha)?.bytes,
     stage: async (list) => {
       await hold;
       if (refuse) throw new Error(refuse);
@@ -110,6 +110,84 @@ describe('CadController STEP import (CAD11/CAD13)', () => {
     expect(session.canUndo).toBe(true);
     session.undo();
     expect(session.content.assets).toEqual([]);
+  });
+
+  it('stores the PMI the import kept beside the BRep and names it on the feature (PMI-2)', async () => {
+    const { controller, session, staged } = setup();
+    const c = controller as unknown as {
+      options: { importStep: () => Promise<CadStepImportResult> };
+    };
+    c.options.importStep = async () => {
+      const r = read();
+      if (r.status !== 'ok') throw new Error('read');
+      return {
+        ...r,
+        pmi: new Uint8Array([7, 7, 7]),
+        report: { ...r.report, pmiAsset: { sha256: sha('e'), byteLength: 3 } },
+      };
+    };
+    await controller.refresh();
+    await controller.prepareStepImport('plate.step', new Uint8Array([1, 2, 3]));
+    expect(await controller.adoptStepImport()).toBe(true);
+    expect(staged[0].map((a) => [a.ref.kind, a.ref.mediaType, [...a.bytes]])).toEqual([
+      ['source-step', 'model/step', [1, 2, 3]],
+      ['normalized-brep', 'model/x-occt-brep', [2, 2]],
+      ['pmi', 'application/json', [7, 7, 7]],
+    ]);
+    const doc = session.content;
+    const pmi = doc.assets.find((a) => a.kind === 'pmi');
+    expect(doc.features[0]).toMatchObject({ args: { pmiAssetId: pmi?.id } });
+  });
+
+  it('lists the kept PMI of the selected body and highlights one item until the selection changes (PMI-2)', async () => {
+    const { controller, session } = setup();
+    const asset = {
+      version: 1,
+      items: [{ id: 'pmi-1', kind: 'datum', name: 'A', targets: [{ shape: 'face', index: 1 }] }],
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(asset));
+    const c = controller as unknown as {
+      options: { importStep: () => Promise<CadStepImportResult> };
+    };
+    c.options.importStep = async () => {
+      const r = read();
+      if (r.status !== 'ok') throw new Error('read');
+      return {
+        ...r,
+        pmi: bytes,
+        report: { ...r.report, pmiAsset: { sha256: sha('e'), byteLength: bytes.byteLength } },
+      };
+    };
+    await controller.refresh();
+    await controller.prepareStepImport('plate.step', new Uint8Array([1, 2, 3]));
+    await controller.adoptStepImport();
+    const body = session.content.bodies[0]!;
+    expect(controller.bodyPmi(body.id)).toMatchObject({ state: { status: 'current' }, asset });
+    // Only on the selected body.
+    controller.focusPmi('pmi-1');
+    expect(controller.getSnapshot().pmiFocus).toBeUndefined();
+    controller.select({ kind: 'body', id: body.id });
+    controller.focusPmi('pmi-1');
+    expect(controller.getSnapshot().pmiFocus).toEqual({ bodyId: body.id, itemId: 'pmi-1' });
+    controller.select({ kind: 'body', id: body.id });
+    expect(controller.getSnapshot().pmiFocus).toEqual({ bodyId: body.id, itemId: 'pmi-1' });
+    controller.select(null);
+    expect(controller.getSnapshot().pmiFocus).toBeUndefined();
+    // PMI-3b: a saved view of the selected body, until the selection changes or All PMI.
+    controller.showPmiView('view-1');
+    expect(controller.getSnapshot().pmiView).toBeUndefined();
+    controller.select({ kind: 'body', id: body.id });
+    controller.showPmiView('view-1');
+    const first = controller.getSnapshot().pmiView!;
+    expect(first).toMatchObject({ bodyId: body.id, viewId: 'view-1' });
+    // Choosing the same view again is a new choice: the viewport aims again.
+    controller.showPmiView('view-1');
+    expect(controller.getSnapshot().pmiView!.chosen).toBeGreaterThan(first.chosen);
+    controller.showPmiView(undefined);
+    expect(controller.getSnapshot().pmiView).toBeUndefined();
+    controller.showPmiView('view-1');
+    controller.select(null);
+    expect(controller.getSnapshot().pmiView).toBeUndefined();
   });
 
   it('reuses refs of a file already imported', async () => {
@@ -191,16 +269,74 @@ describe('CadController STEP import (CAD11/CAD13)', () => {
     c.options.importStep = async () => ({
       status: 'rejected',
       code: 'step-schema-unsupported',
-      detail: 'AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF',
+      detail: 'STRUCTURAL_ANALYSIS_DESIGN',
     });
     await controller.refresh();
     await controller.prepareStepImport('a.step', new Uint8Array(1));
-    expect(controller.getSnapshot().diagnostic?.message).toMatch(/AP203またはAP214.*AP242/);
+    expect(controller.getSnapshot().diagnostic?.message).toMatch(
+      /AP203・AP214・AP242.*STRUCTURAL_ANALYSIS_DESIGN/,
+    );
     c.options.importStep = async () => read();
     await controller.prepareStepImport('a.step', new Uint8Array(1));
     controller.cancelStepImport();
     expect(controller.getSnapshot().stepImport).toBeUndefined();
     expect(await controller.adoptStepImport()).toBe(false);
+    expect(session.content.features).toEqual([]);
+  });
+
+  it('asks before importing a file whose PMI is not kept, and reads it again only with consent (PMI-1)', async () => {
+    const { controller, session } = setup();
+    const calls: unknown[] = [];
+    const pmi = {
+      census: { dimension: 2 },
+      read: { dimensions: 2, tolerances: 0, datums: 0, views: 0 },
+      axes: [],
+      kept: {
+        dimension: 0,
+        'geometric-tolerance': 0,
+        datum: 0,
+        'datum-target': 0,
+        callout: 0,
+        view: 0,
+      },
+      complete: true,
+      lossless: false,
+    };
+    const c = controller as unknown as {
+      options: {
+        importStep: (
+          p: unknown,
+          id: string,
+          b: Uint8Array,
+          o?: unknown,
+        ) => Promise<CadStepImportResult>;
+      };
+    };
+    c.options.importStep = async (_p, _id, _b, options) => {
+      calls.push(options);
+      return (options as { pmi?: string } | undefined)?.pmi === 'discard'
+        ? read()
+        : { status: 'rejected', code: 'step-pmi-partial', detail: 'not-kept', pmi };
+    };
+    await controller.refresh();
+    const asked: unknown[] = [];
+    expect(
+      await controller.prepareStepImport('p.step', new Uint8Array(1), {
+        onPmi: (r) => asked.push(r),
+      }),
+    ).toBeUndefined();
+    expect(asked).toEqual([pmi]);
+    // Asking is not a failure, and nothing is read or stored yet.
+    expect(controller.getSnapshot().diagnostic).toBeUndefined();
+    expect(controller.getSnapshot().stepImport).toBeUndefined();
+    // Without someone to ask, the refusal is shown.
+    await controller.prepareStepImport('p.step', new Uint8Array(1));
+    expect(controller.getSnapshot().diagnostic?.message).toMatch(/PMI/);
+    const preview = await controller.prepareStepImport('p.step', new Uint8Array(1), {
+      pmi: 'discard',
+    });
+    expect(preview).toBeDefined();
+    expect(calls).toEqual([{}, {}, { pmi: 'discard' }]);
     expect(session.content.features).toEqual([]);
   });
 });

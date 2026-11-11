@@ -8,6 +8,8 @@ The kernel the CAD Hosts, `cad-kernel-occt` tests and CAD e2e suites use through
   - `heapAllocatedBytes()`: bytes currently allocated by malloc (`mallinfo().uordblks`), for the leak check.
   - `setStaticInteger(name, value)` and `staticInteger(name)` (R2b): `Interface_Static` integer settings, such as the STEP schema the writer uses (`write.step.schema`, 5 for AP242).
   - `labelName(label)` (R2b): the UTF-8 `TDataStd_Name` of an XDE label, or an empty string.
+  - `labelEntry(label)` (PMI-1): a label's entry (`0:1:1:2`).
+  - `pmiJson(doc)` (PMI-1, docs/cad/pmi.md): the dimensions, geometric tolerances, datums and saved views of an XDE document read with GD&T and view mode, as one JSON text: each item's values and modifiers (enumerations as integers), annotation plane and text point, presentation edges, datum references in order, and its targets as a product label with the 1-based index of the sub-shape in `TopExp::MapShapes` of the product's shape.
 - `patch-destructors.py`: the pinned generator makes `delete()` a no-op for every class with a placement `operator delete` (almost every OCCT value class), so a `TopoDS_Shape`, `gp_Pnt` or `Bnd_Box` returned by value is never freed. The script restores `delete ptr` for the linked bindings and recompiles them before the link. Standard_Transient subclasses and classes without a public destructor keep the no-op.
 - `build.sh <out-dir>`: runs both steps in the pinned image and prints the Wasm SHA-256. Requires a Docker daemon and takes about an hour on 4 cores; the link needs the Emscripten FreeType port, downloaded once from `github.com/emscripten-ports/FreeType/archive/version_1.zip`. Where that download is blocked, set `FREETYPE_SRC` to a checkout of the same tag (`git clone --depth 1 --branch version_1 https://github.com/emscripten-ports/FreeType`); the build copies it into the image's port cache instead. Linking every binding of the full build ran out of memory (wasm-ld killed at 15 GiB), so the build keeps to the D1 set.
 - `bundle.sh <kernel-dir>`: writes `NOTICE.txt` (the notice section of [`docs/third-party/cad-kernel`](../../docs/third-party/cad-kernel/README.md) plus the license texts) next to the Wasm, and `source/` with the corresponding source: the unmodified OCCT archive and the OpenCascade.js generator from the pinned image, these build inputs and `SHA256SUMS`. Anyone serving the kernel outside a development machine serves both. The development server serves `NOTICE.txt` at `/cad-kernel/NOTICE.txt`.
@@ -29,14 +31,14 @@ E2E_SUITE=cad npx playwright test
 
 ## Reproducing the hash
 
-The same inputs do not give the same Wasm everywhere. The pinned `buildFromYaml.py` passes the binding and OCCT objects (about 5,400 `.o` files) to `emcc` in `os.walk` order without sorting, so the link order is the directory order of the filesystem the image is unpacked on. Re-linking the same objects in name order gives another Wasm (`2a1f513b…` instead of `dfa4d5de…`, checked 2026-10-27). A rootfs exported from the image and unpacked on another disk links in another order too: the #502 C1 record (`d8e68450…`) and the 2026-10-26 demo of #538 (`c93cf02e…`, a flattened rootfs built in parallel) are both of this kind.
+The pinned `buildFromYaml.py` passes the binding and OCCT objects (about 5,400 `.o` files) to `emcc` in `os.walk` order without sorting, so the link order was the directory order of the filesystem the image is unpacked on. Builds up to the R2c build (`dfa4d5de…`) were made that way: re-linking the same objects in name order gave another Wasm (`2a1f513b…`, checked 2026-10-27), and a rootfs exported from the image and unpacked on another disk linked in another order too (the #502 C1 record `d8e68450…`, the 2026-10-26 demo of #538 `c93cf02e…`).
+
+Since the R3c build (`9737cd1d…`, 2026-11-06), `build.sh` runs `sort-link-order.py` before the build, which makes the script link both lists in name order. The link inputs then no longer depend on the filesystem. The R3c build was made once, on the Docker daemon of a standard cloud container; a second build on another filesystem has not been compared yet.
 
 - Prefer the released build over a rebuild (next section).
-- To rebuild, run `build.sh` with the Docker daemon of a standard cloud container, which unpacks the image the same way. This reproduced `dfa4d5de…` on 2026-10-27. Do not run the image from a rootfs extracted with other tools.
-- A hash mismatch with unchanged inputs is this order, not a changed source. Do not replace the expected hash with it.
+- To rebuild, run `build.sh` with the Docker daemon of a standard cloud container. Do not run the image from a rootfs extracted with other tools.
+- Earlier builds (`cadKernelPrevious`) reproduce only with their own inputs and unsorted order: rebuild them from their release's `cad-kernel-source.tar`, not with this `build.sh`.
 - Disk: the pinned image is 18 layers, 1.81 GB compressed (registry manifest, checked 2026-10-28), and the build writes about 5,400 objects beside it. Start dockerd with the `overlay2` storage driver, as the 2026-10-27 run did. The `vfs` driver copies every layer in full, which ran out of disk in #538; do not work around that by flattening the image to a rootfs (above).
-
-Sorting the link order makes the build independent of the filesystem but changes the hash. It belongs in the next build that replaces this one (see below), together with the new `wasmSha256`.
 
 ## Released builds
 

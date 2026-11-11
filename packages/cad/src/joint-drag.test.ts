@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   mm,
+  mr1ArmWings,
   r2bJoints,
   type CadJoint,
   type CadJointSolution,
   type Vec3,
 } from '@editor-platform/cad-core';
+import { entryDraftKey, entryStored, parseEntryDraftKey } from './assembly';
 import {
   dragKeys,
   moveJointDrag,
@@ -13,6 +15,7 @@ import {
   startJointDrag,
   type CadDragRay,
 } from './joint-drag';
+import { editedJointValues, jointFields, validJointFields } from './joint-values';
 
 const solved = (at: Vec3, rotation: [number, number, number, number] = [0, 0, 0, 1]) =>
   ({
@@ -150,5 +153,68 @@ describe('joint drag (R2b-2c, CAD47)', () => {
       distance: mm(5),
       angle: { literalRad: Math.PI / 2 },
     });
+  });
+});
+
+describe('MR1a joints in the Surface (TS-1702)', () => {
+  const { assembly } = mr1ArmWings();
+  const joint = (id: string) => structuredClone(assembly.joints.find((x) => x.id === id)!);
+  const ray = down(10, 0);
+
+  it('drags the first angle of a spherical or universal joint and keeps its other angles', () => {
+    expect(dragKeys('spherical', false)).toEqual(['angle']);
+    expect(dragKeys('universal', true)).toEqual(['angle']);
+    const shoulder = joint('j-shoulder');
+    const s = startJointDrag(assembly, shoulder, solved([0, 0, 0]), ray, [10, 0, 0], false);
+    if (s.status !== 'ok') throw new Error(s.status);
+    const moved = moveJointDrag(s.drag, down(0, 10))!;
+    expect(deg(moved.angle)).toBe(120);
+    expect(releasedJointValues(s.drag, moved)).toEqual({
+      angle: { literalRad: (120 * Math.PI) / 180 },
+      angle2: shoulder.values.angle2,
+      angle3: shoulder.values.angle3,
+    });
+  });
+  it('shows the angles in degrees and no field for a value that follows another joint', () => {
+    expect(jointFields(joint('j-shoulder'), assembly)).toEqual(['30', '-20', '10']);
+    expect(jointFields(joint('j-wing-r'), assembly)).toEqual([]);
+    expect(validJointFields(joint('j-wing-r'), [])).toBe(true);
+    expect(editedJointValues(joint('j-wrist'), ['15', '-25'], ['15', '5'])).toEqual({
+      angle: { literalRad: (15 * Math.PI) / 180 },
+      angle2: { literalRad: (5 * Math.PI) / 180 },
+    });
+  });
+  it('keeps a coupled angle while another angle of the same joint is dragged', () => {
+    // The shoulder's second angle follows the left wing (40°); its first is its own.
+    const shoulder = joint('j-shoulder');
+    delete shoulder.values.angle2;
+    shoulder.couplings = [
+      { of: 'angle2', from: { joint: 'j-wing-l', of: 'angle' }, ratio: 1, offset: 0 },
+    ];
+    const s = startJointDrag(assembly, shoulder, solved([0, 0, 0]), ray, [10, 0, 0], false);
+    if (s.status !== 'ok') throw new Error(s.status);
+    const moved = moveJointDrag(s.drag, down(0, 10))!;
+    expect([deg(moved.angle), deg(moved.angle2), deg(moved.angle3)]).toEqual([120, 40, 10]);
+    // Only its own values are released.
+    expect(releasedJointValues(s.drag, moved)).toEqual({
+      angle: { literalRad: (120 * Math.PI) / 180 },
+      angle3: shoulder.values.angle3,
+    });
+  });
+  it('refuses to drag a value that follows another joint', () => {
+    expect(
+      startJointDrag(assembly, joint('j-wing-r'), solved([0, 0, 0]), ray, [10, 0, 0], false),
+    ).toEqual({ status: 'bound' });
+  });
+});
+
+describe('MR1b range and coupling entries (TS-1702)', () => {
+  it('keys an entry by joint and value, whatever the joint ID holds', () => {
+    const joint = structuredClone(mr1ArmWings().assembly.joints.find((j) => j.id === 'j-elbow')!);
+    joint.id = 'robot:elbow';
+    const key = entryDraftKey('range', joint.id, 'angle');
+    expect(parseEntryDraftKey(key)).toEqual({ kind: 'range', jointId: 'robot:elbow', of: 'angle' });
+    expect(JSON.parse(entryStored(joint, key))).toEqual(joint.limits[0]);
+    expect(entryStored(joint, entryDraftKey('coupling', joint.id, 'angle'))).toBe('null');
   });
 });

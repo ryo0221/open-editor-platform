@@ -8,7 +8,8 @@ import {
   settleAssembly,
   type CadAssemblyOperation,
 } from './assembly-operations';
-import type { CadSolvedPose } from './assembly';
+import type { CadComponent, CadPartDef, CadSolvedPose } from './assembly';
+import { makePartRemoval } from './make-part';
 import type { CadExpression } from './expression';
 import {
   dependentParameters,
@@ -36,6 +37,7 @@ import {
   type CadDocument,
   type CadFeature,
   type CadNamedView,
+  type CadSpotWeld,
   type CadParameter,
   type CadCurveLayout,
   type CadPatternLayout,
@@ -52,6 +54,10 @@ import {
   writeSolvedPoses,
   type CadJointOperation,
 } from './joints-operations';
+import { applyConfigurationOperation, type CadConfigurationOperation } from './configurations';
+import { applyMountOperation, pruneMounts, type CadMountOperation } from './mounts';
+import { applyGearMeshOperation, pruneGearMeshes, type CadGearMeshOperation } from './gear-mesh';
+import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
 import { assertCad, cadId, record, validateCadAppearance } from './validation';
@@ -156,6 +162,11 @@ export type CadOperation =
       bodyId: string;
       feature: Extract<CadFeature, { type: CadDetailType }>;
       placementFeatureId: string;
+      /**
+       * CR3b: with a trim, a panel cut out of the body's result before the trim (its source) as a
+       * new body in the same edit: a door taken out of the skin with the gap between them.
+       */
+      panel?: { feature: Extract<CadFeature, { type: 'panel' }>; body: CadNewBody };
     }
   /**
    * Stored references chosen again (docs/cad/r1-modeling.md, 分かれた要素の選び直し), with the
@@ -168,6 +179,12 @@ export type CadOperation =
     }
   | { type: 'deleteClosure'; ids: string[]; cascade: boolean }
   | { type: 'duplicateClosure'; bodyIds: string[]; idMap: Record<string, string> }
+  /**
+   * CR3e "Make part": the body and what only it needed leave the document (`makePartRemoval`),
+   * and `component` places `part` (a version holding `bodyPartContent`) at the origin, in one
+   * edit. The Host keeps the version's closure before the edit names it.
+   */
+  | { type: 'makePart'; bodyId: string; part: CadPartDef; component: CadComponent }
   | { type: 'rename'; targetId: string; name: string }
   /** #661: a body's colour, opacity and finish; display only, the shape is unchanged. */
   | {
@@ -181,6 +198,9 @@ export type CadOperation =
       assets?: CadAssetRef[];
     }
   | { type: 'saveNamedView'; view: CadNamedView }
+  /** CR4e: adds a spot weld row, or replaces the one with its ID. */
+  | { type: 'setSpotWeld'; weld: CadSpotWeld }
+  | { type: 'removeSpotWeld'; id: string }
   | { type: 'reorderFeatures'; featureIds: string[] }
   /** Explicit kernel migration: the next draft names another exact build (docs/cad/model.md). */
   | { type: 'setKernelBuild'; kernelId: string; buildHash: string }
@@ -198,6 +218,10 @@ export type CadOperation =
     }
   | CadAssemblyOperation
   | CadJointOperation
+  | CadConfigurationOperation
+  | CadMountOperation
+  | CadGearMeshOperation
+  | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
    * (R2b-U5). Only the coordinator writes it, after evaluating `edit`; it is still one edit.
@@ -216,7 +240,12 @@ export type CadDetailType =
   | 'draft'
   | 'mirror'
   | 'trim'
-  | 'thicken';
+  | 'split'
+  | 'pressLine'
+  | 'flare'
+  | 'flange'
+  | 'thicken'
+  | 'groove';
 export const cadDetailTypes: readonly CadDetailType[] = [
   'fillet',
   'chamfer',
@@ -224,7 +253,12 @@ export const cadDetailTypes: readonly CadDetailType[] = [
   'draft',
   'mirror',
   'trim',
+  'split',
+  'pressLine',
+  'flare',
+  'flange',
   'thicken',
+  'groove',
 ];
 /** One stored reference replaced: its feature, its path in that feature's args, the new ref. */
 export interface CadReferenceBinding {
@@ -250,6 +284,11 @@ const dropViewsFor = (doc: CadDocument, removed: Set<string>) => {
   doc.namedViews = doc.namedViews
     .map((v) => ({ ...v, bodyIds: v.bodyIds.filter((id) => !removed.has(id)) }))
     .filter((v) => v.bodyIds.length);
+  // CR4e: a spot weld goes with either of its bodies.
+  if (doc.spotWelds) {
+    doc.spotWelds = doc.spotWelds.filter((w) => !w.flanges.some((f) => removed.has(f.bodyId)));
+    if (!doc.spotWelds.length) delete doc.spotWelds;
+  }
 };
 
 /**
@@ -298,10 +337,18 @@ function addBody(doc: CadDocument, b: CadNewBody) {
 function pruneAssets(doc: CadDocument) {
   const used = new Set([
     ...doc.features.flatMap((f) =>
-      f.type === 'imported' ? [f.args.sourceAssetId, f.args.brepAssetId] : [],
+      f.type === 'imported'
+        ? [
+            f.args.sourceAssetId,
+            f.args.brepAssetId,
+            ...(f.args.pmiAssetId === undefined ? [] : [f.args.pmiAssetId]),
+          ]
+        : [],
     ),
     // #662: texture images, by every body that names them (consumed ones too).
     ...doc.bodies.flatMap((b) => Object.values(b.appearance.textures?.maps ?? {})),
+    // PMI-5a: an assembly's PMI of particular instances.
+    ...(doc.assemblyPmiAssetId === undefined ? [] : [doc.assemblyPmiAssetId]),
   ]);
   doc.assets = doc.assets.filter((a) => used.has(a.id));
 }
@@ -582,9 +629,25 @@ function apply(
         f,
         placementFeature(op.placementFeatureId, f.id, generatedName('', body.name, ' placement')),
       );
+      const source = body.resultFeatureId;
       body.resultFeatureId = op.placementFeatureId;
       // A thicken makes a solid of a sheet (R2a-3); the validation checks the kind it gives.
       body.kind = featureKind(next, f.id) ?? body.kind;
+      if (op.panel) {
+        const p = op.panel;
+        if (
+          f.type !== 'trim' ||
+          !record(p) ||
+          !record(p.feature) ||
+          p.feature.type !== 'panel' ||
+          p.feature.args?.source?.featureId !== source ||
+          !record(p.body) ||
+          p.body.sourceFeatureId !== p.feature.id
+        )
+          fail('detail-panel');
+        next.features.push(p.feature);
+        addBody(next, p.body);
+      }
       return next;
     }
     case 'sewBodies': {
@@ -695,16 +758,38 @@ function apply(
       next.sketches = next.sketches.filter((s) => !closure.sketches.has(s.id));
       next.features = next.features.filter((f) => !closure.features.has(f.id));
       next.bodies = next.bodies.filter((b) => !closure.bodies.has(b.id));
-      for (const j of next.joints)
-        if (closure.joints.has(j.id)) fixAtStoredPose(next, j.child.componentId);
-      next.joints = next.joints.filter((j) => !closure.joints.has(j.id));
+      next.joints = next.joints.filter((j) => {
+        if (!closure.joints.has(j.id)) return true;
+        // MR7: a mounted component another candidate still places is not fixed.
+        const child = j.child.componentId;
+        if (!next.joints.some((x) => !closure.joints.has(x.id) && x.child.componentId === child))
+          fixAtStoredPose(next, child);
+        return false;
+      });
+      pruneMounts(next);
+      pruneGearMeshes(next);
       next.components = next.components.filter((c) => !closure.components.has(c.id));
+      // PMI-5a: the PMI of particular instances goes with the last component (a part keeps
+      // none); with components left, an item on a deleted one is stale (PMI-5b).
+      if (!next.components.length) delete next.assemblyPmiAssetId;
       next.componentPatterns = next.componentPatterns.filter((p) => !closure.patterns.has(p.id));
       dropViewsFor(next, closure.bodies);
       return next;
     }
     case 'duplicateClosure':
       return duplicate(next, op.bodyIds, op.idMap);
+    case 'makePart': {
+      const removal = makePartRemoval(next, op.bodyId);
+      if (op.component.partId !== op.part.id) fail('make-part-component');
+      next.profiles = next.profiles.filter((p) => !removal.profiles.has(p.id));
+      next.sketches = next.sketches.filter((s) => !removal.sketches.has(s.id));
+      next.features = next.features.filter((f) => !removal.features.has(f.id));
+      next.bodies = next.bodies.filter((b) => !removal.bodies.has(b.id));
+      dropViewsFor(next, removal.bodies);
+      next.parts.push(op.part);
+      next.components.push(op.component);
+      return next;
+    }
     case 'rename': {
       const targets = [
         ...next.parameters,
@@ -717,6 +802,8 @@ function apply(
         ...next.components,
         ...next.componentPatterns,
         ...next.joints,
+        ...(next.spotWelds ?? []),
+        ...(next.mounts ?? []),
       ];
       find(targets, op.targetId, 'target-missing').name = op.name;
       return next;
@@ -743,6 +830,20 @@ function apply(
       const i = next.namedViews.findIndex((v) => v.id === op.view.id);
       if (i < 0) next.namedViews.push(clone(op.view));
       else next.namedViews[i] = clone(op.view);
+      return next;
+    }
+    case 'setSpotWeld': {
+      const welds = (next.spotWelds ??= []);
+      const i = welds.findIndex((w) => w.id === op.weld.id);
+      if (i >= 0 && canonicalJson(welds[i]) === canonicalJson(op.weld)) fail('spot-weld-unchanged');
+      if (i < 0) welds.push(clone(op.weld));
+      else welds[i] = clone(op.weld);
+      return next;
+    }
+    case 'removeSpotWeld': {
+      find(next.spotWelds ?? [], op.id, 'target-missing');
+      next.spotWelds = next.spotWelds!.filter((w) => w.id !== op.id);
+      if (!next.spotWelds.length) delete next.spotWelds;
       return next;
     }
     case 'setKernelBuild': {
@@ -779,6 +880,26 @@ function apply(
     case 'setJointValues':
     case 'solveAssemblyPoses':
       return applyJointOperation(next, op);
+    case 'insertConfiguration':
+    case 'overwriteConfiguration':
+    case 'renameConfiguration':
+    case 'removeConfiguration':
+    case 'recallConfiguration':
+      return applyConfigurationOperation(next, op);
+    case 'setMount':
+    case 'insertMountJoint':
+    case 'removeMount':
+      // A removed candidate takes its gear meshes, as a deleted joint does.
+      applyMountOperation(next, op);
+      pruneGearMeshes(next);
+      return next;
+    case 'insertGearMesh':
+    case 'removeGearMesh':
+    case 'updateGearMesh':
+      return applyGearMeshOperation(next, op);
+    case 'insertInterferenceAllowance':
+    case 'removeInterferenceAllowance':
+      return applyInterferenceOperation(next, op);
   }
 }
 

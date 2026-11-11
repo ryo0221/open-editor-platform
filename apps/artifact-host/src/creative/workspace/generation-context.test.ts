@@ -8,11 +8,13 @@ import {
   MemoryStorage,
   type Artifact,
 } from '@editor-platform/artifact-core';
+import { editCharacterCommand } from '../character-source';
 import { createDocument, updateBlock } from '@editor-platform/document/model';
 import { createDesign, insertElement, updateElement } from '@editor-platform/design/model';
 import { generatedPng } from '../../../../../tests/fixtures/creative-host/generated-png';
 import { serializeCreativeWorldInput } from './generation-context';
-import type { HostProposalApplied } from '@editor-platform/editor-host';
+import type { ArtifactEditor, HostProposalApplied } from '@editor-platform/editor-host';
+import type { StructuredData } from '@editor-platform/structured-data/model';
 import type { DesignContent } from '@editor-platform/design/model';
 import { creativeDesignAddressKey } from '@editor-platform/design/creative-proposal-diff';
 import {
@@ -428,7 +430,10 @@ describe('CW2a Host input preparation (no execution enablement)', () => {
       before = input.snapshot,
       other = f.p.cards[1];
     f.p.choose(other, 'candidate-2');
-    await f.p.save({ reuseSavedVersions: false });
+    const field = other.fields.find((f) => f.editable)!;
+    const source = f.p.source as ArtifactEditor<StructuredData>; // fixture() defaults to character.
+    source.execute(editCharacterCommand(source.content, other, field.id, field.value + ' changed'));
+    await f.p.save();
     await f.w.refreshReference(
       f.options.sceneId!,
       'character',

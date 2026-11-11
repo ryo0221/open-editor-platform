@@ -211,6 +211,16 @@
   width: 3em;
   text-align: left;
 }
+.cad-pmi-read th:first-child,
+.cad-pmi-read td:first-child {
+  width: 34%;
+  text-align: left;
+  overflow-wrap: normal;
+}
+.cad-pmi-read td:nth-child(2) {
+  text-align: left;
+  overflow-wrap: normal;
+}
 .cad-compare thead th {
   font-weight: 600;
   border-bottom: 1px solid #dde3e8;
@@ -412,14 +422,19 @@
   gap: 8px;
   align-items: baseline;
 }
+.cad-export > * {
+  min-width: 0;
+}
 .cad-export-report {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  /* A long unbroken value (a schema name, a hash) wraps instead of widening the dialog. */
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 12px;
   margin: 0;
 }
 .cad-export-report dd {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .cad-migration {
   border-collapse: collapse;
@@ -607,4 +622,59 @@
   border: 1px solid #c7ced6;
   border-radius: 4px;
   vertical-align: middle;
+}
+/* PMI-2: the semantic PMI of an imported body, by kind. */
+.cad-pmi-kind {
+  margin: 8px 0 4px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.cad-pmi-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cad-inspector .cad-pmi-list .cad-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.cad-inspector .cad-pmi-list .cad-item[aria-pressed='true'] {
+  border-color: #2563eb;
+  background: #e8efff;
+}
+.cad-inspector .cad-pmi-list .cad-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.cad-pmi-stale {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #b54708;
+  background: #fffaeb;
+  color: #7a2e0e;
+}
+/* MR2 forms: one block per form, name and state above its buttons. */
+.cad-forms ul {
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+}
+.cad-form {
+  display: grid;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid #eef1f4;
+}
+.cad-form > .cad-row {
+  align-items: center;
+}
+.cad-forms form.cad-row input {
+  flex: 1 1 8em;
+  min-width: 0;
 }

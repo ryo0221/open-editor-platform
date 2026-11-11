@@ -5,6 +5,7 @@ import type { Artifact } from '@editor-platform/artifact-core';
 import type { BimDocument } from '@editor-platform/bim-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import type { CharacterDocument } from '@editor-platform/character-core';
+import type { SimulationDocument } from '@editor-platform/simulation-core';
 import type { AnimationHostContent } from '@editor-platform/animation-core/v2';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type { GeoDocument } from '@editor-platform/geo-core';
@@ -28,6 +29,7 @@ export type NativeContent = Exclude<
   | CadDocument
   | BimDocument
   | CharacterDocument
+  | SimulationDocument
 >;
 export function nativeContent(content: Content): NativeContent {
   if (validContent('fiction-map', content))
@@ -43,6 +45,8 @@ export function nativeContent(content: Content): NativeContent {
   if (validContent('bim', content)) throw new Error('Building has no template/reuse adapter');
   if (validContent('character', content))
     throw new Error('Character has no template/reuse adapter');
+  if (validContent('simulation', content))
+    throw new Error('Structural analysis has no template/reuse adapter');
   if (validContent('react-ui', content))
     throw new Error('React UI uses its Host registrations, not native reusable definitions');
   return content as NativeContent;

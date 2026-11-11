@@ -11,6 +11,7 @@ import {
   identityQuaternion,
   type Angle,
   type CadAppearance,
+  type CadAssetRef,
   type CadDocument,
   type CadFeature,
   type CadDerivedSection,
@@ -29,6 +30,7 @@ import {
 } from './model';
 import { applyCadOperation, type CadOperation } from './operations';
 import { cadId, cadRangeLimit } from './validation';
+import { edgeName, type CadFaceName } from './topology';
 import { splineThrough, type CadSketch, type CadSketchConstraint } from './sketch';
 
 /** mm, or expression text of a length. */
@@ -267,6 +269,75 @@ export class CadBuilder {
       appearance,
     );
   }
+  /**
+   * WM1a: an involute spur gear, centred at `origin` with its back face there and its axis +Z
+   * turned by `orientation`. Coefficients default to a standard full-depth tooth (1, 1.25, x 0);
+   * a cycloidal (watch) tooth (WM1b) to addendum 1.3, dedendum 1.6 and half the pitch thick.
+   */
+  spurGear(
+    name: string,
+    a: Placed & {
+      module: CadBuildLength;
+      teeth: CadBuildCount;
+      faceWidth: CadBuildLength;
+      /** WM1b: the watch tooth needs the mating gear's teeth (`matingTeeth`). */
+      profile?: 'involute' | 'cycloidal';
+      matingTeeth?: CadBuildCount;
+      toothThickness?: number;
+      pressureAngle?: CadBuildAngle;
+      profileShift?: number;
+      addendum?: number;
+      dedendum?: number;
+      bore?: CadBuildLength;
+      spokes?: {
+        count: CadBuildCount;
+        rim: CadBuildLength;
+        hub: CadBuildLength;
+        width: CadBuildLength;
+      };
+    },
+    appearance?: Partial<CadAppearance>,
+  ) {
+    const s = a.spokes;
+    return this.body(
+      name,
+      {
+        type: 'spurGear',
+        inputFeatureIds: [],
+        args: {
+          module: this.length(a.module),
+          teeth: this.count(a.teeth),
+          ...(a.profile === 'cycloidal'
+            ? {
+                profile: 'cycloidal' as const,
+                matingTeeth: this.count(a.matingTeeth ?? a.teeth),
+                toothThickness: a.toothThickness ?? 0.5,
+                addendum: a.addendum ?? 1.3,
+                dedendum: a.dedendum ?? 1.6,
+              }
+            : {
+                profile: 'involute' as const,
+                pressureAngle: this.angle(a.pressureAngle ?? (20 * Math.PI) / 180),
+                profileShift: a.profileShift ?? 0,
+                addendum: a.addendum ?? 1,
+                dedendum: a.dedendum ?? 1.25,
+              }),
+          faceWidth: this.length(a.faceWidth),
+          bore: this.length(a.bore ?? 0),
+          ...(s && {
+            spokes: {
+              count: this.count(s.count),
+              rim: this.length(s.rim),
+              hub: this.length(s.hub),
+              width: this.length(s.width),
+            },
+          }),
+          ...this.#placed(a),
+        },
+      },
+      appearance,
+    );
+  }
   sphere(
     name: string,
     a: Placed & { radius: CadBuildLength },
@@ -477,6 +548,56 @@ export class CadBuilder {
         type: 'mirror',
         inputFeatureIds: [result],
         args: { plane: { origin: this.point(plane.origin), normal: plane.normal }, union: true },
+      },
+    });
+    return id;
+  }
+
+  /**
+   * WM6: a body's look changed, with the texture assets it names that the document does not
+   * hold yet (`setAppearance`).
+   */
+  appearance(body: string, look: Partial<CadAppearance>, assets: CadAssetRef[] = []) {
+    const b = this.#doc.bodies.find((x) => x.id === body);
+    if (!b) throw this.#refuse(`appearance "${body}"`, 'body-unknown');
+    this.#apply(`appearance "${b.name}"`, {
+      type: 'setAppearance',
+      bodyId: body,
+      appearance: { ...b.appearance, ...look },
+      ...(assets.length ? { assets } : {}),
+    });
+  }
+  /**
+   * WM6 (docs/cad/watch-design.md): a chamfer of `distance` on the body's edges, each named by
+   * its two faces (as the body's result names them) with its centre and length as the hint.
+   */
+  chamfer(
+    body: string,
+    edges: { faces: [CadFaceName, CadFaceName]; centroid: Vec3; length: number }[],
+    distance: CadBuildLength,
+    name = 'Chamfer',
+  ): string {
+    const result = this.#doc.bodies.find((b) => b.id === body)?.resultFeatureId;
+    if (!result) throw this.#refuse(`chamfer "${name}"`, 'body-unknown');
+    const id = this.#id(`${body}-chamfer`, 'feature');
+    this.#apply(`chamfer "${name}"`, {
+      type: 'detailBody',
+      bodyId: body,
+      placementFeatureId: this.#id(`${id}-placement`, 'feature'),
+      feature: {
+        id,
+        name,
+        type: 'chamfer',
+        inputFeatureIds: [result],
+        args: {
+          edges: edges.map((e) => ({
+            kind: 'edge' as const,
+            featureId: result,
+            name: edgeName(...e.faces),
+            hint: { centroid: [...e.centroid], size: e.length },
+          })),
+          distance: this.length(distance),
+        },
       },
     });
     return id;

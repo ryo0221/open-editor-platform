@@ -10,6 +10,16 @@ import {
   f33Types,
   f37Office,
   f39Roofs,
+  f40Lattice,
+  f47Taper,
+  f48Ramp,
+  f50Lean,
+  f51Ramps,
+  f52LeanOpenings,
+  f54LeanJoins,
+  f54LeanRoofs,
+  f55RampOpenings,
+  f55Stairs,
   loopArea,
   type BimDocument,
   type BimDrawing,
@@ -157,6 +167,360 @@ describe.skipIf(!dist)('bim drawings (R2c-5, CAD68)', { timeout: 120_000 }, () =
     expect(ofType(d, 'segments')[0]!.points.length).toBeGreaterThan(0);
   });
 
+  it('cuts and sees leaning columns, sloping beams and members (TW2, F40)', async () => {
+    const doc = f40Lattice();
+    const gl: BimView = { ...plan, id: 'v-gl', level: 'l-gl' };
+    const p = await drawBim(doc, gl, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    // At 1,200 mm the plan cuts the column, the diagonal, the vertical and the grid member;
+    // the horizontal member and the beam lie above the cut.
+    expect(
+      ofType(p.drawing, 'polygon')
+        .map((c) => c.id)
+        .sort(),
+    ).toEqual(['c-lean', 'm-diag', 'm-grid', 'm-vert']);
+    const vert = ofType(p.drawing, 'polygon').find((c) => c.id === 'm-vert')!;
+    // A faceted circle: within 0.1 %.
+    expect(Math.abs(area(vert.loops) / (Math.PI * 200 * 200) - 1)).toBeLessThan(1e-3);
+    expect(vert.cls).toBe('cut cut-member m-metal');
+    expect(p.drawing.failed).toEqual([]);
+    // A section along y = 0 through the column's, the beam's and the vertical member's axes.
+    const along: BimView = {
+      ...section,
+      id: 'v-y0',
+      line: [
+        [-2000, 0],
+        [14000, 0],
+      ],
+    };
+    const r = await drawBim(doc, along, kernel);
+    if (r.status !== 'ok') throw new Error(r.code);
+    const cut = (id: string) => ofType(r.drawing, 'polygon').find((c) => c.id === id)!;
+    expect(area(cut('c-lean').loops)).toBeCloseTo(600 * Math.hypot(2000, 6000), -1);
+    expect(area(cut('b-slope').loops)).toBeCloseTo(700 * Math.hypot(6000, 1500), -1);
+    expect(area(cut('m-vert').loops)).toBeCloseTo(400 * 6000, -1);
+    // The column's square top end rises past L1 by its half width times the lean.
+    const top = Math.max(
+      ...cut('c-lean')
+        .loops.flat()
+        .map((q) => q[1]),
+    );
+    expect(top).toBeCloseTo(6000 + (300 * 2000) / Math.hypot(2000, 6000), 3);
+    expect(r.drawing.failed).toEqual([]);
+  });
+
+  it('cuts tapered columns and sloped slabs in a section (TW5, F47, F48)', async () => {
+    const along = (y: number): BimView => ({
+      ...section,
+      id: `v-y${y}`,
+      line: [
+        [-2000, y],
+        [30000, y],
+      ],
+    });
+    const t = await drawBim(f47Taper(), along(0), kernel);
+    if (t.status !== 'ok') throw new Error(t.code);
+    const cut = (d: BimDrawing, id: string) =>
+      ofType(d, 'polygon')
+        .filter((c) => c.id === id)
+        .flatMap((c) => c.loops);
+    // Through the axes: the round column a trapezoid from Ø1,200 to Ø300; the box column's two
+    // side walls from 40 to 30 mm.
+    expect(area(cut(t.drawing, 'c-round')) / (((1200 + 300) / 2) * 6000) - 1).toBeLessThan(1e-3);
+    expect(area(cut(t.drawing, 'c-box'))).toBeCloseTo(2 * ((40 + 30) / 2) * 6000, -1);
+    expect(t.drawing.failed).toEqual([]);
+    // Along the ramp clear of its hole and opening: 200 mm deep over its 12 m run, up to L1.
+    const r = await drawBim(f48Ramp(), along(500), kernel);
+    if (r.status !== 'ok') throw new Error(r.code);
+    const ramp = cut(r.drawing, 's-ramp');
+    expect(area(ramp)).toBeCloseTo(200 * 12000, -1);
+    expect(Math.max(...ramp.flat().map((q) => q[1]))).toBeCloseTo(3000, 3);
+    expect(Math.min(...ramp.flat().map((q) => q[1]))).toBeCloseTo(0, 3);
+    expect(r.drawing.failed).toEqual([]);
+  });
+
+  it('cuts a leaning wall as a parallelogram in a section (LR2c, F50)', async () => {
+    // Across w-free (0,0)→(6000,0), 4 m high, leaning 15° to its right (−y), 200 mm thick.
+    const across: BimView = {
+      ...section,
+      id: 'v-x3000',
+      line: [
+        [3000, 3000],
+        [3000, -3000],
+      ],
+    };
+    const d = await drawBim(f50Lean(), across, kernel);
+    if (d.status !== 'ok') throw new Error(d.code);
+    const loops = ofType(d.drawing, 'polygon')
+      .filter((c) => c.id === 'w-free')
+      .flatMap((c) => c.loops);
+    const lean = Math.PI / 12;
+    expect(area(loops)).toBeCloseTo((200 / Math.cos(lean)) * 4000, -1);
+    const xs = loops.flat().map((q) => q[0]);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(
+      200 / Math.cos(lean) + 4000 * Math.tan(lean),
+      1,
+    );
+    expect(d.drawing.failed).toEqual([]);
+  });
+
+  it('cuts the openings of a leaning wall along its face (FU3c, F52)', async () => {
+    // Across w-free through the 1,800 mm window (800–2,600 mm along): the wall's 200 mm
+    // strip, 4,000 ÷ cos 15° long up its face, less the window's 900–2,400 mm along it.
+    const lean = Math.PI / 12;
+    const across: BimView = {
+      ...section,
+      id: 'v-x1700',
+      line: [
+        [1700, 3000],
+        [1700, -3000],
+      ],
+    };
+    const d = await drawBim(f52LeanOpenings(), across, kernel);
+    if (d.status !== 'ok') throw new Error(d.code);
+    const loops = ofType(d.drawing, 'polygon')
+      .filter((c) => c.id === 'w-free')
+      .flatMap((c) => c.loops);
+    expect(loops).toHaveLength(2);
+    expect(area(loops)).toBeCloseTo(200 * (4000 / Math.cos(lean) - 1500), -1);
+    // The sill and the head at 900 and 2,400 mm along the face.
+    const z = loops.flatMap((l) => l.map((q) => q[1]));
+    const levels = [...new Set(z.map((v) => Math.round(v)))].sort((a, b) => a - b);
+    expect(levels).toEqual(
+      [0, 900, 2400, 4000 / Math.cos(lean)].map((v) => Math.round(v * Math.cos(lean))),
+    );
+    expect(d.drawing.failed).toEqual([]);
+    // The GL plan at 1,200 mm cuts the window and the door out of the wall.
+    const p = await drawBim(f52LeanOpenings(), { ...plan, id: 'v-gl', level: 'l-gl' }, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    const cut = ofType(p.drawing, 'polygon')
+      .filter((c) => c.id === 'w-free')
+      .flatMap((c) => c.loops);
+    expect(cut).toHaveLength(3);
+    expect(area(cut)).toBeCloseTo((200 / Math.cos(lean)) * (6000 - 1800 - 900), -1);
+    expect(p.drawing.failed).toEqual([]);
+  });
+
+  it("draws a stair's risers, sides, break line and arrow in a plan (LS6, F55)", async () => {
+    // st-main climbs 3,000 mm east from (0, 0) in 17 risers of 176.5 mm, 1,200 mm wide: the
+    // 1,200 mm cut passes over the first 6, through the 6th tread.
+    const doc = f55Stairs();
+    const view: BimView = { ...plan, id: 'v-gl', level: 'l-gl', cutHeightMm: 1200 };
+    const p = await drawBim(doc, view, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    const lines = ofType(p.drawing, 'line').filter((l) => l.id === 'st-main');
+    const of = (cls: string) => lines.filter((l) => l.cls === cls);
+    // Risers across the flight at each 260 mm tread: 6 solid, 11 dashed.
+    const across = (cls: string) =>
+      of(cls).filter((l) => Math.abs(l.a[0] - l.b[0]) < 1e-9 && Math.abs(l.a[1] - l.b[1]) > 1199);
+    expect(across('stair-line').map((l) => l.a[0])).toEqual([0, 260, 520, 780, 1040, 1300]);
+    expect(across('stair-above')).toHaveLength(11);
+    expect(Math.max(...across('stair-above').map((l) => l.a[0]))).toBeCloseTo(16 * 260, 9);
+    // Its sides: solid to the middle of the 6th tread (1,430 mm), dashed beyond.
+    const sides = (cls: string) => of(cls).filter((l) => Math.abs(l.a[1] - l.b[1]) < 1e-9);
+    expect(sides('stair-line').map((l) => [l.a[0], l.b[0]])).toEqual([
+      [0, 1430],
+      [0, 1430],
+    ]);
+    expect(sides('stair-above')).toHaveLength(2);
+    expect(of('stair-break')).toHaveLength(1);
+    // The arrow from the foot's middle to the break: its shaft and a two-stroke head.
+    const arrow = of('stair-arrow');
+    expect(arrow).toHaveLength(3);
+    expect(arrow[0]).toMatchObject({ a: [0, 0], b: [1430, 0] });
+    // st-north (to 1,800 mm, from 0) is all below a cut at 2,000 mm: no break, nothing dashed.
+    const high = await drawBim(doc, { ...view, cutHeightMm: 2000 }, kernel);
+    if (high.status !== 'ok') throw new Error(high.code);
+    const north = ofType(high.drawing, 'line').filter((l) => l.id === 'st-north');
+    expect(north.filter((l) => l.cls === 'stair-line')).toHaveLength(12);
+    expect(north.filter((l) => l.cls === 'stair-above' || l.cls === 'stair-break')).toEqual([]);
+    // Dashed lines above the cut in the SVG.
+    expect(bimDrawingSvg(p.drawing)).toContain('.stair-above{');
+  });
+
+  it('marks a window in a leaning wall only where the roof leaves the wall at the cut (LS1, Codex)', async () => {
+    // F52's free wall leaning 0.5 rad under a 45° roof whose underside is z = 1,000 − y; a
+    // window 900–3,400 mm up the face. At 2,700 mm the wall is 1,474 mm south, under 2,474 mm
+    // of roof: cut away there, though the roof clears the opening's head further north.
+    const doc = f52LeanOpenings();
+    doc.types.push({
+      id: 't-window-tall',
+      kind: 'window',
+      name: 'Tall',
+      widthMm: 1800,
+      heightMm: 2500,
+    });
+    for (const e of doc.elements) {
+      if (e.id === 'w-free' && e.kind === 'wall')
+        Object.assign(e, { lean: 0.5, clipBy: 'r-slope' });
+      if (e.id === 'win-free' && e.kind === 'window') e.typeId = 't-window-tall';
+    }
+    doc.elements.push({
+      id: 'r-slope',
+      kind: 'roof',
+      typeId: 't-roof-200',
+      base: { level: 'l-gl', offsetMm: 0 },
+      boundary: [
+        [-1000, -6000],
+        [7000, -6000],
+        [7000, 1000],
+        [-1000, 1000],
+      ],
+      shape: { form: 'mono', slopeRad: Math.PI / 4, directionRad: -Math.PI / 2 },
+    });
+    const view: BimView = { ...plan, id: 'v-gl', level: 'l-gl', cutHeightMm: 2700 };
+    const p = await drawBim(doc, view, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    expect(ofType(p.drawing, 'line').filter((l) => l.cls === 'window-mark')).toEqual([]);
+    // At 1,200 mm the wall stands there (under 1,000 + 619 mm of roof): the window is marked,
+    // with the square's (1,176–2,646 mm up).
+    const low = await drawBim(doc, { ...view, cutHeightMm: 1200 }, kernel);
+    if (low.status !== 'ok') throw new Error(low.code);
+    expect(ofType(low.drawing, 'line').filter((l) => l.cls === 'window-mark')).toHaveLength(6);
+  });
+
+  it('marks a window under a roof ridge though the roof is below the cut at its jambs (LS1, Codex)', async () => {
+    // F52's free wall (leaning 15°) with a window 2,500 mm high across x = 800–2,600 under a
+    // 45° gable over the whole wall whose ridge at x = 1,700 is 3,000 mm up: 2,100 mm at both
+    // jambs.
+    const doc = f52LeanOpenings();
+    doc.types.push({
+      id: 't-window-tall',
+      kind: 'window',
+      name: 'Tall',
+      widthMm: 1800,
+      heightMm: 2500,
+    });
+    for (const e of doc.elements) {
+      if (e.id === 'w-free' && e.kind === 'wall') e.clipBy = 'r-gable';
+      if (e.id === 'win-free' && e.kind === 'window') e.typeId = 't-window-tall';
+    }
+    doc.elements = doc.elements.filter((e) => e.id !== 'door-free');
+    doc.elements.push({
+      id: 'r-gable',
+      kind: 'roof',
+      typeId: 't-roof-200',
+      base: { level: 'l-gl', offsetMm: -1300 },
+      boundary: [
+        [-2600, -6000],
+        [6000, -6000],
+        [6000, 6000],
+        [-2600, 6000],
+      ],
+      shape: { form: 'gable', slopeRad: Math.PI / 4, ridgeRad: Math.PI / 2 },
+    });
+    const view: BimView = { ...plan, id: 'v-gl', level: 'l-gl', cutHeightMm: 2500 };
+    const p = await drawBim(doc, view, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    expect(
+      ofType(p.drawing, 'line').filter((l) => l.cls === 'window-mark' && l.id === 'win-free'),
+    ).toHaveLength(3);
+    // Above the ridge nothing of the wall is left: no mark.
+    const high = await drawBim(doc, { ...view, cutHeightMm: 3050 }, kernel);
+    if (high.status !== 'ok') throw new Error(high.code);
+    expect(
+      ofType(high.drawing, 'line').filter((l) => l.cls === 'window-mark' && l.id === 'win-free'),
+    ).toEqual([]);
+  });
+
+  it("tests the roof over the wall itself, not the opening tool's margin (LS1, Codex)", async () => {
+    // F52's free wall (leaning 15°) under a 45° roof whose underside is z = 769.93 − y: at the
+    // 1,200 mm cut it reaches 1,195 mm over the wall's far face but 1,205 mm over the cutting
+    // tool's 10 mm margin beyond it. Nothing of the wall is left there: no mark.
+    const marks = async (offsetMm: number) => {
+      const doc = f52LeanOpenings();
+      for (const e of doc.elements) if (e.id === 'w-free' && e.kind === 'wall') e.clipBy = 'r-mono';
+      doc.elements.push({
+        id: 'r-mono',
+        kind: 'roof',
+        typeId: 't-roof-200',
+        base: { level: 'l-gl', offsetMm },
+        boundary: [
+          [-1000, -6000],
+          [7000, -6000],
+          [7000, 1000],
+          [-1000, 1000],
+        ],
+        shape: { form: 'mono', slopeRad: Math.PI / 4, directionRad: -Math.PI / 2 },
+      });
+      const p = await drawBim(
+        doc,
+        { ...plan, id: 'v-gl', level: 'l-gl', cutHeightMm: 1200 },
+        kernel,
+      );
+      if (p.status !== 'ok') throw new Error(p.code);
+      return ofType(p.drawing, 'line').filter(
+        (l) => l.cls === 'window-mark' && l.id === 'win-free',
+      );
+    };
+    expect(await marks(-230.066649)).toEqual([]);
+    // 10 mm higher it reaches 1,205 mm over the wall: the window is marked.
+    expect(await marks(-220.066649)).toHaveLength(3);
+  });
+
+  it('cuts a spiral ramp in a plan and a section (LR3c, F51)', async () => {
+    // Across the 1.5-turn ramp along x = 0: it crosses at 90° and 450° on the north, 270° on
+    // the south, each a 3,000 × 200 mm radial rectangle (its radii stay level).
+    const across: BimView = {
+      ...section,
+      id: 'v-ramp',
+      line: [
+        [0, -6000],
+        [0, 6000],
+      ],
+    };
+    const d = await drawBim(f51Ramps(), across, kernel);
+    if (d.status !== 'ok') throw new Error(d.code);
+    const loops = ofType(d.drawing, 'polygon')
+      .filter((c) => c.id === 'r-spiral')
+      .flatMap((c) => c.loops);
+    expect(loops).toHaveLength(3);
+    expect(area(loops) / (3 * 3000 * 200) - 1).toBeLessThan(1e-3);
+    // Their tops at the heights of those angles: 4,000 mm over 540°.
+    const tops = loops.map((l) => Math.max(...l.map((q) => q[1]))).sort((a, b) => a - b);
+    for (const [k, deg] of [90, 270, 450].entries())
+      expect(tops[k]).toBeCloseTo((4000 * deg) / 540, 0);
+    expect(d.drawing.failed).toEqual([]);
+    // A plan of GL cuts the ramps that rise through its cut height.
+    const p = await drawBim(f51Ramps(), { ...plan, id: 'v-gl', level: 'l-gl' }, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    const ids = new Set(ofType(p.drawing, 'polygon').map((c) => c.id));
+    expect(ids.has('r-spiral')).toBe(true);
+    expect(p.drawing.failed).toEqual([]);
+  });
+
+  it('cuts railings on a spiral ramp in a section and a plan (LS5, F55)', async () => {
+    const across: BimView = {
+      ...section,
+      id: 'v-ramp',
+      line: [
+        [0, -6000],
+        [0, 6000],
+      ],
+    };
+    const doc = f55RampOpenings();
+    const d = await drawBim(doc, across, kernel);
+    if (d.status !== 'ok') throw new Error(d.code);
+    // Each railing of the spiral crosses x = 0 where the ramp does: 50 × 1,100 mm, standing on
+    // the ramp's top at 90°, 270° and 450°.
+    for (const id of ['rail-in', 'rail-out']) {
+      const loops = ofType(d.drawing, 'polygon')
+        .filter((c) => c.id === id)
+        .flatMap((c) => c.loops);
+      expect(loops, id).toHaveLength(3);
+      expect(area(loops) / (3 * 50 * 1100) - 1).toBeLessThan(1e-3);
+      const tops = loops.map((l) => Math.max(...l.map((q) => q[1]))).sort((a, b) => a - b);
+      for (const [k, deg] of [90, 270, 450].entries())
+        expect(tops[k]).toBeCloseTo((4000 * deg) / 540 + 1100, 0);
+    }
+    expect(d.drawing.failed).toEqual([]);
+    const p = await drawBim(doc, { ...plan, id: 'v-gl', level: 'l-gl' }, kernel);
+    if (p.status !== 'ok') throw new Error(p.code);
+    const ids = new Set(ofType(p.drawing, 'polygon').map((c) => c.id));
+    expect(ids.has('rail-in') && ids.has('rail-out')).toBe(true);
+    expect(p.drawing.failed).toEqual([]);
+  });
+
   it('bounds every solid by its box, so a view leaves out only what it never meets', async () => {
     // F37, the roofs and the types, and F31 with an arc wall: every mesh point in its box.
     const arc = f31BoxBuilding();
@@ -164,7 +528,22 @@ describe.skipIf(!dist)('bim drawings (R2c-5, CAD68)', { timeout: 120_000 }, () =
     if (south.kind === 'wall') south.bulge = -0.4;
     arc.elements = arc.elements.filter((e) => e.kind !== 'door' && e.kind !== 'window');
     let checked = 0;
-    for (const doc of [f37Office(), f39Roofs('gable'), f33Types(), arc]) {
+    for (const doc of [
+      f37Office(),
+      f39Roofs('gable'),
+      f33Types(),
+      arc,
+      f40Lattice(),
+      f47Taper(),
+      f48Ramp(),
+      f50Lean(),
+      f51Ramps(),
+      f52LeanOpenings(),
+      f54LeanRoofs(),
+      f54LeanJoins(),
+      f55RampOpenings(),
+      f55Stairs(),
+    ]) {
       const derived = deriveBim(doc);
       const e = await new BimEvaluator(kernel).evaluate(doc);
       if (e.status !== 'ok') throw new Error(e.status);

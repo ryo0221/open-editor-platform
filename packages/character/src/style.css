@@ -25,6 +25,10 @@
   display: block;
   touch-action: none;
 }
+/* C8: while frames are exported the canvas holds the output size; it is shown letterboxed. */
+.character-canvas.character-canvas-capturing {
+  object-fit: contain;
+}
 .character-viewport-note {
   position: absolute;
   left: 16px;
@@ -266,6 +270,19 @@
   border: 1px solid #344054;
   background: #fdb022;
   transform: translate(-50%, -50%) rotate(45deg);
+  cursor: pointer;
+}
+.character-mark {
+  position: absolute;
+  top: 15%;
+  bottom: 15%;
+  width: 6px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background: #d92d20;
+  transform: translateX(-50%);
   cursor: pointer;
 }
 .character-key[aria-pressed='true'] {
@@ -513,4 +530,27 @@
   stroke: #101828;
   stroke-width: 1.5;
   stroke-dasharray: 4 3;
+}
+
+/* C7b: the sculpt brush, a ring where the pointer is. */
+.character-brush-ring {
+  position: absolute;
+  border: 1.5px solid rgba(20, 20, 20, 0.7);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+/* C8a: the Video export settings. */
+.character-video {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.character-video label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.character-video input[type='number'] {
+  width: 6em;
 }

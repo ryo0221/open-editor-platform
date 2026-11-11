@@ -7,7 +7,6 @@ import {
   newId,
   serializeArtifact,
   type Artifact,
-  type StorageAdapter,
 } from '@editor-platform/artifact-core';
 import {
   command,
@@ -22,6 +21,7 @@ import {
   type EditorHostAdapter,
   type HostPendingProposal,
   type HostProposalHooks,
+  type HostArtifactStorage,
 } from '@editor-platform/editor-host';
 import {
   duplicateElements,
@@ -58,7 +58,7 @@ export interface CreativeMapping {
   bindings: CreativeBinding[];
 }
 export interface CreativeStorage {
-  artifacts: StorageAdapter<Artifact<unknown>>;
+  artifacts: HostArtifactStorage;
   readMapping(): Promise<unknown>;
   writeMapping(value: CreativeMapping): Promise<void>;
 }
@@ -137,7 +137,7 @@ export function readCreativeMapping(raw: unknown, mode: string): CreativeMapping
 function typedStorage<T>(
   io: CreativeStorage,
   adapter: EditorHostAdapter<T>,
-): StorageAdapter<Artifact<T>> {
+): HostArtifactStorage<T> {
   return {
     async list() {
       const all = await io.artifacts.list();
@@ -151,7 +151,7 @@ function typedStorage<T>(
       const a = await io.artifacts.get(id);
       return a ? loadHostArtifact(serializeArtifact(a), adapter) : undefined;
     },
-    put: (value) => io.artifacts.put(value),
+    put: (value, context) => io.artifacts.put(value, context),
     ...(io.artifacts.putIfAbsent
       ? {
           putIfAbsent: async (value: Artifact<T>) =>

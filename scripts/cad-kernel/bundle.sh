@@ -31,7 +31,7 @@ docker run --rm -v "$out/source:/out" ${DOCKER_ARGS:-} --entrypoint sh "${IMAGE_
   cat /emsdk/upstream/emscripten/emscripten-version.txt > /out/emscripten-version.txt
   printf "%s\n" "$OCCT_COMMIT_HASH_FULL" > /out/occt-commit.txt'
 
-for f in README.md build.mjs build.sh bundle.sh opencascade.d0-leakcheck.yml patch-destructors.py; do
+for f in README.md build.mjs build.sh bundle.sh opencascade.d0-leakcheck.yml patch-destructors.py sort-link-order.py; do
   cp "$here/$f" "$out/source/editor-platform-cad-kernel/"
 done
 printf '%s\n' "$image" > "$out/source/image.txt"

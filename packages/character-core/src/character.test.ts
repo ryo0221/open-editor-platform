@@ -420,9 +420,14 @@ describe('props and joint keys (C2b)', () => {
       return codes(d);
     };
     expect(bad((p) => (p.source.contentHash = 'nope'))).toEqual(['prop-source $.props[0].source']);
-    expect(bad((p) => ((p.source as { kind: string }).kind = 'bim'))).toEqual([
+    expect(bad((p) => ((p.source as { kind: string }).kind = 'ifc'))).toEqual([
       'prop-source $.props[0].source',
     ]);
+    // C8p (TS-1295): a building version is a prop too, but its elements have no joints to key.
+    expect(bad((p) => ((p.source as { kind: string }).kind = 'bim'))).toEqual([]);
+    const keyed = keyJoint(withArm(), 'shoulder', 'angle', 0, 0);
+    (keyed.props[0]!.source as { kind: string }).kind = 'bim';
+    expect(codes(keyed)).toEqual(['prop-joint-unsupported $.actions[0].tracks[2].target']);
     expect(bad((p) => (p.placement.rotation = [0, 0, 0, 2]))).toEqual([
       'unit-quaternion $.props[0].placement.rotation',
     ]);
@@ -444,8 +449,10 @@ describe('props and joint keys (C2b)', () => {
     expect(pose.joints.get('robot')!.get('slide')).toEqual({ distance: 250 });
     // The bones are sampled as before beside them.
     expect(pose.bones.size).toBe(poseAt(blockyFigure().doc, d.actions[0]!, 12_000).bones.size);
-    // An angle past one turn, or a track on a missing prop, is refused.
-    expect(() => keyJoint(d, 'shoulder', 'angle', 0, 7)).toThrow(/joint-value/);
+    // An angle past a continuous joint's bound (WM2: one turn is the version's limit, checked by
+    // the prop), or a track on a missing prop, is refused.
+    expect(() => keyJoint(d, 'shoulder', 'angle', 0, 7)).not.toThrow();
+    expect(() => keyJoint(d, 'shoulder', 'angle', 0, 1_000_001)).toThrow(/joint-value/);
     const orphan = structuredClone(d);
     orphan.props = [];
     expect(codes(orphan)).toContain('target-id $.actions[0].tracks[3].target.id');

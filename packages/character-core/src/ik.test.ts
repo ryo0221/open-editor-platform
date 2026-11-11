@@ -5,6 +5,7 @@ import {
   characterIds,
   diffCharacterIds,
   emptyCharacter,
+  ikChainProblem,
   ikPoseRotations,
   eulerXyzToQuat,
   identityTransform,
@@ -236,6 +237,29 @@ describe('C5d IK chains (TS-1254)', () => {
     const diff = diffCharacterIds(d, arm());
     expect(diff.changed.map((e) => e.id).sort()).toEqual(['b0', 'b1', 'b2']);
     expect(diffCharacterIds(arm(), arm()).changed).toEqual([]);
+  });
+  it('solves exactly under an unevenly scaled parent, and reports unevenly scaled chain bones (#752, TS-1300)', () => {
+    // b0 scaled 2× along X: b1's head is at x = 600 and its bones are 600 mm long in the world
+    // along X but 300 mm along Y. A 90° turn of b1 about Z brings b3 to [600, 600, 1000].
+    const base = arm(3);
+    base.skeletons[0]!.bones[0]!.rest.scale = [2, 1, 1];
+    for (const target of [
+      [600, 600, 1000],
+      [900, 300, 1000],
+      [400, 200, 1100],
+    ] as Vec3[]) {
+      const d = withChain(base, chain({ tipBoneId: 'b3', length: 2, target }));
+      expect(dist(head(d, 'b3'), target)).toBeLessThan(1e-3);
+    }
+    const s = base.skeletons[0]!;
+    expect(ikChainProblem(s, { tipBoneId: 'b3', length: 2 })).toBeUndefined();
+    // The scaled bone inside the chain: approximate, and reported.
+    expect(ikChainProblem(s, { tipBoneId: 'b2', length: 2 })).toBe('ik-chain-scaled');
+    // Longer chains (FABRIK) too.
+    const long = arm(4);
+    long.skeletons[0]!.bones[0]!.rest.scale = [1, 3, 1];
+    const d = withChain(long, chain({ tipBoneId: 'b4', length: 3, target: [500, 900, 1000] }));
+    expect(dist(head(d, 'b4'), [500, 900, 1000])).toBeLessThan(1e-2);
   });
   it('never solves the rest pose or a disabled chain', () => {
     const d = withChain(arm(), chain());

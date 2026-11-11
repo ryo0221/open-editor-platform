@@ -8,6 +8,7 @@ import { deriveBim } from './derive';
 import { distance } from './geometry';
 import {
   bimDrawingScales,
+  bimGridBubbles,
   bimLimits,
   bimTolerance,
   bimMaterialCategories,
@@ -78,6 +79,13 @@ const typeKindsFor: Partial<Record<BimElementKind, BimTypeKind>> = {
   slab: 'slab',
   column: 'column',
   beam: 'beam',
+  member: 'member',
+  // LR3: a ramp's thickness is a slab type's layers.
+  ramp: 'slab',
+  // LS5: a railing's thickness is a wall type's layers.
+  railing: 'wall',
+  // LS6: a stair's waist is a slab type's layers.
+  stair: 'slab',
   door: 'door',
   window: 'window',
   roof: 'roof',
@@ -265,8 +273,10 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   }
   v.grids.forEach((g, i) => {
     const at = `$.grids[${i}]`;
-    if (!record(g) || !c.keys(g, ['id', 'label', 'start', 'end'], at))
+    if (!record(g) || !c.keys(g, ['id', 'label', 'start', 'end'], at, ['bubbles']))
       return void c.error('grid', at);
+    if (g.bubbles !== undefined && !(bimGridBubbles as readonly unknown[]).includes(g.bubbles))
+      c.error('grid', `${at}.bubbles`);
     if (c.id(g.id, `${at}.id`)) kindOf.set(g.id as string, 'grid');
     c.name(g.label, `${at}.label`);
     if (c.vec2(g.start, `${at}.start`) && c.vec2(g.end, `${at}.end`)) {
@@ -413,7 +423,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     const ok =
       t.kind === 'wall' || t.kind === 'slab' || t.kind === 'roof'
         ? c.keys(t, [...base, 'layers'], at, opt)
-        : t.kind === 'column' || t.kind === 'beam'
+        : t.kind === 'column' || t.kind === 'beam' || t.kind === 'member'
           ? c.keys(t, [...base, 'profile', 'materialId'], at, opt)
           : t.kind === 'door' || t.kind === 'window'
             ? c.keys(t, [...base, 'widthMm', 'heightMm'], at, opt)
@@ -449,7 +459,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
       });
       if (total > bimLimits.maxSectionMm) c.error('dimension', `${at}.layers`);
     }
-    if (t.kind === 'column' || t.kind === 'beam') {
+    if (t.kind === 'column' || t.kind === 'beam' || t.kind === 'member') {
       ref(t.materialId, 'material', `${at}.materialId`);
       profile(t.profile, `${at}.profile`);
     }
@@ -487,6 +497,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
       channel: ['depthMm', 'widthMm', 'webMm', 'flangeMm'],
       l: ['depthMm', 'widthMm', 'thicknessMm'],
       box: ['depthMm', 'widthMm', 'wallMm'],
+      pipe: ['diameterMm', 'wallMm'],
     };
     const keys =
       typeof pr.shape === 'string' && Object.hasOwn(dims, pr.shape) ? dims[pr.shape] : undefined;
@@ -501,7 +512,9 @@ export function validateBim(value: unknown): BimDiagnostic[] {
           ? n.thicknessMm >= Math.min(n.widthMm, n.depthMm)
           : pr.shape === 'box'
             ? 2 * n.wallMm >= Math.min(n.widthMm, n.depthMm)
-            : false;
+            : pr.shape === 'pipe'
+              ? 2 * n.wallMm >= n.diameterMm
+              : false;
     return !thin || c.error('profile-proportion', at);
   }
 
@@ -512,6 +525,19 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     slab: ['typeId', 'top', 'boundary', 'holes'],
     column: ['typeId', 'at', 'rotationRad', 'base', 'top'],
     beam: ['typeId', 'start', 'end', 'top'],
+    member: ['typeId', 'start', 'end', 'rotationRad'],
+    ramp: [
+      'typeId',
+      'center',
+      'innerRadiusMm',
+      'outerRadiusMm',
+      'startAngleRad',
+      'sweepRad',
+      'base',
+      'top',
+    ],
+    railing: ['typeId', 'hostId', 'side', 'heightMm'],
+    stair: ['typeId', 'start', 'directionRad', 'widthMm', 'risers', 'treadMm', 'base', 'top'],
     opening: ['hostId'],
     door: ['typeId', 'hostId', 'alongMm', 'flipFacing', 'flipHand'],
     window: ['typeId', 'hostId', 'alongMm', 'sillMm', 'flipFacing'],
@@ -520,9 +546,11 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     part: ['typeId', 'at', 'base', 'rotationRad'],
   };
   const elementOptional: Record<string, string[]> = {
-    wall: ['bulge', 'clipBy'],
-    column: ['clipBy'],
-    space: ['top'],
+    wall: ['bulge', 'clipBy', 'lean'],
+    column: ['clipBy', 'topAt', 'topScale'],
+    beam: ['endTop'],
+    slab: ['slope'],
+    space: ['top', 'holes'],
     opening: ['wall', 'slab'],
   };
   v.elements.forEach((e, i) => {
@@ -590,6 +618,12 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         levelHeight(e.base, `${at}.base`);
         top(e.top, `${at}.top`);
         if (e.clipBy !== undefined) elementOf(e.clipBy, ['roof'], `${at}.clipBy`);
+        // LS1: a roof cuts a leaning wall too.
+        if (
+          e.lean !== undefined &&
+          !(typeof e.lean === 'number' && Math.abs(e.lean) <= bimLimits.wallLeanRad + 1e-12)
+        )
+          c.error('wall-lean', `${at}.lean`);
         break;
       case 'slab':
         levelHeight(e.top, `${at}.top`);
@@ -597,6 +631,19 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         if (!Array.isArray(e.holes) || e.holes.length > bimLimits.holes)
           c.error('holes', `${at}.holes`);
         else e.holes.forEach((h, j) => c.loop(h, `${at}.holes[${j}]`));
+        if (e.slope !== undefined) {
+          const sl = e.slope;
+          if (!record(sl) || !c.keys(sl, ['edge', 'endTop'], `${at}.slope`))
+            c.error('slab-slope', `${at}.slope`);
+          else {
+            const boundary: unknown[] = Array.isArray(e.boundary) ? e.boundary : [];
+            const edge = sl.edge;
+            const v = Number.isInteger(edge) ? boundary[edge as number] : undefined;
+            // The slope's edge is a straight edge of the boundary.
+            if (!Array.isArray(v) || !!v[2]) c.error('slab-slope', `${at}.slope.edge`);
+            levelHeight(sl.endTop, `${at}.slope.endTop`);
+          }
+        }
         break;
       case 'column':
         point(e.at, `${at}.at`);
@@ -604,19 +651,78 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         levelHeight(e.base, `${at}.base`);
         top(e.top, `${at}.top`);
         if (e.clipBy !== undefined) elementOf(e.clipBy, ['roof'], `${at}.clipBy`);
+        if (e.topAt !== undefined) point(e.topAt, `${at}.topAt`);
+        if (
+          e.topScale !== undefined &&
+          !(typeof e.topScale === 'number' && e.topScale >= 0.1 && e.topScale <= 1)
+        )
+          c.error('column-scale', `${at}.topScale`);
         break;
       case 'beam':
         point(e.start, `${at}.start`);
         point(e.end, `${at}.end`);
         levelHeight(e.top, `${at}.top`);
+        if (e.endTop !== undefined) levelHeight(e.endTop, `${at}.endTop`);
         break;
+      case 'member':
+        for (const end of ['start', 'end'] as const) {
+          const m = e[end];
+          if (!record(m) || !c.keys(m, ['at', 'height'], `${at}.${end}`)) {
+            c.error('member-end', `${at}.${end}`);
+            continue;
+          }
+          point(m.at, `${at}.${end}.at`);
+          levelHeight(m.height, `${at}.${end}.height`);
+        }
+        c.angle(e.rotationRad, `${at}.rotationRad`);
+        break;
+      case 'ramp':
+        // LR3: a ring between two radii, turning up to 3 turns either way (not 0).
+        point(e.center, `${at}.center`);
+        if (
+          c.dimension(e.innerRadiusMm, `${at}.innerRadiusMm`) &&
+          c.dimension(e.outerRadiusMm, `${at}.outerRadiusMm`) &&
+          (e.outerRadiusMm as number) <= (e.innerRadiusMm as number)
+        )
+          c.error('ramp-shape', `${at}.outerRadiusMm`);
+        c.angle(e.startAngleRad, `${at}.startAngleRad`);
+        if (c.angle(e.sweepRad, `${at}.sweepRad`, bimLimits.rampSweepRad) && e.sweepRad === 0)
+          c.error('ramp-shape', `${at}.sweepRad`);
+        levelHeight(e.base, `${at}.base`);
+        levelHeight(e.top, `${at}.top`);
+        break;
+      case 'railing':
+        // LS5: along a ramp's edge, at most `bimLimits.railingHeightMm` tall.
+        elementOf(e.hostId, ['ramp'], `${at}.hostId`);
+        if (!['inner', 'outer'].includes(e.side as string)) c.error('railing-side', `${at}.side`);
+        c.dimension(e.heightMm, `${at}.heightMm`, bimLimits.railingHeightMm);
+        break;
+      case 'stair': {
+        // LS6: a straight flight; its riser height is checked once the heights are known.
+        point(e.start, `${at}.start`);
+        c.angle(e.directionRad, `${at}.directionRad`);
+        c.dimension(e.widthMm, `${at}.widthMm`, bimLimits.maxSectionMm);
+        const { risers, treadMm } = bimLimits.stair;
+        if (
+          !Number.isInteger(e.risers) ||
+          (e.risers as number) < risers[0] ||
+          (e.risers as number) > risers[1]
+        )
+          c.error('stair-risers', `${at}.risers`);
+        if (typeof e.treadMm !== 'number' || !(e.treadMm >= treadMm[0] && e.treadMm <= treadMm[1]))
+          c.error('stair-tread', `${at}.treadMm`);
+        levelHeight(e.base, `${at}.base`);
+        levelHeight(e.top, `${at}.top`);
+        break;
+      }
       case 'opening': {
         const hasWall = Object.hasOwn(e, 'wall');
         if (hasWall === Object.hasOwn(e, 'slab')) {
           c.error('opening-host', at);
           break;
         }
-        if (!elementOf(e.hostId, [hasWall ? 'wall' : 'slab'], `${at}.hostId`)) break;
+        // LS4: a plan opening goes in a slab or a spiral ramp.
+        if (!elementOf(e.hostId, hasWall ? ['wall'] : ['slab', 'ramp'], `${at}.hostId`)) break;
         countOpening(e.hostId as string, at);
         if (hasWall) {
           const w = e.wall;
@@ -671,6 +777,11 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         levelHeight(e.base, `${at}.base`);
         if (e.top !== undefined) top(e.top, `${at}.top`);
         c.loop(e.boundary, `${at}.boundary`);
+        if (e.holes !== undefined) {
+          if (!Array.isArray(e.holes) || e.holes.length > bimLimits.holes)
+            c.error('holes', `${at}.holes`);
+          else e.holes.forEach((h, j) => c.loop(h, `${at}.holes[${j}]`));
+        }
         break;
       case 'part':
         point(e.at, `${at}.at`);

@@ -1,11 +1,20 @@
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { canonicalJson } from '@editor-platform/artifact-core';
-import { sameLocalRevision } from '@editor-platform/editor-core';
+import { EditorInputs, sameLocalRevision } from '@editor-platform/editor-core';
 import { FictionMapArtifactSurface } from '@editor-platform/fiction-map/artifact-surface';
 import '@editor-platform/fiction-map/styles.css';
 import type { CreativeWorkspace } from './model';
 import type { CreativeMapLocation } from './map-links';
+import { useCreativeNavigationState, type CreativeNavigationState } from '../navigation-state';
 
 export function MapLocationEditor({
   workspace,
@@ -13,13 +22,17 @@ export function MapLocationEditor({
   editor,
   leave,
   openLocation,
+  onNavigationStateChange,
 }: {
+  onNavigationStateChange?(state: CreativeNavigationState): void;
   workspace: CreativeWorkspace;
   reference: CreativeMapLocation;
   editor: Awaited<ReturnType<CreativeWorkspace['maps']['open']>>;
   leave(check: () => void): Promise<void>;
   openLocation(check: () => void): Promise<void>;
 }) {
+  const inputs = useMemo(() => new EditorInputs(), [editor]);
+  const inputState = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot, inputs.getSnapshot);
   const [, refresh] = useReducer((n) => n + 1, 0);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
@@ -38,19 +51,22 @@ export function MapLocationEditor({
     return () => privateSurface.remove();
   }, [readable, privateSurface]);
   useEffect(() => editor.attach(refresh), [editor]);
+  const dirty =
+    editor.snapshot.dirty || !!inputState.dirty || !!inputState.composing || !!inputState.settling;
+  useCreativeNavigationState(
+    { dirty, busy: busy || editor.snapshot.saving },
+    onNavigationStateChange,
+  );
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      try {
-        editor.flushInputs();
-        if (editor.snapshot.dirty) throw Error('未保存の地図');
-      } catch {
+      if (dirty) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [editor]);
+  }, [dirty]);
   const run = async (action: () => Promise<void>) => {
     if (busy) return;
     setBusy(true);
@@ -112,6 +128,7 @@ export function MapLocationEditor({
       {createPortal(
         <FictionMapArtifactSurface
           host={editor}
+          inputs={inputs}
           onError={setError}
           mayRead={() =>
             workspace.canReadWorld(editor.id) &&

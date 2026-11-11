@@ -10,7 +10,15 @@
     "./creative": "./src/creative/index.ts",
     "./creative/browser": "./src/creative/browser.tsx",
     "./creative/setting": "./src/creative/setting.ts",
-    "./creative/workspace": "./src/creative/workspace/index.ts"
+    "./creative/workspace": "./src/creative/workspace/index.ts",
+    "./creative/timeline/table": "./src/creative/timeline/table.ts",
+    "./creative/workspace/story-links": "./src/creative/workspace/story-links.ts",
+    "./creative/workspace/links": "./src/creative/workspace/links.ts",
+    "./creative/project": "./src/creative/project.ts",
+    "./creative/source-readers": "./src/creative/source-readers.ts",
+    "./creative/workspace/world-context": "./src/creative/workspace/world-context.ts",
+    "./creative/timeline/refs": "./src/creative/timeline/refs.ts",
+    "./creative/saved-comparison": "./src/creative/saved-comparison.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

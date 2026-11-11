@@ -8,7 +8,7 @@ import {
   type BimDocument,
   type BimOperation,
 } from '@editor-platform/bim-core';
-import { writeIfc } from '@editor-platform/bim-ifc';
+import { bimIfcImportLimits, writeIfc } from '@editor-platform/bim-ifc';
 import { EditorSession } from '@editor-platform/editor-core';
 import type { GeometryRequest } from '@editor-platform/geometry-core';
 import type { OcModule } from '@editor-platform/geometry-kernel-occt';
@@ -18,7 +18,14 @@ import { BimController } from './controller';
 import { draftPart } from './drafting';
 import { bimDirectKernel, bimDisplayMesh, BimEvaluator, type BimKernel } from './evaluate';
 import { drawBim } from './drawing';
-import { bimIfcPartMesh, bimIfcPartMeshFor, exportBimIfc, meshClosed, partStyles } from './ifc';
+import {
+  bimIfcOverImportLimit,
+  bimIfcPartMesh,
+  bimIfcPartMeshFor,
+  exportBimIfc,
+  meshClosed,
+  partStyles,
+} from './ifc';
 import { bimKernelLimits } from './port';
 import type { BimPartStatus } from './parts';
 
@@ -106,7 +113,7 @@ const available = (kinds: ('solid' | 'sheet')[]): BimPartStatus => ({ status: 'a
 const partId = (doc: BimDocument) => doc.elements.find((e) => e.kind === 'part')!.id;
 
 describe('bim IFC from the app (R2c-6)', () => {
-  it('meshes parts at the fixed export tessellation and writes a solid part as a faceted BRep', async () => {
+  it('meshes parts at the fixed export tessellation and writes a solid part as a triangulated face set (TW0a)', async () => {
     const doc = withPart();
     const { kernel, requests } = cubeKernel();
     const r = await exportBimIfc(doc, kernel, { ...file, part: () => available(['solid']) });
@@ -115,7 +122,9 @@ describe('bim IFC from the app (R2c-6)', () => {
     expect(requests.flat()).toEqual([
       expect.objectContaining({ mesh: { deflectionMm: 0.5, angularDeflectionRad: 0.1 } }),
     ]);
-    expect(r.file.text).toContain('IFCFACETEDBREP');
+    expect(r.file.text).toContain('IFCTRIANGULATEDFACESET');
+    expect(r.file.text).toContain("'Tessellation'");
+    expect(r.file.text).not.toContain('IFCFACETEDBREP');
     expect(r.file.text).toContain("'EP_PartReference'");
     // The same content gives the same file.
     const again = await exportBimIfc(doc, kernel, { ...file, part: () => available(['solid']) });
@@ -196,6 +205,12 @@ describe('bim IFC from the app (R2c-6)', () => {
     });
     expect(partStyles([0, 3], status)).toEqual({});
     expect(partStyles([0], { status: 'available', kinds: ['solid'] })).toEqual({});
+  });
+
+  it('names the import limit when a written file is over it, and nothing at the limit (TW0a)', () => {
+    const limit = bimIfcImportLimits.bytes;
+    expect(bimIfcOverImportLimit({ bytes: new Uint8Array(limit) })).toBeUndefined();
+    expect(bimIfcOverImportLimit({ bytes: new Uint8Array(limit + 1) })).toBe(limit);
   });
 
   it('tells a closed mesh from an open one with vertices joined by position', () => {

@@ -11,6 +11,7 @@ export * from './geometry';
 export {
   BimContext,
   bimJoinThrough,
+  bimStairProfile,
   deriveBim,
   layersThickness,
   loopExtreme,
@@ -27,6 +28,7 @@ export {
   bimPanelMm,
   bimGeometry,
   bimNodeRole,
+  bimRampStepRad,
   type BimElementGeometry,
   type BimGeometry,
   type BimPlacement,
@@ -34,12 +36,17 @@ export {
 export {
   bimProfileLoops,
   bimRoofPlanes,
+  bimSlabPlanes,
+  bimSectionAxes,
   bimWallAxis,
   bimWallOpeningLoop,
+  bimWallOpeningRise,
   profileHeight,
   type BimPlane,
+  type BimSectionAxes,
 } from './solids';
 export * from './drawing';
+export * from './schedule';
 export * from './operations';
 export * from './commands';
 export * from './fixtures';

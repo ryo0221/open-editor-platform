@@ -8,6 +8,7 @@ import {
 } from '@editor-platform/character-core';
 import {
   cornerNormals,
+  cornerTangents,
   meshDisplay,
   type EpmMesh,
   type MeshDisplay,
@@ -17,8 +18,17 @@ import {
 export interface PreparedMesh {
   mesh: EpmMesh;
   display: MeshDisplay;
+  /**
+   * With UVs, per display corner the tangent (xyz, w handedness) that a normal map is baked
+   * against and that the GLB writes (C7d), so the view reads a baked map in the same frame.
+   */
+  tangents?: Float32Array;
 }
-export const prepareMesh = (mesh: EpmMesh): PreparedMesh => ({ mesh, display: meshDisplay(mesh) });
+export function prepareMesh(mesh: EpmMesh): PreparedMesh {
+  const display = meshDisplay(mesh);
+  const tangents = mesh.uvs ? cornerTangents(mesh, display.normals) : undefined;
+  return { mesh, display, ...(tangents ? { tangents } : {}) };
+}
 
 /** One part as drawn at one tick: per display corner, character space (mm, Z-up). */
 export interface PartFrame {
@@ -32,6 +42,8 @@ export interface PartFrame {
    * so one reflected limb does not turn the rest of a skin inside out.
    */
   flipped: Uint8Array;
+  /** With UVs: per display corner the posed tangent (xyz, w handedness), as `PreparedMesh`. */
+  tangents?: Float32Array;
 }
 
 /**
@@ -55,7 +67,7 @@ export function characterFrame(
   for (const part of doc.parts) {
     const prepared = meshes.get(part.mesh);
     if (!prepared) continue;
-    const { mesh, display } = prepared;
+    const { mesh, display, tangents: rest } = prepared;
     const base = mesh.positions.slice();
     let morphed = false;
     for (const m of mesh.morphs) {
@@ -65,6 +77,9 @@ export function characterFrame(
     }
     // A morph can turn faces: their normals come from the morphed shape, before skin or part.
     const source = morphed ? cornerNormals({ ...mesh, positions: base }) : display.normals;
+    // The tangents too, so a normal map's frame stays on the morphed faces.
+    const restTangents =
+      rest && morphed ? cornerTangents({ ...mesh, positions: base }, source)! : rest;
     const skin = skins.get(part.id);
     const blended = vertexMatrices(
       mesh,
@@ -85,6 +100,7 @@ export function characterFrame(
     const corners = display.cornerVertex.length;
     const positions = new Float32Array(corners * 3);
     const normals = new Float32Array(corners * 3);
+    const tangents = rest ? new Float32Array(corners * 4) : undefined;
     for (let c = 0; c < corners; c++) {
       const v = display.cornerVertex[c];
       const m = blended.subarray(12 * v, 12 * v + 12);
@@ -117,6 +133,20 @@ export function characterFrame(
       normals[3 * c] = ox / len;
       normals[3 * c + 1] = oy / len;
       normals[3 * c + 2] = oz / len;
+      if (restTangents && tangents) {
+        // Tangents follow the surface (the matrix itself); a mirroring matrix flips handedness.
+        const tx = restTangents[4 * c],
+          ty = restTangents[4 * c + 1],
+          tz = restTangents[4 * c + 2];
+        const qx = ax * tx + bx * ty + cx * tz,
+          qy = ay * tx + by * ty + cy * tz,
+          qz = az * tx + bz * ty + cz * tz;
+        const tl = Math.hypot(qx, qy, qz) || 1;
+        tangents[4 * c] = qx / tl;
+        tangents[4 * c + 1] = qy / tl;
+        tangents[4 * c + 2] = qz / tl;
+        tangents[4 * c + 3] = sign * restTangents[4 * c + 3];
+      }
     }
     out.push({
       partId: part.id,
@@ -124,6 +154,7 @@ export function characterFrame(
       positions,
       normals,
       flipped,
+      ...(tangents ? { tangents } : {}),
     });
   }
   return out;

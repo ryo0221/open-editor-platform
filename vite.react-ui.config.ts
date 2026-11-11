@@ -22,7 +22,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       treeshake: false,
-      input: ['apps/react-ui-reference/index.html', 'apps/react-ui-reference/design.html'],
+      input: ['index.html', 'design.html'].map((entry) =>
+        fileURLToPath(new URL(`./apps/react-ui-reference/${entry}`, import.meta.url)),
+      ),
     },
     outDir: '../../dist/react-ui-preview',
     emptyOutDir: true,

@@ -7,14 +7,32 @@ import {
   dot,
   left,
   loopArea,
+  loopEdges,
+  type LoopEdge,
+  pointInLoop,
   sampleLoop,
   scale,
   sub,
   unit,
 } from './geometry';
-import type { BimDocument, BimDrawingScale, BimType, BimView, Vec2, Vec3 } from './model';
+import {
+  bimGridBubbleAt,
+  type BimDocument,
+  type BimDrawingScale,
+  type BimType,
+  type BimWall,
+  type BimView,
+  type Vec2,
+  type Vec3,
+} from './model';
 import type { BimPlacement } from './ops';
-import { bimRoofPlanes, bimWallAxis } from './solids';
+import {
+  bimRoofPlanes,
+  bimSlabPlanes,
+  bimWallAxis,
+  bimWallOpeningLoop,
+  bimWallOpeningRise,
+} from './solids';
 
 /**
  * Plans and sections (docs/cad/r2c-architecture.md, 平面図と断面図; R2c-U7). A drawing is
@@ -25,7 +43,7 @@ import { bimRoofPlanes, bimWallAxis } from './solids';
  * writes the result.
  */
 
-/** Paper sizes in mm; a drawing multiplies them by its scale (1:50, 1:100, 1:200). */
+/** Paper sizes in mm; a drawing multiplies them by its scale (1:50 to 1:1000). */
 export const bimDrawingPaper = Object.freeze({
   cutStrokeMm: 0.5,
   seenStrokeMm: 0.18,
@@ -213,17 +231,69 @@ export function bimElementBox(
   const reach = (p: object) =>
     Object.values(p).reduce((r: number, v) => (typeof v === 'number' ? r + v : r), 0);
   switch (s.kind) {
-    case 'wall':
-      return box(loopBox(s.footprint), s.zBase, s.zTop);
-    case 'slab':
-      return box(loopBox(s.boundary), s.zBottom, s.zTop);
+    case 'wall': {
+      if (!s.footprintTop) return box(loopBox(s.footprint), s.zBase, s.zTop);
+      // LR2: a leaning wall reaches from its base footprint to its top one.
+      const [a, b] = [loopBox(s.footprint), loopBox(s.footprintTop)];
+      return box(
+        [
+          [Math.min(a[0][0], b[0][0]), Math.min(a[0][1], b[0][1])],
+          [Math.max(a[1][0], b[1][0]), Math.max(a[1][1], b[1][1])],
+        ],
+        s.zBase,
+        s.zTop,
+      );
+    }
+    case 'slab': {
+      if (!s.slope) return box(loopBox(s.boundary), s.zBottom, s.zTop);
+      // TW5: a sloped slab runs from its lowest bottom to its highest top.
+      const { zLow, zHigh } = bimSlabPlanes(s);
+      return box(loopBox(s.boundary), zLow - (s.zTop - s.zBottom), zHigh);
+    }
     case 'column': {
       const r = reach(s.profile);
-      return box(grow([s.at, s.at], r), s.zBase, s.zTop);
+      // TW2: a leaning column's square ends reach up to its section's size past its heights.
+      const lean = s.topAt ? r : 0;
+      return box(grow(pointsBox([s.at, s.topAt ?? s.at]), r), s.zBase - lean, s.zTop + lean);
     }
     case 'beam': {
       const r = reach(s.profile);
-      return box(grow(pointsBox([s.start, s.end]), r), s.zTop - r, s.zTop + r);
+      const z = s.zTopEnd ?? s.zTop;
+      return box(
+        grow(pointsBox([s.start, s.end]), r),
+        Math.min(s.zTop, z) - r,
+        Math.max(s.zTop, z) + r,
+      );
+    }
+    case 'member': {
+      const r = reach(s.profile);
+      const xy = (p: Vec3): Vec2 => [p[0], p[1]];
+      return box(
+        grow(pointsBox([xy(s.start), xy(s.end)]), r),
+        Math.min(s.start[2], s.end[2]) - r,
+        Math.max(s.start[2], s.end[2]) + r,
+      );
+    }
+    case 'ramp':
+    case 'railing': {
+      // LR3: within its outer circle and its heights; 1 mm over for the lofted surface.
+      const r = s.outerRadius + 1;
+      return box(
+        grow([s.center, s.center], r),
+        Math.min(s.zStart, s.zEnd) - s.thickness - 1,
+        Math.max(s.zStart, s.zEnd) + 1,
+      );
+    }
+    case 'stair': {
+      // LS6: its plan rectangle and heights.
+      const d: Vec2 = [Math.cos(s.directionRad), Math.sin(s.directionRad)];
+      const n = left(d);
+      const run = Math.max(...s.profile.map((p) => p[0]));
+      const corners = [0, run].flatMap((u) =>
+        [-1, 1].map((k) => add(add(s.at, scale(d, u)), scale(n, (k * s.width) / 2))),
+      );
+      const zs = s.profile.map((p) => s.zBase + p[1]);
+      return box(pointsBox(corners), Math.min(...zs), Math.max(...zs));
     }
     case 'roof': {
       // Each plane is linear, so over the plan box its heights lie between those at the corners.
@@ -379,35 +449,53 @@ export function bimDrawingSymbols(
     const z = frame.cutZ!;
     // Doors and windows the cut passes through (in walls it cuts): they get symbols. A wall
     // over several storeys has its openings at their own heights.
-    // A wall a roof clips (`clipBy`) ends under every roof plane: its top at a point is the
-    // lowest of them there.
-    const roofTop = (roofId: string, xy: Vec2) => {
+    // A wall a roof clips (`clipBy`) ends under every roof plane: it stands at height `z` over
+    // the part of a plan region below all of them there. LS1 (Codex): the region clipped to each
+    // plane's half-plane above `z` (arcs split finely: within 0.01 mm for a building's), so a
+    // ridge or hip inside the region counts, not only its corners.
+    const roofLeaves = (roofId: string, region: ReturnType<typeof bimWallOpeningLoop>) => {
       const roof = derived.shapes.get(roofId);
-      if (roof?.kind !== 'roof') return Infinity;
-      return Math.min(
-        ...roof.faces.map((f) => {
-          const { under } = bimRoofPlanes(roof, f);
-          const [p, n] = [under.p, under.n];
-          return p[2] - (n[0] * (xy[0] - p[0]) + n[1] * (xy[1] - p[1])) / n[2];
-        }),
-      );
+      if (roof?.kind !== 'roof') return true;
+      let poly = sampleLoop(region, 64);
+      for (const f of roof.faces) {
+        const { under } = bimRoofPlanes(roof, f);
+        const [p, n] = [under.p, under.n];
+        const g = (xy: Vec2) => p[2] - (n[0] * (xy[0] - p[0]) + n[1] * (xy[1] - p[1])) / n[2] - z;
+        const kept: Vec2[] = [];
+        poly.forEach((a, i) => {
+          const b = poly[(i + 1) % poly.length]!;
+          const [ga, gb] = [g(a), g(b)];
+          if (ga >= 0) kept.push(a);
+          if (ga >= 0 !== gb >= 0) kept.push(add(a, scale(sub(b, a), ga / (ga - gb))));
+        });
+        poly = kept;
+        if (poly.length < 3) return false;
+      }
+      return Math.abs(loopArea(poly)) > 1e-3;
+    };
+    const halfThickness = (w: BimWall) => {
+      const a = bimWallAxis(ctx, w);
+      return Math.abs(a.leftOff - a.rightOff) / 2;
     };
     const cutOpenings = new Set<string>();
     for (const w of doc.elements) {
       const sh = w.kind === 'wall' ? derived.shapes.get(w.id) : undefined;
       if (w.kind !== 'wall' || sh?.kind !== 'wall' || !(sh.zBase < z && sh.zTop > z)) continue;
-      const axis = sh.clipBy ? bimWallAxis(ctx, w) : undefined;
       for (const o of sh.openings) {
-        // The wall's top over the opening: its ends and middle, under the roof if clipped.
-        const top = axis
-          ? Math.max(
-              ...[0, 0.5, 1].map((f) =>
-                Math.min(sh.zTop, roofTop(sh.clipBy!, axis.at(o.alongMm + f * o.widthMm)[0])),
-              ),
-            )
-          : sh.zTop;
-        if (sh.zBase + o.sillMm < z && Math.min(sh.zBase + o.sillMm + o.heightMm, top) > z)
-          cutOpenings.add(o.elementId);
+        // FU3a: a leaning wall's sill and head are measured along its face.
+        const [z0, z1] = bimWallOpeningRise(w, o.sillMm, o.heightMm);
+        // Under a roof: whether any of the opening's region where the cut is (a leaning wall's
+        // moves across as it rises, LS1) stands below the roof there.
+        const stands =
+          sh.zTop > z &&
+          (!sh.clipBy ||
+            roofLeaves(
+              sh.clipBy,
+              // Between the wall's faces (Codex): the cutting tool's 10 mm margin beyond them
+              // is no wall.
+              bimWallOpeningLoop(ctx, w, o.alongMm, o.widthMm, z - sh.zBase, halfThickness(w)),
+            ));
+        if (sh.zBase + z0 < z && sh.zBase + z1 > z && stands) cutOpenings.add(o.elementId);
       }
     }
     for (const e of doc.elements) {
@@ -415,7 +503,21 @@ export function bimDrawingSymbols(
       const wall = ctx.elements.get(e.hostId);
       const type = ctx.types.get(e.typeId);
       if (wall?.kind !== 'wall' || (type?.kind !== 'door' && type?.kind !== 'window')) continue;
-      const axis = bimWallAxis(ctx, wall);
+      // FU3c: a leaning wall where the cut passes: moved to its right by the height × tan(lean)
+      // (an arc's radially, at the same angles), its faces thickness ÷ cos(lean) apart.
+      const base = bimWallAxis(ctx, wall);
+      const lean = wall.lean ?? 0;
+      const hs = derived.shapes.get(wall.id);
+      const shift = lean && hs?.kind === 'wall' ? (z - hs.zBase) * Math.tan(lean) : 0;
+      const axis = {
+        ...base,
+        leftOff: base.leftOff / Math.cos(lean),
+        rightOff: base.rightOff / Math.cos(lean),
+        at: (t: number): [Vec2, Vec2] => {
+          const [p, tangent] = base.at(t);
+          return [add(p, scale(left(tangent), -shift)), tangent];
+        },
+      };
       const w = type.widthMm;
       const [p0, t0] = axis.at(e.alongMm);
       const [p1, t1] = axis.at(e.alongMm + w);
@@ -481,13 +583,59 @@ export function bimDrawingSymbols(
         text(add(mid, scale(n, out)), type.name, 'type-mark', awayFrom(n), e.id);
       }
     }
+    // LS6: stairs this plan passes over: each riser's line across the flight (solid below the
+    // cut, dashed above it), its sides, a break line where the cut crosses it and an arrow up
+    // the flight from its foot.
+    const floor = doc.levels.find((l) => l.id === view.level)?.elevationMm ?? -Infinity;
+    for (const e of doc.elements) {
+      const st = e.kind === 'stair' ? derived.shapes.get(e.id) : undefined;
+      if (st?.kind !== 'stair') continue;
+      const height = st.risers * st.riser;
+      if (!(st.zBase < z && st.zBase + height > floor)) continue;
+      const d: Vec2 = [Math.cos(st.directionRad), Math.sin(st.directionRad)];
+      const n = left(d);
+      const at = (u: number, k: number): Vec2 =>
+        add(add(st.at, scale(d, u)), scale(n, (k * st.width) / 2));
+      const run = (st.risers - 1) * st.tread;
+      const line = (a: Vec2, b: Vec2, cls: string) =>
+        items.push({ type: 'line', a, b, cls, id: e.id });
+      // The risers the cut passes below; a cut above the flight leaves it all below.
+      const below = Math.min(st.risers, Math.floor((z - st.zBase) / st.riser + 1e-9));
+      // Riser k (1 to n) rises to k × the riser at k − 1 treads along.
+      for (let k = 1; k <= st.risers; k++) {
+        const u = (k - 1) * st.tread;
+        line(at(u, -1), at(u, 1), k <= below ? 'stair-line' : 'stair-above');
+      }
+      const cut = below < st.risers ? Math.max(0, below - 0.5) * st.tread : run;
+      for (const k of [-1, 1]) {
+        if (cut > 0) line(at(0, k), at(cut, k), 'stair-line');
+        if (cut < run) line(at(cut, k), at(run, k), 'stair-above');
+      }
+      if (cut < run) {
+        // A break line across the flight, slanted so it reads as a break, not a riser.
+        const slant = Math.min(st.tread / 2, st.width / 4);
+        line(at(cut - slant, -1), at(cut + slant, 1), 'stair-break');
+      }
+      // The arrow: from the foot up to the cut (or the top), its head two short strokes.
+      const tip = at(Math.max(cut, st.tread / 2), 0);
+      const head = Math.min(st.width / 4, st.tread);
+      line(at(0, 0), tip, 'stair-arrow');
+      for (const k of [-1, 1])
+        line(tip, add(add(tip, scale(d, -head)), scale(n, (k * head) / 2)), 'stair-arrow');
+    }
     // Spaces of this level: number, name and area.
     for (const e of doc.elements) {
       if (e.kind !== 'space' || e.base.level !== view.level) continue;
       const points = sampleLoop(e.boundary);
-      const c = interiorPoint(points);
-      // Unsigned: a boundary may run either way round.
-      const area = Math.abs(loopArea(e.boundary)) / 1e6;
+      // TW1: a room around a core keeps its label off the core, away from every edge.
+      const c = e.holes?.length
+        ? farthestInside([e.boundary, ...e.holes].map(loopEdges))
+        : interiorPoint(points);
+      // Unsigned: a boundary may run either way round; holes are left out.
+      const area =
+        (Math.abs(loopArea(e.boundary)) -
+          (e.holes ?? []).reduce((n, h) => n + Math.abs(loopArea(h)), 0)) /
+        1e6;
       const name = [e.number, e.name].filter(Boolean).join(' ');
       if (name) text(c, name, 'space-name', 'middle', e.id);
       text(
@@ -498,14 +646,16 @@ export function bimDrawingSymbols(
         e.id,
       );
     }
-    // Grid axes: dashed lines past both ends, bubbles at both ends.
+    // Grid axes: dashed lines past both ends, bubbles at the ends the axis names (TW0e).
     for (const g of doc.grids) {
       const u = unit(sub(g.end, g.start));
       const a = sub(g.start, scale(u, overrun));
       const b = add(g.end, scale(u, overrun));
       items.push({ type: 'line', a, b, cls: 'grid' });
-      bubble(sub(a, scale(u, bimDrawingPaper.bubbleRadiusMm * s)), g.label);
-      bubble(add(b, scale(u, bimDrawingPaper.bubbleRadiusMm * s)), g.label);
+      if (bimGridBubbleAt(g, 'start'))
+        bubble(sub(a, scale(u, bimDrawingPaper.bubbleRadiusMm * s)), g.label);
+      if (bimGridBubbleAt(g, 'end'))
+        bubble(add(b, scale(u, bimDrawingPaper.bubbleRadiusMm * s)), g.label);
     }
     // Dimensions between neighbouring parallel axes, outside their start ends.
     for (const { u, axes: family } of parallelFamilies(doc.grids)) {
@@ -631,6 +781,139 @@ function interiorPoint(points: Vec2[]): Vec2 {
     if (best) return best;
   }
   return c;
+}
+
+/**
+ * A point inside a region (its first loop, less the others) far from every edge (TW1). The
+ * candidates are the middles of the region's runs along 33 rows, so a narrow ring is never
+ * missed, and a 32 × 32 grid over the bounds; the best is refined on a finer grid around it.
+ * Containment and clearance are exact along arcs (a point on an arc's chord is skipped, as
+ * its side cannot be told), so a point inside a curved hole is never taken, and each loop's box is checked first, so many holes of many sides stay quick. An
+ * approximation of the point farthest from the edges, the same for the same loops.
+ */
+function farthestInside(loops: LoopEdge[][]): Vec2 {
+  const boxes = loops.map(edgesBox);
+  const [lo, hi] = boxes[0]!;
+  const within = (p: Vec2) =>
+    loops.reduce((odd, l, i) => (inBox(boxes[i]!, p, 0) && pointInLoop(p, l) ? !odd : odd), false);
+  const clearance = (p: Vec2) => {
+    let d = Infinity;
+    loops.forEach((l, i) => {
+      if (!inBox(boxes[i]!, p, d)) return;
+      for (const e of l) d = Math.min(d, edgeDistance(p, e));
+    });
+    return d;
+  };
+  let best: Vec2 | undefined;
+  let bestD = -1;
+  // `pointInLoop` cannot tell the sides of an arc's chord apart: a point on one is left out.
+  const chords = loops.map((l) => l.filter((e) => e.arc));
+  const onChord = (x: Vec2) =>
+    chords.some(
+      (c, i) =>
+        inBox(boxes[i]!, x, 0) &&
+        c.some(
+          ({ p, q }) =>
+            Math.abs(cross(unit(sub(q, p)), sub(x, p))) <= 1e-9 * (1 + distance(p, q)) &&
+            dot(sub(x, p), sub(x, q)) <= 0,
+        ),
+    );
+  const consider = (p: Vec2) => {
+    if (onChord(p) || !within(p)) return;
+    const d = clearance(p);
+    if (d > bestD) [best, bestD] = [p, d];
+  };
+  const n = 32;
+  const search = (a: Vec2, b: Vec2) => {
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++)
+        consider([a[0] + ((b[0] - a[0]) * i) / n, a[1] + ((b[1] - a[1]) * j) / n]);
+  };
+  for (let j = 0; j <= n; j++) {
+    const y = lo[1] + ((hi[1] - lo[1]) * (j + 0.5)) / (n + 1);
+    const xs = loops.flatMap((l) => l.flatMap((e) => rowCrossings(e, y))).sort((u, v) => u - v);
+    for (let i = 0; i + 1 < xs.length; i++)
+      if (xs[i + 1]! > xs[i]!) consider([(xs[i]! + xs[i + 1]!) / 2, y]);
+  }
+  search(lo, hi);
+  if (!best) return interiorPoint(loops[0]!.map((e) => e.p));
+  const cell: Vec2 = [(hi[0] - lo[0]) / n, (hi[1] - lo[1]) / n];
+  const around = best as Vec2;
+  search([around[0] - cell[0], around[1] - cell[1]], [around[0] + cell[0], around[1] + cell[1]]);
+  return best;
+}
+
+/** The box of a loop, arcs included (each axis extreme an arc passes). */
+function edgesBox(loop: LoopEdge[]): [Vec2, Vec2] {
+  const lo: Vec2 = [Infinity, Infinity];
+  const hi: Vec2 = [-Infinity, -Infinity];
+  const grow = (p: Vec2) => {
+    lo[0] = Math.min(lo[0], p[0]);
+    lo[1] = Math.min(lo[1], p[1]);
+    hi[0] = Math.max(hi[0], p[0]);
+    hi[1] = Math.max(hi[1], p[1]);
+  };
+  for (const e of loop) {
+    grow(e.p);
+    if (e.arc)
+      for (let k = 0; k < 4; k++) {
+        const a = (k * Math.PI) / 2;
+        if (onSweep(e.arc, a))
+          grow([
+            e.arc.center[0] + e.arc.radius * Math.cos(a),
+            e.arc.center[1] + e.arc.radius * Math.sin(a),
+          ]);
+      }
+  }
+  return [lo, hi];
+}
+
+/** Whether a point is within `margin` of a box (strictly nearer, for a margin). */
+function inBox([lo, hi]: [Vec2, Vec2], p: Vec2, margin: number) {
+  const dx = Math.max(lo[0] - p[0], 0, p[0] - hi[0]);
+  const dy = Math.max(lo[1] - p[1], 0, p[1] - hi[1]);
+  return margin ? Math.hypot(dx, dy) < margin : dx === 0 && dy === 0;
+}
+
+/** Where a loop side crosses the row y (half-open in y, so a shared vertex counts once). */
+function rowCrossings(e: LoopEdge, y: number): number[] {
+  if (!e.arc) {
+    const [a, b] = [e.p, e.q];
+    if (a[1] > y === b[1] > y) return [];
+    return [a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0])];
+  }
+  const { center, radius } = e.arc;
+  const h = y - center[1];
+  if (Math.abs(h) >= radius) return [];
+  const w = Math.sqrt(radius * radius - h * h);
+  return [center[0] - w, center[0] + w].filter((x) =>
+    onSweep(e.arc!, Math.atan2(h, x - center[0])),
+  );
+}
+
+/** Whether direction `a` (radians) from an arc's centre lies within its sweep. */
+function onSweep(arc: NonNullable<LoopEdge['arc']>, a: number) {
+  const turn = 2 * Math.PI;
+  const t = ((((a - arc.startAngle) * Math.sign(arc.sweep)) % turn) + turn) % turn;
+  return t <= Math.abs(arc.sweep);
+}
+
+/** Distance from a point to a loop side, exact along an arc. */
+function edgeDistance(p: Vec2, e: LoopEdge) {
+  if (!e.arc) return segmentDistance(p, e.p, e.q);
+  const { center, radius } = e.arc;
+  const r = distance(p, center);
+  if (r > 0 && onSweep(e.arc, Math.atan2(p[1] - center[1], p[0] - center[0])))
+    return Math.abs(r - radius);
+  return Math.min(distance(p, e.p), distance(p, e.q));
+}
+
+function segmentDistance(p: Vec2, a: Vec2, b: Vec2) {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len = dx * dx + dy * dy;
+  const t = len ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
 }
 
 /** Whether a point is inside a polygon (even-odd). */
@@ -855,6 +1138,8 @@ export function bimDrawingSvg(d: BimDrawing): string {
     '.cut.cut-open{fill:none}',
     `.seen{stroke:#000;stroke-width:${n2(p.seenStrokeMm * s)};fill:none}`,
     `.door-leaf,.door-swing,.window-mark{stroke:#000;stroke-width:${n2(p.symbolStrokeMm * s)};fill:none}`,
+    `.stair-line,.stair-arrow,.stair-break{stroke:#000;stroke-width:${n2(p.thinStrokeMm * s)};fill:none}`,
+    `.stair-above{stroke:#000;stroke-width:${n2(p.thinStrokeMm * s)};stroke-dasharray:${n2(1.5 * s)} ${n2(1 * s)};fill:none}`,
     `.grid{stroke:#555;stroke-width:${n2(p.thinStrokeMm * s)};stroke-dasharray:${n2(6 * s)} ${n2(1.5 * s)} ${n2(1 * s)} ${n2(1.5 * s)};fill:none}`,
     `.grid-bubble{stroke:#555;stroke-width:${n2(p.thinStrokeMm * s)};fill:#fff}`,
     `.level,.dimension{stroke:#333;stroke-width:${n2(p.thinStrokeMm * s)};fill:none}`,

@@ -6,7 +6,7 @@ import {
 } from '@editor-platform/bim-core';
 import { describe, expect, it } from 'vitest';
 import { BimController } from './controller';
-import { bimDrawingFileName, bimPngSize, bimSvgPaperMm } from './drawing-export';
+import { bimDrawingFileName, bimPngReducedDpi, bimPngSize, bimSvgPaperMm } from './drawing-export';
 import { draftPlanView, draftSectionView } from './drafting';
 import { EditorSession } from '@editor-platform/editor-core';
 import type { BimKernel } from './evaluate';
@@ -54,6 +54,16 @@ describe('bim views (R2c-5b)', () => {
       ],
     } as BimDocument['views'][number];
     expect(validateBim(flat).map((d) => d.code)).toContain('view-line');
+    // TW0c: 1:500 and 1:1000 are drawing scales; another number is not.
+    for (const scale of [500, 1000])
+      expect(validateBim({ ...doc, views: [{ ...doc.views[0]!, scale }] } as BimDocument)).toEqual(
+        [],
+      );
+    expect(
+      validateBim({ ...doc, views: [{ ...doc.views[0]!, scale: 300 }] } as never).map(
+        (d) => d.code,
+      ),
+    ).toContain('view-scale');
     // A plan follows its level: deleting the level names the plan.
     expect(() =>
       applyBimOperation(doc, { type: 'delete', ids: ['l-1f'], cascade: false }),
@@ -96,6 +106,12 @@ describe('bim views (R2c-5b)', () => {
     expect(bimPngSize([254, 127])).toEqual([1500, 750]);
     // A large sheet is scaled down to the largest side a canvas is given.
     expect(bimPngSize([4000, 1000])).toEqual([8192, 2048]);
+    // TW0c: the full 150 dpi says nothing; a coarser PNG names its resolution.
+    expect(bimPngReducedDpi([254, 127])).toBeUndefined();
+    expect(bimPngReducedDpi([1387, 1387])).toBeUndefined();
+    // The tower section at 1:100 (1.78 m × 6.45 m): 32 dpi; at 1:500 it fits at 150 dpi.
+    expect(bimPngReducedDpi([1780, 6450])).toBe(32);
+    expect(bimPngReducedDpi([356, 1290])).toBeUndefined();
     expect(bimDrawingFileName('A/B', 'Plan: 1F\u0001', 'svg')).toBe('A_B - Plan_ 1F_.svg');
   });
 });

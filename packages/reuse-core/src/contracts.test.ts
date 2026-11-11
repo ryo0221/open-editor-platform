@@ -49,7 +49,8 @@ it('separates adopted closure count from per-closure definitions and reports sta
     expect(validateReuseStateSync(JSON.parse(JSON.stringify(state)))).toEqual(state);
   }
   for (const path of ['closures', 'instances'] as const) {
-    const state = { schemaVersion: 1, closures: [], instances: [], [path]: Array(2001).fill({}) };
+    const over = reuseLimits[path] + 1;
+    const state = { schemaVersion: 1, closures: [], instances: [], [path]: Array(over).fill({}) };
     for (const validate of [readReuseState, validateReuseStateSync])
       expect(() => validate(state)).toThrowError(
         expect.objectContaining({
@@ -57,7 +58,7 @@ it('separates adopted closure count from per-closure definitions and reports sta
           diagnostics: [
             expect.objectContaining({
               address: { path },
-              message: expect.stringContaining('2001'),
+              message: expect.stringContaining(String(over)),
             }),
           ],
         }),
@@ -162,6 +163,29 @@ it('checks retained instance refs at the untrusted load boundary, not just the s
   await expect(
     validateReuseState({ ...state, closures: [closure, closure] }),
   ).rejects.toMatchObject({ code: 'closure-duplicate' });
+});
+it('#801 validates one composed state with as many linked instances as the limit allows', async () => {
+  const base = await tokens(),
+    closure = await lockClosure([definitionRef(base)], [base]);
+  const state = (length: number) => ({
+    schemaVersion: 1,
+    closures: [closure],
+    instances: Array.from({ length }, (_, i) => ({
+      id: 'i' + i,
+      ref: definitionRef(base),
+      closureHash: closure.hash,
+      inputs: {},
+      overrides: {},
+      parts: { root: 'native' + i },
+      slots: {},
+    })),
+  });
+  expect(reuseLimits.instances).toBe(10000);
+  for (const length of [2171, reuseLimits.instances])
+    expect(validateReuseStateSync(state(length))?.instances).toHaveLength(length);
+  expect(() => validateReuseStateSync(state(reuseLimits.instances + 1))).toThrowError(
+    expect.objectContaining({ code: 'reuse-limit' }),
+  );
 });
 it('validates dynamic slot cycles and the exact instance depth at untrusted load boundaries', async () => {
   const base = await tokens(),

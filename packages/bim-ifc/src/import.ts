@@ -1,11 +1,13 @@
 import {
   bimMaterialCategories,
   bimSchemaVersion,
+  bimLimits,
   cross,
   deriveBim,
   dot,
   left,
   loopEdges,
+  loopExtreme,
   pointInLoop,
   sub,
   unit,
@@ -31,10 +33,13 @@ import {
   type BimType,
   type BimView,
   type BimSlab,
+  type BimRamp,
+  type BimStair,
   type BimWall,
   type BimWallJoin,
   type Vec2,
   type Vec3,
+  bimStairProfile,
 } from '@editor-platform/bim-core';
 import {
   P21ReadError,
@@ -44,6 +49,12 @@ import {
   type P21Value,
 } from '@editor-platform/geometry-core';
 import { bimIfcKinds, writeIfcShapes } from './export';
+import {
+  bimFitSlopedPlate,
+  bimFitSpiralRamp,
+  bimFitStraightStair,
+  type BimFacets,
+} from './ramp-fit';
 
 /**
  * IFC4 import of a `bim` document (docs/cad/r2c-architecture.md, 取り込み; R2c-U5). A file this
@@ -140,6 +151,9 @@ const enumValue = (v: P21Value | undefined) => (v?.t === 'enum' ? v.v : undefine
 const items = (v: P21Value | undefined): P21Value[] => (v?.t === 'list' ? v.v : []);
 const typeName = (v: P21Value | undefined) => (v?.t === 'typed' ? v.name : undefined);
 
+/** FU2: shape items read as faceted bodies. */
+const facetedItems = new Set(['IFCTRIANGULATEDFACESET', 'IFCPOLYGONALFACESET', 'IFCFACETEDBREP']);
+
 /** Entity names of elements, by the kind they import as. */
 const elementEntities: Record<string, BimElement['kind']> = {
   IFCWALL: 'wall',
@@ -150,6 +164,16 @@ const elementEntities: Record<string, BimElement['kind']> = {
   IFCCOLUMNSTANDARDCASE: 'column',
   IFCBEAM: 'beam',
   IFCBEAMSTANDARDCASE: 'beam',
+  IFCMEMBER: 'member',
+  IFCMEMBERSTANDARDCASE: 'member',
+  IFCRAMP: 'ramp',
+  // FU2a: a ramp of other software is often an IfcRamp made of its flights.
+  IFCRAMPFLIGHT: 'ramp',
+  // LS5: own railings only; another file's railing is lost (not in the subset).
+  IFCRAILING: 'railing',
+  // LS6: own stairs; LS7 fits another program's straight flights.
+  IFCSTAIR: 'stair',
+  IFCSTAIRFLIGHT: 'stair',
   IFCROOF: 'roof',
   IFCSPACE: 'space',
   IFCBUILDINGELEMENTPROXY: 'part',
@@ -165,6 +189,10 @@ const typeEntities: Record<string, BimType['kind']> = Object.fromEntries(
     .filter(([, k]) => k.type)
     .map(([kind, k]) => [k.type, kind as BimType['kind']]),
 );
+/** LS6: Pset_StairCommon properties a stair writes from its own attributes. */
+const stairCommon = new Set(['NumberOfRiser', 'NumberOfTreads', 'RiserHeight', 'TreadLength']);
+/** An IFC GlobalId: 22 characters of the IFC base-64 alphabet. */
+const globalIdPattern = /^[0-9A-Za-z_$]{22}$/;
 /** Root entities read as structure, relations or definitions; any other root is listed as lost. */
 const structural = new Set([
   'IFCPROJECT',
@@ -374,6 +402,8 @@ class Importer {
   /** Element instances imported from `EP_Constraints` (checked against their shapes). */
   readonly restored = new Set<number>();
   readonly foreign = new Set<number>();
+  /** FU2b: the kind each element read became (a ramp flight may become a sloped slab). */
+  readonly keptKind = new Map<number, BimElement['kind']>();
   /** Joins read from IfcRelConnectsPathElements (dropped when the rules refuse them). */
   readonly foreignJoins = new Set<string>();
   /** Foreign walls cut by a horizontal plane: its height, matched with a roof in `settle`. */
@@ -710,11 +740,14 @@ class Importer {
       const set = this.g.props(this.project.id, 'EP_Grids');
       for (const [id, ref] of set ?? []) {
         const c = this.complex(ref);
+        const bubbles = text(c.get('Bubbles'));
         this.doc.grids.push({
           id: this.newId(id),
           label: text(c.get('Label')) ?? id,
           start: [num(c.get('StartX')) ?? NaN, num(c.get('StartY')) ?? NaN],
           end: [num(c.get('EndX')) ?? NaN, num(c.get('EndY')) ?? NaN],
+          // TW0e: a value the document refuses is refused by validation, not dropped here.
+          ...(bubbles === undefined ? {} : { bubbles: bubbles as BimGridAxis['bubbles'] }),
         });
       }
       return;
@@ -794,6 +827,8 @@ class Importer {
         const c: BimCommonProperties = {};
         let dropped = unread;
         for (const [n, v] of props) {
+          // LS6: a stair's step counts and sizes, written from its own attributes.
+          if (kind === 'stair' && stairCommon.has(n)) continue;
           if (n === 'Reference' && text(v) !== undefined) c.reference = text(v);
           else if (n === 'IsExternal' && flag(v) !== undefined) c.isExternal = flag(v);
           else if (n === 'LoadBearing' && flag(v) !== undefined) c.loadBearing = flag(v);
@@ -857,7 +892,8 @@ class Importer {
       case 'roof':
         return { ...base, kind, layers: this.layers(material) };
       case 'column':
-      case 'beam': {
+      case 'beam':
+      case 'member': {
         const mp = this.g.get(items(material?.args[2])[0]);
         if (material?.type !== 'IFCMATERIALPROFILESET' || !mp) return unsupported('type-profile');
         const materialId = this.idOf.get(this.g.get(mp.args[2])?.id ?? -1);
@@ -934,6 +970,9 @@ class Importer {
       case 'IFCCIRCLEPROFILEDEF':
         profile = { shape: 'circle', diameterMm: n(3) * 2 };
         break;
+      case 'IFCCIRCLEHOLLOWPROFILEDEF':
+        profile = { shape: 'pipe', diameterMm: n(3) * 2, wallMm: n(4) };
+        break;
       case 'IFCISHAPEPROFILEDEF':
         if (!zero(7, 8, 9)) return unsupported('profile-fillet');
         profile = { shape: 'h', widthMm: n(3), depthMm: n(4), webMm: n(5), flangeMm: n(6) };
@@ -978,9 +1017,24 @@ class Importer {
     const kept = new Map<number, BimElement>();
     const filled = new Set(g.openingOf.values());
     const fills = new Set<number>();
+    // FU2a: a ramp with no shape of its own, made of its flights, is read as its flights.
+    const wholes = new Set(g.parent.values());
+    // LS7: a stair whose parts include a flight (not only a railing or a landing, Codex).
+    const flighted = new Set(
+      [...g.parent].filter(([c]) => g.get(c)?.type === 'IFCSTAIRFLIGHT').map(([, p]) => p),
+    );
     for (const e of hostedLast) {
       this.seen.add(e.id);
       const kind = elementEntities[e.type];
+      if (e.type === 'IFCRAMP' && e.args[6]?.t !== 'ref' && wholes.has(e.id)) continue;
+      // LS7: a stair made of flights is read as its flights, even with a body of its own (the
+      // same steps again, Codex), but not our own stair (its constraints say what it is).
+      if (
+        e.type === 'IFCSTAIR' &&
+        flighted.has(e.id) &&
+        !text((this.own ? g.props(e.id, 'EP_Constraints') : undefined)?.get('BimId'))
+      )
+        continue;
       const ep = this.own ? g.props(e.id, 'EP_Constraints') : undefined;
       try {
         if (ep && text(ep.get('BimId'))) {
@@ -994,6 +1048,7 @@ class Importer {
           }
           const el = snapElement(this.foreignElement(e, kind));
           kept.set(e.id, el);
+          this.keptKind.set(e.id, el.kind);
           this.foreign.add(e.id);
         }
       } catch (err) {
@@ -1025,8 +1080,9 @@ class Importer {
       }
     }
     // Hosts may come after their openings were assigned IDs: resolve them now.
+    // A STEP reference to resolve; a railing's host is its ramp's own ID already (Codex).
     for (const el of this.doc.elements)
-      if ('hostId' in el && el.hostId.startsWith('#')) {
+      if ('hostId' in el && el.kind !== 'railing' && el.hostId.startsWith('#')) {
         const host = this.idOf.get(Number(el.hostId.slice(1)));
         if (host) el.hostId = host;
       }
@@ -1079,6 +1135,11 @@ class Importer {
         (b, i): BimLoopVertex => (b ? [xy[2 * i], xy[2 * i + 1], b] : [xy[2 * i], xy[2 * i + 1]]),
       );
     };
+    const holesOf = () => {
+      const holes: BimLoop[] = [];
+      for (let i = 1; ep.has(`Hole${i}`); i++) holes.push(loop(`Hole${i}`));
+      return holes;
+    };
     const typeId = () => this.typeIdOf(e) ?? unsupported('type-missing');
     const host = () => {
       const opening = kind === 'door' || kind === 'window' ? this.g.openingOf.get(e.id) : e.id;
@@ -1090,6 +1151,8 @@ class Importer {
     switch (kind) {
       case 'wall': {
         const bulge = num(ep.get('Bulge'));
+        // LR2b: a leaning wall's angle.
+        const lean = num(ep.get('Lean'));
         return clean({
           ...head,
           kind,
@@ -1101,20 +1164,22 @@ class Importer {
           base: height('Base'),
           top: top(),
           ...(clipBy !== undefined ? { clipBy } : {}),
+          ...(lean !== undefined ? { lean } : {}),
         });
       }
-      case 'slab': {
-        const holes: BimLoop[] = [];
-        for (let i = 1; ep.has(`Hole${i}`); i++) holes.push(loop(`Hole${i}`));
+      case 'slab':
         return {
           ...head,
           kind,
           typeId: typeId(),
           top: height('Top'),
           boundary: loop('Boundary'),
-          holes,
+          holes: holesOf(),
+          // TW5: a sloped slab's edge and its top at the far side.
+          ...(ep.has('SlopeEdge')
+            ? { slope: { edge: num(ep.get('SlopeEdge'))!, endTop: height('SlopeEndTop') } }
+            : {}),
         };
-      }
       case 'column':
         return clean({
           ...head,
@@ -1125,6 +1190,10 @@ class Importer {
           base: height('Base'),
           top: top(),
           ...(clipBy !== undefined ? { clipBy } : {}),
+          // TW2: a leaning column's top.
+          ...(ep.has('TopAtX') || ep.has('TopAtGridA') ? { topAt: point('TopAt') } : {}),
+          // TW5: a tapered column's top scale.
+          ...(ep.has('TopScale') ? { topScale: len('TopScale') } : {}),
         });
       case 'beam':
         return {
@@ -1134,7 +1203,68 @@ class Importer {
           start: point('Start'),
           end: point('End'),
           top: height('Top'),
+          // TW2: a sloping beam's top at its end.
+          ...(ep.has('EndTopLevel') ? { endTop: height('EndTop') } : {}),
         };
+      case 'member':
+        return {
+          ...head,
+          kind,
+          typeId: typeId(),
+          start: { at: point('Start'), height: height('StartHeight') },
+          end: { at: point('End'), height: height('EndHeight') },
+          rotationRad: len('Rotation'),
+        };
+      case 'ramp': {
+        // LR3: the slab type by its GlobalId (IfcRamp may not be typed by a slab type).
+        const gid = ident('Type');
+        const t = this.g.all(bimIfcKinds.slab.type).find((x) => text(x.args[0]) === gid);
+        const typeId = t && this.idOf.get(t.id);
+        if (!typeId) return unsupported('type-missing');
+        return {
+          ...head,
+          kind,
+          typeId,
+          center: point('Center'),
+          innerRadiusMm: len('InnerRadius'),
+          outerRadiusMm: len('OuterRadius'),
+          startAngleRad: len('StartAngle'),
+          sweepRad: len('Sweep'),
+          base: height('Base'),
+          top: height('Top'),
+        };
+      }
+      case 'stair': {
+        // LS6: the slab type by its GlobalId (IfcStair may not be typed by a slab type).
+        const gid = ident('Type');
+        const t = this.g.all(bimIfcKinds.slab.type).find((x) => text(x.args[0]) === gid);
+        const typeId = t && this.idOf.get(t.id);
+        if (!typeId) return unsupported('type-missing');
+        return {
+          ...head,
+          kind,
+          typeId,
+          start: point('Start'),
+          directionRad: len('Direction'),
+          widthMm: len('Width'),
+          risers: len('Risers'),
+          treadMm: len('Tread'),
+          base: height('Base'),
+          top: height('Top'),
+        };
+      }
+      case 'railing': {
+        // LS5: the wall type by its GlobalId (IfcRailing may not be typed by a wall type).
+        const gid = ident('Type');
+        const t = this.g.all(bimIfcKinds.wall.type).find((x) => text(x.args[0]) === gid);
+        const typeId = t && this.idOf.get(t.id);
+        const hostId = ident('Host');
+        const side = ident('Side');
+        if (!typeId) return unsupported('type-missing');
+        if (!hostId) return unsupported('host-missing');
+        if (side !== 'inner' && side !== 'outer') return unsupported('constraint-missing');
+        return { ...head, kind, typeId, hostId, side, heightMm: len('Height') };
+      }
       case 'roof': {
         const form = ident('Form');
         return {
@@ -1163,6 +1293,7 @@ class Importer {
           base: height('Base'),
           ...(ep.has('TopHeight') || ep.has('TopLevel') ? { top: top() } : {}),
           boundary: loop('Boundary'),
+          ...(ep.has('Hole1') ? { holes: holesOf() } : {}),
         });
       case 'part': {
         const t = this.doc.types.find((x) => x.id === this.typeIdOf(e));
@@ -1228,14 +1359,345 @@ class Importer {
     if (!body || its.length !== 1 || !its[0]) return unsupported('shape-unsupported');
     return its[0];
   }
+  /**
+   * FU2a: the corners, edges and face loops of a faceted body in world mm, corners that
+   * coincide (within 1 µm) merged: a triangulated or polygonal face set, or a faceted B-rep.
+   * Only corners a face uses are read; a B-rep bound with `Orientation` false runs reversed.
+   */
+  meshOf(item: P21Instance, xf: Xf): BimFacets {
+    const points: Vec3[] = [];
+    const edges: [number, number][] = [];
+    const loops: number[][] = [];
+    const index = new Map<string, number>();
+    const add = (local: Vec3) => {
+      const p = pointOf(xf, local);
+      const key = p.map((c) => Math.round(c * 1000)).join(',');
+      let i = index.get(key);
+      if (i === undefined) {
+        i = points.length;
+        index.set(key, i);
+        points.push(p);
+      }
+      return i;
+    };
+    const loop = (ids: number[]) => {
+      if (ids.length < 3) return unsupported('shape-unsupported');
+      ids.forEach((a, k) => edges.push([a, ids[(k + 1) % ids.length]!]));
+      loops.push(ids);
+    };
+    if (item.type === 'IFCTRIANGULATEDFACESET' || item.type === 'IFCPOLYGONALFACESET') {
+      const list = this.g.get(item.args[0]);
+      if (list?.type !== 'IFCCARTESIANPOINTLIST3D') return unsupported('shape-unsupported');
+      const raw = items(list.args[0]);
+      const read = new Map<number, number>();
+      const coord = (k: number) => {
+        let i = read.get(k);
+        if (i === undefined) {
+          const c = raw[k - 1] ?? unsupported('shape-unsupported');
+          const v = items(c).map((x) => (num(x) ?? NaN) * this.mm);
+          if (v.length !== 3 || v.some((x) => !Number.isFinite(x)))
+            return unsupported('shape-unsupported');
+          i = add(v as Vec3);
+          read.set(k, i);
+        }
+        return i;
+      };
+      const tri = item.type === 'IFCTRIANGULATEDFACESET';
+      const pn = items(item.args[tri ? 4 : 3]).map((x) => num(x) ?? NaN);
+      const at = (v: P21Value) => {
+        let k = num(v) ?? NaN;
+        if (pn.length) k = pn[k - 1] ?? NaN;
+        return Number.isInteger(k) ? coord(k) : unsupported('shape-unsupported');
+      };
+      if (tri) for (const f of items(item.args[3])) loop(items(f).map(at));
+      else
+        for (const ref of items(item.args[2])) {
+          const f = this.g.get(ref);
+          if (
+            f?.type !== 'IFCINDEXEDPOLYGONALFACE' &&
+            f?.type !== 'IFCINDEXEDPOLYGONALFACEWITHVOIDS'
+          )
+            return unsupported('shape-unsupported');
+          loop(items(f.args[0]).map(at));
+          for (const inner of items(f.args[1])) loop(items(inner).map(at));
+        }
+    } else if (item.type === 'IFCFACETEDBREP') {
+      const shell = this.g.get(item.args[0]);
+      if (shell?.type !== 'IFCCLOSEDSHELL') return unsupported('shape-unsupported');
+      for (const ref of items(shell.args[0])) {
+        const face = this.g.get(ref);
+        if (face?.type !== 'IFCFACE') return unsupported('shape-unsupported');
+        for (const b of items(face.args[0])) {
+          const bound = this.g.get(b);
+          const poly = this.g.get(bound?.args[0]);
+          if (poly?.type !== 'IFCPOLYLOOP') return unsupported('shape-unsupported');
+          const ids = items(poly.args[0]).map((v) => add(this.point(v)));
+          loop(flag(bound!.args[1]) === false ? ids.reverse() : ids);
+        }
+      }
+    } else return unsupported('shape-unsupported');
+    if (!points.length) return unsupported('shape-unsupported');
+    return { points, edges, loops };
+  }
+  /**
+   * FU2a: a ramp of other software, as a spiral `ramp` when every corner of its faceted body
+   * lies within 1 mm of one (FU-U3), else (FU2b) as a sloped slab. Its type is a slab type of
+   * its thickness.
+   */
+  foreignRamp(
+    e: P21Instance,
+    head: ReturnType<Importer['head']>,
+    placement: Xf,
+  ): BimRamp | BimSlab {
+    const mesh = this.meshOf(this.body(e), placement);
+    const s = bimFitSpiralRamp(mesh);
+    if (!s) {
+      const plate = bimFitSlopedPlate(mesh) ?? unsupported('shape-unsupported');
+      return this.plateSlab(e, head, plate.outer, plate.holes, plate);
+    }
+    // More than the turns a ramp may make (LR3) is not this kind of ramp.
+    if (Math.abs(s.sweep) > bimLimits.rampSweepRad + 1e-9) return unsupported('shape-unsupported');
+    const level = this.levelFor(e, s.zStart);
+    // FU6: fitted values rounded (within the 1 mm the fit was checked to).
+    const at = (z: number) => ({ level: level.id, offsetMm: fittedMm(z - level.elevationMm) });
+    return {
+      ...head,
+      kind: 'ramp',
+      typeId: this.layeredType(e, 'slab', s.thickness, fittedMm(s.thickness)),
+      center: { xy: [fittedMm(s.center[0]), fittedMm(s.center[1])] },
+      innerRadiusMm: fittedMm(s.innerRadius),
+      outerRadiusMm: fittedMm(s.outerRadius),
+      startAngleRad: fittedRad(s.startAngle),
+      sweepRad: fittedRad(s.sweep),
+      base: at(s.zStart),
+      top: at(s.zEnd),
+    };
+  }
+  /**
+   * LS7: a stair (or a flight) of other software, as a straight `stair` when every corner of
+   * its faceted body lies within 1 mm of one (FU-U3); a landing, a turn or winders are not. Its
+   * type is a slab type of its waist; its top the level the last riser reaches, if there is one.
+   */
+  foreignStair(e: P21Instance, head: ReturnType<Importer['head']>, placement: Xf): BimStair {
+    const item = this.body(e);
+    if (!facetedItems.has(item.type)) return unsupported('shape-unsupported');
+    const s = bimFitStraightStair(this.meshOf(item, placement)) ?? unsupported('shape-unsupported');
+    const level = this.levelFor(e, s.zBase);
+    const zTop = s.zBase + s.risers * s.riser;
+    const above = this.doc.levels.find((l) => Math.abs(l.elevationMm - zTop) <= 1);
+    // FU6: fitted values rounded (within the 1 mm the fit was checked to).
+    const base = { level: level.id, offsetMm: fittedMm(s.zBase - level.elevationMm) };
+    const top = above
+      ? { level: above.id, offsetMm: fittedMm(zTop - above.elevationMm) }
+      : { level: level.id, offsetMm: fittedMm(zTop - level.elevationMm) };
+    const treadMm = fittedMm(s.tread);
+    // The waist rounded only where the rounded stair keeps a valid profile: near its least
+    // waist, rounded up, else as fitted (Codex).
+    const riser =
+      ((above ?? level).elevationMm + top.offsetMm - level.elevationMm - base.offsetMm) / s.risers;
+    const valid = (w: number) => typeof bimStairProfile(s.risers, riser, treadMm, w) !== 'string';
+    const waist = [fittedMm(s.waist), Math.ceil(s.waist * 1000) / 1000].find(valid) ?? s.waist;
+    return {
+      ...head,
+      kind: 'stair',
+      typeId: this.layeredType(e, 'slab', s.waist, waist),
+      start: { xy: [fittedMm(s.start[0]), fittedMm(s.start[1])] },
+      directionRad: fittedRad(s.directionRad),
+      widthMm: fittedMm(s.width),
+      risers: s.risers,
+      treadMm,
+      base,
+      top,
+    };
+  }
+  /**
+   * FU2b: a slab whose top is the plane `z = c + grade·(x, y)`, `thickness` deep (vertically).
+   * Level, or sloped (TW5) from its lowest straight boundary edge that runs level: a plane no
+   * boundary edge runs level along is not a sloped slab.
+   */
+  plateSlab(
+    e: P21Instance,
+    head: ReturnType<Importer['head']>,
+    outer: BimLoop,
+    holes: BimLoop[],
+    plane: {
+      grade: [number, number];
+      c: number;
+      thickness: number;
+      corners?: { top: Vec3[]; under: Vec3[] };
+    },
+  ): BimSlab {
+    const { grade: g, c, thickness, corners } = plane;
+    // FU6: fitted values rounded (within the 1 mm the fit was checked to).
+    const typeId = this.layeredType(e, 'slab', thickness, fittedMm(thickness));
+    const slab = { ...head, kind: 'slab' as const, typeId, boundary: outer, holes };
+    const rounded = { boundary: fittedLoop(outer), holes: holes.map(fittedLoop) };
+    const steep = Math.hypot(...g);
+    if (steep < 1e-9) {
+      const level = this.levelFor(e, c);
+      return {
+        ...slab,
+        ...rounded,
+        top: { level: level.id, offsetMm: fittedMm(c - level.elevationMm) },
+      };
+    }
+    const fromEdge = (k: number) =>
+      slabSlopeFromEdge(outer, holes, g, c, k, corners && { ...corners, thickness });
+    let edge = -1;
+    let best: ReturnType<typeof fromEdge>;
+    for (let k = 0; k < outer.length; k++) {
+      const f = fromEdge(k);
+      if (f && (!best || f.zTop < best.zTop - 1e-6)) [edge, best] = [k, f];
+    }
+    if (!best) return unsupported('shape-unsupported');
+    // The slope runs square to its edge as rounded: rounded corners only while that edge still
+    // gives a plane within 1 mm of the body (a short edge turns as its ends move, Codex).
+    const again = slabSlopeFromEdge(
+      rounded.boundary,
+      rounded.holes,
+      g,
+      c,
+      edge,
+      corners && { ...corners, thickness },
+    );
+    const { zTop, zEnd } = again ?? best;
+    const level = this.levelFor(e, Math.min(zTop, zEnd));
+    const at = (h: number) => ({ level: level.id, offsetMm: fittedMm(h - level.elevationMm) });
+    return { ...slab, ...(again && rounded), top: at(zTop), slope: { edge, endTop: at(zEnd) } };
+  }
+  /**
+   * FU2b: how low and how high a slab's top runs over a plan region (exact on arcs): level, or
+   * sloped (TW5) square to its edge as the model reads it.
+   */
+  slabTopRange(host: BimSlab, region: BimLoop): [number, number] {
+    const zTop = this.levelZ(host.top);
+    if (!host.slope) return [zTop, zTop];
+    const b = host.boundary;
+    const a = b[host.slope.edge]!;
+    const c = b[(host.slope.edge + 1) % b.length]!;
+    const origin: Vec2 = [a[0], a[1]];
+    const normal = left(unit(sub([c[0], c[1]], origin)));
+    const reach = (d: Vec2) => dot(sub(loopExtreme(b, [-d[0], -d[1]]), origin), d);
+    const r1 = reach(normal);
+    const r2 = reach([-normal[0], -normal[1]]);
+    const d: Vec2 = r1 >= r2 ? normal : [-normal[0], -normal[1]];
+    const run = Math.max(r1, r2);
+    const grade = run > 0 ? (this.levelZ(host.slope.endTop) - zTop) / run : 0;
+    const at = (p: Vec2) => zTop + grade * dot(sub(p, origin), d);
+    const z = [at(loopExtreme(region, d)), at(loopExtreme(region, [-d[0], -d[1]]))];
+    return [Math.min(...z), Math.max(...z)];
+  }
+  /**
+   * FU2b: a sloped slab as an upright extrusion cut above by its top plane and below by its
+   * underside's (as TW5 writes one), or undefined when the cuts are not those two.
+   */
+  clippedPlate(item: P21Instance, placement: Xf) {
+    const planes: { grade: [number, number]; c: number; up: boolean }[] = [];
+    let solid: P21Instance = item;
+    for (let i = 0; solid.type === 'IFCBOOLEANCLIPPINGRESULT'; i++) {
+      if (i > 8 || enumValue(solid.args[0]) !== 'DIFFERENCE') return undefined;
+      const half = this.g.get(solid.args[2]);
+      const surface = this.g.get(half?.args[0]);
+      if (half?.type !== 'IFCHALFSPACESOLID' || surface?.type !== 'IFCPLANE') return undefined;
+      const pos = compose(placement, this.axis2(surface.args[0]));
+      // AgreementFlag false: the half-space lies on the normal's side, which DIFFERENCE removes.
+      const n = flag(half.args[1]) === false ? pos.z : v3.scale(pos.z, -1);
+      if (!(Math.abs(n[2]) > 1e-6)) return undefined;
+      const grade: [number, number] = [-n[0] / n[2], -n[1] / n[2]];
+      const c = pos.o[2] - grade[0] * pos.o[0] - grade[1] * pos.o[1];
+      planes.push({ grade, c, up: n[2] > 0 });
+      solid = this.g.get(solid.args[1]) ?? unsupported('shape-unsupported');
+    }
+    const top = planes.filter((p) => p.up);
+    const under = planes.filter((p) => !p.up);
+    if (top.length !== 1 || under.length !== 1) return undefined;
+    const [t, u] = [top[0]!, under[0]!];
+    if (Math.hypot(t.grade[0] - u.grade[0], t.grade[1] - u.grade[1]) > 1e-9) return undefined;
+    const thickness = t.c - u.c;
+    if (!(thickness > 0)) return undefined;
+    const x = this.extrusion(solid, placement);
+    if (!parallel(x.d, [0, 0, 1]) && !parallel(x.d, [0, 0, -1])) return undefined;
+    const { outer, holes } = this.areaLoops(x.profile, x.xf);
+    // The prism reaches past both planes over the whole boundary: the cuts make every face.
+    const zs = [x.xf.o[2], x.xf.o[2] + x.d[2] * x.depth];
+    const g = t.grade;
+    const steep = Math.hypot(...g);
+    const along = (d: Vec2) => {
+      const q = loopExtreme(outer, d);
+      return g[0] * q[0] + g[1] * q[1];
+    };
+    const low = steep > 0 ? along([g[0] / steep, g[1] / steep]) : 0;
+    const high = steep > 0 ? along([-g[0] / steep, -g[1] / steep]) : 0;
+    if (Math.min(...zs) > u.c + low + 1e-6 || Math.max(...zs) < t.c + high - 1e-6) return undefined;
+    return { outer, holes, grade: g, c: t.c, thickness };
+  }
   /** A vertical extrusion of a profile in world plan coordinates. */
-  extrusion(solid: P21Instance, placement: Xf) {
-    if (solid.type !== 'IFCEXTRUDEDAREASOLID') return unsupported('shape-unsupported');
+  /**
+   * TW5: the uniform scale of a tapered extrusion's end about the profile's origin, or
+   * undefined. IFC4 allows two ends: a derived profile of the swept one, scaled by a plain 2D
+   * operator; or the same kind of profile, at the same place, with every size scaled alike.
+   */
+  endScale(swept: P21Instance | undefined, sweptRef: P21Value, end: P21Instance | undefined) {
+    const unset = (v?: P21Value) => v === undefined || v.t === 'unset';
+    if (!swept || !end) return undefined;
+    if (end.type === 'IFCDERIVEDPROFILEDEF') {
+      const parent = end.args[2];
+      const op = this.g.get(end.args[3]);
+      if (
+        parent?.t !== 'ref' ||
+        sweptRef.t !== 'ref' ||
+        parent.id !== sweptRef.id ||
+        op?.type !== 'IFCCARTESIANTRANSFORMATIONOPERATOR2D' ||
+        !unset(op.args[0]) ||
+        !unset(op.args[1])
+      )
+        return undefined;
+      const at = items(this.g.get(op.args[2])?.args[0]).map((v) => num(v) ?? NaN);
+      if (at.length !== 2 || !at.every((v) => Math.abs(v) < 1e-9)) return undefined;
+      return num(op.args[3]) ?? 1;
+    }
+    // The same kind of profile: no position on either, every size in the same ratio.
+    if (end.type !== swept.type || !unset(swept.args[2]) || !unset(end.args[2])) return undefined;
+    let k: number | undefined;
+    for (let i = 3; i < swept.args.length; i++) {
+      const [a, b] = [num(swept.args[i]), num(end.args[i])];
+      if (a === undefined && b === undefined && unset(swept.args[i]) && unset(end.args[i]))
+        continue;
+      if (a === undefined || b === undefined || !(a > 0)) return undefined;
+      const r = b / a;
+      if (k === undefined) k = r;
+      else if (Math.abs(r - k) > 1e-9 * Math.max(1, k)) return undefined;
+    }
+    return k;
+  }
+  /**
+   * An extrusion's frame, direction, depth and profile. With `tapered`, also a tapered one
+   * whose end is its own profile scaled about the profile's origin (TW5, `endScale`); any other
+   * end, and a tapered extrusion where none is read, is not supported.
+   */
+  extrusion(solid: P21Instance, placement: Xf, tapered = false) {
+    let endScale: number | undefined;
+    if (solid.type === 'IFCEXTRUDEDAREASOLIDTAPERED' && tapered) {
+      const scale = this.endScale(
+        this.g.get(solid.args[0]),
+        solid.args[0],
+        this.g.get(solid.args[4]),
+      );
+      if (scale === undefined || !(scale >= 0.1 && scale <= 1))
+        return unsupported('shape-unsupported');
+      endScale = scale;
+    } else if (solid.type !== 'IFCEXTRUDEDAREASOLID') return unsupported('shape-unsupported');
     const xf = compose(placement, this.axis2(solid.args[1]));
     const d = dirOf(xf, this.direction(solid.args[2], [0, 0, 1]));
     const depth = (num(solid.args[3]) ?? NaN) * this.mm;
     if (!(depth > 0)) return unsupported('shape-unsupported');
-    return { xf, d, depth, profile: this.g.get(solid.args[0]) };
+    return {
+      xf,
+      d,
+      depth,
+      profile: this.g.get(solid.args[0]),
+      ...(endScale !== undefined ? { endScale } : {}),
+    };
   }
   /** Outer and inner loops of an area profile, in world plan coordinates. */
   areaLoops(profile: P21Instance | undefined, xf: Xf): { outer: BimLoop; holes: BimLoop[] } {
@@ -1317,14 +1779,18 @@ class Importer {
     return loop;
   }
 
-  /** The storey an element is in, else the highest storey at or below `z`. */
+  /**
+   * The storey an element is in, else the highest storey at or below `z`. A part of an
+   * aggregate (a ramp's flight) is in the storey its whole is in.
+   */
   levelFor(e: P21Instance, z: number): BimLevel {
-    let c = this.g.container.get(e.id);
-    for (let i = 0; c !== undefined && i < 8; i++) {
+    let c: number | undefined = e.id;
+    for (let i = 0; i < 16; i++) {
+      c = this.g.container.get(c) ?? this.g.parent.get(c);
+      if (c === undefined) break;
       const id = this.idOf.get(c);
       const level = id && this.doc.levels.find((l) => l.id === id);
       if (level) return level;
-      c = this.g.parent.get(c);
     }
     const below = this.doc.levels.filter((l) => l.elevationMm <= z + 1e-6);
     const pool = below.length ? below : this.doc.levels;
@@ -1338,10 +1804,23 @@ class Importer {
     const head = this.head(e, kind, `ifc-${text(e.args[0]) ?? e.id}`, false);
     const placement = this.world(e.args[5]);
     switch (kind) {
+      case 'ramp':
+        return this.foreignRamp(e, head, placement);
+      case 'stair':
+        return this.foreignStair(e, head, placement);
       case 'wall':
         return this.foreignWall(e, head, placement);
       case 'slab': {
-        const x = this.extrusion(this.body(e), placement);
+        // FU2b: a sloped slab of other software, cut by its planes or faceted.
+        const item = this.body(e);
+        const plate =
+          item.type === 'IFCBOOLEANCLIPPINGRESULT'
+            ? this.clippedPlate(item, placement)
+            : facetedItems.has(item.type)
+              ? bimFitSlopedPlate(this.meshOf(item, placement))
+              : undefined;
+        if (plate) return this.plateSlab(e, head, plate.outer, plate.holes, plate);
+        const x = this.extrusion(item, placement);
         if (!parallel(x.d, [0, 0, 1]) && !parallel(x.d, [0, 0, -1]))
           return unsupported('shape-not-vertical');
         const { outer, holes } = this.areaLoops(x.profile, x.xf);
@@ -1378,7 +1857,6 @@ class Importer {
         const x = this.extrusion(this.body(e), placement);
         if (!parallel(x.d, [0, 0, 1])) return unsupported('shape-not-vertical');
         const { outer, holes } = this.areaLoops(x.profile, x.xf);
-        if (holes.length) return unsupported('space-holes');
         const z = x.xf.o[2];
         const level = this.levelFor(e, z);
         return clean({
@@ -1388,12 +1866,39 @@ class Importer {
           base: { level: level.id, offsetMm: z - level.elevationMm },
           top: { heightMm: x.depth },
           boundary: outer,
+          // TW1: a space with voids keeps them as holes.
+          ...(holes.length ? { holes } : {}),
         });
       }
       case 'column': {
-        const x = this.extrusion(this.body(e), placement);
-        if (!parallel(x.d, [0, 0, 1]) || !parallel(x.xf.z, [0, 0, 1]))
-          return unsupported('shape-not-vertical');
+        const x = this.extrusion(this.body(e), placement, true);
+        // TW5: a tapered column, scaled about the section's centre (where its profile is placed).
+        const taper = (position: Xf) => {
+          if (x.endScale === undefined || x.endScale > 1 - 1e-9) return {};
+          if (Math.hypot(...position.o) > 1e-6) return unsupported('shape-unsupported');
+          return { topScale: x.endScale };
+        };
+        if (!parallel(x.d, [0, 0, 1]) || !parallel(x.xf.z, [0, 0, 1])) {
+          // TW2: a leaning column, swept square along its axis and rising.
+          if (!parallel(x.d, x.xf.z) || !(x.d[2] > 1e-9)) return unsupported('shape-not-vertical');
+          const { profile, position } = this.profile(x.profile);
+          const f = compose(x.xf, position);
+          const run = v3.scale(x.d, x.depth);
+          // The level direction in the plane of the section's x and the axis.
+          const h = v3.add(f.x, v3.scale(f.z, -f.x[2] / f.z[2]));
+          const level = this.levelFor(e, f.o[2]);
+          return {
+            ...head,
+            kind,
+            typeId: this.profiledType(e, 'column', profile),
+            at: { xy: [f.o[0], f.o[1]] },
+            rotationRad: Math.atan2(h[1], h[0]) || 0,
+            base: { level: level.id, offsetMm: f.o[2] - level.elevationMm },
+            top: { heightMm: run[2] },
+            topAt: { xy: [f.o[0] + run[0], f.o[1] + run[1]] },
+            ...taper(position),
+          };
+        }
         const { profile, position } = this.profile(x.profile);
         const centre = compose(x.xf, position);
         const level = this.levelFor(e, centre.o[2]);
@@ -1414,6 +1919,7 @@ class Importer {
           rotationRad: Math.atan2(centre.x[1], centre.x[0]) || 0,
           base: { level: level.id, offsetMm: centre.o[2] - level.elevationMm },
           top: { heightMm: x.depth },
+          ...taper(position),
         };
       }
       case 'beam': {
@@ -1422,17 +1928,21 @@ class Importer {
         const frame = compose(x.xf, position);
         // Horizontal, the profile's Y up, its X to the left of the run (as `bim-core` places it).
         // Swept along the profile's normal: an oblique sweep is not a `bim` beam.
+        // TW2: or sloping, swept along its axis with the profile's X level.
+        const sloped = Math.abs(x.d[2]) > 1e-9;
         if (
-          Math.abs(x.d[2]) > 1e-9 ||
-          !parallel(frame.y, [0, 0, 1]) ||
-          !(parallel(x.d, frame.z) || parallel(x.d, v3.scale(frame.z, -1)))
+          (sloped
+            ? Math.abs(frame.x[2]) > 1e-9 || !(frame.y[2] > 0)
+            : !parallel(frame.y, [0, 0, 1])) ||
+          !(parallel(x.d, frame.z) || parallel(x.d, v3.scale(frame.z, -1))) ||
+          Math.hypot(x.d[0], x.d[1]) < 1e-9
         )
           return unsupported('beam-orientation');
         const run = v3.scale(x.d, x.depth);
         const dir = unit([run[0], run[1]]);
         if (!symmetric && !parallel(frame.x, [...left(dir), 0] as Vec3))
           return unsupported('beam-orientation');
-        const h = profile.shape === 'circle' ? profile.diameterMm : profile.depthMm;
+        const h = 'diameterMm' in profile ? profile.diameterMm : profile.depthMm;
         const zTop = frame.o[2] + h / 2;
         const level = this.levelFor(e, frame.o[2]);
         return {
@@ -1442,6 +1952,34 @@ class Importer {
           start: { xy: [frame.o[0], frame.o[1]] },
           end: { xy: [frame.o[0] + run[0], frame.o[1] + run[1]] },
           top: { level: level.id, offsetMm: zTop - level.elevationMm },
+          ...(sloped
+            ? { endTop: { level: level.id, offsetMm: zTop + run[2] - level.elevationMm } }
+            : {}),
+        };
+      }
+      case 'member': {
+        // TW2: swept square along its axis from its start.
+        const x = this.extrusion(this.body(e), placement);
+        const { profile, position } = this.profile(x.profile);
+        const f = compose(x.xf, position);
+        if (!parallel(x.d, f.z)) return unsupported('member-orientation');
+        const run = v3.scale(x.d, x.depth);
+        const z = v3.unit(run);
+        const across = v3.cross([0, 0, 1], z);
+        const level0: Vec3 = Math.hypot(...across) > 1e-9 ? v3.unit(across) : [1, 0, 0];
+        const up = v3.cross(z, level0);
+        const lv = this.levelFor(e, f.o[2]);
+        const at = (p: Vec3) => ({
+          at: { xy: [p[0], p[1]] as Vec2 },
+          height: { level: lv.id, offsetMm: p[2] - lv.elevationMm },
+        });
+        return {
+          ...head,
+          kind,
+          typeId: this.profiledType(e, 'member', profile),
+          start: at(f.o),
+          end: at(v3.add(f.o, run)),
+          rotationRad: Math.atan2(v3.dot(f.x, up), v3.dot(f.x, level0)) || 0,
         };
       }
       case 'opening':
@@ -1465,8 +2003,12 @@ class Importer {
       item = this.g.get(item.args[1]) ?? unsupported('shape-unsupported');
     }
     const x = this.extrusion(item, placement);
-    if (!parallel(x.d, [0, 0, 1]) || !parallel(x.xf.z, [0, 0, 1]))
-      return unsupported('shape-not-vertical');
+    // LR2b: a slanted extrusion of a horizontal footprint is a leaning wall (its slant square to
+    // the axis, checked below once the axis is known).
+    if (!parallel(x.xf.z, [0, 0, 1]) || !(x.d[2] > 1e-9)) return unsupported('shape-not-vertical');
+    const slant: Vec2 = [x.d[0] / x.d[2], x.d[1] / x.d[2]];
+    const leaning = Math.hypot(...slant) > 1e-9;
+    if (leaning && clipZ !== undefined) return unsupported('shape-not-vertical');
     const { outer, holes } = this.areaLoops(x.profile, x.xf);
     if (holes.length || outer.length !== 4 || outer.some((v) => v[2]))
       return unsupported('wall-shape');
@@ -1490,16 +2032,37 @@ class Importer {
       if (along.length !== 1) return unsupported('wall-shape');
       k = along[0];
     } else {
+      // LR2b: a leaning wall's axis is the side square to its slant (its plan width is the
+      // layers' thickness ÷ cos, so the layers do not tell).
+      const square = leaning
+        ? [0, 1].filter(
+            (i) => Math.abs(dot(edges[i], slant)) <= 1e-9 * lens[i] * Math.hypot(...slant),
+          )
+        : [];
       const totals = this.layerTotals(e);
       const across = [0, 1].filter((i) => totals.some((t) => near(t, lens[i], 1e-6)));
-      k = across.length === 1 ? 1 - across[0] : lens[0] >= lens[1] ? 0 : 1;
+      k =
+        square.length === 1
+          ? square[0]
+          : across.length === 1
+            ? 1 - across[0]
+            : lens[0] >= lens[1]
+              ? 0
+              : 1;
     }
-    const thickness = lens[k + 1];
     const half = edges[k + 1].map((c) => c / 2) as Vec2;
     let s: Vec2 = [p[k][0] + half[0], p[k][1] + half[1]];
     let end: Vec2 = [s[0] + edges[k][0], s[1] + edges[k][1]];
     // Keep the Axis representation's direction when there is one.
     if (axis && dot(sub(axis[1], axis[0]), sub(end, s)) < 0) [s, end] = [end, s];
+    // LR2b: the slant runs square to the axis; it leans to the right of travel by its angle.
+    const u = unit(sub(end, s));
+    if (leaning && Math.abs(dot(slant, u)) > 1e-9 * Math.hypot(...slant))
+      return unsupported('shape-not-vertical');
+    const lean = leaning ? Math.atan(-cross(u, slant)) : 0;
+    if (Math.abs(lean) > bimLimits.wallLeanRad + 1e-12) return unsupported('shape-not-vertical');
+    // The layers are square to the faces: the plan width is their thickness ÷ cos.
+    const thickness = lens[k + 1] * Math.cos(lean);
     const zBase = x.xf.o[2];
     const level = this.levelFor(e, zBase);
     const wall = clean({
@@ -1510,7 +2073,8 @@ class Importer {
       end: { xy: end },
       location: 'center',
       base: { level: level.id, offsetMm: zBase - level.elevationMm },
-      top: { heightMm: x.depth },
+      top: { heightMm: x.depth * x.d[2] },
+      ...(lean ? { lean } : {}),
     }) as BimWall;
     if (clipZ !== undefined) this.clipPlanes.set(wall, clipZ);
     return wall;
@@ -1545,7 +2109,8 @@ class Importer {
     const hostInst = this.g.hostOf.get(e.id);
     if (hostInst === undefined) return unsupported('host-missing');
     const hostRef = `#${hostInst}`;
-    const hostKind = elementEntities[this.g.get(hostInst)?.type ?? ''];
+    const hostKind =
+      this.keptKind.get(hostInst) ?? elementEntities[this.g.get(hostInst)?.type ?? ''];
     const x = this.extrusion(this.body(e), placement);
     if (hostKind === 'slab') {
       if (!parallel(x.d, [0, 0, 1]) && !parallel(x.d, [0, 0, -1]))
@@ -1618,7 +2183,16 @@ class Importer {
     }
     return totals;
   }
-  layeredType(e: P21Instance, kind: 'wall' | 'slab' | 'roof', thickness: number): string {
+  /**
+   * The type of `kind` for an element's material layers that add up to `thickness`, or one layer
+   * of its material `made` thick (FU6: a fitted thickness rounded; the layers matched unrounded).
+   */
+  layeredType(
+    e: P21Instance,
+    kind: 'wall' | 'slab' | 'roof',
+    thickness: number,
+    made = thickness,
+  ): string {
     const typeInst = this.g.typeOf.get(e.id);
     const candidates = [
       this.g.materialOf.get(e.id),
@@ -1639,11 +2213,11 @@ class Importer {
     }
     const single = this.g.get(candidates.find((c) => this.g.get(c)?.type === 'IFCMATERIAL'));
     const materialId = (single && this.idOf.get(single.id)) ?? this.fallbackMaterial();
-    return this.typeFor(kind, typeInst, `${materialId}:${thickness}`, {
-      layers: [{ materialId, thicknessMm: thickness }],
+    return this.typeFor(kind, typeInst, `${materialId}:${made}`, {
+      layers: [{ materialId, thicknessMm: made }],
     });
   }
-  profiledType(e: P21Instance, kind: 'column' | 'beam', profile: BimProfile): string {
+  profiledType(e: P21Instance, kind: 'column' | 'beam' | 'member', profile: BimProfile): string {
     const typeInst = this.g.typeOf.get(e.id);
     let materialId: string | undefined;
     for (const c of [
@@ -1820,11 +2394,14 @@ class Importer {
   sweep() {
     for (const e of this.g.file.entities.values()) {
       if (this.seen.has(e.id) || structural.has(e.type)) continue;
-      // Roots carry a GlobalId first; property definitions and resources are not listed.
+      // Roots carry a GlobalId first; property definitions and resources are not listed. A
+      // resource's name can be 22 characters long too, so the GlobalId alphabet is checked and
+      // material resources are never roots.
       const gid = text(e.args[0]);
       if (
         gid === undefined ||
-        gid.length !== 22 ||
+        !globalIdPattern.test(gid) ||
+        e.type.startsWith('IFCMATERIAL') ||
         e.type.endsWith('TYPE') ||
         e.type.endsWith('STYLE')
       )
@@ -1865,9 +2442,13 @@ class Importer {
         const { z, ...slab } = el.slab as { boundary: BimLoop; z: number[] };
         el.slab = slab;
         const host = doc.elements.find((h) => h.id === el.hostId);
-        const top = host?.kind === 'slab' ? this.levelZ(host.top) : NaN;
-        const bottom = host?.kind === 'slab' ? top - this.thickness(host) : NaN;
-        if (!(z[0] <= bottom + 1e-6 && z[1] >= top - 1e-6)) refused.push([el.id, 'opening-shape']);
+        // FU2b: on a sloped slab, its highest top and lowest underside over the opening.
+        const [low, high] =
+          host?.kind === 'slab' ? this.slabTopRange(host, slab.boundary) : [NaN, NaN];
+        const top = high;
+        const bottom = host?.kind === 'slab' ? low - this.thickness(host) : NaN;
+        // Within 0.001 mm: a fitted host's heights are rounded to that (FU6, Codex).
+        if (!(z[0] <= bottom + 1e-3 && z[1] >= top - 1e-3)) refused.push([el.id, 'opening-shape']);
         continue;
       }
       if (el.kind !== 'opening' || !('wall' in el) || !('box' in (el.wall as object))) continue;
@@ -1881,12 +2462,16 @@ class Importer {
       const d = unit(sub(host.end.xy, s));
       const n = left(d);
       const along = box.map((c) => dot(sub([c[0], c[1]], s), d));
-      const across = box.map((c) => dot(sub([c[0], c[1]], s), n));
       const zs = box.map((c) => c[2]);
+      // FU3b: in a leaning wall, a box swept along the lean: its corners measured across the
+      // wall where it stands at their height, its sill and height along the face.
+      const lean = host.lean ?? 0;
+      const zBase = this.levelZ(host.base);
+      const across = box.map((c) => dot(sub([c[0], c[1]], s), n) + (c[2] - zBase) * Math.tan(lean));
       // Every corner on one of two values along each of the wall's directions: a box aligned
       // with the wall, reaching through it.
       const two = (v: number[]) => new Set(v.map((x) => Math.round(x * 1e6) / 1e6)).size === 2;
-      const t = this.thickness(host);
+      const t = this.thickness(host) / Math.cos(lean);
       if (
         !two(along) ||
         !two(across) ||
@@ -1899,9 +2484,9 @@ class Importer {
       }
       el.wall = {
         alongMm: snap(Math.min(...along)),
-        sillMm: snap(Math.min(...zs) - this.levelZ(host.base)),
+        sillMm: snap((Math.min(...zs) - zBase) / Math.cos(lean)),
         widthMm: snap(Math.max(...along) - Math.min(...along)),
-        heightMm: snap(Math.max(...zs) - Math.min(...zs)),
+        heightMm: snap((Math.max(...zs) - Math.min(...zs)) / Math.cos(lean)),
       };
     }
     for (const [id, reason] of refused) this.drop(id, reason);
@@ -1952,16 +2537,20 @@ class Importer {
     const footprints = (walls: BimWall[], joins: BimWallJoin[]) => {
       const elements = walls.map((w) => ({ ...w, clipBy: undefined }) as BimElement);
       const { shapes } = deriveBim({ ...doc, elements, joins });
-      return walls.map((w) => (shapes.get(w.id) as { footprint?: BimLoop } | undefined)?.footprint);
-    };
-    const same = (a: (BimLoop | undefined)[], b: (BimLoop | undefined)[]) =>
-      a.every(
-        (l, i) =>
-          l &&
-          b[i] &&
-          l.length === b[i]!.length &&
-          l.every((v, k) => v.every((c, m) => close(c ?? 0, b[i]![k][m] ?? 0))),
+      return walls.map(
+        (w) => shapes.get(w.id) as { footprint?: BimLoop; footprintTop?: BimLoop } | undefined,
       );
+    };
+    const loopsSame = (l: BimLoop, b: BimLoop) =>
+      l.length === b.length && l.every((v, k) => v.every((c, m) => close(c ?? 0, b[k][m] ?? 0)));
+    // LR2b: a leaning wall's top must match as well as its base.
+    const same = (a: ReturnType<typeof footprints>, b: ReturnType<typeof footprints>) =>
+      a.every((x, i) => {
+        const y = b[i];
+        if (!x?.footprint || !y?.footprint || !loopsSame(x.footprint, y.footprint)) return false;
+        if (!x.footprintTop && !y.footprintTop) return true;
+        return !!x.footprintTop && !!y.footprintTop && loopsSame(x.footprintTop, y.footprintTop);
+      });
     // The bodies as read: each wall alone.
     const bodies = footprints(wallsNow(), []);
     const kept: BimWallJoin[] = [];
@@ -2177,6 +2766,20 @@ function sameTree(
   }
 }
 
+/** FU6: a length fitted to a foreign shape, to 0.001 mm (no negative zero). */
+export function fittedMm(v: number): number {
+  return Math.round(v * 1000) / 1000 || 0;
+}
+/** FU6: an angle fitted to a foreign shape, to 1e-6°. */
+export function fittedRad(a: number): number {
+  return ((Math.round((a * 180 * 1e6) / Math.PI) / 1e6) * Math.PI) / 180 || 0;
+}
+/** FU6: a fitted plan loop: its corners to 0.001 mm, an arc's bulge kept. */
+function fittedLoop(loop: BimLoop): BimLoop {
+  return loop.map((v) =>
+    v.length === 3 ? [fittedMm(v[0]), fittedMm(v[1]), v[2]] : [fittedMm(v[0]), fittedMm(v[1])],
+  );
+}
 /** Bulge of the arc from `a` through `m` to `b`: tan of a quarter of its signed sweep. */
 function bulgeThrough(a: Vec2, m: Vec2, b: Vec2): number {
   // The inscribed angle at `m` is π − θ/2; the arc turns counter-clockwise when `m` lies to the
@@ -2220,4 +2823,51 @@ function snapElement(el: BimElement): BimElement {
   if (Array.isArray(o.holes)) o.holes = (o.holes as BimLoop[]).map(snapLoop);
   if (el.kind === 'opening' && 'slab' in el) el.slab.boundary = snapLoop(el.slab.boundary);
   return el;
+}
+
+/**
+ * FU2b: the plane `z = c + grade·(x, y)` as the model reads a slope (derive, TW5) from boundary
+ * edge `k`: rising square to the edge to the farthest corner, from the edge's mean height.
+ * Undefined unless the boundary and the holes, their arcs included, lie within the fitting
+ * tolerance (1 mm) of that plane.
+ */
+export function slabSlopeFromEdge(
+  outer: BimLoop,
+  holes: BimLoop[],
+  g: Vec2,
+  c: number,
+  k: number,
+  corners?: { top: Vec3[]; under: Vec3[]; thickness: number },
+) {
+  const z = (p: readonly number[]) => c + g[0] * p[0]! + g[1] * p[1]!;
+  const a = outer[k]!;
+  const b = outer[(k + 1) % outer.length]!;
+  if (a[2] || Math.abs(z(a) - z(b)) > 1) return undefined;
+  const origin: Vec2 = [a[0], a[1]];
+  const normal = left(unit(sub([b[0], b[1]], origin)));
+  const reach = (d: Vec2) => dot(sub(loopExtreme(outer, [-d[0], -d[1]]), origin), d);
+  const r1 = reach(normal);
+  const r2 = reach([-normal[0], -normal[1]]);
+  const direction: Vec2 = r1 >= r2 ? normal : [-normal[0], -normal[1]];
+  const zTop = (z(a) + z(b)) / 2;
+  const rise = dot(g, direction);
+  // The two planes differ by a linear function, largest at a loop's extremes along its
+  // gradient: on an arc between the corners too (Codex).
+  const off = (p: Vec2) => zTop + rise * dot(sub(p, origin), direction) - z(p);
+  const w: Vec2 = [rise * direction[0] - g[0], rise * direction[1] - g[1]];
+  const fits = [outer, ...holes].every(
+    (l) =>
+      l.every((p) => Math.abs(off([p[0], p[1]])) <= 1) &&
+      (Math.hypot(...w) < 1e-12 ||
+        // `loopExtreme` takes a unit direction.
+        [unit(w), unit([-w[0], -w[1]])].every((d) => Math.abs(off(loopExtreme(l, d))) <= 1)),
+  );
+  // The faceted body's own corners against the slab made of it: the two fits (the plate's
+  // planes, then this one) must not add up past the tolerance (Codex).
+  const top = (p: Vec3) => zTop + rise * dot(sub([p[0], p[1]], origin), direction);
+  const kept =
+    !corners ||
+    (corners.top.every((p) => Math.abs(top(p) - p[2]) <= 1) &&
+      corners.under.every((p) => Math.abs(top(p) - corners.thickness - p[2]) <= 1));
+  return fits && kept ? { zTop, zEnd: zTop + rise * Math.max(r1, r2) } : undefined;
 }

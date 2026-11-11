@@ -3,14 +3,14 @@ import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from 'vite';
 import type * as Sample from '@editor-platform/extension-sample';
-import type * as Bundles from './src/bundled-package';
+import type * as Bundles from '@editor-platform/extension-runtime/package';
 export async function buildCounterPackages() {
   // Vite config externalizes workspace TS packages. Bundle trusted build helpers as well,
   // so Node never has to resolve their extensionless TypeScript imports.
   const helpers = await build({
     stdin: {
       contents: `export { counterExtension } from '@editor-platform/extension-sample';
-export { describeBundledPackage } from './src/bundled-package';`,
+export { describeExtensionPackage } from '@editor-platform/extension-runtime/package';`,
       resolveDir: fileURLToPath(new URL('.', import.meta.url)),
     },
     bundle: true,
@@ -18,9 +18,10 @@ export { describeBundledPackage } from './src/bundled-package';`,
     platform: 'node',
     format: 'esm',
   });
-  const { counterExtension, describeBundledPackage }: typeof Sample & typeof Bundles = await import(
-    `data:text/javascript;base64,${Buffer.from(helpers.outputFiles![0].contents).toString('base64')}`
-  );
+  const { counterExtension, describeExtensionPackage }: typeof Sample & typeof Bundles =
+    await import(
+      `data:text/javascript;base64,${Buffer.from(helpers.outputFiles![0].contents).toString('base64')}`
+    );
   const packages = [];
   for (const version of ['0.0.1', '0.0.2'] as const) {
     const built = await build({
@@ -42,7 +43,7 @@ export function definition(hash) { const d = counterExtension(hash); d.manifest.
       `sha256:${'0'.repeat(64)}`,
     ).manifest;
     manifest.version = version;
-    const prepared = await describeBundledPackage({
+    const prepared = await describeExtensionPackage({
       manifest,
       entry: 'counter.js',
       files: [{ path: 'counter.js', bytes: built.outputFiles![0].contents }],

@@ -5,6 +5,7 @@ export {
   workspaceComicAdapter,
 } from './model';
 export type {
+  CreativeWorkspaceOptions,
   CreativeWorkspaceStorage,
   CreativeWorkspaceLinks,
   CreativeWorkspaceLinksV1,
@@ -213,6 +214,7 @@ export type {
 export { captureTimelineCandidate } from '../timeline/analysis-context';
 export type {
   TimelineAnalysisRequest,
+  TimelineSavedComparisonSource,
   TimelineAnalysisScope,
   TimelineCandidate,
   TimelineSubstitution,
@@ -229,6 +231,11 @@ export {
 export type { TimelineExceptionInput } from '../timeline/analysis-exceptions';
 
 export { compareTimelineSetting } from '../timeline/analysis-settings';
+export { compareTimelineSavedFacets } from '../timeline/saved-comparison';
+export type {
+  TimelineSavedComparisonRequest,
+  TimelineSavedFacet,
+} from '../timeline/saved-comparison';
 export type { TimelineSettingComparison } from '../timeline/analysis-settings';
 
 export { readStoryBoard } from '../story-board/reading';
@@ -255,3 +262,8 @@ export {
   createStoryBoardSample,
   STORY_BOARD_SAMPLE_SETTINGS,
 } from '../story-board/sample';
+
+export type { CreativeNavigationState } from '../navigation-state';
+
+export { compareCreativeSavedContent } from './saved-content-comparison';
+export type { CreativeSavedContentRequest } from './saved-content-comparison';

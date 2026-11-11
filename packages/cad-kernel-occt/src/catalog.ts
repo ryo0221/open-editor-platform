@@ -14,13 +14,16 @@ import type {
   CadBodyCurvature,
   CadBrepExport,
   CadCombResult,
+  CadGapFlushEdges,
+  CadGapFlushResult,
   CadContinuityResult,
   CadKernelBuild,
   CadMesh,
   CadStepAssemblyResult,
 } from './protocol';
 import type { CadStepAssemblyImportResult } from './step-assembly-import';
-import type { CadStepImportResult } from './step-import';
+import type { CadStepImportOptions, CadStepImportResult } from './step-import';
+import type { CadStepPmiWritten } from './step-pmi-write';
 
 /** A build the Host serves, with the `kernelProfile.id` it gives documents. */
 export interface CadCatalogBuild extends CadKernelBuild {
@@ -123,7 +126,7 @@ export class CatalogKernelPort implements CadKernelPort {
   /** Exact builds only, like exportMeshes. */
   exportStep(
     request: CadEvaluateRequest,
-  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array }> {
+  ): Promise<{ evaluation: CadEvaluation; step?: Uint8Array; stepPmi?: CadStepPmiWritten }> {
     const resolved = this.resolve(request.document.kernelProfile);
     if (this.disposed || resolved.mode !== 'exact')
       return Promise.resolve({
@@ -208,6 +211,21 @@ export class CatalogKernelPort implements CadKernelPort {
       });
     return this.port(resolved.build).analyzeComb(request, edge);
   }
+  /** CR3d: exact builds only, like analyzeComb. */
+  analyzeGapFlush(
+    request: CadEvaluateRequest,
+    edges: CadGapFlushEdges,
+  ): Promise<{ evaluation: CadEvaluation; gapFlush?: CadGapFlushResult }> {
+    const resolved = this.resolve(request.document.kernelProfile);
+    if (this.disposed || resolved.mode !== 'exact')
+      return Promise.resolve({
+        evaluation: failed(
+          request,
+          resolved.mode === 'unavailable' ? resolved.code : 'kernel-reference-only',
+        ),
+      });
+    return this.port(resolved.build).analyzeGapFlush(request, edges);
+  }
   /**
    * D2: reads STEP with the document's own exact build, which the imported feature then names
    * as its importer. Never with a reference substitute.
@@ -216,6 +234,7 @@ export class CatalogKernelPort implements CadKernelPort {
     profile: { buildHash: string; semanticsVersion: number },
     requestId: string,
     bytes: Uint8Array,
+    options: CadStepImportOptions = {},
   ): Promise<CadStepImportResult> {
     const resolved = this.resolve(profile);
     if (this.disposed || resolved.mode !== 'exact')
@@ -223,13 +242,14 @@ export class CatalogKernelPort implements CadKernelPort {
         status: 'rejected',
         code: resolved.mode === 'unavailable' ? resolved.code : 'kernel-reference-only',
       });
-    return this.port(resolved.build).importStep(requestId, bytes);
+    return this.port(resolved.build).importStep(requestId, bytes, options);
   }
   /** R2b-5: reads a STEP assembly with the document's own exact build, as `importStep`. */
   importStepAssembly(
     profile: { buildHash: string; semanticsVersion: number },
     requestId: string,
     bytes: Uint8Array,
+    options: CadStepImportOptions = {},
   ): Promise<CadStepAssemblyImportResult> {
     const resolved = this.resolve(profile);
     if (this.disposed || resolved.mode !== 'exact')
@@ -237,7 +257,7 @@ export class CatalogKernelPort implements CadKernelPort {
         status: 'rejected',
         code: resolved.mode === 'unavailable' ? resolved.code : 'kernel-reference-only',
       });
-    return this.port(resolved.build).importStepAssembly(requestId, bytes);
+    return this.port(resolved.build).importStepAssembly(requestId, bytes, options);
   }
   cancel(requestId: string) {
     for (const port of this.ports.values()) port.cancel(requestId);

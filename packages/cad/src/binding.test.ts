@@ -32,6 +32,11 @@ describe('createCadBinding', () => {
     expect(curvature).toHaveBeenCalledWith(request);
     expect(await options.analyzeComb!(request, { bodyId: 'a', edge: 2 })).toBe(answer);
     expect(comb).toHaveBeenCalledWith(request, { bodyId: 'a', edge: 2 });
+    // CR3d: the gap and flush between two edges goes to the same port.
+    const gap = vi.spyOn(CatalogKernelPort.prototype, 'analyzeGapFlush').mockResolvedValue(answer);
+    const edges = { a: { bodyId: 'a', edge: 2 }, b: { bodyId: 'b', edge: 0 } };
+    expect(await options.analyzeGapFlush!(request, edges)).toBe(answer);
+    expect(gap).toHaveBeenCalledWith(request, edges);
     vi.restoreAllMocks();
     binding.dispose();
   });

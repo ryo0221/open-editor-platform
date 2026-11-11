@@ -2,7 +2,7 @@ import { assertReferenceItems } from '@editor-platform/artifact-references';
 import type { Node as PMNode } from 'prosemirror-model';
 import { canonicalJson, clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import { immutableCommand, type LocalCommandContext } from '@editor-platform/editor-core';
-import { nodeToContent } from './engine';
+import { nodeToContent, projectedSchemaVersion } from './engine';
 import type { DocumentBlock, DocumentContent } from './model';
 
 // Compare the complete native projection before retaining an old block. Unlike
@@ -55,7 +55,7 @@ function prepareLocalDocumentCommand(
   const previous = new Map(basis.blocks.map((block) => [block.id, block]));
   const content: DocumentContent = deepFreeze({
     ...basis,
-    schemaVersion: 2,
+    schemaVersion: projected.schemaVersion,
     blocks: projected.blocks.map((block) => {
       const before = previous.get(block.id);
       return before && sameDocumentProjection(before, block) ? before : clone(block);
@@ -102,7 +102,7 @@ export function createLocalDocumentCommand() {
           retained.get(child) ?? nodeToContent(node.type.create(null, [child]), basis).blocks[0],
         );
       });
-      return { ...basis, schemaVersion: 2, blocks };
+      return { ...basis, schemaVersion: projectedSchemaVersion(basis, blocks), blocks };
     });
     doc.forEach((child, _offset, index) => retained.set(child, result.content.blocks[index]));
     return result;

@@ -90,7 +90,9 @@ export const reuseLimits = Object.freeze({
   jsonDepth: 64,
   values: 200000,
   bytes: 32 * 1024 * 1024,
-  instances: 2000,
+  // One composed Design (for example every screen of a product) links many more
+  // instances than definitions. Adopted parts stay bounded by expandedParts.
+  instances: 10000,
   parts: 10000,
   expandedParts: 20000,
 });

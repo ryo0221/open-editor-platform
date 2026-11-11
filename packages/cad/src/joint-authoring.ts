@@ -4,6 +4,7 @@
  * joint's value moves. Pure: the picks come from the viewport, frames from the evaluation.
  */
 import {
+  activeJoints,
   cadJointValueKeys,
   componentCopies,
   composePoses,
@@ -17,8 +18,10 @@ import {
   parseCopyStep,
   patternMove,
   position,
+  posesForJointValues,
   previewJointPose,
   stepComponent,
+  stepPose,
   topologyRefOf,
   type CadConnector,
   type CadDocument,
@@ -117,6 +120,8 @@ export function originChoice(
 function startValues(type: CadJointType): CadJointValues {
   const zero: Record<CadJointValueKey, CadJointValues[CadJointValueKey]> = {
     angle: { literalRad: 0 },
+    angle2: { literalRad: 0 },
+    angle3: { literalRad: 0 },
     distance: mm(0),
     u: mm(0),
     v: mm(0),
@@ -150,6 +155,21 @@ export function newJoint(
 }
 
 /**
+ * CR3e-2: the parent connector's offset that keeps the child where it stands (`stood`) at the
+ * joint's zero, from a solve with no parent offset: `parent⁻¹ ∘ stood ∘ child`, so the parent's
+ * frame lies on the child connector where it is now (a door on its own hinge edge, across the
+ * gap from the opening's edge).
+ */
+export function keptOffset(
+  solved: Pick<Extract<CadJointSolution, { status: 'solved' }>, 'parent' | 'child'>,
+  stood: CadSolvedPose,
+): CadConnector['offset'] {
+  const o = composePoses(invertPose(solved.parent), composePoses(stood, solved.child));
+  const t = o.translationMm.map((x) => Math.round(x * 1e9) / 1e9 + 0) as Vec3;
+  return { translation: position(...t), rotation: o.rotation };
+}
+
+/**
  * The direct components a drag of a joint's value can start on: its child and the joint children
  * below it that move as it does. A copy, and what hangs from one, turns about the copy's own
  * place, so the grab would not follow the joint's frame.
@@ -169,18 +189,22 @@ export function jointMoves(content: CadDocument, joint: CadJoint) {
  * move after its seed's, since a copy turns about its own place (`C·D·C⁻¹` for a motion `D`).
  */
 export function jointMoveFrames(content: CadDocument, joint: CadJoint) {
+  const frames = new Map<string, CadSolvedPose>();
+  // MR7: a candidate not in effect does not place its child: its drag moves nothing.
+  if (!activeJoints(content).some((j) => j.id === joint.id)) return frames;
   const params = parameterValues(content);
   const copies = componentCopies(content, params);
-  const frames = new Map<string, CadSolvedPose>();
   const add = (id: string, frame: CadSolvedPose) => {
     frames.set(id, frame);
     for (const x of copies.get(id) ?? [])
       frames.set(x.step, composePoses(patternMove(x.pattern.layout, x.index, params), frame));
   };
   add(joint.child.componentId, identityPose());
+  // MR7: a mount's candidates not in effect place nothing, so a drag moves nothing through them.
+  const placing = activeJoints(content);
   for (let grew = true; grew; ) {
     grew = false;
-    for (const j of content.joints) {
+    for (const j of placing) {
       const on = j.parent.componentPath[0];
       const frame = on === undefined ? undefined : frames.get(on);
       if (frame && !frames.has(j.child.componentId)) {
@@ -190,6 +214,57 @@ export function jointMoveFrames(content: CadDocument, joint: CadJoint) {
     }
   }
   return frames;
+}
+/**
+ * The joints a joint's values drive through couplings (MR1), followers of followers too, that are
+ * in effect: a drag shows them moving with it, those that hang from its own child too.
+ */
+export function jointFollowers(content: CadDocument, joint: CadJoint): CadJoint[] {
+  const active = activeJoints(content);
+  if (!active.some((j) => j.id === joint.id)) return [];
+  const driven = new Set([joint.id]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const j of content.joints)
+      if (!driven.has(j.id) && (j.couplings ?? []).some((c) => driven.has(c.from.joint))) {
+        driven.add(j.id);
+        grew = true;
+      }
+  }
+  return active.filter((j) => j.id !== joint.id && driven.has(j.id));
+}
+/**
+ * The steps a drag of a joint moves through its followers (`jointFollowers`): each follower's
+ * child, what hangs from it and their pattern copies. A step its own drag also moves is shown by
+ * its solved motion instead of the drag's rigid one, so a follower below the child turns too.
+ */
+export function jointFollowerSteps(content: CadDocument, joint: CadJoint): Set<string> {
+  return new Set(
+    jointFollowers(content, joint).flatMap((f) => [...jointMoveFrames(content, f).keys()]),
+  );
+}
+/**
+ * Each follower step's motion, in assembly coordinates, for the dragged joint at `values`: from
+ * where it is shown to where the coupled values place it. Each step is solved in full, so a
+ * follower that hangs from another follower adds its own motion to its parent's.
+ */
+export function followerMotions(
+  content: CadDocument,
+  joint: CadJoint,
+  solved: { poses: Record<string, CadSolvedPose>; joints: Record<string, CadJointSolution> },
+  steps: ReadonlySet<string>,
+  values: Partial<Record<CadJointValueKey, number>>,
+): Map<string, CadSolvedPose> {
+  const out = new Map<string, CadSolvedPose>();
+  if (!steps.size) return out;
+  const params = parameterValues(content);
+  const poses = posesForJointValues(content, solved, new Map([[joint.id, values]]), params);
+  for (const step of steps) {
+    const now = stepPose(content, poses, step, params);
+    const shown = stepPose(content, solved.poses, step, params);
+    if (now && shown) out.set(step, composePoses(now, invertPose(shown)));
+  }
+  return out;
 }
 /** The child's motion for other values, from the pose it is shown at: `new ∘ shown⁻¹`. */
 export function dragMotion(

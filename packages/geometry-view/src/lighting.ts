@@ -23,7 +23,11 @@ import {
   Vector3,
   type WebGLRenderer,
 } from 'three';
-import { geometryDefaultFinish } from '@editor-platform/geometry-core';
+import {
+  geometryDefaultFinish,
+  geometryLightLimits,
+  type GeometryLight,
+} from '@editor-platform/geometry-core';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 /** The sun's direction from the model's centre (z up), as the views have always lit it. */
@@ -65,13 +69,63 @@ function roomEnvironment(renderer: WebGLRenderer): Texture {
  */
 export function setViewFinish(
   material: MeshStandardMaterial,
-  look: { roughness?: number; metalness?: number } | undefined,
+  look: (GeometryLight & { roughness?: number; metalness?: number }) | undefined,
 ) {
   material.roughness = look?.roughness ?? geometryDefaultFinish.roughness;
   material.metalness = look?.metalness ?? geometryDefaultFinish.metalness;
   material.userData.metalness = material.metalness;
+  setViewLight(material, look);
   return material;
 }
+/**
+ * CR6a: a look's light on a solid's material. The emission is drawn as the material's emissive
+ * (its strength capped at 1, as the view has no tone for brighter), the transmission as a lower
+ * opacity (the view does not refract). Both are kept as given in `userData` for the path tracer,
+ * which draws the emission as a light and the transmission refracted (`pathRenderScene`).
+ */
+export function setViewLight(material: MeshStandardMaterial, look: GeometryLight | undefined) {
+  // A look set again starts from the material as it was before any light: the emissive and the
+  // see-through state the last look gave are taken back, so the fade never compounds.
+  const base = (material.userData.lightBase ??= {
+    opacity: material.opacity,
+    transparent: material.transparent,
+    depthWrite: material.depthWrite,
+  }) as { opacity: number; transparent: boolean; depthWrite: boolean };
+  if (material.userData.emission || material.userData.transmission !== undefined) {
+    material.opacity = base.opacity;
+    material.transparent = base.transparent;
+    material.depthWrite = base.depthWrite;
+    if (material.userData.emission) {
+      material.emissive.set(0x000000);
+      material.emissiveIntensity = 0;
+    }
+  } else {
+    // The material's own state, changed by its owner since: the base to come back to.
+    base.opacity = material.opacity;
+    base.transparent = material.transparent;
+    base.depthWrite = material.depthWrite;
+  }
+  delete material.userData.emission;
+  delete material.userData.transmission;
+  delete material.userData.ior;
+  delete material.userData.opacity;
+  if (look?.emission && look.emission.strength > 0) {
+    material.emissive.set(look.emission.color);
+    material.emissiveIntensity = Math.min(look.emission.strength, 1);
+    material.userData.emission = { ...look.emission };
+  }
+  if (look?.transmission) {
+    material.userData.transmission = look.transmission;
+    material.userData.ior = look.ior ?? geometryLightLimits.defaultIor;
+    // The opacity the look asks for, before the stand-in for the light it lets through.
+    material.userData.opacity = material.opacity;
+    material.opacity *= 1 - viewTransmissionFade * look.transmission;
+    material.transparent = true;
+    material.depthWrite = false;
+  }
+}
+/** CR6a: how much a fully transmitting look fades in the view's stand-in (opacity × 0.25). */
+export const viewTransmissionFade = 0.75;
 function applyFinishes(root: Object3D, realistic: boolean) {
   root.traverse((o) => {
     const material = (o as Mesh).material;

@@ -28,12 +28,21 @@ export function trackLabel(
   track: CharacterTrack,
   /** A prop joint's name from its version, when the Host has shown it. */
   jointName?: (propId: string, jointId: string) => string | undefined,
+  /** MR7: a prop mount's name from its version, when the Host has shown it. */
+  mountName?: (propId: string, mountId: string) => string | undefined,
 ): string {
   const { target } = track;
+  if (target.kind === 'prop-mount') {
+    const prop = doc.props.find((p) => p.id === target.id)?.name ?? target.id;
+    return `${prop} ${mountName?.(target.id, target.mount) ?? target.mount} mount`;
+  }
   if (target.kind === 'prop-joint') {
     const prop = doc.props.find((p) => p.id === target.id)?.name ?? target.id;
     return `${prop} ${jointName?.(target.id, target.joint) ?? target.joint} ${target.property}`;
   }
+  // MR4: a prop's placement (translation, rotation) is listed under the prop's name.
+  if (target.kind === 'prop')
+    return `${doc.props.find((p) => p.id === target.id)?.name ?? target.id} ${target.property}`;
   const name =
     target.kind === 'bone'
       ? doc.skeletons.flatMap((s) => s.bones).find((b) => b.id === target.id)?.name
@@ -60,6 +69,8 @@ export function DopeSheet({
   onMove,
   onEasing,
   jointName,
+  mountName,
+  marks,
 }: {
   doc: CharacterDocument;
   action: CharacterAction;
@@ -74,6 +85,9 @@ export function DopeSheet({
   onMove(delta: number): void;
   onEasing(easing: Easing): void;
   jointName?: (propId: string, jointId: string) => string | undefined;
+  mountName?: (propId: string, mountId: string) => string | undefined;
+  /** MR5: times marked on their own row (a prop's overlaps); a mark seeks there. */
+  marks?: { label: string; ticks: readonly number[] };
 }) {
   const isSelected = (trackId: string, keyId: string) =>
     selected.some((s) => s.trackId === trackId && s.keyId === keyId);
@@ -149,12 +163,32 @@ export function DopeSheet({
           </select>
         </label>
       </div>
+      {marks && marks.ticks.length > 0 && (
+        <ul className="character-tracks" aria-label={marks.label}>
+          <li className="character-track">
+            <span className="character-track-name">{marks.label}</span>
+            <span className="character-track-lane">
+              <span className="character-track-playhead" style={{ left: at(tick) }} />
+              {marks.ticks.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="character-mark"
+                  style={{ left: at(t) }}
+                  aria-label={`${marks.label} at ${formatTicks(t)}`}
+                  onClick={() => onSeek(t)}
+                />
+              ))}
+            </span>
+          </li>
+        </ul>
+      )}
       {action.tracks.length === 0 ? (
         <p className="character-keys-empty">No keys in this action yet.</p>
       ) : (
         <ul className="character-tracks" aria-label="Tracks">
           {action.tracks.map((t) => {
-            const label = trackLabel(doc, t, jointName);
+            const label = trackLabel(doc, t, jointName, mountName);
             return (
               <li key={t.id} className="character-track">
                 <span className="character-track-name">{label}</span>

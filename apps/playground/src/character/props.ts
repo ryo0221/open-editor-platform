@@ -4,9 +4,18 @@
  * its native file, evaluated with the Host's kernel build, and handed to the character Surface
  * as views it can draw for any joint values without a kernel.
  */
+import { BimController, WorkerBimKernel, bimViewSolids } from '@editor-platform/bim';
+import BimKernelWorker from '@editor-platform/bim/worker?worker';
+import type { BimDocument } from '@editor-platform/bim-core';
 import { createCadBinding, evaluatedVersions, type CadBinding } from '@editor-platform/cad';
 import {
-  cadJointValueKeys,
+  jointSafetyBound,
+  configurationStale,
+  isJointAngleKey,
+  coupledJointValues,
+  interferenceKey,
+  jointLimitViolations,
+  ownJointValueKeys,
   expandAssembly,
   jointValues,
   parameterValues,
@@ -19,13 +28,21 @@ import type { CadMesh } from '@editor-platform/cad-kernel-occt';
 import KernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type {
   CharacterJointValues,
+  CharacterMountChoice,
+  CharacterPropMount,
+  CharacterPropForm,
   CharacterPropInstance,
+  CharacterPropSweep,
+  CharacterPropSweepSample,
   CharacterPropMesh,
+  CharacterPropVersionJoints,
   CharacterPropView,
 } from '@editor-platform/character';
 import { composeMat4, multiplyMat4, type Mat4 } from '@editor-platform/character-core';
 import { EditorSession } from '@editor-platform/editor-core';
-import { cadKernel, cadKernels } from '../model';
+import { cadKernel, cadKernels, type StoredArtifact } from '../model';
+import { createBimPartSource } from '../bim/parts';
+import { partKernel } from '../bim/part-kernel';
 
 const poseMatrix = (p: CadSolvedPose, origin: readonly number[] = [0, 0, 0]): Mat4 =>
   multiplyMat4(
@@ -177,28 +194,15 @@ export class CharacterPropEvaluation {
     const looks = (content: CadDocument | undefined) =>
       new Map((content?.bodies ?? []).map((b) => [b.id, b.appearance]));
     const ownLooks = looks(doc);
-    const joints = doc.joints
-      .filter((j) => cadJointValueKeys[j.type].length)
-      .map((j) => {
-        const saved = jointValues(j, params);
-        return {
-          id: j.id,
-          name: j.name,
-          values: cadJointValueKeys[j.type].map((key) => {
-            const limit = j.limits.find((l) => l.of === key);
-            return {
-              key,
-              saved: saved[key] ?? 0,
-              ...(limit ? { min: limit.min, max: limit.max } : {}),
-            };
-          }),
-        };
-      });
+    const { joints } = propVersionJoints(doc);
     const solved =
       assembly?.poses && assembly.joints
         ? { poses: assembly.poses, joints: assembly.joints }
         : undefined;
-    const draw = (values: CharacterJointValues): CharacterPropInstance[] => {
+    const draw = (
+      values: CharacterJointValues,
+      mounts?: CharacterMountChoice,
+    ): CharacterPropInstance[] => {
       const out: CharacterPropInstance[] = [];
       for (const m of own) {
         const look = ownLooks.get(m.bodyId);
@@ -208,7 +212,7 @@ export class CharacterPropEvaluation {
         });
       }
       const poses = solved
-        ? posesForJointValues(doc, solved, values, params)
+        ? posesForJointValues(doc, solved, values, params, mounts)
         : (assembly?.poses ?? doc.solvedPoses);
       const shown = { ...doc, solvedPoses: { ...doc.solvedPoses, ...poses } };
       for (const o of expandAssembly(shown, this.binding.assembly.lookup).occurrences) {
@@ -243,10 +247,270 @@ export class CharacterPropEvaluation {
       }
       return out;
     };
-    return { status: 'ready', joints, draw };
+    const limitViolation = (values: CharacterJointValues) => {
+      const past = jointLimitViolations(doc, coupledJointValues(doc, params, values))[0];
+      return past && { joint: past.joint, key: past.of };
+    };
+    // MR4: each form's own values (radians, mm), as the transform panel keys them.
+    const forms = (doc.configurations ?? []).map((f): CharacterPropForm => {
+      if (configurationStale(doc, f))
+        return { id: f.id, name: f.name, values: {}, problem: 'configuration-stale' };
+      const values: Record<string, Record<string, number>> = {};
+      for (const j of doc.joints) {
+        const v = f.values[j.id];
+        if (!v) continue;
+        const resolved = jointValues({ type: j.type, values: v }, params);
+        values[j.id] = Object.fromEntries(ownJointValueKeys(j).map((k) => [k, resolved[k] ?? 0]));
+      }
+      const past = limitViolation(new Map(Object.entries(values)));
+      return {
+        id: f.id,
+        name: f.name,
+        values,
+        ...(f.mounts ? { mounts: { ...f.mounts } } : {}),
+        ...(past ? { problem: 'joint-limit' as const } : {}),
+      };
+    });
+    // MR5: the parts by the names of the components on their paths, read from their owners.
+    const names = new Map<string, string>([[interferenceKey([]), 'Own shape']]);
+    const contents = new Map<string, CadDocument | undefined>([[interferenceKey([]), doc]]);
+    for (const o of expandAssembly(doc, this.binding.assembly.lookup).occurrences) {
+      const up = interferenceKey(o.path.slice(0, -1));
+      const step = o.path.at(-1)!;
+      const label = contents.get(up)?.components.find((c) => c.id === step)?.name ?? step;
+      const parent = o.path.length > 1 ? names.get(up) : undefined;
+      names.set(interferenceKey(o.path), parent ? `${parent} / ${label}` : label);
+      contents.set(interferenceKey(o.path), o.content);
+    }
+    const nameOf = (path: readonly string[]) =>
+      names.get(interferenceKey(path)) ?? path.join(' / ');
+    const checkInterferenceAlong = async (
+      samples: CharacterPropSweepSample[],
+    ): Promise<CharacterPropSweep> => {
+      const r = await this.binding.assembly.checkInterferenceAlong(
+        samples.map((s) => ({
+          tick: s.tick,
+          values: Object.fromEntries(s.values),
+          ...(s.mounts ? { mounts: Object.fromEntries(s.mounts) } : {}),
+        })),
+      );
+      if ('error' in r) return { status: 'refused', code: r.error };
+      if (r.report.status === 'refused') return r.report;
+      return {
+        status: 'ok',
+        samples: r.report.samples,
+        hits: r.report.hits.map((h) => ({
+          tick: h.tick,
+          overlaps: h.findings.map((f) => ({
+            a: nameOf(f.a),
+            b: nameOf(f.b),
+            aId: interferenceKey(f.a),
+            bId: interferenceKey(f.b),
+            kind: f.kind,
+            depthMm: f.depthMm,
+          })),
+        })),
+        unchecked: r.report.unchecked.map(nameOf),
+        jumps: r.report.jumps.map((j) => ({ ...j })),
+      };
+    };
+    // MR7: the parts with candidate joints, by the names the version gives them.
+    const jointName = (id: string) => doc.joints.find((j) => j.id === id)?.name ?? id;
+    const mounts = (doc.mounts ?? []).map(
+      (m): CharacterPropMount => ({
+        id: m.id,
+        name: m.name,
+        joints: m.joints.map((id) => ({ id, name: jointName(id) })),
+        active: m.active,
+      }),
+    );
+    return {
+      status: 'ready',
+      joints,
+      draw,
+      limitViolation,
+      forms,
+      checkInterferenceAlong,
+      ...(mounts.length ? { mounts } : {}),
+    };
   }
   dispose() {
     for (const u of this.unsubscribe.splice(0)) u();
     this.binding.dispose();
   }
+}
+
+/** The code of a kernel that could not run (`kernel-crashed`, `kernel-load-failed`, …), if any. */
+export function kernelFailure(evaluation: {
+  elements: Map<string, { status: string; code?: string }>;
+}) {
+  for (const r of evaluation.elements.values())
+    if (r.status === 'error' && r.code?.startsWith('kernel-')) return r.code;
+  return undefined;
+}
+
+/**
+ * C8p: one building version shown as a prop. A read-only BIM controller (its own kernel Worker,
+ * and a CAD kernel Worker for its part types' shapes, read from the versions the character
+ * keeps) evaluates it once; its elements never move, so it has no joints.
+ */
+export class CharacterBimPropEvaluation {
+  private readonly controller: BimController;
+  private readonly kernel: WorkerBimKernel;
+  private readonly parts: ReturnType<typeof partKernel> | undefined;
+  private readonly unsubscribe: () => void;
+  /** The same evaluated mesh is the same prop mesh, so the view keeps its GPU buffers. */
+  private readonly converted = new WeakMap<object, Map<string, CharacterPropMesh>>();
+  private readonly boxes = new Map<string, CharacterPropMesh>();
+  view: CharacterPropView = { status: 'pending' };
+
+  constructor(
+    private readonly content: BimDocument,
+    /** The character's record (its `cadParts` keep the part types' versions). */
+    record: () => StoredArtifact | undefined,
+    private readonly changed: () => void,
+  ) {
+    this.kernel = new WorkerBimKernel({
+      spawn: () => new BimKernelWorker() as never,
+      build: cadKernel ?? undefined,
+    });
+    this.parts = cadKernel ? partKernel(cadKernel) : undefined;
+    this.controller = new BimController({
+      session: new EditorSession(content),
+      kernel: this.kernel,
+      canEdit: () => false,
+      parts: createBimPartSource({
+        // Only the versions kept with the character: a prop reads nothing else.
+        records: () => [],
+        record,
+        persist: async () => false,
+        kernel: this.parts,
+      }),
+    });
+    this.unsubscribe = this.controller.subscribe(() => this.update());
+    this.update();
+  }
+  private update() {
+    const s = this.controller.state;
+    if (!cadKernel) this.view = { status: 'failed', message: 'kernel-build-unavailable' };
+    // Ready once the evaluation of this content is in and no part shape is still being read,
+    // so the Surface's first fit sees the whole building.
+    else if (
+      !s.evaluation ||
+      s.evaluating ||
+      s.evaluatedHash !== s.hash ||
+      [...s.parts.values()].some((p) => p.status === 'loading')
+    )
+      this.view = this.view.status === 'ready' ? this.view : { status: 'pending' };
+    else if (kernelFailure(s.evaluation)) {
+      // The kernel could not run (it crashed, or its build did not load): every element fails
+      // with that code inside an `ok` evaluation, which would otherwise draw an empty prop.
+      this.view = { status: 'failed', message: kernelFailure(s.evaluation)! };
+    } else {
+      const instances: CharacterPropInstance[] = [];
+      const solids = bimViewSolids(this.content, s.evaluation, {
+        selection: new Set(),
+        parts: s.parts,
+      });
+      for (const solid of solids) {
+        if (!solid.meshes) {
+          // A part whose shape could not be read: its type's bounds, as the building view does.
+          const key = JSON.stringify(solid.bounds);
+          let box = this.boxes.get(key);
+          if (!box) this.boxes.set(key, (box = boundsBox(solid.bounds)));
+          for (const inst of solid.instances)
+            instances.push({ mesh: box, matrix: inst.matrix as Mat4 });
+          continue;
+        }
+        for (const m of solid.meshes) {
+          let looks = this.converted.get(m.mesh);
+          if (!looks) this.converted.set(m.mesh, (looks = new Map()));
+          const look = `${m.color} ${m.opacity}`;
+          let mesh = looks.get(look);
+          if (!mesh)
+            looks.set(
+              look,
+              (mesh = {
+                positions: m.mesh.positions,
+                normals: m.mesh.normals,
+                indices: m.mesh.indices,
+                color: m.color,
+                opacity: m.opacity,
+              }),
+            );
+          for (const inst of solid.instances)
+            instances.push({
+              mesh,
+              matrix: multiplyMat4(
+                inst.matrix as Mat4,
+                composeMat4({
+                  translation: [...m.mesh.origin],
+                  rotation: [0, 0, 0, 1],
+                  scale: [1, 1, 1],
+                }),
+              ),
+            });
+        }
+      }
+      this.view = { status: 'ready', joints: [], draw: () => instances };
+    }
+    this.changed();
+  }
+  dispose() {
+    this.unsubscribe();
+    this.controller.dispose();
+    this.kernel.dispose();
+    this.parts?.dispose();
+  }
+}
+
+/**
+ * The joints of a CAD version a prop can key (C2b, MR1): each joint's own values with their
+ * limits and saved values; a value that follows another joint (a coupling) is not keyed but
+ * listed in `followers` (MR4, for the version update check).
+ */
+export function propVersionJoints(doc: CadDocument): CharacterPropVersionJoints {
+  const params = parameterValues(doc);
+  const joints = doc.joints
+    .filter((j) => ownJointValueKeys(j).length)
+    .map((j) => {
+      const saved = jointValues(j, params);
+      return {
+        id: j.id,
+        name: j.name,
+        values: ownJointValueKeys(j).map((key) => {
+          const limit = j.limits.find((l) => l.of === key);
+          // WM2: an angle without a range keeps one turn either way, or a continuous joint's
+          // bound (the key's own bound is the widest, characterLimits.jointTurnRad).
+          const bound = jointSafetyBound(j, key);
+          return {
+            key,
+            saved: saved[key] ?? 0,
+            ...(limit
+              ? { min: limit.min, max: limit.max }
+              : isJointAngleKey(key)
+                ? { min: -bound, max: bound }
+                : {}),
+          };
+        }),
+      };
+    });
+  const followers = doc.joints.flatMap((j) =>
+    (j.couplings ?? []).map((c) => {
+      const limit = j.limits.find((l) => l.of === c.of);
+      // The safety bounds hold without limits too (jointLimitViolations).
+      const bound = jointSafetyBound(j, c.of);
+      return {
+        joint: j.id,
+        key: c.of,
+        from: { joint: c.from.joint, key: c.from.of },
+        ratio: c.ratio,
+        offset: c.offset,
+        min: Math.max(limit?.min ?? -bound, -bound),
+        max: Math.min(limit?.max ?? bound, bound),
+      };
+    }),
+  );
+  const mounts = (doc.mounts ?? []).map((m) => ({ id: m.id, joints: [...m.joints] }));
+  return { joints, followers, ...(mounts.length ? { mounts } : {}) };
 }

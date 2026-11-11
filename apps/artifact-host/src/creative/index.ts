@@ -35,3 +35,5 @@ export type {
 export { createCreativeLayerHttpProvider } from './generation-http';
 
 export { assertWorldGenerationAvailable } from './generation';
+
+export type { CreativeNavigationState } from './navigation-state';

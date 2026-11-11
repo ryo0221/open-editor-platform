@@ -25,6 +25,10 @@ async function references(page: Page, comic = false) {
     await expect(pane.locator('summary').filter({ hasText: '参照：地図・画像' })).toBeVisible();
   return pane;
 }
+async function revealToolbarAction(page: Page, name: string) {
+  if (!(await page.getByRole('button', { name, exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'More editor tools', exact: true }).click();
+}
 async function close(page: Page) {
   for (const name of [
     '原稿と照合',
@@ -173,10 +177,15 @@ test('Comic → setting proposal preview/reject/apply → same page; no automati
   await page.getByRole('button', { name: 'SC-03 · 漫画', exact: true }).click();
   await expect(page.getByRole('application', { name: 'Design canvas', exact: true })).toBeVisible();
   await close(page);
+  await revealToolbarAction(page, 'Designで詳細編集');
   await page.getByRole('button', { name: 'Designで詳細編集', exact: true }).click();
+  await revealToolbarAction(page, '漫画ワークスペース');
   await expect(page.getByRole('button', { name: '漫画ワークスペース', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '漫画ワークスペース', exact: true }).click();
+  await revealToolbarAction(page, 'Designで詳細編集');
   await expect(page.getByRole('button', { name: 'Designで詳細編集', exact: true })).toBeVisible();
+  if (await page.getByRole('dialog', { name: 'More editor tools', exact: true }).isVisible())
+    await page.keyboard.press('Escape');
   const before = await native<CreativeWorkspaceLinks>(page, 'Scene参照JSON');
   const refs = await references(page, true);
   await refs.getByRole('button', { name: 'Setting Modeを開く · LO-02', exact: true }).click();

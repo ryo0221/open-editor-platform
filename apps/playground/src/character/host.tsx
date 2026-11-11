@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  besidePlacement,
   CharacterSurface,
   frameBounds,
+  instanceBounds,
+  type PropBounds,
   type CharacterImportReport,
   type CharacterPropChoice,
   type CharacterPropView,
@@ -21,9 +24,10 @@ import {
   type CharacterAssetRef,
   type CharacterOperation,
   type GltfImport,
+  type Vec3,
 } from '@editor-platform/character-core';
 import type { EditorSession } from '@editor-platform/editor-core';
-import type { CadAssetRef } from '@editor-platform/cad-core';
+import type { CadAssetRef, CadDocument } from '@editor-platform/cad-core';
 import type { StoredArtifact } from '../model';
 import { createCadAssetStore, decodeBytes, portableCadRecord } from '../cad/resources';
 import { assertCharacterHistoryFits, assertCharacterImportFits } from './import-fit';
@@ -31,16 +35,19 @@ import { characterMeshRecord } from './mesh-assets';
 import { CharacterImportReview } from './import-review';
 import { carryProps } from './carry-props';
 import { characterPropChoices, retainCharacterProp } from './parts';
-import { CharacterPropEvaluation } from './props';
+import { CharacterBimPropEvaluation, CharacterPropEvaluation, propVersionJoints } from './props';
+
+/** #718: how long a new prop waits for its version to be drawn before it is placed unmeasured. */
+const propPlaceWaitMs = 60_000;
 
 /**
- * Development builds only, for the browser tests (CH30): each drawn part's bounds, and the
+ * Development builds only, for the browser tests (CH30): each drawn part's (and prop's) bounds, and the
  * view's projection to pick cage elements by their known positions.
  */
 const exposeProbe: NonNullable<Parameters<typeof CharacterSurface>[0]['onFrame']> = (
   frame,
   _playback,
-  _props,
+  props,
   view,
 ) =>
   Object.assign(window, {
@@ -48,6 +55,8 @@ const exposeProbe: NonNullable<Parameters<typeof CharacterSurface>[0]['onFrame']
       parts: Object.fromEntries(
         frame.map((p) => [p.partId, { corners: p.positions.length / 3, bounds: frameBounds([p]) }]),
       ),
+      // #718: each drawn prop's box in character space.
+      props: Object.fromEntries(props.map((p) => [p.propId, instanceBounds(p.instances)])),
       project: view.project,
     },
   });
@@ -115,40 +124,65 @@ export default function CharacterHost({
   const [report, setReport] = useState<CharacterImportReport>();
   const [busy, setBusy] = useState(false);
 
-  // Props: one read-only CAD evaluation per version shown, shared by props that place it and
-  // released when no prop does. Views change as evaluations finish.
-  const evaluations = useRef(new Map<string, CharacterPropEvaluation>());
+  // Props: one read-only CAD (or BIM, C8p) evaluation per version shown, shared by props that
+  // place it and released when no prop does. Views change as evaluations finish.
+  const evaluations = useRef(
+    new Map<string, CharacterPropEvaluation | CharacterBimPropEvaluation>(),
+  );
   const [viewsVersion, setViewsVersion] = useState(0);
   const propsKey = useMemo(() => JSON.stringify(session.content.props), [session, sequence]);
   const placed = useMemo(() => JSON.parse(propsKey) as CharacterDocument['props'], [propsKey]);
+  // #718: versions being measured for a prop about to be added, kept although no prop places
+  // them yet; and what waits for an evaluation to change.
+  const holding = useRef(new Set<string>());
+  const waiters = useRef(new Set<() => void>());
+  /** Set when the Host goes away: a prop being placed is then not added. */
+  const gone = useRef(false);
+  const evaluationOf = (kind: 'cad' | 'bim', hash: string) => {
+    const live = evaluations.current;
+    const known = live.get(hash);
+    if (known) return known;
+    const kept = (h: string) =>
+      storage.current.record()?.cadParts?.find((p) => p.contentHash === h)?.content;
+    const changed = () => {
+      setViewsVersion((n) => n + 1);
+      for (const w of [...waiters.current]) w();
+    };
+    let made: CharacterPropEvaluation | CharacterBimPropEvaluation | undefined;
+    if (kind === 'bim') {
+      const content = storage.current
+        .record()
+        ?.bimParts?.find((p) => p.contentHash === hash)?.content;
+      if (content)
+        made = new CharacterBimPropEvaluation(content, () => storage.current.record(), changed);
+    } else {
+      const content = kept(hash);
+      if (content) made = new CharacterPropEvaluation(content, kept, changed);
+    }
+    if (made) live.set(hash, made);
+    return made;
+  };
   useEffect(() => {
     const live = evaluations.current;
     const hashes = new Set(placed.map((p) => p.source.contentHash));
     for (const [hash, e] of live)
-      if (!hashes.has(hash)) {
+      if (!hashes.has(hash) && !holding.current.has(hash)) {
         e.dispose();
         live.delete(hash);
       }
-    const kept = (hash: string) =>
-      storage.current.record()?.cadParts?.find((p) => p.contentHash === hash)?.content;
-    for (const hash of hashes) {
-      if (live.has(hash)) continue;
-      const content = kept(hash);
-      if (content)
-        live.set(
-          hash,
-          new CharacterPropEvaluation(content, kept, () => setViewsVersion((n) => n + 1)),
-        );
-    }
+    for (const p of placed) evaluationOf(p.source.kind, p.source.contentHash);
     setViewsVersion((n) => n + 1);
   }, [placed, stored]);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      // A placement waiting on a version stops waiting, and adds nothing (#718).
+      gone.current = true;
+      for (const w of [...waiters.current]) w();
       for (const e of evaluations.current.values()) e.dispose();
       evaluations.current.clear();
-    },
-    [],
-  );
+    };
+  }, []);
   const views = useMemo(() => {
     const out = new Map<string, CharacterPropView>();
     for (const p of placed)
@@ -163,35 +197,77 @@ export default function CharacterHost({
   }, [placed, viewsVersion]);
   // Read on each render: a version saved in another Artifact is offered when this one shows.
   const propChoices = characterPropChoices(storage.current.records());
-  const addProp = async (choice: CharacterPropChoice) => {
-    if (readOnlyNow.current) return;
+  /**
+   * #718: the box of a version at its own origin and saved joint values, once its evaluation
+   * has drawn it (or failed, or `propPlaceWaitMs` passed: undefined).
+   */
+  const versionBounds = async (kind: 'cad' | 'bim', hash: string) => {
+    const evaluation = evaluationOf(kind, hash);
+    if (!evaluation) return undefined;
+    if (evaluation.view.status === 'pending')
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          if (evaluation.view.status === 'pending' && !gone.current) return;
+          finish();
+        };
+        const timer = setTimeout(() => finish(), propPlaceWaitMs);
+        const finish = () => {
+          clearTimeout(timer);
+          waiters.current.delete(done);
+          resolve();
+        };
+        waiters.current.add(done);
+      });
+    const view = evaluation.view;
+    return view.status === 'ready' ? instanceBounds(view.draw(new Map())) : undefined;
+  };
+  const addingProp = useRef(false);
+  const [placing, setPlacing] = useState(false);
+  const addProp = async (choice: CharacterPropChoice, beside: PropBounds | undefined) => {
+    if (readOnlyNow.current || addingProp.current) return;
+    addingProp.current = true;
+    setPlacing(true);
     setImportError(undefined);
-    try {
-      const base = session.content;
-      const baseHash = characterContentHash(base);
-      const operation: CharacterOperation = {
-        type: 'addProp',
-        prop: {
-          id: freshCharacterId(base, `prop:${choice.artifactId}`, characterIds(base)),
-          name: choice.label.replace(/ — v\d+.*$/, ''),
-          source: {
-            kind: 'cad',
-            artifactId: choice.artifactId,
-            versionId: choice.versionId,
-            contentHash: choice.contentHash,
-          },
-          placement: { translation: [0, 0, 0], rotation: [0, 0, 0, 1] },
-          visible: true,
+    const kind = choice.kind ?? 'cad';
+    const propOperation = (base: CharacterDocument, translation: Vec3): CharacterOperation => ({
+      type: 'addProp',
+      prop: {
+        id: freshCharacterId(base, `prop:${choice.artifactId}`, characterIds(base)),
+        name: choice.label.replace(/ — v\d+.*$/, ''),
+        source: {
+          kind,
+          artifactId: choice.artifactId,
+          versionId: choice.versionId,
+          contentHash: choice.contentHash,
         },
-      };
-      await retainCharacterProp({
+        placement: { translation, rotation: [0, 0, 0, 1] },
+        visible: true,
+      },
+    });
+    const keep = (draft: CharacterDocument) =>
+      retainCharacterProp({
         choice,
         records: storage.current.records(),
         record: storage.current.record(),
-        draft: applyCharacterOperation(base, operation),
+        draft,
         persist: (r) => storage.current.persistRecord(r),
       });
+    holding.current.add(choice.contentHash);
+    try {
+      // The versions are kept first, so the version can be evaluated and measured; the prop
+      // then stands beside what is shown, at its own size (#718).
+      const first = session.content;
+      await keep(applyCharacterOperation(first, propOperation(first, [0, 0, 0])));
+      if (gone.current) return;
       setStored((n) => n + 1);
+      const own = await versionBounds(kind, choice.contentHash);
+      if (gone.current) return;
+      const base = session.content;
+      const baseHash = characterContentHash(base);
+      const operation = propOperation(base, besidePlacement(beside, own));
+      // The native file must fit with the prop where it goes, in the document as it is now.
+      await keep(applyCharacterOperation(base, operation));
+      if (gone.current) return;
       // Read only may have been turned on while the versions were kept: checked when it runs.
       session.execute(
         characterEditorCommand(operation, {
@@ -201,8 +277,44 @@ export default function CharacterHost({
       );
       persist(session.content);
     } catch (e) {
+      if (gone.current) return;
       setImportError(`Prop not added: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      holding.current.delete(choice.contentHash);
+      addingProp.current = false;
+      if (!gone.current) {
+        setPlacing(false);
+        setStored((n) => n + 1);
+      }
     }
+  };
+
+  /** MR4: keeps another version of a prop's Artifact, and reads its joints for the update. */
+  const preparePropVersion = async (propId: string, choice: CharacterPropChoice) => {
+    if (readOnlyNow.current) throw new Error('read-only');
+    const prop = session.content.props.find((p) => p.id === propId);
+    if (!prop) throw new Error('prop-missing');
+    const draft = applyCharacterOperation(session.content, {
+      type: 'setPropSource',
+      id: propId,
+      source: {
+        kind: prop.source.kind,
+        artifactId: choice.artifactId,
+        versionId: choice.versionId,
+        contentHash: choice.contentHash,
+      },
+    });
+    const content = await retainCharacterProp({
+      choice,
+      records: storage.current.records(),
+      record: storage.current.record(),
+      draft,
+      persist: (r) => storage.current.persistRecord(r),
+    });
+    setStored((n) => n + 1);
+    return prop.source.kind === 'bim'
+      ? { joints: [], followers: [] }
+      : propVersionJoints(content as CadDocument);
   };
 
   const read = async (file: File) => {
@@ -272,7 +384,10 @@ export default function CharacterHost({
 
   // C3: a mesh edit's new asset is kept before the edit names it, in a record pruned to what the
   // draft, the versions and this session's history still reach.
-  const keepMesh = async (asset: { ref: CharacterAssetRef; bytes: Uint8Array }) => {
+  const keepMesh = async (
+    asset: { ref: CharacterAssetRef; bytes: Uint8Array },
+    more?: readonly { ref: CharacterAssetRef; bytes: Uint8Array }[],
+  ) => {
     if (readOnlyNow.current) throw new Error('permission-denied');
     const latest = storage.current.record();
     if (!latest) throw new Error('no record to save into');
@@ -282,6 +397,7 @@ export default function CharacterHost({
       undo: session.historyEntries('undo'),
       redo: session.historyEntries('redo'),
       ...asset,
+      ...(more?.length ? { more } : {}),
     });
     // The Undo entries whose bytes the record drops are forgotten before it is written: none can
     // be restored while the write is pending (or after it), whatever the write's outcome.
@@ -294,13 +410,16 @@ export default function CharacterHost({
   };
 
   /** C6d: the exported GLB, saved by the browser as a download (read only exports too). */
-  const saveFile = (file: { name: string; bytes: Uint8Array }) => {
-    const url = URL.createObjectURL(
+  const saveFile = (file: { name: string; bytes: Uint8Array }) =>
+    download(
+      file.name,
       new Blob([file.bytes as Uint8Array<ArrayBuffer>], { type: 'model/gltf-binary' }),
     );
+  const download = (name: string, data: Blob) => {
+    const url = URL.createObjectURL(data);
     const link = document.createElement('a');
     link.href = url;
-    link.download = file.name;
+    link.download = name;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
   };
@@ -314,11 +433,14 @@ export default function CharacterHost({
         canEdit={() => !readOnlyNow.current}
         {...(readOnly ? {} : { onImport: (file: File) => void read(file) })}
         onExport={saveFile}
+        onExportMedia={(file) => download(file.name, file.data)}
         {...(importError ? { importError } : {})}
         {...(report ? { report } : {})}
         props={views}
         propChoices={propChoices}
-        onAddProp={(c) => void addProp(c)}
+        onAddProp={(c, beside) => void addProp(c, beside)}
+        onPreparePropVersion={preparePropVersion}
+        placingProp={placing}
         {...(readOnly ? {} : { onMeshAsset: keepMesh })}
         onApplied={(content) => persist(content)}
         {...(import.meta.env.DEV ? { onFrame: exposeProbe } : {})}

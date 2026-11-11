@@ -28,7 +28,11 @@ export function MapLocationsPane({
   clearError,
   open,
   openLocation,
+  busy: providedBusy,
+  changeBusy,
 }: {
+  busy?: boolean;
+  changeBusy?(value: boolean): void;
   workspace: CreativeWorkspace;
   sceneId?: string;
   itemId?: string;
@@ -48,7 +52,9 @@ export function MapLocationsPane({
   const [sources, setSources] = useState<Sources>([]);
   const [draft, setDraft] = useState<Draft>();
   const [native, setNative] = useState<{ key: string; content: FictionMapContent; hash: string }>();
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setLocalBusy] = useState(false);
+  const busy = providedBusy ?? localBusy;
+  const setBusy = changeBusy ?? setLocalBusy;
   const liveDraft = useRef(draft);
   liveDraft.current = draft;
   const pendingNative = useRef<
@@ -83,14 +89,14 @@ export function MapLocationsPane({
   }, [draft]);
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
-      if (draft?.dirty || workspace.maps.hasUnsavedSources) {
+      if (busy || draft?.dirty || workspace.maps.hasUnsavedSources) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [workspace, draft]);
+  }, [workspace, draft, busy]);
   useEffect(() => {
     let live = true;
     void Promise.all(refs.map((r) => workspace.maps.read(r))).then((views) => {

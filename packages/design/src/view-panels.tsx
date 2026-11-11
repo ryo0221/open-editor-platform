@@ -335,6 +335,12 @@ export function designCanvasTargets(
   scopedTexts: Map<string, ScopedText>,
   extension: DesignSurfaceExtension | undefined,
 ): CanvasTarget[] {
+  const textParts = new Map<string, NonNullable<CanvasTarget['textParts']>>();
+  for (const part of scopedTexts.values()) {
+    const parts = textParts.get(part.rootId) ?? [];
+    parts.push(part.target);
+    textParts.set(part.rootId, parts);
+  }
   return designPaintOrder(content)
     .filter((e) => !canvasOwners.get(e.id))
     .map((e) => ({
@@ -360,7 +366,7 @@ export function designCanvasTargets(
       editableText: e.type === 'text' || e.type === 'shape' || e.type === 'rectangle',
       hitBox: e.type === 'text' || e.type === 'instance' || e.type === 'react',
       container: e.type === 'group',
-      textParts: [...scopedTexts.values()].filter((p) => p.rootId === e.id).map((p) => p.target),
+      textParts: textParts.get(e.id) ?? [],
     }));
 }
 /** A scoped text changed after editing began; the pending input must not overwrite it. */

@@ -12,7 +12,7 @@ export function exportColor(value: string): { hex: string; alpha: number } | und
       .slice(1)
       .match(/../g)!
       .map((c) => parseInt(c, 16));
-  else if (Object.hasOwn(names, v)) rgba = [...names[v]];
+  else if (Object.hasOwn(names, v)) rgba = [...names[v as keyof typeof names]];
   else {
     const match = /^rgba?\(([^)]+)\)$/.exec(v);
     if (!match) return;

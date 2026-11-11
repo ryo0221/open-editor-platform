@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./controller": "./src/controller.ts",
+    "./viewport": "./src/viewport.ts",
     "./style.css": "./src/style.css"
   },
   "dependencies": {

@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { deflateSync } from 'node:zlib';
 import {
   applyCadOperation,
   cadBuilder,
+  cadToleranceSets,
   f11Bracket,
   f12Fillet,
   f40Car,
@@ -14,10 +17,37 @@ import {
   f15Loft,
   f15Sweep,
   f17Sheets,
+  f18Hood,
+  f19Network,
+  f22Split,
+  cr6dGroove,
+  lampFixture,
+  lampSizes,
+  f59Seat,
+  f60Wheel,
+  f61Mirror,
+  f62Steering,
+  f26Panel,
+  f27Windows,
+  f24Flare,
+  f47Flange,
+  f48ProfileSweep,
+  f49SpotWelds,
+  f29Biw,
+  f25B1Car,
   fixtureKernel,
   partVersionId,
   r1Housing,
   r2bParts,
+  r2bJoints,
+  f70GearTrain,
+  sk01Watch,
+  sk01FinishImages,
+  type Sk01Finish,
+  gearMeshProblems,
+  solveJoints,
+  parameterValues,
+  connectorRefKey,
   type CadDocument,
 } from '@editor-platform/cad-core';
 import type { Locator, Page } from '@playwright/test';
@@ -353,6 +383,305 @@ test('STEP import keeps the file with the record through versions, reload and na
   await page.screenshot({ path: test.info().outputPath('cad-playground-step.png') });
 });
 
+const f43 = (name: string) =>
+  new URL(`../../packages/cad-kernel-occt/fixtures/f43/${name}`, import.meta.url).pathname;
+// PMI-1/PMI-2 (docs/cad/pmi.md, #837): the import keeps the semantic PMI it verified on one part
+// as the part's `pmi` asset. A file of which it would keep less is refused with its breakdown;
+// Cancel stores nothing, and only "Import with the PMI that is kept" imports it, listing PMI as
+// lost. The same for an assembly in an empty document. On desktop and the narrow layout.
+test('PMI-1 STEP with PMI: breakdown, cancel, consent, import (ST-192, CAD81, TS-1364; PMI-4b ST-213, TS-1433)', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const dialog = page.getByRole('dialog', { name: 'STEP with PMI' });
+  const read = dialog.getByRole('table', { name: 'PMI read' });
+  // A reference through an assembly path is listed as not checked; the plate's own items are
+  // what would be kept.
+  await page
+    .getByLabel('STEP file', { exact: true })
+    .setInputFiles(f43('loss-component-path.step'));
+  await expect(dialog.getByLabel('PMI in the file')).toContainText('Geometric tolerances');
+  await expect(read).toContainText('References through an assembly path');
+  await expect(read).toContainText('not checked by this kernel');
+  await expect(dialog.getByLabel('PMI kept')).toContainText('geometric tolerances: 3');
+  await expect(dialog).toContainText('could not be read or checked');
+  await expect(dialog).toContainText('does not cover exports');
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-dialog.png') });
+  // Within the narrow layout too: the dialog does not widen the page.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect((await nativeArtifact(page)).cadResources ?? []).toEqual([]);
+  await expect(page.getByRole('dialog', { name: 'Import STEP' })).toHaveCount(0);
+
+  // An assembly with a dimension across two parts in the empty document: the same consent, then
+  // the assembly dialog with what is kept.
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-assembly.step'));
+  await expect(dialog.getByLabel('PMI kept')).toContainText('dimensions: 2');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Import STEP assembly' })).toHaveCount(0);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-assembly.step'));
+  await dialog
+    .getByRole('button', { name: 'Import with the PMI that is kept', exact: true })
+    .click();
+  const importing = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  await expect(importing.getByLabel('Import report')).toContainText(
+    'PMI the import could not keep',
+  );
+  await expect(importing.getByLabel('Import report')).toContainText('dimensions: 2');
+  await importing.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(importing).toHaveCount(0);
+  expect((await nativeArtifact(page)).cadResources ?? []).toEqual([]);
+
+  // F43 loses nothing: no question; the report lists what is kept, and PMI is not a loss.
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-plate.step'));
+  const report = page.locator('dl[aria-label="Import report"]');
+  await expect(report).toContainText('AP242');
+  await expect(dialog).toHaveCount(0);
+  await expect(report).toContainText('dimensions: 2, geometric tolerances: 3, datums: 2');
+  await expect(report).not.toContainText('PMI the import could not keep');
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-report.png') });
+  await page.getByRole('button', { name: 'Insert body', exact: true }).click();
+  await ready(page);
+  await expect(page.locator('.cad-status')).not.toContainText('could not');
+  // The body list is in the side panel, closed in the narrow layout: the record has the body.
+  const record = await nativeArtifact(page);
+  const draft = record.draft.content as {
+    assets: { kind: string }[];
+    features: { type: string; args?: { pmiAssetId?: string } }[];
+  };
+  expect(draft.features.map((f) => f.type)).toEqual(['imported', 'transform']);
+  expect(draft.assets.map((a) => a.kind)).toEqual(['source-step', 'normalized-brep', 'pmi']);
+  expect(draft.features[0].args?.pmiAssetId).toBeDefined();
+  // The original file, PMI included, is kept unchanged, and the kept PMI is stored beside it.
+  const resources = record.cadResources as { kind: string; bytes: string }[];
+  const original = await readFile(f43('pmi-plate.step'));
+  expect(Buffer.from(resources[0].bytes, 'base64').equals(original)).toBe(true);
+  const kept = resources.find((r) => r.kind === 'pmi');
+  expect(kept).toBeDefined();
+  const asset = JSON.parse(Buffer.from(kept!.bytes, 'base64').toString('utf8')) as {
+    items: { kind: string }[];
+  };
+  expect(asset.items).toHaveLength(7);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-imported.png') });
+  // PMI-4b (TS-1433): the STEP export writes the kept PMI as AP242 and says what it wrote.
+  await (await tool(page, 'Export STEP, STL or GLB')).click();
+  const exporting = page.getByRole('dialog', { name: 'Export 3D file' });
+  await exporting.getByLabel(/^STEP/).check();
+  await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  const exportReport = exporting.getByLabel('Export report');
+  await expect(exportReport).toContainText(
+    'PMI is written as semantic GD&T (AP242) on the faces, edges and vertices it was imported on: 2 dimensions, 3 geometric tolerances, 2 datums',
+  );
+  await expect(exportReport).not.toContainText('PMI (dimensions, tolerances, datums');
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-export.png') });
+  const download = page.waitForEvent('download');
+  await exporting.getByRole('button', { name: 'Save STEP' }).click();
+  const written = (await readFile((await (await download).path())!)).toString('latin1');
+  expect(written).toMatch(/AP242/);
+  expect(written.match(/^#\d+ ?= ?DATUM\(/gm)).toHaveLength(2);
+  expect(written).toMatch(/POSITION_TOLERANCE|GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE/);
+});
+
+// PMI-2 (docs/cad/pmi.md, 表示と操作, CAD83 in part): the selected imported body lists its kept
+// PMI by kind; choosing an item highlights its faces. The list survives a save and reload. What a
+// Boolean leaves of it is PMI-4a's (TS-1430).
+test('PMI-2 list and highlight (ST-194, CAD83, TS-1375)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-plate.step'));
+  await page.getByRole('button', { name: 'Insert body', exact: true }).click();
+  await ready(page);
+  const plate = bodies(page).filter({ hasText: 'pmi-plate' });
+  await plate.click();
+  const pmi = page.getByTestId('cad-pmi');
+  await expect(pmi.getByRole('list', { name: 'Dimensions' })).toContainText(
+    'Diameter ⌀10 ±0.05 mm',
+  );
+  await expect(pmi.getByRole('list', { name: 'Datums' }).getByRole('button')).toHaveCount(2);
+  const position = pmi.getByRole('button', { name: /Position ⌀0\.1 mm \| A \| B/ });
+  await position.click();
+  await expect(position).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-highlight.png') });
+  await position.click();
+  await expect(position).toHaveAttribute('aria-pressed', 'false');
+
+  // Saved and reloaded, the list reads the stored asset again.
+  await page.keyboard.press('Control+s');
+  await page.reload();
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-plate' }).click();
+  await expect(
+    pmi.getByRole('list', { name: 'Geometric tolerances' }).getByRole('button'),
+  ).toHaveCount(3);
+});
+
+// PMI-4a (docs/cad/pmi.md, 加工と失効, CAD84): a box cut through the plate's corner changes the
+// faces it meets. The items on them, and those depending on their datums, are stale and cannot be
+// chosen; datum B on the untouched side stays current and is highlighted. Undo makes all current.
+test('PMI-4a items kept after a Boolean only where unchanged (ST-212, CAD84, TS-1430)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-plate.step'));
+  await page.getByRole('button', { name: 'Insert body', exact: true }).click();
+  await ready(page);
+  const pmi = page.getByTestId('cad-pmi');
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  // The box is added beside the plate (x = 90): moved into it, so the cut takes material.
+  await bodies(page).filter({ hasText: 'Box' }).click();
+  const placement = page
+    .locator('.cad-inspector details')
+    .filter({ has: page.getByText('Placement', { exact: true }) });
+  if ((await placement.getAttribute('open')) === null) await placement.locator('summary').click();
+  await placement.getByLabel('X (mm)').fill('-80');
+  await placement.getByLabel('X (mm)').press('Enter');
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-plate' }).click();
+  const combine = page
+    .locator('.cad-inspector details')
+    .filter({ has: page.getByText('Combine', { exact: true }) });
+  if ((await combine.getAttribute('open')) === null) await combine.locator('summary').click();
+  await combine.getByLabel('With body').selectOption({ index: 1 });
+  await combine.getByRole('button', { name: 'Cut', exact: true }).click();
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-plate' }).click();
+  await expect(pmi.getByRole('note')).toContainText(
+    'changed the shape after the import. 1 of 7 items',
+  );
+  const positionItem = pmi.getByRole('button', { name: /Position/ });
+  await expect(positionItem).toBeDisabled();
+  await expect(positionItem).toContainText('stale');
+  const datumB = pmi.getByRole('button', { name: /Datum B/ });
+  await expect(datumB).toBeEnabled();
+  await expect(datumB).not.toContainText('stale');
+  await datumB.click();
+  await expect(datumB).toHaveAttribute('aria-pressed', 'true');
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-kept.png') });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-plate' }).click();
+  await expect(pmi.getByRole('note')).toHaveCount(0);
+  await expect(pmi.getByRole('button', { name: /Position/ })).toBeEnabled();
+});
+
+/** Pixels of the viewport near a colour (sRGB), from a screenshot of its canvas. */
+async function viewportPixels(page: Page, rgb: [number, number, number]) {
+  const png = await page.locator('.cad-viewport canvas').first().screenshot();
+  return page.evaluate(
+    async ({ data, rgb }) => {
+      const blob = await (await fetch(`data:image/png;base64,${data}`)).blob();
+      const bitmap = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const g = canvas.getContext('2d')!;
+      g.drawImage(bitmap, 0, 0);
+      const pixels = g.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      let n = 0;
+      for (let i = 0; i < pixels.length; i += 4)
+        if (
+          Math.abs(pixels[i]! - rgb[0]) < 40 &&
+          Math.abs(pixels[i + 1]! - rgb[1]) < 40 &&
+          Math.abs(pixels[i + 2]! - rgb[2]) < 40
+        )
+          n++;
+      return n;
+    },
+    { data: png.toString('base64'), rgb },
+  );
+}
+// PMI-3a (docs/cad/pmi.md): the presentation lines the file links to a kept item are kept with it
+// and drawn with the body; the PMI switch hides them, the focused item's are drawn in the
+// targets' colour, and they come back after a save and reload.
+test('PMI-3a presentation lines, switch and focus (ST-210, CAD83, TS-1421)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  // Everything is kept with PMI-3b (the saved views too): the import does not ask.
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-presented.step'));
+  await page.getByRole('button', { name: 'Insert body', exact: true }).click();
+  await ready(page);
+  const shown = page.getByTestId('cad-pmi-shown');
+  await expect(shown).toBeChecked();
+  const green: [number, number, number] = [43, 138, 62];
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-presentation.png') });
+  await shown.uncheck();
+  await expect.poll(() => viewportPixels(page, green)).toBeLessThan(5);
+  await shown.check();
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+
+  // The diameter's lines in the targets' colour once it is chosen.
+  await bodies(page).filter({ hasText: 'pmi-presented' }).click();
+  const pmi = page.getByTestId('cad-pmi');
+  const diameter = pmi.getByRole('button', { name: /Diameter ⌀10 mm/ });
+  await expect(diameter).toContainText('presented');
+  await expect(pmi.getByRole('button', { name: /Flatness/ })).not.toContainText('presented');
+  const before = await viewportPixels(page, green);
+  await diameter.click();
+  await expect.poll(() => viewportPixels(page, green)).toBeLessThan(before);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-presentation-focus.png') });
+
+  // Saved and reloaded: the lines are read from the stored asset again.
+  await page.keyboard.press('Control+s');
+  await page.reload();
+  await ready(page);
+  await expect(page.getByTestId('cad-pmi-shown')).toBeChecked();
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+});
+
+test('PMI-3b saved views: camera and only their PMI (ST-211, CAD83, TS-1425)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-presented.step'));
+  await page.getByRole('button', { name: 'Insert body', exact: true }).click();
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-presented' }).click();
+  const views = page.getByTestId('cad-pmi').getByRole('list', { name: 'Saved views' });
+  await expect(views.getByRole('button')).toHaveCount(3);
+  const all = views.getByRole('button', { name: 'All PMI' });
+  const hole = views.getByRole('button', { name: /^Hole/ });
+  const datumA = views.getByRole('button', { name: /^Datum A/ });
+  await expect(hole).toContainText('2 items');
+  await expect(datumA).toContainText('1 item');
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  const green: [number, number, number] = [43, 138, 62];
+  const everything = await viewportPixels(page, green);
+  // From above, the diameter and position only.
+  await hole.click();
+  await expect(hole).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-view-hole.png') });
+  // From the front, datum A only.
+  await datumA.click();
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(10);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi-view-datum-a.png') });
+  await all.click();
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  expect(everything).toBeGreaterThan(30);
+
+  // Saved and reloaded: the views are read from the stored asset again.
+  await page.keyboard.press('Control+s');
+  await page.reload();
+  await ready(page);
+  await bodies(page).filter({ hasText: 'pmi-presented' }).click();
+  await expect(
+    page.getByTestId('cad-pmi').getByRole('list', { name: 'Saved views' }).getByRole('button'),
+  ).toHaveCount(3);
+});
+
 // R1 acceptance (docs/cad/r1-modeling.md, CAD37): each representative part of R1 in the
 // ordinary Playground — a change that the history follows, a saved version, a reload, a native
 // round trip and its STEP. The STEP files are kept for the independent reader.
@@ -422,6 +751,639 @@ for (const [name, part, change] of r1Parts)
     await mkdir(stepDir, { recursive: true });
     await writeFile(`${stepDir}/${name}.step`, step);
   });
+
+// CR1b (docs/cad/car-design.md, CR1の分け方): a fill side next to a panel is set to G2 in the
+// inspector; the fill is rebuilt with the panel's curvature and Undo takes it back to G1
+// (TS-1476, ST-243).
+test('set a fill side to G2 in the inspector and undo it (CR1b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'hood.json', {
+    ...empty,
+    name: 'Hood',
+    draft: { ...empty.draft, content: { ...f18Hood('sheets'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Hood');
+  await ready(page);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'crown fill', exact: true })
+    .click();
+  const sides = page.getByTestId('cad-fill-boundary').getByRole('combobox');
+  await expect(sides).toHaveCount(4);
+  await expect(sides.nth(1)).toHaveValue('G1');
+  await sides.nth(1).selectOption('G2');
+  await ready(page);
+  const continuity = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    const crown = doc.features.find((f) => f.id === 'crown-fill')!;
+    return crown.type === 'fill' ? crown.args.boundary.map((b) => b.continuity) : [];
+  };
+  expect(await continuity()).toEqual(['G0', 'G2', 'G0', 'G1']);
+  await expect(bodies(page)).toHaveCount(3);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect(await continuity()).toEqual(['G0', 'G1', 'G0', 'G1']);
+});
+
+// CR1d (docs/cad/car-design.md, CR1の分け方): three u arcs and three v arcs of a roof make one
+// Gordon surface from the Boundary dialog, and Undo takes it away (TS-1480, ST-246).
+test('span a curve network from the Boundary dialog and undo it (CR1d)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  const arcs = f19Network();
+  await importJson(page, 'roof.json', {
+    ...empty,
+    name: 'Roof arcs',
+    draft: {
+      ...empty.draft,
+      content: { ...arcs, features: [], bodies: [], kernelProfile },
+    },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Roof arcs');
+  await ready(page);
+  await page.getByRole('button', { name: 'Boundary…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Boundary' });
+  await dialog.getByLabel('Result').selectOption('curveNetwork');
+  for (const id of ['u0', 'u1', 'u2', 'v0', 'v1', 'v2'])
+    await dialog.getByRole('checkbox', { name: `${id} arc`, exact: true }).check();
+  for (const n of [0, 1, 2])
+    await dialog
+      .getByRole('checkbox', { name: 'Across (v)' })
+      .nth(3 + n)
+      .check();
+  await dialog.getByRole('button', { name: 'Create curve network' }).click();
+  await ready(page);
+  const network = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    const f = doc.features.find((x) => x.type === 'curveNetwork');
+    return f?.type === 'curveNetwork'
+      ? [f.args.u, f.args.v].map((w) => w.map((c) => ('sketchId' in c ? c.sketchId : '?')))
+      : undefined;
+  };
+  expect(await network()).toEqual([
+    ['u0', 'u1', 'u2'],
+    ['v0', 'v1', 'v2'],
+  ]);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByTestId('cad-network-v')).toContainText('v0');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect(await network()).toBeUndefined();
+});
+
+// CR2b (docs/cad/car-design.md, CR2の分け方): a sheet is offset 2 mm to its back from the body's
+// inspector into a second sheet body; its side is changed on the feature and Undo takes it away
+// (TS-1488, ST-248).
+test('offset a sheet into a new sheet body and undo it (CR2b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'wall.json', {
+    ...empty,
+    name: 'Wall',
+    draft: { ...empty.draft, content: { ...f17Sheets('extrude'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Wall');
+  await ready(page);
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Offset surface$/ }).click();
+  await page.getByRole('button', { name: 'Offset into a new sheet' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(2);
+  const offset = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'offsetSurface');
+  };
+  expect(await offset()).toMatchObject({ args: { distance: mm(2), side: 'back' } });
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'surface offset offsetSurface', exact: true })
+    .click();
+  await page.getByTestId('cad-offset-side').selectOption('front');
+  await ready(page);
+  expect(await offset()).toMatchObject({ args: { side: 'front' } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  expect(await offset()).toBeUndefined();
+});
+
+// CR2a (docs/cad/car-design.md, CR2の分け方): a flat panel is split along a sketch's line from
+// its inspector; both pieces stay in the one body, and Undo takes the split away (TS-1491, ST-249).
+test('split a sheet along a sketch line, keeping both pieces, and undo it (CR2a)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f22Split('open', false), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Split$/ }).click();
+  await page.getByTestId('cad-split-sketch').selectOption('cutter');
+  await page.getByRole('button', { name: 'Split, keeping every piece' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByTestId('cad-split-along')).toContainText('Cutter (1 elements)');
+  const split = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'split');
+  };
+  expect(await split()).toMatchObject({ args: { tool: { sketchId: 'cutter', elements: ['s0'] } } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect(await split()).toBeUndefined();
+});
+
+// CR3c (docs/cad/car-design.md, CR3の分け方): a row of windows is cut with one trim from the
+// panel's Trim section. A fourth window off the sheet is refused by name; leaving out the lines
+// that miss cuts the three, and Undo takes the trim away (TS-1510, ST-255).
+test('cut a row of windows in one trim, leaving out the one that misses (CR3c)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  const base = f22Split('closed', false);
+  const windows = f27Windows('missed').sketches.find((s) => s.id === 'windows')!;
+  await importJson(page, 'windows.json', {
+    ...empty,
+    name: 'Windows',
+    draft: {
+      ...empty.draft,
+      content: { ...base, sketches: [...base.sketches, windows], kernelProfile },
+    },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Windows');
+  await ready(page);
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Trim$/ }).click();
+  await page.getByLabel('Cut with').selectOption('sketch:windows');
+  await page.getByRole('button', { name: 'Trim', exact: true }).click();
+  await ready(page);
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText(
+    '該当する閉じた線：4番目（w3s0、w3s1、w3s2、w3s3）',
+  );
+  const trim = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'trim');
+  };
+  expect(await trim()).toBeUndefined();
+  // The refused edit draws the body's panel again, its sections closed.
+  if (!(await page.getByLabel('Cut with').isVisible()))
+    await page.locator('summary', { hasText: /^Trim$/ }).click();
+  await page.getByLabel('Cut with').selectOption('sketch:windows');
+  await page.getByLabel('Leave out lines that miss the surface').check();
+  await page.getByRole('button', { name: 'Trim', exact: true }).click();
+  await ready(page);
+  expect(await trim()).toMatchObject({
+    args: {
+      tool: { sketchId: 'windows', elements: ['w0s0', 'w0s1', 'w0s2', 'w0s3'] },
+      keep: 'outside',
+      chains: [
+        ['w1s0', 'w1s1', 'w1s2', 'w1s3'],
+        ['w2s0', 'w2s1', 'w2s2', 'w2s3'],
+        ['w3s0', 'w3s1', 'w3s2', 'w3s3'],
+      ],
+      ifMissed: 'skip',
+    },
+  });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect(await trim()).toBeUndefined();
+});
+
+// CR3b (docs/cad/car-design.md, CR3の分け方): a door is cut out of a flat panel along a sketch's
+// square in one edit, a 3.5 mm gap between them; its gap is widened later in the door's
+// inspector, and Undo takes the change and then the door away (TS-1506, ST-254).
+test('cut a door out of a panel with a gap, widen it, and undo it (CR3b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f22Split('closed', false), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Panel$/ }).click();
+  await page.getByTestId('cad-panel-sketch').selectOption('cutter');
+  await page.getByRole('button', { name: 'Cut out a panel' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(2);
+  const features = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return {
+      trim: doc.features.find((f) => f.type === 'trim'),
+      panel: doc.features.find((f) => f.type === 'panel'),
+    };
+  };
+  const tool = { sketchId: 'cutter', elements: ['s0', 's1', 's2', 's3'] };
+  expect(await features()).toMatchObject({
+    trim: { args: { tool, keep: 'outside', gap: { literalMm: 3.5 } } },
+    panel: { args: { tool, keep: 'inside', gap: { literalMm: 3.5 } } },
+  });
+  // The door's gap is its own: widened in its inspector, the panel's trim stays.
+  const gap = page.getByLabel('Gap (mm)', { exact: true });
+  await gap.fill('6');
+  await gap.press('Enter');
+  await ready(page);
+  expect((await features()).panel).toMatchObject({ args: { gap: { literalMm: 6 } } });
+  expect((await features()).trim).toMatchObject({ args: { gap: { literalMm: 3.5 } } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect((await features()).panel).toMatchObject({ args: { gap: { literalMm: 3.5 } } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  expect(await features()).toEqual({ trim: undefined, panel: undefined });
+});
+
+// CR3e (docs/cad/car-design.md, CR3の分け方): the door cut out of a panel is made a part: a new
+// CAD Artifact with one saved version holds the door's closure, and in the panel's document the
+// door body is replaced by a component at the origin, in one edit that Undo takes back
+// (TS-1519, ST-257).
+test('make the door a part of its own Artifact and undo it (CR3e)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f26Panel(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(2);
+  await bodies(page).nth(1).click();
+  await page.getByRole('button', { name: 'Make part', exact: true }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(components(page)).toHaveText(['door-body 1']);
+  await expect(page.getByTestId('cad-component')).not.toContainText('参照できません');
+  const placed = await nativeArtifact(page);
+  const doc = placed.draft.content as CadDocument;
+  expect(doc.bodies.map((b) => b.id)).toEqual(['panel-body']);
+  expect(doc.features.some((f) => f.id === 'door')).toBe(false);
+  expect(doc.parts).toHaveLength(1);
+  expect(placed.cadParts?.map((p) => p.contentHash)).toEqual([doc.parts[0]!.source.contentHash]);
+  // The new Artifact is offered as a part with its saved version.
+  await page.getByRole('button', { name: 'Insert part…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Insert part' });
+  await expect(dialog.getByLabel('Version of door-body')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(2);
+  await expect(components(page)).toHaveCount(0);
+});
+
+// CR2c (docs/cad/car-design.md, CR2の分け方): a press line is made on a flat panel from its
+// panel, its depth changed later in the feature's inspector, and Undo takes the change and then
+// the press line away (TS-1494, ST-250).
+test('press a line into a sheet, deepen it later, and undo it (CR2c)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f22Split('open', false), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Press line$/ }).click();
+  await page.getByTestId('cad-press-sketch').selectOption('cutter');
+  await page.getByRole('button', { name: 'Press the line' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  const press = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'pressLine');
+  };
+  expect(await press()).toMatchObject({
+    args: {
+      tool: { sketchId: 'cutter', elements: ['s0'] },
+      side: 'left',
+      depth: { literalMm: 2 },
+      toward: 'front',
+      radius: { literalMm: 0.5 },
+    },
+  });
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'Press line pressLine', exact: true })
+    .click();
+  await expect(page.getByTestId('cad-press-along')).toContainText('Cutter (1 elements');
+  const depth = page.locator('.cad-inspector').getByLabel('Depth (mm)');
+  await depth.fill('4');
+  await depth.press('Enter');
+  await ready(page);
+  await expect.poll(async () => (await press())?.args).toMatchObject({ depth: { literalMm: 4 } });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await press())?.args).toMatchObject({ depth: { literalMm: 2 } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  expect(await press()).toBeUndefined();
+});
+
+// TS-1497, ST-251 (CR2d): a flared wheel arch, raised and joined G2 in the inspector, undone.
+test('flare a wheel arch, raise it and join it G2 later, and undo it (CR2d)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'fender.json', {
+    ...empty,
+    name: 'Fender',
+    draft: { ...empty.draft, content: { ...f24Flare(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Fender');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const flare = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'flare');
+  };
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'Flare flare', exact: true })
+    .click();
+  await expect(page.getByTestId('cad-flare-along')).toContainText('Flare line (1 elements)');
+  const height = page.locator('.cad-inspector').getByLabel('Height (mm)');
+  await height.fill('20');
+  await height.press('Enter');
+  await ready(page);
+  await expect.poll(async () => (await flare())?.args).toMatchObject({ height: { literalMm: 20 } });
+  await page.locator('.cad-inspector').getByLabel('Joining the sheet').selectOption('G2');
+  await ready(page);
+  await expect.poll(async () => (await flare())?.args).toMatchObject({ continuity: 'G2' });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await flare())?.args).toMatchObject({ continuity: 'G1' });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await flare())?.args).toMatchObject({ height: { literalMm: 10 } });
+});
+
+// TS-1538, ST-263 (CR4c): a tray of four flanges on a flat panel, made wider, leaned out and turned
+// to the back in the inspector, then undone.
+test('flange a panel’s four borders into a tray, change its width, angle and side, and undo (CR4c)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'tray.json', {
+    ...empty,
+    name: 'Tray',
+    draft: { ...empty.draft, content: { ...f47Flange('tray'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Tray');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const flange = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'flange');
+  };
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'Flange flange', exact: true })
+    .click();
+  const inspector = page.locator('.cad-inspector');
+  await expect(page.getByTestId('cad-flange-along')).toContainText('4 edges');
+  const width = inspector.getByLabel('Width (mm)');
+  await width.fill('25');
+  await width.press('Enter');
+  await ready(page);
+  await expect.poll(async () => (await flange())?.args).toMatchObject({ width: { literalMm: 25 } });
+  const angle = inspector.getByLabel('Angle from the sheet (°)');
+  await angle.fill('60');
+  await angle.press('Enter');
+  await ready(page);
+  await expect
+    .poll(
+      async () => ((await flange())?.args as { angle: { literalRad: number } }).angle.literalRad,
+    )
+    .toBeCloseTo(Math.PI / 3, 9);
+  await inspector.getByLabel('Towards').selectOption('back');
+  await ready(page);
+  await expect.poll(async () => (await flange())?.args).toMatchObject({ toward: 'back' });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Leaning in over the panel, the walls run into each other at the corners: refused, named.
+  await angle.fill('135');
+  await angle.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('フランジが自分や他のフランジ');
+  // The refused edit is not kept: still 60°, and three edits to undo.
+  await ready(page);
+  expect(
+    ((await flange())?.args as { angle: { literalRad: number } }).angle.literalRad,
+  ).toBeCloseTo(Math.PI / 3, 9);
+  for (let i = 0; i < 3; i++) {
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+  }
+  await expect
+    .poll(async () => (await flange())?.args)
+    .toMatchObject({
+      width: { literalMm: 10 },
+      toward: 'front',
+    });
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+});
+
+// TS-1543, ST-264 (CR4d): a hat member made from a path sketch in the Member dialog, its flange
+// and side changed in the inspector, a bend that does not fit refused, then undone.
+test('sweep a hat member along a path, change its flange and side, and undo (CR4d)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  const path = f48ProfileSweep({ path: 'bend' });
+  await importJson(page, 'member.json', {
+    ...empty,
+    name: 'Member',
+    draft: {
+      ...empty.draft,
+      content: { ...path, features: [], bodies: [], kernelProfile },
+    },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Member');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(0);
+  const member = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.features.find((f) => f.type === 'profileSweep');
+  };
+  await page.getByRole('button', { name: 'Member…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Member' });
+  await dialog.getByLabel('Flange width (mm)').fill('20');
+  await dialog.getByRole('button', { name: 'Create member' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect
+    .poll(async () => (await member())?.args)
+    .toMatchObject({
+      path: { sketchId: 'member-path', elements: ['l0', 'a0'] },
+      profile: { kind: 'hat', flange: { literalMm: 20 } },
+      up: 'normal',
+      flip: false,
+    });
+  const inspector = page.locator('.cad-inspector');
+  await expect(page.getByTestId('cad-member-path')).toContainText('Member path (2 elements)');
+  const flange = inspector.getByLabel('Flange width (mm)');
+  await flange.fill('25');
+  await flange.press('Enter');
+  await ready(page);
+  await expect
+    .poll(async () => (await member())?.args)
+    .toMatchObject({ profile: { flange: { literalMm: 25 } } });
+  await inspector.getByLabel('Flip (the other way)').click();
+  await ready(page);
+  await expect.poll(async () => (await member())?.args).toMatchObject({ flip: true });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // A bend R larger than the flange does not fit: refused, the member unchanged.
+  const bend = inspector.getByLabel('Bend R (mm)');
+  await bend.fill('40');
+  await bend.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('角のRが断面の辺に収まりません');
+  await ready(page);
+  expect((await member())?.args).toMatchObject({ profile: { radius: { literalMm: 3 } } });
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+  }
+  await expect
+    .poll(async () => (await member())?.args)
+    .toMatchObject({
+      profile: { flange: { literalMm: 20 } },
+      flip: false,
+    });
+});
+
+// TS-1500, ST-252 (CR2e): the B1 sample, a hatchback's left skin; its wheelbase and roof height
+// changed in the parameter list, undone and redone, saved and reloaded. Not a performance
+// measurement.
+test('the B1 car skin follows its wheelbase and roof height, undo, redo, save and reload (CR2e)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(900_000);
+  const settled = () => expect(state(page)).toHaveText('Shape up to date', { timeout: 300_000 });
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = {
+    ...(empty.draft.content as CadDocument).kernelProfile,
+    ...cadToleranceSets.large,
+  };
+  await importJson(page, 'b1.json', {
+    ...empty,
+    name: 'B1 car',
+    draft: { ...empty.draft, content: { ...f25B1Car(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('B1 car');
+  await settled();
+  await expect(bodies(page)).toHaveCount(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const value = async (id: string) =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).parameters.find((p) => p.id === id)
+      ?.value;
+  const params = page.getByRole('list', { name: 'Parameters' });
+  const set = async (name: string, to: string) => {
+    await params.getByRole('button', { name: new RegExp(`^${name}`) }).click();
+    const field = page.locator('.cad-inspector').getByLabel(/^Value/);
+    await field.fill(to);
+    await field.press('Enter');
+    await settled();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  };
+  await set('Wheelbase', '2500');
+  await expect(params).toContainText(/Wheelbase\s*2,?500 mm/);
+  await set('Roof height', '1400');
+  await expect(params).toContainText(/Roof height\s*1,?400 mm/);
+  await expect(bodies(page)).toHaveCount(2);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await settled();
+  await expect.poll(() => value('roof')).toBe(1335);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await settled();
+  await expect.poll(() => value('roof')).toBe(1400);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.keyboard.press('Control+s');
+  await page.getByRole('button', { name: 'History and compare', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'History (1)' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await settled();
+  await expect(bodies(page)).toHaveCount(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const record = await nativeArtifact(page);
+  expect(record.versions[0].content).toEqual(record.draft.content);
+  expect(await value('wheelbase')).toBe(2500);
+  expect(await value('roof')).toBe(1400);
+});
 
 // CM-2 (docs/cad/complex-models.md, U4): a document whose fillet fails still shows the body
 // outside the failure, measured as usual, and the filleted part before the fillet, faint and
@@ -1224,4 +2186,1592 @@ test('compare a route with the equipment through edit, Undo, Redo, save and relo
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   }
+});
+
+// TS-1548, ST-265 (CR4e): a spot weld row between a hat's flange and its closure plate: its
+// points listed, its pitch and end distance changed, a pitch out of range refused, removed and
+// undone.
+test('list a spot weld row’s points, change its pitch, remove it and undo (CR4e)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'welds.json', {
+    ...empty,
+    name: 'Welds',
+    draft: { ...empty.draft, content: { ...f49SpotWelds(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Welds');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(2);
+  const row = page.getByTestId('cad-weld-welds-l');
+  await expect(row.getByTestId('cad-weld-points')).toContainText(
+    '5 points along 200 mm, 0 too far',
+  );
+  const welds = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).spotWelds ?? [];
+  await row.getByLabel('Pitch (mm)').fill('60');
+  await row.getByLabel('From the ends (mm)').fill('30');
+  await row.getByRole('button', { name: 'Apply' }).click();
+  await ready(page);
+  await expect
+    .poll(async () => (await welds())[0])
+    .toMatchObject({ pitchMm: 60, endDistanceMm: 30 });
+  await expect(row.getByTestId('cad-weld-points')).toContainText('3 points along 200 mm');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Below 10 mm: refused, the row unchanged.
+  await row.getByLabel('Pitch (mm)').fill('5');
+  await row.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByRole('alert')).toContainText('ピッチは10〜200 mm');
+  await ready(page);
+  expect((await welds())[0]).toMatchObject({ pitchMm: 60 });
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await ready(page);
+  await expect.poll(async () => (await welds()).length).toBe(0);
+  await expect(page.getByTestId('cad-weld-welds-l')).toHaveCount(0);
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+  }
+  await expect
+    .poll(async () => (await welds())[0])
+    .toMatchObject({ pitchMm: 40, endDistanceMm: 10 });
+  await expect(page.getByTestId('cad-weld-points')).toContainText('5 points');
+});
+
+// TS-1552, ST-266 (CR4g): the simplified BIW (F29, 42 bodies): the side outer's roof flange made
+// wider in the history, a sill row's pitch changed in the spot weld list, undone and redone,
+// saved and reloaded. Not a performance measurement.
+test('the simplified BIW follows its roof flange width and a weld pitch, undo, redo, save and reload (CR4g)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(900_000);
+  const settled = () => expect(state(page)).toHaveText('Shape up to date', { timeout: 300_000 });
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'biw.json', {
+    ...empty,
+    name: 'BIW',
+    draft: { ...empty.draft, content: { ...f29Biw(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('BIW');
+  await settled();
+  await expect(bodies(page)).toHaveCount(42);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const doc = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const width = async () =>
+    (
+      (await doc()).features.find((f) => f.id === 'side-roof-flange')?.args as {
+        width: { literalMm: number };
+      }
+    ).width.literalMm;
+  const pitch = async () => (await doc()).spotWelds?.find((w) => w.id === 'weld-l-sill-l')?.pitchMm;
+  const roof = page.getByTestId('cad-weld-weld-roof-l').getByTestId('cad-weld-points');
+  const sill = page.getByTestId('cad-weld-weld-l-sill-l');
+  await expect(roof).toContainText(/28 points along 1,?100 mm, 0 too far/);
+  await expect(sill.getByTestId('cad-weld-points')).toContainText(/50 points along 2,?000 mm/);
+  // The roof flange: 80 → 40 mm, ending short of the roof's edge strip (every point too far),
+  // then 100 mm.
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Side outer roof flange/ })
+    .click();
+  const field = page.locator('.cad-inspector').getByLabel('Width (mm)');
+  await field.fill('40');
+  await field.press('Enter');
+  await settled();
+  await expect.poll(width).toBe(40);
+  await expect(roof).toContainText('28 too far');
+  await field.fill('100');
+  await field.press('Enter');
+  await settled();
+  await expect.poll(width).toBe(100);
+  await expect(roof).toContainText('0 too far');
+  // The left sill's lower row: 40 → 50 mm.
+  await sill.getByLabel('Pitch (mm)').fill('50');
+  await sill.getByRole('button', { name: 'Apply' }).click();
+  await settled();
+  await expect.poll(pitch).toBe(50);
+  await expect(sill.getByTestId('cad-weld-points')).toContainText(/40 points along 2,?000 mm/);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await settled();
+  await expect.poll(pitch).toBe(40);
+  await expect(sill.getByTestId('cad-weld-points')).toContainText('50 points');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await settled();
+  await expect.poll(width).toBe(40);
+  await expect(roof).toContainText('28 too far');
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await settled();
+  }
+  await expect.poll(width).toBe(100);
+  await expect.poll(pitch).toBe(50);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.keyboard.press('Control+s');
+  await page.getByRole('button', { name: 'History and compare', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'History (1)' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await settled();
+  await expect(bodies(page)).toHaveCount(42);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const record = await nativeArtifact(page);
+  expect(record.versions[0].content).toEqual(record.draft.content);
+  expect(await width()).toBe(100);
+  expect(await pitch()).toBe(50);
+  await expect(roof).toContainText('0 too far');
+  await expect(sill.getByTestId('cad-weld-points')).toContainText(/40 points along 2,?000 mm/);
+});
+
+// TS-1593, ST-281 (CR6a): a body's look given a lamp's light (a preset) and a lens's transmission
+// (by hand) in the inspector, undone and redone, saved and reloaded.
+test('give a body a lamp’s light and a lens’s transmission, undo, redo, save and reload (CR6a)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  await bodies(page).last().click();
+  const inspector = page.locator('.cad-inspector');
+  const look = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    return doc.bodies[doc.bodies.length - 1]!.appearance;
+  };
+  await inspector.getByLabel('Material').selectOption('lamp-red');
+  await ready(page);
+  await expect
+    .poll(look)
+    .toMatchObject({ material: 'lamp-red', emission: { color: '#ff2a1f', strength: 6 } });
+  await expect(inspector.getByLabel('Emission strength')).toHaveValue('6');
+  // A value by hand: the look is no longer the preset's.
+  const transmission = inspector.getByLabel('Transmission');
+  await transmission.fill('0.8');
+  await transmission.press('Enter');
+  await ready(page);
+  await expect.poll(look).toMatchObject({ transmission: 0.8, emission: { strength: 6 } });
+  expect((await look()).material).toBeUndefined();
+  const ior = inspector.getByLabel('Index of refraction');
+  // Above 2.5: refused, the look unchanged.
+  await ior.fill('3');
+  await ior.press('Enter');
+  await expect(inspector.getByRole('alert')).toContainText('Index of refraction');
+  await ior.press('Escape');
+  await expect(ior).toHaveValue('1.5');
+  expect((await look()).ior).toBeUndefined();
+  await ior.fill('1.49');
+  await ior.press('Enter');
+  await ready(page);
+  await expect.poll(async () => (await look()).ior).toBe(1.49);
+  // Strength 0 is no light.
+  const strength = inspector.getByLabel('Emission strength');
+  await strength.fill('0');
+  await strength.press('Enter');
+  await ready(page);
+  await expect.poll(async () => (await look()).emission).toBeUndefined();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await look()).emission?.strength).toBe(6);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await look()).emission).toBeUndefined();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  await bodies(page).last().click();
+  await expect(page.locator('.cad-inspector').getByLabel('Transmission')).toHaveValue('0.8');
+  await expect(page.locator('.cad-inspector').getByLabel('Emission strength')).toHaveValue('6');
+  expect((await nativeArtifact(page)).versions[0]!.content).toMatchObject({
+    bodies: expect.arrayContaining([
+      expect.objectContaining({
+        appearance: expect.objectContaining({ transmission: 0.8, ior: 1.49 }),
+      }),
+    ]),
+  });
+  await page.screenshot({ path: test.info().outputPath('cr6a-light.png') });
+});
+
+// TS-1595, ST-282 (CR6b): a box's wall thickness and draft angle shown on the display mesh,
+// with the range, the pull direction and the mould halves changed. Display only: the content
+// is unchanged.
+test('check a part’s wall thickness and draft angle on the display mesh (CR6b)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  const shading = page.getByTestId('cad-shading');
+  await shading.selectOption('thickness');
+  const thickness = page.getByTestId('cad-thickness');
+  await expect(thickness).toContainText('display mesh');
+  const results = page.getByTestId('cad-thickness-results');
+  await expect(results).toContainText(/min [\d.]+ mm at \(/);
+  console.log('CR6b thickness', await results.innerText());
+  // A thinnest wall over the thickest is refused.
+  await page.getByLabel('Thinnest wall (mm)').fill('20');
+  await page.getByLabel('Thinnest wall (mm)').press('Enter');
+  await expect(thickness.getByRole('alert')).toHaveCount(1);
+  await page.getByLabel('Thinnest wall (mm)').press('Escape');
+  await page.getByLabel('Thickest wall (mm)').fill('25');
+  await page.getByLabel('Thickest wall (mm)').press('Enter');
+  await page.getByLabel('Thinnest wall (mm)').fill('20');
+  await page.getByLabel('Thinnest wall (mm)').press('Enter');
+  await expect(thickness).toContainText('under 20 mm');
+  await expect(thickness).toContainText('over 25 mm');
+  await page.screenshot({ path: test.info().outputPath('cr6b-thickness.png') });
+  await shading.selectOption('draft');
+  const draft = page.getByTestId('cad-draft-results');
+  await expect(draft).toContainText(/under 1° [\d.]+%/);
+  console.log('CR6b draft', await draft.innerText());
+  await page
+    .getByLabel('Two mould halves (faces against the pull release into the other half)')
+    .uncheck();
+  await expect(draft).toContainText(/undercut [\d.]+%/);
+  console.log('CR6b draft one half', await draft.innerText());
+  await page.getByLabel('Pull direction').selectOption('+x');
+  console.log('CR6b draft +x', await draft.innerText());
+  await page.screenshot({ path: test.info().outputPath('cr6b-draft.png') });
+  await shading.selectOption('shaded');
+  await expect(page.getByTestId('cad-draft-check')).toHaveCount(0);
+  expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+});
+
+// TS-1597, ST-283 (CR6c): a ray diagram over a box made a mirror, a clear lens and a matte
+// plastic in turn: one ray reflected, refracted in and out, and stopped. Display only.
+test('trace a ray diagram through a mirror, a lens and an opaque body (CR6c)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  await page.getByTestId('cad-rays-shown').check();
+  const panel = page.getByTestId('cad-rays');
+  await expect(panel).toContainText('no light distribution');
+  const set = async (label: string, value: string) => {
+    await panel.getByLabel(label).fill(value);
+    await panel.getByLabel(label).press('Enter');
+  };
+  await set('Focus X (mm)', '-200');
+  await set('Focus Y (mm)', '2');
+  await set('Focus Z (mm)', '2');
+  await panel.getByLabel('Direction').selectOption('+x');
+  await set('Spread (°)', '0');
+  await set('Rays', '1');
+  const result = page.getByTestId('cad-rays-result');
+  // A plain box stops the ray.
+  await expect(result).toContainText('1 rays: 0 leave the model (orange), 1 stopped');
+  await bodies(page).last().click();
+  const material = page.locator('.cad-inspector').getByLabel('Material');
+  await material.selectOption('chrome');
+  await ready(page);
+  await expect(result).toContainText('1 leave the model');
+  await expect(result).toContainText('Hits: 1 reflections, 0 refractions');
+  await expect(result).toContainText('1 mirror');
+  await material.selectOption('lamp-lens');
+  await ready(page);
+  await expect(result).toContainText('Hits: 0 reflections, 2 refractions');
+  await expect(result).toContainText('1 transmitting');
+  await set('Rays', '9');
+  await set('Spread (°)', '10');
+  await page.screenshot({ path: test.info().outputPath('cr6c-rays.png') });
+  // The fan plane cannot be normal to the direction.
+  await expect(panel.getByLabel('Fan plane normal').locator('option[value="x"]')).toHaveAttribute(
+    'disabled',
+    '',
+  );
+  await page.getByTestId('cad-rays-shown').uncheck();
+  await expect(panel).toHaveCount(0);
+  const after = (await nativeArtifact(page)).draft.content as CadDocument;
+  // Only the look changed: the rays are not part of the content.
+  expect(JSON.stringify({ ...after, bodies: [] })).toBe(
+    JSON.stringify({ ...JSON.parse(before), bodies: [] }),
+  );
+});
+
+// TS-1599, ST-284 (CR6d): a seat cushion's stitch groove cut from the Groove section (out of
+// range refused first), its radius changed in the inspector, both undone; a lens's 3 × 2 grid of
+// cuts, its rows raised to 3 in the pattern's inspector.
+test('cut a groove along a line, and edit a grid pattern’s rows (CR6d)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'cushion.json', {
+    ...empty,
+    name: 'Cushion',
+    draft: {
+      ...empty.draft,
+      content: { ...cr6dGroove('open', 1, { groove: false }), kernelProfile },
+    },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Cushion');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const grooves = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).features.filter(
+      (f) => f.type === 'groove',
+    );
+  await bodies(page).first().click();
+  await page.locator('summary', { hasText: /^Groove$/ }).click();
+  await page.getByTestId('cad-groove-sketch').selectOption('stitch');
+  const r = page.getByLabel('Groove R (mm)');
+  await r.fill('20');
+  await r.press('Enter');
+  await expect(page.getByRole('button', { name: 'Cut the groove' })).toBeDisabled();
+  await r.fill('1');
+  await r.press('Enter');
+  await page.getByRole('button', { name: 'Cut the groove' }).click();
+  await ready(page);
+  await expect.poll(async () => (await grooves()).length).toBe(1);
+  expect((await grooves())[0]).toMatchObject({
+    args: { tool: { sketchId: 'stitch', elements: ['s0'] }, radius: { literalMm: 1 } },
+  });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Groove groove$/ })
+    .click();
+  await expect(page.getByTestId('cad-groove-along')).toContainText('Stitch line (1 elements');
+  const radius = page.locator('.cad-inspector').getByLabel('Radius (mm)');
+  await radius.fill('2');
+  await radius.press('Enter');
+  await ready(page);
+  await expect
+    .poll(async () => (await grooves())[0]?.args)
+    .toMatchObject({ radius: { literalMm: 2 } });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect
+    .poll(async () => (await grooves())[0]?.args)
+    .toMatchObject({ radius: { literalMm: 1 } });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(async () => (await grooves()).length).toBe(0);
+
+  // The lens: rows of the pattern's row.
+  const lens = await nativeArtifact(page);
+  await importJson(page, 'lens.json', {
+    ...lens,
+    name: 'Lens',
+    draft: { ...lens.draft, content: { ...cr6dGroove('grid'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Lens');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: 'pattern cut pattern', exact: true })
+    .click();
+  await expect(page.getByTestId('cad-pattern-rows')).toContainText('In rows along (0, 1, 0)');
+  const rows = page.locator('.cad-inspector').getByLabel('Rows');
+  await rows.fill('3');
+  await rows.press('Enter');
+  await ready(page);
+  await expect
+    .poll(async () => {
+      const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+      const f = doc.features.find((x) => x.id === 'cuts');
+      return f?.type === 'pattern' && f.args.layout.type === 'linear'
+        ? f.args.layout.rows?.count
+        : undefined;
+    })
+    .toEqual({ literal: 3 });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+// TS-1801, ST-285 (CR6e): the headlamp sample (F57) opened in the CAD screen: its five bodies,
+// the housing's wall and draft checks, a ray fan from the bulb reflected by the reflector and
+// refracted by the lenses, and the lens thickness changed from its parameter and undone; the
+// tail lamp (F58) opened with its red lenses lit.
+test('open the headlamp and tail lamp samples, check them and change the lens (CR6e)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'headlamp.json', {
+    ...empty,
+    name: 'Headlamp',
+    draft: { ...empty.draft, content: { ...lampFixture('headlamp'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Headlamp');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(5);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  await page.screenshot({ path: test.info().outputPath('cr6e-headlamp.png') });
+
+  // The housing's wall: 2.5 mm at its thinnest.
+  const shading = page.getByTestId('cad-shading');
+  await shading.selectOption('thickness');
+  const thickness = page.getByTestId('cad-thickness-results');
+  await expect(thickness).toContainText(/Housing: min 2\.5\d* mm/);
+  console.log('CR6e thickness', await thickness.innerText());
+  await page.screenshot({ path: test.info().outputPath('cr6e-thickness.png') });
+  await shading.selectOption('draft');
+  await page.getByLabel('Pull direction').selectOption('+x');
+  const draft = page.getByTestId('cad-draft-results');
+  await expect(draft).toContainText('Housing');
+  console.log('CR6e draft', await draft.innerText());
+  await page.screenshot({ path: test.info().outputPath('cr6e-draft.png') });
+  await shading.selectOption('shaded');
+
+  // Rays from the bulb at the focus: the reflector sends them forward through both lenses.
+  await page.getByTestId('cad-rays-shown').check();
+  const panel = page.getByTestId('cad-rays');
+  const set = async (label: string, value: string) => {
+    await panel.getByLabel(label).fill(value);
+    await panel.getByLabel(label).press('Enter');
+  };
+  await set('Focus X (mm)', String(lampSizes.headlamp.focusX));
+  await set('Focus Y (mm)', '0');
+  await set('Focus Z (mm)', '0');
+  await panel.getByLabel('Direction').selectOption('-x');
+  await set('Spread (°)', '120');
+  await set('Rays', '15');
+  await set('Bounces', '8');
+  const result = page.getByTestId('cad-rays-result');
+  await expect(result).toContainText(/Hits: [1-9]\d* reflections, [1-9]\d* refractions/);
+  await expect(result).toContainText('1 mirror');
+  console.log('CR6e rays', await result.innerText());
+  await page.screenshot({ path: test.info().outputPath('cr6e-rays.png') });
+  await page.getByTestId('cad-rays-shown').uncheck();
+  expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+
+  // The outer lens's thickness from its parameter, and undone.
+  const params = page.getByRole('list', { name: 'Parameters' });
+  await params.getByRole('button', { name: /^Lens thickness/ }).click();
+  const field = page.locator('.cad-inspector').getByLabel(/^Value/);
+  await field.fill('4');
+  await field.press('Enter');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(params).toContainText(/Lens thickness\s*4 mm/);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(params).toContainText(/Lens thickness\s*3 mm/);
+
+  // The tail lamp: its inner and outer lenses lit red.
+  const lamp = await nativeArtifact(page);
+  await importJson(page, 'tail-lamp.json', {
+    ...lamp,
+    name: 'Tail lamp',
+    draft: { ...lamp.draft, content: { ...lampFixture('tail'), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Tail lamp');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(5);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const tail = (await nativeArtifact(page)).draft.content as CadDocument;
+  expect(
+    tail.bodies.filter((b) => b.appearance.material === 'lamp-red').map((b) => b.name),
+  ).toEqual(['Inner lens', 'Outer lens']);
+  await page.screenshot({ path: test.info().outputPath('cr6e-tail.png') });
+});
+
+// TS-1804, ST-286 (CR6f): the seat assembly (F59) opened with its parts' closure: five parts on
+// the rails, the slide moved 120 mm and the back reclined 25° from the joint values, a slide
+// past its range refused, and both undone.
+test('open the seat assembly, slide it and recline its back (CR6f)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const seat = f59Seat({ id, buildHash });
+  await importJson(page, 'seat.json', {
+    ...empty,
+    name: 'Seat',
+    draft: { ...empty.draft, content: seat.assembly },
+    cadParts: [...seat.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Seat');
+  await ready(page);
+  await expect(components(page)).toHaveCount(5);
+  await expect(bodies(page)).toHaveCount(2);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('cr6f-seat.png') });
+  // The ray diagram does not trace placed components: refused instead of rays through them.
+  await page.getByTestId('cad-rays-shown').check();
+  await expect(page.getByTestId('cad-rays').getByRole('alert')).toContainText(
+    "traces only this document's bodies",
+  );
+  await page.getByTestId('cad-rays-shown').uncheck();
+  const poses = async () => ((await nativeArtifact(page)).draft.content as CadDocument).solvedPoses;
+  const joints = page.getByRole('list', { name: 'Joints' });
+  const values = page.getByRole('form', { name: 'Joint values' });
+  // Slide 120 mm forward: the frame, pan and cushion move together.
+  await joints.getByRole('button', { name: /^Seat slide/ }).click();
+  await values.getByLabel('Distance (mm)').fill('120');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  await expect
+    .poll(async () => (await poses())['c-cushion']?.translationMm.map((v) => Math.round(v)))
+    .toEqual([120, 0, 0]);
+  // Past the range (0–240 mm) is refused.
+  await values.getByLabel('Distance (mm)').fill('300');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText('範囲の外');
+  await values.getByLabel('Distance (mm)').press('Escape');
+  // Recline 25°: the back turns about its hinge, which moved with the frame.
+  await joints.getByRole('button', { name: /^Recline/ }).click();
+  await values.getByLabel('Angle (°)').fill('25');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  await expect
+    .poll(async () => {
+      const q = (await poses())['c-back']?.rotation;
+      return q ? Math.round((2 * Math.acos(Math.min(1, Math.abs(q[3]))) * 180) / Math.PI) : 0;
+    })
+    .toBe(25);
+  expect((await poses())['c-back-shell']).toEqual((await poses())['c-back']);
+  await page.screenshot({ path: test.info().outputPath('cr6f-reclined.png') });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect
+    .poll(async () => (await poses())['c-cushion']?.translationMm.map((v) => Math.round(v)))
+    .toEqual([0, 0, 0]);
+});
+
+// TS-1806, ST-287 (CR6g): the wheel and tyre (F60), door mirror (F61) and steering wheel (F62)
+// opened one after another in the CAD screen, each evaluated without an error.
+test('open the wheel and tyre, door mirror and steering wheel samples (CR6g)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const samples = [
+    { name: 'Wheel', file: 'wheel.json', make: f60Wheel, bodies: 2 },
+    { name: 'Door mirror', file: 'mirror.json', make: f61Mirror, bodies: 3 },
+    { name: 'Steering wheel', file: 'steering.json', make: f62Steering, bodies: 2 },
+  ];
+  for (const s of samples) {
+    const record = await nativeArtifact(page);
+    const { id, buildHash } = (record.draft.content as CadDocument).kernelProfile;
+    await importJson(page, s.file, {
+      ...record,
+      name: s.name,
+      draft: { ...record.draft, content: s.make({ id, buildHash }) },
+    });
+    await expect(page.getByLabel('Artifact name')).toHaveValue(s.name);
+    await ready(page);
+    await expect(bodies(page)).toHaveCount(s.bodies);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await page.screenshot({
+      path: test.info().outputPath(`cr6g-${s.file.replace('.json', '')}.png`),
+    });
+  }
+});
+
+// WM1a (docs/cad/watch-design.md): ST-440, TS-1882.
+test('add an involute gear, change its teeth, add spoke windows, refuse an undercut', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add gear')).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Gear spurGear$/ })
+    .click();
+  const inspector = page.locator('.cad-inspector');
+  const teeth = inspector.getByLabel('Teeth', { exact: true });
+  await teeth.fill('40');
+  await teeth.press('Enter');
+  await ready(page);
+  await inspector.getByRole('button', { name: 'Add spokes', exact: true }).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const gear = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    const f = doc.features.find((x) => x.type === 'spurGear');
+    if (f?.type !== 'spurGear') throw new Error('no gear');
+    return f.args;
+  };
+  expect((await gear()).teeth).toEqual({ literal: 40 });
+  expect((await gear()).spokes?.count).toEqual({ literal: 5 });
+  await page.screenshot({ path: test.info().outputPath('gear.png') });
+  // Ten teeth undercut with a standard rack: refused with its code, the gear stays.
+  await teeth.fill('10');
+  await teeth.press('Enter');
+  await expect(page.getByText(/gear-undercut/)).toBeVisible();
+  expect((await gear()).teeth).toEqual({ literal: 40 });
+  // A profile shift makes ten teeth possible.
+  const shift = inspector.getByLabel('Profile shift', { exact: true });
+  await shift.fill('0.5');
+  await shift.press('Enter');
+  await ready(page);
+  // The windows no longer fit inside ten teeth: refused until the spokes go.
+  await teeth.fill('10');
+  await teeth.press('Enter');
+  await expect(page.getByText(/gear-spokes-too-wide/)).toBeVisible();
+  await inspector.getByRole('button', { name: 'Remove spokes', exact: true }).click();
+  await ready(page);
+  await teeth.fill('10');
+  await teeth.press('Enter');
+  await ready(page);
+  expect((await gear()).teeth).toEqual({ literal: 10 });
+  expect((await gear()).spokes).toBeUndefined();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+// WM1b (docs/cad/watch-design.md): ST-441, TS-1885.
+test('switch a gear to the cycloidal watch tooth and back', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add gear')).click();
+  await ready(page);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Gear spurGear$/ })
+    .click();
+  const inspector = page.locator('.cad-inspector');
+  const gear = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    const f = doc.features.find((x) => x.type === 'spurGear');
+    if (f?.type !== 'spurGear') throw new Error('no gear');
+    return f.args;
+  };
+  await inspector.getByRole('combobox', { name: 'Tooth profile' }).selectOption('cycloidal');
+  await ready(page);
+  expect(await gear()).toMatchObject({
+    profile: 'cycloidal',
+    matingTeeth: { literal: 24 },
+    toothThickness: 0.5,
+    addendum: 1.3,
+    dedendum: 1.6,
+  });
+  expect((await gear()).pressureAngle).toBeUndefined();
+  await expect(inspector.getByLabel('Pressure angle (°)')).toHaveCount(0);
+  // A wheel of 24 driving an 8-leaf pinion.
+  const mating = inspector.getByLabel('Mating teeth', { exact: true });
+  await mating.fill('8');
+  await mating.press('Enter');
+  await ready(page);
+  expect((await gear()).matingTeeth).toEqual({ literal: 8 });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('cycloidal.png') });
+  // Too thick a tooth closes the gap at the root.
+  const thickness = inspector.getByLabel('Tooth thickness', { exact: true });
+  await thickness.fill('0.9');
+  await thickness.press('Enter');
+  await expect(page.getByText(/gear-tooth-thickness/)).toBeVisible();
+  expect((await gear()).toothThickness).toBe(0.5);
+  await inspector.getByRole('combobox', { name: 'Tooth profile' }).selectOption('involute');
+  await ready(page);
+  expect(await gear()).toMatchObject({ profile: 'involute', profileShift: 0, addendum: 1 });
+  expect((await gear()).matingTeeth).toBeUndefined();
+});
+
+// TS-1887, ST-442 (WM2a): a revolute joint and the wheel that follows it at −3 × set to turn
+// continuously in the joints panel, driven 10¼ turns: the values keep the turns, the follower
+// lies where its fractional turn puts it, turning it back to one turn is refused, and undone.
+test('turn a wheel ten turns with continuous joints (WM2a)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(180_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const r2b = r2bJoints({ id, buildHash });
+  const doc = structuredClone(r2b.assembly);
+  const driver = doc.joints.find((j) => j.id === 'j-turn')!;
+  driver.limits = [];
+  driver.values = { angle: { literalRad: 0 } };
+  const wheel = doc.joints.find((j) => j.id === 'j-plane')!;
+  wheel.type = 'revolute';
+  wheel.values = {};
+  wheel.couplings = [{ of: 'angle', from: { joint: 'j-turn', of: 'angle' }, ratio: -3, offset: 0 }];
+  doc.solvedPoses = solveJoints(
+    doc,
+    parameterValues(doc),
+    (h) => r2b.closure.get(h),
+    (at, ref) => r2b.frames.get(`${at} ${connectorRefKey(ref)}`),
+    () => true,
+  ).poses;
+  await importJson(page, 'wheels.json', {
+    ...empty,
+    name: 'Wheels',
+    draft: { ...empty.draft, content: doc },
+    cadParts: [...r2b.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Wheels');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const content = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const joints = page.getByRole('list', { name: 'Joints' });
+  const panel = page.getByTestId('cad-joint');
+  const continuous = panel.getByLabel('Turns continuously');
+  for (const name of [/^j-turn/, /^j-plane/]) {
+    await joints.getByRole('button', { name }).click();
+    await continuous.check();
+    await ready(page);
+  }
+  expect((await content()).joints.filter((j) => j.continuous).map((j) => j.id)).toEqual([
+    'j-turn',
+    'j-plane',
+  ]);
+  // A continuous joint has no range.
+  await expect(page.getByRole('form', { name: 'Joint range' })).toHaveCount(0);
+  await joints.getByRole('button', { name: /^j-turn/ }).click();
+  const values = page.getByRole('form', { name: 'Joint values' });
+  await values.getByLabel('Angle (°)').fill('3690');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const turned = await content();
+  expect(turned.joints.find((j) => j.id === 'j-turn')!.values.angle).toEqual({
+    literalRad: (3690 * Math.PI) / 180,
+  });
+  // −30¾ turns: the wheel stands a quarter turn from where it started.
+  const angleOf = (q: readonly number[]) =>
+    Math.round((2 * Math.atan2(q[2]!, q[3]!) * 180) / Math.PI + 720) % 360;
+  const start = doc.solvedPoses['c-plate-1']!.rotation;
+  await expect
+    .poll(
+      async () =>
+        (angleOf((await content()).solvedPoses['c-plate-1']!.rotation) - angleOf(start) + 360) %
+        360,
+    )
+    .toBe(90);
+  await page.screenshot({ path: test.info().outputPath('wm2a-turned.png') });
+  // Back to one turn while past one turn is refused.
+  await continuous.click();
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toBeVisible();
+  expect((await content()).joints.find((j) => j.id === 'j-turn')!.continuous).toBe(true);
+  for (let i = 0; i < 3; i++) {
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+  }
+  expect((await content()).joints.some((j) => j.continuous)).toBe(false);
+});
+
+// TS-1890, ST-444 (WM2c): the F70 train opened without meshes; the centre wheel meshed with the
+// third pinion and the third wheel with the fourth pinion in the Gear meshes section, a pair at
+// leaves cut for another wheel refused, the gear train listing ×−8 and ×60
+// (60 s a turn), the centre wheel driven 10¼ turns, a mesh removed, and undone.
+test('mesh a watch gear train and list its ratios (WM2c)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const f70 = f70GearTrain({ id, buildHash });
+  const doc = structuredClone(f70.assembly);
+  delete doc.gearMeshes;
+  for (const j of doc.joints) {
+    delete j.couplings;
+    j.values = { angle: { literalRad: 0 } };
+  }
+  doc.solvedPoses = f70.solve(doc).poses;
+  await importJson(page, 'train.json', {
+    ...empty,
+    name: 'Train',
+    draft: { ...empty.draft, content: doc },
+    cadParts: [...f70.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Train');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const content = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const section = page.getByTestId('cad-gear-meshes');
+  const add = section.getByRole('form', { name: 'Add gear mesh' });
+  const mesh = async (driver: string, a: string, driven: string, b: string) => {
+    await add.getByLabel('Driver joint').selectOption({ label: driver });
+    await add.getByLabel('Driver gear').selectOption({ label: a });
+    await add.getByLabel('Driven joint').selectOption({ label: driven });
+    await add.getByLabel('Driven gear').selectOption({ label: b });
+    await add.getByRole('button', { name: 'Mesh gears' }).click();
+  };
+  // The centre wheel cannot drive the fourth pinion: its leaves were cut for the third wheel.
+  await mesh('j-centre', 'Centre wheel', 'j-fourth', 'Fourth pinion');
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText(
+    'サイクロイドの歯車が相手の歯数で作られていません',
+  );
+  expect((await content()).gearMeshes).toBeUndefined();
+  await mesh('j-centre', 'Centre wheel', 'j-third', 'Third pinion');
+  await ready(page);
+  await mesh('j-third', 'Third wheel', 'j-fourth', 'Fourth pinion');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const meshed = await content();
+  expect(meshed.gearMeshes!.map((m) => [m.driver.joint, m.driven.joint])).toEqual([
+    ['j-centre', 'j-third'],
+    ['j-third', 'j-fourth'],
+  ]);
+  // The same couplings the fixture's own registration gives.
+  for (const id of ['j-third', 'j-fourth']) {
+    const c = meshed.joints.find((j) => j.id === id)!.couplings![0]!;
+    const want = f70.assembly.joints.find((j) => j.id === id)!.couplings![0]!;
+    expect(c.ratio).toBeCloseTo(want.ratio, 9);
+    expect(c.offset).toBeCloseTo(want.offset, 6);
+  }
+  await expect(section.getByRole('note')).toHaveCount(0);
+  const train = page.getByTestId('cad-gear-train');
+  await expect(train.getByTestId('cad-gear-train-row')).toHaveText([
+    /j-third：×-8（1回転 450 秒、逆回り）/,
+    /j-fourth：×60（1回転 60 秒、同じ向き）/,
+  ]);
+  await page.screenshot({ path: test.info().outputPath('wm2c-meshes.png') });
+  // 10¼ turns of the centre wheel: the fourth wheel turns 615 times.
+  await page
+    .getByRole('list', { name: 'Joints' })
+    .getByRole('button', { name: /^j-centre/ })
+    .click();
+  const values = page.getByRole('form', { name: 'Joint values' });
+  await values.getByLabel('Angle (°)').fill('3690');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(section.getByRole('note')).toHaveCount(0);
+  // The driven joints show their mesh in place of a coupling form.
+  await page
+    .getByRole('list', { name: 'Joints' })
+    .getByRole('button', { name: /^j-fourth/ })
+    .click();
+  await expect(page.getByTestId('cad-joint-mesh-coupling')).toContainText('j-third → j-fourth');
+  await section
+    .getByTestId('cad-gear-mesh')
+    .filter({ hasText: 'j-third → j-fourth' })
+    .getByRole('button', { name: 'Remove mesh' })
+    .click();
+  await ready(page);
+  const removed = await content();
+  expect(removed.gearMeshes!.length).toBe(1);
+  const fourth = removed.joints.find((j) => j.id === 'j-fourth')!;
+  expect(fourth.couplings).toBeUndefined();
+  expect(fourth.values.angle).toBeDefined();
+  for (let i = 0; i < 4; i++) {
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+  }
+  expect((await content()).gearMeshes).toBeUndefined();
+  // A picked joint that is deleted gives way to a remaining one.
+  await add.getByLabel('Driver joint').selectOption({ label: 'j-centre' });
+  await add.getByLabel('Driven joint').selectOption({ label: 'j-fourth' });
+  // j-fourth is still the selected joint from the mesh note above.
+  await expect(page.getByRole('form', { name: 'Joint values' })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete joint' }).click();
+  await ready(page);
+  await expect(add.getByLabel('Driven joint')).toHaveValue('j-third');
+  await expect(add.getByLabel('Driven gear')).toHaveValue(/.+/);
+  await expect(add.getByRole('button', { name: 'Mesh gears' })).toBeEnabled();
+});
+
+// TS-1892, ST-445 (WM3): watch-sized parts on a 30 mm plate — a 0.05 mm cube and an 8-leaf pinion
+// of module 0.05 — read with their own digits (0.000125 mm³, not 0), framed by Zoom to selection
+// though a pixel across in the whole view, measured corner to corner exactly (0.05 mm), and the
+// pinion framed in perspective and zoomed in further toward the cursor without clipping.
+test('edit watch-sized parts (WM3)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  const b = cadBuilder(kernelProfile);
+  b.box('Plate', { size: [30, 30, 0.5], origin: [-15, -15, 0] });
+  b.box('Tiny', { size: [0.05, 0.05, 0.05], origin: [12, 8, 0.5] });
+  b.spurGear('Pinion', {
+    profile: 'cycloidal',
+    module: 0.05,
+    teeth: 8,
+    matingTeeth: 60,
+    faceWidth: 0.2,
+    bore: 0,
+    origin: [-10, -5, 0.5],
+  });
+  await importJson(page, 'small.json', {
+    ...empty,
+    name: 'Small',
+    draft: { ...empty.draft, content: { ...b.build().document, kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Small');
+  await ready(page);
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 90_000 });
+  await page.getByTestId('cad-standard-view').selectOption('plan');
+  await bodies(page).filter({ hasText: 'Tiny' }).click();
+  const metrics = page.locator('.cad-metrics');
+  await expect(metrics).toContainText('0.000125 mm³');
+  await expect(metrics).toContainText('0.05 × 0.05 × 0.05 mm');
+  // A pixel across in the whole view: framed, it fills the view, and its corners snap.
+  await page.getByRole('button', { name: 'Zoom to selection' }).click();
+  const canvas = (await page.locator('canvas').first().boundingBox())!;
+  const cx = canvas.x + canvas.width / 2;
+  const cy = canvas.y + canvas.height / 2;
+  await (await tool(page, 'Measure distance')).click();
+  await page.mouse.click(cx - 200, cy - 200);
+  await page.mouse.click(cx + 200, cy - 200);
+  const measured = page.locator('.cad-measure');
+  await expect(page.getByTestId('cad-distance')).toHaveText('0.05');
+  await expect(measured).toContainText('Exact: both points are corners');
+  await page.screenshot({ path: test.info().outputPath('wm3-tiny.png') });
+  await measured.getByRole('button', { name: 'Clear' }).click();
+  await (await tool(page, 'Measure distance')).click();
+  // The pinion in perspective, then closer toward the cursor: its leaves stay whole.
+  await page.getByTestId('cad-standard-view').selectOption('three-quarter');
+  await bodies(page).filter({ hasText: 'Pinion' }).click();
+  await page.getByRole('button', { name: 'Zoom to selection' }).click();
+  await page.mouse.move(cx, cy);
+  for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -200);
+  await page.screenshot({ path: test.info().outputPath('wm3-pinion.png') });
+  await page.mouse.click(cx, cy);
+  await expect(page.locator('.cad-inspector').getByLabel('Name')).toHaveValue('Pinion');
+});
+
+// W1 acceptance (docs/cad/watch-design.md, 受け入れの区切り W1; WM1–WM3): the F70 train opened
+// without meshes and meshed in the normal screen; the centre wheel turned to 0°, 1234.5° and
+// 3690° (10¼ turns, the fourth wheel 615 turns), at each of which the gear mesh checks (phase
+// and centre distance) find nothing and the MR3 interference check on the display meshes finds
+// no overlapping parts; then saved, reloaded and copied through native JSON with the same
+// meshes and couplings. A train with its fourth arbor 0.05 mm off is refused at that pair.
+test('W1 acceptance: mesh a watch train, turn it ten turns without interference, and keep it', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(420_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const f70 = f70GearTrain({ id, buildHash });
+  const unmeshed = (shift = 0) => {
+    const doc = structuredClone(f70.assembly);
+    delete doc.gearMeshes;
+    for (const j of doc.joints) {
+      delete j.couplings;
+      j.values = { angle: { literalRad: 0 } };
+      if (j.id === 'j-fourth')
+        j.parent.offset!.translation[0] = mm(
+          (j.parent.offset!.translation[0] as { literalMm: number }).literalMm + shift,
+        );
+    }
+    doc.solvedPoses = f70.solve(doc).poses;
+    return doc;
+  };
+  const cadParts = [...f70.closure].map(([contentHash, content]) => ({ contentHash, content }));
+  await importJson(page, 'train.json', {
+    ...empty,
+    name: 'Train',
+    draft: { ...empty.draft, content: unmeshed() },
+    cadParts,
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Train');
+  await ready(page);
+  const content = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const section = page.getByTestId('cad-gear-meshes');
+  const add = section.getByRole('form', { name: 'Add gear mesh' });
+  const mesh = async (driver: string, a: string, driven: string, b: string) => {
+    await add.getByLabel('Driver joint').selectOption({ label: driver });
+    await add.getByLabel('Driver gear').selectOption({ label: a });
+    await add.getByLabel('Driven joint').selectOption({ label: driven });
+    await add.getByLabel('Driven gear').selectOption({ label: b });
+    await add.getByRole('button', { name: 'Mesh gears' }).click();
+    await ready(page);
+  };
+  await mesh('j-centre', 'Centre wheel', 'j-third', 'Third pinion');
+  await mesh('j-third', 'Third wheel', 'j-fourth', 'Fourth pinion');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect((await content()).gearMeshes).toHaveLength(2);
+  const interference = page.getByTestId('cad-interference');
+  const status = page.getByTestId('cad-interference-status');
+  const values = page.getByRole('form', { name: 'Joint values' });
+  for (const degrees of ['0', '1234.5', '3690']) {
+    // 0° is where the train was meshed: nothing to apply.
+    if (degrees !== '0') {
+      // A click on the selected joint clears it: click until its values show.
+      const centre = page.getByRole('list', { name: 'Joints' }).getByRole('button', {
+        name: /^j-centre/,
+      });
+      await centre.click();
+      if (!(await values.isVisible())) await centre.click();
+      await values.getByLabel('Angle (°)').fill(degrees);
+      await values.getByRole('button', { name: 'Apply values' }).click();
+      await ready(page);
+    }
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(section.getByRole('note')).toHaveCount(0);
+    const doc = await content();
+    expect(gearMeshProblems(doc, f70.solve(doc), f70.lookup).size, degrees).toBe(0);
+    await interference.getByRole('button', { name: 'Check interference' }).click();
+    await expect(status).toHaveText('今の姿勢：干渉はありません。', { timeout: 120_000 });
+    await page.screenshot({ path: test.info().outputPath(`w1-${degrees}.png`) });
+  }
+  // 3690° on the centre wheel: −8 × and 60 × on the others, kept whole (not wrapped).
+  const turned = await content();
+  const solved = f70.solve(turned);
+  expect(Object.keys(solved.joints).sort()).toEqual(['j-centre', 'j-fourth', 'j-third']);
+  // Saved, reloaded, and copied through native JSON: the same meshes and couplings.
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  const reloaded = await content();
+  expect(reloaded.gearMeshes).toEqual(turned.gearMeshes);
+  expect(reloaded.joints).toEqual(turned.joints);
+  const record = await nativeArtifact(page);
+  expect(record.versions[0]!.content).toEqual(reloaded);
+  await importJson(page, 'train-copy.json', { ...record, name: 'Train copy' });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Train copy');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const copied = await content();
+  expect(copied.gearMeshes).toEqual(turned.gearMeshes);
+  expect(copied.joints).toEqual(turned.joints);
+  await expect(section.getByRole('note')).toHaveCount(0);
+  // The fourth arbor 0.05 mm off: that pair is refused with both distances.
+  await importJson(page, 'train-off.json', {
+    ...empty,
+    name: 'Train off',
+    draft: { ...empty.draft, content: unmeshed(0.05) },
+    cadParts,
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Train off');
+  await ready(page);
+  await mesh('j-centre', 'Centre wheel', 'j-third', 'Third pinion');
+  await mesh('j-third', 'Third wheel', 'j-fourth', 'Fourth pinion');
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText('この組は 4.25 mm');
+  expect((await content()).gearMeshes!.map((m) => m.id)).toHaveLength(1);
+});
+
+// WM5b (docs/cad/watch-design.md, WM5): the SK-01 sample watch opened in the Playground through
+// native JSON with its part versions (cadParts): the movement in its case with the hands, clear
+// of interference at rest; the form 分解 recalled as one edit lifts the bridges, the back and the
+// bezel and is clear too, and 組立 puts them back.
+test('WM5b: open the SK-01 watch, recall 分解 and 組立, clear of interference', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(900_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const watch = sk01Watch({ id, buildHash });
+  await importJson(page, 'sk01.json', {
+    ...empty,
+    name: 'SK-01',
+    draft: { ...empty.draft, content: watch.assembly },
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const content = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const form = (name: string) => page.locator(`[data-testid=cad-form][data-form=${name}]`);
+  await expect(form('form-assembled').locator('[data-state=current]')).toBeVisible();
+  const interference = page.getByTestId('cad-interference');
+  const status = page.getByTestId('cad-interference-status');
+  const clear = async (shot: string) => {
+    // The parts are evaluated in the background, gears about 10 s each: until every one is in,
+    // the check lists the rest unchecked.
+    await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 600_000 });
+    await interference.getByRole('button', { name: 'Check interference' }).click();
+    await expect(status).toHaveText('今の姿勢：干渉はありません。', { timeout: 600_000 });
+    await page.screenshot({ path: test.info().outputPath(`${shot}.png`) });
+  };
+  await clear('wm5b-assembled');
+  await page
+    .getByRole('group', { name: 'Form 分解' })
+    .getByRole('button', { name: 'Recall' })
+    .click();
+  await ready(page);
+  await expect(form('form-exploded').locator('[data-state=current]')).toBeVisible();
+  const lifted = (await content()).joints.filter((j) => j.id.startsWith('j-lift-'));
+  expect(
+    Object.fromEntries(
+      lifted.map((j) => [j.id, (j.values.distance as { literalMm: number }).literalMm]),
+    ),
+  ).toEqual({
+    'j-lift-case-back': 14,
+    'j-lift-balance-cock': 8,
+    'j-lift-train-bridge': 6,
+    'j-lift-barrel-bridge': 6,
+    'j-lift-bezel': -8,
+  });
+  await clear('wm5b-exploded');
+  await page
+    .getByRole('group', { name: 'Form 組立' })
+    .getByRole('button', { name: 'Recall' })
+    .click();
+  await ready(page);
+  await expect(form('form-assembled').locator('[data-state=current]')).toBeVisible();
+  expect((await content()).joints).toEqual(watch.assembly.joints);
+});
+
+// WM5c (docs/cad/watch-design.md, WM5): the SK-01 watch written from the Playground's export as
+// STEP AP242 (each of its 17 part versions once as a product, placed once each under the root)
+// and as GLB (each placed part's display mesh at its pose). The files go to CAD_WATCH_DEMO_DIR
+// when it is set (the demo, never committed).
+test('WM5c: export the SK-01 watch as STEP AP242 and GLB', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(900_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const watch = sk01Watch({ id, buildHash });
+  await importJson(page, 'sk01.json', {
+    ...empty,
+    name: 'SK-01',
+    draft: { ...empty.draft, content: watch.assembly },
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await ready(page);
+  await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 600_000 });
+  const dir = process.env.CAD_WATCH_DEMO_DIR;
+  const exporting = page.getByRole('dialog', { name: 'Export 3D file' });
+  const report = exporting.getByLabel('Export report');
+  const keep = async (name: string, bytes: Buffer) => {
+    if (!dir) return;
+    await mkdir(dir, { recursive: true });
+    await writeFile(`${dir}/${name}`, bytes);
+  };
+
+  await (await tool(page, 'Export STEP, STL or GLB')).click();
+  await expect(exporting.getByLabel(/^STEP \(AP242 assembly/)).toBeChecked();
+  await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  await expect(report.locator('dt:has-text("Products") + dd')).toHaveText('18', {
+    timeout: 300_000,
+  });
+  await expect(report.locator('dt:has-text("Instances") + dd')).toHaveText('17');
+  // About 16 MiB with the gears: written (up to 64 MiB), but past what this editor reads.
+  await expect(exporting.getByRole('note')).toContainText('cannot import it back');
+  let download = page.waitForEvent('download');
+  await exporting.getByRole('button', { name: 'Save STEP' }).click();
+  const step = await readFile((await (await download).path())!);
+  expect(step.toString('latin1')).toMatch(/AP242/);
+  for (const name of ['Main plate', 'Escape wheel', 'Balance', 'Case middle', 'Chapter ring'])
+    expect(step.toString('latin1'), name).toContain(`'${name}'`);
+  await keep('sk01.step', step);
+  await page.keyboard.press('Escape');
+
+  await (await tool(page, 'Export STEP, STL or GLB')).click();
+  await exporting.getByLabel(/^GLB \(each placed part/).check();
+  await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  await expect(report).toContainText('m', { timeout: 300_000 });
+  download = page.waitForEvent('download');
+  await exporting.getByRole('button', { name: 'Save GLB' }).click();
+  const glb = await readFile((await (await download).path())!);
+  expect(glb.subarray(0, 4).toString('latin1')).toBe('glTF');
+  await keep('sk01.glb', glb);
+});
+
+// WM5c-2 (docs/cad/watch-design.md, 通常の画面での編集; W2): the SK-01 watch edited by hand in the
+// normal screen. Its third wheel and train bridge are saved parts of their own. (1) The third
+// wheel's teeth changed and the new version taken into the watch: its meshes report the centre
+// distance; Undo and Redo bring it back and forth. (2) A window of the train bridge made smaller
+// with a radius dimension in its sketch and taken in: no interference. Saved, reloaded and
+// copied through native JSON in the same state.
+test('WM5c-2: change the third wheel’s teeth and a bridge window by hand in the SK-01 watch', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_200_000);
+  await page.goto('/');
+  const switchTo = async (name: string) => {
+    const nav = page.getByRole('navigation', { name: 'Artifacts', exact: true });
+    if (!(await nav.isVisible()))
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await nav.getByRole('button').filter({ hasText: name }).first().click();
+    await expect(page.getByLabel('Artifact name')).toHaveValue(name);
+    if (await nav.isVisible())
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await expect(nav).toBeHidden();
+    await ready(page);
+  };
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const watch = sk01Watch({ id, buildHash });
+  // The two parts edited by hand, each saved once as it is in the watch.
+  const saved: Record<string, { id: string; versionId: string; contentHash: string }> = {};
+  for (const [key, name] of [
+    ['third', 'Third wheel part'],
+    ['train-bridge', 'Train bridge part'],
+  ] as const) {
+    await importJson(page, `${key}.json`, {
+      ...empty,
+      name,
+      draft: { ...empty.draft, content: watch.versions.get(key)!.content },
+      versions: [],
+    });
+    await expect(page.getByLabel('Artifact name')).toHaveValue(name);
+    await ready(page);
+    await save(page, 1);
+    const record = await nativeArtifact(page);
+    expect(record.versions[0]!.contentHash).toBe(watch.versions.get(key)!.contentHash);
+    saved[key] = { id: record.id, ...record.versions[0]! };
+  }
+  const assembly = structuredClone(watch.assembly);
+  for (const [key, v] of Object.entries(saved))
+    assembly.parts.find((p) => p.id === `part-${key}`)!.source = {
+      kind: 'version',
+      artifactId: v.id,
+      versionId: v.versionId,
+      contentHash: v.contentHash,
+    };
+  await importJson(page, 'sk01.json', {
+    ...empty,
+    name: 'SK-01',
+    draft: { ...empty.draft, content: assembly },
+    versions: [],
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const meshes = page.getByTestId('cad-gear-meshes');
+  await expect(meshes.getByRole('note')).toHaveCount(0);
+
+  // (1) 75 → 76 teeth on the third wheel, saved as v2.
+  await switchTo('Third wheel part');
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Third wheel spurGear$/ })
+    .click();
+  const teeth = page.locator('.cad-inspector').getByLabel('Teeth', { exact: true });
+  await teeth.fill('76');
+  await teeth.press('Enter');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await save(page, 2);
+  await switchTo('SK-01');
+  const third = components(page).filter({ hasText: 'Third wheel' });
+  await expect(third).toContainText('新しい版あり');
+  const update = async (row: typeof third) => {
+    await row.click();
+    await page
+      .getByTestId('cad-component')
+      .getByRole('button', { name: 'Change version…' })
+      .click();
+    const dialog = page.getByTestId('cad-update-parts');
+    await dialog.getByRole('button', { name: 'Preview' }).click();
+    await dialog.getByRole('button', { name: 'Apply update' }).click();
+    await ready(page);
+  };
+  await update(third);
+  // The third wheel's pitch circle grew: both of its meshes are off their centre distance.
+  await expect(meshes.getByRole('note').filter({ hasText: '中心距離' }).first()).toBeVisible();
+  const changed = (await nativeArtifact(page)).draft.content as CadDocument;
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(meshes.getByRole('note')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await ready(page);
+  await expect(meshes.getByRole('note').filter({ hasText: '中心距離' }).first()).toBeVisible();
+  expect((await nativeArtifact(page)).draft.content).toEqual(changed);
+  await page.screenshot({ path: test.info().outputPath('wm5c2-teeth.png') });
+  // Back to v1 (Undo), as the watch goes on.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+
+  // (2) The train bridge's first window from its radius to 0.1 mm smaller, saved as v2.
+  await switchTo('Train bridge part');
+  await page.getByRole('button', { name: 'Edit sketch Train bridge outline' }).click();
+  const drawing = page.getByRole('application', { name: 'Drawing of Train bridge outline' });
+  await page.getByRole('button', { name: 'Fit sketch', exact: true }).click();
+  // On its rim: the centre point's marker covers the middle.
+  const window = drawing.locator('[data-id="o1"]');
+  const box = (await window.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + 1);
+  await page
+    .getByRole('group', { name: 'Add constraint' })
+    .getByRole('button', { name: 'Radius', exact: true })
+    .click();
+  const constraints = page.getByRole('list', { name: 'Constraints' });
+  const radius = constraints.getByRole('textbox', { name: 'Radius (mm)' });
+  const before = Number(await radius.inputValue());
+  await radius.fill(String(Math.round((before - 0.1) * 1000) / 1000));
+  await radius.press('Enter');
+  await page.getByTestId('cad-sketch-panel').getByRole('button', { name: 'Finish' }).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await save(page, 2);
+  await switchTo('SK-01');
+  await update(components(page).filter({ hasText: 'Train bridge' }));
+  await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 600_000 });
+  await page
+    .getByTestId('cad-interference')
+    .getByRole('button', { name: 'Check interference' })
+    .click();
+  await expect(page.getByTestId('cad-interference-status')).toHaveText(
+    '今の姿勢：干渉はありません。',
+    { timeout: 600_000 },
+  );
+  await page.screenshot({ path: test.info().outputPath('wm5c2-window.png') });
+
+  // Saved, reloaded, copied: the same parts and meshes.
+  const edited = (await nativeArtifact(page)).draft.content as CadDocument;
+  expect(edited.parts.find((p) => p.id === 'part-train-bridge')!.source).toMatchObject({
+    artifactId: saved['train-bridge']!.id,
+  });
+  expect(partVersionId(edited.parts.find((p) => p.id === 'part-third')!.source)).toBe(
+    saved.third!.versionId,
+  );
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  expect((await nativeArtifact(page)).draft.content).toEqual(edited);
+  const record = await nativeArtifact(page);
+  await importJson(page, 'sk01-copy.json', { ...record, name: 'SK-01 copy' });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01 copy');
+  await ready(page);
+  expect((await nativeArtifact(page)).draft.content).toEqual(edited);
+  await expect(meshes.getByRole('note')).toHaveCount(0);
+});
+
+/** An 8-bit RGB PNG (filter none per row). */
+function rgbPng(width: number, height: number, rgb: Uint8Array): Buffer {
+  const table = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf: Buffer) => {
+    let c = 0xffffffff;
+    for (const b of buf) c = table[(c ^ b) & 0xff]! ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc(body), 8 + data.length);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  const rows: Buffer[] = [];
+  for (let y = 0; y < height; y++)
+    rows.push(
+      Buffer.concat([Buffer.of(0), Buffer.from(rgb.subarray(y * width * 3, (y + 1) * width * 3))]),
+    );
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/**
+ * WM6: SK-01 with its finishes (`sk01FinishImages` as PNG assets in the native file), opened in
+ * the Playground with every part evaluated. Returns the resources it carried.
+ */
+async function openFinishedSk01(page: Page) {
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const images = sk01FinishImages(256);
+  const resources: Record<string, unknown>[] = [];
+  const asset = (name: string, img: { width: number; height: number; rgb: Uint8Array }) => {
+    const bytes = rgbPng(img.width, img.height, img.rgb);
+    const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    resources.push({
+      kind: 'texture-png',
+      sha256,
+      byteLength: bytes.length,
+      mediaType: 'image/png',
+      encoding: 'base64',
+      bytes: bytes.toString('base64'),
+    });
+    return {
+      id: name,
+      kind: 'texture-png' as const,
+      sha256,
+      byteLength: bytes.length,
+      mediaType: 'image/png',
+    };
+  };
+  const finish: Sk01Finish = {
+    perlage: {
+      color: asset('tex-perlage-color', images.perlage.color),
+      normal: asset('tex-perlage-normal', images.perlage.normal),
+    },
+    cotes: {
+      color: asset('tex-cotes-color', images.cotes.color),
+      normal: asset('tex-cotes-normal', images.cotes.normal),
+    },
+  };
+  const watch = sk01Watch({ id, buildHash }, finish);
+  await importJson(page, 'sk01.json', {
+    ...empty,
+    name: 'SK-01',
+    draft: { ...empty.draft, content: watch.assembly },
+    cadParts: [...watch.closure].map(([contentHash, content]) => ({ contentHash, content })),
+    cadResources: resources,
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('SK-01');
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 900_000 });
+  return resources;
+}
+
+// WM6a (ST-452, TS-1908): SK-01 with its finishes: the anglage on the plate and bridges, perlage
+// and Côtes de Genève as image maps (drawn by `sk01FinishImages`, carried in the native file),
+// clear rubies. It opens with its maps, stays clear of interference, and renders path-traced.
+test('WM6a: open the finished SK-01 with its decoration and render it path-traced', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_500_000);
+  const resources = await openFinishedSk01(page);
+  const interference = page.getByTestId('cad-interference');
+  await interference.getByRole('button', { name: 'Check interference' }).click();
+  await expect(page.getByTestId('cad-interference-status')).toHaveText(
+    '今の姿勢：干渉はありません。',
+    { timeout: 600_000 },
+  );
+  const dir = process.env.CAD_WATCH_DEMO_DIR;
+  if (dir) await mkdir(dir, { recursive: true });
+  const shot = async (name: string) => {
+    await page.screenshot({ path: test.info().outputPath(`${name}.png`) });
+    if (dir) await page.screenshot({ path: `${dir}/${name}.png` });
+  };
+  // The back (the bridges, under the case-back crystal) and three-quarter.
+  await page.getByTestId('cad-standard-view').selectOption('plan');
+  await shot('wm6a-back');
+  await page.getByTestId('cad-standard-view').selectOption('three-quarter');
+  await shot('wm6a-three-quarter');
+  // A path-traced still of the back.
+  await page.getByTestId('cad-standard-view').selectOption('plan');
+  await (await tool(page, 'Render image')).click();
+  const dialog = page.getByRole('dialog', { name: 'Render image' });
+  await dialog.getByLabel('Width (px)').fill('960');
+  await dialog.getByLabel('Height (px)').fill('720');
+  await dialog.getByLabel('Samples').fill('64');
+  await dialog.getByLabel('Time limit (s, 0 = none)').fill('240');
+  await dialog.getByLabel('Floor under the model').uncheck();
+  await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+  await expect(dialog.getByTestId('view-render-done')).toHaveText(/^960 × 720 px, \d+ samples?/, {
+    timeout: 900_000,
+  });
+  await expect(dialog.getByTestId('view-render-invalid')).toHaveCount(0);
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Save PNG' }).click();
+  const file = await readFile((await (await download).path())!);
+  expect([file.readUInt32BE(16), file.readUInt32BE(20)]).toEqual([960, 720]);
+  if (dir) await writeFile(`${dir}/wm6a-back-path-traced.png`, file);
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  // The maps travel with the parts: a native round trip keeps the resources.
+  const saved = await nativeArtifact(page);
+  expect(saved.cadResources?.map((r: { sha256: string }) => r.sha256).sort()).toEqual(
+    resources.map((r) => r.sha256).sort(),
+  );
+});
+
+// WM6b (ST-453, TS-1910): path-traced stills of the finished SK-01: the dial (the camera turned
+// under the watch from Front), three-quarter from the back, and a close view of the movement.
+test('WM6b: path-traced stills of the finished SK-01 from the dial, three-quarter and close', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(2_400_000);
+  await openFinishedSk01(page);
+  const dir = process.env.CAD_WATCH_DEMO_DIR;
+  if (dir) await mkdir(dir, { recursive: true });
+  const look = page.getByTestId('cad-standard-view');
+  const canvas = page.locator('.cad-canvas');
+  const box = (await canvas.boundingBox())!;
+  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  /** Orbits by dragging: a drag of half the view's height turns the camera 90°. */
+  const drag = async (dx: number, dy: number) => {
+    await page.mouse.move(centre.x, centre.y);
+    await page.mouse.down();
+    await page.mouse.move(centre.x + dx, centre.y + dy, { steps: 20 });
+    await page.mouse.up();
+  };
+  const render = async (name: string) => {
+    await page.screenshot({ path: test.info().outputPath(`${name}-view.png`) });
+    await (await tool(page, 'Render image')).click();
+    const dialog = page.getByRole('dialog', { name: 'Render image' });
+    await dialog.getByLabel('Width (px)').fill('960');
+    await dialog.getByLabel('Height (px)').fill('720');
+    await dialog.getByLabel('Samples').fill('64');
+    await dialog.getByLabel('Time limit (s, 0 = none)').fill('240');
+    await dialog.getByLabel('Floor under the model').uncheck();
+    await dialog.getByRole('button', { name: 'Render', exact: true }).click();
+    await expect(dialog.getByTestId('view-render-done')).toHaveText(/^960 × 720 px, \d+ samples?/, {
+      timeout: 900_000,
+    });
+    await expect(dialog.getByTestId('view-render-invalid')).toHaveCount(0);
+    const download = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Save PNG' }).click();
+    const file = await readFile((await (await download).path())!);
+    expect([file.readUInt32BE(16), file.readUInt32BE(20)]).toEqual([960, 720]);
+    if (dir) await writeFile(`${dir}/${name}.png`, file);
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  };
+  // The dial: from Front (along +y), turned 90° down under the watch.
+  await look.selectOption('front');
+  await drag(0, -box.height / 2);
+  await render('wm6b-dial');
+  // Three-quarter from the back, over the bridges.
+  await look.selectOption('three-quarter');
+  await render('wm6b-three-quarter');
+  // Close: the same view, zoomed in toward the middle of the movement.
+  await page.mouse.move(centre.x, centre.y);
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -200);
+  await render('wm6b-close');
 });

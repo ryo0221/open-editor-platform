@@ -202,6 +202,16 @@ mainBuild:
     - symbol: STEPCAFControl_Writer
     - symbol: STEPCAFControl_Reader
     - symbol: gp_Cylinder
+    # R3c (docs/cad/r3-analysis.md, 形状準備): defeaturing of holes, fillets and chosen faces,
+    # with its history (Modified / Generated / IsDeleted) for the load and constraint mapping.
+    # Region splits use the BRepAlgoAPI_Splitter bound for R2a.
+    - symbol: BRepAlgoAPI_Defeaturing
+    # CR1c (docs/cad/car-design.md, CR1の分け方): the pole grid of a Gordon surface, the
+    # (position, radius) pairs of a variable fillet and the closest points of two curves.
+    - symbol: TColgp_Array2OfPnt
+    - symbol: TColStd_Array2OfReal
+    - symbol: TColgp_Array1OfPnt2d
+    - symbol: GeomAPI_ExtremaCurveCurve
   emccFlags:
     - -flto
     - -fexceptions
@@ -222,6 +232,44 @@ additionalCppCode: |
   #include <TDF_Label.hxx>
   #include <TDataStd_Name.hxx>
   #include <TCollection_AsciiString.hxx>
+  #include <sstream>
+  #include <string>
+  #include <BRepBuilderAPI_MakeEdge.hxx>
+  #include <BRep_Builder.hxx>
+  #include <TopoDS_Compound.hxx>
+  #include <Precision.hxx>
+  #include <gp_Ax2.hxx>
+  #include <vector>
+  #include <iomanip>
+  #include <TDF_Tool.hxx>
+  #include <TDF_LabelSequence.hxx>
+  #include <TDocStd_Document.hxx>
+  #include <TopExp.hxx>
+  #include <TopExp_Explorer.hxx>
+  #include <TopoDS.hxx>
+  #include <TopoDS_Edge.hxx>
+  #include <TopTools_IndexedMapOfShape.hxx>
+  #include <BRep_Tool.hxx>
+  #include <TColStd_HArray1OfReal.hxx>
+  #include <XCAFDoc_DocumentTool.hxx>
+  #include <XCAFDoc_ShapeTool.hxx>
+  #include <XCAFDoc_DimTolTool.hxx>
+  #include <XCAFDoc_ViewTool.hxx>
+  #include <XCAFDoc_Dimension.hxx>
+  #include <XCAFDoc_GeomTolerance.hxx>
+  #include <XCAFDoc_Datum.hxx>
+  #include <XCAFDoc_View.hxx>
+  #include <XCAFDimTolObjects_DimensionObject.hxx>
+  #include <XCAFDimTolObjects_GeomToleranceObject.hxx>
+  #include <XCAFDimTolObjects_DatumObject.hxx>
+  #include <XCAFView_Object.hxx>
+  #include <STEPCAFControl_Reader.hxx>
+  #include <STEPControl_Reader.hxx>
+  #include <XSControl_WorkSession.hxx>
+  #include <XSControl_TransferReader.hxx>
+  #include <Transfer_TransientProcess.hxx>
+  #include <TransferBRep.hxx>
+  #include <Interface_InterfaceModel.hxx>
   extern "C" void __cxa_increment_exception_refcount(void*);
   extern "C" void __cxa_decrement_exception_refcount(void*);
   typedef Handle(IMeshTools_Context) Handle_IMeshTools_Context;
@@ -252,5 +300,474 @@ additionalCppCode: |
       Handle(TDataStd_Name) name;
       if (!label.FindAttribute(TDataStd_Name::GetID(), name)) return TCollection_AsciiString();
       return TCollection_AsciiString(name->Get(), Standard_True);
+    }
+    // A label's entry (e.g. 0:1:1:2), to match the labels a caller walks with the PMI below.
+    static TCollection_AsciiString labelEntry(const TDF_Label& label) {
+      TCollection_AsciiString entry;
+      TDF_Tool::Entry(label, entry);
+      return entry;
+    }
+    // PMI (docs/cad/pmi.md, PMI-U1): the GD&T and saved views an XDE document read with GDT and
+    // view mode, as one JSON text. Targets are a product's sub-shapes by their 1-based index in
+    // TopExp::MapShapes of the product's shape; a target that is no product's sub-shape has no
+    // index. Enumerations are their integer values; the caller names them.
+    static TCollection_AsciiString pmiJson(const Handle(TDocStd_Document)& doc) {
+      std::ostringstream o;
+      o << std::setprecision(17);
+      const TDF_Label main = doc->Main();
+      Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(main);
+      Handle(XCAFDoc_DimTolTool) dimTol = XCAFDoc_DocumentTool::DimTolTool(main);
+      Handle(XCAFDoc_ViewTool) views = XCAFDoc_DocumentTool::ViewTool(main);
+      auto str = [&](const Handle(TCollection_HAsciiString)& h) {
+        o << '"';
+        if (!h.IsNull())
+          for (const char* c = h->ToCString(); *c; ++c) {
+            unsigned char u = static_cast<unsigned char>(*c);
+            if (u == '"' || u == '\\') o << '\\' << *c;
+            else if (u < 0x20) o << "\\u" << std::hex << std::setw(4) << std::setfill('0') << int(u) << std::dec << std::setfill(' ');
+            else o << *c;
+          }
+        o << '"';
+      };
+      auto entry = [&](const TDF_Label& l) {
+        TCollection_AsciiString e;
+        TDF_Tool::Entry(l, e);
+        o << '"' << e.ToCString() << '"';
+      };
+      auto pnt = [&](const gp_Pnt& p) { o << '[' << p.X() << ',' << p.Y() << ',' << p.Z() << ']'; };
+      auto dir = [&](const gp_Dir& d) { o << '[' << d.X() << ',' << d.Y() << ',' << d.Z() << ']'; };
+      auto ax2 = [&](const gp_Ax2& a) {
+        o << "{\"origin\":"; pnt(a.Location());
+        o << ",\"z\":"; dir(a.Direction());
+        o << ",\"x\":"; dir(a.XDirection());
+        o << '}';
+      };
+      // One sub-shape label as {product, kind, index}; a label not under a product has no index.
+      auto target = [&](const TDF_Label& l) {
+        o << "{\"label\":"; entry(l);
+        TopoDS_Shape sub = XCAFDoc_ShapeTool::GetShape(l);
+        TDF_Label product = XCAFDoc_ShapeTool::IsSubShape(l) ? l.Father() : TDF_Label();
+        o << ",\"shape\":" << (sub.IsNull() ? -1 : int(sub.ShapeType()));
+        if (!product.IsNull() && !sub.IsNull()) {
+          TopTools_IndexedMapOfShape map;
+          TopExp::MapShapes(XCAFDoc_ShapeTool::GetShape(product), sub.ShapeType(), map);
+          o << ",\"product\":"; entry(product);
+          o << ",\"index\":" << map.FindIndex(sub);
+        } else if (XCAFDoc_ShapeTool::IsShape(l)) {
+          o << ",\"product\":"; entry(l);
+        }
+        o << '}';
+      };
+      auto targets = [&](const TDF_Label& gdt) {
+        TDF_LabelSequence first, second;
+        dimTol->GetRefShapeLabel(gdt, first, second);
+        o << "\"targets\":[";
+        for (Standard_Integer i = 1; i <= first.Length(); i++) { if (i > 1) o << ','; target(first.Value(i)); }
+        o << "],\"targets2\":[";
+        for (Standard_Integer i = 1; i <= second.Length(); i++) { if (i > 1) o << ','; target(second.Value(i)); }
+        o << ']';
+      };
+      // The presentation: each edge as its end points, and the counts of what it holds.
+      auto presentation = [&](const TopoDS_Shape& p, const Handle(TCollection_HAsciiString)& name) {
+        o << "\"presentation\":";
+        if (p.IsNull()) { o << "null"; return; }
+        o << "{\"name\":"; str(name);
+        o << ",\"segments\":[";
+        bool firstEdge = true;
+        for (TopExp_Explorer ex(p, TopAbs_EDGE); ex.More(); ex.Next()) {
+          TopoDS_Vertex a, b;
+          TopExp::Vertices(TopoDS::Edge(ex.Current()), a, b);
+          if (a.IsNull() || b.IsNull()) continue;
+          if (!firstEdge) o << ',';
+          firstEdge = false;
+          gp_Pnt pa = BRep_Tool::Pnt(a), pb = BRep_Tool::Pnt(b);
+          o << pa.X() << ',' << pa.Y() << ',' << pa.Z() << ',' << pb.X() << ',' << pb.Y() << ',' << pb.Z();
+        }
+        int faces = 0, edges = 0;
+        for (TopExp_Explorer ex(p, TopAbs_FACE); ex.More(); ex.Next()) faces++;
+        for (TopExp_Explorer ex(p, TopAbs_EDGE); ex.More(); ex.Next()) edges++;
+        o << "],\"edges\":" << edges << ",\"faces\":" << faces << '}';
+      };
+      auto placing = [&](bool hasPlane, const gp_Ax2& plane, bool hasText, const gp_Pnt& text) {
+        o << "\"plane\":"; if (hasPlane) ax2(plane); else o << "null";
+        o << ",\"text\":"; if (hasText) pnt(text); else o << "null";
+      };
+      o << "{\"dimensions\":[";
+      TDF_LabelSequence labels;
+      dimTol->GetDimensionLabels(labels);
+      for (Standard_Integer i = 1; i <= labels.Length(); i++) {
+        const TDF_Label l = labels.Value(i);
+        if (i > 1) o << ',';
+        o << "{\"label\":"; entry(l);
+        Handle(XCAFDoc_Dimension) attr;
+        Handle(XCAFDimTolObjects_DimensionObject) d;
+        if (l.FindAttribute(XCAFDoc_Dimension::GetID(), attr)) d = attr->GetObject();
+        if (d.IsNull()) { o << ",\"object\":false,"; targets(l); o << '}'; continue; }
+        o << ",\"object\":true,\"name\":"; str(d->GetSemanticName());
+        o << ",\"type\":" << int(d->GetType());
+        o << ",\"qualifier\":" << (d->HasQualifier() ? int(d->GetQualifier()) : -1);
+        o << ",\"values\":[";
+        Handle(TColStd_HArray1OfReal) v = d->GetValues();
+        if (!v.IsNull()) for (Standard_Integer k = v->Lower(); k <= v->Upper(); k++) { if (k > v->Lower()) o << ','; o << v->Value(k); }
+        o << "],\"range\":" << (d->IsDimWithRange() ? "true" : "false");
+        o << ",\"plusMinus\":" << (d->IsDimWithPlusMinusTolerance() ? "true" : "false");
+        if (d->IsDimWithPlusMinusTolerance()) o << ",\"lowerTol\":" << d->GetLowerTolValue() << ",\"upperTol\":" << d->GetUpperTolValue();
+        o << ",\"classOfTolerance\":";
+        Standard_Boolean hole; XCAFDimTolObjects_DimensionFormVariance fv; XCAFDimTolObjects_DimensionGrade gr;
+        if (d->IsDimWithClassOfTolerance() && d->GetClassOfTolerance(hole, fv, gr)) o << "{\"hole\":" << (hole ? "true" : "false") << ",\"variance\":" << int(fv) << ",\"grade\":" << int(gr) << '}';
+        else o << "null";
+        Standard_Integer dl = 0, dr = 0; d->GetNbOfDecimalPlaces(dl, dr);
+        o << ",\"decimals\":[" << dl << ',' << dr << "],\"modifiers\":[";
+        XCAFDimTolObjects_DimensionModifiersSequence m = d->GetModifiers();
+        for (Standard_Integer k = 1; k <= m.Length(); k++) { if (k > 1) o << ','; o << int(m.Value(k)); }
+        o << "],\"descriptions\":" << (d->HasDescriptions() ? d->NbDescriptions() : 0) << ',';
+        placing(d->HasPlane(), d->GetPlane(), d->HasTextPoint(), d->GetPointTextAttach());
+        o << ','; presentation(d->GetPresentation(), d->GetPresentationName());
+        o << ','; targets(l); o << '}';
+      }
+      o << "],\"tolerances\":[";
+      labels.Clear();
+      dimTol->GetGeomToleranceLabels(labels);
+      for (Standard_Integer i = 1; i <= labels.Length(); i++) {
+        const TDF_Label l = labels.Value(i);
+        if (i > 1) o << ',';
+        o << "{\"label\":"; entry(l);
+        Handle(XCAFDoc_GeomTolerance) attr;
+        Handle(XCAFDimTolObjects_GeomToleranceObject) t;
+        if (l.FindAttribute(XCAFDoc_GeomTolerance::GetID(), attr)) t = attr->GetObject();
+        if (t.IsNull()) { o << ",\"object\":false,"; targets(l); o << '}'; continue; }
+        o << ",\"object\":true,\"name\":"; str(t->GetSemanticName());
+        o << ",\"type\":" << int(t->GetType()) << ",\"typeOfValue\":" << int(t->GetTypeOfValue());
+        o << ",\"value\":" << t->GetValue() << ",\"material\":" << int(t->GetMaterialRequirementModifier());
+        o << ",\"zone\":" << int(t->GetZoneModifier()) << ",\"zoneValue\":" << t->GetValueOfZoneModifier();
+        o << ",\"maxValue\":" << t->GetMaxValueModifier() << ",\"modifiers\":[";
+        XCAFDimTolObjects_GeomToleranceModifiersSequence m = t->GetModifiers();
+        for (Standard_Integer k = 1; k <= m.Length(); k++) { if (k > 1) o << ','; o << int(m.Value(k)); }
+        o << "],\"datums\":[";
+        TDF_LabelSequence datums;
+        dimTol->GetDatumWithObjectOfTolerLabels(l, datums);
+        for (Standard_Integer k = 1; k <= datums.Length(); k++) { if (k > 1) o << ','; entry(datums.Value(k)); }
+        o << "],";
+        placing(t->HasPlane(), t->GetPlane(), t->HasPointText(), t->GetPointTextAttach());
+        o << ','; presentation(t->GetPresentation(), t->GetPresentationName());
+        o << ','; targets(l); o << '}';
+      }
+      o << "],\"datums\":[";
+      labels.Clear();
+      dimTol->GetDatumLabels(labels);
+      for (Standard_Integer i = 1; i <= labels.Length(); i++) {
+        const TDF_Label l = labels.Value(i);
+        if (i > 1) o << ',';
+        o << "{\"label\":"; entry(l);
+        Handle(XCAFDoc_Datum) attr;
+        Handle(XCAFDimTolObjects_DatumObject) d;
+        if (l.FindAttribute(XCAFDoc_Datum::GetID(), attr)) d = attr->GetObject();
+        if (d.IsNull()) { o << ",\"object\":false,"; targets(l); o << '}'; continue; }
+        o << ",\"object\":true,\"name\":"; str(d->GetName());
+        o << ",\"position\":" << d->GetPosition() << ",\"modifiers\":[";
+        XCAFDimTolObjects_DatumModifiersSequence m = d->GetModifiers();
+        for (Standard_Integer k = 1; k <= m.Length(); k++) { if (k > 1) o << ','; o << int(m.Value(k)); }
+        o << "],\"target\":";
+        if (d->IsDatumTarget()) o << "{\"type\":" << int(d->GetDatumTargetType()) << ",\"number\":" << d->GetDatumTargetNumber() << '}';
+        else o << "null";
+        o << ',';
+        placing(d->HasPlane(), d->GetPlane(), d->HasPointText(), d->GetPointTextAttach());
+        o << ','; presentation(d->GetPresentation(), d->GetPresentationName());
+        o << ','; targets(l); o << '}';
+      }
+      o << "],\"views\":[";
+      labels.Clear();
+      if (!views.IsNull()) views->GetViewLabels(labels);
+      for (Standard_Integer i = 1; i <= labels.Length(); i++) {
+        const TDF_Label l = labels.Value(i);
+        if (i > 1) o << ',';
+        o << "{\"label\":"; entry(l);
+        Handle(XCAFDoc_View) attr;
+        Handle(XCAFView_Object) v;
+        if (l.FindAttribute(XCAFDoc_View::GetID(), attr)) v = attr->GetObject();
+        if (v.IsNull()) { o << ",\"object\":false}"; continue; }
+        o << ",\"object\":true,\"name\":"; str(v->Name());
+        o << ",\"type\":" << int(v->Type()) << ",\"eye\":"; pnt(v->ProjectionPoint());
+        o << ",\"direction\":"; dir(v->ViewDirection());
+        o << ",\"up\":"; dir(v->UpDirection());
+        o << ",\"zoom\":" << v->ZoomFactor() << ",\"window\":[" << v->WindowHorizontalSize() << ',' << v->WindowVerticalSize() << ']';
+        o << ",\"clipping\":" << ((v->HasFrontPlaneClipping() || v->HasBackPlaneClipping() || v->HasViewVolumeSidesClipping()) ? "true" : "false");
+        o << ",\"gdt\":[";
+        TDF_LabelSequence gdt;
+        views->GetRefGDTLabel(l, gdt);
+        for (Standard_Integer k = 1; k <= gdt.Length(); k++) { if (k > 1) o << ','; entry(gdt.Value(k)); }
+        o << "]}";
+      }
+      o << "]}";
+      return TCollection_AsciiString(o.str().c_str());
+    }
+    // PMI-4b (docs/cad/pmi.md, 書き出し): adds semantic PMI on the sub-shapes of `part` (a free
+    // shape of `doc`) for STEPCAFControl_Writer with DimTol mode. One item per line, tokens
+    // separated by spaces:
+    //   dat <name as UTF-8 hex> <targets>
+    //   dim <type> <qualifier, -1 none> <count 1|2> <values> <plusMinus 0|1> <lower> <upper> <targets> <targets2>
+    //   tol <type> <value> <typeOfValue> <material> <maxValue, 0 none> <count> <modifiers> <targets>
+    //       <compartments> then per compartment: <count> <datums> <count> <modifiers>
+    // Each line may end with its presentation (PMI-4c), which the writer writes as a tessellated
+    // callout: prs <hasPlane 0|1> [origin z x, 9 numbers] <count> <count segments, 6 numbers each>.
+    // Enumerations are the XCAFDimTolObjects integer values; `lower` is in XDE's convention (the
+    // writer writes it negated). <targets> is a count, then per target its TopAbs_ShapeEnum and
+    // its 1-based index in TopExp::MapShapes of the part's shape of that kind. A tolerance names
+    // datums by their 0-based order among the dat lines, which come first; each reference gets
+    // its own datum label with its compartment's position and modifiers (the writer writes one
+    // DATUM per name, from the dat line's label, which has the targets).
+    // Returns the number of items added, or -(line number) of the first line it cannot read:
+    // the caller then must not write the document.
+    static int addPmi(const Handle(TDocStd_Document)& doc, const TDF_Label& part, const TCollection_AsciiString& spec) {
+      const TDF_Label main = doc->Main();
+      Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(main);
+      Handle(XCAFDoc_DimTolTool) dimTol = XCAFDoc_DocumentTool::DimTolTool(main);
+      const TopoDS_Shape whole = XCAFDoc_ShapeTool::GetShape(part);
+      if (whole.IsNull()) return -1;
+      TopTools_IndexedMapOfShape maps[3];
+      bool mapped[3] = {false, false, false};
+      const TopAbs_ShapeEnum kinds[3] = {TopAbs_FACE, TopAbs_EDGE, TopAbs_VERTEX};
+      std::vector<TDF_Label> datums;
+      std::vector<Handle(TCollection_HAsciiString)> names;
+      std::istringstream lines(spec.ToCString());
+      std::string line;
+      int n = 0;
+      while (std::getline(lines, line)) {
+        n++;
+        std::istringstream in(line);
+        std::string kind;
+        if (!(in >> kind)) return -n;
+        auto readTargets = [&](TDF_LabelSequence& out) {
+          int count = 0;
+          if (!(in >> count) || count < 0 || count > 100000) return false;
+          for (int i = 0; i < count; i++) {
+            int k = -1, index = 0, m = -1;
+            if (!(in >> k >> index)) return false;
+            for (int j = 0; j < 3; j++) if (int(kinds[j]) == k) m = j;
+            if (m < 0) return false;
+            if (!mapped[m]) { TopExp::MapShapes(whole, kinds[m], maps[m]); mapped[m] = true; }
+            if (index < 1 || index > maps[m].Extent()) return false;
+            TDF_Label sub;
+            shapes->AddSubShape(part, maps[m].FindKey(index), sub);
+            if (sub.IsNull()) return false;
+            out.Append(sub);
+          }
+          return true;
+        };
+        auto inRange = [](int v, int last) { return v >= 0 && v <= last; };
+        // The optional presentation: false when it is there and cannot be read.
+        auto readPresentation = [&](auto object) {
+          std::string tag;
+          if (!(in >> tag)) return true;
+          int hasPlane = 0, count = 0;
+          if (tag != "prs" || !(in >> hasPlane)) return false;
+          if (hasPlane) {
+            double v[9];
+            for (double& x : v) if (!(in >> x)) return false;
+            const gp_Vec z(v[3], v[4], v[5]), x(v[6], v[7], v[8]);
+            if (z.Magnitude() < 1e-12 || x.Magnitude() < 1e-12 || z.IsParallel(x, 1e-9)) return false;
+            const gp_Pnt origin(v[0], v[1], v[2]);
+            object->SetPlane(gp_Ax2(origin, gp_Dir(z), gp_Dir(x)));
+            // The writer puts the plane's origin at the text position.
+            object->SetPointTextAttach(origin);
+          }
+          if (!(in >> count) || count < 1 || count > 2000000) return false;
+          BRep_Builder builder;
+          TopoDS_Compound lines;
+          builder.MakeCompound(lines);
+          for (int i = 0; i < count; i++) {
+            double v[6];
+            for (double& x : v) if (!(in >> x)) return false;
+            const gp_Pnt a(v[0], v[1], v[2]), b(v[3], v[4], v[5]);
+            if (a.Distance(b) <= Precision::Confusion()) return false;
+            BRepBuilderAPI_MakeEdge edge(a, b);
+            if (!edge.IsDone()) return false;
+            builder.Add(lines, edge.Edge());
+          }
+          object->SetPresentation(lines, new TCollection_HAsciiString());
+          std::string rest;
+          return !(in >> rest);
+        };
+        if (kind == "dat") {
+          std::string hex, name;
+          if (!(in >> hex) || hex.empty() || hex.size() % 2) return -n;
+          for (size_t i = 0; i < hex.size(); i += 2) {
+            int v = 0;
+            for (size_t j = i; j < i + 2; j++) {
+              const char c = hex[j];
+              const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+              if (d < 0) return -n;
+              v = v * 16 + d;
+            }
+            if (v == 0) return -n;
+            name += char(v);
+          }
+          TDF_LabelSequence targets;
+          if (!readTargets(targets) || targets.IsEmpty()) return -n;
+          Handle(TCollection_HAsciiString) letters = new TCollection_HAsciiString(name.c_str());
+          TDF_Label l = dimTol->AddDatum();
+          dimTol->SetDatum(targets, l);
+          Handle(XCAFDimTolObjects_DatumObject) d = new XCAFDimTolObjects_DatumObject();
+          d->SetName(letters);
+          if (!readPresentation(d)) return -n;
+          XCAFDoc_Datum::Set(l)->SetObject(d);
+          datums.push_back(l);
+          names.push_back(letters);
+        } else if (kind == "dim") {
+          int type = -1, qualifier = -1, count = 0, plusMinus = 0;
+          if (!(in >> type >> qualifier >> count)) return -n;
+          if (!inRange(type, XCAFDimTolObjects_DimensionType_DimensionPresentation) || count < 1 || count > 2) return -n;
+          if (qualifier != -1 && !inRange(qualifier, XCAFDimTolObjects_DimensionQualifier_Avg)) return -n;
+          Handle(TColStd_HArray1OfReal) values = new TColStd_HArray1OfReal(1, count);
+          for (int i = 1; i <= count; i++) {
+            double v = 0;
+            if (!(in >> v)) return -n;
+            values->SetValue(i, v);
+          }
+          double lower = 0, upper = 0;
+          if (!(in >> plusMinus >> lower >> upper) || (plusMinus && count != 1)) return -n;
+          TDF_LabelSequence first, second;
+          if (!readTargets(first) || !readTargets(second) || first.IsEmpty()) return -n;
+          Handle(XCAFDimTolObjects_DimensionObject) d = new XCAFDimTolObjects_DimensionObject();
+          d->SetType(XCAFDimTolObjects_DimensionType(type));
+          d->SetValues(values);
+          // The lower first: from one value, each setter makes three with both deviations its own.
+          if (plusMinus) { d->SetLowerTolValue(lower); d->SetUpperTolValue(upper); }
+          if (qualifier > 0) d->SetQualifier(XCAFDimTolObjects_DimensionQualifier(qualifier));
+          if (!readPresentation(d)) return -n;
+          TDF_Label l = dimTol->AddDimension();
+          dimTol->SetDimension(first, second, l);
+          XCAFDoc_Dimension::Set(l)->SetObject(d);
+        } else if (kind == "tol") {
+          int type = -1, typeOfValue = -1, material = -1, count = -1;
+          double value = 0, maxValue = 0;
+          if (!(in >> type >> value >> typeOfValue >> material >> maxValue >> count)) return -n;
+          if (!inRange(type, XCAFDimTolObjects_GeomToleranceType_TotalRunout) ||
+              !inRange(typeOfValue, XCAFDimTolObjects_GeomToleranceTypeValue_SphericalDiameter) ||
+              !inRange(material, XCAFDimTolObjects_GeomToleranceMatReqModif_L) || count < 0 || maxValue < 0)
+            return -n;
+          Handle(XCAFDimTolObjects_GeomToleranceObject) t = new XCAFDimTolObjects_GeomToleranceObject();
+          t->SetType(XCAFDimTolObjects_GeomToleranceType(type));
+          t->SetValue(value);
+          t->SetTypeOfValue(XCAFDimTolObjects_GeomToleranceTypeValue(typeOfValue));
+          t->SetMaterialRequirementModifier(XCAFDimTolObjects_GeomToleranceMatReqModif(material));
+          if (maxValue > 0) t->SetMaxValueModifier(maxValue);
+          for (int i = 0; i < count; i++) {
+            int m = -1;
+            if (!(in >> m) || !inRange(m, XCAFDimTolObjects_GeomToleranceModif_All_Over)) return -n;
+            t->AddModifier(XCAFDimTolObjects_GeomToleranceModif(m));
+          }
+          TDF_LabelSequence targets;
+          if (!readTargets(targets) || targets.IsEmpty()) return -n;
+          int compartments = -1;
+          if (!(in >> compartments) || compartments < 0) return -n;
+          // Read every compartment before adding anything for this line.
+          std::vector<std::vector<int>> refs(compartments), mods(compartments);
+          for (int c = 0; c < compartments; c++) {
+            int nd = 0, nm = 0;
+            if (!(in >> nd) || nd < 1) return -n;
+            for (int i = 0; i < nd; i++) {
+              int d = -1;
+              if (!(in >> d) || d < 0 || d >= int(datums.size())) return -n;
+              refs[c].push_back(d);
+            }
+            if (!(in >> nm) || nm < 0) return -n;
+            for (int i = 0; i < nm; i++) {
+              int m = -1;
+              if (!(in >> m) || !inRange(m, XCAFDimTolObjects_DatumSingleModif_Translation)) return -n;
+              mods[c].push_back(m);
+            }
+          }
+          if (!readPresentation(t)) return -n;
+          TDF_Label l = dimTol->AddGeomTolerance();
+          dimTol->SetGeomTolerance(targets, l);
+          XCAFDoc_GeomTolerance::Set(l)->SetObject(t);
+          for (int c = 0; c < compartments; c++)
+            for (int d : refs[c]) {
+              TDF_Label copy = dimTol->AddDatum();
+              Handle(XCAFDimTolObjects_DatumObject) o = new XCAFDimTolObjects_DatumObject();
+              o->SetName(names[d]);
+              o->SetPosition(c + 1);
+              for (int m : mods[c]) o->AddModifier(XCAFDimTolObjects_DatumSingleModif(m));
+              XCAFDoc_Datum::Set(copy)->SetObject(o);
+              dimTol->SetDatumToGeomTol(copy, l);
+            }
+        } else {
+          return -n;
+        }
+      }
+      return n;
+    }
+    // PMI-5 (docs/cad/pmi.md, 組立経路の参照): what the reader's transfer made of each STEP
+    // entity number in `spec` (space separated), as a JSON array in the same order. A face, edge
+    // or vertex is {"entity","product","shape","index"}: the one product label whose shape holds
+    // it, its TopAbs_ShapeEnum and its 1-based index in TopExp::MapShapes of that kind. A
+    // NEXT_ASSEMBLY_USAGE_OCCURRENCE is {"entity","component"}: the one component label whose
+    // located shape it made. With no result, or more than one match ("matches"), neither is set:
+    // the caller never picks one of several.
+    static TCollection_AsciiString pmiEntityShapes(STEPCAFControl_Reader& reader, const Handle(TDocStd_Document)& doc, const TCollection_AsciiString& spec) {
+      std::ostringstream o;
+      const Handle(XSControl_WorkSession) ws = reader.ChangeReader().WS();
+      const Handle(Interface_InterfaceModel) model = reader.ChangeReader().Model();
+      Handle(Transfer_TransientProcess) tp;
+      if (!ws.IsNull() && !ws->TransferReader().IsNull()) tp = ws->TransferReader()->TransientProcess();
+      Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+      TDF_LabelSequence all;
+      shapes->GetShapes(all);
+      std::vector<TDF_Label> products, components;
+      for (Standard_Integer i = 1; i <= all.Length(); i++) {
+        const TDF_Label l = all.Value(i);
+        if (XCAFDoc_ShapeTool::IsAssembly(l)) {
+          TDF_LabelSequence c;
+          XCAFDoc_ShapeTool::GetComponents(l, c, false);
+          for (Standard_Integer k = 1; k <= c.Length(); k++) components.push_back(c.Value(k));
+        } else {
+          products.push_back(l);
+        }
+      }
+      auto entry = [&](const TDF_Label& l) {
+        TCollection_AsciiString e;
+        TDF_Tool::Entry(l, e);
+        o << '"' << e.ToCString() << '"';
+      };
+      std::istringstream in(spec.ToCString());
+      long n;
+      bool first = true;
+      o << '[';
+      while (in >> n) {
+        if (!first) o << ',';
+        first = false;
+        o << "{\"entity\":" << n;
+        TopoDS_Shape s;
+        if (!tp.IsNull() && !model.IsNull() && n >= 1 && n <= model->NbEntities())
+          s = TransferBRep::ShapeResult(tp, model->Value(n));
+        if (!s.IsNull()) {
+          const TopAbs_ShapeEnum kind = s.ShapeType();
+          int matches = 0;
+          if (kind == TopAbs_FACE || kind == TopAbs_EDGE || kind == TopAbs_VERTEX) {
+            TDF_Label product;
+            int index = 0;
+            for (const TDF_Label& l : products) {
+              TopTools_IndexedMapOfShape map;
+              TopExp::MapShapes(XCAFDoc_ShapeTool::GetShape(l), kind, map);
+              const int k = map.FindIndex(s);
+              if (k > 0) { matches++; product = l; index = k; }
+            }
+            if (matches == 1) {
+              o << ",\"product\":"; entry(product);
+              o << ",\"shape\":" << int(kind) << ",\"index\":" << index;
+            }
+          } else {
+            TDF_Label component;
+            for (const TDF_Label& l : components)
+              if (XCAFDoc_ShapeTool::GetShape(l).IsEqual(s)) { matches++; component = l; }
+            if (matches == 1) { o << ",\"component\":"; entry(component); }
+          }
+          if (matches != 1) o << ",\"matches\":" << matches;
+        }
+        o << '}';
+      }
+      o << ']';
+      return TCollection_AsciiString(o.str().c_str());
     }
   };

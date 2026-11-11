@@ -42,9 +42,13 @@ export {
 export {
   geometryCategoryPreset,
   geometryDefaultFinish,
+  geometryLightLimits,
+  geometryLightProblems,
   geometryMaterialPreset,
   geometryMaterialPresets,
+  type GeometryEmission,
   type GeometryFinish,
+  type GeometryLight,
   type GeometryLook,
   type GeometryMaterialCategory,
   type GeometryMaterialPreset,

@@ -2,9 +2,22 @@ import {
   geometryMaterialPreset,
   geometryTextureLimits,
   geometryTextureSetProblems,
+  geometryLightProblems,
 } from '@editor-platform/geometry-core';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { assemblyKeys, validateAssembly } from './assembly-validation';
+import { validateConfigurations } from './configurations';
+import { spurGearProblem, type SpurGearSpec } from './gear';
+import { validateMounts } from './mounts';
+import { validateGearMeshes } from './gear-mesh';
+import { cadJointLimits } from './joints';
+import { validateInterferenceAllowances } from './interference';
+import {
+  cadProfileKinds,
+  cadProfileLimitsMm,
+  profileOutline,
+  type CadProfileKind,
+} from './profile-section';
 import {
   cadExpressionLimits,
   CadExpressionError,
@@ -24,14 +37,25 @@ import {
 } from './graph';
 import {
   cadAssetMediaTypes,
+  cadImportToleranceMm,
   cadLengthUnits,
   cadBooleanTools,
   cadLoftSections,
   cadBoundaryCurves,
+  cadCurveNetwork,
   cadSewInputs,
   cadSewToleranceMm,
   cadLimits,
+  cadSpotWeldLimits,
   cadPatternCopies,
+  cadFilletRadii,
+  cadOffsetSurfaceMaxMm,
+  cadPanelGapMm,
+  cadTrimChains,
+  cadPressLineDepthMm,
+  cadGrooveRadiusMm,
+  cadFlareHeightMm,
+  cadFlangeWidthMm,
   cadShellOpenFaces,
   cadTolerance,
   cadToleranceSetOf,
@@ -57,6 +81,7 @@ import {
   type SketchRegionGeometry,
 } from './sketch';
 import { cadTopologyLimits, faceNameFits, faceNameKey, type CadTopologyKind } from './topology';
+import { cadPmiLimits } from './pmi';
 
 type Rec = Record<string, unknown>;
 type Pt = [number, number];
@@ -231,8 +256,15 @@ class Check {
   }
   /** Pattern copies in the whole document. */
   copies = 0;
-  /** A dimension angle is in (0, 2π]; a joint angle (R2b-2) within one turn either way. */
-  angle(v: unknown, path: string, use: 'dimension' | 'joint' = 'dimension'): number | undefined {
+  /**
+   * A dimension angle is in (0, 2π]; a joint angle (R2b-2) within one turn either way, a
+   * continuous joint's (WM2) within `cadJointLimits.continuousRad`.
+   */
+  angle(
+    v: unknown,
+    path: string,
+    use: 'dimension' | 'joint' | 'continuous' = 'dimension',
+  ): number | undefined {
     if (!record(v)) return void this.error('angle', path);
     let value: number;
     if (Object.hasOwn(v, 'expression')) {
@@ -251,7 +283,13 @@ class Check {
       if (p.type !== 'angle') return void this.error('parameter-type', path);
       value = p.value;
     }
-    if (use === 'joint' ? !(Math.abs(value) <= 2 * Math.PI) : !(value > 0 && value <= 2 * Math.PI))
+    if (
+      use === 'continuous'
+        ? !(Math.abs(value) <= cadJointLimits.continuousRad)
+        : use === 'joint'
+          ? !(Math.abs(value) <= 2 * Math.PI)
+          : !(value > 0 && value <= 2 * Math.PI)
+    )
       return void this.error('angle-range', path);
     return value;
   }
@@ -773,6 +811,98 @@ function derivedSection(c: Check, x: Rec, path: string, earlier: unknown[]) {
     c.error('derived-section-scale', `${path}.scale`);
 }
 
+/** WM1a: a spur gear's arguments, its ranges and its geometry (`spurGearProblem`). */
+function validateSpurGear(c: Check, a: Rec, ap: string) {
+  const cycloidal = a.profile === 'cycloidal';
+  if (a.profile !== 'involute' && !cycloidal) c.error('gear-profile', `${ap}.profile`);
+  // Each profile has its own tooth fields and no others (WM1b).
+  const own = cycloidal ? ['matingTeeth', 'toothThickness'] : ['pressureAngle', 'profileShift'];
+  c.keys(
+    a,
+    [
+      'module',
+      'teeth',
+      'profile',
+      ...own,
+      'addendum',
+      'dedendum',
+      'faceWidth',
+      'bore',
+      'origin',
+      'orientation',
+    ],
+    ap,
+    ['spokes'],
+  );
+  const m = c.length(a.module, `${ap}.module`, 'dimension');
+  const z = c.count(a.teeth, `${ap}.teeth`);
+  const alpha = cycloidal ? 0 : c.angle(a.pressureAngle, `${ap}.pressureAngle`);
+  const mating = cycloidal ? c.count(a.matingTeeth, `${ap}.matingTeeth`) : 0;
+  c.length(a.faceWidth, `${ap}.faceWidth`, 'dimension');
+  const bore = c.length(a.bore, `${ap}.bore`, 'coordinate');
+  const codes: Record<string, string> = {
+    profileShift: 'gear-profile-shift',
+    toothThickness: 'gear-tooth-thickness',
+  };
+  const num = (k: string) => {
+    if (!finite(a[k])) c.error(codes[k] ?? `gear-${k}`, `${ap}.${k}`);
+    return a[k] as number;
+  };
+  const [x, ha, hf] = [
+    num(cycloidal ? 'toothThickness' : 'profileShift'),
+    num('addendum'),
+    num('dedendum'),
+  ];
+  let spokes: SpurGearSpec['spokes'];
+  let spokesOk = true;
+  if (Object.hasOwn(a, 'spokes')) {
+    const s = a.spokes;
+    const sp = `${ap}.spokes`;
+    if (!record(s)) {
+      c.error('gear-spokes', sp);
+      spokesOk = false;
+    } else {
+      c.keys(s, ['count', 'rim', 'hub', 'width'], sp);
+      const v = [
+        c.count(s.count, `${sp}.count`),
+        c.length(s.rim, `${sp}.rim`, 'dimension'),
+        c.length(s.hub, `${sp}.hub`, 'dimension'),
+        c.length(s.width, `${sp}.width`, 'dimension'),
+      ];
+      if (v.every((n) => n !== undefined)) {
+        const [count, rim, hub, width] = v as number[];
+        spokes = { count: count!, rim: rim!, hub: hub!, width: width! };
+      } else spokesOk = false;
+    }
+  }
+  c.position(a.origin, `${ap}.origin`);
+  c.quaternion(a.orientation, `${ap}.orientation`);
+  if (
+    m === undefined ||
+    z === undefined ||
+    alpha === undefined ||
+    mating === undefined ||
+    bore === undefined ||
+    !spokesOk
+  )
+    return;
+  if (![x, ha, hf].every(finite)) return;
+  const common = {
+    module: m,
+    teeth: z,
+    addendum: ha,
+    dedendum: hf,
+    bore,
+    ...(spokes && { spokes }),
+  };
+  const problem = spurGearProblem(
+    cycloidal
+      ? { ...common, profile: 'cycloidal', matingTeeth: mating, toothThickness: x }
+      : { ...common, profile: 'involute', pressureAngle: alpha, profileShift: x },
+  );
+  if (problem) c.error(problem.code, `${ap}.${problem.path}`);
+}
+
 const primitiveArgs: Record<string, string[]> = {
   box: ['size', 'origin', 'orientation'],
   cylinder: ['radius', 'height', 'origin', 'orientation'],
@@ -789,6 +919,7 @@ const featureArity: Record<string, [number, number]> = {
   box: [0, 0],
   cylinder: [0, 0],
   sphere: [0, 0],
+  spurGear: [0, 0],
   extrude: [0, 0],
   revolve: [0, 0],
   loft: [0, 0],
@@ -797,7 +928,12 @@ const featureArity: Record<string, [number, number]> = {
   revolveSurface: [0, 0],
   surfaceLoft: [0, 0],
   surfaceSweep: [0, 0],
+  profileSweep: [0, 0],
   boundarySurface: [0, 0],
+  curveNetwork: [0, 0],
+  offsetSurface: [0, 0],
+  mirrorCopy: [0, 0],
+  panel: [0, 0],
   fill: [0, 0],
   transform: [1, 1],
   boolean: [2, 1 + cadBooleanTools],
@@ -809,6 +945,11 @@ const featureArity: Record<string, [number, number]> = {
   pattern: [2, 2],
   mirror: [1, 1],
   trim: [1, 1],
+  split: [1, 1],
+  pressLine: [1, 1],
+  groove: [1, 1],
+  flare: [1, 1],
+  flange: [1, 1],
   sew: [2, cadSewInputs],
   thicken: [1, 1],
 };
@@ -817,6 +958,8 @@ const sha256Ref = (v: unknown): v is string =>
 const assetBytes: Record<CadAssetKind, number> = {
   'source-step': cadLimits.stepBytes,
   'normalized-brep': cadLimits.brepBytes,
+  pmi: cadPmiLimits.bytes,
+  'assembly-pmi': cadPmiLimits.bytes,
   'texture-png': geometryTextureLimits.imageBytes,
   'texture-jpeg': geometryTextureLimits.imageBytes,
 };
@@ -860,13 +1003,27 @@ function validateAssets(c: Check, assets: unknown[]): Map<string, CadAssetKind> 
   return kinds;
 }
 
-/** Features whose inputs must be sheets (R2a-3): trim, sew and thicken. */
+/** Features whose inputs must be sheets (R2a-3): trim, sew and thicken; a split (CR2a). */
 const needsSheet = (f: CadDocument['features'][number]) =>
-  f.type === 'trim' || f.type === 'sew' || f.type === 'thicken';
-/** Features whose inputs must be solids: Booleans, detail features and a mirror's union. */
+  f.type === 'trim' ||
+  f.type === 'split' ||
+  f.type === 'pressLine' ||
+  f.type === 'flare' ||
+  f.type === 'flange' ||
+  f.type === 'sew' ||
+  f.type === 'thicken';
+/**
+ * Features whose inputs must be solids: Booleans, detail features and a mirror's union. A fillet
+ * takes a sheet too (CR1e).
+ */
 const needsSolid = (f: CadDocument['features'][number]) =>
-  ['boolean', 'fillet', 'chamfer', 'shell', 'draft', 'pattern'].includes(f.type) ||
+  ['boolean', 'chamfer', 'shell', 'draft', 'pattern', 'groove'].includes(f.type) ||
   (f.type === 'mirror' && (f.args as { union?: unknown } | null | undefined)?.union !== false);
+/** CR3b: a panel's gap, 0.5–10 mm. */
+function panelGap(c: Check, v: unknown, path: string) {
+  const g = c.length(v, path, 'dimension');
+  if (g !== undefined && (g < cadPanelGapMm[0] || g > cadPanelGapMm[1])) c.error('panel-gap', path);
+}
 /** A sweep's or surface feature's `{ sketchId, elements }` chain, checked against its sketch. */
 function validatePath(
   c: Check,
@@ -971,6 +1128,9 @@ function validateFeature(
       if (f.type === 'cylinder') c.length(a.height, `${ap}.height`, 'dimension');
       c.position(a.origin, `${ap}.origin`);
       c.quaternion(a.orientation, `${ap}.orientation`);
+      return;
+    case 'spurGear':
+      validateSpurGear(c, a, ap);
       return;
     case 'extrude':
       if (Object.hasOwn(a, 'sketchId')) {
@@ -1121,6 +1281,57 @@ function validateFeature(
       validatePath(c, a.path, pp, sketches, 'refuse');
       return;
     }
+    case 'profileSweep': {
+      // CR4d: an open chain, a section of a kind with its dimensions, its up and flip.
+      c.keys(a, ['path', 'profile', 'up', 'flip'], ap);
+      validatePath(c, a.path, `${ap}.path`, sketches, 'refuse');
+      const pp = `${ap}.profile`;
+      const p = a.profile;
+      if (!record(p) || !c.keys(p, ['kind', 'height', 'width', 'flange', 'radius'], pp))
+        return void c.error('profile-section', pp);
+      if (!cadProfileKinds.includes(p.kind as CadProfileKind))
+        c.error('profile-kind', `${pp}.kind`);
+      const dims = (['height', 'width', 'flange', 'radius'] as const).map((k) => {
+        // A flange and a bend may be 0 (none): read as coordinates, held to the limits below.
+        const v = c.length(
+          p[k],
+          `${pp}.${k}`,
+          k === 'flange' || k === 'radius' ? 'coordinate' : 'dimension',
+        );
+        const [lo, hi] = cadProfileLimitsMm[k];
+        if (v !== undefined && (v < lo || v > hi)) {
+          c.error(
+            k === 'flange' || k === 'radius' ? `profile-${k}-range` : `profile-${k}`,
+            `${pp}.${k}`,
+          );
+          return undefined;
+        }
+        return v;
+      });
+      // The outline is drawn only from dimensions within their limits.
+      if (
+        cadProfileKinds.includes(p.kind as CadProfileKind) &&
+        dims.every((v) => v !== undefined)
+      ) {
+        const [h, w, f, r] = dims as number[];
+        const outline = profileOutline(p.kind as CadProfileKind, h!, w!, f!, r!);
+        if ('code' in outline)
+          c.error(outline.code, `${pp}.${outline.code === 'profile-flange' ? 'flange' : 'radius'}`);
+      }
+      const up = a.up;
+      if (
+        up !== 'normal' &&
+        up !== 'inPlane' &&
+        !(
+          tuple(up, 3) &&
+          up.every(finite) &&
+          Math.abs(Math.hypot(...(up as number[])) - 1) <= quaternionNormTolerance
+        )
+      )
+        c.error('profile-up', `${ap}.up`);
+      if (typeof a.flip !== 'boolean') c.error('profile-flip', `${ap}.flip`);
+      return;
+    }
     case 'boundarySurface': {
       c.keys(a, ['curves'], ap);
       const [min, max] = cadBoundaryCurves.surface;
@@ -1129,6 +1340,29 @@ function validateFeature(
       validateCurves(
         c,
         a.curves.map((x, i) => [x, `${ap}.curves[${i}]`]),
+        sketches,
+        featureIds,
+      );
+      return;
+    }
+    case 'curveNetwork': {
+      c.keys(a, ['u', 'v', 'toleranceMm'], ap);
+      const [min, max] = cadCurveNetwork.curves;
+      const ways = (['u', 'v'] as const).filter((way) => {
+        const list = a[way];
+        const ok = Array.isArray(list) && list.length >= min && list.length <= max;
+        if (!ok) c.error('curve-network-curves', `${ap}.${way}`);
+        return ok;
+      });
+      const [lo, hi] = cadCurveNetwork.toleranceMm;
+      if (typeof a.toleranceMm !== 'number' || !(a.toleranceMm >= lo && a.toleranceMm <= hi))
+        c.error('curve-network-tolerance', `${ap}.toleranceMm`);
+      // One list: a curve used twice, in either way, is refused like a boundary's.
+      validateCurves(
+        c,
+        ways.flatMap((way) =>
+          (a[way] as unknown[]).map((x, i): [unknown, string] => [x, `${ap}.${way}[${i}]`]),
+        ),
         sketches,
         featureIds,
       );
@@ -1145,26 +1379,158 @@ function validateFeature(
         const bp = `${ap}.boundary[${i}]`;
         if (!record(b) || !c.keys(b, ['curve', 'continuity'], bp))
           return void c.error('fill-boundary', bp);
-        if (b.continuity !== 'G0' && b.continuity !== 'G1')
+        if (b.continuity !== 'G0' && b.continuity !== 'G1' && b.continuity !== 'G2')
           c.error('fill-continuity', `${bp}.continuity`);
-        // G1 meets the face beside a referenced edge; a sketch curve has none.
-        else if (b.continuity === 'G1' && record(b.curve) && !Object.hasOwn(b.curve, 'edge'))
+        // G1 and G2 (CR1b) meet the face beside a referenced edge; a sketch curve has none.
+        else if (b.continuity !== 'G0' && record(b.curve) && !Object.hasOwn(b.curve, 'edge'))
           c.error('fill-no-adjacent-face', `${bp}.continuity`);
         curves.push([b.curve, `${bp}.curve`]);
       });
       validateCurves(c, curves, sketches, featureIds);
       return;
     }
+    case 'panel': {
+      // CR3b: a closed chain of a sketch, a side and a gap, on a sheet read as a source.
+      c.keys(a, ['source', 'tool', 'keep', 'gap'], ap);
+      const src = a.source;
+      const sp = `${ap}.source`;
+      if (!record(src) || !c.keys(src, ['featureId'], sp)) c.error('panel-source', sp);
+      else if (!featureIds.includes(src.featureId as string))
+        c.error('reference-feature', `${sp}.featureId`);
+      const chain = validatePath(c, a.tool, `${ap}.tool`, sketches, 'allow');
+      if (chain && !chain.g.closed) c.error('trim-tool-open', `${ap}.tool.elements`);
+      if (a.keep !== 'inside' && a.keep !== 'outside') c.error('trim-keep', `${ap}.keep`);
+      panelGap(c, a.gap, `${ap}.gap`);
+      return;
+    }
+    case 'mirrorCopy': {
+      // CR4b: a source feature read, never consumed, and a plane of a point and a unit normal.
+      c.keys(a, ['source', 'plane'], ap);
+      const src = a.source;
+      const sp = `${ap}.source`;
+      if (!record(src) || !c.keys(src, ['featureId'], sp)) c.error('mirror-source', sp);
+      else if (!featureIds.includes(src.featureId as string))
+        c.error('reference-feature', `${sp}.featureId`);
+      const pl = a.plane;
+      const pp = `${ap}.plane`;
+      if (!record(pl)) return void c.error('mirror-plane', pp);
+      c.keys(pl, ['origin', 'normal'], pp);
+      c.position(pl.origin, `${pp}.origin`);
+      c.unit(pl.normal, `${pp}.normal`, 'mirror-normal');
+      return;
+    }
+    case 'offsetSurface': {
+      c.keys(a, ['source', 'distance', 'side'], ap);
+      const src = a.source;
+      const sp = `${ap}.source`;
+      if (!record(src) || !c.keys(src, ['featureId'], sp)) c.error('offset-source', sp);
+      else if (!featureIds.includes(src.featureId as string))
+        c.error('reference-feature', `${sp}.featureId`);
+      const d = c.length(a.distance, `${ap}.distance`, 'dimension');
+      if (d !== undefined && (d < 0.01 || d > cadOffsetSurfaceMaxMm))
+        c.error('offset-distance', `${ap}.distance`);
+      if (a.side !== 'front' && a.side !== 'back') c.error('offset-side', `${ap}.side`);
+      return;
+    }
+    case 'flare': {
+      // CR2d: an open chain, the arch edge on the input, a height and the joint's continuity.
+      c.keys(a, ['tool', 'arch', 'height', 'continuity'], ap);
+      const chain = validatePath(c, a.tool, `${ap}.tool`, sketches, 'allow');
+      if (chain?.g.closed) c.error('flare-chain-closed', `${ap}.tool`);
+      c.ref(a.arch, `${ap}.arch`, 'edge', inputs);
+      const h = c.length(a.height, `${ap}.height`, 'dimension');
+      if (h !== undefined && (h < cadFlareHeightMm[0] || h > cadFlareHeightMm[1]))
+        c.error('flare-height', `${ap}.height`);
+      if (a.continuity !== 'G1' && a.continuity !== 'G2')
+        c.error('flare-continuity', `${ap}.continuity`);
+      return;
+    }
+    case 'flange': {
+      // CR4c: free edges of the input, a width, an angle up to a half turn and the side.
+      c.keys(a, ['edges', 'width', 'angle', 'toward'], ap);
+      c.refList(a.edges, `${ap}.edges`, 'edge', inputs);
+      const w = c.length(a.width, `${ap}.width`, 'dimension');
+      if (w !== undefined && (w < cadFlangeWidthMm[0] || w > cadFlangeWidthMm[1]))
+        c.error('flange-width', `${ap}.width`);
+      const angle = c.angle(a.angle, `${ap}.angle`);
+      if (angle !== undefined && angle > Math.PI) c.error('flange-angle', `${ap}.angle`);
+      if (a.toward !== 'front' && a.toward !== 'back') c.error('flange-toward', `${ap}.toward`);
+      return;
+    }
+    case 'pressLine': {
+      // CR2c: the side named as the chain is open (left/right) or closed (inside/outside).
+      c.keys(a, ['tool', 'side', 'depth', 'toward', 'radius'], ap);
+      const chain = validatePath(c, a.tool, `${ap}.tool`, sketches, 'allow');
+      const sides = chain?.g.closed ? ['inside', 'outside'] : ['left', 'right'];
+      if (!sides.includes(a.side as string)) c.error('press-line-side', `${ap}.side`);
+      const d = c.length(a.depth, `${ap}.depth`, 'dimension');
+      if (d !== undefined && (d < cadPressLineDepthMm[0] || d > cadPressLineDepthMm[1]))
+        c.error('press-line-depth', `${ap}.depth`);
+      if (a.toward !== 'front' && a.toward !== 'back') c.error('press-line-toward', `${ap}.toward`);
+      c.length(a.radius, `${ap}.radius`, 'dimension');
+      return;
+    }
+    case 'groove': {
+      // CR6d: an open or closed chain projected onto the solid, a round groove of the radius.
+      c.keys(a, ['tool', 'radius'], ap);
+      validatePath(c, a.tool, `${ap}.tool`, sketches, 'allow');
+      const r = c.length(a.radius, `${ap}.radius`, 'dimension');
+      if (r !== undefined && (r < cadGrooveRadiusMm[0] || r > cadGrooveRadiusMm[1]))
+        c.error('groove-radius', `${ap}.radius`);
+      return;
+    }
+    case 'split':
+      // CR2a: an open or closed chain; the kernel says which pieces lie on which side.
+      c.keys(a, ['tool'], ap);
+      validatePath(c, a.tool, `${ap}.tool`, sketches, 'allow');
+      return;
     case 'trim': {
-      c.keys(a, ['tool', 'keep'], ap);
+      c.keys(a, ['tool', 'keep'], ap, ['gap', 'chains', 'ifMissed']);
       const t = a.tool;
       const tp = `${ap}.tool`;
       let sides: string[] = ['front', 'back'];
+      // CR3b: a gap only off a sketch chain.
+      if (a.gap !== undefined) {
+        if (!record(t) || !Object.hasOwn(t, 'sketchId')) c.error('trim-gap-tool', `${ap}.gap`);
+        else panelGap(c, a.gap, `${ap}.gap`);
+      }
+      // CR3c: more chains and `ifMissed` only with a sketch's chain.
+      const sketchTool = record(t) && Object.hasOwn(t, 'sketchId');
+      for (const k of ['chains', 'ifMissed'] as const)
+        if (a[k] !== undefined && !sketchTool) c.error('trim-chains-tool', `${ap}.${k}`);
+      if (a.ifMissed !== undefined && a.ifMissed !== 'skip')
+        c.error('trim-if-missed', `${ap}.ifMissed`);
       if (record(t) && Object.hasOwn(t, 'sketchId')) {
         // A closed chain cut along its sketch's normal: its inside or its outside is kept.
         sides = ['inside', 'outside'];
         const chain = validatePath(c, t, tp, sketches, 'allow');
         if (chain && !chain.g.closed) c.error('trim-tool-open', `${tp}.elements`);
+        // CR3c: more closed chains of the same sketch, no element used twice.
+        if (a.chains !== undefined) {
+          const cp = `${ap}.chains`;
+          if (!Array.isArray(a.chains) || !a.chains.length || a.chains.length + 1 > cadTrimChains)
+            c.error('trim-chains', cp);
+          else {
+            const used = new Set(Array.isArray(t.elements) ? (t.elements as unknown[]) : []);
+            a.chains.forEach((ids, i) => {
+              const ep = `${cp}[${i}]`;
+              if (
+                !Array.isArray(ids) ||
+                !ids.length ||
+                ids.length > cadSketchLimits.entities ||
+                !ids.every(cadId)
+              )
+                return void c.error('sweep-path', ep);
+              if (ids.some((id) => used.has(id))) c.error('trim-chains-shared', ep);
+              for (const id of ids) used.add(id);
+              const sketch = sketches.get(t.sketchId as string);
+              if (!sketch) return;
+              const g = sketchPath(sketch, ids as string[], 'allow');
+              if ('code' in g) c.error(g.code, `${ep}${g.path}`);
+              else if (!g.closed) c.error('trim-tool-open', ep);
+            });
+          }
+        }
       } else if (record(t) && Object.hasOwn(t, 'plane')) {
         c.keys(t, ['plane'], tp);
         const pl = t.plane;
@@ -1213,11 +1579,29 @@ function validateFeature(
       if (Array.isArray(inputs) && new Set(inputs).size !== inputs.length)
         c.error('boolean-same-input', `${path}.inputFeatureIds`);
       return;
-    case 'fillet':
-      c.keys(a, ['edges', 'radius'], ap);
+    case 'fillet': {
+      c.keys(a, ['edges', 'radius'], ap, ['radiusEnd', 'radii']);
       c.refList(a.edges, `${ap}.edges`, 'edge', inputs);
       c.length(a.radius, `${ap}.radius`, 'dimension');
+      // CR1e: a radius that varies along each edge, by its two ends or 2–8 points.
+      if (Object.hasOwn(a, 'radiusEnd')) c.length(a.radiusEnd, `${ap}.radiusEnd`, 'dimension');
+      if (!Object.hasOwn(a, 'radii')) return;
+      if (!Object.hasOwn(a, 'radiusEnd')) return void c.error('fillet-radii-end', `${ap}.radii`);
+      const radii = a.radii;
+      // The ends are `radius` and `radiusEnd`: 1 to 6 between.
+      if (!Array.isArray(radii) || radii.length < 1 || radii.length > cadFilletRadii[1] - 2)
+        return void c.error('fillet-radii', `${ap}.radii`);
+      let last = 0;
+      radii.forEach((p: unknown, i: number) => {
+        const pp = `${ap}.radii[${i}]`;
+        if (!record(p)) return void c.error('fillet-radii', pp);
+        c.keys(p, ['at', 'radius'], pp);
+        if (!finite(p.at) || !(p.at > last) || !(p.at < 1)) c.error('fillet-radii-at', `${pp}.at`);
+        else last = p.at;
+        c.length(p.radius, `${pp}.radius`, 'dimension');
+      });
       return;
+    }
     case 'shell':
       c.keys(a, ['openFaces', 'thickness', 'side'], ap);
       c.refList(a.openFaces, `${ap}.openFaces`, 'face', inputs, 0, cadShellOpenFaces);
@@ -1233,6 +1617,7 @@ function validateFeature(
       const lp = `${ap}.layout`;
       if (!record(l) || (l.type !== 'linear' && l.type !== 'circular' && l.type !== 'curve'))
         return void c.error('pattern-layout', lp);
+      let rowCount: number | undefined;
       if (l.type === 'curve') {
         // K5a: along an open chain of lines and arcs a sketch draws.
         c.keys(l, ['type', 'path', 'count', 'align'], lp);
@@ -1241,9 +1626,21 @@ function validateFeature(
         if (spline >= 0) c.error('pattern-path', `${lp}.path.elements[${spline}]`);
         if (typeof l.align !== 'boolean') c.error('pattern-align', `${lp}.align`);
       } else if (l.type === 'linear') {
-        c.keys(l, ['type', 'direction', 'count', 'spacing'], lp);
+        c.keys(l, ['type', 'direction', 'count', 'spacing'], lp, ['rows']);
         c.unit(l.direction, `${lp}.direction`, 'pattern-direction');
         c.length(l.spacing, `${lp}.spacing`, 'dimension');
+        // CR6d: a grid, the row repeated along a second direction.
+        if (Object.hasOwn(l, 'rows')) {
+          const rows = l.rows;
+          const rp = `${lp}.rows`;
+          if (!record(rows)) c.error('pattern-rows', rp);
+          else {
+            c.keys(rows, ['direction', 'count', 'spacing'], rp);
+            c.unit(rows.direction, `${rp}.direction`, 'pattern-direction');
+            c.length(rows.spacing, `${rp}.spacing`, 'dimension');
+            rowCount = c.count(rows.count, `${rp}.count`);
+          }
+        }
       } else {
         c.keys(l, ['type', 'axisOrigin', 'axisDirection', 'count', 'angle'], lp);
         c.position(l.axisOrigin, `${lp}.axisOrigin`);
@@ -1251,7 +1648,8 @@ function validateFeature(
         c.angle(l.angle, `${lp}.angle`);
       }
       const n = c.count(l.count, `${lp}.count`);
-      if (n !== undefined) c.copies += n;
+      // CR6d: each further row of a grid adds as many copies again.
+      if (n !== undefined) c.copies += n * (rowCount ?? 1);
       return;
     }
     case 'mirror': {
@@ -1301,6 +1699,7 @@ function validateFeature(
         a,
         ['kind', 'sourceAssetId', 'brepAssetId', 'importer', 'sourceUnit', 'scaleToMm'],
         ap,
+        ['maxToleranceMm', 'pmiAssetId'],
       );
       if (a.kind !== 'solid' && a.kind !== 'sheet') c.error('body-kind', `${ap}.kind`);
       for (const [key, kind] of [
@@ -1309,6 +1708,11 @@ function validateFeature(
       ] as const) {
         if (assets.get(a[key] as string) !== kind) c.error('asset-missing', `${ap}.${key}`);
         else used.add(a[key] as string);
+      }
+      if (Object.hasOwn(a, 'pmiAssetId')) {
+        if (assets.get(a.pmiAssetId as string) !== 'pmi')
+          c.error('asset-missing', `${ap}.pmiAssetId`);
+        else used.add(a.pmiAssetId as string);
       }
       const im = a.importer;
       if (!record(im)) c.error('importer', `${ap}.importer`);
@@ -1323,6 +1727,16 @@ function validateFeature(
         c.error('source-unit', `${ap}.sourceUnit`);
       else if (a.scaleToMm !== cadLengthUnits[unit as keyof typeof cadLengthUnits])
         c.error('source-scale', `${ap}.scaleToMm`);
+      // #820: recorded only above the standard result limit, and never past the import limit.
+      if (
+        Object.hasOwn(a, 'maxToleranceMm') &&
+        !(
+          typeof a.maxToleranceMm === 'number' &&
+          a.maxToleranceMm > cadTolerance.maxResultLinearToleranceMm &&
+          a.maxToleranceMm <= cadImportToleranceMm
+        )
+      )
+        c.error('imported-tolerance', `${ap}.maxToleranceMm`);
     }
   }
 }
@@ -1380,7 +1794,15 @@ const countLimits = [
 /** A body's appearance (#661): colour, opacity and, optionally, a finish and its preset. */
 function checkAppearance(c: Check, a: unknown, ap: string) {
   if (!record(a)) return c.error('appearance', ap);
-  c.keys(a, ['color', 'opacity'], ap, ['roughness', 'metalness', 'material', 'textures']);
+  c.keys(a, ['color', 'opacity'], ap, [
+    'roughness',
+    'metalness',
+    'material',
+    'textures',
+    'emission',
+    'transmission',
+    'ior',
+  ]);
   if (typeof a.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(a.color))
     c.error('appearance-color', `${ap}.color`);
   const unit = (v: unknown) => finite(v) && v >= 0 && v <= 1;
@@ -1393,6 +1815,9 @@ function checkAppearance(c: Check, a: unknown, ap: string) {
   )
     c.error('appearance-material', `${ap}.material`);
   if (Object.hasOwn(a, 'textures')) checkTextures(c, a.textures, `${ap}.textures`);
+  // CR6a: emission (colour and strength 0–50), transmission 0–1, ior 1–2.5.
+  for (const [key, problem] of geometryLightProblems(a))
+    c.error(`appearance-${problem}`, `${ap}.${key}`);
   return true;
 }
 /** #662: a texture set's shape (its maps' assets are checked against the content's). */
@@ -1443,6 +1868,14 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       ...assemblyKeys,
     ],
     '$',
+    [
+      'assemblyPmiAssetId',
+      'spotWelds',
+      'configurations',
+      'interferenceAllowances',
+      'mounts',
+      'gearMeshes',
+    ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
   if (value.axes !== 'right-handed-z-up') c.error('axes', '$.axes');
@@ -1486,6 +1919,15 @@ export function validateCad(value: unknown): CadDiagnostic[] {
     ? validateAssets(c, value.assets)
     : (c.error('collection', '$.assets'), new Map<string, CadAssetKind>());
   const usedAssets = new Set<string>();
+  // PMI-5: an assembly's PMI of particular instances; its targets are checked against the
+  // parts' shapes when the assembly is evaluated (`assemblyPmiAssetProblem`).
+  if (Object.hasOwn(value, 'assemblyPmiAssetId')) {
+    if (assets.get(value.assemblyPmiAssetId as string) !== 'assembly-pmi')
+      c.error('asset-missing', '$.assemblyPmiAssetId');
+    else usedAssets.add(value.assemblyPmiAssetId as string);
+    if (!Array.isArray(value.components) || !value.components.length)
+      c.error('assembly-pmi-not-assembly', '$.assemblyPmiAssetId');
+  }
 
   validateParameters(c, value.parameters as unknown[]);
   const profiles = new Map<string, Profile2D | undefined>();
@@ -1579,6 +2021,12 @@ export function validateCad(value: unknown): CadDiagnostic[] {
               if (featureKind({ features: typed }, input) === 'solid')
                 c.error('solid-not-sheet', `$.features[${i}].inputFeatureIds[${j}]`);
             });
+          // CR2b: an offset surface moves a sheet; CR3b: a panel is cut out of one.
+          if ((f.type === 'offsetSurface' || f.type === 'panel') && record(f.args?.source)) {
+            const id = f.args.source.featureId;
+            if (byId.has(id) && featureKind({ features: typed }, id) !== 'sheet')
+              c.error('solid-not-sheet', `$.features[${i}].args.source.featureId`);
+          }
           if (f.type === 'trim' && record(f.args?.tool) && 'featureId' in f.args.tool) {
             const id = f.args.tool.featureId;
             if (byId.has(id) && featureKind({ features: typed }, id) !== 'sheet')
@@ -1704,11 +2152,73 @@ export function validateCad(value: unknown): CadDiagnostic[] {
         c.error('projection-span', `${path}.projection.spanMm`);
     } else c.error('projection', `${path}.projection.type`);
   }
+  validateSpotWelds(c, value, typed, active);
   validateAssembly(c, value);
+  if (Object.hasOwn(value, 'configurations'))
+    validateConfigurations(c, value.configurations, cadId);
+  if (Object.hasOwn(value, 'interferenceAllowances'))
+    validateInterferenceAllowances(c, value.interferenceAllowances, cadId);
+  if (Object.hasOwn(value, 'mounts'))
+    validateMounts(
+      c,
+      value.mounts,
+      Array.isArray(value.joints) ? value.joints : [],
+      new Set(
+        (Array.isArray(value.components) ? value.components : []).flatMap((x) =>
+          record(x) && typeof x.id === 'string' ? [x.id] : [],
+        ),
+      ),
+    );
+  if (Object.hasOwn(value, 'gearMeshes'))
+    validateGearMeshes(c, value.gearMeshes, Array.isArray(value.joints) ? value.joints : [], cadId);
   if (c.nodes > cadExpressionLimits.documentNodes) c.error('limit-expression-nodes', '$');
   if (c.refs > cadTopologyLimits.refsPerDocument) c.error('limit-references', '$.features');
   if (c.copies > cadPatternCopies) c.error('limit-pattern-copies', '$.features');
   return c.d;
+}
+/** CR4e: spot welds, each between faces of two different active bodies. */
+function validateSpotWelds(
+  c: Check,
+  value: Rec,
+  features: CadDocument['features'],
+  active: { id: string; result: string }[],
+) {
+  if (!Object.hasOwn(value, 'spotWelds')) return;
+  const welds = value.spotWelds;
+  if (!Array.isArray(welds) || !welds.length) return void c.error('spot-welds', '$.spotWelds');
+  if (welds.length > cadSpotWeldLimits.spotWelds) c.error('limit-spot-welds', '$.spotWelds');
+  const L = cadSpotWeldLimits;
+  const inRange = (v: unknown, [lo, hi]: readonly [number, number]) =>
+    finite(v) && v >= lo && v <= hi;
+  for (const [i, w] of welds.entries()) {
+    const path = `$.spotWelds[${i}]`;
+    if (!record(w)) {
+      c.error('spot-weld', path);
+      continue;
+    }
+    c.keys(w, ['id', 'name', 'flanges', 'pitchMm', 'endDistanceMm', 'maxGapMm'], path);
+    c.id(w.id, `${path}.id`);
+    c.name(w.name, `${path}.name`);
+    if (!inRange(w.pitchMm, L.pitchMm)) c.error('spot-weld-pitch', `${path}.pitchMm`);
+    if (!inRange(w.endDistanceMm, L.endDistanceMm))
+      c.error('spot-weld-end-distance', `${path}.endDistanceMm`);
+    if (!inRange(w.maxGapMm, L.maxGapMm)) c.error('spot-weld-gap', `${path}.maxGapMm`);
+    if (!Array.isArray(w.flanges) || w.flanges.length !== 2) {
+      c.error('spot-weld-flanges', `${path}.flanges`);
+      continue;
+    }
+    const bodies: unknown[] = [];
+    w.flanges.forEach((f: unknown, j: number) => {
+      const fp = `${path}.flanges[${j}]`;
+      if (!record(f) || !c.keys(f, ['bodyId', 'face'], fp)) return c.error('spot-weld-flange', fp);
+      bodies.push(f.bodyId);
+      const body = active.find((a) => a.id === f.bodyId);
+      if (!body) return c.error('spot-weld-body', `${fp}.bodyId`);
+      c.ref(f.face, `${fp}.face`, 'face', [...upstreamFeatures(features, [body.result])]);
+    });
+    if (bodies.length === 2 && bodies[0] === bodies[1])
+      c.error('spot-weld-same-body', `${path}.flanges`);
+  }
 }
 export class CadValidationError extends Error {
   constructor(readonly diagnostics: CadDiagnostic[]) {

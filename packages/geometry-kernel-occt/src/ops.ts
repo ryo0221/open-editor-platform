@@ -7,6 +7,7 @@ import {
   validateGeometry,
   type GeometryFrame,
   type GeometryGraph,
+  type GeometryOp,
   type GeometryIssue,
   type GeometryLoop,
   type GeometryRequest,
@@ -72,6 +73,9 @@ class GeometryOpError extends Error {
 
 /** Points per full turn of a circle in a section polyline. */
 const sectionSegmentsPerTurn = 128;
+/** LR3: how far a section polyline of another curve may stray from it (mm), halving at most 10 times per step. */
+const sectionDeflectionMm = 0.05;
+const sectionMaxDepth = 10;
 
 /**
  * Runs a geometry graph (geometry-core's ops) and answers each request from the node it names.
@@ -160,6 +164,48 @@ export async function evaluateGeometry(
     return own(builder.Wire());
   };
 
+  /**
+   * TW5: a prism whose end profile is its start's scaled about the frame's origin, ruled
+   * between them (planar faces between straight edges, cones between arcs). Holes are ruled
+   * the same way and cut out.
+   */
+  const taper = (
+    op: Extract<GeometryOp, { op: 'prism' }>,
+    toModel: (p: GeometryVec2) => GeometryVec3,
+    id: string,
+  ) => {
+    const k = op.endScale!;
+    const v = op.vector;
+    const toEnd = (p: GeometryVec2): GeometryVec3 => {
+      const q = toModel(p);
+      return [q[0] + v[0], q[1] + v[1], q[2] + v[2]];
+    };
+    const scaled = (l: GeometryLoop): GeometryLoop =>
+      l.map((p) => (p.length > 2 ? [p[0] * k, p[1] * k, p[2]!] : [p[0] * k, p[1] * k]));
+    const ruled = (l: GeometryLoop) => {
+      const loft = own(new oc.BRepOffsetAPI_ThruSections(true, true, geometryLimits.toleranceMm));
+      loft.AddWire(wire(l, toModel, op.frame, true, id));
+      loft.AddWire(wire(scaled(l), toEnd, op.frame, true, id));
+      loft.CheckCompatibility(false);
+      loft.Build(progress());
+      if (!loft.IsDone()) throw new GeometryOpError('prism-failed', id);
+      return own(loft.Shape());
+    };
+    const outer = ruled(op.outer);
+    if (!op.holes?.length) return checked(outer, id);
+    const cut = own(new oc.BRepAlgoAPI_Cut_1());
+    const list = (items: unknown[]) => {
+      const l = own(new oc.TopTools_ListOfShape_1());
+      for (const x of items) own(l.Append_1(x));
+      return l;
+    };
+    cut.SetArguments(list([outer]));
+    cut.SetTools(list(op.holes.map(ruled)));
+    cut.Build(progress());
+    if (!cut.IsDone() || cut.HasErrors()) throw new GeometryOpError('prism-failed', id);
+    return checked(own(cut.Shape()), id);
+  };
+
   const shapes = new Map<string, unknown>();
   const failed = new Map<string, GeometryOpError>();
   // Children first, in a loop rather than by recursion, so a chain as long as the node limit
@@ -203,6 +249,7 @@ export async function evaluateGeometry(
           f.origin[1] + u * x[1] + v * y[1],
           f.origin[2] + u * x[2] + v * y[2],
         ];
+        if (op.endScale !== undefined && op.endScale !== 1) return taper(op, toModel, id);
         const plane = own(new oc.gp_Pln_3(pnt(f.origin), dir(z)));
         const face = own(
           new oc.BRepBuilderAPI_MakeFace_16(plane, wire(op.outer, toModel, f, true, id), true),
@@ -214,6 +261,32 @@ export async function evaluateGeometry(
         );
         if (!prism.IsDone()) throw new GeometryOpError('prism-failed', id);
         return checked(own(prism.Shape()), id);
+      }
+      case 'loft': {
+        // LR1: each section's wire as written (never reversed), so vertex i meets vertex i.
+        const loft = own(
+          new oc.BRepOffsetAPI_ThruSections(
+            true,
+            op.ruled ?? op.sections.length === 2,
+            geometryLimits.toleranceMm,
+          ),
+        );
+        for (const s of op.sections) {
+          const f = s.frame;
+          const z = geometryUnit(f.z);
+          const x = geometryUnit(f.x);
+          const y = geometryCross(z, x);
+          const toModel = ([u, v]: GeometryVec2): GeometryVec3 => [
+            f.origin[0] + u * x[0] + v * y[0],
+            f.origin[1] + u * x[1] + v * y[1],
+            f.origin[2] + u * x[2] + v * y[2],
+          ];
+          loft.AddWire(wire(s.outer, toModel, f, loopArea(s.outer) > 0, id));
+        }
+        loft.CheckCompatibility(false);
+        loft.Build(progress());
+        if (!loft.IsDone()) throw new GeometryOpError('loft-failed', id);
+        return checked(own(loft.Shape()), id);
       }
       case 'boolean': {
         const target = shapes.get(op.target);
@@ -432,16 +505,44 @@ export async function evaluateGeometry(
     const t1 = oc.BRep_Tool.Parameter_2(last, edge) as number;
     const curve = handle.get();
     const type = own(curve.DynamicType()).get().Name() as string;
-    const n =
-      type === 'Geom_Line'
-        ? 1
-        : Math.max(2, Math.ceil((Math.abs(t1 - t0) / (2 * Math.PI)) * sectionSegmentsPerTurn));
-    const out = new Float64Array((n + 1) * 3);
-    for (let i = 0; i <= n; i++) {
-      const p = own(curve.Value(t0 + ((t1 - t0) * i) / n));
-      out.set([p.X(), p.Y(), p.Z()], i * 3);
+    const at = (t: number): GeometryVec3 => {
+      const p = own(curve.Value(t));
+      return [p.X(), p.Y(), p.Z()];
+    };
+    // A circle's or an ellipse's parameter is its angle: points by the turn.
+    if (type === 'Geom_Line' || type === 'Geom_Circle' || type === 'Geom_Ellipse') {
+      const n =
+        type === 'Geom_Line'
+          ? 1
+          : Math.max(2, Math.ceil((Math.abs(t1 - t0) / (2 * Math.PI)) * sectionSegmentsPerTurn));
+      const out = new Float64Array((n + 1) * 3);
+      for (let i = 0; i <= n; i++) out.set(at(t0 + ((t1 - t0) * i) / n), i * 3);
+      return out;
     }
-    return out;
+    // LR3: any other curve's parameter says nothing of its shape (a loft's B-spline runs over
+    // its length): 16 even steps, each halved until its middle lies within the deflection of
+    // its chord.
+    const pts: GeometryVec3[] = [at(t0)];
+    const refine = (a: number, pa: GeometryVec3, b: number, pb: GeometryVec3, depth: number) => {
+      const m = (a + b) / 2;
+      const pm = at(m);
+      const chord = [0, 1, 2].map((k) => pb[k]! - pa[k]!);
+      const len = Math.hypot(...chord);
+      const w = [0, 1, 2].map((k) => pm[k]! - pa[k]!);
+      const along = len ? (w[0]! * chord[0]! + w[1]! * chord[1]! + w[2]! * chord[2]!) / len : 0;
+      const off = Math.sqrt(Math.max(0, w[0]! ** 2 + w[1]! ** 2 + w[2]! ** 2 - along * along));
+      if (depth < sectionMaxDepth && off > sectionDeflectionMm) {
+        refine(a, pa, m, pm, depth + 1);
+        refine(m, pm, b, pb, depth + 1);
+      } else pts.push(pb);
+    };
+    const n0 = 16;
+    for (let i = 0; i < n0; i++) {
+      const a = t0 + ((t1 - t0) * i) / n0;
+      const b = t0 + ((t1 - t0) * (i + 1)) / n0;
+      refine(a, pts.at(-1)!, b, at(b), 0);
+    }
+    return new Float64Array(pts.flat());
   };
   const section = (shape: unknown, origin: GeometryVec3, normal: GeometryVec3): Float64Array[] => {
     const plane = own(new oc.gp_Pln_3(pnt(origin), dir(geometryUnit(normal))));

@@ -586,3 +586,5 @@ function checkWorldlines(rows: TimelineRow[], fail: (p: TimelineTableProblem) =>
     }
   }
 }
+
+export { TL1_COLUMNS, TL1_ROLES, TL1_LIMITS } from './tl1-schema';

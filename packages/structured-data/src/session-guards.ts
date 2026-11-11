@@ -9,7 +9,11 @@ const sameValue = (a: DataRow['values'], b: DataRow['values'], columnId: string)
   canonicalJson(a[columnId]) === canonicalJson(b[columnId]);
 
 /** New records must keep read-only defaults and must not author formula values. */
-export function assertAddedRowDefaults(current: StructuredData, next: StructuredData) {
+export function assertAddedRowDefaults(
+  current: StructuredData,
+  next: StructuredData,
+  permits?: (rowId: string, columnId: string) => boolean,
+) {
   const existingIds = new Set(current.rows.map((r) => r.id)),
     added = next.rows.filter((r) => !existingIds.has(r.id));
   if (!added.length) return;
@@ -21,7 +25,7 @@ export function assertAddedRowDefaults(current: StructuredData, next: Structured
     defaults = makeRow({ ...next, columns: protectedColumns }, 'defaults').values;
   for (const column of protectedColumns.filter((c) => c.readOnly || c.type === 'formula'))
     for (const row of added)
-      if (!sameValue(row.values, defaults, column.id))
+      if (!sameValue(row.values, defaults, column.id) && !permits?.(row.id, column.id))
         throw new Error(
           `${column.name}: New records must retain read-only defaults and omit formula values`,
         );

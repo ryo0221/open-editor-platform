@@ -25,7 +25,10 @@ export async function nativeArtifact(page: Page): Promise<StoredArtifact> {
   await page.getByRole('button', { name: 'Export JSON', exact: true }).click();
   const file = await pending;
   const record = JSON.parse(await readFile((await file.path())!, 'utf8'));
-  await page.keyboard.press('Escape');
+  // Close the menu only if it is still open: an Escape that reaches the editor instead clears
+  // its selection (a CAD body or feature), which the next step of a test may rely on.
+  const item = page.getByRole('button', { name: 'Export JSON', exact: true });
+  if (await item.isVisible()) await page.keyboard.press('Escape');
   return record;
 }
 export async function create(page: Page, kind = 'document') {

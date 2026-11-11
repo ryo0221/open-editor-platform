@@ -9,6 +9,7 @@ import {
   type Artifact,
 } from '@editor-platform/artifact-core';
 import { adoptFictionMapBase } from '@editor-platform/fiction-map/host';
+import type { HostSaveContext } from '@editor-platform/editor-host';
 import {
   prepareFictionMapChange,
   commitFictionMapChange,
@@ -32,6 +33,7 @@ async function fixture() {
   const access = { write: true };
   const denied = new Set<string>();
   const faults = { links: '', native: '', puts: 0, writes: 0 };
+  const contexts: HostSaveContext[] = [];
   let hold: (() => Promise<void>) | undefined;
   const io: CreativeWorkspaceStorage = {
     artifacts: {
@@ -39,7 +41,8 @@ async function fixture() {
       list: store.list.bind(store),
       remove: store.remove.bind(store),
       putIfAbsent: store.putIfAbsent.bind(store),
-      put: async (a) => {
+      put: async (a, context) => {
+        if (context) contexts.push(context);
         faults.puts++;
         if (faults.native === 'fail') {
           faults.native = '';
@@ -88,6 +91,7 @@ async function fixture() {
   const map = (await store.get(reference.map.artifactId))!;
   faults.puts = 0;
   faults.writes = 0;
+  contexts.length = 0;
   return {
     store,
     io,
@@ -98,6 +102,7 @@ async function fixture() {
     access,
     denied,
     faults,
+    contexts,
     setHold: (value?: () => Promise<void>) => {
       hold = value;
     },
@@ -532,6 +537,17 @@ describe('CW3 fixed semantic maps', () => {
         expect(saved.versions.slice(0, 2)).toEqual(f.map.versions);
         expect(f.w.maps.mapping).toEqual(pins);
         expect(f.faults.puts).toBe(kind === 'lost' ? 1 : 2);
+        expect(f.contexts).toHaveLength(f.faults.puts);
+        expect(f.contexts[0]).toMatchObject({
+          artifactId: editor.id,
+          kind: 'fiction-map',
+          committed: true,
+          versionId: saved.versions.at(-1)!.versionId,
+          contentHash: saved.versions.at(-1)!.contentHash,
+          proposalTransactions: [],
+        });
+        expect(Object.isFrozen(f.contexts[0])).toBe(true);
+        for (const context of f.contexts) expect(context).toBe(f.contexts[0]);
       },
     );
   it('late native save never replaces further input or a different Scene map pin', async () => {

@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { f30Fixtures, type GeometryGraph, type GeometryVec3 } from '@editor-platform/geometry-core';
+import {
+  f30Fixtures,
+  validateGeometry,
+  type GeometryGraph,
+  type GeometryVec3,
+} from '@editor-platform/geometry-core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { cadKernelBuild } from '../../../scripts/cad-kernel/build.mjs';
 import type { OcModule } from './module';
@@ -164,6 +169,179 @@ describe.skipIf(!dist)('geometry ops with the development build (F30)', () => {
         evaluation.results.map((r) => (r.status === 'error' ? `${r.code}@${r.node}` : 'ok')),
     ).toEqual(['asset-missing@base']);
     expect(built).toEqual(['base']);
+  });
+
+  it('rules a tapered prism between its start and its scaled end (TW5)', async () => {
+    const frame = {
+      origin: [0, 0, 0] as GeometryVec3,
+      x: [1, 0, 0] as GeometryVec3,
+      z: [0, 0, 1] as GeometryVec3,
+    };
+    const square = (s: number) =>
+      [
+        [-s / 2, -s / 2],
+        [s / 2, -s / 2],
+        [s / 2, s / 2],
+        [-s / 2, s / 2],
+      ] as [number, number][];
+    const graph: GeometryGraph = {
+      nodes: {
+        // A 1000 mm square to a 400 mm one over 6 m.
+        square: { op: 'prism', frame, outer: square(1000), vector: [0, 0, 6000], endScale: 0.4 },
+        // A Ø800 circle to Ø400, leaning 500 mm in x.
+        cone: {
+          op: 'prism',
+          frame,
+          outer: [
+            [400, 0, 1],
+            [-400, 0, 1],
+          ],
+          vector: [500, 0, 3000],
+          endScale: 0.5,
+        },
+        // A 600 mm box of 100 mm walls to half its size (the walls scale too).
+        box: {
+          op: 'prism',
+          frame,
+          outer: square(600),
+          holes: [square(400)],
+          vector: [0, 0, 2000],
+          endScale: 0.5,
+        },
+      },
+    };
+    const evaluation = await evaluateGeometry(oc, graph, [
+      { node: 'square', measure: true },
+      { node: 'cone', measure: true },
+      { node: 'box', measure: true },
+    ]);
+    if (evaluation.status !== 'ok') throw new Error(JSON.stringify(evaluation));
+    const [sq, cone, box] = evaluation.results.map((r) => ok(r).measure!);
+    // Similar sections scaled linearly by k: V = A·h·(1 + k + k²)/3.
+    const frustum = (a: number, h: number, k: number) => (a * h * (1 + k + k * k)) / 3;
+    near(sq.volumeMm3, frustum(1000 ** 2, 6000, 0.4), 1e-9);
+    near(cone.volumeMm3, frustum(Math.PI * 400 ** 2, 3000, 0.5), 1e-6);
+    near(box.volumeMm3, frustum(600 ** 2 - 400 ** 2, 2000, 0.5), 1e-9);
+    expect(sq.bounds).toEqual(
+      [
+        [-500, -500, 0],
+        [500, 500, 6000],
+      ].map((p) => p.map((v) => expect.closeTo(v, 6))),
+    );
+  });
+
+  it('lofts ruled sections (a leaning wall, a cone) and smooth ones (a spiral) (LR1)', async () => {
+    const flat = (z: number) => ({
+      origin: [0, 0, z] as GeometryVec3,
+      x: [1, 0, 0] as GeometryVec3,
+      z: [0, 0, 1] as GeometryVec3,
+    });
+    const rect = (x0: number, y0: number, x1: number, y1: number) =>
+      [
+        [x0, y0],
+        [x1, y0],
+        [x1, y1],
+        [x0, y1],
+      ] as [number, number][];
+    // A quarter ring of radii r..R, counter-clockwise from +x.
+    const b = Math.tan(Math.PI / 8);
+    const ring = (r: number, R: number) =>
+      [
+        [R, 0, b],
+        [0, R],
+        [0, r, -b],
+        [r, 0],
+      ] as [number, number, number?][] as never;
+    // A spiral: radial sections every 5° over a quarter turn, rising 2,000 mm, 300 mm thick.
+    const spiral = Array.from({ length: 19 }, (_, i) => {
+      const t = ((i * 5) / 180) * Math.PI;
+      const top = (2000 * i) / 18;
+      return {
+        frame: {
+          origin: [0, 0, 0] as GeometryVec3,
+          x: [Math.cos(t), Math.sin(t), 0] as GeometryVec3,
+          z: [Math.sin(t), -Math.cos(t), 0] as GeometryVec3,
+        },
+        outer: rect(5000, top - 300, 8000, top),
+      };
+    });
+    const graph: GeometryGraph = {
+      nodes: {
+        // A 4 m wall 200 mm wide, its top 500 mm across: a sheared prism.
+        wall: {
+          op: 'loft',
+          sections: [
+            { frame: flat(0), outer: rect(0, 0, 4000, 200) },
+            { frame: flat(3000), outer: rect(0, 500, 4000, 700) },
+          ],
+        },
+        // A quarter cone: the ring 10,000–10,080 at the base, 10,500–10,580 at 3 m.
+        cone: {
+          op: 'loft',
+          sections: [
+            { frame: flat(0), outer: ring(10000, 10080) },
+            { frame: flat(3000), outer: ring(10500, 10580) },
+          ],
+        },
+        spiral: { op: 'loft', sections: spiral },
+      },
+    };
+    const evaluation = await evaluateGeometry(oc, graph, [
+      { node: 'wall', measure: true },
+      { node: 'cone', measure: true },
+      { node: 'spiral', measure: true },
+    ]);
+    if (evaluation.status !== 'ok') throw new Error(JSON.stringify(evaluation));
+    const [wall, cone, spiralM] = evaluation.results.map((r) => ok(r).measure!);
+    near(wall.volumeMm3, 4000 * 200 * 3000, 1e-9);
+    // Annular sectors of linearly growing radii: Simpson's rule is exact.
+    const sector = (r: number, R: number) => (Math.PI / 4) * (R * R - r * r);
+    near(
+      cone.volumeMm3,
+      (3000 / 6) * (sector(10000, 10080) + 4 * sector(10250, 10330) + sector(10500, 10580)),
+      1e-6,
+    );
+    // A spiral slab of vertical thickness t: its plan area × t.
+    near(spiralM.volumeMm3, sector(5000, 8000) * 300, 1e-4);
+    // Sections of different shapes are refused before the kernel.
+    const bad = validateGeometry({
+      nodes: {
+        x: {
+          op: 'loft',
+          sections: [
+            { frame: flat(0), outer: rect(0, 0, 1, 1) },
+            { frame: flat(1), outer: ring(1, 2) },
+          ],
+        },
+        y: { op: 'loft', sections: [{ frame: flat(0), outer: rect(0, 0, 1, 1) }] },
+        // A missing section or frame is reported, not skipped.
+        w: {
+          op: 'loft',
+          sections: [
+            null as never,
+            { outer: rect(0, 0, 1, 1) } as never,
+            { frame: flat(2), outer: rect(0, 0, 1, 1) },
+          ],
+        },
+        // A broken first loop is reported, not compared against (no throw).
+        z: {
+          op: 'loft',
+          sections: [
+            { frame: flat(0), outer: undefined as never },
+            { frame: flat(1), outer: [null, [1, 0], [1, 1]] as never },
+            { frame: flat(2), outer: rect(0, 0, 1, 1) },
+          ],
+        },
+      },
+    });
+    expect(bad.map((i) => `${i.code}@${i.node}`)).toEqual([
+      'loft-sections@x',
+      'loft-sections@y',
+      'frame-invalid@w',
+      'frame-invalid@w',
+      'loop-invalid@z',
+      'not-finite@z',
+    ]);
   });
 
   it('cuts a sloped plane exactly where the half-space ends', async () => {

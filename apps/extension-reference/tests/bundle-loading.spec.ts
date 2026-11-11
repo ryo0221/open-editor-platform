@@ -17,7 +17,7 @@ test('normal Host refuses altered bundle bytes before mounting any extension', a
   });
   await page.goto('/');
   await expect(page.locator('#status')).toContainText(
-    'Bundle verification failed: Error: Untrusted bundle pin',
+    'Bundle verification failed: Error: Untrusted package pin',
   );
   expect(intercepted).toBe(true);
   await expect(page.locator('#surface')).toBeEmpty();

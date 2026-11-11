@@ -66,7 +66,8 @@ async function connect(
     domain === 'schedule' ||
     domain === 'cad' ||
     domain === 'bim' ||
-    domain === 'character'
+    domain === 'character' ||
+    domain === 'simulation'
   )
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))

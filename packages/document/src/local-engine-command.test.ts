@@ -217,3 +217,17 @@ it('does not certify an identity shortcut through hidden mutable children or acc
   expect(sameDocumentProjection(owned, owned)).toBe(true);
   expect(sameDocumentProjection(owned, structuredClone(owned))).toBe(true);
 });
+
+it('#801 a first local projection keeps sparse blocks of a large frozen basis', async () => {
+  const { createLocalDocumentCommand } = await import('./local-engine-command');
+  const blocks = Array.from({ length: 2000 }, (_, i) => ({
+    id: `p${i}`,
+    type: 'paragraph' as const,
+    text: `段落 ${i}`,
+  }));
+  const content = deepFreeze<DocumentContent>({ schemaVersion: 2, blocks });
+  const doc = contentToNode(content);
+  const result = createLocalDocumentCommand()(content, doc, context);
+  expect(result.content.blocks).toEqual(blocks);
+  expect(result.content.blocks[0]).toBe(content.blocks[0]);
+});

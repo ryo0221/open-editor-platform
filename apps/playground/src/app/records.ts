@@ -6,6 +6,7 @@ import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import { validateArtifactReferenceHistory } from '../artifact-references';
 import { validateGeoRecord } from '../geo/resources';
+import { validateSimulationSources } from '../simulation/source';
 import { createLocalSession, validContent, type Content, type StoredArtifact } from '../model';
 
 export const storage = new IndexedDBStorage<StoredArtifact>();
@@ -35,7 +36,8 @@ export async function openStoredRecord(record: StoredArtifact, references: Refer
     record.kind === 'animation' ||
     record.kind === 'cad' ||
     record.kind === 'bim' ||
-    record.kind === 'character'
+    record.kind === 'character' ||
+    record.kind === 'simulation'
   ) {
     for (const v of record.versions)
       if ((await contentHash(v.content)) !== v.contentHash)
@@ -43,6 +45,7 @@ export async function openStoredRecord(record: StoredArtifact, references: Refer
   }
   if (record.kind === 'fiction-map') await verifyFictionMapArtifact(record);
   if (record.kind === 'geo') await validateGeoRecord(record);
+  if (record.kind === 'simulation') validateSimulationSources(record, { stored: true });
   await verifyAnalysisArtifact(record);
   await verifyEstimateArtifact(record);
   record.versions.forEach(deepFreeze);

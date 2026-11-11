@@ -1,8 +1,18 @@
 import { checkCharacterMeshes, type CharacterDocument } from '@editor-platform/character-core';
-import { decodeEpm, epmSha256, MeshAssetError, type EpmMesh } from '@editor-platform/geometry-mesh';
+import {
+  decodeEpm,
+  decodeMultiresChunk,
+  epmSha256,
+  MeshAssetError,
+  MultiresAssetError,
+  type EpmMesh,
+  type MultiresChunk,
+} from '@editor-platform/geometry-mesh';
 
 export interface CharacterAssetRead {
   meshes: Map<string, EpmMesh>;
+  /** C7a: decoded multires chunks by asset ID. */
+  multires: Map<string, MultiresChunk>;
   /** Image bytes the document names, checked against their SHA-256. */
   images: Map<string, { bytes: Uint8Array; mediaType: string }>;
   /** Why the document cannot be shown, one line each; empty when it can. */
@@ -30,6 +40,7 @@ export function decodeCharacterAssets(
   bytes: ReadonlyMap<string, Uint8Array>,
 ): CharacterAssetRead {
   const meshes = new Map<string, EpmMesh>();
+  const multires = new Map<string, MultiresChunk>();
   const images = new Map<string, { bytes: Uint8Array; mediaType: string }>();
   const problems: string[] = [];
   for (const ref of refs) {
@@ -40,6 +51,15 @@ export function decodeCharacterAssets(
     }
     if (b.length !== ref.byteLength || epmSha256(b) !== ref.sha256) {
       problems.push(`${ref.id}: bytes do not match the document`);
+      continue;
+    }
+    if (ref.kind === 'mesh-mres') {
+      try {
+        multires.set(ref.id, decodeMultiresChunk(b));
+      } catch (e) {
+        if (!(e instanceof MultiresAssetError)) throw e;
+        problems.push(`${ref.id}: ${e.problem} ${e.detail}`);
+      }
       continue;
     }
     if (ref.kind !== 'mesh-epm') {
@@ -53,7 +73,7 @@ export function decodeCharacterAssets(
       problems.push(`${ref.id}: ${e.problem} ${e.detail}`);
     }
   }
-  return { meshes, images, problems };
+  return { meshes, multires, images, problems };
 }
 
 /**
@@ -65,6 +85,8 @@ export function checkCharacterAssets(
   decoded: CharacterAssetRead,
 ): CharacterAssetRead {
   if (decoded.problems.length) return decoded;
-  const problems = checkCharacterMeshes(doc, decoded.meshes).map((d) => `${d.path}: ${d.code}`);
+  const problems = checkCharacterMeshes(doc, decoded.meshes, decoded.multires).map(
+    (d) => `${d.path}: ${d.code}`,
+  );
   return problems.length ? { ...decoded, problems } : decoded;
 }

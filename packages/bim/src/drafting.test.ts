@@ -4,6 +4,7 @@ import {
   bimStarter,
   deriveBim,
   f31BoxBuilding,
+  f50Lean,
   type BimDocument,
   type BimOperation,
   arcOf,
@@ -18,10 +19,15 @@ import {
   bimSnap,
   bimSnapRadius,
   bimWallAt,
+  bimWorkingPlan,
   draftBeam,
   draftColumn,
   draftGrid,
   draftHosted,
+  draftMember,
+  draftRailing,
+  draftRamp,
+  draftStair,
   draftLevel,
   draftRegion,
   draftWall,
@@ -35,6 +41,32 @@ const xy = (x: number, y: number) => ({
 });
 
 describe('bim drafting (R2c-3c-2)', () => {
+  it('sees the working plan down to the level below, or 1 m below the lowest (TW0b)', () => {
+    const levels = [
+      { id: 'l-gl', name: 'GL', elevationMm: 0 },
+      { id: 'l-340', name: 'Deck 340', elevationMm: 340_000 },
+      { id: 'l-300', name: 'Belt 300', elevationMm: 300_000 },
+    ];
+    expect(bimWorkingPlan({ levels }, 'l-340')).toEqual({
+      elevationMm: 340_000,
+      cutMm: 1200,
+      depthMm: 41_200,
+    });
+    expect(bimWorkingPlan({ levels }, 'l-gl')).toEqual({
+      elevationMm: 0,
+      cutMm: 1200,
+      depthMm: 2200,
+    });
+    // A typed cut moves the default depth with it; a typed depth is kept as typed.
+    expect(bimWorkingPlan({ levels }, 'l-300', { cutMm: 3000 })?.depthMm).toBe(303_000);
+    expect(bimWorkingPlan({ levels }, 'l-300', { depthMm: 500 })).toEqual({
+      elevationMm: 300_000,
+      cutMm: 1200,
+      depthMm: 500,
+    });
+    expect(bimWorkingPlan({ levels }, 'l-missing')).toBeUndefined();
+  });
+
   it('snaps to grid intersections, then wall ends, then the step', () => {
     const doc = f31BoxBuilding();
     expect(bimSnap(doc, 'l-1f', [130, -40])).toMatchObject({ kind: 'end', xy: [0, 0] });
@@ -144,6 +176,19 @@ describe('bim drafting (R2c-3c-2)', () => {
     expect(bimWallAt(doc, 'l-1f', [5_000, 4_000])).toBeUndefined();
   });
 
+  it('finds a leaning wall anywhere over its slanted body (FU3c)', () => {
+    // w-free (0,0)→(6000,0), 4 m high, leans 15° to its right: in plan it covers y from 0
+    // down to −4,000·tan 15° = −1,072 mm.
+    const doc = f50Lean();
+    const hit = bimWallAt(doc, 'l-gl', [3_000, -900])!;
+    expect(hit.wall.id).toBe('w-free');
+    expect(hit.alongMm).toBeCloseTo(3_000, 6);
+    expect(hit.d).toBeCloseTo(0, 9);
+    // Past the top's line by more than the reach, and on the side it leans away from.
+    expect(bimWallAt(doc, 'l-gl', [3_000, -1_500])?.wall.id).toBeUndefined();
+    expect(bimWallAt(doc, 'l-gl', [3_000, 400])?.wall.id).toBeUndefined();
+  });
+
   it('keeps a door inside a diagonal wall at its end, after rounding', () => {
     let doc = bimStarter();
     doc = apply(doc, draftWall(doc, 'l-1f', xy(0, 0), xy(4_000, 4_000)));
@@ -187,6 +232,91 @@ describe('bim drafting (R2c-3c-2)', () => {
     doc = apply(doc, draftWall(doc, 'l-1f', xy(0, 0), xy(500, 0)));
     const host = bimWallAt(doc, 'l-1f', [250, 0])!;
     expect(() => apply(doc, draftHosted(doc, 'door', host))).toThrow('opening-outside-host');
+  });
+});
+
+describe('bim ramps (LR3c)', () => {
+  it('places one turn around the clicked centre, up to the level above', () => {
+    let doc = bimStarter();
+    doc = apply(doc, draftRamp(doc, 'l-1f', xy(5_000, 4_000)));
+    const r = doc.elements.find((e) => e.kind === 'ramp')!;
+    expect(r).toMatchObject({
+      center: { xy: [5_000, 4_000] },
+      innerRadiusMm: 1_500,
+      outerRadiusMm: 3_500,
+      startAngleRad: 0,
+      sweepRad: 2 * Math.PI,
+      base: { level: 'l-1f', offsetMm: 0 },
+      top: { level: 'l-2f', offsetMm: 0 },
+    });
+    expect(doc.types.find((t) => t.id === (r as { typeId: string }).typeId)?.kind).toBe('slab');
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    // On the top level: one storey up from it.
+    doc = apply(doc, draftRamp(doc, 'l-rf', xy(0, 0)));
+    expect(doc.elements.filter((e) => e.kind === 'ramp').at(-1)).toMatchObject({
+      top: { level: 'l-rf', offsetMm: 3_000 },
+    });
+  });
+});
+
+describe('bim railings (LS5)', () => {
+  it('adds a railing along either edge of a ramp, of the thinnest wall type', () => {
+    let doc = bimStarter();
+    doc = apply(doc, draftRamp(doc, 'l-1f', xy(5_000, 4_000)));
+    const ramp = doc.elements.find((e) => e.kind === 'ramp')!;
+    for (const side of ['inner', 'outer'] as const)
+      doc = apply(doc, draftRailing(doc, ramp.id, side));
+    const rails = doc.elements.filter((e) => e.kind === 'railing');
+    expect(rails.map((r) => [r.id, r.side, r.heightMm, r.hostId])).toEqual([
+      ['rail-1', 'inner', 1_100, ramp.id],
+      ['rail-2', 'outer', 1_100, ramp.id],
+    ]);
+    const width = (id: string) => {
+      const t = doc.types.find((x) => x.id === id);
+      return t && 'layers' in t ? t.layers.reduce((n, l) => n + l.thicknessMm, 0) : NaN;
+    };
+    const walls = doc.types.filter((t) => t.kind === 'wall').map((t) => width(t.id));
+    expect(width(rails[0]!.typeId)).toBe(Math.min(...walls));
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+  });
+});
+
+describe('bim members (TW2)', () => {
+  it('draws a brace up to the level above, adding a member type once', () => {
+    let doc = bimStarter();
+    expect(doc.types.some((t) => t.kind === 'member')).toBe(false);
+    const op = draftMember(doc, 'l-1f', xy(0, 0), xy(4_000, 0));
+    doc = apply(doc, op);
+    const m = doc.elements.find((e) => e.id === 'm-1')!;
+    expect(m).toMatchObject({
+      kind: 'member',
+      start: { at: { xy: [0, 0] }, height: { level: 'l-1f', offsetMm: 0 } },
+      end: { at: { xy: [4_000, 0] }, height: { level: 'l-2f', offsetMm: 0 } },
+      rotationRad: 0,
+    });
+    const type = doc.types.find((t) => t.kind === 'member')!;
+    expect(type).toMatchObject({ profile: { shape: 'pipe', diameterMm: 300, wallMm: 12 } });
+    // The starter's steel is reused; a second brace uses the same type.
+    expect(doc.materials.filter((x) => x.category === 'metal')).toHaveLength(1);
+    doc = apply(doc, draftMember(doc, 'l-rf', xy(0, 0), xy(0, 4_000)));
+    expect(doc.types.filter((t) => t.kind === 'member')).toHaveLength(1);
+    // On the top level, one storey up from it.
+    expect(doc.elements.find((e) => e.id === 'm-2')).toMatchObject({
+      end: { height: { level: 'l-rf', offsetMm: 3_000 } },
+    });
+    expect(() => draftMember(doc, 'l-1f', xy(0, 0), xy(0, 0))).toThrow('member-too-short');
+  });
+  it('adds a steel material when the document has no metal', () => {
+    let doc = bimStarter();
+    doc.materials = doc.materials.filter((x) => x.category !== 'metal');
+    doc.types = doc.types.filter((t) => !('materialId' in t) || t.materialId !== 'm-steel');
+    doc = apply(doc, draftMember(doc, 'l-1f', xy(0, 0), xy(4_000, 0)));
+    const type = doc.types.find((t) => t.kind === 'member')!;
+    expect(
+      doc.materials.find((x) => 'materialId' in type && x.id === type.materialId),
+    ).toMatchObject({
+      category: 'metal',
+    });
   });
 });
 
@@ -359,5 +489,40 @@ describe('bim levels and grid axes (R2c-3c-3)', () => {
     const segment = (5_000 ** 2 / 2) * (sweep - Math.sin(sweep));
     const slab = doc.elements.find((e) => e.kind === 'slab')!;
     expect(derived.quantities.get(slab.id)!.values.grossArea).toBeCloseTo(48e6 + segment, 0);
+  });
+});
+
+describe('bim stairs (LS6)', () => {
+  it('climbs from the first point towards the second, up to the level above in equal risers', () => {
+    let doc = bimStarter();
+    const [l1, l2] = ['l-1f', 'l-2f'].map((id) => doc.levels.find((l) => l.id === id)!);
+    const height = l2!.elevationMm - l1!.elevationMm;
+    const risers = Math.round(height / 180);
+    doc = apply(
+      doc,
+      draftStair(doc, 'l-1f', xy(1_000, 2_000), xy(1_000, 2_000 + 260 * (risers - 1))),
+    );
+    const st = doc.elements.find((e) => e.kind === 'stair')!;
+    expect(st).toMatchObject({
+      id: 'st-1',
+      start: { xy: [1_000, 2_000] },
+      directionRad: Math.PI / 2,
+      widthMm: 1_200,
+      risers,
+      treadMm: 260,
+      base: { level: 'l-1f', offsetMm: 0 },
+      top: { level: 'l-2f', offsetMm: 0 },
+    });
+    expect(doc.types.find((t) => t.id === (st as { typeId: string }).typeId)?.kind).toBe('slab');
+    expect(deriveBim(doc).diagnostics).toEqual([]);
+    // On the top level: one storey up; a short run keeps the shortest tread allowed.
+    doc = apply(doc, draftStair(doc, 'l-rf', xy(0, 0), xy(-500, 0)));
+    expect(doc.elements.filter((e) => e.kind === 'stair').at(-1)).toMatchObject({
+      directionRad: Math.PI,
+      risers: 17,
+      treadMm: 150,
+      top: { level: 'l-rf', offsetMm: 3_000 },
+    });
+    expect(() => draftStair(doc, 'l-1f', xy(0, 0), xy(0, 0.5))).toThrow('stair-too-short');
   });
 });

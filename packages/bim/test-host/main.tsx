@@ -72,6 +72,9 @@ function App() {
         : {})}
       onUndo={() => history('undo')}
       onRedo={() => history('redo')}
+      {...(params.has('compact')
+        ? { layout: { compactBreakpoint: Number(params.get('compact')) } }
+        : {})}
     />
   );
 }

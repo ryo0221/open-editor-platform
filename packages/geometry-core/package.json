@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./bezier": "./src/bezier.ts",
+    "./interference": "./src/interference.ts",
     "./planar": "./src/planar.ts"
   }
 }

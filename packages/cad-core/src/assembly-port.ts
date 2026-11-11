@@ -6,6 +6,7 @@
  * 段階的な表示), the result waits only for the versions its joints read; the others evaluate
  * after it, one at a time, largest on screen first.
  */
+import { gearMeshProblems, type CadGearMeshProblem } from './gear-mesh';
 import {
   expandAssembly,
   occurrenceAccess,
@@ -65,6 +66,11 @@ export interface CadAssemblyEvaluation {
    * until the port reports them (`version`). Measurement waits for them.
    */
   pending?: string[];
+  /**
+   * WM2: each gear mesh that does not check where the joints solve, by mesh ID (absent when
+   * every mesh checks).
+   */
+  gearMeshes?: Record<string, CadGearMeshProblem[]>;
 }
 /** A kernel that can evaluate a part with the build of the assembly that places it. */
 export interface CadPartKernelPort extends CadKernelPort {
@@ -303,6 +309,10 @@ export class CadAssemblyPort implements CadKernelPort {
         assembly.joints = solved.joints;
         assembly.poses = solved.poses;
         assembly.poseMismatch = solved.mismatch;
+        if (doc.gearMeshes?.length) {
+          const problems = gearMeshProblems(doc, solved, read);
+          if (problems.size) assembly.gearMeshes = Object.fromEntries(problems);
+        }
       }
       if (later.size) this.startBackground(request, later);
       return { ...own, ...(reference ? { reference: true as const } : {}), assembly };

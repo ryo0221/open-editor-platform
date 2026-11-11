@@ -9,6 +9,7 @@ import {
   type AnalysisNode,
   type AnalysisTable,
   type Exact,
+  type TimelineSavedComparisonSource,
 } from './analysis-context';
 import {
   convertTimelineClock,
@@ -78,7 +79,7 @@ export class TimelineSemanticResolver {
   private times = new Map<string, TimelineCalculatedTime>();
   /** Inputs actually resolved while calculating a time, retained in this Context only. */
   private timeInputs = new Map<string, AnalysisNode[]>();
-  constructor(readonly context: TimelineAnalysisContext) {}
+  constructor(readonly context: TimelineAnalysisContext<TimelineSavedComparisonSource>) {}
   get world() {
     return this.context.roots.get(this.context.links.story.worldSettings);
   }

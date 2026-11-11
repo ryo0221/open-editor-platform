@@ -31,6 +31,7 @@ import {
   Replace,
   Ruler,
   Scan,
+  ScanSearch,
   SplinePointer,
   SquareDashed,
   SquareMousePointer,
@@ -38,6 +39,8 @@ import {
   Trash2,
   Undo2,
   Aperture,
+  Package,
+  Cog,
 } from 'lucide-react';
 import {
   CommitInput,
@@ -55,13 +58,31 @@ import {
 import { readCadInput } from './expression-input';
 import {
   cadBoundaryCurves,
+  cadCurveNetwork,
   cadLimits,
+  cadPanelGapDefaultMm,
+  cadPanelGapMm,
+  cadGrooveRadiusMm,
+  cadBodyPmiPlacements,
+  cadPmiTrackedIndex,
+  cadPmiViewCamera,
+  cadPmiItemText,
+  placePmiPoint,
+  type CadPmiAsset,
+  type CadPmiItem,
+  type CadPmiItemState,
+  type CadPmiPlacement,
+  type CadPmiTracking,
+  type CadPmiKind,
+  type CadPmiTarget,
   formatExpression,
   formatTopoName,
   mm,
   position,
   parameterValues,
   resolveLength,
+  resolveCount,
+  type CadSpurGearArgs,
   resolvePosition,
   sketchDefaultPath,
   sketchElement,
@@ -82,9 +103,15 @@ import {
   type Vec3,
   cadContinuity,
   cadCurvature,
+  cadGapFlush,
+  cadSpotWeldLimits,
+  type CadSpotWeld,
+  type CadSpotWeldPoints,
   curvatureColors,
   curvatureRange,
   type CadContinuityLevel,
+  cadProfileKinds,
+  type CadProfileKind,
 } from '@editor-platform/cad-core';
 import {
   describeCode,
@@ -96,8 +123,18 @@ import {
   type CadSnapshot,
   type CadStepImportPreview,
 } from './controller';
-import { displayDeflectionMm, type CadExportReport } from '@editor-platform/cad-kernel-occt';
-import { CadViewport, type CadMeasurePoint, type CadShading } from './viewport';
+import {
+  displayDeflectionMm,
+  type CadExportReport,
+  type CadMesh,
+  type CadStepPmiReport,
+} from '@editor-platform/cad-kernel-occt';
+import {
+  CadViewport,
+  type CadMeasurePoint,
+  type CadShading,
+  type CadTopologyPick,
+} from './viewport';
 import type { CadAssembly, CadStepAssemblyImportPreview } from './assembly';
 import { AssemblyLayer, AssemblyPanel } from './assembly-panel';
 import { PartPropertiesSection } from './bom-panel';
@@ -115,13 +152,30 @@ import {
 } from './dimension-fields';
 import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
 import {
+  draftColor,
+  draftSummary,
   finishOf,
+  partCheckColors,
+  partCheckColorsOf,
+  partCheckLimits,
+  partDraft,
+  partThickness,
+  thicknessColor,
+  type DraftSummary,
+  type ThicknessResult,
+  rayDiagramLimits,
+  rayDiagramSegments,
+  traceRayFan,
+  type RayFan,
+  type RaySurface,
+  type TracedRay,
   PathRenderDialog,
   viewTexturesOf,
   ViewTextureCache,
 } from '@editor-platform/geometry-view';
 import { TextureSection } from './texture-panel';
-import { geometryMaterialPresets } from '@editor-platform/geometry-core';
+import { sheetFront } from './sheet-front';
+import { geometryLightLimits, geometryMaterialPresets } from '@editor-platform/geometry-core';
 import './style.css';
 
 const parameterUnit = (type: CadDocument['parameters'][number]['type']) =>
@@ -201,6 +255,11 @@ function Viewport({
   moving: boolean;
 }) {
   const status = useStatusProps();
+  // MR3: a shown interference finding with the assembly's own shape (the empty path).
+  const ownShown = useSyncExternalStore(
+    assembly?.subscribe ?? noParts,
+    () => !!assembly?.getSnapshot().highlighted?.some((p) => p.length === 0),
+  );
   const host = useRef<HTMLDivElement>(null);
   const [lost, setLost] = useState(false);
   /** Bytes the GPU budget refused for the shown shape (CAD26). */
@@ -266,15 +325,28 @@ function Viewport({
   // A new budget applies to the viewport in place: its shape, tools and camera stay.
   useEffect(() => view.current?.setGpuBudget(gpuBytes), [view, gpuBytes]);
   // Shading (R2a-4): display only, never part of the content.
-  const [shading, setShading] = useState<'shaded' | 'realistic' | 'zebra' | 'mean' | 'gauss'>(
-    'shaded',
-  );
+  const [shading, setShading] = useState<
+    'shaded' | 'realistic' | 'zebra' | 'mean' | 'gauss' | 'thickness' | 'draft'
+  >('shaded');
+  /** CR6c: the ray diagram's fan, when shown; display only. */
+  const [rayFan, setRayFan] = useState<RayFanSettings | undefined>();
+  /** CR6b: the wanted wall thickness (mm) and the draft check's settings; display only. */
+  const [thickness, setThickness] = useState({ min: 1.5, max: 3 });
+  const [draft, setDraft] = useState<{
+    minDeg: number;
+    axis: 'x' | 'y' | 'z';
+    sign: 1 | -1;
+    split: boolean;
+  }>({ minDeg: 1, axis: 'z', sign: 1, split: true });
   const [zebraAxis, setZebraAxis] = useState<'x' | 'y' | 'z'>('z');
   /** Zebra on the selected body only; the others keep their colour. */
   const [zebraSelected, setZebraSelected] = useState(false);
   /** The ground grid at z = 0 (display only): off for models that sit on their own ground. */
   const [grid, setGrid] = useState(true);
   useEffect(() => view.current?.setGrid(grid), [view, grid, restored]);
+  /** PMI-3a: the PMI presentation lines of the bodies (display only), shown by default. */
+  const [pmiShown, setPmiShown] = useState(true);
+  const pmiLines = useMemo(() => new PmiLineCache(), []);
   const [stripes, setStripes] = useState(12);
   /** The colour range is the automatic one times 2 to this power. */
   const [rangeStep, setRangeStep] = useState(0);
@@ -319,6 +391,83 @@ function Viewport({
     [values, shownIds],
   );
   const range = autoRange && autoRange * 2 ** rangeStep;
+  // CR6b: the part checks on the current meshes of the shown bodies (sheets have no wall).
+  const checkMeshes = useMemo(() => {
+    if (shading !== 'thickness' && shading !== 'draft') return undefined;
+    if (!snapshot.meshes?.current) return undefined;
+    return snapshot.meshes.meshes.filter((m) => shownIds.has(m.bodyId) && !m.lod);
+  }, [shading, snapshot.meshes, shownIds]);
+  const kinds = useMemo(
+    () => new Map(snapshot.content.bodies.map((b) => [b.id, b.kind] as const)),
+    [snapshot.content.bodies],
+  );
+  const thicknesses = useMemo(
+    () =>
+      shading === 'thickness' && checkMeshes
+        ? checkMeshes
+            .filter((m) => kinds.get(m.bodyId) === 'solid')
+            .map((m) => ({ bodyId: m.bodyId, result: partThickness(m) }))
+        : undefined,
+    [shading, checkMeshes, kinds],
+  );
+  const drafts = useMemo(() => {
+    if (shading !== 'draft' || !checkMeshes) return undefined;
+    const pull: [number, number, number] = [0, 0, 0];
+    pull['xyz'.indexOf(draft.axis)] = draft.sign;
+    return checkMeshes.map((m) => {
+      const values = partDraft(m, pull);
+      return {
+        bodyId: m.bodyId,
+        values,
+        summary: draftSummary(m, values, draft.minDeg, draft.split),
+      };
+    });
+  }, [shading, checkMeshes, draft]);
+  const checkColors = useMemo(() => {
+    if (thicknesses)
+      return new Map(
+        thicknesses.map((t) => [
+          t.bodyId,
+          partCheckColorsOf(t.result.values, (v) =>
+            thicknessColor(v, thickness.min, thickness.max),
+          ),
+        ]),
+      );
+    if (drafts)
+      return new Map(
+        drafts.map((d) => [
+          d.bodyId,
+          partCheckColorsOf(d.values, (v) => draftColor(v, draft.minDeg, draft.split)),
+        ]),
+      );
+    return undefined;
+  }, [thicknesses, drafts, thickness, draft]);
+  // CR6c: the fan traced through the shown bodies' current meshes.
+  const rayResult = useMemo(() => {
+    if (!rayFan || !snapshot.meshes?.current) return undefined;
+    // Placed components are drawn by the assembly layer, not traced: refuse rather than show rays
+    // that pass through them.
+    if (snapshot.content.components.length > 0)
+      return {
+        rays: undefined,
+        error:
+          "The ray diagram traces only this document's bodies; open a placed part on its own to trace it.",
+      };
+    const bodies = new Map(snapshot.content.bodies.map((b) => [b.id, b]));
+    const meshes = snapshot.meshes.meshes.filter((m) => shownIds.has(m.bodyId) && !m.lod);
+    try {
+      const rays = traceRayFan(
+        meshes.map((m) => ({ ...m, surface: raySurfaceOf(bodies.get(m.bodyId)?.appearance) })),
+        rayFanOf(rayFan),
+      );
+      return { rays, kinds: countRaySurfaces(meshes, bodies) };
+    } catch (e) {
+      return { rays: undefined, error: e instanceof Error ? e.message : String(e) };
+    }
+  }, [rayFan, snapshot.meshes, snapshot.content.bodies, snapshot.content.components, shownIds]);
+  useEffect(() => {
+    view.current?.showRays(rayResult?.rays ? rayLines(rayResult.rays) : undefined);
+  }, [view, rayResult, restored]);
   // Asks for the curvature once per content while a curvature shading is chosen.
   const asked = useRef('');
   useEffect(() => {
@@ -333,6 +482,22 @@ function Viewport({
     void controller.showCurvature();
   }, [controller, curving, curvature, snapshot]);
   const comb = snapshot.comb?.status === 'done' ? snapshot.comb : undefined;
+  // CR3d: the measured gap and flush, drawn along the first edge.
+  const gapFlush = snapshot.gapFlush?.status === 'done' ? snapshot.gapFlush : undefined;
+  useEffect(() => {
+    view.current?.showGapFlush(gapFlush?.samples);
+  }, [view, gapFlush, restored]);
+  // CR4e: the spot weld points of the current content, each red where it is too far.
+  const welds = snapshot.spotWelds;
+  const weldDoc = snapshot.content.spotWelds;
+  useEffect(() => {
+    view.current?.showSpotWelds(
+      welds?.flatMap((w) => {
+        const max = weldDoc?.find((d) => d.id === w.id)?.maxGapMm ?? Infinity;
+        return w.status === 'ok' ? [{ points: w.points, far: w.gaps.map((g) => g > max) }] : [];
+      }),
+    );
+  }, [view, welds, weldDoc, restored]);
   const combScale = comb && comb.scale * 2 ** combStep;
   useEffect(() => {
     view.current?.showComb(
@@ -354,6 +519,32 @@ function Viewport({
     view.current?.setShading(mode);
     const selection = snapshot.selection;
     const picked = selection?.kind === 'face' || selection?.kind === 'edge' ? selection : undefined;
+    // PMI-2: the focused item's targets on its body's current mesh.
+    const focus = snapshot.pmiFocus;
+    const focusAsset = focus && controller.bodyPmi(focus.bodyId).asset;
+    const focusItem = focusAsset?.items.find((i) => i.id === focus!.itemId);
+    const pmiFocus = focus && focusItem ? { bodyId: focus.bodyId, item: focusItem } : undefined;
+    /**
+     * PMI-3a: a body's presentation lines where it is now, the focused item's in its colour;
+     * with a saved view shown (PMI-3b), only the lines of the items it shows.
+     */
+    const pmiView = snapshot.pmiView;
+    const annotations = (mesh: CadMesh) => {
+      if (!pmiShown || !meshes?.current) return undefined;
+      if (pmiView && pmiView.bodyId !== mesh.bodyId) return undefined;
+      const pmi = controller.bodyPmi(mesh.bodyId);
+      const placements = pmi.asset && cadBodyPmiPlacements(snapshot.content, mesh.bodyId);
+      if (!pmi.asset || !placements) return undefined;
+      const lines = pmiLines.get(
+        pmi.asset,
+        placements,
+        mesh.origin,
+        pmiFocus?.bodyId === mesh.bodyId ? pmiFocus.item.id : undefined,
+        pmiView?.viewId,
+        pmi.items,
+      );
+      return lines.length ? lines : undefined;
+    };
     view.current?.show(
       (meshes?.meshes ?? []).flatMap((mesh) => {
         const body = bodies.get(mesh.bodyId);
@@ -371,12 +562,21 @@ function Viewport({
               textureCache,
               (sha) => controller.assetBytes(sha),
             ),
-            selected: snapshot.selection?.kind === 'body' && snapshot.selection.id === mesh.bodyId,
+            selected:
+              ownShown ||
+              (snapshot.selection?.kind === 'body' && snapshot.selection.id === mesh.bodyId),
             sheet: body?.kind === 'sheet',
             ...(values?.has(mesh.bodyId) ? { curvature: values.get(mesh.bodyId)! } : {}),
+            ...(checkColors?.has(mesh.bodyId) && !mesh.lod
+              ? { colors: checkColors.get(mesh.bodyId)! }
+              : {}),
             ...(picked?.id === mesh.bodyId && picked.contentHash === meshes?.contentHash
               ? { highlight: { bodyId: mesh.bodyId, kind: picked.kind, id: picked.pick } }
               : {}),
+            ...(pmiFocus?.bodyId === mesh.bodyId && meshes?.current && !mesh.lod
+              ? { marks: pmiMarks(mesh, pmiFocus.item, controller.bodyPmi(mesh.bodyId).tracking) }
+              : {}),
+            ...(annotations(mesh) ? { annotations: annotations(mesh) } : {}),
           },
         ];
       }),
@@ -393,7 +593,12 @@ function Viewport({
   }, [
     snapshot.meshes,
     snapshot.selection,
+    snapshot.pmiFocus,
+    snapshot.pmiView,
     snapshot.content,
+    ownShown,
+    pmiShown,
+    pmiLines,
     view,
     restored,
     shownIds,
@@ -403,10 +608,29 @@ function Viewport({
     stripes,
     values,
     range,
+    checkColors,
     textureCache,
     texturesLoaded,
     controller,
   ]);
+  // PMI-3b: choosing a saved view aims the camera once, after the bodies above are shown;
+  // orbiting from there is the user's, until another view is chosen.
+  // Each choice aims again, the same view included (after orbiting, or a moved body).
+  const pmiViewKey = snapshot.pmiView
+    ? `${snapshot.pmiView.bodyId}\u0000${snapshot.pmiView.viewId}\u0000${snapshot.pmiView.chosen}`
+    : '';
+  const pmiViewAim = useRef({ snapshot, controller });
+  pmiViewAim.current = { snapshot, controller };
+  useEffect(() => {
+    const { snapshot: now, controller: c } = pmiViewAim.current;
+    const chosen = now.pmiView;
+    if (!chosen) return;
+    const saved = c.bodyPmi(chosen.bodyId).asset?.views?.find((v) => v.id === chosen.viewId);
+    const placements = saved && cadBodyPmiPlacements(now.content, chosen.bodyId);
+    const frame = view.current?.bodyFrame(chosen.bodyId);
+    if (!saved || !placements || !frame) return;
+    view.current?.setView(cadPmiViewCamera(placements, saved.camera, frame.center, frame.aspect));
+  }, [pmiViewKey, view]);
   useEffect(() => {
     view.current?.setMoveTool(
       moving
@@ -460,6 +684,11 @@ function Viewport({
     [partTextureCache, controller, texturesLoaded],
   );
   const views = snapshot.content.namedViews;
+  // PMI-3a: the PMI switch is offered once a body has presentation lines.
+  const presented = snapshot.content.bodies.some(
+    (b) =>
+      b.state === 'active' && controller.bodyPmi(b.id).asset?.items.some((i) => i.presentation),
+  );
   const hasBodies =
     snapshot.content.bodies.some((b) => b.state === 'active') ||
     snapshot.content.components.length > 0;
@@ -539,7 +768,7 @@ function Viewport({
           onClear={() => setMeasure({ hash: '', points: [] })}
         />
       )}
-      {((shading !== 'shaded' && shading !== 'realistic') || comb) && (
+      {((shading !== 'shaded' && shading !== 'realistic') || comb || gapFlush || rayFan) && (
         <div className="cad-analysis">
           {shading === 'zebra' && (
             <section aria-label="Zebra" data-testid="cad-zebra">
@@ -609,6 +838,56 @@ function Viewport({
               onCompute={() => void controller.showCurvature()}
             />
           )}
+          {shading === 'thickness' && (
+            <ThicknessLegend
+              bounds={thickness}
+              onBounds={setThickness}
+              results={thicknesses}
+              names={snapshot.content.bodies}
+              sheets={(checkMeshes ?? []).filter((m) => kinds.get(m.bodyId) === 'sheet').length}
+            />
+          )}
+          {shading === 'draft' && (
+            <DraftLegend
+              settings={draft}
+              onSettings={setDraft}
+              results={drafts}
+              names={snapshot.content.bodies}
+            />
+          )}
+          {rayFan && (
+            <RayDiagramPanel
+              settings={rayFan}
+              onSettings={setRayFan}
+              result={rayResult}
+              measured={points[points.length - 1]?.point}
+            />
+          )}
+          {gapFlush && (
+            <section aria-label="Gap and flush" data-testid="cad-gap-flush">
+              <p>
+                Gap and flush from {gapFlush.from.bodyId} to {gapFlush.to.bodyId}:{' '}
+                {gapFlush.report.samples} of {cadGapFlush.samples} points face each other.
+              </p>
+              <dl className="cad-metrics">
+                {(['gap', 'flush'] as const).map((k) => (
+                  <Fragment key={k}>
+                    <dt>{k === 'gap' ? 'Gap' : 'Flush'}</dt>
+                    <dd>
+                      min {fmt(gapFlush.report[k].min)} mm, max {fmt(gapFlush.report[k].max)} mm,
+                      mean {fmt(gapFlush.report[k].mean)} mm
+                    </dd>
+                  </Fragment>
+                ))}
+              </dl>
+              <p className="cad-muted">
+                The line along the edge runs from blue (smallest gap) to red (largest).
+              </p>
+              <button type="button" onClick={() => controller.clearGapFlush()}>
+                Clear
+              </button>
+            </section>
+          )}
           {comb && combScale !== undefined && (
             <section aria-label="Curvature comb" data-testid="cad-comb">
               <p>
@@ -651,6 +930,8 @@ function Viewport({
             <option value="zebra">Zebra</option>
             <option value="mean">Mean curvature</option>
             <option value="gauss">Gauss curvature</option>
+            <option value="thickness">Wall thickness</option>
+            <option value="draft">Draft angle</option>
           </select>
         </label>
         {views.length > 0 && (
@@ -693,7 +974,33 @@ function Viewport({
           />
           <span>Grid</span>
         </label>
+        {presented && (
+          <label className="cad-views">
+            <input
+              type="checkbox"
+              checked={pmiShown}
+              onChange={(e) => setPmiShown(e.target.checked)}
+              data-testid="cad-pmi-shown"
+            />
+            <span>PMI</span>
+          </label>
+        )}
+        <label className="cad-views">
+          <input
+            type="checkbox"
+            checked={!!rayFan}
+            onChange={(e) => setRayFan(e.target.checked ? defaultRayFan : undefined)}
+            data-testid="cad-rays-shown"
+          />
+          <span>Rays</span>
+        </label>
         <IconButton icon={Scan} label="Fit view" onClick={() => view.current?.fit()} />
+        {/* WM3: frame the selected body or part, however small in the model (camera only). */}
+        <IconButton
+          icon={ScanSearch}
+          label="Zoom to selection"
+          onClick={() => view.current?.fit({ selection: true })}
+        />
       </div>
     </div>
   );
@@ -704,6 +1011,397 @@ const cssColor = (c: readonly number[]) =>
   `rgb(${c
     .map((v) => Math.round(255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055)))
     .join(' ')})`;
+
+/** CR6b: why the checks are approximate, shown with both. */
+const checkNote =
+  'Read on the display mesh, not the exact shape: the values change with how fine the mesh is.';
+function CheckNumber({
+  label,
+  value,
+  limits,
+  step,
+  onValue,
+}: {
+  label: string;
+  value: number;
+  limits: readonly [number, number];
+  step: number;
+  onValue(v: number): boolean | void;
+}) {
+  return (
+    <CommitInput
+      label={label}
+      type="number"
+      min={limits[0]}
+      max={limits[1]}
+      step={step}
+      value={value}
+      onCommit={(v) => onValue(Number(v))}
+    />
+  );
+}
+/**
+ * CR6b: the wall thickness shading's range and result: each node's distance through the part
+ * along its inward normal, red under the range, green within, blue over it.
+ */
+function ThicknessLegend({
+  bounds,
+  onBounds,
+  results,
+  names,
+  sheets,
+}: {
+  bounds: { min: number; max: number };
+  onBounds(b: { min: number; max: number }): void;
+  results: { bodyId: string; result: ThicknessResult }[] | undefined;
+  names: CadBody[];
+  sheets: number;
+}) {
+  const name = (id: string) => names.find((b) => b.id === id)?.name ?? id;
+  const c = partCheckColors;
+  const at = (p: [number, number, number]) => `(${p.map((v) => fmt(v)).join(', ')})`;
+  return (
+    <section aria-label="Wall thickness" data-testid="cad-thickness">
+      <p className="cad-muted">
+        Wall thickness at each mesh node, through the part along its inward normal. {checkNote}
+      </p>
+      <p className="cad-legend-labels">
+        <span style={{ color: cssColor(c.thin) }}>■ under {fmt(bounds.min)} mm</span>
+        <span style={{ color: cssColor(c.ok) }}>■ within</span>
+        <span style={{ color: cssColor(c.thick) }}>■ over {fmt(bounds.max)} mm</span>
+      </p>
+      <CheckNumber
+        label="Thinnest wall (mm)"
+        value={bounds.min}
+        limits={partCheckLimits.thickness}
+        step={0.1}
+        onValue={(min) => {
+          if (min > bounds.max) return false;
+          onBounds({ ...bounds, min });
+        }}
+      />
+      <CheckNumber
+        label="Thickest wall (mm)"
+        value={bounds.max}
+        limits={partCheckLimits.thickness}
+        step={0.1}
+        onValue={(max) => {
+          if (max < bounds.min) return false;
+          onBounds({ ...bounds, max });
+        }}
+      />
+      {!results && <p className="cad-muted">The thickness is shown once the shape is evaluated.</p>}
+      {results && (
+        <ul data-testid="cad-thickness-results">
+          {results.map(({ bodyId, result }) => (
+            <li key={bodyId}>
+              {name(bodyId)}:{' '}
+              {result.min && result.max
+                ? `min ${fmt(result.min.mm)} mm at ${at(result.min.at)}, max ${fmt(result.max.mm)} mm at ${at(result.max.at)}`
+                : 'no wall found'}
+              {result.missing > 0 && `; ${result.missing} nodes without a wall (grey)`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {sheets > 0 && (
+        <p className="cad-muted">
+          {sheets} shown sheet{sheets === 1 ? '' : 's'}: a sheet has no wall to measure.
+        </p>
+      )}
+    </section>
+  );
+}
+/**
+ * CR6b: the draft shading's pull direction and result: each node's angle to the pull, green
+ * releasing along it, blue into the other half (a mould in two halves), yellow under the smallest
+ * draft, red an undercut (a mould in one direction).
+ */
+function DraftLegend({
+  settings,
+  onSettings,
+  results,
+  names,
+}: {
+  settings: { minDeg: number; axis: 'x' | 'y' | 'z'; sign: 1 | -1; split: boolean };
+  onSettings(s: { minDeg: number; axis: 'x' | 'y' | 'z'; sign: 1 | -1; split: boolean }): void;
+  results: { bodyId: string; summary: DraftSummary }[] | undefined;
+  names: CadBody[];
+}) {
+  const name = (id: string) => names.find((b) => b.id === id)?.name ?? id;
+  const c = partCheckColors;
+  const pct = (part: number, all: number) => (all > 0 ? `${fmt((part / all) * 100)}%` : '0%');
+  return (
+    <section aria-label="Draft angle" data-testid="cad-draft-check">
+      <p className="cad-muted">
+        Draft of each mesh node to the pull direction, from the display mesh&apos;s normals.{' '}
+        {checkNote}
+      </p>
+      <label>
+        Pull direction{' '}
+        <select
+          value={`${settings.sign > 0 ? '+' : '-'}${settings.axis}`}
+          onChange={(e) =>
+            onSettings({
+              ...settings,
+              sign: e.target.value.startsWith('-') ? -1 : 1,
+              axis: e.target.value.slice(1) as 'x' | 'y' | 'z',
+            })
+          }
+        >
+          {(['+', '-'] as const).flatMap((sign) =>
+            (['x', 'y', 'z'] as const).map((axis) => (
+              <option key={sign + axis} value={sign + axis}>
+                {sign}
+                {axis.toUpperCase()}
+              </option>
+            )),
+          )}
+        </select>
+      </label>{' '}
+      <label>
+        <input
+          type="checkbox"
+          checked={settings.split}
+          onChange={(e) => onSettings({ ...settings, split: e.target.checked })}
+        />{' '}
+        Two mould halves (faces against the pull release into the other half)
+      </label>
+      <CheckNumber
+        label="Smallest draft (°)"
+        value={settings.minDeg}
+        limits={partCheckLimits.draft}
+        step={0.5}
+        onValue={(minDeg) => onSettings({ ...settings, minDeg })}
+      />
+      <p className="cad-legend-labels">
+        <span style={{ color: cssColor(c.withPull) }}>■ along the pull</span>
+        {settings.split && <span style={{ color: cssColor(c.againstPull) }}>■ other half</span>}
+        <span style={{ color: cssColor(c.tooSmall) }}>■ under {fmt(settings.minDeg)}°</span>
+        {!settings.split && <span style={{ color: cssColor(c.undercut) }}>■ undercut</span>}
+      </p>
+      {!results && <p className="cad-muted">The draft is shown once the shape is evaluated.</p>}
+      {results && (
+        <ul data-testid="cad-draft-results">
+          {results.map(({ bodyId, summary: s }) => {
+            const all = s.withPull + s.againstPull + s.tooSmall + s.undercut;
+            return (
+              <li key={bodyId}>
+                {name(bodyId)}: under {fmt(settings.minDeg)}° {pct(s.tooSmall, all)}
+                {settings.split
+                  ? `, other half ${pct(s.againstPull, all)}`
+                  : `, undercut ${pct(s.undercut, all)}`}{' '}
+                of {fmtGrouped(all)} mm²
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+type Axis = 'x' | 'y' | 'z';
+/** CR6c: the ray diagram's settings as the panel edits them. */
+interface RayFanSettings {
+  focus: [number, number, number];
+  /** The fan's middle direction, an axis with its sign. */
+  direction: `${'+' | '-'}${Axis}`;
+  /** The axis normal to the fan's plane. */
+  plane: Axis;
+  spreadDeg: number;
+  count: number;
+  maxBounces: number;
+  exitLength: number;
+}
+const defaultRayFan: RayFanSettings = {
+  focus: [0, 0, 0],
+  direction: '-x',
+  plane: 'z',
+  spreadDeg: 120,
+  count: 15,
+  maxBounces: 4,
+  exitLength: 500,
+};
+const axisVector = (axis: Axis, sign = 1): [number, number, number] => {
+  const v: [number, number, number] = [0, 0, 0];
+  v['xyz'.indexOf(axis)] = sign;
+  return v;
+};
+function rayFanOf(s: RayFanSettings): RayFan {
+  return {
+    focus: s.focus,
+    direction: axisVector(s.direction.slice(1) as Axis, s.direction.startsWith('-') ? -1 : 1),
+    planeNormal: axisVector(s.plane),
+    spreadDeg: s.spreadDeg,
+    count: s.count,
+    maxBounces: s.maxBounces,
+    exitLength: s.exitLength,
+  };
+}
+/**
+ * CR6c: how a body's look treats a ray: a lit body is the source (passed through), a
+ * transmitting one refracts, a metal one (metalness 0.9 or more) mirrors, any other stops it.
+ */
+function raySurfaceOf(a: CadAppearance | undefined): RaySurface {
+  if (!a) return { kind: 'opaque' };
+  if (a.emission && a.emission.strength > 0) return { kind: 'pass' };
+  if (a.transmission) return { kind: 'refract', ior: a.ior ?? geometryLightLimits.defaultIor };
+  if ((a.metalness ?? 0) >= 0.9) return { kind: 'mirror' };
+  return { kind: 'opaque' };
+}
+function countRaySurfaces(meshes: CadMesh[], bodies: Map<string, CadBody>) {
+  const out = { mirror: 0, refract: 0, opaque: 0, pass: 0 };
+  for (const id of new Set(meshes.map((m) => m.bodyId)))
+    out[raySurfaceOf(bodies.get(id)?.appearance).kind]++;
+  return out;
+}
+/** CR6c: each ray's colour by how it ended (linear RGB). */
+const rayColors = {
+  escaped: [1, 0.45, 0] as const,
+  absorbed: [0.35, 0.38, 0.42] as const,
+  bounces: [0.55, 0.2, 0.85] as const,
+};
+function rayLines(rays: TracedRay[]) {
+  const segments = rayDiagramSegments(rays);
+  const colors = new Float32Array(segments.length);
+  let k = 0;
+  for (const r of rays)
+    for (let i = 1; i < r.points.length; i++) {
+      colors.set(rayColors[r.end], k);
+      colors.set(rayColors[r.end], k + 3);
+      k += 6;
+    }
+  return { segments, colors };
+}
+/**
+ * CR6c: the ray diagram's fan (focus, direction, plane, spread, rays, bounces) and what the rays
+ * met. Geometry only: no light distribution and no standard's check.
+ */
+function RayDiagramPanel({
+  settings,
+  onSettings,
+  result,
+  measured,
+}: {
+  settings: RayFanSettings;
+  onSettings(s: RayFanSettings): void;
+  result:
+    | { rays: TracedRay[]; kinds: Record<RaySurface['kind'], number>; error?: undefined }
+    | { rays: undefined; error: string }
+    | undefined;
+  measured: Vec3 | undefined;
+}) {
+  const set = (patch: Partial<RayFanSettings>) => onSettings({ ...settings, ...patch });
+  const L = rayDiagramLimits;
+  const whole = (v: string) => Number.isInteger(Number(v));
+  const ends = result?.rays && countBy(result.rays.map((r) => r.end));
+  const hits = result?.rays && countBy(result.rays.flatMap((r) => r.events));
+  return (
+    <section aria-label="Ray diagram" data-testid="cad-rays">
+      <p className="cad-muted">
+        Rays from the focus in a fan, reflected by metal bodies (metalness 0.9 or more), refracted
+        by transmitting ones and stopped by the others; lit bodies are the source and let the rays
+        through. Traced on the display mesh: geometry only, no light distribution.
+      </p>
+      <div className="cad-row">
+        {(['x', 'y', 'z'] as const).map((axis, i) => (
+          <CheckNumber
+            key={axis}
+            label={`Focus ${axis.toUpperCase()} (mm)`}
+            value={settings.focus[i]!}
+            limits={[-1e6, 1e6]}
+            step={1}
+            onValue={(v) => {
+              const focus = [...settings.focus] as [number, number, number];
+              focus[i] = v;
+              set({ focus });
+            }}
+          />
+        ))}
+      </div>
+      {measured && (
+        <button
+          type="button"
+          onClick={() => set({ focus: [...measured] as [number, number, number] })}
+        >
+          Focus at the measured point
+        </button>
+      )}{' '}
+      <label>
+        Direction{' '}
+        <select
+          value={settings.direction}
+          onChange={(e) => set({ direction: e.target.value as RayFanSettings['direction'] })}
+        >
+          {(['+', '-'] as const).flatMap((sign) =>
+            (['x', 'y', 'z'] as const).map((axis) => (
+              <option key={sign + axis} value={sign + axis}>
+                {sign}
+                {axis.toUpperCase()}
+              </option>
+            )),
+          )}
+        </select>
+      </label>{' '}
+      <label>
+        Fan plane normal{' '}
+        <select value={settings.plane} onChange={(e) => set({ plane: e.target.value as Axis })}>
+          {(['x', 'y', 'z'] as const).map((axis) => (
+            <option key={axis} value={axis} disabled={settings.direction.endsWith(axis)}>
+              {axis.toUpperCase()}
+            </option>
+          ))}
+        </select>
+      </label>
+      <CheckNumber
+        label="Spread (°)"
+        value={settings.spreadDeg}
+        limits={L.spreadDeg}
+        step={5}
+        onValue={(spreadDeg) => set({ spreadDeg })}
+      />
+      <CheckNumber
+        label="Rays"
+        value={settings.count}
+        limits={L.count}
+        step={1}
+        onValue={(count) => (whole(String(count)) ? set({ count }) : false)}
+      />
+      <CheckNumber
+        label="Bounces"
+        value={settings.maxBounces}
+        limits={L.maxBounces}
+        step={1}
+        onValue={(maxBounces) => (whole(String(maxBounces)) ? set({ maxBounces }) : false)}
+      />
+      <CheckNumber
+        label="Length out (mm)"
+        value={settings.exitLength}
+        limits={L.exitLength}
+        step={10}
+        onValue={(exitLength) => set({ exitLength })}
+      />
+      {!result && <p className="cad-muted">The rays are traced once the shape is evaluated.</p>}
+      {result?.error && <p role="alert">{result.error}</p>}
+      {result?.rays && ends && hits && (
+        <p data-testid="cad-rays-result">
+          {result.rays.length} rays: {ends.escaped ?? 0} leave the model (orange),{' '}
+          {ends.absorbed ?? 0} stopped (grey), {ends.bounces ?? 0} at the bounce limit (purple).
+          Hits: {hits.mirror ?? 0} reflections, {hits.refract ?? 0} refractions,{' '}
+          {hits.internal ?? 0} total internal reflections. Shown bodies: {result.kinds.mirror}{' '}
+          mirror, {result.kinds.refract} transmitting, {result.kinds.pass} lit,{' '}
+          {result.kinds.opaque} opaque.
+        </p>
+      )}
+    </section>
+  );
+}
+function countBy<T extends string>(items: T[]): Partial<Record<T, number>> {
+  const out: Partial<Record<T, number>> = {};
+  for (const i of items) out[i] = (out[i] ?? 0) + 1;
+  return out;
+}
 
 /**
  * The curvature colours' legend and range (docs/cad/r2a-freeform.md, 連続性の判定と表示): the
@@ -1246,6 +1944,8 @@ function FeatureArgs({
           onCommit={(v) => update({ ...feature.args, radius: v })}
         />
       );
+    case 'spurGear':
+      return <GearFields args={feature.args} doc={doc} onCommit={update} />;
     case 'extrude':
       return (
         <>
@@ -1392,6 +2092,84 @@ function FeatureArgs({
         </>
       );
     }
+    case 'profileSweep': {
+      const a = feature.args;
+      const profile = (patch: Partial<typeof a.profile>) =>
+        void update({ ...a, profile: { ...a.profile, ...patch } });
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Path</span>
+            <Output data-testid="cad-member-path">
+              {doc.sketches.find((s) => s.id === a.path.sketchId)?.name ?? a.path.sketchId} (
+              {a.path.elements.length} elements)
+            </Output>
+          </div>
+          <label className="ep-field">
+            Section
+            <select
+              value={a.profile.kind}
+              onChange={(e) => profile({ kind: e.target.value as CadProfileKind })}
+            >
+              {cadProfileKinds.map((k) => (
+                <option key={k} value={k}>
+                  {profileKindLabels[k]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <LengthField
+            label="Height"
+            length={a.profile.height}
+            doc={doc}
+            onCommit={(v) => profile({ height: v })}
+          />
+          <LengthField
+            label="Width"
+            length={a.profile.width}
+            doc={doc}
+            onCommit={(v) => profile({ width: v })}
+          />
+          <LengthField
+            label="Flange width"
+            length={a.profile.flange}
+            doc={doc}
+            onCommit={(v) => profile({ flange: v })}
+          />
+          <LengthField
+            label="Bend R"
+            length={a.profile.radius}
+            doc={doc}
+            onCommit={(v) => profile({ radius: v })}
+          />
+          {typeof a.up === 'string' ? (
+            <label className="ep-field">
+              Height points
+              <select
+                value={a.up}
+                onChange={(e) => void update({ ...a, up: e.target.value as 'normal' | 'inPlane' })}
+              >
+                <option value="normal">{profileUpLabels.normal}</option>
+                <option value="inPlane">{profileUpLabels.inPlane}</option>
+              </select>
+            </label>
+          ) : (
+            <div className="cad-readonly-field">
+              <span>Height points</span>
+              <Output>along ({a.up.map((x) => fmt(x)).join(', ')})</Output>
+            </div>
+          )}
+          <label className="cad-check">
+            <input
+              type="checkbox"
+              checked={a.flip}
+              onChange={(e) => void update({ ...a, flip: e.target.checked })}
+            />
+            Flip (the other way)
+          </label>
+        </>
+      );
+    }
     case 'boundarySurface':
       return (
         <div className="cad-readonly-field">
@@ -1400,6 +2178,27 @@ function FeatureArgs({
             {feature.args.curves.map((c) => curveLabel(doc, c)).join(' → ')}
           </Output>
         </div>
+      );
+    case 'curveNetwork':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along (u)</span>
+            <Output data-testid="cad-network-u">
+              {feature.args.u.map((c) => curveLabel(doc, c)).join(' → ')}
+            </Output>
+          </div>
+          <div className="cad-readonly-field">
+            <span>Across (v)</span>
+            <Output data-testid="cad-network-v">
+              {feature.args.v.map((c) => curveLabel(doc, c)).join(' → ')}
+            </Output>
+          </div>
+          <div className="cad-readonly-field">
+            <span>Meeting tolerance</span>
+            <Output>{feature.args.toleranceMm} mm</Output>
+          </div>
+        </>
       );
     case 'fill':
       return (
@@ -1414,39 +2213,113 @@ function FeatureArgs({
                 onChange={(e) =>
                   void update({
                     boundary: feature.args.boundary.map((x, j) =>
-                      j === i ? { ...x, continuity: e.target.value as 'G0' | 'G1' } : x,
+                      j === i ? { ...x, continuity: e.target.value as 'G0' | 'G1' | 'G2' } : x,
                     ),
                   })
                 }
               >
                 <option value="G0">G0 (meets the curve)</option>
                 <option value="G1">G1 (tangent to the face beside)</option>
+                <option value="G2">G2 (same curvature as the face beside)</option>
               </select>
             </label>
           ))}
         </div>
+      );
+    case 'split':
+      return (
+        <div className="cad-readonly-field">
+          <span>Along</span>
+          <Output data-testid="cad-split-along">
+            {doc.sketches.find((s) => s.id === feature.args.tool.sketchId)?.name ??
+              feature.args.tool.sketchId}{' '}
+            ({feature.args.tool.elements.length} elements)
+          </Output>
+        </div>
+      );
+    case 'panel':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along</span>
+            <Output>
+              {doc.sketches.find((s) => s.id === feature.args.tool.sketchId)?.name ??
+                feature.args.tool.sketchId}{' '}
+              ({feature.args.tool.elements.length} elements)
+            </Output>
+          </div>
+          <label className="ep-field">
+            Panel
+            <select
+              value={feature.args.keep}
+              onChange={(e) =>
+                void update({ ...feature.args, keep: e.target.value as 'inside' | 'outside' })
+              }
+            >
+              <option value="inside">Inside the line</option>
+              <option value="outside">Outside the line</option>
+            </select>
+          </label>
+          <LengthField
+            label="Gap"
+            length={feature.args.gap}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, gap: v })}
+          />
+        </>
       );
     case 'trim': {
       const sides =
         'sketchId' in feature.args.tool
           ? (['inside', 'outside'] as const)
           : (['front', 'back'] as const);
+      const gap = feature.args.gap;
       return (
-        <label className="ep-field">
-          Keep
-          <select
-            value={feature.args.keep}
-            onChange={(e) =>
-              void update({ ...feature.args, keep: e.target.value as (typeof sides)[number] })
-            }
-          >
-            {sides.map((x) => (
-              <option key={x} value={x}>
-                {trimSideLabels[x]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <>
+          {gap && (
+            <LengthField
+              label="Gap"
+              length={gap}
+              doc={doc}
+              onCommit={(v) => update({ ...feature.args, gap: v })}
+            />
+          )}
+          <label className="ep-field">
+            Keep
+            <select
+              value={feature.args.keep}
+              onChange={(e) =>
+                void update({ ...feature.args, keep: e.target.value as (typeof sides)[number] })
+              }
+            >
+              {sides.map((x) => (
+                <option key={x} value={x}>
+                  {trimSideLabels[x]}
+                </option>
+              ))}
+            </select>
+          </label>
+          {feature.args.chains && (
+            <div className="cad-readonly-field">
+              <span>Closed lines</span>
+              <Output>{feature.args.chains.length + 1}</Output>
+            </div>
+          )}
+          {'sketchId' in feature.args.tool && (
+            <label className="cad-check">
+              <input
+                type="checkbox"
+                data-testid="cad-trim-skip-missed"
+                checked={feature.args.ifMissed === 'skip'}
+                onChange={(e) => {
+                  const { ifMissed: _, ...rest } = feature.args;
+                  void update(e.target.checked ? { ...rest, ifMissed: 'skip' } : rest);
+                }}
+              />
+              Leave out lines that miss the surface
+            </label>
+          )}
+        </>
       );
     }
     case 'sew':
@@ -1463,6 +2336,152 @@ function FeatureArgs({
               onChange={(e) => void update({ ...feature.args, solid: e.target.checked })}
             />
             Close into a solid
+          </label>
+        </>
+      );
+    case 'groove':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along</span>
+            <Output data-testid="cad-groove-along">
+              {doc.sketches.find((s) => s.id === feature.args.tool.sketchId)?.name ??
+                feature.args.tool.sketchId}{' '}
+              ({feature.args.tool.elements.length} elements, on the nearest faces)
+            </Output>
+          </div>
+          <LengthField
+            label="Radius"
+            length={feature.args.radius}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, radius: v })}
+          />
+        </>
+      );
+    case 'pressLine':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along</span>
+            <Output data-testid="cad-press-along">
+              {doc.sketches.find((s) => s.id === feature.args.tool.sketchId)?.name ??
+                feature.args.tool.sketchId}{' '}
+              ({feature.args.tool.elements.length} elements, the {feature.args.side} side moved)
+            </Output>
+          </div>
+          <LengthField
+            label="Depth"
+            length={feature.args.depth}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, depth: v })}
+          />
+          <label className="ep-field">
+            Towards
+            <select
+              value={feature.args.toward}
+              onChange={(e) =>
+                void update({ ...feature.args, toward: e.target.value as 'front' | 'back' })
+              }
+            >
+              <option value="front">The front (its normal)</option>
+              <option value="back">The back</option>
+            </select>
+          </label>
+          <LengthField
+            label="Step R"
+            length={feature.args.radius}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, radius: v })}
+          />
+        </>
+      );
+    case 'flange':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along</span>
+            <Output data-testid="cad-flange-along">
+              {feature.args.edges.length} {feature.args.edges.length === 1 ? 'edge' : 'edges'}
+            </Output>
+          </div>
+          <LengthField
+            label="Width"
+            length={feature.args.width}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, width: v })}
+          />
+          <AngleField
+            label="Angle from the sheet"
+            angle={feature.args.angle}
+            doc={doc}
+            onCommit={(angle) => void update({ ...feature.args, angle })}
+          />
+          <label className="ep-field">
+            Towards
+            <select
+              value={feature.args.toward}
+              onChange={(e) =>
+                void update({ ...feature.args, toward: e.target.value as 'front' | 'back' })
+              }
+            >
+              <option value="front">The front (its normal)</option>
+              <option value="back">The back</option>
+            </select>
+          </label>
+        </>
+      );
+    case 'flare':
+      return (
+        <>
+          <div className="cad-readonly-field">
+            <span>Along</span>
+            <Output data-testid="cad-flare-along">
+              {doc.sketches.find((s) => s.id === feature.args.tool.sketchId)?.name ??
+                feature.args.tool.sketchId}{' '}
+              ({feature.args.tool.elements.length} elements)
+            </Output>
+          </div>
+          <LengthField
+            label="Height"
+            length={feature.args.height}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, height: v })}
+          />
+          <label className="ep-field">
+            Joining the sheet
+            <select
+              value={feature.args.continuity}
+              onChange={(e) =>
+                void update({ ...feature.args, continuity: e.target.value as 'G1' | 'G2' })
+              }
+            >
+              <option value="G1">G1 (tangent)</option>
+              <option value="G2">G2 (curvature too)</option>
+            </select>
+          </label>
+        </>
+      );
+    case 'offsetSurface':
+      return (
+        <>
+          <LengthField
+            label="Distance"
+            length={feature.args.distance}
+            doc={doc}
+            onCommit={(v) => update({ ...feature.args, distance: v })}
+          />
+          <label className="ep-field">
+            Towards
+            <select
+              data-testid="cad-offset-side"
+              value={feature.args.side}
+              onChange={(e) =>
+                void update({ ...feature.args, side: e.target.value as 'front' | 'back' })
+              }
+            >
+              <option value="front">The front (its normal)</option>
+              <option value="back">The back</option>
+            </select>
           </label>
         </>
       );
@@ -1596,12 +2615,33 @@ function FeatureArgs({
               Turn each copy with the path
             </label>
           ) : layout.type === 'linear' ? (
-            <LengthField
-              label="Spacing"
-              length={layout.spacing}
-              doc={doc}
-              onCommit={(spacing) => set({ ...layout, spacing })}
-            />
+            <>
+              <LengthField
+                label="Spacing"
+                length={layout.spacing}
+                doc={doc}
+                onCommit={(spacing) => set({ ...layout, spacing })}
+              />
+              {layout.rows && (
+                <>
+                  <p className="cad-muted" data-testid="cad-pattern-rows">
+                    In rows along ({layout.rows.direction.map((c) => fmt(c)).join(', ')}).
+                  </p>
+                  <CountField
+                    count={layout.rows.count}
+                    doc={doc}
+                    label="Rows"
+                    onCommit={(count) => set({ ...layout, rows: { ...layout.rows!, count } })}
+                  />
+                  <LengthField
+                    label="Row spacing"
+                    length={layout.rows.spacing}
+                    doc={doc}
+                    onCommit={(spacing) => set({ ...layout, rows: { ...layout.rows!, spacing } })}
+                  />
+                </>
+              )}
+            </>
           ) : (
             <AngleField
               label="Step angle"
@@ -1662,9 +2702,21 @@ function DocumentSettings({
   );
 }
 
-function Inspector({ controller, snapshot }: { controller: CadController; snapshot: CadSnapshot }) {
+function Inspector({
+  controller,
+  snapshot,
+  assembly,
+}: {
+  controller: CadController;
+  snapshot: CadSnapshot;
+  assembly?: CadAssembly;
+}) {
   const { content: doc, selection, evaluation, readOnly } = snapshot;
   const [tool, setTool] = useState('');
+  const canMakePart = useSyncExternalStore(
+    assembly?.subscribe ?? noParts,
+    () => !!assembly?.getSnapshot().canMakePart,
+  );
   if (!selection)
     return (
       <>
@@ -1809,6 +2861,7 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
       {metrics && others.length > 0 && (
         <CompareSize body={body} others={others} snapshot={snapshot} />
       )}
+      <PmiSection body={body} snapshot={snapshot} controller={controller} />
       {!readOnly && body.state === 'active' && (
         <Section title="Combine">
           <label className="ep-field">
@@ -1845,6 +2898,9 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
           controller={controller}
         />
       )}
+      {!readOnly && body.state === 'active' && body.kind === 'solid' && (
+        <GrooveSection body={body} doc={doc} snapshot={snapshot} controller={controller} />
+      )}
       {!readOnly && body.state === 'active' && others.length > 0 && (
         <PatternSection body={body} others={others} snapshot={snapshot} controller={controller} />
       )}
@@ -1855,6 +2911,16 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
           onClick={() => void controller.duplicateBody(body.id)}
         >
           <Copy size={16} aria-hidden="true" /> Duplicate body
+        </button>
+      )}
+      {!readOnly && body.state === 'active' && assembly && (
+        <button
+          type="button"
+          disabled={snapshot.busy || !canMakePart}
+          title="このbodyと、その形を作るsketch・featureを新しい部品のArtifactにし、ここではその部品を同じ位置に置きます"
+          onClick={() => void assembly.makePart(body.id)}
+        >
+          <Package size={16} aria-hidden="true" /> Make part
         </button>
       )}
       {!readOnly && (
@@ -1869,6 +2935,275 @@ function Inspector({ controller, snapshot }: { controller: CadController; snapsh
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * PMI-2: an item's targets as marks on its body's mesh: the pick table lists the body's faces and
+ * edges in the same map order as the asset's indices. A location dimension's second end has its
+ * own colour. Vertices are listed, not drawn.
+ */
+/**
+ * The faces and edges an item targets, as pick ids of the body's mesh: by their own index when
+ * the body is the import, through the evaluation's tracking after a change (PMI-4a).
+ */
+function pmiMarks(mesh: CadMesh, item: CadPmiItem, tracking?: CadPmiTracking) {
+  const marks: { pick: CadTopologyPick; color: string }[] = [];
+  const add = (targets: CadPmiTarget[], color: string) => {
+    for (const t of targets) {
+      const i = tracking ? cadPmiTrackedIndex(tracking, t) : t.index - 1;
+      if (i === undefined || i < 0) continue;
+      if (t.shape === 'face' && i < mesh.topology.faces.length)
+        marks.push({
+          pick: { bodyId: mesh.bodyId, kind: 'face', id: mesh.faceBase + 1 + i },
+          color,
+        });
+      else if (t.shape === 'edge' && i < mesh.topology.edges.length)
+        marks.push({
+          pick: { bodyId: mesh.bodyId, kind: 'edge', id: mesh.edgeBase + 1 + i },
+          color,
+        });
+    }
+  };
+  add(item.targets, pmiTargetColour);
+  if (item.kind === 'dimension') add(item.targets2 ?? [], pmiSecondColour);
+  return marks;
+}
+const pmiTargetColour = '#e8590c';
+/** PMI-3a: presentation lines, and the focused item's (in the targets' colour). */
+const pmiLineColour = '#2b8a3e';
+/**
+ * PMI-3a: the presentation lines of a body's asset as viewport segments, placed where the body is
+ * and relative to its mesh origin; the last few results are kept, as a large file's lines are
+ * many and the viewport redraws on every selection.
+ */
+class PmiLineCache {
+  private readonly entries = new Map<string, { segments: Float32Array; color: string }[]>();
+  private readonly ids = new WeakMap<object, number>();
+  private next = 0;
+  private idOf(o: object) {
+    let id = this.ids.get(o);
+    if (id === undefined) this.ids.set(o, (id = this.next++));
+    return id;
+  }
+  get(
+    asset: CadPmiAsset,
+    placements: CadPmiPlacement[],
+    origin: Vec3,
+    focusId: string | undefined,
+    viewId?: string,
+    /** PMI-4a: after a change of the shape, only the current items are drawn. */
+    states?: ReadonlyMap<string, CadPmiItemState>,
+  ): { segments: Float32Array; color: string }[] {
+    const key = JSON.stringify([
+      this.idOf(asset),
+      states ? this.idOf(states) : null,
+      placements,
+      origin,
+      focusId ?? null,
+      viewId ?? null,
+    ]);
+    const hit = this.entries.get(key);
+    if (hit) return hit;
+    // With a view shown, only the ranges (callouts) that view lists; otherwise all lines.
+    const segmentsOf = (i: CadPmiItem): number[] => {
+      const p = i.presentation;
+      if (!p) return [];
+      if (viewId === undefined || !p.ranges) return p.segments;
+      let from = 0;
+      return p.ranges.flatMap((range) => {
+        const part = range.views.includes(viewId) ? p.segments.slice(from, range.end) : [];
+        from = range.end;
+        return part;
+      });
+    };
+    const line = (items: CadPmiItem[]) => {
+      const parts = items.map(segmentsOf);
+      const n = parts.reduce((k, s) => k + s.length, 0);
+      const out = new Float32Array(n);
+      let at = 0;
+      for (const s of parts) {
+        for (let k = 0; k < s.length; k += 3) {
+          const p = placePmiPoint(placements, [s[k]!, s[k + 1]!, s[k + 2]!]);
+          out[at++] = p[0] - origin[0];
+          out[at++] = p[1] - origin[1];
+          out[at++] = p[2] - origin[2];
+        }
+      }
+      return out;
+    };
+    const shown = asset.items.filter(
+      (i) =>
+        i.presentation &&
+        (viewId === undefined || i.views?.includes(viewId)) &&
+        (!states || states.get(i.id)?.current === true),
+    );
+    const focused = shown.filter((i) => i.id === focusId);
+    const rest = shown.filter((i) => i.id !== focusId);
+    const lines = [
+      ...(rest.length ? [{ segments: line(rest), color: pmiLineColour }] : []),
+      ...(focused.length ? [{ segments: line(focused), color: pmiTargetColour }] : []),
+    ];
+    if (this.entries.size >= 8) this.entries.delete(this.entries.keys().next().value!);
+    this.entries.set(key, lines);
+    return lines;
+  }
+}
+const pmiSecondColour = '#1c7ed6';
+const pmiKindTitles: Record<CadPmiKind, string> = {
+  dimension: 'Dimensions',
+  'geometric-tolerance': 'Geometric tolerances',
+  datum: 'Datums',
+  'datum-target': 'Datum targets',
+};
+const targetCount = (item: CadPmiItem) => {
+  const all = [...item.targets, ...(item.kind === 'dimension' ? (item.targets2 ?? []) : [])];
+  const n = (kind: string, one: string, many: string) => {
+    const c = all.filter((t) => t.shape === kind).length;
+    return c ? [`${c} ${c === 1 ? one : many}`] : [];
+  };
+  return [
+    ...n('face', 'face', 'faces'),
+    ...n('edge', 'edge', 'edges'),
+    ...n('vertex', 'vertex', 'vertices'),
+  ].join(', ');
+};
+/**
+ * PMI-2 (docs/cad/pmi.md, 表示と操作): the semantic PMI an imported body keeps, by kind. Choosing
+ * an item highlights its faces and edges (display only). PMI-4a: after a feature that changes the
+ * shape, an item whose faces, edges and datums the evaluation found unchanged stays current; the
+ * others are listed as stale and cannot be chosen. A body that joins two imports with PMI has all
+ * of it stale.
+ */
+function PmiSection({
+  body,
+  snapshot,
+  controller,
+}: {
+  body: CadBody;
+  snapshot: CadSnapshot;
+  controller: CadController;
+}) {
+  const { state, asset, unreadable, items: states } = controller.bodyPmi(body.id);
+  if (state.status === 'none') return null;
+  const focus = snapshot.pmiFocus?.bodyId === body.id ? snapshot.pmiFocus.itemId : undefined;
+  const shownView = snapshot.pmiView?.bodyId === body.id ? snapshot.pmiView.viewId : undefined;
+  const stale = state.status === 'stale';
+  const changedBy =
+    state.status !== 'current' &&
+    snapshot.content.features.find((f) => f.id === state.changedById)?.name;
+  // PMI-4a: after a change of the shape, the items the evaluation found unchanged.
+  const kept = states && [...states.values()].filter((s) => s.current).length;
+  const itemStale = (id: string) => !!states && states.get(id)?.current !== true;
+  return (
+    <Section title="PMI">
+      <div data-testid="cad-pmi">
+        {unreadable || !asset ? (
+          <p className="cad-muted">The PMI kept with this body could not be read.</p>
+        ) : (
+          <>
+            {stale ? (
+              <p className="cad-pmi-stale" role="note">
+                Stale: {changedBy ?? 'a feature'} joined this body with another body that has PMI,
+                so this PMI is not checked against the body&apos;s faces and is not highlighted.
+              </p>
+            ) : state.status === 'changed' ? (
+              <p className="cad-pmi-stale" role="note">
+                {changedBy ?? 'A feature'} changed the shape after the import.{' '}
+                {snapshot.meshes?.current
+                  ? `${kept} of ${asset.items.length} items have all their faces, edges and datums unchanged and are kept; the others are stale.`
+                  : 'Which items are kept is shown once the body is evaluated.'}
+              </p>
+            ) : (
+              <p className="cad-muted">
+                PMI kept from the STEP file. Choose an item to highlight its faces and edges, and
+                its presentation lines where the file has them. A saved view sets the camera and
+                shows only its PMI.
+              </p>
+            )}
+            {asset.views?.length ? (
+              <>
+                <h4 className="cad-pmi-kind">Saved views ({asset.views.length})</h4>
+                <ul className="cad-pmi-list" aria-label="Saved views">
+                  <li>
+                    <button
+                      type="button"
+                      className="cad-item"
+                      aria-pressed={shownView === undefined}
+                      disabled={stale}
+                      onClick={() => controller.showPmiView(undefined)}
+                    >
+                      <span>All PMI</span>
+                    </button>
+                  </li>
+                  {asset.views.map((v) => {
+                    const n = asset.items.filter(
+                      (i) => i.views?.includes(v.id) && !itemStale(i.id),
+                    ).length;
+                    return (
+                      <li key={v.id}>
+                        <button
+                          type="button"
+                          className="cad-item"
+                          aria-pressed={shownView === v.id}
+                          disabled={stale}
+                          onClick={() => controller.showPmiView(v.id)}
+                        >
+                          <span>{v.name || v.id}</span>
+                          <small>
+                            {n} {n === 1 ? 'item' : 'items'}
+                          </small>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            ) : null}
+            {(Object.keys(pmiKindTitles) as CadPmiKind[]).map((kind) => {
+              const items = asset.items.filter((i) => i.kind === kind);
+              if (!items.length) return null;
+              return (
+                <Fragment key={kind}>
+                  <h4 className="cad-pmi-kind">
+                    {pmiKindTitles[kind]} ({items.length})
+                  </h4>
+                  <ul className="cad-pmi-list" aria-label={pmiKindTitles[kind]}>
+                    {items.map((item) => {
+                      const s = states?.get(item.id);
+                      return (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className="cad-item"
+                            aria-pressed={focus === item.id}
+                            disabled={stale || itemStale(item.id)}
+                            onClick={() =>
+                              controller.focusPmi(focus === item.id ? undefined : item.id)
+                            }
+                          >
+                            <span>{cadPmiItemText(item, asset)}</span>
+                            <small>
+                              {targetCount(item)}
+                              {item.presentation ? ' · presented' : ''}
+                              {s && !s.current
+                                ? s.reason === 'datum'
+                                  ? ' · stale (a datum is stale)'
+                                  : ' · stale (changed)'
+                                : ''}
+                            </small>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </Fragment>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -1905,6 +3240,9 @@ function AppearanceSection({
   /** One value changed by hand: the look is no longer the preset's. */
   const custom = (patch: Partial<CadAppearance>) => {
     const { material: _preset, ...rest } = { ...a, ...patch };
+    // A field patched to undefined is left out (CR6a: no emission, no transmission).
+    for (const k of Object.keys(rest) as (keyof typeof rest)[])
+      if (rest[k] === undefined) delete rest[k];
     set(rest);
   };
   const preset = geometryMaterialPresets.find((p) => p.id === a.material);
@@ -1925,6 +3263,12 @@ function AppearanceSection({
           <dd>{finish.metalness}</dd>
           <dt>Opacity</dt>
           <dd>{a.opacity}</dd>
+          <dt>Emission</dt>
+          <dd>{a.emission ? `${a.emission.color} × ${a.emission.strength}` : 'None'}</dd>
+          <dt>Transmission</dt>
+          <dd>{a.transmission ?? 0}</dd>
+          <dt>Index of refraction</dt>
+          <dd>{a.ior ?? geometryLightLimits.defaultIor}</dd>
         </dl>
         <TextureSection body={body} controller={controller} readOnly />
       </Section>
@@ -1955,6 +3299,9 @@ function AppearanceSection({
                 opacity: p.opacity,
                 roughness: p.roughness,
                 metalness: p.metalness,
+                ...(p.emission ? { emission: { ...p.emission } } : {}),
+                ...(p.transmission !== undefined ? { transmission: p.transmission } : {}),
+                ...(p.ior !== undefined ? { ior: p.ior } : {}),
                 material: p.id,
               });
             }}
@@ -1982,9 +3329,86 @@ function AppearanceSection({
         {unit('roughness', 'Roughness', finish.roughness)}
         {unit('metalness', 'Metalness', finish.metalness)}
         {unit('opacity', 'Opacity', a.opacity)}
+        <LightFields appearance={a} onChange={custom} />
         <TextureSection body={body} controller={controller} readOnly={false} />
       </div>
     </Section>
+  );
+}
+/**
+ * CR6a: the light a body gives off (a lamp: colour and strength, 0 for none) and lets through
+ * (a lens: transmission 0–1 and its index of refraction). The view draws the light as a glow and
+ * the transmission as a lower opacity; a path-traced render draws them as light and refraction.
+ */
+function LightFields({
+  appearance: a,
+  onChange,
+}: {
+  appearance: CadAppearance;
+  onChange: (patch: Partial<CadAppearance>) => void;
+}) {
+  const [lo, hi] = geometryLightLimits.emissionStrength;
+  const strength = a.emission?.strength ?? 0;
+  const emissionColor = a.emission?.color ?? '#ffffff';
+  /** An emission of strength 0 is none: the field is left out. */
+  const emit = (color: string, value: number) => {
+    onChange({ emission: value > 0 ? { color, strength: value } : undefined });
+  };
+  const ranged = (v: string, [min, max]: readonly [number, number]) => {
+    const n = Number(v);
+    return v.trim() !== '' && Number.isFinite(n) && n >= min && n <= max ? n : undefined;
+  };
+  return (
+    <div data-testid="cad-appearance-light">
+      <CommitInput
+        label="Emission strength"
+        type="number"
+        min={lo}
+        max={hi}
+        step={0.5}
+        value={strength}
+        onCommit={(v) => {
+          const n = ranged(v, geometryLightLimits.emissionStrength);
+          if (n === undefined) return false;
+          emit(emissionColor, n);
+        }}
+      />
+      <CommitInput
+        label="Emission colour"
+        value={emissionColor}
+        onCommit={(v) => {
+          const color = v.trim().toLowerCase();
+          if (!/^#[0-9a-f]{6}$/.test(color)) return false;
+          emit(color, strength || 1);
+        }}
+      />
+      <CommitInput
+        label="Transmission"
+        type="number"
+        min={0}
+        max={1}
+        step={0.05}
+        value={a.transmission ?? 0}
+        onCommit={(v) => {
+          const n = ranged(v, geometryLightLimits.transmission);
+          if (n === undefined) return false;
+          onChange({ transmission: n || undefined });
+        }}
+      />
+      <CommitInput
+        label="Index of refraction"
+        type="number"
+        min={geometryLightLimits.ior[0]}
+        max={geometryLightLimits.ior[1]}
+        step={0.01}
+        value={a.ior ?? geometryLightLimits.defaultIor}
+        onCommit={(v) => {
+          const n = ranged(v, geometryLightLimits.ior);
+          if (n === undefined) return false;
+          onChange({ ior: n });
+        }}
+      />
+    </div>
   );
 }
 function SheetSection({
@@ -2004,10 +3428,32 @@ function SheetSection({
   const [sewn, setSewn] = useState<string[]>([]);
   const [solid, setSolid] = useState(false);
   const [tool, setTool] = useState('');
+  const [divider, setDivider] = useState('');
+  // CR3b: a panel cut out along a sketch's closed chain, the gap between it and this body.
+  const [panelSketch, setPanelSketch] = useState('');
+  const [panelGap, setPanelGap] = useState(String(cadPanelGapDefaultMm));
+  const [panelKeep, setPanelKeep] = useState<'inside' | 'outside'>('inside');
+  const gapMm = Number(panelGap);
+  const [press, setPress] = useState('');
+  const [pressSide, setPressSide] = useState<'left' | 'right'>('left');
+  const [pressDepth, setPressDepth] = useState('2');
+  const [pressToward, setPressToward] = useState<'front' | 'back'>('front');
+  const [pressRadius, setPressRadius] = useState('0.5');
   const [keep, setKeep] = useState<keyof typeof trimSideLabels>('outside');
+  // CR3c: closed chains of the sketch that cut nothing are left out instead of refused.
+  const [skipMissed, setSkipMissed] = useState(false);
   const [offset, setOffset] = useState('0');
   const [thickness, setThickness] = useState('1');
   const [side, setSide] = useState<'front' | 'back' | 'both'>('front');
+  const [distance, setDistance] = useState('2');
+  const [offsetSide, setOffsetSide] = useState<'front' | 'back'>('back');
+  const d = Number(distance);
+  const [mirrorAxis, setMirrorAxis] = useState<'x' | 'y' | 'z'>('y');
+  const sheetMesh =
+    snapshot.meshes?.contentHash === snapshot.contentHash
+      ? snapshot.meshes.meshes.find((m) => m.bodyId === body.id && !m.lod && !m.beforeFailure)
+      : undefined;
+  const front = useMemo(() => (sheetMesh ? sheetFront(sheetMesh) : undefined), [sheetMesh]);
   const byCurve = tool.startsWith('sketch:');
   const sides = byCurve ? (['inside', 'outside'] as const) : (['front', 'back'] as const);
   const kept = (sides as readonly string[]).includes(keep) ? keep : sides[0];
@@ -2025,7 +3471,9 @@ function SheetSection({
                 normal: axes[id]!,
               },
             };
-    void controller.trimBody(body, made, kept).then((ok) => ok && setTool(''));
+    void controller
+      .trimBody(body, made, kept, kind === 'sketch' && skipMissed ? 'skip' : undefined)
+      .then((ok) => ok && setTool(''));
   };
   const t = Number(thickness);
   return (
@@ -2109,10 +3557,165 @@ function SheetSection({
             ))}
           </select>
         </label>
+        {byCurve && (
+          <>
+            <p className="cad-muted">
+              Every closed line of the sketch is cut at once (a row of windows).
+            </p>
+            <label className="cad-check">
+              <input
+                type="checkbox"
+                checked={skipMissed}
+                onChange={(e) => setSkipMissed(e.target.checked)}
+              />
+              Leave out lines that miss the surface
+            </label>
+          </>
+        )}
         <button type="button" disabled={!tool || snapshot.busy} onClick={trim}>
           Trim
         </button>
       </Section>
+      <Section title="Split" open={false}>
+        <label className="ep-field">
+          Divide along
+          <select
+            data-testid="cad-split-sketch"
+            value={divider}
+            onChange={(e) => setDivider(e.target.value)}
+          >
+            <option value="">Choose…</option>
+            {doc.sketches.map((s) => (
+              <option key={s.id} value={s.id}>
+                Sketch {s.name} (along its normal)
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!divider || snapshot.busy}
+          onClick={() => void controller.splitBody(body, divider)}
+        >
+          Split, keeping every piece
+        </button>
+      </Section>
+      <Section title="Panel" open={false}>
+        <label className="ep-field">
+          Cut out along
+          <select
+            data-testid="cad-panel-sketch"
+            value={panelSketch}
+            onChange={(e) => setPanelSketch(e.target.value)}
+          >
+            <option value="">Choose…</option>
+            {doc.sketches.map((s) => (
+              <option key={s.id} value={s.id}>
+                Sketch {s.name} (a closed line, along its normal)
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="ep-field">
+          Panel
+          <select
+            value={panelKeep}
+            onChange={(e) => setPanelKeep(e.target.value as typeof panelKeep)}
+          >
+            <option value="inside">Inside the line</option>
+            <option value="outside">Outside the line</option>
+          </select>
+        </label>
+        <CommitInput
+          label="Gap (mm)"
+          type="number"
+          step={0.5}
+          value={panelGap}
+          onCommit={setPanelGap}
+        />
+        <button
+          type="button"
+          disabled={
+            !panelSketch ||
+            !(gapMm >= cadPanelGapMm[0] && gapMm <= cadPanelGapMm[1]) ||
+            snapshot.busy
+          }
+          onClick={() => void controller.cutPanel(body, panelSketch, gapMm, panelKeep)}
+        >
+          Cut out a panel
+        </button>
+      </Section>
+      <Section title="Press line" open={false}>
+        <label className="ep-field">
+          Along
+          <select
+            data-testid="cad-press-sketch"
+            value={press}
+            onChange={(e) => setPress(e.target.value)}
+          >
+            <option value="">Choose…</option>
+            {doc.sketches.map((s) => (
+              <option key={s.id} value={s.id}>
+                Sketch {s.name} (along its normal)
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="ep-field">
+          Moved side
+          <select
+            value={pressSide}
+            onChange={(e) => setPressSide(e.target.value as typeof pressSide)}
+          >
+            <option value="left">Left (inside a closed line)</option>
+            <option value="right">Right (outside a closed line)</option>
+          </select>
+        </label>
+        <CommitInput
+          label="Depth (mm)"
+          type="number"
+          step={0.5}
+          value={pressDepth}
+          onCommit={setPressDepth}
+        />
+        <label className="ep-field">
+          Towards
+          <select
+            value={pressToward}
+            onChange={(e) => setPressToward(e.target.value as typeof pressToward)}
+          >
+            <option value="front">The front (its normal)</option>
+            <option value="back">The back</option>
+          </select>
+        </label>
+        <CommitInput
+          label="Step R (mm)"
+          type="number"
+          step={0.1}
+          value={pressRadius}
+          onCommit={setPressRadius}
+        />
+        <button
+          type="button"
+          disabled={!press || snapshot.busy}
+          onClick={() =>
+            void controller.pressLine(body, press, {
+              side: pressSide,
+              depthMm: Number(pressDepth),
+              toward: pressToward,
+              radiusMm: Number(pressRadius),
+            })
+          }
+        >
+          Press the line
+        </button>
+      </Section>
+      {/* CR4b (86M6): which way "the front" is, before choosing a side below. */}
+      <p className="cad-muted" data-testid="cad-sheet-front">
+        {front
+          ? `Its front (its normal) faces mostly ${front.axis}${front.share < 0.9 ? ` (${Math.round(100 * front.share)}% of its area along it)` : ''}.`
+          : 'Its front faces no one way (its normals cancel).'}
+      </p>
       <Section title="Thicken" open={false}>
         <CommitInput
           label="Thickness (mm)"
@@ -2135,6 +3738,52 @@ function SheetSection({
           onClick={() => void controller.thickenBody(body, t, side)}
         >
           Thicken
+        </button>
+      </Section>
+      <Section title="Mirror copy" open={false}>
+        <label className="ep-field">
+          Across
+          <select
+            value={mirrorAxis}
+            onChange={(e) => setMirrorAxis(e.target.value as typeof mirrorAxis)}
+          >
+            <option value="y">The plane y = 0 (left to right)</option>
+            <option value="x">The plane x = 0</option>
+            <option value="z">The plane z = 0</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={snapshot.busy}
+          onClick={() => void controller.mirrorCopy(body, mirrorAxis)}
+        >
+          Mirror into a new body
+        </button>
+      </Section>
+      <Section title="Offset surface" open={false}>
+        <CommitInput
+          label="Distance (mm)"
+          type="number"
+          step={0.5}
+          value={distance}
+          onCommit={setDistance}
+        />
+        <label className="ep-field">
+          Towards
+          <select
+            value={offsetSide}
+            onChange={(e) => setOffsetSide(e.target.value as typeof offsetSide)}
+          >
+            <option value="front">The front (its normal)</option>
+            <option value="back">The back</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!(d >= 0.01 && d <= 100) || snapshot.busy}
+          onClick={() => void controller.offsetSurface(body, d, offsetSide)}
+        >
+          Offset into a new sheet
         </button>
       </Section>
     </>
@@ -2162,14 +3811,33 @@ function PatternSection({
   const [count, setCount] = useState('3');
   const [step, setStep] = useState('10');
   const [align, setAlign] = useState(true);
+  // CR6d: a grid, rows of the row along a second axis.
+  const [rows, setRows] = useState('1');
+  const [rowAxis, setRowAxis] = useState('y');
+  const [rowStep, setRowStep] = useState('10');
   const circular = layout === 'circle';
   // K5a: along the open chain a sketch draws.
   const path = layout.startsWith('path:') ? layout.slice(5) : undefined;
   const paths = snapshot.content.sketches.filter((s) => sketchDefaultPath(s));
   const n = Number(count);
   const by = Number(step);
+  const linear = !path && !circular;
+  const rowN = Number(rows);
+  const rowBy = Number(rowStep);
+  const gridded = linear && rowN > 1;
+  const rowsValid =
+    !gridded ||
+    (Number.isInteger(rowN) &&
+      rowN * n <= 1000 &&
+      rowAxis !== layout &&
+      Number.isFinite(rowBy) &&
+      rowBy !== 0);
   const valid =
-    Number.isInteger(n) && n >= 1 && n <= 1000 && (!!path || (Number.isFinite(by) && by !== 0));
+    Number.isInteger(n) &&
+    n >= 1 &&
+    n <= 1000 &&
+    (!!path || (Number.isFinite(by) && by !== 0)) &&
+    (!linear || (Number.isInteger(rowN) && rowN >= 1 && rowsValid));
   const centre = () => {
     const e = snapshot.evaluation;
     const b = e?.status === 'ok' && e.reference ? undefined : bodyMetrics(e, body.id);
@@ -2188,7 +3856,21 @@ function PatternSection({
           count: { literal: n },
           angle: { literalRad: (by * Math.PI) / 180 },
         }
-      : { type: 'linear', direction: axes[layout]!, count: { literal: n }, spacing: mm(by) };
+      : {
+          type: 'linear',
+          direction: axes[layout]!,
+          count: { literal: n },
+          spacing: mm(by),
+          ...(gridded
+            ? {
+                rows: {
+                  direction: axes[rowAxis]!,
+                  count: { literal: rowN },
+                  spacing: mm(rowBy),
+                },
+              }
+            : {}),
+        };
     void controller.pattern(body.id, tool, mode, l).then((ok) => ok && setTool(''));
   };
   return (
@@ -2240,6 +3922,44 @@ function PatternSection({
           <input type="number" value={step} onChange={(e) => setStep(e.target.value)} />
         </label>
       )}
+      {linear && (
+        <>
+          <label className="ep-field">
+            Rows
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              step={1}
+              value={rows}
+              onChange={(e) => setRows(e.target.value)}
+            />
+          </label>
+          {gridded && (
+            <>
+              <label className="ep-field">
+                Rows along
+                <select value={rowAxis} onChange={(e) => setRowAxis(e.target.value)}>
+                  {(['x', 'y', 'z'] as const).map((a) => (
+                    <option key={a} value={a} disabled={a === layout}>
+                      {a.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="ep-field">
+                Row spacing (mm)
+                <input type="number" value={rowStep} onChange={(e) => setRowStep(e.target.value)} />
+              </label>
+              {!rowsValid && (
+                <p className="cad-muted" role="alert">
+                  The rows need another axis than the row, a spacing, and 1,000 copies at most.
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
       <div className="cad-row">
         <button
           type="button"
@@ -2257,6 +3977,246 @@ function PatternSection({
         </button>
       </div>
     </Section>
+  );
+}
+
+/**
+ * CR6d: a round groove (a stitch line, a seam) along the chain a sketch draws, carried along the
+ * sketch's normal onto the solid's nearest faces: a half-round of the radius.
+ */
+function GrooveSection({
+  body,
+  doc,
+  snapshot,
+  controller,
+}: {
+  body: CadBody;
+  doc: CadDocument;
+  snapshot: CadSnapshot;
+  controller: CadController;
+}) {
+  const [sketch, setSketch] = useState('');
+  const [radius, setRadius] = useState('1');
+  const r = Number(radius);
+  const valid = r >= cadGrooveRadiusMm[0] && r <= cadGrooveRadiusMm[1];
+  return (
+    <Section title="Groove" open={false}>
+      <label className="ep-field">
+        Along
+        <select
+          data-testid="cad-groove-sketch"
+          value={sketch}
+          onChange={(e) => setSketch(e.target.value)}
+        >
+          <option value="">Choose…</option>
+          {doc.sketches.map((s) => (
+            <option key={s.id} value={s.id}>
+              Sketch {s.name} (along its normal)
+            </option>
+          ))}
+        </select>
+      </label>
+      <CommitInput
+        label="Groove R (mm)"
+        type="number"
+        step={0.1}
+        value={radius}
+        onCommit={setRadius}
+      />
+      {!valid && (
+        <p className="cad-muted" role="alert">
+          The radius is {cadGrooveRadiusMm[0]}–{cadGrooveRadiusMm[1]} mm.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={!sketch || !valid || snapshot.busy}
+        onClick={() => void controller.groove(body, sketch, r)}
+      >
+        Cut the groove
+      </button>
+    </Section>
+  );
+}
+
+/**
+ * WM1a: a spur gear's fields. Each commit is one edit; values the gear cannot have (undercut,
+ * pointed tips, windows that do not fit) are refused by validation with their code.
+ */
+function GearFields({
+  args: a,
+  doc,
+  onCommit,
+}: {
+  args: CadSpurGearArgs;
+  doc: CadDocument;
+  onCommit: (args: CadSpurGearArgs) => void;
+}) {
+  const coefficient = (
+    label: string,
+    key: 'profileShift' | 'addendum' | 'dedendum' | 'toothThickness',
+    placeholder = '× module',
+  ) => (
+    <CommitInput
+      label={label}
+      value={a[key] ?? ''}
+      placeholder={placeholder}
+      onCommit={(text) => {
+        const v = Number(text);
+        if (text.trim() && Number.isFinite(v)) onCommit({ ...a, [key]: v });
+      }}
+    />
+  );
+  const s = a.spokes;
+  return (
+    <>
+      <LengthField
+        label="Module"
+        length={a.module}
+        doc={doc}
+        onCommit={(module) => onCommit({ ...a, module })}
+      />
+      <CountField
+        label="Teeth"
+        count={a.teeth}
+        doc={doc}
+        onCommit={(teeth) => onCommit({ ...a, teeth })}
+      />
+      <label className="ep-field">
+        Tooth profile
+        <select
+          value={a.profile}
+          onChange={(e) => {
+            // WM1b: each profile has its own tooth fields; switching starts from its defaults.
+            const {
+              pressureAngle: _a,
+              profileShift: _x,
+              matingTeeth: _z,
+              toothThickness: _s,
+              ...rest
+            } = a;
+            void [_a, _x, _z, _s];
+            onCommit(
+              e.target.value === 'cycloidal'
+                ? {
+                    ...rest,
+                    profile: 'cycloidal',
+                    matingTeeth: a.teeth,
+                    toothThickness: 0.5,
+                    addendum: 1.3,
+                    dedendum: 1.6,
+                  }
+                : {
+                    ...rest,
+                    profile: 'involute',
+                    pressureAngle: { literalRad: (20 * Math.PI) / 180 },
+                    profileShift: 0,
+                    addendum: 1,
+                    dedendum: 1.25,
+                  },
+            );
+          }}
+        >
+          <option value="involute">Involute</option>
+          <option value="cycloidal">Cycloidal (watch)</option>
+        </select>
+      </label>
+      {a.profile === 'cycloidal' ? (
+        <>
+          <CountField
+            label="Mating teeth"
+            count={a.matingTeeth ?? a.teeth}
+            doc={doc}
+            onCommit={(matingTeeth) => onCommit({ ...a, matingTeeth })}
+          />
+          {coefficient('Tooth thickness', 'toothThickness', '× circular pitch')}
+        </>
+      ) : (
+        <>
+          <AngleField
+            label="Pressure angle"
+            angle={a.pressureAngle ?? { literalRad: (20 * Math.PI) / 180 }}
+            doc={doc}
+            onCommit={(pressureAngle) => onCommit({ ...a, pressureAngle })}
+          />
+          {coefficient('Profile shift', 'profileShift')}
+        </>
+      )}
+      {coefficient('Addendum', 'addendum')}
+      {coefficient('Dedendum', 'dedendum')}
+      <LengthField
+        label="Face width"
+        length={a.faceWidth}
+        doc={doc}
+        onCommit={(faceWidth) => onCommit({ ...a, faceWidth })}
+      />
+      <LengthField
+        label="Bore"
+        length={a.bore}
+        doc={doc}
+        onCommit={(bore) => onCommit({ ...a, bore })}
+      />
+      {s ? (
+        <>
+          <CountField
+            label="Spokes"
+            count={s.count}
+            doc={doc}
+            onCommit={(count) => onCommit({ ...a, spokes: { ...s, count } })}
+          />
+          <LengthField
+            label="Spoke width"
+            length={s.width}
+            doc={doc}
+            onCommit={(width) => onCommit({ ...a, spokes: { ...s, width } })}
+          />
+          <LengthField
+            label="Rim"
+            length={s.rim}
+            doc={doc}
+            onCommit={(rim) => onCommit({ ...a, spokes: { ...s, rim } })}
+          />
+          <LengthField
+            label="Hub"
+            length={s.hub}
+            doc={doc}
+            onCommit={(hub) => onCommit({ ...a, spokes: { ...s, hub } })}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              const { spokes: _, ...rest } = a;
+              void _;
+              onCommit(rest);
+            }}
+          >
+            Remove spokes
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            // A start that fits most gears: arms and rings in proportion to the root circle.
+            const v = parameterValues(doc);
+            const m = resolveLength(a.module, v);
+            const root = (m * resolveCount(a.teeth, v)) / 2 - 1.25 * m;
+            const ring = Math.max(m, root * 0.12);
+            onCommit({
+              ...a,
+              spokes: {
+                count: { literal: 5 },
+                rim: { literalMm: Number(ring.toFixed(3)) },
+                hub: { literalMm: Number(ring.toFixed(3)) },
+                width: { literalMm: Number(ring.toFixed(3)) },
+              },
+            });
+          }}
+        >
+          Add spokes
+        </button>
+      )}
+    </>
   );
 }
 
@@ -2278,6 +4238,25 @@ function NumberField({
   );
 }
 const positive = (text: string) => Number.isFinite(Number(text)) && Number(text) > 0;
+/**
+ * CR1e: a fillet's varying radius from the inspector's fields: none when both are empty, `null`
+ * when they cannot be read (points as `at:R`, comma-separated; they need an end R).
+ */
+function filletVariation(
+  endR: string,
+  radii: string,
+): { endMm: number; points: { at: number; radiusMm: number }[] } | undefined | null {
+  if (!endR.trim() && !radii.trim()) return undefined;
+  if (!positive(endR)) return null;
+  const points = radii.trim()
+    ? radii.split(',').map((part) => {
+        const [at, r] = part.split(':').map((x) => Number(x.trim()));
+        return { at: at!, radiusMm: r! };
+      })
+    : [];
+  if (points.some((p) => !Number.isFinite(p.at) || !(p.radiusMm > 0))) return null;
+  return { endMm: Number(endR), points };
+}
 
 /**
  * A picked face or edge: its persistent name and whether a reference could pick it again
@@ -2294,6 +4273,15 @@ function TopologyInspector({
   const [size, setSize] = useState('1');
   const [wall, setWall] = useState('2');
   const [angle, setAngle] = useState('3');
+  const [endR, setEndR] = useState('');
+  const [radii, setRadii] = useState('');
+  const [flareLine, setFlareLine] = useState('');
+  const [flareHeight, setFlareHeight] = useState('10');
+  const [flareJoin, setFlareJoin] = useState<'G1' | 'G2'>('G1');
+  const [flangeWidth, setFlangeWidth] = useState('10');
+  const [flangeAngle, setFlangeAngle] = useState('90');
+  const [flangeToward, setFlangeToward] = useState<'front' | 'back'>('front');
+  const vary = filletVariation(endR, radii);
   const info = snapshot.topology;
   if (!info) return <p className="cad-muted">The picked element is no longer shown.</p>;
   const body = snapshot.content.bodies.find((b) => b.id === info.bodyId);
@@ -2329,11 +4317,23 @@ function TopologyInspector({
       {referable && !snapshot.readOnly && body?.state === 'active' && info.kind === 'edge' && (
         <Section title="Round or bevel this edge">
           <NumberField label="Size (mm)" value={size} onChange={setSize} />
+          <NumberField label="Fillet end R (mm, optional)" value={endR} onChange={setEndR} />
+          <label>
+            R along the edge (optional)
+            <input
+              data-testid="cad-fillet-radii"
+              placeholder="0.5:8, 0.75:6"
+              value={radii}
+              onChange={(e) => setRadii(e.target.value)}
+            />
+          </label>
           <div className="cad-row">
             <button
               type="button"
-              disabled={!editable || !positive(size)}
-              onClick={() => void controller.blendPickedEdge('fillet', Number(size))}
+              disabled={!editable || !positive(size) || vary === null}
+              onClick={() =>
+                void controller.blendPickedEdge('fillet', Number(size), vary ?? undefined)
+              }
             >
               Fillet
             </button>
@@ -2372,11 +4372,100 @@ function TopologyInspector({
           </div>
         </Section>
       )}
+      {referable &&
+        !snapshot.readOnly &&
+        body?.state === 'active' &&
+        body.kind === 'sheet' &&
+        info.kind === 'edge' && (
+          <Section title="Flare from this arch" open={false}>
+            <label className="ep-field">
+              Along
+              <select
+                data-testid="cad-flare-sketch"
+                value={flareLine}
+                onChange={(e) => setFlareLine(e.target.value)}
+              >
+                <option value="">Choose…</option>
+                {snapshot.content.sketches.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    Sketch {s.name} (along its normal)
+                  </option>
+                ))}
+              </select>
+            </label>
+            <NumberField label="Height (mm)" value={flareHeight} onChange={setFlareHeight} />
+            <label className="ep-field">
+              Joining the sheet
+              <select
+                value={flareJoin}
+                onChange={(e) => setFlareJoin(e.target.value as 'G1' | 'G2')}
+              >
+                <option value="G1">G1 (tangent)</option>
+                <option value="G2">G2 (curvature too)</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!editable || !flareLine || !positive(flareHeight)}
+              onClick={() =>
+                void controller.flarePickedEdge(flareLine, Number(flareHeight), flareJoin)
+              }
+            >
+              Flare the arch out
+            </button>
+          </Section>
+        )}
+      {referable &&
+        !snapshot.readOnly &&
+        body?.state === 'active' &&
+        body.kind === 'sheet' &&
+        info.kind === 'edge' && (
+          <Section title="Flange this edge" open={false}>
+            <p className="cad-muted">
+              Collect edges of this sheet first to flange them all at once (with this one among
+              them).
+            </p>
+            <NumberField label="Width (mm)" value={flangeWidth} onChange={setFlangeWidth} />
+            <NumberField
+              label="Angle from the sheet (°)"
+              value={flangeAngle}
+              onChange={setFlangeAngle}
+            />
+            <label className="ep-field">
+              Towards
+              <select
+                data-testid="cad-flange-toward"
+                value={flangeToward}
+                onChange={(e) => setFlangeToward(e.target.value as 'front' | 'back')}
+              >
+                <option value="front">The front (its normal)</option>
+                <option value="back">The back</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!editable || !positive(flangeWidth) || !positive(flangeAngle)}
+              onClick={() =>
+                void controller.flangePickedEdge(
+                  Number(flangeWidth),
+                  Number(flangeAngle),
+                  flangeToward,
+                )
+              }
+            >
+              Stand the flange up
+            </button>
+          </Section>
+        )}
       {info.kind === 'edge' && body?.state === 'active' && !snapshot.reference && (
         <>
           <ContinuitySection controller={controller} snapshot={snapshot} />
           <CombSection controller={controller} snapshot={snapshot} />
+          <GapFlushSection controller={controller} snapshot={snapshot} />
         </>
+      )}
+      {referable && !snapshot.readOnly && body?.state === 'active' && info.kind === 'face' && (
+        <SpotWeldSection controller={controller} snapshot={snapshot} editable={editable} />
       )}
       {referable && !snapshot.readOnly && body?.state === 'active' && info.kind === 'face' && (
         <>
@@ -2686,9 +4775,12 @@ function BoundaryDialog({
   edges: CadCollectedEdge[];
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<'boundarySurface' | 'fill'>('boundarySurface');
+  const [kind, setKind] = useState<'boundarySurface' | 'fill' | 'curveNetwork'>('boundarySurface');
   const [chosen, setChosen] = useState<string[]>([]);
   const [tangent, setTangent] = useState<Set<string>>(new Set());
+  // CR1d: the curves of a network that run across (v); the others run along (u).
+  const [across, setAcross] = useState<Set<string>>(new Set());
+  const [tolerance, setTolerance] = useState('0.01');
   const options = new Map<string, { label: string; curve: CadCurveSource; free?: boolean }>();
   edges.forEach((e, i) =>
     options.set(`edge:${i}`, { label: e.label, curve: { edge: e.ref }, free: e.free }),
@@ -2702,7 +4794,23 @@ function BoundaryDialog({
         curve: { sketchId: sketch.id, element: x.id },
       });
     }
-  const [min, max] = cadBoundaryCurves[kind === 'fill' ? 'fill' : 'surface'];
+  const network = kind === 'curveNetwork';
+  const ways = {
+    u: chosen.filter((k) => !across.has(k)),
+    v: chosen.filter((k) => across.has(k)),
+  };
+  const [netMin, netMax] = cadCurveNetwork.curves;
+  const [min, max] = network
+    ? [2 * netMin, 2 * netMax]
+    : cadBoundaryCurves[kind === 'fill' ? 'fill' : 'surface'];
+  const networkReady =
+    !network ||
+    (ways.u.length >= netMin &&
+      ways.u.length <= netMax &&
+      ways.v.length >= netMin &&
+      ways.v.length <= netMax &&
+      Number(tolerance) >= cadCurveNetwork.toleranceMm[0] &&
+      Number(tolerance) <= cadCurveNetwork.toleranceMm[1]);
   return (
     <Dialog title="Boundary" onClose={onClose}>
       <div className="cad-export">
@@ -2714,12 +4822,30 @@ function BoundaryDialog({
           Result
           <select
             value={kind}
-            onChange={(e) => setKind(e.target.value as 'boundarySurface' | 'fill')}
+            onChange={(e) => setKind(e.target.value as 'boundarySurface' | 'fill' | 'curveNetwork')}
           >
             <option value="boundarySurface">Boundary surface (3 or 4 curves)</option>
             <option value="fill">Fill (3 to 16 curves)</option>
+            <option value="curveNetwork">Curve network (2 to 16 each way)</option>
           </select>
         </label>
+        {network && (
+          <>
+            <p>
+              Choose the curves along (u) in order, and mark the curves across (v), also in order.
+              Each curve along must cross each curve across.
+            </p>
+            <label className="ep-field">
+              Meeting tolerance (mm)
+              <input
+                type="number"
+                step="any"
+                value={tolerance}
+                onChange={(e) => setTolerance(e.target.value)}
+              />
+            </label>
+          </>
+        )}
         <ol className="cad-loft-sections" aria-label="Curves">
           {[...options].map(([key, o]) => {
             const at = chosen.indexOf(key);
@@ -2736,8 +4862,32 @@ function BoundaryDialog({
                     }
                   />
                   {o.label}
-                  {at >= 0 && <small> (curve {at + 1})</small>}
+                  {at >= 0 && !network && <small> (curve {at + 1})</small>}
+                  {at >= 0 && network && (
+                    <small>
+                      {' '}
+                      ({across.has(key) ? 'v' : 'u'}{' '}
+                      {(across.has(key) ? ways.v : ways.u).indexOf(key) + 1})
+                    </small>
+                  )}
                 </label>
+                {network && at >= 0 && (
+                  <label className="cad-check">
+                    <input
+                      type="checkbox"
+                      checked={across.has(key)}
+                      onChange={(e) =>
+                        setAcross((t) => {
+                          const next = new Set(t);
+                          if (e.target.checked) next.add(key);
+                          else next.delete(key);
+                          return next;
+                        })
+                      }
+                    />
+                    Across (v)
+                  </label>
+                )}
                 {kind === 'fill' && at >= 0 && o.free && (
                   <label className="cad-check">
                     <input
@@ -2762,8 +4912,14 @@ function BoundaryDialog({
         <div className="cad-row">
           <button
             type="button"
-            disabled={chosen.length < min || chosen.length > max}
+            disabled={chosen.length < min || chosen.length > max || !networkReady}
             onClick={async () => {
+              if (network) {
+                const of = (keys: string[]) => keys.map((key) => options.get(key)!.curve);
+                if (await controller.addCurveNetwork(of(ways.u), of(ways.v), Number(tolerance)))
+                  onClose();
+                return;
+              }
               const curves = chosen.map((key) => ({
                 curve: options.get(key)!.curve,
                 continuity: kind === 'fill' && tangent.has(key) ? ('G1' as const) : ('G0' as const),
@@ -2771,7 +4927,7 @@ function BoundaryDialog({
               if (await controller.addBoundary(kind, curves)) onClose();
             }}
           >
-            Create {kind === 'fill' ? 'fill' : 'boundary surface'}
+            Create {kind === 'fill' ? 'fill' : network ? 'curve network' : 'boundary surface'}
           </button>
           <button type="button" onClick={onClose}>
             Cancel
@@ -2840,6 +4996,116 @@ function SweepDialog({
             }}
           >
             Create sweep
+          </button>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+const profileKindLabels: Record<CadProfileKind, string> = {
+  hat: 'Hat (flanges out at its open side)',
+  z: 'Z (a flange each way)',
+  channel: 'Channel (no flanges)',
+  flat: 'Flat plate (a closure)',
+};
+const profileUpLabels = {
+  normal: "Along the path sketch's normal",
+  inPlane: "Across the path, in the sketch's plane",
+} as const;
+
+/**
+ * CR4d: a member: a hat, Z, channel or flat section by its dimensions, swept along the open chain
+ * of a sketch into a new sheet.
+ */
+function MemberDialog({
+  controller,
+  doc,
+  onClose,
+}: {
+  controller: CadController;
+  doc: CadDocument;
+  onClose: () => void;
+}) {
+  const [path, setPath] = useState(doc.sketches[0]?.id ?? '');
+  const [kind, setKind] = useState<CadProfileKind>('hat');
+  const [height, setHeight] = useState('30');
+  const [width, setWidth] = useState('40');
+  const [flange, setFlange] = useState('15');
+  const [radius, setRadius] = useState('3');
+  const [up, setUp] = useState<'normal' | 'inPlane'>('normal');
+  const [flip, setFlip] = useState(false);
+  const values = [height, width, flange, radius].map(Number);
+  const ok =
+    !!path && values.every((v) => Number.isFinite(v) && v >= 0) && values[0]! > 0 && values[1]! > 0;
+  return (
+    <Dialog title="Member" onClose={onClose}>
+      <div className="cad-export">
+        <p>
+          A sheet of a section carried along the open chain the path sketch draws: a hat opens
+          towards its flanges, so two hats facing each other (one flipped) meet on their flanges.
+        </p>
+        <label className="ep-field">
+          Path
+          <select value={path} onChange={(e) => setPath(e.target.value)}>
+            {doc.sketches.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="ep-field">
+          Section
+          <select value={kind} onChange={(e) => setKind(e.target.value as CadProfileKind)}>
+            {cadProfileKinds.map((k) => (
+              <option key={k} value={k}>
+                {profileKindLabels[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <NumberField label="Height (mm)" value={height} onChange={setHeight} />
+        <NumberField label="Width (mm)" value={width} onChange={setWidth} />
+        <NumberField label="Flange width (mm)" value={flange} onChange={setFlange} />
+        <NumberField label="Bend R (mm)" value={radius} onChange={setRadius} />
+        <label className="ep-field">
+          Height points
+          <select value={up} onChange={(e) => setUp(e.target.value as 'normal' | 'inPlane')}>
+            <option value="normal">{profileUpLabels.normal}</option>
+            <option value="inPlane">{profileUpLabels.inPlane}</option>
+          </select>
+        </label>
+        <label className="cad-check">
+          <input type="checkbox" checked={flip} onChange={(e) => setFlip(e.target.checked)} />
+          Flip (the other way)
+        </label>
+        <div className="cad-row">
+          <button
+            type="button"
+            disabled={!ok}
+            onClick={async () => {
+              const [heightMm, widthMm, flangeMm, radiusMm] = values as [
+                number,
+                number,
+                number,
+                number,
+              ];
+              if (
+                await controller.addProfileSweep(
+                  path,
+                  { kind, heightMm, widthMm, flangeMm, radiusMm },
+                  up,
+                  flip,
+                )
+              )
+                onClose();
+            }}
+          >
+            Create member
           </button>
           <button type="button" onClick={onClose}>
             Cancel
@@ -3029,7 +5295,7 @@ function Navigator({
     start();
   };
   const onFace = snapshot.topology?.kind === 'face' && !!snapshot.topology.normal;
-  const [making, setMaking] = useState<'loft' | 'sweep' | 'surface' | 'boundary'>();
+  const [making, setMaking] = useState<'loft' | 'sweep' | 'member' | 'surface' | 'boundary'>();
   const button = (
     kind: 'body' | 'feature' | 'parameter',
     id: string,
@@ -3080,6 +5346,7 @@ function Navigator({
           })}
         </ul>
       </Section>
+      {!!doc.spotWelds?.length && <SpotWeldList controller={controller} snapshot={snapshot} />}
       <Section title="Model tree" open={false}>
         <ModelTree doc={doc} item={item} />
       </Section>
@@ -3177,6 +5444,13 @@ function Navigator({
               <button
                 type="button"
                 disabled={snapshot.busy || !!snapshot.sketch || !doc.sketches.length}
+                onClick={() => setMaking('member')}
+              >
+                Member…
+              </button>
+              <button
+                type="button"
+                disabled={snapshot.busy || !!snapshot.sketch || !doc.sketches.length}
                 onClick={() => setMaking('surface')}
               >
                 Surface…
@@ -3205,6 +5479,9 @@ function Navigator({
         )}
         {making === 'sweep' && (
           <SweepDialog controller={controller} doc={doc} onClose={() => setMaking(undefined)} />
+        )}
+        {making === 'member' && (
+          <MemberDialog controller={controller} doc={doc} onClose={() => setMaking(undefined)} />
         )}
         {making === 'surface' && (
           <SurfaceDialog controller={controller} doc={doc} onClose={() => setMaking(undefined)} />
@@ -3279,11 +5556,13 @@ function ExportFileDialog({
     }
     setPrepared('preparing');
     const result =
-      format !== 'step'
-        ? await controller.exportMesh(format, { deflectionMm })
-        : placing && assembly
-          ? await assembly.exportStep(name)
-          : await controller.exportStep();
+      placing && assembly && format === 'glb'
+        ? await assembly.exportGlb()
+        : format !== 'step'
+          ? await controller.exportMesh(format, { deflectionMm })
+          : placing && assembly
+            ? await assembly.exportStep(name)
+            : await controller.exportStep();
     setPrepared(result);
     if (!result) setError(controller.getSnapshot().diagnostic?.message);
   }
@@ -3324,10 +5603,11 @@ function ExportFileDialog({
               type="radio"
               name="cad-export-format"
               checked={format === 'glb'}
-              disabled={placing}
               onChange={() => (setFormat('glb'), reset())}
             />
-            GLB (display mesh with colours, metres, Y-up)
+            {placing
+              ? 'GLB (each placed part’s display mesh at its pose, with colours, metres, Y-up)'
+              : 'GLB (display mesh with colours, metres, Y-up)'}
           </label>
           <label>
             <input
@@ -3338,9 +5618,11 @@ function ExportFileDialog({
             />
             {placing
               ? 'STEP (AP242 assembly: each part once as a product, its instances placed, millimetres)'
-              : 'STEP (AP214, exact solids or surfaces, one per body, millimetres)'}
+              : 'STEP (AP214, exact solids or surfaces, one per body, millimetres; AP242 when kept PMI is written)'}
           </label>
-          {placing && <p className="cad-muted">An assembly is written as STEP only.</p>}
+          {placing && (
+            <p className="cad-muted">An assembly is written as STEP or as GLB (not STL).</p>
+          )}
         </fieldset>
         {format === 'stl' && (
           <>
@@ -3405,6 +5687,13 @@ function ExportFileDialog({
             <dd>{ready.report.losses.join(' ')}</dd>
           </dl>
         )}
+        {ready?.report.format === 'step' && ready.bytes.byteLength > cadLimits.stepBytes && (
+          // WM5c: written up to `stepExportBytes`, read only up to `stepBytes`.
+          <p className="cad-muted" role="note">
+            This file is larger than 16 MiB: other CAD tools can open it, but this editor cannot
+            import it back.
+          </p>
+        )}
         {error && (
           <p role="alert" className="cad-diagnostic">
             {error}
@@ -3437,8 +5726,134 @@ const lossText: Record<string, string> = {
   'source-feature-history': 'feature history of the source CAD',
   appearance: 'colours and styles',
   material: 'material',
+  pmi: 'PMI the import could not keep (saved views, presentation it could not tie to a kept item, or items it could not match to a part)',
   nesting: 'nested sub-assemblies (flattened; each path stays in the component name)',
 };
+const pmiFamilyText: Record<string, string> = {
+  dimension: 'Dimensions',
+  'geometric-tolerance': 'Geometric tolerances',
+  datum: 'Datums',
+  'datum-target': 'Datum targets',
+  'datum-feature': 'Datum features',
+  'datum-system': 'Datum systems',
+  callout: 'Callouts',
+  annotation: 'Annotations (presentation)',
+  view: 'Saved views',
+  'component-path': 'References through an assembly path',
+  other: 'Other PMI entities',
+};
+const pmiAxisText: Record<string, string> = {
+  semantic: 'meaning matches the file',
+  target: 'on as many faces or edges as in the file',
+  presentation: 'presentation',
+  view: 'saved views',
+  path: 'read through an assembly path (own reader)',
+  unsupported: 'not checked by this kernel',
+};
+/** PMI-2: the semantic PMI the import keeps on its parts, by kind. */
+function PmiKeptRow({ kept }: { kept: CadStepPmiReport['kept'] }) {
+  const counts = (Object.entries(kept) as [string, number][]).filter(([, n]) => n > 0);
+  return (
+    <>
+      <dt>PMI kept</dt>
+      <dd>
+        {counts.length
+          ? counts
+              .map(
+                ([kind, n]) =>
+                  `${(pmiFamilyText[kind] ?? kind).toLowerCase()}: ${fmtGrouped(n, 0)}`,
+              )
+              .join(', ')
+          : 'None'}
+      </dd>
+    </>
+  );
+}
+/**
+ * PMI-1/PMI-2 (docs/cad/pmi.md, PMI-U3): the import keeps the semantic PMI it verified on one
+ * part, and asks before it imports a file of which it would keep less. The dialog lists what the
+ * file holds, what the kernel read and what it would keep; only an explicit choice imports the
+ * file without the rest. The original file is kept either way.
+ */
+function StepPmiDialog({
+  fileName,
+  report,
+  onCancel,
+  onDiscard,
+}: {
+  fileName: string;
+  report: CadStepPmiReport;
+  onCancel: () => void;
+  onDiscard: () => void;
+}) {
+  const census = Object.entries(report.census) as [string, number][];
+  return (
+    <Dialog title="STEP with PMI" onClose={onCancel}>
+      <div className="cad-export">
+        <p>
+          {fileName} has product manufacturing information (PMI) that this version cannot keep in
+          full. It keeps the dimensions, tolerances, datums and datum targets that match the file
+          and sit on one part, with the presentation lines of the callouts that show them; saved
+          views and the rest are not kept. The original file is kept unchanged with the document.
+        </p>
+        <dl className="cad-export-report" aria-label="PMI in the file">
+          {census.length ? (
+            census.map(([family, n]) => (
+              <Fragment key={family}>
+                <dt>{pmiFamilyText[family] ?? family}</dt>
+                <dd>{fmtGrouped(n, 0)} in the file</dd>
+              </Fragment>
+            ))
+          ) : (
+            <>
+              <dt>PMI</dt>
+              <dd>Parts of PMI items only</dd>
+            </>
+          )}
+        </dl>
+        <dl className="cad-export-report" aria-label="PMI kept">
+          <PmiKeptRow kept={report.kept} />
+        </dl>
+        <table className="cad-compare cad-pmi-read" aria-label="PMI read">
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Checked</th>
+              <th scope="col">In file</th>
+              <th scope="col">Read</th>
+              <th scope="col">Not read</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.axes.map((a) => (
+              <tr key={`${a.axis}-${a.family}`}>
+                <td>{pmiFamilyText[a.family] ?? a.family}</td>
+                <td>{pmiAxisText[a.axis] ?? a.axis}</td>
+                <td>{fmtGrouped(a.inFile, 0)}</td>
+                <td>{fmtGrouped(a.read, 0)}</td>
+                <td>{fmtGrouped(a.unread, 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p>
+          {report.complete
+            ? 'Every PMI item was read and matched the file on the checks above, but not all of it can be kept.'
+            : 'Some PMI could not be read or checked; only what is listed as kept is kept.'}{' '}
+          Agreeing here does not cover exports: an exported file will not carry this PMI.
+        </p>
+        <div className="cad-row">
+          <button type="button" onClick={onDiscard}>
+            Import with the PMI that is kept
+          </button>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 /**
  * Preflight report of a read STEP assembly (docs/cad/r2b-assembly.md, R2b-U7): each distinct
  * shape becomes an imported part and each instance a fixed component of this empty document.
@@ -3493,6 +5908,7 @@ function StepAssemblyImportDialog({
           )}
           <dt>Healing</dt>
           <dd>None (each solid is kept as read)</dd>
+          {report.pmi && <PmiKeptRow kept={report.pmi.kept} />}
           <dt>Not kept</dt>
           <dd>{report.losses.map((l) => lossText[l] ?? l).join(', ')}</dd>
         </dl>
@@ -3564,9 +5980,14 @@ function StepImportDialog({
           <dt>Size</dt>
           <dd>{size} mm</dd>
           <dt>Largest tolerance</dt>
-          <dd>{report.maxToleranceMm.toExponential(2)} mm</dd>
+          <dd>
+            {report.maxToleranceMm.toExponential(2)} mm
+            {report.maxToleranceMm > preview.resultLimitMm &&
+              ` (above this document's limit of ${preview.resultLimitMm} mm: the body can be placed, measured and exported, but not used in Booleans or other features)`}
+          </dd>
           <dt>Healing</dt>
           <dd>None (the solid is kept as read)</dd>
+          {report.pmi && <PmiKeptRow kept={report.pmi.kept} />}
           <dt>Not kept</dt>
           <dd>{report.losses.map((l) => lossText[l] ?? l).join(', ')}</dd>
         </dl>
@@ -3845,16 +6266,25 @@ function Surface({
   // Import is a Host capability (asset storage): the button stays while an edit evaluates.
   const importAvailable = controller.importAvailable;
   const importInput = useRef<HTMLInputElement>(null);
+  /** PMI-1: a file whose PMI the import would not keep, waiting for the user's choice. */
+  const [pmiConsent, setPmiConsent] = useState<{
+    fileName: string;
+    bytes: Uint8Array;
+    report: CadStepPmiReport;
+  }>();
   async function importStep(file: File) {
     // Refused before reading, so a very large file is never held in memory.
     if (file.size > cadLimits.stepBytes) return controller.report(describeCode('step-too-large'));
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    await readStep(file.name, new Uint8Array(await file.arrayBuffer()));
+  }
+  async function readStep(fileName: string, bytes: Uint8Array, pmi?: 'discard') {
+    const onPmi = (report: CadStepPmiReport) => setPmiConsent({ fileName, bytes, report });
+    const options = pmi ? { pmi, onPmi } : { onPmi };
     // A file with assembly usages (R2b-5), as the kernel's scan finds them, goes to the assembly.
-    await controller.prepareStepImport(
-      file.name,
-      bytes,
-      assembly ? { assembly: () => assembly.prepareStepImport(file.name, bytes) } : {},
-    );
+    await controller.prepareStepImport(fileName, bytes, {
+      ...options,
+      ...(assembly ? { assembly: () => assembly.prepareStepImport(fileName, bytes, options) } : {}),
+    });
   }
   useEffect(() => {
     void controller.refresh();
@@ -3979,6 +6409,13 @@ function Surface({
                   label="Add sphere"
                   disabled={disabled}
                   onClick={() => void controller.addPrimitive('sphere')}
+                />
+                <IconButton
+                  icon={Cog}
+                  label="Add gear"
+                  reason="Involute spur gear: module, teeth, bore and spoke windows"
+                  disabled={disabled}
+                  onClick={() => void controller.addGear()}
                 />
                 <IconButton
                   icon={RectangleHorizontal}
@@ -4145,7 +6582,7 @@ function Surface({
                 onComb={setSketchComb}
               />
             ) : (
-              <Inspector controller={controller} snapshot={snapshot} />
+              <Inspector controller={controller} snapshot={snapshot} assembly={assembly} />
             )}
           </fieldset>
         }
@@ -4243,6 +6680,17 @@ function Surface({
       {assembly && assemblyImport && (
         <StepAssemblyImportDialog assembly={assembly} preview={assemblyImport} />
       )}
+      {pmiConsent && (
+        <StepPmiDialog
+          fileName={pmiConsent.fileName}
+          report={pmiConsent.report}
+          onCancel={() => setPmiConsent(undefined)}
+          onDiscard={() => {
+            setPmiConsent(undefined);
+            void readStep(pmiConsent.fileName, pmiConsent.bytes, 'discard');
+          }}
+        />
+      )}
       <input
         ref={importInput}
         type="file"
@@ -4336,6 +6784,208 @@ function ContinuitySection({
         </div>
       )}
     </Section>
+  );
+}
+
+/**
+ * CR3d: the gap and flush between two bodies' border edges. The picked edge becomes the first
+ * edge; picking another body's edge then measures from the first to it.
+ */
+function GapFlushSection({
+  controller,
+  snapshot,
+}: {
+  controller: CadController;
+  snapshot: CadSnapshot;
+}) {
+  const view = snapshot.gapFlush;
+  const s = snapshot.selection;
+  const picked = s?.kind === 'edge' ? { bodyId: s.id, pick: s.pick } : undefined;
+  const isFirst = view && picked?.bodyId === view.from.bodyId && picked.pick === view.from.pick;
+  const other = view && picked && picked.bodyId !== view.from.bodyId;
+  const ready = snapshot.meshes?.current === true;
+  return (
+    <Section title="Gap and flush">
+      <p className="cad-muted">
+        Measures from one surface body&apos;s border edge to another&apos;s at {cadGapFlush.samples}{' '}
+        points along the first edge: the gap across it in its face, and the flush along its
+        face&apos;s normal. Display only.
+      </p>
+      {view && !isFirst && (
+        <p>
+          First edge: {view.from.bodyId}, edge {view.from.pick}.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={!ready || isFirst || view?.status === 'running'}
+        onClick={() => controller.chooseGapFlushEdge()}
+      >
+        Gap from this edge
+      </button>{' '}
+      {other && (
+        <button
+          type="button"
+          disabled={!ready || view.status === 'running'}
+          onClick={() => void controller.measureGapFlush()}
+        >
+          {view.status === 'running' ? 'Measuring…' : 'Measure gap and flush to this edge'}
+        </button>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * CR4e: a spot weld row from the picked face. The picked face becomes the first flange; picking
+ * another body's face then makes the row along the first flange's centre line.
+ */
+function SpotWeldSection({
+  controller,
+  snapshot,
+  editable,
+}: {
+  controller: CadController;
+  snapshot: CadSnapshot;
+  editable: boolean;
+}) {
+  const L = cadSpotWeldLimits;
+  const [pitch, setPitch] = useState(String(L.defaultPitchMm));
+  const [end, setEnd] = useState(String(L.defaultEndDistanceMm));
+  const [gap, setGap] = useState(String(L.defaultMaxGapMm));
+  const start = snapshot.weldStart;
+  const s = snapshot.selection;
+  const picked = s?.kind === 'face' ? { bodyId: s.id, pick: s.pick } : undefined;
+  const isFirst = start && picked?.bodyId === start.bodyId && picked.pick === start.pick;
+  const other = start && picked && picked.bodyId !== start.bodyId;
+  const name = (id: string) => snapshot.content.bodies.find((b) => b.id === id)?.name ?? id;
+  return (
+    <Section title="Spot welds" open={!!start}>
+      <p className="cad-muted">
+        Places weld points along the first flange&apos;s centre line, a pitch apart, and measures
+        each to the second flange. Points further than the largest gap are drawn red.
+      </p>
+      {start && !isFirst && (
+        <p data-testid="cad-weld-start">
+          First flange: {name(start.bodyId)}, face {start.pick}.
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={!editable || isFirst}
+        onClick={() => controller.chooseWeldFlange()}
+      >
+        {isFirst ? 'First flange chosen' : 'Weld from this flange'}
+      </button>
+      {other && (
+        <>
+          <NumberField label="Pitch (mm)" value={pitch} onChange={setPitch} />
+          <NumberField label="From the ends (mm)" value={end} onChange={setEnd} />
+          <NumberField label="Largest gap (mm)" value={gap} onChange={setGap} />
+          <button
+            type="button"
+            disabled={!editable || !positive(pitch) || !positive(gap) || !(Number(end) >= 0)}
+            onClick={() =>
+              void controller.weldToPickedFace(Number(pitch), Number(end), Number(gap))
+            }
+          >
+            Weld to this flange
+          </button>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** CR4e: the document's spot weld rows, each with its points, gaps and values to change. */
+function SpotWeldList({
+  controller,
+  snapshot,
+}: {
+  controller: CadController;
+  snapshot: CadSnapshot;
+}) {
+  const welds = snapshot.content.spotWelds ?? [];
+  return (
+    <Section title={`Spot welds (${welds.length})`}>
+      <ul aria-label="Spot welds" className="cad-weld-list">
+        {welds.map((w) => (
+          <SpotWeldRow
+            key={w.id}
+            controller={controller}
+            weld={w}
+            points={snapshot.spotWelds?.find((p) => p.id === w.id)}
+            editable={!snapshot.readOnly && snapshot.canEdit}
+            bodyName={(id) => snapshot.content.bodies.find((b) => b.id === id)?.name ?? id}
+          />
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
+function SpotWeldRow({
+  controller,
+  weld,
+  points,
+  editable,
+  bodyName,
+}: {
+  controller: CadController;
+  weld: CadSpotWeld;
+  points: CadSpotWeldPoints | undefined;
+  editable: boolean;
+  bodyName: (id: string) => string;
+}) {
+  const [pitch, setPitch] = useState(String(weld.pitchMm));
+  const [end, setEnd] = useState(String(weld.endDistanceMm));
+  const [gap, setGap] = useState(String(weld.maxGapMm));
+  useEffect(() => {
+    setPitch(String(weld.pitchMm));
+    setEnd(String(weld.endDistanceMm));
+    setGap(String(weld.maxGapMm));
+  }, [weld.pitchMm, weld.endDistanceMm, weld.maxGapMm]);
+  const changed =
+    Number(pitch) !== weld.pitchMm ||
+    Number(end) !== weld.endDistanceMm ||
+    Number(gap) !== weld.maxGapMm;
+  return (
+    <li data-testid={`cad-weld-${weld.id}`}>
+      <strong>{weld.name}</strong>{' '}
+      <span className="cad-muted">
+        {bodyName(weld.flanges[0].bodyId)} → {bodyName(weld.flanges[1].bodyId)}
+      </span>
+      <p data-testid="cad-weld-points">
+        {!points
+          ? 'Points are made when the shape is evaluated.'
+          : points.status === 'ok'
+            ? `${points.gaps.length} points along ${fmt(points.lengthMm)} mm, ${points.tooFar} too far (largest gap ${fmt(Math.max(0, ...points.gaps))} mm)`
+            : describeCode(points.code)}
+      </p>
+      <NumberField label="Pitch (mm)" value={pitch} onChange={setPitch} />
+      <NumberField label="From the ends (mm)" value={end} onChange={setEnd} />
+      <NumberField label="Largest gap (mm)" value={gap} onChange={setGap} />
+      <button
+        type="button"
+        disabled={!editable || !changed}
+        onClick={() =>
+          void controller.updateSpotWeld(weld.id, {
+            pitchMm: Number(pitch),
+            endDistanceMm: Number(end),
+            maxGapMm: Number(gap),
+          })
+        }
+      >
+        Apply
+      </button>{' '}
+      <button
+        type="button"
+        disabled={!editable}
+        onClick={() => void controller.removeSpotWeld(weld.id)}
+      >
+        Remove
+      </button>
+    </li>
   );
 }
 

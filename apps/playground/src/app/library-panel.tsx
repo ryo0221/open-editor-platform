@@ -5,6 +5,7 @@ import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
 import type { PrivateVideoEntry } from '../private-video/catalog';
 import { graphTemplates, type GraphTemplateId } from './graph-templates';
+import { simulationSourceChoices, type SimulationSourceChoice } from '../simulation/source';
 import {
   cadKernel,
   creatableKinds,
@@ -103,7 +104,7 @@ export function LibraryPanel({
   onKindChange(kind: Kind): void;
   graphTemplate: GraphTemplateId;
   onGraphTemplateChange(template: GraphTemplateId): void;
-  onCreate(kind: Kind): void;
+  onCreate(kind: Kind, simulationSource?: SimulationSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
   onCreateNovel(): Promise<void>;
   onCreateFromTemplate(): void;
@@ -117,6 +118,9 @@ export function LibraryPanel({
     direction: 'rtl',
   });
   const [creatingManga, setCreatingManga] = useState(false);
+  const [sourceAt, setSourceAt] = useState(0);
+  const sources = kind === 'simulation' ? simulationSourceChoices(records) : [];
+  const source = sources[Math.min(sourceAt, sources.length - 1)];
   const [creatingNovel, setCreatingNovel] = useState(false);
   const openPrivate = privateVideo.openEditor;
   const privateDisabled = !loaded || busy;
@@ -173,7 +177,31 @@ export function LibraryPanel({
           </select>
         </label>
       )}
-      <button className="primary new-artifact" onClick={() => onCreate(kind)} disabled={!loaded}>
+      {kind === 'simulation' && (
+        <label className="create-type">
+          Part to analyse
+          {sources.length ? (
+            <select
+              aria-label="Part to analyse"
+              value={Math.min(sourceAt, sources.length - 1)}
+              onChange={(e) => setSourceAt(Number(e.target.value))}
+            >
+              {sources.map((c, i) => (
+                <option key={`${c.artifactId}/${c.versionId}/${c.bodyId}`} value={i}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <small>Save a version of a 3D CAD part with a solid body first.</small>
+          )}
+        </label>
+      )}
+      <button
+        className="primary new-artifact"
+        onClick={() => onCreate(kind, kind === 'simulation' ? source : undefined)}
+        disabled={!loaded || (kind === 'simulation' && !source)}
+      >
         ＋ New artifact
       </button>
       <details>
@@ -315,7 +343,7 @@ export function WelcomePanel({
   busy: boolean;
   privateVideo: PrivateVideoLaunchers;
   onFindTemplates(): void;
-  onCreate(kind: Kind): void;
+  onCreate(kind: Kind, simulationSource?: SimulationSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
   onCreateNovel(): Promise<void>;
 }) {

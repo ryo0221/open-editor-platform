@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { privateVideoBuild } from './scripts/dev/private-video.mjs';
 import { dependencySecurity } from './scripts/dev/dependency-security.mjs';
 import { cadDevelopmentKernel } from './scripts/dev/cad-kernel.mjs';
+import { femDevelopmentMesher } from './scripts/dev/fem-mesher.mjs';
+import { simulationReferenceHost } from './scripts/dev/simulation-host.mjs';
 import { playgroundMangaSample } from './scripts/dev/playground-manga.mjs';
 export default defineConfig({
   root: 'apps/playground',
@@ -14,6 +16,8 @@ export default defineConfig({
     privateVideoBuild(),
     dependencySecurity(),
     cadDevelopmentKernel(),
+    femDevelopmentMesher(),
+    simulationReferenceHost(),
     playgroundMangaSample(),
   ],
   worker: { format: 'es', plugins: () => [dependencySecurity('worker')] },

@@ -79,10 +79,10 @@ export const topoNameKey = (name: CadTopoName) => JSON.stringify(name);
 /**
  * The segments that hold a list of names as JSON (`blend:[…]`, `shared:[…]`, R2a-2c's
  * `boundary:[…]` and `side:[…]` for a referenced edge, and R2a-3's `cut:[…]` for a trim's cut
- * along a sheet's face).
+ * along a sheet's face, and CR2c's `wall:[…]` for a press line's step).
  */
 const nested = (s: string): [string, CadTopoName] | null => {
-  const m = /^(blend|shared|boundary|side|cut):\[/.exec(s);
+  const m = /^(blend|shared|boundary|side|cut|wall):\[/.exec(s);
   if (!m) return null;
   try {
     return [m[1]!, JSON.parse(s.slice(m[1]!.length + 1)) as CadTopoName];
@@ -334,6 +334,16 @@ export function featureReferences(
       return f.args.curves.flatMap((c, i) =>
         'edge' in c ? [{ path: ['curves', i, 'edge'], ref: c.edge }] : [],
       );
+    case 'curveNetwork':
+      return (['u', 'v'] as const).flatMap((way) =>
+        f.args[way].flatMap((c, i) =>
+          'edge' in c ? [{ path: [way, i, 'edge'], ref: c.edge }] : [],
+        ),
+      );
+    case 'flare':
+      return [{ path: ['arch'], ref: f.args.arch }];
+    case 'flange':
+      return list('edges', f.args.edges);
     case 'fill':
       return f.args.boundary.flatMap((b, i) =>
         'edge' in b.curve ? [{ path: ['boundary', i, 'curve', 'edge'], ref: b.curve.edge }] : [],
@@ -412,7 +422,7 @@ export function sharedFaceName(names: CadFaceName[]): CadFaceName {
 
 /**
  * A name with the IDs it carries replaced by `idMap` (a duplicated closure's copies): `tool:<id>`,
- * `copy:<id>:<i>`, `mirror:<id>`, `sew:<id>` and `trim:<id>:<side>` segments, polyline sides `side:v:<vertex ID>` (other side
+ * `copy:<id>:<i>`, `mirror:<id>`, `sew:<id>`, `trim:<id>:<side>`, `panel:<id>:<side>`, `split:<id>:<side>`, `split:<id>`, `press:<id>:<side>`, `press:<id>` and `groove:<id>:<i>` segments, polyline sides `side:v:<vertex ID>` (other side
  * names are recipe names, never IDs) and the names inside `blend:` and `shared:` segments.
  */
 export function remapTopoName(
@@ -432,15 +442,41 @@ export function remapTopoName(
       return `sketch:${idMap[s.slice(7)]}`;
     if (s.startsWith('sew:') && Object.hasOwn(idMap, s.slice(4))) return `sew:${idMap[s.slice(4)]}`;
     // The side is a word, so the ID is everything before the last `:`.
-    const trim = /^trim:(.*):(inside|outside|front|back)$/.exec(s);
-    if (trim && Object.hasOwn(idMap, trim[1]!)) return `trim:${idMap[trim[1]!]}:${trim[2]}`;
-    // The copy index is digits, so the ID is everything before the last `:`.
-    const copy = /^copy:(.*):(\d+)$/.exec(s);
+    const trim = /^(trim|panel):(.*):(inside|outside|front|back)$/.exec(s);
+    if (trim && Object.hasOwn(idMap, trim[2]!)) return `${trim[1]}:${idMap[trim[2]!]}:${trim[3]}`;
+    // CR2a: a split's pieces `split:<id>:<side>` and its input's edges `split:<id>`.
+    const split = /^split:(.*):(left|right|inside|outside)$/.exec(s);
+    if (split && Object.hasOwn(idMap, split[1]!)) return `split:${idMap[split[1]!]}:${split[2]}`;
+    if (s.startsWith('split:') && Object.hasOwn(idMap, s.slice(6)))
+      return `split:${idMap[s.slice(6)]}`;
+    // CR2c: a press line's pieces `press:<id>:<side>` (or `moved`), its open ends
+    // `press:<id>:end` and its walls and borders `press:<id>`.
+    const press = /^press:(.*):(left|right|inside|outside|moved|end)$/.exec(s);
+    if (press && Object.hasOwn(idMap, press[1]!)) return `press:${idMap[press[1]!]}:${press[2]}`;
+    if (s.startsWith('press:') && Object.hasOwn(idMap, s.slice(6)))
+      return `press:${idMap[s.slice(6)]}`;
+    // CR2d: a flare's kept pieces and its face `flare:<id>`, its new edges `flare:<id>:moved|first|last`.
+    const flare = /^flare:(.*):(moved|first|last)$/.exec(s);
+    if (flare && Object.hasOwn(idMap, flare[1]!)) return `flare:${idMap[flare[1]!]}:${flare[2]!}`;
+    if (s.startsWith('flare:') && Object.hasOwn(idMap, s.slice(6)))
+      return `flare:${idMap[s.slice(6)]}`;
+    // CR4c: a flange's sheet `flange:<id>`, its strips `flange:<id>:wall` and their new edges.
+    const flange = /^flange:(.*):(wall|far|start|end)$/.exec(s);
+    if (flange && Object.hasOwn(idMap, flange[1]!))
+      return `flange:${idMap[flange[1]!]}:${flange[2]!}`;
+    if (s.startsWith('flange:') && Object.hasOwn(idMap, s.slice(7)))
+      return `flange:${idMap[s.slice(7)]}`;
+    // CR6d: a groove's faces `groove:<id>:<i>` (its i-th projected line).
+    const groove = /^groove:(.*):(\d+)$/.exec(s);
+    if (groove && Object.hasOwn(idMap, groove[1]!))
+      return `groove:${idMap[groove[1]!]}:${groove[2]}`;
+    // The copy index is digits (a grid's row r ≥ 1 adds `:row<r>`), so the ID is everything before.
+    const copy = /^copy:(.*):(\d+(?::row\d+)?)$/.exec(s);
     if (copy && Object.hasOwn(idMap, copy[1]!)) return `copy:${idMap[copy[1]!]}:${copy[2]}`;
     const n = nested(s);
     if (!n) return s;
     const inner = remapTopoName(n[1], idMap);
-    if (n[0] === 'boundary' || n[0] === 'side' || n[0] === 'cut')
+    if (n[0] === 'boundary' || n[0] === 'side' || n[0] === 'cut' || n[0] === 'wall')
       return `${n[0]}:${topoNameKey(inner)}`;
     return (n[0] === 'blend' ? blendFaceName(inner) : sharedFaceName([...inner]))[0]!;
   };

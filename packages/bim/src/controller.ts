@@ -64,6 +64,14 @@ export interface BimNotice {
   message?: string;
 }
 
+/**
+ * TW3: the kernel's measured quantities, only when the adopted evaluation is of the current
+ * content; while a newer one runs, an edited element's measurement is not known yet.
+ */
+export const bimCurrentKernelQuantities = (
+  s: Pick<BimState, 'hash' | 'evaluatedHash' | 'evaluation'>,
+) => (s.evaluatedHash === s.hash ? s.evaluation?.kernelQuantities : undefined);
+
 export interface BimState {
   content: BimDocument;
   hash: string;

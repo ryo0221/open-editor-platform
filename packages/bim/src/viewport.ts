@@ -26,6 +26,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { bimGridBubbleAt, type BimGridBubbles } from '@editor-platform/bim-core';
 import {
   disposeInstances,
   instancePath,
@@ -34,6 +35,7 @@ import {
   type ViewSolid,
   type PathRenderSource,
 } from '@editor-platform/geometry-view';
+import { bimClearDirection } from './view-direction';
 
 export interface BimViewportOptions {
   /** A click on an element (its ID) or on nothing; `add` with Shift or Ctrl/⌘. */
@@ -58,11 +60,13 @@ export interface BimDraftMarks {
   /** The drawn line through the points and the hover, arcs as many points (OH-U2). */
   line?: [number, number][];
 }
-/** A grid axis as the view draws it: a dashed line with its label at both ends. */
+/** A grid axis as the view draws it: a dashed line with its label at the ends it names. */
 export interface BimViewAxis {
   label: string;
   start: [number, number];
   end: [number, number];
+  /** TW0e: the ends that carry the label. Omitted: both. */
+  bubbles?: BimGridBubbles;
 }
 type Bounds = [[number, number, number], [number, number, number]];
 const noRaycast = () => {};
@@ -156,8 +160,14 @@ export class BimViewport {
     }
     this.render();
   }
-  /** Frames the bounds: from the south-west and above in 3D, from straight above in a plan. */
-  fit(bounds: Bounds) {
+  /**
+   * Frames the bounds: from the south-west and above in 3D, from straight above in a plan.
+   * FU1: `keepDirection` keeps the 3D camera's current direction (zoom to selection). FU5: with
+   * the `selected` elements, it turns to the nearest direction from which no other solid hides
+   * them, when one does from the current one, first to the side away from the middle of
+   * `around` (the whole building).
+   */
+  fit(bounds: Bounds, keepDirection = false, selected?: ReadonlySet<string>, around?: Bounds) {
     const [lo, hi] = bounds;
     const center = new Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
     const radius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1_000);
@@ -172,7 +182,13 @@ export class BimViewport {
       this.orthographic.position.set(center.x, center.y, this.plan.elevationMm + 1_000_000);
     } else {
       const distance = radius / Math.sin((this.perspective.fov * Math.PI) / 360);
-      const dir = new Vector3(-0.55, -0.75, 0.45).normalize();
+      const look = this.perspective.position.clone().sub(this.controls.target);
+      let dir =
+        keepDirection && look.lengthSq() > 0
+          ? look.normalize()
+          : new Vector3(-0.55, -0.75, 0.45).normalize();
+      if (keepDirection && selected?.size && this.group)
+        dir = bimClearDirection(this.group.children, bounds, dir, distance, selected, around);
       this.perspective.position.copy(center).addScaledVector(dir, distance);
     }
     this.controls.target.copy(center);
@@ -198,7 +214,8 @@ export class BimViewport {
       this.controls = this.makeControls();
       this.controls.target.copy(target);
     }
-    if (was?.elevationMm !== plan?.elevationMm) this.drawAxes();
+    // The axes lie under the cut, which a lower cut moves (TW0b).
+    if (was?.elevationMm !== plan?.elevationMm || was?.cutMm !== plan?.cutMm) this.drawAxes();
     // An empty building frames 20 m around the origin.
     if (!was || !plan || was.elevationMm !== plan.elevationMm)
       this.fit(
@@ -230,7 +247,7 @@ export class BimViewport {
     }
     if (!this.axesShown) return this.render();
     const { axes } = this.axesShown;
-    const z = this.plan ? this.plan.elevationMm + 3 : this.axesShown.z;
+    const z = this.plan ? this.overlayZ(3) : this.axesShown.z;
     if (axes.length) {
       const geometry = new BufferGeometry();
       geometry.setAttribute(
@@ -254,13 +271,24 @@ export class BimViewport {
       this.axes.add(lines);
     }
     for (const a of axes)
-      for (const at of [a.start, a.end]) {
+      for (const at of [
+        ...(bimGridBubbleAt(a, 'start') ? [a.start] : []),
+        ...(bimGridBubbleAt(a, 'end') ? [a.end] : []),
+      ]) {
         // On a plan the labels stay over everything; in 3D the building hides those behind it.
         const label = axisLabel(a.label, !!this.plan);
         label.position.set(at[0], at[1], z);
         this.axes.add(label);
       }
     this.render();
+  }
+  /**
+   * The height of what a plan draws over its level (axes, a drawing in progress): `lift` above
+   * the level, but always under the cut, or a cut a few millimetres up would clip it (TW0b).
+   */
+  private overlayZ(lift: number) {
+    const plan = this.plan!;
+    return plan.elevationMm + Math.min(lift, plan.cutMm / 2);
   }
   /** Draws the points of a drawing in progress and the pointer over the plan. */
   setMarks(marks: BimDraftMarks | undefined) {
@@ -270,7 +298,7 @@ export class BimViewport {
       ((child as LineSegments).material as LineBasicMaterial).dispose();
     }
     if (marks && this.plan) {
-      const z = this.plan.elevationMm + 5;
+      const z = this.overlayZ(5);
       const path = [...marks.points, ...(marks.hover ? [marks.hover] : [])];
       const line = marks.line ?? path;
       const segments: number[] = [];

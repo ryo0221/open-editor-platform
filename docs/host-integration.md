@@ -255,6 +255,47 @@ saving the newly captured content. A superseding draft-only write creates no ver
 The uncertain put remains dirty and blocks require-saved close even when bytes equal
 the previous draft. This does not make a blind storage adapter a distributed CAS:
 consuming Hosts still own storage conflicts and commit-time authorization.
+
+### Captured context at the storage boundary
+
+`HostArtifactStorage<T>` extends the ordinary Artifact storage with
+`put(artifact, context?: HostSaveContext)`. `ArtifactEditor.save` supplies a frozen
+context from the same flushed snapshot as the artifact, before the storage write:
+`schemaVersion: 1`, `artifactId`, `kind`, `revision`, `baseVersionId`, `versionId`,
+`contentHash`, `committed`, and `proposalTransactions`. Revision and the transaction
+array are also frozen. The hash covers the captured draft content. For a draft-only
+save, `committed` is false and `versionId` names only the unchanged base; it must not
+be treated as a newly committed version of that content.
+
+The exact same context **object** is passed again when a failed/uncertain save
+candidate is retried. A new save candidate has a new context object, even when its
+content is unchanged. A consuming Host can assign its own operation ID using a
+`WeakMap<HostSaveContext, OperationId>` at the first write and reuse it on retries.
+Do not use content equality as an operation identity. If later edits require a new
+save, an uncertain immutable candidate and context are resolved first. As in the
+existing retry contract, a superseded draft-only candidate can be replaced without
+creating or claiming an immutable version. Host wrappers must
+forward the second argument unchanged; CreativeWorkspace's native, map and role storage
+wrappers do so. Direct storage puts used to create/import artifacts have no context.
+
+The successful `HostSaveResult.saveContext` and `HostSavedEvent.saveContext` are the
+same object delivered to storage. These fields make correlation possible; an event
+does not persist the context. To survive process loss after a successful write, the
+Host must atomically store its evidence with that artifact write, then reconcile
+from that durable storage after restart. A storage implementation that ignores the
+second argument retains ordinary native persistence but provides no durable proposal
+ancestry guarantee. A newly opened Session still has empty local ancestry.
+
+EP does not allocate product operation IDs, store run/approval/identity metadata,
+create another history or promise cross-owner atomicity. The Host validates ownership,
+permissions, actual saved bytes/hash, operation scope and conflicts at its trusted
+storage boundary. Context reports local proposal ancestry; it is not cryptographic
+proof that a proposal authored all saved content. An observer failure after storage
+succeeds does not roll back that save. Keep each owner's outcome distinct when a
+multi-owner operation partially fails.
+
+### Save completion and permissions
+
 Concurrent saves/close return `save-busy`. A delayed success updates the saved baseline
 without overwriting newer Session edits; `result.dirty` requires another save.
 The trusted Host checks permission at command/Undo/Redo/save boundaries and its storage
@@ -384,3 +425,103 @@ The Host must also remove unauthorized content from the displayed document and
 retain pending input/leave guards; this callback supplies no DOM masking or identity service.
 
 Draft and all retained versions require D1 admission and retained hash verification. Generic draft image export is unsupported for this adapter; the explicit saved-version output panel produces SVG/PNG from an immutable version and saved view. Input boundaries reject unresolved Inspector/composition/drawing text rather than silently saving it. See the D3 contract and verification.
+
+## Creative workspace: owned proposals and exact saved comparisons
+
+`CreativeWorkspace.open(io, mayEdit?, mayRead?, mayEditShared?, options?)` and the
+constructor accept a final `CreativeWorkspaceOptions`. `options.documentAdapter`
+is captured once per workspace for **new generic Document sessions**. Existing
+Setting source sessions retain their dedicated validator and proposal adapter;
+existing manuscript/world sessions and concurrent opens retain one owner/session.
+The exported default adapter is not mutated. Native `isDocument` validation is
+always retained, including all immutable versions; the supplied validator can
+narrow admission. Wrong kind, shared mode, invalid capability declarations, missing
+text access, or proposal capability without changed-element access are rejected.
+
+```ts
+import {
+  CreativeWorkspace,
+  workspaceDocumentAdapter,
+} from '@editor-platform/reference-artifact-host/creative/workspace';
+import { documentChangedElementIds } from '@editor-platform/document/proposal-diff';
+
+const workspace = await CreativeWorkspace.open(io, mayEdit, mayRead, mayEditShared, {
+  documentAdapter: {
+    ...workspaceDocumentAdapter,
+    capabilities: { ...workspaceDocumentAdapter.capabilities, proposals: true },
+    changedElements: documentChangedElementIds,
+  },
+});
+const editor = await workspace.openScene(sceneId);
+// Use this retained ArtifactEditor: native text commands, propose, hooks,
+// acceptProposal/rejectProposal, Undo, input preparation and onSaved.
+```
+
+Host-owned AI execution, authorized input scope, review UI and durable provenance
+remain outside this API. Apply is an unsaved native transaction. Reconcile the
+`onApplied.transactionId` with `onSaved.proposalTransactions`, require
+`onSaved.committed`, and read `readSaved(onSaved.versionId)` for the exact hash and
+content before recording saved use. Save failure has no saved receipt; Undo may
+remove proposal ancestry. Observer edits can make the live editor differ from the
+saved receipt. Recheck Host authority/references synchronously in `beforeApply`.
+
+The Node-safe public subpath
+`@editor-platform/reference-artifact-host/creative/saved-comparison` exports:
+
+- `compareTimelineSavedFacets(workbench, request)`: request has `before`, `after`,
+  `beforeRoots`, `afterRoots` and `facets`. Each exact is the native
+  `{ type: 'exact', artifact, version, hash, item }`; roots identify explicit saved
+  world/clock and other premises for that side. Target owner/item must agree.
+  The context never reads draft/base versions or disguises versions as candidates.
+  Existing native readers and `changedFacets` provide event `existence`, `time`,
+  `participants`, `content`, `evaluation`, `info:X`, `participants:X`, `knows:X`.
+  Missing world/semantic premises or unresolved time/evaluation return
+  `undetermined`. Non-event facets (except existence) and unknown facets are
+  `unsupported`. Unreadable owners or invalidated reads throw without result data.
+- `compareCreativeSavedContent(workbench, request)`: request has `domain`, `before`,
+  `after`, `facets`. `domain: 'document-block'` uses a native top-level block ID as
+  `item`, with `existence`/`content`; no text-range remapping is implied.
+  `domain: 'character'` uses a CH ID plus explicit `beforeColumns`/`afterColumns`
+  mappings and the existing character reader. It supports `existence`, `content`,
+  and `field:id/name/description/desire/wound/voice/relationships/firstAppearance`
+  (one field name after `field:`). Unsupported domain semantics stay unsupported.
+  Character cells use native evaluation/validation: an unresolved or invalid selected
+  cell makes its field and aggregate content `undetermined`, while unrelated valid
+  fields remain comparable. Literal text `#ERROR` is ordinary text; successful
+  formulas still compare their native display values.
+- LO temporal impact continues to use existing `compareTimelineSetting`; this
+  change does not create another LO interpreter or infer time/knowledge from prose.
+
+Both comparisons return copied exact inputs, facet records
+`{ facet, state: 'changed' | 'unchanged' | 'unsupported' | 'undetermined', reason? }`,
+`scope: 'complete' | 'partial'`, a rule version (`dependencyRules` or
+`comparisonRules`), `requestKey`, and `current()`. An unresolved item on both sides
+is undetermined; addition/removal changes existence but does not certify other
+facets. Equal content in distinct versions is not by itself a semantic change.
+The Timeline `content` facet contains information facets, but `info:X` is never
+widened to unrelated `info:Y` or `time` when propagating references.
+
+```ts
+const generation = ++requestGeneration;
+const comparison = await compareTimelineSavedFacets(workbench, {
+  before: exactA,
+  after: exactB,
+  beforeRoots: savedPremisesA,
+  afterRoots: savedPremisesB,
+  facets: ['time', 'content', 'info:S1'],
+});
+if (generation !== requestGeneration || !comparison.current()) return;
+// Render each facet state. partial/unsupported/undetermined is not "no impact".
+```
+
+`workbench` may be the existing TimelineWorkbench or the public read-only
+`TimelineSavedComparisonSource` port: `links` (validated V2 Story/role associations),
+`source.get(id)` (authorized retained native reader), `readable(id)`,
+`captureAccess(id)` (returns a permission/source generation guard), and
+`accessEpoch` (current generation). No EditorSession/workbench creation is required
+for comparisons. The pure source port uses the same native reader/validator path. The Host resolves its external commit/native-version mapping and
+namespace, checks current authorization, advances the port generation (or calls Workbench `invalidate()`) on access/source
+changes (including revoke/regrant), and discards old asynchronous generations.
+Exact comparison does not discover consuming sites or certify unreferenced,
+unresolved or unauthorized dependencies as unaffected. For Timeline propagation,
+retain the existing analysis/recheck API and its facet-consumption rules.

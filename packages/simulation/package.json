@@ -1,0 +1,23 @@
+{
+  "name": "@editor-platform/simulation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./surface": "./src/surface.tsx",
+    "./viewport": "./src/viewport.tsx",
+    "./run-worker": "./src/run-worker.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/cad": "*",
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/cad-kernel-occt": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/fem-mesher": "*",
+    "@editor-platform/geometry-fem": "*",
+    "@editor-platform/simulation-core": "*",
+    "react": "19.1.1"
+  }
+}

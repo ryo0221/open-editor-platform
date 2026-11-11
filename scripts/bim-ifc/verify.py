@@ -123,7 +123,9 @@ def check(path: Path, expected: dict) -> list[str]:
             vol_mm3 = vol * 1e9
             # Faceted arcs lose a little volume; plane faces must agree to the last digits.
             rel = 1e-4 if exp.get("curved") else 1e-6
-            if "volume" in exp and abs(vol_mm3 - exp["volume"]) > rel * exp["volume"] + 1.0:
+            if "volumeNotChecked" in exp:
+                print(f"  note: volume of {gid} not compared: {exp['volumeNotChecked']}")
+            elif "volume" in exp and abs(vol_mm3 - exp["volume"]) > rel * exp["volume"] + 1.0:
                 errors.append(f"volume {gid} {exp['kind']} {vol_mm3:.3f} != {exp['volume']:.3f}")
             if "bounds" in exp:
                 for k in range(3):

@@ -617,6 +617,10 @@ describe('D2 imported bodies (CAD13 content side)', () => {
       [mutate(doc, (d) => (d.features[0].args.brepAssetId = 'a-step')), 'asset-missing'],
       [mutate(doc, (d) => (d.features[0].args.sourceUnit = 'yard')), 'source-unit'],
       [mutate(doc, (d) => (d.features[0].args.scaleToMm = 25)), 'source-scale'],
+      // #820: recorded only above the standard limit (0.0001 mm), at most 1 mm.
+      [mutate(doc, (d) => (d.features[0].args.maxToleranceMm = 0.0001)), 'imported-tolerance'],
+      [mutate(doc, (d) => (d.features[0].args.maxToleranceMm = 1.0001)), 'imported-tolerance'],
+      [mutate(doc, (d) => (d.features[0].args.maxToleranceMm = '0.01')), 'imported-tolerance'],
       [mutate(doc, (d) => (d.features[0].args.importer.buildHash = 'x')), 'kernel-build-hash'],
       [mutate(doc, (d) => (d.features[0].inputFeatureIds = ['imp-placement'])), 'feature-arity'],
       [mutate(doc, (d) => d.assets.push({ ...d.assets[0], id: 'a-extra' })), 'asset-duplicate'],
@@ -625,8 +629,44 @@ describe('D2 imported bodies (CAD13 content side)', () => {
         'asset-unreferenced',
       ],
       [mutate(doc, (d) => (d.assets[0].id = 'imp')), 'duplicate-id'],
+      // PMI-2: a `pmi` asset is named by `pmiAssetId`, and only an asset of that kind.
+      [mutate(doc, (d) => (d.features[0].args.pmiAssetId = 'a-brep')), 'asset-missing'],
+      [mutate(doc, (d) => (d.features[0].args.pmiAssetId = 'a-pmi')), 'asset-missing'],
+      [
+        mutate(doc, (d) =>
+          d.assets.push({
+            id: 'a-pmi',
+            kind: 'pmi',
+            sha256: hash('e'),
+            byteLength: 8 * 1024 * 1024 + 1,
+            mediaType: 'application/json',
+          }),
+        ),
+        'asset-size',
+      ],
     ];
     for (const [value, code] of cases) expect(codes(value), code).toContain(code);
+    const withPmi = mutate(doc, (d) => {
+      d.assets.push({
+        id: 'a-pmi',
+        kind: 'pmi',
+        sha256: hash('e'),
+        byteLength: 8 * 1024 * 1024,
+        mediaType: 'application/json',
+      });
+      d.features[0].args.pmiAssetId = 'a-pmi';
+    });
+    expect(codes(withPmi)).toEqual([]);
+    // Kept by later edits while the imported feature names it.
+    expect(
+      applyCadOperation(withPmi, { type: 'rename', targetId: 'body', name: 'plate' }).assets.map(
+        (a) => a.id,
+      ),
+    ).toContain('a-pmi');
+    for (const v of [0.00011, 0.1075, 1])
+      expect(codes(mutate(doc, (d) => (d.features[0].args.maxToleranceMm = v))), String(v)).toEqual(
+        [],
+      );
   });
 
   it('drops refs with their last reader; duplicates share them; Undo restores them', () => {

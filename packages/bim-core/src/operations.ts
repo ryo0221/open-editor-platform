@@ -85,12 +85,19 @@ export function entityReferences(collection: BimCollection, e: Entity): string[]
       if ('hostId' in el) refs.push(el.hostId);
       if ('clipBy' in el && el.clipBy) refs.push(el.clipBy);
       if ('base' in el) refs.push(el.base.level);
-      if (el.kind === 'slab' || el.kind === 'beam') refs.push(el.top.level);
+      if (el.kind === 'slab' || el.kind === 'beam' || el.kind === 'ramp') refs.push(el.top.level);
+      if (el.kind === 'ramp') refs.push(...pointRefs(el.center));
+      if (el.kind === 'stair') refs.push(el.top.level, ...pointRefs(el.start));
       if (el.kind === 'wall' || el.kind === 'column' || el.kind === 'space')
         refs.push(...topRefs(el.top));
       if (el.kind === 'wall' || el.kind === 'beam')
         refs.push(...pointRefs(el.start), ...pointRefs(el.end));
       if (el.kind === 'column' || el.kind === 'part') refs.push(...pointRefs(el.at));
+      if (el.kind === 'column' && el.topAt) refs.push(...pointRefs(el.topAt));
+      if (el.kind === 'beam' && el.endTop) refs.push(el.endTop.level);
+      if (el.kind === 'slab' && el.slope) refs.push(el.slope.endTop.level);
+      if (el.kind === 'member')
+        for (const end of [el.start, el.end]) refs.push(end.height.level, ...pointRefs(end.at));
       return refs;
     }
     case 'joins':

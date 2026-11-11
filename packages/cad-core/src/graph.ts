@@ -240,6 +240,14 @@ export function featureReads(f: CadFeature): {
     case 'sphere':
       lengths.push(f.args.radius, ...f.args.origin);
       break;
+    case 'spurGear': {
+      const a = f.args;
+      lengths.push(a.module, a.teeth, a.faceWidth, a.bore, ...a.origin);
+      if (a.pressureAngle) lengths.push(a.pressureAngle);
+      if (a.matingTeeth) lengths.push(a.matingTeeth);
+      if (a.spokes) lengths.push(a.spokes.count, a.spokes.rim, a.spokes.hub, a.spokes.width);
+      break;
+    }
     case 'extrude':
       lengths.push(f.args.distance);
       source(f.args);
@@ -254,10 +262,20 @@ export function featureReads(f: CadFeature): {
         if ('derivedFrom' in x) lengths.push(...x.offset, x.angle, x.scale as Count);
       sketches.push(...featureSketches(f));
       break;
+    case 'profileSweep':
+      lengths.push(
+        f.args.profile.height,
+        f.args.profile.width,
+        f.args.profile.flange,
+        f.args.profile.radius,
+      );
+      sketches.push(...featureSketches(f));
+      break;
     case 'sweep':
     case 'surfaceLoft':
     case 'surfaceSweep':
     case 'boundarySurface':
+    case 'curveNetwork':
     case 'fill':
       sketches.push(...featureSketches(f));
       break;
@@ -274,13 +292,43 @@ export function featureReads(f: CadFeature): {
       break;
     case 'trim':
       if ('plane' in f.args.tool) lengths.push(...f.args.tool.plane.origin);
+      if (f.args.gap) lengths.push(f.args.gap);
       sketches.push(...featureSketches(f));
+      break;
+    case 'split':
+      sketches.push(...featureSketches(f));
+      break;
+    case 'pressLine':
+      lengths.push(f.args.depth, f.args.radius);
+      sketches.push(...featureSketches(f));
+      break;
+    case 'groove':
+      lengths.push(f.args.radius);
+      sketches.push(...featureSketches(f));
+      break;
+    case 'flare':
+      lengths.push(f.args.height);
+      sketches.push(...featureSketches(f));
+      break;
+    case 'flange':
+      lengths.push(f.args.width, f.args.angle);
       break;
     case 'thicken':
       lengths.push(f.args.thickness);
       break;
+    case 'offsetSurface':
+      lengths.push(f.args.distance);
+      break;
+    case 'panel':
+      lengths.push(f.args.gap);
+      sketches.push(...featureSketches(f));
+      break;
     case 'fillet':
-      lengths.push(f.args.radius);
+      lengths.push(
+        f.args.radius,
+        ...(f.args.radiusEnd ? [f.args.radiusEnd] : []),
+        ...(f.args.radii ?? []).map((p) => p.radius),
+      );
       break;
     case 'chamfer':
       lengths.push(f.args.distance, ...('distance2' in f.args ? [f.args.distance2] : []));
@@ -293,7 +341,7 @@ export function featureReads(f: CadFeature): {
       lengths.push(
         l.count,
         ...(l.type === 'linear'
-          ? [l.spacing]
+          ? [l.spacing, ...(l.rows ? [l.rows.count, l.rows.spacing] : [])]
           : l.type === 'circular'
             ? [...l.axisOrigin, l.angle]
             : []),
@@ -304,6 +352,9 @@ export function featureReads(f: CadFeature): {
     }
     case 'mirror':
       if ('origin' in f.args.plane) lengths.push(...f.args.plane.origin);
+      break;
+    case 'mirrorCopy':
+      lengths.push(...f.args.plane.origin);
       break;
     case 'draft':
       lengths.push(f.args.angle);
@@ -351,18 +402,32 @@ export function featureKind(
     case 'revolveSurface':
     case 'surfaceLoft':
     case 'surfaceSweep':
+    case 'profileSweep':
     case 'boundarySurface':
+    case 'curveNetwork':
+    case 'offsetSurface':
+    case 'panel':
     case 'fill':
     case 'trim':
+    case 'split':
+    case 'pressLine':
+    case 'flare':
+    case 'flange':
       return 'sheet';
     case 'sew':
       return (f.args as { solid?: unknown } | undefined)?.solid === true ? 'solid' : 'sheet';
     case 'imported':
       return (f.args as { kind?: unknown } | undefined)?.kind === 'sheet' ? 'sheet' : 'solid';
     case 'transform':
+    case 'fillet':
       return first();
     case 'mirror':
       return (f.args as { union?: unknown } | undefined)?.union === false ? first() : 'solid';
+    case 'mirrorCopy': {
+      // CR4b: the kind of the feature it reflects.
+      const id = (f.args as { source?: { featureId?: unknown } } | undefined)?.source?.featureId;
+      return (typeof id === 'string' && featureKind(doc, id, seen)) || 'solid';
+    }
     default:
       return 'solid';
   }
@@ -389,14 +454,24 @@ export function featureSketches(f: Pick<CadFeature, 'type' | 'args'>): string[] 
       return [...new Set([...of(a?.profile), ...of(a?.path)])];
     case 'extrudeSurface':
     case 'revolveSurface':
+    case 'profileSweep':
       return of(a?.path);
     case 'boundarySurface':
       return Array.isArray(a?.curves) ? [...new Set(a.curves.flatMap(of))] : [];
+    case 'curveNetwork':
+      return [
+        ...new Set([a?.u, a?.v].flatMap((list) => (Array.isArray(list) ? list.flatMap(of) : []))),
+      ];
     case 'fill':
       return Array.isArray(a?.boundary)
         ? [...new Set(a.boundary.flatMap((b) => of((b as { curve?: unknown } | null)?.curve)))]
         : [];
     case 'trim':
+    case 'panel':
+    case 'split':
+    case 'pressLine':
+    case 'flare':
+    case 'groove':
       return of(a?.tool);
     case 'pattern':
       return of((a?.layout as { path?: unknown } | undefined)?.path);
@@ -414,7 +489,17 @@ export function featureReferenceSources(f: Pick<CadFeature, 'type' | 'args'>): s
     const id = (f.args as { tool?: { featureId?: unknown } } | undefined)?.tool?.featureId;
     return typeof id === 'string' ? [id] : [];
   }
-  if (f.type !== 'surfaceLoft' && f.type !== 'boundarySurface' && f.type !== 'fill') return [];
+  if (f.type === 'offsetSurface' || f.type === 'panel' || f.type === 'mirrorCopy') {
+    const id = (f.args as { source?: { featureId?: unknown } } | undefined)?.source?.featureId;
+    return typeof id === 'string' ? [id] : [];
+  }
+  if (
+    f.type !== 'surfaceLoft' &&
+    f.type !== 'boundarySurface' &&
+    f.type !== 'curveNetwork' &&
+    f.type !== 'fill'
+  )
+    return [];
   const out = new Set<string>();
   const ref = (x: unknown) => {
     const id = (x as { featureId?: unknown } | null | undefined)?.featureId;
@@ -425,6 +510,7 @@ export function featureReferenceSources(f: Pick<CadFeature, 'type' | 'args'>): s
   for (const section of list(a?.sections))
     for (const e of list((section as { edges?: unknown } | null)?.edges)) ref(e);
   for (const c of list(a?.curves)) ref((c as { edge?: unknown } | null)?.edge);
+  for (const c of [...list(a?.u), ...list(a?.v)]) ref((c as { edge?: unknown } | null)?.edge);
   for (const b of list(a?.boundary)) ref((b as { curve?: { edge?: unknown } } | null)?.curve?.edge);
   return [...out];
 }

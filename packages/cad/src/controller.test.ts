@@ -5,11 +5,14 @@ import {
   k5aBars,
   cadToleranceSets,
   f02Plate,
+  f49SpotWelds,
   f11Bracket,
   f15Loft,
   f15Sweep,
   f17Boundaries,
   f18Hood,
+  f22Split,
+  f27Windows,
   f17Surfaces,
   fixtureKernel,
   identityQuaternion,
@@ -26,6 +29,7 @@ import {
   type CadNamedView,
   type CadContinuitySample,
   type CadCombSample,
+  type CadGapFlushSample,
   cadContentHash,
   upstreamFeatures,
 } from '@editor-platform/cad-core';
@@ -38,6 +42,7 @@ import {
   referenceRows,
   retainedBytes,
   topologyInfo,
+  trimChains,
   type CadControllerOptions,
 } from './controller';
 
@@ -115,6 +120,7 @@ function setup(
     retryable = false,
     references?: CadReferenceProblem[],
     edges?: { featureId: string; name: CadTopoName }[],
+    failedPaths?: (string | number)[][],
   ) =>
     fails.push({
       code,
@@ -122,6 +128,7 @@ function setup(
       retryable,
       ...(references ? { references } : {}),
       ...(edges ? { edges } : {}),
+      ...(failedPaths ? { failedPaths } : {}),
     });
   return { controller, session, auth, requests, failNext, delivered };
 }
@@ -1156,6 +1163,82 @@ describe('CadController face and edge picks (R1b, CAD31)', () => {
     expect(bare.controller.getSnapshot().diagnostic?.code).toBe('kernel-unavailable');
   });
 
+  it('measures the gap and flush from a chosen edge to another body’s edge, display only (CR3d)', async () => {
+    // TS-1512, ST-256.
+    const asked: unknown[] = [];
+    let digest = 'digest';
+    let answer: { samples: CadGapFlushSample[] } | { code: string } = {
+      samples: [3.4, 3.6].map((gapMm, i) => ({
+        at: [i * 10, 0, 0] as [number, number, number],
+        to: [i * 10, -gapMm, 0] as [number, number, number],
+        gapMm,
+        flushMm: i ? 0.5 : -0.5,
+      })),
+    };
+    const { controller, session } = setup(true, true, f02Plate(), undefined, {
+      analyzeGapFlush: async (request, edges) => {
+        asked.push(edges);
+        const shown = controller.getSnapshot().evaluation as Extract<
+          CadEvaluation,
+          { status: 'ok' }
+        >;
+        return {
+          evaluation: { ...shown, contentHash: request.candidateHash, geometryDigest: digest },
+          gapFlush: answer,
+        };
+      },
+    });
+    await controller.refresh();
+    const { contentHash } = controller.getSnapshot();
+    controller.receiveMeshes(contentHash, [picked(), { ...picked('door'), edgeBase: 40 }]);
+    // A second edge first is refused: no first edge yet.
+    controller.select({ kind: 'edge', id: 'door', pick: 42, contentHash });
+    expect(await controller.measureGapFlush()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('gap-flush-no-start');
+    expect(controller.chooseGapFlushEdge()).toBe(true);
+    expect(controller.getSnapshot().gapFlush).toEqual({
+      from: { bodyId: 'door', pick: 42 },
+      status: 'chosen',
+    });
+    // Another edge of the same body is refused before the kernel is asked.
+    controller.select({ kind: 'edge', id: 'door', pick: 41, contentHash });
+    expect(await controller.measureGapFlush()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('gap-flush-same-body');
+    controller.select({ kind: 'edge', id: 'plate', pick: 22, contentHash });
+    const report = await controller.measureGapFlush();
+    expect(asked).toEqual([{ a: { bodyId: 'door', edge: 1 }, b: { bodyId: 'plate', edge: 1 } }]);
+    expect(report).toEqual({
+      samples: 2,
+      gap: { min: 3.4, max: 3.6, mean: 3.5 },
+      flush: { min: -0.5, max: 0.5, mean: 0 },
+    });
+    expect(controller.getSnapshot().gapFlush).toMatchObject({
+      from: { bodyId: 'door', pick: 42 },
+      to: { bodyId: 'plate', pick: 22 },
+      status: 'done',
+      report,
+    });
+    // Display only: the content and history are untouched; it stays while other things are picked.
+    expect(cadContentHash(session.content)).toBe(contentHash);
+    expect(controller.getSnapshot().canUndo).toBe(false);
+    controller.select({ kind: 'body', id: 'plate' });
+    expect(controller.getSnapshot().gapFlush).toMatchObject({ status: 'done' });
+    // A kernel refusal keeps the first edge; another shape is refused.
+    controller.select({ kind: 'edge', id: 'plate', pick: 21, contentHash });
+    answer = { code: 'gap-flush-apart' };
+    expect(await controller.measureGapFlush()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.message).toBe(describeCode('gap-flush-apart'));
+    expect(controller.getSnapshot().gapFlush).toEqual({
+      from: { bodyId: 'door', pick: 42 },
+      status: 'chosen',
+    });
+    digest = 'other';
+    expect(await controller.measureGapFlush()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('gap-flush-mismatch');
+    controller.clearGapFlush();
+    expect(controller.getSnapshot().gapFlush).toBeUndefined();
+  });
+
   it('samples a picked edge’s comb and the shown nodes’ curvature, display only (R2a-4, ST-50)', async () => {
     const combs: { bodyId: string; edge: number }[] = [];
     let digest = 'digest';
@@ -1306,6 +1389,72 @@ describe('CadController face and edge picks (R1b, CAD31)', () => {
     expect(controller.getSnapshot().selection).toEqual({ kind: 'feature', id: fillet.id });
     controller.undo();
     expect(session.content.features.some((f) => f.id === fillet.id)).toBe(false);
+  });
+
+  // TS-1485, ST-247.
+  it('fillets the picked edge with a radius varying along it (CR1e)', async () => {
+    const { controller, session, contentHash } = await ready();
+    controller.select({ kind: 'edge', id: 'plate', pick: 21, contentHash });
+    expect(
+      await controller.blendPickedEdge('fillet', 2, {
+        endMm: 4,
+        points: [{ at: 0.5, radiusMm: 3 }],
+      }),
+    ).toBe(true);
+    expect(added(session)).toMatchObject({
+      type: 'fillet',
+      args: { radius: mm(2), radiusEnd: mm(4), radii: [{ at: 0.5, radius: mm(3) }] },
+    });
+    controller.undo();
+    // Two radii only: no points between.
+    controller.select({ kind: 'edge', id: 'plate', pick: 21, contentHash });
+    expect(await controller.blendPickedEdge('fillet', 2, { endMm: 4 })).toBe(true);
+    const linear = added(session);
+    expect(linear.args).toEqual({ edges: expect.any(Array), radius: mm(2), radiusEnd: mm(4) });
+  });
+
+  it('refuses a flare from the picked edge without a chain sketch (CR2d)', async () => {
+    const { controller, session, contentHash } = await ready();
+    const before = session.content;
+    const edge = { kind: 'edge' as const, id: 'plate', pick: 21, contentHash };
+    controller.select(edge);
+    expect(await controller.flarePickedEdge('nope', 10, 'G1')).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toBe('surface-path');
+    expect(session.content).toEqual(before);
+    // Without a picked edge nothing is flared.
+    controller.select({ kind: 'body', id: 'plate' });
+    expect(await controller.flarePickedEdge('nope', 10, 'G1')).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toBe('selection-stale');
+  });
+
+  // TS-1537, ST-263.
+  it('flanges the picked edge, refusing a solid’s (CR4c)', async () => {
+    const { controller, session, contentHash } = await ready();
+    const before = session.content;
+    controller.select({ kind: 'edge', id: 'plate', pick: 21, contentHash });
+    expect(await controller.flangePickedEdge(10, 90, 'front')).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toMatch(/solid-not-sheet@/);
+    expect(session.content).toEqual(before);
+    controller.select({ kind: 'body', id: 'plate' });
+    expect(await controller.flangePickedEdge(10, 90, 'front')).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toBe('selection-stale');
+  });
+
+  // TS-1546, ST-265.
+  it('chooses a first flange for spot welds, refusing a row without one or on the same body (CR4e)', async () => {
+    const { controller, session, contentHash } = await ready();
+    const before = session.content;
+    const top = { kind: 'face' as const, id: 'plate', pick: 11, contentHash };
+    controller.select(top);
+    expect(await controller.weldToPickedFace()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('spot-weld-no-start');
+    expect(controller.chooseWeldFlange()).toBe(true);
+    expect(controller.getSnapshot().weldStart).toEqual({ bodyId: 'plate', pick: 11 });
+    expect(await controller.weldToPickedFace()).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('spot-weld-same-body');
+    expect(session.content).toEqual(before);
+    controller.clearWeldFlange();
+    expect(controller.getSnapshot().weldStart).toBeUndefined();
   });
 
   it('refuses a pick that cannot be referenced, or that is not on the current shape', async () => {
@@ -1960,6 +2109,91 @@ describe('CadController Sketch mode (R1d-3, CAD34)', () => {
     expect(cadInputState(controller).dirty).toBe(false);
   });
 
+  it('trims a sheet with every closed line of a sketch, naming the line that fails (CR3c)', async () => {
+    // TS-1509, ST-255: the F27 windows drawn in one sketch, cut by one trim.
+    // Fixed IDs, so the refused trim below is the same feature as the one undone.
+    const { controller, session, failNext } = setup(
+      true,
+      false,
+      f22Split('closed', false),
+      undefined,
+      {
+        newId: (prefix) => `${prefix}-cr3c`,
+      },
+    );
+    await controller.refresh();
+    const windows = f27Windows().sketches.find((s) => s.id === 'windows')!;
+    await controller.run({ type: 'insertFeatures', features: [], sketches: [windows] });
+    const panel = () => session.content.bodies.find((b) => b.id === 'panel-body')!;
+    expect(await controller.trimBody(panel(), { sketchId: 'windows' }, 'outside', 'skip')).toBe(
+      true,
+    );
+    const trim = session.content.features.find((f) => f.type === 'trim')!;
+    expect(trim.args).toEqual({
+      tool: { sketchId: 'windows', elements: ['w0s0', 'w0s1', 'w0s2', 'w0s3'] },
+      keep: 'outside',
+      chains: [
+        ['w1s0', 'w1s1', 'w1s2', 'w1s3'],
+        ['w2s0', 'w2s1', 'w2s2', 'w2s3'],
+      ],
+      ifMissed: 'skip',
+    });
+    // Again, the kernel naming the third window as the one that parts the sheet: the message
+    // names it, the content stays.
+    await controller.undo();
+    const before = controller.getSnapshot().contentHash;
+    failNext('trim-disconnected', trim.id, false, undefined, undefined, [['chains', 1]]);
+    expect(await controller.trimBody(panel(), { sketchId: 'windows' }, 'outside')).toBe(false);
+    expect(controller.getSnapshot().diagnostic).toMatchObject({ code: 'trim-disconnected' });
+    expect(controller.getSnapshot().diagnostic!.message).toContain(
+      '該当する閉じた線：3番目（w2s0、w2s1、w2s2、w2s3）',
+    );
+    expect(controller.getSnapshot().contentHash).toBe(before);
+    // The message names the chains by number and elements.
+    const doc = f27Windows();
+    expect(
+      trimChains(doc, {
+        code: 'trim-no-cut',
+        featureId: 'windows-trim',
+        failedPaths: [['tool'], ['chains', 1]],
+      }),
+    ).toBe('1番目（w0s0、w0s1、w0s2、w0s3）、3番目（w2s0、w2s1、w2s2、w2s3）');
+    expect(trimChains(doc, { code: 'trim-failed', featureId: 'windows-trim' })).toBeUndefined();
+  });
+
+  it('offsets a drawn chain into new elements, refusing one that collapses (CR3a)', async () => {
+    const { controller } = setup();
+    await controller.refresh();
+    controller.startSketch('xy');
+    const a = controller.sketchLine({ at: [0, 0] }, { at: [100, 0] })!;
+    const b = controller.sketchLine({ id: 'p2' }, { at: [100, 50] })!;
+    const c = controller.sketchLine({ id: 'p3' }, { at: [0, 50] })!;
+    const d = controller.sketchLine({ id: 'p4' }, { id: 'p1' })!;
+    const drawing = controller.getSnapshot().sketch!.sketch;
+    // Collapsing inwards is refused with the selection named, the drawing kept.
+    expect(controller.sketchOffset([a, b, c, d], -30)).toBeUndefined();
+    const refused = controller.getSnapshot().sketch!;
+    expect(refused.problem).toMatchObject({
+      code: 'sketch-offset-self-intersects',
+      elements: [a, b, c, d],
+    });
+    expect(refused.sketch).toBe(drawing);
+    const ids = controller.sketchOffset([a, b, c, d], 5)!;
+    expect(ids).toHaveLength(4);
+    const view = controller.getSnapshot().sketch!;
+    expect(view.problem).toBeUndefined();
+    expect(
+      view.sketch.solved[
+        (view.sketch.entities.find((e) => e.id === ids[0]) as { start: string }).start
+      ],
+    ).toEqual([-5, -5]);
+    // The two loops make a frame: the offset outside, the drawn rectangle its hole.
+    expect(view.region).toEqual({ outer: ids, holes: [[a, b, c, d]] });
+    // The new elements take constraints like any other.
+    expect(controller.sketchConstrain({ type: 'horizontal', line: ids[0]! } as never)).toBe(true);
+    expect(await controller.finishSketch({ distance: 10 })).toBe(true);
+  });
+
   it('draws splines: closed alone or open with a line, refusing a crossing one (R2a-2, CAD40)', async () => {
     const { controller } = setup();
     await controller.refresh();
@@ -2189,6 +2423,58 @@ describe('CadController loft and sweep (R1e, CAD35)', () => {
     expect(await controller.addLoft(['loft-base', 'loft-base'], false)).toBe(false);
     expect(controller.getSnapshot().diagnostic?.code).toMatch(/loft-same-sketch/);
     expect(controller.getSnapshot().contentHash).toBe(before);
+  });
+
+  // TS-1542, ST-264.
+  it('sweeps a hat section along a path sketch into a member, refusing one that does not fit (CR4d)', async () => {
+    const { controller } = setup(true, false, sections());
+    await controller.refresh();
+    const hat = { kind: 'hat' as const, heightMm: 30, widthMm: 40, flangeMm: 15, radiusMm: 3 };
+    // The loft base draws a loop, not an open path.
+    expect(await controller.addProfileSweep('loft-base', hat, 'normal', false)).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toBe('sweep-path');
+    expect(await controller.addProfileSweep('pipe-path', hat, 'inPlane', true)).toBe(true);
+    let doc = controller.getSnapshot().content;
+    expect(doc.features[0]).toMatchObject({
+      name: 'Member',
+      type: 'profileSweep',
+      args: {
+        path: { sketchId: 'pipe-path', elements: ['l0', 'a0'] },
+        profile: { kind: 'hat', height: mm(30), width: mm(40), flange: mm(15), radius: mm(3) },
+        up: 'inPlane',
+        flip: true,
+      },
+    });
+    expect(doc.bodies.map((b) => [b.name, b.kind])).toEqual([['Member', 'sheet']]);
+    // A bend wider than the flange is refused by validation, the content unchanged.
+    const before = controller.getSnapshot().contentHash;
+    expect(
+      await controller.addProfileSweep('pipe-path', { ...hat, flangeMm: 2 }, 'normal', false),
+    ).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toMatch(/profile-radius@/);
+    expect(controller.getSnapshot().contentHash).toBe(before);
+    doc = controller.getSnapshot().content;
+    expect(doc.features).toHaveLength(2);
+  });
+
+  // TS-1547, ST-265.
+  it('changes and removes a spot weld row, refusing a pitch out of range (CR4e)', async () => {
+    const { controller, session } = setup(true, false, f49SpotWelds({ both: true }));
+    await controller.refresh();
+    const ok = await controller.updateSpotWeld('welds-l', { pitchMm: 60, endDistanceMm: 30 });
+    expect(controller.getSnapshot().diagnostic).toBeUndefined();
+    expect(ok).toBe(true);
+    expect(session.content.spotWelds![0]).toMatchObject({ pitchMm: 60, endDistanceMm: 30 });
+    const before = session.content;
+    expect(await controller.updateSpotWeld('welds-l', { pitchMm: 5 })).toBe(false);
+    expect(controller.getSnapshot().diagnostic?.code).toMatch(/spot-weld-pitch@/);
+    expect(session.content).toEqual(before);
+    const removed = await controller.removeSpotWeld('welds-r');
+    expect(controller.getSnapshot().diagnostic?.code).toBeUndefined();
+    expect(removed).toBe(true);
+    expect(session.content.spotWelds!.map((w) => w.id)).toEqual(['welds-l']);
+    controller.undo();
+    expect(session.content.spotWelds!.map((w) => w.id)).toEqual(['welds-l', 'welds-r']);
   });
 
   it('lofts and sweeps the chains sketches draw into surfaces (R2a-2b, CAD41)', async () => {
