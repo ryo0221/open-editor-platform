@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { MangaCreationOptions } from './manga-workspace';
+import { novelChapterLimit, type NovelCreationOptions } from './novel-workspace';
 import { X } from 'lucide-react';
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
@@ -113,7 +114,7 @@ export function LibraryPanel({
   onPcbTemplateChange(template: PcbTemplateId): void;
   onCreate(kind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
-  onCreateNovel(): Promise<void>;
+  onCreateNovel(options?: NovelCreationOptions): Promise<void>;
   onCreateFromTemplate(): void;
   onOpenReusableLibrary(): void;
   onOfficeImport(): void;
@@ -134,6 +135,11 @@ export function LibraryPanel({
         : [];
   const source = sources[Math.min(sourceAt, sources.length - 1)];
   const [creatingNovel, setCreatingNovel] = useState(false);
+  const [novelOptions, setNovelOptions] = useState<NovelCreationOptions>({
+    title: '',
+    writingMode: 'vertical-rl',
+    chapters: 3,
+  });
   const openPrivate = privateVideo.openEditor;
   const privateDisabled = !loaded || busy;
   return (
@@ -299,6 +305,66 @@ export function LibraryPanel({
           漫画を新規作成
         </button>
       </details>
+      <details>
+        <summary>小説を作成</summary>
+        <label>
+          題名
+          <input
+            aria-label="小説の題名"
+            placeholder="無題の小説"
+            value={novelOptions.title}
+            onChange={(e) => setNovelOptions({ ...novelOptions, title: e.target.value })}
+          />
+        </label>
+        <label>
+          組み方
+          <select
+            aria-label="小説の組み方"
+            value={novelOptions.writingMode}
+            onChange={(e) =>
+              setNovelOptions({
+                ...novelOptions,
+                writingMode: e.target.value as NovelCreationOptions['writingMode'],
+              })
+            }
+          >
+            <option value="vertical-rl">縦書き</option>
+            <option value="horizontal-tb">横書き</option>
+          </select>
+        </label>
+        <label>
+          章の数
+          <input
+            aria-label="小説の章の数"
+            type="number"
+            min={1}
+            max={novelChapterLimit}
+            value={novelOptions.chapters}
+            onChange={(e) =>
+              setNovelOptions({
+                ...novelOptions,
+                chapters: Math.min(
+                  novelChapterLimit,
+                  Math.max(1, Math.trunc(Number(e.target.value) || 1)),
+                ),
+              })
+            }
+          />
+        </label>
+        <button
+          disabled={!loaded || shared || readOnly || busy || creatingNovel}
+          onClick={async () => {
+            setCreatingNovel(true);
+            try {
+              await onCreateNovel(novelOptions);
+            } finally {
+              setCreatingNovel(false);
+            }
+          }}
+        >
+          小説を新規作成
+        </button>
+      </details>
       <button
         title="ルビ・傍点・縦書きを使ったサンプル原稿（3章）で小説ワークスペースを開きます"
         disabled={!loaded || shared || readOnly || busy || creatingNovel}
@@ -398,7 +464,7 @@ export function WelcomePanel({
   onFindTemplates(): void;
   onCreate(kind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
-  onCreateNovel(): Promise<void>;
+  onCreateNovel(options?: NovelCreationOptions): Promise<void>;
 }) {
   const [creatingManga, setCreatingManga] = useState(false);
   const [creatingNovel, setCreatingNovel] = useState(false);

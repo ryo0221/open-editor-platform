@@ -4,6 +4,7 @@ import type { DocumentSequenceSource } from '@editor-platform/document/sequence'
 import {
   prepareDocumentEpub,
   encodeDocumentEpub,
+  type DocumentEpubFont,
   type DocumentEpubPlan,
 } from '@editor-platform/document-export/epub';
 import { downloadBlob } from '@editor-platform/canvas-ui';
@@ -22,6 +23,8 @@ export function EpubReview({
   const [language, setLanguage] = useState('ja');
   const [identifier] = useState(() => newId('book'));
   const [creator, setCreator] = useState('');
+  const [font, setFont] = useState<DocumentEpubFont>();
+  const [readingFont, setReadingFont] = useState(false);
   const [plan, setPlan] = useState<DocumentEpubPlan>();
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState('');
@@ -40,7 +43,7 @@ export function EpubReview({
     },
     [],
   );
-  const busy = phase === 'preparing' || phase === 'encoding';
+  const busy = phase === 'preparing' || phase === 'encoding' || readingFont;
   const stale = !!plan && preparedKey.current !== sourcesKey;
   function invalidate() {
     generation.current++;
@@ -73,6 +76,7 @@ export function EpubReview({
           modified: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
         },
         controller.signal,
+        font ? { fonts: [font] } : {},
       );
       if (attempt !== generation.current) return;
       preparedKey.current = key;
@@ -141,8 +145,9 @@ export function EpubReview({
     <section aria-label="EPUB export review">
       <h3>EPUB export — reflowable subset</h3>
       <p>
-        Captures saved chapter versions. All-vertical chapters become a vertical EPUB with ruby;
-        mixed writing modes, links, images and fixed pagination are unsupported.
+        Captures saved chapter versions. Each chapter keeps its writing mode (vertical with ruby, or
+        horizontal); embedded images, links and a font you choose are packaged. Fixed pagination is
+        not kept.
       </p>
       <label>
         EPUB title{' '}
@@ -177,10 +182,40 @@ export function EpubReview({
           }}
         />
       </label>
+      <label>
+        Embed font (optional, a font you may distribute; subset large CJK fonts first){' '}
+        <input
+          type="file"
+          accept=".otf,.ttf,.woff,.woff2"
+          disabled={busy}
+          onChange={async (e) => {
+            invalidate();
+            const file = e.target.files?.[0];
+            setFont(undefined);
+            if (!file) return;
+            const format = file.name.split('.').pop()?.toLowerCase();
+            // Preparing waits for the bytes, so a plan never carries a stale or missing font.
+            setReadingFont(true);
+            try {
+              const data = new Uint8Array(await file.arrayBuffer());
+              invalidate();
+              setFont({
+                family: file.name.replace(/\.[^.]+$/, '').replace(/["\\<>;{}]/g, '') || 'Embedded',
+                format: format as DocumentEpubFont['format'],
+                data,
+              });
+            } catch (error) {
+              setError(`Font could not be read: ${String(error)}`);
+            } finally {
+              setReadingFont(false);
+            }
+          }}
+        />
+      </label>
       <button disabled={busy} onClick={() => void prepare()}>
         Prepare EPUB preview
       </button>
-      {busy && (
+      {(phase === 'preparing' || phase === 'encoding') && (
         <button
           onClick={() => {
             invalidate();

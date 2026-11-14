@@ -439,3 +439,48 @@ test('horizontal print preview draws ruby and 傍点', async ({ page }, info) =>
   await writeFile(info.outputPath('horizontal-print.png'), Buffer.from(png, 'base64'));
   expect(errors).toEqual([]);
 });
+
+test('vertical print sets tables and lists in the flow instead of refusing them', async ({
+  page,
+}, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.getByRole('button', { name: '小説ワークスペース', exact: true }).click();
+  await closePanels(page);
+  await page.getByRole('button', { name: '縦書き', exact: true }).click();
+  await page.getByRole('button', { name: 'Documentで詳細編集', exact: true }).click();
+  await page.locator('[data-block-id="scene-night"]').click();
+  // Narrow toolbars keep the insert button under More editor tools.
+  for (const name of ['Table', 'Bulleted list']) {
+    const insert = page.getByRole('button', { name: 'Insert block', exact: true });
+    if (!(await insert.isVisible()))
+      await page.getByRole('button', { name: 'More editor tools', exact: true }).click();
+    await insertDoc(page, name);
+  }
+  await exportMenu(page);
+  await page.getByRole('button', { name: 'Print preview', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Document print preview' });
+  await expect(dialog.getByRole('img').first()).toBeVisible();
+  await expect(dialog).not.toContainText('縦書きの印刷');
+  const images = dialog.getByRole('img');
+  for (let n = 0; n < (await images.count()); n++) {
+    const png = await images.nth(n).evaluate((img: HTMLImageElement) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d')!.drawImage(img, 0, 0);
+      return canvas.toDataURL('image/png').split(',')[1];
+    });
+    await writeFile(
+      info.outputPath(`vertical-print-table-${n + 1}.png`),
+      Buffer.from(png, 'base64'),
+    );
+  }
+  await page.getByRole('button', { name: 'Close Document print preview', exact: true }).click();
+  await exportMenu(page);
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export PDF', exact: true }).click();
+  const pdf = await PDFDocument.load(await readFile((await (await pending).path())!));
+  expect(pdf.getPageCount()).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});

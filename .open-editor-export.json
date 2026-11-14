@@ -873,7 +873,7 @@
     },
     {
       "path": "apps/artifact-host/src/epub-review.tsx",
-      "sha256": "2a2d4a9583e2dc0f86a8071d0bcefc47fd7abf56007b3684bfd50e7ca8183ad8",
+      "sha256": "e98ef9929f27c1624121d44b2b7f172d7553709553ba08e57cb52b113d76b95b",
       "mode": "100644"
     },
     {
@@ -1258,7 +1258,7 @@
     },
     {
       "path": "apps/playground/src/App.tsx",
-      "sha256": "560da6749ec46e1492a9e8f6a4d7c0a97eb2ed96daab0f626af7c8de62c516f2",
+      "sha256": "978a659aa21864ea82317a28820313be9a3ad1251bcb38b82ff3172836a2b4aa",
       "mode": "100644"
     },
     {
@@ -1313,7 +1313,7 @@
     },
     {
       "path": "apps/playground/src/app/editor-surfaces.tsx",
-      "sha256": "44eb0b494dbadb1a1d4c12f44fc7b9abc5c6648639ceb48d5f8397c6bb172a71",
+      "sha256": "24b0ff663481cf984aea01ca3352f816568bb330402dd4df810eb69f771bdfb2",
       "mode": "100644"
     },
     {
@@ -1363,7 +1363,7 @@
     },
     {
       "path": "apps/playground/src/app/library-panel.tsx",
-      "sha256": "783daea3651fd8581e65817d484cd3a0e6886ad20be5020ffb6cde1051521747",
+      "sha256": "c4fbc0bc6bab67e882112f9d2456d5a0f512000098ec8172d2d5eabdebbdf5a2",
       "mode": "100644"
     },
     {
@@ -1393,7 +1393,7 @@
     },
     {
       "path": "apps/playground/src/app/novel-workspace.ts",
-      "sha256": "4b82d48ff9d78a755f9234b56ae386dc266e6c5c0a4fea78f98bae3f1ad72404",
+      "sha256": "79a04f135e8f00928fbdb89f9f160595d718d14daccfce85e8bf225859f11237",
       "mode": "100644"
     },
     {
@@ -2163,7 +2163,7 @@
     },
     {
       "path": "CONTRIBUTOR-LICENSING.md",
-      "sha256": "f1af75d74d5992fb279de5004bcf488494e4e61e929a66000d23a0f10834ae08",
+      "sha256": "b1e8a4e6fe88388adf458c2fa88e274ceb4d516668227d40f35aaa2ed365ecbe",
       "mode": "100644"
     },
     {
@@ -2218,7 +2218,7 @@
     },
     {
       "path": "docs/authoring-contract.md",
-      "sha256": "289f25f2bc92e81293191ec7b4e6e53124008692dd6b97071b170eefc708cc27",
+      "sha256": "04f3aeb6b4b769bb1913eefdb5c7bccf612ed93b6b11b2bcb48063a90b73e11d",
       "mode": "100644"
     },
     {
@@ -2428,7 +2428,7 @@
     },
     {
       "path": "docs/novel-creation/workspace-design.md",
-      "sha256": "f30af9889cd50deb46f0dcb50543e7a415495a9e0ac96dd5ab8bc2eaa795ef6c",
+      "sha256": "c5c59e03ff9cdb649a4d9e188615e4a9da4f177be148ba65b043da0d04aadc91",
       "mode": "100644"
     },
     {
@@ -3047,8 +3047,23 @@
       "mode": "100644"
     },
     {
-      "path": "legal/CONTRIBUTOR-AGREEMENT-DRAFT.md",
-      "sha256": "1aebfeb2f1cbf1cfda3c8baddcab92000259c5e154209673b4aa10e00fff76de",
+      "path": "legal/CLA-ENTITY.ja.md",
+      "sha256": "0698d62f1b62a1786523f59856d2a37c0c052971ec6fc6df489b07358268b4c9",
+      "mode": "100644"
+    },
+    {
+      "path": "legal/CLA-ENTITY.md",
+      "sha256": "d91515f0785b4ca4ff49531f598bf4d14a48752c1ef352c67a0e5aefe7fa7ade",
+      "mode": "100644"
+    },
+    {
+      "path": "legal/CLA-INDIVIDUAL.ja.md",
+      "sha256": "1880e3dc9e483dfc74e5e41e4ebd2bffc60a8e5d05b6d7b45e1f6768f86d0fa1",
+      "mode": "100644"
+    },
+    {
+      "path": "legal/CLA-INDIVIDUAL.md",
+      "sha256": "fdcae86060673f0520b2d46f9da380953abb6a0975b1c2d65c54ec6eb9998e09",
       "mode": "100644"
     },
     {
@@ -3063,7 +3078,7 @@
     },
     {
       "path": "legal/PUBLICATION-READINESS.md",
-      "sha256": "f9cda53e1b7c0d8363e910b3dc8452e89521c64c6cd21d44c3f38f28ef44e117",
+      "sha256": "3e45746a73b31a1fc1836c2aab7634fcde1491678088a89c3f6c0eecda45548e",
       "mode": "100644"
     },
     {
@@ -6568,12 +6583,12 @@
     },
     {
       "path": "packages/collaboration-adapters/src/document-attributes.test.ts",
-      "sha256": "fd8fe3ed6315823bd6870e0c41836804f73aa4a5ed6d5178e5f10d1be9830c4e",
+      "sha256": "3d1907037c4f65fe68dafeff2c454326ccd050b104152d90d1403ce0937f4cb0",
       "mode": "100644"
     },
     {
       "path": "packages/collaboration-adapters/src/document-collaboration.test.ts",
-      "sha256": "1aad974dabaa1c76c489adb8ca6ce0b7c85b433350e59841a47d8566327fd5ee",
+      "sha256": "498c581755335c624a82477afdeec9281965b148da04002c98e73caa06ffba78",
       "mode": "100644"
     },
     {
@@ -6583,7 +6598,7 @@
     },
     {
       "path": "packages/collaboration-adapters/src/document.ts",
-      "sha256": "0a5a6de350bc8f8fe821c26660a5e9d58a824dc93e76ddf0971475680166d3fa",
+      "sha256": "9d7d7fe76f5d7213445ac0b581cf1a4b63694a6126f896295da4cf666303945e",
       "mode": "100644"
     },
     {
@@ -7718,12 +7733,12 @@
     },
     {
       "path": "packages/document-export/src/epub.test.ts",
-      "sha256": "2583f722143c8f6761c45162eeb69f0e4dd4c58fd7c94ae28dcac50ffebe6dd2",
+      "sha256": "694c82b2145d0f44359d82b6cc659958195d6892c6b891e78abb6fa26a2f9e06",
       "mode": "100644"
     },
     {
       "path": "packages/document-export/src/epub.ts",
-      "sha256": "c86a64f60801a5b3153824562537b68c49c7f713c3d3dcabe177865aaa18accb",
+      "sha256": "1e134c83a19cb9551d4d985b6c6f5c95066fd9fdb669f4eff5cfb1bbc033e0a7",
       "mode": "100644"
     },
     {
@@ -7918,7 +7933,7 @@
     },
     {
       "path": "packages/document/src/novel-workspace.tsx",
-      "sha256": "e0d0cb89ba57d7922407f216e127aad212550243c0eb27f3f54eb3226b447ef6",
+      "sha256": "e552e98b1c666aefd8280a030d1d9ebf1d4312159fa3f6f84a427bd9e42a63cb",
       "mode": "100644"
     },
     {
@@ -7953,17 +7968,17 @@
     },
     {
       "path": "packages/document/src/print-renderer.ts",
-      "sha256": "33009f478696f24700037d83c9ea3740e2a28104c98ada9d7e9fa207364e28fc",
+      "sha256": "e10802d39a1d6465c3477dafa301adc7522e4ca26a3a1e675e81ebab4d9397f7",
       "mode": "100644"
     },
     {
       "path": "packages/document/src/print-vertical.ts",
-      "sha256": "b953ce4ce20c37de3d99d0039ef13be7942a5d055db35df22e2155e0be298136",
+      "sha256": "eb31bbd216debd5af55077a2abaa44764967b583ec41314d5f0ab8faeaabf49b",
       "mode": "100644"
     },
     {
       "path": "packages/document/src/print.ts",
-      "sha256": "388623d407dd24e9d1b3d4aecb1eba5ecac19932fc7da4e4b415644605bc617d",
+      "sha256": "12e2c16b7d89a09c6052007c678b41ed98fc42536ecface1cb28c00178e6ccf2",
       "mode": "100644"
     },
     {
@@ -8038,7 +8053,7 @@
     },
     {
       "path": "packages/document/src/vertical.test.ts",
-      "sha256": "1eb15cd2f80bb753318a9146ee49c8cab8828e3111d1a97935f5d593fdfb8ca7",
+      "sha256": "6e79a7fee70bffa797b8065132ab90056b22940f09c56a7d3b1f8fdac1606482",
       "mode": "100644"
     },
     {
@@ -8093,7 +8108,7 @@
     },
     {
       "path": "packages/document/src/view.tsx",
-      "sha256": "591b3583ae40a1f524a416746bfdab13d93e2635ca3ce6bcdc45db9959943501",
+      "sha256": "2578f53ddc1906e1c375d8426208223d314620ba8711da8b7d160aec5c4e1980",
       "mode": "100644"
     },
     {
@@ -17453,7 +17468,7 @@
     },
     {
       "path": "tests/e2e/authoring.spec.ts",
-      "sha256": "fa2f076aac93d4986f27ba207b4acd9cc9055458cf37a8e10e1c20079a9eaa01",
+      "sha256": "f58932a8e3899735b87bbac3d9ee8bba5b1ecd75d2e78819ba2efcfb017a9d19",
       "mode": "100644"
     },
     {
@@ -18013,12 +18028,12 @@
     },
     {
       "path": "tests/e2e/novel-demo.spec.ts",
-      "sha256": "c910454e0c82a0a773693b4667c447a3c6a5b28ad340dee83b0210fade855c58",
+      "sha256": "35db936465bd16572b4f315b4f8c6b86c99cdf8de3b2e6477098d8494eda863e",
       "mode": "100644"
     },
     {
       "path": "tests/e2e/novel-workspace.spec.ts",
-      "sha256": "4d2aa3df9a673870ba472cfbd715b69f8be928300e37dc16249b8578e8ee4d90",
+      "sha256": "d7860cdbfefbe9ea49783b8815dcd0056d8afe16a678533cf95beed00c9023b3",
       "mode": "100644"
     },
     {

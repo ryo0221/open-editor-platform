@@ -5,7 +5,9 @@ import { readMangaWorkspace, writeMangaWorkspace } from './manga-workspace';
 import {
   novelNotationRules,
   readNovelChapters,
+  readNovelGoal,
   readNovelWorkspace,
+  writeNovelGoal,
   writeNovelWorkspace,
 } from './novel-workspace';
 import { isEstimate } from '@editor-platform/estimate-core';
@@ -866,6 +868,9 @@ function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurf
   const chapterIds = host.shared ? undefined : readNovelChapters(active.id);
   const [choice, setChoice] = useState<{ id: string; workspace: 'document' | 'novel' }>();
   const workspace = choice?.id === active.id ? choice.workspace : readNovelWorkspace(active.id);
+  // The character goal is Host view state per chapter, like the workspace choice.
+  const [goalChoice, setGoalChoice] = useState<{ id: string; goal: number | undefined }>();
+  const goal = goalChoice?.id === active.id ? goalChoice.goal : readNovelGoal(active.id);
   // 通読 composes the saved version of every chapter in the Host's order; drafts stay out.
   const chapters = chapterIds?.map((id) => records.find((r) => r.id === id));
   const savedKey = chapters?.map((c) => `${c?.id}@${c?.draft.baseVersionId}`).join(',');
@@ -922,6 +927,11 @@ function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurf
     },
     novel: {
       notationRules: novelNotationRules,
+      goal,
+      onGoalChange: (next) => {
+        setGoalChoice({ id: active.id, goal: next });
+        writeNovelGoal(active.id, next);
+      },
       ...(current?.content
         ? {
             reading: {

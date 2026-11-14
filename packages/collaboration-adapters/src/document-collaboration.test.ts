@@ -220,3 +220,40 @@ it('deleting a referenced range orphans a delayed cursor instead of relocating i
   });
   expect(values[0].anchor).toMatchObject({ orphan: true });
 });
+it('shares ruby and 傍点 in a vertical manuscript, rebasing concurrent edits and refusing bad readings', async () => {
+  const manuscript = {
+    schemaVersion: 2 as const,
+    page: { size: 'A4' as const, margin: 64, writingMode: 'vertical-rl' as const },
+    blocks: [{ id: 'p', type: 'paragraph' as const, text: '東京の夜' }],
+  };
+  const authority = new Authority(documentCodec, initial('novel', documentCodec, manuscript)),
+    a = new DocumentReplica(localAdapter(authority, person('A'))),
+    b = new DocumentReplica(localAdapter(authority, person('B')));
+  await Promise.all([a.open(), b.open()]);
+  const ruby = { text: 'とうきょう', base: '東京', id: 'ruby-a' };
+  a.dispatch(a.state.tr.addMark(1, 3, documentSchema.marks.ruby.create(ruby)));
+  b.dispatch(b.state.tr.addMark(4, 5, documentSchema.marks.emphasisDots.create()));
+  b.dispatch(b.state.tr.insertText('静かな', 4));
+  await Promise.all([a.flush(), b.flush()]);
+  await Promise.all([a.sync(), b.sync()]);
+  expect(a.state.doc.toJSON()).toEqual(b.state.doc.toJSON());
+  const shared = authority.snapshot().content;
+  // The page setting is not touched by text steps; the reading and 傍点 survive the rebase.
+  expect(shared.page).toEqual(manuscript.page);
+  expect(shared.blocks[0].rich).toEqual([
+    { text: '東京', ruby },
+    { text: 'の静かな' },
+    { text: '夜', emphasisDots: true },
+  ]);
+  // A step whose reading the editor could never set is refused by the Document invariant.
+  const before = authority.snapshot();
+  a.dispatch(
+    a.state.tr.addMark(
+      4,
+      6,
+      documentSchema.marks.ruby.create({ text: '《》', base: '静か', id: 'bad' }),
+    ),
+  );
+  await a.flush().catch(() => undefined);
+  expect(authority.snapshot().content).toEqual(before.content);
+});

@@ -331,12 +331,94 @@ describe('Vertical print layout', () => {
     ).toHaveLength(10000);
   });
 
-  it('refuses blocks that have no vertical layout instead of setting them horizontally', () => {
+  it('needs a figure renderer for upright blocks instead of setting them horizontally', () => {
     expect(() =>
       layout([
         { id: 'p', type: 'paragraph', text: '本文' },
         { id: 't', type: 'table', text: '' },
       ]),
-    ).toThrow('未対応: 表');
+    ).toThrow('表を置くには図の描画が必要です');
+  });
+
+  it('sets list items as indented columns with their markers', () => {
+    const result = layout([
+      {
+        id: 'l',
+        type: 'numbered-list',
+        text: '',
+        start: 3,
+        items: [
+          {
+            id: 'a',
+            rich: [{ text: '港' }],
+            children: [{ id: 'b', rich: [{ text: '坂' }] }],
+          },
+          { id: 'c', rich: [{ text: '灯台' }] },
+        ],
+      },
+      {
+        id: 'k',
+        type: 'check-list',
+        text: '',
+        items: [{ id: 'd', rich: [{ text: '済' }], checked: true }],
+      },
+    ]);
+    const columns = result.pages[0];
+    expect(columns.map((c) => c.glyphs.map((g) => g.text).join(''))).toEqual([
+      '3．港',
+      '・坂',
+      '4．灯台',
+      '■　済',
+    ]);
+    // A nested item starts one level (1.5em) lower; columns run right to left.
+    expect(columns[1].top).toBe(columns[0].top + 1.5 * columns[0].size);
+    expect(columns[1].x).toBeLessThan(columns[0].x);
+  });
+
+  it('reserves upright boxes for figures in the right-to-left flow, turning pages as needed', () => {
+    const sizes: Record<string, { width: number; height: number }[]> = {
+      i: [{ width: 300, height: 200 }],
+      t: [
+        { width: 600, height: 900 },
+        { width: 600, height: 120 },
+      ],
+    };
+    const result = layoutVerticalDocument(
+      {
+        ...vertical,
+        blocks: [
+          { id: 'p', type: 'paragraph', text: '前' },
+          { id: 'i', type: 'image', text: '', src: 'data:,' },
+          { id: 't', type: 'table', text: '' },
+          { id: 'q', type: 'paragraph', text: '後' },
+        ],
+      },
+      page,
+      latin,
+      (block, box) => {
+        expect(box).toEqual({ maxWidth: 794 - 128, maxHeight: 1123 - 128 });
+        return sizes[block.id];
+      },
+    );
+    const [first, second, third] = result.figures;
+    const before = result.pages[0][0];
+    // The image stands left of the first column, at the top of the text area.
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ blockId: 'i', y: 64, width: 300, after: 1 });
+    expect(first[0].x + 300).toBeLessThanOrEqual(before.x - before.size / 2);
+    // Each table slice takes a page of its own when the one before has no room.
+    expect(second).toEqual([
+      { blockId: 't', slice: 0, x: 730 - 600, y: 64, width: 600, height: 900, after: 0 },
+    ]);
+    expect(third[0]).toMatchObject({ blockId: 't', slice: 1, x: 730 - 600 });
+    // Text after the figure continues left of it.
+    expect(result.pages[2][0].x).toBeLessThan(third[0].x);
+    const lines = verticalTextLines(result, (fig) =>
+      fig.blockId === 'i' ? [{ text: 'cap', x: 1, y: 2, size: 12, width: 20, order: 0 }] : [],
+    );
+    expect(lines[0].map((l) => [l.text, l.x, l.y, l.order])).toEqual([
+      ['前', before.x, before.top, 0],
+      ['cap', first[0].x + 1, 66, 1],
+    ]);
   });
 });

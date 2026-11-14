@@ -51,7 +51,7 @@ interface PrintTextStyle {
 }
 
 const headingSizes = [34, 27, 22, 19, 17, 16];
-const listBlockTypes = ['bulleted-list', 'numbered-list', 'check-list'];
+export const listBlockTypes = ['bulleted-list', 'numbered-list', 'check-list'];
 
 export function printFont(span: InlineSpan, size: number, family?: string) {
   return `${span.italic ? 'italic ' : ''}${span.bold ? '700' : '400'} ${size}px ${span.code ? 'monospace' : family ? '"' + family + '"' : 'system-ui'}`;
@@ -84,7 +84,12 @@ export function blockSpaceAfter(block: DocumentBlock) {
       : 10;
 }
 
-function listMarker(item: DocumentListItem, numbered: boolean, index: number, start: number) {
+export function listMarker(
+  item: DocumentListItem,
+  numbered: boolean,
+  index: number,
+  start: number,
+) {
   return item.checked === undefined
     ? numbered
       ? `${index + start}. `
@@ -94,7 +99,7 @@ function listMarker(item: DocumentListItem, numbered: boolean, index: number, st
       : '[ ] ';
 }
 
-function blockListItems(block: DocumentBlock): DocumentListItem[] {
+export function blockListItems(block: DocumentBlock): DocumentListItem[] {
   return (
     block.items ??
     block.text.split('\n').map((value, index) => ({

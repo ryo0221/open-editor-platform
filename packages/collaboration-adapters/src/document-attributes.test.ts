@@ -244,7 +244,7 @@ it('image attribute adoption and selective Undo retain peer image captions, docu
   expect(tr.mapping.map(3)).toBe(3);
 });
 
-it('refuses ruby and 傍点 in shared editing until the novel stages are accepted', () => {
+it('accepts ruby, 傍点 and vertical manuscripts in shared editing', () => {
   const plain = {
     schemaVersion: 2 as const,
     blocks: [{ id: 'p', type: 'paragraph' as const, text: '東京' }],
@@ -260,30 +260,24 @@ it('refuses ruby and 傍点 in shared editing until the novel stages are accepte
         },
       ],
     }),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     documentCodec.validate({
       ...plain,
       blocks: [{ ...plain.blocks[0], rich: [{ text: '東京', emphasisDots: true }] }],
     }),
-  ).toBe(false);
-});
-
-it('refuses a vertical manuscript in shared editing until the novel stages are accepted', () => {
-  const plain = {
-    schemaVersion: 2 as const,
-    blocks: [{ id: 'p', type: 'paragraph' as const, text: '縦' }],
-  };
+  ).toBe(true);
   expect(
     documentCodec.validate({
       ...plain,
       page: { size: 'A4' as const, margin: 64, writingMode: 'vertical-rl' as const },
     }),
-  ).toBe(false);
+  ).toBe(true);
+  // A malformed reading is still refused.
   expect(
     documentCodec.validate({
       ...plain,
-      page: { size: 'A4' as const, margin: 64, writingMode: 'horizontal-tb' as const },
+      blocks: [{ ...plain.blocks[0], rich: [{ text: '東京', ruby: { text: '', base: '東京' } }] }],
     }),
-  ).toBe(true);
+  ).toBe(false);
 });

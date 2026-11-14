@@ -119,9 +119,9 @@ AIの提案は既存の `ArtifactEditor` の propose/accept/reject と `document
 
 ## 9. 宣言能力と非対応
 
-- 共有編集はDocumentの既存の宣言subsetに限る。ルビ・縦書き設定の共有経路はV0〜V1の受入まで非対応として拒否する。
+- 共有編集はDocumentの既存の宣言subsetに限る。ルビと傍点は通常の書式としてstepで共有する。縦書きは原稿の設定で、本文のstepでは変わらない（2026-11-14に拒否をやめた）。
 - 章をまたぐtransaction、章・シーンentity、Story Graph、作品の進行管理は追加しない。
-- 縦書きEPUB/PDFはV3まで拒否のdiagnosticを保ち、水平で近似出力しない。
+- 縦書きEPUB/PDFはV3まで拒否のdiagnosticを保ち、水平で近似出力しない。（V3で対応済み。2026-11-14に縦書きPDFの表・画像・図・コード・リスト、EPUBの画像・リンク・フォント・縦横混在も対応。）
 - 新規の性能測定・tuningは現在の保守条件に従い、本案に含めない。
 
 ## 10. 実装順と受入計画

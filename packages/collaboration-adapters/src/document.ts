@@ -13,12 +13,7 @@ import {
   documentAttributeTransform,
   type DocumentAttributePatch,
 } from '@editor-platform/document/engine';
-import {
-  documentHasRubyOrEmphasis,
-  isDocument,
-  isVerticalDocument,
-  type DocumentContent,
-} from '@editor-platform/document/model';
+import { isDocument, type DocumentContent } from '@editor-platform/document/model';
 import {
   canonical,
   copy,
@@ -141,15 +136,9 @@ export const documentCodec: DomainCodec<DocumentContent> = {
   domain: 'document',
   validate: (v): v is DocumentContent => {
     try {
-      // Ruby, 傍点 and vertical writing are not shared until the novel stages V0–V1 are accepted
-      // (novel-creation design §9).
-      return (
-        isDocument(v) &&
-        validIds(v) &&
-        !containsEmbeddedReference(v) &&
-        !documentHasRubyOrEmphasis(v) &&
-        !isVerticalDocument(v)
-      );
+      // Ruby and 傍点 are ordinary marks and travel in engine steps; the writing mode is a page
+      // setting that text steps never change (novel-creation design §9).
+      return isDocument(v) && validIds(v) && !containsEmbeddedReference(v);
     } catch {
       return false;
     }
@@ -266,11 +255,6 @@ export const documentCodec: DomainCodec<DocumentContent> = {
     const after = nodeToContent(tr.doc, content);
     if (!validNodeIds(tr.doc))
       fail('invalid-operation', 'Text engine IDs must be stable and unique');
-    if (documentHasRubyOrEmphasis(after))
-      fail(
-        'unsupported-operation',
-        'Ruby and emphasis dots are not supported in shared Document editing yet',
-      );
     const beforeResources = engineNodes(tr.before),
       afterResources = engineNodes(tr.doc);
     return {

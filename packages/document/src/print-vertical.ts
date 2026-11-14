@@ -2,6 +2,8 @@ import { breakJapaneseLines } from '@editor-platform/editor-core';
 import type { PrintedTextLine } from './pdf-text';
 import {
   blockFontSize,
+  blockListItems,
+  listBlockTypes,
   blockLineHeight,
   blockSpaceAfter,
   blockSpans,
@@ -10,32 +12,81 @@ import {
   printFont,
 } from './print-renderer';
 import {
+  nestedLists,
   rubyGroups,
   uprightDigitRanges,
   type DocumentBlock,
   type DocumentContent,
+  type DocumentListItem,
   type InlineSpan,
 } from './model';
 
-/** Vertical print covers the novel manuscript subset; other blocks have no vertical layout yet. */
-const verticalBlockTypes = new Set(['paragraph', 'heading']);
-const blockLabels: Record<string, string> = {
+/** Blocks set upright inside the vertical flow, as figures and tables are in a vertical book:
+ * the Host renders each one horizontally and the layout reserves its box. */
+export const verticalFigureTypes = new Set(['image', 'table', 'mermaid', 'code', 'html']);
+const figureLabels: Record<string, string> = {
   image: '画像',
   table: '表',
   mermaid: '図',
   code: 'コード',
   html: 'HTML',
-  'bulleted-list': '箇条書き',
-  'numbered-list': '番号付きリスト',
-  'check-list': 'チェックリスト',
 };
-export function checkVerticalPrintBlocks(blocks: DocumentBlock[]) {
+/** The size of each slice of a figure in pixels, already fitted within `maxWidth` × `maxHeight`;
+ * a long table or code block is several slices. */
+export type VerticalFigureMeasure = (
+  block: DocumentBlock,
+  box: { maxWidth: number; maxHeight: number },
+) => { width: number; height: number }[];
+export interface VerticalFigure {
+  blockId: string;
+  slice: number;
+  /** Left and top of the figure's box on the page. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** How many columns of the page come before the figure, for reading order. */
+  after: number;
+}
+
+/** Lists are set as columns: one per item, with its marker, indented by depth. */
+function verticalListBlocks(block: DocumentBlock): DocumentBlock[] {
+  const out: DocumentBlock[] = [];
+  const walk = (items: DocumentListItem[], numbered: boolean, depth: number, start: number) =>
+    items.forEach((item, index) => {
+      const marker =
+        item.checked === undefined
+          ? numbered
+            ? `${index + start}．`
+            : '・'
+          : item.checked
+            ? '■　'
+            : '□　';
+      const rich = [{ text: marker }, ...item.rich];
+      out.push({
+        id: `${block.id}:${item.id}`,
+        type: 'paragraph',
+        text: rich.map((r) => r.text).join(''),
+        rich,
+        ...(depth || block.indent ? { indent: (block.indent ?? 0) + depth } : {}),
+        ...(block.style ? { style: block.style } : {}),
+      });
+      nestedLists(item).forEach((nested) =>
+        walk(nested.items, nested.type === 'ordered_list', depth + 1, nested.start ?? 1),
+      );
+    });
+  walk(blockListItems(block), block.type === 'numbered-list', 0, block.start ?? 1);
+  return out;
+}
+
+export function checkVerticalPrintBlocks(blocks: DocumentBlock[], figures: boolean) {
+  if (figures) return;
   const unsupported = [
-    ...new Set(blocks.filter((b) => !verticalBlockTypes.has(b.type)).map((b) => b.type)),
+    ...new Set(blocks.filter((b) => verticalFigureTypes.has(b.type)).map((b) => b.type)),
   ];
   if (unsupported.length)
     throw new Error(
-      `縦書きの印刷・PDFは段落と見出しだけに対応しています。未対応: ${unsupported.map((t) => blockLabels[t] ?? t).join('、')}。横書きにするかDOCXで出力してください。`,
+      `縦書きの印刷・PDFで${unsupported.map((t) => figureLabels[t] ?? t).join('、')}を置くには図の描画が必要です。`,
     );
 }
 
@@ -74,6 +125,8 @@ export interface VerticalLayout {
   height: number;
   margin: number;
   pages: VerticalColumn[][];
+  /** Upright figures per page, beside `pages`. */
+  figures: VerticalFigure[][];
 }
 
 const rotated = /^[「」『』（）〔〕［］｛｝〈〉《》【】〘〙〖〗ー～〜…‥—―－‐−=＝<>＜＞(){}[\]]$/u;
@@ -129,11 +182,20 @@ export function layoutVerticalDocument(
   content: DocumentContent,
   page: { width: number; height: number; margin: number },
   measure: (text: string, font: string) => number,
+  measureFigure?: VerticalFigureMeasure,
 ): VerticalLayout {
-  const blocks = content.blocks.filter((b) => !b.hidden);
-  checkVerticalPrintBlocks(blocks);
+  const visible = content.blocks.filter((b) => !b.hidden);
+  checkVerticalPrintBlocks(visible, Boolean(measureFigure));
+  const blocks = visible.flatMap((b) =>
+    listBlockTypes.includes(b.type) ? verticalListBlocks(b) : [b],
+  );
   const { width, height, margin } = page;
   const pages: VerticalColumn[][] = [[]];
+  const figures: VerticalFigure[][] = [[]];
+  const newPage = () => {
+    pages.push([]);
+    figures.push([]);
+  };
   let x = width - margin;
   // Left edge of the previous column's text on this page (the paper's edge before the first);
   // ruby to a column's right must clear it.
@@ -143,7 +205,7 @@ export function layoutVerticalDocument(
     const centre = () => Math.min(x - lineHeight / 2, previousLeft - right);
     if (centre() - lineHeight / 2 < margin) {
       // Spacing never pushes a column off a page: an empty page drops it, a used one turns over.
-      if (pages.at(-1)!.length) pages.push([]);
+      if (pages.at(-1)!.length || figures.at(-1)!.length) newPage();
       x = width - margin;
       previousLeft = width;
       if (centre() - lineHeight / 2 < margin)
@@ -156,7 +218,40 @@ export function layoutVerticalDocument(
     previousLeft = cx - size / 2 - left;
     return cx;
   };
+  /** A figure's box stands at the top of the text area, left of the text before it. */
+  const figure = (block: DocumentBlock) => {
+    const gap = 16;
+    const slices = measureFigure!(block, {
+      maxWidth: width - margin * 2,
+      maxHeight: height - margin * 2,
+    });
+    slices.forEach((slice, index) => {
+      if (Math.min(x, previousLeft) - slice.width < margin) {
+        if (pages.at(-1)!.length || figures.at(-1)!.length) newPage();
+        x = width - margin;
+        previousLeft = width;
+      }
+      const left = Math.min(x, previousLeft) - slice.width;
+      figures.at(-1)!.push({
+        blockId: block.id,
+        slice: index,
+        x: left,
+        y: margin,
+        width: slice.width,
+        height: slice.height,
+        after: pages.at(-1)!.length,
+      });
+      x = left - gap;
+      previousLeft = left - gap;
+    });
+  };
   for (const block of blocks) {
+    if (verticalFigureTypes.has(block.type)) {
+      if (block.style?.spaceBefore) x -= (block.style.spaceBefore * 4) / 3;
+      figure(block);
+      x -= blockSpaceAfter(block);
+      continue;
+    }
     const size = blockFontSize(block);
     const lineHeight = blockLineHeight(block, size) ?? size * 1.75;
     const family = block.style?.fontFamily;
@@ -286,16 +381,29 @@ export function layoutVerticalDocument(
     }
     x -= blockSpaceAfter(block);
   }
-  return { width, height, margin, pages };
+  return { width, height, margin, pages, figures };
 }
 
-/** Text for the invisible search/copy layer, one entry per column in reading order. */
-export function verticalTextLines(layout: VerticalLayout): PrintedTextLine[][] {
+/** Text for the invisible search/copy layer in reading order: each column, and each figure's
+ * own horizontal lines (from `figureText`, relative to the figure's box) where it stands. */
+export function verticalTextLines(
+  layout: VerticalLayout,
+  figureText?: (figure: VerticalFigure) => PrintedTextLine[],
+): PrintedTextLine[][] {
   let order = 0;
-  return layout.pages.map((columns) =>
-    columns.map((col) => {
+  return layout.pages.map((columns, page) => {
+    const out: PrintedTextLine[] = [];
+    const placed = layout.figures?.[page] ?? [];
+    const addFigures = (before: number) => {
+      for (const fig of placed)
+        if (fig.after === before)
+          for (const line of figureText?.(fig) ?? [])
+            out.push({ ...line, x: line.x + fig.x, y: line.y + fig.y, order: order++ });
+    };
+    columns.forEach((col, index) => {
+      addFigures(index);
       const last = col.glyphs.at(-1);
-      return {
+      out.push({
         text: col.glyphs.map((g) => g.text).join(''),
         x: col.x,
         y: col.top,
@@ -303,9 +411,11 @@ export function verticalTextLines(layout: VerticalLayout): PrintedTextLine[][] {
         width: last ? last.y + last.advance - col.top : 0,
         order: order++,
         vertical: true,
-      };
-    }),
-  );
+      });
+    });
+    addFigures(columns.length);
+    return out;
+  });
 }
 
 /** One glyph centred at (x, mid) in a vertical line of the given size. */
@@ -370,7 +480,11 @@ function paintGlyph(ctx: CanvasRenderingContext2D, col: VerticalColumn, glyph: V
   }
 }
 
-export function paintVerticalPages(layout: VerticalLayout) {
+/** `figure` returns the horizontal rendering of a figure slice, drawn at its box unscaled. */
+export function paintVerticalPages(
+  layout: VerticalLayout,
+  figure?: (figure: VerticalFigure) => CanvasImageSource | undefined,
+) {
   return layout.pages.map((columns, index) => {
     const canvas = document.createElement('canvas');
     canvas.width = layout.width * 2;
@@ -379,6 +493,10 @@ export function paintVerticalPages(layout: VerticalLayout) {
     ctx.scale(2, 2);
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, layout.width, layout.height);
+    for (const fig of layout.figures?.[index] ?? []) {
+      const image = figure?.(fig);
+      if (image) ctx.drawImage(image, fig.x, fig.y, fig.width, fig.height);
+    }
     for (const col of columns) {
       for (const glyph of col.glyphs) paintGlyph(ctx, col, glyph);
       const rubySize = col.size * 0.5;

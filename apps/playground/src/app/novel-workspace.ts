@@ -104,16 +104,52 @@ const chapters: { name: string; blocks: DocumentBlock[] }[] = [
   },
 ];
 
-function chapterContent(blocks: DocumentBlock[]): DocumentContent {
+function chapterContent(blocks: DocumentBlock[], vertical = true): DocumentContent {
   const value: DocumentContent = {
     schemaVersion: 2,
-    page: { size: 'A4', margin: 64, writingMode: 'vertical-rl' },
+    page: { size: 'A4', margin: 64, ...(vertical ? { writingMode: 'vertical-rl' as const } : {}) },
     blocks,
   };
   // Round-trip through the native engine so the seed matches what editing would produce.
   return nodeToContent(contentToNode(value), value);
 }
 
+/** A new novel: its title, writing direction and number of chapters (1 to `novelChapterLimit`). */
+export interface NovelCreationOptions {
+  title: string;
+  writingMode: 'vertical-rl' | 'horizontal-tb';
+  chapters: number;
+}
+export const novelChapterLimit = 50;
+const kanjiNumber = (n: number) => {
+  const digits = '〇一二三四五六七八九';
+  if (n < 10) return digits[n];
+  const tens = Math.floor(n / 10),
+    ones = n % 10;
+  return `${tens > 1 ? digits[tens] : ''}十${ones ? digits[ones] : ''}`;
+};
+/** Empty chapters (a 第N章 heading and an empty paragraph), each with a first saved version. */
+export async function makeBlankNovelArtifacts(
+  options: NovelCreationOptions,
+): Promise<StoredArtifact[]> {
+  const title = options.title.trim() || '無題の小説';
+  if (!Number.isSafeInteger(options.chapters) || options.chapters < 1)
+    throw new Error('章の数は1以上の整数にしてください');
+  if (options.chapters > novelChapterLimit) throw new Error(`章の数は${novelChapterLimit}までです`);
+  return Promise.all(
+    Array.from({ length: options.chapters }, async (_, i) => {
+      const n = i + 1,
+        heading = `第${kanjiNumber(n)}章`;
+      const content = chapterContent(
+        [h1(`chapter-${n}-title`, heading), p(`chapter-${n}-p1`)],
+        options.writingMode === 'vertical-rl',
+      );
+      const draft = createArtifact('document', `${title}\u3000${heading}`, content);
+      const saved = await commitVersion(draft, null, '小説の作成');
+      return { ...saved, annotations: [] };
+    }),
+  );
+}
 /** Saved chapters: 通読 composes committed versions only, so each chapter starts with one. */
 export async function makeNovelArtifacts(): Promise<StoredArtifact[]> {
   return Promise.all(
@@ -161,6 +197,24 @@ export function readNovelChapters(id: string): string[] | undefined {
       : undefined;
   } catch {
     return undefined;
+  }
+}
+const goalKey = (id: string) => `editor-platform.novel-goal.${id}`;
+/** The author's character goal for a chapter; undefined when none is set. */
+export function readNovelGoal(id: string): number | undefined {
+  try {
+    const value = Number(localStorage.getItem(goalKey(id)) ?? NaN);
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+export function writeNovelGoal(id: string, goal: number | undefined) {
+  try {
+    if (goal === undefined) localStorage.removeItem(goalKey(id));
+    else localStorage.setItem(goalKey(id), String(goal));
+  } catch {
+    /* A goal is a view preference; it never prevents editing. */
   }
 }
 function writeNovelChapters(ids: string[]) {

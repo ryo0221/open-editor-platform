@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
-import type { EditorCommand } from '@editor-platform/editor-core';
+import type { Annotation, EditorCommand } from '@editor-platform/editor-core';
 import { Section } from '@editor-platform/editor-ui';
 import {
   ReferenceImage,
@@ -19,6 +19,7 @@ import {
 import {
   isVerticalDocument,
   nestedLists,
+  resolveDocumentAddress,
   rubyGroups,
   type DocumentBlock,
   type DocumentContent,
@@ -46,7 +47,13 @@ export interface DocumentNovelOptions {
   reading?: { content: DocumentContent; label?: string };
   /** Why the Host could not compose a read-through, shown next to the disabled 通読. */
   readingUnavailable?: string;
+  /** The Host's character goal for this chapter, counted with `characterCount`. The Host stores
+   * it; with `onGoalChange` the author can set or clear it here. */
+  goal?: number;
+  onGoalChange?(goal: number | undefined): void;
 }
+/** The largest character goal the panel accepts (a long novel is about 1,000,000). */
+export const novelGoalLimit = 10_000_000;
 
 const headingText = (block: DocumentBlock) =>
   (block.rich?.map((span) => span.text).join('') ?? block.text) || '無題';
@@ -102,11 +109,14 @@ export function NovelManuscriptPanel({
   options,
   readOnly,
   choose,
+  annotations = [],
 }: {
   content: DocumentContent;
   options?: DocumentNovelOptions;
   readOnly: boolean;
   choose(id: string): void;
+  /** The Host's range annotations (reader remarks). Shown and followed; never edited here. */
+  annotations?: readonly Annotation[];
 }) {
   const summary = useMemo(() => {
     try {
@@ -160,6 +170,13 @@ export function NovelManuscriptPanel({
             約{paper.sheets.toLocaleString('ja-JP')}枚（{paper.columns}×{paper.rows}・
             {paper.lines.toLocaleString('ja-JP')}行）
           </dd>
+          {(options?.goal !== undefined || options?.onGoalChange) && (
+            <NovelGoal
+              total={count.total}
+              goal={options.goal}
+              onChange={readOnly ? undefined : options.onGoalChange}
+            />
+          )}
         </dl>
         <p className="ep-novel-note">
           {count.rule.whitespace ? '空白を含む' : '空白を除く'}・
@@ -170,6 +187,7 @@ export function NovelManuscriptPanel({
           近似です。
         </p>
       </Section>
+      <NovelAnnotations content={content} annotations={annotations} choose={choose} />
       {rubies.length > 0 && (
         <Section title={`ルビの確認（${rubies.length}件）`}>
           <ul className="ep-novel-findings">
@@ -230,6 +248,116 @@ export function NovelManuscriptPanel({
         </Section>
       )}
     </div>
+  );
+}
+
+/** Goal and progress. A goal is a whole number of characters, 1 to `novelGoalLimit`. */
+function NovelGoal({
+  total,
+  goal,
+  onChange,
+}: {
+  total: number;
+  goal?: number;
+  onChange?(goal: number | undefined): void;
+}) {
+  const valid = goal !== undefined && Number.isSafeInteger(goal) && goal > 0;
+  const [text, setText] = useState<string>();
+  const shown = text ?? (valid ? String(goal) : '');
+  const commit = () => {
+    if (text === undefined) return;
+    setText(undefined);
+    const trimmed = text.trim();
+    if (!trimmed) return onChange?.(undefined);
+    const value = Number(trimmed);
+    if (Number.isSafeInteger(value) && value > 0 && value <= novelGoalLimit) onChange?.(value);
+  };
+  return (
+    <>
+      <dt>目標</dt>
+      <dd>
+        {onChange ? (
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={novelGoalLimit}
+            step={1}
+            aria-label="文字数の目標"
+            placeholder="なし"
+            value={shown}
+            onChange={(event) => setText(event.currentTarget.value)}
+            onBlur={commit}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) commit();
+              if (event.key === 'Escape') setText(undefined);
+            }}
+          />
+        ) : valid ? (
+          `${goal.toLocaleString('ja-JP')}字`
+        ) : (
+          'なし'
+        )}
+        {valid && (
+          <span aria-label="目標までの進み具合" className="ep-novel-goal">
+            {total >= goal
+              ? `達成（${Math.floor((total / goal) * 100)}%）`
+              : `${Math.floor((total / goal) * 100)}%・残り${(goal - total).toLocaleString('ja-JP')}字`}
+          </span>
+        )}
+      </dd>
+    </>
+  );
+}
+
+/** Range annotations on this chapter: open first, each followed to its block. */
+function NovelAnnotations({
+  content,
+  annotations,
+  choose,
+}: {
+  content: DocumentContent;
+  annotations: readonly Annotation[];
+  choose(id: string): void;
+}) {
+  if (!annotations.length) return null;
+  const blocks = new Map(content.blocks.map((block) => [block.id, block]));
+  const open = annotations.filter((a) => !a.resolved).length;
+  const ordered = [...annotations].sort((a, b) => Number(a.resolved) - Number(b.resolved));
+  return (
+    <Section title={`範囲の指摘（未解決${open}件）`}>
+      <ul className="ep-novel-findings" aria-label="範囲の指摘">
+        {ordered.map((annotation) => {
+          // As the editor's highlights do, follow the range only while it still resolves.
+          const found = annotation.anchor.addresses
+            .map((address) => ({
+              state: resolveDocumentAddress(content, address).state,
+              block: blocks.get(address.elementId),
+            }))
+            .find((r) => r.block && r.state !== 'Orphan');
+          const target = found?.block;
+          const changed = found?.state === 'Outdated' ? '（範囲の文が変わりました）' : '';
+          const first = annotation.comments[0];
+          const label = `${first?.body ?? ''}${annotation.comments.length > 1 ? `（ほか${annotation.comments.length - 1}件）` : ''}`;
+          const where = target ? headingText(target).slice(0, 24) : undefined;
+          return (
+            <li key={annotation.id} data-resolved={annotation.resolved || undefined}>
+              {target ? (
+                <button type="button" onClick={() => choose(target.id)}>
+                  {annotation.resolved ? '解決済み・' : ''}「{where}」{changed}：{label}
+                </button>
+              ) : (
+                <span>
+                  {annotation.resolved ? '解決済み・' : ''}
+                  元の範囲がこの章にありません（削除されたか、別の章です）：{label}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="ep-novel-note">指摘は本文を変えません。付け方と解決はHostの注釈で行います。</p>
+    </Section>
   );
 }
 

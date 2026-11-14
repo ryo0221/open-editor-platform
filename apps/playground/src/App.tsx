@@ -10,7 +10,12 @@ import {
   writeMangaWorkspace,
   type MangaCreationOptions,
 } from './app/manga-workspace';
-import { makeNovelArtifacts, saveNewNovel } from './app/novel-workspace';
+import {
+  makeBlankNovelArtifacts,
+  makeNovelArtifacts,
+  saveNewNovel,
+  type NovelCreationOptions,
+} from './app/novel-workspace';
 import { createEstimateReferenceAdapter } from '@editor-platform/estimate/references';
 import { playgroundEstimateQuantities } from './app/estimate-bim';
 import { createAnalysisReferenceAdapter } from '@editor-platform/analysis/references';
@@ -719,13 +724,19 @@ export default function App({
     return task;
   }
   const novelCreation = useRef<
-    { artifacts: Promise<StoredArtifact[]>; pending?: Promise<void> } | undefined
+    { key: string; artifacts: Promise<StoredArtifact[]>; pending?: Promise<void> } | undefined
   >(undefined);
-  function createNovel(): Promise<void> {
+  function createNovel(options?: NovelCreationOptions): Promise<void> {
     if (novelCreation.current?.pending) return novelCreation.current.pending;
     if (!loaded || shared || busy || readOnly || !flushInputs()) return Promise.resolve();
-    // Retries reuse the same chapters, so a failed save never leaves a second novel behind.
-    novelCreation.current ??= { artifacts: makeNovelArtifacts() };
+    // Retries with the same choices reuse the same chapters, so a failed save never leaves a
+    // second novel behind; changed choices start over.
+    const key = JSON.stringify(options ?? 'demo');
+    if (novelCreation.current?.key !== key)
+      novelCreation.current = {
+        key,
+        artifacts: options ? makeBlankNovelArtifacts(options) : makeNovelArtifacts(),
+      };
     const request = novelCreation.current;
     const task = (async () => {
       try {

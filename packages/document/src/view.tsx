@@ -380,6 +380,7 @@ export function DocumentSurface({
               options={novel}
               readOnly={readOnly}
               choose={chooseOutline}
+              annotations={annotations}
             />
           )}
         </>

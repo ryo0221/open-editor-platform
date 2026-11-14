@@ -398,6 +398,12 @@ test('N2 horizontal EPUB reviews exact saved chapters and refuses stale or inval
   await expect(page.getByLabel('Save state')).toHaveText('Saved');
   await expect(review.getByLabel('EPUB state')).toHaveText('Stale');
   await expect(review.getByRole('button', { name: 'Download EPUB', exact: true })).toBeDisabled();
+  // A chosen font invalidates the plan; preparing again embeds exactly that file.
+  await review.getByLabel(/^Embed font/).setInputFiles({
+    name: 'BookSerif.otf',
+    mimeType: 'font/otf',
+    buffer: Buffer.from([0x4f, 0x54, 0x54, 0x4f, 1, 2, 3]),
+  });
   await review.getByRole('button', { name: 'Prepare EPUB preview', exact: true }).click();
   await expect(review.getByLabel('EPUB state')).toHaveText('Prepared');
   const report = JSON.parse((await review.getByLabel('EPUB report').textContent())!);
@@ -418,6 +424,11 @@ test('N2 horizontal EPUB reviews exact saved chapters and refuses stale or inval
   expect(strFromU8(files['EPUB/chapter-001.xhtml'])).toContain('第3章');
   expect(strFromU8(files['EPUB/chapter-003.xhtml'])).toContain('第1章');
   expect(JSON.parse(strFromU8(files['EPUB/export-report.json']))).toEqual(report);
+  expect(report.resources).toEqual([
+    expect.objectContaining({ path: 'EPUB/fonts/font-1.otf', mediaType: 'font/otf', bytes: 7 }),
+  ]);
+  expect([...files['EPUB/fonts/font-1.otf']]).toEqual([0x4f, 0x54, 0x54, 0x4f, 1, 2, 3]);
+  expect(strFromU8(files['EPUB/style.css'])).toContain('font-family: "BookSerif"');
   const after = await page.evaluate(() =>
     [1, 2, 3].map((n) => JSON.parse(localStorage.getItem(`authoring:chapter-${n}`)!)),
   );

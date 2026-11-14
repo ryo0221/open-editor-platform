@@ -29,7 +29,7 @@ Until that gate is complete: no signed paid proprietary licenses, fee representa
 
 ## Community contribution policy until legal intake is ready
 
-Discuss Issues and code suggestions freely, but **do not merge externally owned source contributions** into a codebase intended for proprietary relicensing until adequate documented AGPL + commercial relicensing permissions and provenance review are in place. PR approval alone is not an assignment or broad sublicense. The independent Editor linking exception is still **a draft**, not a presently effective exemption.
+Discuss Issues and code suggestions freely, but **do not merge externally owned source contributions** into a codebase intended for proprietary relicensing until adequate documented AGPL + commercial relicensing permissions and provenance review are in place. PR approval alone is not an assignment or broad sublicense. Since 2026-11-14 the [Contributor License Agreement](../CONTRIBUTOR-LICENSING.md) version 1.0 (adopted without legal review) provides that permission; merge an external code PR only after the contributor has accepted it. The independent Editor linking exception is still **a draft**, not a presently effective exemption.
 
 ## Operational constraints
 

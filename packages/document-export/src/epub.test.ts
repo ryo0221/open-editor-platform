@@ -131,7 +131,7 @@ it('captures source and metadata before awaits, and cannot waive warnings/errors
 it('rejects unsupported links/blocks, invalid XML, corrupt or missing exact versions without partial bytes', async () => {
   for (const change of [
     (d: DocumentContent) => {
-      d.blocks[1].rich![0].link = '#scene';
+      d.blocks[1].rich![0].link = 'javascript:alert(1)';
     },
     (d: DocumentContent) => {
       d.blocks[1].rich![0].text = '\u0000';
@@ -161,8 +161,9 @@ it('rejects unsupported links/blocks, invalid XML, corrupt or missing exact vers
   const corrupt = await prepareDocumentEpub(sources, metadata);
   expect((await encodeDocumentEpub(corrupt, consent(corrupt))).status).toBe('blocked');
 });
+const png = 'data:image/png;base64,iVBORw0KGgo=';
 it.each(['horizontal-tb', 'vertical-rl'] as const)(
-  'keeps images unsupported in %s EPUB without silent loss or partial bytes',
+  'packages embedded images with alt and caption in %s EPUB, and refuses remote images',
   async (writingMode) => {
     const sources = await withContent((content) => {
       content.page = { size: 'A4', margin: 64, writingMode };
@@ -170,52 +171,166 @@ it.each(['horizontal-tb', 'vertical-rl'] as const)(
         id: 'ordinary-image',
         type: 'image',
         text: '',
-        src: 'data:image/png;base64,AA==',
-        alt: 'Map',
-        caption: 'A caption that must not silently disappear',
+        src: png,
+        alt: 'Map < 1',
+        caption: '港の地図 & 坂',
         width: 500,
       });
     });
     const before = canonicalJson(sources);
     const plan = await prepareDocumentEpub(sources, metadata);
-    const errors = plan.report.diagnostics.filter((d) => d.severity === 'error');
-    expect(errors).toHaveLength(3);
-    expect(errors).toEqual(
+    expect(plan.report.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+    // One image used by three chapters is packaged once.
+    expect(plan.report.resources).toEqual([
+      expect.objectContaining({
+        path: 'EPUB/images/image-1.png',
+        mediaType: 'image/png',
+        bytes: 8,
+      }),
+    ]);
+    const result = await encodeDocumentEpub(plan, consent(plan));
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    const files = unzipSync(result.bytes);
+    expect([...files['EPUB/images/image-1.png']]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    const chapter = strFromU8(files['EPUB/chapter-002.xhtml']);
+    expect(chapter).toContain(
+      '<img src="images/image-1.png" alt="Map &lt; 1" width="500"/><figcaption>港の地図 &amp; 坂</figcaption></figure>',
+    );
+    expect(strFromU8(files['EPUB/package.opf'])).toContain(
+      '<item id="resource-1" href="images/image-1.png" media-type="image/png"/>',
+    );
+    expect(canonicalJson(sources)).toBe(before);
+
+    const remote = await withContent((content) => {
+      content.page = { size: 'A4', margin: 64, writingMode };
+      content.blocks.push({
+        id: 'remote',
+        type: 'image',
+        text: '',
+        src: 'https://example.com/a.png',
+      });
+    });
+    const refused = await prepareDocumentEpub(remote, metadata);
+    expect(refused.report.diagnostics.filter((d) => d.severity === 'error')).toEqual(
       [0, 1, 2].map((i) =>
         expect.objectContaining({
-          code: 'IMAGE_UNSUPPORTED',
-          severity: 'error',
+          code: 'IMAGE_SOURCE_UNSUPPORTED',
           effect: 'blocked',
-          address: { domain: 'document', blockId: `sequence:${i}:ordinary-image` },
+          address: { domain: 'document', blockId: `sequence:${i}:remote` },
         }),
       ),
     );
-    expect(plan.report.chapters).toEqual([]);
-    const result = await encodeDocumentEpub(plan, consent(plan));
-    expect(result.status).toBe('blocked');
-    expect(result).not.toHaveProperty('bytes');
-    expect(canonicalJson(sources)).toBe(before);
+    const blocked = await encodeDocumentEpub(refused, consent(refused));
+    expect(blocked.status).toBe('blocked');
+    expect(blocked).not.toHaveProperty('bytes');
   },
 );
-it('refuses mixed writing modes, also when only a later chapter is vertical', async () => {
+it("keeps each chapter's writing mode when vertical and horizontal chapters are mixed", async () => {
   const sources = await chapters();
   const content = clone(sources[2].artifact.draft.content);
   content.page = { size: 'A4', margin: 64, writingMode: 'vertical-rl' };
+  content.blocks[1].indent = 1;
   sources[2].artifact = clone(
     await commitVersion(createArtifact('document', 'Vertical', content), null, 'fixture'),
   );
   sources[2].versionId = sources[2].artifact.versions[0].versionId;
   const plan = await prepareDocumentEpub(sources, metadata);
   expect(plan.report.diagnostics).toContainEqual(
-    expect.objectContaining({ code: 'MIXED_WRITING_MODE', severity: 'error' }),
+    expect.objectContaining({
+      code: 'MIXED_WRITING_MODE',
+      severity: 'warning',
+      requiresAcceptance: true,
+    }),
   );
-  expect((await encodeDocumentEpub(plan, consent(plan))).status).toBe('blocked');
+  expect(plan.report.format).toBe('epub3-horizontal');
+  expect(plan.report.chapters.map((c) => c.writingMode)).toEqual([
+    'horizontal-tb',
+    'horizontal-tb',
+    'vertical-rl',
+  ]);
+  const result = await encodeDocumentEpub(plan, consent(plan));
+  expect(result.status).toBe('ok');
+  if (result.status !== 'ok') return;
+  const files = unzipSync(result.bytes);
+  const read = (p: string) => strFromU8(files[p]);
+  expect(read('EPUB/chapter-001.xhtml')).toContain('lang="ja" class="horizontal">');
+  expect(read('EPUB/chapter-003.xhtml')).toContain('lang="ja" class="vertical">');
+  expect(read('EPUB/chapter-003.xhtml')).toContain('margin-top:1.5em;');
+  expect(read('EPUB/style.css')).toContain('html.vertical { writing-mode: vertical-rl;');
+  expect(read('EPUB/package.opf')).toContain('page-progression-direction="ltr"');
 });
-async function withContent(change: (d: DocumentContent) => void) {
+it('keeps web, mail and in-book links, resolving in-book targets to their chapter', async () => {
+  const sources = await withContent((d, n) => {
+    d.blocks[1].rich = [
+      { text: 'web', link: 'https://example.com/?a=1&b=2' },
+      { text: 'mail', link: 'mailto:a@example.com' },
+      { text: 'here', link: '#title' },
+      { text: 'there', link: n === 0 ? '#only-in-third' : '#title' },
+      { text: 'gone', link: '#hidden' },
+    ];
+    d.blocks[1].text = 'webmailheretheregone';
+    if (n === 2) d.blocks.push({ id: 'only-in-third', type: 'paragraph', text: '終わり' });
+  });
+  const plan = await prepareDocumentEpub(sources, metadata);
+  expect(plan.report.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(plan.report.diagnostics.filter((d) => d.code === 'LINK_TARGET_MISSING')).toHaveLength(3);
+  const result = await encodeDocumentEpub(plan, consent(plan));
+  expect(result.status).toBe('ok');
+  if (result.status !== 'ok') return;
+  const files = unzipSync(result.bytes);
+  const first = strFromU8(files['EPUB/chapter-001.xhtml']);
+  expect(first).toContain('<a href="https://example.com/?a=1&amp;b=2">web</a>');
+  expect(first).toContain('<a href="mailto:a@example.com">mail</a>');
+  expect(first).toContain('<a href="chapter-001.xhtml#block-1">here</a>');
+  expect(first).toContain('<a href="chapter-003.xhtml#block-4">there</a>');
+  // A hidden target is not in the book: the text stays, without a link.
+  expect(first).toContain('</a>gone</p>');
+  expect(strFromU8(files['EPUB/chapter-002.xhtml'])).toContain(
+    '<a href="chapter-002.xhtml#block-1">here</a>',
+  );
+});
+it('embeds Host-chosen fonts with @font-face and refuses bytes that do not match the format', async () => {
+  const otf = new Uint8Array([0x4f, 0x54, 0x54, 0x4f, 1, 2, 3]);
+  const sources = await withContent((d) => {
+    d.blocks[1].style = { ...d.blocks[1].style, fontFamily: 'Noto Sans Mono CJK JP' };
+  });
+  const fonts = [{ family: 'Book Serif', format: 'otf' as const, data: otf }];
+  const plan = await prepareDocumentEpub(sources, metadata, undefined, { fonts });
+  otf[4] = 9; // Bytes are captured when the plan is prepared.
+  expect(plan.report.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
+  expect(plan.report.diagnostics).toContainEqual(
+    expect.objectContaining({ code: 'FONT_NOT_EMBEDDED', severity: 'warning' }),
+  );
+  expect(plan.report.resources).toEqual([
+    expect.objectContaining({ path: 'EPUB/fonts/font-1.otf', mediaType: 'font/otf', bytes: 7 }),
+  ]);
+  const result = await encodeDocumentEpub(plan, consent(plan));
+  expect(result.status).toBe('ok');
+  if (result.status !== 'ok') return;
+  const files = unzipSync(result.bytes);
+  expect([...files['EPUB/fonts/font-1.otf']]).toEqual([0x4f, 0x54, 0x54, 0x4f, 1, 2, 3]);
+  const css = strFromU8(files['EPUB/style.css']);
+  expect(css).toContain(
+    '@font-face { font-family: "Book Serif"; src: url("fonts/font-1.otf") format("opentype"); font-weight: 400; }',
+  );
+  expect(css).toContain('font-family: "Book Serif", serif;');
+  expect(strFromU8(files['EPUB/package.opf'])).toContain('media-type="font/otf"');
+  for (const bad of [
+    { family: 'Wrong', format: 'woff2' as const, data: new Uint8Array([0x4f, 0x54, 0x54, 0x4f]) },
+    { family: 'x"; } body { color: red', format: 'otf' as const, data: otf },
+  ]) {
+    const refused = await prepareDocumentEpub(sources, metadata, undefined, { fonts: [bad] });
+    expect(refused.report.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'INVALID_FONT', severity: 'error' }),
+    );
+  }
+});
+async function withContent(change: (d: DocumentContent, index: number) => void) {
   const sources = await chapters();
   for (const [i, source] of sources.entries()) {
     const content = clone(source.artifact.draft.content);
-    change(content);
+    change(content, i);
     source.artifact = clone(
       await commitVersion(createArtifact('document', `第${i + 1}章`, content), null, 'fixture'),
     );
@@ -287,7 +402,7 @@ it('encodes an all-vertical sequence as a right-to-left vertical EPUB with ruby 
   );
   expect(plan.report).toMatchObject({
     format: 'epub3-vertical',
-    exporterVersion: 'epub-vertical/1.0.0',
+    exporterVersion: 'epub-vertical/1.1.0',
   });
   expect(plan.report.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
   expect(plan.report.diagnostics).toContainEqual(
@@ -303,6 +418,7 @@ it('encodes an all-vertical sequence as a right-to-left vertical EPUB with ruby 
   );
   expect(read('EPUB/chapter-001.xhtml')).toContain('margin-top:1.5em;');
   expect(read('EPUB/style.css')).toContain('writing-mode: vertical-rl');
+  expect(read('EPUB/chapter-001.xhtml')).toContain('class="vertical"');
   expect(read('EPUB/package.opf')).toContain('page-progression-direction="rtl"');
   await mkdir('/tmp/epub-validation', { recursive: true });
   await writeFile('/tmp/epub-validation/vertical.epub', result.bytes);

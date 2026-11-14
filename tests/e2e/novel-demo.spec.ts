@@ -68,3 +68,72 @@ test('novel demo: sample chapters open in the novel workspace with ruby, notatio
   await page.reload();
   await expect(workspace).toHaveAttribute('data-workspace', 'novel');
 });
+
+test('new novel: chooses horizontal and the number of chapters, keeps a character goal and lists range notes', async ({
+  page,
+}, info) => {
+  await page.goto('/');
+  const library = page.getByRole('complementary', { name: 'Artifact library' });
+  if (!(await library.isVisible()))
+    await page
+      .getByRole('button', { name: /library/i })
+      .first()
+      .click();
+  await library.getByText('小説を作成', { exact: true }).click();
+  await library.getByLabel('小説の題名').fill('港の話');
+  await library.getByLabel('小説の組み方').selectOption('horizontal-tb');
+  await library.getByLabel('小説の章の数').fill('2');
+  await library.getByRole('button', { name: '小説を新規作成', exact: true }).click();
+  const workspace = page.locator('[data-workspace]');
+  await expect(workspace).toHaveAttribute('data-workspace', 'novel');
+  await expect(page.getByRole('textbox', { name: 'Artifact name' })).toHaveValue(/港の話\s第一章/);
+  await expect(page.getByRole('button', { name: '縦書き', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  const order = await page.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('editor-platform.novel-chapters.'))
+      .map((k) => JSON.parse(localStorage.getItem(k)!) as string[]),
+  );
+  expect(order).toHaveLength(2);
+
+  const editor = page.locator('.ProseMirror').first();
+  await editor.locator('p').first().click();
+  await page.keyboard.type('坂の上に灯台がある。');
+  const panel = await inspector(page);
+  const goal = panel.getByLabel('文字数の目標');
+  await goal.fill('20');
+  await goal.press('Enter');
+  await expect(panel.getByLabel('目標までの進み具合')).toContainText('残り');
+  await page.screenshot({ path: info.outputPath('novel-new-goal.png') });
+
+  // A range note from the Host's comments shows in the novel screen and jumps to its paragraph.
+  await closeInspector(page);
+  const paragraph = editor.locator('p').first();
+  await paragraph.click({ clickCount: 3 });
+  await page.getByRole('button', { name: 'More artifact actions', exact: true }).click();
+  await page.getByRole('button', { name: /^Comments \(/ }).click();
+  await page.keyboard.press('Escape');
+  await page.getByPlaceholder('Leave a note on this selection…').fill('灯台の位置を確認');
+  await page.getByRole('button', { name: 'Add comment', exact: true }).click();
+  await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+  const notes = (await inspector(page)).getByRole('list', { name: '範囲の指摘' });
+  await expect(notes).toContainText('灯台の位置を確認');
+  await expect(await inspector(page)).toContainText('範囲の指摘（未解決1件）');
+  await expect(notes.getByRole('button')).toContainText('灯台の位置を確認');
+  // Once the noted sentence is gone, the note no longer points at the paragraph's new text.
+  await closeInspector(page);
+  await paragraph.click({ clickCount: 3 });
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('別の文。');
+  await expect((await inspector(page)).getByRole('list', { name: '範囲の指摘' })).toContainText(
+    '元の範囲がこの章にありません',
+  );
+  await expect(notes.getByRole('button')).toHaveCount(0);
+
+  await page.reload();
+  await expect(workspace).toHaveAttribute('data-workspace', 'novel');
+  await expect(page.locator('.ProseMirror').first()).toContainText('別の文');
+  await expect((await inspector(page)).getByLabel('文字数の目標')).toHaveValue('20');
+});
