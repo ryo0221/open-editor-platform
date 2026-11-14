@@ -28,10 +28,27 @@ export interface CadResource {
   bytes: string;
 }
 /**
- * The native file must stay importable: the same limit as native import (the current Host's
- * 16 MB). STEP is refused before it would cross it; the limit itself is not raised for CAD.
+ * The native file must stay importable: the same limit as the Playground's native import of a
+ * CAD, building, character or construction-schedule file (a schedule keeps its building versions). CR7f raised it from 16 MB to 256 MB so that a whole car read
+ * from a STEP file of up to 64 MiB (its source file and its parts' BReps) can be kept. Anything
+ * that would cross it is refused before it is stored.
  */
-export const cadNativeFileBytes = 16_000_000;
+export const cadNativeLimit = {
+  /** Unit tests lower it to keep their records small; nothing else changes it. */
+  bytes: 256_000_000,
+};
+/** The kinds whose native files may be that large; the others keep the Host's 64 MiB. */
+export const cadNativeKinds: ReadonlySet<string> = new Set([
+  'cad',
+  'bim',
+  'character',
+  'construction',
+]);
+/** The Host's native JSON limit for a record of this kind (undefined: the Host's own). */
+export const hostNativeLimitOf = (kind: string) =>
+  cadNativeKinds.has(kind) ? cadNativeLimit.bytes : undefined;
+/** The limit as messages name it. */
+export const cadNativeLimitText = () => `${cadNativeLimit.bytes / 1e6} MB`;
 /** Room kept for the edit that names the staged assets (refs, feature, placement, body). */
 export const cadInsertReserveBytes = 8 * 1024;
 
@@ -113,8 +130,8 @@ export const nativeBytes = (record: StoredArtifact) =>
 export function assertCadNativeFits(record: StoredArtifact, action: 'version' | 'export') {
   if (record.kind !== 'cad' && record.kind !== 'character') return;
   const size = nativeBytes(portableCadRecord(record));
-  if (size <= cadNativeFileBytes) return;
-  const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます`;
+  if (size <= cadNativeLimit.bytes) return;
+  const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の${cadNativeLimitText()}を超えます`;
   throw new Error(
     action === 'version'
       ? `Versionを保存すると${mb}。保存しません。下書きは保持しています。`
@@ -233,9 +250,9 @@ export function createCadAssetStore(options: {
           ),
         ],
       });
-      if (size + cadInsertReserveBytes > cadNativeFileBytes)
+      if (size + cadInsertReserveBytes > cadNativeLimit.bytes)
         throw new Error(
-          `（native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます）`,
+          `（native fileが${(size / 1e6).toFixed(1)} MBになり、上限の${cadNativeLimitText()}を超えます）`,
         );
       if (!(await options.persist({ ...record, cadResources: resources })))
         throw new Error('（ブラウザへの保存に失敗しました）');

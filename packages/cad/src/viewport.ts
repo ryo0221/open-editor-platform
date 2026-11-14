@@ -63,6 +63,7 @@ import {
   gridForView,
   orbitRotateSpeed,
   standardViews,
+  threeViewLayout,
   viewOf,
   type Bounds,
   type CadStandardView,
@@ -79,6 +80,7 @@ import {
   type ViewportPart,
 } from './assembly-view';
 import type { CadDragRay } from './joint-drag';
+import type { CadRenderMeshes } from './assembly';
 import { cadBudgets } from './controller';
 
 export interface ViewportBody {
@@ -137,7 +139,9 @@ export type CadShading =
   /** Shaded under the realistic lighting: environment light, tone mapping, shadows (#665). */
   | { mode: 'realistic' }
   | { mode: 'zebra'; axis: 'x' | 'y' | 'z'; stripes: number; selectedOnly?: boolean }
-  | { mode: 'curvature'; range: number };
+  | { mode: 'curvature'; range: number }
+  /** CLF6: every body black on white, no grid: the outline alone (CLF1b). */
+  | { mode: 'silhouette' };
 /** The comb's colour: teeth and the line through their tips. */
 const combColor = '#7c3aed';
 const zebraVertex = `
@@ -318,6 +322,14 @@ export class CadViewport {
   /** CR6c: the ray diagram's lines. */
   private readonly rays = new Group();
   private shading: CadShading = { mode: 'shaded' };
+  /** CLF1b: the drawing board's three panes are drawn instead of the current camera. */
+  private threeView = false;
+  /** The board's pane cameras, by the standard view each looks from. */
+  private readonly paneCameras = new Map<string, OrthographicCamera>();
+  /** The panes last drawn, for the parts' levels of detail while the board is on. */
+  private lastBoard: { camera: OrthographicCamera; rect: { width: number; height: number } }[] = [];
+  /** CLF6: what every body is drawn with in the silhouette shading. */
+  private readonly silhouette = new MeshBasicMaterial({ color: '#000000', side: DoubleSide });
   /** Standard or realistic lighting (#665); the analysis shadings always use the standard. */
   private readonly lighting: ViewLighting;
   private measuring = false;
@@ -371,6 +383,8 @@ export class CadViewport {
     | undefined;
   /** Connector frames and picked points of a joint being made, drawn over the model. */
   private readonly jointMarks = new Group();
+  /** PMI-5b: a placed part's PMI targets and presentation lines, drawn over its instance. */
+  private readonly partPmi = new Group();
   private frame = 0;
   /** The camera was placed (by a fit or a saved view): a later fit keeps its direction. */
   private fitted = false;
@@ -405,6 +419,7 @@ export class CadViewport {
       this.parts,
       this.marks,
       this.jointMarks,
+      this.partPmi,
       this.combs,
       this.gapFlushes,
       this.spotWelds,
@@ -431,6 +446,7 @@ export class CadViewport {
       if (this.drag && e.pointerId !== this.drag.pointerId) return this.endMove(false);
       if (this.jointDrag && e.pointerId !== this.jointDrag.pointerId)
         return this.endJointDrag(false);
+      if (this.threeView) return;
       if (this.moveTool && e.isPrimary && e.button === 0 && this.pointers.size === 1)
         this.startMove(e);
       else if (this.jointTool && e.isPrimary && e.button === 0 && this.pointers.size === 1)
@@ -469,7 +485,8 @@ export class CadViewport {
         this.endMove(false);
       } else if (!still) return; // A drag is camera navigation, never a selection.
       this.down = undefined;
-      if (!this.pickable) return;
+      // CLF1b: the board's panes are not the camera a pick is made through.
+      if (!this.pickable || this.threeView) return;
       if (this.connectorTool) return this.connectorTool.onPick(this.pickConnector(e));
       if (this.topologyTool) return options.onPickTopology?.(this.pickTopology(e));
       if (!this.measuring) {
@@ -583,6 +600,8 @@ export class CadViewport {
     controls.zoomToCursor = true;
     // Rebuilt controls (a view with another camera or up) keep the Move tool's orbit-off state.
     controls.enableRotate = !this.moveTool;
+    // CLF1b: the board's panes have their own fixed cameras; navigation waits until it is off.
+    controls.enabled = !this.threeView;
     controls.addEventListener('change', () => {
       this.followDepth();
       this.viewGrid();
@@ -609,9 +628,85 @@ export class CadViewport {
   private render() {
     cancelAnimationFrame(this.frame);
     this.frame = requestAnimationFrame(() => {
+      // A joint drag's preview moves the parts, not the PMI drawn at their poses: it is hidden
+      // until the preview ends.
+      this.partPmi.visible = !this.partsPose;
       this.lighting.prepare([this.bodies, this.parts]);
-      this.renderer.render(this.scene, this.camera);
+      this.draw();
     });
+  }
+  /** One frame: the current camera's, or the drawing board's three panes (CLF1b). */
+  private draw() {
+    const helpers = [this.grid.visible, this.axes.visible];
+    // CLF6: the outline alone, without the grid and the axes.
+    if (this.shading.mode === 'silhouette') this.grid.visible = this.axes.visible = false;
+    const board = this.threeView ? this.board() : undefined;
+    this.lastBoard = board ?? [];
+    if (!board) this.renderer.render(this.scene, this.camera);
+    else {
+      const { clientWidth: width, clientHeight: height } = this.host;
+      // The pane left empty takes the background too (none in a PNG without background).
+      const clear = this.renderer.getClearColor(new Color());
+      const alpha = this.renderer.getClearAlpha();
+      const backdrop = this.scene.background;
+      if (backdrop instanceof Color) this.renderer.setClearColor(backdrop, 1);
+      else this.renderer.setClearColor(0x000000, 0);
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, width, height);
+      this.renderer.clear();
+      this.renderer.setScissorTest(true);
+      for (const { camera, rect } of board) {
+        // The renderer counts up from the bottom of the canvas.
+        const y = height - rect.y - rect.height;
+        this.renderer.setViewport(rect.x, y, rect.width, rect.height);
+        this.renderer.setScissor(rect.x, y, rect.width, rect.height);
+        this.renderer.render(this.scene, camera);
+      }
+      this.renderer.setScissorTest(false);
+      this.renderer.setViewport(0, 0, width, height);
+      this.renderer.setClearColor(clear, alpha);
+    }
+    [this.grid.visible, this.axes.visible] = helpers;
+  }
+  /**
+   * CLF1b: each pane's camera, looking at the shown bodies' and parts' centre from its standard
+   * view at the one scale of `threeViewLayout`; undefined when nothing is shown.
+   */
+  private board() {
+    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const { clientWidth: width, clientHeight: height } = this.host;
+    if (box.isEmpty() || !width || !height) return undefined;
+    const bounds = [box.min.toArray(), box.max.toArray()] as Bounds;
+    const { mmPerPixel, panes, center } = threeViewLayout(bounds, width, height);
+    const target = new Vector3(...center);
+    // Far enough back that the whole box lies between the near and far planes.
+    const reach = box.getSize(new Vector3()).length() || 100;
+    return panes.map(({ view, rect }) => {
+      let camera = this.paneCameras.get(view);
+      if (!camera) this.paneCameras.set(view, (camera = new OrthographicCamera()));
+      const { from, up } = standardViews[view];
+      const [halfW, halfH] = [(rect.width * mmPerPixel) / 2, (rect.height * mmPerPixel) / 2];
+      Object.assign(camera, { left: -halfW, right: halfW, top: halfH, bottom: -halfH });
+      Object.assign(camera, { near: 0, far: 2 * reach, zoom: 1 });
+      camera.up.set(...up);
+      camera.position.copy(target).addScaledVector(new Vector3(...from), reach);
+      camera.lookAt(target);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld();
+      return { camera, rect };
+    });
+  }
+  /**
+   * CLF1b: draws the drawing board (side, front and plan at one scale) instead of the current
+   * camera, or the camera again. Display only, never stored: while it is on, picking, moving and
+   * navigation wait, and Fit and the standard views change the camera shown after it.
+   */
+  setThreeView(on: boolean) {
+    this.threeView = on;
+    this.controls.enabled = !on;
+    this.render();
+    // The parts' levels follow the cameras drawn (#1113 review): after the frame sets the panes.
+    this.scheduleLevels();
   }
   private release = (e: PointerEvent) => this.pointers.delete(e.pointerId);
   /** Whether a body is being dragged: its display offset is not committed content. */
@@ -958,6 +1053,48 @@ export class CadViewport {
     }
     this.render();
   }
+  /**
+   * PMI-5b: draws faces and edges of placed parts' meshes (`pick` ids of `mesh`) and
+   * presentation lines (relative to `mesh.origin`, as the mesh's positions are) at an instance's
+   * matrix (column-major, of the part's origin), or clears them. Display only, never picked.
+   */
+  showPartPmi(
+    marks: { mesh: CadMesh; matrix: number[]; pick: CadTopologyPick; color: string }[],
+    lines: { mesh: CadMesh; matrix: number[]; segments: Float32Array; color: string }[] = [],
+  ) {
+    this.lastPartPmi = [marks, lines];
+    this.clearPartPmi();
+    // Over boxes (the parts did not fit) nothing is highlighted.
+    if (!this.partsFit) return this.render();
+    const place = (object: Object3D, mesh: CadMesh, matrix: number[]) => {
+      object.matrixAutoUpdate = false;
+      object.matrix.fromArray(matrix).multiply(new Matrix4().makeTranslation(...mesh.origin));
+      object.updateMatrixWorld(true);
+      this.partPmi.add(object);
+    };
+    for (const m of marks) place(this.highlighted(m.mesh, m.pick, m.color), m.mesh, m.matrix);
+    for (const l of lines) {
+      const geometry = new BufferGeometry();
+      geometry.setAttribute('position', new BufferAttribute(l.segments, 3));
+      const line = new LineSegments(geometry, new LineBasicMaterial({ color: l.color }));
+      line.renderOrder = 1;
+      place(line, l.mesh, l.matrix);
+    }
+    // Admitted within the GPU budget with the bodies and the parts' shapes (CAD26), or not drawn.
+    const used = this.gpuBytes + this.partsFullBytes + this.bufferBytes(this.partPmi);
+    if (used > (this.gpuBudget ?? cadBudgets.gpuBytes)) this.clearPartPmi();
+    this.render();
+  }
+  /** What `showPartPmi` was last given, drawn again when the parts are admitted again. */
+  private lastPartPmi: Parameters<CadViewport['showPartPmi']> = [[], []];
+  private clearPartPmi() {
+    for (const child of [...this.partPmi.children]) {
+      this.partPmi.remove(child);
+      const x = child as Mesh | LineSegments;
+      x.geometry.dispose();
+      (x.material as { dispose(): void }).dispose();
+    }
+  }
   /** Turns the measure tool on or off; it leaves selection and navigation as they are. */
   setMeasureTool(on: boolean) {
     this.measuring = on;
@@ -1239,9 +1376,12 @@ export class CadViewport {
     this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
   }
   get gpuBytes(): number {
-    const seen = new Set<unknown>();
+    return this.bufferBytes(this.bodies);
+  }
+  /** The GPU buffers a group's meshes and lines upload, each array and image once. */
+  private bufferBytes(group: Group, seen = new Set<unknown>()): number {
     let bytes = 0;
-    for (const child of this.bodies.children)
+    for (const child of group.children)
       if (child instanceof Mesh || child instanceof LineSegments) {
         const { attributes, index } = child.geometry;
         for (const a of [...Object.values(attributes), ...(index ? [index] : [])])
@@ -1344,6 +1484,8 @@ export class CadViewport {
               Object.assign(material.clone(), {
                 side: BackSide,
                 color: new Color(colored ? '#ffffff' : color).multiplyScalar(0.55),
+                // Display only: a render draws the sheet's own surface from both sides.
+                userData: { ...material.userData, sheetBack: true },
               }),
             )
           : undefined;
@@ -1430,6 +1572,10 @@ export class CadViewport {
   setShading(shading: CadShading) {
     this.shading = shading;
     this.lighting.setRealistic(shading.mode === 'realistic');
+    // CLF6: black bodies on white; every other shading on the usual background.
+    const silhouette = shading.mode === 'silhouette';
+    this.scene.overrideMaterial = silhouette ? this.silhouette : null;
+    this.scene.background = new Color(silhouette ? '#ffffff' : '#f4f6f8');
   }
   /**
    * Draws a curvature comb over the shape (model space): a tooth from each sample away from the
@@ -1706,10 +1852,25 @@ export class CadViewport {
    * R2b-4: how large a world box shows on screen (the diagonal of its projected extent, px),
    * 0 when it lies outside the view; one around or behind the camera counts as the whole view.
    */
-  screenSize([lo, hi]: [Vec3, Vec3]) {
-    const camera = this.camera;
-    camera.updateMatrixWorld();
+  screenSize(bounds: [Vec3, Vec3]) {
+    // CLF1b: on the board, the largest of the panes it is drawn in.
+    if (this.threeView && this.lastBoard.length)
+      return Math.max(
+        ...this.lastBoard.map(({ camera, rect }) =>
+          this.sizeThrough(camera, rect.width, rect.height, bounds),
+        ),
+      );
     const { clientWidth: w, clientHeight: h } = this.host;
+    return this.sizeThrough(this.camera, w, h, bounds);
+  }
+  /** The size in pixels of a box seen through `camera` on a `w`×`h` view. */
+  private sizeThrough(
+    camera: PerspectiveCamera | OrthographicCamera,
+    w: number,
+    h: number,
+    [lo, hi]: [Vec3, Vec3],
+  ) {
+    camera.updateMatrixWorld();
     const p = new Vector3();
     const min = [Infinity, Infinity, Infinity];
     const max = [-Infinity, -Infinity, -Infinity];
@@ -1769,6 +1930,9 @@ export class CadViewport {
     this.render();
     this.partsFit = fits;
     this.onPartsFit?.(fits);
+    // PMI-5b: the parts' PMI overlay is admitted again against the parts as now drawn.
+    if (this.lastPartPmi[0].length || this.lastPartPmi[1]?.length)
+      this.showPartPmi(...this.lastPartPmi);
     return fits;
   }
   /**
@@ -1878,7 +2042,7 @@ export class CadViewport {
     }
     // Measurement and connector marks are not part of the model's picture.
     this.marks.visible = this.jointMarks.visible = false;
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     this.scene.background = backdrop;
     this.grid.visible = this.gridVisible;
     this.axes.visible = this.marks.visible = this.jointMarks.visible = true;
@@ -1888,9 +2052,33 @@ export class CadViewport {
       this.render();
     });
   }
-  /** The shown bodies and parts and the camera, for a path-traced render (#664). */
-  renderSource(): PathRenderSource {
-    return { roots: [this.bodies, this.parts], camera: this.camera };
+  /**
+   * The shown bodies and parts and the camera, for a path-traced render (#664). Every part is
+   * given with its standard mesh, at whatever level of detail the view draws it (R2b-4): the
+   * image is not the screen. `fine` gives finer meshes of the same shapes to draw in place of
+   * the display ones.
+   */
+  renderSource(fine?: CadRenderMeshes): PathRenderSource {
+    const parts = partsGroup(this.lastParts);
+    if (this.partsPose) poseParts(parts, this.partsPose.moves, this.partsPose.delta);
+    return {
+      roots: [this.bodies, parts],
+      camera: this.camera,
+      ...(fine && {
+        finer: (object: Mesh) => {
+          // A part's mesh is the version's own, shared by its instances.
+          const source = object.userData.mesh as CadMesh | undefined;
+          if (source) {
+            const mesh = fine.parts.get(source);
+            return mesh && { mesh, shown: source };
+          }
+          const bodyId = object.userData.bodyId as string | undefined;
+          const shown = bodyId === undefined ? undefined : this.shownMeshes.get(bodyId);
+          const mesh = bodyId === undefined ? undefined : fine.bodies.get(bodyId);
+          return shown && mesh && { mesh, shown };
+        },
+      }),
+    };
   }
   dispose() {
     window.removeEventListener('keydown', this.onKey, true);
@@ -1909,6 +2097,7 @@ export class CadViewport {
     this.clearComb(this.spotWelds);
     this.clearComb(this.rays);
     this.lighting.dispose();
+    this.silhouette.dispose();
     this.grid.dispose();
     this.axes.dispose();
     this.renderer.dispose();

@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./weights": "./src/weights-entry.ts",
     "./bake": "./src/bake-entry.ts",
+    "./video": "./src/video-entry.ts",
     "./style.css": "./src/style.css"
   },
   "dependencies": {

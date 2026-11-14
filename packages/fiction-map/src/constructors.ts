@@ -41,11 +41,17 @@ export function deleteFeatures(ids: readonly string[]): FictionMapResult<Fiction
 }
 type Metadata = Pick<
   FictionMapFeature,
-  'name' | 'description' | 'category' | 'style' | 'worldEntityRef'
+  'name' | 'description' | 'category' | 'style' | 'worldEntityRef' | 'artifactRefs'
 >;
 export interface FictionMapMetadataPatch {
   readonly set?: Partial<Metadata>;
-  readonly clear?: readonly ('description' | 'category' | 'style' | 'worldEntityRef')[];
+  readonly clear?: readonly (
+    | 'description'
+    | 'category'
+    | 'style'
+    | 'worldEntityRef'
+    | 'artifactRefs'
+  )[];
 }
 export function updateFeatureMetadata(
   content: FictionMapContent,
@@ -60,7 +66,7 @@ export function updateFeatureMetadata(
           p.set,
           '/patch/set',
           [],
-          ['name', 'description', 'category', 'style', 'worldEntityRef'],
+          ['name', 'description', 'category', 'style', 'worldEntityRef', 'artifactRefs'],
         )
       : {};
     const clear = Object.hasOwn(p, 'clear') ? p.clear : [];
@@ -70,7 +76,7 @@ export function updateFeatureMetadata(
     clear.forEach((k, i) => {
       if (
         typeof k !== 'string' ||
-        !['description', 'category', 'style', 'worldEntityRef'].includes(k) ||
+        !['description', 'category', 'style', 'worldEntityRef', 'artifactRefs'].includes(k) ||
         fields.has(k) ||
         Object.hasOwn(set, k)
       )

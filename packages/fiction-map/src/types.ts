@@ -44,6 +44,19 @@ export type FictionMapFeature = {
     readonly label?: boolean;
   };
   readonly worldEntityRef?: { readonly namespace: string; readonly entityId: string };
+  /** Fixed versions of other Artifacts (a CAD part, a BIM building) this feature stands for. */
+  readonly artifactRefs?: readonly FictionMapArtifactRef[];
+};
+/**
+ * One committed version of another Artifact, pinned by version ID and content hash.
+ * It never follows the latest version; the map only stores the pointer, never the content.
+ */
+export type FictionMapArtifactRef = {
+  readonly artifactId: string;
+  readonly domain: string;
+  readonly versionId: string;
+  readonly contentHash: string;
+  readonly label?: string;
 };
 export type FictionMapNamedView = {
   readonly id: FictionMapId;

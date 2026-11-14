@@ -35,6 +35,7 @@ export {
   type CharacterPropInstance,
   type CharacterPropJoint,
   type CharacterPropJointValue,
+  type CharacterPropFinish,
   type CharacterPropMesh,
   type CharacterPropVersionJoints,
   type CharacterPropView,

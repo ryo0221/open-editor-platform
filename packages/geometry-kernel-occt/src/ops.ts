@@ -11,12 +11,14 @@ import {
   type GeometryIssue,
   type GeometryLoop,
   type GeometryRequest,
+  type GeometryStepRequest,
   type GeometryVec2,
   type GeometryVec3,
 } from '@editor-platform/geometry-core';
 import { vertexNormals } from './mesh';
 import { faceTextureUvs } from './texture-uv';
 import { decodeKernelException, type OcModule } from './module';
+import { GeometryStepError, writeStep } from './step';
 
 /** Triangles of one shape in model space, faces in the kernel's explorer order. */
 export interface GeometryMesh {
@@ -51,8 +53,13 @@ export type GeometryResult =
   /** `node` is the node that failed, which may be an input of the requested one. */
   | { status: 'error'; node: string; code: string };
 
+/** PB7c: the STEP file, or why it was not written (a part's node that failed, or the writer). */
+export type GeometryStepResult =
+  | { status: 'ok'; bytes: Uint8Array }
+  | { status: 'error'; node?: string; code: string };
+
 export type GeometryEvaluation =
-  | { status: 'ok'; results: GeometryResult[] }
+  | { status: 'ok'; results: GeometryResult[]; step?: GeometryStepResult }
   | { status: 'invalid'; issues: GeometryIssue[] };
 
 export interface GeometryEvaluateOptions {
@@ -60,6 +67,8 @@ export interface GeometryEvaluateOptions {
   assets?: Map<string, Uint8Array>;
   /** Called between nodes; throwing (e.g. a cancel) stops the evaluation. */
   checkpoint?: (node: string) => void | Promise<void>;
+  /** PB7c: also write these nodes as one STEP file (`GeometryEvaluation.step`). */
+  step?: GeometryStepRequest;
 }
 
 class GeometryOpError extends Error {
@@ -88,7 +97,7 @@ export async function evaluateGeometry(
   requests: GeometryRequest[],
   options: GeometryEvaluateOptions = {},
 ): Promise<GeometryEvaluation> {
-  const issues = validateGeometry(graph, requests);
+  const issues = validateGeometry(graph, requests, options.step);
   if (issues.length) return { status: 'invalid', issues };
   const owned: { delete(): void }[] = [];
   const own = <T>(value: T): T => (owned.push(value as never), value);
@@ -675,7 +684,29 @@ export async function evaluateGeometry(
         results.push({ status: 'error', node: r.node, code });
       }
     }
-    return { status: 'ok', results };
+    if (!options.step) return { status: 'ok', results };
+    const parts: unknown[] = [];
+    try {
+      for (const p of options.step.parts) parts.push(await build(p.node));
+    } catch (error) {
+      // A cancel from the checkpoint stops the evaluation, as for the requests.
+      if (!(error instanceof GeometryOpError)) throw error;
+      return {
+        status: 'ok',
+        results,
+        step: { status: 'error', node: error.node, code: error.code },
+      };
+    }
+    let step: GeometryStepResult;
+    try {
+      step = { status: 'ok', bytes: writeStep(oc, options.step, parts) };
+    } catch (error) {
+      step = {
+        status: 'error',
+        code: error instanceof GeometryStepError ? error.code : kernelCode(error),
+      };
+    }
+    return { status: 'ok', results, step };
   } finally {
     for (const o of owned.reverse()) o.delete();
   }

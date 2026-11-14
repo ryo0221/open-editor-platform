@@ -468,7 +468,9 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
             ? ['kind', 'id', 'joint', 'property']
             : k === 'prop-mount'
               ? ['kind', 'id', 'mount', 'property']
-              : ['kind', 'id', 'property'],
+              : k === 'camera'
+                ? ['kind', 'property']
+                : ['kind', 'id', 'property'],
         );
         if (
           (k === 'part' || k === 'bone') &&
@@ -486,9 +488,12 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
           size = 1;
         // MR7: a mount's joint in effect, a joint ID per key.
         else if (k === 'prop-mount' && prop === 'joint' && characterId(target.mount)) size = -1;
+        // CR7e: the action's camera has no element to name.
+        else if (k === 'camera' && (prop === 'position' || prop === 'target')) size = 3;
         else add('target', `${q}.target`);
         const ofProp = k === 'prop-joint' || k === 'prop-mount';
-        if (size && kindOf(target.id) !== (ofProp ? 'prop' : k)) add('target-id', `${q}.target.id`);
+        if (size && k !== 'camera' && kindOf(target.id) !== (ofProp ? 'prop' : k))
+          add('target-id', `${q}.target.id`);
         // C8p: a building's elements have no joints to key.
         else if (size && ofProp && bimProps.has(target.id as string))
           add('prop-joint-unsupported', `${q}.target`);
@@ -540,6 +545,13 @@ export function validateCharacter(value: unknown): CharacterDiagnostic[] {
           // WM2: a CAD continuous joint turns on and on; a joint that keeps one turn bounds its
           // keys through its version's limits (one turn either way).
           add('joint-value', `${r}.value`);
+        else if (
+          record(target) &&
+          target.kind === 'camera' &&
+          size === 3 &&
+          (key.value as number[]).some((x) => Math.abs(x) > characterLimits.cameraRangeMm)
+        )
+          add('camera-range', `${r}.value`);
         else if (
           size === 4 &&
           Math.abs(Math.hypot(...(key.value as number[])) - 1) > characterTolerance.unitQuaternion

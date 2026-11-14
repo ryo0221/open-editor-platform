@@ -40,8 +40,15 @@ export {
   bimViewBounds,
   bimViewSolids,
   placementMatrix,
+  type BimLook,
   type BimViewOptions,
 } from './view';
+export {
+  BimViewport,
+  type BimPlanView,
+  type BimViewAxis,
+  type BimViewportOptions,
+} from './viewport';
 export { BimSurface } from './surface';
 export type {
   BimPartCandidate,

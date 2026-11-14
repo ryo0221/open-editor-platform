@@ -12,6 +12,8 @@ import { fixtureKernel } from './fixtures';
 import { cadAssetMediaTypes, emptyCad, type CadAssetRef } from './model';
 import { applyCadOperation, cadContentHash } from './operations';
 import { validateCad } from './validation';
+import { assemblyPmiAssetProblem } from './pmi';
+import { assertCadOperation } from './commands';
 
 const sha = (c: string) => `sha256:${c.repeat(64)}`;
 const ref = (kind: CadAssetRef['kind'], c: string): CadAssetRef => ({
@@ -193,8 +195,10 @@ describe('STEP AP242 assembly import plan (R2b-5, R2b-U7)', () => {
 });
 
 describe('the PMI of particular instances in a STEP import (PMI-5a, CAD86, TS-1436)', () => {
-  const withPmi = (component: string): CadStepAssemblyRead => ({
+  const counts = { faces: 7, edges: 15, vertices: 10 };
+  const withPmi = (component: string, withCounts = true): CadStepAssemblyRead => ({
     ...read(),
+    ...(withCounts && { shapes: read().shapes.map((s) => ({ ...s, counts })) }),
     assemblyPmi: {
       version: 1,
       items: [
@@ -219,18 +223,27 @@ describe('the PMI of particular instances in a STEP import (PMI-5a, CAD86, TS-14
       { shape: 'face', index: 2, component: 'component-5' },
     ]);
     expect(p.components.map((c) => c.id)).toEqual(['component-3', 'component-4', 'component-5']);
+    // PMI-5b: each named component's version, its part's counts and its pose as read.
+    expect(asset.parts).toEqual({
+      'component-3': { contentHash: p.parts[0]!.source.contentHash, ...counts, pose: pose(0) },
+      'component-5': { contentHash: p.parts[1]!.source.contentHash, ...counts, pose: pose(20) },
+    });
+    expect(assemblyPmiAssetProblem(asset)).toBeUndefined();
     expect(p.assemblyPmi!.ref).toMatchObject({
       id: 'assembly-pmi',
       kind: 'assembly-pmi',
       byteLength: p.assemblyPmi!.bytes.byteLength,
       mediaType: 'application/json',
     });
-    const doc = applyCadOperation(emptyCad(fixtureKernel), {
-      type: 'insertComponents',
+    const insert = {
+      type: 'insertComponents' as const,
       parts: p.parts,
       components: p.components,
       assemblyPmi: p.assemblyPmi!.ref,
-    });
+    };
+    // PMI-5b: the edit passes the operation gate the Surface runs it through.
+    expect(() => assertCadOperation(insert)).not.toThrow();
+    const doc = applyCadOperation(emptyCad(fixtureKernel), insert);
     expect(doc.assemblyPmiAssetId).toBe('assembly-pmi');
     expect(validateCad(doc)).toEqual([]);
     // Deleting a component keeps the asset (its items go stale, PMI-5b); deleting the last
@@ -261,5 +274,7 @@ describe('the PMI of particular instances in a STEP import (PMI-5a, CAD86, TS-14
   it('refuses a target whose instance is not one the file placed', () => {
     for (const wrong of ['3', '-1', '01', 'x', ''])
       expect(plan(withPmi(wrong))).toEqual({ status: 'refused', code: 'step-assembly-pmi' });
+    // PMI-5b: or whose shape has no counts to check its indices against.
+    expect(plan(withPmi('2', false))).toEqual({ status: 'refused', code: 'step-assembly-pmi' });
   });
 });

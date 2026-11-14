@@ -175,6 +175,45 @@ function splitByFaces(kernel: GeometryMesh, mesh: ViewMesh, last: boolean[]): [V
   return out;
 }
 
+/** A flat-shaded box over `bounds`, centred on them. */
+function boxViewMesh([lo, hi]: ViewSolid['bounds']): ViewMesh {
+  const origin = [0, 1, 2].map((i) => (lo[i]! + hi[i]!) / 2) as [number, number, number];
+  const half = [0, 1, 2].map((i) => Math.max((hi[i]! - lo[i]!) / 2, 0.005));
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  for (let axis = 0; axis < 3; axis++)
+    for (const sign of [-1, 1]) {
+      const u = (axis + 1) % 3;
+      const v = (axis + 2) % 3;
+      const base = positions.length / 3;
+      for (const [a, b] of [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ]) {
+        const p = [0, 0, 0];
+        p[axis] = sign * half[axis]!;
+        p[u] = a! * half[u]!;
+        p[v] = b! * half[v]!;
+        positions.push(...p);
+        const n = [0, 0, 0];
+        n[axis] = sign;
+        normals.push(...n);
+      }
+      // Counter-clockwise seen from outside.
+      if (sign > 0) indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+      else indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
+    }
+  return {
+    origin,
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    indices: new Uint32Array(indices),
+  };
+}
+
 /** A kernel mesh re-centred on its bounds, so large site coordinates keep float precision. */
 const viewMeshes = new WeakMap<GeometryMesh, ViewMesh>();
 function viewMesh(mesh: GeometryMesh, bounds: [number[], number[]]): ViewMesh {
@@ -230,6 +269,17 @@ export interface BimViewOptions {
    * neither drawn nor picked. An element reaching above it is drawn whole.
    */
   belowMm?: number;
+  /**
+   * CR7d: keep a part's bodies apart (one mesh per body, its `body` set) instead of one mesh per
+   * look, for a check that reads each body as its own solid.
+   */
+  bodies?: boolean;
+  /**
+   * CS1b (docs/cad/construction-site.md): an element's look by its ID, over its own. `null`
+   * leaves the element out (neither drawn nor picked); `undefined` keeps its own look. A tinted
+   * element is drawn in one look: its last-layer face and part bodies are not told apart.
+   */
+  tint?: (id: string) => BimLook | null | undefined;
 }
 
 /**
@@ -248,6 +298,8 @@ export function bimViewSolids(
   let ctx: BimContext | undefined;
   for (const el of doc.elements) {
     if (options.hiddenKinds?.has(el.kind)) continue;
+    const tint = options.tint?.(el.id);
+    if (tint === null) continue;
     const r = evaluation.elements.get(el.id);
     if (options.belowMm !== undefined && r) {
       const top = elementBounds(doc, el.id, r)?.[1][2];
@@ -258,14 +310,27 @@ export function bimViewSolids(
       const type = doc.types.find((t) => t.id === el.typeId);
       if (type?.kind !== 'part') continue;
       const loading = options.parts?.get(type.source.contentHash)?.status === 'loading';
-      const key = `${type.id}\u0000box\u0000${loading}`;
+      const bounds: ViewSolid['bounds'] = [type.hintBounds.min, type.hintBounds.max];
+      // A tinted part is still a box, drawn solid in its tint (e.g. a construction state).
+      const key = tint
+        ? `${type.id}\u0000box\u0000${JSON.stringify(tint)}`
+        : `${type.id}\u0000box\u0000${loading}`;
       let solid = solids.get(key);
       if (!solid) {
-        solid = {
-          bounds: [type.hintBounds.min, type.hintBounds.max],
-          box: loading ? 'pending' : 'unavailable',
-          instances: [],
-        };
+        solid = tint
+          ? {
+              meshes: [
+                {
+                  mesh: boxViewMesh(bounds),
+                  color: tint.color,
+                  opacity: tint.opacity,
+                  sheet: false,
+                },
+              ],
+              bounds,
+              instances: [],
+            }
+          : { bounds, box: loading ? 'pending' : 'unavailable', instances: [] };
         solids.set(key, solid);
       }
       solid.instances.push({
@@ -276,17 +341,18 @@ export function bimViewSolids(
       continue;
     }
     if (r?.status !== 'ok' || !r.mesh.indices.length) continue;
-    const style = looks(el);
-    const lastLook = faceLooks(el);
+    const style = tint ?? looks(el);
+    const lastLook = tint ? undefined : faceLooks(el);
     // A wall's faces are told apart by its drawing direction: its solid is its own.
     const key = `${r.solid}\u0000${el.kind}\u0000${JSON.stringify(style)}${
       lastLook ? `\u0000${JSON.stringify(lastLook)}\u0000${el.kind === 'wall' ? el.id : ''}` : ''
     }`;
-    const status = el.kind === 'part' ? partStatus(doc, el.typeId, options.parts) : undefined;
+    const status =
+      el.kind === 'part' && !tint ? partStatus(doc, el.typeId, options.parts) : undefined;
     let solid = solids.get(key);
     if (!solid) {
       const mesh = viewMesh(r.mesh, r.measure.bounds);
-      const bodies = status && partBodyMeshes(r.mesh, mesh, status);
+      const bodies = status && partBodyMeshes(r.mesh, mesh, status, options.bodies);
       const sheet = !!status?.kinds.includes('sheet');
       const drawn = (m: ViewMesh, look: BimLook): ViewSolidMesh => ({
         mesh: m,
@@ -344,11 +410,12 @@ export function partBodyMeshes(
   kernel: GeometryMesh,
   mesh: ViewMesh,
   status: Extract<BimPartStatus, { status: 'available' }>,
+  byBody = false,
 ): ViewSolidMesh[] | undefined {
   const bodyOf = partFaceBodies(status);
   if (!bodyOf) return undefined;
   const { looks, kinds } = status as Required<typeof status>;
-  const key = JSON.stringify([looks, status.faces, kinds]);
+  const key = JSON.stringify([looks, status.faces, kinds, byBody]);
   let cached = bodyMeshes.get(mesh);
   if (cached?.has(key)) return cached.get(key);
   const groupOf = looks.map(
@@ -361,7 +428,7 @@ export function partBodyMeshes(
     const body = bodyOf[kernel.faceIndices[t]!];
     if (body === undefined) ok = false;
     else {
-      const g = groupOf[body]!;
+      const g = byBody ? `${body}` : groupOf[body]!;
       let list = triangles.get(g);
       if (!list) triangles.set(g, (list = []));
       list.push(mesh.indices[3 * t]!, mesh.indices[3 * t + 1]!, mesh.indices[3 * t + 2]!);
@@ -370,7 +437,7 @@ export function partBodyMeshes(
   let out: ViewSolidMesh[] | undefined;
   if (ok && triangles.size) {
     out = [...triangles].map(([g, indices]) => {
-      const body = groupOf.indexOf(g);
+      const body = byBody ? Number(g) : groupOf.indexOf(g);
       return {
         mesh: triangles.size === 1 ? mesh : { ...mesh, indices: new Uint32Array(indices) },
         color: looks[body]!.color,
@@ -378,6 +445,7 @@ export function partBodyMeshes(
         ...(looks[body]!.roughness === undefined ? {} : { roughness: looks[body]!.roughness }),
         ...(looks[body]!.metalness === undefined ? {} : { metalness: looks[body]!.metalness }),
         sheet: kinds[body] === 'sheet',
+        ...(byBody ? { body: g } : {}),
       };
     });
   }

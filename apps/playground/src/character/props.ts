@@ -20,6 +20,7 @@ import {
   jointValues,
   parameterValues,
   posesForJointValues,
+  type CadAppearance,
   type CadAssemblyEvaluation,
   type CadDocument,
   type CadSolvedPose,
@@ -128,15 +129,25 @@ export class CharacterPropEvaluation {
     );
     void this.binding.controller.sync();
   }
-  private mesh(mesh: CadMesh, color: string, opacity: number): CharacterPropMesh {
+  private mesh(mesh: CadMesh, look: CadAppearance | undefined, sheet = false): CharacterPropMesh {
     let out = this.converted.get(mesh);
     if (!out) {
+      // CR7g-3: the look's finish and light, for the view's realistic lighting.
+      const finish = look && {
+        ...(look.roughness !== undefined ? { roughness: look.roughness } : {}),
+        ...(look.metalness !== undefined ? { metalness: look.metalness } : {}),
+        ...(look.emission ? { emission: look.emission } : {}),
+        ...(look.transmission !== undefined ? { transmission: look.transmission } : {}),
+        ...(look.ior !== undefined ? { ior: look.ior } : {}),
+      };
       out = {
         positions: mesh.positions,
         normals: mesh.normals,
         indices: mesh.indices,
-        color,
-        opacity,
+        color: look?.color ?? '#9aa4b1',
+        opacity: look?.opacity ?? 1,
+        ...(sheet ? { sheet: true } : {}),
+        ...(finish && Object.keys(finish).length ? { finish } : {}),
       };
       this.converted.set(mesh, out);
     }
@@ -199,16 +210,33 @@ export class CharacterPropEvaluation {
       assembly?.poses && assembly.joints
         ? { poses: assembly.poses, joints: assembly.joints }
         : undefined;
+    // MR5: the parts by the names of the components on their paths, read from their owners.
+    const names = new Map<string, string>([[interferenceKey([]), 'Own shape']]);
+    const contents = new Map<string, CadDocument | undefined>([[interferenceKey([]), doc]]);
+    for (const o of expandAssembly(doc, this.binding.assembly.lookup).occurrences) {
+      const up = interferenceKey(o.path.slice(0, -1));
+      const step = o.path.at(-1)!;
+      const label = contents.get(up)?.components.find((c) => c.id === step)?.name ?? step;
+      const parent = o.path.length > 1 ? names.get(up) : undefined;
+      names.set(interferenceKey(o.path), parent ? `${parent} / ${label}` : label);
+      contents.set(interferenceKey(o.path), o.content);
+    }
+    const nameOf = (path: readonly string[]) =>
+      names.get(interferenceKey(path)) ?? path.join(' / ');
     const draw = (
       values: CharacterJointValues,
       mounts?: CharacterMountChoice,
     ): CharacterPropInstance[] => {
       const out: CharacterPropInstance[] = [];
+      const ownSheets = sheetsOf(doc);
+      const ownPiece = { id: interferenceKey([]), name: nameOf([]), frame: poseMatrix(identity) };
       for (const m of own) {
         const look = ownLooks.get(m.bodyId);
         out.push({
-          mesh: this.mesh(m, look?.color ?? '#9aa4b1', look?.opacity ?? 1),
+          mesh: this.mesh(m, look, ownSheets.has(m.bodyId)),
           matrix: poseMatrix(identity, m.origin),
+          piece: ownPiece,
+          body: m.bodyId,
         });
       }
       const poses = solved
@@ -233,15 +261,27 @@ export class CharacterPropEvaluation {
           if (!boxed || !o.content?.bodies.some((b) => b.state === 'active')) continue;
           let box = this.boxes.get(hash);
           if (!box) this.boxes.set(hash, (box = boundsBox(o.part.hint.boundsMm)));
-          out.push({ mesh: box, matrix: poseMatrix(o.pose) });
+          out.push({
+            mesh: box,
+            matrix: poseMatrix(o.pose),
+            piece: { id: interferenceKey(o.path), name: nameOf(o.path), box: true },
+          });
           continue;
         }
         const partLooks = looks(o.content);
+        const sheets = sheetsOf(o.content);
+        const piece = {
+          id: interferenceKey(o.path),
+          name: nameOf(o.path),
+          frame: poseMatrix(o.pose),
+        };
         for (const m of meshes) {
           const look = partLooks.get(m.bodyId);
           out.push({
-            mesh: this.mesh(m, look?.color ?? '#9aa4b1', look?.opacity ?? 1),
+            mesh: this.mesh(m, look, sheets.has(m.bodyId)),
             matrix: poseMatrix(o.pose, m.origin),
+            piece,
+            body: m.bodyId,
           });
         }
       }
@@ -271,19 +311,6 @@ export class CharacterPropEvaluation {
         ...(past ? { problem: 'joint-limit' as const } : {}),
       };
     });
-    // MR5: the parts by the names of the components on their paths, read from their owners.
-    const names = new Map<string, string>([[interferenceKey([]), 'Own shape']]);
-    const contents = new Map<string, CadDocument | undefined>([[interferenceKey([]), doc]]);
-    for (const o of expandAssembly(doc, this.binding.assembly.lookup).occurrences) {
-      const up = interferenceKey(o.path.slice(0, -1));
-      const step = o.path.at(-1)!;
-      const label = contents.get(up)?.components.find((c) => c.id === step)?.name ?? step;
-      const parent = o.path.length > 1 ? names.get(up) : undefined;
-      names.set(interferenceKey(o.path), parent ? `${parent} / ${label}` : label);
-      contents.set(interferenceKey(o.path), o.content);
-    }
-    const nameOf = (path: readonly string[]) =>
-      names.get(interferenceKey(path)) ?? path.join(' / ');
     const checkInterferenceAlong = async (
       samples: CharacterPropSweepSample[],
     ): Promise<CharacterPropSweep> => {
@@ -411,21 +438,41 @@ export class CharacterBimPropEvaluation {
       const solids = bimViewSolids(this.content, s.evaluation, {
         selection: new Set(),
         parts: s.parts,
+        // CR7d: a part's bodies apart, so the occupant check reads each as its own solid.
+        bodies: true,
+      });
+      // CR7d: each instance is its element (its path), named as the building names it.
+      const names = new Map(this.content.elements.map((e) => [e.id, e.name]));
+      // A space is the room's air (its prism), not material: shown, never an obstacle.
+      const spaces = new Set(
+        this.content.elements.filter((e) => e.kind === 'space').map((e) => e.id),
+      );
+      const piece = (path: readonly string[], frame: Mat4, box = false) => ({
+        id: path.join('/'),
+        name: path.map((id) => names.get(id) ?? id).join(' / '),
+        frame,
+        ...(box ? { box: true } : {}),
+        ...(path.some((id) => spaces.has(id)) ? { air: true } : {}),
       });
       for (const solid of solids) {
         if (!solid.meshes) {
           // A part whose shape could not be read: its type's bounds, as the building view does.
+          // A stand-in that no check reads (CR7d).
           const key = JSON.stringify(solid.bounds);
           let box = this.boxes.get(key);
           if (!box) this.boxes.set(key, (box = boundsBox(solid.bounds)));
           for (const inst of solid.instances)
-            instances.push({ mesh: box, matrix: inst.matrix as Mat4 });
+            instances.push({
+              mesh: box,
+              matrix: inst.matrix as Mat4,
+              piece: piece(inst.path, inst.matrix as Mat4, true),
+            });
           continue;
         }
         for (const m of solid.meshes) {
           let looks = this.converted.get(m.mesh);
           if (!looks) this.converted.set(m.mesh, (looks = new Map()));
-          const look = `${m.color} ${m.opacity}`;
+          const look = `${m.color} ${m.opacity} ${m.sheet ? 'sheet' : 'solid'}`;
           let mesh = looks.get(look);
           if (!mesh)
             looks.set(
@@ -436,6 +483,8 @@ export class CharacterBimPropEvaluation {
                 indices: m.mesh.indices,
                 color: m.color,
                 opacity: m.opacity,
+                // CR7d: a sheet has no inside for the occupant check.
+                ...(m.sheet ? { sheet: true } : {}),
               }),
             );
           for (const inst of solid.instances)
@@ -449,6 +498,8 @@ export class CharacterBimPropEvaluation {
                   scale: [1, 1, 1],
                 }),
               ),
+              piece: piece(inst.path, inst.matrix as Mat4),
+              ...(m.body !== undefined ? { body: m.body } : {}),
             });
         }
       }
@@ -463,6 +514,10 @@ export class CharacterBimPropEvaluation {
     this.parts?.dispose();
   }
 }
+
+/** CR7d: the sheet bodies of a document, by ID (their meshes have no inside). */
+const sheetsOf = (content: CadDocument | undefined) =>
+  new Set((content?.bodies ?? []).filter((b) => b.kind === 'sheet').map((b) => b.id));
 
 /**
  * The joints of a CAD version a prop can key (C2b, MR1): each joint's own values with their

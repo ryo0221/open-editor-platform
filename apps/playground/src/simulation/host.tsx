@@ -19,6 +19,7 @@ import {
   type SimulationOperation,
 } from '@editor-platform/simulation-core';
 import {
+  aeroAtYaw,
   simulationSolverBuild,
   type SimulationRunner,
   type StudyRunMessage,
@@ -320,6 +321,7 @@ export default function SimulationHost({
           label: computeHost.label,
           destination: computeHost.destination,
           limits: computeHost.limits,
+          ...(computeHost.aero ? { aero: computeHost.aero } : {}),
           builds:
             'code' in kernel || !mesher
               ? undefined
@@ -355,7 +357,11 @@ export default function SimulationHost({
       }
       const request: StudyRunRequest = {
         type: 'run',
-        doc: session.content,
+        // VS4d: one run of a yaw sweep takes the study at that yaw.
+        doc:
+          options?.yawDeg === undefined
+            ? session.content
+            : aeroAtYaw(session.content, studyId, options.yawDeg),
         cad: kept,
         cadContentHash: session.content.source.contentHash,
         studyId,

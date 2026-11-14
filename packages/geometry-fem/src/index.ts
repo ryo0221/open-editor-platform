@@ -12,4 +12,5 @@ export * from './shell-repair';
 export * from './bonded';
 export * from './calculix-shell';
 export * from './calculix-modal';
+export * from './calculix-frame';
 export * from './spot-weld';

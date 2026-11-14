@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { faceRef, type CadTopologyTable } from '@editor-platform/cad-core';
 import {
+  aeroStudy,
   applySimulationOperation,
   simulationFixture,
   validateSimulation,
@@ -130,6 +131,10 @@ describe('loads and constraints on picked faces', () => {
     expect(g.studies).toHaveLength(2);
     const h = apply(g, removeConditionOps(g, 'loads', c.loads[2]!.id));
     expect(h.studies.map((s) => s.kind)).toEqual(['linear-static']);
+    // VS4a (TS-2210, ST-607; Codex on #1181): a wind tunnel stays when a condition goes.
+    const t = apply(g, [{ type: 'addStudy', study: aeroStudy('tunnel') }]);
+    const u = apply(t, removeConditionOps(t, 'loads', c.loads[2]!.id));
+    expect(u.studies.map((s) => s.kind)).toEqual(['linear-static', 'aero']);
     expect(defaultModalStudy(f).constraintIds).toEqual(
       f.constraints.filter((x) => x.kind === 'fixed').map((x) => x.id),
     );

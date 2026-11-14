@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react';
 import type { SimulationStudy } from '@editor-platform/simulation-core';
 import type { RunProgress, StudyRun } from './run';
 import type { StiffnessTestResult } from './stiffness-test';
+import { aeroSection, aeroStreamlines } from './aero-view';
 import {
   autoDeformationScale,
   resultBounds,
@@ -34,11 +35,17 @@ export interface SimulationRunner {
     destination: string;
     limits: { nodes: number; elements: number };
     builds?: StudyRun['builds'];
+    /** VS4b: the Host also runs wind tunnels, with this solver build. */
+    aero?: { solverBuild: string };
   };
   run(
     studyId: string,
     onProgress: (progress: RunProgress) => void,
-    options?: { onHost?: boolean },
+    /**
+     * VS4d: `yawDeg` runs a wind-tunnel study at that yaw instead of its own (one run of a yaw
+     * sweep; the document is not changed, see `aeroAtYaw`).
+     */
+    options?: { onHost?: boolean; yawDeg?: number },
   ): { result: Promise<StudyRun>; cancel(): void };
 }
 
@@ -125,6 +132,34 @@ export function useResultDisplay(source: ResultSource | undefined) {
     // `cut` is derived from `section` and `bounds`.
     [source, field, scale, range, cut?.axis, cut?.offset],
   );
+  // VS4c: a browser wind tunnel's streamlines and a section of its flow speed.
+  const [streamlinesOn, setStreamlines] = useState(true);
+  const [flowSection, setFlowSection] = useState<{ axis: 0 | 1 | 2; at: number } | undefined>({
+    axis: 1,
+    at: 0.5,
+  });
+  const flow = source?.aero?.flow;
+  const streamlines = useMemo(
+    () => (flow && streamlinesOn ? aeroStreamlines(flow) : undefined),
+    [flow, streamlinesOn],
+  );
+  const flowCut =
+    flow && flowSection && bounds
+      ? {
+          axis: flowSection.axis,
+          offset:
+            bounds.lo[flowSection.axis]! +
+            (bounds.hi[flowSection.axis]! - bounds.lo[flowSection.axis]!) * flowSection.at,
+        }
+      : undefined;
+  const flowPlane = useMemo(
+    () =>
+      flow && flowCut && bounds
+        ? aeroSection(flow, flowCut.axis, flowCut.offset, bounds.lo, bounds.hi)
+        : undefined,
+    // `flowCut` is derived from `flowSection` and `bounds`.
+    [flow, flowCut?.axis, flowCut?.offset, bounds],
+  );
   return {
     field,
     setField,
@@ -142,6 +177,13 @@ export function useResultDisplay(source: ResultSource | undefined) {
     setSection,
     cut,
     shown,
+    streamlinesOn,
+    setStreamlines,
+    streamlines,
+    flowSection,
+    setFlowSection,
+    flowCut,
+    flowPlane,
   };
 }
 
@@ -171,13 +213,17 @@ export function RunPanel({
   const run = state.status === 'done' ? state.run : undefined;
   const modalRun = run?.levels.some((l) => l.metrics['first-frequency'] !== undefined) ?? false;
   const thermalRun = run?.levels.some((l) => l.metrics['max-temperature'] !== undefined) ?? false;
+  // VS4b: a wind tunnel's levels by their cell, fluid cells and coefficients.
+  const aeroRun = study?.kind === 'aero' && run?.studyId === study.id;
   return (
     <fieldset className="simulation-group" aria-label="Run">
       <legend>Run</legend>
       {unavailable ? (
         <p className="simulation-note">Studies cannot run here: {unavailable}</p>
       ) : !study ? (
-        <p className="simulation-note">Add a load and a constraint to make a study first.</p>
+        <p className="simulation-note">
+          Add a load and a constraint to make a study first, or add a wind tunnel.
+        </p>
       ) : null}
       <div className="simulation-actions">
         {state.status === 'running' ? (
@@ -203,15 +249,27 @@ export function RunPanel({
       </div>
       {host && startOnHost && state.status !== 'running' && (
         <p className="simulation-note" aria-label="What a Host run sends">
-          “Run on {host.label}” meshes here, then sends {host.destination} the mesh (node
-          coordinates and elements),{' '}
-          {study?.kind === 'modal'
-            ? 'E, ν and the density, the held nodes and the number of modes'
-            : 'E and ν, the held nodes and the nodal forces'}
-          , nothing else: no CAD document, names or sign-in. It takes up to{' '}
-          {host.limits.nodes.toLocaleString('en')} nodes and{' '}
-          {host.limits.elements.toLocaleString('en')} elements.
+          {study?.kind === 'aero' ? (
+            <>
+              “Run on {host.label}” sends {host.destination} the bodies’ closed surface (triangles,
+              mm), the wind speed and yaw, the ground, the mesh sizes, the iterations and the
+              reference area, nothing else: no CAD document, names or sign-in. OpenFOAM meshes and
+              solves it there; a level can take tens of minutes.
+            </>
+          ) : (
+            <>
+              “Run on {host.label}” meshes here, then sends {host.destination} the mesh (node
+              coordinates and elements),{' '}
+              {study?.kind === 'modal'
+                ? 'E, ν and the density, the held nodes and the number of modes'
+                : 'E and ν, the held nodes and the nodal forces'}
+              , nothing else: no CAD document, names or sign-in. It takes up to{' '}
+              {host.limits.nodes.toLocaleString('en')} nodes and{' '}
+              {host.limits.elements.toLocaleString('en')} elements.
+            </>
+          )}
           {study?.kind !== 'thermal' &&
+            study?.kind !== 'aero' &&
             study?.idealisation === 'shell' &&
             ' A shell goes as 15-node wedges over its wall, about nine nodes for each shell node.'}
         </p>
@@ -219,7 +277,7 @@ export function RunPanel({
       <p className="simulation-note" role="status" aria-live="polite">
         {state.status === 'running'
           ? state.progress
-            ? `Level ${state.progress.level + 1} of ${state.progress.levels}: ${stepLabels[state.progress.step]}${state.progress.on ? ` on ${state.progress.on}` : ''}…`
+            ? `Level ${state.progress.level + 1} of ${state.progress.levels}: ${stepLabels[state.progress.step]}${state.progress.on ? ` on ${state.progress.on}` : ''}${state.progress.flow ? ` step ${state.progress.flow.step.toLocaleString('en')} of ${state.progress.flow.steps.toLocaleString('en')}, Cd ${fmt(state.progress.flow.cd)}` : ''}…`
             : 'Starting the solver…'
           : state.status === 'error'
             ? `The run stopped: ${state.message}`
@@ -247,9 +305,15 @@ export function RunPanel({
           <thead>
             <tr>
               <th>Level</th>
-              <th>Size mm</th>
-              <th>Nodes</th>
-              {modalRun ? (
+              <th>{aeroRun ? 'Cell mm' : 'Size mm'}</th>
+              <th>{aeroRun ? 'Cells' : 'Nodes'}</th>
+              {aeroRun ? (
+                <>
+                  <th>Cd</th>
+                  <th>Cl</th>
+                  <th>Cs</th>
+                </>
+              ) : modalRun ? (
                 <th>First frequency Hz</th>
               ) : thermalRun ? (
                 <>
@@ -270,7 +334,13 @@ export function RunPanel({
                 <td>{i + 1}</td>
                 <td>{fmt(l.settings.size)}</td>
                 <td>{l.nodes.toLocaleString('en')}</td>
-                {modalRun ? (
+                {aeroRun ? (
+                  <>
+                    <td>{fmt(l.metrics['drag-coefficient'])}</td>
+                    <td>{fmt(l.metrics['lift-coefficient'])}</td>
+                    <td>{fmt(l.metrics['side-force-coefficient'])}</td>
+                  </>
+                ) : modalRun ? (
                   <td>{fmt(l.metrics['first-frequency'])}</td>
                 ) : thermalRun ? (
                   <>
@@ -419,16 +489,19 @@ export function ResultPanel({
               ))}
             </select>
           </label>
-          <label className="simulation-field">
-            <span>
-              Deformation scale <small>× (auto {fmt(display.auto)})</small>
-            </span>
-            <input
-              aria-label="Deformation scale"
-              value={display.scaleText}
-              onChange={(e) => display.setScaleText(e.target.value.trim() || 'auto')}
-            />
-          </label>
+          {/* VS4c: nothing moves a wind tunnel's bodies. */}
+          {!source.aero && (
+            <label className="simulation-field">
+              <span>
+                Deformation scale <small>× (auto {fmt(display.auto)})</small>
+              </span>
+              <input
+                aria-label="Deformation scale"
+                value={display.scaleText}
+                onChange={(e) => display.setScaleText(e.target.value.trim() || 'auto')}
+              />
+            </label>
+          )}
           {/* A shell's midsurface has no inside to cut. */}
           {source.tets.length > 0 && (
             <label className="simulation-field">
@@ -473,6 +546,72 @@ export function ResultPanel({
                 }
               />
             </label>
+          )}
+          {source.aero?.flow && (
+            <>
+              <label className="simulation-field">
+                <span>Streamlines</span>
+                <input
+                  type="checkbox"
+                  aria-label="Streamlines"
+                  checked={display.streamlinesOn}
+                  onChange={(e) => display.setStreamlines(e.target.checked)}
+                />
+              </label>
+              <label className="simulation-field">
+                <span>Flow section</span>
+                <select
+                  aria-label="Flow section axis"
+                  value={display.flowSection ? String(display.flowSection.axis) : 'none'}
+                  onChange={(e) =>
+                    display.setFlowSection(
+                      e.target.value === 'none'
+                        ? undefined
+                        : {
+                            axis: Number(e.target.value) as 0 | 1 | 2,
+                            at: display.flowSection?.at ?? 0.5,
+                          },
+                    )
+                  }
+                >
+                  <option value="none">None</option>
+                  {axes.map((a, i) => (
+                    <option key={a} value={i}>
+                      Plane across {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {display.flowSection && (
+                <label className="simulation-field">
+                  <span>
+                    Flow section place <small>{fmt(display.flowCut?.offset ?? 0)} mm</small>
+                  </span>
+                  <input
+                    aria-label="Flow section place"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={display.flowSection.at}
+                    onChange={(e) =>
+                      display.setFlowSection({
+                        axis: display.flowSection!.axis,
+                        at: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <p className="simulation-note" aria-label="Flow colours">
+                Streamlines and the section are coloured by the air speed, from 0 (blue) to 1.5 ×
+                the wind (red)
+                {display.streamlines
+                  ? `; ${display.streamlines.lines} streamlines from a rake ahead of the bodies`
+                  : ''}
+                .
+              </p>
+            </>
           )}
           {scalar && (
             <>

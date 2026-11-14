@@ -57,6 +57,10 @@ import {
 } from '@editor-platform/editor-ui';
 import { readCadInput } from './expression-input';
 import {
+  bodyMass,
+  cadMassLimits,
+  cadMassMaterials,
+  type CadBodyMass,
   cadBoundaryCurves,
   cadCurveNetwork,
   cadLimits,
@@ -64,17 +68,9 @@ import {
   cadPanelGapMm,
   cadGrooveRadiusMm,
   cadBodyPmiPlacements,
-  cadPmiTrackedIndex,
   cadPmiViewCamera,
   cadPmiItemText,
-  placePmiPoint,
-  type CadPmiAsset,
-  type CadPmiItem,
-  type CadPmiItemState,
-  type CadPmiPlacement,
-  type CadPmiTracking,
   type CadPmiKind,
-  type CadPmiTarget,
   formatExpression,
   formatTopoName,
   mm,
@@ -133,11 +129,17 @@ import {
   CadViewport,
   type CadMeasurePoint,
   type CadShading,
-  type CadTopologyPick,
 } from './viewport';
-import type { CadAssembly, CadStepAssemblyImportPreview } from './assembly';
+import {
+  cadRenderMeshQuality,
+  type CadAssembly,
+  type CadStepAssemblyImportPreview,
+} from './assembly';
 import { AssemblyLayer, AssemblyPanel } from './assembly-panel';
+import { AssemblyPmiLayer, selectedPartPresented } from './assembly-pmi-panel';
+import { PmiLineCache, pmiKindTitles, pmiMarks, targetCount } from './pmi-view';
 import { PartPropertiesSection } from './bom-panel';
+import { ProportionsSection } from './proportions-panel';
 import { modelTree, type CadTreeNode } from './model-tree';
 import { compareSizes, initialView, standardViews, type CadStandardView } from './view-math';
 import { SketchCanvas, SketchPanel, SketchTools, type SketchTool } from './sketch-mode';
@@ -151,6 +153,7 @@ import {
   parameterName,
 } from './dimension-fields';
 import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
+import { sketchUnderlay } from './sketch-underlay';
 import {
   draftColor,
   draftSummary,
@@ -183,6 +186,12 @@ const parameterUnit = (type: CadDocument['parameters'][number]['type']) =>
 const placementOf = (doc: CadDocument, body: CadBody) =>
   doc.features.find((f) => f.id === body.resultFeatureId);
 const noParts = () => () => {};
+/** CLF1b: the drawing board's pane labels and corners, as `threeViewLayout` places the panes. */
+const threeViewLabels = [
+  ['Side (XZ)', 'top-left'],
+  ['Front (YZ)', 'top-right'],
+  ['Plan (XY)', 'bottom-left'],
+] as const;
 /** A body's measurement: from an ok result, or from a failed one's bodies outside it (U4). */
 const bodyMetrics = (
   evaluation: CadSnapshot['evaluation'],
@@ -326,7 +335,7 @@ function Viewport({
   useEffect(() => view.current?.setGpuBudget(gpuBytes), [view, gpuBytes]);
   // Shading (R2a-4): display only, never part of the content.
   const [shading, setShading] = useState<
-    'shaded' | 'realistic' | 'zebra' | 'mean' | 'gauss' | 'thickness' | 'draft'
+    'shaded' | 'realistic' | 'silhouette' | 'zebra' | 'mean' | 'gauss' | 'thickness' | 'draft'
   >('shaded');
   /** CR6c: the ray diagram's fan, when shown; display only. */
   const [rayFan, setRayFan] = useState<RayFanSettings | undefined>();
@@ -344,6 +353,9 @@ function Viewport({
   /** The ground grid at z = 0 (display only): off for models that sit on their own ground. */
   const [grid, setGrid] = useState(true);
   useEffect(() => view.current?.setGrid(grid), [view, grid, restored]);
+  // CLF1b: the drawing board's three panes, view state only.
+  const [threeView, setThreeView] = useState(false);
+  useEffect(() => view.current?.setThreeView(threeView), [view, threeView, restored]);
   /** PMI-3a: the PMI presentation lines of the bodies (display only), shown by default. */
   const [pmiShown, setPmiShown] = useState(true);
   const pmiLines = useMemo(() => new PmiLineCache(), []);
@@ -515,7 +527,9 @@ function Viewport({
           ? { mode: 'curvature', range }
           : shading === 'realistic'
             ? { mode: 'realistic' }
-            : { mode: 'shaded' };
+            : shading === 'silhouette'
+              ? { mode: 'silhouette' }
+              : { mode: 'shaded' };
     view.current?.setShading(mode);
     const selection = snapshot.selection;
     const picked = selection?.kind === 'face' || selection?.kind === 'edge' ? selection : undefined;
@@ -685,10 +699,13 @@ function Viewport({
   );
   const views = snapshot.content.namedViews;
   // PMI-3a: the PMI switch is offered once a body has presentation lines.
-  const presented = snapshot.content.bodies.some(
-    (b) =>
-      b.state === 'active' && controller.bodyPmi(b.id).asset?.items.some((i) => i.presentation),
-  );
+  const presented =
+    snapshot.content.bodies.some(
+      (b) =>
+        b.state === 'active' && controller.bodyPmi(b.id).asset?.items.some((i) => i.presentation),
+    ) ||
+    // PMI-5b: or the selected component's part draws them.
+    (!!assembly && selectedPartPresented(assembly));
   const hasBodies =
     snapshot.content.bodies.some((b) => b.state === 'active') ||
     snapshot.content.components.length > 0;
@@ -701,6 +718,16 @@ function Viewport({
   return (
     <div className="cad-viewport" data-testid="cad-viewport">
       <div ref={host} className="cad-canvas-host" />
+      {threeView && (
+        // CLF1b: the panes are fixed halves of the canvas (threeViewLayout).
+        <div className="cad-three-view" data-testid="cad-three-view" aria-hidden="true">
+          {threeViewLabels.map(([label, place]) => (
+            <span key={label} className={`cad-three-view-label ${place}`}>
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
       {assembly && (
         <AssemblyLayer
           assembly={assembly}
@@ -708,6 +735,15 @@ function Viewport({
           snapshot={snapshot}
           restored={restored}
           textures={partTextures}
+        />
+      )}
+      {assembly && (
+        <AssemblyPmiLayer
+          assembly={assembly}
+          view={view}
+          snapshot={snapshot}
+          restored={restored}
+          linesShown={pmiShown}
         />
       )}
       {lost && (
@@ -768,7 +804,10 @@ function Viewport({
           onClear={() => setMeasure({ hash: '', points: [] })}
         />
       )}
-      {((shading !== 'shaded' && shading !== 'realistic') || comb || gapFlush || rayFan) && (
+      {((shading !== 'shaded' && shading !== 'realistic' && shading !== 'silhouette') ||
+        comb ||
+        gapFlush ||
+        rayFan) && (
         <div className="cad-analysis">
           {shading === 'zebra' && (
             <section aria-label="Zebra" data-testid="cad-zebra">
@@ -927,6 +966,7 @@ function Viewport({
           >
             <option value="shaded">Shaded</option>
             <option value="realistic">Realistic</option>
+            <option value="silhouette">Silhouette</option>
             <option value="zebra">Zebra</option>
             <option value="mean">Mean curvature</option>
             <option value="gauss">Gauss curvature</option>
@@ -973,6 +1013,15 @@ function Viewport({
             data-testid="cad-grid"
           />
           <span>Grid</span>
+        </label>
+        <label className="cad-views">
+          <input
+            type="checkbox"
+            checked={threeView}
+            onChange={(e) => setThreeView(e.target.checked)}
+            data-testid="cad-three-view-shown"
+          />
+          <span>Three views</span>
         </label>
         {presented && (
           <label className="cad-views">
@@ -2813,6 +2862,7 @@ function Inspector({
         )}
       </Section>
       <AppearanceSection body={body} controller={controller} readOnly={readOnly} />
+      <MassSection body={body} controller={controller} readOnly={readOnly} metrics={metrics} />
       <Section title="Measurements">
         {metrics ? (
           <dl className="cad-metrics">
@@ -2938,136 +2988,6 @@ function Inspector({
   );
 }
 
-/**
- * PMI-2: an item's targets as marks on its body's mesh: the pick table lists the body's faces and
- * edges in the same map order as the asset's indices. A location dimension's second end has its
- * own colour. Vertices are listed, not drawn.
- */
-/**
- * The faces and edges an item targets, as pick ids of the body's mesh: by their own index when
- * the body is the import, through the evaluation's tracking after a change (PMI-4a).
- */
-function pmiMarks(mesh: CadMesh, item: CadPmiItem, tracking?: CadPmiTracking) {
-  const marks: { pick: CadTopologyPick; color: string }[] = [];
-  const add = (targets: CadPmiTarget[], color: string) => {
-    for (const t of targets) {
-      const i = tracking ? cadPmiTrackedIndex(tracking, t) : t.index - 1;
-      if (i === undefined || i < 0) continue;
-      if (t.shape === 'face' && i < mesh.topology.faces.length)
-        marks.push({
-          pick: { bodyId: mesh.bodyId, kind: 'face', id: mesh.faceBase + 1 + i },
-          color,
-        });
-      else if (t.shape === 'edge' && i < mesh.topology.edges.length)
-        marks.push({
-          pick: { bodyId: mesh.bodyId, kind: 'edge', id: mesh.edgeBase + 1 + i },
-          color,
-        });
-    }
-  };
-  add(item.targets, pmiTargetColour);
-  if (item.kind === 'dimension') add(item.targets2 ?? [], pmiSecondColour);
-  return marks;
-}
-const pmiTargetColour = '#e8590c';
-/** PMI-3a: presentation lines, and the focused item's (in the targets' colour). */
-const pmiLineColour = '#2b8a3e';
-/**
- * PMI-3a: the presentation lines of a body's asset as viewport segments, placed where the body is
- * and relative to its mesh origin; the last few results are kept, as a large file's lines are
- * many and the viewport redraws on every selection.
- */
-class PmiLineCache {
-  private readonly entries = new Map<string, { segments: Float32Array; color: string }[]>();
-  private readonly ids = new WeakMap<object, number>();
-  private next = 0;
-  private idOf(o: object) {
-    let id = this.ids.get(o);
-    if (id === undefined) this.ids.set(o, (id = this.next++));
-    return id;
-  }
-  get(
-    asset: CadPmiAsset,
-    placements: CadPmiPlacement[],
-    origin: Vec3,
-    focusId: string | undefined,
-    viewId?: string,
-    /** PMI-4a: after a change of the shape, only the current items are drawn. */
-    states?: ReadonlyMap<string, CadPmiItemState>,
-  ): { segments: Float32Array; color: string }[] {
-    const key = JSON.stringify([
-      this.idOf(asset),
-      states ? this.idOf(states) : null,
-      placements,
-      origin,
-      focusId ?? null,
-      viewId ?? null,
-    ]);
-    const hit = this.entries.get(key);
-    if (hit) return hit;
-    // With a view shown, only the ranges (callouts) that view lists; otherwise all lines.
-    const segmentsOf = (i: CadPmiItem): number[] => {
-      const p = i.presentation;
-      if (!p) return [];
-      if (viewId === undefined || !p.ranges) return p.segments;
-      let from = 0;
-      return p.ranges.flatMap((range) => {
-        const part = range.views.includes(viewId) ? p.segments.slice(from, range.end) : [];
-        from = range.end;
-        return part;
-      });
-    };
-    const line = (items: CadPmiItem[]) => {
-      const parts = items.map(segmentsOf);
-      const n = parts.reduce((k, s) => k + s.length, 0);
-      const out = new Float32Array(n);
-      let at = 0;
-      for (const s of parts) {
-        for (let k = 0; k < s.length; k += 3) {
-          const p = placePmiPoint(placements, [s[k]!, s[k + 1]!, s[k + 2]!]);
-          out[at++] = p[0] - origin[0];
-          out[at++] = p[1] - origin[1];
-          out[at++] = p[2] - origin[2];
-        }
-      }
-      return out;
-    };
-    const shown = asset.items.filter(
-      (i) =>
-        i.presentation &&
-        (viewId === undefined || i.views?.includes(viewId)) &&
-        (!states || states.get(i.id)?.current === true),
-    );
-    const focused = shown.filter((i) => i.id === focusId);
-    const rest = shown.filter((i) => i.id !== focusId);
-    const lines = [
-      ...(rest.length ? [{ segments: line(rest), color: pmiLineColour }] : []),
-      ...(focused.length ? [{ segments: line(focused), color: pmiTargetColour }] : []),
-    ];
-    if (this.entries.size >= 8) this.entries.delete(this.entries.keys().next().value!);
-    this.entries.set(key, lines);
-    return lines;
-  }
-}
-const pmiSecondColour = '#1c7ed6';
-const pmiKindTitles: Record<CadPmiKind, string> = {
-  dimension: 'Dimensions',
-  'geometric-tolerance': 'Geometric tolerances',
-  datum: 'Datums',
-  'datum-target': 'Datum targets',
-};
-const targetCount = (item: CadPmiItem) => {
-  const all = [...item.targets, ...(item.kind === 'dimension' ? (item.targets2 ?? []) : [])];
-  const n = (kind: string, one: string, many: string) => {
-    const c = all.filter((t) => t.shape === kind).length;
-    return c ? [`${c} ${c === 1 ? one : many}`] : [];
-  };
-  return [
-    ...n('face', 'face', 'faces'),
-    ...n('edge', 'edge', 'edges'),
-    ...n('vertex', 'vertex', 'vertices'),
-  ].join(', ');
-};
 /**
  * PMI-2 (docs/cad/pmi.md, 表示と操作): the semantic PMI an imported body keeps, by kind. Choosing
  * an item highlights its faces and edges (display only). PMI-4a: after a feature that changes the
@@ -3331,6 +3251,122 @@ function AppearanceSection({
         {unit('opacity', 'Opacity', a.opacity)}
         <LightFields appearance={a} onChange={custom} />
         <TextureSection body={body} controller={controller} readOnly={false} />
+      </div>
+    </Section>
+  );
+}
+/**
+ * CR7a (docs/cad/car-design.md, A3): what a body weighs: a material's density (or a density by
+ * hand) and a sheet's thickness. The body's mass is shown once its shape is calculated; without
+ * a density (or a sheet without a thickness) it is left out of the mass, never counted as 0.
+ */
+function MassSection({
+  body,
+  controller,
+  readOnly,
+  metrics,
+}: {
+  body: CadBody;
+  controller: CadController;
+  readOnly: boolean;
+  metrics: CadBodyEvaluation | undefined;
+}) {
+  const m = body.mass;
+  const weighed = bodyMass(body, metrics);
+  const total =
+    'code' in weighed ? (
+      <p className="cad-muted" data-testid="cad-body-mass">
+        {weighed.code === 'mass-missing'
+          ? 'No density: left out of the mass.'
+          : weighed.code === 'mass-thickness-missing'
+            ? 'A sheet needs a thickness to weigh.'
+            : 'Available after the shape is calculated.'}
+      </p>
+    ) : (
+      <dl className="cad-metrics" data-testid="cad-body-mass">
+        <dt>Mass</dt>
+        <dd>{fmtGrouped(weighed.massKg, 3)} kg</dd>
+        <dt>Centre of mass</dt>
+        <dd>{weighed.centroidMm.map((v: number) => fmtGrouped(v, 1)).join(', ')} mm</dd>
+      </dl>
+    );
+  if (readOnly)
+    return (
+      <Section title="Mass">
+        <dl className="cad-metrics">
+          <dt>Density</dt>
+          <dd>
+            {m
+              ? `${fmtGrouped(m.densityKgM3, 0)} kg/m³${m.material ? ` (${m.material})` : ''}`
+              : 'None'}
+          </dd>
+          {body.kind === 'sheet' && (
+            <>
+              <dt>Thickness</dt>
+              <dd>{m?.thicknessMm !== undefined ? `${m.thicknessMm} mm` : 'None'}</dd>
+            </>
+          )}
+        </dl>
+        {total}
+      </Section>
+    );
+  const set = (next: CadBodyMass | null) =>
+    void controller.run({ type: 'setBodyMass', bodyId: body.id, mass: next });
+  const [lo, hi] = cadMassLimits.densityKgM3;
+  const [tlo, thi] = cadMassLimits.thicknessMm;
+  const thickness = m?.thicknessMm !== undefined ? { thicknessMm: m.thicknessMm } : {};
+  return (
+    <Section title="Mass">
+      <div data-testid="cad-mass">
+        <label className="ep-field">
+          Density preset
+          <select
+            value={m ? (m.material ?? 'custom') : ''}
+            onChange={(e) => {
+              const id = e.target.value;
+              if (!id) return set(null);
+              const density = cadMassMaterials[id];
+              if (density === undefined) return;
+              set({ densityKgM3: density, ...thickness, material: id });
+            }}
+          >
+            <option value="">None</option>
+            {m && !m.material && <option value="custom">Custom</option>}
+            {Object.keys(cadMassMaterials).map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <CommitInput
+          label="Density (kg/m³)"
+          type="number"
+          min={lo}
+          max={hi}
+          value={m?.densityKgM3 ?? ''}
+          onCommit={(v) => {
+            const d = Number(v);
+            if (!(d >= lo && d <= hi)) return false;
+            set({ densityKgM3: d, ...thickness });
+          }}
+        />
+        {body.kind === 'sheet' && (
+          <CommitInput
+            label="Sheet thickness (mm)"
+            type="number"
+            min={tlo}
+            max={thi}
+            step={0.1}
+            value={m?.thicknessMm ?? ''}
+            onCommit={(v) => {
+              const t = Number(v);
+              if (!m || !(t >= tlo && t <= thi)) return false;
+              set({ ...m, thicknessMm: t });
+            }}
+          />
+        )}
+        {total}
       </div>
     </Section>
   );
@@ -4620,7 +4656,11 @@ function RebindPanel({
 /** A boundary curve as the editor reads it: the sketch and element, or the edge's name. */
 function curveLabel(doc: CadDocument, c: CadCurveSource) {
   if ('edge' in c) return formatTopoName(c.edge.name);
-  return `${doc.sketches.find((s) => s.id === c.sketchId)?.name ?? c.sketchId} ${c.element}`;
+  const of = (x: { sketchId: string; element: string }) =>
+    `${doc.sketches.find((s) => s.id === x.sketchId)?.name ?? x.sketchId} ${x.element}`;
+  if ('twoView' in c)
+    return `Two-view: ${of(c.twoView.side)} (side) × ${of(c.twoView.plan)} (plan)`;
+  return of(c);
 }
 
 /** Chooses the sections of a new loft, in order, and whether it is ruled (R1e). */
@@ -4759,6 +4799,8 @@ function LoftDialog({
   );
 }
 
+/** CLF2: a two-view curve's option key; JSON, so no pair of keys can run together. */
+const twoViewKey = (side: string, plan: string) => `tv:${JSON.stringify([side, plan])}`;
 /**
  * Chooses a boundary surface (3 or 4 curves) or a fill (3 to 16) and its curves in loop order:
  * sketch lines, arcs and open splines, and the edges collected from picks (R2a-2c). A fill
@@ -4781,6 +4823,10 @@ function BoundaryDialog({
   // CR1d: the curves of a network that run across (v); the others run along (u).
   const [across, setAcross] = useState<Set<string>>(new Set());
   const [tolerance, setTolerance] = useState('0.01');
+  // CLF2: two-view curves made here, by the keys of their side and plan sketch elements.
+  const [twoViews, setTwoViews] = useState<[string, string][]>([]);
+  const [viewSide, setViewSide] = useState('');
+  const [viewPlan, setViewPlan] = useState('');
   const options = new Map<string, { label: string; curve: CadCurveSource; free?: boolean }>();
   edges.forEach((e, i) =>
     options.set(`edge:${i}`, { label: e.label, curve: { edge: e.ref }, free: e.free }),
@@ -4794,6 +4840,20 @@ function BoundaryDialog({
         curve: { sketchId: sketch.id, element: x.id },
       });
     }
+  const sketchKeys = [...options].filter(([, o]) => 'sketchId' in o.curve);
+  // The views' own sketch IDs (an ID may hold `/`, so never read back from a key, #1111 review).
+  const sketchOf = (key: string) => {
+    const c = options.get(key)?.curve;
+    return c && 'sketchId' in c ? c.sketchId : undefined;
+  };
+  for (const [side, plan] of twoViews) {
+    const [a, b] = [options.get(side), options.get(plan)];
+    if (!a || !b || !('sketchId' in a.curve) || !('sketchId' in b.curve)) continue;
+    options.set(twoViewKey(side, plan), {
+      label: `Two-view: ${a.label} (side) × ${b.label} (plan)`,
+      curve: { twoView: { side: a.curve, plan: b.curve } },
+    });
+  }
   const network = kind === 'curveNetwork';
   const ways = {
     u: chosen.filter((k) => !across.has(k)),
@@ -4846,6 +4906,50 @@ function BoundaryDialog({
             </label>
           </>
         )}
+        <fieldset className="cad-two-view">
+          <legend>Two-view curve</legend>
+          <p>
+            A 3D curve from a side view line (a sketch parallel to XZ) and a plan view line (a
+            sketch parallel to XY), each running one way front to back.
+          </p>
+          <label className="ep-field">
+            Side view
+            <select value={viewSide} onChange={(e) => setViewSide(e.target.value)}>
+              <option value="">—</option>
+              {sketchKeys.map(([key, o]) => (
+                <option key={key} value={key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="ep-field">
+            Plan view
+            <select value={viewPlan} onChange={(e) => setViewPlan(e.target.value)}>
+              <option value="">—</option>
+              {sketchKeys.map(([key, o]) => (
+                <option key={key} value={key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={
+              !viewSide ||
+              !viewPlan ||
+              sketchOf(viewSide) === sketchOf(viewPlan) ||
+              twoViews.some(([a, b]) => a === viewSide && b === viewPlan)
+            }
+            onClick={() => {
+              setTwoViews((all) => [...all, [viewSide, viewPlan]]);
+              setChosen((c) => [...c, twoViewKey(viewSide, viewPlan)]);
+            }}
+          >
+            Add two-view curve
+          </button>
+        </fieldset>
         <ol className="cad-loft-sections" aria-label="Curves">
           {[...options].map(([key, o]) => {
             const at = chosen.indexOf(key);
@@ -5347,6 +5451,11 @@ function Navigator({
         </ul>
       </Section>
       {!!doc.spotWelds?.length && <SpotWeldList controller={controller} snapshot={snapshot} />}
+      <ProportionsSection
+        controller={controller}
+        snapshot={snapshot}
+        editable={!snapshot.readOnly && snapshot.canEdit}
+      />
       <Section title="Model tree" open={false}>
         <ModelTree doc={doc} item={item} />
       </Section>
@@ -5686,13 +5795,6 @@ function ExportFileDialog({
             <dt>Not kept</dt>
             <dd>{ready.report.losses.join(' ')}</dd>
           </dl>
-        )}
-        {ready?.report.format === 'step' && ready.bytes.byteLength > cadLimits.stepBytes && (
-          // WM5c: written up to `stepExportBytes`, read only up to `stepBytes`.
-          <p className="cad-muted" role="note">
-            This file is larger than 16 MiB: other CAD tools can open it, but this editor cannot
-            import it back.
-          </p>
         )}
         {error && (
           <p role="alert" className="cad-diagnostic">
@@ -6144,8 +6246,13 @@ function Surface({
   const [sketchTool, setSketchTool] = useState<SketchTool>('line');
   /** Sketch mode's curvature comb (R2a-4): its scale step, undefined when off. */
   const [sketchComb, setSketchComb] = useState<number>();
+  // CLF1a: the shown bodies and other sketches drawn under a sketch, on until turned off.
+  const [sketchUnder, setSketchUnder] = useState(true);
   const [sketchSelection, setSketchSelection] = useState<string[]>([]);
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  // A render's finer meshes are kept for rendering again from another angle, until the
+  // content changes or the editor closes.
+  useEffect(() => () => assembly?.releaseRenderMeshes(), [assembly, snapshot.contentHash]);
   const sketching = snapshot.sketch;
   // A new Sketch mode session starts with the line tool and nothing selected.
   const sketchSession = sketching ? `${sketching.sketch.id}:${sketching.isNew}` : '';
@@ -6181,6 +6288,29 @@ function Surface({
       return next;
     });
   const shownIds = shownBodies(snapshot.content, shownView, toggled);
+  const shownKey = shownIds.join('\n');
+  const underlayMeshes =
+    snapshot.meshes?.contentHash === snapshot.contentHash ? snapshot.meshes.meshes : undefined;
+  const underlay = useMemo(
+    () =>
+      sketchUnder && sketching
+        ? sketchUnderlay(
+            snapshot.content,
+            sketching.sketch,
+            underlayMeshes ?? [],
+            new Set(shownKey.split('\n')),
+          )
+        : undefined,
+    // The sketch's own drawing never changes what lies under it: only its plane does.
+    [
+      sketchUnder,
+      sketching?.sketch.id,
+      sketching?.sketch.plane,
+      snapshot.content,
+      underlayMeshes,
+      shownKey,
+    ],
+  );
   async function saveView() {
     const current = view.current?.currentView();
     const bodyIds = shownIds;
@@ -6580,6 +6710,8 @@ function Surface({
                 onSelect={setSketchSelection}
                 comb={sketchComb}
                 onComb={setSketchComb}
+                underlay={sketchUnder}
+                onUnderlay={setSketchUnder}
               />
             ) : (
               <Inspector controller={controller} snapshot={snapshot} assembly={assembly} />
@@ -6666,6 +6798,7 @@ function Surface({
                 onSelect={setSketchSelection}
                 ownsKey={ownsKey}
                 comb={sketchComb}
+                underlay={underlay}
               />
             )
           }
@@ -6707,6 +6840,16 @@ function Surface({
         <PathRenderDialog
           name={name}
           source={() => view.current?.renderSource()}
+          finerSource={
+            assembly &&
+            (async (control, onProgress) => {
+              const fine = await assembly.renderMeshes(cadRenderMeshQuality, {
+                control,
+                onProgress,
+              });
+              return view.current?.renderSource(fine);
+            })
+          }
           onSavePng={onExportPng && ((png) => onExportPng(png, { background: true }))}
           onClose={() => setRendering(false)}
         />

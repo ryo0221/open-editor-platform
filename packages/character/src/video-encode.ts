@@ -144,7 +144,38 @@ export async function exportMp4(
   maxBytes: number = videoLimits.maxOutputBytes,
 ): Promise<Blob> {
   checkVideoSettings(doc, settings);
-  const { width, height, fps } = settings;
+  return encodeMp4(
+    { ...settings, ticks: videoFrameTicks(settings) },
+    source,
+    encoding,
+    progress,
+    signal,
+    maxBytes,
+  );
+}
+
+/** The frames of a video: their size, rate, and the tick each is drawn at. */
+export interface Mp4Frames {
+  width: number;
+  height: number;
+  fps: Rational;
+  ticks: readonly number[];
+}
+
+/**
+ * Draws `frames.ticks` from `source`, encodes them with H.264 (WebCodecs) and writes an MP4 (the
+ * size and rate already checked by the caller). Shared by the character video (C8b) and the
+ * construction schedule video (CS6c).
+ */
+export async function encodeMp4(
+  frames: Mp4Frames,
+  source: VideoEncodeSource,
+  encoding: VideoEncoding | undefined,
+  progress?: VideoProgress,
+  signal?: AbortSignal,
+  maxBytes: number = videoLimits.maxOutputBytes,
+): Promise<Blob> {
+  const { width, height, fps, ticks } = frames;
   const unsupported = () =>
     new VideoExportError(
       'video-encoder-unsupported',
@@ -172,7 +203,6 @@ export async function exportMp4(
   const cancelled = () => new VideoExportError('video-cancelled', 'The export was cancelled.');
   if (signal?.aborted) throw cancelled();
 
-  const ticks = videoFrameTicks(settings);
   const clock = mp4Clock(fps);
   // The writer's media duration is 32 bits: refused before anything is drawn.
   if (ticks.length * clock.sampleDuration > 0xffffffff || clock.timescale > 0xffffffff)

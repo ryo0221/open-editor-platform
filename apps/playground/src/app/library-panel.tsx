@@ -6,12 +6,15 @@ import { IconButton } from '@editor-platform/editor-ui';
 import type { PrivateVideoEntry } from '../private-video/catalog';
 import { graphTemplates, type GraphTemplateId } from './graph-templates';
 import { simulationSourceChoices, type SimulationSourceChoice } from '../simulation/source';
+import { constructionSourceChoices, type ConstructionSourceChoice } from '../construction/source';
 import {
   cadKernel,
   creatableKinds,
   downloadText,
   kinds,
+  pcbTemplates,
   type Kind,
+  type PcbTemplateId,
   type StoredArtifact,
 } from '../model';
 
@@ -80,6 +83,8 @@ export function LibraryPanel({
   onKindChange,
   graphTemplate,
   onGraphTemplateChange,
+  pcbTemplate,
+  onPcbTemplateChange,
   onCreate,
   onCreateManga,
   onCreateNovel,
@@ -104,7 +109,9 @@ export function LibraryPanel({
   onKindChange(kind: Kind): void;
   graphTemplate: GraphTemplateId;
   onGraphTemplateChange(template: GraphTemplateId): void;
-  onCreate(kind: Kind, simulationSource?: SimulationSourceChoice): void;
+  pcbTemplate: PcbTemplateId;
+  onPcbTemplateChange(template: PcbTemplateId): void;
+  onCreate(kind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
   onCreateNovel(): Promise<void>;
   onCreateFromTemplate(): void;
@@ -119,7 +126,12 @@ export function LibraryPanel({
   });
   const [creatingManga, setCreatingManga] = useState(false);
   const [sourceAt, setSourceAt] = useState(0);
-  const sources = kind === 'simulation' ? simulationSourceChoices(records) : [];
+  const sources: (SimulationSourceChoice | ConstructionSourceChoice)[] =
+    kind === 'simulation'
+      ? simulationSourceChoices(records)
+      : kind === 'construction'
+        ? constructionSourceChoices(records)
+        : [];
   const source = sources[Math.min(sourceAt, sources.length - 1)];
   const [creatingNovel, setCreatingNovel] = useState(false);
   const openPrivate = privateVideo.openEditor;
@@ -177,6 +189,22 @@ export function LibraryPanel({
           </select>
         </label>
       )}
+      {kind === 'pcb' && (
+        <label className="create-type">
+          Board template
+          <select
+            aria-label="Board template"
+            value={pcbTemplate}
+            onChange={(e) => onPcbTemplateChange(e.target.value as PcbTemplateId)}
+          >
+            {pcbTemplates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {kind === 'simulation' && (
         <label className="create-type">
           Part to analyse
@@ -187,7 +215,10 @@ export function LibraryPanel({
               onChange={(e) => setSourceAt(Number(e.target.value))}
             >
               {sources.map((c, i) => (
-                <option key={`${c.artifactId}/${c.versionId}/${c.bodyId}`} value={i}>
+                <option
+                  key={`${c.artifactId}/${c.versionId}/${'bodyId' in c ? c.bodyId : ''}`}
+                  value={i}
+                >
                   {c.label}
                 </option>
               ))}
@@ -197,10 +228,32 @@ export function LibraryPanel({
           )}
         </label>
       )}
+      {kind === 'construction' && (
+        <label className="create-type">
+          Building to schedule
+          {sources.length ? (
+            <select
+              aria-label="Building to schedule"
+              value={Math.min(sourceAt, sources.length - 1)}
+              onChange={(e) => setSourceAt(Number(e.target.value))}
+            >
+              {sources.map((c, i) => (
+                <option key={`${c.artifactId}/${c.versionId}`} value={i}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <small>Save a version of a Building first.</small>
+          )}
+        </label>
+      )}
       <button
         className="primary new-artifact"
-        onClick={() => onCreate(kind, kind === 'simulation' ? source : undefined)}
-        disabled={!loaded || (kind === 'simulation' && !source)}
+        onClick={() =>
+          onCreate(kind, kind === 'simulation' || kind === 'construction' ? source : undefined)
+        }
+        disabled={!loaded || ((kind === 'simulation' || kind === 'construction') && !source)}
       >
         ＋ New artifact
       </button>
@@ -343,7 +396,7 @@ export function WelcomePanel({
   busy: boolean;
   privateVideo: PrivateVideoLaunchers;
   onFindTemplates(): void;
-  onCreate(kind: Kind, simulationSource?: SimulationSourceChoice): void;
+  onCreate(kind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice): void;
   onCreateManga(options: MangaCreationOptions): Promise<void>;
   onCreateNovel(): Promise<void>;
 }) {

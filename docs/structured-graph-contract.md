@@ -17,17 +17,17 @@
 
 ## 能力matrix
 
-| 能力                                              | 初期宣言                                                                                 | 未対応入口                                                                  |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| local / Viewer                                    | native Graph、typed属性、接続/付替え/削除、明示配置、ノードの形と塗り、Undo/Redo         | readOnlyはHost適用境界でも拒否                                              |
-| selection                                         | graph/node/edgeの安定ID、Host通知                                                        | annotationなし（既存Hostで入口を隠す）                                      |
-| headless / proposal                               | serializable intent batch、preview/apply、revision/profile/adapterの再検証               | AI/runtimeはHost所有                                                        |
-| native JSON                                       | draft・全version・hash検証、restore、schema 2のみ（Preview）                             | schema 1は理由付きで拒否。未知schema/profileを拒否、旧versionを書き換えない |
-| external adapter                                  | canonical Session一つ、損失のない対象field編集、導出edgeはreadOnly、presentation sidecar | 保存不能な操作を理由付き拒否                                                |
-| Data projection                                   | 同一DataのGrid/Form/Graph、single nullable row ID relation                               | 多値/入れ子/自由なedge属性を文字列へ埋め込まない                            |
-| Shared / template / reuse / Office / React export | 非対応                                                                                   | Graphには入口を表示しない。既存domain unionへ追加しない                     |
-| text                                              | controlled input buffer、submit一編集、Cancel/Escape、composition中shortcut抑制          | native OS IMEは別途NOT RUNを記録                                            |
-| browser                                           | Chromium desktop/mobile viewport、独立Host/通常Host                                      | 実機、他engine、assistive technologyは実施範囲を別記                        |
+| 能力                                              | 初期宣言                                                                                 | 未対応入口                                                                   |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| local / Viewer                                    | native Graph、typed属性、接続/付替え/削除、明示配置、ノードの形と塗り、Undo/Redo         | readOnlyはHost適用境界でも拒否                                               |
+| selection                                         | graph/node/edgeの安定ID、Host通知                                                        | annotationなし（既存Hostで入口を隠す）                                       |
+| headless / proposal                               | serializable intent batch、preview/apply、revision/profile/adapterの再検証               | AI/runtimeはHost所有                                                         |
+| native JSON                                       | draft・全version・hash検証、restore。schema 3を書き、schema 1・2を読む                   | 新しすぎるschemaは理由付きで拒否。未知profileを拒否、旧versionを書き換えない |
+| external adapter                                  | canonical Session一つ、損失のない対象field編集、導出edgeはreadOnly、presentation sidecar | 保存不能な操作を理由付き拒否                                                 |
+| Data projection                                   | 同一DataのGrid/Form/Graph、single nullable row ID relation                               | 多値/入れ子/自由なedge属性を文字列へ埋め込まない                             |
+| Shared / template / reuse / Office / React export | 非対応                                                                                   | Graphには入口を表示しない。既存domain unionへ追加しない                      |
+| text                                              | controlled input buffer、submit一編集、Cancel/Escape、composition中shortcut抑制          | native OS IMEは別途NOT RUNを記録                                             |
+| browser                                           | Chromium desktop/mobile viewport、独立Host/通常Host                                      | 実機、他engine、assistive technologyは実施範囲を別記                         |
 
 ## Native model / Profile
 
@@ -41,6 +41,16 @@ Nodeは `{id,type,attributes,sectionId?}`、Edgeは `{id,type,from,to,attributes
 Profile schema 2はdata schemaとUI schemaを分離する（`sections` はSectionの型のmap）。data schemaはboundedなstring/number/boolean/enum/array/object、required/readOnly、数値範囲、string length。UI schemaはlabel/description/order/labelField、node typeの既定の形 `shape` と塗り `style`。scalarは型付きinput、array/objectはschema検証付きJSON textareaを使う初期範囲。JSON Schemaの完全実装、recursive form builder、`$ref`/remote resolution、code/HTML rendererではない。未知属性はJSONとして保持しフォームでは変更しない。Profile登録はHostの信頼境界。Profile ID/versionとcontent schema/Artifact envelope/外部Definitionの公開版を混同しない。
 
 required欠落は未完成draftのdiagnostics（公開/版保存はHostが判断）。存在する値の型不正、未知type、接続先欠落、上限違反はcommit拒否。edge typeごとにfrom/to型、self/parallel/cycle、max incoming/outgoingを宣言する。接続数と隣接表はtypeごとに一度集計し、cycleは反復DFSの強連結成分から該当edgeだけを診断する。未宣言の禁止は固定しない。readOnly field/typeはUI以外でも差分検証で拒否する。診断はscope/element ID/field path/code/severityを持ち、投影stampと一緒に返す。
+
+## 互換性
+
+2026-11-14からStructured Graphは互換を守る保存形式として扱う（Preview・Experimental・pre-1.0の扱いを外した。Ryoさんの判断）。
+
+- **番号**：Graphの保存形式を変えたら `schemaVersion` を上げる。現在はGraph schema 3（`graphSchemaVersion`）、Profile schema 2（`graphProfileSchemaVersion`）、presentation sidecar schema 2。Section（#396）とSectionにつなぐ接続（#594）は、それまでschema 2のまま書いていたので、schema 3で区別する。
+- **新しい版は古い番号を読む**：`upgradeGraphDocument`・`readGraphDocument` はschema 1（位置は `layout`、Section無し）とschema 2を、入力を変えずにschema 3として返す。schema 2として保存されたSectionへの接続もそのまま読む。Profile schema 1（Section型無し）は `upgradeGraphProfile`・`readGraphProfile` でschema 2として、sidecar schema 1（`positions`）はschema 2のnode presentationとして読む。
+- **保存済みの版は書き換えない**：Playgroundは古いschemaの下書きを開く・取り込むときに現在のschemaへ移す。保存済みの版はbytesとhashを保ち、表示・参照・版の復元のときに読み替える。復元した下書きと次の版はschema 3になる。
+- **古い版は新しい番号を理由付きで断る**：この版から、読めるより新しい番号は「Graph schema N is newer than this version reads」で断る（不正なデータとは区別する）。これより前の版はschema 3を「Invalid Graph schema…」で断る。
+- **今後**：保存形式を変える変更は、番号を上げ、旧番号の読み込み（または明示的な移行）と試験を同じ変更に入れる。読み込みを外すときは[変更の記録](structured-graph/changes.md)に書き、少なくとも1つ前の番号は読み続ける。APIはpackageの版に従い、破壊的な変更は変更の記録に書く。
 
 ## 閲覧表示 (#224–#228)
 
@@ -62,7 +72,7 @@ Edge Profileの `ui.edgeStyle` は3/6桁hex色と最大8個の正のfinite dash�
 edgeStyleはProfile schema 2でも追加指定なしで有効（schema 1のProfileは理由付きで拒否する）。Profileの変更は既存のHost版管理に従う。
 Graph content、確定version、hash、編集履歴には表示設定を保存しない。
 
-## ノードの形と塗り (#396 Phase 1, Preview)
+## ノードの形と塗り (#396 Phase 1)
 
 形は `rectangle`・`rounded-rectangle`・`ellipse`・`diamond`・`cylinder`・`hexagon`・`cloud` の7種。
 塗りは `style {fill?, stroke?, strokeWidth?: 1|2|3, dash?}`（色は3/6桁hex、dashは最大8個の正のfinite値で各64以下、空配列は実線）。
@@ -70,7 +80,7 @@ Graph content、確定version、hash、編集履歴には表示設定を保存�
 変更はintent `set-node-shape {id, shape|null}` と `set-node-style {id, style|null}` で、nullと空のstyleは保存値を消して既定へ戻す。
 意味のデータ（type・属性・接続）を変えず、それぞれ一編集でUndoする。`move-node` は形と塗りを保持する。readOnlyのnode typeは変更を拒否する。
 
-## ノードのアイコン (workflow-definitions #8, Preview)
+## ノードのアイコン (workflow-definitions #8)
 
 Profileのnode typeは `ui.icon`（型の既定）、`ui.iconBy`（その型のschemaにある属性名）と `ui.icons`（属性値を文字列にした値 → アイコン）を持てる。
 決め方は `icons[String(attributes[iconBy])]` → `icon` → なし。object・array・null・未設定の値は既定へ落ちる。
@@ -83,7 +93,7 @@ Paletteは型の既定アイコン、参照SVGは同じバッジを描く。ア�
 形ごとに接続点を並べる範囲を辺の中央寄りに狭め、平行な関係も別の端点を持つ。自動の高さはラベルが形の内側に収まる高さ（最小70px）。
 ラベルの色は塗りに対して対比の高い黒か白（どの色でも4.5:1以上）。寸法はこのPhaseでは保存しない。
 
-## Section (#396 Phase 2, Preview)
+## Section (#396 Phase 2)
 
 Sectionは意味を持つまとまりで、`GraphSection {id, type, attributes, parentId?}` を `sections` に、所属を `node.sectionId` に置く。
 所属は位置ではなく明示の値で決まり、ノードは0か1個のSectionに入る。親子は `parentId` で、深さ8段・500個まで、枠は各辺40〜200,000。
@@ -98,7 +108,7 @@ intentは `add-section {section, bounds}`・`set-node-section {id, sectionId|nul
 `move-section {id, position}`・`resize-section {id, bounds}`・`set-section-style {id, style|null}`・`delete-section {id, cascade?}`、
 属性は既存の `set-attribute`/`remove-attribute` の `scope: 'section'`。それぞれ一編集でUndoする。
 `move-section` は子孫のSectionの枠と所属ノード（既定位置のものも）を同じだけ動かし、`resize-section` は所属を変えない。
-`delete-section` は中身（ノードと子のSection）を親へ、親が無ければ最上位へ移し、ノードと関係を残す（Section自身につながる関係は[Sectionにつなぐ接続](#sectionにつなぐ接続-594-preview)）。
+`delete-section` は中身（ノードと子のSection）を親へ、親が無ければ最上位へ移し、ノードと関係を残す（Section自身につながる関係は[Sectionにつなぐ接続](#sectionにつなぐ接続-594)）。
 自分の子孫を親にする操作は「A section cannot be placed inside itself」、深さの超過は「Sections can nest at most 8 levels」で拒否する。
 readOnlyの型のSectionは、新規作成・属性・枠・親・存在・中身（ノードと子のSection）の変更をbatch全体で拒否する。
 
@@ -116,11 +126,11 @@ Sectionを編集できるSurfaceでノードをドラッグして離すと、ノ
 `sectionDropOutside: 'keep'` で所属を残す（既定 `'clear'`）。`contains` や readOnly の型のSectionが断る所属は変えずに
 移動だけを入れ、理由を示す。Inspectorの `Node section` と `set-node-section` はそのまま使える。
 
-## Sectionにつなぐ接続 (#594, Preview)
+## Sectionにつなぐ接続 (#594)
 
 Edgeの `from`・`to` はノードのIDかSectionのIDを取る。IDはGraphの中で一意なので、IDがどちらを指すかを決め、端点の種類は持たない
-（`graphEndpointKind(graph, id)` が `'node' | 'section' | undefined` を返す）。schemaは2のままで、Sectionにつながる接続を持つGraphは
-この版より前の読み込みでは不正として断られる。
+（`graphEndpointKind(graph, id)` が `'node' | 'section' | undefined` を返す）。この形式はschema 3で番号を分けた（当初はschema 2のまま書いていた。[互換性](#互換性)）。schema 2として保存された
+Sectionにつながる接続も、schema 3として読む。
 Sectionの端点はProfileの許可が要る。edge typeの `connection.fromSections`・`toSections` はSectionの型の一覧で、省略と `[]` は
 Sectionにつなげない、一覧はその型のSectionにだけつなげる（ノードの `from`・`to` と違い、既定は禁止）。未知の型と重複はProfileとして拒否する。
 許されないSectionの端点は `connection-section` の `blocking` の診断になり、`add-edge`・`reconnect-edge` はbatch全体で断られる。
@@ -141,7 +151,7 @@ Surfaceは開いた枠の辺の中央に端点を置き、ノードを避けて�
 ノードを絞って枠を描かない参照ではその接続を描かない。DataのGraphと `sections: true` でないadapterはSectionを持たないので、
 Sectionへの接続も作れない。
 
-## 図の作成支援 (#396 Phase 3, Preview)
+## 図の作成支援 (#396 Phase 3)
 
 `arrangeGraph(graph, {nodeSize?, origin?})` はpureで決定的な自動配置で、`GraphIntent[]` を返す。
 最上位と各Sectionをそれぞれ一つの入れ物として、直下のノードと子Sectionを、入れ物の中の関係の向きで左から右の列（最長経路の段）に並べる。

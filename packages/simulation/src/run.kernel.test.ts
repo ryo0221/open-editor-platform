@@ -13,7 +13,11 @@ import {
 } from '@editor-platform/cad-core';
 import { evaluateCad } from '@editor-platform/cad-kernel-occt';
 import { meshSurfaceReport, type FemMesherModule } from '@editor-platform/fem-mesher';
-import { simulationFixture, type SimulationDocument } from '@editor-platform/simulation-core';
+import {
+  aeroStudy,
+  simulationFixture,
+  type SimulationDocument,
+} from '@editor-platform/simulation-core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { cadKernelBuild } from '../../../scripts/cad-kernel/build.mjs';
 import { spawnSync } from 'node:child_process';
@@ -98,6 +102,27 @@ describe.skipIf(!available)('a study run with the kernel and Netgen (R3e-3)', ()
     doc.studies[0]!.convergence.tolerance = 0.05;
     return { cad, doc, table };
   };
+
+  // VS4b (TS-2211, ST-608 #1): the plate's own analysis surface through the browser wind tunnel.
+  it('runs a wind tunnel past the F02 plate on its kernel surface', async () => {
+    const { cad, doc } = simulationFixture();
+    doc.source.contentHash = cadContentHash(cad);
+    const study = aeroStudy('tunnel');
+    study.aero.browserCellMm = 5;
+    study.solver.maxIterations = 400;
+    doc.studies.push(study);
+    const table = await tableOf(cad, 'plate');
+    const run = await runStudy(doc, cad, cadContentHash(cad), 'tunnel', table, env());
+    expect(run.failure, JSON.stringify(run.failure)).toBeUndefined();
+    expect(run.status.status).toBe('reference');
+    const [level] = run.levels;
+    expect(level!.checks.every((c) => c.pass)).toBe(true);
+    expect(level!.checks[0]!.detail).toMatch(/^1 closed body, \d+ triangles, lowest point 0 mm/);
+    // The plate lies on the ground one cell thick: a drag pushing it downstream, not a value to
+    // compare (the tunnel's numbers are checked on the sphere, TS-2201, and Ahmed, TS-2205).
+    expect(level!.metrics['drag-coefficient']).toBeGreaterThan(0.3);
+    expect(Number.isFinite(level!.metrics['lift-coefficient'])).toBe(true);
+  }, 120_000);
 
   it('bends the F02 plate: every check passes on both levels, the tip moves as a cantilever', async () => {
     const { cad, doc, table } = await plate();

@@ -45,6 +45,25 @@ import {
   type BondedModalRunFields,
   type BondedStaticRunFields,
 } from './run-bonded';
+import {
+  CfdError,
+  checkSurface,
+  mergeSurfaces,
+  type AeroHostResult,
+  type AeroJob,
+  type TriangleSurface,
+} from '@editor-platform/geometry-cfd';
+import type { AeroRunFields } from './aero-view';
+import {
+  aeroBrowserCellMm,
+  aeroDeflectionMm,
+  aeroHostLevel,
+  frontalAreaMm2,
+  runAeroBrowserLevel,
+  runAeroHostLevel,
+  type AeroLevelResult,
+  type AeroRunEnvironment,
+} from './run-aero';
 import { runShellLevel, type ShellModalRunFields, type ShellStaticRunFields } from './run-shell';
 import {
   addedMasses,
@@ -69,6 +88,7 @@ import {
   validateSimulation,
   type MappingRow,
   type RunCheck,
+  type SimulationAeroStudy,
   type SimulationDocument,
   type SimulationMeshSettings,
   type SimulationMetric,
@@ -106,6 +126,8 @@ export interface RunEnvironment {
    * mesh limits. `solve` gets the same input and gives the same result or throws `ElasticError`;
    * `name` says where, in the progress and the solver check.
    */
+  /** VS4b: a wind-tunnel study run in the browser (no `remote`): its WebGPU. */
+  aero?: AeroRunEnvironment;
   remote?: {
     name: string;
     limits: { nodes: number; elements: number };
@@ -124,6 +146,8 @@ export interface RunEnvironment {
     solveModal?(input: ModalInput): Promise<ModalResult>;
     solveShellModal?(input: ShellModalInput): Promise<ShellModalResult>;
     solveBondedModal?(input: BondedModalInput): Promise<BondedModalResult>;
+    /** VS4b: a wind-tunnel study on the Host (OpenFOAM); without it one is refused with `host`. */
+    solveAero?(job: AeroJob): Promise<AeroHostResult>;
     /** The relative imbalance the equilibrium check allows for its results (default 1e-6). */
     equilibrium?: number;
     /** R3j-5c: what the modal checks allow for its modes (`modalChecks`, default 1e-6). */
@@ -136,6 +160,8 @@ export interface RunProgress {
   step: 'surface' | 'mesh' | 'mapping' | 'solve' | 'checks';
   /** Where the solve runs, when not in the browser. */
   on?: string;
+  /** VS4b: a browser wind tunnel's flow so far (its step and the drag averaged since the last). */
+  flow?: { step: number; steps: number; cd: number };
 }
 
 /** Why a run left no result. */
@@ -178,6 +204,7 @@ export interface RunLevel {
 }
 /** The finest level's fields, for display and VTU (nodal, mm and MPa). */
 export type RunFields =
+  | AeroRunFields
   | StaticRunFields
   | ModalRunFields
   | ThermalRunFields
@@ -313,6 +340,8 @@ export async function runStudy(
   if (cadContentHash !== doc.source.contentHash)
     return failed('source', 'the CAD version is not the document source');
   if (source.length) return failed('source', source.map((d) => d.code).join(', '));
+  // VS4b: a wind-tunnel study takes the bodies' outside only: no material, mesh or condition.
+  if (study.kind === 'aero') return runAeroStudy(doc, cad, study, env, failed);
   const material = doc.materials.find((m) => m.id === doc.materialId);
   if (!material) return failed('material-missing', 'no material on the body');
   const others = (doc.bodies ?? []).map((b) => ({
@@ -1076,3 +1105,125 @@ export function levelFaceSizes(
   );
   return [...sizes].map(([face, maxEdgeMm]) => ({ face, maxEdgeMm }));
 }
+
+/**
+ * VS4b: a wind-tunnel study, level by level. Each analysed body's closed analysis surface (the
+ * source body and `doc.bodies`, without the preparation: the air sees the whole outside), the
+ * `surface` check (closed, above the ground), then the flow: in the browser at the level's cell
+ * (`aeroBrowserCellMm`), or on the Host (`remote.solveAero`) at the level's refinement
+ * (`aeroHostLevel`). A level's nodes are its fluid cells (the background cells on the Host) and its elements the
+ * surface's triangles. The study stays `reference` (VS4a).
+ */
+async function runAeroStudy(
+  doc: SimulationDocument,
+  cad: CadDocument,
+  study: SimulationAeroStudy,
+  env: RunEnvironment,
+  refuse: (code: RunFailureCode, detail: string, level?: number) => StudyRun,
+): Promise<StudyRun> {
+  const levels: RunLevel[] = [];
+  /** A refusal with the levels run before it. */
+  const failed = (code: RunFailureCode, detail: string, level?: number) => ({
+    ...refuse(code, detail, level),
+    levels,
+  });
+  const remote = env.remote;
+  if (remote && !remote.solveAero) return failed('host', `${remote.name} has no wind tunnel`);
+  const count = study.convergence.levels;
+  let fields: AeroRunFields | undefined;
+  const bodyIds = [doc.source.bodyId, ...(doc.bodies ?? []).map((b) => b.bodyId)];
+  for (let level = 0; level < count; level++) {
+    const step = (s: RunProgress['step'], flow?: RunProgress['flow']) =>
+      env.checkpoint?.({
+        level,
+        levels: count,
+        step: s,
+        ...(s === 'solve' && remote ? { on: remote.name } : {}),
+        ...(flow ? { flow } : {}),
+      });
+    const hostLevel = aeroHostLevel(study, level, count);
+    const cellMm = remote
+      ? study.aero.host.baseMm / 2 ** hostLevel
+      : aeroBrowserCellMm(study, level);
+    await step('surface');
+    const bodies: TriangleSurface[] = [];
+    for (const bodyId of bodyIds) {
+      const r = await env.surface(cad, {
+        bodyId,
+        deflectionMm: aeroDeflectionMm(cellMm),
+        clampDeflection: true,
+      });
+      if (!('surface' in r)) return failed('surface', `${bodyId}: ${r.code}`, level);
+      bodies.push({ positions: r.surface.points, triangles: r.surface.triangles });
+    }
+    let lowest = Infinity;
+    try {
+      for (const b of bodies) {
+        checkSurface(b);
+        for (let i = 2; i < b.positions.length; i += 3) lowest = Math.min(lowest, b.positions[i]!);
+      }
+    } catch (e) {
+      if (e instanceof CfdError) return failed('surface', e.message, level);
+      throw e;
+    }
+    if (lowest < 0)
+      return failed(
+        'surface',
+        `the bodies reach ${round3(lowest)} mm below the ground (z = 0)`,
+        level,
+      );
+    const shape = mergeSurfaces(bodies);
+    const triangles = shape.triangles.length / 3;
+    const surfaceCheck: RunCheck = {
+      name: 'surface',
+      pass: true,
+      detail: `${bodies.length} closed bod${bodies.length === 1 ? 'y' : 'ies'}, ${triangles} triangles, lowest point ${round3(lowest)} mm above the ground`,
+    };
+    const frontal = frontalAreaMm2(shape, study.aero.yawDeg);
+    if (!(frontal > 0) && study.aero.referenceAreaMm2 === null)
+      return failed('surface', 'the bodies show no area to the wind: give a reference area', level);
+    await step('solve');
+    let flow: RunProgress['flow'];
+    let out: AeroLevelResult;
+    try {
+      out = remote
+        ? await runAeroHostLevel(shape, study, hostLevel, frontal, (job) => remote.solveAero!(job))
+        : await runAeroBrowserLevel(bodies, study, cellMm, frontal, {
+            ...(env.aero?.gpu ? { gpu: env.aero.gpu } : {}),
+            onProgress: (p) => {
+              flow = { step: p.step, steps: p.steps, cd: p.cd };
+            },
+            pause: async () => {
+              await step('solve', flow);
+            },
+          });
+    } catch (e) {
+      if (e instanceof RunRefusal) return failed(e.code, e.message, level);
+      if (e instanceof CfdError) return failed('solve', e.message, level);
+      throw e;
+    }
+    // A flow that blew up has no coefficients: the run failed (Codex on #1182), not a result.
+    const broke = out.checks.find((c) => !c.pass);
+    if (broke) return failed('solve', `${broke.name}: ${broke.detail}`, level);
+    await step('checks');
+    fields = out.fields;
+    levels.push({
+      settings: { ...doc.mesh, size: out.cellMm, minSize: out.cellMm, local: [] },
+      nodes: out.cells,
+      elements: triangles,
+      metrics: out.metrics,
+      checks: [surfaceCheck, ...out.checks],
+    });
+  }
+  const last = levels[levels.length - 1]!;
+  return {
+    studyId: study.id,
+    status: studyStatus({ study, checks: last.checks, levels: levels.map((l) => l.metrics) }),
+    levels,
+    mapping: [],
+    ...(fields ? { fields } : {}),
+    builds: env.builds,
+  };
+}
+
+const round3 = (v: number) => Math.round(v * 1000) / 1000;

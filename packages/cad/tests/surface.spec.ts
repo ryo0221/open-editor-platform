@@ -680,7 +680,7 @@ test.describe('with the development kernel', () => {
     await expect.poll(look).toEqual({ color: '#c9a24b', opacity: 1, roughness: 0.8, metalness: 1 });
     await expect(appearance.getByLabel('Material')).toHaveValue('');
     // A colour that is not #rrggbb is not committed.
-    const colour = appearance.getByLabel('Colour');
+    const colour = appearance.getByLabel('Colour', { exact: true });
     await colour.fill('gold');
     await colour.press('Enter');
     await expect.poll(look).toMatchObject({ color: '#c9a24b' });
@@ -889,7 +889,7 @@ test.describe('with the development kernel', () => {
   }) => {
     await page.goto('/?fixture=plate&view=side');
     await ready(page);
-    const views = page.getByLabel('Views');
+    const views = page.getByRole('combobox', { name: 'Views' });
     await expect(views).toHaveValue('side');
     const hash = async () => (await cadSnapshot(page)).contentHash;
     const before = await hash();
@@ -926,7 +926,7 @@ test.describe('with the development kernel', () => {
     await ready(page);
     await page.getByRole('button', { name: 'Add box' }).click();
     await ready(page);
-    const views = page.getByLabel('Views');
+    const views = page.getByRole('combobox', { name: 'Views' });
     await views.selectOption({ label: 'Side' });
     await views.selectOption({ label: 'Whole model' });
     await page.getByRole('button', { name: 'Save view' }).click();
@@ -959,7 +959,7 @@ test.describe('with the development kernel', () => {
     expect(await page.getByRole('button', { name: 'Undo' }).isEnabled()).toBe(undoable);
     await page.getByRole('button', { name: 'Save view' }).click();
     await ready(page);
-    const views = page.getByLabel('Views');
+    const views = page.getByRole('combobox', { name: 'Views' });
     const [saved] = (await cadSnapshot(page)).content.namedViews;
     await expect(views).toHaveValue(saved!.id);
     expect(saved!.bodyIds).toEqual(['plate']);
@@ -2567,7 +2567,7 @@ test.describe('interference of an assembly (MR3, ST-402)', () => {
     await expect(status).toHaveText('今の姿勢：2組が干渉しています。');
     await expect(page.getByTestId('cad-interference-finding')).toHaveCount(2);
     await expect(finding(page, 'c-upper と c-fore')).toContainText('交差');
-    await expect(finding(page, 'c-upper と c-fore')).toContainText(/深さの目安 \d+\.\d mm/);
+    await expect(finding(page, 'c-upper と c-fore')).toContainText(/深さの目安 \d+(\.\d+)? mm/);
     const show = finding(page, 'c-upper と c-fore').getByRole('button', { name: 'Show' });
     await show.click();
     await expect(show).toHaveAttribute('aria-pressed', 'true');
@@ -3523,7 +3523,7 @@ test.describe('trim, sew and thicken (R2a-3, CAD42)', () => {
     // A 1.5 mm skin towards the normal: a solid.
     inspector = await left();
     await inspector.locator('summary', { hasText: /^Thicken$/ }).click();
-    const thickness = inspector.getByLabel('Thickness (mm)');
+    const thickness = inspector.getByLabel('Thickness (mm)', { exact: true });
     await thickness.fill('1.5');
     await thickness.press('Enter');
     await inspector.getByRole('button', { name: 'Thicken', exact: true }).click();
@@ -3571,7 +3571,7 @@ test.describe('mirror copy and the sheet front (CR4b)', () => {
     const sheet = (await measured(leftId))!.bounds;
     // Thickened 5 mm towards the front: the solid grows that way, not the other.
     await inspector.locator('summary', { hasText: /^Thicken$/ }).click();
-    const thickness = inspector.getByLabel('Thickness (mm)');
+    const thickness = inspector.getByLabel('Thickness (mm)', { exact: true });
     await thickness.fill('5');
     await thickness.press('Enter');
     await inspector.getByRole('button', { name: 'Thicken', exact: true }).click();
@@ -3588,10 +3588,11 @@ test.describe('mirror copy and the sheet front (CR4b)', () => {
     inspector = await select('left');
     await inspector.locator('summary', { hasText: /^Mirror copy$/ }).click();
     await inspector.getByRole('combobox', { name: 'Across' }).selectOption('x');
-    const count = await bodies(page).count();
+    // Counted in the document: in the narrow layout the Bodies list is in a closed drawer.
+    const count = (await cadSnapshot(page)).content.bodies.length;
     await inspector.getByRole('button', { name: 'Mirror into a new body', exact: true }).click();
     await ready(page);
-    await expect(bodies(page)).toHaveCount(count + 1);
+    await expect.poll(async () => (await cadSnapshot(page)).content.bodies.length).toBe(count + 1);
     const snapshot = await cadSnapshot(page);
     const copy = snapshot.content.bodies.find((b) => b.name === 'left mirrored')!;
     const mirrored = (await measured(copy.id))!.bounds;
@@ -4100,4 +4101,33 @@ test.describe('zebra, curvature colours and combs (R2a-4, CAD43)', () => {
     await comb.getByRole('button', { name: 'Hide' }).click();
     await expect(page.getByTestId('cad-comb')).toHaveCount(0);
   });
+});
+
+// CLF1b (docs/cad/car-look-process.md): the board's panes pick the parts' levels of detail, not
+// the camera hidden behind them (#1113 review). ST-502, TS-2007.
+test('draws the parts on the three-view board at the level its panes need (CLF1b)', async ({
+  page,
+}) => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  test.skip(test.info().project.name !== 'desktop', 'desktop layout');
+  await page.goto('/?fixture=r2b');
+  await ready(page);
+  await expect(page.locator('.cad-part-state')).toHaveCount(0);
+  const canvas = page.locator('.cad-canvas');
+  const levels = async () => {
+    const text = (await canvas.getAttribute('data-part-levels')) ?? '';
+    const [, standard, , coarse, , box] = text.split(' ').map(Number);
+    return { standard: standard!, coarse: coarse!, box: box! };
+  };
+  // Zoomed far out, every part is a box.
+  const at = (await canvas.boundingBox())!;
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  for (let i = 0; i < 40 && (await levels()).standard > 0; i++) await page.mouse.wheel(0, 2000);
+  await expect.poll(async () => (await levels()).standard).toBe(0);
+  // On the board the parts fill the panes: drawn in full again.
+  await page.getByTestId('cad-three-view-shown').check();
+  await expect.poll(async () => (await levels()).standard).toBeGreaterThan(0);
+  // Off again, the far camera's boxes come back.
+  await page.getByTestId('cad-three-view-shown').uncheck();
+  await expect.poll(async () => (await levels()).standard).toBe(0);
 });

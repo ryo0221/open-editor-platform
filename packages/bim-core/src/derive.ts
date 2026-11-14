@@ -22,6 +22,7 @@ import {
   unit,
 } from './geometry';
 import {
+  bimBodyLimits,
   bimLimits,
   bimTolerance,
   type BimDiagnostic,
@@ -275,7 +276,10 @@ export class BimContext {
   readonly types;
   readonly elements;
   readonly sortedLevels;
+  /** GV2b: the rules this building's people set. */
+  readonly body;
   constructor(readonly doc: BimDocument) {
+    this.body = bimBodyLimits(doc);
     this.levels = new Map(doc.levels.map((l) => [l.id, l]));
     this.grids = new Map(doc.grids.map((g) => [g.id, g]));
     this.types = new Map(doc.types.map((t) => [t.id, t]));
@@ -1418,6 +1422,7 @@ export function deriveBim(doc: BimDocument): BimDerived {
           (zTop - zBase) / e.risers,
           e.treadMm,
           layersThickness(ctx.types.get(e.typeId)!),
+          ctx.body.stair.riserMm,
         );
         if (shape === 'riser') throw new DeriveError('stair-riser', `${path}.top`);
         if (shape === 'waist') throw new DeriveError('stair-shape', `${path}.typeId`);
@@ -1693,8 +1698,10 @@ export function bimStairProfile(
   riser: number,
   tread: number,
   waist: number,
+  /** GV2b: the building's riser range (`bimBodyLimits(doc).stair.riserMm`). */
+  riserMm: readonly [number, number] = bimLimits.stair.riserMm as [number, number],
 ): { profile: Vec2[]; waist: number } | 'riser' | 'waist' {
-  const [lo, hi] = bimLimits.stair.riserMm;
+  const [lo, hi] = riserMm;
   if (!(riser >= lo - bimTolerance && riser <= hi + bimTolerance)) return 'riser';
   const slope = riser / tread;
   const drop = waist * Math.hypot(1, slope);

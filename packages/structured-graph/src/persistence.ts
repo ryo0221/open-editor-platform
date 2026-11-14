@@ -1,5 +1,5 @@
 import { contentHash, deserializeArtifact, type Artifact } from '@editor-platform/artifact-core';
-import { assertGraphDocument, type GraphDocument } from './model';
+import { readGraphDocument, type GraphDocument } from './model';
 import { assertGraph, type GraphProfile } from './profile';
 export type ProfileResolver = (id: string, version: number) => GraphProfile | undefined;
 export const graphArtifactByteLimit = 16_000_000;
@@ -24,17 +24,23 @@ export async function readGraphArtifact(
     throw new Error('Graph import exceeds 16 MB');
   const artifact = deserializeArtifact(text);
   if (artifact.kind !== 'structured-graph') throw new Error('Expected a Structured Graph artifact');
+  // Older schemas are read as the current one. Versions keep their stored bytes (and hashes);
+  // read their content with `readGraphDocument`. The draft is returned as the current schema.
   const check = (value: unknown) => {
-    assertGraphDocument(value);
-    const profile = resolve(value.profile.id, value.profile.version);
+    const graph = readGraphDocument(value);
+    const profile = resolve(graph.profile.id, graph.profile.version);
     if (!profile) throw new Error('Unknown or missing Graph Profile');
-    assertGraph(value, profile);
+    assertGraph(graph, profile);
+    return graph;
   };
-  check(artifact.draft.content);
+  const draft = check(artifact.draft.content);
   for (const version of artifact.versions) {
     check(version.content);
     if ((await contentHash(version.content)) !== version.contentHash)
       throw new Error('Graph version content hash mismatch');
   }
-  return artifact as Artifact<GraphDocument>;
+  return {
+    ...artifact,
+    draft: { ...artifact.draft, content: draft },
+  } as Artifact<GraphDocument>;
 }

@@ -19,7 +19,7 @@ import {
 import { defaultView, viewRows } from '@editor-platform/structured-data/views';
 import { chartSvg } from '@editor-platform/structured-data/charts';
 import {
-  isGraphDocument,
+  upgradeGraphDocument,
   isGraphProfile,
   validateGraph,
   graphElementLabel,
@@ -159,8 +159,9 @@ export const dataReferenceAdapter: ReferenceAdapter = {
   },
 };
 function graphSource(snapshot: ReferenceSnapshot): { graph: GraphDocument; profile: GraphProfile } {
-  const graph = snapshot.content;
-  if (!isGraphDocument(graph)) throw new ReferenceError('error', 'Graphの保存版が不正です。');
+  // A saved version of an older Graph schema is read as the current one; its bytes are pinned.
+  const graph = upgradeGraphDocument(snapshot.content);
+  if (!graph) throw new ReferenceError('error', 'Graphの保存版が不正です。');
   if (snapshot.dependencies.length !== 1)
     throw new ReferenceError('error', 'Graphの依存は保存版のProfile一件に限定してください。');
   const profile = snapshot.dependencies.find(

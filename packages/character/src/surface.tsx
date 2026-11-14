@@ -92,6 +92,7 @@ import { EscapementPanel } from './escapement-panel';
 import { followerViolation } from './follower-limits';
 import { PropVersionUpdate } from './prop-version';
 import { PropSweepPanel, type PropSweepResult } from './prop-sweep';
+import { OccupantPanel, occupantLines, occupantOverlay, type OccupantResult } from './occupant';
 import {
   instanceBounds,
   missingJoints,
@@ -180,6 +181,7 @@ import { BakeJobs, type BakeRun } from './bake-job';
 import { NormalBakeControls, type BakeReport } from './bake-controls';
 import { MaterialMaps } from './material-maps';
 import { VideoControls, type VideoKind, type VideoReport } from './video-controls';
+import { CameraControls } from './camera-controls';
 import { browserVideoEncoding, exportMp4 } from './video-encode';
 import {
   exportPngSequence,
@@ -507,6 +509,11 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
       setViewReady(false);
     };
   }, []);
+  /** CR7g-3: the view's lighting, for the view and the video it exports (not saved). */
+  const [lighting, setLighting] = useState<'standard' | 'realistic'>('standard');
+  useEffect(() => {
+    if (viewReady) viewport.current?.setRealistic(lighting === 'realistic');
+  }, [lighting, viewReady]);
   // Another document (a new session) is framed again even when it reuses the same assets;
   // edits within one session keep the camera the user chose.
   useEffect(() => viewport.current?.refit(), [session]);
@@ -610,6 +617,9 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   ]);
   const views = props.props ?? noViews;
   const pose = useMemo(() => poseAt(doc, action, playback.tick), [doc, action, playback.tick]);
+  // CR7e: the view looks through the action's keyed camera while this is on (the person may
+  // still orbit; the next tick or edit puts the camera back on its keys).
+  const [followCamera, setFollowCamera] = useState(true);
   // Props stand beside the character even when its own assets do not match.
   const shownProps = useMemo(() => propFrames(doc, views, pose), [doc, views, pose]);
   // A prop whose shape arrives later is framed then too, unless the camera was moved meanwhile.
@@ -644,6 +654,10 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     lastDrawn.current = { frame: drawn, props: shownProps };
     onFrame.current?.(frame, playback, shownProps, probe);
   }, [frame, shownProps, images, prepared, sculptedPart]);
+  // After drawing, so a first frame's fit does not override the keyed camera.
+  useEffect(() => {
+    if (followCamera && pose.camera) viewport.current?.setCamera(pose.camera);
+  }, [followCamera, pose, frame, shownProps]);
   const lastDrawn = useRef<{ frame: readonly PartFrame[]; props: readonly PropFrame[] }>({
     frame: [],
     props: [],
@@ -698,9 +712,12 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
           'video-changed',
           'The document changed during the export; nothing was saved.',
         );
+      const at = poseAt(doc, docAction, tick);
+      // CR7e: an action with camera keys is filmed through its camera.
       return [
         characterFrame(shownDoc, meshes, chosen, tick, true),
-        propFrames(doc, views, poseAt(doc, docAction, tick)),
+        propFrames(doc, views, at),
+        at.camera,
       ] as const;
     };
     const progress = (done: number, total: number) => setVideoRun({ done, total, kind });
@@ -1986,6 +2003,31 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   };
   /** MR5: the last check along the action of each prop, by prop ID. */
   const [sweeps, setSweeps] = useState<ReadonlyMap<string, PropSweepResult>>(new Map());
+  // CR7d: the last occupant check, and its lines drawn while it holds for the pose shown.
+  const [occupant, setOccupant] = useState<OccupantResult>();
+  // The figure as the view draws it: the display document and meshes (subdivided parts smoothed).
+  const figureMeshes = useMemo(
+    () => new Map([...display.meshes].map(([id, p]) => [id, p.mesh] as const)),
+    [display],
+  );
+  const occupantShown =
+    occupant &&
+    occupant.doc === doc &&
+    occupant.action === action &&
+    occupant.tick === playback.tick &&
+    doc.props.some((p) => p.id === occupant.propId)
+      ? occupant
+      : undefined;
+  useEffect(() => {
+    const view = viewport.current;
+    if (!view || !occupantShown) return;
+    const guide = occupantOverlay(occupantLines(occupantShown));
+    view.setGuide(guide);
+    return () => {
+      view.setGuide(null);
+      disposeOverlay(guide);
+    };
+  }, [occupantShown]);
   /** MR4: keys a prop's translation and rotation (or `only` one) at the playhead, as one edit. */
   const keyPlacement = (
     placement: CharacterProp['placement'],
@@ -2006,6 +2048,33 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
           target: { kind: 'prop' as const, id: prop.id, property },
           tick: playback.tick,
           value: [...placement[property]] as Vec3 | Quat,
+          trackId,
+          keyId,
+        };
+      });
+    if (!keys.length) return true;
+    return edit({ type: 'setKeys', actionId: action.id, keys });
+  };
+  /**
+   * CR7e: keys the action's camera at the playhead where the view's camera stands and looks now
+   * (position and target, one edit).
+   */
+  const keyCamera = (): boolean => {
+    const view = viewport.current;
+    if (!action || !view) return false;
+    const now = view.viewCamera();
+    const taken = characterIds(doc);
+    const keys = (['position', 'target'] as const)
+      .filter((property) => !keyedAlready({ kind: 'camera', property }, now[property]))
+      .map((property) => {
+        const trackId = freshCharacterId(doc, `${action.id}/camera/${property}`, taken);
+        taken.add(trackId);
+        const keyId = freshCharacterId(doc, `${trackId}#${playback.tick}`, taken);
+        taken.add(keyId);
+        return {
+          target: { kind: 'camera' as const, property },
+          tick: playback.tick,
+          value: now[property],
           trackId,
           keyId,
         };
@@ -2717,6 +2786,23 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                 }
               />
             )}
+            {prop && readyView(views.get(prop.id)) && (
+              <OccupantPanel
+                key={`occupant ${prop.id}`}
+                doc={display.doc}
+                source={doc}
+                prop={prop}
+                action={action}
+                tick={playback.tick}
+                meshes={figureMeshes}
+                figureProblem={
+                  shown ? undefined : 'The figure’s assets could not be read: it cannot be checked.'
+                }
+                frame={shownProps.find((f) => f.propId === prop.id)}
+                result={occupant?.propId === prop.id ? occupant : undefined}
+                onResult={setOccupant}
+              />
+            )}
             {prop && !!readyView(views.get(prop.id))?.forms?.length && (
               <PropTransformPanel
                 key={`transform ${prop.id}@${prop.source.contentHash}`}
@@ -2757,6 +2843,34 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
                   onMake={makeTransform}
                 />
               )}
+            {action && (
+              <Section title="Camera">
+                <CameraControls
+                  keyed={action.tracks.some((t) => t.target.kind === 'camera')}
+                  follow={followCamera}
+                  onFollow={setFollowCamera}
+                  canKey={!readOnly && !playback.playing && !busy}
+                  reason={readOnly ? 'Read only.' : 'Pause to key the camera.'}
+                  onKey={keyCamera}
+                />
+              </Section>
+            )}
+            <Section title="View">
+              <label className="character-field">
+                Lighting
+                <select
+                  aria-label="Lighting"
+                  value={lighting}
+                  // An export draws every frame under one lighting (Codex, #1091).
+                  disabled={!!videoRun}
+                  title={videoRun ? 'The video is exporting.' : undefined}
+                  onChange={(e) => setLighting(e.target.value as typeof lighting)}
+                >
+                  <option value="standard">Standard</option>
+                  <option value="realistic">Realistic</option>
+                </select>
+              </label>
+            </Section>
             {props.onExportMedia && (
               <Section title="Video">
                 <VideoControls

@@ -186,7 +186,14 @@ export type CharacterTrackTarget =
    * Keys hold a joint ID with `hold` easing: each from its tick until the next. Before the first
    * key the version's own choice holds. The version is not read here, like `prop-joint`.
    */
-  | { kind: 'prop-mount'; id: string; mount: string; property: 'joint' };
+  | { kind: 'prop-mount'; id: string; mount: string; property: 'joint' }
+  /**
+   * CR7e: the action's camera (one per action): where it stands and the point it looks at, in
+   * the character's space (mm), Vec3 keys interpolated as a translation. The lens and the up
+   * axis (+Z) are the view's. Playback and the video export look through it; without these
+   * tracks the view's own camera is used, as before.
+   */
+  | { kind: 'camera'; property: 'position' | 'target' };
 /** What a key holds: a string only in a `prop-mount` track (MR7). */
 export type CharacterKeyValue = number | Vec3 | Quat | string;
 export interface CharacterKey {
@@ -258,6 +265,12 @@ export const characterLimits = Object.freeze({
   retiredIds: 65_536,
   /** The largest joint distance a key may hold, in mm (a kilometre). */
   jointTravelMm: 1_000_000,
+  /**
+   * CR7e: how far from the origin a camera key may stand or look, in mm. GV2c: 10 km, so a shot
+   * can take in a whole flying island (7.2 km across, rising 6.4 km). The view's far plane
+   * follows the scene's size, not this bound.
+   */
+  cameraRangeMm: 10_000_000,
   /**
    * WM2: the largest joint angle a key may hold, in radians: a CAD continuous joint's bound
    * (`cadJointLimits.continuousRad`). A joint that keeps one turn bounds its keys by the limits

@@ -49,6 +49,35 @@ export const f59Ranges = {
 /** The back's hinge: across the seat (along y), behind the cushion. */
 export const f59Hinge: [number, number, number] = [-40, 0, 180];
 
+/**
+ * CR7d: F59's low version for F63 (a bucket seat, the cushion's top 100 mm lower): side plates
+ * 30 mm tall instead of 80, the pan and back 50 mm lower, the cushion 70 mm thick instead of 120.
+ * F59 itself is unchanged (B3's seat sample).
+ */
+export const f59LowBoxes = {
+  ...f59Boxes,
+  plateLeft: { at: [0, -203, 25], size: [450, 3, 30] },
+  plateRight: { at: [0, 200, 25], size: [450, 3, 30] },
+  pan: { at: [10, -190, 55], size: [440, 380, 50] },
+  cushion: { at: [12.5, -187.5, 57.5], size: [435, 375, 70] },
+  back: { at: [-90, -200, 110], size: [100, 400, 560] },
+  backShell: { at: [-130, -200, 110], size: [40, 400, 560] },
+} satisfies Record<string, Box>;
+export const f59LowHinge: [number, number, number] = [-40, 0, 130];
+/**
+ * CR7d: the low seat's H-point, in the cushion's (and the frame's) coordinates: where an
+ * occupant's hip joint sits, 122.5 mm above the cushion's top (z 127.5) and 120 mm in front of
+ * the back (x 10).
+ */
+export const f59LowHPoint: [number, number, number] = [130, 0, 250];
+
+/** The seat's dimensions: F59's, or its low version's. */
+const variants = {
+  standard: { boxes: f59Boxes, hinge: f59Hinge, tubeZ: 65, artifact: 'seat' },
+  low: { boxes: f59LowBoxes, hinge: f59LowHinge, tubeZ: 40, artifact: 'seat-low' },
+};
+export type F59Variant = keyof typeof variants;
+
 const XZ: Quaternion = [Math.SQRT1_2, 0, 0, Math.SQRT1_2];
 /** z along +x (a quarter turn about y): a slider moves the seat forward. */
 const zForward: Quaternion = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
@@ -106,8 +135,11 @@ function lines(
 /** The seat before any part is made: all its bodies in this document. */
 export function f59SeatBodies(
   kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel,
+  variant: F59Variant = 'standard',
 ): CadDocument {
-  const B = f59Boxes;
+  const { boxes: B, tubeZ } = variants[variant];
+  // The back's stitches run from 40 mm above its bottom to 40 mm below its top.
+  const [back0, back1] = [B.back.at[2] + 40, B.back.at[2] + B.back.size[2] - 40];
   const tubeY = B.plateLeft.at[1];
   const sketches: CadSketch[] = [
     // The cross tube: a 12 mm circle on the left plate's face, swept across along y.
@@ -117,12 +149,12 @@ export function f59SeatBodies(
       plane: { origin: position(0, tubeY, 0), orientation: XZ },
       entities: [point('tc'), { type: 'circle', id: 'tube-circle', center: 'tc' }],
       constraints: [],
-      solved: { tc: [40, 65], 'tube-circle': [12, 0] },
+      solved: { tc: [40, tubeZ], 'tube-circle': [12, 0] },
     },
     lines(
       'tube-path',
       'Tube path',
-      { origin: position(0, 0, 65), orientation: identityQuaternion() },
+      { origin: position(0, 0, tubeZ), orientation: identityQuaternion() },
       [
         [
           [40, tubeY],
@@ -147,12 +179,12 @@ export function f59SeatBodies(
     ),
     lines('back-stitch', 'Back stitch', { origin: position(200, 0, 0), orientation: YZ }, [
       [
-        [-200, -80],
-        [-680, -80],
+        [-back0, -80],
+        [-back1, -80],
       ],
       [
-        [-200, 80],
-        [-680, 80],
+        [-back0, 80],
+        [-back1, 80],
       ],
     ]),
   ];
@@ -253,15 +285,18 @@ const boundsOf = (b: Box): [[number, number, number], [number, number, number]] 
  * made) and joined: the frame slides on the rails, the pan and cushion are fastened to the
  * frame, the back turns on the frame's hinge and the back shell is fastened to the back.
  */
-export function f59Seat(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel) {
-  let doc = f59SeatBodies(kernel);
+export function f59Seat(
+  kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel,
+  variant: F59Variant = 'standard',
+) {
+  let doc = f59SeatBodies(kernel, variant);
   const closure = new Map<string, CadDocument>();
-  const B = f59Boxes;
+  const { boxes: B, hinge, artifact } = variants[variant];
   const parts = [
     {
       body: 'frame-body',
       name: 'frame',
-      bounds: boundsOf({ at: [0, -203, 25], size: [450, 406, 80] }),
+      bounds: boundsOf({ at: [0, -203, 25], size: [450, 406, B.plateLeft.size[2]] }),
     },
     { body: 'pan', name: 'pan', bounds: boundsOf(B.pan) },
     { body: 'cushion', name: 'cushion', bounds: boundsOf(B.cushion) },
@@ -281,7 +316,7 @@ export function f59Seat(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fix
         name: body.name,
         source: {
           kind: 'version',
-          artifactId: `seat-${p.name}`,
+          artifactId: `${artifact}-${p.name}`,
           versionId: 'v1',
           contentHash: hash,
         },
@@ -342,7 +377,7 @@ export function f59Seat(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fix
       'revolute',
       ['c-frame'],
       'c-back',
-      [f59Hinge, zAcross],
+      [hinge, zAcross],
       {
         angle: { literalRad: 0 },
       },

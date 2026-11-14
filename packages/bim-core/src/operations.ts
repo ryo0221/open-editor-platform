@@ -52,7 +52,12 @@ export type BimOperation =
     }
   /** Without `cascade`, deleting an entity something depends on is refused (`in-use`). */
   | { type: 'delete'; ids: string[]; cascade: boolean }
-  | { type: 'setProject'; project: BimProject };
+  | { type: 'setProject'; project: BimProject }
+  /**
+   * GV2b: the height of the building's people (mm); without `heightMm`, back to 1,750 mm. A
+   * building whose levels, steps or openings break the new rules is refused, as any edit is.
+   */
+  | { type: 'setInhabitantHeight'; heightMm?: number };
 export type BimOperationType = BimOperation['type'];
 
 export class BimOperationError extends Error {
@@ -187,6 +192,10 @@ export function applyBimOperation(doc: BimDocument, op: BimOperation): BimDocume
     case 'setProject':
       next.project = structuredClone(op.project);
       break;
+    case 'setInhabitantHeight':
+      if (op.heightMm === undefined) delete next.inhabitantHeightMm;
+      else next.inhabitantHeightMm = op.heightMm;
+      break;
   }
   pruneAssets(next);
   assertBim(next);
@@ -228,7 +237,9 @@ export function assertBimOperation(op: unknown): asserts op is BimOperation {
             typeof op.cascade === 'boolean'
           : op.type === 'setProject'
             ? keys === 'project,type' && record(op.project)
-            : undefined;
+            : op.type === 'setInhabitantHeight'
+              ? keys === 'type' || (keys === 'heightMm,type' && typeof op.heightMm === 'number')
+              : undefined;
   if (ok === undefined) throw new Error('unsupported-operation');
   if (!ok) throw new Error('operation-schema');
 }

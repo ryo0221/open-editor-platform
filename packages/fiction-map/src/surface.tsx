@@ -32,6 +32,7 @@ import {
 import { layoutMapLabels } from './label-layout';
 import { FeatureShape } from './surface-render';
 import { FeatureInspector } from './surface-inspector';
+import { FeatureArtifactRefs, type FictionMapArtifactRefHost } from './artifact-refs';
 export interface FictionMapSurfaceProps {
   base: FictionMapBase;
   /** Synchronous trusted Host commit against its current Session and live permission. */
@@ -49,6 +50,8 @@ export interface FictionMapSurfaceProps {
   view?: CanvasView;
   onViewChange?(view: CanvasView): void;
   createId?(): string;
+  /** GV2a: pin and open fixed CAD/BIM versions from the selected feature. */
+  artifactRefs?: FictionMapArtifactRefHost;
 }
 type Mode = 'select' | 'place' | 'path' | 'region' | 'vertices';
 type Drawing = {
@@ -891,6 +894,26 @@ export function FictionMapSurface(props: FictionMapSurfaceProps) {
                 disabled={pointDisabled}
                 onPendingChange={(value) => {
                   inspectorDirty.current = value;
+                }}
+                apply={apply}
+              />
+            )}
+            {only && (mode === 'select' || mode === 'vertices') && (
+              <FeatureArtifactRefs
+                key={'refs-' + only.id}
+                base={base}
+                feature={only}
+                host={props.artifactRefs}
+                disabled={pointDisabled}
+                canChange={() => {
+                  if (inspectorDirty.current || composing.current || vertexBase.current) {
+                    setError({
+                      code: 'input-pending',
+                      message: 'Apply or cancel pending input before changing pinned versions.',
+                    });
+                    return false;
+                  }
+                  return true;
                 }}
                 apply={apply}
               />

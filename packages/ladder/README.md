@@ -1,0 +1,11 @@
+# ladder (SL7b, PLC ladder screen)
+
+Private React Surface for the PLC ladder programs of `ladder-core` (circuit simulation plan, SL7; ADR 021). Imports only `ladder-core`, `artifact-core`, `editor-core` and `editor-ui`; no other domain.
+
+- `LadderController` (no React): the content, the selection (a rung, node or coil ID), the last refusal and the run. Every edit is one `ladder-core` operation applied as one `EditorSession` command (`ladderEditorCommand`, which re-checks the base and the edit authority); the Host saves afterwards and owns Undo/Redo. New elements bring the variables they need (a timer gets a fresh `TON` instance `T1`, a counter `CTU` `C1`, a new rung's coil a BOOL output no plain coil drives yet). Running keeps the scan state, held inputs and forced values in the controller, never in the content; edits are refused (`running`) until it stops, and any content change (an edit, Undo) starts the run again from the initial values. Scans come from a clock every `scanMs` (virtual time; no real-time promise).
+- `ladderLayout(rung)`: the rung on a grid: a series left to right, a parallel's branches stacked and joined by bars, coils in one column at the right. Every wire and cell names the node whose output powers it, so power is coloured from a scan's result.
+- `LadderSurface`: the toolbar (Undo/Redo when the Host has none, Run/Stop, One scan, Reset, Add rung, the element to add with Add after / Add before / Add branch, Add coil, Delete), the diagram (click to select, drag an element onto another to move it before or after it, also into another rung; Delete key), the variable table (rename, type, role, value; Press and hold buttons for BOOL inputs, a typed value for INT/TIME inputs, forcing a BOOL), the inspector (contact, coil, timer, counter, compare, rung comment and order) and the status (scans, virtual time, the refusal).
+
+The Playground kind `ladder` (SL7c, `apps/playground/src/ladder/host.tsx`) opens it with the Host's Undo/Redo and saving; local only (no shared editing, templates or reuse).
+
+Not yet here: coupling to the schematic (SL8). Browser tests: `E2E_SUITE=ladder npx playwright test` (TS-2114); unit: `npx vitest run packages/ladder/` (TS-2113).

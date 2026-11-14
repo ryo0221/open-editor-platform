@@ -1202,7 +1202,7 @@ test('#378 a connection name typed during composition survives a read-only Host 
   expect(saved.edges.at(-1)).toMatchObject({ from: 'n0', to: 'n1', attributes: { label: '出資' } });
 });
 
-test('#396 node shapes and paint: Inspector and new-node shape, outline endpoints, one Undo each, reload and schema 1 refusal', async ({
+test('#396 node shapes and paint: Inspector and new-node shape, outline endpoints, one Undo each, reload, newer-schema refusal and schema 1 import', async ({
   page,
 }, info) => {
   await page.goto('/');
@@ -1267,23 +1267,53 @@ test('#396 node shapes and paint: Inspector and new-node shape, outline endpoint
   await save(page, 1);
   await page.reload();
   await expect(node).toHaveAttribute('data-shape', 'ellipse');
-  // A schema 1 Graph from the earlier preview is refused with its own reason, not read.
+  // A Graph of a newer schema than this version reads is refused with its own reason.
   const record = await nativeArtifact(page),
-    old = {
+    current = record.draft.content as GraphDocument,
+    newer = {
       ...record,
       versions: [],
-      draft: {
-        ...record.draft,
-        content: { ...(record.draft.content as GraphDocument), schemaVersion: 1 },
-      },
+      draft: { ...record.draft, content: { ...current, schemaVersion: 4 } },
     };
+  await page.getByLabel('Import artifact', { exact: true }).setInputFiles({
+    name: 'schema-4.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(newer)),
+  });
+  await expect(page.getByRole('alert')).toContainText('Graph schema 4 is newer than this version');
+  expect((await nativeArtifact(page)).draft.content).toEqual(record.draft.content);
+  // A schema 1 Graph from the earlier preview (positions in `layout`, no Sections) is read.
+  const old = {
+    ...record,
+    versions: [],
+    draft: {
+      ...record.draft,
+      content: {
+        schemaVersion: 1,
+        id: current.id,
+        profile: current.profile,
+        attributes: current.attributes,
+        nodes: current.nodes.map(({ id, type, attributes }) => ({ id, type, attributes })),
+        edges: current.edges,
+        layout: Object.fromEntries(
+          Object.entries(current.presentation.nodes).map(([id, p]) => [id, { x: p.x, y: p.y }]),
+        ),
+      },
+    },
+  };
   await page.getByLabel('Import artifact', { exact: true }).setInputFiles({
     name: 'schema-1.json',
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(old)),
   });
-  await expect(page.getByRole('alert')).toContainText('Graph schema 1 is not supported');
-  expect((await nativeArtifact(page)).draft.content).toEqual(record.draft.content);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const upgraded = (await nativeArtifact(page)).draft.content as GraphDocument;
+  expect(upgraded.schemaVersion).toBe(3);
+  expect(upgraded.nodes.map((n) => n.id)).toEqual(current.nodes.map((n) => n.id));
+  expect(upgraded.presentation.nodes['resource-a']).toEqual({
+    x: current.presentation.nodes['resource-a'].x,
+    y: current.presentation.nodes['resource-a'].y,
+  });
 });
 
 test('#396 Definition sidecar: shapes for existing nodes only, source unchanged', async ({

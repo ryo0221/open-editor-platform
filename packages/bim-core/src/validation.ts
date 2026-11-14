@@ -9,6 +9,7 @@ import { distance } from './geometry';
 import {
   bimDrawingScales,
   bimGridBubbles,
+  bimBodyLimits,
   bimLimits,
   bimTolerance,
   bimMaterialCategories,
@@ -189,7 +190,17 @@ export function validateBim(value: unknown): BimDiagnostic[] {
     'views',
     'propertySets',
   ] as const;
-  c.keys(value, ['schemaVersion', 'units', 'axes', 'project', ...collections], '$', ['assets']);
+  c.keys(value, ['schemaVersion', 'units', 'axes', 'project', ...collections], '$', [
+    'assets',
+    'inhabitantHeightMm',
+  ]);
+  // GV2b: the people the building is for; the body-based rules below scale by it.
+  if (Object.hasOwn(value, 'inhabitantHeightMm')) {
+    const h = value.inhabitantHeightMm,
+      [lo, hi] = bimLimits.inhabitantHeightMm.range;
+    if (!finite(h) || h < lo || h > hi) c.error('inhabitant-height', '$.inhabitantHeightMm');
+  }
+  const body = bimBodyLimits(value as Pick<BimDocument, 'inhabitantHeightMm'>);
   if (value.units !== 'mm') c.error('units', '$.units');
   if (value.axes !== 'right-handed-z-up') c.error('axes', '$.axes');
   for (const k of collections) if (!Array.isArray(value[k])) c.error('collection', `$.${k}`);
@@ -268,8 +279,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   const sorted = [...levelElevations].sort((a, b) => a - b);
   for (let i = 1; i < sorted.length; i++) {
     const gap = sorted[i] - sorted[i - 1];
-    if (gap < bimLimits.minStoreyMm || gap > bimLimits.maxStoreyMm)
-      c.error('level-spacing', '$.levels');
+    if (gap < body.minStoreyMm || gap > bimLimits.maxStoreyMm) c.error('level-spacing', '$.levels');
   }
   v.grids.forEach((g, i) => {
     const at = `$.grids[${i}]`;
@@ -287,8 +297,31 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   });
   v.materials.forEach((m, i) => {
     const at = `$.materials[${i}]`;
-    if (!record(m) || !c.keys(m, ['id', 'name', 'category'], at, ['appearance']))
+    if (
+      !record(m) ||
+      !c.keys(m, ['id', 'name', 'category'], at, [
+        'appearance',
+        'densityKgM3',
+        'youngsModulusMPa',
+        'poissonsRatio',
+      ])
+    )
       return void c.error('material', at);
+    if (Object.hasOwn(m, 'densityKgM3')) {
+      const d = m.densityKgM3;
+      if (typeof d !== 'number' || !Number.isFinite(d) || d <= 0 || d > bimLimits.densityKgM3)
+        c.error('material-density', `${at}.densityKgM3`);
+    }
+    if (Object.hasOwn(m, 'youngsModulusMPa')) {
+      const e = m.youngsModulusMPa;
+      if (typeof e !== 'number' || !Number.isFinite(e) || e <= 0 || e > bimLimits.youngsModulusMPa)
+        c.error('material-stiffness', `${at}.youngsModulusMPa`);
+    }
+    if (Object.hasOwn(m, 'poissonsRatio')) {
+      const v = m.poissonsRatio;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v >= 0.5)
+        c.error('material-stiffness', `${at}.poissonsRatio`);
+    }
     if (Object.hasOwn(m, 'appearance')) {
       const a = m.appearance;
       const ap = `${at}.appearance`;
@@ -454,18 +487,18 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         if (!record(l) || !c.keys(l, ['materialId', 'thicknessMm'], lp))
           return void c.error('layer', lp);
         ref(l.materialId, 'material', `${lp}.materialId`);
-        if (c.dimension(l.thicknessMm, `${lp}.thicknessMm`, bimLimits.maxSectionMm))
+        if (c.dimension(l.thicknessMm, `${lp}.thicknessMm`, body.maxSectionMm))
           total += l.thicknessMm as number;
       });
-      if (total > bimLimits.maxSectionMm) c.error('dimension', `${at}.layers`);
+      if (total > body.maxSectionMm) c.error('dimension', `${at}.layers`);
     }
     if (t.kind === 'column' || t.kind === 'beam' || t.kind === 'member') {
       ref(t.materialId, 'material', `${at}.materialId`);
       profile(t.profile, `${at}.profile`);
     }
     if (t.kind === 'door' || t.kind === 'window') {
-      c.dimension(t.widthMm, `${at}.widthMm`, bimLimits.maxSectionMm);
-      c.dimension(t.heightMm, `${at}.heightMm`, bimLimits.maxSectionMm);
+      c.dimension(t.widthMm, `${at}.widthMm`, body.openingMm);
+      c.dimension(t.heightMm, `${at}.heightMm`, body.openingMm);
     }
     if (t.kind === 'part') {
       const s = t.source;
@@ -503,7 +536,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
       typeof pr.shape === 'string' && Object.hasOwn(dims, pr.shape) ? dims[pr.shape] : undefined;
     if (!keys) return c.error('profile', `${at}.shape`);
     if (!c.keys(pr, ['shape', ...keys], at)) return false;
-    if (!keys.every((k) => c.dimension(pr[k], `${at}.${k}`, bimLimits.maxSectionMm))) return false;
+    if (!keys.every((k) => c.dimension(pr[k], `${at}.${k}`, body.maxSectionMm))) return false;
     const n = pr as Record<string, number>;
     const thin =
       pr.shape === 'h' || pr.shape === 'channel'
@@ -692,17 +725,18 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         levelHeight(e.top, `${at}.top`);
         break;
       case 'railing':
-        // LS5: along a ramp's edge, at most `bimLimits.railingHeightMm` tall.
+        // LS5: along a ramp's edge, at most `bimLimits.railingHeightMm` tall (GV2b: scaled).
         elementOf(e.hostId, ['ramp'], `${at}.hostId`);
         if (!['inner', 'outer'].includes(e.side as string)) c.error('railing-side', `${at}.side`);
-        c.dimension(e.heightMm, `${at}.heightMm`, bimLimits.railingHeightMm);
+        c.dimension(e.heightMm, `${at}.heightMm`, body.railingHeightMm);
         break;
       case 'stair': {
         // LS6: a straight flight; its riser height is checked once the heights are known.
         point(e.start, `${at}.start`);
         c.angle(e.directionRad, `${at}.directionRad`);
-        c.dimension(e.widthMm, `${at}.widthMm`, bimLimits.maxSectionMm);
-        const { risers, treadMm } = bimLimits.stair;
+        c.dimension(e.widthMm, `${at}.widthMm`, body.stair.widthMm);
+        const { risers } = bimLimits.stair,
+          { treadMm } = body.stair;
         if (
           !Number.isInteger(e.risers) ||
           (e.risers as number) < risers[0] ||

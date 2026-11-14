@@ -46,6 +46,18 @@ import {
   f48ProfileSweep,
   f49SpotWelds,
   f29Biw,
+  cadClearance,
+  checkCadInterference,
+  checkCadInterferenceAlong,
+  f63Body,
+  f63Car,
+  f63FaceRef,
+  f63Faces,
+  jointRangeSamples,
+  parameterValues,
+  solveJoints,
+  type CadTopologyRef,
+  type F63Face,
   f25B1Car,
   bodyPartContent,
   withMirrorCopy,
@@ -59,6 +71,7 @@ import {
   f17LoftReference,
   f18Hood,
   f19Network,
+  f81TwoView,
   f19NetworkArea,
   f19NetworkSphere,
   f18Seams,
@@ -120,6 +133,7 @@ import { createKernelHost, kernelLoadMarks, loadVerifiedBuild } from './host';
 import type {
   CadFaceDistanceQuery,
   CadMesh,
+  CadRenderMeshQuality,
   CadWorkerRequest,
   CadWorkerResponse,
 } from './protocol';
@@ -2563,6 +2577,41 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     });
   });
 
+  it('builds two-view curves from a side and a plan view and refuses views that do not fit (CLF2)', async () => {
+    // TS-2001, ST-500: F19's sphere network with its u arcs given as two-view curves: the same
+    // surface (area), with the u borders named by both views.
+    const result = await evaluate('clf2-sphere', f81TwoView());
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result));
+    const roof = result.evaluation.bodies.roof;
+    if (roof?.kind !== 'sheet') throw new Error(JSON.stringify(roof));
+    expect(Math.abs(roof.areaMm2 / f19NetworkArea() - 1)).toBeLessThan(2e-3);
+    const mesh = result.meshes.find((m) => m.bodyId === 'roof')!;
+    expect(sortedNames(edgeNames(mesh).filter((_, i) => mesh.topology.edges[i]!.boundary))).toEqual(
+      [
+        'sketch:u0/sketch:plan/boundary:tv:["arc","l0"] | surface',
+        'sketch:u2/sketch:plan/boundary:tv:["arc","l2"] | surface',
+        'sketch:v0/boundary:e:arc | surface',
+        'sketch:v2/boundary:e:arc | surface',
+      ],
+    );
+    // At the tightest meeting tolerance (0.0001 mm), the fit stays within it (#1111 review).
+    const tight = f81TwoView();
+    const net = tight.features.find((x) => x.id === 'net')!;
+    if (net.type !== 'curveNetwork') throw new Error(net.type);
+    net.args.toleranceMm = 0.0001;
+    expect(await evaluate('clf2-tight', tight)).toMatchObject({ evaluation: { status: 'ok' } });
+    // TS-2002: a plan view not parallel to XY, views apart along X, a view that turns back.
+    for (const [kind, code] of [
+      ['plane', 'two-view-plane'],
+      ['apart', 'two-view-no-overlap'],
+      ['fold', 'two-view-not-monotonic'],
+    ] as const)
+      expect(await evaluate(`clf2-${kind}`, f81TwoView(kind))).toMatchObject({
+        evaluation: { status: 'error', code, featureId: 'net' },
+      });
+  });
+
   it('offsets a sheet along its normal into a new sheet body, either side (CR2b)', async () => {
     // TS-1486, ST-248: the line-and-arc wall moved 2 mm each way.
     const base = (40 + 10 * Math.PI) * 30;
@@ -2844,6 +2893,156 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     const [sx, sy, sz] = f59Boxes.backShell.size;
     expect(vol('back-shell')).toBeCloseTo(sx * sy * sz - (sx - 2.5) * (sy - 5) * (sz - 5), 0);
   }, 300_000);
+
+  it('reads the body in white faces the F63 car is joined to as the frames F63 assumes (CR7b)', async () => {
+    // TS-1810, ST-289 (the F63 body in white since the fit-up, ST-291).
+    const faces = Object.keys(f63Faces) as F63Face[];
+    const document = pinned(f63Body());
+    await handle({
+      type: 'evaluate',
+      requestId: 'cr7b-faces',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(document),
+      document,
+      connectors: faces.map((f) => f63FaceRef(f63Body(), f)),
+    });
+    const m = posted.find(
+      (x) => 'requestId' in x && x.requestId === 'cr7b-faces' && x.type !== 'progress',
+    )!;
+    if (m.type !== 'result' || m.evaluation.status !== 'ok') throw new Error(JSON.stringify(m));
+    const frames = m.evaluation.connectors!;
+    faces.forEach((face, i) => {
+      const got = frames[i]!;
+      if (got.status !== 'resolved') throw new Error(`${face}: ${JSON.stringify(got)}`);
+      const want = f63Faces[face].frame;
+      got.frame.translationMm.forEach((v, k) =>
+        expect(v, `${face} t${k}`).toBeCloseTo(want.translationMm[k]!, 0),
+      );
+      // The same rotation (q or −q).
+      const dot = got.frame.rotation.reduce((t, v, k) => t + v * want.rotation[k]!, 0);
+      expect(Math.abs(dot), `${face} rotation ${got.frame.rotation.join(',')}`).toBeCloseTo(1, 6);
+    });
+  }, 900_000);
+
+  it('offsets a widened skin within the result tolerance once its refitted edges meet (CR7g-1, TS-1832)', async () => {
+    // F28's skin 1.15 times as wide: the offset's centreline and front edges are refitted and
+    // meet at a vertex; each held the other's old tolerance (0.0154 mm > 0.01 mm) before.
+    const doc = applyCadOperation(f28B2Car({ widthScale: 1.15, flareContinuity: 'G1' }), {
+      type: 'updateFeature',
+      featureId: 'inner',
+      args: { source: { featureId: 'front-arch' }, distance: mm(20), side: 'back' },
+    });
+    const r = await evaluate('cr7g1-inner', doc);
+    if (r.type !== 'result' || r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r));
+    const inner = r.evaluation.bodies['inner-body'];
+    expect(inner?.kind).toBe('sheet');
+  }, 600_000);
+  it('fits every part of the F63 car without interference, at rest and through its joints’ ranges (CR7 fit-up)', async () => {
+    // TS-1816, ST-291.
+    const { assembly, closure } = f63Car();
+    const meshesByHash = new Map<string, CadMesh[]>();
+    for (const [hash, content] of closure) {
+      const r = await evaluate(`fit-${hash.slice(-12)}`, content);
+      if (r.type !== 'result' || r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r));
+      meshesByHash.set(hash, r.meshes);
+    }
+    const own = await evaluate('fit-own', assembly);
+    if (own.type !== 'result' || own.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(own));
+    // Every own body meshed, the right halves too.
+    for (const b of assembly.bodies.filter((x) => x.state === 'active'))
+      expect(
+        own.meshes.filter((x) => x.bodyId === b.id).reduce((n, x) => n + x.indices.length, 0),
+        b.id,
+      ).toBeGreaterThan(0);
+    const lookup = (h: string) => closure.get(h);
+    const meshesOf = (h: string) => meshesByHash.get(h);
+    // The body in white's faces as the kernel reads them (TS-1810 checks they are F63's).
+    const body = f63Body();
+    const frameOf = (ref: CadTopologyRef) => {
+      const face = (Object.keys(f63Faces) as F63Face[]).find((f) => {
+        const r = f63FaceRef(body, f);
+        return (
+          r.kind === 'face' &&
+          ref.kind === 'face' &&
+          r.featureId === ref.featureId &&
+          JSON.stringify(r.name) === JSON.stringify(ref.name)
+        );
+      });
+      return face && f63Faces[face].frame;
+    };
+    const solved = solveJoints(
+      assembly,
+      parameterValues(assembly),
+      lookup,
+      (_at, ref) => {
+        const frame = frameOf(ref as CadTopologyRef);
+        return frame ? { status: 'resolved', frame } : undefined;
+      },
+      () => true,
+    );
+    expect(solved.mismatch).toEqual([]);
+    const doc = { ...assembly, solvedPoses: solved.poses };
+    const input = { doc, lookup, meshesOf, ownMeshes: own.meshes, joints: solved.joints };
+    const rest = checkCadInterference(input);
+    if (rest.status !== 'ok') throw new Error(JSON.stringify(rest));
+    expect(rest.findings).toEqual([]);
+    expect(rest.unchecked).toEqual([]);
+    // Doors and hood open, front wheels steer, the steering wheel turns: clear at every step.
+    for (const j of [
+      'j-door',
+      'j-door-r',
+      'j-hood',
+      'j-hood-r',
+      'j-wheel-front-l',
+      'j-wheel-front-r',
+      'j-steering',
+    ]) {
+      const range = jointRangeSamples(assembly, j, 'angle', 8);
+      if ('code' in range) throw new Error(`${j}: ${range.code}`);
+      const sweep = checkCadInterferenceAlong(input, range.samples);
+      if (sweep.status !== 'ok') throw new Error(`${j}: ${JSON.stringify(sweep)}`);
+      expect(sweep.hits, j).toEqual([]);
+    }
+    // The tyres clear the skin's arches (the meshes' precision) and the body in white.
+    for (const w of ['c-wheel-front-l', 'c-wheel-rear-r']) {
+      const skin = cadClearance(input, [w], []);
+      const biw = cadClearance(input, [w], ['c-biw']);
+      if (skin.status !== 'ok' || biw.status !== 'ok') throw new Error(JSON.stringify([skin, biw]));
+      expect(skin.distanceMm, w).toBeGreaterThan(30);
+      expect(biw.distanceMm, w).toBeGreaterThan(30);
+    }
+  }, 1_800_000);
+
+  it('reports the centre of a solid’s volume and of a sheet’s area (CR7a)', async () => {
+    // TS-1808, ST-288.
+    const result = await evaluate('cr7a-block', cr6dGroove('open', 1, { groove: false }));
+    if (result.type !== 'result' || result.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(result));
+    // The 100 × 60 × 20 block from the origin.
+    const block = solid(result.evaluation.bodies.cushion);
+    block.centroidMm!.forEach((v, i) => expect(v).toBeCloseTo([50, 30, 10][i]!, 6));
+    // The grooved block: the half-round along y = 30 on the top face pulls the centre down.
+    const grooved = await evaluate('cr7a-grooved', cr6dGroove('open'));
+    if (grooved.type !== 'result' || grooved.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(grooved));
+    const g = solid(grooved.evaluation.bodies.cushion).centroidMm!;
+    expect(g[1]).toBeCloseTo(30, 6);
+    expect(g[2]).toBeLessThan(10);
+    // A flat sheet panel: its centre on its plane, inside its bounds.
+    const panel = await evaluate('cr7a-panel', f26Panel('flat'));
+    if (panel.type !== 'result' || panel.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(panel));
+    for (const b of Object.values(panel.evaluation.bodies)) {
+      if (b.kind !== 'sheet') continue;
+      expect(b.centroidMm).toBeDefined();
+      b.centroidMm!.forEach((v, i) => {
+        expect(v).toBeGreaterThanOrEqual(b.bounds[0][i]! - 1e-6);
+        expect(v).toBeLessThanOrEqual(b.bounds[1][i]! + 1e-6);
+      });
+    }
+  });
 
   it('builds the wheel and tyre, door mirror and steering wheel samples (CR6g)', async () => {
     // TS-1805, ST-287 (F60–F62).
@@ -6571,6 +6770,54 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('meshes finer for a render without changing the display meshes after it (ST-530, TS-2054)', async () => {
+    const doc = sphere('render-ball', 40, 0);
+    const result = async (requestId: string, renderMesh?: CadRenderMeshQuality) => {
+      const document = pinned(doc);
+      await handle({
+        type: 'evaluate',
+        requestId,
+        generation: 1,
+        baseHash: '',
+        candidateHash: cadContentHash(document),
+        document,
+        ...(renderMesh ? { renderMesh } : {}),
+      });
+      const r = posted.find(
+        (m) => 'requestId' in m && m.requestId === requestId && m.type !== 'progress',
+      )!;
+      if (r.type !== 'result' || r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r));
+      return r;
+    };
+    const before = await result('render-display-1');
+    const fine = await result('render-fine', {
+      relativeDeflection: 0.0002,
+      angularDeflectionRad: 0.1,
+    });
+    const after = await result('render-display-2');
+    const triangles = (r: typeof before) => r.meshes[0]!.indices.length / 3;
+    // The same body, the same measurements (the digest covers the mesh bytes), many more
+    // triangles closer to the sphere.
+    const measured = ({ evaluation: e }: typeof before) => ({ ...e, geometryDigest: undefined });
+    expect(measured(fine)).toEqual(measured(before));
+    expect(triangles(fine)).toBeGreaterThan(4 * triangles(before));
+    // How far the flat triangles sag inside the sphere: the worst centroid's distance from it.
+    const sag = (r: typeof before) => {
+      const { positions, indices } = r.meshes[0]!;
+      let worst = 0;
+      for (let t = 0; t < indices.length; t += 3) {
+        const c = [0, 1, 2].map(
+          (k) => [0, 1, 2].reduce((sum, v) => sum + positions[indices[t + v]! * 3 + k]!, 0) / 3,
+        );
+        worst = Math.max(worst, 40 - Math.hypot(c[0]!, c[1]!, c[2]!));
+      }
+      return worst;
+    };
+    expect(sag(fine)).toBeLessThan(sag(before) / 2);
+    // The display evaluation that follows is the display one, not the render's (no cache kept it).
+    expect(after.meshes).toEqual(before.meshes);
   });
 });
 

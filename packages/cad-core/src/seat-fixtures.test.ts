@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { parameterValues } from './graph';
 import { posesForJointValues, solveJoints } from './joints';
 import { applyCadOperation } from './operations';
-import { f59Hinge, f59Ranges, f59Seat } from './seat-fixtures';
+import {
+  f59Boxes,
+  f59Hinge,
+  f59LowBoxes,
+  f59LowHinge,
+  f59LowHPoint,
+  f59Ranges,
+  f59Seat,
+} from './seat-fixtures';
 import { validateCad } from './validation';
 
 const codes = (doc: unknown) => validateCad(doc).map((d) => `${d.code}@${d.path}`);
@@ -77,5 +85,42 @@ describe('F59 seat assembly (CR6f, TS-1802)', () => {
         joint: { ...recline, values: { angle: { literalRad: (-20 * Math.PI) / 180 } } },
       }),
     ).toThrow();
+  });
+});
+
+describe('F59’s low version (CR7d, TS-1819)', () => {
+  it('is the same assembly with the cushion’s top 100 mm lower and its back hinge 50 mm lower', () => {
+    const std = f59Seat();
+    const low = f59Seat(undefined, 'low');
+    expect(codes(low.assembly)).toEqual([]);
+    for (const content of low.closure.values()) expect(codes(content)).toEqual([]);
+    expect(low.assembly.components.map((c) => c.id)).toEqual(
+      std.assembly.components.map((c) => c.id),
+    );
+    expect(
+      low.assembly.parts.map((p) => p.source.kind === 'version' && p.source.artifactId),
+    ).toEqual([
+      'seat-low-frame',
+      'seat-low-pan',
+      'seat-low-cushion',
+      'seat-low-back',
+      'seat-low-back-shell',
+    ]);
+    const top = (b: { at: number[]; size: number[] }) => b.at[2]! + b.size[2]!;
+    expect(top(f59Boxes.cushion) - top(f59LowBoxes.cushion)).toBe(100);
+    expect(f59Hinge[2] - f59LowHinge[2]).toBe(50);
+    // The H-point sits over the cushion, in front of the back.
+    expect(f59LowHPoint[2]).toBeGreaterThan(top(f59LowBoxes.cushion) + 100);
+    expect(f59LowHPoint[0]).toBeGreaterThan(
+      f59LowBoxes.back.at[0] + f59LowBoxes.back.size[0] + 100,
+    );
+    const s = solveJoints(
+      low.assembly,
+      parameterValues(low.assembly),
+      (h) => low.closure.get(h),
+      () => undefined,
+      () => true,
+    );
+    expect(s.mismatch).toEqual([]);
   });
 });

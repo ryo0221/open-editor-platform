@@ -8,6 +8,7 @@
  * Pure: the reference Host server (scripts/dev/simulation-host.mjs) uses `computeJobInp` too, so
  * a job is checked the same way on both sides and the `.inp` is always written from numbers.
  */
+import type { AeroHostResult, AeroJob } from '@editor-platform/geometry-cfd';
 import {
   bondedHostModel,
   bondedModalHostModel,
@@ -47,6 +48,12 @@ import {
   type ElasticResult,
   type FrdResult,
   type FemMesh,
+  checkFrameModel,
+  FrameModelError,
+  readCalculixFrame,
+  writeCalculixFrame,
+  type FrameModel,
+  type FrameResult,
 } from '@editor-platform/geometry-fem';
 
 export interface SimulationComputeLimits {
@@ -78,6 +85,11 @@ export interface SimulationComputeDescriptor {
   limits: SimulationComputeLimits;
   /** The job endpoint (same origin). */
   endpoint: string;
+  /**
+   * VS3b: the Host also runs wind-tunnel jobs (`kind: 'aero'`, geometry-cfd's `AeroJob`) on this
+   * OpenFOAM build, e.g. "openfoam-2412".
+   */
+  aero?: { solverBuild: string };
 }
 
 /** Everything a job sends. Numbers only: no names, document content or credentials. */
@@ -336,11 +348,47 @@ export function checkComputeJob(
   };
 }
 
+/**
+ * CS4 (docs/cad/construction-site.md, CS-U5): a frame of beam elements, solved on the Host only.
+ * Numbers only, as for the other jobs: nodes, element groups with their sections and materials,
+ * fixed nodes, nodal forces and gravity.
+ */
+export interface FrameComputeJob {
+  kind: 'frame-static';
+  frame: FrameModel;
+}
+
+/** Checks a frame job as it arrives; its sizes against `limits` too. */
+export function checkFrameJob(
+  value: unknown,
+  limits: Readonly<SimulationComputeLimits> = referenceComputeLimits,
+): FrameModel {
+  if (!isObject(value)) return refuse('shape', 'not an object');
+  keysOnly(value, ['kind', 'frame'], '');
+  if (value.kind !== 'frame-static') refuse('shape', 'kind');
+  try {
+    return checkFrameModel(value.frame, {
+      nodes: limits.nodes,
+      elements: limits.elements,
+      groups: 2000,
+    });
+  } catch (e) {
+    if (!(e instanceof FrameModelError)) throw e;
+    const problem =
+      e.problem === 'section' ? 'shape' : (e.problem as Exclude<typeof e.problem, 'section'>);
+    return refuse(problem, `frame: ${e.detail}`);
+  }
+}
+
 /** The `.inp` of a checked job: the only text the reference Host gives CalculiX. */
 export function computeJobInp(
   value: unknown,
   limits: Readonly<SimulationComputeLimits> = referenceComputeLimits,
 ): { inp: string; nodes: number; units: CalculixUnits } {
+  if (isObject(value) && value.kind === 'frame-static') {
+    const frame = checkFrameJob(value, limits);
+    return { inp: writeCalculixFrame(frame), nodes: frame.nodes.length / 3, units: 'mm' };
+  }
   const model = checkComputeJob(value, limits);
   return {
     inp: writeCalculixModel(model),
@@ -381,7 +429,7 @@ export interface ComputeRunOptions {
  */
 export async function runComputeJob(
   host: SimulationComputeDescriptor,
-  job: SimulationComputeJob,
+  job: SimulationComputeJob | FrameComputeJob | AeroJob,
   options: ComputeRunOptions = {},
 ): Promise<string> {
   const http = options.fetch ?? fetch;
@@ -616,4 +664,58 @@ export async function solveBondedModalOnHost(
     model,
     readCalculixModes(text, model.model.nodes.length / 3, calculixModeCount(model.model)),
   );
+}
+
+/**
+ * CS4: a frame on a compute Host: checked here first (`FrameModelError`), run, and its `.frd` read
+ * back onto the frame's nodes and elements (`FrdError` when it does not fit).
+ */
+export async function solveFrameOnHost(
+  host: SimulationComputeDescriptor,
+  frame: FrameModel,
+  options: ComputeRunOptions = {},
+): Promise<FrameResult> {
+  const checked = checkFrameModel(frame);
+  const text = await runComputeJob(host, { kind: 'frame-static', frame: checked }, options);
+  return readCalculixFrame(checked, text);
+}
+
+/**
+ * VS4b: a wind-tunnel job on a compute Host that runs them (`aero` in its descriptor): the job,
+ * the run, and its JSON result checked (finite coefficients, a history, the surface samples in
+ * step). A Host without a wind tunnel is `refused` before anything is sent.
+ */
+export async function solveAeroOnHost(
+  host: SimulationComputeDescriptor,
+  job: AeroJob,
+  options: ComputeRunOptions = {},
+): Promise<AeroHostResult> {
+  if (!host.aero) throw new ComputeHostError('refused', `${host.label} has no wind tunnel`);
+  const text = await runComputeJob(host, job, { pollMs: 2000, ...options });
+  const bad = (what: string): never => {
+    throw new ComputeHostError('failed', `${host.label} sent a wind-tunnel result without ${what}`);
+  };
+  let v: Record<string, unknown>;
+  try {
+    v = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return bad('JSON');
+  }
+  if (typeof v !== 'object' || v === null) return bad('an object');
+  for (const k of ['cd', 'cl', 'cs', 'clFront', 'clRear'])
+    if (typeof v[k] !== 'number' || !Number.isFinite(v[k])) bad(`a finite ${k}`);
+  const numbers = (k: string) => {
+    const a = v[k];
+    if (!Array.isArray(a) || !a.every((x) => typeof x === 'number' && Number.isFinite(x)))
+      bad(`its ${k} as numbers`);
+    return a as number[];
+  };
+  const points = numbers('points');
+  const cp = numbers('cp');
+  const cf = numbers('cf');
+  const htc = numbers('htc');
+  if (points.length !== 3 * cp.length || cf.length !== cp.length || htc.length !== cp.length)
+    bad('surface samples that line up');
+  if (!Array.isArray(v.history)) bad('a history');
+  return { ...(v as unknown as AeroHostResult), points, cp, cf, htc };
 }

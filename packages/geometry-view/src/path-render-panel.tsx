@@ -1,6 +1,7 @@
 /**
- * The Render dialog (#664) shared by CAD and the building: size, samples, time limit, HDRI and
- * floor; a progress line with Cancel (nothing kept) and Stop (keeps the image reached); then
+ * The Render dialog (#664) shared by CAD and the building: size, samples, time limit, the light
+ * (studio, sky or an HDRI), exposure and floor, and where the view offers it finer surfaces
+ * (the shapes evaluated again with finer meshes first); a progress line with Cancel (nothing kept) and Stop (keeps the image reached); then
  * the image and a PNG download. The dialog is modal, so the model does not change during a
  * render, and the path tracing runs on a canvas of its own (see `renderPathTraced`).
  */
@@ -23,6 +24,7 @@ import './path-render-panel.css';
 
 type Phase =
   | { kind: 'settings' }
+  | { kind: 'refining'; done: number; total: number }
   | { kind: 'rendering'; samples: number; elapsedMs: number; preparing: boolean }
   | { kind: 'done'; result: PathRenderResult; url: string };
 
@@ -38,9 +40,21 @@ export function PathRenderDialog({
   onSavePng,
   onClose,
   support = pathRenderSupport,
+  finerSource,
+  defaultLighting = defaultPathRenderSettings.lighting,
 }: {
   /** The view's solids and camera, read when the render starts; undefined when nothing is shown. */
   source(): PathRenderSource | undefined;
+  /**
+   * The source with finer meshes of the shown shapes, evaluated again first (slow for a large
+   * model; `onProgress` gets the shapes done and their total); offered as Finer surfaces.
+   */
+  finerSource?(
+    control: PathRenderControl,
+    onProgress: (done: number, total: number) => void,
+  ): Promise<PathRenderSource | undefined>;
+  /** The light without an HDRI that the dialog starts with. */
+  defaultLighting?: PathRenderSettings['lighting'];
   /** File name stem of the PNG. */
   name: string;
   /** Receives the PNG; without it the dialog offers a download. */
@@ -49,7 +63,11 @@ export function PathRenderDialog({
   support?: typeof pathRenderSupport;
 }) {
   const supported = useMemo(() => support(), [support]);
-  const [settings, setSettings] = useState<PathRenderSettings>(defaultPathRenderSettings);
+  const [settings, setSettings] = useState<PathRenderSettings>({
+    ...defaultPathRenderSettings,
+    lighting: defaultLighting,
+  });
+  const [finer, setFiner] = useState(!!finerSource);
   const [hdri, setHdri] = useState<File>();
   const [phase, setPhase] = useState<Phase>({ kind: 'settings' });
   const [error, setError] = useState<string>();
@@ -85,8 +103,17 @@ export function PathRenderDialog({
     try {
       if (hdri) environment = await readHdri(hdri);
       if (run.cancelled) return;
-      // Read after the HDRI: renderPathTraced copies it at once, before its own awaits.
-      const shown = source();
+      // Read after the HDRI: renderPathTraced copies it at once, before its own awaits. The finer
+      // meshes are made first; the model cannot change meanwhile (the dialog is modal).
+      let shown: PathRenderSource | undefined;
+      if (finer && finerSource) {
+        setPhase({ kind: 'refining', done: 0, total: 0 });
+        shown = await finerSource(run, (done, total) => {
+          if (!run.cancelled) setPhase({ kind: 'refining', done, total });
+        });
+        if (run.cancelled) return;
+        setPhase({ kind: 'rendering', samples: 0, elapsedMs: 0, preparing: true });
+      } else shown = source();
       if (!shown) throw new Error('Nothing is shown to render.');
       const result = await renderPathTraced(shown, settings, {
         control: run,
@@ -115,7 +142,7 @@ export function PathRenderDialog({
     setTimeout(() => URL.revokeObjectURL(href), 0);
   }
   const close = () => (cancel(), onClose());
-  const rendering = phase.kind === 'rendering';
+  const rendering = phase.kind === 'rendering' || phase.kind === 'refining';
   const { minSide, maxSide, maxSamples, maxTimeLimit } = pathRenderLimits;
 
   return (
@@ -159,6 +186,16 @@ export function PathRenderDialog({
                 Sampling stops at the samples or the time limit, whichever comes first, and the
                 image reached is kept.
               </p>
+              {finerSource && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={finer}
+                    onChange={(e) => setFiner(e.target.checked)}
+                  />
+                  Finer surfaces (the shapes are calculated again first)
+                </label>
+              )}
             </fieldset>
             <fieldset disabled={rendering}>
               <legend>Lighting</legend>
@@ -189,8 +226,29 @@ export function PathRenderDialog({
                   </label>
                 </div>
               ) : (
-                <p className="view-render-muted">Without an HDRI: a plain sky and a sun.</p>
+                <label>
+                  Light
+                  <select
+                    value={settings.lighting}
+                    onChange={(e) =>
+                      set({ lighting: e.target.value as PathRenderSettings['lighting'] })
+                    }
+                  >
+                    <option value="studio">Studio (soft boxes in a dark room)</option>
+                    <option value="sky">Sky and sun</option>
+                  </select>
+                </label>
               )}
+              <label>
+                Exposure (stops)
+                <input
+                  type="number"
+                  min={-pathRenderLimits.maxExposureStops}
+                  max={pathRenderLimits.maxExposureStops}
+                  step={0.5}
+                  {...number('exposureStops')}
+                />
+              </label>
               <label>
                 <input
                   type="checkbox"
@@ -204,6 +262,13 @@ export function PathRenderDialog({
         )}
         {problem && supported.ok && <p role="alert">{problem}</p>}
         {error && <p role="alert">{error}</p>}
+        {phase.kind === 'refining' && (
+          <p role="status" data-testid="view-render-progress">
+            {phase.total
+              ? `Calculating finer surfaces: ${phase.done} / ${phase.total} shapes`
+              : 'Calculating finer surfaces'}
+          </p>
+        )}
         {phase.kind === 'rendering' && (
           <p role="status" data-testid="view-render-progress">
             {phase.preparing && phase.samples === 0
@@ -237,9 +302,14 @@ export function PathRenderDialog({
           </figure>
         )}
         <div className="view-render-actions">
-          {phase.kind === 'rendering' ? (
+          {rendering ? (
             <>
-              <button onClick={() => (control.current.finishNow = true)}>Stop and keep</button>
+              <button
+                disabled={phase.kind !== 'rendering'}
+                onClick={() => (control.current.finishNow = true)}
+              >
+                Stop and keep
+              </button>
               <button onClick={cancel}>Cancel</button>
             </>
           ) : (

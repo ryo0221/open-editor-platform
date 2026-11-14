@@ -9,16 +9,23 @@ import type { OcModule } from './evaluator';
  */
 export const cadVolumeRelativeError = 1e-9;
 
-/** A shape's area (mm²) and, for a solid, its volume (mm³), shared by evaluation and import. */
+/**
+ * A shape's area (mm²) and, for a solid, its volume (mm³), shared by evaluation and import; with
+ * CR7a's centre of the area (a sheet) or of the volume (a solid).
+ */
 export function shapeMetrics(
   oc: OcModule,
   shape: unknown,
   own: <T>(value: T) => T,
   solid: boolean,
-): { areaMm2: number; volumeMm3?: number } {
+): { areaMm2: number; volumeMm3?: number; centroidMm: [number, number, number] } {
+  const centre = (props: { CentreOfMass(): unknown }): [number, number, number] => {
+    const c = own(props.CentreOfMass()) as { X(): number; Y(): number; Z(): number };
+    return [c.X(), c.Y(), c.Z()];
+  };
   const surface = own(new oc.GProp_GProps_1());
   oc.BRepGProp.SurfaceProperties_1(shape, surface, false, false);
-  if (!solid) return { areaMm2: surface.Mass() };
+  if (!solid) return { areaMm2: surface.Mass(), centroidMm: centre(surface) };
   const volume = own(new oc.GProp_GProps_1());
   oc.BRepGProp.VolumePropertiesGK_1(
     shape,
@@ -30,5 +37,10 @@ export function shapeMetrics(
     false,
     false,
   );
-  return { areaMm2: surface.Mass(), volumeMm3: volume.Mass() };
+  // CR7a: the centre from OCCT's fixed-order integration. The adaptive one above with its
+  // centre-of-gravity flag took 15× as long on the lamps (F57); the fixed order misses a B-spline
+  // solid's moments by about the same 5 × 10⁻⁵ as its volume, far below a part's tolerance.
+  const moments = own(new oc.GProp_GProps_1());
+  oc.BRepGProp.VolumeProperties_1(shape, moments, false, false, false);
+  return { areaMm2: surface.Mass(), volumeMm3: volume.Mass(), centroidMm: centre(moments) };
 }

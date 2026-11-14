@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import {
   commitVersion,
   createArtifact,
@@ -15,7 +15,16 @@ import {
   CadNativeCounter,
   utf8Length,
 } from './native-size';
-import { cadNativeFileBytes, portableCadRecord, type CadResource } from './resources';
+import { cadNativeLimit, portableCadRecord, type CadResource } from './resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 /** The real serializer, the reference the counter must match exactly. */
 const real = (r: StoredArtifact) =>
@@ -171,7 +180,7 @@ describe('CAD native byte counter (CAD23)', () => {
     const doc = f02Plate();
     const filler = asset('source-step', 11_000_000);
     const base = await record({ ...doc, assets: [filler.ref] }, [], [filler.resource], '');
-    const free = cadNativeFileBytes - real(base);
+    const free = cadNativeLimit.bytes - real(base);
     expect(free).toBeGreaterThan(0);
     const receipt = await counter.prepare(base.draft.content as CadDocument, 'h');
     for (const [delta, fits] of [
@@ -181,10 +190,10 @@ describe('CAD native byte counter (CAD23)', () => {
     ] as const) {
       // The artifact name is written once, one byte per ASCII character.
       const r = { ...base, name: 'x'.repeat(free + delta) };
-      expect(real(r)).toBe(cadNativeFileBytes + delta);
+      expect(real(r)).toBe(cadNativeLimit.bytes + delta);
       expect(counter.count(r)).toBe(real(r));
       expect(counter.admit(receipt, r.draft.content as CadDocument, r), String(delta)).toBe(
-        fits ? undefined : cadNativeFileBytes + delta,
+        fits ? undefined : cadNativeLimit.bytes + delta,
       );
     }
   });
@@ -242,7 +251,7 @@ describe('CAD native byte counter (CAD23)', () => {
     const saved = await record(candidate, [big], [filler.resource]);
     const padded = {
       ...saved,
-      name: saved.name + 'x'.repeat(cadNativeFileBytes - real(saved) + 1),
+      name: saved.name + 'x'.repeat(cadNativeLimit.bytes - real(saved) + 1),
     };
     expect(counter.admit(receipt, candidate, padded)).toBe(real({ ...padded }));
   });
@@ -281,8 +290,8 @@ describe('CAD native byte counter (CAD23)', () => {
     session.execute({ type: 'set', label: 'set', apply: () => larger });
     const r = await record(session.content, [session.content], [filler.resource]);
     // The earlier, smaller content fits; padding the envelope makes the larger draft just fit.
-    const tight = { ...r, name: r.name + 'x'.repeat(cadNativeFileBytes - real(r)) };
-    expect(real(tight)).toBe(cadNativeFileBytes);
+    const tight = { ...r, name: r.name + 'x'.repeat(cadNativeLimit.bytes - real(r)) };
+    expect(real(tight)).toBe(cadNativeLimit.bytes);
     expect(() => assertCadContentFits(tight, larger, 'Undoする')).not.toThrow();
     const huge = { ...plate('w'.repeat(250)), assets: [filler.ref] };
     expect(() => assertCadContentFits(tight, huge, 'Undoする')).toThrow(

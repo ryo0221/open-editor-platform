@@ -928,6 +928,80 @@ test('add a modal study, read its natural frequencies and look at each mode (FE7
   await expect(surface.getByText(/\(linear static\)/)).toBeVisible();
 });
 
+// VS4b (docs/cad/vehicle-simulation.md VS4, TS-2211): a wind tunnel past the plate in the
+// browser: added without any load or constraint, its wind and cell set, run, and its drag, lift
+// and side force read per level as a reference result.
+test('add a wind tunnel past the part and read its coefficients (VS4b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');
+  test.setTimeout(300_000);
+  const surface = await analysePlate(page);
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const set = async (label: string, value: string) => {
+    const input = surface.getByLabel(label, { exact: true });
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toHaveValue(value);
+  };
+  await button('Add wind tunnel').click();
+  await expect(
+    surface.getByText(/\(wind tunnel\): the air past the analysed bodies at 30/),
+  ).toBeVisible();
+  await set('Wind speed', '40');
+  await set('Browser cell', '5');
+  await set('Solver iteration limit', '400');
+  await surface.getByLabel('Ground', { exact: true }).selectOption('fixed');
+  await button('Run study').click();
+  const state = surface
+    .getByRole('status')
+    .filter({ hasText: /Level|Starting|Verified|Reference|Failed/ });
+  await expect(state).toHaveText(/^Reference only/, { timeout: 240_000 });
+  const table = surface.locator('.simulation-levels').first();
+  await expect(table.locator('th')).toContainText(['Cell mm', 'Cells', 'Cd', 'Cl', 'Cs']);
+  const cd = Number(await table.locator('tbody tr').first().locator('td').nth(3).innerText());
+  // The plate lies on the ground one cell thick: a drag pushing it downstream, not a value to
+  // compare (the tunnel's numbers are checked on the sphere and the Ahmed body).
+  expect(cd).toBeGreaterThan(0.3);
+  await expect(surface.getByText('aero: wind-tunnel results are for reference')).toBeVisible();
+  // VS4c (TS-2212): Cp on the plate, streamlines and the flow speed on a section.
+  const field = surface.getByLabel('Result field', { exact: true });
+  await expect(field.locator('option')).toHaveText(['Pressure coefficient Cp']);
+  await expect(surface.getByLabel('Deformation scale', { exact: true })).toHaveCount(0);
+  await expect(surface.getByLabel('Streamlines', { exact: true })).toBeChecked();
+  await expect(surface.getByLabel('Flow colours')).toContainText(/\d+ streamlines/);
+  await surface.getByLabel('Flow section axis', { exact: true }).selectOption('2');
+  await surface.getByLabel('Flow section place', { exact: true }).fill('0.5');
+  const canvas = surface.locator('.simulation-viewport canvas');
+  await canvas.screenshot({ path: test.info().outputPath('wind-tunnel.png') });
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    surface.getByRole('button', { name: 'Export VTU', exact: true }).click(),
+  ]);
+  const vtu = Buffer.concat(await (await download.createReadStream()).toArray()).toString('utf8');
+  expect(vtu).toContain('Name="Cp"');
+  // VS4d (TS-2213): a sweep of two yaws, each a run of the study at that yaw; the study keeps 0°.
+  const sweep = surface.getByRole('group', { name: 'Yaw sweep' });
+  await sweep.getByLabel('Yaw angles', { exact: true }).fill('0, 10');
+  await sweep.getByRole('button', { name: 'Run yaw sweep', exact: true }).click();
+  const rows = sweep.getByRole('table', { name: 'Yaw sweep coefficients' }).locator('tbody tr');
+  await expect(rows).toHaveCount(2, { timeout: 240_000 });
+  await expect(sweep.getByRole('button', { name: 'Run yaw sweep', exact: true })).toBeVisible({
+    timeout: 60_000,
+  });
+  const cs = await rows.locator('td:nth-child(4)').allInnerTexts();
+  // The air from the left at 10° pushes the plate toward +y more than at 0°.
+  expect(Number(cs[1])).toBeGreaterThan(Number(cs[0]));
+  // Each row keeps its run's status and reasons (every wind tunnel is for reference).
+  await expect(rows.locator('td:nth-child(5)')).toHaveText([/^reference/, /^reference/]);
+  await expect(surface.getByLabel('Yaw', { exact: true })).toHaveValue('0');
+  // An edit during a sweep stops it and clears the table: one table never mixes settings.
+  await sweep.getByRole('button', { name: 'Run yaw sweep', exact: true }).click();
+  await expect(sweep.getByRole('button', { name: 'Cancel sweep', exact: true })).toBeVisible();
+  await set('Wind speed', '41');
+  await expect(sweep.getByRole('button', { name: 'Run yaw sweep', exact: true })).toBeVisible();
+  await expect(rows).toHaveCount(0);
+});
+
 // R3i-5 (docs/cad/r3-analysis.md A3, FE90): the plate without its hole solved as tet10 and then
 // as a shell on its midsurface (5 mm thick, a side held, a pressure on the top): the shell's
 // deflection is the solid's within tolerance; its top and bottom stresses and its VTU, opened

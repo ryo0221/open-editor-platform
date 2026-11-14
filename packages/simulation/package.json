@@ -16,6 +16,7 @@
     "@editor-platform/cad-kernel-occt": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/fem-mesher": "*",
+    "@editor-platform/geometry-cfd": "*",
     "@editor-platform/geometry-fem": "*",
     "@editor-platform/simulation-core": "*",
     "react": "19.1.1"

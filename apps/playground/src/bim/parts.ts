@@ -12,7 +12,12 @@ import type { BimPartReference, BimPartShape, BimPartSource } from '@editor-plat
 import { isBimDocument, type BimDocument } from '@editor-platform/bim-core';
 import type { StoredArtifact } from '../model';
 import type { CadPartRecord } from '../cad/parts';
-import { cadNativeFileBytes, nativeBytes, portableCadRecord } from '../cad/resources';
+import {
+  cadNativeLimit,
+  cadNativeLimitText,
+  nativeBytes,
+  portableCadRecord,
+} from '../cad/resources';
 
 /** What the source needs of a CAD kernel: one exact document written as BRep. */
 export interface BimPartKernel {
@@ -96,7 +101,7 @@ export function createBimPartSource(options: {
       // The native file must still import with this version in it (the type names it next).
       const portable = portableBimRecord(portableCadRecord(record));
       const next = { ...portable, cadParts: [...(portable.cadParts ?? []), cadParts.at(-1)!] };
-      if (nativeBytes(next) > cadNativeFileBytes) throw new Error('part-file-too-large');
+      if (nativeBytes(next) > cadNativeLimit.bytes) throw new Error('part-file-too-large');
       if (!(await options.persist({ ...record, cadParts }))) throw new Error('part-retain-failed');
     },
   };
@@ -133,8 +138,8 @@ export function assertBimNativeFits(
   if (record.kind !== 'bim') return;
   // Its texture images (#662) count too: only those its draft and versions name.
   const size = nativeBytes(portableBimRecord(portableCadRecord(record)));
-  if (size <= cadNativeFileBytes) return;
-  const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます`;
+  if (size <= cadNativeLimit.bytes) return;
+  const mb = `native fileが${(size / 1e6).toFixed(1)} MBになり、上限の${cadNativeLimitText()}を超えます`;
   throw new Error(
     action === 'version'
       ? `Versionを保存すると${mb}。保存しません。下書きは保持しています。`

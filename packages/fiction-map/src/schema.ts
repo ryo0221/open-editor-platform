@@ -5,6 +5,7 @@ import type {
   FictionMapBounds,
   FictionMapContent,
   FictionMapCoordinateSpace,
+  FictionMapArtifactRef,
   FictionMapFeature,
   FictionMapGeometry,
   FictionMapLayer,
@@ -171,7 +172,7 @@ function readFeature(value: unknown, path: string): FictionMapFeature {
     value,
     path,
     ['id', 'layerId', 'featureKind', 'geometry', 'name'],
-    ['description', 'category', 'style', 'worldEntityRef'],
+    ['description', 'category', 'style', 'worldEntityRef', 'artifactRefs'],
   );
   const basic = {
     id: text(o.id, path + '/id'),
@@ -216,13 +217,42 @@ function readFeature(value: unknown, path: string): FictionMapFeature {
       entityId: text(r.entityId, path + '/worldEntityRef/entityId'),
     };
   }
+  const artifactRefs = Object.hasOwn(o, 'artifactRefs')
+    ? { artifactRefs: readArtifactRefs(o.artifactRefs, path + '/artifactRefs') }
+    : {};
   return {
     ...basic,
     ...description,
     ...category,
     ...(style ? { style } : {}),
     ...(worldEntityRef ? { worldEntityRef } : {}),
+    ...artifactRefs,
   };
+}
+/** GV2a: 1..8 pinned versions per feature, each Artifact at most once. */
+export function readArtifactRefs(value: unknown, path: string): FictionMapArtifactRef[] {
+  const items = list(value, path);
+  if (items.length < 1 || items.length > limits.artifactRefsPerFeature)
+    fail('invalid-field', path, { limit: limits.artifactRefsPerFeature, actual: items.length });
+  const seen = new Set<string>();
+  return items.map((item, i) => {
+    const p = pointer(path, i),
+      r = record(item, p, ['artifactId', 'domain', 'versionId', 'contentHash'], ['label']);
+    const artifactId = text(r.artifactId, p + '/artifactId');
+    if (seen.has(artifactId)) fail('duplicate-id', p + '/artifactId', { id: artifactId });
+    seen.add(artifactId);
+    const domain = text(r.domain, p + '/domain', 64);
+    if (!/^[a-z][a-z0-9-]*$/.test(domain)) fail('invalid-field', p + '/domain');
+    const contentHash = text(r.contentHash, p + '/contentHash', 64);
+    if (!/^[a-f0-9]{64}$/.test(contentHash)) fail('invalid-field', p + '/contentHash');
+    return {
+      artifactId,
+      domain,
+      versionId: text(r.versionId, p + '/versionId'),
+      contentHash,
+      ...(Object.hasOwn(r, 'label') ? { label: text(r.label, p + '/label', 128) } : {}),
+    };
+  });
 }
 function readView(value: unknown, path: string): FictionMapNamedView {
   const o = record(value, path, ['id', 'name', 'extent', 'visibleLayerIds']);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, clone } from '@editor-platform/artifact-core';
+import { canonicalJson, clone, deepFreeze } from '@editor-platform/artifact-core';
 import {
   GraphBinding,
   GraphSession,
@@ -23,6 +23,10 @@ import {
   separateGraphRoutes,
   assertGraphDocument,
   assertGraphProfile,
+  readGraphDocument,
+  readGraphProfile,
+  upgradeGraphDocument,
+  upgradeGraphProfile,
   type GraphAdapter,
   type GraphDocument,
   type GraphNodeShape,
@@ -172,17 +176,50 @@ describe('node shape geometry', () => {
 });
 
 describe('schema 2 presentation', () => {
-  it('refuses schema 1 Graphs and Profiles with a reason instead of reading them', () => {
-    const old = { ...clone(createRelationGraph()), schemaVersion: 1 } as Record<string, unknown>;
-    delete old.presentation;
-    delete old.sections;
-    old.layout = {};
-    expect(isGraphDocument(old)).toBe(false);
-    expect(() => assertGraphDocument(old)).toThrow(/schema 1 is not supported/);
-    const profile = { ...clone(relationProfile), schemaVersion: 1 } as Record<string, unknown>;
-    delete profile.sections;
-    expect(isGraphProfile(profile)).toBe(false);
-    expect(() => assertGraphProfile(profile)).toThrow(/schema 1 is not supported/);
+  it('reads schema 1 and 2 Graphs as schema 3 without changing them, and refuses newer schemas', () => {
+    const current = createRelationGraph();
+    const v1 = { ...clone(current), schemaVersion: 1 } as Record<string, unknown>;
+    delete v1.presentation;
+    delete v1.sections;
+    v1.layout = { 'resource-a': { x: 10, y: 20 } };
+    const frozen = deepFreeze(clone(v1));
+    expect(isGraphDocument(v1)).toBe(false);
+    const read = upgradeGraphDocument(frozen)!;
+    expect(read.schemaVersion).toBe(3);
+    expect(read.sections).toEqual([]);
+    expect(read.presentation).toEqual({ nodes: { 'resource-a': { x: 10, y: 20 } }, sections: {} });
+    expect(read.nodes).toEqual(current.nodes);
+    expect(frozen).toEqual(v1);
+    // Schema 1 had no Sections: an edge to anything but a node, or a node Section, is refused.
+    expect(
+      upgradeGraphDocument({ ...v1, nodes: [{ ...current.nodes[0], sectionId: 's' }] }),
+    ).toBeUndefined();
+
+    const v2 = { ...clone(current), schemaVersion: 2 };
+    expect(isGraphDocument(v2)).toBe(false);
+    expect(readGraphDocument(v2)).toEqual(current);
+    expect(v2.schemaVersion).toBe(2);
+    expect(upgradeGraphDocument(current)).toBe(current);
+
+    const newer = { ...clone(current), schemaVersion: 4 };
+    expect(upgradeGraphDocument(newer)).toBeUndefined();
+    expect(() => readGraphDocument(newer)).toThrow(/schema 4 is newer than this version reads/);
+    expect(() => assertGraphDocument(newer)).toThrow(/schema 4 is newer/);
+    expect(() => readGraphDocument({ ...current, schemaVersion: 0 })).toThrow(
+      /Invalid Graph schema/,
+    );
+  });
+
+  it('reads a schema 1 Profile as schema 2 with no Section types, and refuses newer Profiles', () => {
+    const v1 = { ...clone(relationProfile), schemaVersion: 1 } as Record<string, unknown>;
+    delete v1.sections;
+    expect(isGraphProfile(v1)).toBe(false);
+    expect(readGraphProfile(v1)).toEqual({ ...relationProfile, sections: {} });
+    expect(v1.schemaVersion).toBe(1);
+    expect(upgradeGraphProfile(relationProfile)).toBe(relationProfile);
+    const newer = { ...clone(relationProfile), schemaVersion: 3 };
+    expect(() => readGraphProfile(newer)).toThrow(/Profile schema 3 is newer/);
+    expect(() => assertGraphProfile(newer)).toThrow(/Profile schema 3 is newer/);
   });
 
   it.each([
@@ -409,7 +446,7 @@ function binding(mode: GraphAdapter<Source>['presentationMode'], sections = fals
     sections,
     profile: () => sourceProfile,
     project: (source, presentation) => ({
-      schemaVersion: 2,
+      schemaVersion: 3,
       id: 'names-graph',
       profile: { id: 'names', version: 1 },
       attributes: {},
@@ -510,7 +547,21 @@ describe('adapter presentation modes', () => {
     expect(() => binding('source', true)).not.toThrow();
   });
 
-  it('refuses an old or malformed presentation sidecar', () => {
+  it('reads a schema 1 layout sidecar as node presentation', () => {
+    const h = binding('sidecar'),
+      { stamp } = h.binding.project();
+    h.binding.apply([{ type: 'move-node', id: 'a', position: { x: 1, y: 1 } }], stamp);
+    const { presentation, ...rest } = clone(h.sidecar!);
+    const v1 = { ...rest, schemaVersion: 1, positions: { a: { x: 7, y: 8 } } };
+    void presentation;
+    const other = new GraphBinding<Source>({
+      ...h.binding.options,
+      getPresentation: () => v1 as unknown as PresentationSidecar,
+    });
+    expect(other.project().graph.presentation.nodes.a).toEqual({ x: 7, y: 8 });
+  });
+
+  it('refuses a malformed presentation sidecar', () => {
     const h = binding('sidecar'),
       { stamp } = h.binding.project();
     h.binding.apply([{ type: 'move-node', id: 'a', position: { x: 1, y: 1 } }], stamp);

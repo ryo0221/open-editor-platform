@@ -5,7 +5,14 @@ export * from './evaluate';
 export * from './operations';
 export * from './rig';
 export * from './ik';
-export { blockyFigure, hattedFigure, type CharacterFixture } from './fixtures';
+export {
+  blockyFigure,
+  hattedFigure,
+  seatedFigure,
+  f64SitDegrees,
+  type CharacterFixture,
+} from './fixtures';
+export * from './occupant';
 export * from './ids';
 export {
   importGltf,

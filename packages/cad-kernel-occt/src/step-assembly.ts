@@ -131,8 +131,7 @@ export function writeAssemblyStep(
     if (writer.Write(path) !== oc.IFSelect_ReturnStatus.IFSelect_RetDone)
       throw new CadKernelError('step-write-failed');
     const bytes = named(oc.FS.readFile(path) as Uint8Array, plan, instanceNames);
-    if (bytes.byteLength > cadLimits.stepExportBytes)
-      throw new CadKernelError('step-export-too-large');
+    if (bytes.byteLength > cadLimits.stepBytes) throw new CadKernelError('step-export-too-large');
     return bytes;
   } finally {
     oc.OCJS.setStaticInteger('write.step.schema', schema);

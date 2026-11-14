@@ -46,6 +46,11 @@ export interface BimViewportOptions {
    */
   onPlan?(xy: [number, number], kind: 'move' | 'click' | 'double', mmPerPx: number): void;
   onContextLost(): void;
+  /**
+   * CS2b: IDs drawn as a backdrop (a site's ground): a pick takes them only when nothing else,
+   * transparent or not, is under the pointer.
+   */
+  isBackdrop?(id: string): boolean;
 }
 /** The plan of a level: looked at from above, cut `cutMm` above the level. */
 export interface BimPlanView {
@@ -92,12 +97,15 @@ export class BimViewport {
   drawing = false;
   private group: Group | undefined;
   private grid: GridHelper | undefined;
+  private gridShown = true;
   private readonly resize: ResizeObserver;
   private frame = 0;
   private fitted = false;
   private down: { x: number; y: number } | undefined;
   /** Standard or realistic lighting (#665); a plan never shows the shadows. */
   private readonly lighting: ViewLighting;
+  /** CS6c: a video being recorded, through its own camera. */
+  private capture: { camera: PerspectiveCamera } | undefined;
 
   constructor(
     private readonly host: HTMLElement,
@@ -337,9 +345,69 @@ export class BimViewport {
     if (this.plan || !this.group) return undefined;
     return { roots: [this.group], camera: this.camera };
   }
+  /**
+   * CS6c: draws frames for a video at `width × height` (device pixels), through a copy of the 3D
+   * camera with the video's aspect (the vertical field of view kept). The view stops drawing on
+   * its own meanwhile and shows the recorded frames letterboxed; `endCapture` restores it.
+   * Refused in a plan, and where the browser cannot draw that size.
+   */
+  beginCapture(width: number, height: number) {
+    if (this.capture) throw new Error('A recording is already running.');
+    if (this.plan) throw new Error('A plan cannot be recorded; leave the plan first.');
+    cancelAnimationFrame(this.frame);
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(width, height, false);
+    const camera = this.perspective.clone();
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    this.capture = { camera };
+    this.renderer.domElement.classList.add('bim-canvas-capturing');
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) {
+      this.endCapture();
+      throw new Error('The 3D view was lost.');
+    }
+    if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) {
+      const [w, h] = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+      this.endCapture();
+      throw new Error(`This browser can draw at most ${w} × ${h} here.`);
+    }
+  }
+  /**
+   * CS6c: draws the solids shown now as one recorded frame and returns the canvas holding it,
+   * for the caller to take (`new VideoFrame(canvas)`) before anything draws again.
+   */
+  captureCanvas(): HTMLCanvasElement {
+    const capture = this.capture;
+    if (!capture) throw new Error('No recording is running.');
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) throw new Error('The 3D view was lost.');
+    this.lighting.prepare(this.group ? [this.group] : [], true);
+    this.renderer.render(this.scene, capture.camera);
+    if (gl.isContextLost()) throw new Error('The 3D view was lost.');
+    return this.renderer.domElement;
+  }
+  /** CS6c: ends a recording: the view draws at its own size again. */
+  endCapture() {
+    if (!this.capture) return;
+    this.capture = undefined;
+    this.renderer.domElement.classList.remove('bim-canvas-capturing');
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.layout();
+    this.render();
+  }
   /** Switches the realistic lighting (environment light, tone mapping, shadows) on or off. */
   setRealistic(on: boolean) {
     this.lighting.setRealistic(on);
+    this.render();
+  }
+  /**
+   * CS2b: shows or hides the floor grid (a view drawing its own ground hides it, else the grid
+   * shows through wherever the ground lies below it).
+   */
+  showGrid(on: boolean) {
+    this.gridShown = on;
+    if (this.grid) this.grid.visible = on;
     this.render();
   }
   dispose() {
@@ -426,11 +494,17 @@ export class BimViewport {
     } finally {
       for (const undo of restore) undo();
     }
-    const solid = hits.find((h) => {
+    const backdrop = (h: (typeof hits)[number]) => {
+      const id = instancePath(h)?.[0];
+      return id !== undefined && !!this.options.isBackdrop?.(id);
+    };
+    const faces = hits.filter((h) => h.object.type !== 'LineSegments');
+    const front = faces.filter((h) => !backdrop(h));
+    const solid = front.find((h) => {
       const material = (h.object as { material?: { transparent?: boolean } }).material;
-      return h.object.type !== 'LineSegments' && !material?.transparent;
+      return !material?.transparent;
     });
-    return instancePath(solid ?? hits.find((h) => h.object.type !== 'LineSegments'))?.[0];
+    return instancePath(solid ?? front[0] ?? faces[0])?.[0];
   }
   private placeGrid(lo: number[], hi: number[]) {
     if (this.grid) {
@@ -443,6 +517,7 @@ export class BimViewport {
     this.grid = new GridHelper(divisions * step, divisions, '#b8c2cc', '#dde3e8');
     this.grid.rotation.x = Math.PI / 2;
     this.grid.position.set((lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2, lo[2]! - 1);
+    this.grid.visible = this.gridShown;
     this.scene.add(this.grid);
   }
   private clear() {
@@ -452,6 +527,8 @@ export class BimViewport {
     this.group = undefined;
   }
   private layout() {
+    // A recording keeps its own size until it ends.
+    if (this.capture) return;
     const { clientWidth: w, clientHeight: h } = this.host;
     if (!w || !h) return;
     this.renderer.setSize(w, h, false);
@@ -462,6 +539,8 @@ export class BimViewport {
   }
   private render() {
     cancelAnimationFrame(this.frame);
+    // A recording draws only its frames.
+    if (this.capture) return;
     this.frame = requestAnimationFrame(() => {
       // Labels keep their size on screen: a plan's camera has no perspective to shrink them by.
       // In 3D they are smaller: at a site's scale a row of them stood in front of the building.

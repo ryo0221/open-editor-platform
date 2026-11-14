@@ -1,3 +1,4 @@
+import { bimStarter } from '@editor-platform/bim-core';
 import { expect, it, vi } from 'vitest';
 import { command } from '@editor-platform/editor-core';
 import { f02Plate } from '@editor-platform/cad-core';
@@ -93,11 +94,19 @@ it('rejects other native domains before the full Animation reader while still va
   try {
     for (const kind of Object.keys(kinds) as Kind[]) {
       if (kind === 'animation') continue;
-      // A structural analysis is made of a saved CAD version.
+      // A structural analysis is made of a saved CAD version, a schedule of a saved building.
       const source =
         kind === 'simulation'
           ? { artifactId: 'cad', versionId: 'v1', bodyId: 'plate', label: '', content: f02Plate() }
-          : undefined;
+          : kind === 'construction'
+            ? {
+                kind: 'construction' as const,
+                artifactId: 'bim',
+                versionId: 'v1',
+                label: '',
+                content: bimStarter(),
+              }
+            : undefined;
       expect(
         validContent('animation', makeArtifact(kind, 1, undefined, source).draft.content),
       ).toBe(false);

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { commitVersion, createArtifact, serializeArtifact } from '@editor-platform/artifact-core';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { applyBimOperation, bimStarter, type BimAssetRef } from '@editor-platform/bim-core';
@@ -14,6 +14,16 @@ import {
   validateCadRecord,
 } from '../cad/resources';
 import { assertBimNativeFits, portableBimRecord } from './parts';
+import { cadNativeLimit } from '../cad/resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 /** A building keeps its materials' texture images beside its content, as CAD keeps assets (#662). */
 const image = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);

@@ -1,7 +1,8 @@
 import type { CharacterDocument } from '@editor-platform/character-core';
 import type { StoredArtifact } from '../model';
 import {
-  cadNativeFileBytes,
+  cadNativeLimit,
+  cadNativeLimitText,
   encodeBytes,
   nativeBytes,
   portableCadRecord,
@@ -35,14 +36,16 @@ export function assertCharacterImportFits(
       });
   const after = { ...latest, draft: { ...latest.draft, content: doc }, cadResources: resources };
   const size = nativeBytes(portableCadRecord(after));
-  if (size > cadNativeFileBytes)
-    throw new Error(`the native file would be ${(size / 1e6).toFixed(1)} MB, over the 16 MB limit`);
+  if (size > cadNativeLimit.bytes)
+    throw new Error(
+      `the native file would be ${(size / 1e6).toFixed(1)} MB, over the ${cadNativeLimitText()} limit`,
+    );
   // The stored record also keeps assets only Undo still names (earlier imports): it must stay
   // storable too, or every later edit of this character would fail to save.
   const stored = nativeBytes(after);
-  if (stored > cadNativeFileBytes)
+  if (stored > cadNativeLimit.bytes)
     throw new Error(
-      `the stored record would be ${(stored / 1e6).toFixed(1)} MB with the assets Undo keeps, over the 16 MB limit`,
+      `the stored record would be ${(stored / 1e6).toFixed(1)} MB with the assets Undo keeps, over the ${cadNativeLimitText()} limit`,
     );
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
 import { f02Plate, r2bJoints, type CadDocument } from '@editor-platform/cad-core';
 import {
@@ -17,6 +17,16 @@ import {
   retainCharacterProp,
   validateCharacterParts,
 } from './parts';
+import { cadNativeLimit } from '../cad/resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 /** Props of characters (C2b-3): the CAD versions kept with the character, and re-import. */
 const stored = async (
@@ -179,6 +189,16 @@ describe('character props in the Playground', () => {
       trackId: 'wave/rig/m-tool',
       keyId: 'wave/rig/m-tool#0',
     });
+    // CR7e (TS-1825): the action's camera is carried too (glTF keeps no camera keys).
+    current = applyCharacterOperation(current, {
+      type: 'setKey',
+      actionId: 'wave',
+      target: { kind: 'camera', property: 'position' },
+      tick: 0,
+      value: [0, -3000, 1000],
+      trackId: 'wave/camera/position',
+      keyId: 'wave/camera/position#0',
+    });
     // The same model again: its own wave action, without the joint track.
     const imported = blockyFigure().doc;
     const { doc, dropped } = carryProps(current, imported);
@@ -187,13 +207,16 @@ describe('character props in the Playground', () => {
     expect(wave.tracks.filter((t) => t.target.kind === 'prop-joint')).toHaveLength(1);
     expect(wave.tracks.find((t) => t.target.kind === 'prop')?.keys[0]?.value).toEqual([0, 0, 500]);
     expect(wave.tracks.find((t) => t.target.kind === 'prop-mount')?.keys[0]?.value).toBe('j-back');
+    expect(wave.tracks.find((t) => t.target.kind === 'camera')?.keys[0]?.value).toEqual([
+      0, -3000, 1000,
+    ]);
     expect(dropped).toEqual([]);
     // A file without that action: the keys are reported, the prop stays.
     const other = structuredClone(imported);
     for (const a of other.actions) a.id = `${a.id}-other`;
     const r = carryProps(current, other);
     expect(r.doc.props).toHaveLength(1);
-    expect(r.dropped).toEqual(['Prop joint keys of action Wave (not in the file)']);
+    expect(r.dropped).toEqual(['Prop and camera keys of action Wave (not in the file)']);
   });
 
   // C8p (TS-1296): a building as a prop keeps its version in `bimParts` and the CAD versions its

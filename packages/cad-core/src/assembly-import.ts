@@ -26,7 +26,14 @@ import {
   type Vec3,
 } from './model';
 import { applyCadOperation, cadContentHash } from './operations';
-import type { CadPmiAsset, CadPmiTarget } from './pmi';
+import {
+  assemblyPmiAssetProblem,
+  type CadAssemblyPmiAsset,
+  type CadAssemblyPmiPart,
+  type CadPmiAsset,
+  type CadPmiShapeCounts,
+  type CadPmiTarget,
+} from './pmi';
 
 /**
  * Import limits (上限): every flattened instance becomes a direct component; the file's tree is
@@ -58,6 +65,11 @@ export interface CadStepAssemblyRead {
     maxToleranceMm?: number;
     /** PMI-2: the shape's `pmi` asset, when the import kept PMI on it. */
     pmi?: { sha256: string; byteLength: number };
+    /**
+     * PMI-5b: the shape's sub-shape counts (`TopExp::MapShapes`), when the file has PMI through
+     * assembly paths: `assembly-pmi` keeps them for each component its targets name.
+     */
+    counts?: CadPmiShapeCounts;
   }[];
   /** Every instance, flattened: its shape, its path of names in the file and its pose. */
   instances: { shape: number; path: string[]; pose: CadSolvedPose }[];
@@ -211,25 +223,37 @@ export function stepImportPlan(
       bom: 'include',
     };
   });
-  let assemblyPmi: CadPmiAsset | undefined;
+  let assemblyPmi: CadAssemblyPmiAsset | undefined;
   if (read.assemblyPmi) {
     // Every target names one instance by its index; anything else is refused, never guessed.
+    // PMI-5b: each named component keeps its part version, the shape's counts and its pose.
     let wrong = false;
+    const named: Record<string, CadAssemblyPmiPart> = {};
     const on = (t: CadPmiTarget): CadPmiTarget => {
       const i = /^(0|[1-9]\d*)$/.test(t.component ?? '') ? Number(t.component) : -1;
       const component = components[i];
-      if (!component) wrong = true;
+      const instance = read.instances[i];
+      const counts = instance && read.shapes[instance.shape]?.counts;
+      if (!component || !instance || !counts) wrong = true;
+      else
+        named[component.id] ??= {
+          contentHash: partOf[instance.shape]!.source.contentHash,
+          faces: counts.faces,
+          edges: counts.edges,
+          vertices: counts.vertices,
+          pose: instance.pose,
+        };
       return { ...t, component: component?.id ?? '' };
     };
-    assemblyPmi = {
-      ...read.assemblyPmi,
-      items: read.assemblyPmi.items.map((item) =>
-        item.kind === 'dimension' && item.targets2
-          ? { ...item, targets: item.targets.map(on), targets2: item.targets2.map(on) }
-          : { ...item, targets: item.targets.map(on) },
-      ),
-    };
-    if (wrong) return { status: 'refused', code: 'step-assembly-pmi' };
+    const items = read.assemblyPmi.items.map((item) =>
+      item.kind === 'dimension' && item.targets2
+        ? { ...item, targets: item.targets.map(on), targets2: item.targets2.map(on) }
+        : { ...item, targets: item.targets.map(on) },
+    );
+    assemblyPmi = { ...read.assemblyPmi, items, parts: named };
+    // The asset an evaluation will accept, or none is imported.
+    if (wrong || assemblyPmiAssetProblem(assemblyPmi) !== undefined)
+      return { status: 'refused', code: 'step-assembly-pmi' };
   }
   const bytes = assemblyPmi && new TextEncoder().encode(JSON.stringify(assemblyPmi));
   return {

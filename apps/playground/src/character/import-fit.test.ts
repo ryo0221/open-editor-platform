@@ -1,7 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { blockyFigure } from '@editor-platform/character-core';
 import { makeArtifact, type StoredArtifact } from '../model';
 import { assertCharacterHistoryFits, assertCharacterImportFits } from './import-fit';
+import { cadNativeLimit } from '../cad/resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 describe('character import size', () => {
   it('accepts an import that keeps the native file readable and refuses one that would not', () => {

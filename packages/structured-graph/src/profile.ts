@@ -291,13 +291,35 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
     Object.entries(p.edges).every(([k, t]) => validGraphId(k) && type(t, 'edge'))
   );
 }
+/** The Profile schema this version writes. It is raised whenever the Profile format changes. */
+export const graphProfileSchemaVersion = 2;
+const graphProfileMessage = (value: unknown) =>
+  plainRecord(value) &&
+  typeof value.schemaVersion === 'number' &&
+  Number.isSafeInteger(value.schemaVersion) &&
+  value.schemaVersion > graphProfileSchemaVersion
+    ? `Graph Profile schema ${value.schemaVersion} is newer than this version reads (schemas 1–${graphProfileSchemaVersion}); use a newer version`
+    : 'Invalid or unsupported declarative Graph Profile';
 export function assertGraphProfile(value: unknown): asserts value is GraphProfile {
-  if (!isGraphProfile(value))
-    throw new Error(
-      plainRecord(value) && value.schemaVersion === 1
-        ? 'Graph Profile schema 1 is not supported by this preview; update the Profile to schema 2'
-        : 'Invalid or unsupported declarative Graph Profile',
-    );
+  if (!isGraphProfile(value)) throw new Error(graphProfileMessage(value));
+}
+/**
+ * A Profile of any readable schema as the current schema, or undefined. Pure. Schema 1 had no
+ * Section types; it reads as schema 2 with none. A current Profile is returned as it is.
+ */
+export function upgradeGraphProfile(value: unknown): GraphProfile | undefined {
+  if (!isGraphJson(value) || !plainRecord(value)) return undefined;
+  const next =
+    value.schemaVersion === 1 && !('sections' in value)
+      ? { ...value, schemaVersion: 2, sections: {} }
+      : value;
+  return isGraphProfile(next) ? next : undefined;
+}
+/** `upgradeGraphProfile` that throws the reason for an unreadable value. */
+export function readGraphProfile(value: unknown): GraphProfile {
+  const profile = upgradeGraphProfile(value);
+  if (!profile) throw new Error(graphProfileMessage(value));
+  return profile;
 }
 export function validateAttributes(
   attributes: Attributes,

@@ -66,6 +66,11 @@ export interface ViewSolidMesh<M extends ViewMesh = ViewMesh> {
   /** #662: image maps, drawn where the mesh has texture coordinates. */
   textures?: ViewTextureSet;
   sheet: boolean;
+  /**
+   * CR7d: the solid body of the part it draws, when a view keeps bodies apart (a check reads
+   * each body as its own solid). Absent when bodies of one look are drawn as one mesh.
+   */
+  body?: string;
 }
 export interface ViewSolid<M extends ViewMesh = ViewMesh> {
   /** The solid's meshes, or undefined (and no `coarse`) to draw boxes. */
@@ -222,6 +227,8 @@ function meshesAt(group: Group, part: ViewSolid, meshes: ViewSolidMesh[], pickab
           Object.assign(material.clone(), {
             side: BackSide,
             color: new Color(color).multiplyScalar(0.55),
+            // Display only: a render draws the sheet's own surface from both sides.
+            userData: { ...material.userData, sheetBack: true },
           }),
           part,
           offset,

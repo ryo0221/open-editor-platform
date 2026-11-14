@@ -77,6 +77,7 @@ export function createKernelHost(options: KernelHostOptions) {
       candidateHash,
       document,
       deflectionMm,
+      renderMesh,
       reference,
       step,
       brep: brepWanted,
@@ -124,6 +125,7 @@ export function createKernelHost(options: KernelHostOptions) {
       } = await evaluateCad(oc, document, candidateHash, {
         ...options.evaluate,
         ...(deflectionMm === undefined ? {} : { deflectionMm }),
+        ...(renderMesh && !reference ? { ...renderMesh, renderMesh: true as const } : {}),
         ...(step && !reference ? { step } : {}),
         // A part's shape, like a STEP file, comes from exact shapes only.
         ...(brepWanted && !reference ? { brep: brepWanted } : {}),

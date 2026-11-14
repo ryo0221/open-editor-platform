@@ -11,7 +11,12 @@ function nativeContent(content: Content): NativeContent {
     'lanes' in content ||
     'kernelProfile' in content ||
     'studies' in content ||
-    'axes' in content
+    'calendar' in content ||
+    'axes' in content ||
+    'board' in content ||
+    'wires' in content ||
+    'rungs' in content ||
+    'bindings' in content
   )
     throw new Error('Expected native content');
   if ('domain' in content && content.domain === 'estimate')

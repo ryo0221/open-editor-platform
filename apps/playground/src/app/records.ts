@@ -2,11 +2,12 @@ import { verifyFictionMapArtifact } from '@editor-platform/fiction-map/host';
 import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './estimate-bim';
 import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { contentHash, deepFreeze, IndexedDBStorage } from '@editor-platform/artifact-core';
-import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
+import { graphSchemaMessage, readGraphDocument } from '@editor-platform/structured-graph/model';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import { validateArtifactReferenceHistory } from '../artifact-references';
 import { validateGeoRecord } from '../geo/resources';
 import { validateSimulationSources } from '../simulation/source';
+import { validateConstructionSources } from '../construction/source';
 import { createLocalSession, validContent, type Content, type StoredArtifact } from '../model';
 
 export const storage = new IndexedDBStorage<StoredArtifact>();
@@ -21,7 +22,7 @@ export function editedDraft(record: StoredArtifact, content: Content): StoredArt
 export async function openStoredRecord(record: StoredArtifact, references: ReferenceResolver) {
   if (!validContent(record.kind, record.draft.content))
     throw new Error(
-      // An older preview format gets its own reason; the record stays exportable.
+      // A newer Graph schema gets its own reason; the record stays exportable.
       record.kind === 'structured-graph'
         ? graphSchemaMessage(record.draft.content)
         : 'Invalid stored content',
@@ -37,7 +38,12 @@ export async function openStoredRecord(record: StoredArtifact, references: Refer
     record.kind === 'cad' ||
     record.kind === 'bim' ||
     record.kind === 'character' ||
-    record.kind === 'simulation'
+    record.kind === 'simulation' ||
+    record.kind === 'construction' ||
+    record.kind === 'pcb' ||
+    record.kind === 'schematic' ||
+    record.kind === 'ladder' ||
+    record.kind === 'cosim'
   ) {
     for (const v of record.versions)
       if ((await contentHash(v.content)) !== v.contentHash)
@@ -46,9 +52,15 @@ export async function openStoredRecord(record: StoredArtifact, references: Refer
   if (record.kind === 'fiction-map') await verifyFictionMapArtifact(record);
   if (record.kind === 'geo') await validateGeoRecord(record);
   if (record.kind === 'simulation') validateSimulationSources(record, { stored: true });
+  if (record.kind === 'construction') validateConstructionSources(record, { stored: true });
   await verifyAnalysisArtifact(record);
   await verifyEstimateArtifact(record);
   record.versions.forEach(deepFreeze);
   await validateArtifactReferenceHistory(record, references);
-  return createLocalSession(record.draft.content);
+  // An older Graph schema opens as the current one; its saved versions are not rewritten.
+  return createLocalSession(
+    record.kind === 'structured-graph'
+      ? (readGraphDocument(record.draft.content) as unknown as Content)
+      : record.draft.content,
+  );
 }

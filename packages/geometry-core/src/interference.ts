@@ -130,8 +130,8 @@ interface Prepared {
   box: Box;
 }
 
-/** A BVH over triangles: nodes as boxes, leaves as ranges of `order`. */
-interface Bvh {
+/** A BVH over triangles: nodes as boxes, leaves as ranges of `order` (also read by clearance.ts). */
+export interface Bvh {
   boxes: Float64Array;
   /** Per node: left child, or −1 − first item for a leaf. */
   left: Int32Array;
@@ -155,7 +155,7 @@ function triBox(v: Float64Array, t: Uint32Array, i: number, out: Box) {
   return out;
 }
 
-function buildBvh(v: Float64Array, t: Uint32Array): Bvh {
+export function buildBvh(v: Float64Array, t: Uint32Array): Bvh {
   const n = t.length / 3;
   const order = new Uint32Array(n);
   const centers = new Float64Array(n * 3);
@@ -267,44 +267,63 @@ function queryRay(bvh: Bvh, o: InterferenceVec3, d: InterferenceVec3, out: numbe
 
 const prepared = new WeakMap<readonly InterferenceMesh[], Prepared>();
 
+/**
+ * Vertices by grid cell of the weld size: one closer than it to a vertex in its cell or a
+ * neighbouring one is that vertex, wherever a rounding boundary falls between them.
+ */
+class Welder {
+  readonly verts: number[] = [];
+  private readonly cells = new Map<string, number[]>();
+  add(x: number, y: number, z: number): number {
+    const { verts, cells } = this;
+    const [cx, cy, cz] = [Math.floor(x / weldMm), Math.floor(y / weldMm), Math.floor(z / weldMm)];
+    let id: number | undefined;
+    for (let dx = -1; dx <= 1 && id === undefined; dx++)
+      for (let dy = -1; dy <= 1 && id === undefined; dy++)
+        for (let dz = -1; dz <= 1 && id === undefined; dz++)
+          id = cells
+            .get(`${cx + dx},${cy + dy},${cz + dz}`)
+            ?.find(
+              (j) =>
+                Math.hypot(verts[3 * j]! - x, verts[3 * j + 1]! - y, verts[3 * j + 2]! - z) <=
+                weldMm,
+            );
+    if (id === undefined) {
+      id = verts.length / 3;
+      const k = `${cx},${cy},${cz}`;
+      const list = cells.get(k);
+      if (list) list.push(id);
+      else cells.set(k, [id]);
+      verts.push(x, y, z);
+    }
+    return id;
+  }
+}
+
+/**
+ * The welded vertex of each vertex (x, y, z per vertex), as the check welds them when it finds
+ * shells: vertices closer than the weld size are one.
+ */
+export function interferenceWeld(positions: ArrayLike<number>): number[] {
+  const welder = new Welder();
+  const out: number[] = [];
+  for (let i = 0; i < positions.length / 3; i++)
+    out.push(welder.add(positions[3 * i]!, positions[3 * i + 1]!, positions[3 * i + 2]!));
+  return out;
+}
+
 /** Welds, finds shells and builds the BVH of one body's meshes (cached per `meshes` array). */
 function prepare(meshes: readonly InterferenceMesh[]): Prepared {
   const hit = prepared.get(meshes);
   if (hit) return hit;
-  // Vertices by grid cell of the weld size: one closer than it to a vertex in its cell or a
-  // neighbouring one is that vertex, wherever a rounding boundary falls between them.
-  const cells = new Map<string, number[]>();
-  const verts: number[] = [];
+  const welder = new Welder();
+  const verts = welder.verts;
   const tris: number[] = [];
   const sheetTri: boolean[] = [];
   for (const m of meshes) {
     const local: number[] = [];
-    for (let i = 0; i < m.positions.length / 3; i++) {
-      const x = m.positions[3 * i]!;
-      const y = m.positions[3 * i + 1]!;
-      const z = m.positions[3 * i + 2]!;
-      const [cx, cy, cz] = [Math.floor(x / weldMm), Math.floor(y / weldMm), Math.floor(z / weldMm)];
-      let id: number | undefined;
-      for (let dx = -1; dx <= 1 && id === undefined; dx++)
-        for (let dy = -1; dy <= 1 && id === undefined; dy++)
-          for (let dz = -1; dz <= 1 && id === undefined; dz++)
-            id = cells
-              .get(`${cx + dx},${cy + dy},${cz + dz}`)
-              ?.find(
-                (j) =>
-                  Math.hypot(verts[3 * j]! - x, verts[3 * j + 1]! - y, verts[3 * j + 2]! - z) <=
-                  weldMm,
-              );
-      if (id === undefined) {
-        id = verts.length / 3;
-        const k = `${cx},${cy},${cz}`;
-        const list = cells.get(k);
-        if (list) list.push(id);
-        else cells.set(k, [id]);
-        verts.push(x, y, z);
-      }
-      local.push(id);
-    }
+    for (let i = 0; i < m.positions.length / 3; i++)
+      local.push(welder.add(m.positions[3 * i]!, m.positions[3 * i + 1]!, m.positions[3 * i + 2]!));
     for (let i = 0; i + 2 < m.indices.length; i += 3) {
       const a = local[m.indices[i]!]!;
       const b = local[m.indices[i + 1]!]!;

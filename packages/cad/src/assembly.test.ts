@@ -62,6 +62,9 @@ function setup(
     coarseBytes?: number;
     /** R2b-5: the kernel's BRep and STEP AP242 writers (doubles). */
     exportBrep?: CadAssemblyOptions['exportBrep'];
+    /** A render's finer meshes (a double). */
+    renderMeshes?: CadAssemblyOptions['renderMeshes'];
+    cancelRender?: CadAssemblyOptions['cancelRender'];
     exportAssemblyStep?: CadAssemblyOptions['exportAssemblyStep'];
     /** R2b-5: the kernel's STEP assembly reader (a double); the Host stores assets. */
     importStepAssembly?: CadAssemblyOptions['importStepAssembly'];
@@ -212,6 +215,8 @@ function setup(
     source,
     ...(options.mainBytes ? { mainBytes: options.mainBytes } : {}),
     ...(options.exportBrep ? { exportBrep: options.exportBrep } : {}),
+    ...(options.renderMeshes ? { renderMeshes: options.renderMeshes } : {}),
+    ...(options.cancelRender ? { cancelRender: options.cancelRender } : {}),
     ...(options.exportAssemblyStep ? { exportAssemblyStep: options.exportAssemblyStep } : {}),
     ...(options.importStepAssembly ? { importStepAssembly: options.importStepAssembly } : {}),
   });
@@ -1249,5 +1254,121 @@ describe('Make part (CR3e)', () => {
       describeCode('limit-components'),
     );
     expect(calls).toBe(0);
+  });
+});
+
+describe('finer meshes for a render (ST-530, TS-2055)', () => {
+  it('evaluates each shown version once, keeps it for the next render, and the display on a failure', async () => {
+    const asked: string[] = [];
+    let fail = false;
+    const { controller, assembly, fixture } = setup({
+      renderMeshes: async (request, quality) => {
+        asked.push(request.candidateHash);
+        expect(quality).toEqual({ relativeDeflection: 0.0002, angularDeflectionRad: 0.1 });
+        if (fail)
+          return {
+            evaluation: {
+              status: 'error',
+              contentHash: request.candidateHash,
+              code: 'kernel-timeout',
+              retryable: true,
+            },
+            meshes: [],
+          };
+        const evaluation: CadEvaluation = {
+          status: 'ok',
+          contentHash: request.candidateHash,
+          buildHash: request.document.kernelProfile.buildHash,
+          geometryDigest: 'fine',
+          bodies: {},
+        };
+        const bodies = request.document.bodies.filter((b) => b.state === 'active');
+        return { evaluation, meshes: bodies.map((b) => mesh(b.id, 48)) };
+      },
+    });
+    await controller.refresh();
+    expect(await assembly.insert('plate', 'v1', 'Plate')).toBe(true);
+    expect(await assembly.insert('plate', 'v1', 'Plate')).toBe(true);
+    expect(await assembly.insert('pair', 'v1', 'Pair')).toBe(true);
+    const plate = fixture.plate.contentHash;
+    const [shown] = assembly.meshes(plate)!;
+    const progress: [number, number][] = [];
+    const quality = { relativeDeflection: 0.0002, angularDeflectionRad: 0.1 };
+    const fine = await assembly.renderMeshes(quality, {
+      onProgress: (done, total) => progress.push([done, total]),
+    });
+    // The plate is placed four times (twice, and twice in the pair) and evaluated once; the
+    // pair has no bodies of its own, and the empty assembly none either.
+    expect(asked).toEqual([plate]);
+    expect(progress).toEqual([
+      [0, 1],
+      [1, 1],
+    ]);
+    expect(fine.bodies.size).toBe(0);
+    expect([...fine.parts.keys()]).toEqual([shown]);
+    expect(fine.parts.get(shown)!.positions.length).toBe(12);
+    // The display meshes stay as they are.
+    expect(assembly.meshes(plate)![0]).toBe(shown);
+    // Rendering again uses the finer meshes already made, until they are let go.
+    asked.length = 0;
+    expect((await assembly.renderMeshes(quality)).parts.get(shown)).toBe(fine.parts.get(shown));
+    expect(asked).toEqual([]);
+    assembly.releaseRenderMeshes();
+    // A version that fails keeps its display meshes; a cancelled run asks for nothing.
+    fail = true;
+    expect((await assembly.renderMeshes(quality)).parts.size).toBe(0);
+    asked.length = 0;
+    const cancelled = await assembly.renderMeshes(quality, { control: { cancelled: true } });
+    expect([asked, cancelled.parts.size]).toEqual([[], 0]);
+  });
+
+  it('stops the kernel job on Cancel and keeps finer meshes only within the budget', async () => {
+    const control: { cancelled?: boolean } = {};
+    const cancelled: string[] = [];
+    let answer: (() => void) | undefined;
+    const quality = { relativeDeflection: 0.0002, angularDeflectionRad: 0.1 };
+    const { controller, assembly, fixture } = setup({
+      mainBytes: 4096,
+      cancelRender: (id) => {
+        cancelled.push(id);
+        answer?.();
+      },
+      renderMeshes: async (request) => {
+        const evaluation: CadEvaluation = {
+          status: 'ok',
+          contentHash: request.candidateHash,
+          buildHash: request.document.kernelProfile.buildHash,
+          geometryDigest: 'fine',
+          bodies: {},
+        };
+        const bodies = request.document.bodies.filter((b) => b.state === 'active');
+        // Finer than the budget can keep (8 KiB per body).
+        const meshes = bodies.map((b) => mesh(b.id, 8192));
+        if (!control.cancelled && answer === undefined && cancelled.length === 0) {
+          // The first job runs until it is cancelled.
+          await new Promise<void>((resolve) => (answer = resolve));
+          return {
+            evaluation: { ...evaluation, status: 'error', code: 'cancelled', retryable: true },
+            meshes: [],
+          } as never;
+        }
+        return { evaluation, meshes };
+      },
+    });
+    await controller.refresh();
+    expect(await assembly.insert('plate', 'v1', 'Plate')).toBe(true);
+    const plate = fixture.plate.contentHash;
+    const [shown] = assembly.meshes(plate)!;
+    const running = assembly.renderMeshes(quality, { control });
+    await new Promise((r) => setTimeout(r, 50));
+    control.cancelled = true;
+    const stopped = await running;
+    // The running job was cancelled in the kernel, and nothing was kept.
+    expect(cancelled).toHaveLength(1);
+    expect(stopped.parts.size).toBe(0);
+    // A finished render over the budget draws with its finer meshes but keeps none.
+    const fine = await assembly.renderMeshes(quality);
+    expect(fine.parts.get(shown)!.positions.length).toBe(2048);
+    expect((assembly as unknown as { renderKept: Map<string, unknown> }).renderKept.size).toBe(0);
   });
 });

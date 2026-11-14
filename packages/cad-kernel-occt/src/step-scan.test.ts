@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { importStep, pmiReadable, scanStep } from './step-import';
 import { comparePmi, pmiCensus, pmiSemantics, type CadPmiSemantics } from './step-pmi';
 import { readP21 } from '@editor-platform/geometry-core';
+import { cadLimits } from '@editor-platform/cad-core';
 
 const corpus = (name: string) =>
   new Uint8Array(readFileSync(new URL(`../fixtures/f07/${name}`, import.meta.url)));
@@ -851,12 +852,12 @@ describe('STEP text scan before the reader (F07, CAD11)', () => {
     expect(ap214.axes[0]).toMatchObject({ axis: 'semantic', read: 1 });
   });
 
-  it('refuses a file over 16 MiB before the kernel reads it', () => {
+  it('refuses a file over the STEP limit (64 MiB) before the kernel reads it', () => {
     // No kernel needed: the size is checked first.
-    expect(importStep({}, new Uint8Array(16 * 1024 * 1024 + 1), '')).toEqual({
+    expect(importStep({}, new Uint8Array(cadLimits.stepBytes + 1), '')).toEqual({
       status: 'rejected',
       code: 'step-too-large',
-      detail: String(16 * 1024 * 1024 + 1),
+      detail: String(cadLimits.stepBytes + 1),
     });
   });
 });

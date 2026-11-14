@@ -2,6 +2,8 @@
 
 設計案 v1、2026-10-29。`@editor-platform/document` の能力追加を提案する。[長編Document・Designページ構成](../novel-comic-design.md)と[長編Host契約](../authoring-contract.md)の後続案で、[漫画ワークスペース設計](../manga-creation/workspace-design.md)（#575）と同じ型を小説に当てはめる。新しい `novel` kindは設けず、小説専用の画面から同じDocument原稿を編集する。これは未実装の提案であり、既存機能の受け入れ記録ではない。
 
+> **2026-11-14の注記：** この文書は当時（2026-10-29）の設計提案で、本文の「未実装」「未受け入れ」は当時の状態です。小説ワークスペースはその後実装し、2026-11-14に正式版として受け入れました。現在の機能と制限は[status](../status.md)の「長編Document・Designページ」、[長編Host契約](../authoring-contract.md)（縦書きEPUB/PDFの対象・拒否条件など）と検証記録を参照してください。
+
 ## 1. 採用を提案する判断
 
 利用者には「小説」を独立した作成・編集の入口として見せる。内部では章ごとのDocument Artifact、一つのdraft、一つの編集sessionをそのまま使う。小説画面は章・シーンの並び、本文、通読、参照中の設定、提案の比較を中心に構成し、「Documentで詳細編集」から通常の書式・表・inspectorへ往復する。

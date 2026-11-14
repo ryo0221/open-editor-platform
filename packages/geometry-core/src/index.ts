@@ -25,6 +25,7 @@ export {
   type GeometryLoopVertex,
   type GeometryOp,
   type GeometryRequest,
+  type GeometryStepRequest,
   type GeometryVec2,
   type GeometryVec3,
 } from './ops';

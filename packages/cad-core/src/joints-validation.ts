@@ -127,12 +127,10 @@ export function validateJoints(c: JointCheck, list: unknown[], ctx: JointContext
   list.forEach((j, i) => {
     const path = `$.joints[${i}]`;
     if (!record(j)) return c.error('joint', path);
-    c.keys(
-      j,
-      ['id', 'name', 'type', 'parent', 'child', 'values', 'limits'],
-      path,
-      ['couplings', 'continuous'],
-    );
+    c.keys(j, ['id', 'name', 'type', 'parent', 'child', 'values', 'limits'], path, [
+      'couplings',
+      'continuous',
+    ]);
     c.id(j.id, `${path}.id`);
     c.name(j.name, `${path}.name`);
     const type =

@@ -15,6 +15,7 @@ import { guardDataCommand, assertDataReadable } from '@editor-platform/structure
 import { graphProfileFor, graphTemplates, type GraphTemplateId } from './app/graph-templates';
 import {
   isGraphDocument,
+  upgradeGraphDocument,
   relationProfile,
   assertGraph,
   guardGraphCommand,
@@ -58,8 +59,27 @@ import {
 import { createDesign, isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { emptyCad, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
 import { bimStarter, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
+import {
+  f75Pi5Example,
+  f76HatBoard,
+  isPcbDocument,
+  pcbStarter,
+  type PcbDocument,
+} from '@editor-platform/pcb-core';
+import {
+  isSchematicDocument,
+  schematicStarter,
+  type SchematicDocument,
+} from '@editor-platform/schematic-core';
+import { isLadderDocument, ladderStarter, type LadderDocument } from '@editor-platform/ladder-core';
+import { cosimStarter, isCosimDocument, type CosimDocument } from '@editor-platform/cosim-core';
 import { isSimulationDocument, type SimulationDocument } from '@editor-platform/simulation-core';
 import { newSimulation, type SimulationSourceChoice } from './simulation/source';
+import {
+  isConstructionDocument,
+  type ConstructionDocument,
+} from '@editor-platform/construction-core';
+import { newConstructionSchedule, type ConstructionSourceChoice } from './construction/source';
 import {
   isCharacterDocument,
   validateCharacter,
@@ -117,7 +137,12 @@ export type Content =
   | CadDocument
   | BimDocument
   | CharacterDocument
-  | SimulationDocument;
+  | SimulationDocument
+  | ConstructionDocument
+  | PcbDocument
+  | SchematicDocument
+  | LadderDocument
+  | CosimDocument;
 export type Kind =
   | 'fiction-map'
   | 'estimate'
@@ -137,7 +162,12 @@ export type Kind =
   | 'cad'
   | 'bim'
   | 'character'
-  | 'simulation';
+  | 'simulation'
+  | 'construction'
+  | 'pcb'
+  | 'schematic'
+  | 'ladder'
+  | 'cosim';
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
@@ -154,6 +184,11 @@ export interface StoredArtifact extends Artifact<Content> {
    * so the record evaluates on its own, wherever the CAD Artifact goes.
    */
   simulationSources?: CadPartRecord[];
+  /**
+   * CS1b: the BIM versions a construction schedule's draft and versions plan (content by hash),
+   * so the record shows its building on its own, wherever the Building Artifact goes.
+   */
+  constructionSources?: BimPartRecord[];
   /**
    * C8p: a character's BIM versions placed as props (content by hash); the CAD versions they
    * place are in `cadParts`.
@@ -228,6 +263,31 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     icon: 'σ',
     description: 'Load a saved 3D CAD part and solve it for displacement and stress',
   },
+  construction: {
+    label: 'Construction schedule',
+    icon: '⛏',
+    description: 'Plan when each element of a saved building is built, day by day in 3D',
+  },
+  pcb: {
+    label: 'Circuit board',
+    icon: '▦',
+    description: 'Lay out a printed circuit board: outline, layers and holes',
+  },
+  schematic: {
+    label: 'Schematic',
+    icon: '⏚',
+    description: 'Draw a circuit: symbols, wires, net labels and power ports',
+  },
+  ladder: {
+    label: 'Ladder',
+    icon: '⊣⊢',
+    description: 'Write a PLC ladder program (IEC 61131-3) and run it scan by scan',
+  },
+  cosim: {
+    label: 'Co-simulation',
+    icon: '⇄',
+    description: 'Run a saved ladder program against a saved schematic: buttons, LEDs, GPIO',
+  },
 };
 /**
  * The Host-supplied CAD kernel build (the custom development OpenCascade.js while D0 is open).
@@ -243,15 +303,41 @@ export const cadKernelProfile = {
 };
 export const creatableKinds = (Object.keys(kinds) as Kind[]).filter(
   // Both 3D domains evaluate with the Host's kernel build.
-  (k) => (k !== 'cad' && k !== 'bim' && k !== 'simulation') || !!cadKernel,
+  (k) => (k !== 'cad' && k !== 'bim' && k !== 'simulation' && k !== 'construction') || !!cadKernel,
 );
+const isConstructionChoice = (
+  c: SimulationSourceChoice | ConstructionSourceChoice | undefined,
+): c is ConstructionSourceChoice => !!c && 'kind' in c && c.kind === 'construction';
+/** PB8: what a new circuit board starts as. */
+export const pcbTemplates = [
+  { id: 'empty', label: 'Empty board', name: 'Circuit board' },
+  { id: 'pi5', label: 'Raspberry Pi 5 form factor (F75)', name: 'Pi 5 form factor' },
+  { id: 'hat', label: 'Sensor HAT+ (F76)', name: 'Sensor HAT+' },
+] as const;
+export type PcbTemplateId = (typeof pcbTemplates)[number]['id'];
+
 export function makeArtifact(
   kind: Kind,
   count: number,
   graphTemplate: GraphTemplateId = 'relations',
-  /** A structural analysis needs the saved CAD version and solid body it analyses. */
-  simulationSource?: SimulationSourceChoice,
+  /**
+   * A structural analysis needs the saved CAD version and solid body it analyses; a construction
+   * schedule the saved BIM version it plans.
+   */
+  source?: SimulationSourceChoice | ConstructionSourceChoice,
+  pcbTemplate: PcbTemplateId = 'empty',
 ): StoredArtifact {
+  if (kind === 'construction') {
+    if (!isConstructionChoice(source))
+      throw new Error('Choose a saved Building version to schedule');
+    const { doc, retained } = newConstructionSchedule(source, `${kinds[kind].label} ${count}`);
+    return {
+      ...createArtifact<Content>(kind, doc.name, doc),
+      annotations: [],
+      constructionSources: [retained],
+    };
+  }
+  const simulationSource = isConstructionChoice(source) ? undefined : source;
   if (kind === 'simulation') {
     if (!simulationSource) throw new Error('Choose a saved 3D CAD version to analyse');
     const { doc, retained } = newSimulation(simulationSource, `${kinds[kind].label} ${count}`);
@@ -298,9 +384,25 @@ export function makeArtifact(
                                     ? bimStarter()
                                     : kind === 'character'
                                       ? characterStarter().doc
-                                      : createFile();
+                                      : kind === 'pcb'
+                                        ? pcbTemplate === 'pi5'
+                                          ? f75Pi5Example()
+                                          : pcbTemplate === 'hat'
+                                            ? f76HatBoard()
+                                            : pcbStarter()
+                                        : kind === 'schematic'
+                                          ? schematicStarter()
+                                          : kind === 'ladder'
+                                            ? ladderStarter()
+                                            : kind === 'cosim'
+                                              ? cosimStarter()
+                                              : createFile();
   return {
-    ...createArtifact<Content>(kind, `${kinds[kind].label} ${count}`, content),
+    ...createArtifact<Content>(
+      kind,
+      `${kind === 'pcb' ? pcbTemplates.find((t) => t.id === pcbTemplate)!.name : kinds[kind].label} ${count}`,
+      content,
+    ),
     annotations: [],
     // A new character starts as the sample figure, its mesh bytes kept beside the content.
     ...(kind === 'character'
@@ -366,10 +468,12 @@ export function validContent(kind: string, content: unknown): content is Content
   }
   if (kind === 'structured-graph') {
     try {
-      if (!isGraphDocument(content)) return false;
-      const profile = graphProfileFor(content);
+      // A stored draft or version of an older schema is valid if it reads as the current one.
+      const graph = upgradeGraphDocument(content);
+      if (!graph) return false;
+      const profile = graphProfileFor(graph);
       if (!profile) return false;
-      assertGraph(content, profile);
+      assertGraph(graph, profile);
       return true;
     } catch {
       return false;
@@ -390,6 +494,11 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'cad') return isCadDocument(content);
   if (kind === 'bim') return isBimDocument(content);
   if (kind === 'simulation') return isSimulationDocument(content);
+  if (kind === 'construction') return isConstructionDocument(content);
+  if (kind === 'pcb') return isPcbDocument(content);
+  if (kind === 'schematic') return isSchematicDocument(content);
+  if (kind === 'ladder') return isLadderDocument(content);
+  if (kind === 'cosim') return isCosimDocument(content);
   if (kind === 'character')
     return isCharacterDocument(content) && validateCharacter(content).length === 0;
   return kind === 'document'

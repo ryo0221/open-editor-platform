@@ -16,6 +16,9 @@
   overflow: hidden;
   background: #f4f6f8;
 }
+.bim-canvas.bim-canvas-capturing {
+  object-fit: contain;
+}
 .bim-canvas-host,
 .bim-canvas {
   position: absolute;

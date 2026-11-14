@@ -28,6 +28,8 @@ export interface CadSolidEvaluation {
   volumeMm3: number;
   areaMm2: number;
   bounds: [Vec3, Vec3];
+  /** CR7a: the centre of the volume (absent in results from before CR7a). */
+  centroidMm?: Vec3;
   /** K1: the number of disjoint solids, when more than one. */
   solids?: number;
 }
@@ -36,6 +38,8 @@ export interface CadSheetEvaluation {
   kind: 'sheet';
   areaMm2: number;
   bounds: [Vec3, Vec3];
+  /** CR7a: the centre of the area (absent in results from before CR7a). */
+  centroidMm?: Vec3;
   freeEdges: number;
   freeEdgeLengthMm: number;
 }

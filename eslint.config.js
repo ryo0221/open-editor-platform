@@ -86,6 +86,47 @@ export default tseslint.config(
     },
   },
   {
+    // ADR 021: the circuit board domain shares only geometry, never another domain's content.
+    files: [
+      'packages/pcb/**/*.{ts,tsx}',
+      'packages/pcb-*/**/*.{ts,tsx}',
+      'packages/schematic/**/*.{ts,tsx}',
+      'packages/schematic-*/**/*.{ts,tsx}',
+      'packages/circuit-sim-core/**/*.{ts,tsx}',
+      'packages/ladder/**/*.{ts,tsx}',
+      'packages/ladder-core/**/*.{ts,tsx}',
+      'packages/cosim/**/*.{ts,tsx}',
+      'packages/cosim-core/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@editor-platform/cad',
+                '@editor-platform/cad-*',
+                '@editor-platform/cad/*',
+                '@editor-platform/bim',
+                '@editor-platform/bim-*',
+                '@editor-platform/bim/*',
+                '@editor-platform/character',
+                '@editor-platform/character-*',
+                '@editor-platform/character/*',
+                '@editor-platform/simulation',
+                '@editor-platform/simulation-*',
+                '@editor-platform/simulation/*',
+              ],
+              message:
+                'pcb, schematic, circuit-sim and ladder packages do not import other domains (ADR 021).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // ADR 019: the character domain shares only geometry and time, never CAD or building content.
     files: ['packages/character/**/*.{ts,tsx}', 'packages/character-*/**/*.{ts,tsx}'],
     rules: {

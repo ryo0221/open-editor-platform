@@ -32,6 +32,7 @@ import {
   type SimulationSpotWeld,
   type SimulationOperation,
   type SimulationPreparation,
+  type SimulationAeroStudy,
   type SimulationStudy,
   type Vec3,
 } from '@editor-platform/simulation-core';
@@ -42,6 +43,7 @@ import {
   addMassOps,
   addWeightOps,
   defaultModalStudy,
+  defaultAeroStudy,
   defaultThermalStudy,
   isThermalKind,
   narrowFaces,
@@ -70,6 +72,8 @@ import {
   type RunState,
   type SimulationRunner,
 } from './run-panel';
+import { aeroSolverBuild } from './run-protocol';
+import { YawSweep } from './aero-sweep';
 import { bondedBodies, readAt, runResult, vtuResult, type ResultSource } from './results';
 import { MappingIssues } from './mapping-issues';
 import {
@@ -182,6 +186,114 @@ const field = (label: string, unit: string, input: ReactNode) => (
     {input}
   </label>
 );
+
+/**
+ * VS4b: a wind tunnel's settings, each within `simulationLimits` (the document's check refuses
+ * the rest): the wind, the ground, the browser's cell, the Host's mesh and the reference area.
+ */
+function AeroSettings({
+  study,
+  disabled,
+  commit,
+}: {
+  study: SimulationAeroStudy;
+  disabled: boolean;
+  commit(aero: SimulationAeroStudy['aero']): string | undefined;
+}) {
+  const L = simulationLimits;
+  const a = study.aero;
+  const num = (
+    label: string,
+    unit: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    set: (v: number) => SimulationAeroStudy['aero'],
+  ) =>
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={label}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit(set(v))}
+      />,
+    );
+  return (
+    <>
+      {num('Wind speed', 'm/s', a.speed, 1, L.aeroSpeed, 1, (speed) => ({ ...a, speed }))}
+      {num(
+        'Yaw',
+        '° (air from the left when positive)',
+        a.yawDeg,
+        -L.aeroYawDeg,
+        L.aeroYawDeg,
+        1,
+        (yawDeg) => ({ ...a, yawDeg }),
+      )}
+      <label className="simulation-field">
+        <span>Ground</span>
+        <select
+          aria-label="Ground"
+          value={a.ground}
+          disabled={disabled}
+          onChange={(e) =>
+            commit({ ...a, ground: e.currentTarget.value as SimulationAeroStudy['aero']['ground'] })
+          }
+        >
+          <option value="moving">Moving with the air (rolling road)</option>
+          <option value="fixed">Fixed (a tunnel floor)</option>
+          <option value="slip">Slip (no ground drag)</option>
+        </select>
+      </label>
+      {num('Browser cell', 'mm', a.browserCellMm, 1, L.aeroCellMm, 5, (browserCellMm) => ({
+        ...a,
+        browserCellMm,
+      }))}
+      {num(
+        'Host cell',
+        'mm, background',
+        a.host.baseMm,
+        L.aeroHostBaseMmMin,
+        L.aeroHostBaseMmMax,
+        10,
+        (baseMm) => ({ ...a, host: { ...a.host, baseMm } }),
+      )}
+      {num(
+        'Host refinement',
+        'levels on the body',
+        a.host.level,
+        0,
+        L.aeroHostLevel,
+        1,
+        (level) => ({ ...a, host: { ...a.host, level } }),
+      )}
+      {num(
+        'Host iterations',
+        'SIMPLE',
+        a.host.iterations,
+        10,
+        L.aeroHostIterations,
+        50,
+        (iterations) => ({ ...a, host: { ...a.host, iterations } }),
+      )}
+      {num(
+        'Reference area',
+        'mm² (0: the frontal area)',
+        a.referenceAreaMm2 ?? 0,
+        0,
+        L.aeroReferenceAreaMm2,
+        1000,
+        (v) => ({ ...a, referenceAreaMm2: v > 0 ? v : null }),
+      )}
+    </>
+  );
+}
 
 /** A number input that applies on commit (blur or Enter), never on each keystroke. */
 function NumberInput({
@@ -309,6 +421,13 @@ export function SimulationSurface({
   const resultKey = useMemo(() => `result-${++resultSeq}`, [result]);
   const display = useResultDisplay(result);
   const resultShown = showing && !!display.shown;
+  // VS4c: a wind tunnel's streamlines and flow section beside its bodies.
+  const flowViews = useMemo<SimulationViewBody[] | undefined>(() => {
+    const views = [display.streamlines, display.flowPlane].flatMap((v) =>
+      v ? [{ mesh: v.mesh, colors: v.colors, marks: [], faded: false }] : [],
+    );
+    return views.length ? views : undefined;
+  }, [display.streamlines, display.flowPlane]);
   const [point, setPoint] = useState<number[]>();
   const readout = point && display.shown ? readAt(display.shown, point) : undefined;
   const openVtu = (file: File) => {
@@ -505,6 +624,25 @@ export function SimulationSurface({
     }
     return out;
   }, [resolved, localResolved, doc, selected, sourceBodyId, pickBodies, preview, shownRim]);
+  /** The analysed bodies' largest side (mm) as shown, for a new wind tunnel's Host mesh. */
+  const analysedLength = () => {
+    if (!ok?.mesh) return undefined;
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    const meshes = [
+      ok.mesh,
+      ...(ok.others ?? []).flatMap((o) => (o.mesh && pickBodies.has(o.bodyId) ? [o.mesh] : [])),
+    ];
+    for (const m of meshes)
+      for (let i = 0; i < m.positions.length; i += 3)
+        for (let a = 0; a < 3; a++) {
+          const v = m.positions[i + a]! + m.origin[a]!;
+          lo[a] = Math.min(lo[a]!, v);
+          hi[a] = Math.max(hi[a]!, v);
+        }
+    const length = Math.max(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!);
+    return length > 0 ? length : undefined;
+  };
   const otherViews = useMemo<SimulationViewBody[]>(
     () =>
       (ok?.others ?? []).flatMap((o) =>
@@ -670,7 +808,7 @@ export function SimulationSurface({
                     `shape:${doc.source.contentHash}:${doc.source.bodyId}`
               }
               marks={resultShown ? noMarks : (marks.get(sourceBodyId) ?? noMarks)}
-              others={resultShown ? undefined : otherViews}
+              others={resultShown ? flowViews : otherViews}
               picking={!!ok && !readOnly && !resultShown}
               onPoint={resultShown ? setPoint : undefined}
               onPickFace={toggleFace}
@@ -1193,6 +1331,12 @@ export function SimulationSurface({
                         {study.constraintIds.length === 1 ? '' : 's'}, {study.loadIds.length} heat
                         flux or convection condition{study.loadIds.length === 1 ? '' : 's'}.
                       </>
+                    ) : study.kind === 'aero' ? (
+                      <>
+                        (wind tunnel): the air past the analysed bodies at {study.aero.speed} m/s,
+                        yaw {study.aero.yawDeg}°; no load, constraint or material. Its coefficients
+                        are for reference.
+                      </>
                     ) : study.kind === 'modal' ? (
                       <>
                         (modal): the {study.modes} lowest natural frequencies with{' '}
@@ -1208,7 +1352,7 @@ export function SimulationSurface({
                       </>
                     )}
                   </p>
-                  {study.kind !== 'thermal' && (
+                  {study.kind !== 'thermal' && study.kind !== 'aero' && (
                     <>
                       <label className="simulation-field">
                         <span>
@@ -1243,6 +1387,13 @@ export function SimulationSurface({
                       )}
                     </>
                   )}
+                  {study.kind === 'aero' && (
+                    <AeroSettings
+                      study={study}
+                      disabled={readOnly}
+                      commit={(aero) => run({ type: 'updateStudy', study: { ...study, aero } })}
+                    />
+                  )}
                   {study.kind === 'modal' &&
                     field(
                       'Modes',
@@ -1276,8 +1427,8 @@ export function SimulationSurface({
                     />,
                   )}
                   {field(
-                    'Solver iterations',
-                    'at most',
+                    study.kind === 'aero' ? 'Flow steps' : 'Solver iterations',
+                    study.kind === 'aero' ? 'in the browser' : 'at most',
                     <NumberInput
                       label="Solver iteration limit"
                       value={study.solver.maxIterations}
@@ -1315,6 +1466,13 @@ export function SimulationSurface({
                 >
                   Add thermal study
                 </button>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => addStudy(defaultAeroStudy(doc, analysedLength()))}
+                >
+                  Add wind tunnel
+                </button>
                 {study && doc.studies.length > 1 && (
                   <button
                     type="button"
@@ -1350,10 +1508,22 @@ export function SimulationSurface({
                 host={runner.host}
                 startOnHost={
                   // R3j-5a/5b: shells and bonded bodies too; R3j-5c: modal studies too.
-                  runner.host && study && study.kind !== 'thermal'
+                  // VS4b: a wind tunnel on a Host that has one.
+                  runner.host &&
+                  study &&
+                  study.kind !== 'thermal' &&
+                  (study.kind !== 'aero' || runner.host.aero)
                     ? () => startRun(true)
                     : undefined
                 }
+              />
+            )}
+            {runner && study?.kind === 'aero' && (
+              <YawSweep
+                study={study}
+                runner={runner}
+                readOnly={readOnly}
+                inputKey={JSON.stringify([doc.source, doc.bodies ?? null, study])}
               />
             )}
             <RecordPanel
@@ -1362,7 +1532,19 @@ export function SimulationSurface({
               run={lastRun?.run}
               runCurrent={!!lastRun && lastRun.hash === hash}
               readOnly={readOnly}
-              builds={[runner?.builds, runner?.host?.builds]}
+              builds={
+                // VS4b: a wind tunnel's solver is the LBM here or OpenFOAM on the Host.
+                study?.kind === 'aero'
+                  ? [
+                      runner?.builds && { ...runner.builds, solver: aeroSolverBuild },
+                      runner?.host?.builds &&
+                        runner.host.aero && {
+                          ...runner.host.builds,
+                          solver: runner.host.aero.solverBuild,
+                        },
+                    ]
+                  : [runner?.builds, runner?.host?.builds]
+              }
               apply={run}
             />
             {lastRun && lastRun.hash === hash && lastRun.run.failure?.code === 'mapping' && (
@@ -1480,7 +1662,9 @@ function BodiesPanel({
     return b ? `; solved as ${solvedLabel(b)}` : '';
   };
   const studyIdealisation =
-    study && study.kind !== 'thermal' ? (study.idealisation ?? 'solid') : 'solid';
+    study && study.kind !== 'thermal' && study.kind !== 'aero'
+      ? (study.idealisation ?? 'solid')
+      : 'solid';
   const materialName = (id: string | null) =>
     doc.materials.find((m) => m.id === id)?.name ?? 'no material';
   /** Chooses a material (an existing one, or a preset added in the same edit) for a body. */
@@ -1699,7 +1883,8 @@ function BondsPanel({
   preview(faces: SimulationBodyFace[] | undefined): void;
 }) {
   const [tolerance, setTolerance] = useState(bondToleranceDefault);
-  const studyShell = !!study && study.kind !== 'thermal' && study.idealisation === 'shell';
+  const studyShell =
+    !!study && study.kind !== 'thermal' && study.kind !== 'aero' && study.idealisation === 'shell';
   const shellOf = (bodyId: string) => {
     // CR5e (Codex on #977): a sheet is a shell whatever the study says, as the run solves it.
     if (bodies.get(bodyId)?.sheet) return true;

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
 import { bimStarter, type BimDocument } from '@editor-platform/bim-core';
 import type { BimPartReference } from '@editor-platform/bim';
@@ -14,6 +14,16 @@ import {
   validateBimParts,
   type BimPartKernel,
 } from './parts';
+import { cadNativeLimit } from '../cad/resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 /** The Playground's part source for buildings: its saved CAD versions (R2c-3c-3b). */
 const stored = async (kind: 'cad' | 'bim', name: string, content: object, versions = 1) => {

@@ -125,7 +125,15 @@ export type SimulationMetric =
    * CR5c: a stiffness test's result (N·m/deg for torsion, N/mm for bending), measured on every
    * level of a static study with a `test` and only there.
    */
-  | 'stiffness';
+  | 'stiffness'
+  /**
+   * VS4a (docs/cad/vehicle-simulation.md): the force coefficients of a wind-tunnel study, on the
+   * study's reference area and the air's dynamic pressure: drag along the wind, lift up, side
+   * force across.
+   */
+  | 'drag-coefficient'
+  | 'lift-coefficient'
+  | 'side-force-coefficient';
 export const simulationMetrics: readonly SimulationMetric[] = Object.freeze([
   'max-displacement',
   'max-von-mises',
@@ -134,8 +142,11 @@ export const simulationMetrics: readonly SimulationMetric[] = Object.freeze([
   'max-temperature',
   'max-heat-flux',
   'stiffness',
+  'drag-coefficient',
+  'lift-coefficient',
+  'side-force-coefficient',
 ]);
-export type SimulationStudyKind = 'linear-static' | 'modal' | 'thermal';
+export type SimulationStudyKind = 'linear-static' | 'modal' | 'thermal' | 'aero';
 /** The metrics a run of each kind of study measures on every level. */
 export const studyMetrics: Readonly<Record<SimulationStudyKind, readonly SimulationMetric[]>> =
   Object.freeze({
@@ -146,10 +157,19 @@ export const studyMetrics: Readonly<Record<SimulationStudyKind, readonly Simulat
     ] as const),
     modal: Object.freeze(['first-frequency'] as const),
     thermal: Object.freeze(['max-temperature', 'max-heat-flux'] as const),
+    aero: Object.freeze([
+      'drag-coefficient',
+      'lift-coefficient',
+      'side-force-coefficient',
+    ] as const),
   });
 
 /** One analysis case: which loads and constraints, how it is solved and how convergence is judged. */
-export type SimulationStudy = SimulationStaticStudy | SimulationModalStudy | SimulationThermalStudy;
+export type SimulationStudy =
+  | SimulationStaticStudy
+  | SimulationModalStudy
+  | SimulationThermalStudy
+  | SimulationAeroStudy;
 interface SimulationStudyBase {
   id: string;
   name: string;
@@ -201,6 +221,34 @@ export interface SimulationModalStudy extends SimulationStudyBase {
 export interface SimulationThermalStudy extends SimulationStudyBase {
   kind: 'thermal';
 }
+/**
+ * VS4a (docs/cad/vehicle-simulation.md, VS4): a wind tunnel around the source body and the other
+ * analysed bodies (`bodies`), as one closed outside surface in the vehicle frame (x forward to the
+ * nose, z up, the ground at z = 0). No loads, constraints or material. The browser runs it on the
+ * LBM (`browserCellMm`, each convergence level × 1/√2); the Host on OpenFOAM (`host`). Its run is
+ * always `reference` in V1: the numbers are not claimed to be right, only computed by the method
+ * the Ahmed body checks (docs/verification/vehicle-sim). `solver.maxIterations` is the browser's
+ * lattice steps on each level (the last fifth is averaged); `solver.tolerance` is not used by
+ * the flow and keeps the structural range.
+ */
+export interface SimulationAeroStudy extends SimulationStudyBase {
+  kind: 'aero';
+  aero: SimulationAeroSettings;
+}
+export type SimulationAeroGround = 'moving' | 'fixed' | 'slip';
+export interface SimulationAeroSettings {
+  /** Air speed (m/s). */
+  speed: number;
+  /** Side-wind angle (degrees), positive with the air coming from the left (−y) side. */
+  yawDeg: number;
+  ground: SimulationAeroGround;
+  /** The browser's lattice cell (mm) on the first convergence level. */
+  browserCellMm: number;
+  /** The Host's background cell (mm), refinement level on the body and SIMPLE iterations. */
+  host: { baseMm: number; level: number; iterations: number };
+  /** The coefficients' reference area (mm²); null for the bodies' frontal area. */
+  referenceAreaMm2: number | null;
+}
 
 /**
  * The user's choice for one ambiguous target (docs/cad/r3-analysis.md, 選び直し): which of the
@@ -229,7 +277,9 @@ export type SimulationRunCheckName =
   | 'solver'
   | 'equilibrium'
   | 'mass'
-  | 'orthogonality';
+  | 'orthogonality'
+  /** VS4a: the wind-tunnel surface is closed (every edge on two triangles) and above the ground. */
+  | 'surface';
 
 /**
  * R3e-5c: a study's run as recorded (評価記録), one per study, the latest. It names its inputs
@@ -400,6 +450,18 @@ export const simulationLimits = Object.freeze({
   convergenceLevels: 4,
   /** R3g: modes a modal study asks for. */
   modes: 20,
+  /**
+   * VS4a: a wind-tunnel study's air speed (m/s), side wind (degrees), browser cell (mm), Host
+   * mesh (as the Host's `aeroLimits`) and reference area (mm²).
+   */
+  aeroSpeed: 70,
+  aeroYawDeg: 20,
+  aeroCellMm: 1_000,
+  aeroHostBaseMmMin: 10,
+  aeroHostBaseMmMax: 2_000,
+  aeroHostLevel: 6,
+  aeroHostIterations: 3_000,
+  aeroReferenceAreaMm2: 1e8,
   /** R3h: K, mW/mm² (kW/m²), mW/(mm²·K) (kW/(m²·K)) and mW/(mm·K) (W/(m·K)). */
   temperatureK: 100_000,
   heatFlux: 1e9,
@@ -501,5 +563,50 @@ export function emptySimulation(
     loads: [],
     constraints: [],
     studies: [],
+  };
+}
+
+/**
+ * The Host's background cell for bodies `lengthMm` long (their largest side): the Ahmed-checked
+ * mesh (160 mm at level 6 on the 1044 mm body, TS-2205) scaled to the bodies, so the tunnel holds
+ * as many cells as the checked one (a 4 m car: about 610 mm, not 160 mm, which would pass the
+ * Host's background limit). Rounded to 10 mm, within the limits.
+ */
+export function aeroHostBaseMm(lengthMm: number): number {
+  const base = Math.round((160 * lengthMm) / 1044 / 10) * 10;
+  return Number.isFinite(base)
+    ? Math.min(
+        simulationLimits.aeroHostBaseMmMax,
+        Math.max(simulationLimits.aeroHostBaseMmMin, base),
+      )
+    : 160;
+}
+
+/**
+ * VS4a: a new wind-tunnel study with the settings the 凪 runs start from: 30 m/s straight on, a
+ * moving road, 60 mm cells in the browser and the Host's Ahmed-checked mesh (160 mm, level 6), or
+ * that mesh scaled to the bodies' length (`lengthMm`, `aeroHostBaseMm`) when it is known.
+ */
+export function aeroStudy(
+  id: string,
+  name = 'Wind tunnel',
+  lengthMm?: number,
+): SimulationAeroStudy {
+  return {
+    id,
+    name,
+    kind: 'aero',
+    loadIds: [],
+    constraintIds: [],
+    solver: { tolerance: 1e-6, maxIterations: 4_000 },
+    convergence: { levels: 1, metrics: ['drag-coefficient'], tolerance: 0.05 },
+    aero: {
+      speed: 30,
+      yawDeg: 0,
+      ground: 'moving',
+      browserCellMm: 60,
+      host: { baseMm: lengthMm ? aeroHostBaseMm(lengthMm) : 160, level: 6, iterations: 400 },
+      referenceAreaMm2: null,
+    },
   };
 }

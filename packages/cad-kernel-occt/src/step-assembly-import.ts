@@ -1,8 +1,8 @@
 /**
  * R2b-5 (docs/cad/r2b-assembly.md, STEP AP242 取り込み, R2b-U7): reads a STEP assembly through
- * OCCT's XDE into its distinct shapes and its flattened instances. A product's solids (or,
- * without a solid, its shells) are its shapes, each written once as a normalized BRep; a product
- * with neither is skipped. Every instance is placed by its location composed down the tree.
+ * OCCT's XDE into its distinct shapes and its flattened instances. A product's solids and its
+ * shells outside a solid (sheets) are its shapes, each written once as a normalized BRep; a
+ * product with neither is skipped. Every instance is placed by its location composed down the tree.
  * Refuses rather than heals, as the single-solid import does, and refuses more instances than
  * the document can hold before anything is written.
  */
@@ -288,13 +288,22 @@ export function importStepAssembly(
       const prototype = own(oc.XCAFDoc_ShapeTool.GetShape_2(label));
       const known = products.find((p) => p.shape.IsSame(prototype));
       if (known) return known.shapes;
-      const solids = collect(prototype, 'TopAbs_SOLID', 'TopAbs_SHAPE');
-      // Without a solid, each shell of connected faces is a sheet (as the single import reads).
-      const kind: CadBodyKind = solids.length ? 'solid' : 'sheet';
-      const found = solids.length ? solids : collect(prototype, 'TopAbs_SHELL', 'TopAbs_SOLID');
+      // Its solids, then each shell of connected faces outside a solid as a sheet (as the single
+      // import reads a file without a solid): a product of both, as this editor writes a part
+      // with solid and sheet bodies, keeps both (CR7f).
+      const found: [unknown, CadBodyKind][] = [
+        ...collect(prototype, 'TopAbs_SOLID', 'TopAbs_SHAPE').map((s): [unknown, CadBodyKind] => [
+          s,
+          'solid',
+        ]),
+        ...collect(prototype, 'TopAbs_SHELL', 'TopAbs_SOLID').map((s): [unknown, CadBodyKind] => [
+          s,
+          'sheet',
+        ]),
+      ];
       const product = { id, name: given, description };
       const bodies: unknown[] = [];
-      const shapes = found.map((shape, i) => {
+      const shapes = found.map(([shape, kind], i) => {
         const one = own(kind === 'solid' ? oc.TopoDS.Solid_1(shape) : oc.TopoDS.Shell_1(shape));
         bodies.push(one);
         const { bounds, tolerance: measured } = check(one, kind);
@@ -314,6 +323,8 @@ export function importStepAssembly(
           brep: { sha256: `sha256:${bytesToHex(sha256(brep))}`, byteLength: brep.byteLength },
           boundsMm: bounds,
           ...(tolerance > cadTolerance.maxResultLinearToleranceMm && { maxToleranceMm: tolerance }),
+          // PMI-5b: what `assembly-pmi` checks its targets' indices against.
+          ...(withPmi && { counts: shapeCounts(one) }),
         });
         return read.shapes.length - 1;
       });
@@ -326,6 +337,18 @@ export function importStepAssembly(
         });
       products.push({ shape: prototype, shapes });
       return shapes;
+    };
+    const shapeCounts = (shape: unknown) => {
+      const count = (kind: string) => {
+        const map = own(new oc.TopTools_IndexedMapOfShape_1());
+        oc.TopExp.MapShapes_1(shape, oc.TopAbs_ShapeEnum[kind], map);
+        return map.Extent() as number;
+      };
+      return {
+        faces: count('TopAbs_FACE'),
+        edges: count('TopAbs_EDGE'),
+        vertices: count('TopAbs_VERTEX'),
+      };
     };
     const collect = (shape: unknown, kind: string, avoid: string) => {
       const found: unknown[] = [];

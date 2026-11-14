@@ -85,7 +85,7 @@ describe('GLB export (C6c, TS-1267)', () => {
     );
     // The morph keeps its ID (C6d reads ep_morph_ids), and so do its weight keys' target.
     const chest = d.actions[0].tracks.find((t) => t.target.kind === 'morph')!;
-    expect(chest.target.id).toBe('chest-wide');
+    expect((chest.target as { id?: string }).id).toBe('chest-wide');
     expect(chest.keys.map((k) => [k.tick, k.value])).toEqual([
       [0, 0],
       [120000, 1],

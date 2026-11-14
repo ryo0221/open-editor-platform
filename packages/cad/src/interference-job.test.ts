@@ -101,3 +101,16 @@ describe('MR3 interference jobs (TS-1709)', () => {
     }
   });
 });
+
+describe('clearance in a job (CR7c, TS-1814)', () => {
+  it('measures between two components from plain data', () => {
+    const base = request();
+    const [first, second] = base.doc.components;
+    const r = runInterference({ ...base, clearance: { a: [first!.id], b: [second!.id] } });
+    expect(r.status).toBe('ok');
+    expect(runInterference({ ...base, clearance: { a: [first!.id], b: [first!.id] } })).toEqual({
+      status: 'refused',
+      code: 'clearance-same',
+    });
+  });
+});

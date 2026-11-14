@@ -92,6 +92,19 @@ export interface BimMaterial {
   category: BimMaterialCategory;
   /** #661: absent, the elements made of it keep their kind's colour. */
   appearance?: BimAppearance;
+  /**
+   * CS3: mass density in kg/m³ (steel 7850, concrete 2400), above 0 and at most
+   * `bimLimits.densityKgM3`. Absent, an element of it has no known mass.
+   */
+  densityKgM3?: number;
+  /**
+   * CS4: Young's modulus (MPa, steel 205,000, concrete 24,000), above 0 and at most
+   * `bimLimits.youngsModulusMPa`, for the frame analysis of a construction stage. Absent, a
+   * member of it is left out of the frame.
+   */
+  youngsModulusMPa?: number;
+  /** CS4: Poisson's ratio, from 0 to under 0.5; absent, 0.2 for concrete, else 0.3. */
+  poissonsRatio?: number;
 }
 export interface BimLayer {
   materialId: string;
@@ -410,6 +423,12 @@ export interface BimDocument {
    * image no material names is not kept.
    */
   assets?: BimAssetRef[];
+  /**
+   * GV2b: how tall the people the building is for are (mm; absent = 1,750). The rules that come
+   * from a person's body (storey height, steps, railings, door/window and stair sizes) scale by
+   * this over 1,750 (`bimBodyLimits`); coordinates, the 1 mm minimum and materials do not.
+   */
+  inhabitantHeightMm?: number;
 }
 
 export interface BimDiagnostic {
@@ -441,12 +460,25 @@ export const bimLimits = Object.freeze({
    */
   stair: { riserMm: [50, 250], risers: [2, 50], treadMm: [150, 500] },
   minStoreyMm: 1_000,
+  /**
+   * GV2b: a door or window type at most this wide and high (for 1,750 mm people). GV3: 20 m, not
+   * 10 m: Lilliput's largest temple has a gate 4 ft high for 146 mm people (8.3 times their
+   * height), and a cathedral's or a hangar's doors pass 10 m for ours.
+   */
+  openingMm: 20_000,
+  /** GV2b: a stair at most this wide (for 1,750 mm people). */
+  stairWidthMm: 10_000,
+  /** GV2b: the people a building may be for, 100 mm to 30 m tall; 1,750 mm when not said. */
+  inhabitantHeightMm: { default: 1_750, range: [100, 30_000] },
   /** As far as a coordinate reaches (TW0d): a tall tower's decks need no unused levels between. */
   maxStoreyMm: 1_000_000,
   levels: 64,
   gridAxes: 256,
   types: 1_000,
   materials: 256,
+  /** CS3: the densest material allowed (kg/m³; osmium is 22,600). */
+  densityKgM3: 30_000,
+  youngsModulusMPa: 1_000_000,
   elements: 10_000,
   joins: 20_000,
   views: 64,
@@ -466,6 +498,50 @@ export const bimLimits = Object.freeze({
 /** Linear tolerance for coincidence (join endpoints, a point on an axis). */
 export const bimTolerance = 0.001;
 /** Property-set names a user may not take (R2c-U8): internal names and IFC's prefixes. */
+/** GV2b: the body-based rules for one building's people, scaled from the 1,750 mm ones. */
+export interface BimBodyLimits {
+  inhabitantHeightMm: number;
+  /** inhabitantHeightMm / 1,750. */
+  scale: number;
+  minStoreyMm: number;
+  stair: { riserMm: [number, number]; treadMm: [number, number]; widthMm: number };
+  railingHeightMm: number;
+  openingMm: number;
+  /**
+   * GV4a: the thickest layered type or member section. It grows with people taller than ours
+   * (Brobdingnag's temple tower has walls 100 ft thick, for 21 m people) and stays at
+   * `bimLimits.maxSectionMm` for smaller people: a section is structure, not a body size, and a
+   * Lilliput wall may be as thick as it likes within our limit.
+   */
+  maxSectionMm: number;
+}
+/**
+ * The rules a building's people set (GV2b). A document without `inhabitantHeightMm`, or with
+ * one outside `bimLimits.inhabitantHeightMm.range` (which validation reports), gets the
+ * 1,750 mm rules. The count of risers is a number, not a size, and stays as it is.
+ */
+export function bimBodyLimits(doc?: Pick<BimDocument, 'inhabitantHeightMm'>): BimBodyLimits {
+  const { default: base, range } = bimLimits.inhabitantHeightMm;
+  const h = doc?.inhabitantHeightMm;
+  const height =
+    typeof h === 'number' && Number.isFinite(h) && h >= range[0] && h <= range[1] ? h : base;
+  const k = height / base;
+  const s = bimLimits.stair;
+  return {
+    inhabitantHeightMm: height,
+    scale: k,
+    minStoreyMm: bimLimits.minStoreyMm * k,
+    stair: {
+      riserMm: [s.riserMm[0] * k, s.riserMm[1] * k],
+      treadMm: [s.treadMm[0] * k, s.treadMm[1] * k],
+      widthMm: bimLimits.stairWidthMm * k,
+    },
+    railingHeightMm: bimLimits.railingHeightMm * k,
+    openingMm: bimLimits.openingMm * k,
+    maxSectionMm: bimLimits.maxSectionMm * Math.max(1, k),
+  };
+}
+
 export const bimReservedPropertyPrefixes = ['EP_', 'Pset_', 'Qto_'] as const;
 
 export const bimSchemaVersion = 1;

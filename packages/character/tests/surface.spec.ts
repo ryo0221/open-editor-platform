@@ -2159,9 +2159,108 @@ test('props: makes a watch escapement as joint keys, replaced after asking (WM4,
   await transform.getByLabel('Transform to').selectOption({ label: 'Turned far' });
   await transform.getByRole('button', { name: 'Make transform' }).click();
   const replace = transform.getByRole('alertdialog', { name: 'Replace keys' });
-  if (await replace.isVisible()) await replace.getByRole('button', { name: 'Replace keys' }).click();
+  if (await replace.isVisible())
+    await replace.getByRole('button', { name: 'Replace keys' }).click();
   await expect(
     page.getByRole('alert').filter({ hasText: 'joint-limit: j-hand angle' }),
   ).toBeVisible();
   await expect(escapeKeys).toHaveCount(before);
+});
+
+test('props: checks the figure as an occupant of a prop, and draws the check’s lines (CR7d, TS-1818)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1');
+  await expect(viewState(page)).toHaveText('Ready');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  // The arm's base (300 mm square, 200 tall) 100 mm over the head's top (z 1690).
+  const place = async (axis: 'X' | 'Y' | 'Z', v: number) => {
+    const f = inspector.getByLabel(`Prop position ${axis}`, { exact: true });
+    await f.fill(String(v));
+    await f.press('Enter');
+  };
+  await place('X', 0);
+  await place('Y', 0);
+  await place('Z', 1790);
+  const occupant = inspector.getByTestId('character-occupant');
+  await expect(occupant.getByLabel('Head bone', { exact: true })).toHaveValue('head');
+  await expect(occupant.getByLabel('Hip bone', { exact: true })).toHaveValue('hip');
+  await occupant.getByLabel('Seat part', { exact: true }).selectOption({ label: 'Base' });
+  // The hip (z 950) in the base's own coordinates.
+  await occupant.getByLabel('H-point in the seat part (mm) z', { exact: true }).fill('-830');
+  const before = await pixels(page);
+  await occupant.getByRole('button', { name: 'Check the occupant', exact: true }).click();
+  const status = occupant.getByTestId('character-occupant-status');
+  await expect(status).toHaveText('The figure overlaps no part of the prop.');
+  await expect(occupant.getByTestId('character-occupant-headroom')).toHaveText(
+    'Headroom: 100.0 mm up to Base.',
+  );
+  await expect(occupant.getByTestId('character-occupant-hpoint')).toHaveText(
+    'H-point to the hip: 10.0 mm (x 0.0, y 0.0, z -10.0).',
+  );
+  await expect(occupant.getByTestId('character-occupant-sight')).toHaveText(
+    'Sight line: meets nothing within 5000.0 mm.',
+  );
+  // The lines are drawn over the view.
+  await expect.poll(() => pixels(page)).not.toBe(before);
+  // Another part selected and the arm again: the panel shows the inputs of the result it keeps.
+  await parts.getByRole('button', { name: 'Body', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  await expect(occupant.getByLabel('Seat part', { exact: true })).toHaveValue(/.+/);
+  await expect(occupant.getByLabel('H-point in the seat part (mm) z', { exact: true })).toHaveValue(
+    '-830',
+  );
+  await expect(occupant.getByTestId('character-occupant-hpoint')).toHaveText(
+    'H-point to the hip: 10.0 mm (x 0.0, y 0.0, z -10.0).',
+  );
+  // Changing an input drops the result (and its lines): the report answers the inputs shown.
+  await occupant.getByLabel('Seat part', { exact: true }).selectOption({ label: 'No H-point' });
+  await expect(occupant.getByTestId('character-occupant-measures')).toHaveCount(0);
+  await expect(status).toHaveText(
+    'Checks the figure as posed now against the prop’s parts, on their display meshes.',
+  );
+  await occupant.getByLabel('Seat part', { exact: true }).selectOption({ label: 'Base' });
+  await occupant.getByRole('button', { name: 'Check the occupant', exact: true }).click();
+  await expect(occupant.getByTestId('character-occupant-hpoint')).toHaveText(
+    'H-point to the hip: 10.0 mm (x 0.0, y 0.0, z -10.0).',
+  );
+  // Lowered onto the head, the base overlaps it; the old result is stale until checked again.
+  await place('Z', 1600);
+  await expect(status).toHaveText(
+    'The pose, the time or the document changed since the last check: check again.',
+  );
+  await occupant.getByRole('button', { name: 'Check the occupant', exact: true }).click();
+  await expect(status).toHaveText('The figure overlaps 1 part of the prop.');
+  await expect(occupant.getByTestId('character-occupant-overlap')).toHaveText(
+    /^Base \(intersect, about \d+\.\d mm\)$/,
+  );
+  // A bad coordinate is refused.
+  await occupant.getByLabel('Eye looks along y', { exact: true }).fill('a');
+  await occupant.getByRole('button', { name: 'Check the occupant', exact: true }).click();
+  await expect(occupant.getByRole('alert')).toHaveText(
+    'occupant-input: every coordinate must be a number (mm).',
+  );
+});
+
+test('props: refuses the occupant check when the figure’s assets do not read (CR7d, TS-1818)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/?props=1&broken=1');
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Robot arm — v1' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Robot arm', exact: true }).click();
+  const occupant = (await panel(page, 'Inspector')).getByTestId('character-occupant');
+  await expect(occupant.getByTestId('character-occupant-status')).toHaveText(
+    'The figure’s assets could not be read: it cannot be checked.',
+  );
+  await expect(
+    occupant.getByRole('button', { name: 'Check the occupant', exact: true }),
+  ).toBeDisabled();
 });

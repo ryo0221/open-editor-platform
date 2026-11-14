@@ -292,6 +292,7 @@ export function gordonSurface(
   vCurves: NetworkCurve[],
   toleranceMm: number,
   fitMm: number,
+  options: { lean?: boolean } = {},
 ): GordonSurface | GordonFailure {
   const m = uCurves.length;
   const n = vCurves.length;
@@ -391,11 +392,9 @@ export function gordonSurface(
       for (let j = 0; j < n; j++) p = sub(p, scale(X[i]![j]!, lv[i]! * mu[j]!));
     return p;
   };
-  // Interpolate the sum, refining the pole count until the surface keeps to the network.
-  let count = Math.max(8, 2 * Math.max(m, n));
-  for (;;) {
-    const nu = count;
-    const nv = count;
+  // Interpolate the sum at nu × nv poles: the surface, or its deviation when it strays from the
+  // network beyond the tolerance.
+  const fitAt = (nu: number, nv: number): GordonSurface | number => {
     const ku = uniformKnots(nu);
     const kv = uniformKnots(nv);
     const gu = greville(ku, 3, nu);
@@ -474,10 +473,36 @@ export function gordonSurface(
         gapMm,
       };
     }
-    if (count >= gordonLimits.maxPoles)
-      return { code: 'curve-network-fit', deviationMm: deviation };
+    return deviation;
+  };
+  // Refine the pole count until the surface keeps to the network.
+  let count = Math.max(8, 2 * Math.max(m, n));
+  let fit: GordonSurface | number;
+  for (;;) {
+    fit = fitAt(count, count);
+    if (typeof fit !== 'number') break;
+    if (count >= gordonLimits.maxPoles) return { code: 'curve-network-fit', deviationMm: fit };
     count = Math.min(gordonLimits.maxPoles, count * 2);
   }
+  // CR7g-1 (`lean`): one way may need far fewer poles than the other (a flare's cubic profiles
+  // across its long run), so each way is halved while the fit still keeps to the network.
+  let [nu, nv] = [count, count];
+  if (!options.lean) return fit;
+  const floorU = Math.max(8, 2 * n);
+  const floorV = Math.max(8, 2 * m);
+  const halves = (x: number, floor: number) => Number.isInteger(x / 2) && x / 2 >= floor;
+  for (let changed = true; changed; ) {
+    changed = false;
+    if (halves(nv, floorV)) {
+      const f = fitAt(nu, nv / 2);
+      if (typeof f !== 'number') [fit, nv, changed] = [f, nv / 2, true];
+    }
+    if (halves(nu, floorU)) {
+      const f = fitAt(nu / 2, nv);
+      if (typeof f !== 'number') [fit, nu, changed] = [f, nu / 2, true];
+    }
+  }
+  return fit;
 }
 
 /** A curve run the other way. */
@@ -571,27 +596,47 @@ export function distanceToCurve(c: NetworkCurve, p: V): number {
 
 /**
  * A cubic B-spline through `points` at parameters `ts` (0 to 1, in order) on `n` poles with
- * uniform knots: least squares, each point weighted alike. Returns the full knot vector (over
- * [0, 1]) and the poles.
+ * uniform knots: least squares, each point weighted alike. With `ends` (CLF2), the first and last
+ * poles are those points exactly (the curve starts and ends on them) and the rest are fitted.
+ * Returns the full knot vector (over [0, 1]) and the poles.
  */
-export function fitCurve(ts: number[], points: V[], n: number) {
+export function fitCurve(ts: number[], points: V[], n: number, ends?: [V, V]) {
   const knots = uniformKnots(n);
+  // The poles solved for: all, or all but the fixed first and last.
+  const lo = ends ? 1 : 0;
+  const hi = ends ? n - 1 : n;
+  const m = hi - lo;
   // Normal equations AᵀA x = Aᵀb, A banded: dense is fine for n up to a few hundred.
-  const ata = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-  const atb = Array.from({ length: n }, () => [0, 0, 0]);
+  const ata = Array.from({ length: m }, () => new Array<number>(m).fill(0));
+  const atb = Array.from({ length: m }, () => [0, 0, 0]);
   ts.forEach((t, k) => {
     const b = basis(knots, 3, n, t);
+    // The point less what the fixed poles give it.
+    const rest = [...points[k]!] as V;
+    if (ends)
+      b.values.forEach((v, i) => {
+        const r = b.first + i;
+        const fixed = r === 0 ? ends[0] : r === n - 1 ? ends[1] : undefined;
+        if (fixed) for (let c = 0; c < 3; c++) rest[c]! -= v * fixed[c]!;
+      });
     b.values.forEach((vi, i) => {
-      const r = b.first + i;
-      b.values.forEach((vj, j) => (ata[r]![b.first + j]! += vi * vj));
-      for (let c = 0; c < 3; c++) atb[r]![c]! += vi * points[k]![c]!;
+      const r = b.first + i - lo;
+      if (r < 0 || r >= m) return;
+      b.values.forEach((vj, j) => {
+        const q = b.first + j - lo;
+        if (q >= 0 && q < m) ata[r]![q]! += vi * vj;
+      });
+      for (let c = 0; c < 3; c++) atb[r]![c]! += vi * rest[c]!;
     });
   });
   const solve = lu(ata);
   const cols = [0, 1, 2].map((c) => solve(atb.map((row) => row[c]!)));
-  const poles = Array.from(
-    { length: n },
-    (_, i) => [cols[0]![i]!, cols[1]![i]!, cols[2]![i]!] as V,
+  const poles = Array.from({ length: n }, (_, i) =>
+    ends && i === 0
+      ? ends[0]
+      : ends && i === n - 1
+        ? ends[1]
+        : ([cols[0]![i - lo]!, cols[1]![i - lo]!, cols[2]![i - lo]!] as V),
   );
   const at = (t: number): V => {
     const b = basis(knots, 3, n, t);

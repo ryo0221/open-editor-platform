@@ -87,6 +87,41 @@ describe('ViewLighting (#665)', () => {
     expect(ground.visible).toBe(true);
   });
 
+  it('names the objects it added to the scene, for a view drawing only some children (CR7g-3, TS-1836)', () => {
+    const { scene, lighting, solids, ground } = setup();
+    const added = scene.children.filter((o) => o !== solids);
+    expect([...lighting.objects].sort((a, b) => a.id - b.id)).toEqual(
+      added.sort((a, b) => a.id - b.id),
+    );
+    expect(lighting.objects).toContain(ground);
+  });
+  it('casts a shadow from a mesh with several materials only when all are opaque (CR7g-3, TS-1836)', () => {
+    const { lighting, solids } = setup();
+    const part = (opacity: number) =>
+      new Mesh(new BoxGeometry(10, 10, 10), [
+        new MeshStandardMaterial(),
+        new MeshStandardMaterial({ transparent: opacity < 1, opacity }),
+      ]);
+    const solid = part(1);
+    const faded = part(0.3);
+    solids.add(solid, faded);
+    lighting.setRealistic(true);
+    lighting.prepare([solids]);
+    expect(solid.castShadow).toBe(true);
+    expect(faded.castShadow).toBe(false);
+  });
+  it('fits the ground to the shown meshes only, not a hidden one (CR7g-3, TS-1836)', () => {
+    const { lighting, solids, ground } = setup();
+    const hidden = new Mesh(new BoxGeometry(10, 10, 10), new MeshStandardMaterial());
+    hidden.position.set(0, 0, -500);
+    hidden.visible = false;
+    solids.add(hidden);
+    solids.updateMatrixWorld();
+    lighting.setRealistic(true);
+    lighting.prepare([solids]);
+    // The opaque box's bottom (z 20), not the hidden one's (z −505).
+    expect(ground.position.z).toBeGreaterThan(19);
+  });
   it('makes the environment again after a lost context is restored', () => {
     const scene = new Scene();
     const made: Texture[] = [];

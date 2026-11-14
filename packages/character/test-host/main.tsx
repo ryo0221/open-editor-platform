@@ -137,6 +137,13 @@ const armJoints = (limit: number) => ({
     ? { mounts: [{ id: 'm-tool', joints: ['j-tool-tip', 'j-tool-base'] }] }
     : {}),
 });
+const still = composeMat4({ translation: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] });
+const turned = (a: number) =>
+  composeMat4({
+    translation: [0, 0, 0],
+    rotation: [0, 0, Math.sin(a / 2), Math.cos(a / 2)],
+    scale: [1, 1, 1],
+  });
 const armView: CharacterPropView =
   params.get('props') === 'failed'
     ? { status: 'failed', message: 'part-build-mismatch' }
@@ -218,23 +225,19 @@ const armView: CharacterPropView =
           return [
             {
               mesh: armBase,
-              matrix: composeMat4({
-                translation: [0, 0, 0],
-                rotation: [0, 0, 0, 1],
-                scale: [1, 1, 1],
-              }),
+              matrix: still,
+              // CR7d: each part named, with its own frame (the occupant check's seat part).
+              piece: { id: 'base', name: 'Base', frame: still },
             },
             {
               mesh: armLink,
-              matrix: composeMat4({
-                translation: [0, 0, 0],
-                rotation: [0, 0, Math.sin(a / 2), Math.cos(a / 2)],
-                scale: [1, 1, 1],
-              }),
+              matrix: turned(a),
+              piece: { id: 'link', name: 'Link', frame: turned(a) },
             },
             {
               mesh: armTool,
               matrix: composeMat4({ translation: tool, rotation: [0, 0, 0, 1], scale: [1, 1, 1] }),
+              piece: { id: 'tool', name: 'Tool' },
             },
           ];
         },

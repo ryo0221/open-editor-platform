@@ -1,0 +1,21 @@
+{
+  "name": "@editor-platform/ladder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/ladder-core": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1"
+  },
+  "devDependencies": {
+    "react-dom": "19.1.1"
+  }
+}

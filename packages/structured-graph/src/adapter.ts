@@ -2,6 +2,7 @@ import { canonicalJson, clone, newId } from '@editor-platform/artifact-core';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
 import {
   isGraphJson,
+  plainRecord,
   validNodePresentations,
   type GraphDiagnostic,
   type GraphDocument,
@@ -57,6 +58,24 @@ export interface PresentationSidecar {
   /** Sidecar adapters cannot hold Sections, so only node presentation is stored. */
   presentation: { nodes: GraphNodePresentations };
 }
+/**
+ * A schema 1 layout sidecar (`positions`) reads as schema 2: the same positions as node
+ * presentation. It is written back as schema 2 on the next presentation change. Other values pass
+ * through to the checks below unchanged.
+ */
+function upgradeSidecar(value: unknown): PresentationSidecar | undefined {
+  if (value === undefined) return undefined;
+  if (
+    plainRecord(value) &&
+    value.schemaVersion === 1 &&
+    Object.keys(value).length === 6 &&
+    'positions' in value
+  ) {
+    const { positions, ...rest } = value;
+    return { ...rest, schemaVersion: 2, presentation: { nodes: positions } } as PresentationSidecar;
+  }
+  return value as PresentationSidecar;
+}
 const presentationIntents = new Set<GraphIntent['type']>([
   'move-node',
   'set-node-shape',
@@ -94,7 +113,8 @@ export class GraphBinding<S> {
     const source = this.options.read(),
       adapter = this.options.adapter,
       profile = adapter.profile(source.content),
-      sidecar = this.mode === 'sidecar' ? this.options.getPresentation?.() : undefined;
+      sidecar =
+        this.mode === 'sidecar' ? upgradeSidecar(this.options.getPresentation?.()) : undefined;
     let presentation: GraphNodePresentations | undefined;
     if (sidecar) {
       if (

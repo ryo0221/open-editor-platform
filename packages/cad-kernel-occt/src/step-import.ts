@@ -667,10 +667,17 @@ export function importStep(
               kind: 'sheet',
               areaMm2: metrics.areaMm2,
               bounds,
+              centroidMm: metrics.centroidMm,
               freeEdges: sheet.freeEdges,
               freeEdgeLengthMm: sheet.freeEdgeLengthMm,
             }
-          : { kind: 'solid', volumeMm3: metrics.volumeMm3!, areaMm2: metrics.areaMm2, bounds },
+          : {
+              kind: 'solid',
+              volumeMm3: metrics.volumeMm3!,
+              areaMm2: metrics.areaMm2,
+              bounds,
+              centroidMm: metrics.centroidMm,
+            },
         brep: { sha256: `sha256:${bytesToHex(sha256(brep))}`, byteLength: brep.byteLength },
         healing: 'none',
         // PMI-2: PMI is a loss unless all of it is kept.

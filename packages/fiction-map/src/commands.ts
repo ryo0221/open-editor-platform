@@ -132,7 +132,7 @@ function materialize(base: FictionMapContent, input: unknown): FictionMapContent
           v,
           p,
           ['id', 'layerId', 'featureKind', 'geometry', 'name'],
-          ['description', 'category', 'style', 'worldEntityRef'],
+          ['description', 'category', 'style', 'worldEntityRef', 'artifactRefs'],
         );
       const id = text(f.id, p + '/id');
       unique(id, p + '/id');

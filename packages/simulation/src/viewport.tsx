@@ -24,6 +24,8 @@ export interface SimulationViewBody {
   faded: boolean;
   /** CR0c: its colour in the CAD version (`#rrggbb`); the neutral grey without one. */
   color?: string;
+  /** VS4c: one colour per vertex (a wind tunnel's streamlines or section) instead of `color`. */
+  colors?: Float32Array;
 }
 
 /** The look of a body without a colour of its own, and of the analysed body under a result. */
@@ -135,6 +137,7 @@ export function SimulationViewport({
             ...(others ?? []).map((b) => ({
               ...shownBody(b.mesh, b.marks, b.faded ? 0.25 : 1, b.color),
               ...(b.faded ? { topologyTransparent: true } : {}),
+              ...(b.colors ? { colors: b.colors } : {}),
             })),
           ]
         : [],

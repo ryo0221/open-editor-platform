@@ -175,6 +175,8 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
     controller,
     port: assemblyPort,
     exportBrep: (request) => port.exportBrep(request),
+    renderMeshes: (request, quality) => port.renderMeshes(request, quality),
+    cancelRender: (requestId) => port.cancel(requestId),
     exportAssemblyStep: (profile, requestId, plan, breps) =>
       port.exportAssemblyStep(profile, requestId, plan, breps),
     importStepAssembly: (profile, requestId, bytes, options) =>

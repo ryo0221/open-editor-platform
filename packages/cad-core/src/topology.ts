@@ -6,7 +6,7 @@
  * vertices by the faces around them (three at a box's corner), each list sorted, so a name never
  * carries a kernel enumeration index.
  */
-import type { CadFeature } from './model';
+import type { CadCurveSource, CadFeature } from './model';
 import type { CadSketch } from './sketch';
 
 export type CadFaceName = readonly string[];
@@ -357,15 +357,22 @@ export function featureReferences(
  * Where a surface feature's curve comes from (docs/cad/r2a-freeform.md, 命名), so its boundary
  * edge keeps one name whatever the curves' order or direction: a sketch element is
  * `sketch:<sketch ID>/boundary:e:<element ID>`, a referenced edge
- * `from:<feature ID>/boundary:<the edge's name>`.
+ * `from:<feature ID>/boundary:<the edge's name>`, a two-view curve (CLF2)
+ * `sketch:<side sketch>/sketch:<plan sketch>/boundary:tv:["<side element>","<plan element>"]`.
  */
-export function curveBoundaryName(
-  source: { sketchId: string; element: string } | { edge: CadTopologyRef },
-): CadFaceName {
+export function curveBoundaryName(source: CadCurveSource): CadFaceName {
   const name =
     'edge' in source
       ? [`from:${source.edge.featureId}`, `boundary:${topoNameKey(source.edge.name)}`]
-      : [`sketch:${source.sketchId}`, `boundary:e:${source.element}`];
+      : 'twoView' in source
+        ? // CLF2: both elements, so changing either view keeps one curve's name.
+          [
+            `sketch:${source.twoView.side.sketchId}`,
+            `sketch:${source.twoView.plan.sketchId}`,
+            // The pair as JSON: element IDs may hold any character, `:` too.
+            `boundary:tv:${JSON.stringify([source.twoView.side.element, source.twoView.plan.element])}`,
+          ]
+        : [`sketch:${source.sketchId}`, `boundary:e:${source.element}`];
   if (!faceNameFits(name)) throw new Error('topology-name-too-long');
   return name;
 }

@@ -12,6 +12,7 @@ import {
   ArtifactEditor,
   hostNativeArtifactByteLimit,
   loadHostArtifact,
+  serializeHostNativeArtifact,
   type EditorHostAdapter,
 } from './index';
 type Content = { schemaVersion: 1; text: string };
@@ -314,6 +315,16 @@ describe('native persistence size boundary', () => {
     await expect(host.export('native-json')).rejects.toMatchObject({ code: 'invalid-artifact' });
     expect(host.snapshot.dirty).toBe(true);
     expect(await storage.get(host.id)).toBeUndefined();
+  });
+  it('lets a Host give a kind a larger native limit than 64 MiB (CR7f)', () => {
+    // TS-1829, ST-294
+    const big = createArtifact('example', 'Example', {
+      schemaVersion: 1 as const,
+      text: 'x'.repeat(1_000),
+    });
+    expect(() => serializeHostNativeArtifact(big, 512)).toThrow('exceeds the 0.000512 MB');
+    expect(serializeHostNativeArtifact(big, 4_096)).toContain('xxxx');
+    expect(serializeHostNativeArtifact(big)).toContain('xxxx');
   });
 });
 

@@ -438,8 +438,11 @@ export function featureKind(
  */
 export function featureSketches(f: Pick<CadFeature, 'type' | 'args'>): string[] {
   const a = f.args as Record<string, unknown> | undefined;
-  const of = (x: unknown) => {
-    const id = (x as { sketchId?: unknown } | undefined)?.sketchId;
+  const of = (x: unknown): string[] => {
+    // CLF2: a two-view curve reads its side and its plan sketch.
+    const two = (x as { twoView?: { side?: unknown; plan?: unknown } } | null | undefined)?.twoView;
+    if (two) return [...of(two.side), ...of(two.plan)];
+    const id = (x as { sketchId?: unknown } | null | undefined)?.sketchId;
     return typeof id === 'string' ? [id] : [];
   };
   switch (f.type) {

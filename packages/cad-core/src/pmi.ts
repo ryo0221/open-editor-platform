@@ -1,6 +1,12 @@
-import { rotateVector } from './assembly';
+import { cadAssemblyLimits, rotateVector } from './assembly';
 import { parameterValues, resolvePosition } from './graph';
-import { cadLimits, type CadDocument, type Quaternion, type Vec3 } from './model';
+import {
+  cadLimits,
+  quaternionNormTolerance,
+  type CadDocument,
+  type Quaternion,
+  type Vec3,
+} from './model';
 
 /**
  * PMI-2 (docs/cad/pmi.md): the semantic PMI an import kept, as the `pmi` asset of the document
@@ -124,6 +130,21 @@ export interface CadPmiAsset {
   views?: CadPmiView[];
 }
 
+/**
+ * PMI-5b: what one component placed when an assembly's PMI was read: its part version (the
+ * content hash), that part's sub-shape counts and the component's pose in mm. The item stays
+ * current only while the component places the same version (docs/cad/pmi.md, 検証と失効).
+ */
+export interface CadAssemblyPmiPart extends CadPmiShapeCounts {
+  contentHash: string;
+  pose: { translationMm: Vec3; rotation: Quaternion };
+}
+/** PMI-5: the `assembly-pmi` asset's JSON: targets name components (`parts`' keys). */
+export interface CadAssemblyPmiAsset extends CadPmiAsset {
+  /** Every component a target names, as it was when the file was read. */
+  parts: Record<string, CadAssemblyPmiPart>;
+}
+
 /** Proposed limits (docs/cad/pmi.md, 上限). */
 export const cadPmiLimits = Object.freeze({
   items: 5000,
@@ -173,16 +194,46 @@ export function pmiAssetProblem(value: unknown, counts: CadPmiShapeCounts): stri
 }
 /**
  * PMI-5: checks an assembly's `assembly-pmi` asset as `pmiAssetProblem` does, with every target
- * naming a component (`counts` of its part, undefined when the document has no such
- * component). A datum may have no targets: JAMA's assembly datums stand on features that name
- * no geometry.
+ * naming a component of `parts` and an index within that part's counts as they were read
+ * (PMI-5b). A datum may have no targets: JAMA's assembly datums stand on features that name no
+ * geometry. Whether the document still places those versions is staleness, not validity
+ * (`cadAssemblyPmiStates`): a deleted component never makes the document invalid.
  */
-export function assemblyPmiAssetProblem(
-  value: unknown,
-  counts: (componentId: string) => CadPmiShapeCounts | undefined,
-): string | undefined {
-  return assetProblem(value, {
-    counts: (t) => (typeof t.component === 'string' ? counts(t.component) : undefined),
+export function assemblyPmiAssetProblem(value: unknown): string | undefined {
+  if (!record(value)) return '$';
+  const parts = value.parts;
+  if (!record(parts) || Object.keys(parts).length > cadAssemblyLimits.components) return '$.parts';
+  for (const [id, p] of Object.entries(parts)) {
+    const at = `$.parts[${JSON.stringify(id)}]`;
+    if (!id || id.length > 64) return at;
+    if (
+      !record(p) ||
+      !onlyKeys(p, ['contentHash', 'faces', 'edges', 'vertices', 'pose']) ||
+      typeof p.contentHash !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(p.contentHash) ||
+      !(['faces', 'edges', 'vertices'] as const).every(
+        (k) => Number.isInteger(p[k]) && (p[k] as number) >= 0,
+      )
+    )
+      return at;
+    const pose = p.pose;
+    if (
+      !record(pose) ||
+      !onlyKeys(pose, ['translationMm', 'rotation']) ||
+      !vec(pose.translationMm) ||
+      !Array.isArray(pose.rotation) ||
+      pose.rotation.length !== 4 ||
+      !pose.rotation.every(finite) ||
+      Math.abs(Math.hypot(...(pose.rotation as number[])) - 1) > quaternionNormTolerance
+    )
+      return `${at}.pose`;
+  }
+  const { parts: _, ...rest } = value;
+  return assetProblem(rest, {
+    counts: (t) =>
+      typeof t.component === 'string' && Object.hasOwn(parts, t.component)
+        ? (parts[t.component] as unknown as CadPmiShapeCounts)
+        : undefined,
     assembly: true,
   });
 }
@@ -650,6 +701,87 @@ export function cadPmiItemStates(
     else out.set(item.id, { current: true });
   }
   return out;
+}
+/** PMI-5b: whether an item of an assembly's `assembly-pmi` asset is current. */
+export type CadAssemblyPmiItemState =
+  | { current: true }
+  /**
+   * `component`: a component a target names was deleted; `part`: it places another version
+   * now (`replacePartSources`, a changed shape); `datum`: a datum it depends on is stale.
+   */
+  | { current: false; reason: 'component' | 'part' | 'datum' };
+/**
+ * PMI-5b (docs/cad/pmi.md, 検証と失効, PMI-U5): each item of an assembly's asset is current while
+ * every component its targets name is in the document and places the part version it placed
+ * when the file was read, and every datum it depends on is current (a tolerance's datums, a
+ * datum's datum targets). Moving a component never makes an item stale. A datum with no
+ * targets (on the assembly) depends on nothing.
+ */
+export function cadAssemblyPmiStates(
+  doc: Pick<CadDocument, 'components' | 'parts'>,
+  asset: CadAssemblyPmiAsset,
+): Map<string, CadAssemblyPmiItemState> {
+  const out = new Map<string, CadAssemblyPmiItemState>();
+  const components = new Map(doc.components.map((c) => [c.id, c]));
+  const parts = new Map(doc.parts.map((p) => [p.id, p]));
+  const problem = (item: CadPmiItem): 'component' | 'part' | undefined => {
+    const all = [...item.targets, ...(item.kind === 'dimension' ? (item.targets2 ?? []) : [])];
+    let found: 'component' | 'part' | undefined;
+    for (const t of all) {
+      const c = t.component === undefined ? undefined : components.get(t.component);
+      if (!c) return 'component';
+      const read = asset.parts[c.id];
+      if (!read || parts.get(c.partId)?.source.contentHash !== read.contentHash) found = 'part';
+    }
+    return found;
+  };
+  const stale = (reason: 'component' | 'part' | 'datum'): CadAssemblyPmiItemState => ({
+    current: false,
+    reason,
+  });
+  const own = (item: CadPmiItem) => {
+    const p = problem(item);
+    return p ? stale(p) : ({ current: true } as const);
+  };
+  for (const item of asset.items) if (item.kind === 'datum-target') out.set(item.id, own(item));
+  const targetsOf = new Map<string, boolean>();
+  for (const item of asset.items)
+    if (item.kind === 'datum-target')
+      targetsOf.set(item.datum, (targetsOf.get(item.datum) ?? true) && out.get(item.id)!.current);
+  for (const item of asset.items)
+    if (item.kind === 'datum') {
+      const state = own(item);
+      out.set(
+        item.id,
+        !state.current ? state : targetsOf.get(item.name) === false ? stale('datum') : state,
+      );
+    }
+  for (const item of asset.items) {
+    if (item.kind === 'datum' || item.kind === 'datum-target') continue;
+    const state = own(item);
+    if (!state.current) out.set(item.id, state);
+    else if (
+      item.kind === 'geometric-tolerance' &&
+      item.references.some((r) => r.datums.some((d) => out.get(d)?.current !== true))
+    )
+      out.set(item.id, stale('datum'));
+    else out.set(item.id, state);
+  }
+  return out;
+}
+/**
+ * PMI-5b: an assembly's `assembly-pmi` asset from its bytes, or undefined when they are not one
+ * (the evaluation refuses such a document with `assembly-pmi-invalid`).
+ */
+export function readCadAssemblyPmiAsset(bytes: Uint8Array): CadAssemblyPmiAsset | undefined {
+  try {
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return assemblyPmiAssetProblem(value) === undefined
+      ? (value as CadAssemblyPmiAsset)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 /** A point of the imported body's model space where the body is now. */
 export function placePmiPoint(placements: readonly CadPmiPlacement[], p: Vec3): Vec3 {

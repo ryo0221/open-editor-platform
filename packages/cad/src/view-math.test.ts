@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CadCamera, CadNamedView } from '@editor-platform/cad-core';
+import type { CadCamera, CadNamedView, Vec3 } from '@editor-platform/cad-core';
 import {
   compareSizes,
   defaultGrid,
@@ -10,6 +10,7 @@ import {
   niceStep,
   orbitRotateSpeed,
   standardViews,
+  threeViewLayout,
   viewOf,
 } from './view-math';
 
@@ -146,5 +147,44 @@ describe('watch-sized views (WM3, TS-1891)', () => {
     expect(depthRange(0.15, 21)).toEqual({ near: 0.00015, far: 42.3 });
     expect(depthRange(60, 21).near).toBeCloseTo(0.06, 9);
     expect(depthRange(60, 21).far).toBe(6000);
+  });
+});
+
+// CLF1b (docs/cad/car-look-process.md, CLF1〜CLF3の分け方). ST-502, TS-2006.
+describe('threeViewLayout (CLF1b)', () => {
+  it('places side, front and plan at one scale, sharing X and Z, the box fitting each pane', () => {
+    // A car-sized box: 4350 long, 1950 wide, 1130 high, on the ground.
+    const box: [Vec3, Vec3] = [
+      [-950, -975, 0],
+      [3400, 975, 1130],
+    ];
+    const { mmPerPixel, panes, center } = threeViewLayout(box, 1200, 800);
+    expect(panes.map((p) => [p.view, p.rect])).toEqual([
+      ['front', { x: 0, y: 0, width: 600, height: 400 }],
+      ['right', { x: 600, y: 0, width: 600, height: 400 }],
+      ['plan', { x: 0, y: 400, width: 600, height: 400 }],
+    ]);
+    // The length decides: 4350 mm over a 600 px pane, with 10 % to spare.
+    expect(mmPerPixel).toBeCloseTo((1.1 * 4350) / 600, 9);
+    expect(center).toEqual([1225, 0, 565]);
+    // Each extent fits the pane it shows in: X and Y across, Z and Y up.
+    for (const [extent, px] of [
+      [4350, 600],
+      [1950, 600],
+      [1130, 400],
+      [1950, 400],
+    ])
+      expect(extent / mmPerPixel).toBeLessThanOrEqual(px!);
+    // A tall narrow box: the height decides instead.
+    expect(
+      threeViewLayout(
+        [
+          [0, 0, 0],
+          [100, 100, 1000],
+        ],
+        1200,
+        800,
+      ).mmPerPixel,
+    ).toBeCloseTo((1.1 * 1000) / 400, 9);
   });
 });

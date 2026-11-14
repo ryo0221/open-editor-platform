@@ -2561,6 +2561,65 @@ export function f19Network(
 }
 
 /**
+ * F81 two-view network for CLF2 (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): F19's
+ * sphere network with each `u` arc given as a two-view curve, its side view the arc itself
+ * (a sketch parallel to XZ) and its plan view the line y = 0, 40 or 80 on sketch `plan` (XY,
+ * z = 0), so the network and its area are F19's. Refusals: `plane` takes the plan view from a `v`
+ * sketch (parallel to YZ), `apart` moves the plan lines to x 100–180, `fold` makes the middle
+ * plan view an arc of 270° that turns back along X.
+ */
+export function f81TwoView(kind: 'sphere' | 'plane' | 'apart' | 'fold' = 'sphere'): CadDocument {
+  const f19 = f19Network();
+  const net = f19.features.find((f) => f.id === 'net') as Extract<
+    CadFeature,
+    { type: 'curveNetwork' }
+  >;
+  const shift = kind === 'apart' ? 100 : 0;
+  const points: Record<string, [number, number]> = {
+    a0: [shift, 0],
+    b0: [80 + shift, 0],
+    a1: [shift, 40],
+    b1: [80 + shift, 40],
+    a2: [shift, 80],
+    b2: [80 + shift, 80],
+    o: [40, 40],
+    f0: [40, 0],
+    f1: [80, 40],
+  };
+  const plan: CadSketch = {
+    id: 'plan',
+    name: 'plan',
+    plane: { origin: position(0, 0, 0), orientation: identityQuaternion() },
+    entities: [
+      ...sketchPoints(points),
+      { type: 'line', id: 'l0', start: 'a0', end: 'b0' },
+      kind === 'fold'
+        ? { type: 'arc', id: 'l1', center: 'o', start: 'f0', end: 'f1', clockwise: true }
+        : { type: 'line', id: 'l1', start: 'a1', end: 'b1' },
+      { type: 'line', id: 'l2', start: 'a2', end: 'b2' },
+    ],
+    constraints: [],
+    solved: points,
+  };
+  const u = net.args.u.map((side, i) => ({
+    twoView: {
+      side: side as { sketchId: string; element: string },
+      plan:
+        kind === 'plane' && i === 0
+          ? { sketchId: 'v1', element: 'arc' }
+          : { sketchId: 'plan', element: `l${i}` },
+    },
+  }));
+  return applyCadOperation(f01Empty(), {
+    type: 'insertFeatures',
+    parameters: [],
+    sketches: [...f19.sketches, plan],
+    features: [{ ...net, args: { ...net.args, u } }],
+    bodies: [body('roof', 'net')],
+  });
+}
+
+/**
  * F19 thin: a flat 100 × 0.02 mm strip spanned by two lines each way, its long sides closer than
  * four times the tolerance (each border must still keep its own name).
  */
@@ -3255,6 +3314,34 @@ export function f24Flare(
   });
 }
 
+/** F25's skin sections (wheelbase 2400): x0, half width, crown height and how much of the roof's change it takes. */
+export const f25Sections = [
+  { x0: 0, w: 700, top: 980, k: 0 },
+  { x0: 450, w: 760, top: 1120, k: 0.5 },
+  { x0: 1300, w: 800, top: 1315, k: 1 },
+  { x0: 2000, w: 810, top: 1335, k: 1 },
+  { x0: 2700, w: 805, top: 1060, k: 0.3 },
+  { x0: 3500, w: 780, top: 930, k: 0 },
+  { x0: 4205, w: 720, top: 860, k: 0 },
+];
+/** The heights (z) of F25's shoulder and rocker lines. */
+export const f25SectionLevels = { shoulder: 900, rocker: 200 };
+/** A section's points (y, z) of the left half, from the crown at `z` down to the rocker. */
+export function f25SectionPoints(
+  r: { w: number },
+  z: number,
+  /** Where the roof's side meets it, as a part of the half width (CR7g-1: less leans it in). */
+  greenhouse = 0.55,
+): [number, number][] {
+  const { shoulder, rocker } = f25SectionLevels;
+  return [
+    [0, z],
+    [-greenhouse * r.w, 0.9 * z + 0.1 * shoulder],
+    [-r.w, shoulder],
+    [-r.w, 550],
+    [-0.92 * r.w, rocker],
+  ];
+}
 /**
  * F25 (CR2e, B1): the left half of a three-door hatchback's skin at a real size (4205 mm long,
  * x forward from the tail, y across with the left side at y < 0, z up), the sample B1 is
@@ -3281,6 +3368,13 @@ export function f25B1Car(
     flareContinuity?: 'G1' | 'G2';
     wheelbase?: number;
     roof?: number;
+    /**
+     * CR7g-1: every section's half width times this, or each section's by its own factor (F63
+     * is wider than F25, and narrower at its ends than in the middle).
+     */
+    widthScale?: number | readonly number[];
+    /** CR7g-1: the roof side's point, as a part of the half width (F25: 0.55). */
+    greenhouse?: number;
   } = {},
 ): CadDocument {
   const base = { wheelbase: 2400, roof: 1335 };
@@ -3298,30 +3392,16 @@ export function f25B1Car(
   /** An affine length of one parameter (`scale` × it + `offset`), or a literal. */
   const affine = (parameterId: 'wheelbase' | 'roof', scale: number, offset: number): Length =>
     Math.abs(scale) < 1e-12 ? mm(offset) : { affine: { parameterId, scale, offsetMm: offset } };
-  // Sections: x0, half width, crown height and how much of the roof's change it takes.
-  const rows = [
-    { x0: 0, w: 700, top: 980, k: 0 },
-    { x0: 450, w: 760, top: 1120, k: 0.5 },
-    { x0: 1300, w: 800, top: 1315, k: 1 },
-    { x0: 2000, w: 810, top: 1335, k: 1 },
-    { x0: 2700, w: 805, top: 1060, k: 0.3 },
-    { x0: 3500, w: 780, top: 930, k: 0 },
-    { x0: 4205, w: 720, top: 860, k: 0 },
-  ];
-  const shoulder = 900;
-  const rocker = 200;
+  const scale = options.widthScale ?? 1;
+  const rows = f25Sections.map((r, i) => ({
+    ...r,
+    w: r.w * (typeof scale === 'number' ? scale : (scale[i] ?? 1)),
+  }));
+  const { shoulder, rocker } = f25SectionLevels;
   const crown = (r: (typeof rows)[number], roof: number) => r.top + r.k * (roof - base.roof);
   // Section points (y, z) from the crown down to the rocker, at a roof height.
-  const sectionPoints = (r: (typeof rows)[number], roof: number): [number, number][] => {
-    const z = crown(r, roof);
-    return [
-      [0, z],
-      [-0.55 * r.w, 0.9 * z + 0.1 * shoulder],
-      [-r.w, shoulder],
-      [-r.w, 550],
-      [-0.92 * r.w, rocker],
-    ];
-  };
+  const sectionPoints = (r: (typeof rows)[number], roof: number) =>
+    f25SectionPoints(r, crown(r, roof), options.greenhouse);
   /**
    * A spline sketch through points that move linearly with one parameter per coordinate: its
    * poles at two values of each give every pole's coordinates as affine lengths.

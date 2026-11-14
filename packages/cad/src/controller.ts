@@ -71,6 +71,7 @@ import {
   gapFlushReport,
   type CadGapFlushReport,
   type CadGapFlushSample,
+  type CadProportions,
   type CadSpotWeld,
   type CadSpotWeldPoints,
   type CadContinuityReport,
@@ -577,6 +578,8 @@ const messages: Record<string, string> = {
   'output-limit': '表示できる形状の上限を超えています。',
   'pmi-invalid':
     '取り込んだPMIの記録が形状と合いません（存在しない面・辺・頂点を指しているなど）。STEPファイルを取り込み直してください。',
+  'assembly-pmi-invalid':
+    '組立のPMIの記録が読めません（記録にないcomponentや、部品の形に無い面を指しているなど）。STEPファイルを取り込み直してください。',
   'kernel-unavailable': '形状計算を開始できません。再計算を試してください。',
   'kernel-build-unavailable': 'この文書の計算に必要なkernelがありません。',
   'kernel-build-revoked': 'この文書のkernelは安全上の理由で使えなくなりました。',
@@ -628,7 +631,7 @@ const messages: Record<string, string> = {
   'asset-hash-mismatch': '取り込んだ形状のデータが記録と一致しないため、計算しませんでした。',
   'asset-unreadable': '取り込んだ形状のデータを読めませんでした。',
   'step-import-unavailable': 'このHostではSTEPを取り込めません（資産を保存できません）。',
-  'step-too-large': 'STEP fileが大きすぎます（16 MiBまで）。',
+  'step-too-large': 'STEP fileが大きすぎます（64 MiBまで）。',
   'step-export-too-large': '書き出すSTEP fileが大きすぎます（64 MiBまで）。',
   'memory-budget':
     'この形状のデータは、表示に使えるメモリーの上限を超えます。編集は入れていません。bodyや細部を減らしてください。',
@@ -734,6 +737,11 @@ const messages: Record<string, string> = {
   'spot-weld-no-start': '先に1枚目のフランジの面を選んでください。',
   'spot-weld-same-body': 'スポット溶接は別のbodyのフランジどうしで結んでください。',
   'spot-weld-unchanged': 'スポット溶接の値が変わっていません。',
+  'proportions-unchanged': '比率の設定が変わっていません。',
+  'proportions-body': '比率の設定に、今のbodyでないものがあります。',
+  'proportions-body-twice': '1つのbodyを比率の2つの役に入れることはできません。',
+  'proportions-ground': '地面の高さは±10,000,000 mm以内の数です。',
+  'proportions-band': '目安は数で、下限は上限以下です。',
   'spot-weld-pitch': 'スポット溶接のピッチは10〜200 mmにしてください。',
   'spot-weld-end-distance': '端からの距離は0〜100 mmにしてください。',
   'spot-weld-gap': '許す離れは0.1〜20 mmにしてください。',
@@ -835,6 +843,16 @@ const messages: Record<string, string> = {
     'fillをG2の辺の隣の面と同じ曲率（差1%以内）にできません。G1にするか、境界や隣の面を変えてください。',
   'fill-failed': 'この境界ではfillを作れません。',
   'curve-network-curves': '曲線網の曲線は、縦・横とも2〜16本にしてください。',
+  'two-view-curve':
+    '2面の曲線には、側面の要素（side）と平面の要素（plan）を1つずつ指定してください。',
+  'two-view-same-sketch': '2面の曲線の側面と平面は、別々のsketchの要素にしてください。',
+  'two-view-plane':
+    '2面の曲線の側面の要素はXZに平行な平面、平面の要素はXYに平行な平面のsketchに描いてください。',
+  'two-view-not-monotonic':
+    '2面の曲線の側面と平面の要素は、それぞれ前後（X）の一方向に進む線にしてください。折り返す線は2本に分けてください。',
+  'two-view-no-overlap': '2面の曲線の側面と平面の要素が、前後（X）の同じ範囲にありません。',
+  'two-view-fit':
+    '2面の曲線を0.001 mm（曲線網では交わりの許容差の4分の1）以内の曲線にできません。急に曲がる所を滑らかにしてください。',
   'curve-network-tolerance': '曲線網の交わりの許容は0.0001〜1 mmにしてください。',
   'curve-network-gap':
     '曲線網の縦の曲線と横の曲線が許容の距離で交わっていません。示した2本が交わるように曲線を直すか、許容を広げてください。',
@@ -2212,6 +2230,14 @@ export class CadController {
       },
       body: this.newBody(id, name.replace(/\.(step|stp)$/i, '') || 'STEP'),
     });
+  }
+  /**
+   * PMI-5b: keeps a document asset's bytes with the Host before an edit names it (an imported
+   * assembly's `assembly-pmi`). Throws with a message for the user when it cannot.
+   */
+  async stageAssets(assets: { ref: CadAssetRef; bytes: Uint8Array }[]): Promise<void> {
+    if (!this.options.assets) throw new Error(describeCode('step-import-unavailable'));
+    await this.options.assets.stage(assets);
   }
   /** #662: the bytes the Host keeps for an asset's hash (texture images for the view). */
   assetBytes(sha256: string): Uint8Array | undefined {
@@ -4023,6 +4049,10 @@ export class CadController {
     return this.run({ type: 'setSpotWeld', weld: { ...weld, ...change } });
   }
   /** CR4e: removes a spot weld row. */
+  /** CLF3: sets the car's proportion setup (roles, ground, bands), or removes it with null. */
+  setProportions(proportions: CadProportions | null) {
+    return this.run({ type: 'setProportions', proportions });
+  }
   removeSpotWeld(id: string) {
     return this.run({ type: 'removeSpotWeld', id });
   }

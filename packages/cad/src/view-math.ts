@@ -141,3 +141,36 @@ export function gridForView(
 export function depthRange(distance: number, modelRadius: number): { near: number; far: number } {
   return { near: distance / 1000, far: Math.max(distance * 100, (distance + modelRadius) * 2) };
 }
+
+/** CLF1b: a pane of the three-view drawing board, in CSS pixels from the canvas's top left. */
+export interface CadThreeViewPane {
+  view: 'front' | 'plan' | 'right';
+  label: string;
+  rect: { x: number; y: number; width: number; height: number };
+}
+/**
+ * CLF1b (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): the drawing board's three panes on a
+ * `width`×`height` canvas, and the one scale (mm per pixel) all three share. Side (XZ, the
+ * `front` view) top left, front (YZ, the `right` view) top right, plan (XY) bottom left: the
+ * side and the plan share their X, the side and the front their Z. Every pane looks at the
+ * centre of `box`, which fits its pane with `margin` to spare.
+ */
+export function threeViewLayout(box: Bounds, width: number, height: number, margin = 1.1) {
+  const w = width / 2;
+  const h = height / 2;
+  const [x, y, z] = [0, 1, 2].map((i) => box[1][i]! - box[0][i]!) as Vec3;
+  // Side: X across, Z up. Front: Y across, Z up. Plan: X across, Y up.
+  const mmPerPixel = margin * Math.max(x / w, y / w, z / h, y / h) || 1;
+  const pane = (view: CadThreeViewPane['view'], label: string, col: number, row: number) => ({
+    view,
+    label,
+    rect: { x: col * w, y: row * h, width: w, height: h },
+  });
+  const panes: CadThreeViewPane[] = [
+    pane('front', 'Side (XZ)', 0, 0),
+    pane('right', 'Front (YZ)', 1, 0),
+    pane('plan', 'Plan (XY)', 0, 1),
+  ];
+  const center = [0, 1, 2].map((i) => (box[0][i]! + box[1][i]!) / 2) as Vec3;
+  return { mmPerPixel, panes, center };
+}

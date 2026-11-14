@@ -47,6 +47,11 @@ import { NativeGraphSurface, relationProfile } from '@editor-platform/structured
 import type { BimDocument } from '@editor-platform/bim-core';
 import type { CharacterDocument } from '@editor-platform/character-core';
 import type { SimulationDocument } from '@editor-platform/simulation-core';
+import type { ConstructionDocument } from '@editor-platform/construction-core';
+import type { PcbDocument } from '@editor-platform/pcb-core';
+import type { SchematicDocument } from '@editor-platform/schematic-core';
+import type { LadderDocument } from '@editor-platform/ladder-core';
+import type { CosimDocument } from '@editor-platform/cosim-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
@@ -165,6 +170,11 @@ const CadHost = lazy(() => import('../cad/host'));
 const BimHost = lazy(() => import('../bim/host'));
 const CharacterHost = lazy(() => import('../character/host'));
 const SimulationHost = lazy(() => import('../simulation/host'));
+const ConstructionHost = lazy(() => import('../construction/host'));
+const PcbHost = lazy(() => import('../pcb/host'));
+const SchematicHost = lazy(() => import('../schematic/host'));
+const LadderHost = lazy(() => import('../ladder/host'));
+const CosimHost = lazy(() => import('../cosim/host'));
 
 export function checkedContent(content: unknown, kind: string | undefined) {
   return {
@@ -202,6 +212,21 @@ export function checkedContent(content: unknown, kind: string | undefined) {
       kind === 'simulation' && validContent('simulation', content)
         ? (content as SimulationDocument)
         : undefined,
+    construction:
+      kind === 'construction' && validContent('construction', content)
+        ? (content as ConstructionDocument)
+        : undefined,
+    pcb: kind === 'pcb' && validContent('pcb', content) ? (content as PcbDocument) : undefined,
+    schematic:
+      kind === 'schematic' && validContent('schematic', content)
+        ? (content as SchematicDocument)
+        : undefined,
+    ladder:
+      kind === 'ladder' && validContent('ladder', content)
+        ? (content as LadderDocument)
+        : undefined,
+    cosim:
+      kind === 'cosim' && validContent('cosim', content) ? (content as CosimDocument) : undefined,
   };
 }
 export type RenderedContent = ReturnType<typeof checkedContent>;
@@ -1029,6 +1054,93 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
               if (latest) host.persist(editedDraft(latest, content));
             }}
             persistRecord={async (record) => (await host.persist(record)) !== false}
+          />
+        </Suspense>
+      )}
+      {rendered.construction && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Construction schedule…</p>}>
+          <ConstructionHost
+            key={active.id}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<ConstructionDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            record={() => latestRecord(host)}
+            records={() => host.recordsRef.current}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
+          />
+        </Suspense>
+      )}
+      {rendered.pcb && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Circuit board…</p>}>
+          <PcbHost
+            key={active.id}
+            artifact={active}
+            session={host.sessions.current.get(active.id) as unknown as EditorSession<PcbDocument>}
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            records={() => host.recordsRef.current}
+          />
+        </Suspense>
+      )}
+      {rendered.schematic && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Schematic…</p>}>
+          <SchematicHost
+            key={active.id}
+            artifact={active}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<SchematicDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+          />
+        </Suspense>
+      )}
+      {rendered.ladder && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Ladder…</p>}>
+          <LadderHost
+            key={active.id}
+            artifact={active}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<LadderDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+          />
+        </Suspense>
+      )}
+      {rendered.cosim && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Co-simulation…</p>}>
+          <CosimHost
+            key={active.id}
+            artifact={active}
+            records={() => host.recordsRef.current}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<CosimDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
           />
         </Suspense>
       )}

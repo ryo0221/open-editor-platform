@@ -76,7 +76,11 @@ describe('glTF import', () => {
     expect(r.doc.materials[0].maps.color).toBe(image.id);
     expect(r.assets.get(image.id)).toEqual(onePixelPng);
     expect(
-      r.doc.actions[0].tracks.map((t) => [t.target.kind, t.target.id, t.target.property]),
+      r.doc.actions[0].tracks.map((t) => [
+        t.target.kind,
+        (t.target as { id?: string }).id,
+        t.target.property,
+      ]),
     ).toEqual([
       ['bone', 'bone:arm', 'rotation'],
       ['bone', 'bone:root', 'translation'],
@@ -280,7 +284,7 @@ describe('glTF import', () => {
     const r = importGltf(testGltf({ mirrorKey: true }));
     expect(r.losses).toEqual([]);
     const track = r.doc.actions[0].tracks.find(
-      (t) => t.target.id === 'bone:arm' && t.target.property === 'scale',
+      (t) => (t.target as { id?: string }).id === 'bone:arm' && t.target.property === 'scale',
     )!;
     // glTF scale (1, −1, 1) is (1, 1, −1) in Z-up.
     near(track.keys[1].value as number[], [1, 1, -1]);
@@ -360,7 +364,7 @@ describe('glTF import', () => {
     expect(validateCharacter(r.doc)).toEqual([]);
     const targets = r.doc.actions[0].tracks
       .filter((t) => t.target.property === 'rotation')
-      .map((t) => `${t.target.kind}:${t.target.id}`);
+      .map((t) => `${t.target.kind}:${(t.target as { id?: string }).id}`);
     expect(targets).toEqual(['bone:bone:arm', 'part:part:arm']);
   });
 

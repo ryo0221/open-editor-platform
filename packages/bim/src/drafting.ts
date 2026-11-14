@@ -3,6 +3,7 @@ import {
   arcOf,
   arcPoint,
   BimContext,
+  bimBodyLimits,
   bimLimits,
   bimWallAxis,
   deriveBim,
@@ -277,11 +278,20 @@ export function draftLevel(doc: BimDocument): BimOperation {
         {
           id: bimNewId(doc, 'l'),
           name: `${n}F`,
-          elevationMm: doc.levels.length ? top + bimDraftDefaults.storeyMm : 0,
+          elevationMm: doc.levels.length ? top + bodySized(doc, bimDraftDefaults.storeyMm) : 0,
         },
       ],
     },
   };
+}
+
+/**
+ * GV2b: a default sized for 1,750 mm people, scaled to the building's people (whole mm, at
+ * least 1). A 1,750 mm building keeps the defaults exactly.
+ */
+function bodySized(doc: BimDocument, mm: number) {
+  const k = bimBodyLimits(doc).scale;
+  return k === 1 ? mm : Math.max(1, Math.round(mm * k));
 }
 
 /** Up to the level above, or a storey's height on the top level. */
@@ -290,7 +300,7 @@ function storeyTop(doc: BimDocument, level: string): BimTop {
   const above = doc.levels
     .filter((l) => l.elevationMm > here.elevationMm)
     .sort((a, b) => a.elevationMm - b.elevationMm)[0];
-  return above ? { level: above.id, offsetMm: 0 } : { heightMm: bimDraftDefaults.storeyMm };
+  return above ? { level: above.id, offsetMm: 0 } : { heightMm: bodySized(doc, bimDraftDefaults.storeyMm) };
 }
 /** The first type of a kind, or the one asked for. */
 function typeOf(doc: BimDocument, kind: string, typeId?: string) {
@@ -500,7 +510,7 @@ export function draftRailing(
           typeId: typeId ? typeOf(doc, 'wall', typeId).id : (thinnest ?? typeOf(doc, 'wall')).id,
           hostId,
           side,
-          heightMm: bimDraftDefaults.railingHeightMm,
+          heightMm: bodySized(doc, bimDraftDefaults.railingHeightMm),
         },
       ],
     },
@@ -527,11 +537,12 @@ export function draftStair(
     'level' in top
       ? doc.levels.find((l) => l.id === top.level)!.elevationMm + top.offsetMm - here
       : top.heightMm;
-  const { riserMm, treadMm, risers: n } = bimLimits.stair;
+  const { riserMm, treadMm } = bimBodyLimits(doc).stair,
+    { risers: n } = bimLimits.stair;
   const clamp = (v: number, [lo, hi]: readonly number[]) => Math.min(hi!, Math.max(lo!, v));
   // As many risers as keep each within its limits, nearest the aim.
   const risers = clamp(
-    clamp(Math.round(height / bimDraftDefaults.stair.riserMm), [
+    clamp(Math.round(height / bodySized(doc, bimDraftDefaults.stair.riserMm)), [
       Math.ceil(height / riserMm[1]),
       Math.floor(height / riserMm[0]),
     ]),
@@ -549,7 +560,7 @@ export function draftStair(
           typeId: typeOf(doc, 'slab', typeId).id,
           start: a.point,
           directionRad: Math.atan2(b.xy[1] - a.xy[1], b.xy[0] - a.xy[0]),
-          widthMm: bimDraftDefaults.stair.widthMm,
+          widthMm: bodySized(doc, bimDraftDefaults.stair.widthMm),
           risers,
           treadMm: tread,
           base: { level, offsetMm: 0 },
@@ -732,7 +743,11 @@ export function draftHosted(
   typeId?: string,
 ): BimOperation {
   const t = kind === 'opening' ? undefined : typeOf(doc, kind, typeId);
-  const width = t && 'widthMm' in t ? t.widthMm : bimDraftDefaults.openingMm.widthMm;
+  const opening = {
+    widthMm: bodySized(doc, bimDraftDefaults.openingMm.widthMm),
+    heightMm: bodySized(doc, bimDraftDefaults.openingMm.heightMm),
+  };
+  const width = t && 'widthMm' in t ? t.widthMm : opening.widthMm;
   // Rounded first, then kept inside: rounding never pushes a fitting opening past the end.
   const start = Math.min(
     Math.max(Math.round(host.alongMm - width / 2), 0),
@@ -757,14 +772,14 @@ export function draftHosted(
             typeId: t!.id,
             hostId: host.wall.id,
             alongMm: start,
-            sillMm: bimDraftDefaults.sillMm,
+            sillMm: bodySized(doc, bimDraftDefaults.sillMm),
             flipFacing: false,
           }
         : {
             ...base,
             kind: 'opening',
             hostId: host.wall.id,
-            wall: { alongMm: start, sillMm: 0, ...bimDraftDefaults.openingMm },
+            wall: { alongMm: start, sillMm: 0, ...opening },
           };
   return { type: 'insert', entities: { elements: [element] } };
 }

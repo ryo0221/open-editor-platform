@@ -267,6 +267,15 @@ describe('bim part types (R2c-3c-3b)', () => {
     expect(bimViewBounds(evaluation, doc, ['p-2'])![0][0]).toBe(5000);
     expect(bimViewBounds(evaluation, doc, ['p-1'])![1][0]).toBe(100);
     expect(bimViewBounds(evaluation, doc, ['nothing'])).toBeUndefined();
+    // CS1b: a tinted part shown as its bounds is a box drawn solid in its tint, not "unavailable".
+    const tinted = bimViewSolids(doc, evaluation, {
+      selection: new Set(),
+      tint: (id) => (id === 'p-2' ? { color: '#f59e0b', opacity: 0.5 } : undefined),
+    }).find((v) => v.instances.some((i) => i.path[0] === 'p-2'))!;
+    expect(tinted.box).toBeUndefined();
+    expect(tinted.meshes![0]).toMatchObject({ color: '#f59e0b', opacity: 0.5 });
+    expect(tinted.meshes![0]!.mesh.indices).toHaveLength(36);
+    expect(tinted.meshes![0]!.mesh.origin).toEqual([50, 25, 5]);
   });
 
   it('colours a part body by body from its CAD looks, and keeps the part colour without them (OH-U1)', () => {
@@ -341,6 +350,18 @@ describe('bim part types (R2c-3c-3b)', () => {
     })[0]!.meshes!;
     expect(solids).toHaveLength(1);
     expect(solids[0]!.mesh.indices).toHaveLength(9);
+    // CR7d: with `bodies`, alike bodies stay apart, each mesh naming its body.
+    const apart = bimViewSolids(doc, evaluation, {
+      selection: new Set(),
+      bodies: true,
+      parts: new Map([
+        [H, { status: 'available', kinds: ['solid', 'solid'], looks: [tile, tile], faces: [1, 2] }],
+      ]),
+    })[0]!.meshes!;
+    expect(apart.map((m) => [m.body, [...m.mesh.indices]])).toEqual([
+      ['0', [0, 1, 2]],
+      ['1', [3, 4, 5, 6, 7, 8]],
+    ]);
     // Without looks, or when the faces do not add up, the part colour as before.
     expect(meshes({})).toEqual([
       { color: '#a78bfa', opacity: 1, sheet: true, indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] },

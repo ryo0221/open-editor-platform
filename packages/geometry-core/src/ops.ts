@@ -112,6 +112,18 @@ export interface GeometryRequest {
   };
 }
 
+/**
+ * PB7c (ADR 017): the shapes of named nodes written as one STEP file, one product per part
+ * under a top product named `name`, each part's surfaces in its colour. No feature history or
+ * domain structure: the receiving tool sees named solids.
+ */
+export interface GeometryStepRequest {
+  /** `ap214` (automotive design, IS) or `ap242` (managed model-based 3D engineering). */
+  schema: 'ap214' | 'ap242';
+  name: string;
+  parts: { node: string; name: string; color?: string }[];
+}
+
 export const geometryLimits = Object.freeze({
   /** Largest absolute coordinate, as in CAD. */
   coordinateMm: 1_000_000,
@@ -123,6 +135,11 @@ export const geometryLimits = Object.freeze({
   loftSections: 256,
   /** Smallest length the ops tell apart (a vertex gap, a vector). */
   toleranceMm: 1e-6,
+  /** PB7c: parts of one STEP file, and the file's largest size (as CAD's STEP export). */
+  stepParts: 10_000,
+  stepBytes: 64 * 1024 * 1024,
+  /** Characters of a STEP name. */
+  stepName: 256,
 });
 
 export type GeometryIssueCode =
@@ -233,6 +250,7 @@ export function geometryChildren(op: GeometryOp): string[] {
 export function validateGeometry(
   graph: GeometryGraph,
   requests: GeometryRequest[] = [],
+  step?: GeometryStepRequest,
 ): GeometryIssue[] {
   const issues: GeometryIssue[] = [];
   const ids = Object.keys(graph.nodes);
@@ -406,6 +424,24 @@ export function validateGeometry(
         issue('request-invalid', r.node, `${at}.projection`);
     }
   });
+  if (step) {
+    const name = (v: unknown) =>
+      typeof v === 'string' && v.length > 0 && [...v].length <= geometryLimits.stepName;
+    if (step.schema !== 'ap214' && step.schema !== 'ap242')
+      issue('request-invalid', '', 'step.schema');
+    if (!name(step.name)) issue('request-invalid', '', 'step.name');
+    if (!Array.isArray(step.parts) || step.parts.length === 0)
+      issue('request-invalid', '', 'step.parts');
+    else if (step.parts.length > geometryLimits.stepParts) issue('too-many', '', 'step.parts');
+    else
+      step.parts.forEach((p, i) => {
+        const at = `step.parts[${i}]`;
+        if (!geometryHasNode(graph, String(p?.node))) issue('node-missing', String(p?.node), at);
+        if (!name(p?.name)) issue('request-invalid', p.node, `${at}.name`);
+        if (p?.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(p.color))
+          issue('request-invalid', p.node, `${at}.color`);
+      });
+  }
   return issues;
 }
 

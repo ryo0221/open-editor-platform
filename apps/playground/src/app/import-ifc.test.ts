@@ -6,22 +6,12 @@ import type { BimPartReference } from '@editor-platform/bim';
 import { f02Plate, type CadDocument } from '@editor-platform/cad-core';
 import type { StoredArtifact } from '../model';
 import { readIfcImport } from './import-artifact';
+import { cadNativeLimit } from '../cad/resources';
 
 /**
  * The Playground's IFC import against its own CAD versions (R2c-6): the file's reader is replaced
  * by one that returns what `readIfc` returns for a file whose parts' elements were dropped.
  */
-/** The native file limit, lowered for one test. */
-const native = vi.hoisted(() => ({ limit: undefined as number | undefined }));
-vi.mock('../cad/resources', async (original) => {
-  const actual = await original<typeof import('../cad/resources')>();
-  return {
-    ...actual,
-    get cadNativeFileBytes() {
-      return native.limit ?? actual.cadNativeFileBytes;
-    },
-  };
-});
 const read = vi.hoisted(() => ({
   document: undefined as unknown,
   losses: [] as { entity: string; reason: string }[],
@@ -131,13 +121,14 @@ describe('importing an IFC file into the Playground (R2c-6)', () => {
     const once = await readIfcImport(file, { records: () => [one, two] });
     if (once.status !== 'imported') throw new Error(once.status);
     const size = new Blob([JSON.stringify(once.record)]).size;
-    native.limit = size - 1;
+    const limit = cadNativeLimit.bytes;
+    cadNativeLimit.bytes = size - 1;
     try {
       await expect(readIfcImport(file, { records: () => [one, two] })).rejects.toThrow(
         '取り込みません',
       );
     } finally {
-      native.limit = undefined;
+      cadNativeLimit.bytes = limit;
     }
   });
 });

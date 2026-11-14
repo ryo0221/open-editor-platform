@@ -6,6 +6,7 @@ import {
   assertCad,
   assertCadOperation,
   cadContentHash,
+  cadLimits,
   cadEditorCommand,
   cadTolerance,
   cadToleranceSetOf,
@@ -609,10 +610,19 @@ describe('D2 imported bodies (CAD13 content side)', () => {
 
   it('validates refs, kinds, sizes, units and an exact closure', () => {
     const doc = imported();
+    // CR7f (TS-1828): a STEP file and a BRep at their limits fit the document's asset total.
+    expect(
+      validateCad(
+        mutate(doc, (d) => {
+          d.assets[0].byteLength = cadLimits.stepBytes;
+          d.assets[1].byteLength = cadLimits.brepBytes;
+        }),
+      ).map((x) => x.code),
+    ).not.toContain('limit-asset-bytes');
     const cases: [unknown, string][] = [
       [mutate(doc, (d) => (d.assets[0].sha256 = 'abc')), 'asset-hash'],
       [mutate(doc, (d) => (d.assets[0].mediaType = 'text/plain')), 'asset-media-type'],
-      [mutate(doc, (d) => (d.assets[0].byteLength = 16 * 1024 * 1024 + 1)), 'asset-size'],
+      [mutate(doc, (d) => (d.assets[0].byteLength = cadLimits.stepBytes + 1)), 'asset-size'],
       [mutate(doc, (d) => (d.assets[1].byteLength = 0.5)), 'asset-size'],
       [mutate(doc, (d) => (d.features[0].args.brepAssetId = 'a-step')), 'asset-missing'],
       [mutate(doc, (d) => (d.features[0].args.sourceUnit = 'yard')), 'source-unit'],

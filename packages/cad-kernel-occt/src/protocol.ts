@@ -262,6 +262,11 @@ export type CadAnalysisSurfaceResult =
 export type CadStepAssemblyResult =
   | { status: 'ok'; step: Uint8Array }
   | { status: 'error'; code: string; elementId?: string; retryable: boolean };
+/** How fine a render's meshes are: a share of each body's diagonal, and the largest angle. */
+export interface CadRenderMeshQuality {
+  relativeDeflection: number;
+  angularDeflectionRad: number;
+}
 export type CadWorkerRequest =
   | { type: 'init'; build: CadKernelBuild }
   | {
@@ -273,6 +278,11 @@ export type CadWorkerRequest =
       document: CadDocument;
       /** Export triangulation (absolute linear deflection, mm); the display default otherwise. */
       deflectionMm?: number;
+      /**
+       * A render's finer triangulation, relative to each body's size like the display's (its
+       * bounding-box diagonal times `relativeDeflection`), evaluated afresh like an export.
+       */
+      renderMesh?: CadRenderMeshQuality;
       /**
        * The Host approved this build as a read-only substitute for the document's build. The
        * result names this build and is marked `reference`.

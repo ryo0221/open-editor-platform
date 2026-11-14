@@ -1,13 +1,26 @@
 # Structured Graph の変更の記録
 
-Structured Graph は **Preview / Experimental（pre-1.0）** です。schema・API・保存形式は予告なく
-変わることがあり、旧形式を読み続ける互換層は持ちません。更新の前に、残したい Graph を
-native JSON でエクスポートしてください。
+Structured Graph は互換を守る保存形式です（2026-11-14 から。[互換性の約束](../structured-graph-contract.md#互換性)）。
+保存形式を変えるときは schema の番号を上げ、古い番号の読み込みを残します。
+
+## 互換を守る形式へ（schema 3）
+
+- **変更：** Graph は schema 3 になりました。中身は schema 2 と同じで、Section につなぐ線（#594）を含む形式に番号を付け直したものです。
+  新しく作る・保存する Graph は schema 3 です。
+- **追加：** `upgradeGraphDocument`・`readGraphDocument`。schema 1（位置は `layout`、Section 無し）と schema 2 の Graph を、入力を変えずに
+  schema 3 として読みます。`graphSchemaVersion`・`readableGraphSchemas`。
+- **追加：** `upgradeGraphProfile`・`readGraphProfile`。Profile schema 1 を、Section の型が無い schema 2 として読みます。`graphProfileSchemaVersion`。
+- **変更：** presentation sidecar の schema 1（`positions`）を schema 2 の node presentation として読み、次の変更で schema 2 に書きます。
+- **変更：** 読めるより新しい schema は「Graph schema N is newer than this version reads」で断ります（Profile も同様）。
+  これまでの「schema 1 is not supported by this preview」の拒否は無くなりました。
+- **変更：** Playground は古い schema の下書きを開く・取り込むときに schema 3 へ移し、保存済みの版は書き換えません。版の復元・参照・
+  Data の参照元の一覧でも古い版を読みます。参照 Host（`graph-host.html`）の native も同じです。
+- **互換：** これより前の版は schema 3 の Graph を「Invalid Graph schema…」で断ります。
 
 ## 線を Section につなぐ（#594）
 
-- **変更：** edge の `from`・`to` に Section の ID を書けます。schema は 2 のままですが、Section につながる線を持つ Graph は
-  この版より前では読めません。
+- **変更：** edge の `from`・`to` に Section の ID を書けます。このときは schema 2 のままでした（後に schema 3 として区別。上の「互換を守る形式へ」）。
+  Section につながる線を持つ Graph は、この版より前では読めません。
 - **追加：** Profile の edge type の `connection.fromSections`・`toSections`（つなげてよい Section の型）。既定はつなげません。
   許されない Section への線は診断 `connection-section` になります。`graphEndpointKind`。
 - **変更：** `delete-section` に `cascade`。Section 自身につながる線があると `cascade: true` が要り、その線も一緒に消えます。

@@ -1,0 +1,26 @@
+{
+  "name": "@editor-platform/pcb",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./worker": "./src/worker.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/geometry-core": "*",
+    "@editor-platform/geometry-kernel-occt": "*",
+    "@editor-platform/pcb-core": "*",
+    "@editor-platform/schematic-core": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "react-dom": "19.1.1"
+  }
+}

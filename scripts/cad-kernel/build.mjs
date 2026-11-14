@@ -8,9 +8,9 @@ export const cadKernelBuild = {
     'donalffons/opencascade.js@sha256:3069f4c2e3ab62bb82d81843bad2c0f8552ee92373208f8f655ef9bf71c0524d',
   js: 'opencascade.d0-leakcheck.js',
   wasm: 'opencascade.d0-leakcheck.wasm',
-  wasmSha256: '187d0db45ebdd7acd16482effc4067a0647613925acea1016164051b4b7e9186',
+  wasmSha256: '443e3d7b6a1c68c44735833fd96c10380d5a63072f0bb36e30d366bc8c7c29c9',
   /** The loader's SHA-256, checked by fetch.mjs (the development server checks the Wasm only). */
-  jsSha256: '9dbe63d19996ee835b92999d5cadf3ecc2f3d78298c2ce8fb60ce12e8a6f96eb',
+  jsSha256: '9a138143d4b15435fd9f37581c9e7c1838b65fd0f9794330099872601af6d8fb',
 };
 /**
  * Where built kernels are released (README.md, "Released builds"): one GitHub release per build,
@@ -24,6 +24,17 @@ export const cadKernelRelease = { repository: 'ryo0221/open-editor-platform' };
  * Entries: { id, js, wasm, wasmSha256, substitute?, revoked? }.
  */
 export const cadKernelPrevious = [
+  {
+    // CR1c build (#906, released as cad-kernel-187d0db45ebd). The CR7f build only raises the
+    // Wasm memory limit from 512 MB to 2 GB (MAXIMUM_MEMORY; docs/cad/car-design.md, CR7f), so it
+    // may show these documents as a reference display until they are migrated.
+    id: 'opencascade.js-2.0.0-beta.b5ff984-cad-d1',
+    js: 'opencascade.d0-leakcheck.js',
+    wasm: 'opencascade.d0-leakcheck.wasm',
+    wasmSha256: '187d0db45ebdd7acd16482effc4067a0647613925acea1016164051b4b7e9186',
+    jsSha256: '9dbe63d19996ee835b92999d5cadf3ecc2f3d78298c2ce8fb60ce12e8a6f96eb',
+    substitute: true,
+  },
   {
     // PMI-5a build (#881, released as cad-kernel-1d04a1e00c99). The CR1c build adds bindings only
     // (TColgp_Array2OfPnt, TColStd_Array2OfReal, TColgp_Array1OfPnt2d, GeomAPI_ExtremaCurveCurve;

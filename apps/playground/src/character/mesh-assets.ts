@@ -3,7 +3,8 @@ import type { StoredArtifact } from '../model';
 import {
   cadClosure,
   cadInsertReserveBytes,
-  cadNativeFileBytes,
+  cadNativeLimit,
+  cadNativeLimitText,
   encodeBytes,
   nativeBytes,
   portableCadRecord,
@@ -17,7 +18,7 @@ const key = (r: { kind: string; sha256: string }) => `${r.kind} ${r.sha256}`;
  *
  * Every mesh edit adds a whole new mesh, so the record would only grow. The record keeps only
  * the assets something can still reach: the draft, every saved version, the current content and
- * the session's Undo and Redo entries, plus the new one. When even that would pass the 16 MB a
+ * the session's Undo and Redo entries, plus the new one. When even that would pass the limit a
  * stored record can hold, the oldest Undo entries are given up (`forget` of them), never the
  * versions or the content; when the native file itself (draft and versions, with the new asset)
  * would pass it, the edit is refused. Nothing is changed when it is refused.
@@ -49,9 +50,9 @@ export function characterMeshRecord(input: {
   const draft = { ...content, assets: [...content.assets, ...all.map((a) => a.ref)] };
   const after = { ...record, draft: { ...record.draft, content: draft } } as StoredArtifact;
   const portable = nativeBytes(portableCadRecord({ ...after, cadResources: withNew }));
-  if (portable + cadInsertReserveBytes > cadNativeFileBytes)
+  if (portable + cadInsertReserveBytes > cadNativeLimit.bytes)
     throw new Error(
-      `the native file would be ${(portable / 1e6).toFixed(1)} MB, over the 16 MB limit`,
+      `the native file would be ${(portable / 1e6).toFixed(1)} MB, over the ${cadNativeLimitText()} limit`,
     );
   // The stored record with the history from the n-th oldest Undo entry on.
   const fixed = new Set<string>([...cadClosure(after).keys(), ...cadClosure(record).keys()]);
@@ -65,7 +66,9 @@ export function characterMeshRecord(input: {
   };
   for (let n = 0; n <= undo.length; n++) {
     const { next, size } = storedWith(n);
-    if (size + cadInsertReserveBytes <= cadNativeFileBytes) return { record: next, forget: n };
+    if (size + cadInsertReserveBytes <= cadNativeLimit.bytes) return { record: next, forget: n };
   }
-  throw new Error('the stored record would pass the 16 MB limit even without Undo history');
+  throw new Error(
+    `the stored record would pass the ${cadNativeLimitText()} limit even without Undo history`,
+  );
 }

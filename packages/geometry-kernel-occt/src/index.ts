@@ -16,5 +16,7 @@ export {
   type GeometryMesh,
   type GeometryProjection,
   type GeometryResult,
+  type GeometryStepResult,
 } from './ops';
+export { stepString } from './step';
 export { faceTextureUvs } from './texture-uv';

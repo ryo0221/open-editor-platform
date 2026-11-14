@@ -8,7 +8,7 @@
 import { serializeArtifact } from '@editor-platform/artifact-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import type { StoredArtifact } from '../model';
-import { cadNativeFileBytes, portableCadRecord } from './resources';
+import { cadNativeLimit, cadNativeLimitText, portableCadRecord } from './resources';
 
 /** Bumped whenever `serializeArtifact` changes how it writes a record; receipts then expire. */
 export const cadNativeCodecVersion = 1;
@@ -184,13 +184,13 @@ export class CadNativeCounter {
         ? receipt.fragment
         : this.fragment(candidate, receipt.candidateHash);
     const size = this.count(record, { content: candidate, fragment });
-    return size > cadNativeFileBytes ? size : undefined;
+    return size > cadNativeLimit.bytes ? size : undefined;
   }
 
   /** The same admission for content that has no receipt: Undo, Redo and restore. */
   admitContent(record: StoredArtifact, content: CadDocument): number | undefined {
     const size = this.count(record, { content, fragment: this.fragment(content) });
-    return size > cadNativeFileBytes ? size : undefined;
+    return size > cadNativeLimit.bytes ? size : undefined;
   }
 }
 
@@ -202,6 +202,6 @@ export function assertCadContentFits(record: StoredArtifact, content: CadDocumen
   const size = cadNativeCounter.admitContent(record, content);
   if (size !== undefined)
     throw new Error(
-      `${action}と、native fileが${(size / 1e6).toFixed(1)} MBになり、上限の16 MBを超えます。内容は変えていません。`,
+      `${action}と、native fileが${(size / 1e6).toFixed(1)} MBになり、上限の${cadNativeLimitText()}を超えます。内容は変えていません。`,
     );
 }

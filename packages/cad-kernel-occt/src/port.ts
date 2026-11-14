@@ -19,6 +19,7 @@ import type {
   CadContinuityResult,
   CadKernelBuild,
   CadMesh,
+  CadRenderMeshQuality,
   CadStepAssemblyResult,
   CadWorkerRequest,
   CadWorkerResponse,
@@ -46,6 +47,11 @@ export interface WorkerKernelPortOptions {
    * after about `sliceMs`, so only one long feature (one large Boolean) runs up to this.
    */
   sliceJobTimeoutMs?: number;
+  /**
+   * CR7f (#846): what a STEP read adds to the job limit for each MiB of the file (initial 5 s).
+   * A read cannot pause, and a 64 MiB file (cadLimits.stepBytes) takes longer than 30 s.
+   */
+  stepReadMsPerMiB?: number;
   /**
    * Receives meshes of every successful evaluation, and of a failed one that shows the bodies
    * outside the failure (U4); ownership of the buffers moves to the callee.
@@ -86,6 +92,12 @@ export interface WorkerKernelPortOptions {
  * coarse mesh, reference display), shared by every port given it (#589). The meshes are read
  * only: every port that answers from it hands the same arrays to its `onMeshes`.
  */
+/**
+ * The asset kinds an evaluation reads, sent with the request: the BRep and PMI of an import, and
+ * an assembly's `assembly-pmi` (PMI-5b, checked when the assembly evaluates).
+ */
+const evaluatedAssetKinds = new Set(['normalized-brep', 'pmi', 'assembly-pmi']);
+
 export class CadEvaluationMemory {
   private readonly kept = new Map<
     string,
@@ -213,7 +225,7 @@ export class WorkerKernelPort implements CadKernelPort {
     return (
       cadContentHash(request.document) === request.candidateHash &&
       request.document.assets.every((a) => {
-        if (a.kind !== 'normalized-brep' && a.kind !== 'pmi') return true;
+        if (!evaluatedAssetKinds.has(a.kind)) return true;
         const bytes = this.options.assets?.(a.sha256);
         return (
           !!bytes &&
@@ -301,6 +313,25 @@ export class WorkerKernelPort implements CadKernelPort {
         this.evaluation(
           request,
           { deflectionMm, slice: this.slice() },
+          (data) => resolve({ evaluation: data.evaluation, meshes: data.meshes }),
+          (evaluation) => resolve({ evaluation, meshes: [] }),
+        ),
+      ),
+    );
+  }
+  /**
+   * Evaluates the document again, like an export, with finer meshes for a path-traced render
+   * (each body's deflection a share of its own size, as on screen). Nothing is cached.
+   */
+  renderMeshes(
+    request: CadEvaluateRequest,
+    quality: CadRenderMeshQuality,
+  ): Promise<{ evaluation: CadEvaluation; meshes: CadMesh[] }> {
+    return new Promise((resolve) =>
+      this.enqueueExport(
+        this.evaluation(
+          request,
+          { renderMesh: quality, slice: this.slice() },
           (data) => resolve({ evaluation: data.evaluation, meshes: data.meshes }),
           (evaluation) => resolve({ evaluation, meshes: [] }),
         ),
@@ -546,6 +577,7 @@ export class WorkerKernelPort implements CadKernelPort {
     request: CadEvaluateRequest,
     extra: {
       deflectionMm?: number;
+      renderMesh?: CadRenderMeshQuality;
       reference?: true;
       step?: true;
       brep?: true;
@@ -561,7 +593,7 @@ export class WorkerKernelPort implements CadKernelPort {
   ): Job {
     const assets: Record<string, Uint8Array> = {};
     for (const a of request.document.assets)
-      if (a.kind === 'normalized-brep' || a.kind === 'pmi') {
+      if (evaluatedAssetKinds.has(a.kind)) {
         const bytes = this.options.assets?.(a.sha256);
         if (bytes) assets[a.sha256] = bytes;
       }
@@ -732,8 +764,13 @@ export class WorkerKernelPort implements CadKernelPort {
   }
   /** A job's limit: the job limit, and for a split evaluation no later than its total limit. */
   private limit(job: Job) {
-    if (job.message.type !== 'evaluate' || !job.message.slice)
-      return this.options.jobTimeoutMs ?? 30_000;
+    const message = job.message;
+    if (message.type === 'import-step' || message.type === 'import-step-assembly')
+      return (
+        (this.options.jobTimeoutMs ?? 30_000) +
+        Math.round((message.bytes.byteLength / 2 ** 20) * (this.options.stepReadMsPerMiB ?? 5_000))
+      );
+    if (message.type !== 'evaluate' || !message.slice) return this.options.jobTimeoutMs ?? 30_000;
     const each = this.options.sliceJobTimeoutMs ?? 120_000;
     const left = (this.options.totalTimeoutMs ?? 300_000) - (this.now() - job.began!);
     return Math.max(0, Math.min(each, left));

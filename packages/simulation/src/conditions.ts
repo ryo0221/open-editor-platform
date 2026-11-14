@@ -10,6 +10,7 @@ import {
   type CadTopologyTable,
 } from '@editor-platform/cad-core';
 import {
+  aeroStudy,
   freshSimulationId,
   sameSimulationTarget,
   thermalConstraintKinds,
@@ -53,7 +54,8 @@ const thermal = <T extends { kind: string }>(items: readonly T[]) =>
 /** Whether a study of this kind takes an item of this kind. */
 const takes = (study: SimulationStudy, kind: string, isConstraint: boolean) =>
   // CR5c: a stiffness test keeps its own supports and loads only.
-  study.kind === 'linear-static' && study.test
+  // VS4a: a wind tunnel takes no loads or constraints.
+  (study.kind === 'linear-static' && study.test) || study.kind === 'aero'
     ? false
     : study.kind === 'thermal'
       ? isThermalKind(kind)
@@ -257,6 +259,21 @@ export function defaultModalStudy(doc: SimulationDocument): SimulationStudy {
   };
 }
 
+/**
+ * VS4b: a wind tunnel past the analysed bodies, with `aeroStudy`'s settings (no condition); the
+ * Host mesh scaled to the bodies' largest side `lengthMm` when the shapes are shown.
+ */
+export function defaultAeroStudy(doc: SimulationDocument, lengthMm?: number): SimulationStudy {
+  return aeroStudy(
+    freshSimulationId(doc, 'aero'),
+    numbered(
+      doc.studies.map((s) => s.name),
+      'Wind tunnel',
+    ),
+    lengthMm,
+  );
+}
+
 const numbered = (names: readonly string[], base: string) => {
   for (let n = 1; ; n++) if (!names.includes(`${base} ${n}`)) return `${base} ${n}`;
 };
@@ -441,6 +458,8 @@ export function removeConditionOps(
   id: string,
 ): SimulationOperation[] {
   const held = (s: SimulationStudy) => {
+    // VS4a: a wind tunnel takes no conditions; removing one leaves it as it is.
+    if (s.kind === 'aero') return true;
     const constraints = s.constraintIds.filter((c) => collection === 'loads' || c !== id);
     const convection = s.loadIds.some(
       (l) =>

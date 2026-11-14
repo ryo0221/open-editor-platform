@@ -1,12 +1,19 @@
 import { deflateSync } from 'node:zlib';
 import type { Page } from '@playwright/test';
 import { testGltf } from '@editor-platform/character-core/gltf-fixtures';
-import { importGltf, type CharacterDocument } from '@editor-platform/character-core';
+import { importGltf, seatedFigure, type CharacterDocument } from '@editor-platform/character-core';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
 import { inspectVideoFile } from '@editor-platform/video-metadata/file-admission';
-import { r2bJoints, sk01Watch, type CadDocument } from '@editor-platform/cad-core';
+import {
+  f59LowHPoint,
+  f63Car,
+  f63DriverHPoint,
+  r2bJoints,
+  sk01Watch,
+  type CadDocument,
+} from '@editor-platform/cad-core';
 import { f31BoxBuilding } from '@editor-platform/bim-core';
 import { create, expect, nativeArtifact, save, test } from './fixtures';
 
@@ -289,6 +296,103 @@ test('CH20: a character pose and a CAD joint keyed on the same timeline, played,
   await expect(keys.getByRole('button', { name: /^Key Rig j-turn angle at / })).toHaveCount(2);
 });
 
+// TS-1820, ST-292 (CR7d, CR7-U1 A): the whole car (F63) saved in CAD and placed as a prop in the
+// character, the figure in the action Sit (F64) with its hip on the driver's seat's H-point; the
+// occupant check finds no overlap, the headroom up to the roof, the H-point on the hip and the
+// sight line out over the hood.
+test('seats the figure in the whole car and checks the occupant (CR7d)', async ({ page }) => {
+  test.skip(!process.env.CAD_OCCT_DIST, 'needs the development kernel (CAD_OCCT_DIST)');
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_800_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  await importArtifact(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: car.assembly },
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Car');
+  await expect(page.getByTestId('cad-geometry-state')).toHaveText('Shape up to date', {
+    timeout: 600_000,
+  });
+  await save(page, 1);
+
+  // The figure with the action Sit (F64): the starter's figure and its mesh, with the action.
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const starter = await nativeArtifact(page);
+  await importArtifact(page, 'driver.json', {
+    ...starter,
+    name: 'Driver',
+    draft: { ...starter.draft, content: seatedFigure().doc },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue(/Driver/);
+  await expect(viewState(page)).toHaveText('Ready');
+  await page.getByRole('combobox', { name: 'Action', exact: true }).selectOption({ label: 'Sit' });
+
+  const parts = await panel(page, 'Parts');
+  await parts.getByLabel('Prop version').selectOption({ label: 'Car — v1 (Manual save)' });
+  await parts.getByRole('button', { name: 'Add prop', exact: true }).click();
+  await parts.getByRole('button', { name: 'Car', exact: true }).click();
+  const inspector = await panel(page, 'Inspector');
+  // The car turned so its front (+x) is the figure's (−y), the H-point on the hip (0, 0, 950).
+  const [hx, hy, hz] = f63DriverHPoint;
+  const place = async (field: string, v: number) => {
+    const f = inspector.getByLabel(field, { exact: true });
+    await f.fill(String(v));
+    await f.press('Enter');
+  };
+  await place('Prop rotation Z', -90);
+  await place('Prop position X', -hy);
+  await place('Prop position Y', hx);
+  await place('Prop position Z', 950 - hz);
+  const occupant = inspector.getByTestId('character-occupant');
+  await expect(occupant).toBeVisible({ timeout: 900_000 });
+  const seat = occupant.getByLabel('Seat part', { exact: true });
+  await expect(seat.locator('option', { hasText: 'Seat L / Cushion 1' })).toHaveCount(1, {
+    timeout: 900_000,
+  });
+  await seat.selectOption({ label: 'Seat L / Cushion 1' });
+  for (const [k, axis] of (['x', 'y', 'z'] as const).entries())
+    await occupant
+      .getByLabel(`H-point in the seat part (mm) ${axis}`, { exact: true })
+      .fill(String(f59LowHPoint[k]));
+  // Looking a little down the road.
+  await occupant.getByLabel('Eye looks along z', { exact: true }).fill('-0.1');
+  const check = occupant.getByRole('button', { name: 'Check the occupant', exact: true });
+  const status = occupant.getByTestId('character-occupant-status');
+  // Every part's meshes are in before the check counts: none is a stand-in box.
+  await expect
+    .poll(
+      async () => {
+        await check.click();
+        return (
+          (await status.innerText()) +
+          ((await occupant.getByText(/^Not checked/).count()) ? ' (boxes)' : '')
+        );
+      },
+      { timeout: 600_000, intervals: [10_000] },
+    )
+    .toBe('The figure overlaps no part of the prop.');
+  const headroom = occupant.getByTestId('character-occupant-headroom');
+  await expect(headroom).toHaveText(/^Headroom: (4\d|5\d|6\d)\.\d mm up to Own shape\.$/);
+  await expect(occupant.getByTestId('character-occupant-hpoint')).toHaveText(
+    'H-point to the hip: 0.0 mm (x 0.0, y 0.0, z 0.0).',
+  );
+  const sight = occupant.getByTestId('character-occupant-sight');
+  await expect(sight).toHaveText(/^Sight line: meets .+ at \d+\.\d mm\.$/);
+  test.info().annotations.push({
+    type: 'occupant',
+    description: `${await headroom.innerText()} ${await sight.innerText()}`,
+  });
+  await page.screenshot({ path: test.info().outputPath('cr7d-occupant.png') });
+  await occupant.screenshot({ path: test.info().outputPath('cr7d-panel.png') });
+});
+
 // C8p (TS-1297): a saved building (BIM) placed as a prop through Add prop, drawn beside the
 // figure once its kernel evaluated it, kept in the character's record, and back after a reload.
 test('places a saved building as a prop, saves and reloads it (C8p, TS-1297)', async ({ page }) => {
@@ -543,6 +647,148 @@ test('CH80: a figure and a building animated into a 720p MP4 and a PNG sequence 
   );
   await page.waitForTimeout(500);
   expect(downloads).toBe(0);
+});
+
+// TS-1826, ST-295 (CR7e): the action's camera keyed from the view at two times; the view looks
+// through it when seeking, and the exported frames are filmed through it (without the keys, the
+// last frame keeps the first one's camera).
+test('keys the action camera from the view and films the video through it (CR7e)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const transport = page.getByRole('group', { name: 'Playback', exact: true });
+  await transport.getByLabel('Action').selectOption({ label: 'Wave' });
+  const inspector = await panel(page, 'Inspector');
+  const camera = inspector.getByRole('group', { name: 'Action camera' });
+  await expect(camera.getByTestId('camera-keyed')).toHaveText(/^No camera keys/);
+  await expect(camera.getByLabel('Look through the action’s camera')).toBeDisabled();
+  const pixels = () =>
+    page.evaluate(() =>
+      document.querySelector<HTMLCanvasElement>('.character-canvas')!.toDataURL(),
+    );
+  const settled = async () => {
+    let last = await pixels();
+    await expect
+      .poll(async () => {
+        const now = await pixels();
+        const same = now === last;
+        last = now;
+        return same;
+      })
+      .toBe(true);
+    return last;
+  };
+  await camera.getByRole('button', { name: 'Key camera', exact: true }).click();
+  await expect(camera.getByTestId('camera-keyed')).toHaveText(/filmed through/);
+  const time = transport.getByLabel('Time');
+  const start = await settled();
+  // At the end, from another side: the view orbited, then keyed.
+  await time.press('End');
+  const box = (await page.locator('.character-canvas').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2 + 30, { steps: 8 });
+  await page.mouse.up();
+  await settled();
+  await camera.getByRole('button', { name: 'Key camera', exact: true }).click();
+  const end = await settled();
+  // Back to the start, the view looks through the first key again.
+  await time.press('Home');
+  await expect.poll(pixels).toBe(start);
+  await time.press('End');
+  await expect.poll(pixels).toBe(end);
+  await time.press('Home');
+  await expect.poll(pixels).toBe(start);
+
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  await video.getByLabel('Export action').selectOption({ label: 'Wave' });
+  await video.getByLabel('Size').selectOption('720p');
+  await video.getByLabel('Frame rate').selectOption('action');
+  const frames = async (tag: string) => {
+    const download = page.waitForEvent('download', { timeout: 180_000 });
+    await video.getByRole('button', { name: 'Export frames' }).click();
+    const zip = unzipSync(readFileSync(await (await download).path()));
+    const names = Object.keys(zip).sort();
+    return [names[0]!, names[names.length - 1]!].map((name, i) => {
+      const path = info.outputPath(`${tag}-${i ? 'last' : 'first'}.png`);
+      writeFileSync(path, zip[name]!);
+      return rgb(path);
+    });
+  };
+  const [keyedFirst, keyedLast] = await frames('keyed');
+  // The same export without the camera keys (two edits undone): the view's camera throughout.
+  for (let i = 0; i < 2; i++) await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(camera.getByTestId('camera-keyed')).toHaveText(/^No camera keys/);
+  const [plainFirst, plainLast] = await frames('plain');
+  expect(meanDiff(keyedFirst!, plainFirst!)).toBeLessThan(2);
+  expect(share(keyedLast!, plainLast!)).toBeGreaterThan(0.02);
+});
+
+// TS-1837, ST-299 (CR7g-3): the realistic lighting chosen for the view draws the view and the
+// exported frames under the environment light, the sun's shadows and tone mapping; Standard
+// draws exactly the view as before.
+test('draws the view and the exported frames under the realistic lighting (CR7g-3)', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'character');
+  await expect(viewState(page)).toHaveText('Ready');
+  const canvas = page.locator('.character-canvas');
+  await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+  const pixels = () =>
+    page.evaluate(() =>
+      document.querySelector<HTMLCanvasElement>('.character-canvas')!.toDataURL(),
+    );
+  const settled = async () => {
+    let last = await pixels();
+    await expect
+      .poll(async () => {
+        const now = await pixels();
+        const same = now === last;
+        last = now;
+        return same;
+      })
+      .toBe(true);
+    return last;
+  };
+  const inspector = await panel(page, 'Inspector');
+  const lighting = inspector.getByLabel('Lighting', { exact: true });
+  await expect(lighting).toHaveValue('standard');
+  const standard = await settled();
+  const video = inspector.getByRole('group', { name: 'Video export' });
+  const transport = page.getByRole('group', { name: 'Playback', exact: true });
+  await transport.getByLabel('Action').selectOption({ label: 'Wave' });
+  await video.getByLabel('Export action').selectOption({ label: 'Wave' });
+  await video.getByLabel('Size').selectOption('720p');
+  await video.getByLabel('Frame rate').selectOption('action');
+  const first = async (tag: string) => {
+    const download = page.waitForEvent('download', { timeout: 180_000 });
+    await video.getByRole('button', { name: 'Export frames' }).click();
+    const zip = unzipSync(readFileSync(await (await download).path()));
+    const name = Object.keys(zip).sort()[0]!;
+    const path = info.outputPath(`${tag}.png`);
+    writeFileSync(path, zip[name]!);
+    return rgb(path);
+  };
+  const plain = await first('standard');
+  await lighting.selectOption('realistic');
+  await expect(canvas).toHaveAttribute('data-lighting', 'realistic');
+  const realistic = await settled();
+  expect(realistic).not.toBe(standard);
+  const lit = await first('realistic');
+  // The exported frame is drawn under the same lighting as the view.
+  expect(meanDiff(lit!, plain!)).toBeGreaterThan(2);
+  await page.screenshot({ path: info.outputPath('cr7g3-realistic.png') });
+  await lighting.selectOption('standard');
+  await expect(canvas).toHaveAttribute('data-lighting', 'standard');
+  await transport.getByLabel('Time').press('Home');
+  await expect.poll(pixels).toBe(standard);
 });
 
 // C3f, CH30 (TS-1225): a humanoid modelled from a cube in the Playground. Cage elements are

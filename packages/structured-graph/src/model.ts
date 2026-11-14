@@ -72,8 +72,12 @@ export interface GraphPresentation {
   nodes: GraphNodePresentations;
   sections: Record<string, GraphSectionPresentation>;
 }
+/** The schema this version writes. It is raised whenever the saved format changes. */
+export const graphSchemaVersion = 3;
+/** The stored schemas this version reads: older ones are upgraded by `upgradeGraphDocument`. */
+export const readableGraphSchemas = [1, 2, 3] as const;
 export interface GraphDocument {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
   profile: ProfileRef;
   attributes: Attributes;
@@ -261,10 +265,16 @@ export function graphEndpointKind(
   if (graph.sections.some((s) => s.id === id)) return 'section';
   return undefined;
 }
-/** Schema 1 Graphs are refused rather than read: the preview has no reader for older formats. */
+/**
+ * Why a value is not a readable Graph. A newer schema than this version reads gets its own
+ * reason, so a document saved by a later version is never reported as corrupt.
+ */
 export const graphSchemaMessage = (value: unknown) =>
-  plainRecord(value) && value.schemaVersion === 1
-    ? 'Graph schema 1 is not supported by this preview; export it with the previous version or recreate it'
+  plainRecord(value) &&
+  typeof value.schemaVersion === 'number' &&
+  Number.isSafeInteger(value.schemaVersion) &&
+  value.schemaVersion > graphSchemaVersion
+    ? `Graph schema ${value.schemaVersion} is newer than this version reads (schemas 1–${graphSchemaVersion}); open it with a newer version`
     : 'Invalid Graph schema, IDs, references, JSON values or size limits';
 export function isGraphDocument(value: unknown): value is GraphDocument {
   if (!isGraphJson(value) || !plainRecord(value)) return false;
@@ -289,7 +299,7 @@ export function isGraphDocument(value: unknown): value is GraphDocument {
     plainRecord(v) &&
     new TextEncoder().encode(JSON.stringify(v)).length <= graphLimits.attributeBytes;
   if (
-    g.schemaVersion !== 2 ||
+    g.schemaVersion !== 3 ||
     !validGraphId(g.id) ||
     !plainRecord(g.profile) ||
     !validGraphId(g.profile.id) ||
@@ -350,6 +360,61 @@ export function isGraphDocument(value: unknown): value is GraphDocument {
 export function assertGraphDocument(value: unknown): asserts value is GraphDocument {
   if (!isGraphDocument(value)) throw new Error(graphSchemaMessage(value));
 }
+const onlyKeys = (value: unknown, keys: string[]) =>
+  plainRecord(value) && Object.keys(value).every((k) => keys.includes(k));
+/**
+ * A stored Graph of any readable schema as the current schema, or undefined when it is not one.
+ * Pure: the input (an immutable version, for example) is never changed, and a current Graph is
+ * returned as it is. Schema 2 (#396) has the current fields; it was also written with edges to a
+ * Section (#594), which schema 3 numbers. Schema 1 kept node positions in `layout` and had no
+ * Sections.
+ */
+export function upgradeGraphDocument(value: unknown): GraphDocument | undefined {
+  if (!isGraphJson(value) || !plainRecord(value)) return undefined;
+  if (value.schemaVersion === 3) return isGraphDocument(value) ? value : undefined;
+  let next: unknown;
+  if (value.schemaVersion === 2) next = { ...value, schemaVersion: 3 };
+  else if (value.schemaVersion === 1) {
+    const v = value;
+    if (
+      !onlyKeys(v, ['schemaVersion', 'id', 'profile', 'attributes', 'nodes', 'edges', 'layout']) ||
+      !Array.isArray(v.nodes) ||
+      !Array.isArray(v.edges) ||
+      !v.nodes.every((n) => onlyKeys(n, ['id', 'type', 'attributes'])) ||
+      !v.edges.every((e) => onlyKeys(e, ['id', 'type', 'from', 'to', 'attributes'])) ||
+      !plainRecord(v.layout) ||
+      !Object.values(v.layout).every(validPosition)
+    )
+      return undefined;
+    const nodes = new Set(v.nodes.map((n) => (n as unknown as GraphNode).id));
+    // Schema 1 edges joined nodes only.
+    if (
+      v.edges.some(
+        (e) =>
+          !nodes.has((e as unknown as GraphEdge).from) ||
+          !nodes.has((e as unknown as GraphEdge).to),
+      )
+    )
+      return undefined;
+    next = {
+      schemaVersion: 3,
+      id: v.id,
+      profile: v.profile,
+      attributes: v.attributes,
+      nodes: v.nodes,
+      edges: v.edges,
+      sections: [],
+      presentation: { nodes: v.layout, sections: {} },
+    };
+  } else return undefined;
+  return isGraphDocument(next) ? next : undefined;
+}
+/** `upgradeGraphDocument` that throws the reason (`graphSchemaMessage`) for an unreadable value. */
+export function readGraphDocument(value: unknown): GraphDocument {
+  const graph = upgradeGraphDocument(value);
+  if (!graph) throw new Error(graphSchemaMessage(value));
+  return graph;
+}
 /** The deterministic position of a node that has no saved presentation, by its list index. */
 export const defaultGraphPosition = (index: number): Position => ({
   x: 40 + (index % 3) * 260,
@@ -360,7 +425,7 @@ export function createGraph(
   id = newId('graph'),
 ): GraphDocument {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id,
     profile: { ...profile },
     attributes: {},

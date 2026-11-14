@@ -4,9 +4,16 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { setImmediate } from 'node:timers';
 import {
+  applyCadOperation,
   assemblyStepPlan,
+  cadAssetMediaTypes,
   cadContentHash,
+  emptyCad,
+  readCadAssemblyPmiAsset,
+  stepImportPlan,
+  type CadAssetRef,
   expandAssembly,
+  lampFixture,
   r2bBom,
   type CadDocument,
   type CadEvaluation,
@@ -243,6 +250,51 @@ describe.skipIf(!dist)(
       translationMm: [x, 0, 0] as [number, number, number],
       rotation: [0, 0, 0, 1] as [number, number, number, number],
     });
+
+    // TS-1823, ST-294 (CR7f): a part of solids and a sheet (the headlamp, F57: housing, bulb,
+    // lenses and the reflector sheet) reads back as all of them, not its solids alone.
+    it('reads a product of solids and a sheet back as both (CR7f)', async () => {
+      const lamp = {
+        ...lampFixture('headlamp'),
+        kernelProfile: { ...lampFixture('headlamp').kernelProfile, buildHash },
+      };
+      const hash = cadContentHash(lamp);
+      const { evaluation, bytes } = await brep(lamp);
+      const bodies = Object.values(evaluation.bodies);
+      const plan: CadStepPlan = {
+        products: [
+          {
+            key: 'lamp',
+            name: 'Headlamp',
+            id: 'HL-1',
+            shape: {
+              contentHash: hash,
+              bodies: bodies.map((b) => ({ kind: b.kind, color: '#888888' })),
+            },
+            instances: [],
+          },
+          {
+            key: 'root',
+            name: 'Car',
+            id: 'C-1',
+            instances: [{ product: 'lamp', name: 'Headlamp L', pose: at(0) }],
+          },
+        ],
+        root: 'root',
+        instances: 1,
+      };
+      const result = importStepAssembly(
+        oc,
+        writeAssemblyStep(oc, plan, new Map([[hash, bytes]])),
+        buildHash,
+      );
+      if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail}`);
+      const kinds = (list: { kind: string }[]) => list.map((b) => b.kind).sort();
+      expect(kinds(result.read.shapes)).toEqual(kinds(bodies));
+      expect(kinds(result.read.shapes)).toContain('sheet');
+      expect(result.read.instances).toHaveLength(bodies.length);
+      expect(result.report.split).toEqual([{ name: 'Headlamp', count: bodies.length }]);
+    }, 300_000);
 
     it('takes 1,024 instances and refuses 1,025 before anything is written', () => {
       const row = (count: number) =>
@@ -589,6 +641,126 @@ describe.skipIf(!dist)(
       const again = importStepAssembly(oc, renumbered, buildHash, { pmi: 'discard' });
       if (again.status !== 'ok') throw new Error(`${again.code} ${again.detail}`);
       expect(again.read.assemblyPmi).toEqual(asset);
+    }, 300_000);
+
+    it('records what each component placed and refuses an asset that does not fit (PMI-5b, CAD86, TS-1439)', async () => {
+      const file = new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/pmi-path.step', import.meta.url)),
+      );
+      const result = importStepAssembly(oc, file, buildHash, { pmi: 'discard' });
+      if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail}`);
+      // Each shape's counts are its BRep's, as an evaluation of the part maps them.
+      const owned: { delete(): void }[] = [];
+      const own = <T>(x: T) => (owned.push(x as never), x);
+      try {
+        result.read.shapes.forEach((shape, i) => {
+          oc.FS.writeFile('/f46.brep', result.breps[i]!);
+          const body = own(new oc.TopoDS_Shape());
+          oc.BRepTools.Read_2(
+            body,
+            '/f46.brep',
+            own(new oc.BRep_Builder()),
+            own(new oc.Message_ProgressRange_1()),
+          );
+          oc.FS.unlink('/f46.brep');
+          const count = (kind: string) => {
+            const map = own(new oc.TopTools_IndexedMapOfShape_1());
+            oc.TopExp.MapShapes_1(body, oc.TopAbs_ShapeEnum[kind], map);
+            return map.Extent();
+          };
+          expect(shape.counts).toEqual({
+            faces: count('TopAbs_FACE'),
+            edges: count('TopAbs_EDGE'),
+            vertices: count('TopAbs_VERTEX'),
+          });
+        });
+      } finally {
+        for (const x of owned.reverse()) x.delete();
+      }
+      const ref = (id: string, kind: CadAssetRef['kind'], bytes: Uint8Array): CadAssetRef => ({
+        id,
+        kind,
+        sha256: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+        byteLength: bytes.byteLength,
+        mediaType: cadAssetMediaTypes[kind],
+      });
+      let n = 0;
+      const plan = stepImportPlan(
+        { id: 'occt', buildHash },
+        result.read,
+        {
+          source: ref('source', 'source-step', file),
+          breps: result.breps.map((b, i) => ref(`brep-${i}`, 'normalized-brep', b)),
+        },
+        { sourceUnit: 'mm', scaleToMm: 1 },
+        (prefix) => `${prefix}-${++n}`,
+      );
+      if (plan.status !== 'ok' || !plan.assemblyPmi) throw new Error(JSON.stringify(plan));
+      const asset = readCadAssemblyPmiAsset(plan.assemblyPmi.bytes)!;
+      // The second plate and the block, with their versions and poses as read.
+      const named = Object.keys(asset.parts).sort();
+      expect(named).toEqual([plan.components[1]!.id, plan.components[2]!.id].sort());
+      for (const id of named) {
+        const i = plan.components.findIndex((c) => c.id === id);
+        const instance = result.read.instances[i]!;
+        expect(asset.parts[id]).toEqual({
+          contentHash: plan.parts.find((p) => p.id === plan.components[i]!.partId)!.source
+            .contentHash,
+          ...result.read.shapes[instance.shape]!.counts,
+          pose: instance.pose,
+        });
+      }
+      const assembly = (r: CadAssetRef) =>
+        applyCadOperation(emptyCad({ id: 'occt', buildHash }), {
+          type: 'insertComponents',
+          parts: plan.parts,
+          components: plan.components,
+          assemblyPmi: r,
+        });
+      const evaluate = async (
+        requestId: string,
+        doc: CadDocument,
+        assets: Record<string, Uint8Array>,
+      ) => {
+        const hash = cadContentHash(doc);
+        await handle({
+          type: 'evaluate',
+          requestId,
+          generation: 1,
+          baseHash: hash,
+          candidateHash: hash,
+          document: doc,
+          assets,
+        });
+        const m = posted.find((x) => x.type === 'result' && x.requestId === requestId);
+        if (m?.type !== 'result') throw new Error(JSON.stringify(m));
+        return m.evaluation;
+      };
+      const good = plan.assemblyPmi.ref;
+      expect(
+        await evaluate('f46-asset', assembly(good), { [good.sha256]: plan.assemblyPmi.bytes }),
+      ).toMatchObject({ status: 'ok' });
+      expect(await evaluate('f46-asset-missing', assembly(good), {})).toMatchObject({
+        status: 'error',
+        code: 'asset-missing',
+      });
+      // A face past the part's counts, and a target on a component it does not record.
+      const past = structuredClone(asset);
+      past.items[1]!.targets[0]!.index =
+        asset.parts[past.items[1]!.targets[0]!.component!]!.faces + 1;
+      const unknown = structuredClone(asset);
+      unknown.items[1]!.targets[0]!.component = plan.components[0]!.id;
+      for (const [id, wrong] of [
+        ['f46-asset-face', past],
+        ['f46-asset-component', unknown],
+      ] as const) {
+        const bytes = new TextEncoder().encode(JSON.stringify(wrong));
+        const r = ref('assembly-pmi', 'assembly-pmi', bytes);
+        expect(await evaluate(id, assembly(r), { [r.sha256]: bytes }), id).toMatchObject({
+          status: 'error',
+          code: 'assembly-pmi-invalid',
+        });
+      }
     }, 300_000);
   },
 );

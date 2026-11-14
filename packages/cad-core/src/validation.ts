@@ -10,6 +10,7 @@ import { validateConfigurations } from './configurations';
 import { spurGearProblem, type SpurGearSpec } from './gear';
 import { validateMounts } from './mounts';
 import { validateGearMeshes } from './gear-mesh';
+import { validateProportions } from './proportions';
 import { cadJointLimits } from './joints';
 import { validateInterferenceAllowances } from './interference';
 import {
@@ -46,6 +47,8 @@ import {
   cadSewInputs,
   cadSewToleranceMm,
   cadLimits,
+  cadMassLimits,
+  cadMassMaterials,
   cadSpotWeldLimits,
   cadPatternCopies,
   cadFilletRadii,
@@ -1054,6 +1057,35 @@ function validatePath(
  * a reference to an edge of a feature's result, each once. Whether they close a loop in space is
  * decided by the kernel (`boundary-open`), as sketch frames may come from faces.
  */
+/**
+ * A sketch's line, arc or open spline `{ sketchId, element }` used as a curve: false (after
+ * reporting why) when the sketch is missing or the element is not one curve with two ends.
+ */
+function sketchCurve(
+  c: Check,
+  x: unknown,
+  cp: string,
+  sketches: Map<string, CadSketch | undefined>,
+): boolean {
+  if (!record(x)) {
+    c.error('boundary-curve', cp);
+    return false;
+  }
+  if (!c.keys(x, ['sketchId', 'element'], cp)) return false;
+  if (!sketches.has(x.sketchId as string)) {
+    c.error('sketch-missing', `${cp}.sketchId`);
+    return false;
+  }
+  const sketch = sketches.get(x.sketchId as string);
+  if (!sketch) return false;
+  const e = typeof x.element === 'string' ? sketchElement(sketch, x.element) : undefined;
+  // One curve with two ends: a circle or a closed spline is a loop by itself.
+  if (!e || e.ends.length !== 2) {
+    c.error('boundary-curve', `${cp}.element`);
+    return false;
+  }
+  return true;
+}
 function validateCurves(
   c: Check,
   curves: [unknown, string][],
@@ -1076,19 +1108,38 @@ function validateCurves(
       }
       continue;
     }
-    if (!c.keys(x, ['sketchId', 'element'], cp)) continue;
-    if (!sketches.has(x.sketchId as string)) {
-      c.error('sketch-missing', `${cp}.sketchId`);
+    if (Object.hasOwn(x, 'twoView')) {
+      // CLF2: a side element and a plan element of two different sketches. Which plane each
+      // lies on, and that each runs one way along X, is checked when the curve is built.
+      c.keys(x, ['twoView'], cp);
+      const t = x.twoView;
+      const tp = `${cp}.twoView`;
+      if (!record(t)) {
+        c.error('two-view-curve', tp);
+        continue;
+      }
+      if (!c.keys(t, ['side', 'plan'], tp)) continue;
+      const ok = (['side', 'plan'] as const).map((view) =>
+        sketchCurve(c, t[view], `${tp}.${view}`, sketches),
+      );
+      if (!ok.every(Boolean)) continue;
+      const [side, plan] = [t.side, t.plan] as { sketchId: string; element: string }[];
+      if (side!.sketchId === plan!.sketchId) {
+        c.error('two-view-same-sketch', `${tp}.plan.sketchId`);
+        continue;
+      }
+      const key = JSON.stringify([
+        'twoView',
+        side!.sketchId,
+        side!.element,
+        plan!.sketchId,
+        plan!.element,
+      ]);
+      if (seen.has(key)) c.error('boundary-curve-duplicate', cp);
+      seen.add(key);
       continue;
     }
-    const sketch = sketches.get(x.sketchId as string);
-    if (!sketch) continue;
-    const e = typeof x.element === 'string' ? sketchElement(sketch, x.element) : undefined;
-    // One curve with two ends: a circle or a closed spline is a loop by itself.
-    if (!e || e.ends.length !== 2) {
-      c.error('boundary-curve', `${cp}.element`);
-      continue;
-    }
+    if (!sketchCurve(c, x, cp, sketches)) continue;
     const key = JSON.stringify([x.sketchId, x.element]);
     if (seen.has(key)) c.error('boundary-curve-duplicate', cp);
     seen.add(key);
@@ -1791,6 +1842,22 @@ const countLimits = [
 ] as const;
 
 /** Full CAD validation from unknown input: schema, references, graph and limits. */
+/** CR7a: a body's density in range, and a thickness only on a sheet, in range. */
+function checkMass(c: Check, m: unknown, kind: unknown, ap: string) {
+  if (!record(m)) return c.error('mass', ap);
+  c.keys(m, ['densityKgM3'], ap, ['thicknessMm', 'material']);
+  const within = (v: unknown, [lo, hi]: readonly [number, number]) =>
+    typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  if (!within(m.densityKgM3, cadMassLimits.densityKgM3))
+    c.error('mass-density', `${ap}.densityKgM3`);
+  if (Object.hasOwn(m, 'thicknessMm')) {
+    if (kind !== 'sheet') c.error('mass-thickness-solid', `${ap}.thicknessMm`);
+    else if (!within(m.thicknessMm, cadMassLimits.thicknessMm))
+      c.error('mass-thickness', `${ap}.thicknessMm`);
+  }
+  if (Object.hasOwn(m, 'material') && !Object.hasOwn(cadMassMaterials, m.material as string))
+    c.error('mass-material', `${ap}.material`);
+}
 /** A body's appearance (#661): colour, opacity and, optionally, a finish and its preset. */
 function checkAppearance(c: Check, a: unknown, ap: string) {
   if (!record(a)) return c.error('appearance', ap);
@@ -1875,6 +1942,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       'interferenceAllowances',
       'mounts',
       'gearMeshes',
+      'proportions',
     ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
@@ -2058,6 +2126,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
         ...(consumed ? ['consumedByFeatureId'] : []),
       ],
       path,
+      ['mass'],
     );
     if (b.kind !== 'solid' && b.kind !== 'sheet') c.error('body-kind', `${path}.kind`);
     c.id(b.id, `${path}.id`);
@@ -2084,6 +2153,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
     } else if (b.state === 'active' && result && cadId(b.id))
       active.push({ id: b.id, result: result.id });
     checkAppearance(c, b.appearance, `${path}.appearance`);
+    if (Object.hasOwn(b, 'mass')) checkMass(c, b.mass, b.kind, `${path}.mass`);
   }
   if (graphOk && !c.d.some((x) => x.code === 'feature-cycle'))
     for (const a of active) {
@@ -2094,6 +2164,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
     }
 
   const activeIds = new Set(active.map((a) => a.id));
+  if (Object.hasOwn(value, 'proportions')) validateProportions(c, value.proportions, activeIds);
   for (const [i, v] of (value.namedViews as unknown[]).entries()) {
     const path = `$.namedViews[${i}]`;
     if (!record(v)) {

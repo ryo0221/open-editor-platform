@@ -2,6 +2,7 @@
  * CAD schema 2 (docs/cad/model.md, docs/cad/r1-modeling.md), the only schema: CAD is unreleased,
  * so schema 1 is not read. Pure data: no functions, typed arrays, URLs or Wasm handles.
  */
+import type { CadProportions } from './proportions';
 import type {
   CadComponent,
   CadComponentPattern,
@@ -121,7 +122,21 @@ export interface CadEdgeChain {
  * R2a-2c: one curve of a surface feature's boundary: a line, arc or open spline of a sketch, or
  * an edge of a feature's result (read, never consumed).
  */
-export type CadCurveSource = { sketchId: string; element: string } | { edge: CadTopologyRef };
+export type CadCurveSource =
+  | { sketchId: string; element: string }
+  | { edge: CadTopologyRef }
+  | {
+      /**
+       * CLF2 (docs/cad/car-look-process.md): the 3D curve whose side view (onto XZ) is element
+       * `side` and whose plan view (onto XY) is element `plan`. `side` lies on a sketch plane
+       * parallel to XZ, `plan` on one parallel to XY; each runs one way along X. The curve spans
+       * where their X ranges overlap.
+       */
+      twoView: {
+        side: { sketchId: string; element: string };
+        plan: { sketchId: string; element: string };
+      };
+    };
 /**
  * R2a-3: what a trim cuts a sheet with: a closed chain of a sketch projected along the sketch's
  * normal (kept `inside` or `outside`), a plane, or another sheet's result (read, never consumed;
@@ -609,6 +624,35 @@ export interface CadTextures {
  */
 export type CadBodyKind = 'solid' | 'sheet';
 /** `resultFeatureId` is the body's dedicated final placement transform. */
+/**
+ * CR7a (docs/cad/car-design.md, A3): what a body weighs. The material's density, and a sheet's
+ * thickness (a sheet has no volume). Separate from the appearance, which is only its look.
+ */
+export interface CadBodyMass {
+  densityKgM3: number;
+  /** A sheet's only: without it the sheet is left out of the mass. */
+  thicknessMm?: number;
+  /** The `cadMassMaterials` entry the density was copied from. */
+  material?: string;
+}
+/** CR7a: the accepted ranges (foams to tungsten; sheet metal to thick plates). */
+export const cadMassLimits = Object.freeze({
+  densityKgM3: Object.freeze([10, 25_000] as const),
+  thicknessMm: Object.freeze([0.1, 20] as const),
+});
+/** CR7a: common materials' densities (kg/m³), offered in the inspector. */
+export const cadMassMaterials: Readonly<Record<string, number>> = Object.freeze({
+  steel: 7850,
+  aluminium: 2700,
+  pmma: 1190,
+  polycarbonate: 1200,
+  abs: 1050,
+  polypropylene: 900,
+  rubber: 1150,
+  glass: 2500,
+  'pu-foam': 45,
+  leather: 860,
+});
 export type CadBody = {
   id: string;
   name: string;
@@ -616,6 +660,8 @@ export type CadBody = {
   kind: CadBodyKind;
   resultFeatureId: string;
   appearance: CadAppearance;
+  /** CR7a: absent, the body is left out of the mass. */
+  mass?: CadBodyMass;
 } & ({ state: 'active' } | { state: 'consumed'; consumedByFeatureId: string });
 export interface CadCamera {
   position: Vec3;
@@ -752,6 +798,8 @@ export interface CadDocument {
   mounts?: CadMount[];
   /** WM2 (docs/cad/watch-design.md): spur gears in mesh, 1–256 when present. */
   gearMeshes?: CadGearMesh[];
+  /** CLF3 (docs/cad/car-look-process.md): the car's proportion setup (CLF-U2). */
+  proportions?: CadProportions;
 }
 export interface CadDiagnostic {
   code: string;
@@ -796,15 +844,13 @@ export const cadLimits = Object.freeze({
   jsonDepth: 32,
   /** D2 asset limits per document (model.md); the Host's total admission comes first. */
   assets: 128,
-  stepBytes: 16 * 1024 * 1024,
-  /**
-   * WM5c (docs/cad/watch-design.md): an assembly written as STEP AP242. Larger than what is read
-   * (`stepBytes`): a watch's 17 parts with their gears write about 16 MiB, so the written file
-   * may not be read back here.
-   */
-  stepExportBytes: 64 * 1024 * 1024,
+  stepBytes: 64 * 1024 * 1024,
   brepBytes: 32 * 1024 * 1024,
-  assetBytes: 64 * 1024 * 1024,
+  /**
+   * CR7f: an imported part version keeps the whole STEP file and its own BRep, so the total fits
+   * a STEP file and a BRep at their limits.
+   */
+  assetBytes: 96 * 1024 * 1024,
 });
 /** Tools one Boolean applies at once (docs/cad/r1-modeling.md, 上限). */
 export const cadBooleanTools = 256;

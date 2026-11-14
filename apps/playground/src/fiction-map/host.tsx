@@ -17,6 +17,7 @@ import {
 } from '@editor-platform/fiction-map/model';
 import type { SurfaceHost } from '../app/editor-surfaces';
 import { editedDraft } from '../app/records';
+import { playgroundArtifactRefHost } from './artifact-refs';
 /** Same Session as the Playground toolbar/history/storage. No second EditorSession. */
 export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
   const latest = useRef(host);
@@ -49,6 +50,16 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
     return result;
   }
   const saved = host.savedRecords.current.get(host.active.id);
+  const artifactRefs = useMemo(
+    () =>
+      playgroundArtifactRefHost({
+        mapId: host.active.id,
+        saved: () => latest.current.savedRecords.current,
+        activate: (id) => latest.current.activate(id),
+        setStatus: (m) => latest.current.setStatus(m),
+      }),
+    [host.active.id],
+  );
   return (
     <>
       <FictionMapSurface
@@ -63,6 +74,7 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
         onCommit={(prepared) => publish(commitFictionMapChange(native, prepared, gate))}
         onUndo={() => publish(undoFictionMap(native, gate))}
         onRedo={() => publish(redoFictionMap(native, gate))}
+        artifactRefs={artifactRefs}
       />
       <FictionMapNativeInput
         base={base}

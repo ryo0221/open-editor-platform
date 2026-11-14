@@ -63,9 +63,9 @@ describe('character schema 1', () => {
     expect(codes(edit((d) => (d.actions[0].tracks[0].keys[1].value = [1, 2, 3])))).toEqual([
       'value $.actions[0].tracks[0].keys[1].value',
     ]);
-    expect(codes(edit((d) => (d.actions[0].tracks[1].target.id = 'arm.R')))).toEqual([
-      'target-id $.actions[0].tracks[1].target.id',
-    ]);
+    expect(
+      codes(edit((d) => ((d.actions[0].tracks[1].target as { id?: string }).id = 'arm.R'))),
+    ).toEqual(['target-id $.actions[0].tracks[1].target.id']);
     expect(
       codes(edit((d) => ((d.materials[0] as unknown as Record<string, unknown>).extra = 1))),
     ).toEqual(['unknown-key $.materials[0].extra']);
@@ -261,7 +261,7 @@ describe('keyframes (C2a)', () => {
       trackId: freshCharacterId(next, 'wave/hip/translation'),
       keyId: freshCharacterId(next, 'wave/hip/translation#0'),
     });
-    const hip = wave(next).tracks.find((t) => t.target.id === 'hip')!;
+    const hip = wave(next).tracks.find((t) => (t.target as { id?: string }).id === 'hip')!;
     expect(hip.keys).toEqual([
       { id: 'wave/hip/translation#0', tick: 0, value: [0, 0, 1000], easing: { type: 'hold' } },
     ]);

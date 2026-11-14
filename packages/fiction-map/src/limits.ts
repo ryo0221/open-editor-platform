@@ -24,6 +24,7 @@ export const fictionMapLimits = Object.freeze({
   passPairs: 62040,
   appendPairs: 124080,
   edges: 1000,
+  artifactRefsPerFeature: 8,
 } as const);
 export type FictionMapLimits = typeof fictionMapLimits;
 export interface WorkPlan {

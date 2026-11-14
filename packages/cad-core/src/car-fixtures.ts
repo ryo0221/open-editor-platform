@@ -27,31 +27,39 @@ import type { CadSketch } from './sketch';
 const XZ: Quaternion = [Math.SQRT1_2, 0, 0, Math.SQRT1_2];
 const grey = { color: '#9aa4b1', opacity: 1 };
 
-/** Closed outlines (rectangles, corners in order) as one sketch's lines, one chain each. */
-function outlines(
+/** A rectangle `[u0, u1, v0, v1]`, or a polygon's corners (u, v) in order (CR7g-2). */
+export type F28Outline = [number, number, number, number] | readonly (readonly [number, number])[];
+
+/** Closed outlines (rectangles or polygons) as one sketch's lines, one chain each. */
+export function outlines(
   id: string,
   name: string,
   orientation: Quaternion,
-  boxes: [number, number, number, number][],
+  boxes: readonly F28Outline[],
 ): { sketch: CadSketch; chains: string[][] } {
   const solved: Record<string, [number, number]> = {};
   const entities: CadSketch['entities'] = [];
-  const chains = boxes.map(([u0, u1, v0, v1], k) => {
-    const corners = (
-      [
-        [u0, v0],
-        [u1, v0],
-        [u1, v1],
-        [u0, v1],
-      ] as [number, number][]
-    ).map((p, j) => {
+  const chains = boxes.map((box, k) => {
+    const points: [number, number][] =
+      typeof box[0] === 'number'
+        ? (() => {
+            const [u0, u1, v0, v1] = box as [number, number, number, number];
+            return [
+              [u0, v0],
+              [u1, v0],
+              [u1, v1],
+              [u0, v1],
+            ];
+          })()
+        : (box as readonly (readonly [number, number])[]).map(([u, v]) => [u, v]);
+    const corners = points.map((p, j) => {
       solved[`b${k}p${j}`] = p;
       return `b${k}p${j}`;
     });
     entities.push(...corners.map((c) => ({ type: 'point' as const, id: c })));
     return corners.map((start, j) => {
       const line = `b${k}s${j}`;
-      entities.push({ type: 'line', id: line, start, end: corners[(j + 1) % 4]! });
+      entities.push({ type: 'line', id: line, start, end: corners[(j + 1) % corners.length]! });
       return line;
     });
   });
@@ -82,27 +90,63 @@ export const f28Outlines = {
 /** The parameter all F28 gaps read. */
 export const f28GapParameter = 'panel-gap';
 
-export function f28B2Car(options: { gap?: number; upTo?: 'door' | 'panels' } = {}): CadDocument {
+export function f28B2Car(
+  options: {
+    gap?: number;
+    upTo?: 'door' | 'panels';
+    /** CR7g-1: the skin (F25) and the hood and hatch outlines widened by this across the car. */
+    widthScale?: number | readonly number[];
+    /** CR7g-1: the roof side's point, as a part of the half width (F25's 0.55 when not given). */
+    greenhouse?: number;
+    /** The wheel arches' flares' continuity (F25's, G2 when not given). */
+    flareContinuity?: 'G1' | 'G2';
+    /** CR7g-2: the side windows' outlines (x/z), `f28Outlines.windows` when not given. */
+    windows?: readonly F28Outline[];
+  } = {},
+): CadDocument {
+  // The hood and hatch lines run across the middle sections: the widest factor.
+  const scale = options.widthScale ?? 1;
+  const k = typeof scale === 'number' ? scale : Math.max(...scale);
+  const across = ([u0, u1, v0, v1]: [number, number, number, number]): [
+    number,
+    number,
+    number,
+    number,
+  ] => [u0, u1, Math.round(v0 * k), v1];
   // One parameter for every opening's and panel's gap: one edit changes them all (CR3f).
   const gap = { parameterId: f28GapParameter };
   const door = outlines('door-line', 'Door line', XZ, [f28Outlines.door]);
-  const hood = outlines('hood-line', 'Hood line', identityQuaternion(), [f28Outlines.hood]);
-  const hatch = outlines('hatch-line', 'Hatch line', identityQuaternion(), [f28Outlines.hatch]);
-  const windows = outlines('window-line', 'Window line', XZ, f28Outlines.windows);
-  let doc = applyCadOperation(f25B1Car(), {
-    type: 'insertFeatures',
-    parameters: [
-      {
-        id: f28GapParameter,
-        name: 'Panel gap',
-        type: 'length',
-        value: options.gap ?? cadPanelGapDefaultMm,
-      },
-    ],
-    sketches: [door.sketch, hood.sketch, hatch.sketch, windows.sketch],
-    features: [],
-    bodies: [],
-  });
+  const hood = outlines('hood-line', 'Hood line', identityQuaternion(), [across(f28Outlines.hood)]);
+  const hatch = outlines('hatch-line', 'Hatch line', identityQuaternion(), [
+    across(f28Outlines.hatch),
+  ]);
+  const windows = outlines(
+    'window-line',
+    'Window line',
+    XZ,
+    options.windows ?? f28Outlines.windows,
+  );
+  let doc = applyCadOperation(
+    f25B1Car({
+      widthScale: scale,
+      ...(options.greenhouse ? { greenhouse: options.greenhouse } : {}),
+      ...(options.flareContinuity ? { flareContinuity: options.flareContinuity } : {}),
+    }),
+    {
+      type: 'insertFeatures',
+      parameters: [
+        {
+          id: f28GapParameter,
+          name: 'Panel gap',
+          type: 'length',
+          value: options.gap ?? cadPanelGapDefaultMm,
+        },
+      ],
+      sketches: [door.sketch, hood.sketch, hatch.sketch, windows.sketch],
+      features: [],
+      bodies: [],
+    },
+  );
   // Each panel is cut out of the skin as it stands then, in one edit with its opening (CR3b).
   const cut = (id: string, name: string, line: { sketch: CadSketch; chains: string[][] }) => {
     const source = doc.bodies.find((b) => b.id === 'skin-body')!.resultFeatureId;
@@ -222,7 +266,10 @@ export function f28B2CarParts(options: { gap?: number } = {}) {
 }
 
 /** Bounds the parts are drawn by before they evaluate (their outlines on the skin, rounded out). */
-const f28Bounds: Record<'door' | 'hood', [[number, number, number], [number, number, number]]> = {
+export const f28Bounds: Record<
+  'door' | 'hood',
+  [[number, number, number], [number, number, number]]
+> = {
   door: [
     [1440, -830, 290],
     [2560, -700, 870],

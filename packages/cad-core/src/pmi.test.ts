@@ -14,6 +14,9 @@ import {
   pmiAssetProblem,
   assemblyPmiAssetProblem,
   readCadPmiAsset,
+  cadAssemblyPmiStates,
+  readCadAssemblyPmiAsset,
+  type CadAssemblyPmiAsset,
   type CadPmiAsset,
 } from './pmi';
 
@@ -615,14 +618,23 @@ describe('reading and naming PMI items (PMI-2)', () => {
 
 describe("an assembly's PMI of particular instances (PMI-5a, CAD86, TS-1435)", () => {
   // F46: the block (6 faces) placed once and the plate (7 faces) twice.
-  const parts: Record<string, typeof counts> = {
-    'c-plate-1': counts,
-    'c-plate-2': counts,
-    'c-block': { faces: 6, edges: 12, vertices: 8 },
+  const read = (n: number, c: typeof counts) => ({
+    contentHash: String(n).repeat(64),
+    ...c,
+    pose: {
+      translationMm: [n * 10, 0, 0] as [number, number, number],
+      rotation: identityQuaternion(),
+    },
+  });
+  const parts = {
+    'c-plate-1': read(1, counts),
+    'c-plate-2': read(1, counts),
+    'c-block': read(2, { faces: 6, edges: 12, vertices: 8 }),
   };
   const on = (component: string, index: number) => ({ component, shape: 'face' as const, index });
-  const assembly = (): CadPmiAsset => ({
+  const assembly = (): CadAssemblyPmiAsset => ({
     version: 1,
+    parts,
     items: [
       {
         id: 'pmi-1',
@@ -654,7 +666,7 @@ describe("an assembly's PMI of particular instances (PMI-5a, CAD86, TS-1435)", (
       },
     ],
   });
-  const check = (a: unknown) => assemblyPmiAssetProblem(a, (id) => parts[id]);
+  const check = (a: unknown) => assemblyPmiAssetProblem(a);
 
   it('accepts targets on components, across two of them', () => {
     expect(check(assembly())).toBeUndefined();
@@ -686,5 +698,88 @@ describe("an assembly's PMI of particular instances (PMI-5a, CAD86, TS-1435)", (
     const b = plate() as unknown as Loose;
     b.items[0]!.targets = [];
     expect(pmiAssetProblem(b, counts)).toBe('$.items[0].targets');
+  });
+
+  describe('PMI-5b: what the components placed when it was read (CAD86, TS-1438)', () => {
+    it('refuses parts that are not a record of versions, counts and poses', () => {
+      const edited = (edit: (a: Record<string, unknown>) => void) => {
+        const a = structuredClone(assembly()) as unknown as Record<string, unknown>;
+        edit(a);
+        return check(a);
+      };
+      expect(edited((a) => delete a.parts)).toBe('$.parts');
+      const p = (a: Record<string, unknown>) =>
+        (a.parts as Record<string, Record<string, unknown>>)['c-block']!;
+      expect(edited((a) => (p(a).contentHash = 'sha256:00'))).toBe('$.parts["c-block"]');
+      expect(edited((a) => (p(a).faces = -1))).toBe('$.parts["c-block"]');
+      expect(edited((a) => (p(a).extra = 1))).toBe('$.parts["c-block"]');
+      expect(
+        edited((a) => (p(a).pose = { translationMm: [0, 0, 0], rotation: [0, 0, 0, 2] })),
+      ).toBe('$.parts["c-block"].pose');
+      // The index is checked against the counts the asset records.
+      expect(edited((a) => (p(a).faces = 5))).toBe('$.items[1].targets2[0].index');
+    });
+
+    it('reads the bytes only when they are a valid asset', () => {
+      const bytes = new TextEncoder().encode(JSON.stringify(assembly()));
+      expect(readCadAssemblyPmiAsset(bytes)).toEqual(assembly());
+      expect(readCadAssemblyPmiAsset(new TextEncoder().encode(JSON.stringify(plate())))).toBe(
+        undefined,
+      );
+      expect(readCadAssemblyPmiAsset(new Uint8Array([0x7b, 0xff]))).toBeUndefined();
+    });
+
+    const doc = () => ({
+      parts: [
+        { id: 'p-plate', source: { contentHash: '1'.repeat(64) } },
+        { id: 'p-block', source: { contentHash: '2'.repeat(64) } },
+      ],
+      components: [
+        { id: 'c-plate-1', partId: 'p-plate' },
+        { id: 'c-plate-2', partId: 'p-plate' },
+        { id: 'c-block', partId: 'p-block' },
+      ],
+    });
+    type Doc = Parameters<typeof cadAssemblyPmiStates>[0];
+    const states = (d: ReturnType<typeof doc>) =>
+      Object.fromEntries(cadAssemblyPmiStates(d as unknown as Doc, assembly()));
+
+    it('is current while every component places the version it placed', () => {
+      expect(states(doc())).toEqual({
+        'pmi-1': { current: true },
+        'pmi-2': { current: true },
+        'pmi-3': { current: true },
+        'pmi-4': { current: true },
+      });
+    });
+
+    it('goes stale with a deleted component, another version, and the datums it uses', () => {
+      const gone = doc();
+      gone.components = gone.components.filter((c) => c.id !== 'c-plate-2');
+      expect(states(gone)).toMatchObject({
+        'pmi-1': { current: false, reason: 'component' },
+        'pmi-2': { current: false, reason: 'component' },
+        'pmi-4': { current: true },
+      });
+      const replaced = doc();
+      replaced.parts[1]!.source.contentHash = '3'.repeat(64);
+      expect(states(replaced)).toMatchObject({
+        'pmi-1': { current: true },
+        'pmi-2': { current: false, reason: 'part' },
+        'pmi-4': { current: false, reason: 'part' },
+      });
+      // A datum on a changed part takes the tolerances that reference it with it.
+      const datumOn = assembly();
+      datumOn.items[2] = { id: 'pmi-3', kind: 'datum', name: 'A', targets: [on('c-plate-1', 1)] };
+      datumOn.items[3]!.targets = [on('c-plate-2', 3)];
+      const moved = doc();
+      moved.components[0]!.partId = 'p-block';
+      expect(Object.fromEntries(cadAssemblyPmiStates(moved as unknown as Doc, datumOn))).toEqual({
+        'pmi-1': { current: true },
+        'pmi-2': { current: true },
+        'pmi-3': { current: false, reason: 'part' },
+        'pmi-4': { current: false, reason: 'datum' },
+      });
+    });
   });
 });

@@ -25,6 +25,7 @@ const labels: Record<BimOperationType, string> = {
   update: 'Edit',
   delete: 'Delete',
   setProject: 'Edit project',
+  setInhabitantHeight: "Set inhabitants' height",
 };
 
 /** One ordinary EditorSession transaction for an operation; re-checks base, authority and schema. */

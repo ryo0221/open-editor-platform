@@ -1,0 +1,195 @@
+.lad-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.lad-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.lad-main {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: auto;
+  background: #eef1f4;
+}
+.lad-var-panel {
+  margin: 0 12px 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #d5dbe2;
+  max-width: 980px;
+}
+.lad-var-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.lad-viewport {
+  width: 100%;
+  background: #eef1f4;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.lad-rung {
+  display: block;
+  flex: none;
+  font-family: system-ui, sans-serif;
+  touch-action: none;
+  user-select: none;
+}
+.lad-rung-bg {
+  fill: #fff;
+  stroke: #d5dbe2;
+}
+.lad-rung[data-selected] .lad-rung-bg {
+  stroke: #2563eb;
+  stroke-width: 2;
+}
+.lad-rung-no {
+  font-size: 14px;
+  font-weight: 600;
+  fill: #52606d;
+}
+.lad-comment {
+  font-size: 12px;
+  fill: #52606d;
+  font-style: italic;
+}
+.lad-rail {
+  stroke: #33414f;
+  stroke-width: 3;
+}
+.lad-rail[data-on] {
+  stroke: #15803d;
+}
+.lad-wire,
+.lad-symbol {
+  stroke: #33414f;
+  stroke-width: 2;
+  fill: none;
+}
+.lad-wire[data-on],
+.lad-symbol[data-on] {
+  stroke: #16a34a;
+  stroke-width: 3;
+}
+.lad-box {
+  fill: #f8fafc;
+  stroke: #33414f;
+  stroke-width: 2;
+}
+.lad-box[data-on] {
+  stroke: #16a34a;
+  fill: #dcfce7;
+  stroke-width: 3;
+}
+.lad-name,
+.lad-mark,
+.lad-box-title,
+.lad-box-line {
+  text-anchor: middle;
+  fill: #1f2933;
+  pointer-events: none;
+}
+.lad-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+.lad-mark,
+.lad-box-title {
+  font-size: 11px;
+  font-weight: 700;
+}
+.lad-box-line {
+  font-size: 10px;
+}
+.lad-hit {
+  fill: transparent;
+}
+.lad-cell {
+  cursor: pointer;
+}
+.lad-cell[data-selected] .lad-hit {
+  fill: rgb(37 99 235 / 12%);
+  stroke: #2563eb;
+  stroke-dasharray: 4 3;
+}
+.lad-cell[data-dragging] {
+  opacity: 0.45;
+}
+.lad-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.lad-sep {
+  width: 1px;
+  align-self: stretch;
+  background: #d5dbe2;
+  margin: 0 4px;
+}
+.lad-vars {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.lad-vars th {
+  text-align: left;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+.lad-vars td {
+  padding: 2px 4px;
+  vertical-align: middle;
+}
+.lad-vars .ep-field {
+  font-size: 0;
+}
+.lad-vars input,
+.lad-vars select {
+  max-width: 10em;
+  font-size: 12px;
+}
+.lad-io {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.lad-value {
+  font-family: ui-monospace, monospace;
+}
+.lad-value[data-forced] {
+  color: #b45309;
+  font-weight: 700;
+}
+.lad-press:active {
+  background: #bbf7d0;
+}
+.lad-row {
+  display: flex;
+  gap: 4px;
+}
+.lad-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+.lad-empty,
+.lad-facts {
+  font-size: 13px;
+  color: #52606d;
+}
+.lad-status {
+  font-size: 12px;
+}
+.lad-notice {
+  color: #b42318;
+}

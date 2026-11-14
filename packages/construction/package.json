@@ -1,0 +1,23 @@
+{
+  "name": "@editor-platform/construction",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/bim": "*",
+    "@editor-platform/bim-core": "*",
+    "@editor-platform/character": "*",
+    "@editor-platform/character-core": "*",
+    "@editor-platform/construction-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/geometry-fem": "*",
+    "@editor-platform/geometry-view": "*",
+    "@editor-platform/time-axis": "*",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  }
+}

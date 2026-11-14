@@ -7,10 +7,13 @@
  */
 import {
   Box3,
+  BufferAttribute,
+  BufferGeometry,
   type Camera,
   Color,
   DataTexture,
   DirectionalLight,
+  DoubleSide,
   EquirectangularReflectionMapping,
   Euler,
   FloatType,
@@ -25,12 +28,14 @@ import {
   OrthographicCamera,
   PerspectiveCamera,
   PlaneGeometry,
+  RectAreaLight,
   Scene,
   type Texture,
   Vector3,
   WebGLRenderer,
 } from 'three';
 import { geometryLightLimits, type GeometryEmission } from '@editor-platform/geometry-core';
+import type { ViewMesh } from './instances';
 
 /** Limits of the render settings; the time limit is in seconds, 0 for none. */
 export const pathRenderLimits = {
@@ -41,7 +46,15 @@ export const pathRenderLimits = {
   maxSamples: 4096,
   maxTimeLimit: 3600,
   hdriBytes: 64 * 1024 * 1024,
+  /** Exposure in stops either way of the standard one. */
+  maxExposureStops: 5,
 } as const;
+
+/**
+ * Light without an HDRI: `studio` is a dark room with soft boxes around the model and a light
+ * floor (a product shot), `sky` a grey-to-blue sky and a sun.
+ */
+export type PathRenderLighting = 'studio' | 'sky';
 
 export interface PathRenderSettings {
   width: number;
@@ -56,6 +69,10 @@ export interface PathRenderSettings {
   hdriRotation: number;
   /** Strength of the HDRI's light and background. */
   hdriIntensity: number;
+  /** The light when no HDRI is given. */
+  lighting: PathRenderLighting;
+  /** Stops brighter (+) or darker (−) than the standard exposure. */
+  exposureStops: number;
 }
 
 export const defaultPathRenderSettings: PathRenderSettings = {
@@ -66,6 +83,8 @@ export const defaultPathRenderSettings: PathRenderSettings = {
   floor: true,
   hdriRotation: 0,
   hdriIntensity: 1,
+  lighting: 'studio',
+  exposureStops: 0,
 };
 
 /** Why the settings cannot be rendered, or undefined when they can. */
@@ -82,6 +101,10 @@ export function pathRenderProblem(s: PathRenderSettings): string | undefined {
   if (!Number.isFinite(s.hdriRotation)) return 'The HDRI rotation must be a number.';
   if (!Number.isFinite(s.hdriIntensity) || s.hdriIntensity <= 0 || s.hdriIntensity > 100)
     return 'The HDRI strength must be above 0 and at most 100.';
+  const stops = pathRenderLimits.maxExposureStops;
+  if (!Number.isFinite(s.exposureStops) || Math.abs(s.exposureStops) > stops)
+    return `The exposure must be from −${stops} to +${stops} stops.`;
+  if (s.lighting !== 'studio' && s.lighting !== 'sky') return 'Choose the studio or the sky light.';
   return undefined;
 }
 
@@ -116,6 +139,12 @@ export interface PathRenderSource {
   /** Groups holding the shown solids; edges, labels, helpers and marks are not meshes and are left out. */
   roots: Object3D[];
   camera: PerspectiveCamera | OrthographicCamera;
+  /**
+   * A finer triangulation of a shown mesh's shape, for smoother surfaces in the image:
+   * `mesh` in place of `shown`, both with their positions relative to their own origin. The
+   * shown mesh is drawn as it is when this is absent or gives nothing.
+   */
+  finer?(object: Mesh): { mesh: ViewMesh; shown: ViewMesh } | undefined;
 }
 
 function renderMaterial(material: Material, copies: Map<Material, Material>): Material {
@@ -130,6 +159,8 @@ function renderMaterial(material: Material, copies: Map<Material, Material>): Ma
       'The view shows an analysis shading. Switch the shading to Shaded or Realistic, then render.',
     );
   let copy = material.clone();
+  // Both sides: a sheet is seen from either, and a closed solid's inside is never reached.
+  copy.side = DoubleSide;
   if (copy instanceof MeshStandardMaterial) {
     // The metalness the look asks for, not the standard lighting's stand-in (see setViewFinish).
     if (typeof material.userData.metalness === 'number')
@@ -166,10 +197,12 @@ function renderMaterial(material: Material, copies: Map<Material, Material>): Ma
  * sharing the geometry and textures, with its own materials. An instanced mesh becomes one mesh
  * per instance (the path tracer draws a mesh once), without the instance colours (the selection).
  */
-export function pathRenderScene(roots: Object3D[]): Scene {
+export function pathRenderScene(roots: Object3D[], finer?: PathRenderSource['finer']): Scene {
   const scene = new Scene();
   const copies = new Map<Material, Material>();
   const instance = new Matrix4();
+  /** Geometries made from finer meshes, one per mesh (instances share it); disposed with the scene. */
+  const made = new Map<ViewMesh, BufferGeometry>();
   for (const root of roots) {
     root.updateWorldMatrix(true, true);
     root.traverseVisible((o) => {
@@ -177,13 +210,29 @@ export function pathRenderScene(roots: Object3D[]): Scene {
       if (!mesh.isMesh || !mesh.geometry?.getAttribute('position')) return;
       // Selection overlays (a picked face drawn over its solid) are not the model.
       if (mesh.userData.highlight) return;
+      // A sheet's darker back is a display aid on the same triangles: two coincident surfaces
+      // would speckle each other in a path tracer. The sheet's own surface is drawn two-sided.
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      if (materials.some((m) => m.userData.sheetBack)) return;
       const material = Array.isArray(mesh.material)
         ? mesh.material.map((m) => renderMaterial(m, copies))
         : renderMaterial(mesh.material, copies);
+      // A finer mesh of the same shape: its own origin, so the placement shifts by the difference.
+      const fine = finer?.(mesh);
+      let geometry = mesh.geometry;
+      let shift: Matrix4 | undefined;
+      if (fine) {
+        geometry = made.get(fine.mesh) ?? viewMeshGeometry(fine.mesh);
+        geometry.userData.pathRenderOwned = true;
+        made.set(fine.mesh, geometry);
+        const [a, b] = [fine.mesh.origin, fine.shown.origin];
+        shift = new Matrix4().makeTranslation(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      }
       const add = (matrix: Matrix4) => {
-        const copy = new Mesh(mesh.geometry, material);
+        const copy = new Mesh(geometry, material);
         copy.matrixAutoUpdate = false;
         copy.matrix.copy(matrix);
+        if (shift) copy.matrix.multiply(shift);
         copy.name = mesh.name;
         scene.add(copy);
       };
@@ -199,6 +248,68 @@ export function pathRenderScene(roots: Object3D[]): Scene {
   }
   scene.updateMatrixWorld(true);
   return scene;
+}
+
+/** A mesh's triangles as a geometry, positions relative to its origin. */
+export function viewMeshGeometry(mesh: ViewMesh): BufferGeometry {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(mesh.positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(mesh.normals, 3));
+  if (mesh.uvs) geometry.setAttribute('uv', new BufferAttribute(mesh.uvs, 2));
+  geometry.setIndex(new BufferAttribute(mesh.indices, 1));
+  return geometry;
+}
+
+/**
+ * The studio light (no HDRI): a dark room's faint glow and four soft boxes sized to the model,
+ * placed by the camera's heading so the model is lit the same from any side it is seen. A big
+ * box overhead, a key at the camera's front left, a rim behind at the right and a long strip low
+ * on the far side; the boxes show in glossy surfaces as a studio's do.
+ */
+export function pathRenderStudioLights(box: Box3, camera: Camera): RectAreaLight[] {
+  const centre = box.getCenter(new Vector3());
+  const size = box.getSize(new Vector3());
+  const r = Math.max(size.length() / 2, 1);
+  // The camera's heading in the ground plane (z up); straight down, the model's long axis.
+  const view = camera.getWorldDirection(new Vector3());
+  const ahead = new Vector3(view.x, view.y, 0);
+  if (ahead.lengthSq() < 1e-6) ahead.set(size.x >= size.y ? 0 : 1, size.x >= size.y ? 1 : 0, 0);
+  ahead.normalize();
+  const right = new Vector3(ahead.y, -ahead.x, 0);
+  const at = (forward: number, side: number, up: number) =>
+    centre
+      .clone()
+      .addScaledVector(ahead, forward * r)
+      .addScaledVector(right, side * r)
+      .add(new Vector3(0, 0, up * r));
+  const light = (
+    intensity: number,
+    width: number,
+    height: number,
+    position: Vector3,
+    target: Vector3,
+  ) => {
+    const l = new RectAreaLight(new Color('#ffffff'), intensity, width * r, height * r);
+    l.position.copy(position);
+    l.lookAt(target);
+    l.updateMatrixWorld(true);
+    return l;
+  };
+  const low = centre.clone().setZ(box.min.z + size.z * 0.3);
+  return [
+    // Overhead: the long side along the model's longer horizontal axis.
+    (() => {
+      const l = light(3.5, 1.6, 0.9, centre.clone().setZ(box.max.z + 1.6 * r), centre);
+      // Looking straight down, the box's width (its x) runs square to `up`.
+      l.up.set(size.x >= size.y ? 0 : 1, size.x >= size.y ? 1 : 0, 0);
+      l.lookAt(centre);
+      l.updateMatrixWorld(true);
+      return l;
+    })(),
+    light(7, 0.9, 0.9, at(-1.4, -1.5, 1.1), centre),
+    light(8, 0.6, 0.9, at(1.8, 1.4, 0.9), centre),
+    light(4, 2.2, 0.18, at(1.6, -0.2, 0.25), low),
+  ];
 }
 
 /** The view's camera at the render's aspect ratio, the shown area kept by its height. */
@@ -376,7 +487,7 @@ export async function renderPathTraced(
   const now = options.now ?? (() => performance.now());
   const { width, height } = settings;
   // The model and camera as they are now, copied before anything is awaited.
-  const scene = pathRenderScene(source.roots);
+  const scene = pathRenderScene(source.roots, source.finer);
   if (!scene.children.length) throw new Error('Nothing is shown to render.');
   const camera = pathRenderCamera(source.camera, width, height);
   const { GradientEquirectTexture } = await import('three-gpu-pathtracer');
@@ -389,10 +500,15 @@ export async function renderPathTraced(
   const size = box.getSize(new Vector3());
   const radius = Math.max(size.length() / 2, 1);
   const owned: { dispose(): void }[] = [];
+  const studio = !options.hdri && settings.lighting === 'studio';
   if (settings.floor) {
     const floor = new Mesh(
       new PlaneGeometry(radius * 60, radius * 60),
-      new MeshStandardMaterial({ color: '#d4d7da', roughness: 0.9, metalness: 0 }),
+      new MeshStandardMaterial(
+        studio
+          ? { color: '#6f7378', roughness: 0.45, metalness: 0 }
+          : { color: '#d4d7da', roughness: 0.9, metalness: 0 },
+      ),
     );
     floor.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z);
     owned.push(floor.geometry, floor.material);
@@ -402,6 +518,17 @@ export async function renderPathTraced(
   if (options.hdri) {
     environment = options.hdri;
     scene.environmentIntensity = scene.backgroundIntensity = settings.hdriIntensity;
+  } else if (studio) {
+    // A dark room: a faint glow from above, darker towards the floor, and the soft boxes.
+    const room = new GradientEquirectTexture(256);
+    room.topColor.set('#3a3e44');
+    room.bottomColor.set('#0b0c0e');
+    room.exponent = 1.4;
+    room.update();
+    owned.push(room);
+    environment = room;
+    scene.environmentIntensity = scene.backgroundIntensity = 0.6;
+    scene.add(...pathRenderStudioLights(box, camera));
   } else {
     // No HDRI: a grey-to-blue sky and a sun, so a render needs no downloaded image.
     const sky = new GradientEquirectTexture(256);
@@ -439,6 +566,7 @@ export async function renderPathTraced(
     traced ??= await traceWebGL(scene, camera, loop);
     const { pixels, invalid } = pathRenderPixels(traced.radiance, width, height, {
       topRowFirst: traced.topRowFirst,
+      exposure: pathRenderExposure * 2 ** settings.exposureStops,
     });
     const out = Object.assign(document.createElement('canvas'), { width, height });
     out.getContext('2d')!.putImageData(new ImageData(pixels, width, height), 0, 0);
@@ -628,11 +756,15 @@ async function traceWebGL(scene: Scene, camera: Camera, loop: SampleLoop): Promi
   }
 }
 
+/** The scene's own materials, and the geometries it made from finer meshes (the view's stay). */
 function disposeMaterials(scene: Scene) {
   const materials = new Set<Material>();
+  const geometries = new Set<BufferGeometry>();
   scene.traverse((o) => {
-    const m = (o as Mesh).material;
+    const { material: m, geometry } = o as Mesh;
     if (m) for (const x of Array.isArray(m) ? m : [m]) materials.add(x);
+    if (geometry?.userData.pathRenderOwned) geometries.add(geometry);
   });
   for (const m of materials) m.dispose();
+  for (const g of geometries) g.dispose();
 }

@@ -37,6 +37,9 @@ import {
   readGraphArtifact,
   readGraphArtifactFile,
   isGraphDocument,
+  readGraphDocument,
+  upgradeGraphDocument,
+  upgradeGraphProfile,
   graphCommand,
   prepareGraphDefinition,
   validateGraph,
@@ -78,6 +81,20 @@ const factory = (mode: Mode): Source =>
       : mode === 'profile'
         ? { graph: createRelationGraph(), profile: clone(relationProfile) }
         : clone(publishedDefinition);
+/** A Definition source whose Graph or Profile has an older schema, read as the current one. */
+const upgradeDefinitionSource = (value: Source): Source => {
+  if (!('graph' in value) || !('profile' in value)) return value;
+  const graph = upgradeGraphDocument(value.graph),
+    profile = upgradeGraphProfile(value.profile);
+  return graph && profile ? { ...value, graph, profile } : value;
+};
+/** Older schemas are read as the current one, so restoring an old version works too. */
+const upgradeSource = (mode: string, value: Source): Source =>
+  mode === 'native'
+    ? (readGraphDocument(value) as unknown as Source)
+    : mode === 'profile'
+      ? upgradeDefinitionSource(value)
+      : value;
 const isDefinitionSource = (value: Source): value is GraphDefinitionSource =>
   'graph' in value &&
   'profile' in value &&
@@ -128,19 +145,16 @@ function HostEditor({ mode, inputs }: { mode: Mode; inputs: EditorInputs }) {
     setRecord(value);
     setLayout(value.layout);
     if (mode === 'native') {
-      if (!isGraphDocument(value.draft.content)) throw new Error('Invalid Graph content');
-      native.current = new GraphSession(value.draft.content, relationProfile);
+      // An older Graph schema is read as the current one (`readGraphDocument` gives the reason).
+      native.current = new GraphSession(readGraphDocument(value.draft.content), relationProfile);
     } else if (mode === 'data') {
       if (!isStructuredData(value.draft.content)) throw new Error('Invalid Data content');
       data.current = new DataSession(value.draft.content);
     } else {
-      if (
-        mode === 'profile'
-          ? !isDefinitionSource(value.draft.content)
-          : !isReferenceDefinition(value.draft.content)
-      )
+      const content = upgradeSource(mode, value.draft.content);
+      if (mode === 'profile' ? !isDefinitionSource(content) : !isReferenceDefinition(content))
         throw new Error('Invalid Definition content');
-      session.current = new EditorSession(value.draft.content);
+      session.current = new EditorSession(content);
     }
   }
   useEffect(() => {
@@ -352,7 +366,7 @@ function HostEditor({ mode, inputs }: { mode: Mode; inputs: EditorInputs }) {
         execute({
           type: 'host.restore',
           label: 'Restore version',
-          apply: () => clone(version.content),
+          apply: () => upgradeSource(mode, clone(version.content)),
         });
       }
     } catch (e) {

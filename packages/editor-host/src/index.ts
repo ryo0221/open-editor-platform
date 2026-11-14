@@ -273,17 +273,26 @@ function checkArtifact<T>(
 }
 /** UTF-8 native JSON limit, including drafts, immutable versions and provenance. */
 export const hostNativeArtifactByteLimit = 64 * 1024 * 1024;
-function assertNativeSize(json: string, artifactId: string) {
-  if (new TextEncoder().encode(json).length > hostNativeArtifactByteLimit)
+function assertNativeSize(json: string, artifactId: string, limit = hostNativeArtifactByteLimit) {
+  if (new TextEncoder().encode(json).length > limit)
     throw new EditorHostError(
       'invalid-artifact',
       artifactId,
-      'Native JSON exceeds the 64 MiB boundary',
+      limit === hostNativeArtifactByteLimit
+        ? 'Native JSON exceeds the 64 MiB boundary'
+        : `Native JSON exceeds the ${limit / 1e6} MB boundary`,
     );
 }
-export function serializeHostNativeArtifact<T>(artifact: Artifact<T>) {
+/**
+ * The native JSON of an Artifact, refused past the limit. A Host may give a kind a larger limit
+ * than the 64 MiB boundary when it keeps files that large itself (the Playground's CAD, CR7f).
+ */
+export function serializeHostNativeArtifact<T>(
+  artifact: Artifact<T>,
+  limit = hostNativeArtifactByteLimit,
+) {
   const json = serializeArtifact(artifact);
-  assertNativeSize(json, artifact.id);
+  assertNativeSize(json, artifact.id, limit);
   return json;
 }
 export async function loadHostArtifact<T>(

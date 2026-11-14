@@ -186,6 +186,34 @@ describe('Gordon surface through a curve network (CR1d)', () => {
     expect(wrong).toBeGreaterThan(1e-3);
   });
 
+  // TS-1833, ST-297 (CR7g-1).
+  it('halves the poles each way a lean fit can spare, still within the fit (CR7g-1)', () => {
+    // A long wavy run lifted straight across: many poles along x, few across y.
+    const wave = (y: number, z0: number): NetworkCurve => ({
+      t0: 0,
+      t1: 1,
+      at: (t) => [800 * t, y, z0 + 20 * Math.sin(12 * Math.PI * t)],
+    });
+    const us = [wave(0, 0), wave(100, 30)];
+    const vs = Array.from({ length: 9 }, (_, j) => {
+      const t = j / 8;
+      return line(us[0]!.at(t) as V, us[1]!.at(t) as V);
+    });
+    const square = gordonSurface(us, vs, 0.01, 0.005);
+    const lean = gordonSurface(us, vs, 0.01, 0.005, { lean: true });
+    if ('code' in square || 'code' in lean) throw new Error('no fit');
+    expect(square.poles.length).toBe(square.poles[0]!.length);
+    expect(lean.poles.length).toBe(square.poles.length);
+    expect(lean.poles[0]!.length).toBeLessThan(square.poles[0]!.length);
+    expect(lean.deviationMm).toBeLessThanOrEqual(0.005 + lean.gapMm);
+    for (const t of [0.13, 0.5, 0.77]) {
+      const p = evaluate(lean, t, 0.5);
+      // Midway across, over the point's own x.
+      const z = 15 + 20 * Math.sin((12 * Math.PI * p[0]) / 800);
+      expect(Math.hypot(p[1] - 50, p[2] - z)).toBeLessThan(0.05);
+    }
+  });
+
   it('maps parameters monotonically through the intersections', () => {
     const f = monotoneCubic([0, 0.3, 1], [2, 2.1, 5]);
     expect(f(0)).toBeCloseTo(2, 12);

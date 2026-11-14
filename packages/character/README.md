@@ -1,6 +1,6 @@
 # character (Character C1c, Surface)
 
-Experimental React Surface for the [Character design](../../docs/character/README.md) and ADR 019. Registered in the Playground; not a stable public API. No CAD or BIM imports (ESLint).
+React Surface for the [Character design](../../docs/character/README.md) and ADR 019. Registered in the Playground and accepted as a regular editor on 2026-11-14 (record); not a stable public API. No CAD or BIM imports (ESLint).
 
 - `CharacterSurface`: the C1 viewer. The Host passes an `EditorSession<CharacterDocument>` and the asset bytes by asset ID; the Surface checks every asset against the document (`readCharacterAssets`: present, same length and SHA-256, EPM decodes, meshes match) and draws nothing when one does not match. It plays an action (play, pause, stop, seek by slider, arrows by one frame, Page keys by one second, Space to play or pause, loop), shows or hides parts as one EditorSession edit with Undo, and shows the model's counts, the Host's import report (losses) and VRM terms of use. The transport sits under the view at every width. Optional `onImport(file)` offers "Import glTF or VRM"; the Host reads the file (`importGltf`) and replaces the session.
 - `frame.ts`: `characterFrame(doc, meshes, action, tick)` poses every part on the CPU with `character-core`'s `poseAt`, `worldMatrices` and `skinMatrices` (morphs, then linear blend skinning with every weight, or the part's world matrix), per display corner with normals. GPU skinning is later.

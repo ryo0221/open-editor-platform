@@ -32,6 +32,7 @@ import {
   identityQuaternion,
   position,
   type CadAppearance,
+  type CadBodyMass,
   type CadAssetRef,
   type CadBody,
   type CadDocument,
@@ -57,6 +58,11 @@ import {
 import { applyConfigurationOperation, type CadConfigurationOperation } from './configurations';
 import { applyMountOperation, pruneMounts, type CadMountOperation } from './mounts';
 import { applyGearMeshOperation, pruneGearMeshes, type CadGearMeshOperation } from './gear-mesh';
+import {
+  applyProportionsOperation,
+  pruneProportions,
+  type CadProportionsOperation,
+} from './proportions';
 import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
@@ -197,6 +203,8 @@ export type CadOperation =
        */
       assets?: CadAssetRef[];
     }
+  /** CR7a: a body's density (and a sheet's thickness), or none (`null`); the shape is unchanged. */
+  | { type: 'setBodyMass'; bodyId: string; mass: CadBodyMass | null }
   | { type: 'saveNamedView'; view: CadNamedView }
   /** CR4e: adds a spot weld row, or replaces the one with its ID. */
   | { type: 'setSpotWeld'; weld: CadSpotWeld }
@@ -221,6 +229,7 @@ export type CadOperation =
   | CadConfigurationOperation
   | CadMountOperation
   | CadGearMeshOperation
+  | CadProportionsOperation
   | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
@@ -289,6 +298,8 @@ const dropViewsFor = (doc: CadDocument, removed: Set<string>) => {
     doc.spotWelds = doc.spotWelds.filter((w) => !w.flanges.some((f) => removed.has(f.bodyId)));
     if (!doc.spotWelds.length) delete doc.spotWelds;
   }
+  // CLF3: a removed body leaves its proportion role.
+  pruneProportions(doc, removed);
 };
 
 /**
@@ -316,6 +327,18 @@ const solverCodes = new Set([
   'coordinate-range',
 ]);
 
+/**
+ * CR7a: a body an edit turned from a sheet into a solid (a thicken, a solid sew) keeps its
+ * density and drops the sheet thickness its volume now replaces.
+ */
+function settleMass(before: CadDocument, next: CadDocument) {
+  const was = new Map(before.bodies.map((b) => [b.id, b.kind]));
+  for (const b of next.bodies)
+    if (b.kind === 'solid' && was.get(b.id) === 'sheet' && b.mass?.thicknessMm !== undefined) {
+      const { thicknessMm: _, ...rest } = b.mass;
+      b.mass = rest;
+    }
+}
 function addBody(doc: CadDocument, b: CadNewBody) {
   doc.features.push(
     placementFeature(
@@ -545,6 +568,7 @@ function apply(
           kind: tool.kind,
           resultFeatureId: tool.resultFeatureId,
           appearance: tool.appearance,
+          ...(tool.mass ? { mass: tool.mass } : {}),
           state: 'consumed',
           consumedByFeatureId: op.booleanFeatureId,
         };
@@ -578,6 +602,7 @@ function apply(
             kind: body.kind,
             resultFeatureId: body.resultFeatureId,
             appearance: body.appearance,
+            ...(body.mass ? { mass: body.mass } : {}),
             state: 'active',
           };
       return next;
@@ -608,6 +633,7 @@ function apply(
         kind: tool.kind,
         resultFeatureId: tool.resultFeatureId,
         appearance: tool.appearance,
+        ...(tool.mass ? { mass: tool.mass } : {}),
         state: 'consumed',
         consumedByFeatureId: op.patternFeatureId,
       };
@@ -684,6 +710,7 @@ function apply(
           kind: tool.kind,
           resultFeatureId: tool.resultFeatureId,
           appearance: tool.appearance,
+          ...(tool.mass ? { mass: tool.mass } : {}),
           state: 'consumed',
           consumedByFeatureId: op.sewFeatureId,
         };
@@ -826,6 +853,14 @@ function apply(
       body.appearance = clone(op.appearance);
       return next;
     }
+    case 'setBodyMass': {
+      const body = find(next.bodies, op.bodyId, 'target-missing');
+      if (canonicalJson(body.mass ?? null) === canonicalJson(op.mass)) fail('mass-unchanged');
+      if (op.mass) body.mass = clone(op.mass);
+      else delete body.mass;
+      // The whole document is checked after the edit (range, a thickness only on a sheet).
+      return next;
+    }
     case 'saveNamedView': {
       const i = next.namedViews.findIndex((v) => v.id === op.view.id);
       if (i < 0) next.namedViews.push(clone(op.view));
@@ -897,6 +932,8 @@ function apply(
     case 'removeGearMesh':
     case 'updateGearMesh':
       return applyGearMeshOperation(next, op);
+    case 'setProportions':
+      return applyProportionsOperation(next, op);
     case 'insertInterferenceAllowance':
     case 'removeInterferenceAllowance':
       return applyInterferenceOperation(next, op);
@@ -1047,6 +1084,7 @@ export function applyCadOperation(doc: CadDocument, op: CadOperation): CadDocume
     solved ? solved.edit : (op as Exclude<CadOperation, { type: 'withSolvedPoses' }>),
   );
   pruneAssets(next);
+  settleMass(doc, next);
   settleAssembly(next);
   if (solved) writeSolvedPoses(next, solved.poses);
   assertCad(next);

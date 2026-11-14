@@ -18,6 +18,7 @@ import type {
   CadGapFlushResult,
   CadContinuityResult,
   CadKernelBuild,
+  CadRenderMeshQuality,
   CadMesh,
   CadStepAssemblyResult,
 } from './protocol';
@@ -122,6 +123,22 @@ export class CatalogKernelPort implements CadKernelPort {
         meshes: [],
       });
     return this.port(resolved.build).exportMeshes(request, deflectionMm);
+  }
+  /** Exact builds only, like exportMeshes: a render's finer meshes (WorkerKernelPort.renderMeshes). */
+  renderMeshes(
+    request: CadEvaluateRequest,
+    quality: CadRenderMeshQuality,
+  ): Promise<{ evaluation: CadEvaluation; meshes: CadMesh[] }> {
+    const resolved = this.resolve(request.document.kernelProfile);
+    if (this.disposed || resolved.mode !== 'exact')
+      return Promise.resolve({
+        evaluation: failed(
+          request,
+          resolved.mode === 'unavailable' ? resolved.code : 'kernel-reference-only',
+        ),
+        meshes: [],
+      });
+    return this.port(resolved.build).renderMeshes(request, quality);
   }
   /** Exact builds only, like exportMeshes. */
   exportStep(

@@ -111,6 +111,39 @@ describe('CharacterPropEvaluation', () => {
     expect(n('mesh')).toBe(5);
     expect(n('box')).toBe(1);
   });
+  it('gives a mesh its body’s finish and light, for the realistic lighting (CR7g-3, TS-1835)', () => {
+    const plate = rig.closure.get(rig.plate.contentHash)!;
+    const body = plate.bodies[0]!.id;
+    const look = {
+      color: '#cccccc',
+      opacity: 1,
+      roughness: 0.04,
+      metalness: 1,
+      emission: { color: '#ffffff', strength: 2 },
+    };
+    const lit = { ...plate, bodies: plate.bodies.map((b) => ({ ...b, appearance: look })) };
+    const p = new CharacterPropEvaluation(
+      rig.assembly,
+      (h) => (h === rig.plate.contentHash ? lit : rig.closure.get(h)),
+      () => {},
+    );
+    fake.meshes.set(rig.plate.contentHash, [mesh(body)]);
+    fake.meshes.set(rig.shaft.contentHash, [mesh('other')]);
+    fake.meshes.set(rig.pair.contentHash, []);
+    settle({ evaluation: ok() });
+    if (p.view.status !== 'ready') throw new Error(p.view.status);
+    const drawn = p.view.draw(new Map());
+    const plates = drawn.filter((i) => i.mesh.color === '#cccccc');
+    expect(plates.length).toBeGreaterThan(0);
+    for (const i of plates)
+      expect(i.mesh.finish).toEqual({
+        roughness: 0.04,
+        metalness: 1,
+        emission: { color: '#ffffff', strength: 2 },
+      });
+    // A body without a finish of its own keeps none: the view draws its plain finish.
+    expect(drawn.filter((i) => i.mesh.color !== '#cccccc').every((i) => !i.mesh.finish)).toBe(true);
+  });
   it('draws a version that failed its checks as a box, not by the meshes it delivered', () => {
     const p = evaluate();
     for (const v of [rig.plate, rig.shaft]) fake.meshes.set(v.contentHash, [mesh('b')]);

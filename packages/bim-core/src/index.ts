@@ -47,6 +47,7 @@ export {
 } from './solids';
 export * from './drawing';
 export * from './schedule';
+export * from './mass';
 export * from './operations';
 export * from './commands';
 export * from './fixtures';

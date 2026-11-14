@@ -32,18 +32,20 @@ Run an optional reference service in another terminal when needed:
 
 ## Use and integrate
 
-Character provides experimental 3D character editing and animation. See the
-[public overview and limits](docs/character/README.md); this does not certify
-production acceptance, performance or external model rights.
+Character provides 3D character editing and animation, accepted as a regular
+editor on 2026-11-14. See the [public overview and limits](docs/character/README.md);
+a stable API, performance, every environment and external model rights are not
+guaranteed.
 
 The Playground artifact library creates editable artifacts and offers templates
 for supported domains. Editing a draft and saving an immutable version are separate
 operations. Formats, shared editing and reuse support vary by Editor.
 See [status and limits](docs/status.md) and [Surface contracts](docs/surface-semantics.md).
 
-Structured Graph is **Preview / Experimental (pre-1.0)**. Its schema and API may change
-without notice, and older formats are refused rather than migrated. Export the Graphs you
-want to keep as native JSON before updating. Changes are recorded in
+Structured Graph is a compatible saved format (since 2026-11-14; currently schema 3).
+Format changes raise the schema number, and older schema numbers are still read and moved
+to the current schema. A schema newer than the running version can read is refused with a reason.
+See [the compatibility promise](docs/structured-graph-contract.md#互換性) and
 [the Structured Graph change record](docs/structured-graph/changes.md).
 
 Import workspace packages through public `@editor-platform/*` entrypoints.

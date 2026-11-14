@@ -16,6 +16,7 @@ import {
   type FemMesh,
   type VtuResult,
 } from '@editor-platform/geometry-fem';
+import type { AeroFlowField, AeroRunFields } from './aero-view';
 import type { RunFields } from './run';
 
 /** One nodal scalar a result can be coloured by. */
@@ -51,6 +52,8 @@ export interface ResultSource {
    */
   twoSided?: Uint8Array;
   scalars: ResultScalar[];
+  /** VS4c: a wind tunnel's bodies (nothing moves them); a browser run's flow, for streamlines and a section of its speed. */
+  aero?: { flow?: AeroFlowField };
 }
 
 const magnitude = (v: Float64Array) => {
@@ -265,7 +268,34 @@ function bondedResult(fields: BondedFields): ResultSource {
 }
 
 /** A run's finest level: von Mises, the principal stresses and the displacement's magnitude. */
+/** VS4c: a wind-tunnel run's bodies, coloured by Cp (and on the Host by Cf and h). */
+function aeroResult(fields: AeroRunFields): ResultSource {
+  const scalars: ResultScalar[] = [
+    { id: 'cp', label: 'Pressure coefficient Cp', unit: '', values: fields.cp },
+  ];
+  if (fields.cf)
+    scalars.push({ id: 'cf', label: 'Skin friction coefficient Cf', unit: '', values: fields.cf });
+  if (fields.htc)
+    scalars.push({
+      id: 'htc',
+      label: 'Heat transfer coefficient',
+      unit: 'W/(m²·K)',
+      values: fields.htc,
+    });
+  return {
+    origin: 'Run',
+    nodes: fields.points,
+    tets: new Uint32Array(0),
+    triangles: fields.triangles,
+    // A closed outside, seen from outside only.
+    twoSided: new Uint8Array(fields.triangles.length / 3),
+    scalars,
+    aero: fields.flow ? { flow: fields.flow } : {},
+  };
+}
+
 export function runResult(fields: RunFields, bodyId?: string): ResultSource {
+  if (fields.kind === 'aero') return aeroResult(fields);
   // R3j-6c: one body of a bonded run, or every body together.
   if (fields.kind === 'bonded-static' || fields.kind === 'bonded-modal') {
     const one = fields.bodies.find((b) => b.bodyId === bodyId);
@@ -691,6 +721,24 @@ export function readAt(display: ResultDisplay, point: readonly number[]) {
 
 /** The VTU (ParaView) of a run's finest mesh with its nodal fields, mm and MPa. */
 export const resultVtu = (fields: RunFields, bodyId?: string): string => {
+  // VS4c: a wind tunnel's bodies as triangles with Cp (and the Host's Cf and h) per point.
+  if (fields.kind === 'aero')
+    return writeVtu({
+      mesh: { type: 'tri3', nodes: fields.points, elements: fields.triangles },
+      pointData: [
+        { name: 'Cp', components: 1, values: fields.cp },
+        ...(fields.cf ? [{ name: 'Cf', components: 1 as const, values: fields.cf }] : []),
+        ...(fields.htc
+          ? [
+              {
+                name: 'Heat transfer coefficient (W per m2 K)',
+                components: 1 as const,
+                values: fields.htc,
+              },
+            ]
+          : []),
+      ],
+    });
   // R3j-6c: one body of a bonded run (a VTU holds one kind of element); the source body's when
   // none is named.
   if (fields.kind === 'bonded-static' || fields.kind === 'bonded-modal')

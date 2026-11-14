@@ -53,11 +53,19 @@
 
 漫画専用画面と通常Designを同じ原稿で往復する: [操作・APIガイド](manga-creation/guide.md) / [ワークスペースとコマ境界の設計](manga-creation/workspace-design.md)。直線分割・連動境界・通読・提案採用のlocal/native実装と制限を説明します。
 
+PLATEAUの3D形状から建物別の編集可能な背景線を作る任意Host: 使い方・制限。カメラとソースはHost、投影した線は既存Design原稿で扱います。
+
 小説専用画面と通常Documentを同じ原稿で往復する: [小説ワークスペースの設計案](novel-creation/workspace-design.md)。漫画と共通にする部分、日本語組版の段階、文字数・表記照合を整理しています。
 
 通常PlaygroundのDesignで線・画像を編集する: [ペン入力・提案の比較と採用](playground-inking.md) / [限定PNG編集](design-raster-editing.md)。人物・動物別の生成presetや作品制作Hostはこの汎用契約に含めません。
 
 CAD部品の構造・熱の解析（荷重・拘束の引き継ぎ、meshing、線形静解析）: R3の設計差分・ADR 020。
+
+回路基板（PCB）の設計（外形・層・部品・ネット・配線・DRC・製造データ・3D、Raspberry Pi 5の例）: 回路基板の開発計画・ADR 021。
+
+回路図・回路シミュレーション（DC・過渡）・PLCラダーと回路の連成（計画）: 回路図・回路シミュレーション・PLCラダーの開発計画。
+
+車両開発シミュレーション（空力・衝突・防水・熱、凪の例）（計画）: 車両開発シミュレーション（凪）の開発計画。
 
 キャラクター・3Dアニメーション（モデリング・リグ・キーフレーム）: [Characterの設計](character/README.md)・ADR 019。
 

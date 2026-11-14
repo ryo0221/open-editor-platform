@@ -1,0 +1,200 @@
+.construction-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-height: 0;
+  padding: 12px 16px;
+  box-sizing: border-box;
+}
+.construction-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+}
+.construction-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+.construction-source,
+.construction-note {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.construction-error {
+  margin: 0;
+  color: #b91c1c;
+}
+.construction-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.construction-timeline input[type='range'] {
+  flex: 1 1 200px;
+  min-width: 120px;
+}
+.construction-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.construction-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 0.85rem;
+}
+.construction-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 3px 0 8px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+.construction-problems {
+  margin: 0;
+  padding-left: 18px;
+  color: #b45309;
+  font-size: 0.85rem;
+  max-height: 6em;
+  overflow: auto;
+}
+.construction-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 470px);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .construction-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 320px auto;
+  }
+}
+.construction-view {
+  position: relative;
+  min-height: 280px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.construction-canvas {
+  position: absolute;
+  inset: 0;
+}
+.construction-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.construction-status {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  margin: 0;
+  padding: 4px 8px;
+  background: rgb(255 255 255 / 0.85);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.construction-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+/* The side scrolls as a whole: its tables keep their height instead of shrinking to fit. */
+.construction-side > * {
+  flex-shrink: 0;
+}
+.construction-site > * + * {
+  margin-top: 8px;
+}
+.construction-site > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.construction-table-wrap {
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.construction-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.construction-table th,
+.construction-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+  white-space: nowrap;
+}
+.construction-table th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+}
+.construction-table tr.critical td:first-child {
+  box-shadow: inset 3px 0 #dc2626;
+}
+.construction-table tr.selected {
+  background: #dbeafe;
+}
+.construction-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.construction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.construction-form fieldset,
+.construction-calendar fieldset {
+  display: grid;
+  gap: 6px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.construction-form h3 {
+  margin: 4px 0;
+  font-size: 0.95rem;
+}
+.construction-field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.construction-elements {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.construction-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.85rem;
+}

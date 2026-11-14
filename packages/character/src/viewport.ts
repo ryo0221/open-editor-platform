@@ -24,9 +24,10 @@ import {
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { CharacterDocument } from '@editor-platform/character-core';
+import { setViewFinish, setViewLight, ViewLighting } from '@editor-platform/geometry-view';
+import type { CharacterCameraPose, CharacterDocument } from '@editor-platform/character-core';
 import { frameBounds, type PartFrame, type PreparedMesh } from './frame';
-import type { CharacterPropMesh, PropFrame } from './props';
+import type { CharacterPropFinish, CharacterPropMesh, PropFrame } from './props';
 
 export interface CharacterViewportOptions {
   onContextLost(): void;
@@ -68,6 +69,11 @@ export class CharacterViewport {
   >();
   private readonly propMeshes: Mesh[] = [];
   private readonly lights: Object3D[];
+  /**
+   * CR7g-3: the realistic lighting (geometry-view's, as the CAD and BIM views'), made when first
+   * chosen; the view's own lights are the standard one.
+   */
+  private lighting: ViewLighting | undefined;
 
   constructor(
     private readonly host: HTMLElement,
@@ -78,6 +84,7 @@ export class CharacterViewport {
     this.renderer.outputColorSpace = SRGBColorSpace;
     const canvas = this.renderer.domElement;
     canvas.className = 'character-canvas';
+    canvas.dataset.lighting = 'standard';
     canvas.setAttribute('aria-hidden', 'true');
     host.append(canvas);
     this.scene.background = new Color('#eef1f4');
@@ -227,7 +234,50 @@ export class CharacterViewport {
         if (changed) index.needsUpdate = true;
       }
       g.computeBoundingSphere();
+      // The posed corners' box, which the realistic lighting fits its shadow and ground to
+      // (Box3.setFromObject keeps a geometry's first box otherwise; Codex, #1091).
+      if (this.lighting?.realistic) g.computeBoundingBox();
+      else g.boundingBox = null;
     }
+  }
+
+  /**
+   * CR7g-3: the realistic lighting (environment light, sun and ground shadows, tone mapping) or
+   * the standard one, for the view and the frames it exports. The props draw their looks' finish
+   * and light under the realistic lighting only.
+   */
+  setRealistic(on: boolean) {
+    if (on && !this.lighting)
+      // Nothing of its own under the standard lighting: the view's lights stay as they were.
+      this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0, sun: 0 });
+    if (!this.lighting || this.lighting.realistic === on) return;
+    this.lighting.setRealistic(on);
+    for (const l of this.lights) l.visible = !on;
+    for (const { material } of this.propGeometry.values()) this.finishProp(material);
+    this.request();
+  }
+  get realistic(): boolean {
+    return this.lighting?.realistic ?? false;
+  }
+  /** A prop's material under the lighting shown: its look's finish, or the plain one. */
+  private finishProp(material: MeshStandardMaterial) {
+    const finish = material.userData.finish as CharacterPropFinish | undefined;
+    if (!finish) return;
+    if (this.realistic) setViewFinish(material, finish);
+    else {
+      setViewLight(material, undefined);
+      material.roughness = 0.6;
+      material.metalness = 0.1;
+      delete material.userData.metalness;
+    }
+    material.needsUpdate = true;
+  }
+  /** Before a draw under the realistic lighting: the shadow and ground fitted to what is shown. */
+  private prepareLighting() {
+    if (!this.lighting?.realistic) return;
+    // Parts and props move every frame: the shadow follows them.
+    this.lighting.invalidate();
+    this.lighting.prepare([this.group, this.propGroup]);
   }
 
   /**
@@ -245,10 +295,12 @@ export class CharacterViewport {
     const camera = this.camera.clone();
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    const position = this.camera.position.clone();
+    const target = this.controls.target.clone();
     const hidden = [this.grid, this.overlay, this.sculpt].filter(
       (o): o is Object3D => !!o && o.visible,
     );
-    this.capture = { camera, hidden, lights: this.lights };
+    this.capture = { camera, hidden, lights: this.lights, position, target };
     for (const o of hidden) o.visible = false;
     canvas.classList.add('character-canvas-capturing');
     if (
@@ -266,11 +318,16 @@ export class CharacterViewport {
    * C8b: poses and draws one exported frame and returns the canvas holding it, for the caller
    * to take (`new VideoFrame(canvas)`) before anything draws again.
    */
-  captureCanvas(frame: readonly PartFrame[], props: readonly PropFrame[] = []): HTMLCanvasElement {
+  captureCanvas(
+    frame: readonly PartFrame[],
+    props: readonly PropFrame[] = [],
+    camera?: CharacterCameraPose,
+  ): HTMLCanvasElement {
     const capture = this.capture;
     if (!capture) throw new Error('No capture is running.');
     if (this.renderer.getContext().isContextLost()) throw contextLost();
     this.pose(frame, props);
+    this.aimCapture(capture, camera);
     this.renderCapture(capture);
     if (this.renderer.getContext().isContextLost()) throw contextLost();
     return this.renderer.domElement;
@@ -279,10 +336,12 @@ export class CharacterViewport {
   async captureFrame(
     frame: readonly PartFrame[],
     props: readonly PropFrame[] = [],
+    camera?: CharacterCameraPose,
   ): Promise<Uint8Array> {
     const capture = this.capture;
     if (!capture) throw new Error('No capture is running.');
     this.pose(frame, props);
+    this.aimCapture(capture, camera);
     const gl = this.renderer.getContext();
     if (gl.isContextLost()) throw contextLost();
     this.renderCapture(capture);
@@ -295,11 +354,27 @@ export class CharacterViewport {
     if (!blob) throw new CaptureUnsupported('The frame could not be read from the view.');
     return new Uint8Array(await blob.arrayBuffer());
   }
+  /**
+   * CR7e: an action's keyed camera for this frame; without one the frame keeps the view's camera
+   * as the capture began. A property not keyed keeps the view's.
+   */
+  private aimCapture(
+    capture: NonNullable<typeof this.capture>,
+    pose: CharacterCameraPose | undefined,
+  ) {
+    if (pose) aim(capture.camera, new Vector3(), pose, capture.position, capture.target);
+  }
   /** Draws only the parts and props: anything added to the scene since the capture began is left out. */
   private renderCapture(capture: NonNullable<typeof this.capture>) {
-    const shown = new Set<Object3D>([this.group, this.propGroup, ...capture.lights]);
+    const shown = new Set<Object3D>([
+      this.group,
+      this.propGroup,
+      ...capture.lights,
+      ...(this.lighting?.objects ?? []),
+    ]);
     const off = this.scene.children.filter((o) => !shown.has(o) && o.visible);
     for (const o of off) o.visible = false;
+    this.prepareLighting();
     this.renderer.render(this.scene, capture.camera);
     for (const o of off) o.visible = true;
   }
@@ -316,6 +391,9 @@ export class CharacterViewport {
   private capture:
     | {
         camera: PerspectiveCamera;
+        /** Where the view's camera stood and looked when the capture began. */
+        position: Vector3;
+        target: Vector3;
         hidden: Object3D[];
         lights: Object3D[];
         /** The last `show` asked for while capturing. */
@@ -344,6 +422,10 @@ export class CharacterViewport {
             metalness: 0.1,
             side: DoubleSide,
           });
+          if (i.mesh.finish) {
+            material.userData.finish = i.mesh.finish;
+            this.finishProp(material);
+          }
           gpu = { geometry, material };
           this.propGeometry.set(i.mesh, gpu);
         }
@@ -393,6 +475,8 @@ export class CharacterViewport {
     const distance = ((radius / Math.sin(Math.min(vertical, horizontal))) * 1.05) / along;
     this.camera.near = Math.max(size / 1000, 0.1);
     this.camera.far = Math.max(size, distance) * 100;
+    // GV2c: the framed planes; a far keyed camera widens from these, never from a widened pair.
+    this.camera.userData.planes = { near: this.camera.near, far: this.camera.far };
     this.camera.position.set(
       center.x + distance * 0.35,
       center.y - distance,
@@ -449,6 +533,24 @@ export class CharacterViewport {
     const c = this.camera.position;
     return [c.x, c.y, c.z];
   }
+  /** CR7e: where the view's camera stands and the point it turns about (mm, character space). */
+  viewCamera(): { position: [number, number, number]; target: [number, number, number] } {
+    const p = this.camera.position,
+      t = this.controls.target;
+    return { position: [p.x, p.y, p.z], target: [t.x, t.y, t.z] };
+  }
+  /**
+   * CR7e: looks through an action's keyed camera (playback, scrubbing). A property not keyed
+   * keeps the view's. Counts as the person's move: props arriving later do not refit the view.
+   */
+  setCamera(pose: CharacterCameraPose) {
+    if (this.capture) return;
+    const target = this.controls.target.clone();
+    aim(this.camera, this.controls.target, pose, this.camera.position.clone(), target);
+    this.controls.update();
+    this.moved = true;
+    this.request();
+  }
   /** The mesh edit overlay (C3e), drawn over the parts; null removes it. */
   setOverlay(overlay: Object3D | null) {
     this.overlay?.removeFromParent();
@@ -457,6 +559,14 @@ export class CharacterViewport {
     this.request();
   }
   private overlay: Object3D | undefined;
+  /** CR7d: the occupant check's lines, a slot apart from the mesh edit overlay; null removes them. */
+  setGuide(guide: Object3D | null) {
+    this.guide?.removeFromParent();
+    this.guide = guide ?? undefined;
+    if (guide) this.scene.add(guide);
+    this.request();
+  }
+  private guide: Object3D | undefined;
 
   /**
    * C7b: the multires surface being sculpted, drawn in place of its part (the Surface hides the
@@ -624,6 +734,7 @@ export class CharacterViewport {
     if (this.frame || this.capture) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
+      this.prepareLighting();
       this.renderer.render(this.scene, this.camera);
       for (const f of this.rendered) f();
     });
@@ -645,6 +756,7 @@ export class CharacterViewport {
     this.clear();
     this.clearProps();
     this.grid?.dispose();
+    this.lighting?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -692,4 +804,42 @@ function unionBounds(a: Box | undefined, b: Box | undefined): Box | undefined {
     [Math.min(a[0][0], b[0][0]), Math.min(a[0][1], b[0][1]), Math.min(a[0][2], b[0][2])],
     [Math.max(a[1][0], b[1][0]), Math.max(a[1][1], b[1][1]), Math.max(a[1][2], b[1][2])],
   ];
+}
+
+/**
+ * Puts `camera` at the pose's position looking at its target (the base for a property not
+ * keyed), with +Z up; `pivot` follows the target. A position on its target cannot aim and is
+ * left as it was.
+ */
+export function aim(
+  camera: PerspectiveCamera,
+  pivot: Vector3,
+  pose: CharacterCameraPose | undefined,
+  basePosition: Vector3,
+  baseTarget: Vector3,
+) {
+  const position = pose?.position ? new Vector3(...pose.position) : basePosition.clone();
+  const target = pose?.target ? new Vector3(...pose.target) : baseTarget.clone();
+  if (position.distanceToSquared(target) === 0) return;
+  camera.position.copy(position);
+  pivot.copy(target);
+  camera.up.set(0, 0, 1);
+  camera.lookAt(target);
+  camera.updateMatrixWorld();
+  // GV2c: a keyed camera may stand up to 10 km out, beyond the far plane the view was framed
+  // with. Reach at least four times as far as it looks, the near plane then within a depth
+  // ratio of 10⁶. Each pose starts again from the framed planes (Codex): a close-up after a far
+  // shot gets the framed planes back, whatever frame came before.
+  const framed = (camera.userData.planes ??= { near: camera.near, far: camera.far }) as {
+    near: number;
+    far: number;
+  };
+  const reach = position.distanceTo(target) * 4;
+  const far = Math.max(framed.far, reach),
+    near = reach > framed.far ? Math.max(framed.near, reach / 1e6) : framed.near;
+  if (far !== camera.far || near !== camera.near) {
+    camera.far = far;
+    camera.near = near;
+    camera.updateProjectionMatrix();
+  }
 }

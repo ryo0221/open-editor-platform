@@ -16,11 +16,41 @@ export interface CharacterPropMesh {
   indices: Uint32Array;
   color: string;
   opacity: number;
+  /** CR7d: a sheet's surface (no volume), so a check does not read it as a solid with holes. */
+  sheet?: boolean;
+  /**
+   * CR7g-3: the look's finish and light (as the CAD view draws them), used by the realistic
+   * lighting; the standard lighting keeps the props' plain finish.
+   */
+  finish?: CharacterPropFinish;
+}
+/** CR7g-3: a prop look's finish (glTF metal/roughness) and light (emission, transmission). */
+export interface CharacterPropFinish {
+  roughness?: number;
+  metalness?: number;
+  emission?: { color: string; strength: number };
+  transmission?: number;
+  ior?: number;
 }
 /** One drawn copy of a mesh: where it lies in the prop's own space (column-major 4×4). */
 export interface CharacterPropInstance {
   mesh: CharacterPropMesh;
   matrix: Mat4;
+  /**
+   * CR7d: the part occurrence it draws (a stable id and the name the Host gives it); `box` when
+   * it is a stand-in box (the version's meshes are not at hand), which no check reads.
+   */
+  piece?: {
+    id: string;
+    name: string;
+    box?: boolean;
+    /** The occurrence's own frame (its pose), in the same space as `matrix`. */
+    frame?: Mat4;
+    /** Not material (a building's room space, its air): drawn, but never an obstacle. */
+    air?: boolean;
+  };
+  /** CR7d: the solid body it draws within its piece (a check reads each body as its own solid). */
+  body?: string;
 }
 /** One value a joint can be keyed by, with its bounds and the value its version saved. */
 export interface CharacterPropJointValue {
@@ -170,7 +200,13 @@ export function propFrames(
       visible: prop.visible,
       instances: view
         .draw(pose.joints.get(prop.id) ?? new Map(), pose.mounts.get(prop.id))
-        .map((i) => ({ mesh: i.mesh, matrix: multiplyMat4(place, i.matrix) })),
+        .map((i) => ({
+          ...i,
+          matrix: multiplyMat4(place, i.matrix),
+          ...(i.piece?.frame
+            ? { piece: { ...i.piece, frame: multiplyMat4(place, i.piece.frame) } }
+            : {}),
+        })),
     });
   }
   return out;

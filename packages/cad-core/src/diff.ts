@@ -26,14 +26,15 @@ const list = (doc: CadDocument, key: (typeof collections)[number]): { id: string
 export function compareCad(before: CadDocument, after: CadDocument): Change[] {
   const changes: Change[] = [];
   // Document-level values: the kernel build and the assembly's own BOM values (R2b).
-  for (const key of ['kernelProfile', 'partProperties'] as const)
-    if (!canonicalEqual(before[key], after[key]))
+  // CLF3: the car's proportion setup, one value (absent when there is none).
+  for (const key of ['kernelProfile', 'partProperties', 'proportions'] as const)
+    if (!canonicalEqual(before[key] ?? null, after[key] ?? null))
       changes.push({
         elementId: key,
         path: key,
         kind: 'changed',
-        before: canonicalJson(before[key]),
-        after: canonicalJson(after[key]),
+        before: canonicalJson(before[key] ?? null),
+        after: canonicalJson(after[key] ?? null),
       });
   for (const key of collections) {
     const a = new Map<string, object>(list(before, key).map((x) => [x.id, x]));

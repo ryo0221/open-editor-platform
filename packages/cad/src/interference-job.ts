@@ -5,8 +5,10 @@
  * comes back.
  */
 import {
+  cadClearance,
   checkCadInterference,
   checkCadInterferenceAlong,
+  type CadClearanceReport,
   type CadConfiguration,
   type CadDocument,
   type CadInterferenceMesh,
@@ -33,14 +35,15 @@ export interface CadInterferenceRequest {
     /** MR7: each mount's joint in effect then. */
     mounts?: Record<string, string>;
   }[];
+  /** CR7c: measure the clearance between two component paths instead (at `values` if given). */
+  clearance?: { a: string[]; b: string[]; values?: Record<string, CadResolvedJointValues> };
 }
+export type CadInterferenceJobReport = CadInterferenceReport | CadSweepReport | CadClearanceReport;
 export type CadInterferenceResponse =
-  | { id: number; status: 'done'; report: CadInterferenceReport | CadSweepReport }
+  | { id: number; status: 'done'; report: CadInterferenceJobReport }
   | { id: number; status: 'failed'; message: string };
 
-export function runInterference(
-  request: CadInterferenceRequest,
-): CadInterferenceReport | CadSweepReport {
+export function runInterference(request: CadInterferenceRequest): CadInterferenceJobReport {
   const input = {
     doc: request.doc,
     lookup: (hash: string) => request.parts[hash],
@@ -48,6 +51,14 @@ export function runInterference(
     ...(request.ownMeshes ? { ownMeshes: request.ownMeshes } : {}),
     joints: request.joints,
   };
+  if (request.clearance) {
+    const { a, b, values } = request.clearance;
+    return cadClearance(
+      { ...input, ...(values ? { values: new Map(Object.entries(values)) } : {}) },
+      a,
+      b,
+    );
+  }
   if (request.samples)
     return checkCadInterferenceAlong(
       input,
@@ -66,12 +77,12 @@ export class CadInterferenceJobs {
   private sequence = 0;
   private readonly pending = new Map<
     number,
-    { resolve(report: CadInterferenceReport | CadSweepReport): void; reject(error: Error): void }
+    { resolve(report: CadInterferenceJobReport): void; reject(error: Error): void }
   >();
 
   constructor(private readonly start: () => Worker = defaultWorker) {}
 
-  run(request: CadInterferenceRequest): Promise<CadInterferenceReport | CadSweepReport> {
+  run(request: CadInterferenceRequest): Promise<CadInterferenceJobReport> {
     const worker = this.ensure();
     if (!worker)
       return new Promise((resolve, reject) => {

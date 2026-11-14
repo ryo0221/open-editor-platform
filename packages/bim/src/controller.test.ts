@@ -110,6 +110,20 @@ describe.skipIf(!dist)(
       expect(paths(3000)).not.toContain('win-n1');
       expect(paths(3000)).toContain('w-north');
       expect(paths(2400)).toContain('win-n1');
+      // CS1b: a tint replaces an element's look by its ID; null leaves the element out.
+      const tinted = bimViewSolids(c.state.content, c.state.evaluation, {
+        selection: new Set(),
+        tint: (id) =>
+          id === 'w-north'
+            ? null
+            : id === 'win-n1'
+              ? { color: '#ff0000', opacity: 0.5 }
+              : undefined,
+      });
+      expect(tinted.flatMap((s) => s.instances.map((i) => i.path[0]))).not.toContain('w-north');
+      const red = tinted.find((s) => s.instances.some((i) => i.path[0] === 'win-n1'))!;
+      expect(red.instances.map((i) => i.path[0])).toEqual(['win-n1']);
+      expect(red.meshes!.map((m) => [m.color, m.opacity])).toEqual([['#ff0000', 0.5]]);
       const t = c.state.content.types.find((x) => x.id === 't-window-1800')!;
       c.apply({ type: 'update', collection: 'types', entity: { ...t, widthMm: 1200 } as typeof t });
       await settled(c);

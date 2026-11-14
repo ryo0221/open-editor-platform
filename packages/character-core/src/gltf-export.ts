@@ -560,12 +560,18 @@ function animationOut(
         ? rotationOut(v as Quat)
         : scaleOut(v as Vec3);
   let baked = 0,
-    props = 0;
+    props = 0,
+    cameras = 0;
   for (const track of action.tracks) {
     const t = track.target;
     // Props are not written (C2b), so neither are their joints' nor placements' tracks (MR4).
     if (t.kind === 'prop-joint' || t.kind === 'prop-mount' || t.kind === 'prop') {
       props++;
+      continue;
+    }
+    // CR7e: the action's camera is the editor's view, not a node of the file.
+    if (t.kind === 'camera') {
+      cameras++;
       continue;
     }
     if (t.kind === 'morph') continue;
@@ -628,6 +634,7 @@ function animationOut(
     });
   }
   w.loss('prop-joint-track', props);
+  w.loss('camera-track', cameras);
   w.loss('eased-keys-baked', baked);
   if (!channels.length) {
     w.loss('empty-action');

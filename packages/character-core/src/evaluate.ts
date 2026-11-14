@@ -13,7 +13,10 @@ import type {
   Vec3,
 } from './model';
 
-/** Local transforms and morph weights at one tick; camera, selection and playhead are not here. */
+/**
+ * Local transforms and morph weights at one tick, and the action's camera (CR7e) when it is keyed;
+ * the view's own camera, selection and playhead are not here.
+ */
 export interface CharacterPose {
   parts: Map<string, Transform3>;
   bones: Map<string, Transform3>;
@@ -30,6 +33,15 @@ export interface CharacterPose {
    * or before its first key, keeps the version's own choice.
    */
   mounts: Map<string, Map<string, string>>;
+  /**
+   * CR7e: the action's keyed camera. Absent without camera tracks; a property without a track is
+   * absent too (the view's own stands in for it).
+   */
+  camera?: CharacterCameraPose;
+}
+export interface CharacterCameraPose {
+  position?: Vec3;
+  target?: Vec3;
 }
 
 /** The rest pose, then every track of `action` sampled at `tick` (clamped to the action). */
@@ -75,6 +87,10 @@ export function poseAt(
       let mounts = pose.mounts.get(target.id);
       if (!mounts) pose.mounts.set(target.id, (mounts = new Map()));
       mounts.set(target.mount, joint);
+      continue;
+    }
+    if (target.kind === 'camera') {
+      (pose.camera ??= {})[target.property] = sampleVec3(track.keys, t);
       continue;
     }
     if (target.kind === 'prop') {

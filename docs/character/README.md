@@ -1,4 +1,4 @@
-# Character: experimental 3D editing and animation
+# Character: 3D editing and animation
 
 Character is a separate domain for mesh assets, parts, skeletons, morphs and animation
 actions. It shares geometry and time utilities with other editors, but keeps its own
@@ -7,7 +7,9 @@ also has a reference test Host.
 
 The source includes glTF/GLB and VRM import, playback, mesh editing and subdivision,
 UV editing, rigging and weights, pose/keyframe editing, morphs and GLB export.
-These implementations do not establish production acceptance or a stable public API.
+Character was accepted as a regular editor on 2026-11-14. It is open source software used at
+your own risk: shared editing, a stable public API, performance and every environment are
+not guaranteed.
 See the package-level contracts for exact operations and limits:
 
 - [Character Surface](../../packages/character/README.md)

@@ -468,12 +468,65 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     const p = `$.studies[${i}]`;
     if (!record(s)) return add('study', p);
     const base = ['id', 'name', 'kind', 'loadIds', 'constraintIds', 'solver', 'convergence'];
-    if (s.kind !== 'linear-static' && s.kind !== 'modal' && s.kind !== 'thermal')
+    if (
+      s.kind !== 'linear-static' &&
+      s.kind !== 'modal' &&
+      s.kind !== 'thermal' &&
+      s.kind !== 'aero'
+    )
       return add('unsupported-analysis', `${p}.kind`);
     // R3i-4: a structural study may say how it models the body; a thermal one is solid only.
     const optional =
-      s.kind === 'thermal' ? [] : s.kind === 'modal' ? ['idealisation'] : ['idealisation', 'test'];
-    if (!keys(s, p, s.kind === 'modal' ? [...base, 'modes'] : base, optional)) return;
+      s.kind === 'thermal' || s.kind === 'aero'
+        ? []
+        : s.kind === 'modal'
+          ? ['idealisation']
+          : ['idealisation', 'test'];
+    const required =
+      s.kind === 'modal' ? [...base, 'modes'] : s.kind === 'aero' ? [...base, 'aero'] : base;
+    if (!keys(s, p, required, optional)) return;
+    // VS4a: a wind tunnel's air, browser cell and Host mesh; no loads or constraints.
+    const aero = s.kind === 'aero';
+    if (aero) {
+      const a = s.aero;
+      const q = `${p}.aero`;
+      if (!record(a)) add('value', q);
+      else if (
+        keys(a, q, ['speed', 'yawDeg', 'ground', 'browserCellMm', 'host', 'referenceAreaMm2'])
+      ) {
+        if (!finite(a.speed) || a.speed < 1 || a.speed > L.aeroSpeed) add('value', `${q}.speed`);
+        if (!within(a.yawDeg, L.aeroYawDeg)) add('value', `${q}.yawDeg`);
+        if (a.ground !== 'moving' && a.ground !== 'fixed' && a.ground !== 'slip')
+          add('value', `${q}.ground`);
+        if (!finite(a.browserCellMm) || a.browserCellMm <= 0 || a.browserCellMm > L.aeroCellMm)
+          add('value', `${q}.browserCellMm`);
+        if (
+          a.referenceAreaMm2 !== null &&
+          (!finite(a.referenceAreaMm2) ||
+            a.referenceAreaMm2 <= 0 ||
+            a.referenceAreaMm2 > L.aeroReferenceAreaMm2)
+        )
+          add('value', `${q}.referenceAreaMm2`);
+        const h = a.host;
+        if (!record(h)) add('value', `${q}.host`);
+        else if (keys(h, `${q}.host`, ['baseMm', 'level', 'iterations'])) {
+          if (!finite(h.baseMm) || h.baseMm < L.aeroHostBaseMmMin || h.baseMm > L.aeroHostBaseMmMax)
+            add('value', `${q}.host.baseMm`);
+          if (
+            !Number.isSafeInteger(h.level) ||
+            (h.level as number) < 0 ||
+            (h.level as number) > L.aeroHostLevel
+          )
+            add('value', `${q}.host.level`);
+          if (
+            !Number.isSafeInteger(h.iterations) ||
+            (h.iterations as number) < 10 ||
+            (h.iterations as number) > L.aeroHostIterations
+          )
+            add('value', `${q}.host.iterations`);
+        }
+      }
+    }
     if (s.idealisation !== undefined && s.idealisation !== 'solid' && s.idealisation !== 'shell')
       add('value', `${p}.idealisation`);
     id(s.id, `${p}.id`);
@@ -492,9 +545,12 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       return a;
     };
     const ls = refs(s.loadIds, `${p}.loadIds`, loadIds, L.loads);
+    if (aero && ls.length) add('value', `${p}.loadIds`, 'a wind-tunnel study has no loads');
     // Natural modes have no loads.
     if (s.kind === 'modal' && ls.length) add('value', `${p}.loadIds`, 'a modal study has no loads');
     const cs = refs(s.constraintIds, `${p}.constraintIds`, constraintIds, L.constraints);
+    if (aero && cs.length)
+      add('value', `${p}.constraintIds`, 'a wind-tunnel study has no constraints');
     // R3h: a thermal study takes the thermal items only, the others none of them.
     const thermal = s.kind === 'thermal';
     ls.forEach((x, k) => {
@@ -512,7 +568,11 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         );
     });
     // A thermal study is held by a temperature or a convection; the others by a constraint.
-    if (!cs.length && !(thermal && ls.some((x) => loadKinds.get(x as string) === 'convection')))
+    if (
+      !aero &&
+      !cs.length &&
+      !(thermal && ls.some((x) => loadKinds.get(x as string) === 'convection'))
+    )
       add('constraints-empty', `${p}.constraintIds`);
     // CR5c: a stiffness test names a pair of the study's displacements (torsion) or one of its
     // forces (bending).
@@ -646,7 +706,9 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
             .filter(record)
             .map((x): [string, SimulationStudyKind] => [
               x.id as string,
-              x.kind === 'modal' || x.kind === 'thermal' ? x.kind : 'linear-static',
+              x.kind === 'modal' || x.kind === 'thermal' || x.kind === 'aero'
+                ? x.kind
+                : 'linear-static',
             ])
         : [],
     );
@@ -664,7 +726,9 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     const checksOf = (kind: SimulationStudyKind | undefined) =>
       kind === 'modal'
         ? ['mapping', 'mass', 'quality', 'solver', 'orthogonality']
-        : ['mapping', 'load', 'quality', 'solver', 'equilibrium'];
+        : kind === 'aero'
+          ? ['surface', 'solver']
+          : ['mapping', 'load', 'quality', 'solver', 'equilibrium'];
     const studied = new Set<string>();
     const runs = list(value.runs, '$.runs', L.studies);
     if (!runs.length) add('runs', '$.runs', 'absent when there are none');
@@ -729,6 +793,9 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       reasons.forEach((x, k) => {
         if (!runText(x)) add('run', `${p}.reasons[${k}]`);
       });
+      // VS4a: a wind tunnel's result is for reference in V1.
+      if (kind === 'aero' && r.status === 'verified')
+        add('run', `${p}.status`, 'a wind-tunnel run is for reference');
       if (r.status === 'verified' && reasons.length)
         add('run', `${p}.reasons`, 'a verified run has none');
       // Verified needs every check passed over at least two levels (状態の決め方).

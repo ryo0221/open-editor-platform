@@ -25,6 +25,36 @@
   display: block;
   touch-action: none;
 }
+/* CLF1b: the drawing board's pane lines and labels over the canvas (display only). */
+.cad-three-view {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(#9aa6b2, #9aa6b2) 50% 0 / 1px 100% no-repeat,
+    linear-gradient(#9aa6b2, #9aa6b2) 0 50% / 100% 1px no-repeat;
+}
+.cad-three-view-label {
+  position: absolute;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 80%);
+  color: #33414f;
+  font-size: 12px;
+}
+/* At each pane's foot, clear of the notes along the viewport's top. */
+.cad-three-view-label.top-left {
+  left: 8px;
+  bottom: calc(50% + 8px);
+}
+.cad-three-view-label.top-right {
+  left: calc(50% + 8px);
+  bottom: calc(50% + 8px);
+}
+.cad-three-view-label.bottom-left {
+  left: 8px;
+  bottom: 8px;
+}
 .cad-viewport-note {
   position: absolute;
   left: 16px;
@@ -652,6 +682,24 @@
   cursor: default;
   opacity: 0.6;
 }
+/* PMI-5b: an assembly's PMI in its navigator: the components an item names under its text. */
+.cad-assembly .cad-pmi-list .cad-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.cad-assembly .cad-pmi-list .cad-item[aria-pressed='true'] {
+  border-color: #2563eb;
+  background: #e8efff;
+}
+.cad-assembly .cad-pmi-list .cad-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 .cad-pmi-stale {
   margin: 0 0 6px;
   padding: 6px 8px;
@@ -677,4 +725,71 @@
 .cad-forms form.cad-row input {
   flex: 1 1 8em;
   min-width: 0;
+}
+/* CLF1a: what lies under a sketch, drawn faintly and never picked. */
+.cad-sketch-canvas .cad-sketch-underlay {
+  pointer-events: none;
+}
+.cad-sketch-canvas .cad-sketch-underlay image {
+  opacity: 0.2;
+}
+.cad-sketch-canvas .cad-sketch-underlay polyline {
+  stroke: #5b7a99;
+  stroke-width: 1px;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+
+/* CLF3: the proportion indicators; a value outside its band is marked. */
+.cad-proportions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cad-proportions-role {
+  display: grid;
+  gap: 2px;
+}
+.cad-proportions-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.cad-proportions-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.cad-proportions-list li.ok strong {
+  color: #1f7a3a;
+}
+.cad-proportions-list li.outside strong {
+  color: #b42318;
+}
+.cad-proportions-band {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+/* The band fields are named for assistive tech; on screen their placeholders name them. */
+.cad-proportions-band .ep-field {
+  font-size: 0;
+}
+.cad-proportions-band .ep-field input {
+  width: 5.5em;
+  font-size: 12px;
+}
+/* A refused value's message stays readable. */
+.cad-proportions-band .ep-field small {
+  font-size: 11px;
+  color: #b42318;
+}
+.cad-proportions-band {
+  flex-wrap: wrap;
 }

@@ -32,6 +32,7 @@ export function trackLabel(
   mountName?: (propId: string, mountId: string) => string | undefined,
 ): string {
   const { target } = track;
+  if (target.kind === 'camera') return `Camera ${target.property}`;
   if (target.kind === 'prop-mount') {
     const prop = doc.props.find((p) => p.id === target.id)?.name ?? target.id;
     return `${prop} ${mountName?.(target.id, target.mount) ?? target.mount} mount`;

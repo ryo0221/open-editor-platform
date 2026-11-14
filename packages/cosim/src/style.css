@@ -1,0 +1,96 @@
+.cosim-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cosim-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.cosim-main {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  display: grid;
+  grid-template-rows: minmax(240px, 1fr) auto;
+  background: #eef1f4;
+  overflow: auto;
+}
+.cosim-sheet {
+  position: relative;
+  min-height: 240px;
+  display: flex;
+}
+.cosim-sheet > * {
+  flex: 1;
+}
+.cosim-ladder {
+  border-top: 1px solid #d5dbe2;
+}
+.cosim-panel {
+  display: flex;
+  flex-direction: column;
+}
+.cosim-empty {
+  margin: 8px 12px;
+  color: #5b6570;
+  font-size: 13px;
+}
+.cosim-error {
+  margin: 2px 0 8px;
+  color: #b3261e;
+  font-size: 12px;
+}
+.cosim-bindings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cosim-bindings li {
+  border: 1px solid #d5dbe2;
+  padding: 6px;
+  background: #fff;
+}
+.cosim-kind {
+  font-size: 12px;
+  font-weight: 600;
+}
+.cosim-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.cosim-row > span {
+  min-width: 48px;
+}
+.cosim-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.cosim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cosim-table th {
+  text-align: left;
+  font-weight: 500;
+  padding: 2px 4px;
+}
+.cosim-table td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 4px;
+}
+.cosim-status {
+  font-size: 12px;
+}
+.cosim-notice {
+  color: #b3261e;
+}

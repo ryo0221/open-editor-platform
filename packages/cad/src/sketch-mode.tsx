@@ -28,6 +28,7 @@ import type { CadController, CadSketchView } from './controller';
 import { readCadInput } from './expression-input';
 import { constraintTargets, currentLength, type SketchConstraintInput } from './sketch-draft';
 import { Output } from './status-role';
+import type { CadSketchUnderlay } from './sketch-underlay';
 
 /**
  * Sketch mode (docs/cad/r1-modeling.md, Surface, CAD34): the drawing on its plane, seen from the
@@ -53,7 +54,11 @@ const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
  * The view round the sketch's elements. On entering, at least 200 mm across (a drawing area for
  * a new sketch); `Fit sketch` (`floor` 0.5 mm) fits even a watch bridge of a few millimetres (WM5c).
  */
-function fitBox(s: CadSketch, floor = 200): [number, number, number, number] {
+function fitBox(
+  s: CadSketch,
+  floor = 200,
+  around?: [number, number, number, number],
+): [number, number, number, number] {
   const pts: Pt[] = [];
   for (const e of s.entities) {
     if (e.type === 'point') pts.push(at(s, e.id));
@@ -78,6 +83,8 @@ function fitBox(s: CadSketch, floor = 200): [number, number, number, number] {
       }
     }
   }
+  // CLF1a: an empty sketch opens on what lies under it, if anything.
+  if (!pts.length && around) pts.push([around[0], around[1]], [around[2], around[3]]);
   if (!pts.length) return [-100, -100, 200, 200];
   const us = pts.map((p) => p[0]);
   const vs = pts.map((p) => p[1]);
@@ -97,6 +104,53 @@ function arcPath(s: CadSketch, e: Extract<CadSketchEntity, { type: 'arc' }>) {
   // SVG y is −v, which mirrors the turn: the plane's counter-clockwise is SVG's flag 0.
   const large = Math.abs(sweep) > Math.PI ? 1 : 0;
   return `M ${a[0]} ${-a[1]} A ${r} ${r} 0 ${large} ${e.clockwise ? 1 : 0} ${b[0]} ${-b[1]}`;
+}
+
+/** Pixels across the longer side of the shadow image. */
+const shadowPx = 1536;
+/**
+ * CLF1a: the shown bodies' projected triangles filled into one image (their silhouette as seen
+ * along the sketch's normal), over the box they cover; undefined without a DOM or triangles.
+ */
+function shadowImage(
+  underlay: CadSketchUnderlay,
+): { href: string; box: [number, number, number, number] } | undefined {
+  if (typeof document === 'undefined' || !underlay.shadows.length) return undefined;
+  let box: [number, number, number, number] | undefined;
+  for (const { triangles: t } of underlay.shadows)
+    for (let i = 0; i < t.length; i += 2)
+      box = box
+        ? [
+            Math.min(box[0], t[i]!),
+            Math.min(box[1], t[i + 1]!),
+            Math.max(box[2], t[i]!),
+            Math.max(box[3], t[i + 1]!),
+          ]
+        : [t[i]!, t[i + 1]!, t[i]!, t[i + 1]!];
+  if (!box) return undefined;
+  const span = Math.max(box[2] - box[0], box[3] - box[1], 1e-6);
+  const k = shadowPx / span;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil((box[2] - box[0]) * k));
+  canvas.height = Math.max(1, Math.ceil((box[3] - box[1]) * k));
+  const g = canvas.getContext('2d');
+  if (!g) return undefined;
+  g.fillStyle = '#1d2733';
+  // Each triangle a little grown (the stroke) so shared edges leave no seam.
+  g.strokeStyle = '#1d2733';
+  g.lineWidth = 1;
+  g.beginPath();
+  const [u0, , , v1] = box;
+  for (const { triangles: t } of underlay.shadows)
+    for (let i = 0; i + 5 < t.length; i += 6) {
+      g.moveTo((t[i]! - u0) * k, (v1 - t[i + 1]!) * k);
+      g.lineTo((t[i + 2]! - u0) * k, (v1 - t[i + 3]!) * k);
+      g.lineTo((t[i + 4]! - u0) * k, (v1 - t[i + 5]!) * k);
+      g.closePath();
+    }
+  g.fill('nonzero');
+  g.stroke();
+  return { href: canvas.toDataURL('image/png'), box };
 }
 
 /** A comb's teeth as one SVG path: each from its sample to its tip (SVG y is −v). */
@@ -156,10 +210,13 @@ export function SketchCanvas({
   onSelect,
   ownsKey,
   comb,
+  underlay,
 }: {
   controller: CadController;
   view: CadSketchView;
   tool: SketchTool;
+  /** CLF1a: the shown bodies and other sketches under the drawing; none when off. */
+  underlay?: CadSketchUnderlay;
   /** The curvature comb of every spline, its automatic scale times 2 to this power; off when undefined. */
   comb?: number;
   /** Whether a key event belongs to this canvas's Surface (several may be mounted). */
@@ -169,7 +226,8 @@ export function SketchCanvas({
 }) {
   const { sketch } = view;
   const svg = useRef<SVGSVGElement>(null);
-  const [box, setBox] = useState(() => fitBox(sketch));
+  const [box, setBox] = useState(() => fitBox(sketch, 200, underlay?.bounds));
+  const shadow = useMemo(() => underlay && shadowImage(underlay), [underlay]);
   const [pending, setPending] = useState<{ id?: string; at: Pt }[]>([]);
   const [cursor, setCursor] = useState<Pt>();
   const [drag, setDrag] = useState<{ id: string; at: Pt }>();
@@ -389,6 +447,28 @@ export function SketchCanvas({
           <line x1={u} y1={0} x2={u + w} y2={0} />
           <line x1={0} y1={-v} x2={0} y2={-(v + h)} />
         </g>
+        {underlay && (
+          <g className="cad-sketch-underlay" data-testid="cad-sketch-underlay">
+            {shadow && (
+              <image
+                href={shadow.href}
+                x={shadow.box[0]}
+                y={-shadow.box[3]}
+                width={shadow.box[2] - shadow.box[0]}
+                height={shadow.box[3] - shadow.box[1]}
+                preserveAspectRatio="none"
+                data-testid="cad-sketch-shadow"
+              />
+            )}
+            {underlay.lines.map((l) => (
+              <polyline
+                key={`${l.sketchId}/${l.element}`}
+                data-sketch={l.sketchId}
+                points={l.points.map(([x, y]) => `${x},${-y}`).join(' ')}
+              />
+            ))}
+          </g>
+        )}
         {combs.map((c) => (
           <g
             key={`comb-${c.id}`}
@@ -472,7 +552,11 @@ export function SketchCanvas({
         {preview}
       </svg>
       <div className="cad-sketch-view-tools">
-        <IconButton icon={Scan} label="Fit sketch" onClick={() => setBox(fitBox(sketch, 0.5))} />
+        <IconButton
+          icon={Scan}
+          label="Fit sketch"
+          onClick={() => setBox(fitBox(sketch, 0.5, underlay?.bounds))}
+        />
       </div>
     </div>
   );
@@ -682,6 +766,8 @@ export function SketchPanel({
   onSelect,
   comb,
   onComb,
+  underlay,
+  onUnderlay,
 }: {
   controller: CadController;
   view: CadSketchView;
@@ -691,6 +777,9 @@ export function SketchPanel({
   /** The curvature comb's scale step (SketchCanvas `comb`), undefined when off. */
   comb?: number;
   onComb(comb: number | undefined): void;
+  /** CLF1a: whether the underlay is drawn (SketchCanvas `underlay`). */
+  underlay?: boolean;
+  onUnderlay?(on: boolean): void;
 }) {
   const { sketch } = view;
   const [distance, setDistance] = useState('10');
@@ -729,6 +818,19 @@ export function SketchPanel({
         <p role="alert" className="cad-diagnostic" data-testid="cad-sketch-problem">
           {view.problem.message}
         </p>
+      )}
+      {onUnderlay && (
+        <label
+          className="cad-check"
+          title="The shown bodies and the other sketches, seen along this sketch's normal"
+        >
+          <input
+            type="checkbox"
+            checked={!!underlay}
+            onChange={(e) => onUnderlay(e.target.checked)}
+          />{' '}
+          Underlay
+        </label>
       )}
       {sketch.entities.some((e) => e.type === 'spline') && (
         <div className="cad-row" role="group" aria-label="Curvature comb">

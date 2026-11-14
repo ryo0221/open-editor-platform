@@ -978,6 +978,134 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // Circuit board Surface standalone host (PB1): no kernel, SVG only.
+  pcb: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/pcb/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/pcb-surface-results',
+    use: { baseURL: 'http://127.0.0.1:4207', launchOptions: chromiumLaunchOptions() },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/pcb/vite.config.ts',
+        url: 'http://127.0.0.1:4207',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // Schematic Surface standalone host (SL1): SVG only.
+  schematic: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/schematic/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/schematic-surface-results',
+    use: { baseURL: 'http://127.0.0.1:4209', launchOptions: chromiumLaunchOptions() },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/schematic/vite.config.ts',
+        url: 'http://127.0.0.1:4209',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The ladder Surface's standalone host (SL7b).
+  ladder: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/ladder/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/ladder-surface-results',
+    use: { baseURL: 'http://127.0.0.1:4215', launchOptions: chromiumLaunchOptions() },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/ladder/vite.config.ts',
+        url: 'http://127.0.0.1:4215',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The co-simulation Surface's test host (SL8b): ladder program and schematic run together.
+  cosim: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/cosim/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/cosim-surface-results',
+    use: { baseURL: 'http://127.0.0.1:4217', launchOptions: chromiumLaunchOptions() },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/cosim/vite.config.ts',
+        url: 'http://127.0.0.1:4217',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The schematic Surface in the ordinary Playground (SL1). Its own port, so a stale server on
+  // another suite's port is never reused.
+  'schematic.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/schematic-playground-results',
+    testMatch: /schematic-playground.spec.ts$/,
+    use: { baseURL: 'http://127.0.0.1:4214', launchOptions: chromiumLaunchOptions() },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4214 --strictPort',
+        url: 'http://127.0.0.1:4214',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The ladder Surface in the ordinary Playground (SL7c), on its own port.
+  'ladder.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/ladder-playground-results',
+    testMatch: /ladder-playground.spec.ts$/,
+    use: { baseURL: 'http://127.0.0.1:4216', launchOptions: chromiumLaunchOptions() },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4216 --strictPort',
+        url: 'http://127.0.0.1:4216',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The co-simulation Surface in the ordinary Playground (SL8c), on its own port.
+  'cosim.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/cosim-playground-results',
+    testMatch: /(cosim-playground|circuit-acceptance).spec.ts$/,
+    use: { baseURL: 'http://127.0.0.1:4218', launchOptions: chromiumLaunchOptions() },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4218 --strictPort',
+        url: 'http://127.0.0.1:4218',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // Character Surface standalone host (C1c): no kernel, software WebGL.
   character: () => ({
     ...playwrightTimeouts,
@@ -1002,12 +1130,36 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // The circuit board Surface in the ordinary Playground (PB1). Its own port, so a stale server
+  // on the CAD ports is never reused. The 3D test (PB7b) needs CAD_OCCT_DIST.
+  'pcb.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/pcb-playground-results',
+    testMatch: /pcb-playground.spec.ts$/,
+    use: {
+      baseURL: 'http://127.0.0.1:4208',
+      acceptDownloads: true,
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4208 --strictPort',
+        url: 'http://127.0.0.1:4208',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // The building Surface in the ordinary Playground (development kernel from CAD_OCCT_DIST).
   'bim.playground': () => ({
     timeout: 180_000,
     workers: 1,
     outputDir: '/tmp/bim-playground-results',
-    testMatch: /bim-playground.spec.ts$/,
+    testMatch: /(bim-playground|gulliver-[a-z-]+).spec.ts$/,
     use: {
       baseURL: 'http://127.0.0.1:4202',
       launchOptions: chromiumLaunchOptions({
@@ -1024,6 +1176,29 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // CS1b: the construction schedule in the ordinary Playground (development kernel from
+  // CAD_OCCT_DIST). Its own port, so a stale server on the building's port is never reused.
+  'construction.playground': () => ({
+    timeout: 180_000,
+    workers: 1,
+    outputDir: '/tmp/construction-playground-results',
+    testMatch: /construction-playground.spec.ts$/,
+    use: {
+      baseURL: 'http://127.0.0.1:4210',
+      launchOptions: chromiumLaunchOptions({
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+      }),
+    },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4210 --strictPort',
+        url: 'http://127.0.0.1:4210',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // The character Surface in the ordinary Playground (C1d). The CH20 props test needs CAD_OCCT_DIST
   // (development kernel); the others need none. Its own port, so a stale
   // preview server on the CAD ports is never reused.
@@ -1031,7 +1206,7 @@ export const suites: Record<string, () => Suite> = {
     timeout: 120_000,
     workers: 1,
     outputDir: '/tmp/character-playground-results',
-    testMatch: /character-playground.spec.ts$/,
+    testMatch: /character-(playground|laputa-range).spec.ts$/,
     use: {
       baseURL: 'http://127.0.0.1:4206',
       launchOptions: chromiumLaunchOptions({

@@ -50,6 +50,7 @@ export const studyCheckNames: Readonly<Record<SimulationStudyKind, readonly RunC
     'linear-static': runCheckNames,
     modal: Object.freeze(['mapping', 'mass', 'quality', 'solver', 'orthogonality'] as const),
     thermal: runCheckNames,
+    aero: Object.freeze(['surface', 'solver'] as const),
   });
 
 export type RunStatus = 'verified' | 'reference' | 'failed';
@@ -87,6 +88,8 @@ export function studyStatus(input: StudyStatusInput): StudyStatus {
     if (!input.checks.some((c) => c.name === name)) reasons.push(`${name}: not checked`);
   const { levels, metrics, tolerance } = input.study.convergence;
   const changes: StudyStatus['changes'] = {};
+  // VS4a: a wind tunnel's coefficients are for reference in V1, whatever the checks.
+  if (input.study.kind === 'aero') reasons.push('aero: wind-tunnel results are for reference');
   if (input.levels.length < levels)
     reasons.push(`convergence: ${input.levels.length} of ${levels} levels solved`);
   // One level cannot show mesh convergence, even when the study asks for only one.

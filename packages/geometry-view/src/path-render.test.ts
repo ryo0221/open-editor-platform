@@ -12,6 +12,10 @@ import {
   PerspectiveCamera,
   Group,
   ShaderMaterial,
+  BackSide,
+  Box3,
+  DoubleSide,
+  RectAreaLight,
   Vector3,
 } from 'three';
 import { describe, expect, it } from 'vitest';
@@ -23,9 +27,11 @@ import {
   withoutFloatBlending,
   pathRenderProblem,
   pathRenderScene,
+  pathRenderStudioLights,
   pathRenderSupport,
   pathRenderTiles,
 } from './path-render';
+import { instancesGroup, type ViewMesh } from './instances';
 import { setViewFinish } from './lighting';
 
 describe('path render settings', () => {
@@ -39,6 +45,14 @@ describe('path render settings', () => {
     expect(pathRenderProblem({ ...s, timeLimit: -1 })).toMatch(/time limit/);
     expect(pathRenderProblem({ ...s, timeLimit: 0 })).toBeUndefined();
     expect(pathRenderProblem({ ...s, hdriIntensity: 0 })).toMatch(/strength/);
+  });
+  it('starts in the studio light at the standard exposure, within ±5 stops (ST-530, TS-2050)', () => {
+    const s = defaultPathRenderSettings;
+    expect([s.lighting, s.exposureStops]).toEqual(['studio', 0]);
+    expect(pathRenderProblem({ ...s, lighting: 'sky', exposureStops: -5 })).toBeUndefined();
+    expect(pathRenderProblem({ ...s, exposureStops: 5.5 })).toMatch(/exposure/);
+    expect(pathRenderProblem({ ...s, exposureStops: Number.NaN })).toMatch(/exposure/);
+    expect(pathRenderProblem({ ...s, lighting: 'night' as never })).toMatch(/studio or the sky/);
   });
   it('splits large images into tiles of about 512² pixels', () => {
     expect(pathRenderTiles(320, 200)).toBe(1);
@@ -136,6 +150,73 @@ describe('path render scene', () => {
     expect(lens.userData.opacity).toBeUndefined();
   });
 
+  it('draws a sheet once, two-sided, without the view’s darker back (ST-530, TS-2051)', () => {
+    const mesh: ViewMesh = {
+      origin: [0, 0, 0],
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: new Uint32Array([0, 1, 2]),
+    };
+    const group = instancesGroup([
+      {
+        meshes: [{ mesh, color: '#cc0000', opacity: 1, sheet: true }],
+        bounds: [
+          [0, 0, 0],
+          [1, 1, 0],
+        ],
+        instances: [{ path: ['a'], matrix: new Matrix4().toArray(), selected: false }],
+      },
+    ]);
+    // The view: the sheet's face, its darker back on the same triangles, and outlines.
+    const faces = group.children.filter((o) => (o as Mesh).isMesh) as Mesh[];
+    expect(faces.map((m) => (m.material as MeshStandardMaterial).side)).toEqual([0, BackSide]);
+    const drawn = pathRenderScene([group]).children as Mesh[];
+    expect(drawn).toHaveLength(1);
+    const material = drawn[0]!.material as MeshStandardMaterial;
+    expect([material.side, material.color.getHexString()]).toEqual([DoubleSide, 'cc0000']);
+  });
+
+  it('draws a finer mesh in place of the shown one, moved by their origins (ST-530, TS-2052)', () => {
+    const triangle = (origin: [number, number, number], scale: number): ViewMesh => ({
+      origin,
+      positions: new Float32Array([0, 0, 0, scale, 0, 0, 0, scale, 0]),
+      normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: new Uint32Array([0, 1, 2]),
+    });
+    const shown = triangle([10, 0, 0], 1);
+    const fine = triangle([12, 0, 0], 1);
+    const group = instancesGroup([
+      {
+        meshes: [{ mesh: shown, color: '#808080', opacity: 1, sheet: false }],
+        bounds: [
+          [0, 0, 0],
+          [1, 1, 0],
+        ],
+        instances: [0, 100].map((y, i) => ({
+          path: [`p${i}`],
+          matrix: new Matrix4().makeTranslation(0, y, 0).toArray(),
+          selected: false,
+        })),
+      },
+    ]);
+    const plain = new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial());
+    const scene = pathRenderScene([group, plain], (object) =>
+      object.userData.mesh === shown ? { mesh: fine, shown } : undefined,
+    );
+    const [a, b, box] = scene.children as Mesh[];
+    // One geometry for both instances, from the finer mesh; the view's mesh is left alone.
+    expect(a!.geometry).toBe(b!.geometry);
+    expect(a!.geometry.getAttribute('position').array).toBe(fine.positions);
+    expect(a!.geometry.userData.pathRenderOwned).toBe(true);
+    // Its points are relative to its own origin: placed 2 mm further along x.
+    const at = (m: Mesh) => new Vector3().setFromMatrixPosition(m.matrixWorld).toArray();
+    expect([at(a!), at(b!)]).toEqual([
+      [12, 0, 0],
+      [12, 100, 0],
+    ]);
+    expect(box!.geometry).toBe(plain.geometry);
+  });
+
   it('refuses an analysis shading, which has no model colour', () => {
     const zebra = new Mesh(new BoxGeometry(1, 1, 1), new ShaderMaterial());
     expect(() => pathRenderScene([zebra])).toThrow(/Shaded or Realistic/);
@@ -143,6 +224,43 @@ describe('path render scene', () => {
     curvature.userData.analysis = true;
     const coloured = new Mesh(new BoxGeometry(1, 1, 1), curvature);
     expect(() => pathRenderScene([coloured])).toThrow(/Shaded or Realistic/);
+  });
+});
+
+describe('path render studio', () => {
+  it('lights the model from four soft boxes sized to it and turned with the camera (ST-530, TS-2053)', () => {
+    const box = new Box3(new Vector3(0, -900, 0), new Vector3(4000, 900, 1300));
+    const centre = box.getCenter(new Vector3());
+    const radius = box.getSize(new Vector3()).length() / 2;
+    const camera = new PerspectiveCamera();
+    camera.position.set(9000, -6000, 2500);
+    camera.lookAt(centre);
+    camera.updateMatrixWorld(true);
+    const lights = pathRenderStudioLights(box, camera);
+    expect(lights).toHaveLength(4);
+    expect(lights.every((l) => l instanceof RectAreaLight)).toBe(true);
+    for (const l of lights) {
+      // Above the floor, and shining at the model (a rect light shines along its −z).
+      expect(l.position.z).toBeGreaterThan(box.min.z);
+      const shine = new Vector3(0, 0, -1).transformDirection(l.matrixWorld);
+      const toModel = centre.clone().sub(l.position).normalize();
+      expect(shine.dot(toModel)).toBeGreaterThan(0.8);
+    }
+    // The overhead box is long along the model's longer side, above its top.
+    const [top] = lights;
+    expect(top!.position.z).toBeGreaterThan(box.max.z + radius);
+    expect(top!.width).toBeGreaterThan(top!.height);
+    const along = new Vector3(1, 0, 0).transformDirection(top!.matrixWorld);
+    expect(Math.abs(along.x)).toBeCloseTo(1, 6);
+    // The key is on the camera's side of the model, the rim behind it.
+    const toCamera = camera.position.clone().sub(centre).setZ(0).normalize();
+    const side = (l: RectAreaLight) => l.position.clone().sub(centre).setZ(0).dot(toCamera);
+    expect(side(lights[1]!)).toBeGreaterThan(0);
+    expect(side(lights[2]!)).toBeLessThan(0);
+    // Twice the model, twice the boxes and their distances.
+    const twice = new Box3(box.min.clone().multiplyScalar(2), box.max.clone().multiplyScalar(2));
+    const big = pathRenderStudioLights(twice, camera);
+    expect(big[0]!.width).toBeCloseTo(2 * top!.width, 6);
   });
 });
 

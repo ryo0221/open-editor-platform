@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/cosim-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/circuit-sim-core": "*",
+    "@editor-platform/ladder-core": "*",
+    "@editor-platform/schematic-core": "*"
+  }
+}

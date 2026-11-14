@@ -11,6 +11,8 @@ import type { RunProgress, StudyRun } from './run';
 
 /** The solver's build identity, recorded with each run (the solver is part of this package). */
 export const simulationSolverBuild = 'geometry-fem';
+/** VS4b: the browser wind tunnel's (geometry-cfd's LBM), recorded with a wind-tunnel run. */
+export const aeroSolverBuild = 'geometry-cfd';
 
 /** A verified Netgen build: the loader and the Wasm whose SHA-256 must be `buildHash`. */
 export interface FemMesherBuild {

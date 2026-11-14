@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { commitVersion, createArtifact, serializeArtifact } from '@editor-platform/artifact-core';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { applyCadOperation, f01Empty, type CadDocument } from '@editor-platform/cad-core';
@@ -8,7 +8,7 @@ import { readImportFiles } from '../app/import-artifact';
 import type { StoredArtifact } from '../model';
 import {
   assertCadNativeFits,
-  cadNativeFileBytes,
+  cadNativeLimit,
   createCadAssetStore,
   decodeBytes,
   encodeBytes,
@@ -18,6 +18,15 @@ import {
   validateCadRecord,
   type CadResource,
 } from './resources';
+
+// These records are sized for the 16 MB limit the Playground had before CR7f.
+const nativeLimit = cadNativeLimit.bytes;
+beforeAll(() => {
+  cadNativeLimit.bytes = 16_000_000;
+});
+afterAll(() => {
+  cadNativeLimit.bytes = nativeLimit;
+});
 
 const step = new TextEncoder().encode('ISO-10303-21; a STEP file');
 const brep = new TextEncoder().encode('DBRep_DrawableShape a BRep');
@@ -155,7 +164,7 @@ describe('CAD asset closure in the Playground record (CAD13, F08)', () => {
     expect(() => assertCadNativeFits(base, 'version')).not.toThrow();
     // A record past 16 MB (versions or ordinary draft growth) is refused with its size, both
     // for a version save and for a native export, which also says how to recover.
-    const big = { ...base, name: 'x'.repeat(cadNativeFileBytes) };
+    const big = { ...base, name: 'x'.repeat(cadNativeLimit.bytes) };
     expect(() => assertCadNativeFits(big, 'version')).toThrow('16 MB');
     expect(() => assertCadNativeFits(big, 'export')).toThrow('Undo');
   });
@@ -239,7 +248,7 @@ describe('createCadAssetStore', () => {
     const ref = { ...r.step, sha256: await sha256Ref(big), byteLength: big.length };
     await expect(store.stage([{ ref, bytes: big }])).rejects.toThrow('16 MB');
     expect(get().cadResources).toEqual([]);
-    expect(cadNativeFileBytes).toBe(16_000_000);
+    expect(nativeLimit).toBe(256_000_000);
   });
 
   it('decodes a 6 MB asset without growing the stack, and refuses malformed text', () => {

@@ -180,6 +180,14 @@ export class ViewLighting {
     return this.on;
   }
 
+  /**
+   * CR7g-3: the objects this lighting added to the scene (its lights and the ground), for a view
+   * that draws only some of the scene's children (the character view's export).
+   */
+  get objects(): readonly Object3D[] {
+    return [this.ambient, this.sun, this.sun.target, this.ground];
+  }
+
   /** Switches the realistic lighting on or off; off draws exactly the standard lighting. */
   setRealistic(on: boolean) {
     if (on === this.on) return;
@@ -240,16 +248,22 @@ export class ViewLighting {
     this.stale = false;
     const box = new Box3();
     for (const root of roots) {
-      root.traverse((o) => {
+      // Only what is shown: a hidden part or a pooled, unused mesh neither casts a shadow nor
+      // moves the ground (Codex, #1091).
+      root.traverseVisible((o) => {
         if (!(o as Mesh).isMesh) return;
         const mesh = o as Mesh;
-        const material = mesh.material as { transparent?: boolean; opacity?: number };
-        // Faded and see-through solids (a reference build, glass, spaces) cast no shadow.
-        const opaque = !material.transparent || (material.opacity ?? 1) >= 0.99;
+        // Faded and see-through solids (a reference build, glass, spaces) cast no shadow; a mesh
+        // with several materials (a character's part) only when all of them are opaque.
+        const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as {
+          transparent?: boolean;
+          opacity?: number;
+        }[];
+        const opaque = materials.every((m) => !m.transparent || (m.opacity ?? 1) >= 0.99);
         mesh.castShadow = opaque;
         mesh.receiveShadow = opaque;
+        box.union(new Box3().setFromObject(mesh));
       });
-      box.union(new Box3().setFromObject(root));
     }
     if (box.isEmpty()) {
       this.ground.visible = false;

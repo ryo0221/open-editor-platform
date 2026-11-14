@@ -8,17 +8,24 @@ import { isDesignWithPaths } from '@editor-platform/design';
 import { importMarkdown } from '@editor-platform/document';
 import { hasSlideAnimations, isDeck } from '@editor-platform/slide';
 import { importCsv, isStructuredData } from '@editor-platform/structured-data';
-import { graphSchemaMessage } from '@editor-platform/structured-graph/model';
+import { graphSchemaMessage, readGraphDocument } from '@editor-platform/structured-graph/model';
 import { validateNativeReusableDefinitions, type Domain } from '@editor-platform/templates';
 import { artifactReferenceItems, validateArtifactReferenceHistory } from '../artifact-references';
+import type { CosimDocument } from '@editor-platform/cosim-core';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
 import { validateSimulationSources } from '../simulation/source';
+import { validateConstructionSources } from '../construction/source';
 import { validateCharacterParts } from '../character/parts';
 import type { CadPartRecord } from '../cad/parts';
 import type { CadDocument } from '@editor-platform/cad-core';
 import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
 import type { BimPartReference } from '@editor-platform/bim';
-import { validateCadRecord } from '../cad/resources';
+import {
+  cadNativeKinds,
+  cadNativeLimit,
+  cadNativeLimitText,
+  validateCadRecord,
+} from '../cad/resources';
 import { validateGeoRecord } from '../geo/resources';
 import { makeArtifact, validContent, type Content, type StoredArtifact } from '../model';
 import { nativeContent } from './native';
@@ -39,7 +46,7 @@ async function importedArtifact(
   );
   if (invalid !== undefined)
     throw new Error(
-      // An older Graph preview format gets its own reason, as when it is opened from storage.
+      // A newer Graph schema gets its own reason, as when it is opened from storage.
       artifact.kind === 'structured-graph' ? graphSchemaMessage(invalid) : 'Invalid domain content',
     );
   for (const version of artifact.versions)
@@ -53,7 +60,13 @@ async function importedArtifact(
   const record: StoredArtifact = {
     ...artifact,
     id,
-    draft: { ...artifact.draft, content: artifact.draft.content as Content },
+    draft: {
+      ...artifact.draft,
+      // An older Graph schema is imported as the current one; versions keep their bytes.
+      content: (artifact.kind === 'structured-graph'
+        ? readGraphDocument(artifact.draft.content)
+        : artifact.draft.content) as Content,
+    },
     versions: artifact.versions.map((v) => ({
       ...v,
       artifactId: id,
@@ -99,6 +112,12 @@ async function importedArtifact(
     if (raw !== undefined) record.cadResources = raw;
     await validateCadRecord(record);
   }
+  if (record.kind === 'construction') {
+    // The scheduled BIM versions travel in the same file; a missing or altered one refuses it.
+    const sources = (value as StoredArtifact).constructionSources;
+    if (sources !== undefined) record.constructionSources = sources;
+    validateConstructionSources(record);
+  }
   if (record.kind === 'simulation') {
     // The analysed CAD versions travel in the same file; a missing or altered one refuses it.
     const sources = (value as StoredArtifact).simulationSources;
@@ -136,6 +155,11 @@ function hasReusableAdapter(kind: string, content: Content) {
     kind !== 'bim' &&
     kind !== 'character' &&
     kind !== 'simulation' &&
+    kind !== 'construction' &&
+    kind !== 'pcb' &&
+    kind !== 'schematic' &&
+    kind !== 'ladder' &&
+    kind !== 'cosim' &&
     kind !== 'fiction-map' &&
     !(isDeck(content) && hasSlideAnimations(content))
   );
@@ -154,7 +178,13 @@ async function readImportFile(
   file: File,
   context: ImportContext,
 ): Promise<{ record: StoredArtifact; originalId?: string }> {
-  if (file.size > maxImportBytes) throw new Error('Import files must be smaller than 16 MB');
+  const native = /\.json$/i.test(file.name);
+  if (file.size > (native ? cadNativeLimit.bytes : maxImportBytes))
+    throw new Error(
+      native
+        ? `Import files must be smaller than 16 MB (${cadNativeLimitText()} for CAD, building and character files)`
+        : 'Import files must be smaller than 16 MB',
+    );
   const text = await file.text();
   let record: StoredArtifact;
   let nativeName: string | undefined;
@@ -180,6 +210,8 @@ async function readImportFile(
       nativeName = imported.name;
       importedArtifactId = imported.originalId;
     }
+    if (file.size > maxImportBytes && !cadNativeKinds.has(record.kind))
+      throw new Error('Import files must be smaller than 16 MB');
   }
   for (const content of [record.draft.content, ...record.versions.map((v) => v.content)])
     if (hasReusableAdapter(record.kind, content))
@@ -210,6 +242,15 @@ function relink(record: StoredArtifact, ids: Map<string, string>): StoredArtifac
         source: { ...reference.source, artifactId: id },
         snapshot: { ...reference.snapshot, artifactId: id },
       };
+  }
+  // A co-simulation names its schematic and ladder versions by artifact (SL8c): follow them too.
+  if (record.kind === 'cosim') {
+    const doc = content as CosimDocument;
+    for (const key of ['schematic', 'ladder'] as const) {
+      const ref = doc[key];
+      const id = ref && ids.get(ref.artifactId);
+      if (ref && id) doc[key] = { ...ref, artifactId: id };
+    }
   }
   return {
     ...record,

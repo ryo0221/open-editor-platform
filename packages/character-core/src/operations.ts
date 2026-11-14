@@ -243,7 +243,7 @@ export function applyCharacterOperation(
     const targets = op.keys.map((k) =>
       JSON.stringify([
         k.target.kind,
-        k.target.id,
+        k.target.kind === 'camera' ? null : k.target.id,
         k.target.kind === 'prop-joint'
           ? k.target.joint
           : k.target.kind === 'prop-mount'
@@ -535,7 +535,7 @@ function editKeys(
   if (op.type === 'setKey') {
     const same = (t: CharacterTrackTarget) =>
       t.kind === op.target.kind &&
-      t.id === op.target.id &&
+      (t.kind === 'camera' || op.target.kind === 'camera' || t.id === op.target.id) &&
       t.property === op.target.property &&
       (t.kind !== 'prop-joint' || op.target.kind !== 'prop-joint' || t.joint === op.target.joint) &&
       (t.kind !== 'prop-mount' || op.target.kind !== 'prop-mount' || t.mount === op.target.mount);

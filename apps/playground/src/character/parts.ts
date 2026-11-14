@@ -9,7 +9,7 @@ import type { CharacterDocument } from '@editor-platform/character-core';
 import type { StoredArtifact } from '../model';
 import type { CharacterPropChoice } from '@editor-platform/character';
 import type { CadPartRecord } from '../cad/parts';
-import { cadNativeFileBytes, nativeBytes, portableCadRecord } from '../cad/resources';
+import { cadNativeLimit, nativeBytes, portableCadRecord } from '../cad/resources';
 
 /** One BIM version kept with a character (C8p): its content and the hash it is named by. */
 export interface BimPartRecord {
@@ -212,8 +212,8 @@ export async function retainCharacterProp(options: {
   };
   // The stored record keeps versions Undo may need too, and is serialized whole on each save.
   if (
-    nativeBytes(portableCadRecord(portableCharacterRecord(proposed))) > cadNativeFileBytes ||
-    nativeBytes(proposed) > cadNativeFileBytes
+    nativeBytes(portableCadRecord(portableCharacterRecord(proposed))) > cadNativeLimit.bytes ||
+    nativeBytes(proposed) > cadNativeLimit.bytes
   )
     throw new Error('prop-file-too-large');
   if (!(await options.persist({ ...record, ...parts }))) throw new Error('prop-retain-failed');

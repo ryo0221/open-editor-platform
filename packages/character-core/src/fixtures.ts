@@ -1,5 +1,5 @@
 import { boxMesh, encodeEpm, epmSha256, type EpmMesh } from '@editor-platform/geometry-mesh';
-import { axisAngleQuat, composeMat4, invertMat4 } from './math';
+import { axisAngleQuat, composeMat4, invertMat4, multiplyQuat } from './math';
 import {
   characterAssetMediaTypes,
   emptyCharacter,
@@ -243,5 +243,57 @@ export function hattedFigure(): CharacterFixture {
   );
   f.assets.set('mesh-hat', bytes);
   f.meshes.set('mesh-hat', hat);
+  return f;
+}
+
+/** F64's pose (degrees about each bone's own axes, the figure facing −y). */
+export const f64SitDegrees = {
+  /** The back upright, against an upright seat back. */
+  spine: 0,
+  /** Thighs forward and a little up (a low seat). */
+  thigh: -95,
+  /** Shins stretched forward-down from the knee (relative to the thigh). */
+  shin: 20,
+  /** Upper arms forward (about z) and down (about x, after). */
+  armForward: 90,
+  armDown: 25,
+};
+
+/**
+ * F64 (CR7d, docs/cad/car-design.md, CR7の分け方): the blocky figure with an action `sit` (one
+ * key per bone at tick 0): the back upright, thighs forward, shins down to the floor, arms forward
+ * to a steering wheel. The figure faces −y; its hip bone is the point set on a seat's H-point.
+ */
+export function seatedFigure(degrees: Partial<typeof f64SitDegrees> = {}): CharacterFixture {
+  const f = blockyFigure();
+  const D = { ...f64SitDegrees, ...degrees };
+  const rad = Math.PI / 180;
+  const key = (bone: string, value: [number, number, number, number]) => ({
+    id: `sit-${bone}`,
+    target: { kind: 'bone' as const, id: bone, property: 'rotation' as const },
+    keys: [{ id: `sit-${bone}-0`, tick: 0, value, easing: { type: 'hold' as const } }],
+  });
+  const arm = (side: 1 | -1) => {
+    // L lies along +x: a −90° turn about z points it forward (−y), R (−x) the other way.
+    const forward = axisAngleQuat([0, 0, 1], -side * D.armForward * rad);
+    const down = axisAngleQuat([1, 0, 0], D.armDown * rad);
+    // Forward first, then down about the world x (left-multiplied).
+    return multiplyQuat(down, forward);
+  };
+  f.doc.actions.push({
+    id: 'sit',
+    name: 'Sit',
+    duration: 1000,
+    frameRate: { numerator: 30, denominator: 1 },
+    tracks: [
+      key('spine', axisAngleQuat([1, 0, 0], D.spine * rad)),
+      key('thigh.L', axisAngleQuat([1, 0, 0], D.thigh * rad)),
+      key('thigh.R', axisAngleQuat([1, 0, 0], D.thigh * rad)),
+      key('shin.L', axisAngleQuat([1, 0, 0], D.shin * rad)),
+      key('shin.R', axisAngleQuat([1, 0, 0], D.shin * rad)),
+      key('arm.L', arm(1)),
+      key('arm.R', arm(-1)),
+    ],
+  });
   return f;
 }

@@ -11,7 +11,7 @@ import {
 import type { GeoDocument } from '@editor-platform/geo-core';
 import { isStructuredData } from '@editor-platform/structured-data';
 import {
-  isGraphDocument,
+  upgradeGraphDocument,
   relationProfile,
   type GraphProfile,
 } from '@editor-platform/structured-graph';
@@ -218,13 +218,13 @@ export function savedRecordReferences(context: {
                 target: { kind: 'map', viewId: view.id },
               },
             });
-        } else if (isGraphDocument(content))
+        } else if (upgradeGraphDocument(content))
           options.push({
             label: `${a.name} · Graph`,
             source: {
               artifactId: a.id,
               domain: 'structured-graph',
-              target: { kind: 'graph', viewId: content.id },
+              target: { kind: 'graph', viewId: upgradeGraphDocument(content)!.id },
             },
           });
       }
@@ -244,8 +244,10 @@ export function savedRecordReferences(context: {
         revision: a.versions.length,
         contentHash: version.contentHash,
         content: version.content,
-        dependencies: isGraphDocument(version.content)
-          ? await graphProfileDependency(graphProfileFor(version.content) ?? relationProfile)
+        dependencies: upgradeGraphDocument(version.content)
+          ? await graphProfileDependency(
+              graphProfileFor(upgradeGraphDocument(version.content)!) ?? relationProfile,
+            )
           : [],
       };
     },

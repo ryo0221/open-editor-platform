@@ -107,6 +107,7 @@ import {
   profileOutline,
   profileReach,
   rotateVector,
+  readCadAssemblyPmiAsset,
 } from '@editor-platform/cad-core';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
@@ -121,6 +122,7 @@ import {
 } from './analysis-surface';
 import { connectorFrame } from './connector-frames';
 import { edgeContinuity, surfaceProjector } from './continuity';
+import { twoViewCurve } from './two-view';
 import { edgeGapFlush } from './gap-flush';
 import { faceSetDistances } from './face-distance';
 import { spotWeldPoints } from './spot-weld';
@@ -184,6 +186,12 @@ export interface EvaluateOptions {
   /** Linear deflection of the display mesh as a share of each body's bounding-box diagonal. */
   relativeDeflection?: number;
   angularDeflectionRad?: number;
+  /**
+   * A path-traced render's finer meshes (at `relativeDeflection` and `angularDeflectionRad`):
+   * built afresh like an export, never from or into the display caches, so the display's own
+   * triangulation is never replaced by the finer one.
+   */
+  renderMesh?: true;
   /**
    * Cooperative cancel point before each feature and each body's mesh, named by that feature or
    * body ID; must yield to a macrotask, not a microtask.
@@ -985,6 +993,22 @@ export async function evaluateCad(
     if (pmiAssetProblem(json, counts) !== undefined) throw new CadKernelError('pmi-invalid', f.id);
   }
   /**
+   * PMI-5b: an assembly's `assembly-pmi` asset must be present, match its ref and be valid
+   * (`assemblyPmiAssetProblem`: targets on the components it records, indices within their
+   * parts' counts), or the document is refused with `assembly-pmi-invalid`. A deleted or replaced
+   * component makes its items stale, never the document invalid.
+   */
+  function checkAssemblyPmi() {
+    const id = doc.assemblyPmiAssetId;
+    if (id === undefined) return;
+    const ref = doc.assets.find((a) => a.id === id);
+    const bytes = ref && options.assets?.get(ref.sha256);
+    if (!ref || !bytes) throw new CadKernelError('asset-missing');
+    if (bytes.byteLength !== ref.byteLength || `sha256:${bytesToHex(sha256(bytes))}` !== ref.sha256)
+      throw new CadKernelError('asset-hash-mismatch');
+    if (!readCadAssemblyPmiAsset(bytes)) throw new CadKernelError('assembly-pmi-invalid');
+  }
+  /**
    * A full turn's history leaves some side faces out (OCCT 7.6 gives no Generated face for a
    * profile edge across the axis). A straight edge's surface of revolution is known exactly
    * (Pappus): area θ·L·(r₁ + r₂)/2, and the axial centroid of its weight r. An unnamed face takes
@@ -1310,7 +1334,9 @@ export async function evaluateCad(
     let edge: unknown;
     let face: unknown;
     let geometry: CurveGeometry = { kind: 'other' };
-    if ('edge' in source) {
+    if ('twoView' in source) {
+      ({ edge, geometry } = twoViewEdge(f, source.twoView, path));
+    } else if ('edge' in source) {
       const input = shapes.get(source.edge.featureId)!;
       const [index] = resolveRefs(f, input, [{ path: [...path, 'edge'], ref: source.edge }]);
       const table = tableOf(input);
@@ -1345,6 +1371,45 @@ export async function evaluateCad(
       geometry,
       measure: edgeMeasure(edge),
       boundary: naming ? curveBoundaryName(source) : (['surface'] as CadFaceName),
+    };
+  }
+  /**
+   * CLF2: the edge of a two-view curve (`twoViewCurve`) and its exact B-spline. The views'
+   * plane is checked within 10× the linear tolerance; the fit is held to 0.001 mm (or that
+   * tolerance, if larger), finer than any meeting tolerance of a curve network.
+   */
+  function twoViewEdge(
+    f: CadFeature,
+    views: {
+      side: { sketchId: string; element: string };
+      plan: { sketchId: string; element: string };
+    },
+    path: (string | number)[],
+  ): { edge: unknown; geometry: CurveGeometry } {
+    const view = (v: { sketchId: string; element: string }) => {
+      const chain = pathWire(f, { sketchId: v.sketchId, elements: [v.element] });
+      return networkCurve(f, own(oc.TopoDS.Edge_1(chain.edges[0]!.edge)));
+    };
+    const tol = doc.kernelProfile.linearToleranceMm * 10;
+    // Within 0.001 mm, and in a curve network well within the gap it allows where curves meet
+    // (a quarter of it), so the fit never opens a gap the exact views would not (#1111 review).
+    const meet = f.type === 'curveNetwork' ? f.args.toleranceMm / 4 : Infinity;
+    const fitTol = Math.max(tol, Math.min(0.001, meet));
+    const made = twoViewCurve(view(views.side), view(views.plan), tol, fitTol);
+    if ('code' in made) throw new CadKernelError(made.code, f.id, false, undefined, [path]);
+    const distinct = [...new Set(made.knots)];
+    const mults = distinct.map((x) => made.knots.filter((y) => y === x).length);
+    const P = own(new oc.TColgp_Array1OfPnt_2(1, made.poles.length));
+    made.poles.forEach((p, i) => P.SetValue(i + 1, pnt(...p)));
+    const K = own(new oc.TColStd_Array1OfReal_2(1, distinct.length));
+    distinct.forEach((x, i) => K.SetValue(i + 1, x));
+    const M = own(new oc.TColStd_Array1OfInteger_2(1, mults.length));
+    mults.forEach((x, i) => M.SetValue(i + 1, x));
+    const curve = own(new oc.Handle_Geom_Curve_2(new oc.Geom_BSplineCurve_1(P, K, M, 3, false)));
+    const edge = own(own(new oc.BRepBuilderAPI_MakeEdge_24(curve)).Edge());
+    return {
+      edge,
+      geometry: { kind: 'spline', poles: made.poles, degree: 3, knots: distinct, mults },
     };
   }
   /** A referenced edge's geometry when it is a line or a circle's arc (its own parameters). */
@@ -1630,6 +1695,8 @@ export async function evaluateCad(
       });
       const matching =
         message.includes('BRepFill_CompatibleWires') ||
+        // VS1: the polar matching names itself without the class (`BRepFill::SameNumberBy…`).
+        message.includes('SameNumberByPolarMethod') ||
         message.includes('BRepFill :: profiles are inconsistent');
       if (!matching || edges.some((n) => n !== edges[0]))
         throw new CadKernelError(
@@ -3038,6 +3105,21 @@ export async function evaluateCad(
    * ramps `flare:<ID>:first/…` and `flare:<ID>:last/…` (by the chain's end they start from).
    */
   function flare(f: Extract<CadFeature, { type: 'flare' }>, shapes: Map<string, Named>): Named {
+    // CR7g-1: the fill first with as few poles as keep to its network (a 256 × 256 fill made the
+    // F63's STEP pass 64 MiB); when that fill misses a later check, the square fit as before.
+    try {
+      return flareWith(f, shapes, true);
+    } catch (e) {
+      if (!(e instanceof CadKernelError)) throw e;
+      return flareWith(f, shapes, false);
+    }
+  }
+
+  function flareWith(
+    f: Extract<CadFeature, { type: 'flare' }>,
+    shapes: Map<string, Named>,
+    lean: boolean,
+  ): Named {
     const input = shapes.get(f.inputFeatureIds[0])!;
     const failed = (path: (string | number)[] = ['height']) =>
       new CadKernelError('flare-failed', f.id, false, undefined, [path]);
@@ -3181,7 +3263,9 @@ export async function evaluateCad(
       profiles.push(bezierCurve([a, p1, p2, Z]));
     }
     const fit = doc.kernelProfile.maxResultLinearToleranceMm * 0.8;
-    const surfaceOf = gordonSurface([chain, movedCurve(archRun, v)], profiles, fit, fit);
+    const surfaceOf = gordonSurface([chain, movedCurve(archRun, v)], profiles, fit, fit, {
+      lean,
+    });
     if ('code' in surfaceOf) throw failed();
     const made = gordonFace(f, surfaceOf).face;
     // Which network curve each of the fill's edges lies on (its midpoint nearest).
@@ -3770,6 +3854,7 @@ export async function evaluateCad(
         loose.push(edge);
     });
     if (!loose.length) return;
+    const refit: { edge: unknown; deviation: number }[] = [];
     const meshedFaces = new Map<unknown, ReturnType<typeof surfaceProjector>>();
     const projector = (face: unknown) => {
       for (const [k, p] of meshedFaces) if ((k as OcModule).IsSame(face)) return p;
@@ -3836,25 +3921,33 @@ export async function evaluateCad(
           new oc.Handle_Geom_Curve_2(new oc.Geom_BSplineCurve_1(P1, K, M, 3, false)),
         );
         builder.UpdateEdge_1(edge, curve, best.deviation);
-        // The edge and its vertices down to what it and the vertices' other edges need.
-        const first = own(new oc.TopoDS_Vertex());
-        const last = own(new oc.TopoDS_Vertex());
-        oc.TopExp.Vertices_1(edge, first, last, false);
-        let need = Math.max(2 * best.deviation, 1e-7);
-        for (const v of [first, last]) {
-          const j = vertexEdges.FindIndex(v);
-          if (j > 0)
-            for (const e of listOf(vertexEdges.FindFromIndex(j)))
-              if (!(e as OcModule).IsSame(edge))
-                need = Math.max(need, oc.BRep_Tool.Tolerance_2(own(oc.TopoDS.Edge_1(e))) as number);
-        }
-        own(new oc.ShapeFix_ShapeTolerance()).LimitTolerance(
-          edge,
-          0,
-          need,
-          oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
-        );
+        refit.push({ edge, deviation: best.deviation });
       }
+    }
+    // Each refitted edge and its vertices down to what it and the vertices' other edges need,
+    // once every edge is refitted: a refitted neighbour needs its own fit, not the tolerance it
+    // had (CR7g-1, the widened F63 skin's centreline and end edges meet at a vertex).
+    const needOf = (e: unknown) => {
+      const r = refit.find((x) => (x.edge as OcModule).IsSame(e));
+      return r ? 2 * r.deviation : (oc.BRep_Tool.Tolerance_2(own(oc.TopoDS.Edge_1(e))) as number);
+    };
+    for (const { edge, deviation } of refit) {
+      const first = own(new oc.TopoDS_Vertex());
+      const last = own(new oc.TopoDS_Vertex());
+      oc.TopExp.Vertices_1(edge, first, last, false);
+      let need = Math.max(2 * deviation, 1e-7);
+      for (const v of [first, last]) {
+        const j = vertexEdges.FindIndex(v);
+        if (j > 0)
+          for (const e of listOf(vertexEdges.FindFromIndex(j)))
+            if (!(e as OcModule).IsSame(edge)) need = Math.max(need, needOf(e));
+      }
+      own(new oc.ShapeFix_ShapeTolerance()).LimitTolerance(
+        edge,
+        0,
+        need,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      );
     }
   }
   /**
@@ -3868,10 +3961,10 @@ export async function evaluateCad(
   ): Named {
     const source = shapes.get(f.args.source.featureId)!;
     const d = len(f.args.distance) * (f.args.side === 'back' ? -1 : 1);
-    const off = own(new oc.BRepOffsetAPI_MakeOffsetShape());
-    off.PerformBySimple(source.shape, d);
     const failed = () =>
       new CadKernelError('offset-failed', f.id, false, undefined, [['distance']]);
+    const off = own(new oc.BRepOffsetAPI_MakeOffsetShape());
+    off.PerformBySimple(source.shape, d);
     try {
       off.Build(own(new oc.Message_ProgressRange_1()));
     } catch {
@@ -6242,6 +6335,7 @@ export async function evaluateCad(
   };
   const display =
     options.deflectionMm === undefined &&
+    !options.renderMesh &&
     !options.step &&
     !options.brep &&
     !options.analysisSurface;
@@ -6251,6 +6345,7 @@ export async function evaluateCad(
   // cache too; an export (deflection, STEP, BRep) still builds the full graph.
   const analysis =
     options.deflectionMm === undefined &&
+    !options.renderMesh &&
     !options.step &&
     !options.brep &&
     !!options.analysisSurface;
@@ -6283,6 +6378,7 @@ export async function evaluateCad(
     ...(bodies && Object.keys(bodies).length ? { partial: bodies } : {}),
   });
   try {
+    checkAssemblyPmi();
     const byId = new Map(doc.features.map((f) => [f.id, f]));
     const active = doc.bodies.filter((b) => b.state === 'active');
     /** Each active body's final shape, from the kept shapes or from the full graph. */
@@ -6524,6 +6620,7 @@ export async function evaluateCad(
           kind: 'sheet',
           areaMm2: metrics.areaMm2,
           bounds,
+          centroidMm: metrics.centroidMm,
           freeEdges,
           freeEdgeLengthMm,
         };
@@ -6538,6 +6635,7 @@ export async function evaluateCad(
           volumeMm3: metrics.volumeMm3!,
           areaMm2: metrics.areaMm2,
           bounds,
+          centroidMm: metrics.centroidMm,
           // Only past one: a single solid's evaluation is as before K1.
           ...(solids > 1 ? { solids } : {}),
         };

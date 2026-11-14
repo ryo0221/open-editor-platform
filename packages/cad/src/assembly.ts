@@ -7,6 +7,14 @@ import {
   applyCadOperation,
   assemblyStepPlan,
   assertCad,
+  cadAssemblyPmiStates,
+  cadBodyPmi,
+  cadPmiItemStates,
+  readCadAssemblyPmiAsset,
+  readCadPmiAsset,
+  type CadAssemblyPmiAsset,
+  type CadAssemblyPmiItemState,
+  type CadPmiAsset,
   bomCsv,
   bodyPartContent,
   identityPose,
@@ -22,6 +30,7 @@ import {
   expandAssembly,
   identityQuaternion,
   occurrenceAccess,
+  partArtifactId,
   mm,
   componentCopies,
   parameterValues,
@@ -47,6 +56,8 @@ import {
   type CadInterferenceReport,
   type CadResolvedJointValues,
   type CadSweepReport,
+  type CadClearanceReport,
+  jointRangeSamples,
   type CadEvaluation,
   type CadJointType,
   type CadJointValueKey,
@@ -77,6 +88,7 @@ import {
   writeGlb,
   type CadBrepExport,
   type CadMesh,
+  type CadRenderMeshQuality,
   type CadStepAssemblyImportReport,
   type CadStepAssemblyImportResult,
   type CadStepImportOptions,
@@ -85,12 +97,17 @@ import {
 } from '@editor-platform/cad-kernel-occt';
 import { assemblyGlbBodies } from './assembly-glb';
 import { describeAssemblyCode, describeGearMeshProblem } from './assembly-messages';
-import { CadInterferenceJobs, type CadInterferenceRequest } from './interference-job';
+import {
+  CadInterferenceJobs,
+  type CadInterferenceJobReport,
+  type CadInterferenceRequest,
+} from './interference-job';
 import {
   cadBudgets,
   describeCode,
   retainedBytes,
   type CadController,
+  type CadBodyPmiView,
   type CadMeshExport,
 } from './controller';
 import {
@@ -313,8 +330,30 @@ export interface CadAssemblySnapshot {
   progress: CadPartProgress | undefined;
   /** R2b-5: a STEP assembly read and not yet placed (Surface state, never content). */
   stepImport: CadStepAssemblyImportPreview | undefined;
+  /** PMI-5b: the PMI item highlighted on the placed parts (Surface state, never content). */
+  pmiFocus: CadAssemblyPmiFocus | undefined;
   /** MR3: the occurrences of the interference finding shown in the view (Surface state). */
   highlighted: readonly string[][] | undefined;
+}
+/**
+ * PMI-5b: a highlighted item: one of the assembly's own (`assembly-pmi`, that instance's alone),
+ * or one of a component's part (`pmi`, common to every instance), shown on that component.
+ */
+export type CadAssemblyPmiFocus =
+  | { source: 'assembly'; itemId: string }
+  | { source: 'part'; componentId: string; bodyId: string; itemId: string };
+/** PMI-5b: the assembly's own PMI with each item's state (`cadAssemblyPmiStates`). */
+export interface CadAssemblyPmiView {
+  asset?: CadAssemblyPmiAsset;
+  /** The Host has no bytes, or they are not an `assembly-pmi` asset. */
+  unreadable?: true;
+  items?: ReadonlyMap<string, CadAssemblyPmiItemState>;
+}
+/** PMI-5b: one body of a component's part version with the PMI it keeps. */
+export interface CadComponentPmi {
+  bodyId: string;
+  name: string;
+  view: CadBodyPmiView;
 }
 /** R2b-5: what a read STEP assembly becomes, before anything is stored. */
 export interface CadStepAssemblyImportPreview {
@@ -398,6 +437,24 @@ export function parseEntryDraftKey(key: string) {
   const [kind, jointId, of] = JSON.parse(key) as ['range' | 'coupling', string, string];
   return { kind, jointId, of };
 }
+/** How often a running finer-mesh job looks for a Cancel (ms). */
+const renderCancelPollMs = 200;
+/**
+ * How fine a render's meshes are: 0.02% of each body's diagonal (a fifth of the display's) and
+ * at most 0.1 rad between neighbouring normals, so reflections run smoothly over curved panels.
+ */
+export const cadRenderMeshQuality = Object.freeze({
+  relativeDeflection: 0.0002,
+  angularDeflectionRad: 0.1,
+});
+/**
+ * A render's finer meshes (`CadAssembly.renderMeshes`): the document's own bodies by body ID,
+ * and each part's by the display mesh it replaces (one per version and body).
+ */
+export interface CadRenderMeshes {
+  bodies: Map<string, CadMesh>;
+  parts: Map<CadMesh, CadMesh>;
+}
 export interface CadAssemblyOptions {
   controller: CadController;
   port: CadAssemblyPort;
@@ -407,6 +464,13 @@ export interface CadAssemblyOptions {
   mainBytes?: number;
   /** MR3: starts the interference worker (tests run the check on the main thread). */
   interferenceWorker?: () => Worker;
+  /** Stops a render's finer-mesh job (CatalogKernelPort.cancel). */
+  cancelRender?(requestId: string): void;
+  /** A document's meshes made finer for a render, from its exact build (CatalogKernelPort). */
+  renderMeshes?(
+    request: CadEvaluateRequest,
+    quality: CadRenderMeshQuality,
+  ): Promise<{ evaluation: CadEvaluation; meshes: CadMesh[] }>;
   /** R2b-5: a version's active bodies as one BRep, from its exact build (CatalogKernelPort). */
   exportBrep?(request: CadEvaluateRequest): Promise<{
     evaluation: CadEvaluation;
@@ -453,6 +517,7 @@ export class CadAssembly {
   private readonly drafts = new Map<string, CadPlacementDraft>();
   private selectedJoint: string | undefined;
   private selectedPattern: string | undefined;
+  private pmiFocus: CadAssemblyPmiFocus | undefined;
   private readonly jointDrafts = new Map<string, CadPlacementDraft>();
   private readonly entryDrafts = new Map<string, CadEntryDraft>();
   private update: CadPartUpdateView | undefined;
@@ -521,6 +586,7 @@ export class CadAssembly {
         components: this.stepImport.result.read.instances.length,
         skipped: this.stepImport.result.read.skipped,
       },
+      pmiFocus: this.shownPmiFocus(s.content),
     };
   }
   /**
@@ -628,6 +694,113 @@ export class CadAssembly {
   }
   get source() {
     return this.options.source;
+  }
+  /** PMI-5b: assets read from the Host's bytes, by hash (null: not one). */
+  private readonly pmiAssets = new Map<string, CadPmiAsset | CadAssemblyPmiAsset | null>();
+  private readonly assemblyPmiStates = new WeakMap<
+    CadAssemblyPmiAsset,
+    { components: unknown; parts: unknown; items: Map<string, CadAssemblyPmiItemState> }
+  >();
+  private readAsset<T extends CadPmiAsset>(
+    sha256: string,
+    read: (bytes: Uint8Array) => T | undefined,
+  ): T | null {
+    let asset = this.pmiAssets.get(sha256) as T | null | undefined;
+    if (asset === undefined) {
+      const bytes = this.options.controller.assetBytes(sha256);
+      if (!bytes) return null;
+      asset = read(bytes) ?? null;
+      this.pmiAssets.set(sha256, asset);
+    }
+    return asset;
+  }
+  /**
+   * PMI-5b: the assembly's own PMI (the items of particular instances), with each item current
+   * or stale (a deleted component, another version placed, a stale datum). Undefined when the
+   * document has none.
+   */
+  assemblyPmi(
+    content = this.options.controller.getSnapshot().content,
+  ): CadAssemblyPmiView | undefined {
+    const id = content.assemblyPmiAssetId;
+    if (id === undefined) return undefined;
+    const ref = content.assets.find((a) => a.id === id);
+    const asset = ref && this.readAsset(ref.sha256, readCadAssemblyPmiAsset);
+    if (!asset) return { unreadable: true };
+    let hit = this.assemblyPmiStates.get(asset);
+    if (hit?.components !== content.components || hit.parts !== content.parts) {
+      hit = {
+        components: content.components,
+        parts: content.parts,
+        items: cadAssemblyPmiStates(content, asset),
+      };
+      this.assemblyPmiStates.set(asset, hit);
+    }
+    return { asset, items: hit.items };
+  }
+  /**
+   * PMI-5b: the PMI a direct component's part keeps (each body's `pmi`, common to every instance
+   * of the part), read from its version as a part document reads it. Empty while the version is
+   * not retained or keeps none.
+   */
+  componentPmi(
+    componentId: string,
+    content = this.options.controller.getSnapshot().content,
+  ): CadComponentPmi[] {
+    const component = content.components.find((c) => c.id === componentId);
+    const part = component && content.parts.find((p) => p.id === component.partId);
+    // A part whose Artifact is no longer readable shows none of its PMI (as none of its shape).
+    const artifactId = part && partArtifactId(part.source);
+    if (artifactId !== undefined && !this.access(artifactId)) return [];
+    const hash = part?.source.contentHash;
+    const version = hash === undefined ? undefined : this.lookup(hash);
+    if (!version) return [];
+    const out: CadComponentPmi[] = [];
+    for (const body of version.bodies) {
+      if (body.state !== 'active') continue;
+      const state = cadBodyPmi(version, body.id);
+      if (state.status === 'none') continue;
+      const ref = version.assets.find((a) => a.id === state.assetId);
+      const asset = ref && this.readAsset(ref.sha256, readCadPmiAsset);
+      let view: CadBodyPmiView;
+      if (!asset) view = { state, unreadable: true };
+      else if (state.status === 'current') view = { state, asset };
+      else {
+        // PMI-4a: past a change of the shape, by the part's own evaluation's tracking.
+        const mesh =
+          state.status === 'changed'
+            ? this.meshStore.get(hash!)?.find((m) => m.bodyId === body.id && !m.beforeFailure)
+            : undefined;
+        const tracking = mesh?.pmi?.find((t) => t.featureId === state.featureId);
+        view = {
+          state,
+          asset,
+          items: cadPmiItemStates(asset, tracking),
+          ...(tracking ? { tracking } : {}),
+        };
+      }
+      out.push({ bodyId: body.id, name: body.name, view });
+    }
+    return out;
+  }
+  /** PMI-5b: highlights one item on the placed parts, or none (display only). */
+  focusPmi(focus: CadAssemblyPmiFocus | undefined) {
+    this.pmiFocus = focus;
+    this.emit();
+  }
+  /** The focus while its item is there and current, on a component of the content. */
+  private shownPmiFocus(content: CadDocument): CadAssemblyPmiFocus | undefined {
+    const f = this.pmiFocus;
+    if (!f) return undefined;
+    if (f.source === 'assembly')
+      return this.assemblyPmi(content)?.items?.get(f.itemId)?.current ? f : undefined;
+    if (!content.components.some((c) => c.id === f.componentId)) return undefined;
+    const view = this.componentPmi(f.componentId).find((b) => b.bodyId === f.bodyId)?.view;
+    const current =
+      !!view?.asset?.items.some((i) => i.id === f.itemId) &&
+      view.state.status !== 'stale' &&
+      (view.state.status === 'current' || view.items?.get(f.itemId)?.current === true);
+    return current ? f : undefined;
   }
   /**
    * Port callback: meshes of one part job (ownership of the buffers moves here), kept within
@@ -1150,10 +1323,11 @@ export class CadAssembly {
         if (r && bytes && !assets.some((a) => a.ref.sha256 === r.sha256))
           assets.push({ ref: r, bytes });
       });
-      // PMI-5a: the PMI of particular instances is the assembly document's own asset.
-      if (plan.assemblyPmi) assets.push(plan.assemblyPmi);
       try {
         await store.stage(plan.versions, assets);
+        // PMI-5a: the PMI of particular instances is the assembly document's own asset: the
+        // Host keeps it with the document's assets, which its evaluation reads (PMI-5b).
+        if (plan.assemblyPmi) await controller.stageAssets([plan.assemblyPmi]);
       } catch (e) {
         return this.refuse(e instanceof Error && e.message ? e.message : 'part-stage-failed');
       }
@@ -1283,6 +1457,103 @@ export class CadAssembly {
       sizeMm: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]],
       ...(volume === undefined ? {} : { volumeMm3: volume }),
     };
+  }
+  /**
+   * Finer meshes of what is shown, for a path-traced render: the document's own bodies by body
+   * ID, and for each part mesh shown its finer one. Each version is evaluated again from its
+   * exact build, like an export, and nothing is kept. A version that cannot be (another build,
+   * a failure, a shape that is not the one shown) keeps its display meshes; so does everything
+   * once `control.cancelled` is set. `onProgress` gets the versions done and the total.
+   */
+  /** The last render's finer meshes by version and quality (`renderMeshes`). */
+  private renderKept = new Map<string, CadMesh[]>();
+  /** Lets the last render's finer meshes go (the content changed, or the editor closed). */
+  releaseRenderMeshes() {
+    this.renderKept = new Map();
+  }
+  async renderMeshes(
+    quality: CadRenderMeshQuality,
+    {
+      control = {},
+      onProgress,
+    }: { control?: { cancelled?: boolean }; onProgress?(done: number, total: number): void } = {},
+  ): Promise<CadRenderMeshes> {
+    const out: CadRenderMeshes = { bodies: new Map(), parts: new Map() };
+    const render = this.options.renderMeshes;
+    const { controller } = this.options;
+    if (!render) return out;
+    const shown = controller.getSnapshot();
+    const own =
+      shown.meshes?.current && !shown.meshes.preview && shown.evaluation?.status === 'ok'
+        ? { content: shown.content, hash: shown.contentHash, meshes: shown.meshes.meshes }
+        : undefined;
+    // The versions shown with their display meshes, each once, and reachable now.
+    const { occurrences } = expandAssembly(shown.content, this.lookup);
+    const allowed = occurrenceAccess(occurrences, this.access);
+    const parts = new Map<string, { content: CadDocument; hash: string; meshes: CadMesh[] }>();
+    for (const [i, o] of occurrences.entries()) {
+      const hash = o.part.source.contentHash;
+      const meshes = this.meshes(hash);
+      if (allowed[i] && o.content && meshes?.length && !parts.has(hash))
+        parts.set(hash, { content: o.content, hash, meshes });
+    }
+    const jobs = [...(own?.meshes.length ? [own] : []), ...parts.values()];
+    const key = (hash: string) =>
+      `${hash} ${quality.relativeDeflection} ${quality.angularDeflectionRad}`;
+    // The last render's finer meshes are kept for the versions it drew, so rendering again
+    // (another light, another angle) does not calculate them again.
+    const kept = this.renderKept;
+    this.renderKept = new Map();
+    let done = 0;
+    onProgress?.(done, jobs.length);
+    for (const job of jobs) {
+      if (control.cancelled) break;
+      const known = kept.get(key(job.hash));
+      let meshes = known;
+      if (!meshes) {
+        const requestId = controller.newId('render');
+        // A Cancel stops the kernel's job too: an export-like job holds back the editor's own
+        // evaluations until it ends.
+        const watch = setInterval(() => {
+          if (control.cancelled) this.options.cancelRender?.(requestId);
+        }, renderCancelPollMs);
+        try {
+          const finer = await render(
+            {
+              requestId,
+              generation: 0,
+              baseHash: job.hash,
+              candidateHash: job.hash,
+              document: job.content,
+            },
+            quality,
+          ).catch(() => undefined);
+          if (finer?.evaluation.status === 'ok' && finer.evaluation.contentHash === job.hash)
+            meshes = finer.meshes;
+        } finally {
+          clearInterval(watch);
+        }
+      }
+      onProgress?.(++done, jobs.length);
+      if (control.cancelled) break;
+      if (!meshes) continue;
+      // Kept for rendering again only within the main-thread mesh budget (CAD26), beside the
+      // part meshes already held; beyond it they are dropped after this render.
+      const keptBytes = retainedBytes([...this.renderKept.values()].flat());
+      const held = retainedBytes([...this.meshStore.values(), ...this.coarseStore.values()].flat());
+      const budget =
+        (this.options.mainBytes ?? cadBudgets.mainBytes) - controller.retainedMeshBytes;
+      if (keptBytes + retainedBytes(meshes) + held <= budget)
+        this.renderKept.set(key(job.hash), meshes);
+      const byBody = new Map(meshes.map((m) => [m.bodyId, m]));
+      for (const mesh of job.meshes) {
+        const fine = byBody.get(mesh.bodyId);
+        if (!fine) continue;
+        if (job === own) out.bodies.set(mesh.bodyId, fine);
+        else out.parts.set(mesh, fine);
+      }
+    }
+    return out;
   }
   /**
    * A placed version's name for people: the Host's label (`v2`), else a shortened ID. The IDs
@@ -2219,11 +2490,40 @@ export class CadAssembly {
     const r = await this.runInterference({ samples });
     return 'error' in r ? r : { content: r.content, report: r.report as CadSweepReport };
   }
-  private async runInterference(
-    target: Pick<CadInterferenceRequest, 'form' | 'samples'>,
+  /**
+   * CR7c: the MR5 check at each of `steps` values of one joint value through its limits (both
+   * ends included); `values` gives each step's value (radians or mm).
+   */
+  async checkJointRange(
+    jointId: string,
+    of: CadJointValueKey,
+    steps: number,
   ): Promise<
-    { content: CadDocument; report: CadInterferenceReport | CadSweepReport } | { error: string }
+    { content: CadDocument; values: number[]; report: CadSweepReport } | { error: string }
   > {
+    const content = this.options.controller.getSnapshot().content;
+    const range = jointRangeSamples(content, jointId, of, steps);
+    if ('code' in range) return { error: range.code };
+    const r = await this.checkInterferenceAlong(
+      range.samples.map((s) => ({ tick: s.tick, values: Object.fromEntries(s.values) })),
+    );
+    return 'error' in r ? r : { ...r, values: range.values };
+  }
+  /**
+   * CR7c: the shortest distance between two components' display meshes (and what they place),
+   * in the current pose or at joint values, off the main thread like `checkInterference`.
+   */
+  async measureClearance(
+    a: string[],
+    b: string[],
+    values?: Record<string, CadResolvedJointValues>,
+  ): Promise<{ content: CadDocument; report: CadClearanceReport } | { error: string }> {
+    const r = await this.runInterference({ clearance: { a, b, ...(values ? { values } : {}) } });
+    return 'error' in r ? r : { content: r.content, report: r.report as CadClearanceReport };
+  }
+  private async runInterference(
+    target: Pick<CadInterferenceRequest, 'form' | 'samples' | 'clearance'>,
+  ): Promise<{ content: CadDocument; report: CadInterferenceJobReport } | { error: string }> {
     const { controller } = this.options;
     const s = controller.getSnapshot();
     const evaluated = s.evaluation?.status === 'ok' ? s.evaluation : undefined;

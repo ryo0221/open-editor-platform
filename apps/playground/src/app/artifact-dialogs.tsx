@@ -61,6 +61,11 @@ const nonNativeKinds = [
   'bim',
   'character',
   'simulation',
+  'construction',
+  'pcb',
+  'schematic',
+  'ladder',
+  'cosim',
 ];
 
 export interface TemplateAuthoring {
@@ -180,6 +185,11 @@ async function createFromTemplate(
             r.kind !== 'bim' &&
             r.kind !== 'character' &&
             r.kind !== 'simulation' &&
+            r.kind !== 'construction' &&
+            r.kind !== 'pcb' &&
+            r.kind !== 'schematic' &&
+            r.kind !== 'ladder' &&
+            r.kind !== 'cosim' &&
             r.kind !== 'animation',
         )
         .map(nativeRecord),
@@ -192,7 +202,12 @@ async function createFromTemplate(
         record.kind !== 'cad' &&
         record.kind !== 'bim' &&
         record.kind !== 'character' &&
-        record.kind !== 'simulation'
+        record.kind !== 'simulation' &&
+        record.kind !== 'construction' &&
+        record.kind !== 'pcb' &&
+        record.kind !== 'schematic' &&
+        record.kind !== 'ladder' &&
+        record.kind !== 'cosim'
         ? nativeRecord(record)
         : undefined;
     },
@@ -312,7 +327,12 @@ function ReuseBatchHost({ host, onClose }: { host: DialogHost; onClose(): void }
     active.kind !== 'cad' &&
     active.kind !== 'bim' &&
     active.kind !== 'character' &&
-    active.kind !== 'simulation'
+    active.kind !== 'simulation' &&
+    active.kind !== 'construction' &&
+    active.kind !== 'pcb' &&
+    active.kind !== 'schematic' &&
+    active.kind !== 'ladder' &&
+    active.kind !== 'cosim'
       ? [active]
       : [];
   return (
@@ -449,6 +469,11 @@ function ReuseDialogs({
     active.kind !== 'bim' &&
     active.kind !== 'character' &&
     active.kind !== 'simulation' &&
+    active.kind !== 'construction' &&
+    active.kind !== 'pcb' &&
+    active.kind !== 'schematic' &&
+    active.kind !== 'ladder' &&
+    active.kind !== 'cosim' &&
     active.kind !== 'animation'
       ? active
       : undefined;

@@ -14,7 +14,8 @@
     "./artifact-surface": "./src/artifact-surface.tsx",
     "./world-panel": "./src/world-panel.tsx",
     "./saved-views": "./src/saved-views.tsx",
-    "./native-input": "./src/native-input.tsx"
+    "./native-input": "./src/native-input.tsx",
+    "./artifact-refs": "./src/artifact-refs.tsx"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "0.1.0",

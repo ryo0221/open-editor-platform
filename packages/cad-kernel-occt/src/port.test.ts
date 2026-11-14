@@ -219,6 +219,34 @@ describe('WorkerKernelPort (CAD24)', () => {
     expect(workers[0].inbox.at(-1)).toMatchObject({ type: 'evaluate', assets: { [sha]: brep } });
     workers[0].send(ok(request('e')));
     await evaluated;
+    // PMI-5b: an assembly's `assembly-pmi` travels too: its evaluation checks it.
+    const pmiSha = `sha256:${'c'.repeat(64)}`;
+    const pmiBytes = new Uint8Array([7, 7]);
+    const withPmi = new WorkerKernelPort({
+      spawn,
+      build,
+      timers,
+      assets: (hash) => (hash === pmiSha ? pmiBytes : undefined),
+    });
+    const assembly = f02Plate();
+    assembly.assets = [
+      {
+        id: 'assembly-pmi',
+        kind: 'assembly-pmi',
+        sha256: pmiSha,
+        byteLength: 2,
+        mediaType: 'application/json',
+      },
+    ];
+    const checked = withPmi.evaluate({ ...request('a'), document: assembly });
+    workers[1].send({ type: 'ready', buildHash: build.buildHash });
+    await flush();
+    expect(workers[1].inbox.at(-1)).toMatchObject({
+      type: 'evaluate',
+      assets: { [pmiSha]: pmiBytes },
+    });
+    workers[1].send(ok(request('a')));
+    await checked;
     const plain = port.evaluate(request('p'));
     await flush();
     expect(workers[0].inbox.at(-1)).not.toHaveProperty('assets');
@@ -765,7 +793,8 @@ describe('split evaluations (CM-4, P3)', () => {
     expect(await result).toMatchObject({ status: 'error', code: 'timeout' });
   });
 
-  it('keeps 30 s for a job that is not split, such as a STEP read', async () => {
+  it('gives a STEP read 30 s and 5 s for each MiB of the file (CR7f, #846)', async () => {
+    // TS-1827, ST-294
     const { workers, spawn } = fakeWorkers();
     const timers = manualTimers();
     const port = new WorkerKernelPort({ spawn, build, timers });
@@ -773,5 +802,9 @@ describe('split evaluations (CM-4, P3)', () => {
     workers[0].send({ type: 'ready', buildHash: build.buildHash });
     await flush();
     expect(timers.delays).toEqual([30_000]);
+    void port.importStepAssembly('car', new Uint8Array(64 * 2 ** 20));
+    workers[0].send({ type: 'import-result', requestId: 'read', result: {} } as never);
+    await flush();
+    expect(timers.delays).toEqual([30_000, 350_000]);
   });
 });

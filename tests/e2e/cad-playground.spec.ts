@@ -19,6 +19,9 @@ import {
   f17Sheets,
   f18Hood,
   f19Network,
+  f80Package,
+  f80Sample,
+  f81TwoView,
   f22Split,
   cr6dGroove,
   lampFixture,
@@ -27,6 +30,7 @@ import {
   f60Wheel,
   f61Mirror,
   f62Steering,
+  f63Car,
   f26Panel,
   f27Windows,
   f24Flare,
@@ -48,6 +52,11 @@ import {
   solveJoints,
   parameterValues,
   connectorRefKey,
+  f02Plate,
+  fixtureComponent,
+  fixturePart,
+  fixtureVersion,
+  emptyCad,
   type CadDocument,
 } from '@editor-platform/cad-core';
 import type { Locator, Page } from '@playwright/test';
@@ -839,6 +848,98 @@ test('span a curve network from the Boundary dialog and undo it (CR1d)', async (
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await ready(page);
   expect(await network()).toBeUndefined();
+});
+
+// CLF2 (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): each u curve of the roof is made
+// from a side arc and a plan line in the Boundary dialog, and spans the network with the v arcs
+// (TS-2003, ST-500).
+test('span a curve network through two-view curves (CLF2)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'views.json', {
+    ...empty,
+    name: 'Roof views',
+    draft: {
+      ...empty.draft,
+      content: {
+        ...f81TwoView(),
+        // Sketch IDs may hold `/` (#1111 review): the side views and the plan share a prefix.
+        sketches: f81TwoView().sketches.map((x) =>
+          x.id.startsWith('v') ? x : { ...x, id: `roof/${x.id}` },
+        ),
+        features: [],
+        bodies: [],
+        kernelProfile,
+      },
+    },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Roof views');
+  await ready(page);
+  await page.getByRole('button', { name: 'Boundary…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Boundary' });
+  await dialog.getByLabel('Result').selectOption('curveNetwork');
+  for (const id of ['v0', 'v1', 'v2']) {
+    await dialog.getByRole('checkbox', { name: `${id} arc`, exact: true }).check();
+    await dialog.getByRole('checkbox', { name: 'Across (v)' }).last().check();
+  }
+  for (const n of [0, 1, 2]) {
+    await dialog.getByLabel('Side view').selectOption({ label: `u${n} arc` });
+    await dialog.getByLabel('Plan view').selectOption({ label: `plan l${n}` });
+    await dialog.getByRole('button', { name: 'Add two-view curve' }).click();
+  }
+  // The same pair twice, or both views from one sketch, cannot be added.
+  await expect(dialog.getByRole('button', { name: 'Add two-view curve' })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Create curve network' }).click();
+  await ready(page);
+  const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+  const f = doc.features.find((x) => x.type === 'curveNetwork');
+  expect(f?.type === 'curveNetwork' && f.args.u).toEqual(
+    [0, 1, 2].map((n) => ({
+      twoView: {
+        side: { sketchId: `roof/u${n}`, element: 'arc' },
+        plan: { sketchId: 'roof/plan', element: `l${n}` },
+      },
+    })),
+  );
+  await expect(bodies(page)).toHaveCount(1);
+  await expect(page.getByText('Shape could not be calculated')).toHaveCount(0);
+});
+
+// CLF1a (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): a sketch is drawn over the shown
+// bodies' silhouette and the other sketches' lines, which can be turned off (TS-2004, ST-501).
+test('draw a sketch over the bodies and the other sketches (CLF1a)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'roof.json', {
+    ...empty,
+    name: 'Roof',
+    draft: { ...empty.draft, content: { ...f81TwoView(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Roof');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  await page.getByRole('button', { name: 'Edit sketch u1' }).click();
+  const drawing = page.getByRole('application', { name: 'Drawing of u1' });
+  const under = drawing.getByTestId('cad-sketch-underlay');
+  // The roof seen from the side, and the 8 elements of the other 7 sketches.
+  await expect(under.getByTestId('cad-sketch-shadow')).toHaveCount(1);
+  await expect(under.locator('polyline')).toHaveCount(8);
+  // The shadow spans the roof's 80 mm along X (u of a sketch parallel to XZ).
+  const shadow = under.getByTestId('cad-sketch-shadow');
+  expect(Number(await shadow.getAttribute('width'))).toBeCloseTo(80, 0);
+  await page.screenshot({ path: test.info().outputPath('clf1a-underlay.png') });
+  await page.getByRole('checkbox', { name: 'Underlay' }).uncheck();
+  await expect(drawing.getByTestId('cad-sketch-underlay')).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'Underlay' }).check();
+  await expect(drawing.getByTestId('cad-sketch-underlay')).toHaveCount(1);
 });
 
 // CR2b (docs/cad/car-design.md, CR2の分け方): a sheet is offset 2 mm to its back from the body's
@@ -1956,6 +2057,106 @@ test('R2b-5 STEP assembly import: an empty document becomes the assembly, saved,
   await expect(components(page)).toHaveCount(2);
   await expect(page.locator('.cad-part-state')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('cad-r2b-step-import.png') });
+});
+
+/** PMI-5b: pixels in the highlight's orange (well redder than blue), over grey parts. */
+async function warmPixels(page: Page) {
+  const png = await page.locator('.cad-viewport canvas').first().screenshot();
+  return page.evaluate(async (data) => {
+    const bitmap = await createImageBitmap(
+      await (await fetch(`data:image/png;base64,${data}`)).blob(),
+    );
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const g = canvas.getContext('2d')!;
+    g.drawImage(bitmap, 0, 0);
+    const p = g.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    let n = 0;
+    for (let i = 0; i < p.length; i += 4) if (p[i]! - p[i + 2]! > 70 && p[i]! - p[i + 1]! > 30) n++;
+    return n;
+  }, png.toString('base64'));
+}
+// PMI-5b (docs/cad/pmi.md, 一覧・表示, 検証と失効): F46's items of particular instances are listed
+// on the assembly, apart from each part's own PMI; choosing one highlights its faces on the
+// instance it names. Deleting that component makes its items stale (Undo brings them back); the
+// list is the same after a save, a reload and the native file.
+test('PMI-5b assembly PMI: instances and parts, highlight, stale, saved and reloaded (ST-215, CAD86, TS-1440)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await page.getByLabel('Artifact name').fill('Path rig');
+  await page.getByLabel('Artifact name').press('Enter');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-path.step'));
+  // F43's distance across two parts names no path: kept only with consent, as before.
+  await page
+    .getByRole('dialog', { name: 'STEP with PMI' })
+    .getByRole('button', { name: 'Import with the PMI that is kept', exact: true })
+    .click();
+  const importing = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  await importing.getByRole('button', { name: 'Import assembly', exact: true }).click();
+  await expect(importing).toHaveCount(0);
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  const own = page.getByTestId('cad-instance-pmi');
+  await expect(own).toContainText('Of particular instances (7)');
+  const flatness = own.getByRole('button', { name: /Flatness 0\.04 mm/ });
+  await expect(flatness).toBeEnabled();
+  const plate2 = await components(page).nth(1).innerText();
+  await expect(flatness).toContainText(`on ${plate2.split('\n')[0]}`);
+  await expect.poll(() => warmPixels(page)).toBeLessThan(5);
+  await flatness.click();
+  await expect(flatness).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => warmPixels(page)).toBeGreaterThan(30);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi5b-instance.png') });
+  await flatness.click();
+  await expect.poll(() => warmPixels(page)).toBeLessThan(5);
+
+  // The first plate's own PMI is the part's: the same on each plate, shown on the one chosen.
+  await components(page).nth(0).click();
+  const common = page.getByTestId('cad-part-pmi');
+  await expect(common).toContainText('Every instance of');
+  const datum = common.getByRole('button', { name: /^Datum A/ });
+  await datum.click();
+  await expect(datum).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => warmPixels(page)).toBeGreaterThan(30);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi5b-part.png') });
+
+  // Removing the second plate makes the items on it stale, never the document invalid.
+  await components(page).nth(1).click();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await ready(page);
+  await expect(components(page)).toHaveCount(2);
+  await expect(flatness).toBeDisabled();
+  await expect(flatness).toContainText('stale (a component it names was deleted)');
+  await expect(own).toContainText('are stale');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  await expect(flatness).toBeEnabled();
+  await expect(own).not.toContainText('are stale');
+
+  // Saved and reloaded, and the native file opened as a copy: the same items, current.
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  await expect(page.getByTestId('cad-instance-pmi')).toContainText('Of particular instances (7)');
+  await expect(
+    page.getByTestId('cad-instance-pmi').getByRole('button', { name: /Flatness 0\.04 mm/ }),
+  ).toBeEnabled();
+  const saved = await nativeArtifact(page);
+  const resources = saved.cadResources as { kind: string }[];
+  expect(resources.filter((r) => r.kind === 'assembly-pmi')).toHaveLength(1);
+  await importJson(page, 'path-rig-copy.json', { ...saved, name: 'Path rig copy' });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Path rig copy');
+  await ready(page);
+  await expect(page.getByTestId('cad-instance-pmi')).toContainText('Of particular instances (7)');
+  await page
+    .getByTestId('cad-instance-pmi')
+    .getByRole('button', { name: /Flatness 0\.04 mm/ })
+    .click();
+  await expect.poll(() => warmPixels(page)).toBeGreaterThan(30);
 });
 
 test('R2b-2b assembly: a newer saved version of a part is shown, previewed and taken as one edit (CAD48)', async ({
@@ -3386,8 +3587,8 @@ test('WM5c: export the SK-01 watch as STEP AP242 and GLB', async ({ page }) => {
     timeout: 300_000,
   });
   await expect(report.locator('dt:has-text("Instances") + dd')).toHaveText('17');
-  // About 16 MiB with the gears: written (up to 64 MiB), but past what this editor reads.
-  await expect(exporting.getByRole('note')).toContainText('cannot import it back');
+  // About 16.5 MiB with the gears: within the 64 MiB STEP limit both ways (CR7g-4), so no note.
+  await expect(exporting.getByText(/cannot import it back/)).toHaveCount(0);
   let download = page.waitForEvent('download');
   await exporting.getByRole('button', { name: 'Save STEP' }).click();
   const step = await readFile((await (await download).path())!);
@@ -3774,4 +3975,849 @@ test('WM6b: path-traced stills of the finished SK-01 from the dial, three-quarte
   await page.mouse.move(centre.x, centre.y);
   for (let i = 0; i < 6; i++) await page.mouse.wheel(0, -200);
   await render('wm6b-close');
+});
+
+// TS-1809, ST-288 (CR7a): a box given steel's density in the inspector weighs its volume times
+// 7,850 kg/m³, undone; an assembly of two weighed plates and a bare one: the total, the bare one
+// left out, and the front/rear split between the two plates' axles.
+test('weigh a body and an assembly with its front/rear split (CR7a)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  await bodies(page).last().click();
+  const mass = page.getByTestId('cad-mass');
+  await expect(page.getByTestId('cad-body-mass')).toContainText('No density');
+  await mass.getByLabel('Density preset').selectOption('steel');
+  await ready(page);
+  const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+  expect(doc.bodies.at(-1)!.mass).toEqual({ densityKgM3: 7850, material: 'steel' });
+  await expect(page.getByTestId('cad-body-mass')).toContainText(' kg');
+  // A solid takes no thickness.
+  await expect(mass.getByLabel('Sheet thickness (mm)')).toHaveCount(0);
+  await mass.getByLabel('Density (kg/m³)').fill('5');
+  await mass.getByLabel('Density (kg/m³)').press('Enter');
+  // Out of range: not taken (an invalid field blocks the export, so it is cancelled first).
+  await mass.getByLabel('Density (kg/m³)').press('Escape');
+  expect(((await nativeArtifact(page)).draft.content as CadDocument).bodies.at(-1)!.mass).toEqual({
+    densityKgM3: 7850,
+    material: 'steel',
+  });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(page.getByTestId('cad-body-mass')).toContainText('No density');
+
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  const kernel = { id: kernelProfile.id, buildHash: kernelProfile.buildHash };
+  const plateDoc = { ...f02Plate(), kernelProfile };
+  const weighed = applyCadOperation(plateDoc, {
+    type: 'setBodyMass',
+    bodyId: plateDoc.bodies[0]!.id,
+    mass: { densityKgM3: 7850, material: 'steel' },
+  });
+  const plate = fixtureVersion('cr7a-plate', 'v1', weighed);
+  const bare = fixtureVersion('cr7a-bare', 'v1', plateDoc);
+  let car = { ...emptyCad(kernel), kernelProfile };
+  car = applyCadOperation(car, {
+    type: 'insertComponents',
+    parts: [fixturePart('p-plate', 'Plate', plate), fixturePart('p-bare', 'Bare', bare)],
+    components: [
+      { ...fixtureComponent('front', 'p-plate', [0, 0, 0]), name: 'Front' },
+      { ...fixtureComponent('rear', 'p-plate', [3000, 0, 0]), name: 'Rear' },
+      { ...fixtureComponent('trim', 'p-bare', [1000, 0, 0]), name: 'Trim' },
+    ],
+  });
+  await importJson(page, 'weighed.json', {
+    ...empty,
+    name: 'Weighed',
+    versions: [],
+    cadParts: [plate, bare].map((v) => ({ contentHash: v.contentHash, content: v.content })),
+    draft: { ...empty.draft, content: car },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Weighed');
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  const total = page.getByTestId('cad-mass-total');
+  // 80 × 50 × 5 mm less a hole: two of them, each about 0.15 kg.
+  await expect(page.getByTestId('cad-mass-left-out')).toContainText('Left out: 1');
+  await expect
+    .poll(async () => parseFloat(await page.getByTestId('cad-mass-kg').innerText()))
+    .toBeGreaterThan(0.25);
+  const kg = parseFloat(await page.getByTestId('cad-mass-kg').innerText());
+  expect(kg).toBeLessThan(2 * 0.157);
+  await total.getByLabel('Front axle').selectOption(['front']);
+  await total.getByLabel('Rear axle').selectOption(['rear']);
+  await expect(page.getByTestId('cad-mass-split')).toContainText('Front 50 % · rear 50 %');
+  await expect(page.getByTestId('cad-mass-split')).toContainText('3,000 mm apart');
+  await page.screenshot({ path: test.info().outputPath('cr7a-mass.png') });
+});
+
+// TS-1812, ST-289 (CR7b): the whole car (F63) opened with its parts' closure: 18 components on
+// the body in white's faces and the hinges, every joint solved with no alert, its mass with a
+// front/rear split between the wheels, and the left door opened 45° from its joint, undone.
+test('open the whole car, weigh it and open a door (CR7b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(900_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  await importJson(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: car.assembly },
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Car');
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  await expect(components(page)).toHaveCount(18);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('cr7b-car.png') });
+  const total = page.getByTestId('cad-mass-total');
+  const kg = async () =>
+    parseFloat((await page.getByTestId('cad-mass-kg').innerText()).replace(/,/g, ''));
+  await expect.poll(kg, { timeout: 300_000 }).toBeGreaterThan(100);
+  await expect(page.getByTestId('cad-mass-left-out')).toHaveCount(0);
+  await total.getByLabel('Front axle').selectOption(['c-wheel-front-l', 'c-wheel-front-r']);
+  await total.getByLabel('Rear axle').selectOption(['c-wheel-rear-l', 'c-wheel-rear-r']);
+  await expect(page.getByTestId('cad-mass-split')).toContainText('2,400 mm apart');
+  test.info().annotations.push({
+    type: 'mass',
+    description: `${await kg()} kg; ${await page.getByTestId('cad-mass-split').innerText()}; centre ${await page.getByTestId('cad-mass-centre').innerText()}`,
+  });
+  await total.screenshot({ path: test.info().outputPath('cr7b-mass.png') });
+  const poses = async () => ((await nativeArtifact(page)).draft.content as CadDocument).solvedPoses;
+  const joints = page.getByRole('list', { name: 'Joints' });
+  const values = page.getByRole('form', { name: 'Joint values' });
+  await joints.getByRole('button', { name: /^Door L hinge/ }).click();
+  await values.getByLabel('Angle (°)').fill('45');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  // The mirror on the door turns with it (from −90° about z to −45°).
+  await expect
+    .poll(async () => {
+      const q = (await poses())['c-mirror-l']?.rotation;
+      return q ? Math.round((2 * Math.acos(Math.min(1, Math.abs(q[3]))) * 180) / Math.PI) : 0;
+    })
+    .toBe(45);
+  await page.screenshot({ path: test.info().outputPath('cr7b-door.png') });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect
+    .poll(async () => (await poses())['c-door']?.rotation.map((v) => Math.round(v * 1000)))
+    .toEqual([0, 0, 0, 1000]);
+});
+
+// F63's parts evaluate one after another after the assembly itself is up to date: about 6 min
+// in a 4-core container (2026-11-13; the CR7g shape and details made them heavier than the
+// 5 min these waits had).
+const f63PartsMs = 900_000;
+
+// TS-1815, ST-290 (CR7c): the whole car (F63): the left door's hinge stepped through 0–70° in
+// 8 steps and checked for interference at each (none since the fit-up, ST-291), and the
+// clearance between the front left wheel and the skin now and at full steering lock.
+test('check a door through its range and the front wheel’s clearance (CR7c)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(2_400_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  await importJson(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: car.assembly },
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  // Every part evaluated (all weigh, none left out) before checking.
+  await expect
+    .poll(
+      async () => parseFloat((await page.getByTestId('cad-mass-kg').innerText()).replace(/,/g, '')),
+      { timeout: f63PartsMs },
+    )
+    .toBeGreaterThan(370);
+  await expect(page.getByTestId('cad-mass-left-out')).toHaveCount(0);
+  const range = page.getByTestId('cad-range');
+  await range
+    .getByRole('combobox', { name: 'Joint', exact: true })
+    .selectOption({ label: 'Door L hinge' });
+  await range.getByLabel('Steps').fill('8');
+  await range.getByRole('button', { name: 'Check through the range' }).click();
+  const status = page.getByTestId('cad-range-status');
+  await expect(status).toContainText('Door L hinge（0°〜70°、8刻み）', { timeout: 300_000 });
+  test.info().annotations.push({ type: 'range', description: await status.innerText() });
+  // F63 fitted (CR7 fit-up): the door opens clear of the skin and the body in white.
+  await expect(status).toContainText('干渉はありません。');
+  await range.getByLabel('Clearance from').selectOption({ label: 'Wheel front L' });
+  await range.getByLabel('Clearance to').selectOption({ label: 'このassemblyの形状' });
+  await range.getByRole('button', { name: 'Measure clearance' }).click();
+  const clear = page.getByTestId('cad-clearance-status');
+  // The tyre clears the skin's arch by about 39 mm (the meshes' precision).
+  await expect(clear).toContainText(/の最短距離 (3[5-9]|4[0-4])\.\d mm。/, { timeout: 300_000 });
+  test.info().annotations.push({ type: 'clearance', description: await clear.innerText() });
+  await page.screenshot({ path: test.info().outputPath('cr7c-clearance.png') });
+  await range.getByLabel('At joint').selectOption({ label: 'Wheel front L mount' });
+  await range.getByLabel('At angle (°)').fill('35');
+  await range.getByRole('button', { name: 'Measure clearance' }).click();
+  await expect(clear).toContainText('Wheel front L mount 35°で', { timeout: 300_000 });
+  // At full lock the tyre turns away from the arch (F63 widened, CR7g-1: about 48 mm).
+  await expect(clear).toContainText(/の最短距離 (4[0-9]|5[0-5])(\.\d)? mm。/);
+  test.info().annotations.push({ type: 'clearance-lock', description: await clear.innerText() });
+  await page.screenshot({ path: test.info().outputPath('cr7c-lock.png') });
+});
+
+// TS-2056, ST-530: a render of a sheet and a placed part in the studio light, their shapes
+// calculated again with finer meshes first; the sky light is still offered and lighter.
+test('render a sheet and a part with finer surfaces in the studio and the sky light', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_200_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f26Panel(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  // The door becomes a placed part: the panel is the document's own sheet, the door a part's.
+  await bodies(page).nth(1).click();
+  await page.getByRole('button', { name: 'Make part', exact: true }).click();
+  await ready(page);
+  await expect(components(page)).toHaveText(['door-body 1']);
+  await page.getByRole('button', { name: 'Render image' }).click();
+  const render = page.getByTestId('view-render');
+  await render.getByLabel('Width (px)').fill('240');
+  await render.getByLabel('Height (px)').fill('150');
+  await render.getByLabel('Samples').fill('4');
+  await render.getByLabel('Time limit (s, 0 = none)').fill('300');
+  // The studio light and finer surfaces are the CAD defaults.
+  await expect(render.getByRole('combobox', { name: 'Light', exact: true })).toHaveValue('studio');
+  await expect(render.getByLabel(/Finer surfaces/)).toBeChecked();
+  const corner = async () =>
+    render.getByTestId('view-render-image').evaluate(async (img: HTMLImageElement) => {
+      await img.decode();
+      const c = document.createElement('canvas');
+      [c.width, c.height] = [img.naturalWidth, img.naturalHeight];
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      // The top corners: the room or the sky behind the model.
+      const d = [
+        ...g.getImageData(0, 0, 12, 12).data,
+        ...g.getImageData(c.width - 12, 0, 12, 12).data,
+      ];
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) sum += (d[i]! + d[i + 1]! + d[i + 2]!) / 3;
+      return sum / (d.length / 4) / 255;
+    });
+  const progress = render.getByTestId('view-render-progress');
+  await render.getByRole('button', { name: 'Render', exact: true }).click();
+  // Both shapes, the panel and the door's version, are calculated again first.
+  await expect(progress).toHaveText(/Calculating finer surfaces|Preparing|Rendering/);
+  await expect(render.getByTestId('view-render-done')).toHaveText(/^240 × 150 px, 4 samples/, {
+    timeout: 900_000,
+  });
+  await expect(render.getByTestId('view-render-invalid')).toHaveCount(0);
+  const studio = await corner();
+  expect(studio).toBeLessThan(0.3);
+  await render.getByLabel(/Finer surfaces/).uncheck();
+  await render.getByRole('combobox', { name: 'Light', exact: true }).selectOption('sky');
+  await render.getByRole('button', { name: 'Render again', exact: true }).click();
+  await expect(render.getByTestId('view-render-done')).toHaveText(/^240 × 150 px, 4 samples/, {
+    timeout: 900_000,
+  });
+  expect(await corner()).toBeGreaterThan(studio + 0.15);
+});
+
+// TS-1822, ST-293 (CR7e): the whole car (F63) finished, its panels painted and its side windows
+// glazed, drawn by the path tracer with the lamps lit and the lenses and glass clear.
+test('render the whole car with paint, glass and lit lamps (CR7e)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(2_700_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  await importJson(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: car.assembly },
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  await expect
+    .poll(
+      async () => parseFloat((await page.getByTestId('cad-mass-kg').innerText()).replace(/,/g, '')),
+      { timeout: f63PartsMs },
+    )
+    .toBeGreaterThan(370);
+  await expect(page.getByTestId('cad-mass-left-out')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Render image' }).click();
+  const render = page.getByTestId('view-render');
+  await render.getByLabel('Width (px)').fill('480');
+  await render.getByLabel('Height (px)').fill('270');
+  await render.getByLabel('Samples').fill('8');
+  await render.getByLabel('Time limit (s, 0 = none)').fill('300');
+  await render.getByRole('button', { name: 'Render', exact: true }).click();
+  await expect(render.getByTestId('view-render-done')).toHaveText(/^480 × 270 px, \d+ samples? /, {
+    timeout: 900_000,
+  });
+  await expect(render.getByTestId('view-render-invalid')).toHaveCount(0);
+  // The paint is in the image: a good share of pixels are its blue (the hue, any brightness).
+  const shares = await render
+    .getByTestId('view-render-image')
+    .evaluate(async (img: HTMLImageElement) => {
+      await img.decode();
+      const c = document.createElement('canvas');
+      [c.width, c.height] = [img.naturalWidth, img.naturalHeight];
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const [r, gr, b] = [d[i]!, d[i + 1]!, d[i + 2]!];
+        if (b > r + 25 && b > gr + 5 && b > 40) blue++;
+      }
+      return { blue: blue / (d.length / 4) };
+    });
+  test.info().annotations.push({
+    type: 'render',
+    description: `${await render.getByTestId('view-render-done').innerText()}; paint ${(shares.blue * 100).toFixed(1)} %`,
+  });
+  expect(shares.blue).toBeGreaterThan(0.02);
+  await render
+    .getByTestId('view-render-image')
+    .screenshot({ path: test.info().outputPath('cr7e-render.png') });
+});
+
+// TS-1824, ST-294 (CR7f): the whole car (F63) written as one STEP AP242 assembly and read back
+// into an empty document: the same parts, components and placements, the skin as sheets.
+test('write the whole car as STEP AP242 and read it back (CR7f)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(3_000_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  await importJson(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: car.assembly },
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  await expect
+    .poll(
+      async () => parseFloat((await page.getByTestId('cad-mass-kg').innerText()).replace(/,/g, '')),
+      { timeout: f63PartsMs },
+    )
+    .toBeGreaterThan(370);
+  await expect(page.getByTestId('cad-mass-left-out')).toHaveCount(0);
+  test.info().annotations.push({
+    type: 'before-export',
+    description: (await page.locator('.cad-diagnostic').allInnerTexts()).join(' | '),
+  });
+  await page.screenshot({ path: test.info().outputPath('cr7f-before.png') });
+  await (await tool(page, 'Export STEP, STL or GLB')).click();
+  const exporting = page.getByRole('dialog', { name: 'Export 3D file' });
+  await exporting.getByLabel(/^STEP/).check();
+  const started = Date.now();
+  await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  const exported = exporting.getByLabel('Export report');
+  await expect(exported.or(page.locator('.cad-diagnostic[role=alert]')).first()).toBeVisible({
+    timeout: 900_000,
+  });
+  test.info().annotations.push({
+    type: 'export',
+    description: `${Math.round((Date.now() - started) / 1000)} s; ${await exported
+      .or(page.locator('.cad-diagnostic[role=alert]'))
+      .first()
+      .innerText()}`,
+  });
+  await page.screenshot({ path: test.info().outputPath('cr7f-exported.png') });
+  test.info().annotations.push({
+    type: 'after-export',
+    description: (await page.locator('.cad-diagnostic').allInnerTexts()).join(' | '),
+  });
+  await expect(exported).toBeVisible();
+  const download = page.waitForEvent('download');
+  await exporting.getByRole('button', { name: 'Save STEP' }).click();
+  const ap242 = await readFile((await (await download).path())!);
+  // Playwright refuses buffers over 50 MB, so the file goes in by its path.
+  const stepPath = test.info().outputPath('f63.step');
+  await writeFile(stepPath, ap242);
+
+  await create(page, 'cad');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(stepPath);
+  const dialog = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  const report = dialog.getByLabel('Import report');
+  await expect(report.or(page.locator('.cad-diagnostic[role=alert]')).first()).toBeVisible({
+    timeout: 900_000,
+  });
+  test.info().annotations.push({
+    type: 'import',
+    description: await report.or(page.locator('.cad-diagnostic[role=alert]')).first().innerText(),
+  });
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toHaveCount(0);
+  // Every body comes back as a part, every placed occurrence as a component. CR7g-2 adds 9: the
+  // windscreen and rear window (both sides), the doors' handles, the exhaust and two plates.
+  await expect(report).toContainText(/Parts\s*83(?!\d)/);
+  await expect(report).toContainText(/Components\s*96(?!\d)/);
+  await expect(report).toContainText(/Units\s*mm \(no conversion\)/);
+  // The Playground keeps native files up to 256 MB (CR7f): the document with the file and its
+  // parts' BReps is stored and every part evaluates again.
+  await dialog.getByRole('button', { name: 'Import assembly', exact: true }).click();
+  await expect(dialog).toHaveCount(0, { timeout: 900_000 });
+  await ready(page);
+  await expect(page.locator('.cad-part-state')).toHaveCount(0, { timeout: 900_000 });
+  // The insertion ends after the assembly's evaluation; until then other edits are refused.
+  const inserted = Date.now();
+  await expect(page.getByRole('button', { name: 'Insert part…', exact: true })).toBeEnabled({
+    timeout: 900_000,
+  });
+  test.info().annotations.push({
+    type: 'inserted',
+    description: `${Math.round((Date.now() - inserted) / 1000)} s after the parts were shown`,
+  });
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toHaveCount(0);
+  const record = await nativeArtifact(page);
+  const doc = record.draft.content as CadDocument;
+  expect(doc.parts).toHaveLength(83);
+  expect(doc.components).toHaveLength(96);
+  test.info().annotations.push({
+    type: 'stored',
+    description: `${(new Blob([JSON.stringify(record)]).size / 1e6).toFixed(1)} MB native record`,
+  });
+  await page.screenshot({ path: test.info().outputPath('cr7f-read.png') });
+});
+
+// TS-1839, CR7g-4 (E14 in B4): the whole car (F63) edited by hand in the normal screen. (1) The
+// driver's seat slid 100 mm forward from its mount's joint value; Undo and Redo go between the
+// two. (2) Both headlamps' parts saved, their lens made 4 mm thick (from 3) and saved as v2, and
+// the car's headlamps changed to that version. The car saved, reloaded: the same seat, the same
+// versions, the same mass.
+test('slide a seat and change the headlamps to the 4 mm lens in the whole car (CR7g-4, E14)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(2_700_000);
+  await page.goto('/');
+  const switchTo = async (name: string) => {
+    const nav = page.getByRole('navigation', { name: 'Artifacts', exact: true });
+    if (!(await nav.isVisible()))
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await nav.getByRole('button').filter({ hasText: name }).first().click();
+    await expect(page.getByLabel('Artifact name')).toHaveValue(name);
+    if (await nav.isVisible())
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await expect(nav).toBeHidden();
+    // The car evaluates again on opening (its 114 features take minutes).
+    await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  };
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const car = f63Car({ id, buildHash });
+  const assembly = structuredClone(car.assembly);
+  // The headlamps' parts, each saved once as it is in the car.
+  const lamps = [
+    ['part-headlamp-l', 'Headlamp L part'],
+    ['part-headlamp-r', 'Headlamp R part'],
+  ] as const;
+  for (const [partId, name] of lamps) {
+    const part = assembly.parts.find((p) => p.id === partId)!;
+    const content = car.closure.get(part.source.contentHash)!;
+    await importJson(page, `${partId}.json`, {
+      ...empty,
+      name,
+      draft: { ...empty.draft, content },
+      versions: [],
+    });
+    await expect(page.getByLabel('Artifact name')).toHaveValue(name);
+    await ready(page);
+    await save(page, 1);
+    const record = await nativeArtifact(page);
+    expect(record.versions[0]!.contentHash).toBe(part.source.contentHash);
+    part.source = {
+      kind: 'version',
+      artifactId: record.id,
+      versionId: record.versions[0]!.versionId,
+      contentHash: record.versions[0]!.contentHash,
+    };
+  }
+  await importJson(page, 'car.json', {
+    ...empty,
+    name: 'Car',
+    draft: { ...empty.draft, content: assembly },
+    versions: [],
+    cadParts: [...car.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Car');
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  const kg = async () =>
+    parseFloat((await page.getByTestId('cad-mass-kg').innerText()).replace(/,/g, ''));
+  await expect.poll(kg, { timeout: f63PartsMs }).toBeGreaterThan(370);
+  const before = await kg();
+  const doc = async () => (await nativeArtifact(page)).draft.content as CadDocument;
+  const seatX = async () => Math.round((await doc()).solvedPoses['c-seat-l']!.translationMm[0]);
+  const x0 = await seatX();
+
+  // (1) The driver's seat 100 mm forward; past its travel (0–240 mm) is refused.
+  const joints = page.getByRole('list', { name: 'Joints' });
+  const values = page.getByRole('form', { name: 'Joint values' });
+  await joints.getByRole('button', { name: /^Seat L mount/ }).click();
+  await values.getByLabel('Distance (mm)').fill('300');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await expect(page.locator('.cad-diagnostic[role=alert]')).toContainText('範囲の外');
+  await values.getByLabel('Distance (mm)').fill('100');
+  await values.getByRole('button', { name: 'Apply values' }).click();
+  await ready(page);
+  await expect.poll(seatX).toBe(x0 + 100);
+  const slid = await doc();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect.poll(seatX).toBe(x0);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await ready(page);
+  await expect.poll(seatX).toBe(x0 + 100);
+  expect(await doc()).toEqual(slid);
+  await page.screenshot({ path: test.info().outputPath('cr7g4-seat.png') });
+
+  // (2) Each headlamp's lens 3 → 4 mm, saved as v2, and the car's headlamp changed to it.
+  for (const [, name] of lamps) {
+    await switchTo(name);
+    const params = page.getByRole('list', { name: 'Parameters' });
+    await params.getByRole('button', { name: /^Lens thickness/ }).click();
+    const field = page.locator('.cad-inspector').getByLabel(/^Value/);
+    await field.fill('4');
+    await field.press('Enter');
+    await ready(page);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(params).toContainText(/Lens thickness\s*4 mm/);
+    await save(page, 2);
+  }
+  await switchTo('Car');
+  for (const [, name] of lamps) {
+    const row = components(page).filter({ hasText: name.replace(' part', '') });
+    await expect(row).toContainText('新しい版あり');
+    await row.click();
+    await page
+      .getByTestId('cad-component')
+      .getByRole('button', { name: 'Change version…' })
+      .click();
+    const dialog = page.getByTestId('cad-update-parts');
+    await dialog.getByRole('button', { name: 'Preview' }).click();
+    await expect(dialog.getByRole('table', { name: 'Changes' })).toContainText('→ v2');
+    await dialog.getByRole('button', { name: 'Apply update' }).click();
+    await ready(page);
+  }
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  await expect(page.locator('.cad-part-newer')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  // The thicker lenses weigh a little more (PMMA; it may not show at the shown precision).
+  await expect.poll(kg, { timeout: 300_000 }).toBeGreaterThanOrEqual(before);
+  const after = await kg();
+  test.info().annotations.push({ type: 'mass', description: `${before} → ${after} kg` });
+  await page.screenshot({ path: test.info().outputPath('cr7g4-lamps.png') });
+
+  // Saved and reloaded: the same seat, the same versions, the same mass.
+  await save(page, 1);
+  const saved = await nativeArtifact(page);
+  await page.reload();
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Car');
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  const reloaded = await nativeArtifact(page);
+  expect(reloaded.draft.content).toEqual(saved.draft.content);
+  expect(reloaded.versions.map((v) => v.contentHash)).toEqual(
+    saved.versions.map((v) => v.contentHash),
+  );
+  await expect.poll(seatX).toBe(x0 + 100);
+  const parts = (reloaded.draft.content as CadDocument).parts;
+  for (const id of ['part-headlamp-l', 'part-headlamp-r']) {
+    const source = parts.find((p) => p.id === id)!.source;
+    expect(source.kind === 'version' && source.versionId).toBeTruthy();
+  }
+  await expect.poll(kg, { timeout: 300_000 }).toBe(after);
+});
+
+// CLF1b (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): the drawing board's three panes at
+// one scale, and the silhouette shading. View state only. ST-502, TS-2007.
+test('draw the side, front and plan at one scale, in silhouette (CLF1b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const content = {
+    ...f11Bracket(),
+    kernelProfile: (empty.draft.content as CadDocument).kernelProfile,
+  };
+  await importJson(page, 'board.json', {
+    ...empty,
+    name: 'Board',
+    draft: { ...empty.draft, content },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Board');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(1);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  // Black pixels in each quarter of the canvas (top left, top right, bottom left, bottom right).
+  const quarters = async () => {
+    const png = await page.locator('.cad-viewport canvas').first().screenshot();
+    return page.evaluate(async (data) => {
+      const bitmap = await createImageBitmap(
+        await (await fetch(`data:image/png;base64,${data}`)).blob(),
+      );
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const g = canvas.getContext('2d')!;
+      g.drawImage(bitmap, 0, 0);
+      const { width: w, height: h } = bitmap;
+      const px = g.getImageData(0, 0, w, h).data;
+      const n = [0, 0, 0, 0];
+      let white = 0;
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const i = 4 * (y * w + x);
+          const sum = px[i]! + px[i + 1]! + px[i + 2]!;
+          if (sum < 60) n[(y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1)]!++;
+          if (sum > 750) white++;
+        }
+      return { n, white: white / (w * h) };
+    }, png.toString('base64'));
+  };
+  await page.getByTestId('cad-shading').selectOption('silhouette');
+  await expect.poll(async () => (await quarters()).white).toBeGreaterThan(0.5);
+  const single = await quarters();
+  expect(single.n.reduce((a, b) => a + b)).toBeGreaterThan(500);
+
+  await page.getByTestId('cad-three-view-shown').check();
+  const board = page.getByTestId('cad-three-view');
+  await expect(board).toContainText('Side (XZ)');
+  await expect(board).toContainText('Front (YZ)');
+  await expect(board).toContainText('Plan (XY)');
+  // A body in each of the three panes, none in the empty fourth.
+  await expect.poll(async () => (await quarters()).n.slice(0, 3).every((v) => v > 200)).toBe(true);
+  expect((await quarters()).n[3]).toBe(0);
+  // A click on a pane picks nothing: the panes are not the camera picks go through.
+  const canvas = page.locator('.cad-viewport canvas').first();
+  const box = (await canvas.boundingBox())!;
+  await canvas.click({ position: { x: box.width / 4, y: box.height / 4 } });
+  await expect(bodies(page).first()).toHaveAttribute('aria-pressed', 'false');
+
+  await page.getByTestId('cad-three-view-shown').uncheck();
+  await expect(board).toHaveCount(0);
+  await page.getByTestId('cad-shading').selectOption('shaded');
+  await expect.poll(async () => (await quarters()).white).toBeLessThan(0.1);
+  // View state only: the document is as it was.
+  expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+});
+
+// CLF3 (docs/cad/car-look-process.md, 比率の指標, CLF1〜CLF3の分け方): the proportion indicators
+// of F80 (the CL1 package) from its meshes, a band edited, undone, the setup removed and made
+// again. ST-503, TS-2009.
+test('read the car’s proportions against their bands, edit a band and undo it (CLF3)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'f80.json', {
+    ...empty,
+    name: 'F80',
+    draft: { ...empty.draft, content: f80Package({ id, buildHash }) },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('F80');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(6);
+  const panel = page.getByTestId('cad-proportions');
+  const row = (metric: string) => panel.locator(`li[data-metric="${metric}"]`);
+  const value = (metric: string) => page.getByTestId(`cad-proportion-${metric}`);
+  // The tyre's outer diameter over the height, from the tessellated wheel: 716 / 1130.
+  await expect(value('wheelToHeight')).toHaveText(/^0\.6[23]$/);
+  await expect(value('wheelbaseToLength')).toHaveText('0.61');
+  await expect(value('frontOverhangToWheelbase')).toHaveText('0.36');
+  await expect(value('glassToBody')).toHaveText('0.41');
+  await expect(value('widthToHeight')).toHaveText('1.73');
+  await expect(value('wheelToFender')).toHaveText('12.5 mm');
+  for (const m of [
+    'wheelToHeight',
+    'wheelbaseToLength',
+    'glassToBody',
+    'widthToHeight',
+    'wheelToFender',
+  ])
+    await expect(row(m)).toHaveAttribute('data-status', 'ok');
+  await expect(row('frontOverhangToWheelbase')).toHaveAttribute('data-status', 'none');
+  await panel.screenshot({ path: test.info().outputPath('clf3-proportions.png') });
+
+  // A wider target: the car is now too tall for it.
+  const min = panel.getByLabel('Width / height min');
+  await min.fill('1.8');
+  await min.press('Enter');
+  await expect(row('widthToHeight')).toHaveAttribute('data-status', 'outside');
+  await expect(row('widthToHeight')).toContainText('outside');
+  const stored = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).proportions;
+  expect((await stored())?.targets.find((t) => t.metric === 'widthToHeight')).toEqual({
+    metric: 'widthToHeight',
+    min: 1.8,
+  });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(row('widthToHeight')).toHaveAttribute('data-status', 'ok');
+  // A band upside down (min above max) is refused at the field; the stored band stays.
+  const upside = panel.getByLabel('Wheelbase / length min');
+  await upside.fill('0.7');
+  await upside.press('Enter');
+  await expect(panel.getByRole('alert')).toBeVisible();
+  await expect(row('wheelbaseToLength')).toHaveAttribute('data-status', 'ok');
+  // Another band edited meanwhile: the refused text stays in its field (#1114 review).
+  const wide = panel.getByLabel('Width / height max');
+  await wide.fill('3');
+  await wide.press('Enter');
+  // (An export waits while a field holds a refused value: the stored band is read below.)
+  await expect(wide).toBeEnabled();
+  await expect(upside).toBeEnabled();
+  await expect(upside).toHaveValue('0.7');
+  // Back to the stored value (an export waits for a field that holds a refused value).
+  await upside.fill('0.58');
+  await upside.press('Enter');
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  // A ground past the model's ±10,000,000 mm is refused at the field too.
+  const ground = panel.getByLabel('Ground (mm)');
+  await ground.fill('10000001');
+  await ground.press('Enter');
+  await expect(panel.getByRole('alert')).toBeVisible();
+  await ground.fill('0');
+  await ground.press('Enter');
+  await expect(panel.getByRole('alert')).toHaveCount(0);
+  expect((await stored())?.groundMm).toBe(0);
+  expect((await stored())?.targets.find((t) => t.metric === 'wheelbaseToLength')).toEqual({
+    metric: 'wheelbaseToLength',
+    min: 0.58,
+    max: 0.62,
+  });
+  expect((await stored())?.targets.find((t) => t.metric === 'widthToHeight')).toEqual({
+    metric: 'widthToHeight',
+    min: 1.6,
+    max: 3,
+  });
+
+  // Removed, then made again with empty roles: nothing to measure until roles are chosen.
+  await panel.getByRole('button', { name: 'Remove proportions' }).click();
+  await expect(panel).toHaveCount(0);
+  expect(await stored()).toBeUndefined();
+  // Closed while there is no setup, to keep the list short.
+  await page.locator('summary', { hasText: /^Proportions$/ }).click();
+  await page.getByRole('button', { name: 'Set up proportions' }).click();
+  await expect(value('wheelbaseToLength')).toHaveText('—');
+  await panel.getByLabel('Front wheels').selectOption(['front-left-body', 'front-right-body']);
+  // Each choice is its own edit: the next one starts from it.
+  await expect.poll(async () => (await stored())?.frontWheels.length).toBe(2);
+  await panel.getByLabel('Rear wheels').selectOption(['rear-left-body', 'rear-right-body']);
+  // The wheels alone are the car's length now: 2650 over 3348.
+  await expect(value('wheelbaseToLength')).toHaveText('0.79 outside');
+  expect((await stored())?.rearWheels).toEqual(['rear-left-body', 'rear-right-body']);
+});
+
+// CLF-s (docs/cad/car-look-process.md, CLF1〜CLF3の分け方): the sample F80 through the whole
+// toolset: the roof spanned from two-view curves, a side sketch drawn over the car's silhouette,
+// the three-view board in silhouette and the proportion indicators. ST-504, TS-2010.
+test('take the F80 package through the roof, the underlay, the board and the proportions (CLF-s)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernel = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'f80-sample.json', {
+    ...empty,
+    name: 'F80 sample',
+    draft: { ...empty.draft, content: f80Sample(kernel) },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('F80 sample');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(6);
+
+  // The roof: each u curve from its side arc and its plan line, across the v arcs.
+  await page.getByRole('button', { name: 'Boundary…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Boundary' });
+  await dialog.getByLabel('Result').selectOption('curveNetwork');
+  for (const n of [0, 1, 2]) {
+    await dialog.getByRole('checkbox', { name: `Roof v${n} arc`, exact: true }).check();
+    await dialog.getByRole('checkbox', { name: 'Across (v)' }).last().check();
+  }
+  for (const n of [0, 1, 2]) {
+    await dialog.getByLabel('Side view').selectOption({ label: `Roof u${n} arc` });
+    await dialog.getByLabel('Plan view').selectOption({ label: `Roof plan l${n}` });
+    await dialog.getByRole('button', { name: 'Add two-view curve' }).click();
+  }
+  await dialog.getByRole('button', { name: 'Create curve network' }).click();
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(7);
+  await expect(page.getByText('Shape could not be calculated')).toHaveCount(0);
+  const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+  const made = doc.features.find((f) => f.type === 'curveNetwork');
+  const sample = f80Sample(kernel, true).features.find((f) => f.type === 'curveNetwork');
+  expect(made?.args).toEqual(sample?.args);
+
+  // A side sketch over the car's silhouette and the other roof sketches' lines.
+  await page.getByRole('button', { name: 'Edit sketch Roof u1' }).click();
+  const drawing = page.getByRole('application', { name: 'Drawing of Roof u1' });
+  const under = drawing.getByTestId('cad-sketch-underlay');
+  // One shadow of the shown bodies, the car's 4350 mm along X (u of a sketch parallel to XZ).
+  const shadow = under.getByTestId('cad-sketch-shadow');
+  await expect(shadow).toHaveCount(1);
+  expect(Number(await shadow.getAttribute('width'))).toBeCloseTo(4350, 0);
+  // The open sketch refuses document edits: the proportions are held (#1114 review).
+  await expect(page.getByTestId('cad-proportions').getByLabel('Ground (mm)')).toBeDisabled();
+  await page.getByRole('button', { name: 'Fit sketch', exact: true }).click();
+  await page.screenshot({ path: test.info().outputPath('clf-s-underlay.png') });
+  await page.getByTestId('cad-sketch-panel').getByRole('button', { name: 'Finish' }).click();
+  await ready(page);
+
+  // The board: side, front and plan at one scale, in silhouette.
+  await page.getByTestId('cad-shading').selectOption('silhouette');
+  await page.getByTestId('cad-three-view-shown').check();
+  await expect(page.getByTestId('cad-three-view')).toContainText('Plan (XY)');
+  await page
+    .locator('.cad-viewport')
+    .screenshot({ path: test.info().outputPath('clf-s-board.png') });
+  await page.getByTestId('cad-three-view-shown').uncheck();
+  await page.getByTestId('cad-shading').selectOption('shaded');
+
+  // The proportions: the roof is in no role, so they read as F80's.
+  const panel = page.getByTestId('cad-proportions');
+  const value = (metric: string) => page.getByTestId(`cad-proportion-${metric}`);
+  await expect(value('wheelbaseToLength')).toHaveText('0.61');
+  await expect(value('glassToBody')).toHaveText('0.41');
+  await expect(value('widthToHeight')).toHaveText('1.73');
+  await expect(value('wheelToFender')).toHaveText('12.5 mm');
+  await expect(panel.locator('li[data-status="outside"]')).toHaveCount(0);
+  await panel.screenshot({ path: test.info().outputPath('clf-s-proportions.png') });
+  await page.screenshot({ path: test.info().outputPath('clf-s-shaded.png') });
 });

@@ -31,7 +31,10 @@ import { validJointFields } from './joint-values';
 import { BomDialog } from './bom-panel';
 import { PatternDialog, PatternInspector, patternSize } from './component-pattern-panel';
 import { InterferenceSection } from './interference-panel';
+import { MassSection } from './mass-panel';
+import { RangeSection } from './range-panel';
 import { JointsSection } from './joints-panel';
+import { AssemblyPmiSection } from './assembly-pmi-panel';
 import { useStatusProps } from './status-role';
 import { UpdatePartsDialog } from './part-update-panel';
 import { finishOf, viewTexturesOf, type ViewTextureCache } from '@editor-platform/geometry-view';
@@ -802,7 +805,10 @@ export function AssemblyPanel({
         {pattern && <PatternInspector assembly={assembly} snapshot={snapshot} pattern={pattern} />}
         <JointsSection assembly={assembly} snapshot={snapshot} narrow={narrow} />
         <InterferenceSection assembly={assembly} snapshot={snapshot} />
+        <RangeSection assembly={assembly} snapshot={snapshot} />
+        <MassSection assembly={assembly} snapshot={snapshot} />
       </Section>
+      <AssemblyPmiSection assembly={assembly} snapshot={snapshot} />
       {inserting && (
         <InsertPartDialog assembly={assembly} doc={doc} onClose={() => setInserting(false)} />
       )}

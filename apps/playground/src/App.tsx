@@ -21,11 +21,14 @@ import { savedAnimationCatalog } from './animation-library';
 import { validateGeoRecord } from './geo/resources';
 import {
   assertCadNativeFits,
+  hostNativeLimitOf,
   mergeCadResources,
   portableCadRecord,
   validateCadRecord,
 } from './cad/resources';
 import { mergeSimulationSources, portableSimulationRecord } from './simulation/source';
+import { mergeConstructionSources, portableConstructionRecord } from './construction/source';
+import type { ConstructionSourceChoice } from './construction/source';
 import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
 import { assertCharacterHistoryFits } from './character/import-fit';
 import type { CharacterDocument } from '@editor-platform/character-core';
@@ -36,7 +39,12 @@ import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { artifactReferenceItems, captureArtifactReferences } from './artifact-references';
 import type { PrivateVideoEntry } from './private-video/catalog';
-import { relationProfile, isGraphDocument, validateGraph } from '@editor-platform/structured-graph';
+import {
+  relationProfile,
+  isGraphDocument,
+  readGraphDocument,
+  validateGraph,
+} from '@editor-platform/structured-graph';
 import { flushSync } from 'react-dom';
 import type { ScheduleDocument } from '@editor-platform/schedule/model';
 import type { CadDocument } from '@editor-platform/cad-core';
@@ -118,6 +126,7 @@ import {
   downloadFile,
   downloadText,
   makeArtifact,
+  type PcbTemplateId,
   createLocalSession,
   type Content,
   type Kind,
@@ -264,6 +273,7 @@ export default function App({
   const [loaded, setLoaded] = useState(false);
   const [kind, setKind] = useState<Kind>('document');
   const [graphTemplate, setGraphTemplate] = useState<GraphTemplateId>('relations');
+  const [pcbTemplate, setPcbTemplate] = useState<PcbTemplateId>('empty');
   const [navOpen, setNavOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [localReadOnly, setReadOnly] = useState(false);
@@ -409,6 +419,14 @@ export default function App({
           }
         }
         if (!mounted) return;
+        // An older Graph schema opened as the current one: the record's draft adopts it too
+        // (the surfaces read the record). Saved versions keep their stored content.
+        values = values.map((a) => {
+          const content = opened.get(a.id)?.content;
+          return a.kind === 'structured-graph' && content && content !== a.draft.content
+            ? { ...a, draft: { ...a.draft, content } }
+            : a;
+        });
         setAnimationCatalogEpoch((epoch) => epoch + 1);
         setRecords(values);
         recordsRef.current = values;
@@ -445,7 +463,7 @@ export default function App({
     const generation = ++saveGeneration.current;
     const completion = writeQueue.current
       .then(() => {
-        serializeHostNativeArtifact(record);
+        serializeHostNativeArtifact(record, hostNativeLimitOf(record.kind));
         return stored ? undefined : storage.put(record);
       })
       .then(() => {
@@ -727,21 +745,26 @@ export default function App({
     request.pending = task;
     return task;
   }
-  function create(nextKind: Kind, simulationSource?: SimulationSourceChoice) {
+  function create(nextKind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice) {
     if (!flushInputs()) return;
     if (shared) {
       setError('Leave the shared session before creating another artifact.');
       return;
     }
-    if (nextKind === 'simulation' && !simulationSource) {
+    if (nextKind === 'simulation' && !source) {
       setError('Choose the saved 3D CAD part to analyse in the library, then create the analysis.');
+      return;
+    }
+    if (nextKind === 'construction' && !source) {
+      setError('Choose the saved Building version to schedule in the library, then create it.');
       return;
     }
     const a = makeArtifact(
       nextKind,
       records.filter((r) => r.kind === nextKind).length + 1,
       nextKind === 'structured-graph' ? graphTemplate : undefined,
-      simulationSource,
+      source,
+      nextKind === 'pcb' ? pcbTemplate : undefined,
     );
     sessions.current.set(a.id, createLocalSession(a.draft.content));
     persist(a);
@@ -778,6 +801,20 @@ export default function App({
     const pending = inputs.getSnapshot();
     if (active.kind === 'animation' && (pending.dirty || pending.composing)) {
       setError('Animation の入力を適用またはキャンセルしてから履歴を操作してください。');
+      return;
+    }
+    // A schematic Inspector draft (one its commit refused, say) would be lost when Undo or Redo
+    // removes or changes its item: settle it first.
+    if (active.kind === 'schematic' && (pending.dirty || pending.composing)) {
+      setError('Schematic の入力を確定またはキャンセルしてから履歴を操作してください。');
+      return;
+    }
+    if (active.kind === 'ladder' && (pending.dirty || pending.composing)) {
+      setError('Ladder の入力を確定またはキャンセルしてから履歴を操作してください。');
+      return;
+    }
+    if (active.kind === 'cosim' && (pending.dirty || pending.composing)) {
+      setError('Co-simulation の入力を確定またはキャンセルしてから履歴を操作してください。');
       return;
     }
     let privateHistory = false;
@@ -944,10 +981,11 @@ export default function App({
         ...mergeCadParts(saved, latest),
         ...mergeBimParts(saved, latest),
         ...mergeSimulationSources(saved, latest),
+        ...mergeConstructionSources(saved, latest),
         draft: { ...latest.draft, baseVersionId: committed.draft.baseVersionId },
       };
       // A rejected capacity candidate must not enter local immutable history.
-      serializeHostNativeArtifact(result);
+      serializeHostNativeArtifact(result, hostNativeLimitOf(result.kind));
       assertCadNativeFits(result, 'version');
       assertBimNativeFits(result, 'version');
       if (!(await persist(result)))
@@ -1181,7 +1219,9 @@ export default function App({
         downloadText(
           `${current.name}.artifact.json`,
           serializeArtifact(
-            portableSimulationRecord(portableBimRecord(portableCadRecord(exported))),
+            portableConstructionRecord(
+              portableSimulationRecord(portableBimRecord(portableCadRecord(exported))),
+            ),
           ),
           'application/json',
         );
@@ -1640,6 +1680,8 @@ export default function App({
                   onKindChange={setKind}
                   graphTemplate={graphTemplate}
                   onGraphTemplateChange={setGraphTemplate}
+                  pcbTemplate={pcbTemplate}
+                  onPcbTemplateChange={setPcbTemplate}
                   onCreate={create}
                   onCreateManga={createManga}
                   onCreateNovel={createNovel}
@@ -1735,6 +1777,11 @@ export default function App({
                                           active,
                                         v.content as unknown as CharacterDocument,
                                       );
+                                    // An older Graph version is restored as the current schema.
+                                    if (active.kind === 'structured-graph')
+                                      return readGraphDocument(
+                                        clone(v.content),
+                                      ) as unknown as Content;
                                     return clone(v.content);
                                   }),
                                 );
@@ -1771,7 +1818,12 @@ export default function App({
                           active.kind !== 'cad' &&
                           active.kind !== 'bim' &&
                           active.kind !== 'character' &&
-                          active.kind !== 'simulation' && (
+                          active.kind !== 'simulation' &&
+                          active.kind !== 'construction' &&
+                          active.kind !== 'pcb' &&
+                          active.kind !== 'schematic' &&
+                          active.kind !== 'ladder' &&
+                          active.kind !== 'cosim' && (
                             <CommentsInspector
                               active={active}
                               content={content}

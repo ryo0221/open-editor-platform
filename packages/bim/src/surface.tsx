@@ -32,6 +32,7 @@ import {
 import {
   bimDrawingScales,
   bimDrawingSvg,
+  bimBodyLimits,
   bimLimits,
   bimLayerFaceMaterialIds,
   bimSchedule,
@@ -489,6 +490,8 @@ export function BimSurface({
         <PathRenderDialog
           name={name}
           source={() => renderSource.current?.()}
+          // A building stands outdoors: the sky and sun first, the studio on choice.
+          defaultLighting="sky"
           onClose={() => setRendering(false)}
         />
       )}
@@ -1007,7 +1010,7 @@ function StairFields({
   readOnly: boolean;
   update(patch: Partial<BimElement>): string | undefined;
 }) {
-  const s = bimLimits.stair;
+  const s = { ...bimBodyLimits(doc).stair, risers: bimLimits.stair.risers };
   return (
     <>
       {'grid' in el.start && (
@@ -1037,7 +1040,7 @@ function StairFields({
         label="Width (mm)"
         type="number"
         min={1}
-        max={coordinate}
+        max={s.widthMm}
         value={el.widthMm}
         readOnly={readOnly}
         onCommit={(v) => update({ widthMm: Number(v) } as Partial<BimElement>)}
@@ -1432,7 +1435,7 @@ function ElementInspector({ controller, state }: { controller: BimController; st
             label="Height (mm)"
             type="number"
             min={1}
-            max={bimLimits.railingHeightMm}
+            max={bimBodyLimits(doc).railingHeightMm}
             value={el.heightMm}
             readOnly={readOnly}
             onCommit={(v) => update({ heightMm: num(v) } as Partial<BimElement>)}
@@ -1746,9 +1749,48 @@ function LevelPanel({ controller, state }: { controller: BimController; state: B
           <DeleteButton controller={controller} state={state} ids={[level.id]} />
         </div>
       )}
+      <InhabitantField controller={controller} state={state} />
       <GridPanel controller={controller} state={state} />
       <p className="bim-hint">Select an element in the view or the list to edit it.</p>
     </div>
+  );
+}
+
+/**
+ * GV2b: how tall the building's people are. Storey, step, railing, door/window and stair limits
+ * scale with it. Without a value the building is for 1,750 mm people.
+ */
+function InhabitantField({ controller, state }: { controller: BimController; state: BimState }) {
+  const body = bimBodyLimits(state.content);
+  const [lo, hi] = bimLimits.inhabitantHeightMm.range;
+  const n2 = (v: number) => String(Math.round(v * 100) / 100);
+  return (
+    <>
+      <Field
+        label="Inhabitants' height (mm)"
+        type="number"
+        min={lo}
+        max={hi}
+        value={state.content.inhabitantHeightMm ?? bimLimits.inhabitantHeightMm.default}
+        readOnly={state.readOnly}
+        onCommit={(v) => controller.apply({ type: 'setInhabitantHeight', heightMm: Number(v) })}
+      />
+      {!state.readOnly && state.content.inhabitantHeightMm !== undefined && (
+        <button
+          className="bim-button"
+          onClick={() => controller.apply({ type: 'setInhabitantHeight' })}
+        >
+          Back to {bimLimits.inhabitantHeightMm.default} mm people
+        </button>
+      )}
+      <p className="bim-hint" data-testid="bim-body-limits">
+        For people {n2(body.inhabitantHeightMm)} mm tall: storeys at least {n2(body.minStoreyMm)}{' '}
+        mm, risers {n2(body.stair.riserMm[0])}–{n2(body.stair.riserMm[1])} mm, treads{' '}
+        {n2(body.stair.treadMm[0])}–{n2(body.stair.treadMm[1])} mm, stairs up to{' '}
+        {n2(body.stair.widthMm)} mm wide, railings up to {n2(body.railingHeightMm)} mm, doors and
+        windows up to {n2(body.openingMm)} mm.
+      </p>
+    </>
   );
 }
 
@@ -2006,7 +2048,7 @@ function TypeEditor({
           label={`Layer ${i + 1}: ${doc.materials.find((m) => m.id === layer.materialId)?.name ?? layer.materialId} (mm)`}
           type="number"
           min={bimLimits.minDimensionMm}
-          max={bimLimits.maxSectionMm}
+          max={bimBodyLimits(doc).maxSectionMm}
           value={layer.thicknessMm}
           readOnly={readOnly}
           onCommit={(v) =>
@@ -2026,7 +2068,7 @@ function TypeEditor({
             label={`${k.replace(/Mm$/, '')} (mm)`}
             type="number"
             min={bimLimits.minDimensionMm}
-            max={bimLimits.maxSectionMm}
+            max={bimBodyLimits(doc).maxSectionMm}
             value={value as number}
             readOnly={readOnly}
             onCommit={(v) =>
@@ -2042,7 +2084,7 @@ function TypeEditor({
           label={k === 'widthMm' ? 'Width (mm)' : 'Height (mm)'}
           type="number"
           min={bimLimits.minDimensionMm}
-          max={coordinate}
+          max={bimBodyLimits(doc).openingMm}
           value={type[k]}
           readOnly={readOnly}
           onCommit={(v) => update({ [k]: num(v) } as Partial<BimType>)}
@@ -2219,6 +2261,50 @@ function MaterialLook({
           ))}
         </select>
       </label>
+      <Field
+        label="Density (kg/m³)"
+        value={material.densityKgM3 ?? ''}
+        readOnly={readOnly}
+        onCommit={(v) => {
+          // CS3: for crane lifts; empty leaves the mass unknown.
+          const { densityKgM3: _was, ...rest } = material;
+          const text = v.trim();
+          if (!text)
+            return controller.apply({ type: 'update', collection: 'materials', entity: rest });
+          if (!/^\d+(\.\d+)?$/.test(text)) return 'material-density';
+          return controller.apply({
+            type: 'update',
+            collection: 'materials',
+            entity: { ...rest, densityKgM3: Number(text) },
+          });
+        }}
+      />
+      {(
+        [
+          ['youngsModulusMPa', "Young's modulus (MPa)", /^\d+(\.\d+)?$/],
+          ['poissonsRatio', "Poisson's ratio", /^0(\.\d+)?$/],
+        ] as const
+      ).map(([key, label, form]) => (
+        <Field
+          key={key}
+          label={label}
+          value={material[key] ?? ''}
+          readOnly={readOnly}
+          onCommit={(v) => {
+            // CS4: for the frame analysis of a construction stage; empty leaves it out.
+            const { [key]: _was, ...rest } = material;
+            const text = v.trim();
+            if (!text)
+              return controller.apply({ type: 'update', collection: 'materials', entity: rest });
+            if (!form.test(text)) return 'material-stiffness';
+            return controller.apply({
+              type: 'update',
+              collection: 'materials',
+              entity: { ...rest, [key]: Number(text) },
+            });
+          }}
+        />
+      ))}
       {a && (
         <>
           <Field
