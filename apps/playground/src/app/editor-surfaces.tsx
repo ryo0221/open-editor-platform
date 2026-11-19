@@ -54,6 +54,8 @@ import type { PcbDocument } from '@editor-platform/pcb-core';
 import type { SchematicDocument } from '@editor-platform/schematic-core';
 import type { LadderDocument } from '@editor-platform/ladder-core';
 import type { CosimDocument } from '@editor-platform/cosim-core';
+import type { DrawingDocument } from '@editor-platform/drawing-core';
+import type { FactoryDocument } from '@editor-platform/factory-core';
 import type { CadDocument } from '@editor-platform/cad-core';
 import { DataGraphSurface } from '@editor-platform/structured-data-graph';
 import { DesignReactSurface } from '@editor-platform/design-react';
@@ -177,6 +179,8 @@ const PcbHost = lazy(() => import('../pcb/host'));
 const SchematicHost = lazy(() => import('../schematic/host'));
 const LadderHost = lazy(() => import('../ladder/host'));
 const CosimHost = lazy(() => import('../cosim/host'));
+const DrawingHost = lazy(() => import('../drawing/host'));
+const FactoryHost = lazy(() => import('../factory/host'));
 
 export function checkedContent(content: unknown, kind: string | undefined) {
   return {
@@ -229,6 +233,14 @@ export function checkedContent(content: unknown, kind: string | undefined) {
         : undefined,
     cosim:
       kind === 'cosim' && validContent('cosim', content) ? (content as CosimDocument) : undefined,
+    drawing:
+      kind === 'drawing' && validContent('drawing', content)
+        ? (content as DrawingDocument)
+        : undefined,
+    factory:
+      kind === 'factory' && validContent('factory', content)
+        ? (content as FactoryDocument)
+        : undefined,
   };
 }
 export type RenderedContent = ReturnType<typeof checkedContent>;
@@ -1151,6 +1163,46 @@ function ModelSurfaces({ host, rendered }: { host: SurfaceHost; rendered: Render
               const latest = latestRecord(host);
               if (latest) host.persist(editedDraft(latest, content));
             }}
+          />
+        </Suspense>
+      )}
+      {rendered.drawing && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Drawing…</p>}>
+          <DrawingHost
+            key={active.id}
+            artifact={active}
+            record={() => latestRecord(host)}
+            records={() => host.recordsRef.current}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<DrawingDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+          />
+        </Suspense>
+      )}
+      {rendered.factory && !sharedSession && session && (
+        <Suspense fallback={<p className="empty-state">Loading Factory…</p>}>
+          <FactoryHost
+            key={active.id}
+            artifact={active}
+            session={
+              host.sessions.current.get(active.id) as unknown as EditorSession<FactoryDocument>
+            }
+            readOnly={readOnly}
+            inputs={host.inputs}
+            record={() => latestRecord(host)}
+            records={() => host.recordsRef.current}
+            persist={(content) => {
+              const latest = latestRecord(host);
+              if (latest) host.persist(editedDraft(latest, content));
+            }}
+            persistRecord={async (record) => (await host.persist(record)) !== false}
           />
         </Suspense>
       )}

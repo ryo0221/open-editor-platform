@@ -6,6 +6,8 @@ import type {
 import type { MeshReport, MesherSettings } from '@editor-platform/fem-mesher';
 import {
   ElasticError,
+  bondPointGaps,
+  bondTiePairs,
   spotWeldNodes,
   curvedJacobianMin,
   meshShapeQuality,
@@ -57,6 +59,12 @@ import {
   type TargetsOf,
 } from './run-conditions';
 import type { ModalRunFields } from './run';
+import {
+  explicitMaterial,
+  runCrashLevel,
+  type CrashLevelInput,
+  type CrashRunFields,
+} from './run-crash';
 import type { ShellModalRunFields, ShellStaticRunFields } from './run-shell';
 
 /**
@@ -109,6 +117,7 @@ export type BondedLevelFailure = {
     | 'load-targets-mixed'
     | 'roller-direction'
     | 'spot-weld'
+    | 'material-missing'
     | 'solve';
   detail: string;
 };
@@ -117,7 +126,9 @@ export interface BondedLevelInput {
   doc: SimulationDocument;
   cad: CadDocument;
   bodies: BondedBody[];
-  kind: 'linear-static' | 'modal';
+  /** VS7c: `crash` runs the bodies' shells on the explicit solver (`crash` gives the test). */
+  kind: 'linear-static' | 'modal' | 'crash';
+  crash?: Omit<CrashLevelInput, 'bodies' | 'welds'>;
   modes: number;
   solver: { tolerance: number; maxIterations: number };
   loads: SimulationLoad[];
@@ -157,7 +168,7 @@ export type BondedLevelResult =
       metrics: Partial<Record<SimulationMetric, number>>;
       checks: RunCheck[];
       mapping: MappingRow[];
-      fields: BondedStaticRunFields | BondedModalRunFields;
+      fields: BondedStaticRunFields | BondedModalRunFields | CrashRunFields;
     }
   | { failure: BondedLevelFailure; mapping: MappingRow[] };
 
@@ -406,6 +417,32 @@ export async function runBondedLevel(input: BondedLevelInput): Promise<BondedLev
       ...(b.contact ? { contact: true } : {}),
     };
   });
+  // VS7c: a crash run takes every body as a shell and ties its parts by spot welds; VS8c: each
+  // bond becomes a seam of node ties (the explicit solver has no bond): each follower node it
+  // ties follows the node nearest its foot on the faces or edges the bond follows, on a rigid
+  // arm. A tie is local, so the seam does not stiffen into one rigid piece.
+  const crash = input.kind === 'crash';
+  const solidBody = prepared.find((p) => p.kind !== 'shell');
+  if (crash && solidBody)
+    return fail('shell-target', `${solidBody.body.bodyId}: a crash study solves shells only`);
+  const crashWelds: CrashLevelInput['welds'] = [];
+  const seamWelds: CrashLevelInput['welds'] = [];
+  if (crash)
+    for (const [bi, b] of bonds.entries()) {
+      let ties: [number, number][];
+      try {
+        ties = bondTiePairs(parts, b, bi);
+      } catch (e) {
+        if (e instanceof ElasticError) return fail('solve', `${e.problem}: ${e.detail}`);
+        throw e;
+      }
+      seamWelds.push({
+        parts: [b.follower.part, b.on.part],
+        points: [],
+        ties: ties.flat(),
+        radius: 0,
+      });
+    }
   // CR5b: each spot weld row, a bond of its first flange's nodes near its points onto the second.
   const welds = doc.spotWelds ?? [];
   for (const [wi, w] of welds.entries()) {
@@ -446,12 +483,46 @@ export async function runBondedLevel(input: BondedLevelInput): Promise<BondedLev
       return s + (p.kind === 'shell' ? p.thickness / 2 : 0);
     }, 0);
     weldTies.push(tied);
+    crashWelds.push({
+      parts: [follower.part, on.part],
+      points: input.weldPoints?.get(w.id) ?? [],
+      radius: w.radiusMm,
+    });
     bonds.push({
       follower: { ...follower, nodes: tied.nodes },
       on,
       tolerance: w.tolerance + allowance,
     });
   }
+
+  // VS8c (Codex on #1317): a crash run checks the gap at each weld row's point, from the first
+  // flange's elements to the second's through the point (within the row's tolerance and the half
+  // thicknesses, as the bonded solver's gap), before the explicit solver joins the parts near
+  // them, so separated flanges are refused, not welded.
+  if (crash)
+    for (const [wi, w] of welds.entries()) {
+      const b = bonds[(doc.bonds?.length ?? 0) + wi]!;
+      const flat = input.weldPoints?.get(w.id) ?? [];
+      const points = Array.from(
+        { length: Math.floor(flat.length / 3) },
+        (_, k) => [flat[3 * k]!, flat[3 * k + 1]!, flat[3 * k + 2]!] as [number, number, number],
+      );
+      let gaps: number[];
+      try {
+        const own = bondPointGaps(parts[b.follower.part]!, b.follower, points);
+        gaps = bondPointGaps(parts[b.on.part]!, b.on, points).map((d, k) => d + own[k]!);
+      } catch (e) {
+        if (e instanceof ElasticError)
+          return fail('spot-weld', `${w.id}: ${e.problem}: ${e.detail}`);
+        throw e;
+      }
+      const k = gaps.findIndex((d) => d > b.tolerance);
+      if (k >= 0)
+        return fail(
+          'spot-weld',
+          `${w.id}: weld ${k + 1} is ${gaps[k]!.toPrecision(3)} mm across the flanges (tolerance ${b.tolerance} mm)`,
+        );
+    }
 
   const solveFailure = (e: unknown) => {
     if (e instanceof ElasticError)
@@ -491,6 +562,50 @@ export async function runBondedLevel(input: BondedLevelInput): Promise<BondedLev
     pass: prepared.every((p) => p.quality.pass),
     detail: prepared.map((p) => p.quality.detail).join('; '),
   };
+
+  if (crash) {
+    await input.step('solve');
+    const out = await runCrashLevel({
+      ...input.crash!,
+      bodies: prepared.map((p, i) => {
+        const part = parts[i]!;
+        return {
+          bodyId: p.body.bodyId,
+          part: {
+            mesh: p.mesh as ShellMesh,
+            material: explicitMaterial(p.body.material),
+            masses: part.masses ?? [],
+          },
+        };
+      }),
+      welds: [...crashWelds, ...seamWelds],
+    });
+    if ('failure' in out) return fail(out.failure.code, out.failure.detail);
+    await input.step('checks');
+    // The welds' points (the explicit solver ties the nodes within the radius of each).
+    const weldDetail = [
+      ...welds.map((w, i) => `${w.name}: ${crashWelds[i]!.points.length / 3} welds`),
+      ...(doc.bonds ?? []).map(
+        (b, i) => `${b.name}: a seam of ${seamWelds[i]!.ties!.length / 2} ties`,
+      ),
+    ].join('; ');
+    return {
+      nodes,
+      elements,
+      mapping,
+      metrics: out.metrics,
+      checks: [
+        {
+          name: 'mapping',
+          pass: true,
+          detail: `${mapping.length} targets resolved on ${prepared.length} bodies${weldDetail ? `; ${weldDetail}` : ''}`,
+        },
+        qualityCheck,
+        ...out.checks,
+      ],
+      fields: out.fields,
+    };
+  }
 
   if (input.kind === 'modal') {
     await input.step('solve');

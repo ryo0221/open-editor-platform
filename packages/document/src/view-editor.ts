@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from 'react';
 import { type Root } from 'react-dom/client';
-import { EditorState, NodeSelection, type Transaction } from 'prosemirror-state';
+import { EditorState, NodeSelection, TextSelection, type Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { newId } from '@editor-platform/artifact-core';
 import { documentPlugins, contentToNode, activeTextRange } from './engine';
@@ -185,6 +185,45 @@ function editorShortcut(ctx: DocumentEditorContext, editor: EditorView, event: K
 
 function handleKeyDown(ctx: DocumentEditorContext, editor: EditorView, event: KeyboardEvent) {
   if (isGuardedKey(editor, event)) return false;
+  if (
+    event.key === 'Enter' &&
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    editor.state.selection instanceof TextSelection
+  ) {
+    // Arrow navigation may have changed the visible caret before selectionchange
+    // reaches the engine. Do not replace an obsolete text range with a break.
+    const selection = editor.dom.ownerDocument.getSelection();
+    if (
+      ctx.callbacks.current.readOnly ||
+      !editor.hasFocus() ||
+      !selection ||
+      selection.rangeCount !== 1 ||
+      !selection.anchorNode ||
+      !selection.focusNode ||
+      !editor.dom.contains(selection.anchorNode) ||
+      !editor.dom.contains(selection.focusNode)
+    )
+      return true;
+    try {
+      const anchor = editor.posAtDOM(selection.anchorNode, selection.anchorOffset),
+        head = editor.posAtDOM(selection.focusNode, selection.focusOffset);
+      const { doc, selection: current } = editor.state;
+      if (anchor !== current.anchor || head !== current.head) {
+        const next = TextSelection.between(doc.resolve(anchor), doc.resolve(head));
+        if (!(next instanceof TextSelection))
+          throw Error('文字の選択範囲を確認してから改行してください。');
+        editor.dispatch(editor.state.tr.setSelection(next));
+        if (!next.eq(editor.state.selection))
+          throw Error('文字の選択を更新できませんでした。選択を確認してください。');
+      }
+    } catch (error) {
+      ctx.setError(error instanceof Error ? error.message : String(error));
+      return true;
+    }
+  }
   if (isHistoryShortcut(ctx.callbacks.current, event)) {
     runHistoryShortcut(ctx, event);
     return true;

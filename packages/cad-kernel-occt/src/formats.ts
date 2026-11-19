@@ -5,7 +5,7 @@ import type {
   CadToleranceSet,
 } from '@editor-platform/cad-core';
 import { geometryDefaultFinish, geometryLightLimits } from '@editor-platform/geometry-core';
-import type { CadMesh } from './protocol';
+import type { CadAssemblyStepPmiWritten, CadMesh } from './protocol';
 import type { CadStepPmiWritten } from './step-pmi-write';
 
 /** An image to embed in a file, as the document stores it. */
@@ -525,11 +525,11 @@ export function stepReport(
     losses: [
       written
         ? bodies > 1
-          ? `Feature history, parameters, body names, colours, materials and textures are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP242), side by side without an assembly structure.`
-          : 'Feature history, parameters, the body name, colour, material and textures are not written: the body is its solids, or one surface (shell), with exact surfaces (AP242).'
+          ? `Feature history, parameters, body names, colours, materials and textures are not written: each of the ${bodies} bodies is its solids, or its surfaces (shells), with exact surfaces (AP242), side by side without an assembly structure.`
+          : 'Feature history, parameters, the body name, colour, material and textures are not written: the body is its solids, or its surfaces (shells), with exact surfaces (AP242).'
         : bodies > 1
-          ? `Feature history, parameters, body names, colours, materials, textures, named views and PMI (dimensions, tolerances, datums; also when the bodies were imported with it) are not written: each of the ${bodies} bodies is its solids, or one surface (shell), with exact surfaces (AP214), side by side without an assembly structure.`
-          : 'Feature history, parameters, the body name, colour, material, textures, named views and PMI (dimensions, tolerances, datums; also when the body was imported with it) are not written: the body is its solids, or one surface (shell), with exact surfaces (AP214).',
+          ? `Feature history, parameters, body names, colours, materials, textures, named views and PMI (dimensions, tolerances, datums; also when the bodies were imported with it) are not written: each of the ${bodies} bodies is its solids, or its surfaces (shells), with exact surfaces (AP214), side by side without an assembly structure.`
+          : 'Feature history, parameters, the body name, colour, material, textures, named views and PMI (dimensions, tolerances, datums; also when the body was imported with it) are not written: the body is its solids, or its surfaces (shells), with exact surfaces (AP214).',
       ...(pmi ? stepPmiLines(pmi, written) : []),
       ...(note
         ? [
@@ -588,9 +588,17 @@ export function assemblyStepReport(
   bytes: Uint8Array,
   plan: CadStepPlan,
   meta: { sourceContentHash: string; buildHash: string },
+  /** PMI-5c: what the writer wrote of the products' and the assembly's PMI. */
+  pmi?: CadAssemblyStepPmiWritten,
+  /** The assembly's own PMI asset could not be read: none of it is written. */
+  assemblyPmiUnreadable = false,
 ): CadExportReport {
   const head = new TextDecoder().decode(bytes.subarray(0, 64));
   if (!head.startsWith('ISO-10303-21;')) throw new CadExportError('step-invalid');
+  const n = (count: number, one: string, many = `${one}s`) =>
+    `${count} ${count === 1 ? one : many}`;
+  const a = pmi?.assembly;
+  const bodies = pmi ? Object.values(pmi.written).reduce((k, v) => k + v, 0) : 0;
   return {
     ...meta,
     format: 'step',
@@ -600,7 +608,41 @@ export function assemblyStepReport(
     instances: plan.instances,
     transforms: [],
     losses: [
-      'Feature history, parameters, joints, patterns as patterns (their copies are written as instances), named views, PMI and materials are not written. Each part is one product with exact surfaces (AP242).',
+      `Feature history, parameters, joints, patterns as patterns (their copies are written as instances), named views${bodies + (a?.written ?? 0) ? '' : ', PMI'} and materials are not written. Each part is one product with exact surfaces (AP242).`,
+      ...(pmi ? stepPmiLines(pmi, bodies) : []),
+      ...(a?.written
+        ? [
+            `${n(a.written, "of the assembly's own PMI items is", "of the assembly's own PMI items are")} written on the one component's product they stand on, in that part's frame.`,
+          ]
+        : []),
+      ...(a?.shared
+        ? [
+            `${n(a.shared, 'assembly PMI item is', 'assembly PMI items are')} not written: the component's part is placed more than once in the file, so the item would be every instance's.`,
+          ]
+        : []),
+      ...(a?.across
+        ? [
+            `${n(a.across, 'assembly PMI item is', 'assembly PMI items are')} not written: its faces, edges and datums are not all on one component (AP242 product PMI stands on one product).`,
+          ]
+        : []),
+      ...(a?.stale
+        ? [
+            `${n(a.stale, 'assembly PMI item is', 'assembly PMI items are')} not written: stale (a component deleted or another version placed).`,
+          ]
+        : []),
+      ...(a?.unwritable
+        ? [
+            `${n(a.unwritable, 'assembly PMI item is', 'assembly PMI items are')} not written: a datum whose name the file already holds (and what references it), a datum target, or what the writer has no form for or the part does not track.`,
+          ]
+        : []),
+      ...(pmi?.presentationOneFrame
+        ? [
+            `The presentation lines of ${n(pmi.presentationOneFrame, 'written PMI item are', 'written PMI items are')} not written: the PMI is on more than one product, and the writer puts every line of the file in one product's frame.`,
+          ]
+        : []),
+      ...(assemblyPmiUnreadable
+        ? ["The assembly's own PMI cannot be read here and is not written."]
+        : []),
     ],
   };
 }

@@ -15,11 +15,17 @@ export type ConstructionAction =
   /** Standing before the task starts, being removed while it runs, gone after it finishes. */
   | 'remove'
   /** Standing only while the task runs (scaffolding, shoring): absent before and after. */
-  | 'temporary';
+  | 'temporary'
+  /**
+   * TT2: lifts elements built earlier up into place (a lift-up, jacking): they stand `raiseMm`
+   * lower before the task, rise evenly while it runs and stand where the BIM puts them after.
+   */
+  | 'raise';
 export const constructionActions: readonly ConstructionAction[] = Object.freeze([
   'construct',
   'remove',
   'temporary',
+  'raise',
 ]);
 
 /** Finish-to-start: the task starts `lagDays` working days after `taskId` finishes. */
@@ -48,6 +54,8 @@ export interface ConstructionTask {
   /** IDs of elements of the source BIM version. */
   elementIds: string[];
   actual?: ConstructionActual;
+  /** TT2: how far a `raise` task lifts its elements (mm, above 0). Only on `raise`. */
+  raiseMm?: number;
 }
 
 /** Which days are worked. */
@@ -87,6 +95,8 @@ export const constructionLimits = Object.freeze({
   /** Dates are kept between these years. */
   minYear: 1900,
   maxYear: 2200,
+  /** TT2: the longest raise (mm). */
+  raiseMm: 1_000_000,
   /** CSV import: bytes and rows. */
   csvBytes: 2 * 1024 * 1024,
 });

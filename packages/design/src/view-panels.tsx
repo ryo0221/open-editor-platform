@@ -12,6 +12,9 @@ import {
   arrangeDesign,
   designPaintOrder,
   designExportBounds,
+  designFrameAreaBounds,
+  designFrameAreaElements,
+  exportDesignFrameAreaSvg,
   exportDesignSvg,
   insertInstance,
   patchDesign,
@@ -86,7 +89,7 @@ interface InputSnapshotSource {
   getSnapshot(): { dirty?: unknown; composing?: unknown };
 }
 function exportGroups(content: DesignContent, ids: string[], scope: string): string[][] {
-  if (scope === 'frames')
+  if (scope === 'frames' || scope === 'frame areas')
     return content.elements.filter((e) => e.type === 'frame').map((e) => [e.id]);
   if (scope === 'selection') return [ids];
   return [content.elements.map((e) => e.id)];
@@ -128,7 +131,14 @@ export async function exportDesignGraphics(
   const { ids, padding, transparent, scale, extension } = initial;
   const groups = exportGroups(content, ids, scope);
   if (scope === 'selection' && !ids.length) throw new Error('Select elements to export');
-  const included = descendantIds(content.elements, groups.flat());
+  // A frame area draws overlapping non-descendants too; capture exactly what the pages draw.
+  const areas =
+    scope === 'frame areas'
+      ? new Map(groups.map(([id]) => [id, designFrameAreaElements(content, id).map((e) => e.id)]))
+      : undefined;
+  const included = areas
+    ? new Set([...areas.values()].flat())
+    : descendantIds(content.elements, groups.flat());
   const visible = new Set(
     designPaintOrder(content)
       .filter((e) => !e.hidden)
@@ -138,7 +148,24 @@ export async function exportDesignGraphics(
   if (exported.some((e) => e.reference))
     ({ exported, content } = await captureReferences(content, exported, state, references, inputs));
   const pages = groups.map((group) => {
-    extension?.beforeGraphicExport?.(group);
+    // Guards see exactly what the page will draw: a frame area includes overlapping
+    // non-descendants, and leaves out the children of a crossing group that lie outside it.
+    const area = areas?.get(group[0]);
+    if (area) extension?.beforeGraphicExport?.(area, 'exact');
+    else extension?.beforeGraphicExport?.(group, 'subtree');
+    if (scope === 'frame areas') {
+      // What is seen inside each frame, including page-level layers drawn over it (manga panels).
+      const frame = content.elements.find((e) => e.id === group[0])!;
+      return {
+        name: frame.name,
+        // Exactly the frame: padding would show uncropped art from page-level layers.
+        svg: exportDesignFrameAreaSvg(content, frame.id, {
+          background: transparent ? undefined : '#ffffff',
+        }),
+        width: designFrameAreaBounds(content, frame.id).width,
+        height: designFrameAreaBounds(content, frame.id).height,
+      };
+    }
     const box = designExportBounds(content, group);
     return {
       name: group.length === 1 ? content.elements.find((e) => e.id === group[0])!.name : 'design',
@@ -196,7 +223,7 @@ export function DesignExportMenu({
         <option value={2}>2×</option>
       </select>
       {(['svg', 'png'] as const).map((format) =>
-        ['all', 'selection', 'frames'].map((scope) => (
+        ['all', 'selection', 'frames', 'frame areas'].map((scope) => (
           <button key={format + scope} onClick={() => void output(format, scope)}>
             Export {scope} {format.toUpperCase()}
           </button>

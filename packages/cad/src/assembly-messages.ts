@@ -87,6 +87,13 @@ const messages: Record<string, string> = {
   'gear-mesh-module': '2つの歯車のモジュールが違います。',
   'gear-mesh-profile': '2つの歯車の歯形（インボリュート／サイクロイド）が違います。',
   'gear-mesh-pressure-angle': '2つの歯車の圧力角が違います。',
+  'gear-mesh-helix': 'はすば歯車は、同じねじれ角で逆向き（右と左）の歯車とかみ合います。',
+  'gear-mesh-bevel': 'かさ歯車は、かさ歯車とだけかみ合います。',
+  'gear-mesh-apex': '2つのかさ歯車の円すいの頂点が1点に合っていません。',
+  'gear-mesh-cone':
+    '2つのかさ歯車のピッチ円すいが転がり合いません（円すい角の和が軸の角度と違うか、円すい距離が違います）。',
+  'gear-mesh-shift':
+    '2つのかさ歯車の転位係数の和が0ではありません（かさ歯車は、一方を正、他方を同じ量の負にします）。',
   'gear-mesh-distance': '歯車の中心距離がかみ合う距離と違います。',
   'gear-mesh-face': '2つの歯車の歯幅が軸の方向で重なっていません。',
   'gear-mesh-ratio':
@@ -124,6 +131,12 @@ const messages: Record<string, string> = {
   'range-coupled': '他のjointに連動する値は、その値だけを動かして調べられません。',
   'joint-inactive': '使われていない取り付けの候補のjointは、動かして調べられません。',
   'range-steps': '刻みの数は2〜64にしてください。',
+  'coverage-span': '動かす範囲の始めと終わりを、違う値にしてください。',
+  'coverage-bounds':
+    '1刻みの最大の移動（0.001 mm以上）と回転（0より大きく30°まで）を入れてください。',
+  'coverage-samples':
+    '刻みの上限を守ると、姿勢の数が上限（4,096）を超えます。範囲を狭めるか、上限を緩めてください。',
+  'coverage-converge': '刻みの上限を守る刻みが決まりませんでした。上限を緩めてください。',
   'range-no-limits': 'この値には範囲（最小・最大）がありません。jointに範囲を入れてください。',
   'clearance-target': 'すき間を測る2つの部品を選んでください。',
   'clearance-same': 'すき間は2つの違う部品の間で測ります（一方が他方の中の部品ではいけません）。',

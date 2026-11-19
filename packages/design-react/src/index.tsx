@@ -150,8 +150,8 @@ export function DesignReactSurface({
       publicationDiagnostics: designReactPublicationDiagnostics,
       canvasOwner: (element: import('@editor-platform/design/model').DesignElement) =>
         designReactCanvasOwner(content, element.id),
-      beforeGraphicExport: (ids: string[]) => {
-        const unsupported = designReactGraphicProblems(content, ids);
+      beforeGraphicExport: (ids: string[], scope: 'subtree' | 'exact' = 'subtree') => {
+        const unsupported = designReactGraphicProblems(content, ids, scope);
         if (unsupported.length)
           throw new Error(
             'SVG/PNG cannot preserve external React content (' +

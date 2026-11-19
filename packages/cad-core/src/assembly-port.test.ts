@@ -54,6 +54,31 @@ const request = (document: CadDocument, id = 'r1'): CadEvaluateRequest => ({
 });
 
 describe('per-part evaluation (R2b-1, CAD49/CAD50/CAD51)', () => {
+  it('keeps the feature a part failed on with its code (#847)', async () => {
+    // TS-2466
+    const { assembly, closure, plate } = r2bParts();
+    const k = fakeKernel();
+    const kernel: CadPartKernelPort = {
+      ...k.kernel,
+      evaluatePart: (request, profile) =>
+        request.candidateHash === plate.contentHash
+          ? Promise.resolve({
+              status: 'error',
+              contentHash: request.candidateHash,
+              code: 'result-tolerance',
+              featureId: 'imp',
+              retryable: false,
+            })
+          : k.kernel.evaluatePart(request, profile),
+    };
+    const port = new CadAssemblyPort({ kernel, parts: (h) => closure.get(h) });
+    const result = await port.evaluate(request(assembly));
+    expect(result.status === 'ok' && result.assembly!.versions[plate.contentHash]).toEqual({
+      state: 'failed',
+      code: 'result-tolerance',
+      featureId: 'imp',
+    });
+  });
   it('evaluates each version once, and a placement edit evaluates no part again', async () => {
     const { assembly, closure, plate, shaft, pair } = r2bParts();
     const k = fakeKernel();

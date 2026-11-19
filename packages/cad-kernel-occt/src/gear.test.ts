@@ -5,7 +5,10 @@ import { pathToFileURL } from 'node:url';
 import { setImmediate } from 'node:timers';
 import {
   cadBuilder,
+  bevelGearCone,
   cadContentHash,
+  helicalGear,
+  helicalGearTwist,
   spurGearFlankEnd,
   spurGearHalfAngle,
   spurGearRadii,
@@ -13,6 +16,7 @@ import {
   type CycloidalGearSpec,
   type InvoluteGearSpec,
   type SpurGearSpec,
+  withCone,
 } from '@editor-platform/cad-core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createKernelHost } from './host';
@@ -211,4 +215,92 @@ describe.skipIf(!dist)('WM1a spur gear in the kernel (ST-440, TS-1881)', () => {
     const m = await host.evaluate(doc);
     expect(JSON.stringify(m)).toContain('gear-undercut');
   }, 60_000);
+
+  // DW7a (docs/cad/drawing-editor.md, 動力系): ST-715, TS-2452.
+  const shaped = (o: { helixAngle?: number; coneAngle?: number; bore?: number }, w: number) => {
+    const b = cadBuilder({ id: 'occt', buildHash: `sha256:${cadKernelBuild.wasmSha256}` });
+    b.spurGear('Gear', { module: 2, teeth: 30, faceWidth: w, ...o });
+    return b.build().document;
+  };
+  const ok = (m: CadWorkerResponse) => {
+    if (m.type !== 'result' || m.evaluation.status !== 'ok')
+      throw new Error(JSON.stringify(m).slice(0, 2000));
+    return m.meshes[0]!;
+  };
+  const world = (mesh: CadMesh) =>
+    Array.from({ length: mesh.positions.length / 3 }, (_, i) => [
+      mesh.positions[3 * i]! + mesh.origin[0],
+      mesh.positions[3 * i + 1]! + mesh.origin[1],
+      mesh.positions[3 * i + 2]! + mesh.origin[2],
+    ]);
+
+  it('twists a helical gear along its axis: the transverse tooth, turned by its helix', async () => {
+    const beta = deg(20);
+    const w = 20;
+    const t = helicalGear(spec({ module: 2, teeth: 30 }), beta);
+    const mesh = ok(await host.evaluate(shaped({ helixAngle: beta, bore: 12 }, w)));
+    // Each section is the transverse outline: the volume is its area times the width.
+    const expected = (outlineArea(t) - Math.PI * 36) * w;
+    expect(Math.abs(volume(mesh) - expected) / expected).toBeLessThan(0.005);
+    // The top's tooth 0 tip is turned by w tan β / r (the tip land's middle).
+    const { tip } = spurGearRadii(t);
+    const twist = helicalGearTwist(t, w);
+    const top = world(mesh).filter(
+      (p) => Math.abs(p[2]! - w) < 1e-6 && Math.abs(Math.hypot(p[0]!, p[1]!) - tip) < 1e-3,
+    );
+    const near = top
+      .map((p) => Math.atan2(p[1]!, p[0]!))
+      .filter((a) => Math.abs(a - twist) < Math.PI / 30);
+    expect(near.length).toBeGreaterThan(1);
+    expect((Math.min(...near) + Math.max(...near)) / 2).toBeCloseTo(twist, 3);
+    // Left hand: the other way.
+    const left = ok(await host.evaluate(shaped({ helixAngle: -beta }, w)));
+    expect(Math.abs(volume(left) - outlineArea(t) * w) / (outlineArea(t) * w)).toBeLessThan(0.005);
+  }, 300_000);
+
+  it('tapers a bevel gear toward its cone apex, bored through', async () => {
+    const delta = deg(45);
+    const w = 12;
+    const g = withCone(spec({ module: 2, teeth: 30 }), delta, w);
+    const mesh = ok(await host.evaluate(shaped({ coneAngle: delta, bore: 10 }, w)));
+    const { scale: k } = bevelGearCone(g)!;
+    const h = w * Math.cos(delta);
+    // A frustum of the outline less the bore's cylinder.
+    const expected = (outlineArea(g) * h * (1 + k + k * k)) / 3 - Math.PI * 25 * h;
+    expect(Math.abs(volume(mesh) - expected) / expected).toBeLessThan(0.005);
+    const pts = world(mesh);
+    const reach = (z: number) =>
+      Math.max(
+        ...pts.filter((p) => Math.abs(p[2]! - z) < 1e-6).map((p) => Math.hypot(p[0]!, p[1]!)),
+      );
+    const { tip } = spurGearRadii(g);
+    expect(reach(0)).toBeCloseTo(tip, 3);
+    expect(reach(h)).toBeCloseTo(tip * k, 3);
+  }, 300_000);
+
+  it('refuses a helical bevel, spokes on a helix and a face past a third of the cone', () => {
+    const at = (o: object) => () =>
+      cadBuilder({ id: 'occt', buildHash: `sha256:${cadKernelBuild.wasmSha256}` }).spurGear(
+        'Gear',
+        {
+          module: 2,
+          teeth: 30,
+          faceWidth: 10,
+          ...o,
+        },
+      );
+    expect(at({ helixAngle: deg(20), coneAngle: deg(45) })).toThrow('gear-bevel-helix');
+    expect(at({ coneAngle: deg(45), faceWidth: 20 })).toThrow('gear-face-width');
+    expect(at({ helixAngle: deg(60) })).toThrow('gear-helix-angle');
+    expect(at({ helixAngle: deg(0) })).toThrow('gear-helix-angle');
+    // A long thin helix would twist past half a turn: refused before its sections are made.
+    expect(at({ module: 0.5, teeth: 30, helixAngle: deg(45), faceWidth: 100 })).toThrow(
+      'gear-helix-twist',
+    );
+    expect(
+      at({ helixAngle: deg(20), bore: 10, spokes: { count: 5, rim: 4, hub: 4, width: 4 } }),
+    ).toThrow('gear-spokes');
+    // The ranges are the normal values': 1.4 × module 10 is the transverse module at 45°.
+    expect(at({ module: 10, teeth: 30, helixAngle: deg(45) })).not.toThrow();
+  });
 });

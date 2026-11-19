@@ -1,0 +1,454 @@
+.fac-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fac-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.fac-main {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: auto;
+  background: #eef1f4;
+  display: flex;
+  flex-direction: column;
+}
+.fac-sep {
+  width: 1px;
+  align-self: stretch;
+  background: #d5dbe2;
+  margin: 0 4px;
+}
+.fac-plan-wrap {
+  padding: 8px 12px 0;
+}
+.fac-plan-bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.fac-legend {
+  display: flex;
+  gap: 10px;
+}
+.fac-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.fac-plan {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 160px;
+  max-height: 460px;
+  background: #fff;
+  border: 1px solid #d5dbe2;
+  touch-action: none;
+  user-select: none;
+  font-family: system-ui, sans-serif;
+}
+.fac-hint {
+  font-size: 400px;
+  fill: #64748b;
+}
+.fac-box {
+  fill: #f8fafc;
+  stroke: #64748b;
+  stroke-width: 40;
+}
+.fac-obj[data-kind='source'] .fac-box,
+.fac-obj[data-kind='drain'] .fac-box {
+  fill: #e0f2fe;
+}
+.fac-obj[data-kind='buffer'] .fac-box,
+.fac-obj[data-kind='conveyor'] .fac-box {
+  fill: #fef9c3;
+}
+.fac-obj[data-selected] .fac-box {
+  stroke: #2563eb;
+  stroke-width: 80;
+}
+.fac-obj[data-connect] .fac-box {
+  stroke: #9333ea;
+  stroke-dasharray: 160 80;
+  stroke-width: 80;
+}
+.fac-obj {
+  cursor: pointer;
+}
+.fac-kind {
+  font-size: 220px;
+  fill: #475569;
+  text-anchor: middle;
+}
+.fac-name {
+  font-size: 270px;
+  font-weight: 600;
+  fill: #0f172a;
+  text-anchor: middle;
+}
+.fac-bottleneck {
+  font-size: 260px;
+  font-weight: 700;
+  fill: #b91c1c;
+  text-anchor: middle;
+}
+.fac-link line {
+  stroke: #475569;
+}
+.fac-link .fac-link-hit {
+  stroke: transparent;
+  stroke-width: 400;
+}
+.fac-link[data-selected] line:not(.fac-link-hit) {
+  stroke: #2563eb;
+}
+.fac-flow {
+  font-size: 260px;
+  fill: #1e3a8a;
+  text-anchor: middle;
+}
+.fac-results {
+  margin: 12px;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #d5dbe2;
+  font-size: 13px;
+}
+.fac-results[data-stale] {
+  opacity: 0.7;
+}
+.fac-stale {
+  color: #92400e;
+  margin: 0 0 6px;
+}
+.fac-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fac-tile {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  min-width: 110px;
+}
+.fac-tile span {
+  color: #64748b;
+  font-size: 12px;
+}
+.fac-tile b {
+  font-size: 18px;
+}
+.fac-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 10px 0 6px;
+}
+.fac-tabs button[aria-selected='true'] {
+  font-weight: 700;
+  border-bottom: 2px solid #2563eb;
+}
+.fac-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.fac-table {
+  border-collapse: collapse;
+}
+.fac-table th,
+.fac-table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  white-space: nowrap;
+}
+.fac-table tbody tr {
+  cursor: pointer;
+}
+.fac-bar {
+  display: inline-block;
+  width: 60px;
+  height: 8px;
+  background: #f1f5f9;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.fac-bar i {
+  display: block;
+  height: 100%;
+}
+.fac-gantt-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.fac-gantt-bar input {
+  width: 70px;
+}
+.fac-gantt-svg,
+.fac-hist {
+  display: block;
+  width: 100%;
+  max-width: 1000px;
+}
+.fac-gantt-label {
+  font-size: 11px;
+  fill: #334155;
+}
+.fac-gantt-grid {
+  stroke: #e2e8f0;
+}
+.fac-hist rect {
+  fill: #2563eb;
+}
+.fac-hist text {
+  font-size: 11px;
+}
+.fac-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fac-list li {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+}
+.fac-empty,
+.fac-id {
+  color: #64748b;
+  font-size: 12px;
+}
+.fac-dist,
+.fac-filter {
+  border: 1px solid #e2e8f0;
+  margin: 6px 0;
+  padding: 4px 8px;
+}
+.fac-filter label {
+  display: block;
+}
+.fac-notice {
+  color: #b91c1c;
+}
+
+.fac-check {
+  display: block;
+  margin: 6px 0;
+}
+.fac-calendar {
+  flex-wrap: wrap;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
+}
+
+.fac-paths line {
+  stroke: #94a3b8;
+  stroke-width: 60;
+}
+.fac-paths circle {
+  fill: #64748b;
+}
+.fac-paths text {
+  fill: #475569;
+  font-size: 260px;
+  text-anchor: middle;
+}
+
+/* FT4a: the building's walls and columns, door openings and the objects' true boxes. */
+.fac-building polygon {
+  fill: #94a3b8;
+  stroke: #475569;
+  stroke-width: 20;
+}
+.fac-building .fac-passage {
+  fill: #f8fafc;
+  stroke: #94a3b8;
+  stroke-dasharray: 60 40;
+}
+.fac-footprints polygon {
+  fill: none;
+  stroke: #64748b;
+  stroke-width: 30;
+  stroke-dasharray: 120 80;
+  pointer-events: none;
+}
+.fac-footprints polygon[data-clash] {
+  stroke: #dc2626;
+  stroke-width: 60;
+}
+.fac-error {
+  color: #b91c1c;
+  margin: 4px 0;
+}
+
+/* FT4b: the 3D view and its replay. */
+.fac-views {
+  margin-bottom: 4px;
+}
+.fac-3d {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+  flex: 1 1 auto;
+}
+.fac-3d-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: hidden;
+}
+.fac-3d-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+.fac-3d-status {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 2px 6px;
+  background: var(--ep-surface, #fff);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.fac-replay {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.fac-replay input[type='range'] {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.fac-replay-counts {
+  font-size: 12px;
+  color: var(--ep-muted, #64748b);
+}
+.fac-replay-cut {
+  flex-basis: 100%;
+  color: var(--ep-warning, #b45309);
+  font-size: 12px;
+}
+.fac-video {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 6px 0;
+}
+.fac-video label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 2px;
+}
+.fac-video input {
+  width: 7em;
+}
+.fac-video-problems {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--ep-danger, #b91c1c);
+  font-size: 12px;
+}
+.fac-export-note {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* FT6: PLC control */
+.fac-sub {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.fac-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+}
+.fac-control-result {
+  margin-bottom: 8px;
+}
+.fac-ladder {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--ep-border, #e2e8f0);
+  border-radius: 4px;
+}
+.fac-experiment h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.fac-experiment-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fac-factor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-end;
+}
+.fac-experiment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+.fac-experiment-actions button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.fac-experiment-progress {
+  margin: 8px 0 4px;
+}
+.fac-experiment [data-stale] {
+  opacity: 0.7;
+}
+.fac-experiment .fac-table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.fac-experiment tr[data-best] td {
+  font-weight: 700;
+}
+.fac-experiment-note {
+  color: #64748b;
+  font-size: 12px;
+  margin: 4px 0;
+}
+.fac-experiment-setup > .ep-field {
+  max-width: 220px;
+}
+.fac-note {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--ep-muted, #64748b);
+}

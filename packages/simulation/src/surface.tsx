@@ -22,6 +22,7 @@ import {
   simulationLimits,
   simulationMaterialPresets,
   simulationTargets,
+  metricsOfStudy,
   type SimulationDocument,
   type SimulationMaterial,
   type SimulationMeshSettings,
@@ -33,17 +34,39 @@ import {
   type SimulationOperation,
   type SimulationPreparation,
   type SimulationAeroStudy,
+  type SimulationCrashSettings,
+  type SimulationCrashStudy,
+  type SimulationTransientStudy,
+  type SimulationStaticStudy,
+  type SimulationFatigue,
+  type SimulationSeal,
+  type SimulationSealStudy,
+  type SimulationShowerStudy,
   type SimulationStudy,
   type Vec3,
 } from '@editor-platform/simulation-core';
 import {
   addConditionOps,
+  defaultCrashStudy,
   addGravityOps,
   addLocalSizesOp,
   addMassOps,
   addWeightOps,
+  amplitudeOps,
   defaultModalStudy,
+  defaultTransientStudy,
+  formatAmplitude,
+  parseAmplitude,
+  parseHistory,
+  formatHistory,
+  defaultFatigue,
+  sampleRoadHistory,
+  hasStressSupport,
+  transientSettingsStudy,
+  transientStudyReady,
   defaultAeroStudy,
+  defaultSealStudy,
+  defaultShowerStudy,
   defaultThermalStudy,
   isThermalKind,
   narrowFaces,
@@ -63,7 +86,13 @@ import {
   spotWeldOf,
   type SimulationWeldRow,
 } from './conditions';
-import { SimulationViewport, type SimulationViewBody, type SimulationViewMark } from './viewport';
+import {
+  SimulationViewport,
+  simulationBodyColor,
+  type SimulationViewBody,
+  type SimulationViewMark,
+} from './viewport';
+import { shownMesh } from './aero-view';
 import {
   downloadVtu,
   ResultPanel,
@@ -74,7 +103,16 @@ import {
 } from './run-panel';
 import { aeroSolverBuild } from './run-protocol';
 import { YawSweep } from './aero-sweep';
-import { bondedBodies, readAt, runResult, vtuResult, type ResultSource } from './results';
+import {
+  bondedBodies,
+  readAt,
+  runResult,
+  transientTime,
+  vtuResult,
+  type ResultSource,
+} from './results';
+import { CrashResultPanel } from './crash-panel';
+import { crashBarrierViews, crashStudyPoints } from './crash-view';
 import { MappingIssues } from './mapping-issues';
 import {
   bondCandidates,
@@ -295,6 +333,789 @@ function AeroSettings({
   );
 }
 
+/** VS9b: a seal study's spacing and the gap a seal may leave before it leaks. */
+function SealSettings({
+  study,
+  disabled,
+  commit,
+}: {
+  study: SimulationSealStudy | SimulationShowerStudy;
+  disabled: boolean;
+  commit(seal: SimulationSealStudy['seal']): string | undefined;
+}) {
+  const L = simulationLimits;
+  const s = study.seal;
+  return (
+    <>
+      {field(
+        'Point spacing',
+        'mm along the line',
+        <NumberInput
+          label="Seal point spacing"
+          value={s.stepMm}
+          min={L.sealStepMinMm}
+          max={L.sealStepMaxMm}
+          step={1}
+          disabled={disabled}
+          commit={(stepMm) => commit({ ...s, stepMm })}
+        />,
+      )}
+      {field(
+        'Gap threshold',
+        'mm past the free height before it leaks',
+        <NumberInput
+          label="Seal gap threshold"
+          value={s.gapThresholdMm}
+          min={0}
+          max={L.sealGapThresholdMm}
+          step={0.1}
+          disabled={disabled}
+          commit={(gapThresholdMm) => commit({ ...s, gapThresholdMm })}
+        />,
+      )}
+    </>
+  );
+}
+
+/** VS10b: a shower's rain, slope, particles and time, each within `simulationLimits`. */
+function ShowerSettings({
+  study,
+  disabled,
+  commit,
+}: {
+  study: SimulationShowerStudy;
+  disabled: boolean;
+  commit(shower: SimulationShowerStudy['shower']): string | undefined;
+}) {
+  const L = simulationLimits;
+  const s = study.shower;
+  const num = (
+    label: string,
+    unit: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    set: (v: number) => SimulationShowerStudy['shower'],
+  ) =>
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={`Shower ${label.toLowerCase()}`}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit(set(v))}
+      />,
+    );
+  const rain = s.rain;
+  return (
+    <>
+      <label className="simulation-field">
+        <span>Rain</span>
+        <input
+          type="checkbox"
+          aria-label="Shower rain"
+          checked={!!rain}
+          disabled={disabled || (!!rain && !s.nozzles.length)}
+          onChange={(e) =>
+            commit({
+              ...s,
+              rain: e.currentTarget.checked ? { rateMmPerH: 50, angleDeg: 0, azimuthDeg: 0 } : null,
+            })
+          }
+        />
+      </label>
+      {rain && (
+        <>
+          {num('Rain rate', 'mm/h', rain.rateMmPerH, 1, L.showerRainMmPerH, 5, (rateMmPerH) => ({
+            ...s,
+            rain: { ...rain, rateMmPerH },
+          }))}
+          {num('Rain angle', '° from the vertical', rain.angleDeg, 0, 80, 5, (angleDeg) => ({
+            ...s,
+            rain: { ...rain, angleDeg },
+          }))}
+          {num(
+            'Rain heading',
+            '° (the way it blows, from +x to +y)',
+            rain.azimuthDeg,
+            -360,
+            360,
+            15,
+            (azimuthDeg) => ({ ...s, rain: { ...rain, azimuthDeg } }),
+          )}
+        </>
+      )}
+      {s.nozzles.length > 0 && (
+        <p className="simulation-note">
+          Nozzles: {s.nozzles.map((n) => `${n.name} (${n.flowLPerMin} L/min)`).join(', ')}.
+        </p>
+      )}
+      {num(
+        'Pitch',
+        '° (the +x end up)',
+        s.slopeDeg[0],
+        -L.showerSlopeDeg,
+        L.showerSlopeDeg,
+        1,
+        (p) => ({
+          ...s,
+          slopeDeg: [p, s.slopeDeg[1]],
+        }),
+      )}
+      {num(
+        'Roll',
+        '° (the +y side up)',
+        s.slopeDeg[1],
+        -L.showerSlopeDeg,
+        L.showerSlopeDeg,
+        1,
+        (r) => ({
+          ...s,
+          slopeDeg: [s.slopeDeg[0], r],
+        }),
+      )}
+      {num(
+        'Particles',
+        'a second',
+        s.particlesPerS,
+        1,
+        L.showerParticlesPerS,
+        100,
+        (particlesPerS) => ({
+          ...s,
+          particlesPerS,
+        }),
+      )}
+      {num('Time', 's', s.durationS, s.stepS, L.showerDurationS, 0.5, (durationS) => ({
+        ...s,
+        durationS,
+        emitUntilS: Math.min(s.emitUntilS, durationS),
+      }))}
+      {num(
+        'Spraying',
+        's (then the water runs off)',
+        s.emitUntilS,
+        0.001,
+        s.durationS,
+        0.5,
+        (emitUntilS) => ({
+          ...s,
+          emitUntilS,
+        }),
+      )}
+      {num('Step', 's', s.stepS, L.showerStepMinS, L.showerStepMaxS, 0.001, (stepS) => ({
+        ...s,
+        stepS,
+      }))}
+      {num(
+        'Film speed',
+        'mm/s down a vertical face',
+        s.filmSpeedMmPerS,
+        1,
+        L.showerFilmMmPerS,
+        10,
+        (filmSpeedMmPerS) => ({
+          ...s,
+          filmSpeedMmPerS,
+        }),
+      )}
+    </>
+  );
+}
+
+/**
+ * VS9b: one seal's section, inset and hinge angle. The line, base and closure are picked in the
+ * document (a fixture or the CAD names); here they read as their bodies.
+ */
+function SealEditor({
+  seal,
+  sourceBody,
+  disabled,
+  commit,
+}: {
+  seal: SimulationSeal;
+  sourceBody: string;
+  disabled: boolean;
+  commit(seal: SimulationSeal): string | undefined;
+}) {
+  const L = simulationLimits;
+  const s = seal.section;
+  const num = (
+    label: string,
+    unit: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    set: (v: number) => SimulationSeal,
+  ) =>
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={`${seal.name} ${label.toLowerCase()}`}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit(set(v))}
+      />,
+    );
+  const body = seal.base[0]?.body ?? sourceBody;
+  const closure = seal.mating[0]?.body ?? sourceBody;
+  return (
+    <li className="simulation-seal">
+      <p>
+        <strong>{seal.name}</strong>: on {body}, closed by {closure}
+        {seal.hinge ? '' : ' (no hinge)'}.
+      </p>
+      {num('Free height', 'mm', s.diameterMm, 1, L.sealDiameterMm, 1, (diameterMm) => ({
+        ...seal,
+        section: { ...s, diameterMm },
+      }))}
+      {num(
+        'Least compression',
+        '% of the free height',
+        Math.round(s.compression[0] * 1000) / 10,
+        0,
+        99,
+        1,
+        (v) => ({ ...seal, section: { ...s, compression: [v / 100, s.compression[1]] } }),
+      )}
+      {num(
+        'Most compression',
+        '% of the free height',
+        Math.round(s.compression[1] * 1000) / 10,
+        1,
+        100,
+        1,
+        (v) => ({ ...seal, section: { ...s, compression: [s.compression[0], v / 100] } }),
+      )}
+      {num(
+        'Smallest bend radius',
+        'mm',
+        s.minBendRadiusMm,
+        0,
+        L.sealBendRadiusMm,
+        1,
+        (minBendRadiusMm) => ({ ...seal, section: { ...s, minBendRadiusMm } }),
+      )}
+      {num(
+        'Inset',
+        'mm from the edge into the base',
+        seal.insetMm,
+        0,
+        L.sealInsetMm,
+        1,
+        (insetMm) => ({
+          ...seal,
+          insetMm,
+        }),
+      )}
+      {seal.hinge &&
+        num(
+          'Opened',
+          '° about the hinge (0: shut)',
+          seal.hinge.angleDeg,
+          -L.sealHingeDeg,
+          L.sealHingeDeg,
+          0.5,
+          (angleDeg) => ({ ...seal, hinge: { ...seal.hinge!, angleDeg } }),
+        )}
+    </li>
+  );
+}
+
+/** VS9b: how many seals a seal study measures (its `sealIds`, or all of them). */
+const studySealCount = (
+  doc: SimulationDocument,
+  study: SimulationSealStudy | SimulationShowerStudy,
+) => study.seal.sealIds.length || (doc.seals?.length ?? 0);
+
+/**
+ * VS7c-2: a crash test's settings, each within `simulationLimits` (the document's check refuses
+ * the rest): the barrier (a wall, or a pole and its line), the speed, gravity, friction, the end
+ * time, the accelerometer and the intrusions measured (vehicle frame, mm: x from the tail to the
+ * nose, y left, z up).
+ */
+function CrashSettings({
+  study,
+  disabled,
+  commit,
+  polePlace,
+  headPlace,
+}: {
+  study: SimulationCrashStudy;
+  disabled: boolean;
+  commit(crash: SimulationCrashSettings): string | undefined;
+  /** Where a pole goes when the barrier becomes one (from the analysed bodies' bounds). */
+  polePlace: { side: 'left' | 'right'; xMm: number; zMm: number };
+  /** VS8b: where a headform aims when the barrier becomes one, and the hold distance. */
+  headPlace: { targetMm: Vec3; holdBeyondMm: number | null };
+}) {
+  const L = simulationLimits;
+  const c = study.crash;
+  const num = (
+    label: string,
+    unit: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    set: (v: number) => SimulationCrashSettings,
+  ) =>
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={label}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit(set(v))}
+      />,
+    );
+  const point = (label: string, p: Vec3, set: (p: Vec3) => SimulationCrashSettings) => (
+    <div className="simulation-field">
+      <span>
+        {label} <small>x, y, z mm</small>
+      </span>
+      <span className="simulation-vector">
+        {axes3.map((a, k) => (
+          <NumberInput
+            key={a}
+            label={`${label} ${a} (mm)`}
+            value={p[k]!}
+            min={-L.lengthMm}
+            max={L.lengthMm}
+            step={10}
+            disabled={disabled}
+            commit={(v) => {
+              const q: Vec3 = [p[0], p[1], p[2]];
+              q[k] = v;
+              return commit(set(q));
+            }}
+          />
+        ))}
+      </span>
+    </div>
+  );
+  const pole = c.pole;
+  const head = c.barrier === 'head' ? c.head : null;
+  // Leaving a head impact drops its headform; entering one drops gravity and the intrusions
+  // (neither is read there).
+  const { head: _head, ...plain } = c;
+  return (
+    <>
+      <label className="simulation-field">
+        <span>Barrier</span>
+        <select
+          aria-label="Barrier"
+          value={c.barrier}
+          disabled={disabled}
+          onChange={(e) => {
+            const v = e.currentTarget.value;
+            commit(
+              v === 'pole'
+                ? {
+                    ...plain,
+                    barrier: 'pole',
+                    pole: c.pole ?? { diameterMm: 254, angleDeg: 75, ...polePlace },
+                  }
+                : v === 'head'
+                  ? {
+                      ...c,
+                      barrier: 'head',
+                      pole: null,
+                      gravity: false,
+                      intrusions: [],
+                      head: c.head ?? { headform: 'adult', angleDeg: 65, ...headPlace },
+                    }
+                  : { ...plain, barrier: 'wall', pole: null },
+            );
+          }}
+        >
+          <option value="wall">Full-width rigid wall (frontal)</option>
+          <option value="pole">Rigid pole (side)</option>
+          <option value="head">Pedestrian headform (head impact)</option>
+        </select>
+      </label>
+      {num('Speed', 'km/h', c.speedKmh, 1, L.crashSpeedKmh, 1, (speedKmh) => ({ ...c, speedKmh }))}
+      {pole && (
+        <>
+          <label className="simulation-field">
+            <span>Struck side</span>
+            <select
+              aria-label="Struck side"
+              value={pole.side}
+              disabled={disabled}
+              onChange={(e) =>
+                commit({
+                  ...c,
+                  pole: { ...pole, side: e.currentTarget.value as 'left' | 'right' },
+                })
+              }
+            >
+              <option value="right">Right (−y)</option>
+              <option value="left">Left (+y)</option>
+            </select>
+          </label>
+          {num(
+            'Pole diameter',
+            'mm',
+            pole.diameterMm,
+            1,
+            L.crashPoleDiameterMm,
+            1,
+            (diameterMm) => ({
+              ...c,
+              pole: { ...pole, diameterMm },
+            }),
+          )}
+          {num('Impact angle', '° to the long axis', pole.angleDeg, 0, 90, 1, (angleDeg) => ({
+            ...c,
+            pole: { ...pole, angleDeg },
+          }))}
+          {num(
+            'Pole line x',
+            'mm (the head’s place along the car)',
+            pole.xMm,
+            -L.lengthMm,
+            L.lengthMm,
+            10,
+            (xMm) => ({
+              ...c,
+              pole: { ...pole, xMm },
+            }),
+          )}
+          {num('Pole line z', 'mm', pole.zMm, -L.lengthMm, L.lengthMm, 10, (zMm) => ({
+            ...c,
+            pole: { ...pole, zMm },
+          }))}
+        </>
+      )}
+      {head && (
+        <>
+          <label className="simulation-field">
+            <span>
+              Headform <small>UN GTR 9, 165 mm</small>
+            </span>
+            <select
+              aria-label="Headform"
+              value={head.headform}
+              disabled={disabled}
+              onChange={(e) => {
+                const headform = e.currentTarget.value as 'adult' | 'child';
+                commit({
+                  ...c,
+                  head: { ...head, headform, angleDeg: headform === 'adult' ? 65 : 50 },
+                });
+              }}
+            >
+              <option value="adult">Adult (4.5 kg, 65°)</option>
+              <option value="child">Child (3.5 kg, 50°)</option>
+            </select>
+          </label>
+          {point('Head target', head.targetMm, (targetMm) => ({
+            ...c,
+            head: { ...head, targetMm },
+          }))}
+          {num(
+            'Head angle',
+            '° below the horizontal, travelling rearward',
+            head.angleDeg,
+            1,
+            90,
+            1,
+            (angleDeg) => ({ ...c, head: { ...head, angleDeg } }),
+          )}
+          <label className="simulation-field">
+            <span>
+              Hold the rest <small>nodes beyond a distance from the target stay put</small>
+            </span>
+            <input
+              type="checkbox"
+              aria-label="Hold the rest"
+              checked={head.holdBeyondMm !== null}
+              disabled={disabled}
+              onChange={(e) =>
+                commit({
+                  ...c,
+                  head: {
+                    ...head,
+                    holdBeyondMm: e.currentTarget.checked ? (headPlace.holdBeyondMm ?? 500) : null,
+                  },
+                })
+              }
+            />
+          </label>
+          {head.holdBeyondMm !== null &&
+            num('Hold beyond', 'mm from the target', head.holdBeyondMm, 1, L.lengthMm, 10, (v) => ({
+              ...c,
+              head: { ...head, holdBeyondMm: v },
+            }))}
+        </>
+      )}
+      {!head && (
+        <label className="simulation-field">
+          <span>
+            Gravity <small>and the ground under the lowest point</small>
+          </span>
+          <input
+            type="checkbox"
+            aria-label="Gravity"
+            checked={c.gravity}
+            disabled={disabled}
+            onChange={(e) => commit({ ...c, gravity: e.currentTarget.checked })}
+          />
+        </label>
+      )}
+      {num(
+        'Friction',
+        'Coulomb, barrier, ground and between shells',
+        c.friction,
+        0,
+        L.crashFriction,
+        0.05,
+        (friction) => ({
+          ...c,
+          friction,
+        }),
+      )}
+      {num('End time', 'ms', c.endTimeMs, 1, L.crashEndTimeMs, 10, (endTimeMs) => ({
+        ...c,
+        endTimeMs,
+      }))}
+      {!head &&
+        point('Accelerometer', c.accelerometer, (accelerometer) => ({ ...c, accelerometer }))}
+      {!head &&
+        c.intrusions.map((q, k) => {
+          const setRow = (row: SimulationCrashSettings['intrusions'][number]) => ({
+            ...c,
+            intrusions: c.intrusions.map((r, i) => (i === k ? row : r)),
+          });
+          return (
+            // Keyed by its place and name: a row removed or renamed above never lends another row
+            // its inputs' pending text.
+            <div key={`${k}:${q.name}`} className="simulation-crash-intrusion">
+              <label className="simulation-field">
+                <span>Intrusion name</span>
+                <TextInput
+                  label={`Intrusion ${k + 1} name`}
+                  value={q.name}
+                  disabled={disabled}
+                  check={(name) => (name ? undefined : 'Give the intrusion a name.')}
+                  commit={(name) => commit(setRow({ ...q, name }))}
+                />
+              </label>
+              {point(`${q.name}: point`, q.point, (p) => setRow({ ...q, point: p }))}
+              {point(`${q.name}: relative to`, q.reference, (p) => setRow({ ...q, reference: p }))}
+              <div className="simulation-actions">
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() =>
+                    commit({ ...c, intrusions: c.intrusions.filter((_, i) => i !== k) })
+                  }
+                >
+                  Remove {q.name}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      {!head && (
+        <div className="simulation-actions">
+          <button
+            type="button"
+            disabled={disabled || c.intrusions.length >= L.crashIntrusions}
+            onClick={() => {
+              const names = c.intrusions.map((q) => q.name);
+              let n = 1;
+              while (names.includes(`Intrusion ${n}`)) n++;
+              commit({
+                ...c,
+                intrusions: [
+                  ...c.intrusions,
+                  { name: `Intrusion ${n}`, point: c.accelerometer, reference: c.accelerometer },
+                ],
+              });
+            }}
+          >
+            Add intrusion
+          </button>
+        </div>
+      )}
+      <p className="simulation-note">
+        {head
+          ? 'A head impact aims the headform (a rigid sphere of its mass, for the head of a pedestrian struck by the car) at the target, the bodies standing still; HIC15 and the peak come from its centre’s acceleration through CFC 1000. Its rubber skin is not modelled, so HIC reads high. '
+          : ''}
+        A crash runs the bodies’ shells (their spot welds and added masses with them) on the
+        explicit solver (in the browser, or on a Host that runs them); each material needs its
+        plasticity (a crash preset has one). The measures are read at the node nearest each point;
+        an intrusion is how far its point moves relative to its reference. The results are for
+        reference.
+      </p>
+    </>
+  );
+}
+
+const axes3 = ['x', 'y', 'z'] as const;
+
+/**
+ * VS7c-2: a material's plasticity for a crash study as its flow curve, "strain:stress" pairs
+ * (equivalent plastic strain from 0, MPa) applied on blur or Enter; cleared, the material has
+ * none (a crash study then refuses it). Its rate terms are kept and shown.
+ */
+function PlasticityField({
+  material,
+  disabled,
+  commit,
+}: {
+  material: SimulationMaterial;
+  disabled: boolean;
+  commit(m: SimulationMaterial): string | undefined;
+}) {
+  const p = material.plasticity;
+  const stored = p ? p.strain.map((e, k) => `${e}:${p.stress[k]}`).join(', ') : '';
+  const [problem, setProblem] = useState('');
+  const parse = (t: string) => {
+    const pairs = t
+      .split(/[,;\s]+/)
+      .filter(Boolean)
+      .map((q) => q.split(':').map(Number));
+    return pairs.some((q) => q.length !== 2 || !q.every(Number.isFinite)) ? undefined : pairs;
+  };
+  return (
+    <>
+      <label className="simulation-field">
+        <span>
+          Plasticity <small>strain:stress MPa, for a crash study</small>
+        </span>
+        <TextInput
+          label="Plasticity flow curve"
+          placeholder="none (elastic)"
+          value={stored}
+          disabled={disabled}
+          check={(t) =>
+            t && !parse(t) ? 'Give strain:stress pairs, such as 0:200, 0.1:360.' : undefined
+          }
+          onProblem={setProblem}
+          commit={(t) => {
+            if (!t) {
+              const { plasticity: _p, ...rest } = material;
+              return commit(rest);
+            }
+            const pairs = parse(t)!;
+            return commit({
+              ...material,
+              plasticity: {
+                ...(p ?? {}),
+                strain: pairs.map((q) => q[0]!),
+                stress: pairs.map((q) => q[1]!),
+              },
+            });
+          }}
+        />
+      </label>
+      {p?.cowperSymonds && (
+        <p className="simulation-note">
+          Strain rate: Cowper–Symonds C {p.cowperSymonds.C}/s, p {p.cowperSymonds.p}.
+        </p>
+      )}
+      {problem && (
+        <p className="simulation-error" role="alert">
+          Not applied: {problem}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * A text input that applies on commit (blur or Enter), never on each keystroke, shown from the
+ * stored value; while typed in, it is pending at the Host's boundaries like `NumberInput`.
+ * `check` refuses a text before it is applied (the reason goes to `onProblem`).
+ */
+function TextInput({
+  label,
+  value,
+  placeholder,
+  disabled,
+  check,
+  commit,
+  onProblem,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  disabled: boolean;
+  check?(text: string): string | undefined;
+  /** Applies the trimmed text; the reason when refused. */
+  commit(text: string): string | undefined;
+  onProblem?(reason: string): void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  // An IME conversion in progress: Enter confirms it, and the Host's boundaries wait for it.
+  const [composing, setComposing] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  const latest = useRef({ text, value, check, commit, onProblem, composing });
+  latest.current = { text, value, check, commit, onProblem, composing };
+  const done = () => {
+    const { text, value, check, commit, onProblem } = latest.current;
+    if (text === null) return undefined;
+    setText(null);
+    const t = text.trim();
+    if (t === value) return undefined;
+    const reason = check?.(t) ?? commit(t);
+    onProblem?.(reason ?? '');
+    return reason;
+  };
+  const register = useContext(InputBoundary);
+  const editing = text !== null;
+  useEffect(() => {
+    if (!editing || !register) return;
+    return register({
+      label,
+      read: () => ({ dirty: latest.current.text !== null, composing: latest.current.composing }),
+      prepare: () => {
+        const { text, check } = latest.current;
+        const reason = text === null ? undefined : check?.(text.trim());
+        if (reason) throw new Error(reason);
+        return () => (done() ? false : undefined);
+      },
+      focus: () => input.current?.focus(),
+    });
+    // `done` reads the latest values through the ref.
+  }, [editing, register, label]);
+  return (
+    <input
+      ref={input}
+      aria-label={label}
+      placeholder={placeholder}
+      disabled={disabled}
+      value={text ?? value}
+      onChange={(e) => setText(e.target.value)}
+      onCompositionStart={() => setComposing(true)}
+      onCompositionEnd={() => setComposing(false)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (composing || e.nativeEvent.isComposing) return;
+        if (e.key === 'Enter') done();
+        if (e.key === 'Escape') setText(null);
+      }}
+    />
+  );
+}
+
 /** A number input that applies on commit (blur or Enter), never on each keystroke. */
 function NumberInput({
   label,
@@ -367,6 +1188,352 @@ function NumberInput({
   );
 }
 
+/**
+ * VS11d-2: an amplitude as `time:factor` pairs (s : ×), applied on commit (blur or Enter) like
+ * `NumberInput`; empty is none. A pending edit is flushed (or refused) at the Host's boundaries.
+ */
+function AmplitudeInput({
+  label,
+  value,
+  disabled,
+  signed = false,
+  commit,
+}: {
+  label: string;
+  value: string;
+  disabled: boolean;
+  /** Negative factors allowed (a heat flux turning to cooling). */
+  signed?: boolean;
+  /** Applies the text; the reason when refused. */
+  commit(text: string): string | undefined;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const latest = useRef({ text, value, commit, signed });
+  latest.current = { text, value, commit, signed };
+  const done = () => {
+    const { text, value, commit } = latest.current;
+    if (text === null) return undefined;
+    setText(null);
+    return text.trim() !== value ? commit(text) : undefined;
+  };
+  const register = useContext(InputBoundary);
+  const editing = text !== null;
+  useEffect(() => {
+    if (!editing || !register) return;
+    return register({
+      label,
+      read: () => ({ dirty: latest.current.text !== null }),
+      prepare: () => {
+        const t = latest.current.text;
+        if (t !== null && parseAmplitude(t, latest.current.signed) === undefined)
+          throw new Error('Enter time:factor pairs, e.g. 0:0.5, 60:1.');
+        return () => (done() ? false : undefined);
+      },
+      focus: () => input.current?.focus(),
+    });
+    // `done` reads the latest values through the ref.
+  }, [editing, register, label]);
+  return (
+    <input
+      ref={input}
+      aria-label={label}
+      type="text"
+      placeholder="none (e.g. 0:0.5, 60:1)"
+      disabled={disabled}
+      value={text ?? value}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={done}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') done();
+        if (e.key === 'Escape') setText(null);
+      }}
+    />
+  );
+}
+
+/**
+ * VS13b: a static study's fatigue: on or off, its load history (the study's loads' factor at each
+ * point, applied on commit like `NumberInput`) and its S-N line, within `simulationLimits`.
+ */
+function FatigueSettings({
+  study,
+  disabled,
+  commit,
+}: {
+  study: SimulationStaticStudy;
+  disabled: boolean;
+  commit(fatigue: SimulationFatigue | null): string | undefined;
+}) {
+  const f = study.fatigue;
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | undefined>();
+  const area = useRef<HTMLTextAreaElement>(null);
+  const latest = useRef({ text, f, commit });
+  latest.current = { text, f, commit };
+  const done = () => {
+    const { text, f, commit } = latest.current;
+    if (text === null || !f) return undefined;
+    setText(null);
+    const history = parseHistory(text);
+    if (!history) {
+      const why = `Enter 2 to ${simulationLimits.fatiguePoints} factors separated by commas.`;
+      setError(why);
+      return why;
+    }
+    setError(undefined);
+    return formatHistory(history) !== formatHistory(f.history)
+      ? commit({ ...f, history })
+      : undefined;
+  };
+  const register = useContext(InputBoundary);
+  const editing = text !== null;
+  useEffect(() => {
+    if (!editing || !register) return;
+    return register({
+      label: 'Load history',
+      read: () => ({ dirty: latest.current.text !== null }),
+      prepare: () => {
+        const t = latest.current.text;
+        if (t !== null && parseHistory(t) === undefined)
+          throw new Error('Enter the load history as factors separated by commas.');
+        return () => (done() ? false : undefined);
+      },
+      focus: () => area.current?.focus(),
+    });
+    // `done` reads the latest values through the ref.
+  }, [editing, register]);
+  const sn = (
+    label: string,
+    unit: string,
+    key: keyof SimulationFatigue['sn'],
+    min: number,
+    max: number,
+    step: number,
+  ) =>
+    f &&
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={label}
+        value={f.sn[key]}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit({ ...f, sn: { ...f.sn, [key]: v } })}
+      />,
+    );
+  let lo = Infinity,
+    hi = -Infinity;
+  for (const v of f?.history ?? []) {
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
+  }
+  return (
+    <>
+      <label className="simulation-field">
+        <span>
+          Fatigue <small>under a load history</small>
+        </span>
+        <input
+          type="checkbox"
+          aria-label="Fatigue"
+          checked={!!f}
+          disabled={disabled}
+          onChange={(e) => commit(e.currentTarget.checked ? defaultFatigue() : null)}
+        />
+      </label>
+      {f && (
+        <>
+          <label className="simulation-field simulation-field-wide">
+            <span>
+              Load history{' '}
+              <small>
+                × the study&apos;s loads, {f.history.length} points, {lo} to {hi}
+              </small>
+            </span>
+            <textarea
+              ref={area}
+              aria-label="Load history"
+              rows={3}
+              disabled={disabled}
+              value={text ?? formatHistory(f.history)}
+              onChange={(e) => setText(e.target.value)}
+              onBlur={done}
+            />
+          </label>
+          {error && <p className="simulation-error">{error}</p>}
+          {!disabled && (
+            <div className="simulation-actions">
+              <button type="button" onClick={() => commit({ ...f, history: sampleRoadHistory() })}>
+                Sample rough road
+              </button>
+            </div>
+          )}
+          {sn('S-N amplitude', 'MPa', 'amplitude', 1, 1e5, 1)}
+          {sn('at cycles', '', 'cycles', 1, 1e15, 1000)}
+          {sn('S-N slope', 'm', 'slope', 0.1, 100, 0.1)}
+          {sn('Endurance limit', 'MPa (0: none)', 'endurance', 0, 1e5, 1)}
+          {sn('Tensile strength', 'MPa (mean correction)', 'ultimate', 1, 1e5, 1)}
+          <p className="simulation-note">
+            Each node&apos;s von Mises stress (signed by its mean stress) is scaled by the history,
+            rainflow counted, judged on the S-N line with Goodman&apos;s mean correction and summed
+            by Miner&apos;s rule. The result shows the life in passes of the history (log₁₀) and the
+            damage of one pass. Linear elastic, no notch or surface factors.
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * VS11d-2: a transient study's settings, each within `simulationLimits`: the time, the start, the
+ * kept fields, the enclosure's surroundings and rays, and the thermal stress.
+ */
+function TransientSettings({
+  study,
+  disabled,
+  supported,
+  commit,
+}: {
+  study: SimulationTransientStudy;
+  disabled: boolean;
+  /** The document has a support (fixed, roller, displacement) to hold the body for stress. */
+  supported: boolean;
+  commit(transient: SimulationTransientStudy['transient']): string | undefined;
+}) {
+  const L = simulationLimits;
+  const t = study.transient;
+  const num = (
+    label: string,
+    unit: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    set: (v: number) => SimulationTransientStudy['transient'],
+  ) =>
+    field(
+      label,
+      unit,
+      <NumberInput
+        label={label}
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        commit={(v) => commit(set(v))}
+      />,
+    );
+  const steps = Math.max(1, Math.ceil(t.endS / t.stepS - 1e-9));
+  return (
+    <>
+      {num('End time', 's', t.endS, 0, L.transientEndS, 10, (endS) => ({ ...t, endS }))}
+      {num('Time step', 's', t.stepS, 0, L.transientEndS, 1, (stepS) => ({ ...t, stepS }))}
+      {num(
+        'Keep every',
+        'steps (and the end)',
+        t.outputEvery,
+        1,
+        L.transientSteps,
+        1,
+        (outputEvery) => ({
+          ...t,
+          outputEvery,
+        }),
+      )}
+      {num(
+        'Start temperature',
+        'K, the whole body',
+        t.initialTemperature,
+        0,
+        L.temperatureK,
+        1,
+        (initialTemperature) => ({
+          ...t,
+          initialTemperature,
+        }),
+      )}
+      {num('Theta', '1 backward Euler, 0.5 Crank–Nicolson', t.theta, 0.5, 1, 0.5, (theta) => ({
+        ...t,
+        theta,
+      }))}
+      <p className="simulation-note">
+        {steps.toLocaleString('en')} steps of at most {L.transientSteps.toLocaleString('en')};{' '}
+        {/* The start, every `outputEvery` steps and the end, as the solver keeps them. */}
+        {Math.ceil(steps / t.outputEvery) + 1} kept fields of at most {L.transientOutputs}.
+      </p>
+      {t.enclosure && (
+        <>
+          {num(
+            'Enclosure surroundings',
+            'K, seen past the faces',
+            t.enclosure.ambient,
+            0,
+            L.temperatureK,
+            1,
+            (ambient) => ({
+              ...t,
+              enclosure: { ...t.enclosure!, ambient },
+            }),
+          )}
+          {num(
+            'Rays per patch',
+            'for the view factors',
+            t.enclosure.raysPerPatch,
+            1,
+            L.raysPerPatch,
+            16,
+            (raysPerPatch) => ({
+              ...t,
+              enclosure: { ...t.enclosure!, raysPerPatch },
+            }),
+          )}
+        </>
+      )}
+      <label className="simulation-field">
+        <span>
+          Thermal stress <small>of the last field</small>
+        </span>
+        <input
+          type="checkbox"
+          aria-label="Thermal stress"
+          checked={!!t.stress}
+          disabled={disabled || (!t.stress && !supported)}
+          onChange={(e) =>
+            commit({
+              ...t,
+              stress: e.currentTarget.checked ? { reference: t.initialTemperature } : null,
+            })
+          }
+        />
+      </label>
+      {!t.stress && !supported && (
+        <p className="simulation-note">
+          Add a fixed support first: thermal stress holds the body by it.
+        </p>
+      )}
+      {t.stress &&
+        num(
+          'Strain-free temperature',
+          'K',
+          t.stress.reference,
+          0,
+          L.temperatureK,
+          1,
+          (reference) => ({
+            ...t,
+            stress: { reference },
+          }),
+        )}
+    </>
+  );
+}
+
 let resultSeq = 0;
 
 /** A length in mm, as the rim list shows it (four significant digits). */
@@ -410,24 +1577,55 @@ export function SimulationSurface({
     [runFields],
   );
   const shownBody = solvedBodies?.some((b) => b.bodyId === resultBody) ? resultBody : undefined;
+  // VS10b: the shower's frame shown (the last when none is chosen).
+  const [frame, setFrame] = useState<number>();
+  useEffect(() => setFrame(undefined), [runFields]);
+  const frames = runFields?.kind === 'shower' ? runFields.frames : undefined;
+  const shownFrame = frames && frame !== undefined && frame < frames.length ? frame : undefined;
   const runSource = useMemo(
-    () => (runFields ? runResult(runFields, shownBody) : undefined),
-    [runFields, shownBody],
+    () => (runFields ? runResult(runFields, shownBody, shownFrame) : undefined),
+    [runFields, shownBody, shownFrame],
   );
   // An opened VTU is shown instead of the run until it is closed.
   const result = imported ?? runSource;
   // A new result (another run, or a VTU opened or closed) refits the camera; a field or section
   // change keeps it.
-  const resultKey = useMemo(() => `result-${++resultSeq}`, [result]);
+  // VS10b: stepping a shower's water keeps the camera.
+  const resultKey = useMemo(
+    () => `result-${++resultSeq}`,
+    // The result's sources, not its frame.
+    [imported, runFields, shownBody],
+  );
   const display = useResultDisplay(result);
   const resultShown = showing && !!display.shown;
   // VS4c: a wind tunnel's streamlines and flow section beside its bodies.
+  // VS7c-2: a crash run's barrier and ground beside its bodies (not with an opened VTU).
+  const crashFields = !imported && runFields?.kind === 'crash' ? runFields : undefined;
+  // VS10b: a shower's bodies, grey round its water.
+  const showerBodies = useMemo<SimulationViewBody | undefined>(() => {
+    if (imported || runFields?.kind !== 'shower') return undefined;
+    const s = runFields.surface;
+    const { mesh } = shownMesh(
+      'shower-bodies',
+      [...s.points],
+      [...s.triangles],
+      new Array<number>(s.points.length / 3).fill(0),
+      [0, 1],
+    );
+    // Faint, so the water under a closure shows.
+    return { mesh, marks: [], faded: true, color: simulationBodyColor };
+  }, [imported, runFields]);
   const flowViews = useMemo<SimulationViewBody[] | undefined>(() => {
-    const views = [display.streamlines, display.flowPlane].flatMap((v) =>
+    const views: SimulationViewBody[] = [display.streamlines, display.flowPlane].flatMap((v) =>
       v ? [{ mesh: v.mesh, colors: v.colors, marks: [], faded: false }] : [],
     );
+    if (showerBodies) views.push(showerBodies);
+    if (crashFields)
+      for (const b of crashBarrierViews(crashFields))
+        views.push({ mesh: b.mesh, color: b.color, marks: [], faded: false });
     return views.length ? views : undefined;
-  }, [display.streamlines, display.flowPlane]);
+  }, [display.streamlines, display.flowPlane, showerBodies, crashFields]);
+  const viewHost = useRef<HTMLDivElement>(null);
   const [point, setPoint] = useState<number[]>();
   const readout = point && display.shown ? readAt(display.shown, point) : undefined;
   const openVtu = (file: File) => {
@@ -624,8 +1822,8 @@ export function SimulationSurface({
     }
     return out;
   }, [resolved, localResolved, doc, selected, sourceBodyId, pickBodies, preview, shownRim]);
-  /** The analysed bodies' largest side (mm) as shown, for a new wind tunnel's Host mesh. */
-  const analysedLength = () => {
+  /** The analysed bodies' bounds (mm) as shown, for a new wind tunnel or crash study. */
+  const analysedBounds = () => {
     if (!ok?.mesh) return undefined;
     const lo = [Infinity, Infinity, Infinity];
     const hi = [-Infinity, -Infinity, -Infinity];
@@ -640,7 +1838,13 @@ export function SimulationSurface({
           lo[a] = Math.min(lo[a]!, v);
           hi[a] = Math.max(hi[a]!, v);
         }
-    const length = Math.max(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!);
+    return hi[0]! >= lo[0]! ? { lo, hi } : undefined;
+  };
+  /** Their largest side (mm), for a new wind tunnel's Host mesh. */
+  const analysedLength = () => {
+    const b = analysedBounds();
+    if (!b) return undefined;
+    const length = Math.max(b.hi[0]! - b.lo[0]!, b.hi[1]! - b.lo[1]!, b.hi[2]! - b.lo[2]!);
     return length > 0 ? length : undefined;
   };
   const otherViews = useMemo<SimulationViewBody[]>(
@@ -796,10 +2000,11 @@ export function SimulationSurface({
           )}
         </header>
         <div className="simulation-body">
-          <div className="simulation-view">
+          <div className="simulation-view" ref={viewHost}>
             <SimulationViewport
               mesh={resultShown ? display.shown!.mesh : ok?.mesh}
               colors={resultShown ? display.shown!.colors : undefined}
+              outline={!(resultShown && !imported && runFields?.kind === 'shower')}
               color={resultShown ? undefined : ok?.color}
               fitKey={
                 resultShown
@@ -1037,7 +2242,9 @@ export function SimulationSurface({
                 box near them) give a much lower stiffness.
               </p>
               <div className="simulation-actions" aria-label="Thermal conditions">
-                {(['temperature', 'heat-flux', 'convection'] as const).map((kind) => (
+                {(
+                  ['temperature', 'heat-flux', 'convection', 'radiation', 'enclosure'] as const
+                ).map((kind) => (
                   <button
                     key={kind}
                     type="button"
@@ -1075,6 +2282,12 @@ export function SimulationSurface({
                       setSelection(undefined);
                     }}
                     remove={(collection) => run(removeConditionOps(doc, collection, item.id))}
+                    setAmplitude={(text) => {
+                      const amplitude = parseAmplitude(text, item.kind === 'heat-flux');
+                      if (amplitude === undefined)
+                        return 'Enter time:factor pairs with increasing times, e.g. 0:0.5, 60:1.';
+                      return run(amplitudeOps(doc, item, amplitude));
+                    }}
                   />
                 ))}
                 {(doc.masses ?? []).map((m) => (
@@ -1169,6 +2382,59 @@ export function SimulationSurface({
                       commit={(v) => setMaterial({ ...material, conductivity: v })}
                     />,
                   )}
+                  {field(
+                    'Specific heat',
+                    'J/(kg·K), for a transient study',
+                    <NumberInput
+                      label="Specific heat (J/(kg·K))"
+                      value={(material.specificHeat ?? 0) / 1e6}
+                      min={0}
+                      max={L.specificHeat / 1e6}
+                      step={10}
+                      disabled={readOnly}
+                      // J/(kg·K) = m²/(s²·K) = 10⁶ mm²/(s²·K), the document's unit.
+                      commit={(v) => setMaterial({ ...material, specificHeat: v * 1e6 })}
+                    />,
+                  )}
+                  {field(
+                    'Expansion',
+                    '10⁻⁶/K, for thermal stress',
+                    <NumberInput
+                      label="Thermal expansion (10⁻⁶/K)"
+                      value={(material.expansion ?? 0) * 1e6}
+                      min={0}
+                      max={L.expansion * 1e6}
+                      step={0.1}
+                      disabled={readOnly}
+                      commit={(v) => setMaterial({ ...material, expansion: v / 1e6 })}
+                    />,
+                  )}
+                  <PlasticityField
+                    key={material.id}
+                    material={material}
+                    disabled={readOnly}
+                    commit={setMaterial}
+                  />
+                  {material.plasticity &&
+                    field(
+                      'Failure strain',
+                      'plastic, a shell is erased past it (0: never)',
+                      <NumberInput
+                        label="Failure strain"
+                        value={material.plasticity.failureStrain ?? 0}
+                        min={0}
+                        max={10}
+                        step={0.05}
+                        disabled={readOnly}
+                        commit={(v) => {
+                          const { failureStrain: _f, ...rest } = material.plasticity!;
+                          return setMaterial({
+                            ...material,
+                            plasticity: v > 0 ? { ...rest, failureStrain: v } : rest,
+                          });
+                        }}
+                      />,
+                    )}
                 </>
               )}
             </fieldset>
@@ -1325,7 +2591,19 @@ export function SimulationSurface({
                 <>
                   <p>
                     <strong>{study.name}</strong>{' '}
-                    {study.kind === 'thermal' ? (
+                    {study.kind === 'transient-thermal' ? (
+                      <>
+                        (transient heat): {transientTime(study.transient.endS)} in steps of{' '}
+                        {transientTime(study.transient.stepS)}, {study.constraintIds.length}{' '}
+                        constraint{study.constraintIds.length === 1 ? '' : 's'},{' '}
+                        {study.loadIds.length} heat condition
+                        {study.loadIds.length === 1 ? '' : 's'}
+                        {study.transient.stress
+                          ? ', with the thermal stress of the last field'
+                          : ''}
+                        .
+                      </>
+                    ) : study.kind === 'thermal' ? (
                       <>
                         (steady heat conduction): {study.constraintIds.length} temperature
                         {study.constraintIds.length === 1 ? '' : 's'}, {study.loadIds.length} heat
@@ -1336,6 +2614,40 @@ export function SimulationSurface({
                         (wind tunnel): the air past the analysed bodies at {study.aero.speed} m/s,
                         yaw {study.aero.yawDeg}°; no load, constraint or material. Its coefficients
                         are for reference.
+                      </>
+                    ) : study.kind === 'shower' ? (
+                      <>
+                        (shower): {study.shower.rain ? 'rain' : 'no rain'}
+                        {study.shower.nozzles.length
+                          ? ` and ${study.shower.nozzles.length} nozzle${study.shower.nozzles.length === 1 ? '' : 's'}`
+                          : ''}{' '}
+                        on the analysed bodies, past {studySealCount(doc, study)} seal
+                        {studySealCount(doc, study) === 1 ? '' : 's'}. Its water paths are candidate
+                        places, for reference.
+                      </>
+                    ) : study.kind === 'seal' ? (
+                      <>
+                        (seals): {studySealCount(doc, study)} seal
+                        {studySealCount(doc, study) === 1 ? '' : 's'} measured shut (or opened by
+                        their hinge) against their closures; no load, constraint or material. Its
+                        leaks are candidate places, for reference.
+                      </>
+                    ) : study.kind === 'crash' && study.crash.barrier === 'head' ? (
+                      <>
+                        (head impact): the {study.crash.head?.headform ?? 'adult'} headform into the
+                        analysed bodies’ shells at {study.crash.speedKmh} km/h,{' '}
+                        {study.crash.head?.angleDeg ?? 65}° below the horizontal, for{' '}
+                        {study.crash.endTimeMs} ms; no load or constraint. Its HIC15 is for
+                        reference.
+                      </>
+                    ) : study.kind === 'crash' ? (
+                      <>
+                        (crash test): the analysed bodies’ shells into{' '}
+                        {study.crash.barrier === 'pole'
+                          ? `a ${study.crash.pole?.diameterMm ?? 254} mm pole at ${study.crash.pole?.angleDeg ?? 75}°`
+                          : 'a full-width rigid wall'}{' '}
+                        at {study.crash.speedKmh} km/h for {study.crash.endTimeMs} ms; no load or
+                        constraint. Its measures are for reference.
                       </>
                     ) : study.kind === 'modal' ? (
                       <>
@@ -1352,46 +2664,136 @@ export function SimulationSurface({
                       </>
                     )}
                   </p>
-                  {study.kind !== 'thermal' && study.kind !== 'aero' && (
-                    <>
-                      <label className="simulation-field">
-                        <span>
-                          Idealisation <small>of the part</small>
-                        </span>
-                        <select
-                          aria-label="Idealisation"
-                          value={study.idealisation ?? 'solid'}
-                          disabled={readOnly}
-                          onChange={(e) => {
-                            const value = e.currentTarget.value as 'solid' | 'shell';
-                            const { idealisation: _idealisation, ...rest } = study;
-                            run({
-                              type: 'updateStudy',
-                              study: value === 'shell' ? { ...rest, idealisation: 'shell' } : rest,
-                            });
-                          }}
-                        >
-                          <option value="solid">Solid (tetrahedra)</option>
-                          <option value="shell">Shell on the midsurface</option>
-                        </select>
-                      </label>
-                      {study.idealisation === 'shell' && (
-                        <p className="simulation-note">
-                          A shell is solved on the midsurface the CAD history gives a wall of one
-                          thickness (a shell, a thickened sheet or a thin extrude), in the browser.
-                          Pick loads and constraints on the part as usual: a load or a constraint on
-                          either side of the wall acts on the midsurface face, a constraint on a rim
-                          face on its edge. A pinned support holds a shell's translations and leaves
-                          its rotations free.
-                        </p>
-                      )}
-                    </>
+                  {study.kind !== 'thermal' &&
+                    study.kind !== 'aero' &&
+                    study.kind !== 'transient-thermal' &&
+                    study.kind !== 'seal' &&
+                    study.kind !== 'shower' &&
+                    study.kind !== 'crash' && (
+                      <>
+                        <label className="simulation-field">
+                          <span>
+                            Idealisation <small>of the part</small>
+                          </span>
+                          <select
+                            aria-label="Idealisation"
+                            value={study.idealisation ?? 'solid'}
+                            disabled={readOnly}
+                            onChange={(e) => {
+                              const value = e.currentTarget.value as 'solid' | 'shell';
+                              const { idealisation: _idealisation, ...rest } = study;
+                              // VS13b: fatigue is a solid study's only.
+                              const solid =
+                                rest.kind === 'linear-static' && value === 'shell'
+                                  ? (({ fatigue: _fatigue, ...r }) => r)(rest)
+                                  : rest;
+                              run({
+                                type: 'updateStudy',
+                                study:
+                                  value === 'shell' ? { ...solid, idealisation: 'shell' } : rest,
+                              });
+                            }}
+                          >
+                            <option value="solid">Solid (tetrahedra)</option>
+                            <option value="shell">Shell on the midsurface</option>
+                          </select>
+                        </label>
+                        {study.idealisation === 'shell' && (
+                          <p className="simulation-note">
+                            A shell is solved on the midsurface the CAD history gives a wall of one
+                            thickness (a shell, a thickened sheet or a thin extrude), in the
+                            browser. Pick loads and constraints on the part as usual: a load or a
+                            constraint on either side of the wall acts on the midsurface face, a
+                            constraint on a rim face on its edge. A pinned support holds a shell's
+                            translations and leaves its rotations free.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  {study.kind === 'linear-static' &&
+                    // VS13b: fatigue is a single solid's; a sheet is a shell without saying so. A
+                    // study that has a history keeps its controls, so it can be switched off
+                    // after a body is added (Codex on #1284).
+                    (!!study.fatigue ||
+                      (study.idealisation !== 'shell' &&
+                        !study.test &&
+                        !ok?.sheet &&
+                        !(doc.bodies?.length || doc.bonds?.length || doc.spotWelds?.length))) && (
+                      <FatigueSettings
+                        study={study}
+                        disabled={readOnly}
+                        commit={(fatigue) => {
+                          const { fatigue: _old, ...rest } = study;
+                          return run({
+                            type: 'updateStudy',
+                            study: fatigue ? { ...rest, fatigue } : rest,
+                          });
+                        }}
+                      />
+                    )}
+                  {study.kind === 'transient-thermal' && (
+                    <TransientSettings
+                      study={study}
+                      disabled={readOnly}
+                      supported={hasStressSupport(doc)}
+                      commit={(transient) =>
+                        run({
+                          type: 'updateStudy',
+                          study: transientSettingsStudy(doc, study, transient),
+                        })
+                      }
+                    />
                   )}
                   {study.kind === 'aero' && (
                     <AeroSettings
                       study={study}
                       disabled={readOnly}
                       commit={(aero) => run({ type: 'updateStudy', study: { ...study, aero } })}
+                    />
+                  )}
+                  {study.kind === 'shower' && (
+                    <ShowerSettings
+                      study={study}
+                      disabled={readOnly}
+                      commit={(shower) => run({ type: 'updateStudy', study: { ...study, shower } })}
+                    />
+                  )}
+                  {(study.kind === 'seal' || study.kind === 'shower') && (
+                    <SealSettings
+                      study={study}
+                      disabled={readOnly}
+                      commit={(seal) => run({ type: 'updateStudy', study: { ...study, seal } })}
+                    />
+                  )}
+                  {study.kind === 'crash' && (
+                    <CrashSettings
+                      study={study}
+                      disabled={readOnly}
+                      polePlace={(() => {
+                        const b = analysedBounds();
+                        return crashStudyPoints(b?.lo ?? [0, 0, 0], b?.hi ?? [0, 0, 0]).pole;
+                      })()}
+                      headPlace={(() => {
+                        const b = analysedBounds();
+                        return crashStudyPoints(b?.lo ?? [0, 0, 0], b?.hi ?? [0, 0, 0]).head;
+                      })()}
+                      commit={(crash) => {
+                        // VS8b: a head impact measures other metrics than a wall or a pole test:
+                        // the compared ones follow the barrier.
+                        const next = { ...study, crash };
+                        const allowed = metricsOfStudy(next);
+                        const kept = study.convergence.metrics.filter((m) => allowed.includes(m));
+                        return run({
+                          type: 'updateStudy',
+                          study: {
+                            ...next,
+                            convergence: {
+                              ...study.convergence,
+                              metrics: kept.length ? kept : [allowed[0]!],
+                            },
+                          },
+                        });
+                      }}
                     />
                   )}
                   {study.kind === 'modal' &&
@@ -1408,42 +2810,48 @@ export function SimulationSurface({
                         commit={(modes) => run({ type: 'updateStudy', study: { ...study, modes } })}
                       />,
                     )}
-                  {field(
-                    'Mesh levels',
-                    'for convergence',
-                    <NumberInput
-                      label="Convergence mesh levels"
-                      value={study.convergence.levels}
-                      min={1}
-                      max={L.convergenceLevels}
-                      step={1}
-                      disabled={readOnly}
-                      commit={(levels) =>
-                        run({
-                          type: 'updateStudy',
-                          study: { ...study, convergence: { ...study.convergence, levels } },
-                        })
-                      }
-                    />,
-                  )}
-                  {field(
-                    study.kind === 'aero' ? 'Flow steps' : 'Solver iterations',
-                    study.kind === 'aero' ? 'in the browser' : 'at most',
-                    <NumberInput
-                      label="Solver iteration limit"
-                      value={study.solver.maxIterations}
-                      min={1}
-                      max={L.maxIterations}
-                      step={1000}
-                      disabled={readOnly}
-                      commit={(maxIterations) =>
-                        run({
-                          type: 'updateStudy',
-                          study: { ...study, solver: { ...study.solver, maxIterations } },
-                        })
-                      }
-                    />,
-                  )}
+                  {study.kind !== 'seal' &&
+                    study.kind !== 'shower' &&
+                    study.kind !== 'crash' &&
+                    field(
+                      'Mesh levels',
+                      'for convergence',
+                      <NumberInput
+                        label="Convergence mesh levels"
+                        value={study.convergence.levels}
+                        min={1}
+                        max={L.convergenceLevels}
+                        step={1}
+                        disabled={readOnly}
+                        commit={(levels) =>
+                          run({
+                            type: 'updateStudy',
+                            study: { ...study, convergence: { ...study.convergence, levels } },
+                          })
+                        }
+                      />,
+                    )}
+                  {study.kind !== 'seal' &&
+                    study.kind !== 'shower' &&
+                    study.kind !== 'crash' &&
+                    field(
+                      study.kind === 'aero' ? 'Flow steps' : 'Solver iterations',
+                      study.kind === 'aero' ? 'in the browser' : 'at most',
+                      <NumberInput
+                        label="Solver iteration limit"
+                        value={study.solver.maxIterations}
+                        min={1}
+                        max={L.maxIterations}
+                        step={1000}
+                        disabled={readOnly}
+                        commit={(maxIterations) =>
+                          run({
+                            type: 'updateStudy',
+                            study: { ...study, solver: { ...study.solver, maxIterations } },
+                          })
+                        }
+                      />,
+                    )}
                 </>
               ) : (
                 <p className="simulation-note">
@@ -1468,11 +2876,57 @@ export function SimulationSurface({
                 </button>
                 <button
                   type="button"
+                  disabled={readOnly || !transientStudyReady(doc)}
+                  onClick={() => addStudy(defaultTransientStudy(doc))}
+                >
+                  Add transient heat study
+                </button>
+                <button
+                  type="button"
                   disabled={readOnly}
                   onClick={() => addStudy(defaultAeroStudy(doc, analysedLength()))}
                 >
                   Add wind tunnel
                 </button>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => addStudy(defaultCrashStudy(doc, 'wall', analysedBounds()))}
+                >
+                  Add frontal crash
+                </button>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => addStudy(defaultCrashStudy(doc, 'pole', analysedBounds()))}
+                >
+                  Add pole crash
+                </button>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => addStudy(defaultCrashStudy(doc, 'head', analysedBounds()))}
+                >
+                  Add head impact
+                </button>
+                {!!doc.seals?.length && (
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => addStudy(defaultSealStudy(doc))}
+                  >
+                    Add seal study
+                  </button>
+                )}
+                {!!doc.seals?.length && (
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => addStudy(defaultShowerStudy(doc))}
+                  >
+                    Add shower
+                  </button>
+                )}
                 {study && doc.studies.length > 1 && (
                   <button
                     type="button"
@@ -1490,6 +2944,22 @@ export function SimulationSurface({
                 </p>
               )}
             </fieldset>
+            {!!doc.seals?.length && (
+              <fieldset className="simulation-group">
+                <legend>Seals</legend>
+                <ul className="simulation-seals">
+                  {doc.seals.map((seal) => (
+                    <SealEditor
+                      key={seal.id}
+                      seal={seal}
+                      sourceBody={doc.source.bodyId}
+                      disabled={readOnly}
+                      commit={(next) => run({ type: 'updateSeal', seal: next })}
+                    />
+                  ))}
+                </ul>
+              </fieldset>
+            )}
             {runner && (
               <RunPanel
                 study={study}
@@ -1508,10 +2978,20 @@ export function SimulationSurface({
                 host={runner.host}
                 startOnHost={
                   // R3j-5a/5b: shells and bonded bodies too; R3j-5c: modal studies too.
-                  // VS4b: a wind tunnel on a Host that has one.
+                  // VS4b: a wind tunnel on a Host that has one. VS11d-3: a transient study without
+                  // radiation between faces, stepped backward Euler.
                   runner.host &&
                   study &&
                   study.kind !== 'thermal' &&
+                  (study.kind !== 'transient-thermal' ||
+                    (study.transient.theta === 1 &&
+                      !study.loadIds.some(
+                        (id) => doc.loads.find((l) => l.id === id)?.kind === 'enclosure',
+                      ))) &&
+                  study.kind !== 'seal' &&
+                  study.kind !== 'shower' &&
+                  // VS8a: a crash on a Host that runs them.
+                  (study.kind !== 'crash' || runner.host.crash) &&
                   (study.kind !== 'aero' || runner.host.aero)
                     ? () => startRun(true)
                     : undefined
@@ -1543,7 +3023,16 @@ export function SimulationSurface({
                           solver: runner.host.aero.solverBuild,
                         },
                     ]
-                  : [runner?.builds, runner?.host?.builds]
+                  : study?.kind === 'crash'
+                    ? [
+                        runner?.builds,
+                        runner?.host?.builds &&
+                          runner.host.crash && {
+                            ...runner.host.builds,
+                            solver: runner.host.crash.solverBuild,
+                          },
+                      ]
+                    : [runner?.builds, runner?.host?.builds]
               }
               apply={run}
             />
@@ -1600,6 +3089,39 @@ export function SimulationSurface({
               }
               error={resultError}
             />
+            {crashFields && study?.kind === 'crash' && lastRun?.run.studyId === study.id && (
+              <CrashResultPanel
+                fields={crashFields}
+                bodyName={bodyName}
+                field={display.field}
+                setField={(id) => {
+                  display.setField(id);
+                  setShowing(true);
+                }}
+                canvas={() => viewHost.current?.querySelector('canvas') ?? undefined}
+                studyName={study.name}
+              />
+            )}
+            {frames && frames.length > 0 && !imported && (
+              <label className="simulation-field">
+                <span>
+                  Water at{' '}
+                  <small>
+                    {frames[shownFrame ?? frames.length - 1]!.timeS.toFixed(2)} s of{' '}
+                    {frames.at(-1)!.timeS.toFixed(2)} s
+                  </small>
+                </span>
+                <input
+                  type="range"
+                  aria-label="Water frame"
+                  min={0}
+                  max={frames.length - 1}
+                  step={1}
+                  value={shownFrame ?? frames.length - 1}
+                  onChange={(e) => setFrame(Number(e.currentTarget.value))}
+                />
+              </label>
+            )}
             {error && (
               <p className="simulation-error" role="alert">
                 Not applied: {error}
@@ -1661,10 +3183,18 @@ function BodiesPanel({
     const b = solved?.find((x) => x.bodyId === bodyId);
     return b ? `; solved as ${solvedLabel(b)}` : '';
   };
+  // VS7b: a crash test is always of shells.
   const studyIdealisation =
-    study && study.kind !== 'thermal' && study.kind !== 'aero'
-      ? (study.idealisation ?? 'solid')
-      : 'solid';
+    study?.kind === 'crash'
+      ? 'shell'
+      : study &&
+          study.kind !== 'thermal' &&
+          study.kind !== 'aero' &&
+          study.kind !== 'transient-thermal' &&
+          study.kind !== 'seal' &&
+          study.kind !== 'shower'
+        ? (study.idealisation ?? 'solid')
+        : 'solid';
   const materialName = (id: string | null) =>
     doc.materials.find((m) => m.id === id)?.name ?? 'no material';
   /** Chooses a material (an existing one, or a preset added in the same edit) for a body. */
@@ -1884,7 +3414,14 @@ function BondsPanel({
 }) {
   const [tolerance, setTolerance] = useState(bondToleranceDefault);
   const studyShell =
-    !!study && study.kind !== 'thermal' && study.kind !== 'aero' && study.idealisation === 'shell';
+    study?.kind === 'crash' ||
+    (!!study &&
+      study.kind !== 'thermal' &&
+      study.kind !== 'aero' &&
+      study.kind !== 'transient-thermal' &&
+      study.kind !== 'seal' &&
+      study.kind !== 'shower' &&
+      study.idealisation === 'shell');
   const shellOf = (bodyId: string) => {
     // CR5e (Codex on #977): a sheet is a shell whatever the study says, as the run solves it.
     if (bodies.get(bodyId)?.sheet) return true;
@@ -2389,6 +3926,7 @@ function ConditionItem({
   run,
   retarget,
   remove,
+  setAmplitude,
 }: {
   item: SimulationLoad | SimulationConstraint;
   collection: 'loads' | 'constraints';
@@ -2399,6 +3937,8 @@ function ConditionItem({
   run(op: SimulationOperation): string | undefined;
   retarget(): void;
   remove(collection: 'loads' | 'constraints'): void;
+  /** VS11d-2: sets the item's amplitude from its text (empty clears it); the reason when refused. */
+  setAmplitude(text: string): string | undefined;
 }) {
   const count = 'targets' in item ? item.targets.length : 0;
   const L = simulationLimits;
@@ -2535,6 +4075,46 @@ function ConditionItem({
           )}
         </>
       )}
+      {item.kind === 'radiation' &&
+        field(
+          'Ambient',
+          'K, the surroundings it sees',
+          <NumberInput
+            label={`${item.name} ambient temperature (K)`}
+            value={item.ambient}
+            min={0}
+            max={L.temperatureK}
+            step={1}
+            disabled={readOnly}
+            commit={(ambient) => run({ type: 'updateLoad', load: { ...item, ambient } })}
+          />,
+        )}
+      {(item.kind === 'radiation' || item.kind === 'enclosure') &&
+        field(
+          'Emissivity',
+          '0–1',
+          <NumberInput
+            label={`${item.name} emissivity`}
+            value={item.emissivity}
+            min={0}
+            max={1}
+            step={0.05}
+            disabled={readOnly}
+            commit={(emissivity) => run({ type: 'updateLoad', load: { ...item, emissivity } })}
+          />,
+        )}
+      {(item.kind === 'temperature' || item.kind === 'heat-flux' || item.kind === 'convection') &&
+        field(
+          'Amplitude',
+          's:× pairs, transient studies only',
+          <AmplitudeInput
+            label={`${item.name} amplitude`}
+            value={formatAmplitude(item.amplitude)}
+            disabled={readOnly}
+            signed={item.kind === 'heat-flux'}
+            commit={setAmplitude}
+          />,
+        )}
       {!readOnly && (
         <div className="simulation-actions">
           {'targets' in item && (

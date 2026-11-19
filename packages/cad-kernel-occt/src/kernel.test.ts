@@ -15,6 +15,10 @@ import {
   f10Expressions,
   f11Area,
   f11Bracket,
+  f150LugTargets,
+  measureDesignTargets,
+  f157SightChecks,
+  measureSightChecks,
   f11OnPlate,
   f11Region,
   f15Loft,
@@ -129,6 +133,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { evaluateGeometry } from '@editor-platform/geometry-kernel-occt';
 import { checkClosedMesh, stepReport, writeStl } from './formats';
 import { CadEvaluationCancelled, evaluateCad, FeatureCache, PlacementCache } from './evaluator';
+import { optimalBounds } from './bounds';
 import { createKernelHost, kernelLoadMarks, loadVerifiedBuild } from './host';
 import type {
   CadFaceDistanceQuery,
@@ -233,6 +238,109 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     });
     await handle({ type: 'init', build: { buildHash, moduleUrl: '', wasmUrl: '' } });
   }, 300_000);
+
+  it("gives a BRep export's box as the union of its bodies' boxes, as measured on the file (#1250)", async () => {
+    // TS-2469: two spheres apart; the box once measured on the written compound.
+    const a = sphere('a', 5, 0);
+    const b = sphere('b', 3, 40);
+    const doc = pinned(
+      applyCadOperation(a, {
+        type: 'insertFeatures',
+        parameters: [],
+        profiles: [],
+        features: b.features.filter((f) => f.type !== 'transform'),
+        bodies: [
+          {
+            id: 'b-body',
+            name: 'b',
+            sourceFeatureId: 'b',
+            placementFeatureId: 'b-placement',
+            appearance: { color: '#9aa4b1', opacity: 1 },
+          },
+        ],
+      }),
+    );
+    await handle({
+      type: 'evaluate',
+      requestId: 'two-brep',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(doc),
+      document: doc,
+      brep: true,
+    });
+    const written = posted.find(
+      (m) => 'requestId' in m && m.requestId === 'two-brep' && m.type !== 'progress',
+    )!;
+    if (written.type !== 'result' || !written.brep) throw new Error(JSON.stringify(written));
+    oc.FS.writeFile('/two.brep', written.brep.bytes);
+    const read = new oc.TopoDS_Shape();
+    oc.BRepTools.Read_2(read, '/two.brep', new oc.BRep_Builder(), new oc.Message_ProgressRange_1());
+    oc.FS.unlink('/two.brep');
+    const box = new oc.Bnd_Box_1();
+    oc.BRepBndLib.AddOptimal(read, box, false, false);
+    const [min, max] = [box.CornerMin(), box.CornerMax()];
+    const measured = [
+      [min.X(), min.Y(), min.Z()],
+      [max.X(), max.Y(), max.Z()],
+    ];
+    written.brep.bounds.flat().forEach((v, i) => expect(v).toBeCloseTo(measured.flat()[i]!, 9));
+    expect(written.brep.bounds[0][0]).toBeCloseTo(-5, 6);
+    expect(written.brep.bounds[1][0]).toBeCloseTo(43, 6);
+  });
+
+  it('finds the optimal box face by face, the same as the whole computation (TS-2471)', async () => {
+    // #1265: optimalBounds only measures the faces that can reach an extent.
+    const shapes: [string, unknown][] = [];
+    shapes.push(['box', new oc.BRepPrimAPI_MakeBox_2(10, 20, 30).Shape()]);
+    const turn = new oc.gp_Trsf_1();
+    turn.SetRotation_1(new oc.gp_Ax1_2(new oc.gp_Pnt_3(1, 2, 3), new oc.gp_Dir_4(1, 2, 2)), 0.7);
+    const turned = (shape: unknown) => new oc.BRepBuilderAPI_Transform_2(shape, turn, true).Shape();
+    shapes.push(['turned cylinder', turned(new oc.BRepPrimAPI_MakeCylinder_1(4, 25).Shape())]);
+    shapes.push(['turned sphere', turned(new oc.BRepPrimAPI_MakeSphere_1(7).Shape())]);
+    // A B-spline solid: the spline sketch's extrusion, read back from its BRep.
+    const doc = pinned(f16Spline());
+    await handle({
+      type: 'evaluate',
+      requestId: 'ts-2471',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(doc),
+      document: doc,
+      brep: true,
+    });
+    const written = posted.find(
+      (m) => 'requestId' in m && m.requestId === 'ts-2471' && m.type !== 'progress',
+    )!;
+    if (written.type !== 'result' || !written.brep) throw new Error(JSON.stringify(written));
+    oc.FS.writeFile('/ts2471.brep', written.brep.bytes);
+    const spline = new oc.TopoDS_Shape();
+    oc.BRepTools.Read_2(
+      spline,
+      '/ts2471.brep',
+      new oc.BRep_Builder(),
+      new oc.Message_ProgressRange_1(),
+    );
+    oc.FS.unlink('/ts2471.brep');
+    shapes.push(['spline extrusion', turned(spline)]);
+    // A free edge beside a face takes the whole computation.
+    const compound = new oc.TopoDS_Compound();
+    const builder = new oc.BRep_Builder();
+    builder.MakeCompound(compound);
+    builder.Add(compound, new oc.BRepPrimAPI_MakeBox_2(1, 1, 1).Shape());
+    builder.Add(
+      compound,
+      new oc.BRepBuilderAPI_MakeEdge_3(new oc.gp_Pnt_3(5, 5, 5), new oc.gp_Pnt_3(9, -3, 2)).Edge(),
+    );
+    shapes.push(['box and free edge', compound]);
+    for (const [name, shape] of shapes) {
+      const box = new oc.Bnd_Box_1();
+      oc.BRepBndLib.AddOptimal(shape, box, false, false);
+      const [min, max] = [box.CornerMin(), box.CornerMax()];
+      const whole = [min.X(), min.Y(), min.Z(), max.X(), max.Y(), max.Z()];
+      expect(optimalBounds(oc, shape, (x) => x).flat(), name).toEqual(whole);
+    }
+  });
 
   it('writes the active bodies as one BRep that the geometry kernel reads back (R2c-3c-3b)', async () => {
     const doc = pinned(f02Plate());
@@ -4713,7 +4821,6 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
       'reject-truncated.step': 'step-unreadable',
       'reject-two-shells.step': 'step-multiple-shells',
       'reject-two-solids.step': 'step-multiple-solids',
-      'reject-free-face.step': 'step-not-single-solid',
       'reject-tolerance-wide.step': 'step-tolerance-unsupported',
       'reject-unit-mile.step': 'step-unit-unknown',
     };
@@ -4725,6 +4832,158 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     // The kernel's own reading of a widened tolerance, not a fixed message: past 1 mm (#820).
     const wide = await importFile('wide', corpus('reject-tolerance-wide.step'));
     expect(wide.status === 'rejected' && Number(wide.detail)).toBeGreaterThan(1);
+  });
+
+  it('imports the solid and the shell beside it as a second, sheet body (#848, ST-219)', async () => {
+    // TS-2460: the box with a loose face beside it. STEP writes the face as an open shell.
+    const result = await importFile('free-shell', corpus('reject-free-face.step'));
+    if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail ?? ''}`);
+    const { report } = result;
+    expect(report.body.kind).toBe('solid');
+    expect(solid(report.body).volumeMm3).toBeCloseTo(1000, 6);
+    expect(report.sheet).toMatchObject({ faces: 1, body: { kind: 'sheet', freeEdges: 4 } });
+    expect(report.sheet!.body.areaMm2).toBeGreaterThan(0);
+    expect(report.sheet!.body.shells).toBeUndefined();
+    // Each body records its own tolerance (the box is exact; the face as read).
+    expect(report.sheet!.maxToleranceMm).toBeGreaterThan(0);
+    expect(report.maxToleranceMm).toBeLessThanOrEqual(1e-4);
+    expect(report.sheet!.brep.byteLength).toBe(result.sheetBrep!.byteLength);
+    // Each BRep holds its own part: the solid alone, and the shell without a solid.
+    const shapeOf = (bytes: Uint8Array) => {
+      oc.FS.writeFile('/free-shell.brep', bytes);
+      const read = new oc.TopoDS_Shape();
+      oc.BRepTools.Read_2(
+        read,
+        '/free-shell.brep',
+        new oc.BRep_Builder(),
+        new oc.Message_ProgressRange_1(),
+      );
+      oc.FS.unlink('/free-shell.brep');
+      const n = (kind: string) => {
+        let k = 0;
+        for (
+          const ex = new oc.TopExp_Explorer_2(
+            read,
+            oc.TopAbs_ShapeEnum[kind],
+            oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+          );
+          ex.More();
+          ex.Next()
+        )
+          k++;
+        return k;
+      };
+      return { solids: n('TopAbs_SOLID'), shells: n('TopAbs_SHELL'), faces: n('TopAbs_FACE') };
+    };
+    expect(shapeOf(result.brep)).toEqual({ solids: 1, shells: 1, faces: 6 });
+    expect(shapeOf(result.sheetBrep!)).toEqual({ solids: 0, shells: 1, faces: 1 });
+    // A file without free shells has no second body.
+    const plain = await importFile('plain', corpus('normal-mm-plate.step'));
+    expect(plain.status === 'ok' && (plain.report.sheet ?? plain.sheetBrep)).toBeUndefined();
+  });
+
+  it('leaves out curves beside the solid and reports them (#848, ST-219)', async () => {
+    // TS-2463: a box and a line beside it in one product (JAMA J-CA-27/34 carry wireframe and
+    // construction curves). The solid is imported, the line is named as not kept.
+    const compound = new oc.TopoDS_Compound();
+    const builder = new oc.BRep_Builder();
+    builder.MakeCompound(compound);
+    builder.Add(compound, new oc.BRepPrimAPI_MakeBox_2(10, 10, 10).Shape());
+    builder.Add(
+      compound,
+      new oc.BRepBuilderAPI_MakeEdge_3(new oc.gp_Pnt_3(20, 0, 0), new oc.gp_Pnt_3(30, 0, 0)).Edge(),
+    );
+    // One product, not an assembly of the box and the line.
+    const assembly = oc.OCJS.staticInteger('write.step.assembly');
+    oc.OCJS.setStaticInteger('write.step.assembly', 0);
+    const writer = new oc.STEPControl_Writer_1();
+    writer.Transfer(
+      compound,
+      oc.STEPControl_StepModelType.STEPControl_AsIs,
+      true,
+      new oc.Message_ProgressRange_1(),
+    );
+    writer.Write('/wire.step');
+    oc.OCJS.setStaticInteger('write.step.assembly', assembly);
+    const bytes = oc.FS.readFile('/wire.step') as Uint8Array;
+    oc.FS.unlink('/wire.step');
+    const result = await importFile('wire', bytes);
+    if (result.status !== 'ok') throw new Error(`${result.code} ${result.detail ?? ''}`);
+    expect(solid(result.report.body).volumeMm3).toBeCloseTo(1000, 6);
+    expect(result.report.sheet).toBeUndefined();
+    expect(result.report.losses).toContain('wireframe');
+    const plain = await importFile('plain-wire', corpus('normal-mm-plate.step'));
+    expect(plain.status === 'ok' && plain.report.losses).not.toContain('wireframe');
+  });
+
+  it('evaluates an imported sheet of several separate shells (#848, ST-219)', async () => {
+    // TS-2461: the two open boxes apart, as one imported sheet body. Other sheet features still
+    // give one connected shell (`sheet-disconnected`, unchanged).
+    oc.FS.writeFile('/two.step', corpus('reject-two-shells.step'));
+    const reader = new oc.STEPControl_Reader_1();
+    reader.ReadFile('/two.step');
+    reader.TransferRoots(new oc.Message_ProgressRange_1());
+    oc.BRepTools.Write_3(reader.OneShape(), '/two.brep', new oc.Message_ProgressRange_1());
+    const brep = oc.FS.readFile('/two.brep') as Uint8Array;
+    oc.FS.unlink('/two.step');
+    oc.FS.unlink('/two.brep');
+    const sha = `sha256:${createHash('sha256').update(brep).digest('hex')}`;
+    const doc = pinned(
+      applyCadOperation(f01Empty(), {
+        type: 'insertImportedBody',
+        assets: [
+          {
+            id: 's',
+            kind: 'source-step',
+            sha256: sha,
+            byteLength: brep.byteLength,
+            mediaType: 'model/step',
+          },
+          {
+            id: 'b',
+            kind: 'normalized-brep',
+            sha256: sha,
+            byteLength: brep.byteLength,
+            mediaType: 'model/x-occt-brep',
+          },
+        ],
+        feature: {
+          id: 'imp',
+          name: 'shells',
+          type: 'imported',
+          inputFeatureIds: [],
+          args: {
+            kind: 'sheet',
+            sourceAssetId: 's',
+            brepAssetId: 'b',
+            importer: { id: 'dev', buildHash },
+            sourceUnit: 'mm',
+            scaleToMm: 1,
+          },
+        },
+        body: {
+          id: 'shells',
+          name: 'shells',
+          sourceFeatureId: 'imp',
+          placementFeatureId: 'imp-placement',
+          appearance: { color: '#8899aa', opacity: 1 },
+        },
+      }),
+    );
+    await handle({
+      type: 'evaluate',
+      requestId: 'two-shells',
+      generation: 1,
+      baseHash: '',
+      candidateHash: cadContentHash(doc),
+      document: doc,
+      assets: { [sha]: brep },
+    });
+    const m = posted.find(
+      (x) => 'requestId' in x && x.requestId === 'two-shells' && x.type !== 'progress',
+    );
+    if (m?.type !== 'result' || m.evaluation.status !== 'ok') throw new Error(JSON.stringify(m));
+    expect(m.evaluation.bodies.shells).toMatchObject({ kind: 'sheet', shells: 2 });
   });
 
   it('reads F43 PMI with the XDE reader and matches the values written by another OCCT (PMI-1, CAD80)', async () => {
@@ -6818,6 +7077,73 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     expect(sag(fine)).toBeLessThan(sag(before) / 2);
     // The display evaluation that follows is the display one, not the render's (no cache kept it).
     expect(after.meshes).toEqual(before.meshes);
+  });
+
+  // PD1 (docs/cad/product-design.md, PD1): F150's targets on the kernel's evaluation and display
+  // meshes. ST-750, TS-2504.
+  it('measures F150: the lugs fail at 11.2 mm and pass at 16 mm, the case inside its size and mass', async () => {
+    const measured = async (gap: number) => {
+      const doc = pinned(f150LugTargets(undefined, gap));
+      const r = await evaluate(`f150-${gap}`, doc);
+      if (r.type !== 'result' || r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r));
+      const meshes = r.meshes.map((m) => {
+        const points = new Float64Array(m.positions.length);
+        for (let i = 0; i < points.length; i++) points[i] = m.positions[i]! + m.origin[i % 3]!;
+        return { bodyId: m.bodyId, points, indices: m.indices };
+      });
+      return Object.fromEntries(
+        measureDesignTargets(doc, { meshes, bodies: r.evaluation.bodies }).map((x) => [x.id, x]),
+      );
+    };
+    const first = await measured(11.2);
+    expect(first['lug-width']!.status).toBe('fail');
+    expect(first['lug-width']!.value).toBeCloseTo(11.2, 6);
+    // The cylinder's box from its tessellation: its diameter within the mesh's sag.
+    expect(first['case-diameter']!.value).toBeGreaterThan(39.9);
+    expect(first['case-diameter']!.value).toBeLessThanOrEqual(40 + 1e-9);
+    expect(first['case-diameter']!.status).toBe('pass');
+    // π·20²·10 mm³ of steel at 8,000 kg/m³: 0.1005 kg.
+    expect(first['case-mass']!.value).toBeCloseTo(Math.PI * 400 * 10 * 8000 * 1e-9, 6);
+    expect(first['case-mass']!.status).toBe('pass');
+    const fixed = await measured(16);
+    expect(fixed['lug-width']!.value).toBeCloseTo(16, 6);
+    expect(fixed['lug-width']!.status).toBe('pass');
+  });
+
+  // PD7 (docs/cad/product-design.md, PD7 見え方の検査): F157's sight checks on the kernel's
+  // display meshes. ST-769, TS-2554.
+  it('measures F157: pillars hide a few degrees from both eyes, half the balance shows, the lamp turns 18°', async () => {
+    const doc = pinned(f157SightChecks());
+    const r = await evaluate('f157', doc);
+    if (r.type !== 'result' || r.evaluation.status !== 'ok') throw new Error(JSON.stringify(r));
+    const meshes = r.meshes.map((m) => {
+      const points = new Float64Array(m.positions.length);
+      for (let i = 0; i < points.length; i++) points[i] = m.positions[i]! + m.origin[i % 3]!;
+      return { bodyId: m.bodyId, points, indices: m.indices };
+    });
+    const got = Object.fromEntries(measureSightChecks(doc, { meshes }).map((x) => [x.id, x]));
+    // The left pillar's corners seen from each eye (x ahead, y left): the overlap of the two.
+    const deg = (y: number, x: number) => (Math.atan2(y, x) * 180) / Math.PI;
+    const span = (ey: number) => {
+      const a = [700, 760].flatMap((x) => [600, 660].map((y) => deg(y - ey, x)));
+      return [Math.min(...a), Math.max(...a)];
+    };
+    const [a0, a1] = span(32.5);
+    const [b0, b1] = span(-32.5);
+    const both = Math.min(a1!, b1!) - Math.max(a0!, b0!);
+    for (const id of ['pillar-left', 'pillar-right']) {
+      expect(Math.abs(got[id]!.value! - both)).toBeLessThanOrEqual(0.2);
+      expect(got[id]!.status).toBe('pass');
+      expect(got[id]!.value!).toBeLessThan(Math.min(...got[id]!.perEye!));
+    }
+    // The bridge's edge is in the plane through the eye: half the face, within the triangles
+    // that straddle it.
+    expect(Math.abs(got['balance-seen']!.value! - 0.5)).toBeLessThanOrEqual(0.05);
+    expect(got['balance-seen']!.status).toBe('pass');
+    const edge = deg(1, 3);
+    expect(got['lamp-right']!.value!).toBeLessThanOrEqual(edge);
+    expect(got['lamp-right']!.value!).toBeGreaterThan(edge - 0.11);
+    expect(got['lamp-right']!.status).toBe('fail');
   });
 });
 

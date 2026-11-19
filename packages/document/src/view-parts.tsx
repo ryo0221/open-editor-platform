@@ -134,15 +134,18 @@ export function toolButtonFor(readOnly: boolean): ToolButton {
 }
 
 export function documentStatus(
-  textMetrics: { words: number; characters: number },
+  textMetrics: { words: number; characters: number; cjkCharacters?: number },
   content: DocumentContent,
   readOnly: boolean,
 ) {
   return (
     <>
       <span>
-        {textMetrics.words} words · {textMetrics.characters} characters · {content.blocks.length}{' '}
-        blocks
+        {/* Mostly Japanese, Chinese or Korean text is measured in characters, not words. */}
+        {(textMetrics.cjkCharacters ?? 0) * 2 > textMetrics.characters
+          ? ''
+          : `${textMetrics.words} words · `}
+        {textMetrics.characters} characters · {content.blocks.length} blocks
       </span>
       <span className="ep-spacer" />
       <span>{readOnly ? 'Read only' : 'Rich text · / to insert'}</span>

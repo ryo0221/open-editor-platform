@@ -3,6 +3,9 @@
  * so schema 1 is not read. Pure data: no functions, typed arrays, URLs or Wasm handles.
  */
 import type { CadProportions } from './proportions';
+import type { CadDesignTarget } from './design-targets';
+import type { CadSightCheck } from './sight-checks';
+import type { CadToleranceStack } from './tolerance-stacks';
 import type {
   CadComponent,
   CadComponentPattern,
@@ -25,6 +28,7 @@ import type { CadSketch, CadSketchRegion } from './sketch';
 import type { CadTopologyRef } from './topology';
 import type { CadProfileKind } from './profile-section';
 import type { CadSpurGearArgs } from './gear';
+import type { CadSpringArgs } from './spring';
 
 export type Length =
   | { literalMm: number }
@@ -168,6 +172,15 @@ export type CadFeature =
       type: 'spurGear';
       inputFeatureIds: [];
       args: CadSpurGearArgs;
+    })
+  | (FeatureBase & {
+      /**
+       * PD5 (docs/cad/product-design.md): a coil spring (its wire swept along a helix) or a spiral
+       * spring (a flat strip along an Archimedean spiral), with textbook estimates (`spring.ts`).
+       */
+      type: 'spring';
+      inputFeatureIds: [];
+      args: CadSpringArgs;
     })
   | (FeatureBase & {
       type: 'extrude';
@@ -800,6 +813,12 @@ export interface CadDocument {
   gearMeshes?: CadGearMesh[];
   /** CLF3 (docs/cad/car-look-process.md): the car's proportion setup (CLF-U2). */
   proportions?: CadProportions;
+  /** PD1 (docs/cad/product-design.md): design targets, 1–256 when present. */
+  designTargets?: CadDesignTarget[];
+  /** PD7 (docs/cad/product-design.md): sight checks, 1–64 when present. */
+  sightChecks?: CadSightCheck[];
+  /** PD3 (docs/cad/product-design.md): tolerance stacks, 1–64 when present. */
+  toleranceStacks?: CadToleranceStack[];
 }
 export interface CadDiagnostic {
   code: string;
@@ -844,13 +863,14 @@ export const cadLimits = Object.freeze({
   jsonDepth: 32,
   /** D2 asset limits per document (model.md); the Host's total admission comes first. */
   assets: 128,
-  stepBytes: 64 * 1024 * 1024,
+  /** #1250 (Ryo, 2026-11-15): 256 MiB read and written; was 64 MiB (CR7f). */
+  stepBytes: 256 * 1024 * 1024,
   brepBytes: 32 * 1024 * 1024,
   /**
    * CR7f: an imported part version keeps the whole STEP file and its own BRep, so the total fits
    * a STEP file and a BRep at their limits.
    */
-  assetBytes: 96 * 1024 * 1024,
+  assetBytes: 288 * 1024 * 1024,
 });
 /** Tools one Boolean applies at once (docs/cad/r1-modeling.md, 上限). */
 export const cadBooleanTools = 256;

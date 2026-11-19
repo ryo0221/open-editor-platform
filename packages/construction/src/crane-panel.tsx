@@ -10,9 +10,11 @@ import {
   type Lift,
 } from '@editor-platform/construction-core';
 import {
+  formatClimbs,
   formatLoadChart,
   formatPlanList,
   nextLiftId,
+  parseClimbs,
   parseLoadChart,
   parsePlanList,
   parsePoint3,
@@ -89,6 +91,9 @@ export function CranePanel({
   const liftCraneId = cranes.some((c) => c.id === liftCrane) ? liftCrane : cranes[0]?.id;
   const liftTaskId = buildTasks.some((t) => t.id === liftTask) ? liftTask : buildTasks[0]?.id;
   const [pick, setPick] = useState('');
+  // TT3: the truck route that brings the pieces of the lifts added next ('' for none).
+  const [liftRoute, setLiftRoute] = useState('');
+  const delivering = (site?.routes ?? []).filter((r) => r.kind === 'truck' && r.delivers);
   const add = () => {
     if (held()) return;
     const from = doc.tasks[0];
@@ -140,7 +145,18 @@ export function CranePanel({
     for (const e of t.elementIds) {
       if (lifted.has(e) || !liftable(e)) continue;
       const id = nextLiftId(e, ids);
-      ops.push({ type: 'putLift', lift: { id, craneId: c, taskId: t.id, elementId: e, pick: p } });
+      const routeId = delivering.some((r) => r.id === liftRoute) ? liftRoute : undefined;
+      ops.push({
+        type: 'putLift',
+        lift: {
+          id,
+          craneId: c,
+          taskId: t.id,
+          elementId: e,
+          pick: p,
+          ...(routeId ? { routeId } : {}),
+        },
+      });
     }
     if (!ops.length) return setError(`${t.name || t.id} has no element left to lift.`);
     run(ops);
@@ -245,6 +261,22 @@ export function CranePanel({
               onChange={(e) => setPick(e.target.value)}
             />
           </Field>
+          {delivering.length > 0 && (
+            <Field label="Brought by">
+              <select
+                aria-label="Lift delivery"
+                value={liftRoute}
+                onChange={(e) => setLiftRoute(e.target.value)}
+              >
+                <option value="">Already on site</option>
+                {delivering.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name || r.id}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <button type="button" onClick={addLifts}>
             Add lifts for task
           </button>
@@ -309,6 +341,7 @@ function CraneForm({
   const [from, setFrom] = useState(crane.fromTaskId);
   const [until, setUntil] = useState(crane.untilTaskId ?? '');
   const [mass, setMass] = useState(crane.massKg?.toString() ?? '');
+  const [climbs, setClimbs] = useState(formatClimbs(crane.climbs ?? []));
   const [problem, setProblem] = useState('');
   const dirty =
     name !== crane.name ||
@@ -321,7 +354,8 @@ function CraneForm({
     chart !== formatLoadChart(crane.loadChart) ||
     from !== crane.fromTaskId ||
     until !== (crane.untilTaskId ?? '') ||
-    mass !== (crane.massKg?.toString() ?? '');
+    mass !== (crane.massKg?.toString() ?? '') ||
+    climbs !== formatClimbs(crane.climbs ?? []);
   useDirty(report, dirty);
   const number = (v: string, what: string) => {
     if (!/^[+-]?\d+(\.\d+)?$/.test(v.trim())) throw new Error(`${what} must be a number`);
@@ -344,6 +378,8 @@ function CraneForm({
             throw new Error(typeof at === 'string' ? at : 'The base is one "x, y" point');
           const rows = parseLoadChart(chart);
           if (typeof rows === 'string') throw new Error(rows);
+          const climbRows = parseClimbs(climbs);
+          if (typeof climbRows === 'string') throw new Error(climbRows);
           const next: Crane = {
             id: crane.id,
             name,
@@ -357,6 +393,7 @@ function CraneForm({
             fromTaskId: from,
             ...(until ? { untilTaskId: until } : {}),
             ...(mass.trim() ? { massKg: number(mass, 'Own mass') } : {}),
+            ...(climbRows.length ? { climbs: climbRows } : {}),
           };
           setProblem('');
           // Saved, also as another spelling of the stored values: start again from the stored.
@@ -440,6 +477,14 @@ function CraneForm({
         </Field>
         <Field label="Own mass with counterweight (kg, empty = not known)">
           <input aria-label="Crane mass" value={mass} onChange={(e) => setMass(e.target.value)} />
+        </Field>
+        <Field label="Climbs (task, base height mm, height mm, supports …; one a line)">
+          <textarea
+            aria-label="Crane climbs"
+            rows={3}
+            value={climbs}
+            onChange={(e) => setClimbs(e.target.value)}
+          />
         </Field>
         {problem && <p role="alert">{problem}</p>}
         <button type="submit" className="primary">

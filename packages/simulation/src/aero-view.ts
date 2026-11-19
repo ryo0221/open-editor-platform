@@ -38,6 +38,12 @@ export interface AeroRunFields {
   htc?: Float64Array;
   /** Browser only: the flow, for streamlines and sections. */
   flow?: AeroFlowField;
+  /**
+   * VS12c: the topology face of each triangle in its body, and the bodies in order (`ids`, with
+   * the triangles of each), so the Host's heat transfer maps onto a body's faces (`aeroFaceFilms`).
+   */
+  faces?: Int32Array;
+  bodies?: { ids: string[]; triangles: Uint32Array };
 }
 
 /** From the vehicle frame to the tunnel's (VS4b's `toTunnel`): turned by the yaw, x mirrored. */
@@ -137,7 +143,7 @@ export function nearestSamples(
 }
 
 /** A display mesh of `positions` (world mm) and `indices`, its vertex colours from `values`. */
-function shownMesh(
+export function shownMesh(
   bodyId: string,
   positions: number[],
   indices: number[],

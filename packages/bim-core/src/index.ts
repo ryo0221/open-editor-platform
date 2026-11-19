@@ -46,6 +46,7 @@ export {
   type BimSectionAxes,
 } from './solids';
 export * from './drawing';
+export * from './framing';
 export * from './schedule';
 export * from './mass';
 export * from './operations';

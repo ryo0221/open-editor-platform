@@ -4,8 +4,11 @@ import {
   simulationLimits as L,
   simulationMetrics,
   studyMetrics,
+  headImpactMetrics,
   thermalConstraintKinds,
   thermalLoadKinds,
+  thermalStressConstraintKinds,
+  transientLoadKinds,
   type SimulationDiagnostic,
   type SimulationStudyKind,
   type SimulationDocument,
@@ -141,7 +144,7 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         'retiredIds',
         'overrides',
         'runs',
-        ...(schema2 ? ['bodies', 'bonds', 'masses', 'spotWelds', 'sheets'] : []),
+        ...(schema2 ? ['bodies', 'bonds', 'masses', 'spotWelds', 'sheets', 'seals'] : []),
       ],
     )
   )
@@ -252,7 +255,7 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         m,
         p,
         ['id', 'name', 'model', 'youngsModulus', 'poissonsRatio', 'density'],
-        ['conductivity'],
+        ['conductivity', 'plasticity', 'specificHeat', 'expansion'],
       )
     )
       return;
@@ -266,6 +269,56 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     positive(m.density, `${p}.density`, L.densityMax);
     if (Object.hasOwn(m, 'conductivity'))
       positive(m.conductivity, `${p}.conductivity`, L.conductivity);
+    // VS7b: the flow stress from strain 0, both rising (the stress not falling).
+    if (Object.hasOwn(m, 'plasticity')) {
+      const q = `${p}.plasticity`;
+      const c = m.plasticity;
+      if (!record(c)) add('value', q);
+      else if (keys(c, q, ['strain', 'stress'], ['cowperSymonds', 'failureStrain'])) {
+        const e = list(c.strain, `${q}.strain`, L.plasticityPoints);
+        const f = list(c.stress, `${q}.stress`, L.plasticityPoints);
+        if (
+          !e.length ||
+          e[0] !== 0 ||
+          !e.every((x, k) => finite(x) && x <= 10 && (k === 0 || x > (e[k - 1] as number)))
+        )
+          add('value', `${q}.strain`);
+        if (
+          f.length !== e.length ||
+          !f.every(
+            (x, k) =>
+              finite(x) && x > 0 && x <= L.modulusMPa && (k === 0 || x >= (f[k - 1] as number)),
+          )
+        )
+          add('value', `${q}.stress`);
+        if (Object.hasOwn(c, 'cowperSymonds')) {
+          const r = c.cowperSymonds;
+          if (
+            !record(r) ||
+            !keys(r, `${q}.cowperSymonds`, ['C', 'p']) ||
+            !finite(r.C) ||
+            r.C <= 0 ||
+            r.C > 1e9 ||
+            !finite(r.p) ||
+            r.p <= 0 ||
+            r.p > 100
+          )
+            add('value', `${q}.cowperSymonds`);
+        }
+        if (
+          Object.hasOwn(c, 'failureStrain') &&
+          (!finite(c.failureStrain) || c.failureStrain <= 0 || c.failureStrain > 10)
+        )
+          add('value', `${q}.failureStrain`);
+      }
+    }
+    if (Object.hasOwn(m, 'specificHeat'))
+      positive(m.specificHeat, `${p}.specificHeat`, L.specificHeat);
+    if (
+      Object.hasOwn(m, 'expansion') &&
+      (!finite(m.expansion) || m.expansion < 0 || m.expansion > L.expansion)
+    )
+      add('value', `${p}.expansion`);
   });
   const materialIds = new Set(
     Array.isArray(value.materials) ? value.materials.filter(record).map((m) => m.id as string) : [],
@@ -313,6 +366,29 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     if (!tuple(v, 3) || !v.every((c) => within(c, max))) return add('value', path);
     if (nonzero && Math.hypot(...v) === 0) add('value-zero', path);
   };
+  // VS11d: a factor over time, linear between strictly increasing times.
+  const amplitude = (v: unknown, path: string, nonNegative: boolean) => {
+    if (!record(v)) return add('value', path);
+    if (!keys(v, path, ['times', 'factors'])) return;
+    const t = list(v.times, `${path}.times`, L.amplitudePoints);
+    const f = list(v.factors, `${path}.factors`, L.amplitudePoints);
+    if (!t.length || t.length !== f.length)
+      return add('value', path, 'as many times as factors, one or more');
+    t.forEach((x, k) => {
+      if (!finite(x) || x < 0 || x > L.transientEndS) add('value', `${path}.times[${k}]`);
+      else if (k > 0 && !(x > (t[k - 1] as number)))
+        add('value', `${path}.times[${k}]`, 'times increase');
+    });
+    f.forEach((x, k) => {
+      if (!finite(x) || Math.abs(x) > 1e6 || (nonNegative && x < 0))
+        add('value', `${path}.factors[${k}]`);
+    });
+  };
+  const emissivity = (v: unknown, path: string) => {
+    if (!finite(v) || v <= 0 || v > 1) add('value', path);
+  };
+  /** Items with an amplitude: only a transient study takes them. */
+  const timed = new Set<string>();
   const loadIds = new Set<string>();
   const loadKinds = new Map<string, unknown>();
   const constraintKinds = new Map<string, unknown>();
@@ -331,16 +407,30 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       if (!keys(l, p, ['id', 'name', 'kind', 'acceleration'])) return;
       vec(l.acceleration, `${p}.acceleration`, L.accelerationMmS2, true);
     } else if (l.kind === 'heat-flux') {
-      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'flux'])) return;
+      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'flux'], ['amplitude'])) return;
       targets(l.targets, `${p}.targets`, ['face']);
       if (!within(l.flux, L.heatFlux) || l.flux === 0) add('value', `${p}.flux`);
+      if (Object.hasOwn(l, 'amplitude')) amplitude(l.amplitude, `${p}.amplitude`, false);
     } else if (l.kind === 'convection') {
-      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'coefficient', 'ambient'])) return;
+      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'coefficient', 'ambient'], ['amplitude']))
+        return;
       targets(l.targets, `${p}.targets`, ['face']);
       positive(l.coefficient, `${p}.coefficient`, L.filmCoefficient);
       if (!finite(l.ambient) || l.ambient < 0 || l.ambient > L.temperatureK)
         add('value', `${p}.ambient`);
+      if (Object.hasOwn(l, 'amplitude')) amplitude(l.amplitude, `${p}.amplitude`, true);
+    } else if (l.kind === 'radiation') {
+      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'emissivity', 'ambient'])) return;
+      targets(l.targets, `${p}.targets`, ['face']);
+      emissivity(l.emissivity, `${p}.emissivity`);
+      if (!finite(l.ambient) || l.ambient < 0 || l.ambient > L.temperatureK)
+        add('value', `${p}.ambient`);
+    } else if (l.kind === 'enclosure') {
+      if (!keys(l, p, ['id', 'name', 'kind', 'targets', 'emissivity'])) return;
+      targets(l.targets, `${p}.targets`, ['face']);
+      emissivity(l.emissivity, `${p}.emissivity`);
     } else return add('unsupported-load', `${p}.kind`);
+    if (Object.hasOwn(l, 'amplitude')) timed.add(l.id as string);
     loadKinds.set(l.id as string, l.kind);
     id(l.id, `${p}.id`);
     if (!text(l.name)) add('name', `${p}.name`);
@@ -428,6 +518,71 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     });
   }
 
+  // VS9: seals, each a line and base on one analysed body against a closure on another.
+  const sealIds = new Set<string>();
+  if (Object.hasOwn(value, 'seals')) {
+    const seals = list(value.seals, '$.seals', L.seals);
+    if (!seals.length) add('seals-empty', '$.seals', 'leave seals out when there are none');
+    const sourceBody = record(src) ? src.bodyId : undefined;
+    const bodyOf = (x: unknown) => (record(x) && Object.hasOwn(x, 'body') ? x.body : sourceBody);
+    seals.forEach((s, i) => {
+      const p = `$.seals[${i}]`;
+      if (!record(s)) return add('seal', p);
+      // Known to the studies whatever else is wrong with it: one problem is reported once.
+      if (simulationId(s.id)) sealIds.add(s.id);
+      if (!keys(s, p, ['id', 'name', 'line', 'base', 'mating', 'insetMm', 'section'], ['hinge']))
+        return;
+      id(s.id, `${p}.id`);
+      if (!text(s.name)) add('name', `${p}.name`);
+      targets(s.line, `${p}.line`, ['edge']);
+      targets(s.base, `${p}.base`, ['face']);
+      targets(s.mating, `${p}.mating`, ['face']);
+      const own = [
+        ...(Array.isArray(s.line) ? s.line : []),
+        ...(Array.isArray(s.base) ? s.base : []),
+      ].map(bodyOf);
+      const closure = (Array.isArray(s.mating) ? s.mating : []).map(bodyOf);
+      if (new Set(own).size > 1)
+        add('seal-bodies', `${p}.base`, 'the line and its base are on one body');
+      if (new Set(closure).size > 1) add('seal-bodies', `${p}.mating`, 'the closure is one body');
+      else if (closure.length && own.includes(closure[0]))
+        add('seal-bodies', `${p}.mating`, 'the closure is another body than the line');
+      if (!finite(s.insetMm) || s.insetMm < 0 || s.insetMm > L.sealInsetMm)
+        add('value', `${p}.insetMm`);
+      const sec = s.section;
+      const q = `${p}.section`;
+      if (!record(sec)) add('value', q);
+      else if (keys(sec, q, ['diameterMm', 'compression', 'minBendRadiusMm'])) {
+        positive(sec.diameterMm, `${q}.diameterMm`, L.sealDiameterMm);
+        const c = sec.compression;
+        if (!tuple(c, 2) || !(c[0]! > 0 && c[0]! < c[1]! && c[1]! < 1))
+          add('value', `${q}.compression`, 'two shares 0 < min < max < 1');
+        if (
+          !finite(sec.minBendRadiusMm) ||
+          sec.minBendRadiusMm < 0 ||
+          sec.minBendRadiusMm > L.sealBendRadiusMm
+        )
+          add('value', `${q}.minBendRadiusMm`);
+      }
+      if (Object.hasOwn(s, 'hinge')) {
+        const h = s.hinge;
+        const hp = `${p}.hinge`;
+        if (!record(h)) add('value', hp);
+        else if (keys(h, hp, ['origin', 'axis', 'angleDeg'])) {
+          if (!tuple(h.origin, 3) || !h.origin.every((c) => within(c, L.lengthMm)))
+            add('value', `${hp}.origin`);
+          if (
+            !tuple(h.axis, 3) ||
+            !(Math.hypot(...h.axis) > 1e-9) ||
+            !h.axis.every((c) => within(c, 1e6))
+          )
+            add('value', `${hp}.axis`);
+          if (!within(h.angleDeg, L.sealHingeDeg)) add('value', `${hp}.angleDeg`);
+        }
+      }
+    });
+  }
+
   const constraintIds = new Set<string>();
   list(value.constraints, '$.constraints', L.constraints).forEach((c, i) => {
     const p = `$.constraints[${i}]`;
@@ -453,16 +608,87 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       )
         add('value', `${p}.displacement`);
     } else if (c.kind === 'temperature') {
-      if (!keys(c, p, ['id', 'name', 'kind', 'targets', 'temperature'])) return;
+      if (!keys(c, p, ['id', 'name', 'kind', 'targets', 'temperature'], ['amplitude'])) return;
       targets(c.targets, `${p}.targets`, ['face', 'edge']);
       if (!finite(c.temperature) || c.temperature < 0 || c.temperature > L.temperatureK)
         add('value', `${p}.temperature`);
+      if (Object.hasOwn(c, 'amplitude')) {
+        amplitude(c.amplitude, `${p}.amplitude`, true);
+        timed.add(c.id as string);
+      }
     } else return add('unsupported-constraint', `${p}.kind`);
     constraintKinds.set(c.id as string, c.kind);
     id(c.id, `${p}.id`);
     if (!text(c.name)) add('name', `${p}.name`);
     constraintIds.add(c.id as string);
   });
+
+  // VS10: a shower's rain, nozzles, slope, particles and time, each within its limit.
+  const showerSettings = (a: unknown, q: string) => {
+    if (!record(a)) return add('value', q);
+    if (
+      !keys(a, q, [
+        'rain',
+        'nozzles',
+        'slopeDeg',
+        'particlesPerS',
+        'durationS',
+        'stepS',
+        'emitUntilS',
+        'filmSpeedMmPerS',
+        'seed',
+      ])
+    )
+      return;
+    const range = (v: unknown, path: string, lo: number, hi: number, open = false) => {
+      if (!finite(v) || v < lo || v > hi || (open && v === lo)) add('value', path);
+    };
+    const r = a.rain;
+    if (r !== null) {
+      if (!record(r)) add('value', `${q}.rain`);
+      else if (keys(r, `${q}.rain`, ['rateMmPerH', 'angleDeg', 'azimuthDeg'])) {
+        range(r.rateMmPerH, `${q}.rain.rateMmPerH`, 0, L.showerRainMmPerH, true);
+        range(r.angleDeg, `${q}.rain.angleDeg`, 0, 80);
+        range(r.azimuthDeg, `${q}.rain.azimuthDeg`, -360, 360);
+      }
+    }
+    const nozzles = list(a.nozzles, `${q}.nozzles`, L.showerNozzles);
+    const seen = new Set<unknown>();
+    nozzles.forEach((n, k) => {
+      const np = `${q}.nozzles[${k}]`;
+      if (!record(n)) return add('value', np);
+      if (
+        !keys(n, np, ['id', 'name', 'origin', 'direction', 'coneDeg', 'speedMmPerS', 'flowLPerMin'])
+      )
+        return;
+      // A nozzle's id is its study's own (not one of the document's element ids).
+      if (!simulationId(n.id)) add('id', `${np}.id`);
+      else if (seen.has(n.id)) add('duplicate-id', `${np}.id`);
+      seen.add(n.id);
+      if (!text(n.name)) add('name', `${np}.name`);
+      if (!tuple(n.origin, 3)) add('value', `${np}.origin`);
+      if (!tuple(n.direction, 3) || Math.hypot(...n.direction) === 0)
+        add('value', `${np}.direction`);
+      range(n.coneDeg, `${np}.coneDeg`, 0, 90);
+      range(n.speedMmPerS, `${np}.speedMmPerS`, 0, L.showerSpeedMmPerS);
+      range(n.flowLPerMin, `${np}.flowLPerMin`, 0, L.showerFlowLPerMin, true);
+    });
+    if (r === null && !nozzles.length)
+      add('value', `${q}.nozzles`, 'a shower needs rain or a nozzle');
+    if (
+      !tuple(a.slopeDeg, 2) ||
+      !(a.slopeDeg as number[]).every((x) => within(x, L.showerSlopeDeg))
+    )
+      add('value', `${q}.slopeDeg`);
+    range(a.particlesPerS, `${q}.particlesPerS`, 0, L.showerParticlesPerS, true);
+    range(a.durationS, `${q}.durationS`, 0, L.showerDurationS, true);
+    range(a.stepS, `${q}.stepS`, L.showerStepMinS, L.showerStepMaxS);
+    if (finite(a.stepS) && finite(a.durationS) && a.stepS > a.durationS)
+      add('value', `${q}.stepS`, 'a step within the time');
+    range(a.emitUntilS, `${q}.emitUntilS`, 0, finite(a.durationS) ? a.durationS : 0, true);
+    range(a.filmSpeedMmPerS, `${q}.filmSpeedMmPerS`, 0, L.showerFilmMmPerS, true);
+    if (!Number.isSafeInteger(a.seed) || (a.seed as number) < 0) add('value', `${q}.seed`);
+  };
 
   list(value.studies, '$.studies', L.studies).forEach((s, i) => {
     const p = `$.studies[${i}]`;
@@ -472,18 +698,39 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       s.kind !== 'linear-static' &&
       s.kind !== 'modal' &&
       s.kind !== 'thermal' &&
-      s.kind !== 'aero'
+      s.kind !== 'aero' &&
+      s.kind !== 'crash' &&
+      s.kind !== 'transient-thermal' &&
+      s.kind !== 'seal' &&
+      s.kind !== 'shower'
     )
       return add('unsupported-analysis', `${p}.kind`);
     // R3i-4: a structural study may say how it models the body; a thermal one is solid only.
     const optional =
-      s.kind === 'thermal' || s.kind === 'aero'
+      s.kind === 'thermal' ||
+      s.kind === 'aero' ||
+      s.kind === 'crash' ||
+      s.kind === 'transient-thermal' ||
+      s.kind === 'seal' ||
+      s.kind === 'shower'
         ? []
         : s.kind === 'modal'
           ? ['idealisation']
-          : ['idealisation', 'test'];
+          : ['idealisation', 'test', 'fatigue'];
     const required =
-      s.kind === 'modal' ? [...base, 'modes'] : s.kind === 'aero' ? [...base, 'aero'] : base;
+      s.kind === 'modal'
+        ? [...base, 'modes']
+        : s.kind === 'aero'
+          ? [...base, 'aero']
+          : s.kind === 'crash'
+            ? [...base, 'crash']
+            : s.kind === 'transient-thermal'
+              ? [...base, 'transient']
+              : s.kind === 'seal'
+                ? [...base, 'seal']
+                : s.kind === 'shower'
+                  ? [...base, 'seal', 'shower']
+                  : base;
     if (!keys(s, p, required, optional)) return;
     // VS4a: a wind tunnel's air, browser cell and Host mesh; no loads or constraints.
     const aero = s.kind === 'aero';
@@ -527,6 +774,188 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         }
       }
     }
+    // VS7b: a crash test's barrier, speed, time and measuring points; no loads or constraints.
+    const crash = s.kind === 'crash';
+    if (crash) {
+      const c = s.crash;
+      const q = `${p}.crash`;
+      const point = (v: unknown, path: string) => {
+        if (!Array.isArray(v) || v.length !== 3 || !v.every((x) => within(x, L.lengthMm)))
+          add('value', path);
+      };
+      if (!record(c)) add('value', q);
+      else if (
+        keys(
+          c,
+          q,
+          [
+            'barrier',
+            'speedKmh',
+            'pole',
+            'gravity',
+            'friction',
+            'endTimeMs',
+            'accelerometer',
+            'intrusions',
+          ],
+          ['head'],
+        )
+      ) {
+        if (c.barrier !== 'wall' && c.barrier !== 'pole' && c.barrier !== 'head')
+          add('value', `${q}.barrier`);
+        if (!finite(c.speedKmh) || c.speedKmh <= 0 || c.speedKmh > L.crashSpeedKmh)
+          add('value', `${q}.speedKmh`);
+        if ((c.barrier === 'wall' || c.barrier === 'head') && c.pole !== null)
+          add('value', `${q}.pole`, 'only a pole test has a pole');
+        // VS8b: a head impact's headform, target and hold; nothing of it on another test.
+        if (c.barrier !== 'head' && c.head !== undefined && c.head !== null)
+          add('value', `${q}.head`, 'only a head impact has a headform');
+        if (c.barrier === 'head') {
+          const h = c.head;
+          if (c.gravity !== false) add('value', `${q}.gravity`, 'a head impact has no gravity');
+          if (Array.isArray(c.intrusions) && c.intrusions.length)
+            add('value', `${q}.intrusions`, 'a head impact reads no intrusions');
+          if (!record(h)) add('value', `${q}.head`);
+          else if (keys(h, `${q}.head`, ['headform', 'targetMm', 'angleDeg', 'holdBeyondMm'])) {
+            if (h.headform !== 'adult' && h.headform !== 'child')
+              add('value', `${q}.head.headform`);
+            point(h.targetMm, `${q}.head.targetMm`);
+            if (!finite(h.angleDeg) || h.angleDeg <= 0 || h.angleDeg > 90)
+              add('value', `${q}.head.angleDeg`);
+            if (
+              h.holdBeyondMm !== null &&
+              (!finite(h.holdBeyondMm) || h.holdBeyondMm <= 0 || h.holdBeyondMm > L.lengthMm)
+            )
+              add('value', `${q}.head.holdBeyondMm`);
+          }
+        }
+        if (c.barrier === 'pole') {
+          const o = c.pole;
+          if (!record(o)) add('value', `${q}.pole`);
+          else if (keys(o, `${q}.pole`, ['diameterMm', 'angleDeg', 'side', 'xMm', 'zMm'])) {
+            if (!finite(o.diameterMm) || o.diameterMm <= 0 || o.diameterMm > L.crashPoleDiameterMm)
+              add('value', `${q}.pole.diameterMm`);
+            if (!finite(o.angleDeg) || o.angleDeg <= 0 || o.angleDeg > 90)
+              add('value', `${q}.pole.angleDeg`);
+            if (o.side !== 'left' && o.side !== 'right') add('value', `${q}.pole.side`);
+            if (!within(o.xMm, L.lengthMm)) add('value', `${q}.pole.xMm`);
+            if (!within(o.zMm, L.lengthMm)) add('value', `${q}.pole.zMm`);
+          }
+        }
+        if (typeof c.gravity !== 'boolean') add('value', `${q}.gravity`);
+        if (!finite(c.friction) || c.friction < 0 || c.friction > L.crashFriction)
+          add('value', `${q}.friction`);
+        if (!finite(c.endTimeMs) || c.endTimeMs <= 0 || c.endTimeMs > L.crashEndTimeMs)
+          add('value', `${q}.endTimeMs`);
+        point(c.accelerometer, `${q}.accelerometer`);
+        list(c.intrusions, `${q}.intrusions`, L.crashIntrusions).forEach((x, k) => {
+          const r = `${q}.intrusions[${k}]`;
+          if (!record(x)) return add('value', r);
+          if (!keys(x, r, ['name', 'point', 'reference'])) return;
+          if (!text(x.name)) add('name', `${r}.name`);
+          point(x.point, `${r}.point`);
+          point(x.reference, `${r}.reference`);
+        });
+      }
+    }
+    // VS11d: a transient run's time, start, kept fields, enclosure and thermal stress.
+    const transient = s.kind === 'transient-thermal';
+    let stressed = false;
+    let enclosed = false;
+    if (transient) {
+      const t = s.transient;
+      const q = `${p}.transient`;
+      if (!record(t)) add('value', q);
+      else if (
+        keys(t, q, [
+          'endS',
+          'stepS',
+          'theta',
+          'initialTemperature',
+          'outputEvery',
+          'enclosure',
+          'stress',
+        ])
+      ) {
+        if (!finite(t.endS) || t.endS <= 0 || t.endS > L.transientEndS) add('value', `${q}.endS`);
+        if (!finite(t.stepS) || t.stepS <= 0 || t.stepS > L.transientEndS)
+          add('value', `${q}.stepS`);
+        else if (
+          finite(t.endS) &&
+          t.endS > 0 &&
+          Math.ceil(t.endS / t.stepS - 1e-9) > L.transientSteps
+        )
+          add('value', `${q}.stepS`, `more than ${L.transientSteps} steps`);
+        if (!finite(t.theta) || t.theta < 0.5 || t.theta > 1) add('value', `${q}.theta`);
+        if (
+          !finite(t.initialTemperature) ||
+          t.initialTemperature < 0 ||
+          t.initialTemperature > L.temperatureK
+        )
+          add('value', `${q}.initialTemperature`);
+        if (!Number.isSafeInteger(t.outputEvery) || (t.outputEvery as number) < 1)
+          add('value', `${q}.outputEvery`);
+        else if (
+          finite(t.endS) &&
+          finite(t.stepS) &&
+          t.stepS > 0 &&
+          Math.ceil(Math.ceil(t.endS / t.stepS - 1e-9) / (t.outputEvery as number)) + 1 >
+            L.transientOutputs
+        )
+          add('value', `${q}.outputEvery`, `more than ${L.transientOutputs} kept fields`);
+        if (t.enclosure !== null) {
+          enclosed = true;
+          const e = t.enclosure;
+          if (!record(e)) add('value', `${q}.enclosure`);
+          else if (keys(e, `${q}.enclosure`, ['ambient', 'raysPerPatch'])) {
+            if (!finite(e.ambient) || e.ambient < 0 || e.ambient > L.temperatureK)
+              add('value', `${q}.enclosure.ambient`);
+            if (
+              !Number.isSafeInteger(e.raysPerPatch) ||
+              (e.raysPerPatch as number) < 1 ||
+              (e.raysPerPatch as number) > L.raysPerPatch
+            )
+              add('value', `${q}.enclosure.raysPerPatch`);
+          }
+        }
+        if (t.stress !== null) {
+          stressed = true;
+          const st = t.stress;
+          if (!record(st)) add('value', `${q}.stress`);
+          else if (keys(st, `${q}.stress`, ['reference']))
+            if (!finite(st.reference) || st.reference < 0 || st.reference > L.temperatureK)
+              add('value', `${q}.stress.reference`);
+        }
+      }
+    }
+    // VS9: a seal study's seals, spacing and gap threshold; no loads or constraints, one level.
+    // VS10: a shower study measures its seals the same way.
+    const seal = s.kind === 'seal' || s.kind === 'shower';
+    if (seal) {
+      const a = s.seal;
+      const q = `${p}.seal`;
+      if (!record(a)) add('value', q);
+      else if (keys(a, q, ['sealIds', 'stepMm', 'gapThresholdMm'])) {
+        const ids = list(a.sealIds, `${q}.sealIds`, L.seals);
+        ids.forEach((x, k) => {
+          if (!sealIds.has(x as string)) add('reference-missing', `${q}.sealIds[${k}]`);
+        });
+        if (new Set(ids).size !== ids.length) add('duplicate-reference', `${q}.sealIds`);
+        if (!ids.length && !sealIds.size)
+          add('seals-empty', `${q}.sealIds`, 'the document has no seal to measure');
+        if (!finite(a.stepMm) || a.stepMm < L.sealStepMinMm || a.stepMm > L.sealStepMaxMm)
+          add('value', `${q}.stepMm`);
+        if (
+          !finite(a.gapThresholdMm) ||
+          a.gapThresholdMm < 0 ||
+          a.gapThresholdMm > L.sealGapThresholdMm
+        )
+          add('value', `${q}.gapThresholdMm`);
+      }
+      if (record(s.convergence) && s.convergence.levels !== 1)
+        add('value', `${p}.convergence.levels`, 'a seal is measured once');
+    }
+    if (s.kind === 'shower') showerSettings(s.shower, `${p}.shower`);
     if (s.idealisation !== undefined && s.idealisation !== 'solid' && s.idealisation !== 'shell')
       add('value', `${p}.idealisation`);
     id(s.id, `${p}.id`);
@@ -546,34 +975,70 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
     };
     const ls = refs(s.loadIds, `${p}.loadIds`, loadIds, L.loads);
     if (aero && ls.length) add('value', `${p}.loadIds`, 'a wind-tunnel study has no loads');
+    if (crash && ls.length) add('value', `${p}.loadIds`, 'a crash study has no loads');
+    if (seal && ls.length) add('value', `${p}.loadIds`, 'a seal study has no loads');
     // Natural modes have no loads.
     if (s.kind === 'modal' && ls.length) add('value', `${p}.loadIds`, 'a modal study has no loads');
     const cs = refs(s.constraintIds, `${p}.constraintIds`, constraintIds, L.constraints);
     if (aero && cs.length)
       add('value', `${p}.constraintIds`, 'a wind-tunnel study has no constraints');
-    // R3h: a thermal study takes the thermal items only, the others none of them.
+    if (crash && cs.length) add('value', `${p}.constraintIds`, 'a crash study has no constraints');
+    if (seal && cs.length) add('value', `${p}.constraintIds`, 'a seal study has no constraints');
+    // R3h: a thermal study takes the thermal items only, the others none of them. VS11d: a
+    // transient one also radiation and enclosures, amplitudes, and with thermal stress the
+    // structural constraints that hold the body.
     const thermal = s.kind === 'thermal';
+    const heat = thermal || transient;
     ls.forEach((x, k) => {
       const kind = loadKinds.get(x as string);
-      if (kind !== undefined && thermalLoadKinds.includes(kind as never) !== thermal)
-        add('study-kind', `${p}.loadIds[${k}]`, `not a load of a ${String(s.kind)} study`);
+      if (kind === undefined) return;
+      const ok = transient
+        ? transientLoadKinds.includes(kind as never)
+        : thermal
+          ? thermalLoadKinds.includes(kind as never)
+          : !transientLoadKinds.includes(kind as never);
+      if (!ok) add('study-kind', `${p}.loadIds[${k}]`, `not a load of a ${String(s.kind)} study`);
+      else if (!transient && timed.has(x as string))
+        add('study-kind', `${p}.loadIds[${k}]`, 'only a transient study takes an amplitude');
+      if (transient && kind === 'enclosure' && !enclosed)
+        add('study-kind', `${p}.loadIds[${k}]`, 'an enclosure needs transient.enclosure');
     });
+    let held = 0;
     cs.forEach((x, k) => {
       const kind = constraintKinds.get(x as string);
-      if (kind !== undefined && thermalConstraintKinds.includes(kind as never) !== thermal)
+      if (kind === undefined) return;
+      const temperature = thermalConstraintKinds.includes(kind as never);
+      if (temperature) held++;
+      const ok = transient
+        ? temperature || (stressed && thermalStressConstraintKinds.includes(kind as never))
+        : temperature === thermal;
+      if (!ok)
         add(
           'study-kind',
           `${p}.constraintIds[${k}]`,
-          `not a constraint of a ${String(s.kind)} study`,
+          `not a constraint of a ${String(s.kind)} study${transient && !stressed ? ' without thermal stress' : ''}`,
         );
+      else if (!transient && timed.has(x as string))
+        add('study-kind', `${p}.constraintIds[${k}]`, 'only a transient study takes an amplitude');
     });
-    // A thermal study is held by a temperature or a convection; the others by a constraint.
+    // A thermal study is held by a temperature or a convection; the others by a constraint. A
+    // transient one needs neither (its capacity sets the level), but with thermal stress it needs
+    // a structural constraint.
     if (
       !aero &&
+      !crash &&
+      !transient &&
+      !seal &&
       !cs.length &&
-      !(thermal && ls.some((x) => loadKinds.get(x as string) === 'convection'))
+      !(heat && ls.some((x) => loadKinds.get(x as string) === 'convection'))
     )
       add('constraints-empty', `${p}.constraintIds`);
+    if (transient && stressed && cs.length === held)
+      add(
+        'constraints-empty',
+        `${p}.constraintIds`,
+        'thermal stress needs a structural constraint',
+      );
     // CR5c: a stiffness test names a pair of the study's displacements (torsion) or one of its
     // forces (bending).
     if (Object.hasOwn(s, 'test')) {
@@ -603,6 +1068,59 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         } else own(t.load, `${tp}.load`, ls, loadKinds, 'force');
       }
     }
+    // VS13: a fatigue history and S-N line, on a solid study.
+    if (Object.hasOwn(s, 'fatigue')) {
+      const f = s.fatigue;
+      const fp = `${p}.fatigue`;
+      if (!record(f)) add('value', fp);
+      else if (keys(f, fp, ['history', 'sn'])) {
+        if (s.idealisation === 'shell') add('value', fp, 'fatigue is computed on solids only');
+        // The history scales the loads; a prescribed displacement's stress would scale with it
+        // (Codex on #1283): only zero displacements (supports) here.
+        const all = Array.isArray(value.constraints) ? (value.constraints as unknown[]) : [];
+        cs.forEach((id, k) => {
+          const c = all.find((x) => record(x) && x.id === id);
+          if (
+            record(c) &&
+            c.kind === 'displacement' &&
+            Array.isArray(c.displacement) &&
+            c.displacement.some((d) => d !== null && d !== 0)
+          )
+            add(
+              'value',
+              `${p}.constraintIds[${k}]`,
+              'fatigue scales the loads: a prescribed displacement must be 0',
+            );
+        });
+        const h = list(f.history, `${fp}.history`, L.fatiguePoints);
+        if (h.length < 2) add('value', `${fp}.history`, 'at least 2 points');
+        h.forEach((v, k) => {
+          if (!finite(v) || Math.abs(v as number) > 1e6) add('value', `${fp}.history[${k}]`);
+        });
+        const sn = f.sn;
+        if (
+          record(sn) &&
+          keys(sn, `${fp}.sn`, ['amplitude', 'cycles', 'slope', 'endurance', 'ultimate'])
+        ) {
+          const positive = (k: string, max: number) => {
+            const v = sn[k];
+            if (!finite(v) || (v as number) <= 0 || (v as number) > max)
+              add('value', `${fp}.sn.${k}`);
+          };
+          positive('amplitude', 1e5);
+          positive('slope', 100);
+          positive('ultimate', 1e5);
+          if (!finite(sn.cycles) || (sn.cycles as number) < 1 || (sn.cycles as number) > 1e15)
+            add('value', `${fp}.sn.cycles`);
+          if (
+            !finite(sn.endurance) ||
+            (sn.endurance as number) < 0 ||
+            (sn.endurance as number) > 1e5
+          )
+            add('value', `${fp}.sn.endurance`);
+        } else if (!record(sn)) add('value', `${fp}.sn`);
+      }
+    }
     const sv = s.solver;
     if (record(sv) && keys(sv, `${p}.solver`, ['tolerance', 'maxIterations'])) {
       if (!finite(sv.tolerance) || sv.tolerance <= 0 || sv.tolerance > 1e-3)
@@ -625,8 +1143,11 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       const ms = list(cv.metrics, `${p}.convergence.metrics`, simulationMetrics.length);
       // CR5c: a stiffness test also measures its stiffness.
       const allowed: readonly string[] = [
-        ...studyMetrics[s.kind as SimulationStudyKind],
+        ...(s.kind === 'crash' && record(s.crash) && s.crash.barrier === 'head'
+          ? headImpactMetrics
+          : studyMetrics[s.kind as SimulationStudyKind]),
         ...(s.kind === 'linear-static' && Object.hasOwn(s, 'test') ? ['stiffness'] : []),
+        ...(stressed ? ['max-von-mises'] : []),
       ];
       ms.forEach((m, k) => {
         if (!allowed.includes(m as never)) add('value', `${p}.convergence.metrics[${k}]`);
@@ -664,6 +1185,13 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         if (record(b) && typeof b.id === 'string') {
           own(b.id, b.follower);
           own(b.id, b.on);
+        }
+    if (Array.isArray(value.seals))
+      for (const s of value.seals)
+        if (record(s) && typeof s.id === 'string') {
+          own(s.id, s.line);
+          own(s.id, s.base);
+          own(s.id, s.mating);
         }
     if (record(prep)) own('preparation', prep.removeFaces);
     if (record(mesh) && Array.isArray(mesh.local))
@@ -706,18 +1234,42 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
             .filter(record)
             .map((x): [string, SimulationStudyKind] => [
               x.id as string,
-              x.kind === 'modal' || x.kind === 'thermal' || x.kind === 'aero'
+              x.kind === 'modal' ||
+              x.kind === 'thermal' ||
+              x.kind === 'aero' ||
+              x.kind === 'transient-thermal' ||
+              x.kind === 'seal' ||
+              x.kind === 'shower' ||
+              x.kind === 'crash'
                 ? x.kind
                 : 'linear-static',
             ])
         : [],
     );
     const studyIds = new Set(studyKinds.keys());
+    // VS8b: the head impacts, whose levels record the headform's metrics.
+    const heads = new Set(
+      Array.isArray(value.studies)
+        ? value.studies
+            .filter(record)
+            .filter((x) => x.kind === 'crash' && record(x.crash) && x.crash.barrier === 'head')
+            .map((x) => x.id as string)
+        : [],
+    );
     // CR5c: the studies with a stiffness test, whose levels may record the stiffness.
     const tests = new Set(
       Array.isArray(value.studies)
         ? value.studies
             .filter((x) => record(x) && x.kind === 'linear-static' && Object.hasOwn(x, 'test'))
+            .map((x) => (x as Rec).id)
+        : [],
+    );
+    // VS11d: the transient studies, whose levels may record the thermal stress (Codex on #1264:
+    // also a record made before the stress was turned off, which stays until it is run again).
+    const stressedStudies = new Set(
+      Array.isArray(value.studies)
+        ? value.studies
+            .filter((x) => record(x) && x.kind === 'transient-thermal')
             .map((x) => (x as Rec).id)
         : [],
     );
@@ -728,7 +1280,16 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         ? ['mapping', 'mass', 'quality', 'solver', 'orthogonality']
         : kind === 'aero'
           ? ['surface', 'solver']
-          : ['mapping', 'load', 'quality', 'solver', 'equilibrium'];
+          : kind === 'crash'
+            ? ['mapping', 'quality', 'energy-balance', 'hourglass-energy', 'mass-scaling']
+            : kind === 'linear-static'
+              ? // VS13: a fatigue study's summary (kept valid when the fatigue is taken off).
+                ['mapping', 'load', 'quality', 'solver', 'equilibrium', 'fatigue']
+              : kind === 'seal'
+                ? ['mapping', 'seal']
+                : kind === 'shower'
+                  ? ['mapping', 'seal', 'shower']
+                  : ['mapping', 'load', 'quality', 'solver', 'equilibrium'];
     const studied = new Set<string>();
     const runs = list(value.runs, '$.runs', L.studies);
     if (!runs.length) add('runs', '$.runs', 'absent when there are none');
@@ -743,7 +1304,10 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       else studied.add(r.studyId);
       const kind = typeof r.studyId === 'string' ? studyKinds.get(r.studyId) : undefined;
       const checkNames = checksOf(kind);
-      const metricNames = studyMetrics[kind ?? 'linear-static'];
+      const metricNames =
+        kind === 'crash' && heads.has(r.studyId as string)
+          ? headImpactMetrics
+          : studyMetrics[kind ?? 'linear-static'];
       const inputs = r.inputs;
       const inputKeys = [
         'simulationHash',
@@ -768,11 +1332,15 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
         if (!record(m)) return add('run', `${q}.metrics`);
         // Exactly the metrics of its study's kind (and a test's stiffness).
         const tested = tests.has(r.studyId);
-        if (keys(m, `${q}.metrics`, [...metricNames], tested ? ['stiffness'] : [])) {
+        const optional = [
+          ...(tested ? ['stiffness'] : []),
+          ...(stressedStudies.has(r.studyId) ? ['max-von-mises'] : []),
+        ];
+        if (keys(m, `${q}.metrics`, [...metricNames], optional)) {
           for (const name of metricNames)
             if (!finite(m[name])) add('value', `${q}.metrics.${name}`);
-          if (Object.hasOwn(m, 'stiffness') && !finite(m.stiffness))
-            add('value', `${q}.metrics.stiffness`);
+          for (const name of optional)
+            if (Object.hasOwn(m, name) && !finite(m[name])) add('value', `${q}.metrics.${name}`);
         }
       });
       const checks = list(r.checks, `${p}.checks`, L.runChecks);
@@ -796,15 +1364,22 @@ export function validateSimulation(value: unknown): SimulationDiagnostic[] {
       // VS4a: a wind tunnel's result is for reference in V1.
       if (kind === 'aero' && r.status === 'verified')
         add('run', `${p}.status`, 'a wind-tunnel run is for reference');
+      // VS7b: so is a crash run in V2.
+      if (kind === 'crash' && r.status === 'verified')
+        add('run', `${p}.status`, 'a crash run is for reference');
+      // VS9: a seal's leaks are candidate places, for reference (VS-U5).
+      if ((kind === 'seal' || kind === 'shower') && r.status === 'verified')
+        add('run', `${p}.status`, `a ${kind} run is for reference`);
       if (r.status === 'verified' && reasons.length)
         add('run', `${p}.reasons`, 'a verified run has none');
       // Verified needs every check passed over at least two levels (状態の決め方).
       if (
         r.status === 'verified' &&
         (levels.length < 2 ||
-          !checkNames.every((n) =>
-            checks.some((c) => record(c) && c.name === n && c.pass === true),
-          ))
+          !checkNames
+            // VS13: the fatigue summary is only there for a fatigue study.
+            .filter((n) => n !== 'fatigue')
+            .every((n) => checks.some((c) => record(c) && c.name === n && c.pass === true)))
       )
         add('run', `${p}.status`, 'verified needs every check passed over two levels or more');
     });

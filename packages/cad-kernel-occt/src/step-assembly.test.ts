@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -19,7 +19,14 @@ import {
   fixturePart,
   fixtureVersion,
   r2bBom,
+  cadAssemblyPmiStates,
+  cadAssetMediaTypes,
+  readCadAssemblyPmiAsset,
+  stepImportPlan,
+  type CadAssetRef,
   type CadDocument,
+  type CadPmiAsset,
+  type CadPmiTarget,
   type CadEvaluation,
   type CadStepPlan,
 } from '@editor-platform/cad-core';
@@ -28,7 +35,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createKernelHost } from './host';
 import { shapeMetrics } from './metrics';
 import type { CadWorkerRequest, CadWorkerResponse } from './protocol';
-import { writeAssemblyStep } from './step-assembly';
+import { writeAssemblyStep, writeAssemblyStepPmi } from './step-assembly';
+import { importStepAssembly } from './step-assembly-import';
+import { assemblyStepReport } from './formats';
 import { cadKernelBuild } from '../../../scripts/cad-kernel/build.mjs';
 
 // Opt-in: the development kernel (scripts/cad-kernel) built outside the repository.
@@ -43,7 +52,7 @@ describe.skipIf(!dist)(
     let oc: any;
     let n = 0;
     /** A version's evaluation and its active bodies as one BRep compound. */
-    const brep = async (document: CadDocument) => {
+    const brep = async (document: CadDocument, assets?: Record<string, Uint8Array>) => {
       const requestId = `brep-${n++}`;
       const hash = cadContentHash(document);
       await handle({
@@ -54,12 +63,14 @@ describe.skipIf(!dist)(
         candidateHash: hash,
         document,
         brep: true,
+        ...(assets ? { assets } : {}),
       });
       const m = posted.find((x) => x.type === 'result' && x.requestId === requestId);
       if (m?.type !== 'result' || !m.brep) throw new Error(JSON.stringify(m?.type));
       return {
         evaluation: m.evaluation as Extract<CadEvaluation, { status: 'ok' }>,
         bytes: m.brep.bytes,
+        pmi: m.brep.pmi,
       };
     };
     beforeAll(async () => {
@@ -404,6 +415,305 @@ describe.skipIf(!dist)(
       } finally {
         for (const x of own.reverse()) x.delete();
       }
+    }, 300_000);
+    it("writes the parts' and the assembly's PMI into AP242, which reads back the same (PMI-5c, CAD86, TS-1444)", async () => {
+      const file = new Uint8Array(
+        readFileSync(new URL('../fixtures/f43/pmi-path.step', import.meta.url)),
+      );
+      const imported = importStepAssembly(oc, file, buildHash, { pmi: 'discard' });
+      if (imported.status !== 'ok') throw new Error(`${imported.code} ${imported.detail}`);
+      const { read, report } = imported;
+      const sha = (b: Uint8Array) => `sha256:${createHash('sha256').update(b).digest('hex')}`;
+      const ref = (kind: CadAssetRef['kind'], bytes: Uint8Array): CadAssetRef => ({
+        id: kind === 'source-step' ? 'source' : kind === 'pmi' ? 'pmi' : 'brep',
+        kind,
+        sha256: sha(bytes),
+        byteLength: bytes.byteLength,
+        mediaType: cadAssetMediaTypes[kind],
+      });
+      const assets: Record<string, Uint8Array> = { [sha(file)]: file };
+      for (const b of [...imported.breps, ...(imported.pmis ?? [])]) if (b) assets[sha(b)] = b;
+      const kernel = { id: 'occt', buildHash };
+      let id = 0;
+      const planned = stepImportPlan(
+        kernel,
+        read,
+        {
+          source: ref('source-step', file),
+          breps: imported.breps.map((b) => ref('normalized-brep', b)),
+          pmis: (imported.pmis ?? []).map((b) => b && ref('pmi', b)),
+        },
+        { sourceUnit: report.sourceUnit, scaleToMm: report.scaleToMm },
+        (prefix) => `${prefix}-${id++}`,
+      );
+      if (planned.status !== 'ok') throw new Error(planned.code);
+      assets[planned.assemblyPmi!.ref.sha256] = planned.assemblyPmi!.bytes;
+      const root = applyCadOperation(emptyCad(kernel), {
+        type: 'insertComponents',
+        parts: planned.parts,
+        components: planned.components,
+        assemblyPmi: planned.assemblyPmi!.ref,
+      });
+      const versions = new Map(planned.versions.map((v) => [cadContentHash(v), v]));
+      const rootHash = cadContentHash(root);
+      const plan = assemblyStepPlan(root, rootHash, (h) => versions.get(h), 'F43');
+      if (plan.status !== 'ok') throw new Error(plan.code);
+      const breps = new Map<string, Uint8Array>();
+      const products: Record<string, NonNullable<Awaited<ReturnType<typeof brep>>['pmi']>> = {};
+      for (const p of plan.plan.products) {
+        const hash = p.shape?.contentHash;
+        if (!hash || breps.has(hash)) continue;
+        const r = await brep(versions.get(hash)!, assets);
+        breps.set(hash, r.bytes);
+        if (r.pmi) products[hash] = r.pmi;
+      }
+      const asset = readCadAssemblyPmiAsset(planned.assemblyPmi!.bytes)!;
+      const partHash = new Map(root.parts.map((p) => [p.id, p.source.contentHash]));
+      const written = writeAssemblyStepPmi(oc, plan.plan, breps, {
+        products,
+        assembly: {
+          asset,
+          states: [...cadAssemblyPmiStates(root, asset)],
+          components: Object.fromEntries(
+            root.components.map((c) => [c.id, partHash.get(c.partId)!]),
+          ),
+        },
+      });
+      // F43 with paths: the plate's part PMI is written on its product. Of the assembly's own
+      // items, the block's two flatnesses are written on the block (placed once); the plate's
+      // three are not (the plate is placed twice), nor the distance across the parts, nor the
+      // block's datum A (the plate's A already holds the name in the file).
+      expect(written.pmi).toEqual({
+        written: { dimension: 2, 'geometric-tolerance': 1, datum: 2, 'datum-target': 0 },
+        stale: 0,
+        unwritable: 0,
+        presented: 0,
+        presentationLost: 0,
+        views: 0,
+        unsupportedBuild: 0,
+        assembly: { written: 2, shared: 3, across: 1, stale: 0, unwritable: 1 },
+        presentationOneFrame: 0,
+      });
+      // The files the independent reader checks (scripts/cad-kernel/pmi-readback.py).
+      const dir = process.env.CAD_PMI_STEP_DIR ?? '/tmp/cad-pmi-step';
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(`${dir}/pmi-5c-assembly.step`, written.step);
+
+      // Read back with this kernel as a new import: complete, and every item by its meaning.
+      const back = importStepAssembly(oc, written.step, buildHash, { pmi: 'discard' });
+      if (back.status !== 'ok') throw new Error(`${back.code} ${back.detail}`);
+      expect(back.report.pmi).toMatchObject({ complete: true, lossless: true });
+      expect(back.read.assemblyPmi).toBeUndefined();
+      const owned: { delete(): void }[] = [];
+      const own = <T>(x: T) => (owned.push(x as never), x);
+      /** The centroid of face `index` of a BRep (mm, 4 decimals). */
+      const centroid = (bytes: Uint8Array, index: number) => {
+        oc.FS.writeFile('/pmi-5c.brep', bytes);
+        const body = own(new oc.TopoDS_Shape());
+        oc.BRepTools.Read_2(
+          body,
+          '/pmi-5c.brep',
+          own(new oc.BRep_Builder()),
+          own(new oc.Message_ProgressRange_1()),
+        );
+        oc.FS.unlink('/pmi-5c.brep');
+        const map = own(new oc.TopTools_IndexedMapOfShape_1());
+        oc.TopExp.MapShapes_1(body, oc.TopAbs_ShapeEnum.TopAbs_FACE, map);
+        const props = own(new oc.GProp_GProps_1());
+        oc.BRepGProp.SurfaceProperties_1(map.FindKey(index), props, false, false);
+        const c = own(props.CentreOfMass());
+        return [c.X(), c.Y(), c.Z()].map((v) => Math.round(v * 1e4) / 1e4 + 0).join(',');
+      };
+      type Item = CadPmiAsset['items'][number];
+      /** Items by meaning: values, datums by name, each target as its face's centroid. */
+      const meaning = (items: Item[], brepOf: (t: CadPmiTarget) => Uint8Array) => {
+        const names = new Map(
+          items.flatMap((i) => (i.kind === 'datum' ? [[i.id, i.name] as const] : [])),
+        );
+        const where = (ts: CadPmiTarget[] = []) =>
+          ts.map((t) => `${t.shape}@${centroid(brepOf(t), t.index)}`).sort();
+        return items
+          .map((i) =>
+            JSON.stringify({
+              ...i,
+              id: undefined,
+              targets: where(i.targets),
+              ...(i.kind === 'dimension' && i.targets2 ? { targets2: where(i.targets2) } : {}),
+              ...(i.kind === 'geometric-tolerance'
+                ? {
+                    references: i.references.map((r) => ({
+                      ...r,
+                      datums: r.datums.map((d) => names.get(d)),
+                    })),
+                  }
+                : {}),
+            }),
+          )
+          .sort();
+      };
+      try {
+        const assetOf = (b: Uint8Array | undefined) =>
+          JSON.parse(new TextDecoder().decode(b)) as CadPmiAsset;
+        const plate = read.shapes.findIndex((x) => x.pmi);
+        const block = read.instances.find((x) => x.shape !== plate)!.shape;
+        // Back, the plate is the shape whose PMI has the datums.
+        const backPlate = back.read.shapes.findIndex(
+          (x, k) => x.pmi && assetOf(back.pmis![k]).items.some((i) => i.kind === 'datum'),
+        );
+        const backBlock = back.read.shapes.findIndex((_, k) => k !== backPlate);
+        expect(back.read.shapes.filter((x) => x.pmi)).toHaveLength(2);
+        // The plate's part PMI, as it was imported.
+        const plateItems = assetOf(imported.pmis![plate]).items;
+        expect(meaning(assetOf(back.pmis![backPlate]).items, () => back.breps[backPlate]!)).toEqual(
+          meaning(plateItems, () => imported.breps[plate]!),
+        );
+        // The block's flatnesses, now the block part's own PMI on the same faces.
+        const instanceShape = (t: CadPmiTarget) =>
+          read.instances[planned.components.findIndex((c) => c.id === t.component)]!.shape;
+        const onBlock = asset.items.filter(
+          (i) =>
+            i.kind === 'geometric-tolerance' && i.targets.every((t) => instanceShape(t) === block),
+        );
+        expect(onBlock).toHaveLength(2);
+        expect(meaning(assetOf(back.pmis![backBlock]).items, () => back.breps[backBlock]!)).toEqual(
+          meaning(
+            onBlock.map((i) => ({ ...i, targets: i.targets.map(({ component: _, ...t }) => t) })),
+            () => imported.breps[block]!,
+          ),
+        );
+      } finally {
+        for (const x of owned.reverse()) x.delete();
+      }
+
+      // The report names what is written and what is not.
+      const losses = assemblyStepReport(
+        written.step,
+        plan.plan,
+        { sourceContentHash: rootHash, buildHash },
+        written.pmi,
+      ).losses.join('\n');
+      expect(losses).toMatch(/semantic GD&T.*2 dimensions, 1 geometric tolerance, 2 datums/);
+      expect(losses).toMatch(/2 of the assembly's own PMI items are written/);
+      expect(losses).toMatch(
+        /3 assembly PMI items are not written: the component's part is placed more than once/,
+      );
+      expect(losses).toMatch(
+        /1 assembly PMI item is not written: its faces, edges and datums are not all on one component/,
+      );
+      expect(losses).toMatch(
+        /1 assembly PMI item is not written: a datum whose name the file already holds/,
+      );
+      expect(losses).not.toMatch(/named views, PMI and/);
+
+      // A body's own PMI and the assembly's on one product are two specs: each tolerance keeps
+      // its own datum (the block given datum D and a perpendicularity to D of its own).
+      // Datum names like the writer's placeholders stay as they are (only product and usage
+      // names are renamed).
+      const D = 'R2B5P0';
+      const E = 'R2B5P999';
+      const blockHash = Object.keys(products).find((h) => !products[h]!.bodies[0]!.pmi)!;
+      const blockBody = products[blockHash]!.bodies[0]!;
+      const withD = {
+        ...products,
+        [blockHash]: {
+          ...products[blockHash]!,
+          bodies: [
+            {
+              ...blockBody,
+              pmi: {
+                featureId: blockBody.tracking[0]!.featureId,
+                asset: {
+                  version: 1 as const,
+                  items: [
+                    {
+                      id: 'd',
+                      kind: 'datum' as const,
+                      name: D,
+                      targets: [{ shape: 'face' as const, index: 1 }],
+                    },
+                    {
+                      id: 't',
+                      kind: 'geometric-tolerance' as const,
+                      type: 'Perpendicularity',
+                      value: 0.1,
+                      modifiers: [],
+                      references: [{ datums: ['d'], modifiers: [] }],
+                      targets: [{ shape: 'face' as const, index: 2 }],
+                    },
+                  ],
+                },
+                states: [
+                  ['d', { current: true }],
+                  ['t', { current: true }],
+                ] as [string, { current: true }][],
+                placements: [],
+              },
+            },
+          ],
+        },
+      };
+      // The block's assembly datum renamed E (a free name), and an angularity to it.
+      const plateShape = read.shapes.findIndex((x) => x.pmi);
+      const block = read.instances.find((x) => x.shape !== plateShape)!.shape;
+      const instanceOf = (t: CadPmiTarget) =>
+        read.instances[planned.components.findIndex((c) => c.id === t.component)]!.shape;
+      const blockA = asset.items.find(
+        (i) => i.kind === 'datum' && i.targets.every((t) => instanceOf(t) === block),
+      )!;
+      const withE = {
+        ...asset,
+        items: [
+          ...asset.items.map((i) => (i === blockA ? { ...blockA, name: E } : i)),
+          {
+            id: 'angle',
+            kind: 'geometric-tolerance' as const,
+            type: 'Angularity',
+            value: 0.2,
+            modifiers: [],
+            references: [{ datums: [blockA.id], modifiers: [] }],
+            targets: [{ ...blockA.targets[0]!, index: 3 }],
+          },
+        ],
+      } as typeof asset;
+      const two = writeAssemblyStepPmi(oc, plan.plan, breps, {
+        products: withD,
+        assembly: {
+          asset: withE,
+          states: [...cadAssemblyPmiStates(root, withE)],
+          components: Object.fromEntries(
+            root.components.map((c) => [c.id, partHash.get(c.partId)!]),
+          ),
+        },
+      });
+      expect(two.pmi?.assembly.written).toBe(4);
+      const again = importStepAssembly(oc, two.step, buildHash, { pmi: 'discard' });
+      if (again.status !== 'ok') throw new Error(`${again.code} ${again.detail}`);
+      expect(again.report.pmi).toMatchObject({ complete: true, lossless: true });
+      const blockAgain = again.read.shapes.findIndex(
+        (x, k) =>
+          x.pmi &&
+          (JSON.parse(new TextDecoder().decode(again.pmis![k])) as CadPmiAsset).items.some(
+            (i) => i.kind === 'datum' && i.name === D,
+          ),
+      );
+      const items = (JSON.parse(new TextDecoder().decode(again.pmis![blockAgain])) as CadPmiAsset)
+        .items;
+      expect(items.map((i) => ('type' in i ? i.type : i.kind)).sort()).toEqual([
+        'Angularity',
+        'Flatness',
+        'Flatness',
+        'Perpendicularity',
+        'datum',
+        'datum',
+      ]);
+      // Each tolerance names its own datum: joined, the angularity's first datum would be D.
+      const named = (n: string) => items.find((i) => i.kind === 'datum' && i.name === n)!.id;
+      expect(items.find((i) => 'type' in i && i.type === 'Perpendicularity')).toMatchObject({
+        references: [{ datums: [named(D)] }],
+      });
+      expect(items.find((i) => 'type' in i && i.type === 'Angularity')).toMatchObject({
+        references: [{ datums: [named(E)] }],
+      });
     }, 300_000);
   },
 );

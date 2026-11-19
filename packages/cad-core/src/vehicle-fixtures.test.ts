@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { validateCad } from './validation';
-import { f95Nagi, f95NagiAero, f95Section, f95SectionX } from './vehicle-fixtures';
+import { f29Biw } from './biw-fixtures';
+import {
+  f101Bodies,
+  f101NagiCrash,
+  f101NagiCrashBiw,
+  f95Nagi,
+  f95NagiAero,
+  f95Section,
+  f95SectionX,
+} from './vehicle-fixtures';
 
 describe('F95 凪 for the analyses (VS1a)', () => {
+  // Builds and validates both complete shapes; this is a semantic check, not a speed target.
+  // Bounded headroom over ~8 s in-suite; see verification/vehicle-sim/fixture-timeout-20261118.md.
   it('builds the aero shape from main tools as separate closed bodies', () => {
     // TS-2202, ST-601.
     const closed = f95NagiAero();
@@ -31,7 +42,7 @@ describe('F95 凪 for the analyses (VS1a)', () => {
     expect(new Set(closed.features.map((f) => f.type))).toEqual(
       new Set(['loft', 'cylinder', 'transform']),
     );
-  });
+  }, 15_000);
 
   it('keeps the drawing sizes in every skin section', () => {
     // TS-2202, ST-601.
@@ -56,6 +67,28 @@ describe('F95 凪 for the analyses (VS1a)', () => {
       expect(Math.max(...zs)).toBe(s[0]![1]);
       expect(new Set(s.slice(8, 12).map(([, z]) => z)).size).toBe(1);
       expect(Math.min(...zs)).toBe(s[8]![1]);
+    }
+  });
+});
+
+describe('F101 凪 crash BIW (VS8c-2)', () => {
+  it('adds the crash boxes, the bumper beam and the hood to F29 as open sheets', () => {
+    // TS-2236, ST-625.
+    const doc = f101NagiCrashBiw();
+    expect(validateCad(doc)).toEqual([]);
+    const f29 = f29Biw();
+    expect(doc.bodies.map((b) => b.id)).toEqual([...f29.bodies.map((b) => b.id), ...f101Bodies]);
+    expect(doc.spotWelds).toEqual(f29.spotWelds);
+    const { box, bumper, hood } = f101NagiCrash;
+    // The boxes run from the radiator support to the bumper beam's back wall, which ends the
+    // car at 凪's 4000 mm length; the hood stops short of the beam's front.
+    expect(box.toX).toBe(bumper.backX);
+    expect(bumper.frontX).toBe(4000);
+    expect(hood.line.at(-1)![0]).toBeLessThan(bumper.frontX);
+    expect(box.y + box.size / 2).toBeLessThan(bumper.halfWidth);
+    for (const id of f101Bodies) {
+      const feature = doc.features.find((f) => f.id === `${id}-sheet`)!;
+      expect(feature.type).toBe('extrudeSurface');
     }
   });
 });

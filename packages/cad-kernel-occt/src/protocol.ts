@@ -7,6 +7,11 @@ import type {
   CadGapFlushSample,
   CadDocument,
   CadEvaluation,
+  CadAssemblyPmiAsset,
+  CadAssemblyPmiItemState,
+  CadPmiAsset,
+  CadPmiItemState,
+  CadPmiPlacement,
   CadPmiTracking,
   CadStepPlan,
   CadTopologyRef,
@@ -135,6 +140,34 @@ export interface CadBrepExport {
   kinds: CadBodyKind[];
   appearances: CadAppearance[];
   faces: number[];
+  /** PMI-5c: what the assembly STEP writer needs to write the bodies' PMI on this compound. */
+  pmi?: CadBrepPmi;
+}
+/**
+ * PMI-5c (docs/cad/pmi.md, 書き出し): one body of a BRep compound with what its PMI is written
+ * from. `tracking` maps each import's sub-shapes the body still has unchanged (by the import's
+ * 1-based `TopExp::MapShapes` index) to their 1-based index in the compound's maps.
+ */
+export interface CadBrepPmiBody {
+  bodyId: string;
+  tracking: CadPmiTracking[];
+  /** The rigid moves from the body's import to the body, when it is its import moved only. */
+  placements?: CadPmiPlacement[];
+  /** The body's kept PMI when it has one import with current or changed PMI. */
+  pmi?: {
+    featureId: string;
+    asset: CadPmiAsset;
+    states: [string, CadPmiItemState][];
+    /** Rigid placements from the import to the body (`cadBodyPmiPlacements`), when one path. */
+    placements?: CadPmiPlacement[];
+  };
+}
+export interface CadBrepPmi {
+  bodies: CadBrepPmiBody[];
+  /** What cannot be written whatever the file: stale items, views, an earlier build. */
+  report: CadStepPmiWritten;
+  /** Whether this build has the PMI writer (`OCJS.addPmi`). */
+  writer: boolean;
 }
 /**
  * R3c-2a: one body's boundary as the analysis mesher takes it (fem-mesher `SurfaceMeshInput`):
@@ -259,8 +292,43 @@ export type CadAnalysisSurfaceResult =
   /** R3i-2: `detail` says why a midsurface was refused (`midsurface-unsupported`). */
   | { code: string; detail?: string };
 /** R2b-5: an assembly's AP242 file, or why it was not written. */
+/**
+ * PMI-5c (docs/cad/pmi.md, 書き出し): the PMI an assembly STEP writes. Each shaped product's
+ * bodies' PMI comes with its BRep (`CadBrepExport.pmi`, by content hash). The root document's
+ * own `assembly-pmi` items name direct components; each component's version is its product.
+ */
+export interface CadAssemblyStepPmi {
+  products: Record<string, CadBrepPmi>;
+  assembly?: {
+    asset: CadAssemblyPmiAsset;
+    states: [string, CadAssemblyPmiItemState][];
+    /** Each direct component's version (its product's key), by component id. */
+    components: Record<string, string>;
+  };
+}
+/** What an assembly STEP wrote of the PMI: the bodies' (`CadStepPmiWritten`) and the assembly's. */
+export interface CadAssemblyStepPmiWritten extends CadStepPmiWritten {
+  /** The assembly's own items, as a product's own PMI or not written, by why. */
+  assembly: {
+    written: number;
+    /** Items on a product that is placed more than once in the file: its PMI would be every instance's. */
+    shared: number;
+    /** Items whose targets and datums are not all on one product, or name none. */
+    across: number;
+    /** Items not current (`cadAssemblyPmiStates`). */
+    stale: number;
+    /** Items the writer has no form for, or whose sub-shapes are not tracked. */
+    unwritable: number;
+  };
+  /**
+   * Written items (a part's or the assembly's) whose presentation lines are not written: the
+   * file's PMI is on more than one product, and OCCT 7.6's writer gives every line of the file
+   * one product's frame.
+   */
+  presentationOneFrame: number;
+}
 export type CadStepAssemblyResult =
-  | { status: 'ok'; step: Uint8Array }
+  | { status: 'ok'; step: Uint8Array; pmi?: CadAssemblyStepPmiWritten }
   | { status: 'error'; code: string; elementId?: string; retryable: boolean };
 /** How fine a render's meshes are: a share of each body's diagonal, and the largest angle. */
 export interface CadRenderMeshQuality {
@@ -334,6 +402,8 @@ export type CadWorkerRequest =
       requestId: string;
       plan: CadStepPlan;
       breps: Record<string, Uint8Array>;
+      /** PMI-5c: the PMI to write, when any product or the assembly carries it. */
+      pmi?: CadAssemblyStepPmi;
     }
   | { type: 'cancel'; requestId: string }
   /** CM-4: the paused evaluation `requestId` goes on, as the next job. */

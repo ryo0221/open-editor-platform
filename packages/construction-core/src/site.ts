@@ -347,6 +347,7 @@ export function validateSite(
       site.routes,
       site.zones,
       site.hours,
+      site.lifts,
       taskIds,
       ids,
       isId,
@@ -365,6 +366,8 @@ export function siteTaskRefs(site: ConstructionSite | undefined): Set<string> {
     refs.add(t.fromTaskId);
     if (t.untilTaskId) refs.add(t.untilTaskId);
   }
+  // TT1: a climb's task changes the crane on its day.
+  for (const c of site?.cranes ?? []) for (const k of c.climbs ?? []) refs.add(k.taskId);
   for (const l of [
     ...(site?.lifts ?? []),
     ...(site?.loads ?? []),

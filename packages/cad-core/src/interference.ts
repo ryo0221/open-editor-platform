@@ -470,8 +470,10 @@ export type CadSweepReport =
 export function checkCadInterferenceAlong(
   input: Omit<CadInterferenceInput, 'form' | 'values'>,
   samples: readonly CadSweepSample[],
+  /** PD6: a coverage plan's own limit (`cadCoverageLimits.samples`). */
+  limit: number = cadSweepLimits.samples,
 ): CadSweepReport {
-  if (!samples.length || samples.length > cadSweepLimits.samples)
+  if (!samples.length || samples.length > limit)
     return { status: 'refused', code: 'sweep-samples' };
   const hits: CadSweepHit[] = [];
   const jumps: CadSweepJump[] = [];

@@ -66,6 +66,8 @@ const nonNativeKinds = [
   'schematic',
   'ladder',
   'cosim',
+  'drawing',
+  'factory',
 ];
 
 export interface TemplateAuthoring {
@@ -190,6 +192,8 @@ async function createFromTemplate(
             r.kind !== 'schematic' &&
             r.kind !== 'ladder' &&
             r.kind !== 'cosim' &&
+            r.kind !== 'drawing' &&
+            r.kind !== 'factory' &&
             r.kind !== 'animation',
         )
         .map(nativeRecord),
@@ -207,7 +211,9 @@ async function createFromTemplate(
         record.kind !== 'pcb' &&
         record.kind !== 'schematic' &&
         record.kind !== 'ladder' &&
-        record.kind !== 'cosim'
+        record.kind !== 'cosim' &&
+        record.kind !== 'drawing' &&
+        record.kind !== 'factory'
         ? nativeRecord(record)
         : undefined;
     },
@@ -332,7 +338,9 @@ function ReuseBatchHost({ host, onClose }: { host: DialogHost; onClose(): void }
     active.kind !== 'pcb' &&
     active.kind !== 'schematic' &&
     active.kind !== 'ladder' &&
-    active.kind !== 'cosim'
+    active.kind !== 'cosim' &&
+    active.kind !== 'drawing' &&
+    active.kind !== 'factory'
       ? [active]
       : [];
   return (
@@ -474,6 +482,8 @@ function ReuseDialogs({
     active.kind !== 'schematic' &&
     active.kind !== 'ladder' &&
     active.kind !== 'cosim' &&
+    active.kind !== 'drawing' &&
+    active.kind !== 'factory' &&
     active.kind !== 'animation'
       ? active
       : undefined;

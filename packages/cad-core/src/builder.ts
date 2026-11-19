@@ -32,6 +32,7 @@ import { applyCadOperation, type CadOperation } from './operations';
 import { cadId, cadRangeLimit } from './validation';
 import { edgeName, type CadFaceName } from './topology';
 import { splineThrough, type CadSketch, type CadSketchConstraint } from './sketch';
+import type { CadCoilSpringUse, CadSpiralSpringUse, CadSpringMaterial } from './spring';
 
 /** mm, or expression text of a length. */
 export type CadBuildLength = number | string | Length;
@@ -289,6 +290,9 @@ export class CadBuilder {
       addendum?: number;
       dedendum?: number;
       bore?: CadBuildLength;
+      /** DW7a: helical (normal module and pressure angle) or straight bevel, involute only. */
+      helixAngle?: CadBuildAngle;
+      coneAngle?: CadBuildAngle;
       spokes?: {
         count: CadBuildCount;
         rim: CadBuildLength;
@@ -321,6 +325,8 @@ export class CadBuilder {
                 profileShift: a.profileShift ?? 0,
                 addendum: a.addendum ?? 1,
                 dedendum: a.dedendum ?? 1.25,
+                ...(a.helixAngle !== undefined && { helixAngle: this.angle(a.helixAngle) }),
+                ...(a.coneAngle !== undefined && { coneAngle: this.angle(a.coneAngle) }),
               }),
           faceWidth: this.length(a.faceWidth),
           bore: this.length(a.bore ?? 0),
@@ -330,6 +336,97 @@ export class CadBuilder {
               rim: this.length(s.rim),
               hub: this.length(s.hub),
               width: this.length(s.width),
+            },
+          }),
+          ...this.#placed(a),
+        },
+      },
+      appearance,
+    );
+  }
+  /**
+   * PD5: a coil spring standing on its origin along +Z (turned by `orientation`). Active turns
+   * default to all turns but two for a compression spring (one closed each end), all for others.
+   */
+  coilSpring(
+    name: string,
+    a: Placed & {
+      use: CadCoilSpringUse;
+      wireDiameter: CadBuildLength;
+      meanDiameter: CadBuildLength;
+      pitch: CadBuildLength;
+      coils: number;
+      activeCoils?: number;
+      hand?: 'right' | 'left';
+      material: CadSpringMaterial;
+      deflection?: CadBuildLength;
+      angle?: CadBuildAngle;
+      initialTensionN?: number;
+    },
+    appearance?: Partial<CadAppearance>,
+  ) {
+    return this.body(
+      name,
+      {
+        type: 'spring',
+        inputFeatureIds: [],
+        args: {
+          form: 'coil',
+          use: a.use,
+          wireDiameter: this.length(a.wireDiameter),
+          meanDiameter: this.length(a.meanDiameter),
+          pitch: this.length(a.pitch),
+          coils: a.coils,
+          activeCoils:
+            a.activeCoils ?? (a.use === 'compression' ? Math.max(1, a.coils - 2) : a.coils),
+          hand: a.hand ?? 'right',
+          material: { ...a.material },
+          ...(a.deflection !== undefined && { deflection: this.length(a.deflection) }),
+          ...(a.angle !== undefined && { angle: this.angle(a.angle) }),
+          ...(a.initialTensionN !== undefined && { initialTensionN: a.initialTensionN }),
+          ...this.#placed(a),
+        },
+      },
+      appearance,
+    );
+  }
+  /** PD5: a spiral spring (mainspring or hairspring) centred on its origin, its strip up +Z. */
+  spiralSpring(
+    name: string,
+    a: Placed & {
+      use: CadSpiralSpringUse;
+      thickness: CadBuildLength;
+      height: CadBuildLength;
+      innerRadius: CadBuildLength;
+      pitch: CadBuildLength;
+      turns: number;
+      material: CadSpringMaterial;
+      angle?: CadBuildAngle;
+      barrel?: { innerRadius: CadBuildLength; arborRadius: CadBuildLength; hoursPerTurn?: number };
+    },
+    appearance?: Partial<CadAppearance>,
+  ) {
+    const b = a.barrel;
+    return this.body(
+      name,
+      {
+        type: 'spring',
+        inputFeatureIds: [],
+        args: {
+          form: 'spiral',
+          use: a.use,
+          thickness: this.length(a.thickness),
+          height: this.length(a.height),
+          innerRadius: this.length(a.innerRadius),
+          pitch: this.length(a.pitch),
+          turns: a.turns,
+          material: { ...a.material },
+          ...(a.angle !== undefined && { angle: this.angle(a.angle) }),
+          ...(b && {
+            barrel: {
+              innerRadius: this.length(b.innerRadius),
+              arborRadius: this.length(b.arborRadius),
+              ...(b.hoursPerTurn !== undefined && { hoursPerTurn: b.hoursPerTurn }),
             },
           }),
           ...this.#placed(a),

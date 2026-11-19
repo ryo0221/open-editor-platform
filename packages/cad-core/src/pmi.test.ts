@@ -14,6 +14,7 @@ import {
   pmiAssetProblem,
   assemblyPmiAssetProblem,
   readCadPmiAsset,
+  cadAssemblyPmiMoved,
   cadAssemblyPmiStates,
   readCadAssemblyPmiAsset,
   type CadAssemblyPmiAsset,
@@ -780,6 +781,65 @@ describe("an assembly's PMI of particular instances (PMI-5a, CAD86, TS-1435)", (
         'pmi-3': { current: false, reason: 'part' },
         'pmi-4': { current: false, reason: 'datum' },
       });
+    });
+  });
+
+  describe('PMI-5b-2: lines drawn at the import pose only (CAD86, TS-1441)', () => {
+    const at = (id: string) => parts[id as keyof typeof parts]?.pose;
+    const lines = { segments: [0, 0, 0, 1, 0, 0] };
+    const presented = () => {
+      const a = assembly();
+      a.items = a.items.map((i) => ({ ...i, presentation: lines }));
+      return a;
+    };
+
+    it('keeps lines in the import frame and validates them as a part asset does', () => {
+      expect(check(presented())).toBeUndefined();
+      const far = presented();
+      far.items[0]!.presentation = { segments: [0, 0, 0, 2e10, 0, 0] };
+      expect(check(far)).toBe('$.items[0].presentation.segments');
+    });
+
+    it('names the moved components, never a component of another item', () => {
+      const a = presented();
+      expect(a.items.map((i) => cadAssemblyPmiMoved(a, i, at))).toEqual([[], [], [], []]);
+      // Moving the block hides the lines of the items on it, not the plate's flatness.
+      const moved = (id: string) =>
+        id === 'c-block'
+          ? {
+              translationMm: [21, 0, 0] as [number, number, number],
+              rotation: identityQuaternion(),
+            }
+          : at(id);
+      expect(a.items.map((i) => cadAssemblyPmiMoved(a, i, moved))).toEqual([
+        [],
+        ['c-block'],
+        [],
+        ['c-block'],
+      ]);
+      // Within the stored-pose residuals it has not moved; a turn is a move; unplaced is moved.
+      const near = (id: string) =>
+        id === 'c-block'
+          ? {
+              translationMm: [20 + 1e-7, 0, 0] as [number, number, number],
+              rotation: identityQuaternion(),
+            }
+          : at(id);
+      expect(cadAssemblyPmiMoved(a, a.items[1]!, near)).toEqual([]);
+      const turned = (id: string) =>
+        id === 'c-plate-2'
+          ? {
+              translationMm: [10, 0, 0] as [number, number, number],
+              rotation: [0, 0, Math.sin(0.01), Math.cos(0.01)] as [number, number, number, number],
+            }
+          : at(id);
+      expect(cadAssemblyPmiMoved(a, a.items[0]!, turned)).toEqual(['c-plate-2']);
+      expect(cadAssemblyPmiMoved(a, a.items[1]!, () => undefined)).toEqual([
+        'c-plate-2',
+        'c-block',
+      ]);
+      // A datum on no geometry names no component: drawn wherever the components are.
+      expect(cadAssemblyPmiMoved(a, a.items[2]!, () => undefined)).toEqual([]);
     });
   });
 });

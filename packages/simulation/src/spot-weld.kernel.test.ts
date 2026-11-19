@@ -19,6 +19,7 @@ import { evaluateCad, type CadAnalysisSurfaceRequest } from '@editor-platform/ca
 import { meshSurfaceReport, type FemMesherModule } from '@editor-platform/fem-mesher';
 import {
   applySimulationOperation,
+  crashStudy,
   emptySimulation,
   simulationMaterialPresets,
   type SimulationDocument,
@@ -43,7 +44,7 @@ const available =
 const dist = (a: number[], b: number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
 
 /** The plate and the strip, each an extrude of 1 mm, its own body. */
-function lapPlates(): CadDocument {
+function lapPlates(lift = 0): CadDocument {
   const plate = (id: string, origin: [number, number, number], width: number) => ({
     profile: {
       id: `${id}-profile`,
@@ -66,7 +67,7 @@ function lapPlates(): CadDocument {
       appearance: { color: '#9aa4b1', opacity: 1 },
     },
   });
-  const [a, b] = [plate('plate', [0, 0, 0], 40), plate('strip', [0, 10, 1], 20)];
+  const [a, b] = [plate('plate', [0, 0, 0], 40), plate('strip', [0, 10, 1 + lift], 20)];
   return applyCadOperation(
     emptyCad({ id: 'fixture-welds', buildHash: `sha256:${'0'.repeat(64)}` }),
     {
@@ -116,8 +117,8 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
   });
 
   /** The CAD version (with a weld row of `pitchMm`, if given) and the analysis of both plates. */
-  const setup = async (pitchMm?: number) => {
-    let cad = lapPlates();
+  const setup = async (pitchMm?: number, lift = 0) => {
+    let cad = lapPlates(lift);
     const evaluated = await evaluateCad(oc, cad, cadContentHash(cad));
     const tables = new Map<string, CadTopologyTable>(
       evaluated.meshes.map((m) => [m.bodyId, m.topology]),
@@ -138,6 +139,7 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
       ...(bodyId === 'plate' ? {} : { body: bodyId }),
     });
     const under = [100, 20, 1] as [number, number, number];
+    const stripUnder = [100, 20, 1 + lift] as [number, number, number];
     if (pitchMm !== undefined)
       cad = applyCadOperation(cad, {
         type: 'setSpotWeld',
@@ -145,12 +147,12 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
           id: 'row',
           name: 'Strip welds',
           flanges: [
-            { bodyId: 'strip', face: pick('strip', under) },
+            { bodyId: 'strip', face: pick('strip', stripUnder) },
             { bodyId: 'plate', face: pick('plate', under) },
           ],
           pitchMm,
           endDistanceMm: 5,
-          maxGapMm: 0.5,
+          maxGapMm: 0.5 + lift,
         },
       });
     let doc: SimulationDocument = emptySimulation(
@@ -172,7 +174,7 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
       id: 'clamp',
       name: 'Clamp',
       kind: 'fixed',
-      targets: [face('plate', [0, 20, 0.5]), face('strip', [0, 20, 1.5])],
+      targets: [face('plate', [0, 20, 0.5]), face('strip', [0, 20, 1.5 + lift])],
     });
     doc.loads.push({
       id: 'tip',
@@ -199,7 +201,7 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
           id: 'welds',
           name: 'Strip welds',
           weldId: 'row',
-          follower: [face('strip', under)],
+          follower: [face('strip', stripUnder)],
           on: [face('plate', under)],
           radiusMm: 3,
           tolerance: 0.01,
@@ -211,7 +213,7 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
         bond: {
           id: 'glue',
           name: 'Glue',
-          follower: [face('strip', under)],
+          follower: [face('strip', stripUnder)],
           on: [face('plate', under)],
           tolerance: 0.01,
         },
@@ -277,6 +279,68 @@ describe.skipIf(!available)('spot welds in a study with the kernel and Netgen (C
     expect(tied(fine)).toBeGreaterThan(tied(coarse));
     if (fine.run.fields?.kind !== 'bonded-static') throw new Error('not a bonded run');
     expect(fine.run.fields.bodies.map((b) => b.bodyId)).toEqual(['plate', 'strip']);
+  }, 900_000);
+
+  it('runs a bonded strip into the wall as a seam of ties (VS8c)', async () => {
+    // TS-2235 (ST-624): the strip glued over its underside, in a crash study: the explicit solver
+    // has no bond, so each strip node the bond ties follows its nearest plate node (a tie).
+    const s = await setup();
+    const doc = s.bond();
+    doc.materials[0] = {
+      ...doc.materials[0]!,
+      plasticity: { strain: [0, 0.2], stress: [250, 400], cowperSymonds: { C: 40.4, p: 5 } },
+    };
+    doc.mesh = { ...doc.mesh, size: 10, minSize: 5 };
+    const study = crashStudy('front', [0, 20, 0.5]);
+    study.crash.gravity = false;
+    study.crash.endTimeMs = 60;
+    doc.studies.push(study);
+    const run = await runStudy(
+      doc,
+      s.cad,
+      cadContentHash(s.cad),
+      'front',
+      s.tables.get('plate')!,
+      env(),
+      s.tables,
+    );
+    expect(run.failure, JSON.stringify(run.failure)).toBeUndefined();
+    const level = run.levels[0]!;
+    for (const c of level.checks) expect(c.pass, `${c.name}: ${c.detail}`).toBe(true);
+    expect(level.checks[0]!.detail).toMatch(/Glue: a seam of \d+ ties/);
+    const seam = Number(/Glue: a seam of (\d+) ties/.exec(level.checks[0]!.detail)![1]);
+    // The strip's underside at about 10 mm: no fewer than its 21 × 3 nodes.
+    expect(seam).toBeGreaterThanOrEqual(63);
+    expect(level.metrics.crush).toBeGreaterThan(0);
+    if (run.fields?.kind !== 'crash') throw new Error('not a crash run');
+    expect(run.fields.bodies.map((b) => b.bodyId)).toEqual(['plate', 'strip']);
+  }, 900_000);
+
+  it('refuses a crash whose weld row spans a gap past its tolerance (Codex on #1317)', async () => {
+    // TS-2238 (ST-626): the strip lifted 3 mm off the plate, welded with a 0.01 mm tolerance:
+    // the explicit solver would join the parts whatever the gap, so the run checks the row first.
+    const s = await setup(40, 3);
+    const doc = s.weld();
+    doc.materials[0] = {
+      ...doc.materials[0]!,
+      plasticity: { strain: [0, 0.2], stress: [250, 400] },
+    };
+    doc.mesh = { ...doc.mesh, size: 10, minSize: 5 };
+    const study = crashStudy('front', [0, 20, 0.5]);
+    study.crash.gravity = false;
+    study.crash.endTimeMs = 60;
+    doc.studies.push(study);
+    const run = await runStudy(
+      doc,
+      s.cad,
+      cadContentHash(s.cad),
+      'front',
+      s.tables.get('plate')!,
+      env(),
+      s.tables,
+    );
+    expect(run.failure?.code).toBe('spot-weld');
+    expect(run.failure?.detail).toMatch(/^welds: weld 1 is 4\.\d+ mm across the flanges/);
   }, 900_000);
 
   it('sizes the welded flanges without display tables, finer at each level (Codex on #976)', async () => {

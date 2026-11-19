@@ -31,8 +31,14 @@ import {
   InstancedMesh,
   Matrix4,
   Quaternion,
+  CanvasTexture,
+  PlaneGeometry,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import type { CadSketchDisplay } from './sketch-display';
 import {
   disposeViewTextures,
   setViewFinish,
@@ -123,7 +129,11 @@ export interface ViewportBody {
    * R3e-4c: one linear RGB colour (0–1) per node of `mesh`, drawn instead of `color` (an
    * analysis result's colour map); display only, in every shading but zebra.
    */
-  colors?: Float32Array;
+  colors?: Float32Array /**
+   * Its edge lines (default true). A field of many small marks (a shower's water) turns them off:
+   * at a car's scale each mark's outline would hide its colour.
+   */;
+  outline?: boolean;
 }
 /** Opacity of a failed body's shape before the failure (U4): a reference, never picked. */
 const beforeFailureOpacity = 0.3;
@@ -144,6 +154,9 @@ export type CadShading =
   | { mode: 'silhouette' };
 /** The comb's colour: teeth and the line through their tips. */
 const combColor = '#7c3aed';
+/** CLF11: notes are drawn at this em (px) into their images. */
+const noteEm = 64;
+const noteFont = `${noteEm}px system-ui, sans-serif`;
 const zebraVertex = `
 varying vec3 vViewNormal;
 varying vec3 vViewPosition;
@@ -321,6 +334,19 @@ export class CadViewport {
   private readonly spotWelds = new Group();
   /** CR6c: the ray diagram's lines. */
   private readonly rays = new Group();
+  /**
+   * CLF11: the shown sketches' curves and notes, a scene of their own drawn over the model after
+   * it, so the silhouette's override material leaves their colours and they show over the bodies.
+   */
+  private readonly sketchLayer = new Scene();
+  private lastSketches: CadSketchDisplay | undefined;
+  /** The bytes of bodies refused by the GPU budget (CAD26), while refused. */
+  private bodyRefused: number | undefined;
+  /** The bytes of sketches refused by the GPU budget, while refused. */
+  private sketchRefused: number | undefined;
+  private noteMeasure: CanvasRenderingContext2D | undefined;
+  /** CLF11: the sketches' line material, whose width in pixels needs the drawn viewport's size. */
+  private sketchLines: LineMaterial | undefined;
   private shading: CadShading = { mode: 'shaded' };
   /** CLF1b: the drawing board's three panes are drawn instead of the current camera. */
   private threeView = false;
@@ -346,6 +372,8 @@ export class CadViewport {
   /** Whether the parts' shapes are drawn, and their bytes when drawn with shapes. */
   private partsFit = true;
   private partsFullBytes = 0;
+  /** What the parts as drawn hold: their full shapes when they fit, else the boxes in their place. */
+  private partsShownBytes = 0;
   /** Told whether the parts' shapes fit each time they are admitted (R2b). */
   onPartsFit: ((fits: boolean) => void) | undefined;
   /** What the last `show` was given, drawn again when the GPU budget changes. */
@@ -642,8 +670,10 @@ export class CadViewport {
     if (this.shading.mode === 'silhouette') this.grid.visible = this.axes.visible = false;
     const board = this.threeView ? this.board() : undefined;
     this.lastBoard = board ?? [];
-    if (!board) this.renderer.render(this.scene, this.camera);
-    else {
+    if (!board) {
+      this.renderer.render(this.scene, this.camera);
+      this.drawSketches(this.camera, this.host.clientWidth, this.host.clientHeight);
+    } else {
       const { clientWidth: width, clientHeight: height } = this.host;
       // The pane left empty takes the background too (none in a PNG without background).
       const clear = this.renderer.getClearColor(new Color());
@@ -661,6 +691,7 @@ export class CadViewport {
         this.renderer.setViewport(rect.x, y, rect.width, rect.height);
         this.renderer.setScissor(rect.x, y, rect.width, rect.height);
         this.renderer.render(this.scene, camera);
+        this.drawSketches(camera, rect.width, rect.height, true);
       }
       this.renderer.setScissorTest(false);
       this.renderer.setViewport(0, 0, width, height);
@@ -669,11 +700,37 @@ export class CadViewport {
     [this.grid.visible, this.axes.visible] = helpers;
   }
   /**
+   * CLF11: the sketch layer over what was just drawn, in a viewport `width` × `height` px; in a
+   * board `pane`, only the sketches on planes facing its camera.
+   */
+  private drawSketches(
+    camera: PerspectiveCamera | OrthographicCamera,
+    width: number,
+    height: number,
+    pane = false,
+  ) {
+    if (!this.sketchLayer.children.length) return;
+    // A board pane draws the sketches whose plane faces it; edge-on they would be a stray line.
+    const along = pane ? camera.getWorldDirection(new Vector3()) : undefined;
+    for (const child of this.sketchLayer.children)
+      child.visible =
+        !along || Math.abs((child.userData.normal as Vector3 | undefined)?.dot(along) ?? 1) > 0.999;
+    this.sketchLines?.resolution.set(width, height);
+    const autoClear = this.renderer.autoClear;
+    this.renderer.autoClear = false;
+    this.renderer.render(this.sketchLayer, camera);
+    this.renderer.autoClear = autoClear;
+  }
+  /**
    * CLF1b: each pane's camera, looking at the shown bodies' and parts' centre from its standard
    * view at the one scale of `threeViewLayout`; undefined when nothing is shown.
    */
   private board() {
-    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const box = new Box3()
+      .setFromObject(this.bodies)
+      .union(new Box3().setFromObject(this.parts))
+      // CLF11: a board of sketches alone (or reaching past the bodies) takes them in too.
+      .union(new Box3().setFromObject(this.sketchLayer));
     const { clientWidth: width, clientHeight: height } = this.host;
     if (box.isEmpty() || !width || !height) return undefined;
     const bounds = [box.min.toArray(), box.max.toArray()] as Bounds;
@@ -1060,15 +1117,18 @@ export class CadViewport {
    */
   showPartPmi(
     marks: { mesh: CadMesh; matrix: number[]; pick: CadTopologyPick; color: string }[],
-    lines: { mesh: CadMesh; matrix: number[]; segments: Float32Array; color: string }[] = [],
+    /** Lines relative to a mesh's origin, or (no mesh) in the document's frame. */
+    lines: { mesh?: CadMesh; matrix: number[]; segments: Float32Array; color: string }[] = [],
   ) {
     this.lastPartPmi = [marks, lines];
     this.clearPartPmi();
     // Over boxes (the parts did not fit) nothing is highlighted.
-    if (!this.partsFit) return this.render();
-    const place = (object: Object3D, mesh: CadMesh, matrix: number[]) => {
+    if (!this.partsFit) return this.readmitSketches();
+    const place = (object: Object3D, mesh: CadMesh | undefined, matrix: number[]) => {
       object.matrixAutoUpdate = false;
-      object.matrix.fromArray(matrix).multiply(new Matrix4().makeTranslation(...mesh.origin));
+      object.matrix
+        .fromArray(matrix)
+        .multiply(new Matrix4().makeTranslation(...(mesh?.origin ?? [0, 0, 0])));
       object.updateMatrixWorld(true);
       this.partPmi.add(object);
     };
@@ -1083,7 +1143,7 @@ export class CadViewport {
     // Admitted within the GPU budget with the bodies and the parts' shapes (CAD26), or not drawn.
     const used = this.gpuBytes + this.partsFullBytes + this.bufferBytes(this.partPmi);
     if (used > (this.gpuBudget ?? cadBudgets.gpuBytes)) this.clearPartPmi();
-    this.render();
+    this.readmitSketches();
   }
   /** What `showPartPmi` was last given, drawn again when the parts are admitted again. */
   private lastPartPmi: Parameters<CadViewport['showPartPmi']> = [[], []];
@@ -1373,13 +1433,14 @@ export class CadViewport {
   setGpuBudget(bytes: number | undefined) {
     if (bytes === this.gpuBudget) return;
     this.gpuBudget = bytes;
+    // The sketches are admitted again after the bodies (and the parts).
     this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
   }
   get gpuBytes(): number {
     return this.bufferBytes(this.bodies);
   }
   /** The GPU buffers a group's meshes and lines upload, each array and image once. */
-  private bufferBytes(group: Group, seen = new Set<unknown>()): number {
+  private bufferBytes(group: Object3D, seen = new Set<unknown>()): number {
     let bytes = 0;
     for (const child of group.children)
       if (child instanceof Mesh || child instanceof LineSegments) {
@@ -1512,7 +1573,12 @@ export class CadViewport {
           )
         : undefined;
       if (through) through.renderOrder = 2;
-      const drawn = [solid, edges, ...(back ? [back] : []), ...(through ? [through] : [])];
+      const drawn = [
+        solid,
+        ...(body.outline === false ? [] : [edges]),
+        ...(back ? [back] : []),
+        ...(through ? [through] : []),
+      ];
       // Positions are relative to the mesh origin (Float32 precision far from the model origin).
       for (const object of drawn) {
         object.position.set(...mesh.origin);
@@ -1543,7 +1609,8 @@ export class CadViewport {
       this.clear();
       bodies = [];
     }
-    this.options.onGpuBudget?.(bytes > budget ? bytes : undefined);
+    this.bodyRefused = bytes > budget ? bytes : undefined;
+    this.reportGpu();
     // A shape before a failure is drawn only: no pick, snap or move reads it.
     this.shownMeshes = new Map(
       bodies.filter((b) => !b.mesh.beforeFailure).map((b) => [b.mesh.bodyId, b.mesh]),
@@ -1566,7 +1633,8 @@ export class CadViewport {
     // The placed parts share the budget with these bodies: admit them again when that changes.
     const partsFit = this.gpuBytes + this.partsFullBytes <= (this.gpuBudget ?? cadBudgets.gpuBytes);
     if (this.lastParts.length && partsFit !== this.partsFit) this.showParts(this.lastParts);
-    this.render();
+    // CLF11: the sketches take what the bodies, parts and PMI leave (and render).
+    this.readmitSketches();
   }
   /** Shades bodies this way from the next `show` on; display only. */
   setShading(shading: CadShading) {
@@ -1618,6 +1686,167 @@ export class CadViewport {
       }
     }
     this.render();
+  }
+  /**
+   * CLF11: draws the shown sketches' curves (2 px, in their colours; construction curves paler)
+   * and notes (text on the sketch's plane, readable from its +normal) over the model. Undefined
+   * or empty clears them. The host's `data-sketch-lines` / `data-sketch-notes` count what is drawn.
+   */
+  showSketches(display: CadSketchDisplay | undefined) {
+    this.clearSketches();
+    this.lastSketches = display;
+    this.sketchRefused = undefined;
+    const lines = display?.lines.filter((l) => l.points.length > 1) ?? [];
+    const notes = display?.notes ?? [];
+    // Admitted within the GPU budget left by the bodies, the parts and their PMI (CAD26), counted
+    // before anything is made or uploaded: a vertex pair of position and colour per segment
+    // (Float32), and each note's RGBA image with its mipmaps. The parts count as drawn (boxes
+    // when their shapes did not fit), and with nothing to draw nothing is refused.
+    const used = this.gpuBytes + this.partsShownBytes + this.bufferBytes(this.partPmi);
+    let bytes = 0;
+    for (const l of lines) bytes += (l.points.length - 1) * 12 * 4;
+    for (const n of notes) {
+      const [w, h] = this.noteImageSize(n.text);
+      bytes += Math.ceil((w * h * 4 * 4) / 3);
+    }
+    if (bytes > 0 && used + bytes > (this.gpuBudget ?? cadBudgets.gpuBytes)) {
+      this.sketchRefused = used + bytes;
+      this.reportGpu();
+      this.host.dataset.sketchLines = '0';
+      this.host.dataset.sketchNotes = '0';
+      this.host.dataset.sketchRefused = 'true';
+      return this.render();
+    }
+    delete this.host.dataset.sketchRefused;
+    this.reportGpu();
+    if (lines.length || notes.length) {
+      if (lines.length)
+        this.sketchLines = new LineMaterial({
+          linewidth: 2,
+          vertexColors: true,
+          depthTest: false,
+          transparent: true,
+        });
+      // One set of segments per sketch and plane, so a board pane can draw only the planes facing
+      // it, each relative to its own first point (as the bodies are) for Float32 precision.
+      const planes = new Map<string, typeof lines>();
+      for (const l of lines) {
+        const key = `${l.sketchId}|${l.normal.map((x) => x.toFixed(6)).join(',')}`;
+        planes.set(key, [...(planes.get(key) ?? []), l]);
+      }
+      const pale = new Color('#ffffff');
+      for (const group of planes.values()) {
+        const origin = new Vector3(...group[0]!.points[0]!);
+        const positions: number[] = [];
+        const colors: number[] = [];
+        for (const l of group) {
+          const c = new Color(l.color);
+          if (l.construction) c.lerp(pale, 0.5);
+          // `Color` holds linear values (from the sRGB hex), as vertex colours are read.
+          const rgb = c.toArray();
+          for (let i = 1; i < l.points.length; i++) {
+            const [p, q] = [l.points[i - 1]!, l.points[i]!];
+            positions.push(
+              p[0] - origin.x,
+              p[1] - origin.y,
+              p[2] - origin.z,
+              q[0] - origin.x,
+              q[1] - origin.y,
+              q[2] - origin.z,
+            );
+            colors.push(...rgb, ...rgb);
+          }
+        }
+        const geometry = new LineSegmentsGeometry();
+        geometry.setPositions(positions);
+        geometry.setColors(colors);
+        const segments = new LineSegments2(geometry, this.sketchLines);
+        segments.position.copy(origin);
+        segments.userData.normal = new Vector3(...group[0]!.normal);
+        this.sketchLayer.add(segments);
+      }
+      for (const n of notes) {
+        const note = this.noteMesh(n);
+        if (!note) continue;
+        note.userData.normal = new Vector3(...n.normal);
+        this.sketchLayer.add(note);
+      }
+    }
+    this.host.dataset.sketchLines = String(lines.length);
+    this.host.dataset.sketchNotes = String(
+      this.sketchLayer.children.filter((c) => !(c instanceof LineSegments2)).length,
+    );
+    this.render();
+  }
+  /**
+   * A note as a textured rectangle on its plane: 1.5 em high with the baseline 0.375 em above its
+   * foot, so the text sits on `at` as on the sketch canvas.
+   */
+  /** A note's image (px): its text at the 64 px em, 2 px either side, 1.5 em high. */
+  private noteImageSize(text: string): [number, number] {
+    this.noteMeasure ??= document.createElement('canvas').getContext('2d') ?? undefined;
+    const g = this.noteMeasure;
+    if (!g) return [1, 1.5 * noteEm];
+    g.font = noteFont;
+    return [Math.max(1, Math.ceil(g.measureText(text).width) + 4), 1.5 * noteEm];
+  }
+  private noteMesh(n: CadSketchDisplay['notes'][number]) {
+    const em = noteEm;
+    const font = noteFont;
+    const canvas = document.createElement('canvas');
+    const g = canvas.getContext('2d');
+    if (!g) return undefined;
+    const [width, height] = this.noteImageSize(n.text);
+    canvas.width = width;
+    canvas.height = height;
+    g.font = font;
+    g.fillStyle = n.color;
+    g.textBaseline = 'alphabetic';
+    g.fillText(n.text, 2, 1.125 * em);
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = 'srgb';
+    const [w, h] = [(width / em) * n.size, 1.5 * n.size];
+    const geometry = new PlaneGeometry(w, h);
+    // The rectangle's centre from its foot at the baseline's start.
+    geometry.translate(w / 2, h / 2 - 0.375 * n.size, 0);
+    const mesh = new Mesh(
+      geometry,
+      new MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false,
+        side: DoubleSide,
+      }),
+    );
+    const [u, v] = [new Vector3(...n.u), new Vector3(...n.v)];
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.makeBasis(u, v, new Vector3().crossVectors(u, v)).setPosition(...n.at);
+    mesh.updateMatrixWorld(true);
+    return mesh;
+  }
+  /**
+   * Tells the Host what the GPU budget refuses now: the bodies first, else the sketches, else
+   * nothing (so a warning clears when the sketches are hidden or fit again).
+   */
+  private reportGpu() {
+    this.options.onGpuBudget?.(this.bodyRefused ?? this.sketchRefused);
+  }
+  /** The shown sketches admitted again against what the other layers now use. */
+  private readmitSketches() {
+    if (this.lastSketches || this.sketchRefused !== undefined) this.showSketches(this.lastSketches);
+    else this.render();
+  }
+  private clearSketches() {
+    for (const child of [...this.sketchLayer.children]) {
+      this.sketchLayer.remove(child);
+      if (child instanceof Mesh || child instanceof LineSegments2) {
+        child.geometry.dispose();
+        const material = child.material as MeshBasicMaterial | LineMaterial;
+        if (material instanceof MeshBasicMaterial) material.map?.dispose();
+        material.dispose();
+      }
+    }
+    this.sketchLines = undefined;
   }
   /**
    * CR6c: draws a ray diagram over the shape: line segments (pairs of model points, mm), each
@@ -1916,6 +2145,7 @@ export class CadViewport {
       disposeParts(group);
       group = partsGroup(parts.map((p) => ({ ...p, box: p.box ?? 'simplified' })));
     }
+    this.partsShownBytes = fits ? this.partsFullBytes : partsBytes(group);
     this.parts = group;
     this.scene.add(group);
     // A joint drag's preview holds over a redraw of the parts it moved, not over their new poses.
@@ -1933,6 +2163,7 @@ export class CadViewport {
     // PMI-5b: the parts' PMI overlay is admitted again against the parts as now drawn.
     if (this.lastPartPmi[0].length || this.lastPartPmi[1]?.length)
       this.showPartPmi(...this.lastPartPmi);
+    else this.readmitSketches();
     return fits;
   }
   /**
@@ -1987,8 +2218,12 @@ export class CadViewport {
     /** WM3: frame the selected bodies and part instances only (Zoom to selection). */
     selection?: boolean;
   } = {}) {
-    // Nothing shown: keep the camera as it is, so a later fit starts from a set-up one.
-    const whole = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    // Nothing shown: keep the camera as it is, so a later fit starts from a set-up one. CLF11:
+    // the shown sketches are shown content too (a document of sketches alone fits them).
+    const whole = new Box3()
+      .setFromObject(this.bodies)
+      .union(new Box3().setFromObject(this.parts))
+      .union(new Box3().setFromObject(this.sketchLayer));
     const box = selection ? this.selectionBox() : whole;
     if (box.isEmpty()) return;
     this.modelRadius = whole.getSize(new Vector3()).length() / 2 || this.modelRadius;
@@ -2027,6 +2262,8 @@ export class CadViewport {
     this.controls.target.copy(center);
     this.controls.update();
     this.viewGrid();
+    // Fitted: a later fit keeps the direction turned to (also for sketches alone).
+    this.fitted = true;
     this.render();
     this.scheduleLevels();
   }
@@ -2096,6 +2333,7 @@ export class CadViewport {
     this.clearComb(this.gapFlushes);
     this.clearComb(this.spotWelds);
     this.clearComb(this.rays);
+    this.clearSketches();
     this.lighting.dispose();
     this.silhouette.dispose();
     this.grid.dispose();

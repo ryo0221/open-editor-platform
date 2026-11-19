@@ -1,5 +1,7 @@
 import { newId } from '@editor-platform/artifact-core';
 import {
+  defaultCoilSpringArgs,
+  type CadBodyKind,
   CadCoordinator,
   type CadAdmission,
   cadContentHash,
@@ -26,6 +28,7 @@ import {
   CadSketchError,
   parameterValues,
   type CadSketch,
+  type CadSketchNote,
   type CadSketchConstraint,
   type CadSketchPlane,
   type CadSketchRegion,
@@ -72,6 +75,9 @@ import {
   type CadGapFlushReport,
   type CadGapFlushSample,
   type CadProportions,
+  type CadDesignTarget,
+  type CadSightCheck,
+  type CadToleranceStack,
   type CadSpotWeld,
   type CadSpotWeldPoints,
   type CadContinuityReport,
@@ -122,6 +128,9 @@ import {
   constraintTargets,
   movePoint,
   removeItem,
+  setColor,
+  addNote,
+  editNote,
   setDimension,
   solveDraft,
   type SketchConstraintInput,
@@ -631,8 +640,8 @@ const messages: Record<string, string> = {
   'asset-hash-mismatch': '取り込んだ形状のデータが記録と一致しないため、計算しませんでした。',
   'asset-unreadable': '取り込んだ形状のデータを読めませんでした。',
   'step-import-unavailable': 'このHostではSTEPを取り込めません（資産を保存できません）。',
-  'step-too-large': 'STEP fileが大きすぎます（64 MiBまで）。',
-  'step-export-too-large': '書き出すSTEP fileが大きすぎます（64 MiBまで）。',
+  'step-too-large': 'STEP fileが大きすぎます（256 MiBまで）。',
+  'step-export-too-large': '書き出すSTEP fileが大きすぎます（256 MiBまで）。',
   'memory-budget':
     'この形状のデータは、表示に使えるメモリーの上限を超えます。編集は入れていません。bodyや細部を減らしてください。',
   'native-too-large':
@@ -742,6 +751,48 @@ const messages: Record<string, string> = {
   'proportions-body-twice': '1つのbodyを比率の2つの役に入れることはできません。',
   'proportions-ground': '地面の高さは±10,000,000 mm以内の数です。',
   'proportions-band': '目安は数で、下限は上限以下です。',
+  'design-targets-unchanged': '設計の目標値が変わっていません。',
+  'design-target-stack': '目標の公差の積み上げがありません。',
+  'design-target-stack-value': '公差の積み上げのどの値かを選んでください。',
+  'tolerance-stacks-unchanged': '公差の積み上げが変わっていません。',
+  'tolerance-stacks': '公差の積み上げは1〜64個です。',
+  'tolerance-stacks-work': 'モンテカルロの回数×寄与の数は、文書全体で1,000万までです。',
+  'tolerance-stack-band': '積み上げの範囲は±1,000,000 mm以内の数で、下限は上限以下です。',
+  'tolerance-stack-runs': 'モンテカルロの回数は1〜100,000回です。',
+  'tolerance-stack-seed': '種は0〜4,294,967,295の整数です。',
+  'tolerance-stack-outside': '範囲の外に出てよい割合は0〜1です。',
+  'tolerance-stack-requirement': '要求のIDは1〜128文字です。',
+  'tolerance-stack-contributors': '積み上げの寄与は1〜64個です。',
+  'tolerance-stack-sign': '寄与の向きは+1か-1です。',
+  'tolerance-stack-distribution': '分布は正規か一様です。',
+  'tolerance-stack-source': '寄与は名前の付いた寸法かPMIの寸法です。',
+  'tolerance-stack-parameter-unit': '積み上げに使える寸法は長さだけです。',
+  'tolerance-stack-deviation': '公差は±1,000 mm以内で、下の公差は上の公差以下です。',
+  'tolerance-stack-pmi-item': 'PMIの項目を選んでください。',
+  'design-targets': '設計の目標値は1〜256個です。',
+  'design-target-band': '目標の範囲は数で、下限か上限の少なくとも一方があり、下限は上限以下です。',
+  'design-target-body': '目標に、今のbodyでないものがあります。',
+  'design-target-body-twice': '目標の同じ組に1つのbodyを2回入れることはできません。',
+  'design-target-bodies': '目標のbodyを1〜64個選んでください。',
+  'design-target-distance-same': '距離の両側に同じbodyを入れることはできません。',
+  'design-target-parameter': '目標のparameterがありません。',
+  'design-target-requirement': '要求のIDは1〜128文字です。',
+  'sight-checks-unchanged': '見え方の検査が変わっていません。',
+  'sight-checks': '見え方の検査は1〜64個です。',
+  'sight-check-band':
+    '検査の範囲は数で、下限か上限の少なくとも一方があり、下限は上限以下です（見える割合は0〜1）。',
+  'sight-check-body': '検査に、今のbodyでないものがあります。',
+  'sight-check-body-twice': '検査の同じ組に1つのbodyを2回入れることはできません。',
+  'sight-check-bodies': '検査のbodyを1〜64個選んでください。',
+  'sight-check-clear-target': '見る対象のbodyを透明なbodyにも入れることはできません。',
+  'sight-check-eyes': '目の位置は1つか2つです。',
+  'sight-check-point': '点の座標は±10,000,000 mm以内の数です。',
+  'sight-check-direction': '前と上の向きは長さがあり、互いに平行でない向きにしてください。',
+  'sight-check-arc': '円弧は−180°〜180°の中で、始めが終わりより小さい角度です。',
+  'sight-check-step': '角度の刻みは0.01〜5°で、1つの円弧や回転を20,000刻み以内にしてください。',
+  'sight-check-limit': '回す角度の上限は0°より大きく180°以下です。',
+  'sight-check-toward': '回す向きはleft・right・up・downのどれかです。',
+  'sight-check-requirement': '要求のIDは1〜128文字です。',
   'spot-weld-pitch': 'スポット溶接のピッチは10〜200 mmにしてください。',
   'spot-weld-end-distance': '端からの距離は0〜100 mmにしてください。',
   'spot-weld-gap': '許す離れは0.1〜20 mmにしてください。',
@@ -791,6 +842,10 @@ const messages: Record<string, string> = {
     'ずらしたスプラインを制御点256個で0.01 mm以内に当てはめられません。距離を小さくするか、元のスプラインを分けてください。',
   'sketch-spline-poles': 'スプラインの制御点の数が範囲の外です（4〜256個、次数+1個以上）。',
   'sketch-spline-degree': 'スプラインの次数は2・3・5のどれかにしてください。',
+  'sketch-color': 'sketchの線の色は #rrggbb の形にしてください。',
+  'sketch-note-text': 'メモの文字は1〜200文字にしてください（改行などの制御文字は使えません）。',
+  'sketch-note-size': 'メモの文字の高さは1〜2,000 mmにしてください。',
+  'limit-sketch-notes': '1つのsketchのメモは256個までです。',
   'sketch-degenerate':
     'スケッチの要素が潰れる（長さ・半径が0になる、円が重なる）ため、変更しませんでした。',
   'sketch-dimension-range': `寸法が範囲（${cadRangeLimit('sketch-dimension-range')}）の外です。変更しませんでした。`,
@@ -1229,6 +1284,9 @@ export class CadController {
         brep: Uint8Array;
         /** PMI-2: the body's `pmi` asset, when the import kept PMI. */
         pmi?: Uint8Array;
+        /** #848: the second, sheet body's BRep and PMI (report `sheet`). */
+        sheetBrep?: Uint8Array;
+        sheetPmi?: Uint8Array;
         buildHash: string;
       })
     | undefined;
@@ -2141,6 +2199,8 @@ export class CadController {
       source: bytes,
       brep: result.brep,
       ...(result.pmi ? { pmi: result.pmi } : {}),
+      ...(result.sheetBrep ? { sheetBrep: result.sheetBrep } : {}),
+      ...(result.sheetPmi ? { sheetPmi: result.sheetPmi } : {}),
       buildHash: profile.buildHash,
     };
     this.emit();
@@ -2182,6 +2242,15 @@ export class CadController {
       report.pmiAsset && pending.pmi
         ? refFor('pmi', report.pmiAsset.sha256, report.pmiAsset.byteLength)
         : undefined;
+    // #848: the shells beside the solid, as a second, sheet body of the same file.
+    const sheetBrep =
+      report.sheet && pending.sheetBrep
+        ? refFor('normalized-brep', report.sheet.brep.sha256, report.sheet.brep.byteLength)
+        : undefined;
+    const sheetPmi =
+      sheetBrep && report.sheet?.pmiAsset && pending.sheetPmi
+        ? refFor('pmi', report.sheet.pmiAsset.sha256, report.sheet.pmiAsset.byteLength)
+        : undefined;
     // Staging is pending input: Host save and version boundaries wait until the edit names the
     // stored bytes (or the staging fails), so no record is captured between the two.
     const operation = ++this.operation;
@@ -2193,6 +2262,8 @@ export class CadController {
         { ref: source, bytes: pending.source },
         { ref: brep, bytes: pending.brep },
         ...(pmi && pending.pmi ? [{ ref: pmi, bytes: pending.pmi }] : []),
+        ...(sheetBrep && pending.sheetBrep ? [{ ref: sheetBrep, bytes: pending.sheetBrep }] : []),
+        ...(sheetPmi && pending.sheetPmi ? [{ ref: sheetPmi, bytes: pending.sheetPmi }] : []),
       ]);
     } catch (error) {
       this.staging = false;
@@ -2205,30 +2276,65 @@ export class CadController {
     this.staging = false;
     if (operation === this.operation) this.busy = false;
     const id = this.id('imported');
-    const name = [...pending.fileName].slice(0, 256).join('') || 'STEP';
+    // #848: the sheet's names keep room for their suffix within the name limit.
+    const named = (suffix = '') =>
+      [...pending.fileName].slice(0, cadLimits.nameCodePoints - [...suffix].length).join('') ||
+      'STEP';
+    const stem = (n: string) => n.replace(/\.(step|stp)$/i, '') || 'STEP';
+    const surfaces = ' (surfaces)';
+    const name = named();
+    const base = stem(name);
+    const args = (
+      kind: CadBodyKind,
+      brepAssetId: string,
+      toleranceMm: number,
+      pmiAssetId?: string,
+    ) => ({
+      kind,
+      sourceAssetId: source.id,
+      brepAssetId,
+      importer: { id: content.kernelProfile.id, buildHash: pending.buildHash },
+      sourceUnit: report.sourceUnit,
+      scaleToMm: report.scaleToMm,
+      // #820: a shape less precise than the standard limit keeps its tolerance as read; #848:
+      // each body its own.
+      ...(toleranceMm > cadTolerance.maxResultLinearToleranceMm && {
+        maxToleranceMm: toleranceMm,
+      }),
+      ...(pmiAssetId && { pmiAssetId }),
+    });
+    const sheetId = sheetBrep && this.id('imported');
     return this.run({
       type: 'insertImportedBody',
-      assets: pmi ? [source, brep, pmi] : [source, brep],
+      assets: [
+        source,
+        brep,
+        ...(pmi ? [pmi] : []),
+        ...(sheetBrep ? [sheetBrep] : []),
+        ...(sheetPmi ? [sheetPmi] : []),
+      ],
       feature: {
         id,
         name,
         type: 'imported',
         inputFeatureIds: [],
-        args: {
-          kind: report.body.kind,
-          sourceAssetId: source.id,
-          brepAssetId: brep.id,
-          importer: { id: content.kernelProfile.id, buildHash: pending.buildHash },
-          sourceUnit: report.sourceUnit,
-          scaleToMm: report.scaleToMm,
-          // #820: a shape less precise than the standard limit keeps its tolerance as read.
-          ...(report.maxToleranceMm > cadTolerance.maxResultLinearToleranceMm && {
-            maxToleranceMm: report.maxToleranceMm,
-          }),
-          ...(pmi && { pmiAssetId: pmi.id }),
-        },
+        args: args(report.body.kind, brep.id, report.maxToleranceMm, pmi?.id),
       },
-      body: this.newBody(id, name.replace(/\.(step|stp)$/i, '') || 'STEP'),
+      body: this.newBody(id, base),
+      ...(sheetBrep && sheetId
+        ? {
+            sheet: {
+              feature: {
+                id: sheetId,
+                name: `${named(surfaces)}${surfaces}`,
+                type: 'imported' as const,
+                inputFeatureIds: [],
+                args: args('sheet', sheetBrep.id, report.sheet!.maxToleranceMm, sheetPmi?.id),
+              },
+              body: this.newBody(sheetId, `${stem(named(surfaces))}${surfaces}`),
+            },
+          }
+        : {}),
     });
   }
   /**
@@ -2929,7 +3035,11 @@ export class CadController {
     try {
       next = change(current.sketch);
       const { sketch, dof } = solveDraft(next, this.params());
-      for (const x of [...current.sketch.entities, ...current.sketch.constraints])
+      for (const x of [
+        ...current.sketch.entities,
+        ...current.sketch.constraints,
+        ...(current.sketch.notes ?? []),
+      ])
         this.sketchIds.add(x.id);
       this.sketching = { ...current, sketch, dof, problem: undefined };
       this.emit();
@@ -2961,10 +3071,20 @@ export class CadController {
     const k =
       at?.startsWith('constraints[') && s ? s.constraints[Number(at.slice(12, -1))] : undefined;
     const e = at?.startsWith('entities[') && s ? s.entities[Number(at.slice(9, -1))] : undefined;
+    // CLF10: a note is named `notes.<id>`.
+    const note = at?.startsWith('notes.') ? at.slice(6) : undefined;
     return {
       code,
       message: describeCode(code),
-      elements: k ? [k.id, ...constraintTargets(k)] : e ? [e.id] : s ? named(s) : [],
+      elements: k
+        ? [k.id, ...constraintTargets(k)]
+        : e
+          ? [e.id]
+          : note
+            ? [note]
+            : s
+              ? named(s)
+              : [],
     };
   }
   /** Applies an addition; returns the new element's ID, or undefined when it was refused. */
@@ -3029,6 +3149,21 @@ export class CadController {
   sketchRemove(id: string) {
     return this.draw((s) => removeItem(s, id));
   }
+  /** CLF10: adds a note at `at` on the plane, `size` mm high; returns its ID. */
+  sketchNote(at: [number, number], text: string, size: number) {
+    return this.add((s) => addNote(s, at, text, size, this.sketchIds));
+  }
+  /** CLF10: changes a note's text, height or place. */
+  sketchEditNote(id: string, patch: Partial<Pick<CadSketchNote, 'at' | 'text' | 'size'>>) {
+    return this.draw(
+      (s) => editNote(s, id, patch),
+      () => [id],
+    );
+  }
+  /** CLF9: sets (or, with `undefined`, takes off) the line colour of the selected curves. */
+  sketchColor(ids: string[], color: string | undefined) {
+    return this.draw((s) => setColor(s, ids, color));
+  }
   sketchDimension(id: string, value: Length) {
     return this.draw((s) => setDimension(s, id, value));
   }
@@ -3060,6 +3195,8 @@ export class CadController {
         entities: sketch.entities,
         constraints: sketch.constraints,
         solved: sketch.solved,
+        // CLF10: the notes as drawn, none included, so removing the last one is kept.
+        notes: sketch.notes ?? [],
       };
     else if (extrude) {
       if (!view.region) return this.refuse('sketch-no-region') ?? false;
@@ -3189,6 +3326,29 @@ export class CadController {
         },
       ],
       bodies: [this.newBody(id, 'Gear')],
+    });
+  }
+  /**
+   * PD5: a compression coil spring of spring steel (1 mm wire on 8 mm, 8 turns) at the next free
+   * spot; its form (coil or spiral), use and sizes are edited in the inspector.
+   */
+  addSpring() {
+    const id = this.id('spring');
+    return this.run({
+      type: 'insertFeatures',
+      features: [
+        {
+          id,
+          name: 'Spring',
+          type: 'spring',
+          inputFeatureIds: [],
+          args: defaultCoilSpringArgs({
+            origin: this.nextOrigin(),
+            orientation: identityQuaternion(),
+          }),
+        },
+      ],
+      bodies: [this.newBody(id, 'Spring')],
     });
   }
   /** A width parameter, a rectangle profile and an extrusion: the parametric starting point. */
@@ -4052,6 +4212,18 @@ export class CadController {
   /** CLF3: sets the car's proportion setup (roles, ground, bands), or removes it with null. */
   setProportions(proportions: CadProportions | null) {
     return this.run({ type: 'setProportions', proportions });
+  }
+  /** PD1: sets the document's design targets (the whole list; empty removes them). */
+  setDesignTargets(targets: CadDesignTarget[]) {
+    return this.run({ type: 'setDesignTargets', targets });
+  }
+  /** PD7: sets the document's sight checks (the whole list; empty removes them). */
+  setSightChecks(checks: CadSightCheck[]) {
+    return this.run({ type: 'setSightChecks', checks });
+  }
+  /** PD3: sets the document's tolerance stacks (the whole list; empty removes them). */
+  setToleranceStacks(stacks: CadToleranceStack[]) {
+    return this.run({ type: 'setToleranceStacks', stacks });
   }
   removeSpotWeld(id: string) {
     return this.run({ type: 'removeSpotWeld', id });

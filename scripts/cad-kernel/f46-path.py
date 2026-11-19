@@ -66,13 +66,13 @@ def path(nauo, rep, face):
 
 def flatness(value, on):
     measure = add(f"LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE({value}),{mm})")
-    add(f"FLATNESS_TOLERANCE('','',{measure},{on})")
+    return add(f"FLATNESS_TOLERANCE('','',{measure},{on})")
 
 
 block_path = path(block, "#478", block_top)
 plate_path = path(second_plate, "#40", plate_top)
-flatness("0.03", block_path)
-flatness("0.04", plate_path)
+block_flatness = flatness("0.03", block_path)
+plate_flatness = flatness("0.04", plate_path)
 value = add(
     "( LENGTH_MEASURE_WITH_UNIT() MEASURE_REPRESENTATION_ITEM() \n"
     f"MEASURE_WITH_UNIT(POSITIVE_LENGTH_MEASURE(5.),{mm}) REPRESENTATION_ITEM('') )"
@@ -94,6 +94,65 @@ add(
     f"( GEOMETRIC_TOLERANCE('','',{measure},{plate_path}) \n"
     f"GEOMETRIC_TOLERANCE_WITH_DATUM_REFERENCE(({system})) PARALLELISM_TOLERANCE() )"
 )
+
+# PMI-5b-2: presentation lines in the assembly's frame (its representation context #27), as the
+# JAMA files write a path item's callout: the second plate's flatness (linked with a placeholder,
+# AP242 ed3) and the distance (the plain link). The block's flatness has a callout listed only in
+# the block part's context (#809): not the item's frame, so it is not drawn (never guessed).
+asm_context = "#27"
+assert entity(r"^#27 = \( GEOMETRIC_REPRESENTATION_CONTEXT\(3\)")
+block_context = "#809"
+colour = add("DRAUGHTING_PRE_DEFINED_COLOUR('white')")
+font = add("DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous')")
+curve_style = add(f"CURVE_STYLE('',{font},POSITIVE_LENGTH_MEASURE(0.1),{colour})")
+style = add(f"PRESENTATION_STYLE_ASSIGNMENT(({curve_style}))")
+null_style = add("PRESENTATION_STYLE_ASSIGNMENT((NULL_STYLE(.NULL.)))")
+
+
+def point(p):
+    return add("CARTESIAN_POINT('',(" + ",".join(f"{v:.1f}" for v in p) + "))")
+
+
+def callout(name, segments, origin, extra=()):
+    """A callout of line segments (assembly mm) on the plane through `origin` facing -Y."""
+    pts = [p for seg in segments for p in seg]
+    coords = add(f"COORDINATES_LIST('',{len(pts)},(" + ",".join(
+        "(" + ",".join(f"{v:.1f}" for v in p) + ")" for p in pts) + "))")
+    curves = add(f"TESSELLATED_CURVE_SET('',{coords},(" + ",".join(
+        f"({2 * i + 1},{2 * i + 2})" for i in range(len(segments))) + "))")
+    geometry = add(f"TESSELLATED_GEOMETRIC_SET('',({curves}))")
+    occurrence = add(f"TESSELLATED_ANNOTATION_OCCURRENCE('',({style}),{geometry})")
+    c = add(f"DRAUGHTING_CALLOUT('{name}',(" + ",".join([occurrence, *extra]) + "))")
+    z = add("DIRECTION('',(0.,-1.,0.))")
+    x = add("DIRECTION('',(1.,0.,0.))")
+    axis = add(f"AXIS2_PLACEMENT_3D('',{point(origin)},{z},{x})")
+    surface = add(f"PLANE('',{axis})")
+    plane = add(f"ANNOTATION_PLANE('',({null_style}),{surface},({c}))")
+    return c, plane, segments
+
+
+flatness_lines = [((40, 85, 5), (40, 85, 15)), ((40, 85, 15), (56, 85, 15)),
+                  ((56, 85, 15), (56, 85, 20)), ((56, 85, 20), (40, 85, 20)),
+                  ((40, 85, 20), (40, 85, 15)), ((46, 85, 15), (46, 85, 20))]
+distance_lines = [((80, 50, 5), (130, 50, 5)), ((120, 50, 10), (130, 50, 10)),
+                  ((128, 50, 5), (128, 50, 10))]
+block_lines = [((110, 10, 10), (110, 10, 20)), ((110, 10, 20), (126, 10, 20))]
+holder_point = point((48, 85, 17.5))
+holder_set = add(f"GEOMETRIC_SET('',({holder_point}))")
+holder = add(f"ANNOTATION_PLACEHOLDER_OCCURRENCE('flatness',(),{holder_set},.GPS_DATA.,3.5)")
+plate_callout = callout("flatness plate 2", flatness_lines, (40, 85, 15), [holder])
+distance_callout = callout("distance", distance_lines, (128, 50, 5))
+block_callout = callout("flatness block", block_lines, (110, 10, 20))
+asm_model = add(
+    "DRAUGHTING_MODEL('',(" + ",".join([*plate_callout[:2], *distance_callout[:2]]) + f"),{asm_context})"
+)
+block_model = add(f"DRAUGHTING_MODEL('',({block_callout[0]},{block_callout[1]}),{block_context})")
+add(f"DRAUGHTING_MODEL_ITEM_ASSOCIATION_WITH_PLACEHOLDER('','',{plate_flatness},{asm_model},"
+    f"{plate_callout[0]},{holder})")
+add(f"DRAUGHTING_MODEL_ITEM_ASSOCIATION('PMI representation to presentation link','',{location},"
+    f"{asm_model},{distance_callout[0]})")
+add(f"DRAUGHTING_MODEL_ITEM_ASSOCIATION('PMI representation to presentation link','',"
+    f"{block_flatness},{block_model},{block_callout[0]})")
 
 edited = text.replace("ENDSEC;\nEND-ISO-10303-21;", "\n".join(lines) + "\nENDSEC;\nEND-ISO-10303-21;")
 assert edited != text
@@ -121,6 +180,11 @@ expected = {
         {"kind": "datum", "name": "A",
          "targets": [{"instance": 3, "part": "block", "centroid": [110, 10, 10]}]},
     ],
+}
+# The lines each kept item carries, in the assembly's frame (mm; the block's flatness carries none).
+expected["presentation"] = {
+    "Flatness 0.04": [v for seg in flatness_lines for p in seg for v in p],
+    "Location_LinearDistance 5": [v for seg in distance_lines for p in seg for v in p],
 }
 json.dump(expected, open(os.path.join(out, "path.json"), "w"), indent=2)
 open(os.path.join(out, "path.json"), "a").write("\n")

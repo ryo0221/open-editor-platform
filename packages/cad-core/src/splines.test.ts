@@ -138,6 +138,53 @@ describe('sketch splines (R2a-2, CAD40)', () => {
     expect(sketchDefaultRegion(ring)).toEqual({ outer: ['sp'], holes: [] });
   });
 
+  it('keeps a curve’s line colour and refuses one not in #rrggbb (CLF9, TS-2016)', () => {
+    const coloured = (color: unknown, at = 5) => {
+      const s = structuredClone(f16Sketch());
+      (s.entities[at] as Loose).color = color;
+      return codes(withSketch(s));
+    };
+    expect(coloured('#d1495b')).toEqual([]);
+    expect(coloured('#3E7CB1')).toEqual([]);
+    expect(coloured('red')).toEqual(['sketch-color@$.sketches[0].entities[5].color']);
+    expect(coloured(0xff0000)).toEqual(['sketch-color@$.sketches[0].entities[5].color']);
+    // A point has no line to colour.
+    const point = f16Sketch().entities.findIndex((e) => e.type === 'point');
+    expect(coloured('#d1495b', point)).toEqual([
+      `unknown-field@$.sketches[0].entities[${point}].color`,
+    ]);
+  });
+
+  it('keeps a sketch’s notes and refuses bad ones (CLF10, TS-2018)', () => {
+    const noted = (...notes: unknown[]) => {
+      const s = structuredClone(f16Sketch()) as unknown as Loose;
+      s.notes = notes;
+      return codes(withSketch(s as unknown as CadSketch));
+    };
+    const note = { id: 'n1', at: [10, 20], text: 'ルーフ', size: 12 };
+    expect(noted(note, { ...note, id: 'n2', color: '#3e7cb1' })).toEqual([]);
+    expect(noted({ ...note, id: 'base' })).toEqual([
+      'sketch-duplicate-id@$.sketches[0].notes[0].id',
+    ]);
+    expect(noted({ ...note, text: ' ' })).toEqual(['sketch-note-text@$.sketches[0].notes[0].text']);
+    expect(noted({ ...note, text: 'a\nb' })).toEqual([
+      'sketch-note-text@$.sketches[0].notes[0].text',
+    ]);
+    expect(noted({ ...note, text: 'x'.repeat(201) })).toEqual([
+      'sketch-note-text@$.sketches[0].notes[0].text',
+    ]);
+    expect(noted({ ...note, size: 0.5 })).toEqual(['sketch-note-size@$.sketches[0].notes[0].size']);
+    expect(noted({ ...note, color: 'blue' })).toEqual([
+      'sketch-color@$.sketches[0].notes[0].color',
+    ]);
+    expect(noted({ ...note, at: [1e9, 0] })).toEqual([
+      'coordinate-range@$.sketches[0].notes[0].at',
+    ]);
+    expect(noted({ ...note, font: 'serif' })).toEqual([
+      'unknown-field@$.sketches[0].notes[0].font',
+    ]);
+  });
+
   it('refuses a crossing spline, too few control points, a bad degree and bad poles', () => {
     expect(codes(withSketch(f16Sketch('crossing')))).toEqual([
       'sketch-self-intersection@$.sketches[0].entities[5]',

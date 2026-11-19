@@ -11,18 +11,30 @@ import {
 } from '@editor-platform/cad-core';
 import {
   aeroStudy,
+  crashStudy,
+  headImpactStudy,
+  sealStudy,
+  showerStudy,
   freshSimulationId,
+  simulationLimits,
   sameSimulationTarget,
   thermalConstraintKinds,
   thermalLoadKinds,
+  thermalStressConstraintKinds,
+  transientLoadKinds,
+  transientStudy,
+  type SimulationAmplitude,
   type SimulationConstraint,
   type SimulationDocument,
+  type SimulationFatigue,
   type SimulationLoad,
   type SimulationOperation,
   type SimulationSpotWeld,
   type SimulationStudy,
   type SimulationTarget,
+  type SimulationTransientStudy,
 } from '@editor-platform/simulation-core';
+import { crashStudyPoints } from './crash-view';
 
 /** What the Surface adds on the selected faces (R3h: and the thermal conditions). */
 export type SimulationConditionKind =
@@ -32,7 +44,9 @@ export type SimulationConditionKind =
   | 'pinned'
   | 'temperature'
   | 'heat-flux'
-  | 'convection';
+  | 'convection'
+  | 'radiation'
+  | 'enclosure';
 export const simulationConditionLabels: Record<SimulationConditionKind, string> = {
   force: 'Force',
   pressure: 'Pressure',
@@ -42,11 +56,19 @@ export const simulationConditionLabels: Record<SimulationConditionKind, string> 
   temperature: 'Temperature',
   'heat-flux': 'Heat flux',
   convection: 'Convection',
+  // VS11d-2: transient studies only.
+  radiation: 'Radiation to the surroundings',
+  enclosure: 'Radiation between faces',
 };
 const constraintKinds: readonly SimulationConditionKind[] = ['fixed', 'pinned', 'temperature'];
 /** R3h: whether a load or constraint kind belongs to thermal studies. */
 export const isThermalKind = (kind: string) =>
-  thermalLoadKinds.includes(kind as never) || thermalConstraintKinds.includes(kind as never);
+  transientLoadKinds.includes(kind as never) || thermalConstraintKinds.includes(kind as never);
+/** VS11d: what a steady thermal study takes: no radiation, no enclosure, no amplitude. */
+const steadyHeat = (x: { kind: string; amplitude?: unknown }) =>
+  (thermalLoadKinds.includes(x.kind as never) ||
+    thermalConstraintKinds.includes(x.kind as never)) &&
+  x.amplitude === undefined;
 const structural = <T extends { kind: string }>(items: readonly T[]) =>
   items.filter((x) => !isThermalKind(x.kind));
 const thermal = <T extends { kind: string }>(items: readonly T[]) =>
@@ -54,12 +76,18 @@ const thermal = <T extends { kind: string }>(items: readonly T[]) =>
 /** Whether a study of this kind takes an item of this kind. */
 const takes = (study: SimulationStudy, kind: string, isConstraint: boolean) =>
   // CR5c: a stiffness test keeps its own supports and loads only.
-  // VS4a: a wind tunnel takes no loads or constraints.
-  (study.kind === 'linear-static' && study.test) || study.kind === 'aero'
+  // VS4a, VS7b: a wind tunnel and a crash test take no loads or constraints.
+  (study.kind === 'linear-static' && study.test) || study.kind === 'aero' || study.kind === 'crash'
     ? false
     : study.kind === 'thermal'
-      ? isThermalKind(kind)
-      : !isThermalKind(kind) && (isConstraint || study.kind === 'linear-static');
+      ? thermalLoadKinds.includes(kind as never) || thermalConstraintKinds.includes(kind as never)
+      : study.kind === 'transient-thermal'
+        ? // Codex on #1268: with thermal stress, a new support holds the body too.
+          isThermalKind(kind) ||
+          (isConstraint &&
+            !!study.transient.stress &&
+            thermalStressConstraintKinds.includes(kind as never))
+        : !isThermalKind(kind) && (isConstraint || study.kind === 'linear-static');
 
 /** Face targets for face indices of the body's topology table, on its result feature. */
 export const faceTargets = (
@@ -226,11 +254,141 @@ export function defaultThermalStudy(doc: SimulationDocument): SimulationStudy {
       'Thermal',
     ),
     kind: 'thermal',
-    loadIds: thermal(doc.loads).map((l) => l.id),
-    constraintIds: thermal(doc.constraints).map((c) => c.id),
+    loadIds: doc.loads.filter(steadyHeat).map((l) => l.id),
+    constraintIds: doc.constraints.filter(steadyHeat).map((c) => c.id),
     solver: { tolerance: 1e-10, maxIterations: 100_000 },
     convergence: { levels: 2, metrics: ['max-temperature', 'max-heat-flux'], tolerance: 0.02 },
   };
+}
+/**
+ * VS11d: a transient thermal study of every heat item: 10 min in 10 s steps from 293.15 K, one
+ * mesh level; with enclosure loads, 293.15 K surroundings and 64 rays per patch.
+ */
+export function defaultTransientStudy(doc: SimulationDocument): SimulationStudy {
+  const study = transientStudy(
+    freshSimulationId(doc, 'transient'),
+    numbered(
+      doc.studies.map((s) => s.name),
+      'Transient heat',
+    ),
+  );
+  study.loadIds = thermal(doc.loads).map((l) => l.id);
+  study.constraintIds = thermal(doc.constraints).map((c) => c.id);
+  if (doc.loads.some((l) => l.kind === 'enclosure'))
+    study.transient.enclosure = { ...defaultEnclosure };
+  return study;
+}
+/** VS11d-2: a new enclosure's surroundings (K) and rays from each patch. */
+export const defaultEnclosure = { ambient: 293.15, raysPerPatch: 64 } as const;
+/** VS11d-2: whether a transient study can be made: any thermal load or constraint. */
+export const transientStudyReady = (doc: SimulationDocument) =>
+  doc.loads.some((l) => isThermalKind(l.kind)) ||
+  doc.constraints.some((c) => c.kind === 'temperature');
+
+/**
+ * Codex on #1268: a transient study with new settings; turning thermal stress on takes the
+ * document's supports (fixed, roller, displacement) into the study, turning it off takes them out.
+ */
+export function transientSettingsStudy(
+  doc: SimulationDocument,
+  study: SimulationTransientStudy,
+  transient: SimulationTransientStudy['transient'],
+): SimulationTransientStudy {
+  const supports = new Set(stressSupports(doc).map((c) => c.id));
+  const was = !!study.transient.stress;
+  const is = !!transient.stress;
+  const constraintIds =
+    was === is
+      ? study.constraintIds
+      : is
+        ? [
+            ...study.constraintIds,
+            ...[...supports].filter((id) => !study.constraintIds.includes(id)),
+          ]
+        : study.constraintIds.filter((id) => !supports.has(id));
+  if (!was || is) return { ...study, constraintIds, transient };
+  // Off: the stress's metric goes too (Codex on #1268), leaving the temperature if nothing is left.
+  const kept = study.convergence.metrics.filter((m) => m !== 'max-von-mises');
+  const metrics = kept.length ? kept : (['max-temperature'] as typeof kept);
+  return { ...study, constraintIds, transient, convergence: { ...study.convergence, metrics } };
+}
+/**
+ * Codex on #1268: the supports thermal stress holds the body by: fixed, roller, displacement, but
+ * not a stiffness test's (its imposed twist or bend would load the body).
+ */
+const stressSupports = (doc: SimulationDocument) => {
+  const held = testItems(doc);
+  return doc.constraints.filter(
+    (c) => thermalStressConstraintKinds.includes(c.kind) && !held.has(c.id),
+  );
+};
+/** Codex on #1268: whether the document has a support thermal stress can hold the body by. */
+export const hasStressSupport = (doc: SimulationDocument) => stressSupports(doc).length > 0;
+/** VS11d-2: an amplitude as the panel writes it: `time:factor` pairs, e.g. `0:0.5, 60:1`. */
+export const formatAmplitude = (a: SimulationAmplitude | undefined) =>
+  a ? a.times.map((t, i) => `${t}:${a.factors[i]}`).join(', ') : '';
+/**
+ * VS11d-2: an amplitude from the panel's text; empty is none (the value at every time), and text
+ * that is not `time:factor` pairs with increasing times and factors ≥ 0 is refused (undefined).
+ */
+export function parseAmplitude(
+  text: string,
+  /** Codex on #1268: a heat flux may turn to cooling (negative factors); the others may not. */
+  signed = false,
+): SimulationAmplitude | null | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const times: number[] = [];
+  const factors: number[] = [];
+  for (const pair of trimmed.split(/[,;]/)) {
+    const m = /^\s*([^:\s]+)\s*:\s*([^:\s]+)\s*$/.exec(pair);
+    if (!m) return undefined;
+    const t = Number(m[1]),
+      f = Number(m[2]);
+    if (!Number.isFinite(t) || !Number.isFinite(f) || t < 0 || (!signed && f < 0)) return undefined;
+    if (times.length && t <= times.at(-1)!) return undefined;
+    times.push(t);
+    factors.push(f);
+  }
+  return { times, factors };
+}
+/**
+ * VS11d-2: setting (or clearing, `null`) an item's amplitude. An item with one leaves the steady
+ * thermal studies, which take none.
+ */
+export function amplitudeOps(
+  doc: SimulationDocument,
+  item: SimulationLoad | SimulationConstraint,
+  amplitude: SimulationAmplitude | null,
+): SimulationOperation[] {
+  if (item.kind !== 'temperature' && item.kind !== 'heat-flux' && item.kind !== 'convection')
+    return [];
+  const { amplitude: _old, ...rest } = item;
+  const next = amplitude ? { ...rest, amplitude } : rest;
+  const isConstraint = item.kind === 'temperature';
+  // The studies first: each operation is checked on its own, and a steady study may not hold an
+  // item with an amplitude. One left unheld (no temperature, no convection) is removed.
+  const ops: SimulationOperation[] = [];
+  if (amplitude)
+    for (const study of doc.studies)
+      if (study.kind === 'thermal') {
+        const ids = isConstraint ? study.constraintIds : study.loadIds;
+        if (!ids.includes(item.id)) continue;
+        const kept = ids.filter((x) => x !== item.id);
+        const left = isConstraint ? { ...study, constraintIds: kept } : { ...study, loadIds: kept };
+        const held =
+          left.constraintIds.length > 0 ||
+          left.loadIds.some((l) => doc.loads.find((x) => x.id === l)?.kind === 'convection');
+        ops.push(
+          held ? { type: 'updateStudy', study: left } : { type: 'removeStudy', id: study.id },
+        );
+      }
+  ops.push(
+    isConstraint
+      ? { type: 'updateConstraint', constraint: next as SimulationConstraint }
+      : { type: 'updateLoad', load: next as SimulationLoad },
+  );
+  return ops;
 }
 /** Whether a thermal study can be made: a held temperature or a convection. */
 export const thermalStudyReady = (doc: SimulationDocument) =>
@@ -271,6 +429,62 @@ export function defaultAeroStudy(doc: SimulationDocument, lengthMm?: number): Si
       'Wind tunnel',
     ),
     lengthMm,
+  );
+}
+
+/**
+ * VS7c-2: a new crash study: a frontal wall at 56 km/h, or a 254 mm pole at 32 km/h and 75°,
+ * with its accelerometer (and the pole's line) placed from the analysed bodies' bounds (mm,
+ * vehicle frame) by `crashStudyPoints`; the origin when they are not known yet. VS8b: or a head
+ * impact (`head`), the adult headform at 40 km/h on the top of the bodies.
+ */
+export function defaultCrashStudy(
+  doc: SimulationDocument,
+  barrier: 'wall' | 'pole' | 'head',
+  bounds?: { lo: readonly number[]; hi: readonly number[] },
+): SimulationStudy {
+  const points = crashStudyPoints(bounds?.lo ?? [0, 0, 0], bounds?.hi ?? [0, 0, 0]);
+  // VS8b: a head impact on the top of the bodies.
+  if (barrier === 'head')
+    return headImpactStudy(
+      freshSimulationId(doc, 'crash'),
+      points.head.targetMm,
+      points.head.holdBeyondMm,
+      numbered(
+        doc.studies.map((s) => s.name),
+        'Head impact',
+      ),
+    );
+  return crashStudy(
+    freshSimulationId(doc, 'crash'),
+    points.accelerometer,
+    barrier === 'pole' ? points.pole : undefined,
+    numbered(
+      doc.studies.map((s) => s.name),
+      barrier === 'pole' ? 'Pole crash' : 'Frontal crash',
+    ),
+  );
+}
+
+/** VS9b: a seal study over every seal of the document, with `sealStudy`'s settings. */
+export function defaultSealStudy(doc: SimulationDocument): SimulationStudy {
+  return sealStudy(
+    freshSimulationId(doc, 'seals'),
+    numbered(
+      doc.studies.map((s) => s.name),
+      'Seals',
+    ),
+  );
+}
+
+/** VS10b: a shower over every seal of the document, with `showerStudy`'s settings. */
+export function defaultShowerStudy(doc: SimulationDocument): SimulationStudy {
+  return showerStudy(
+    freshSimulationId(doc, 'shower'),
+    numbered(
+      doc.studies.map((s) => s.name),
+      'Shower',
+    ),
   );
 }
 
@@ -322,7 +536,11 @@ export function addConditionOps(
           ? { ...common, kind, flux: 1 }
           : kind === 'convection'
             ? { ...common, kind, coefficient: 0.01, ambient: 293.15 }
-            : { ...common, kind: 'pressure', pressure: 1 };
+            : kind === 'radiation'
+              ? { ...common, kind, emissivity: 0.8, ambient: 293.15 }
+              : kind === 'enclosure'
+                ? { ...common, kind, emissivity: 0.8 }
+                : { ...common, kind: 'pressure', pressure: 1 };
     next.loads.push(load);
     ops.push({ type: 'addLoad', load });
   }
@@ -344,13 +562,19 @@ function joinStudies(
 ): SimulationOperation[] {
   const ops: SimulationOperation[] = [];
   for (const study of doc.studies)
-    if (takes(study, kind, isConstraint))
-      ops.push({
-        type: 'updateStudy',
-        study: isConstraint
-          ? { ...study, constraintIds: [...study.constraintIds, added] }
-          : { ...study, loadIds: [...study.loadIds, added] },
-      });
+    if (takes(study, kind, isConstraint)) {
+      const joined = isConstraint
+        ? { ...study, constraintIds: [...study.constraintIds, added] }
+        : { ...study, loadIds: [...study.loadIds, added] };
+      // VS11d-2: an enclosure needs the study's surroundings and rays.
+      if (
+        joined.kind === 'transient-thermal' &&
+        kind === 'enclosure' &&
+        !joined.transient.enclosure
+      )
+        joined.transient = { ...joined.transient, enclosure: { ...defaultEnclosure } };
+      ops.push({ type: 'updateStudy', study: joined });
+    }
   // The static study is made when there is none yet (also beside a modal or thermal one, or
   // after it was removed): a new structural load would otherwise belong to no study.
   // CR5c (Codex on #982): a stiffness test is no study for the other conditions.
@@ -458,9 +682,19 @@ export function removeConditionOps(
   id: string,
 ): SimulationOperation[] {
   const held = (s: SimulationStudy) => {
-    // VS4a: a wind tunnel takes no conditions; removing one leaves it as it is.
-    if (s.kind === 'aero') return true;
+    // VS4a, VS7b: a wind tunnel and a crash test take no conditions; removing one leaves them.
+    if (s.kind === 'aero' || s.kind === 'crash') return true;
+    // A transient study's heat capacity solves it with nothing held; with thermal stress it keeps
+    // the rule of the rest (Codex on #1264).
+    if (s.kind === 'transient-thermal' && !s.transient.stress) return true;
     const constraints = s.constraintIds.filter((c) => collection === 'loads' || c !== id);
+    // With thermal stress it also needs a structural support left (Codex on #1264).
+    if (s.kind === 'transient-thermal')
+      return constraints.some((c) =>
+        thermalStressConstraintKinds.includes(
+          doc.constraints.find((x) => x.id === c)?.kind as never,
+        ),
+      );
     const convection = s.loadIds.some(
       (l) =>
         !(collection === 'loads' && l === id) &&
@@ -487,7 +721,9 @@ export function retargetOp(
     item.kind === 'force' ||
     item.kind === 'pressure' ||
     item.kind === 'heat-flux' ||
-    item.kind === 'convection'
+    item.kind === 'convection' ||
+    item.kind === 'radiation' ||
+    item.kind === 'enclosure'
   )
     return { type: 'updateLoad', load: { ...item, targets } };
   return { type: 'updateConstraint', constraint: { ...item, targets } };
@@ -570,4 +806,38 @@ export function spotWeldOf(
     radiusMm: spotWeldRadiusDefaultMm,
     tolerance: row.maxGapMm,
   };
+}
+
+/**
+ * VS13b: a sample rough road for a fatigue history, `points` long (deterministic): three waves
+ * and a fine saw tooth about 0, peaks near ±2 (the study's loads × 2 at the worst bump).
+ */
+export function sampleRoadHistory(points = 2000): number[] {
+  return Array.from({ length: points }, (_, i) =>
+    Number(
+      (
+        Math.sin(i / 7) +
+        0.6 * Math.sin(i / 2.3 + 1) +
+        0.3 * Math.sin(i * 1.7) +
+        ((i % 13) - 6) / 30
+      ).toFixed(4),
+    ),
+  );
+}
+/** VS13b: a new fatigue setting: the sample road and the steel S-N line (`steelSn`). */
+export const defaultFatigue = (): SimulationFatigue => ({
+  history: sampleRoadHistory(),
+  sn: { amplitude: 250, cycles: 1e6, slope: 10, endurance: 250, ultimate: 510 },
+});
+/** VS13b: a history as the panel writes it, factors separated by commas. */
+export const formatHistory = (h: readonly number[]) => h.join(', ');
+/**
+ * VS13b: a history from the panel's text (factors separated by commas, spaces, semicolons or
+ * lines); undefined when not 2 to `simulationLimits.fatiguePoints` finite numbers.
+ */
+export function parseHistory(text: string): number[] | undefined {
+  const parts = text.split(/[\s,;]+/).filter((x) => x.length);
+  if (parts.length < 2 || parts.length > simulationLimits.fatiguePoints) return undefined;
+  const out = parts.map(Number);
+  return out.every((v) => Number.isFinite(v) && Math.abs(v) <= 1e6) ? out : undefined;
 }

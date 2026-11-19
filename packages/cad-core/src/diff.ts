@@ -27,7 +27,14 @@ export function compareCad(before: CadDocument, after: CadDocument): Change[] {
   const changes: Change[] = [];
   // Document-level values: the kernel build and the assembly's own BOM values (R2b).
   // CLF3: the car's proportion setup, one value (absent when there is none).
-  for (const key of ['kernelProfile', 'partProperties', 'proportions'] as const)
+  for (const key of [
+    'kernelProfile',
+    'partProperties',
+    'proportions',
+    'designTargets',
+    'sightChecks',
+    'toleranceStacks',
+  ] as const)
     if (!canonicalEqual(before[key] ?? null, after[key] ?? null))
       changes.push({
         elementId: key,

@@ -9,6 +9,7 @@ import {
   deepFreeze,
   IndexedDBStorage,
   MemoryStorage,
+  type OutOfLineParts,
   serializeArtifact,
   updateDraft,
   type StorageAdapter,
@@ -109,3 +110,146 @@ for (const kind of ['memory', 'indexeddb'])
       if (adapter instanceof IndexedDBStorage) await adapter.close();
     });
   });
+
+describe('IndexedDB storage with parts kept apart (#812, ST-218)', () => {
+  // TS-1448
+  type Rec = { id: string; blobs: { key: string; data: string }[] };
+  const parts: OutOfLineParts<Rec> = {
+    split(value) {
+      const out = new Map<string, unknown>();
+      const blobs = value.blobs.map((b) => {
+        if (b.data.length < 4) return b;
+        out.set(b.key, b.data);
+        return { ...b, data: '' };
+      });
+      return { stub: { ...value, blobs }, parts: out };
+    },
+    keys: (stub) => stub.blobs.filter((b) => b.data === '').map((b) => b.key),
+    join: (stub, found) => ({
+      ...stub,
+      blobs: stub.blobs.map((b) =>
+        b.data === '' && typeof found.get(b.key) === 'string'
+          ? { ...b, data: found.get(b.key) as string }
+          : b,
+      ),
+    }),
+  };
+  const rawParts = (name: string) =>
+    new Promise<[string, string][]>((resolve, reject) => {
+      const open = indexedDB.open(`${name}-parts`);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const req = open.result.transaction('parts').objectStore('parts').getAllKeys();
+        req.onsuccess = () => {
+          resolve(req.result as [string, string][]);
+          open.result.close();
+        };
+      };
+    });
+  const rawRecord = (name: string, id: string) =>
+    new Promise<Rec | undefined>((resolve, reject) => {
+      const open = indexedDB.open(name);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const req = open.result.transaction('artifacts').objectStore('artifacts').get(id);
+        req.onsuccess = () => {
+          resolve(req.result as Rec | undefined);
+          open.result.close();
+        };
+      };
+    });
+
+  it('stores large parts as their own values, reads them back, and drops the ones no longer named', async () => {
+    const name = `test-${crypto.randomUUID()}`;
+    const adapter = new IndexedDBStorage<Rec>(name, parts);
+    const one: Rec = {
+      id: 'one',
+      blobs: [
+        { key: 'a', data: 'xy' },
+        { key: 'b', data: 'large-b' },
+        { key: 'c', data: 'large-c' },
+      ],
+    };
+    await adapter.put(one);
+    // The record itself holds only the small one; the database of records stays at version 1.
+    expect((await rawRecord(name, 'one'))!.blobs.map((b) => b.data)).toEqual(['xy', '', '']);
+    expect((await rawParts(name)).sort()).toEqual([
+      ['one', 'b'],
+      ['one', 'c'],
+    ]);
+    expect(await adapter.get('one')).toEqual(one);
+    expect(await adapter.list()).toEqual([one]);
+    // A later write that no longer names c removes it; b stays.
+    await adapter.put({ ...one, blobs: one.blobs.slice(0, 2) });
+    expect(await rawParts(name)).toEqual([['one', 'b']]);
+    // Several records at once, and putIfAbsent keeps the stored record.
+    await adapter.putAll([{ id: 'two', blobs: [{ key: 'd', data: 'large-d' }] }]);
+    expect(
+      await adapter.putIfAbsent({ id: 'two', blobs: [{ key: 'e', data: 'large-e' }] }),
+    ).toEqual({ id: 'two', blobs: [{ key: 'd', data: 'large-d' }] });
+    expect((await rawParts(name)).sort()).toEqual([
+      ['one', 'b'],
+      ['two', 'd'],
+    ]);
+    await adapter.remove('one');
+    expect(await rawParts(name)).toEqual([['two', 'd']]);
+    expect((await adapter.list()).map((r) => r.id)).toEqual(['two']);
+    await adapter.close();
+  });
+
+  it('runs each write under one lock across tabs, and reads under a shared one', async () => {
+    const name = `test-${crypto.randomUUID()}`;
+    // A minimal Web Locks stand-in: one holder at a time, in request order.
+    const calls: string[] = [];
+    let chain: Promise<unknown> = Promise.resolve();
+    const locks = {
+      request: (lock: string, options: { mode: string }, run: () => Promise<unknown>) => {
+        calls.push(`${lock}:${options.mode}`);
+        const next = chain.then(run);
+        chain = next.catch(() => undefined);
+        return next;
+      },
+    };
+    Object.defineProperty(globalThis.navigator, 'locks', { value: locks, configurable: true });
+    try {
+      // Two tabs write the same record with different large parts at the same time.
+      const a = new IndexedDBStorage<Rec>(name, parts);
+      const b = new IndexedDBStorage<Rec>(name, parts);
+      await Promise.all([
+        a.put({ id: 'one', blobs: [{ key: 'a', data: 'large-a' }] }),
+        b.put({ id: 'one', blobs: [{ key: 'b', data: 'large-b' }] }),
+      ]);
+      // The record stored last keeps its part; the other write's part is gone with its stub.
+      expect(await a.get('one')).toEqual({ id: 'one', blobs: [{ key: 'b', data: 'large-b' }] });
+      expect(await rawParts(name)).toEqual([['one', 'b']]);
+      expect(calls).toEqual([
+        `artifact-parts:${name}:exclusive`,
+        `artifact-parts:${name}:exclusive`,
+        `artifact-parts:${name}:shared`,
+      ]);
+      await a.close();
+      await b.close();
+    } finally {
+      delete (globalThis.navigator as { locks?: unknown }).locks;
+    }
+  });
+
+  it('opens a database written before the parts existed, and leaves a missing part empty', async () => {
+    const name = `test-${crypto.randomUUID()}`;
+    const old = new IndexedDBStorage<Rec>(name);
+    await old.put({ id: 'old', blobs: [{ key: 'z', data: 'large-z' }] });
+    await old.close();
+    const adapter = new IndexedDBStorage<Rec>(name, parts);
+    expect(await adapter.get('old')).toEqual({ id: 'old', blobs: [{ key: 'z', data: 'large-z' }] });
+    await adapter.put({ id: 'lost', blobs: [{ key: 'q', data: 'large-q' }] });
+    await adapter.close();
+    // Without its parts database, the stub reads back with the part left empty.
+    await new Promise<void>((resolve) => {
+      const del = indexedDB.deleteDatabase(`${name}-parts`);
+      del.onsuccess = () => resolve();
+    });
+    const again = new IndexedDBStorage<Rec>(name, parts);
+    expect(await again.get('lost')).toEqual({ id: 'lost', blobs: [{ key: 'q', data: '' }] });
+    await again.close();
+  });
+});

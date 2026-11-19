@@ -54,6 +54,22 @@ import {
   writeCalculixFrame,
   type FrameModel,
   type FrameResult,
+  crashJobOf,
+  readCrashResult,
+  type CrashJob,
+  type ExplicitModel,
+  type ExplicitResult,
+  type ExplicitSettings,
+  FrdError,
+  readCalculixTemperatures,
+  solveTransientThermal,
+  transientCalculixModel,
+  writeCalculixHeat,
+  type CalculixHeatFace,
+  type CalculixHeatModel,
+  type ElasticThermal,
+  type TransientInput,
+  type TransientResult,
 } from '@editor-platform/geometry-fem';
 
 export interface SimulationComputeLimits {
@@ -90,6 +106,8 @@ export interface SimulationComputeDescriptor {
    * OpenFOAM build, e.g. "openfoam-2412".
    */
   aero?: { solverBuild: string };
+  /** VS8a: the Host also runs crash jobs (`kind: 'crash'`) on the explicit solver in Node. */
+  crash?: { solverBuild: string };
 }
 
 /** Everything a job sends. Numbers only: no names, document content or credentials. */
@@ -107,8 +125,13 @@ export interface SimulationComputeJob {
   parts: {
     type: CalculixElementType;
     elements: number[];
-    /** `density` (t/mm³) in a modal job only. */
-    material: { youngsModulus: number; poissonsRatio: number; density?: number };
+    /** `density` (t/mm³) in a modal job only; `expansion` (1/K) in a thermal one only. */
+    material: {
+      youngsModulus: number;
+      poissonsRatio: number;
+      density?: number;
+      expansion?: number;
+    };
   }[];
   /** [DOF, mm] pairs, DOF = 3 · node + direction. */
   prescribed: [number, number][];
@@ -118,7 +141,45 @@ export interface SimulationComputeJob {
   equations: [number, number][][];
   /** CR5a: [node, t] point masses, in a modal job only. */
   masses?: [number, number][];
+  /** VS11d-3: a static job's nodal temperature (K) and strain-free temperature (thermal stress). */
+  thermal?: { temperature: number[]; reference: number };
 }
+
+/**
+ * VS11d-3: a transient heat transfer job (`writeCalculixHeat`'s model, as JSON numbers): the mesh,
+ * the material, the start, the time, the amplitudes, the held nodes, the face conditions and the
+ * nodal heats. Its result is the `.frd` of every step's temperature.
+ */
+export interface TransientComputeJob {
+  kind: 'transient-thermal';
+  heat: {
+    nodes: number[];
+    type: 'tet4' | 'tet10';
+    elements: number[];
+    material: { conductivity: number; density: number; specificHeat: number };
+    initialTemperature: number[];
+    time: { end: number; step: number };
+    amplitudes: { times: number[]; factors: number[] }[];
+    holds: { nodes: number[]; temperature: number; amplitude?: number }[];
+    faces: CalculixHeatFace[];
+    nodal: { node: number; heat: number; amplitude?: number }[];
+  };
+}
+/**
+ * VS11d-3: a transient job's steps × nodes at most (each step's temperatures come back, about
+ * 27 bytes a value in the `.frd`), and the amplitude points and face conditions it may have.
+ */
+export const computeTransientShape = Object.freeze({
+  values: 10_000_000,
+  amplitudePoints: 20_010,
+  amplitudes: 1_000,
+});
+/**
+ * VS11d-3: what a Host's transient run is checked with, replayed through the browser's equations:
+ * the largest step residual (CalculiX writes 6 significant digits) and the energy balance.
+ */
+export const computeTransientResidual = 2e-3;
+export const computeTransientBalance = 1e-4;
 
 /** How many element blocks, terms of one equation and modes a job may have. */
 export const computeJobShape = Object.freeze({ parts: 64, terms: 64, modes: 100 });
@@ -144,13 +205,23 @@ export function computeJobOf(
   material: ElasticMaterial,
   prepared: ElasticPrepared,
   units: CalculixUnits = 'mm',
+  thermal?: ElasticThermal,
 ): SimulationComputeJob {
   return computeJobOfModel(
     {
       nodes: mesh.nodes,
-      parts: [{ type: mesh.type, elements: mesh.elements, material }],
+      parts: [
+        {
+          type: mesh.type,
+          elements: mesh.elements,
+          material: thermal ? { ...material, expansion: thermal.expansion } : material,
+        },
+      ],
       prescribed: prepared.prescribed,
       force: prepared.force,
+      ...(thermal
+        ? { thermal: { temperature: thermal.temperature, reference: thermal.reference } }
+        : {}),
     },
     units,
   );
@@ -179,6 +250,7 @@ export function computeJobOfModel(
         youngsModulus: p.material.youngsModulus,
         poissonsRatio: p.material.poissonsRatio,
         ...(modal ? { density: p.material.density! } : {}),
+        ...(model.thermal ? { expansion: p.material.expansion! } : {}),
       },
     })),
     prescribed: [...model.prescribed].sort((a, b) => a[0] - b[0]),
@@ -186,6 +258,14 @@ export function computeJobOfModel(
     equations: (model.equations ?? []).map((e) => e.map(([d, c]): [number, number] => [d, c])),
     ...(modal && model.masses?.length
       ? { masses: model.masses.map(([p, m]): [number, number] => [p, m]) }
+      : {}),
+    ...(model.thermal
+      ? {
+          thermal: {
+            temperature: Array.from(model.thermal.temperature),
+            reference: model.thermal.reference,
+          },
+        }
       : {}),
   };
 }
@@ -211,10 +291,21 @@ export function checkComputeJob(
   if (!isObject(value)) return refuse('shape', 'not an object');
   keysOnly(
     value,
-    ['kind', 'modes', 'units', 'nodes', 'parts', 'prescribed', 'force', 'equations', 'masses'],
+    [
+      'kind',
+      'modes',
+      'units',
+      'nodes',
+      'parts',
+      'prescribed',
+      'force',
+      'equations',
+      'masses',
+      'thermal',
+    ],
     '',
   );
-  const { kind, modes, units, nodes, parts, prescribed, force, equations, masses } = value;
+  const { kind, modes, units, nodes, parts, prescribed, force, equations, masses, thermal } = value;
   if (kind !== 'linear-static' && kind !== 'modal') refuse('shape', 'kind');
   const modal = kind === 'modal';
   if (modal) {
@@ -251,12 +342,20 @@ export function checkComputeJob(
     if (!isObject(material)) return refuse('shape', `part ${k} material`);
     keysOnly(
       material,
-      ['youngsModulus', 'poissonsRatio', ...(modal ? ['density'] : [])],
+      [
+        'youngsModulus',
+        'poissonsRatio',
+        ...(modal ? ['density'] : []),
+        ...(thermal !== undefined ? ['expansion'] : []),
+      ],
       `part ${k} material: `,
     );
     const E = material.youngsModulus,
       nu = material.poissonsRatio,
-      rho = material.density;
+      rho = material.density,
+      alpha = material.expansion;
+    if (thermal !== undefined && !(finite(alpha) && alpha >= 0))
+      refuse('material', `part ${k}: expansion ≥ 0`);
     if (!finite(E) || !finite(nu) || !(E > 0) || !(nu > -1 && nu < 0.5))
       refuse('material', `part ${k}: E > 0 and −1 < ν < 0.5`);
     if (modal && !(finite(rho) && rho > 0)) refuse('material', `part ${k}: density > 0`);
@@ -267,6 +366,7 @@ export function checkComputeJob(
         youngsModulus: E as number,
         poissonsRatio: nu as number,
         ...(modal ? { density: rho as number } : {}),
+        ...(thermal !== undefined ? { expansion: alpha as number } : {}),
       },
     };
   });
@@ -336,9 +436,27 @@ export function checkComputeJob(
       return [p as number, x as number];
     });
   }
+  // VS11d-3: a static job's temperatures, one finite value ≥ 0 K per node.
+  let temperatures: { temperature: Float64Array; reference: number } | undefined;
+  if (thermal !== undefined) {
+    if (modal) refuse('shape', 'temperatures in a modal job');
+    if (!isObject(thermal)) return refuse('shape', 'thermal');
+    keysOnly(thermal, ['temperature', 'reference'], 'thermal: ');
+    const { temperature, reference } = thermal;
+    if (!Array.isArray(temperature) || temperature.length !== n)
+      refuse('shape', 'thermal: a temperature per node');
+    if (!(temperature as unknown[]).every((t) => finite(t) && t >= 0))
+      refuse('not-finite', 'thermal: temperatures ≥ 0 K');
+    if (!finite(reference) || reference < 0) refuse('not-finite', 'thermal: reference ≥ 0 K');
+    temperatures = {
+      temperature: Float64Array.from(temperature as number[]),
+      reference: reference as number,
+    };
+  }
   return {
     nodes: Float64Array.from(nodes as number[]),
     parts: checked,
+    ...(temperatures ? { thermal: temperatures } : {}),
     prescribed: new Map(held),
     force: f,
     equations: eqs,
@@ -380,11 +498,219 @@ export function checkFrameJob(
   }
 }
 
+/**
+ * VS11d-3: checks a transient job as it arrives (from JSON, so anything): its keys, sizes against
+ * `limits` and `computeTransientShape`, every number finite, node and element indices in range,
+ * amplitudes named in range with increasing times, materials > 0 and temperatures ≥ 0 K. Returns
+ * the model `writeCalculixHeat` writes; refuses anything else.
+ */
+export function checkTransientJob(
+  value: unknown,
+  limits: Readonly<SimulationComputeLimits> = referenceComputeLimits,
+): CalculixHeatModel {
+  if (!isObject(value)) return refuse('shape', 'not an object');
+  keysOnly(value, ['kind', 'heat'], '');
+  const heat = value.heat;
+  if (!isObject(heat)) return refuse('shape', 'heat');
+  keysOnly(
+    heat,
+    [
+      'nodes',
+      'type',
+      'elements',
+      'material',
+      'initialTemperature',
+      'time',
+      'amplitudes',
+      'holds',
+      'faces',
+      'nodal',
+    ],
+    'heat: ',
+  );
+  const numbers = (x: unknown, what: string): number[] => {
+    if (!Array.isArray(x)) return refuse('shape', what);
+    if (!x.every(finite)) refuse('not-finite', what);
+    return x as number[];
+  };
+  const nodes = numbers(heat.nodes, 'nodes');
+  if (!nodes.length || nodes.length % 3) refuse('shape', 'nodes is not x, y, z per node');
+  const n = nodes.length / 3;
+  if (n > limits.nodes) refuse('too-large', `${n} nodes > ${limits.nodes}`);
+  const type = heat.type;
+  if (type !== 'tet4' && type !== 'tet10') refuse('shape', 'type');
+  const npe = calculixNodesPerElement[type as 'tet4' | 'tet10'];
+  const elements = numbers(heat.elements, 'elements');
+  if (!elements.length || elements.length % npe)
+    refuse('shape', `elements is not ${npe} per element`);
+  const m = elements.length / npe;
+  if (m > limits.elements) refuse('too-large', `${m} elements > ${limits.elements}`);
+  const node = (p: unknown, what: string) => {
+    if (!Number.isInteger(p) || (p as number) < 0 || (p as number) >= n) refuse('index', what);
+    return p as number;
+  };
+  elements.forEach((p, i) => node(p, `element entry ${i}`));
+  const material = heat.material;
+  if (!isObject(material)) return refuse('shape', 'material');
+  keysOnly(material, ['conductivity', 'density', 'specificHeat'], 'material: ');
+  for (const k of ['conductivity', 'density', 'specificHeat'])
+    if (!(finite(material[k]) && (material[k] as number) > 0)) refuse('material', `${k} > 0`);
+  const initial = numbers(heat.initialTemperature, 'initialTemperature');
+  if (initial.length !== n || !initial.every((t) => t >= 0))
+    refuse('shape', 'initialTemperature: one value ≥ 0 K per node');
+  const time = heat.time;
+  if (!isObject(time)) return refuse('shape', 'time');
+  keysOnly(time, ['end', 'step'], 'time: ');
+  if (!(finite(time.end) && finite(time.step) && time.end > 0 && time.step > 0))
+    refuse('shape', 'time: end and step > 0');
+  const steps = Math.max(1, Math.ceil((time.end as number) / (time.step as number) - 1e-9));
+  if (steps * n > computeTransientShape.values)
+    refuse('too-large', `${steps} steps of ${n} nodes > ${computeTransientShape.values} values`);
+  if (!Array.isArray(heat.amplitudes)) return refuse('shape', 'amplitudes');
+  if (heat.amplitudes.length > computeTransientShape.amplitudes)
+    refuse('too-large', `${heat.amplitudes.length} amplitudes`);
+  let points = 0;
+  const amplitudes = heat.amplitudes.map((a, k) => {
+    if (!isObject(a)) return refuse('shape', `amplitude ${k}`);
+    keysOnly(a, ['times', 'factors'], `amplitude ${k}: `);
+    const times = numbers(a.times, `amplitude ${k} times`);
+    const factors = numbers(a.factors, `amplitude ${k} factors`);
+    if (!times.length || times.length !== factors.length)
+      refuse('shape', `amplitude ${k}: as many times as factors`);
+    points += times.length;
+    if (points > computeTransientShape.amplitudePoints) refuse('too-large', 'amplitude points');
+    times.forEach((t, i) => {
+      if (t < 0 || (i > 0 && !(t > times[i - 1]!)))
+        refuse('shape', `amplitude ${k}: times increase from 0`);
+    });
+    return { times, factors };
+  });
+  const amplitude = (a: unknown, what: string) => {
+    if (a === undefined) return {};
+    if (!Number.isInteger(a) || (a as number) < 0 || (a as number) >= amplitudes.length)
+      refuse('index', `${what} amplitude`);
+    return { amplitude: a as number };
+  };
+  if (!Array.isArray(heat.holds)) return refuse('shape', 'holds');
+  let held = 0;
+  const holds = heat.holds.map((h, k) => {
+    if (!isObject(h)) return refuse('shape', `hold ${k}`);
+    keysOnly(h, ['nodes', 'temperature', 'amplitude'], `hold ${k}: `);
+    const list = numbers(h.nodes, `hold ${k} nodes`);
+    held += list.length;
+    if (held > n) refuse('too-large', 'held nodes');
+    list.forEach((p, i) => node(p, `hold ${k} node ${i}`));
+    if (!(finite(h.temperature) && h.temperature >= 0))
+      refuse('not-finite', `hold ${k} temperature`);
+    return {
+      nodes: list,
+      temperature: h.temperature as number,
+      ...amplitude(h.amplitude, `hold ${k}`),
+    };
+  });
+  if (!Array.isArray(heat.faces)) return refuse('shape', 'faces');
+  // Each of an element's 4 faces may carry a flux, a film and a radiation (Codex on #1272).
+  if (heat.faces.length > 12 * m) refuse('too-large', 'faces');
+  const faces = heat.faces.map((f, k): CalculixHeatFace => {
+    if (!isObject(f)) return refuse('shape', `face ${k}`);
+    const { kind, element, face } = f;
+    if (!Number.isInteger(element) || (element as number) < 0 || (element as number) >= m)
+      refuse('index', `face ${k} element`);
+    if (!Number.isInteger(face) || (face as number) < 0 || (face as number) > 3)
+      refuse('index', `face ${k} local face`);
+    const at = { element: element as number, face: face as number };
+    if (kind === 'flux') {
+      keysOnly(f, ['kind', 'element', 'face', 'flux', 'amplitude'], `face ${k}: `);
+      if (!finite(f.flux)) refuse('not-finite', `face ${k} flux`);
+      return { kind, ...at, flux: f.flux as number, ...amplitude(f.amplitude, `face ${k}`) };
+    }
+    if (kind === 'film') {
+      keysOnly(
+        f,
+        ['kind', 'element', 'face', 'coefficient', 'ambient', 'amplitude'],
+        `face ${k}: `,
+      );
+      if (!(finite(f.coefficient) && f.coefficient > 0 && finite(f.ambient) && f.ambient >= 0))
+        refuse('not-finite', `face ${k}: coefficient > 0, ambient ≥ 0 K`);
+      return {
+        kind,
+        ...at,
+        coefficient: f.coefficient as number,
+        ambient: f.ambient as number,
+        ...amplitude(f.amplitude, `face ${k}`),
+      };
+    }
+    if (kind === 'radiation') {
+      keysOnly(f, ['kind', 'element', 'face', 'emissivity', 'ambient'], `face ${k}: `);
+      if (
+        !(
+          finite(f.emissivity) &&
+          f.emissivity > 0 &&
+          f.emissivity <= 1 &&
+          finite(f.ambient) &&
+          f.ambient >= 0
+        )
+      )
+        refuse('not-finite', `face ${k}: emissivity in (0, 1], ambient ≥ 0 K`);
+      return { kind, ...at, emissivity: f.emissivity as number, ambient: f.ambient as number };
+    }
+    return refuse('shape', `face ${k} kind`);
+  });
+  if (!Array.isArray(heat.nodal)) return refuse('shape', 'nodal');
+  if (heat.nodal.length > n) refuse('too-large', 'nodal');
+  const nodal = heat.nodal.map((c, k) => {
+    if (!isObject(c)) return refuse('shape', `nodal ${k}`);
+    keysOnly(c, ['node', 'heat', 'amplitude'], `nodal ${k}: `);
+    if (!finite(c.heat)) refuse('not-finite', `nodal ${k} heat`);
+    return {
+      node: node(c.node, `nodal ${k}`),
+      heat: c.heat as number,
+      ...amplitude(c.amplitude, `nodal ${k}`),
+    };
+  });
+  return {
+    nodes: Float64Array.from(nodes),
+    type: type as 'tet4' | 'tet10',
+    elements: Uint32Array.from(elements),
+    material: material as CalculixHeatModel['material'],
+    initialTemperature: Float64Array.from(initial),
+    time: { end: time.end as number, step: time.step as number },
+    amplitudes,
+    holds,
+    faces,
+    nodal,
+  };
+}
+
+/** VS11d-3: the job of a transient input (`transientCalculixModel`). */
+export function transientComputeJob(input: TransientInput): TransientComputeJob {
+  const model = transientCalculixModel(input);
+  return {
+    kind: 'transient-thermal',
+    heat: {
+      nodes: Array.from(model.nodes),
+      type: model.type,
+      elements: Array.from(model.elements),
+      material: { ...model.material },
+      initialTemperature: Array.from(model.initialTemperature),
+      time: { ...model.time },
+      amplitudes: model.amplitudes.map((a) => ({ times: [...a.times], factors: [...a.factors] })),
+      holds: model.holds.map((h) => ({ ...h, nodes: [...h.nodes] })),
+      faces: model.faces.map((f) => ({ ...f })),
+      nodal: (model.nodal ?? []).map((c) => ({ ...c })),
+    },
+  };
+}
+
 /** The `.inp` of a checked job: the only text the reference Host gives CalculiX. */
 export function computeJobInp(
   value: unknown,
   limits: Readonly<SimulationComputeLimits> = referenceComputeLimits,
 ): { inp: string; nodes: number; units: CalculixUnits } {
+  if (isObject(value) && value.kind === 'transient-thermal') {
+    const heat = checkTransientJob(value, limits);
+    return { inp: writeCalculixHeat(heat), nodes: heat.nodes.length / 3, units: 'mm' };
+  }
   if (isObject(value) && value.kind === 'frame-static') {
     const frame = checkFrameJob(value, limits);
     return { inp: writeCalculixFrame(frame), nodes: frame.nodes.length / 3, units: 'mm' };
@@ -429,7 +755,7 @@ export interface ComputeRunOptions {
  */
 export async function runComputeJob(
   host: SimulationComputeDescriptor,
-  job: SimulationComputeJob | FrameComputeJob | AeroJob,
+  job: SimulationComputeJob | FrameComputeJob | AeroJob | CrashJob | TransientComputeJob,
   options: ComputeRunOptions = {},
 ): Promise<string> {
   const http = options.fetch ?? fetch;
@@ -569,10 +895,44 @@ export async function solveOnHost(
   const prepared = prepareElastic(input);
   const text = await runComputeJob(
     host,
-    computeJobOf(input.mesh, input.material, prepared),
+    computeJobOf(input.mesh, input.material, prepared, 'mm', input.thermal),
     options,
   );
   return elasticResultFromFrd(prepared, readCalculixFrd(text, input.mesh.nodes.length / 3));
+}
+
+/**
+ * VS11d-3: a transient heat study on a compute Host: the browser's checks and mapping
+ * (`transientCalculixModel`, which throws `ElasticError` and refuses θ ≠ 1 and radiation between
+ * faces), the job, every step's temperatures read back (`readCalculixTemperatures`, `FrdError`
+ * when they do not fit) and replayed through the browser's equations, which give the run its
+ * history, heats, balance and `replayResidual`.
+ */
+export async function solveTransientOnHost(
+  host: SimulationComputeDescriptor,
+  input: TransientInput,
+  options: ComputeRunOptions = {},
+): Promise<TransientResult> {
+  const job = transientComputeJob(input);
+  const n = job.heat.nodes.length / 3;
+  const text = await runComputeJob(host, job, options);
+  const { times, temperatures } = readCalculixTemperatures(text, n);
+  const { end, step } = job.heat.time;
+  const steps = Math.max(1, Math.ceil(end / step - 1e-9));
+  const expected = Array.from({ length: steps }, (_, s) =>
+    s + 1 === steps ? end : (s + 1) * step,
+  );
+  // The `.frd` gives times to about 10 digits.
+  if (
+    times.length !== steps ||
+    times.some((t, s) => Math.abs(t - expected[s]!) > 1e-6 * Math.max(1, expected[s]!))
+  )
+    throw new FrdError(
+      'structure',
+      `${times.length} steps at ${times[0]}…${times.at(-1)} s, not ${steps} to ${end} s`,
+    );
+  // The replay checks the equations sent: CalculiX's capacity rule (Codex on #1272).
+  return solveTransientThermal({ ...input, replay: temperatures, capacityRule: 'conduction' });
 }
 
 /**
@@ -718,4 +1078,35 @@ export async function solveAeroOnHost(
     bad('surface samples that line up');
   if (!Array.isArray(v.history)) bad('a history');
   return { ...(v as unknown as AeroHostResult), points, cp, cf, htc };
+}
+
+/**
+ * VS8a: a crash run on a compute Host that runs them (`crash` in its descriptor): the explicit
+ * model and settings as numbers, the run followed (`onTime` gets the solved time from the Host's
+ * phase), and its result read back into typed arrays. A Host without crash runs is `refused`
+ * before anything is sent.
+ */
+export async function solveCrashOnHost(
+  host: SimulationComputeDescriptor,
+  model: ExplicitModel,
+  settings: ExplicitSettings,
+  options: ComputeRunOptions & { onTime?(time: number, endTime: number): void } = {},
+): Promise<ExplicitResult> {
+  if (!host.crash) throw new ComputeHostError('refused', `${host.label} runs no crash studies`);
+  const { onTime, ...rest } = options;
+  const text = await runComputeJob(host, crashJobOf(model, settings), {
+    pollMs: 1000,
+    ...rest,
+    onProgress: (state) => {
+      rest.onProgress?.(state);
+      const m = state.state === 'running' ? /^solving (\S+) of (\S+) s$/.exec(state.phase) : null;
+      if (m && Number.isFinite(Number(m[1])) && Number.isFinite(Number(m[2])))
+        onTime?.(Number(m[1]), Number(m[2]));
+    },
+  });
+  try {
+    return readCrashResult(text);
+  } catch (e) {
+    throw new ComputeHostError('failed', `${host.label}: ${(e as Error).message}`);
+  }
 }

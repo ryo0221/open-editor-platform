@@ -27,7 +27,8 @@ function partClosure(doc: CadDocument, bodyId: string) {
 /**
  * The content of the part's first version: the body's closure in a new document with the same
  * kernel profile (exact build and tolerance set), in the same coordinates, so the component at
- * the origin stands where the body stood.
+ * the origin stands where the body stood. PD2: the document's material comes along, so a body
+ * without a density of its own weighs the same in the part.
  */
 export function bodyPartContent(doc: CadDocument, bodyId: string): CadDocument {
   const { parameters, profiles, sketches, features, copiedBodies } = partClosure(doc, bodyId);
@@ -39,6 +40,16 @@ export function bodyPartContent(doc: CadDocument, bodyId: string): CadDocument {
     sketches: doc.sketches.filter((s) => sketches.has(s.id)),
     features: doc.features.filter((f) => features.has(f.id)),
     bodies: copiedBodies,
+    // PD2: a body weighing with the document's material keeps it (not its sourcing or cost).
+    ...(doc.partProperties.material
+      ? {
+          partProperties: {
+            partNumber: '',
+            description: '',
+            material: { ...doc.partProperties.material },
+          },
+        }
+      : {}),
   });
 }
 

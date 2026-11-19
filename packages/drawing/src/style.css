@@ -1,0 +1,179 @@
+.drawing-surface {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.drawing-surface .ep-layout {
+  flex: 1;
+  min-height: 0;
+}
+.drawing-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: auto;
+  background: #e6e9ed;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.drawing-sheet {
+  position: relative;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+  touch-action: none;
+}
+.drawing-sheet.placing {
+  cursor: crosshair;
+}
+.drawing-sheet > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+.drawing-hit {
+  position: absolute;
+  padding: 0;
+  border: 1px dashed transparent;
+  background: transparent;
+  cursor: move;
+}
+.drawing-hit:hover {
+  border-color: #7aa7d8;
+}
+.drawing-hit.selected {
+  border: 1.5px solid #1f6fd1;
+  background: rgb(31 111 209 / 6%);
+}
+.drawing-panel {
+  display: flex;
+  flex-direction: column;
+}
+.drawing-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.drawing-list button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.drawing-list button[aria-current='true'] {
+  background: #dbe8f8;
+}
+.drawing-list small {
+  color: #5b6570;
+}
+.drawing-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: end;
+}
+.drawing-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.drawing-empty,
+.drawing-source {
+  color: #5b6570;
+  font-size: 12px;
+  margin: 4px 8px;
+}
+.drawing-error,
+.drawing-notice {
+  color: #b42318;
+}
+.drawing-revisions {
+  margin: 4px 0;
+  padding-left: 8px;
+  list-style: none;
+  font-size: 12px;
+}
+.drawing-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+.drawing-hint {
+  margin: 0;
+  color: var(--muted, #666);
+  font-size: 12px;
+}
+.drawing-sheet.placing .drawing-hit {
+  pointer-events: none;
+}
+.drawing-pick {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid #1f6fd1;
+  border-radius: 50%;
+  background: rgb(31 111 209 / 25%);
+  pointer-events: none;
+}
+.drawing-pick.hover {
+  border-color: #e07a00;
+  background: transparent;
+}
+/* DW3c: a ref to choose again, its candidates and the pick-again button. */
+.drawing-refs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+/* DW3c-2b: what changed in an imported PMI item. */
+.drawing-changes {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+/* A building view being drawn before it is placed: where it goes, and at what scale. */
+.drawing-placing {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px dashed #1f6fd1;
+  border-radius: 6px;
+  background: rgb(31 111 209 / 8%);
+  color: #1f4f8f;
+  font-size: 14px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.drawing-placing-spin {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(31 111 209 / 30%);
+  border-top-color: #1f6fd1;
+  border-radius: 50%;
+  animation: drawing-placing-spin 0.9s linear infinite;
+}
+@keyframes drawing-placing-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawing-placing-spin {
+    animation: none;
+  }
+}

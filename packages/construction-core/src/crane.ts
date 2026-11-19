@@ -12,8 +12,9 @@
  */
 import type { ConstructionDiagnostic, ConstructionDocument } from './model';
 import { taskSpan, WorkingDays, siteOnDay, type ConstructionSchedule } from './schedule';
-import { dayString } from '@editor-platform/time-axis';
+import { dayString, utcDay } from '@editor-platform/time-axis';
 import type { Plan, Point3 } from './site';
+import { BoxIndex } from './spatial-index';
 
 export type CraneKind = 'tower' | 'mobile';
 export const craneKinds: readonly CraneKind[] = Object.freeze(['tower', 'mobile']);
@@ -54,6 +55,23 @@ export interface Crane {
    * Absent, the reaction is the load's only.
    */
   massKg?: number;
+  /**
+   * TT1: the crane climbs (or climbs down). From each climb's task's start, the crane's base
+   * stands at the climb's `baseZ` and its jib (or pivot) at `height` above it; before the first,
+   * at the crane's own. Climbs are taken in the order their tasks start (document order on a tie).
+   */
+  climbs?: CraneClimb[];
+}
+
+/** TT1: one climb of a crane: where it stands from its task's start. */
+export interface CraneClimb {
+  taskId: string;
+  /** Height of the crane's base from then (mm). */
+  baseZ: number;
+  /** Tower: the jib's height above the base. Mobile: the boom pivot's. */
+  height: number;
+  /** BIM elements the crane stands on from then: each stands (built) while the crane does. */
+  supportIds?: string[];
 }
 
 export interface Lift {
@@ -65,6 +83,8 @@ export interface Lift {
   elementId: string;
   /** Where the load lies before the lift: the centre of its underside (mm). */
   pick: Point3;
+  /** TT3: the truck route that brings the piece (one that delivers): picked off its bed. */
+  routeId?: string;
 }
 
 export const craneLimits = Object.freeze({
@@ -74,6 +94,9 @@ export const craneLimits = Object.freeze({
   /** Mast, jib or boom: 500 m at most. */
   maxLength: 500_000,
   maxCapacityKg: 2_000_000,
+  /** TT1: climbs of one crane, and the elements one climb stands on. */
+  climbs: 50,
+  supports: 20,
 });
 
 /** The hook block hangs this far below the jib (or the boom tip) at its highest (mm). */
@@ -167,6 +190,7 @@ export function validateCranes(
             'fromTaskId',
             'untilTaskId',
             'massKg',
+            'climbs',
           ],
           p,
         );
@@ -221,6 +245,35 @@ export function validateCranes(
         }
         task(c.fromTaskId, `${p}.fromTaskId`);
         if (c.untilTaskId !== undefined) task(c.untilTaskId, `${p}.untilTaskId`);
+        if (c.climbs !== undefined) {
+          const cl = c.climbs;
+          if (!Array.isArray(cl) || cl.length > craneLimits.climbs)
+            bad('limit-exceeded', `${p}.climbs`, `at most ${craneLimits.climbs}`);
+          else
+            cl.forEach((k, j) => {
+              const kp = `${p}.climbs[${j}]`;
+              if (!record(k)) return bad('climb', kp);
+              only(k, ['taskId', 'baseZ', 'height', 'supportIds'], kp);
+              task(k.taskId, `${kp}.taskId`);
+              if (!finite(k.baseZ)) bad('coordinate', `${kp}.baseZ`);
+              length(k.height, `${kp}.height`);
+              if (k.supportIds !== undefined) {
+                const ids = k.supportIds;
+                if (
+                  !Array.isArray(ids) ||
+                  !ids.length ||
+                  ids.length > craneLimits.supports ||
+                  !ids.every((x) => isId(x)) ||
+                  new Set(ids).size !== ids.length
+                )
+                  bad(
+                    'climb',
+                    `${kp}.supportIds`,
+                    `1 to ${craneLimits.supports} element IDs, no repeats`,
+                  );
+              }
+            });
+        }
       });
   }
   if (lifts !== undefined) {
@@ -231,7 +284,7 @@ export function validateCranes(
       lifts.forEach((l, i) => {
         const p = `$.site.lifts[${i}]`;
         if (!record(l)) return bad('lift', p);
-        only(l, ['id', 'craneId', 'taskId', 'elementId', 'pick'], p);
+        only(l, ['id', 'craneId', 'taskId', 'elementId', 'pick', 'routeId'], p);
         id(l.id, `${p}.id`);
         if (!isId(l.craneId) || !craneIds.has(l.craneId))
           bad('crane-missing', `${p}.craneId`, isId(l.craneId) ? l.craneId : 'not an ID');
@@ -331,6 +384,55 @@ export function craneStands(
   if (!from || day < from.start) return false;
   const until = crane.untilTaskId ? span(crane.untilTaskId) : undefined;
   return !until || day <= until.finish;
+}
+
+/**
+ * TT1: the crane as it stands on `day`: its base height, height and supports from the last climb
+ * whose task has started by then (none: the crane's own). The result has no `climbs`.
+ */
+export function craneOnDay(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  crane: Crane,
+  day: string,
+): Crane & { supportIds?: string[] } {
+  const { climbs, ...own } = crane;
+  const k = craneClimbOnDay(doc, schedule, crane, day);
+  if (!climbs || k < 0) return own;
+  const c = climbs[k]!;
+  return {
+    ...own,
+    baseZ: c.baseZ,
+    height: c.height,
+    ...(c.supportIds ? { supportIds: c.supportIds } : {}),
+  };
+}
+
+/** TT1: the climbs in the order they happen: by their tasks' start, then document order. */
+export function craneClimbOrder(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  crane: Crane,
+): { index: number; start: string }[] {
+  const out: { index: number; start: string }[] = [];
+  (crane.climbs ?? []).forEach((c, index) => {
+    const task = doc.tasks.find((t) => t.id === c.taskId);
+    const planned = schedule.byId.get(c.taskId);
+    if (task && planned) out.push({ index, start: taskSpan(task, planned).start });
+  });
+  return out.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.index - b.index));
+}
+
+/** TT1: the index of the climb in force on `day`, or -1 before the first. */
+export function craneClimbOnDay(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  crane: Crane,
+  day: string,
+): number {
+  let k = -1;
+  for (const c of craneClimbOrder(doc, schedule, crane)) if (c.start <= day) k = c.index;
+  return k;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -451,16 +553,29 @@ export const boxesMeet = (a: Box, b: Box) =>
 
 /** Triangle (9 numbers from `t[k]`) and box overlap, by the separating axis test. */
 export function triangleMeetsBox(t: ArrayLike<number>, k: number, box: Box): boolean {
-  const c = [0, 1, 2].map((i) => (box[0][i]! + box[1][i]!) / 2);
-  const h = [0, 1, 2].map((i) => (box[1][i]! - box[0][i]!) / 2);
-  const v = [0, 1, 2].map((j) => [0, 1, 2].map((i) => t[k + j * 3 + i]! - c[i]!));
-  const [v0, v1, v2] = v as [number[], number[], number[]];
-  // The box's own axes.
-  for (let i = 0; i < 3; i++) {
-    const lo = Math.min(v0[i]!, v1[i]!, v2[i]!);
-    const hi = Math.max(v0[i]!, v1[i]!, v2[i]!);
-    if (lo > h[i]! || hi < -h[i]!) return false;
-  }
+  // TT5: the box's own axes first, without arrays: most triangles near a load end here.
+  const cx = (box[0][0] + box[1][0]) / 2;
+  const cy = (box[0][1] + box[1][1]) / 2;
+  const cz = (box[0][2] + box[1][2]) / 2;
+  const hx = (box[1][0] - box[0][0]) / 2;
+  const hy = (box[1][1] - box[0][1]) / 2;
+  const hz = (box[1][2] - box[0][2]) / 2;
+  const ax = t[k]! - cx;
+  const bx = t[k + 3]! - cx;
+  const ex = t[k + 6]! - cx;
+  if (Math.min(ax, bx, ex) > hx || Math.max(ax, bx, ex) < -hx) return false;
+  const ay = t[k + 1]! - cy;
+  const by = t[k + 4]! - cy;
+  const ey = t[k + 7]! - cy;
+  if (Math.min(ay, by, ey) > hy || Math.max(ay, by, ey) < -hy) return false;
+  const az = t[k + 2]! - cz;
+  const bz = t[k + 5]! - cz;
+  const ez = t[k + 8]! - cz;
+  if (Math.min(az, bz, ez) > hz || Math.max(az, bz, ez) < -hz) return false;
+  const h = [hx, hy, hz];
+  const v0 = [ax, ay, az];
+  const v1 = [bx, by, bz];
+  const v2 = [ex, ey, ez];
   const sub = (a: number[], b: number[]) => [a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!];
   const cross = (a: number[], b: number[]) => [
     a[1]! * b[2]! - a[2]! * b[1]!,
@@ -495,30 +610,34 @@ export function triangleMeetsBox(t: ArrayLike<number>, k: number, box: Box): boo
  * axes, so it misses edges and corners) are odd.
  */
 function insideMesh(t: ArrayLike<number>, p: Point3): boolean {
-  const d = [1, 0.000731, 0.000419];
+  const d0 = 1;
+  const d1 = 0.000731;
+  const d2 = 0.000419;
   let crossings = 0;
   for (let k = 0; k + 8 < t.length; k += 9) {
-    // Möller–Trumbore.
-    const e1 = [t[k + 3]! - t[k]!, t[k + 4]! - t[k + 1]!, t[k + 5]! - t[k + 2]!];
-    const e2 = [t[k + 6]! - t[k]!, t[k + 7]! - t[k + 1]!, t[k + 8]! - t[k + 2]!];
-    const h = [
-      d[1]! * e2[2]! - d[2]! * e2[1]!,
-      d[2]! * e2[0]! - d[0]! * e2[2]!,
-      d[0]! * e2[1]! - d[1]! * e2[0]!,
-    ];
-    const a = e1[0]! * h[0]! + e1[1]! * h[1]! + e1[2]! * h[2]!;
+    // Möller–Trumbore (TT5: in scalars, the same sums in the same order).
+    const e10 = t[k + 3]! - t[k]!;
+    const e11 = t[k + 4]! - t[k + 1]!;
+    const e12 = t[k + 5]! - t[k + 2]!;
+    const e20 = t[k + 6]! - t[k]!;
+    const e21 = t[k + 7]! - t[k + 1]!;
+    const e22 = t[k + 8]! - t[k + 2]!;
+    const h0 = d1 * e22 - d2 * e21;
+    const h1 = d2 * e20 - d0 * e22;
+    const h2 = d0 * e21 - d1 * e20;
+    const a = e10 * h0 + e11 * h1 + e12 * h2;
     if (Math.abs(a) < 1e-12) continue;
-    const s = [p[0] - t[k]!, p[1] - t[k + 1]!, p[2] - t[k + 2]!];
-    const u = (s[0]! * h[0]! + s[1]! * h[1]! + s[2]! * h[2]!) / a;
+    const s0 = p[0] - t[k]!;
+    const s1 = p[1] - t[k + 1]!;
+    const s2 = p[2] - t[k + 2]!;
+    const u = (s0 * h0 + s1 * h1 + s2 * h2) / a;
     if (u < 0 || u > 1) continue;
-    const q = [
-      s[1]! * e1[2]! - s[2]! * e1[1]!,
-      s[2]! * e1[0]! - s[0]! * e1[2]!,
-      s[0]! * e1[1]! - s[1]! * e1[0]!,
-    ];
-    const v = (d[0]! * q[0]! + d[1]! * q[1]! + d[2]! * q[2]!) / a;
+    const q0 = s1 * e12 - s2 * e11;
+    const q1 = s2 * e10 - s0 * e12;
+    const q2 = s0 * e11 - s1 * e10;
+    const v = (d0 * q0 + d1 * q1 + d2 * q2) / a;
     if (v < 0 || u + v > 1) continue;
-    if ((e2[0]! * q[0]! + e2[1]! * q[1]! + e2[2]! * q[2]!) / a > 0) crossings++;
+    if ((e20 * q0 + e21 * q1 + e22 * q2) / a > 0) crossings++;
   }
   return crossings % 2 === 1;
 }
@@ -552,21 +671,20 @@ export function craneBoxes(
     const len = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
     const n = Math.max(1, Math.ceil(len / step));
     const boxes: Box[] = [];
+    const d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    const h = size / 2;
     for (let i = 0; i < n; i++) {
-      const a = from.map((x, j) => x + ((to[j]! - x) * i) / n) as Point3;
-      const b = from.map((x, j) => x + ((to[j]! - x) * (i + 1)) / n) as Point3;
-      boxes.push([
-        [
-          Math.min(a[0], b[0]) - size / 2,
-          Math.min(a[1], b[1]) - size / 2,
-          Math.min(a[2], b[2]) - size / 2,
-        ],
-        [
-          Math.max(a[0], b[0]) + size / 2,
-          Math.max(a[1], b[1]) + size / 2,
-          Math.max(a[2], b[2]) + size / 2,
-        ],
-      ]);
+      const box: Box = [
+        [0, 0, 0],
+        [0, 0, 0],
+      ];
+      for (let j = 0; j < 3; j++) {
+        const a = from[j]! + (d[j]! * i) / n;
+        const b = from[j]! + (d[j]! * (i + 1)) / n;
+        box[0][j] = Math.min(a, b) - h;
+        box[1][j] = Math.max(a, b) + h;
+      }
+      boxes.push(box);
     }
     return boxes;
   };
@@ -601,6 +719,19 @@ export function craneBoxes(
 // ---------------------------------------------------------------------------------------------
 // Checks
 
+/** TT2: a body moved up (or down) by `dz` mm; the same body when `dz` is 0. */
+export function shiftBody(b: LiftBody, dz: number): LiftBody {
+  if (!dz) return b;
+  const bounds: Box = [
+    [b.bounds[0][0], b.bounds[0][1], b.bounds[0][2] + dz],
+    [b.bounds[1][0], b.bounds[1][1], b.bounds[1][2] + dz],
+  ];
+  if (!b.triangles) return { bounds };
+  const t = Float64Array.from(b.triangles);
+  for (let k = 2; k < t.length; k += 3) t[k] = t[k]! + dz;
+  return { bounds, triangles: t };
+}
+
 export interface CraneWorld {
   /** Bodies of the BIM elements by ID (those the evaluation built). */
   bodies: ReadonlyMap<string, LiftBody>;
@@ -615,6 +746,8 @@ const clashStep = 500;
 
 /** The load clears what it meets by a few mm of tolerance (its box is shrunk by this, mm). */
 const clashTolerance = 5;
+/** TT5: how much higher (mm) than the load's top a body it rests on may reach (pipes meeting at one node). */
+export const supportSlack = 300;
 
 /**
  * What a lift sees: the crane's base height, what stands while it is made (built or existing
@@ -632,7 +765,7 @@ export function liftScene(
     lifted?: Map<string, number>;
     days?: Map<string, ReturnType<typeof siteOnDay>>;
   } = {},
-): { baseZ: number; standing: [string, LiftBody][]; motion: LiftMotion } {
+): { baseZ: number; standing: [string, LiftBody][]; motion: LiftMotion; body: LiftBody } {
   const baseZ = craneBaseZ(crane, world.ground);
   const lifted =
     cache.lifted ??
@@ -647,8 +780,11 @@ export function liftScene(
     day = siteOnDay(doc, schedule, time.day);
     cache.days?.set(time.day, day);
   }
+  // TT2: elements a raise has not yet lifted stand lower on the day, the load's place too.
+  body = shiftBody(body, day.offsets.get(lift.elementId) ?? 0);
   const standing: [string, LiftBody][] = [];
-  for (const [id, b] of world.bodies) {
+  for (const [id, b0] of world.bodies) {
+    const b = shiftBody(b0, day.offsets.get(id) ?? 0);
     if (id === lift.elementId) continue;
     const state = day.states.get(id) ?? 'existing';
     // Lifted earlier and still being built; a later removal still takes it away.
@@ -664,18 +800,24 @@ export function liftScene(
   }
   const top = Math.max(-Infinity, ...standing.map(([, b]) => b.bounds[1][2]));
   const motion = liftMotion(crane, baseZ, lift, body, Number.isFinite(top) ? top : baseZ);
-  return { baseZ, standing, motion };
+  return { baseZ, standing, motion, body };
 }
 
 /**
  * Everything wrong with the cranes and lifts. Lifts are checked in their order; a lift whose
  * crane is missing, or whose element has no body, is reported and skipped.
  */
-export function checkCranes(
+/**
+ * The crane check in parts (#1334): `lift(i)` checks one lift, `finish()` adds the checks of the
+ * whole site (climbs' supports, slewing circles) and gives every problem, in the same order as
+ * `checkCranes`.
+ */
+function craneCheck(
   doc: ConstructionDocument,
   schedule: ConstructionSchedule,
   world: CraneWorld,
-): ConstructionDiagnostic[] {
+  options: { index?: boolean } = {},
+): { count: number; lift(i: number): void; finish(): ConstructionDiagnostic[] } {
   const site = doc.site;
   const cranes = site?.cranes ?? [];
   const lifts = site?.lifts ?? [];
@@ -684,21 +826,36 @@ export function checkCranes(
   const times = liftTimes(doc, schedule);
   const lifted = new Map(lifts.map((l) => [l.elementId, times.get(l.id)?.order ?? Infinity]));
   const days = new Map<string, ReturnType<typeof siteOnDay>>();
-  lifts.forEach((lift, i) => {
+  // TT4: the bodies in a grid, built once: a clash test looks only at those near its box. Each
+  // body keeps its place in the world's order, so what is found comes out in the same order as a
+  // test of every standing body (`index: false`, kept for comparison).
+  const useIndex = options.index !== false;
+  const ordinal = new Map<string, number>();
+  const boxes: Box[] = [];
+  for (const [id, b] of world.bodies) {
+    ordinal.set(id, boxes.length);
+    boxes.push(b.bounds);
+  }
+  const ids = [...ordinal.keys()];
+  const index = useIndex && lifts.length ? new BoxIndex(boxes) : undefined;
+  const checkLift = (lift: Lift, i: number) => {
     const p = `$.site.lifts[${i}]`;
-    const crane = cranesById.get(lift.craneId);
+    const own = cranesById.get(lift.craneId);
     const time = times.get(lift.id);
-    if (!crane || !time) return;
+    if (!own || !time) return;
+    // TT1: where the crane stands on the lift's day.
+    const crane = craneOnDay(doc, schedule, own, time.day);
     const name = `${lift.id} (${lift.elementId})`;
     const say = (code: string, message: string) => out.push({ code, path: p, message });
     if (!craneStands(doc, schedule, crane, time.day))
       say('crane-not-standing', `${name}: ${crane.name || crane.id} is not up on ${time.day}`);
-    const body = world.bodies.get(lift.elementId);
-    if (!body) return say('element-missing', `${name}: the element has no body to lift`);
-    const { baseZ, standing, motion } = liftScene(doc, schedule, world, lift, crane, body, time, {
+    const found = world.bodies.get(lift.elementId);
+    if (!found) return say('element-missing', `${name}: the element has no body to lift`);
+    const scene = liftScene(doc, schedule, world, lift, crane, found, time, {
       lifted,
       days,
     });
+    const { baseZ, standing, motion, body } = scene;
     // Reach and the load chart.
     const reach = craneReach(crane);
     for (const [where, r] of [
@@ -726,14 +883,18 @@ export function checkCranes(
     // Clash: the load along its way and the jib while it slews. The load's own supports (what
     // its place touches, no higher than its top) are left out while it is lowered onto them: a
     // load lowered by h then only meets them where it meets them in place. Anything rising above
-    // the load's top at its place is still checked all the way down.
+    // the load's top at its place is still checked all the way down. TT5: "no higher" within
+    // `supportSlack`: pipes meeting at one node top out apart by their tilts.
     const placed: Box = [
       [body.bounds[0][0] - 1, body.bounds[0][1] - 1, body.bounds[0][2] - 1],
       [body.bounds[1][0] + 1, body.bounds[1][1] + 1, body.bounds[1][2] + 1],
     ];
     const supports = new Set(
       standing
-        .filter(([, b]) => boxesMeet(b.bounds, placed) && b.bounds[1][2] <= placed[1][2])
+        .filter(
+          ([, b]) =>
+            boxesMeet(b.bounds, placed) && b.bounds[1][2] <= body.bounds[1][2] + supportSlack,
+        )
         .map(([id]) => id),
     );
     // Everything standing, in one box: most of the way (above the frame) meets nothing.
@@ -743,10 +904,34 @@ export function checkCranes(
           [0, 1, 2].map((k) => Math.max(...standing.map(([, b]) => b.bounds[1][k]!))) as Point3,
         ]
       : undefined;
-    const meets = (box: Box, skip?: (id: string) => boolean) => {
+    const standingBody = new Map(standing);
+    // Bodies a raise moves today stand away from their indexed place: always looked at.
+    const near = index ? standingBody : undefined;
+    const moved = index
+      ? [...(days.get(time.day)?.offsets.keys() ?? [])].flatMap((id) => {
+          const n = ordinal.get(id);
+          return n === undefined ? [] : [n];
+        })
+      : [];
+    /** What stands with bounds meeting `box` (and not skipped), in the world's order. */
+    const nearBox = (box: Box, skip?: (id: string) => boolean): string[] => {
       if (!all || !boxesMeet(all, box)) return [];
-      return standing.filter(([id, b]) => !skip?.(id) && bodyMeetsBox(b, box)).map(([id]) => id);
+      if (!index || !near)
+        return standing
+          .filter(([id, b]) => !skip?.(id) && boxesMeet(b.bounds, box))
+          .map(([id]) => id);
+      const found = index.query(box, moved);
+      found.sort((a, b) => a - b);
+      const out: string[] = [];
+      for (const n of found) {
+        const id = ids[n]!;
+        const b = near.get(id);
+        if (b && !skip?.(id) && boxesMeet(b.bounds, box)) out.push(id);
+      }
+      return out;
     };
+    const meets = (box: Box, skip?: (id: string) => boolean) =>
+      nearBox(box, skip).filter((id) => bodyMeetsBox(standingBody.get(id)!, box));
     const s0 = motion.at(motion.phases[0]);
     const s1 = motion.at(motion.phases[1]);
     // Each phase is sampled by its own moving geometry, so a long hoist leaves the slew its
@@ -842,36 +1027,153 @@ export function checkCranes(
         `${name}: the load hits ${[...hit].slice(0, 5).join(', ')}${hit.size > 5 ? ' …' : ''}`,
       );
     if (jibHit) say('jib-clash', `${name}: ${crane.name || crane.id} hits ${jibHit}`);
-  });
-  // Slewing circles that overlap while both cranes stand.
-  for (let i = 0; i < cranes.length; i++)
-    for (let j = i + 1; j < cranes.length; j++) {
-      const a = cranes[i]!;
-      const b = cranes[j]!;
-      const sweep = (c: Crane) =>
-        // A mobile crane's boom sweeps no farther (level) than its farthest chart radius.
-        c.kind === 'tower' ? c.jibLength : craneReach(c);
-      const gap = hypot(a.base, b.base);
-      if (gap >= sweep(a) + sweep(b)) continue;
-      // Both stand on some day exactly when both stand on the later of their first days.
-      const first = (c: Crane) => {
-        const task = doc.tasks.find((t) => t.id === c.fromTaskId);
-        const planned = schedule.byId.get(c.fromTaskId);
-        return task && planned ? taskSpan(task, planned).start : undefined;
-      };
-      const fa = first(a);
-      const fb = first(b);
-      if (!fa || !fb) continue;
-      const day = fa > fb ? fa : fb;
-      const both = craneStands(doc, schedule, a, day) && craneStands(doc, schedule, b, day);
-      if (!both) continue;
-      const za = craneBaseZ(a, world.ground) + a.height;
-      const zb = craneBaseZ(b, world.ground) + b.height;
-      out.push({
-        code: 'slew-overlap',
-        path: `$.site.cranes[${j}]`,
-        message: `${a.name || a.id} and ${b.name || b.id} slew over the same ground (jibs ${(Math.abs(za - zb) / 1000).toFixed(1)} m apart in height)`,
-      });
+  };
+  const finish = () => {
+    // TT1: each climb stands on its supports from its start to the next climb (or the crane's
+    // last day): they must be built, and still stand, on both days.
+    const dayOf = (day: string) => {
+      let d = days.get(day);
+      if (!d) days.set(day, (d = siteOnDay(doc, schedule, day)));
+      return d;
+    };
+    const spanOf = (id: string) => {
+      const task = doc.tasks.find((t) => t.id === id);
+      const planned = schedule.byId.get(id);
+      return task && planned ? taskSpan(task, planned) : undefined;
+    };
+    // With no task that takes it down, the crane stands to the last day of any task, actual dates
+    // (which may run past the planned finish) included.
+    let lastOfAll = schedule.projectFinish;
+    for (const t of doc.tasks) {
+      const f = spanOf(t.id)?.finish;
+      if (f && f > lastOfAll) lastOfAll = f;
     }
-  return out;
+    const lastDay = (c: Crane) =>
+      (c.untilTaskId ? spanOf(c.untilTaskId)?.finish : undefined) ?? lastOfAll;
+    cranes.forEach((c, i) => {
+      const order = craneClimbOrder(doc, schedule, c);
+      // The crane stands from its erection: a climb dated earlier holds it from then on.
+      const erected = spanOf(c.fromTaskId)?.start;
+      order.forEach(({ index, start: climbStart }, k) => {
+        const ids = c.climbs![index]!.supportIds;
+        if (!ids || !erected) return;
+        const start = climbStart > erected ? climbStart : erected;
+        const next = order[k + 1]?.start;
+        const end = lastDay(c);
+        // The day before the next climb starts (working or not, siteOnDay takes any day), and no
+        // later than the crane's last day. A climb another one replaces on its first day (or one
+        // after the crane is gone) never holds the crane: nothing to check.
+        const before = next ? dayString(utcDay(next)! - 1) : end;
+        const until = before < end ? before : end;
+        if (until < start) return;
+        for (const id of ids)
+          if (!world.bodies.has(id))
+            out.push({
+              code: 'element-missing',
+              path: `$.site.cranes[${i}].climbs[${index}].supportIds`,
+              message: `${c.name || c.id}: ${id} has no body to stand on`,
+            });
+        for (const day of start === until ? [start] : [start, until]) {
+          const states = dayOf(day).states;
+          const loose = ids.filter((id) => {
+            const st = states.get(id) ?? 'existing';
+            return st !== 'built' && st !== 'existing';
+          });
+          if (loose.length)
+            out.push({
+              code: 'crane-unsupported',
+              path: `$.site.cranes[${i}].climbs[${index}].supportIds`,
+              message: `${c.name || c.id} stands on ${loose.slice(0, 5).join(', ')} on ${day}, not built then`,
+            });
+        }
+      });
+    });
+    // Slewing circles that overlap while both cranes stand.
+    for (let i = 0; i < cranes.length; i++)
+      for (let j = i + 1; j < cranes.length; j++) {
+        const a = cranes[i]!;
+        const b = cranes[j]!;
+        const sweep = (c: Crane) =>
+          // A mobile crane's boom sweeps no farther (level) than its farthest chart radius.
+          c.kind === 'tower' ? c.jibLength : craneReach(c);
+        const gap = hypot(a.base, b.base);
+        if (gap >= sweep(a) + sweep(b)) continue;
+        // Both stand on some day exactly when both stand on the later of their first days.
+        const first = (c: Crane) => {
+          const task = doc.tasks.find((t) => t.id === c.fromTaskId);
+          const planned = schedule.byId.get(c.fromTaskId);
+          return task && planned ? taskSpan(task, planned).start : undefined;
+        };
+        const fa = first(a);
+        const fb = first(b);
+        if (!fa || !fb) continue;
+        const day = fa > fb ? fa : fb;
+        const both = craneStands(doc, schedule, a, day) && craneStands(doc, schedule, b, day);
+        if (!both) continue;
+        // TT1: the jibs' least height apart while both stand: on the first common day and on
+        // each climb's start between then and the earlier last day.
+        const end = lastDay(a) < lastDay(b) ? lastDay(a) : lastDay(b);
+        const checkDays = [
+          day,
+          ...[a, b].flatMap((c) => craneClimbOrder(doc, schedule, c).map((x) => x.start)),
+        ].filter((d) => d >= day && d <= end);
+        const jibZ = (c: Crane, d: string) => {
+          const on = craneOnDay(doc, schedule, c, d);
+          return craneBaseZ(on, world.ground) + on.height;
+        };
+        let gapZ = Infinity;
+        for (const d of checkDays) gapZ = Math.min(gapZ, Math.abs(jibZ(a, d) - jibZ(b, d)));
+        out.push({
+          code: 'slew-overlap',
+          path: `$.site.cranes[${j}]`,
+          message: `${a.name || a.id} and ${b.name || b.id} slew over the same ground (jibs ${(gapZ / 1000).toFixed(1)} m apart in height)`,
+        });
+      }
+    return out;
+  };
+  return { count: lifts.length, lift: (i) => checkLift(lifts[i]!, i), finish };
+}
+
+export function checkCranes(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  world: CraneWorld,
+  options: { index?: boolean } = {},
+): ConstructionDiagnostic[] {
+  const check = craneCheck(doc, schedule, world, options);
+  for (let i = 0; i < check.count; i++) check.lift(i);
+  return check.finish();
+}
+
+/**
+ * #1334: `checkCranes` in slices of about `sliceMs`, giving the page's thread back between them
+ * (`pause`, a macrotask by default), so a large plan doesn't hold the screen still. The same
+ * problems, in the same order; `signal` stops it between slices (it then rejects with its reason).
+ */
+export async function checkCranesInSlices(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  world: CraneWorld,
+  options: {
+    signal?: AbortSignal;
+    sliceMs?: number;
+    pause?: () => Promise<void>;
+    onProgress?: (done: number, total: number) => void;
+  } = {},
+): Promise<ConstructionDiagnostic[]> {
+  const { signal, sliceMs = 25 } = options;
+  const pause = options.pause ?? (() => new Promise<void>((r) => setTimeout(r, 0)));
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const check = craneCheck(doc, schedule, world);
+  let from = now();
+  for (let i = 0; i < check.count; i++) {
+    check.lift(i);
+    if (now() - from >= sliceMs && i + 1 < check.count) {
+      options.onProgress?.(i + 1, check.count);
+      await pause();
+      signal?.throwIfAborted();
+      from = now();
+    }
+  }
+  return check.finish();
 }

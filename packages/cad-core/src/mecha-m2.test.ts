@@ -94,8 +94,20 @@ function sweep(
     tick: switchAt === 'start' ? 0 : n * 2 + 2,
     mounts: switchAt === 'start' ? ma : mb,
   });
+  // Parts are immutable throughout a sweep. Supply the same mesh arrays at every sample,
+  // as a Host does, so the existing prepared-mesh cache can reuse their geometry.
+  const partMeshes = new Map([...f.closure].map(([hash, part]) => [hash, meshes(part)]));
   const r = checkCadInterferenceAlong(
-    { doc, lookup, meshesOf: (h) => meshes(f.closure.get(h)!), joints },
+    {
+      doc,
+      lookup,
+      meshesOf: (h) => {
+        const mesh = partMeshes.get(h);
+        if (!mesh) throw new Error('missing fixture mesh');
+        return mesh;
+      },
+      joints,
+    },
     samples,
   );
   if (r.status !== 'ok') return [r.code];

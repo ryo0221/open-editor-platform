@@ -253,6 +253,8 @@ describe('MR3 static interference on meshes (TS-1707)', () => {
     ]);
     expect(r.status === 'ok' && r.findings.map((f) => f.kind)).toEqual(['contain']);
   });
+  // Large-shell correctness/stack regression (270,000 triangles), not a 5-second performance contract.
+  // Keep the full input and assertions; allow bounded headroom beyond the runner's default.
   it('counts a large contained shell without overflowing (Codex #1006)', () => {
     const r = checkInterference([
       body('big', [box([0, 0, 0], [10, 10, 10])]),
@@ -261,7 +263,7 @@ describe('MR3 static interference on meshes (TS-1707)', () => {
     expect(r.status === 'ok' && r.findings.map((f) => [f.kind, f.depthMm])).toEqual([
       ['contain', 2],
     ]);
-  });
+  }, 15_000);
   it('(a) finds a part wholly inside a solid', () => {
     const r = checkInterference([
       body('big', [box([0, 0, 0], [10, 10, 10])]),

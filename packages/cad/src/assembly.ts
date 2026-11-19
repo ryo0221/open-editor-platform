@@ -7,6 +7,7 @@ import {
   applyCadOperation,
   assemblyStepPlan,
   assertCad,
+  cadAssemblyPmiMoved,
   cadAssemblyPmiStates,
   cadBodyPmi,
   cadPmiItemStates,
@@ -16,6 +17,8 @@ import {
   type CadAssemblyPmiItemState,
   type CadPmiAsset,
   bomCsv,
+  bomJson,
+  bomReport,
   bodyPartContent,
   identityPose,
   poseOf,
@@ -57,6 +60,9 @@ import {
   type CadResolvedJointValues,
   type CadSweepReport,
   type CadClearanceReport,
+  type CadCoverageReport,
+  type CadMotionBounds,
+  type CadMotionDriver,
   jointRangeSamples,
   type CadEvaluation,
   type CadJointType,
@@ -94,6 +100,8 @@ import {
   type CadStepImportOptions,
   type CadStepPmiReport,
   type CadStepAssemblyResult,
+  type CadAssemblyStepPmi,
+  type CadBrepPmi,
 } from '@editor-platform/cad-kernel-occt';
 import { assemblyGlbBodies } from './assembly-glb';
 import { describeAssemblyCode, describeGearMeshProblem } from './assembly-messages';
@@ -241,7 +249,10 @@ export function componentStates(
   later?: (hash: string) => CadVersionEvaluation | undefined,
 ) {
   const versions = evaluatedVersions(evaluation, later);
-  const states = new Map<string, { state: CadComponentState; code?: string }>();
+  const states = new Map<
+    string,
+    { state: CadComponentState; code?: string; featureId?: string; contentHash?: string }
+  >();
   const { occurrences } = expandAssembly(content, lookup);
   const allowed = occurrenceAccess(occurrences, access);
   for (const [i, o] of occurrences.entries()) {
@@ -249,13 +260,45 @@ export function componentStates(
     const next = !allowed[i]
       ? { state: 'unavailable' as const, code: 'part-access-revoked' }
       : v
-        ? { state: v.state as CadComponentState, code: v.code }
+        ? {
+            state: v.state as CadComponentState,
+            code: v.code,
+            // #847: where in which version the failure is, for the component's report.
+            ...(v.featureId ? { featureId: v.featureId } : {}),
+            ...(v.code ? { contentHash: o.part.source.contentHash } : {}),
+          }
         : { state: 'pending' as const };
     const id = o.path[0]!;
     const was = states.get(id);
     if (!was || rank[next.state] > rank[was.state]) states.set(id, next);
   }
   return states;
+}
+
+/**
+ * #847: the direct components whose parts keep an export from being written (not evaluated,
+ * unreadable or a reference display), by name in tree order.
+ */
+export function blockingComponents(
+  content: CadDocument,
+  occurrences: { path: string[]; part: { source: { contentHash: string } } }[],
+  allowed: boolean[],
+  versions: Record<string, CadVersionEvaluation> | undefined,
+): string[] {
+  const ids = new Set<string>();
+  for (const [i, o] of occurrences.entries())
+    if (!allowed[i] || versions?.[o.part.source.contentHash]?.state !== 'available')
+      ids.add(o.path[0]!);
+  return content.components.filter((c) => ids.has(c.id)).map((c) => c.name);
+}
+/** A refusal that names the parts it is about (at most 5, then how many more). */
+export function withComponents(message: string, names: string[]) {
+  if (!names.length) return message;
+  const shown = names
+    .slice(0, 5)
+    .map((n) => `「${n}」`)
+    .join('、');
+  return `${message}該当する部品：${shown}${names.length > 5 ? `ほか${names.length - 5}個` : ''}。`;
 }
 
 /** The 8 corners of a box moved by a pose, as world bounds. */
@@ -348,6 +391,11 @@ export interface CadAssemblyPmiView {
   /** The Host has no bytes, or they are not an `assembly-pmi` asset. */
   unreadable?: true;
   items?: ReadonlyMap<string, CadAssemblyPmiItemState>;
+  /**
+   * PMI-5b-2: for each item with presentation lines, the components it names that are not where
+   * the import placed them (`cadAssemblyPmiMoved`): its lines are drawn only when none.
+   */
+  moved?: ReadonlyMap<string, readonly string[]>;
 }
 /** PMI-5b: one body of a component's part version with the PMI it keeps. */
 export interface CadComponentPmi {
@@ -441,11 +489,13 @@ export function parseEntryDraftKey(key: string) {
 const renderCancelPollMs = 200;
 /**
  * How fine a render's meshes are: 0.02% of each body's diagonal (a fifth of the display's) and
- * at most 0.1 rad between neighbouring normals, so reflections run smoothly over curved panels.
+ * at most 0.05 rad between neighbouring normals, so reflections run smoothly over curved panels.
+ * CL7a: at 0.1 rad the zebra's stripes broke into a saw-tooth where a car's side turns tightly
+ * from the shoulder down to its widest line (F141); at 0.05 rad they run on.
  */
 export const cadRenderMeshQuality = Object.freeze({
   relativeDeflection: 0.0002,
-  angularDeflectionRad: 0.1,
+  angularDeflectionRad: 0.05,
 });
 /**
  * A render's finer meshes (`CadAssembly.renderMeshes`): the document's own bodies by body ID,
@@ -489,6 +539,7 @@ export interface CadAssemblyOptions {
     requestId: string,
     plan: CadStepPlan,
     breps: ReadonlyMap<string, Uint8Array>,
+    pmi?: CadAssemblyStepPmi,
   ): Promise<CadStepAssemblyResult>;
 }
 
@@ -697,6 +748,10 @@ export class CadAssembly {
   }
   /** PMI-5b: assets read from the Host's bytes, by hash (null: not one). */
   private readonly pmiAssets = new Map<string, CadPmiAsset | CadAssemblyPmiAsset | null>();
+  private readonly assemblyPmiMoved = new WeakMap<
+    object,
+    { asset: CadAssemblyPmiAsset; moved: ReadonlyMap<string, readonly string[]> }
+  >();
   private readonly assemblyPmiStates = new WeakMap<
     CadAssemblyPmiAsset,
     { components: unknown; parts: unknown; items: Map<string, CadAssemblyPmiItemState> }
@@ -736,7 +791,26 @@ export class CadAssembly {
       };
       this.assemblyPmiStates.set(asset, hit);
     }
-    return { asset, items: hit.items };
+    // Where each direct component is drawn: the lines are in the import's frame.
+    let moved = this.assemblyPmiMoved.get(content);
+    if (moved?.asset !== asset) {
+      const shown = asset.items.filter((i) => i.presentation);
+      const poses = new Map(
+        shown.length
+          ? expandAssembly(content, this.lookup)
+              .occurrences.filter((o) => o.path.length === 1)
+              .map((o) => [o.path[0]!, o.pose] as const)
+          : [],
+      );
+      moved = {
+        asset,
+        moved: new Map(
+          shown.map((i) => [i.id, cadAssemblyPmiMoved(asset, i, (id) => poses.get(id))] as const),
+        ),
+      };
+      this.assemblyPmiMoved.set(content, moved);
+    }
+    return { asset, items: hit.items, moved: moved.moved };
   }
   /**
    * PMI-5b: the PMI a direct component's part keeps (each body's `pmi`, common to every instance
@@ -2064,9 +2138,31 @@ export class CadAssembly {
   bom(mode: CadBomMode) {
     return bomRows(this.options.controller.getSnapshot().content, this.lookup, mode, this.access);
   }
-  /** The BOM as CSV: the content and its hash do not change (like PNG). */
+  /**
+   * PD2: the BOM with each row's material, sourcing, mass and cost, and the totals. Nothing is
+   * weighed from a reference evaluation (another build's shapes) or while the saved poses do not
+   * match their joints, as the mass panel.
+   */
+  bomReport(mode: CadBomMode) {
+    const { content, evaluation } = this.options.controller.getSnapshot();
+    const usable =
+      evaluation?.status === 'ok' &&
+      !evaluation.reference &&
+      !evaluation.assembly?.poseMismatch?.length;
+    return bomReport(content, this.lookup, mode, {
+      ...(usable ? { own: evaluation.bodies, versions: this.versions(evaluation) } : {}),
+      access: this.access,
+    });
+  }
+  /** The BOM as CSV (PD2: with the mass and cost and a total row): the content does not change. */
   bomCsv(mode: CadBomMode) {
-    return bomCsv(this.bom(mode));
+    const report = this.bomReport(mode);
+    return bomCsv(report.rows, report.totals);
+  }
+  /** PD2: the BOM report as JSON; the content and its hash do not change. */
+  bomJson(mode: CadBomMode, name?: string) {
+    const { contentHash } = this.options.controller.getSnapshot();
+    return bomJson(this.bomReport(mode), { ...(name !== undefined ? { name } : {}), contentHash });
   }
   /**
    * R2b-5: STEP AP242 of the confirmed assembly when it is called (docs/cad/r2b-assembly.md,
@@ -2076,8 +2172,8 @@ export class CadAssembly {
    */
   async exportStep(name: string): Promise<CadMeshExport | undefined> {
     const { controller } = this.options;
-    const refuse = (code: string) => {
-      controller.report(describeCode(code), code);
+    const refuse = (code: string, parts: string[] = []) => {
+      controller.report(withComponents(describeCode(code), parts), code);
       return undefined;
     };
     const shown = controller.getSnapshot();
@@ -2094,16 +2190,13 @@ export class CadAssembly {
     const versions = this.versions(evaluation);
     const { occurrences } = expandAssembly(content, this.lookup);
     const allowed = occurrenceAccess(occurrences, this.access);
-    if (
-      occurrences.some(
-        (o, i) => !allowed[i] || versions?.[o.part.source.contentHash]?.state !== 'available',
-      )
-    )
-      return refuse('step-part-unavailable');
+    const blocking = blockingComponents(content, occurrences, allowed, versions);
+    if (blocking.length) return refuse('step-part-unavailable', blocking);
     const planned = assemblyStepPlan(content, contentHash, this.lookup, name);
     if (planned.status !== 'ok') return refuse(planned.code);
     const { plan } = planned;
     const breps = new Map<string, Uint8Array>();
+    const products: Record<string, CadBrepPmi> = {};
     for (const product of plan.products) {
       const hash = product.shape?.contentHash;
       if (!hash || breps.has(hash)) continue;
@@ -2124,21 +2217,50 @@ export class CadAssembly {
       )
         return refuse('export-mismatch');
       breps.set(hash, exported.brep.bytes);
+      if (exported.brep.pmi) products[hash] = exported.brep.pmi;
     }
+    // PMI-5c: the products' PMI, and the assembly's own items with each direct component's version.
+    const view = this.assemblyPmi(content);
+    const own = view?.asset && view.items ? { asset: view.asset, items: view.items } : undefined;
+    const partHash = new Map(content.parts.map((p) => [p.id, p.source.contentHash]));
+    const pmi: CadAssemblyStepPmi | undefined =
+      Object.keys(products).length || own
+        ? {
+            products,
+            ...(own
+              ? {
+                  assembly: {
+                    asset: own.asset,
+                    states: [...own.items],
+                    components: Object.fromEntries(
+                      content.components.flatMap((c) => {
+                        const h = partHash.get(c.partId);
+                        return h ? [[c.id, h] as const] : [];
+                      }),
+                    ),
+                  },
+                }
+              : {}),
+          }
+        : undefined;
     const written = await this.options.exportAssemblyStep(
       content.kernelProfile,
       controller.newId('export'),
       plan,
       breps,
+      pmi,
     );
     if (written.status !== 'ok') return refuse(written.code);
     try {
       return {
         bytes: written.step,
-        report: assemblyStepReport(written.step, plan, {
-          sourceContentHash: contentHash,
-          buildHash: evaluation.buildHash,
-        }),
+        report: assemblyStepReport(
+          written.step,
+          plan,
+          { sourceContentHash: contentHash, buildHash: evaluation.buildHash },
+          written.pmi,
+          view?.unreadable === true,
+        ),
       };
     } catch (error) {
       if (error instanceof CadExportError) return refuse(error.code);
@@ -2153,8 +2275,8 @@ export class CadAssembly {
    */
   async exportGlb(): Promise<CadMeshExport | undefined> {
     const { controller } = this.options;
-    const refuse = (code: string) => {
-      controller.report(describeCode(code), code);
+    const refuse = (code: string, parts: string[] = []) => {
+      controller.report(withComponents(describeCode(code), parts), code);
       return undefined;
     };
     const shown = controller.getSnapshot();
@@ -2168,12 +2290,8 @@ export class CadAssembly {
     const { occurrences, limit } = expandAssembly(content, this.lookup);
     if (limit) return refuse(limit);
     const allowed = occurrenceAccess(occurrences, this.access);
-    if (
-      occurrences.some(
-        (o, i) => !allowed[i] || versions?.[o.part.source.contentHash]?.state !== 'available',
-      )
-    )
-      return refuse('glb-part-unavailable');
+    const blocking = blockingComponents(content, occurrences, allowed, versions);
+    if (blocking.length) return refuse('glb-part-unavailable', blocking);
     const own =
       shown.meshes?.current && !shown.meshes.preview
         ? { content, meshes: shown.meshes.meshes }
@@ -2510,6 +2628,18 @@ export class CadAssembly {
     return 'error' in r ? r : { ...r, values: range.values };
   }
   /**
+   * PD6: the MR5 check moving one joint value from `driver.from` to `driver.to` (radians or mm)
+   * with every part within `bounds` per step (`checkCadMotionCoverage`): the steps are chosen
+   * from the motion, and each moving part's largest step comes back with the overlaps.
+   */
+  async checkMotionCoverage(
+    driver: CadMotionDriver,
+    bounds: CadMotionBounds,
+  ): Promise<{ content: CadDocument; report: CadCoverageReport } | { error: string }> {
+    const r = await this.runInterference({ coverage: { driver, bounds } });
+    return 'error' in r ? r : { content: r.content, report: r.report as CadCoverageReport };
+  }
+  /**
    * CR7c: the shortest distance between two components' display meshes (and what they place),
    * in the current pose or at joint values, off the main thread like `checkInterference`.
    */
@@ -2522,7 +2652,7 @@ export class CadAssembly {
     return 'error' in r ? r : { content: r.content, report: r.report as CadClearanceReport };
   }
   private async runInterference(
-    target: Pick<CadInterferenceRequest, 'form' | 'samples' | 'clearance'>,
+    target: Pick<CadInterferenceRequest, 'form' | 'samples' | 'clearance' | 'coverage'>,
   ): Promise<{ content: CadDocument; report: CadInterferenceJobReport } | { error: string }> {
     const { controller } = this.options;
     const s = controller.getSnapshot();

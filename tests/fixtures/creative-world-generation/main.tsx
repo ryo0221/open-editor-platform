@@ -2,9 +2,15 @@ import { createRoot } from 'react-dom/client';
 import {
   canonicalJson,
   clone,
+  commitVersion,
+  serializeArtifact,
   IndexedDBStorage,
   type Artifact,
 } from '@editor-platform/artifact-core';
+import {
+  hostNativeArtifactByteLimit,
+  serializeHostNativeArtifact,
+} from '@editor-platform/editor-host';
 import {
   CreativeWorkspace,
   CreativeProductionHost,
@@ -76,7 +82,7 @@ async function mount() {
   };
   const fresh = !(await io.readLinks());
   if (fresh) await createHarborWorkspace(io);
-  const workspace = await CreativeWorkspace.open(io, () => access.write, canRead);
+  let workspace = await CreativeWorkspace.open(io, () => access.write, canRead);
   if (fresh) {
     // Two characters, two locations, two document Scenes + the existing comic Scene,
     // and both style guides. Select only one style in this request's work context.
@@ -115,6 +121,28 @@ async function mount() {
       const a = (await store.get(id))!;
       await store.put({ ...a, id: 'other-work:' + id });
     }
+  }
+  if (new URLSearchParams(location.search).has('capacity')) {
+    // Real retained history leaves less than 16 MiB available under the current
+    // native limit. The generated PNG remains within its separate 4 MiB limit.
+    const project = workspace.project('character');
+    const editor = project.editor(project.cards[0]);
+    if (!editor) throw Error('capacity fixture target is missing');
+    const paddingBytes = hostNativeArtifactByteLimit - 16 * 1024 * 1024;
+    const reason = '界'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
+    const retained = await commitVersion(editor.artifact, null, reason);
+    serializeHostNativeArtifact(retained);
+    await store.put(retained);
+    workspace = await CreativeWorkspace.open(io, () => access.write, canRead);
+    await workspace.project('character').save({ reuseSavedVersions: true });
+    for (const scene of workspace.mapping.scenes)
+      for (const item of scene.items)
+        await workspace.refreshReference(
+          scene.id,
+          item.mode,
+          item.itemId,
+          workspace.item(scene.id, item.mode, item.itemId),
+        );
   }
   const browserRecords = createBrowserCreativeWorldRecords(
     workspace.mapping.world!.namespace,
@@ -320,6 +348,19 @@ async function mount() {
     async artifacts() {
       return store.list();
     },
+    async artifactDigests() {
+      return Promise.all(
+        (await store.list()).map(async (artifact) => {
+          const bytes = new TextEncoder().encode(serializeArtifact(artifact));
+          const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+          return {
+            id: artifact.id,
+            bytes: bytes.length,
+            hash: Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join(''),
+          };
+        }),
+      );
+    },
     async context() {
       return clone(workspace.mapping.world!);
     },
@@ -358,6 +399,7 @@ async function mount() {
 }
 declare global {
   interface Window {
+    cw2Ready: Promise<void>;
     cw2Fixture: {
       resultPadding(bytes: number): void;
       readInput(role: 'source' | 'rough' | 'current' | 'scene', value: boolean): void;
@@ -391,6 +433,7 @@ declare global {
       readonly latest: { input: CreativeWorldInput; identity: CreativeWorldIdentity } | undefined;
       records(): Promise<CreativeWorldExecutionRecord[]>;
       artifacts(): Promise<Artifact<unknown>[]>;
+      artifactDigests(): Promise<{ id: string; bytes: number; hash: string }[]>;
       context(): Promise<NonNullable<CreativeWorkspace['mapping']['world']>>;
       adoptStyle(style: 'anime' | 'gekiga'): Promise<void>;
       manifest(): ReturnType<typeof createCreativeWorldResultManifest>;
@@ -398,7 +441,8 @@ declare global {
     };
   }
 }
-void mount().catch((error) => {
+window.cw2Ready = mount();
+void window.cw2Ready.catch((error) => {
   const p = document.createElement('p');
   p.setAttribute('role', 'alert');
   p.textContent = String(error);

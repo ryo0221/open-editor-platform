@@ -449,7 +449,7 @@ function noticeOf(error: unknown): BimNotice {
 }
 
 /** What a read shape tells the view and drawings, without its bytes. */
-function partAvailable(shape: BimPartShape) {
+export function partAvailable(shape: BimPartShape) {
   const { kinds, bounds, looks, faces } = shape;
   const sized = looks && faces && looks.length === kinds.length && faces.length === kinds.length;
   return { kinds, bounds, ...(sized ? { looks, faces } : {}) };

@@ -34,7 +34,9 @@ from OCP.XCAFDoc import (
 def centroid(shape):
     kind = shape.ShapeType()
     if kind == TopAbs_VERTEX:
-        p = BRep_Tool.Pnt_s(TopoDS.Vertex_s(shape))
+        # cadquery-ocp 8 names the downcast `Vertex` (older OCP: `Vertex_s`).
+        vertex = getattr(TopoDS, "Vertex_s", None) or TopoDS.Vertex
+        p = BRep_Tool.Pnt_s(vertex(shape))
         return "vertex", [round(p.X(), 4), round(p.Y(), 4), round(p.Z(), 4)]
     props = GProp_GProps()
     if kind == TopAbs_FACE:

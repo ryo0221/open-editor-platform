@@ -1,4 +1,4 @@
-import { InstancedMesh, Matrix4, Raycaster, Vector3 } from 'three';
+import { InstancedMesh, LineSegments, Matrix4, Raycaster, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   disposeInstances,
@@ -43,6 +43,21 @@ describe('geometry-view instancing (R2c-3b)', () => {
     expect(instancesBytes(group) - instancesBytes(one)).toBe(16 * 4 + 3 * 4);
     disposeInstances(group);
     expect(group.children).toHaveLength(0);
+  });
+
+  it('finds a mesh outline once and reuses it when drawn again (#1335, ST-805, TS-2610)', () => {
+    const outline = (g: ReturnType<typeof instancesGroup>) =>
+      (
+        g.children.find((o) => (o as LineSegments).isLineSegments) as LineSegments
+      ).geometry.getAttribute('position').array;
+    const a = instancesGroup([solid()]);
+    const b = instancesGroup([solid()]);
+    // The square's four sides; the diagonal between its triangles is flat, so not an edge.
+    expect(outline(a)).toHaveLength(4 * 2 * 3);
+    expect(outline(b)).toBe(outline(a));
+    // Disposed and drawn again: still there.
+    disposeInstances(a);
+    expect(outline(instancesGroup([solid()]))).toBe(outline(b));
   });
 
   it('picks the instance under a ray and moves instances by their matrices only', () => {

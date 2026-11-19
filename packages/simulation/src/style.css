@@ -29,6 +29,15 @@
   align-items: center;
   gap: 8px;
 }
+.simulation-field-wide {
+  grid-template-columns: 1fr;
+}
+.simulation-field-wide textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 0.8rem;
+}
 .simulation-field small,
 .simulation-note {
   color: var(--muted, #667085);
@@ -130,6 +139,27 @@
   height: 12px;
   border-radius: 3px;
 }
+.simulation-legend-classes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+.simulation-legend-classes li {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.simulation-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--line, #d0d5dd);
+}
 .simulation-range {
   display: flex;
   justify-content: space-between;
@@ -149,4 +179,103 @@
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+/* VS7c-2: a crash result's charts. Categorical slots 1–2 (blue, orange), checked for colour vision and contrast. */
+.crash-result {
+  --crash-series-1: #2a78d6;
+  --crash-series-2: #eb6834;
+}
+.crash-chart {
+  margin: 8px 0;
+}
+.crash-chart figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.85rem;
+}
+.crash-chart-legend {
+  display: inline-flex;
+  gap: 10px;
+  color: var(--muted, #667085);
+}
+.crash-chart-key {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.crash-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+}
+.crash-chart-grid {
+  stroke: var(--line, #d0d5dd);
+  stroke-width: 1;
+}
+.crash-chart-tick {
+  fill: var(--muted, #667085);
+  font-size: 9px;
+}
+.crash-chart-span {
+  fill: var(--muted, #667085);
+  opacity: 0.08;
+}
+.crash-chart-marker {
+  stroke: var(--muted, #667085);
+  stroke-dasharray: 3 3;
+}
+.crash-chart-cross {
+  stroke: var(--muted, #667085);
+}
+.crash-chart-dot {
+  stroke: #fff;
+  stroke-width: 2;
+}
+.crash-chart-readout {
+  min-height: 1.2em;
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted, #667085);
+}
+/* VS11d-2: a transient run's time slider and temperature history. */
+.simulation-timeline {
+  display: grid;
+  gap: 4px;
+}
+.simulation-history {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.simulation-history svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+.simulation-history figcaption {
+  font-size: 0.8rem;
+  color: var(--muted, #667085);
+}
+.simulation-history-frame {
+  fill: none;
+  stroke: var(--line, #d0d5dd);
+}
+.simulation-history-max,
+.simulation-history-min {
+  fill: none;
+  stroke: var(--danger, #b42318);
+  stroke-width: 1.5;
+}
+.simulation-history-min {
+  stroke: var(--accent, #1570ef);
+  stroke-dasharray: 4 3;
+}
+.simulation-history-now {
+  stroke: var(--muted, #667085);
+  stroke-width: 1;
 }

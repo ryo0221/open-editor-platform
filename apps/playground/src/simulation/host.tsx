@@ -322,6 +322,7 @@ export default function SimulationHost({
           destination: computeHost.destination,
           limits: computeHost.limits,
           ...(computeHost.aero ? { aero: computeHost.aero } : {}),
+          ...(computeHost.crash ? { crash: computeHost.crash } : {}),
           builds:
             'code' in kernel || !mesher
               ? undefined

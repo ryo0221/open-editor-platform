@@ -28,6 +28,7 @@ import {
 } from './step-pmi';
 import { pmiSubShapes, type PmiProduct } from './step-pmi-keep';
 import type { PmiPath, PmiPathItem, PmiPathProblem, PmiPathTarget } from './step-pmi-path';
+import type { PmiFileCallout, PmiFilePresentation } from './step-pmi-presentation';
 
 /** One leaf placement of the import: its components from the root and its instances. */
 export interface PmiPlacement {
@@ -63,8 +64,22 @@ export interface KeptAssemblyPmi {
   systems: number[];
   /** The datum features of the kept datums. */
   features: number;
+  /**
+   * PMI-5b-2: the callouts drawn whole whose lines the kept items carry (in the root assembly's
+   * frame, the import's coordinates).
+   */
+  callouts: PmiFileCallout[];
+  /** Kept items whose file links lines that are not drawn: not in the root assembly's frame. */
+  unplacedLines: number;
+  /** The kept items' lines are more than one asset holds (`cadPmiLimits.vertices`). */
+  tooLarge?: true;
 }
 
+const append = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
+  const list = map.get(key);
+  if (list) list.push(value);
+  else map.set(key, [value]);
+};
 const noKinds = (): Record<CadPmiKind, number> => ({
   dimension: 0,
   'geometric-tolerance': 0,
@@ -111,6 +126,8 @@ export function keepAssemblyPmi(
   systemsOf: Map<number, number[]>,
   /** How many of a datum's features are datum features (the census's family), by datum. */
   datumFeatures: (datum: number) => number,
+  /** PMI-5b-2: the file's presentation (`pmiPresentation`), whose lines kept items carry. */
+  presentation?: PmiFilePresentation,
 ): KeptAssemblyPmi {
   const found = noKinds();
   const kept = noKinds();
@@ -124,7 +141,16 @@ export function keepAssemblyPmi(
   const shared = new Set(
     [...systemsOf].filter(([t]) => !pathTolerances.has(t)).flatMap(([, s]) => s),
   );
-  const result = { kept, found, problems, paths, systems, features };
+  const result = {
+    kept,
+    found,
+    problems,
+    paths,
+    systems,
+    features,
+    callouts: [] as PmiFileCallout[],
+    unplacedLines: 0,
+  };
   if (!path.items.length) return result;
   // The kernel's names for the faces, edges and vertices.
   const byRank = new Map([...path.ranks].map(([id, rank]) => [rank, id]));
@@ -158,12 +184,19 @@ export function keepAssemblyPmi(
     while (n && p.chain[n - 1] === 0) n--;
     return p.chain.slice(0, n);
   };
+  /**
+   * PMI-5b-2: the paths whose instance hangs directly from the free shape (all its usages are
+   * the path's): the path's assembly is the root the import places at the origin, so lines in
+   * its frame are in the import's coordinates. A path from a sub-assembly is not.
+   */
+  const rooted = new Set<number>();
   const place = (t: PmiPathTarget): CadPmiTarget[] | PmiPathProblem => {
     // The usages of the placements end with the path's occurrences (a path may start at a
     // sub-assembly), and they are all one instance of the file: its split sub-shapes, if any.
     const at = placements.filter((p) => ends(usagesOf(p), t.occurrences));
     const instance = at[0] && usagesOf(at[0]).join(' ');
     if (!at.length || at.some((p) => usagesOf(p).join(' ') !== instance)) return 'path-unplaced';
+    if (usagesOf(at[0]!).length === t.occurrences.length) rooted.add(t.path);
     const out: CadPmiTarget[] = [];
     for (const item of t.items) {
       // The sub-shape's product picks the placement; exactly one may hold it.
@@ -190,9 +223,12 @@ export function keepAssemblyPmi(
   };
 
   const items: CadPmiItem[] = [];
-  const add = (item: NewItem) => {
+  /** The file item each kept item was read from (a datum copied for a tolerance has none). */
+  const sourceOf = new Map<string, PmiPathItem>();
+  const add = (item: NewItem, from?: PmiPathItem) => {
     const id = `pmi-${items.length + 1}`;
     items.push({ id, ...item } as CadPmiItem);
+    if (from) sourceOf.set(id, from);
     return id;
   };
   const lose = (problem: PmiPathProblem) => (problems[problem] = (problems[problem] ?? 0) + 1);
@@ -225,7 +261,7 @@ export function keepAssemblyPmi(
       lose('path-unreadable');
       continue;
     }
-    const id = add({ kind: 'datum', name: i.text.letter, targets: targets[0] ?? [] });
+    const id = add({ kind: 'datum', name: i.text.letter, targets: targets[0] ?? [] }, i);
     pathDatums.push({ item: i, targets, id });
     datumIds.set(i.text.entity, id);
   }
@@ -283,17 +319,20 @@ export function keepAssemblyPmi(
         continue;
       }
       keep(i, targets);
-      add({
-        kind: 'dimension',
-        type: text.type,
-        values: text.deviation ? text.values.slice(0, 1) : text.values,
-        ...(text.deviation && {
-          deviation: { lower: text.deviation[0], upper: text.deviation[1] },
-        }),
-        ...(qualifier && { qualifier }),
-        targets: targets[0] ?? [],
-        ...(targets[1]?.length ? { targets2: targets[1] } : {}),
-      });
+      add(
+        {
+          kind: 'dimension',
+          type: text.type,
+          values: text.deviation ? text.values.slice(0, 1) : text.values,
+          ...(text.deviation && {
+            deviation: { lower: text.deviation[0], upper: text.deviation[1] },
+          }),
+          ...(qualifier && { qualifier }),
+          targets: targets[0] ?? [],
+          ...(targets[1]?.length ? { targets2: targets[1] } : {}),
+        },
+        i,
+      );
       continue;
     }
     const groups = compartments(text.datums);
@@ -328,16 +367,19 @@ export function keepAssemblyPmi(
     }
     keep(i, targets);
     systems.push(...(systemsOf.get(text.entity) ?? []).filter((x) => !shared.has(x)));
-    add({
-      kind: 'geometric-tolerance',
-      type: text.type,
-      value: text.value,
-      modifiers: text.modifiers,
-      ...(zone ? { zone } : {}),
-      ...(text.maximum !== undefined ? { maxValue: text.maximum } : {}),
-      references,
-      targets: targets[0] ?? [],
-    });
+    add(
+      {
+        kind: 'geometric-tolerance',
+        type: text.type,
+        value: text.value,
+        modifiers: text.modifiers,
+        ...(zone ? { zone } : {}),
+        ...(text.maximum !== undefined ? { maxValue: text.maximum } : {}),
+        references,
+        targets: targets[0] ?? [],
+      },
+      i,
+    );
   }
   // A path datum on no geometry stands only for the tolerances that use it (JAMA's datums on the
   // assembly): without a kept one it means nothing and is not kept. Ids are given again in order.
@@ -355,8 +397,55 @@ export function keepAssemblyPmi(
       dropped.add(d.id);
       lose('path-empty');
     }
+  // PMI-5b-2: each kept item's lines, from the callouts drawn whole that present its file item
+  // in the frame of the product it is on (`itemFrame`), when that product is the root assembly:
+  // the frame of an item whose every path is rooted, or, for an item on no geometry (a datum on
+  // the assembly), the frame of such an item. Nothing is placed by guess.
+  const presented = new Map<number, PmiFileCallout[]>();
+  for (const c of presentation?.callouts ?? [])
+    if (!c.unsupported) for (const e of c.presents) append(presented, e, c);
+  const pathsOf = (i: PmiPathItem) => i.ends.flat().map((t) => t.path);
+  const frameOf = (i: PmiPathItem) => presentation?.itemFrame.get(i.text.entity);
+  const keptSources = [...sourceOf].filter(([id]) => !dropped.has(id));
+  const roots = new Set(
+    keptSources.flatMap(([, i]) => {
+      const f = frameOf(i);
+      const ps = pathsOf(i);
+      return f !== undefined && ps.length && ps.every((p) => rooted.has(p)) ? [f] : [];
+    }),
+  );
+  const linesOf = new Map<string, { segments: number[]; plane?: PmiFileCallout['plane'] }>();
+  const used = new Map<number, PmiFileCallout>();
+  let vertices = 0;
+  for (const [id, i] of keptSources) {
+    const f = frameOf(i);
+    const callouts = (presented.get(i.text.entity) ?? []).filter(
+      (c) => f !== undefined && c.frames.includes(f),
+    );
+    if (!callouts.length) continue;
+    const ps = pathsOf(i);
+    if (f === undefined || !roots.has(f) || !ps.every((p) => rooted.has(p))) {
+      result.unplacedLines++;
+      continue;
+    }
+    const lines: { segments: number[]; plane?: PmiFileCallout['plane'] } = { segments: [] };
+    for (const c of callouts) {
+      // Bounded before copying: one asset's vertices at most (`assemblyPmiWithinLimits`).
+      vertices += c.segments.length / 3;
+      if (vertices > cadPmiLimits.vertices) return { ...result, tooLarge: true as const };
+      for (const v of c.segments) lines.segments.push(v);
+      if (!lines.plane && c.plane) lines.plane = c.plane;
+      used.set(c.id, c);
+    }
+    linesOf.set(id, lines);
+  }
+  result.callouts = [...used.values()];
   const ids = new Map<string, string>();
-  const left = items.filter((i) => !dropped.has(i.id));
+  const left = items
+    .filter((i) => !dropped.has(i.id))
+    .map((i) =>
+      linesOf.has(i.id) ? ({ ...i, presentation: linesOf.get(i.id)! } as CadPmiItem) : i,
+    );
   left.forEach((i, n) => ids.set(i.id, `pmi-${n + 1}`));
   const renumbered = left.map((i) =>
     i.kind === 'geometric-tolerance'
@@ -382,6 +471,8 @@ export const assemblyPmiWithinLimits = (asset: CadPmiAsset) =>
       i.targets.length <= cadPmiLimits.targets &&
       (i.kind !== 'dimension' || (i.targets2?.length ?? 0) <= cadPmiLimits.targets),
   ) &&
+  asset.items.reduce((n, i) => n + (i.presentation?.segments.length ?? 0) / 3, 0) <=
+    cadPmiLimits.vertices &&
   new TextEncoder().encode(JSON.stringify(asset)).byteLength <= cadPmiLimits.bytes;
 
 /**
@@ -390,7 +481,17 @@ export const assemblyPmiWithinLimits = (asset: CadPmiAsset) =>
  * `path` row per family says how many of the file's path items were kept, and the paths
  * themselves are read when kept items use them. `kept` adds the kept items.
  */
-export function withPathPmi(report: CadStepPmiReport, path: KeptAssemblyPmi): CadStepPmiReport {
+export function withPathPmi(
+  report: CadStepPmiReport,
+  path: KeptAssemblyPmi,
+  /** The callouts the parts' items read and kept (`pmiKept`), by entity. */
+  parts: { linked: Set<number>; shown: Set<number>; occurrences: Set<number> } = {
+    linked: new Set(),
+    shown: new Set(),
+    occurrences: new Set(),
+  },
+  relationships: readonly (readonly [number, number])[] = [],
+): CadStepPmiReport {
   const families: [CadPmiKind & CadPmiFamily, number][] = (
     ['dimension', 'geometric-tolerance', 'datum'] as const
   ).map((k) => [k, path.kept[k]]);
@@ -427,8 +528,29 @@ export function withPathPmi(report: CadStepPmiReport, path: KeptAssemblyPmi): Ca
         unread: inFile - path.kept[family],
       });
   }
+  // PMI-5b-2: the callouts whose lines the path items carry are read and kept with the parts'
+  // own; a callout both carry counts once, a relationship when both its callouts are counted.
   const kept = { ...report.kept };
   for (const [family, n] of families) kept[family] += n;
+  if (path.callouts.length) {
+    const ours = new Set(path.callouts.map((c) => c.id));
+    const counted = (ids: Set<number>) => {
+      const all = new Set([...ids, ...ours]);
+      return all.size + relationships.filter(([a, b]) => all.has(a) && all.has(b)).length;
+    };
+    const set = (family: CadPmiFamily, read: number) => {
+      const row = axes.find((a) => a.axis === 'presentation' && a.family === family);
+      if (!row) return;
+      row.read = Math.min(row.inFile, read);
+      row.unread = Math.max(0, row.inFile - row.read);
+    };
+    set('callout', counted(parts.linked));
+    set(
+      'annotation',
+      new Set([...parts.occurrences, ...path.callouts.flatMap((c) => c.occurrences)]).size,
+    );
+    kept.callout = counted(parts.shown);
+  }
   const complete = axes.every((a) => a.unread === 0 && a.read === a.inFile);
   const next: CadStepPmiReport = {
     ...report,

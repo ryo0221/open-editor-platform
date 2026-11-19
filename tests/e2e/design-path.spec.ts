@@ -1,4 +1,13 @@
-import { createArtifact, commitVersion, contentHash } from '@editor-platform/artifact-core';
+import {
+  createArtifact,
+  commitVersion,
+  contentHash,
+  serializeArtifact,
+} from '@editor-platform/artifact-core';
+import {
+  hostNativeArtifactByteLimit,
+  serializeHostNativeArtifact,
+} from '@editor-platform/editor-host';
 import {
   createDesign,
   insertDesignPath,
@@ -7,7 +16,7 @@ import {
   patchDesign,
 } from '@editor-platform/design/model';
 import { build } from 'esbuild';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { test, expect, create, nativeArtifact, save } from './fixtures';
 import type { Page } from '@playwright/test';
 import type { DesignContent } from '@editor-platform/design/model';
@@ -641,7 +650,7 @@ test('ordinary Playground: paste into schema2 and Cut/Paste keep native path ide
 
 test('Playground capacity failure retains draft/Undo without growing immutable history and retries after correction', async ({
   page,
-}) => {
+}, info) => {
   test.setTimeout(120000);
   const path = presetDesignPath('line'),
     sub = path.subpaths[0];
@@ -661,12 +670,35 @@ test('Playground capacity failure retains draft/Undo without growing immutable h
   let record = createArtifact('design', 'Capacity path', content);
   record = await commitVersion(record, null, 'first');
   record = await commitVersion(record, null, 'second');
-  const bytes = Buffer.from(JSON.stringify(record));
-  expect(bytes.length).toBeLessThan(16 * 1024 * 1024);
+  // Keep the path below its own 8 MiB limit and retain both real saved snapshots.
+  // Valid version metadata fills the envelope, rather than repeating the same
+  // expensive path validation/hash across many redundant immutable versions.
+  const currentBytes = Buffer.byteLength(serializeHostNativeArtifact(record));
+  const probe = await commitVersion(record, null, 'retained');
+  const versionBytes = Buffer.byteLength(serializeArtifact(probe)) - currentBytes;
+  const paddingBytes = hostNativeArtifactByteLimit - currentBytes - Math.floor(versionBytes / 2);
+  expect(versionBytes).toBeGreaterThan(0);
+  expect(paddingBytes).toBeGreaterThan(0);
+  const padding = '界'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
+  record = {
+    ...record,
+    versions: record.versions.map((version, i) =>
+      i === 0 ? { ...version, reason: version.reason + padding } : version,
+    ),
+  };
+  const bytes = Buffer.from(serializeHostNativeArtifact(record));
+  expect(record.versions).toHaveLength(2);
+  expect(bytes.length).toBe(currentBytes + paddingBytes);
+  expect(bytes.length).toBeLessThan(hostNativeArtifactByteLimit);
+  expect(bytes.length).toBeGreaterThan(16 * 1024 * 1024);
+  expect(
+    Buffer.byteLength(serializeArtifact(await commitVersion(record, null, 'Host save'))),
+  ).toBeGreaterThan(hostNativeArtifactByteLimit);
+  const retainedCount = record.versions.length;
+  const input = info.outputPath('capacity.json');
+  await writeFile(input, bytes);
   await page.goto('/');
-  await page
-    .getByLabel('Import artifact', { exact: true })
-    .setInputFiles({ name: 'capacity.json', mimeType: 'application/json', buffer: bytes });
+  await page.getByLabel('Import artifact', { exact: true }).setInputFiles(input);
   await expect(page.getByLabel('Artifact name')).toHaveValue(/capacity/i);
   for (let i = 0; i < 2; i++) {
     await page.getByRole('button', { name: 'Save version', exact: true }).click();
@@ -691,8 +723,8 @@ test('Playground capacity failure retains draft/Undo without growing immutable h
     record.versions[1].contentHash,
   );
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await save(page, 3);
-  expect((await nativeArtifact(page)).versions).toHaveLength(3);
+  await save(page, retainedCount + 1);
+  expect((await nativeArtifact(page)).versions).toHaveLength(retainedCount + 1);
 });
 
 test('plain EditorSession: a paste exceeding the aggregate anchor limit preserves content and Undo', async ({

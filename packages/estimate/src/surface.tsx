@@ -188,13 +188,19 @@ function Surface(props: Omit<EstimateSurfaceProps, 'statusRole'>) {
   useEffect(() => {
     let active = true;
     setVerified('');
-    if (calculation && readable && !draft)
-      void controller()
-        .verifiedCalculation(calculation.id)
-        .then(() => {
-          if (active) setVerified(signature);
-        })
-        .catch(() => {});
+    const owned = controllerRef.current;
+    if (calculation && readable && !draft && owned)
+      // Verification flushes Host inputs, which may synchronously update React.
+      // Leave the effect lifecycle first and retain this exact controller owner.
+      queueMicrotask(() => {
+        if (!active || controllerRef.current !== owned) return;
+        void owned
+          .verifiedCalculation(calculation.id)
+          .then(() => {
+            if (active && controllerRef.current === owned) setVerified(signature);
+          })
+          .catch(() => {});
+      });
     return () => {
       active = false;
     };

@@ -19,7 +19,11 @@ import {
   type CadStepPlan,
   type CadComponentPlacement,
 } from '@editor-platform/cad-core';
-import type { CadMesh } from '@editor-platform/cad-kernel-occt';
+import {
+  noPmiWritten,
+  type CadAssemblyStepPmi,
+  type CadMesh,
+} from '@editor-platform/cad-kernel-occt';
 import {
   CadAssembly,
   componentStates,
@@ -31,7 +35,7 @@ import {
 import { editedPlacement, mirroredPlacement, placementFields, validPlacement } from './placement';
 import { partPath, partsGroup } from './assembly-view';
 import { cadInputState } from './binding';
-import { CadController, describeCode } from './controller';
+import { CadController, cadFailureReport, describeCode } from './controller';
 
 const mesh = (bodyId: string, bytes = 12): CadMesh => ({
   bodyId,
@@ -351,7 +355,7 @@ describe('assembly in the Surface (R2b-1, CAD49/CAD51/CAD53/CAD54)', () => {
     const states = componentStates(fixture.assembly, controller.getSnapshot().evaluation, (h) =>
       kept.get(h),
     );
-    expect(Object.fromEntries(states)).toEqual({
+    expect(Object.fromEntries(states)).toMatchObject({
       'c-plate-1': { state: 'unavailable', code: 'part-access-revoked' },
       'c-plate-2': { state: 'unavailable', code: 'part-access-revoked' },
       'c-shaft': { state: 'unavailable', code: 'part-source-missing' },
@@ -637,6 +641,40 @@ describe('assembly in the Surface (R2b-1, CAD49/CAD51/CAD53/CAD54)', () => {
     expect(states.get('c-pair')).toEqual({ state: 'unavailable', code: 'part-access-revoked' });
     expect(states.get('c-plate-1')?.state).toBe('available');
   });
+  it("names a failed part's code and feature for its component (#847)", () => {
+    // TS-2467
+    const { assembly: doc, closure, plate, shaft, pair } = r2bParts();
+    const feature = plate.content.features[0]!;
+    const evaluation: CadEvaluation = {
+      status: 'ok',
+      contentHash: 'h',
+      buildHash: fixtureKernel.buildHash,
+      geometryDigest: 'd',
+      bodies: {},
+      assembly: {
+        versions: {
+          [plate.contentHash]: { state: 'failed', code: 'result-tolerance', featureId: feature.id },
+          [shaft.contentHash]: { state: 'available', bodies: {} },
+          [pair.contentHash]: { state: 'available', bodies: {} },
+        },
+      },
+    };
+    const states = componentStates(doc, evaluation, (h) => closure.get(h));
+    // The pair holds the failed plate too: its component reports the plate's failure.
+    for (const id of ['c-plate-1', 'c-pair'])
+      expect(states.get(id)).toEqual({
+        state: 'failed',
+        code: 'result-tolerance',
+        featureId: feature.id,
+        contentHash: plate.contentHash,
+      });
+    expect(states.get('c-shaft')).toEqual({ state: 'available' });
+    const report = cadFailureReport(closure.get(plate.contentHash)!, {
+      code: 'result-tolerance',
+      featureId: feature.id,
+    });
+    expect(report).toMatchObject({ featureName: feature.name, operation: feature.type });
+  });
   it('places nothing from retained content that does not match its hash', async () => {
     const { fixture } = setup();
     const { controller, kept, assembly } = setup({ doc: fixture.assembly });
@@ -658,7 +696,10 @@ describe('assembly in the Surface (R2b-1, CAD49/CAD51/CAD53/CAD54)', () => {
       assembly.lookup,
       assembly.access,
     );
-    expect(states.get('c-pair')).toEqual({ state: 'unavailable', code: 'part-source-mismatch' });
+    expect(states.get('c-pair')).toMatchObject({
+      state: 'unavailable',
+      code: 'part-source-mismatch',
+    });
     expect(states.get('c-plate-1')?.state).toBe('available');
   });
   it("picks a component from its part's outline as from its surface", () => {
@@ -870,7 +911,7 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
   it('writes each shaped version once, then the products and instances, after every part arrives', async () => {
     const { fixture } = setup();
     const breps: string[] = [];
-    const written: { plan: CadStepPlan; breps: string[] }[] = [];
+    const written: { plan: CadStepPlan; breps: string[]; pmi?: CadAssemblyStepPmi }[] = [];
     const { controller, assembly, port, kept, access } = setup({
       doc: fixture.assembly,
       background: true,
@@ -893,12 +934,25 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
             kinds: ['solid'],
             appearances: [{ color: '#9aa4b1', opacity: 1 }],
             faces: [6],
+            // PMI-5c: the plate's bodies carry what its PMI is written from.
+            ...(request.candidateHash === fixture.plate.contentHash
+              ? { pmi: { bodies: [], report: noPmiWritten(), writer: true } }
+              : {}),
           },
         };
       },
-      exportAssemblyStep: async (_profile, _id, plan, bytes) => {
-        written.push({ plan, breps: [...bytes.keys()] });
-        return { status: 'ok', step: new TextEncoder().encode('ISO-10303-21;\nHEADER;') };
+      exportAssemblyStep: async (_profile, _id, plan, bytes, pmi) => {
+        written.push({ plan, breps: [...bytes.keys()], pmi });
+        return {
+          status: 'ok',
+          step: new TextEncoder().encode('ISO-10303-21;\nHEADER;'),
+          pmi: {
+            ...noPmiWritten(),
+            written: { dimension: 0, 'geometric-tolerance': 0, datum: 1, 'datum-target': 0 },
+            assembly: { written: 0, shared: 0, across: 0, stale: 0, unwritable: 0 },
+            presentationOneFrame: 0,
+          },
+        };
       },
     });
     for (const [h, d] of fixture.closure) kept.set(h, d);
@@ -912,6 +966,9 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     expect(breps).toEqual([fixture.plate.contentHash, fixture.shaft.contentHash]);
     expect(written).toHaveLength(1);
     expect(written[0]!.breps).toEqual(breps);
+    // PMI-5c (TS-1446): the products' PMI by version; the Cart has no PMI of its own.
+    expect(Object.keys(written[0]!.pmi!.products)).toEqual([fixture.plate.contentHash]);
+    expect(written[0]!.pmi!.assembly).toBeUndefined();
     expect(written[0]!.plan.products.map((p) => p.name)).toEqual([
       'Plate',
       'Shaft',
@@ -925,6 +982,9 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
       instances: 2 + 4,
       sourceContentHash: controller.getSnapshot().contentHash,
     });
+    expect(file!.report.losses.join('\n')).toMatch(
+      /semantic GD&T.*0 dimensions, 0 geometric tolerances, 1 datum/,
+    );
     // STL stays refused for an assembly.
     expect(await controller.exportMesh('stl')).toBeUndefined();
     expect(controller.getSnapshot().diagnostic?.message).toBe(
@@ -937,11 +997,14 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     // A part the Host no longer lets this user read is not written, before any evaluation.
     access.delete('shaft');
     expect(await assembly.exportStep('Cart')).toBeUndefined();
+    // #847 (TS-2465): the refusal names the component whose part blocks it.
     expect(controller.getSnapshot().diagnostic?.message).toBe(
-      describeCode('step-part-unavailable'),
+      `${describeCode('step-part-unavailable')}該当する部品：「c-shaft」。`,
     );
     expect(await assembly.exportGlb()).toBeUndefined();
-    expect(controller.getSnapshot().diagnostic?.message).toBe(describeCode('glb-part-unavailable'));
+    expect(controller.getSnapshot().diagnostic?.message).toBe(
+      `${describeCode('glb-part-unavailable')}該当する部品：「c-shaft」。`,
+    );
     expect(written).toHaveLength(1);
   });
 });

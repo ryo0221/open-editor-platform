@@ -21,6 +21,7 @@ import type {
   CadRenderMeshQuality,
   CadMesh,
   CadStepAssemblyResult,
+  CadAssemblyStepPmi,
 } from './protocol';
 import type { CadStepAssemblyImportResult } from './step-assembly-import';
 import type { CadStepImportOptions, CadStepImportResult } from './step-import';
@@ -174,6 +175,7 @@ export class CatalogKernelPort implements CadKernelPort {
     requestId: string,
     plan: CadStepPlan,
     breps: ReadonlyMap<string, Uint8Array>,
+    pmi?: CadAssemblyStepPmi,
   ): Promise<CadStepAssemblyResult> {
     const resolved = this.resolve(profile);
     if (this.disposed || resolved.mode !== 'exact')
@@ -182,7 +184,7 @@ export class CatalogKernelPort implements CadKernelPort {
         code: resolved.mode === 'unavailable' ? resolved.code : 'kernel-reference-only',
         retryable: false,
       });
-    return this.port(resolved.build).exportAssemblyStep(requestId, plan, breps);
+    return this.port(resolved.build).exportAssemblyStep(requestId, plan, breps, pmi);
   }
   /** Exact builds only, like exportMeshes: the judgement reads the document's own build (R2a-4). */
   analyzeContinuity(

@@ -273,18 +273,67 @@ export class MemoryStorage<T extends { id: string }> implements StorageAdapter<T
     this.records.delete(id);
   }
 }
+/**
+ * Large parts of a record kept as their own IndexedDB values (#812). Chromium refuses one value
+ * over about 133 MB, so a record whose assets are larger is stored as a small stub plus parts.
+ * A part's key must name its value: the same key always stands for the same value, so a part
+ * already stored under that key is not written again.
+ */
+export interface OutOfLineParts<T> {
+  /** The stub to store and the parts taken out of it, by key. */
+  split(value: T): { stub: T; parts: Map<string, unknown> };
+  /** The parts the stub names. */
+  keys(stub: T): string[];
+  /** The record again; a part that is missing is not in the map. */
+  join(stub: T, parts: Map<string, unknown>): T;
+}
+const partsStore = 'parts';
+function openDb(name: string, store: string, keyPath?: string) {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () =>
+      request.result.createObjectStore(store, keyPath ? { keyPath } : undefined);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error('Close another tab to finish the storage upgrade'));
+  });
+}
+function done(tx: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted'));
+  });
+}
+/** All the part keys of one record: [record id, part key]. */
+const partRange = (id: string) => IDBKeyRange.bound([id], [id, []]);
+
 export class IndexedDBStorage<T extends { id: string }> implements StorageAdapter<T> {
   private db: Promise<IDBDatabase>;
-  constructor(name = 'editor-platform') {
-    this.db = new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 1);
-      request.onupgradeneeded = () =>
-        request.result.createObjectStore('artifacts', { keyPath: 'id' });
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-      request.onblocked = () =>
-        reject(new Error('Close another tab to finish the storage upgrade'));
-    });
+  /** The parts live in their own database, so the records' database keeps its version 1. */
+  private partsDb?: Promise<IDBDatabase>;
+  /** Without the Web Locks API, writes in this context still run one at a time. */
+  private queue: Promise<unknown> = Promise.resolve();
+  constructor(
+    private name = 'editor-platform',
+    private outOfLine?: OutOfLineParts<T>,
+  ) {
+    this.db = openDb(name, 'artifacts', 'id');
+    if (outOfLine) this.partsDb = openDb(`${name}-parts`, partsStore);
+  }
+  /**
+   * The records and their parts are in two databases, so a write (parts, record, then the
+   * removal of parts no record names) is not one transaction. Writes hold an exclusive lock
+   * across tabs, and reads a shared one: otherwise one tab's removal could take parts that
+   * another tab has written but not yet named, or that a reader is about to read.
+   */
+  private locked<R>(mode: 'shared' | 'exclusive', run: () => Promise<R>): Promise<R> {
+    if (!this.outOfLine) return run();
+    const locks = (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
+    if (locks) return locks.request(`artifact-parts:${this.name}`, { mode }, run) as Promise<R>;
+    const next = this.queue.then(run, run);
+    this.queue = next.catch(() => undefined);
+    return next;
   }
   private async request<R>(
     mode: IDBTransactionMode,
@@ -299,57 +348,152 @@ export class IndexedDBStorage<T extends { id: string }> implements StorageAdapte
       tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted'));
     });
   }
-  list() {
-    return this.request<T[]>('readonly', (s) => s.getAll());
-  }
-  get(id: string) {
-    return this.request<T | undefined>('readonly', (s) => s.get(id));
-  }
-  async put(value: T) {
-    // IndexedDB synchronously clones the value at put(), including nested content.
-    await this.request('readwrite', (s) => s.put(value));
-  }
-  async putIfAbsent(value: T): Promise<T> {
-    const db = await this.db;
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('artifacts', 'readwrite'),
-        store = tx.objectStore('artifacts');
-      const request = store.get(value.id);
-      let result: T;
-      request.onsuccess = () => {
-        result = request.result ?? clone(value);
-        if (!request.result) store.add(result);
-      };
-      tx.oncomplete = () => resolve(clone(result));
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted'));
-    });
-  }
-  async putAll(values: T[]): Promise<void> {
-    const db = await this.db;
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('artifacts', 'readwrite'),
-        store = tx.objectStore('artifacts');
-      let failure: unknown;
-      // Aborting also fails the queued puts, whose error events carry no transaction error.
-      const fail = () => reject(failure ?? tx.error ?? new Error('Storage transaction aborted'));
-      tx.oncomplete = () => resolve();
-      tx.onerror = fail;
-      tx.onabort = fail;
-      try {
-        for (const value of values) store.put(value);
-      } catch (error) {
-        // A record that cannot be cloned or stored throws here; abort so nothing is kept.
-        failure = error;
-        tx.abort();
+  /** Reads the parts the stubs name and joins each record again. */
+  private async joined(stubs: T[]): Promise<T[]> {
+    if (!this.outOfLine || !this.partsDb) return stubs;
+    const wanted = stubs.map((stub) => this.outOfLine!.keys(stub));
+    if (!wanted.some((keys) => keys.length)) return stubs;
+    const tx = (await this.partsDb).transaction(partsStore, 'readonly');
+    const store = tx.objectStore(partsStore);
+    const found = stubs.map(() => new Map<string, unknown>());
+    stubs.forEach((stub, i) => {
+      for (const key of wanted[i]!) {
+        const req = store.get([stub.id, key]);
+        req.onsuccess = () => {
+          if (req.result !== undefined) found[i]!.set(key, req.result);
+        };
       }
     });
+    await done(tx);
+    return stubs.map((stub, i) =>
+      wanted[i]!.length ? this.outOfLine!.join(stub, found[i]!) : stub,
+    );
   }
-  async remove(id: string) {
-    await this.request('readwrite', (s) => s.delete(id));
+  /** Writes the parts of these records that are not stored yet; returns their stubs. */
+  private async writeParts(values: T[]): Promise<T[]> {
+    if (!this.outOfLine || !this.partsDb) return values;
+    const split = values.map((value) => this.outOfLine!.split(value));
+    if (!split.some((s) => s.parts.size)) return split.map((s) => s.stub);
+    const tx = (await this.partsDb).transaction(partsStore, 'readwrite');
+    const store = tx.objectStore(partsStore);
+    let failure: unknown;
+    const written = done(tx).catch((e) => Promise.reject(failure ?? e));
+    try {
+      split.forEach(({ parts }, i) => {
+        const id = values[i]!.id;
+        for (const [key, part] of parts) {
+          const req = store.getKey([id, key]);
+          req.onsuccess = () => {
+            if (req.result === undefined) store.put(part, [id, key]);
+          };
+        }
+      });
+    } catch (error) {
+      failure = error;
+      tx.abort();
+    }
+    await written;
+    return split.map((s) => s.stub);
+  }
+  /**
+   * Removes the parts of these records that their stored stubs no longer name. The two
+   * databases cannot share a transaction, so parts are written before and removed after the
+   * records (under the write lock); a failure in between leaves unused parts, which the next
+   * write removes.
+   */
+  private async dropParts(ids: string[]) {
+    if (!this.outOfLine || !this.partsDb) return;
+    const stored = await Promise.all(
+      ids.map((id) => this.request<T | undefined>('readonly', (s) => s.get(id))),
+    );
+    const tx = (await this.partsDb).transaction(partsStore, 'readwrite');
+    const store = tx.objectStore(partsStore);
+    ids.forEach((id, i) => {
+      const keep = new Set(stored[i] ? this.outOfLine!.keys(stored[i]!) : []);
+      const req = store.getAllKeys(partRange(id));
+      req.onsuccess = () => {
+        for (const key of req.result as [string, string][])
+          if (!keep.has(key[1])) store.delete(key);
+      };
+    });
+    await done(tx);
+  }
+  list() {
+    return this.locked('shared', async () =>
+      this.joined(await this.request<T[]>('readonly', (s) => s.getAll())),
+    );
+  }
+  get(id: string) {
+    return this.locked('shared', () => this.getJoined(id));
+  }
+  private async getJoined(id: string) {
+    const stub = await this.request<T | undefined>('readonly', (s) => s.get(id));
+    return stub ? (await this.joined([stub]))[0] : undefined;
+  }
+  put(value: T) {
+    return this.locked('exclusive', async () => {
+      const [stub] = await this.writeParts([value]);
+      // IndexedDB synchronously clones the value at put(), including nested content.
+      await this.request('readwrite', (s) => s.put(stub));
+      await this.dropParts([value.id]);
+    });
+  }
+  putIfAbsent(value: T): Promise<T> {
+    return this.locked('exclusive', async () => {
+      const existing = await this.getJoined(value.id);
+      if (existing) return existing;
+      const [stub] = await this.writeParts([value]);
+      const db = await this.db;
+      const stored = await new Promise<T>((resolve, reject) => {
+        const tx = db.transaction('artifacts', 'readwrite'),
+          store = tx.objectStore('artifacts');
+        const request = store.get(value.id);
+        let result: T;
+        request.onsuccess = () => {
+          result = request.result ?? clone(stub!);
+          if (!request.result) store.add(result);
+        };
+        tx.oncomplete = () => resolve(clone(result));
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted'));
+      });
+      await this.dropParts([value.id]);
+      return (await this.joined([stored]))[0]!;
+    });
+  }
+  putAll(values: T[]): Promise<void> {
+    return this.locked('exclusive', async () => {
+      const stubs = await this.writeParts(values);
+      const db = await this.db;
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction('artifacts', 'readwrite'),
+          store = tx.objectStore('artifacts');
+        let failure: unknown;
+        // Aborting also fails the queued puts, whose error events carry no transaction error.
+        const fail = () => reject(failure ?? tx.error ?? new Error('Storage transaction aborted'));
+        tx.oncomplete = () => resolve();
+        tx.onerror = fail;
+        tx.onabort = fail;
+        try {
+          for (const value of stubs) store.put(value);
+        } catch (error) {
+          // A record that cannot be cloned or stored throws here; abort so nothing is kept.
+          failure = error;
+          tx.abort();
+        }
+      });
+      await this.dropParts(values.map((v) => v.id));
+    });
+  }
+  remove(id: string) {
+    return this.locked('exclusive', async () => {
+      await this.request('readwrite', (s) => s.delete(id));
+      await this.dropParts([id]);
+    });
   }
   async close() {
     (await this.db).close();
+    if (this.partsDb) (await this.partsDb).close();
   }
 }
 export function diffElements(before: { id: string }[], after: { id: string }[]): CompareResult {

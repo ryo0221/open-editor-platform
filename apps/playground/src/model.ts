@@ -73,6 +73,12 @@ import {
 } from '@editor-platform/schematic-core';
 import { isLadderDocument, ladderStarter, type LadderDocument } from '@editor-platform/ladder-core';
 import { cosimStarter, isCosimDocument, type CosimDocument } from '@editor-platform/cosim-core';
+import { isFactoryDocument, newFactory, type FactoryDocument } from '@editor-platform/factory-core';
+import {
+  drawingStarter,
+  isDrawingDocument,
+  type DrawingDocument,
+} from '@editor-platform/drawing-core';
 import { isSimulationDocument, type SimulationDocument } from '@editor-platform/simulation-core';
 import { newSimulation, type SimulationSourceChoice } from './simulation/source';
 import {
@@ -87,6 +93,7 @@ import {
 } from '@editor-platform/character-core';
 import type { CadResource } from './cad/resources';
 import type { CadPartRecord } from './cad/parts';
+import type { DrawingSourceRecord } from './drawing/sources';
 import type { BimPartRecord } from './character/parts';
 export { isCadDocument };
 import cadKernelBuild, { kernels as cadKernelCatalog } from 'virtual:cad-kernel-build';
@@ -142,7 +149,9 @@ export type Content =
   | PcbDocument
   | SchematicDocument
   | LadderDocument
-  | CosimDocument;
+  | CosimDocument
+  | DrawingDocument
+  | FactoryDocument;
 export type Kind =
   | 'fiction-map'
   | 'estimate'
@@ -167,7 +176,22 @@ export type Kind =
   | 'pcb'
   | 'schematic'
   | 'ladder'
-  | 'cosim';
+  | 'cosim'
+  | 'drawing'
+  | 'factory';
+/** DW6b: one issue of a drawing's sheets, with its PDF as issued. */
+export interface DrawingIssueRecord {
+  versionId: string;
+  issuedAt: string;
+  sheets: { sheetId: string; name: string; mark: string }[];
+  pdf: {
+    sha256: string;
+    byteLength: number;
+    mediaType: 'application/pdf';
+    encoding: 'base64';
+    bytes: string;
+  };
+}
 export interface StoredArtifact extends Artifact<Content> {
   annotations: Annotation[];
   geoResources?: SourceClosure[];
@@ -189,6 +213,25 @@ export interface StoredArtifact extends Artifact<Content> {
    * so the record shows its building on its own, wherever the Building Artifact goes.
    */
   constructionSources?: BimPartRecord[];
+  /** FT4a: the BIM versions a factory's draft and versions stand in (content by hash). */
+  factorySources?: BimPartRecord[];
+  /** FT4c: the CAD versions that give a factory's objects their look (content by hash, nested). */
+  factoryLooks?: CadPartRecord[];
+  /**
+   * DW1: the CAD and building versions a drawing's draft and versions see (content by hash),
+   * with the part versions they place, so the drawing shows on its own wherever it goes.
+   */
+  drawingSources?: DrawingSourceRecord[];
+  /**
+   * DW3c-2: the asset bytes (STEP originals, normalized BReps, kept PMI) those CAD versions name,
+   * in the CAD resources' shape, so imported geometry is drawn from the drawing's own copy.
+   */
+  drawingAssets?: CadResource[];
+  /**
+   * DW6b: the drawing's issues (発行), oldest first: each names the saved version it made and
+   * keeps the PDF as issued. Never changed once kept.
+   */
+  drawingIssues?: DrawingIssueRecord[];
   /**
    * C8p: a character's BIM versions placed as props (content by hash); the CAD versions they
    * place are in `cadParts`.
@@ -287,6 +330,17 @@ export const kinds: Record<Kind, { label: string; icon: string; description: str
     label: 'Co-simulation',
     icon: '⇄',
     description: 'Run a saved ladder program against a saved schematic: buttons, LEDs, GPIO',
+  },
+  drawing: {
+    label: 'Drawing',
+    icon: '⌗',
+    description: 'Make construction and shop drawings from saved CAD and building versions',
+  },
+  factory: {
+    label: 'Factory',
+    icon: '⚙',
+    description:
+      'Model a production line and simulate its material flow: throughput and bottlenecks',
   },
 };
 /**
@@ -396,7 +450,11 @@ export function makeArtifact(
                                             ? ladderStarter()
                                             : kind === 'cosim'
                                               ? cosimStarter()
-                                              : createFile();
+                                              : kind === 'drawing'
+                                                ? drawingStarter()
+                                                : kind === 'factory'
+                                                  ? newFactory('Factory')
+                                                  : createFile();
   return {
     ...createArtifact<Content>(
       kind,
@@ -499,6 +557,8 @@ export function validContent(kind: string, content: unknown): content is Content
   if (kind === 'schematic') return isSchematicDocument(content);
   if (kind === 'ladder') return isLadderDocument(content);
   if (kind === 'cosim') return isCosimDocument(content);
+  if (kind === 'drawing') return isDrawingDocument(content);
+  if (kind === 'factory') return isFactoryDocument(content);
   if (kind === 'character')
     return isCharacterDocument(content) && validateCharacter(content).length === 0;
   return kind === 'document'

@@ -23,6 +23,7 @@ import {
   frontalAreaMm2,
   parseYawSweep,
 } from './run-aero';
+import { aeroFaceFilms } from './aero-film';
 
 /**
  * TS-2211 (ST-608): a wind-tunnel study run (VS4b), on a box the kernel stand-in gives as the
@@ -53,7 +54,14 @@ const env = (surface: TriangleSurface | { code: string } = block) => {
       e.requests.push(request);
       return 'code' in surface
         ? surface
-        : ({ surface: { points: surface.positions, triangles: surface.triangles } } as never);
+        : ({
+            surface: {
+              points: surface.positions,
+              triangles: surface.triangles,
+              // VS12c: a box's faces, two triangles each.
+              faces: Uint32Array.from({ length: surface.triangles.length / 3 }, (_, i) => i >> 1),
+            },
+          } as never);
     },
     mesh: () => {
       throw new Error('a wind tunnel meshes nothing');
@@ -153,6 +161,10 @@ describe('wind-tunnel study run (VS4b)', () => {
     const f = run.fields;
     if (f?.kind !== 'aero') throw new Error('no wind-tunnel fields');
     expect([f.cp[1], f.cp[0], f.htc?.[1], f.flow]).toEqual([0.9, -0.2, 60, undefined]);
+    // VS12c (TS-2294): each triangle's face and body, so the films map onto the faces.
+    expect(f.bodies).toEqual({ ids: ['plate'], triangles: Uint32Array.of(12) });
+    expect([...f.faces!]).toEqual([0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5]);
+    expect(aeroFaceFilms(f, 'plate').size).toBe(6);
     expect(run.status.status).toBe('reference');
     expect(e.progress.filter((p) => p.step === 'solve').every((p) => p.on === 'Host')).toBe(true);
     // Codex on #1182: a Host run records (its background cells as the level's count).

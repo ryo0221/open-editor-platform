@@ -11,6 +11,7 @@ import {
   resultVtu,
   runResult,
   scalarRange,
+  transientTimeLabels,
   vtuResult,
 } from './results';
 
@@ -264,6 +265,71 @@ describe('result display, section, readout and VTU (R3e-4c, R3e-4d)', () => {
     expect(Array.from(back.scalars[0]!.values)).toEqual(Array.from(temperature));
     expect(Array.from(back.scalars[1]!.values)).toEqual([0, 0, 0, 5]);
     expect(back.displacement).toBeUndefined();
+  });
+
+  it('names each kept time of a transient run once, also a last step just after one (Codex on #1264)', () => {
+    expect(transientTimeLabels([0, 594, 600, 600.001])).toEqual([
+      '0 s',
+      '594 s',
+      '600 s',
+      '600.001 s',
+    ]);
+    expect(transientTimeLabels([600, 600 + 1e-13])).toEqual(['600 s', '600 s (2)']);
+    const { mesh } = tet();
+    const T = new Float64Array([300, 300, 300, 300]);
+    const fields = {
+      kind: 'transient-thermal' as const,
+      mesh,
+      times: [0, 600, 600.001],
+      temperatures: [T, T, T],
+      history: {
+        time: new Float64Array([0, 600, 600.001]),
+        maxTemperature: new Float64Array(3).fill(300),
+        minTemperature: new Float64Array(3).fill(300),
+        stored: new Float64Array(3),
+        heatIn: new Float64Array(3),
+        probes: [],
+      },
+      fluxMagnitude: new Float64Array(4),
+    };
+    const back = vtuResult(resultVtu(fields), 'heat.vtu');
+    expect(back.scalars.map((s) => s.label).slice(0, 3)).toEqual([
+      'Temperature at 0 s',
+      'Temperature at 600 s',
+      'Temperature at 600.001 s',
+    ]);
+    // 61 kept times and the flux (62 point fields, more than 32) read back.
+    const times = Array.from({ length: 61 }, (_, i) => 10 * i);
+    const many = {
+      ...fields,
+      times,
+      temperatures: times.map(() => T),
+      history: {
+        time: Float64Array.from(times),
+        maxTemperature: new Float64Array(61).fill(300),
+        minTemperature: new Float64Array(61).fill(300),
+        stored: new Float64Array(61),
+        heatIn: new Float64Array(61),
+        probes: [],
+      },
+    };
+    const all = vtuResult(resultVtu(many), 'heat.vtu');
+    expect(all.scalars.filter((s) => s.label.startsWith('Temperature at'))).toHaveLength(61);
+  });
+
+  it('writes a fatigue result that fails at once to a VTU (Codex on #1283)', () => {
+    const f = {
+      ...tet(),
+      fatigue: {
+        damage: new Float64Array([0, 1e-3, Infinity, 2]),
+        life: new Float64Array([Infinity, 1e3, 0, 0.5]),
+      },
+    };
+    const read = readVtu(resultVtu(f));
+    const damage = read.pointData.find((d) => d.name === 'Fatigue damage per pass')!;
+    expect(Array.from(damage.values)).toEqual([0, 1e-3, 1e15, 2]);
+    const life = read.pointData.find((d) => d.name === 'Fatigue life (log10 passes)')!;
+    expect(Array.from(life.values)).toEqual([15, 3, -15, Math.log10(0.5)]);
   });
 
   it('exports every nodal field to a VTU that reads back (TS-1342, ST-185#2)', () => {

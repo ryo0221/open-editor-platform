@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   boxTetMesh,
+  bondTiePairs,
   ElasticError,
   solveBonded,
   solveBondedModal,
@@ -8,6 +9,7 @@ import {
   solveModal,
   solveShell,
   solveShellModal,
+  type Bond,
   type BondedPart,
   type FemMesh,
   type ShellMesh,
@@ -622,4 +624,50 @@ describe('modes of bonded bodies (R3j-4c, FX8d)', () => {
       ),
     ).toBe('constraint-conflict');
   }, 15_000);
+});
+
+describe('a bond as node pairs for a crash run (VS8c)', () => {
+  it('pairs each tied follower node with its nearest node on the faces the bond follows', () => {
+    // TS-2235 (ST-624, Codex on #1225): the side followed (face 0, z = 0) under the follower
+    // (z = 1) and another face of that body nearer it (face 1, z = 0.9): the pairs keep to face 0.
+    const at = (m: ShellMesh, z: number, face: number): ShellMesh => {
+      const nodes = m.nodes.slice();
+      for (let p = 0; p < nodes.length / 3; p++) nodes[3 * p + 2] = z;
+      return { ...m, nodes, faces: new Int32Array(m.faces.length).fill(face) };
+    };
+    const g = grid(4, 4, [0, 40], [0, 40], 1);
+    const [low, high] = [at(g, 0, 0), at(g, 0.9, 1)];
+    const n = low.nodes.length / 3;
+    const on: ShellMesh = {
+      nodes: Float64Array.from([...low.nodes, ...high.nodes]),
+      triangles: Uint32Array.from([...low.triangles, ...[...high.triangles].map((i) => i + n)]),
+      thickness: new Float64Array(2 * low.thickness.length).fill(1),
+      faces: Int32Array.from([...low.faces, ...high.faces]),
+      shapeFaces: 2,
+      shapeEdges: 0,
+      edges: { offsets: Uint32Array.from([0]), nodes: new Uint32Array() },
+    };
+    const parts: BondedPart[] = [
+      { kind: 'shell', mesh: at(g, 1, 0), material: steel, loads: [], constraints: [] },
+      { kind: 'shell', mesh: on, material: steel, loads: [], constraints: [] },
+    ];
+    const bond: Bond = {
+      follower: { part: 0, faces: [0], edges: [] },
+      on: { part: 1, faces: [0], edges: [] },
+      tolerance: 1.5,
+    };
+    const pairs = bondTiePairs(parts, bond);
+    expect(pairs).toHaveLength(n);
+    for (const [f, t] of pairs) {
+      expect(t).toBeLessThan(n);
+      // Matching grids: each follower node above its own node.
+      expect([0, 1].map((q) => on.nodes[3 * t + q])).toEqual([0, 1].map((q) => g.nodes[3 * f + q]));
+    }
+    expect(new Set(pairs.map(([, t]) => t)).size).toBe(n);
+    // Beyond the tolerance: refused, or left out by a contact.
+    expect(refusal(() => bondTiePairs(parts, { ...bond, tolerance: 0.5 }))).toBe('bond-gap');
+    expect(refusal(() => bondTiePairs(parts, { ...bond, tolerance: 0.5, contact: true }))).toBe(
+      'bond-gap',
+    );
+  });
 });

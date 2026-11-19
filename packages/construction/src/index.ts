@@ -19,7 +19,15 @@ export {
   sitePickPrefix,
 } from './site-view';
 export { craneSolid, beamBox, siteCraneId } from './crane-view';
-export { formatLoadChart, parseLoadChart, parsePoint3, formatTonnes, nextLiftId } from './display';
+export {
+  formatClimbs,
+  parseClimbs,
+  formatLoadChart,
+  parseLoadChart,
+  parsePoint3,
+  formatTonnes,
+  nextLiftId,
+} from './display';
 export {
   analysedLook,
   analysisLooks,
@@ -35,6 +43,7 @@ export {
 } from './analysis-view';
 export {
   clockInDay,
+  playRange,
   hazardLooks,
   hazardSolid,
   moverSolids,

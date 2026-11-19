@@ -4,7 +4,9 @@
  * patterns. `applyCadOperation` re-solves `solvedPoses` after every edit.
  */
 import {
+  cadPartBomKeys,
   solveAssemblyPoses,
+  type CadPartBomValues,
   type CadComponent,
   type CadComponentPattern,
   type CadComponentPlacement,
@@ -29,7 +31,13 @@ export type CadAssemblyOperation =
       assemblyPmi?: CadAssetRef;
     }
   | { type: 'setComponentPlacement'; componentId: string; placement: CadComponentPlacement }
-  | ({ type: 'setPartProperties' } & CadPartProperties)
+  /** The part number and description; the PD2 values stay as they are. */
+  | ({ type: 'setPartProperties' } & Pick<CadPartProperties, 'partNumber' | 'description'>)
+  /**
+   * PD2: the material, sourcing class, unit cost, currency and supplier note, replaced together
+   * (an absent one is cleared). The part number and description stay as they are.
+   */
+  | ({ type: 'setPartBomProperties' } & CadPartBomValues)
   /** R2b-3: whether a component (and what it places) is counted in the BOM. */
   | { type: 'setComponentBom'; componentId: string; bom: CadComponent['bom'] }
   /** R2b-3: copies of a direct component in a row or a circle. */
@@ -108,8 +116,21 @@ export function applyAssemblyOperation(next: CadDocument, op: CadAssemblyOperati
       return next;
     }
     case 'setPartProperties':
-      next.partProperties = { partNumber: op.partNumber, description: op.description };
+      next.partProperties = {
+        ...next.partProperties,
+        partNumber: op.partNumber,
+        description: op.description,
+      };
       return next;
+    case 'setPartBomProperties': {
+      const { partNumber, description } = next.partProperties;
+      const values: CadPartBomValues = {};
+      for (const k of cadPartBomKeys)
+        if (op[k] !== undefined) Object.assign(values, { [k]: op[k] });
+      if (values.material) values.material = { ...values.material };
+      next.partProperties = { partNumber, description, ...values };
+      return next;
+    }
     case 'insertComponentPattern':
       if (!next.components.some((c) => c.id === op.pattern.seedComponentId)) fail('target-missing');
       next.componentPatterns.push(op.pattern);

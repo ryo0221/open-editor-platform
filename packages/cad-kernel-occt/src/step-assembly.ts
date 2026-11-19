@@ -3,8 +3,20 @@
  * One product per plan product (its shape written once, from the version's normalized BRep),
  * one `NEXT_ASSEMBLY_USAGE_OCCURRENCE` per instance with its placement, names and body colours.
  */
-import { cadLimits, type CadStepPlan } from '@editor-platform/cad-core';
+import {
+  cadLimits,
+  cadPmiTrackedIndex,
+  rotateVector,
+  type CadPmiAsset,
+  type CadPmiItem,
+  type CadPmiItemState,
+  type CadPmiPlacement,
+  type CadPmiTarget,
+  type CadStepPlan,
+} from '@editor-platform/cad-core';
 import { CadKernelError, type OcModule } from './evaluator';
+import type { CadAssemblyStepPmi, CadAssemblyStepPmiWritten, CadBrepPmi } from './protocol';
+import { noPmiWritten, pmiWriteSpec } from './step-pmi-write';
 
 /** `write.step.schema` 5 selects AP242 (DIS); the writer's default (AP214) is restored after. */
 const ap242 = 5;
@@ -18,11 +30,32 @@ export function writeAssemblyStep(
   plan: CadStepPlan,
   breps: ReadonlyMap<string, Uint8Array>,
 ): Uint8Array {
+  return writeAssemblyStepPmi(oc, plan, breps).step;
+}
+
+/** `writeAssemblyStep` with PMI-5c's PMI, and what of it is written. */
+export function writeAssemblyStepPmi(
+  oc: OcModule,
+  plan: CadStepPlan,
+  breps: ReadonlyMap<string, Uint8Array>,
+  /** PMI-5c: the products' and the assembly's PMI to write (`assemblyPmiLines`). */
+  pmi?: CadAssemblyStepPmi,
+): { step: Uint8Array; pmi?: CadAssemblyStepPmiWritten } {
   if (
     typeof oc.STEPCAFControl_Writer_1 !== 'function' ||
     typeof oc.OCJS?.setStaticInteger !== 'function'
   )
     throw new CadKernelError('step-unsupported-build');
+  const written = pmi
+    ? assemblyPmiLines(plan, pmi, {
+        face: oc.TopAbs_ShapeEnum.TopAbs_FACE.value,
+        edge: oc.TopAbs_ShapeEnum.TopAbs_EDGE.value,
+        vertex: oc.TopAbs_ShapeEnum.TopAbs_VERTEX.value,
+      })
+    : undefined;
+  const pmiOf = written?.lines ?? new Map<string, string[][]>();
+  if (pmiOf.size && typeof oc.OCJS?.addPmi !== 'function')
+    throw new CadKernelError('step-pmi-unsupported-build');
   const owned: { delete(): void }[] = [];
   const own = <T extends { delete(): void }>(x: T) => (owned.push(x), x);
   const text = (s: string) => own(new oc.TCollection_ExtendedString_2(s, false));
@@ -115,6 +148,13 @@ export function writeAssemblyStep(
           name(component, token('I', instanceNames.push(instance.name) - 1));
         }
       }
+      // PMI-5c: the product's PMI on its own shape's sub-shapes (one product, one shape).
+      // One call per spec: a spec's datum ordinals count its own datums only.
+      for (const lines of (product.shape && pmiOf.get(product.key)) || []) {
+        const spec = own(new oc.TCollection_AsciiString_2(lines.join('\n')));
+        if (oc.OCJS.addPmi(doc, label, spec) !== lines.length)
+          throw new CadKernelError('step-write-failed', product.key);
+      }
       // A placeholder the file's products are renamed from: XDE writes a label's name as both the
       // product's id and name, and two products may share a name.
       name(label, token('P', labels.size));
@@ -126,18 +166,212 @@ export function writeAssemblyStep(
     const writer = own(new oc.STEPCAFControl_Writer_1());
     writer.SetNameMode(true);
     writer.SetColorMode(true);
+    if (pmiOf.size) writer.SetDimTolMode(true);
     if (!writer.Transfer_1(doc, oc.STEPControl_StepModelType.STEPControl_AsIs, null, progress()))
       throw new CadKernelError('step-write-failed');
     if (writer.Write(path) !== oc.IFSelect_ReturnStatus.IFSelect_RetDone)
       throw new CadKernelError('step-write-failed');
     const bytes = named(oc.FS.readFile(path) as Uint8Array, plan, instanceNames);
     if (bytes.byteLength > cadLimits.stepBytes) throw new CadKernelError('step-export-too-large');
-    return bytes;
+    return { step: bytes, ...(written ? { pmi: written.report } : {}) };
   } finally {
     oc.OCJS.setStaticInteger('write.step.schema', schema);
     if (oc.FS.analyzePath(path).exists) oc.FS.unlink(path);
     for (const x of owned.reverse()) x.delete();
   }
+}
+
+/** How many times each product is placed in the whole file (the root once). */
+function placements(plan: CadStepPlan): Map<string, number> {
+  const times = new Map<string, number>([[plan.root, 1]]);
+  // Instances name products earlier in the list: from the root down.
+  for (let i = plan.products.length - 1; i >= 0; i--) {
+    const p = plan.products[i]!;
+    const n = times.get(p.key) ?? 0;
+    for (const instance of p.instances)
+      times.set(instance.product, (times.get(instance.product) ?? 0) + n);
+  }
+  return times;
+}
+
+/** The placement that takes a point from the assembly's frame into a component's part. */
+function inverse(pose: { translationMm: readonly number[]; rotation: readonly number[] }) {
+  const [x, y, z, w] = pose.rotation as [number, number, number, number];
+  const rotation: [number, number, number, number] = [-x, -y, -z, w];
+  const t = rotateVector(rotation, pose.translationMm as [number, number, number]);
+  return { rotation, translation: [-t[0], -t[1], -t[2]] } as CadPmiPlacement;
+}
+
+/**
+ * PMI-5c (docs/cad/pmi.md, 書き出し): the `OCJS.addPmi` specs of each shaped product, and what is
+ * and is not written. A product's bodies write their own current PMI on their sub-shapes in the
+ * product's compound. The assembly's own items are written on a product only when all their
+ * targets (and the datums a tolerance references) are on one component, its product is placed
+ * once in the whole file (so the item means that instance alone, as in the assembly), and the
+ * component's version tracks the sub-shapes it was imported with; their lines are taken from the
+ * assembly's frame into the part's by the component's pose at the import. Datum names are merged
+ * across the file by OCCT's writer, so a name written once is not written again (`pmiWriteSpec`).
+ */
+export function assemblyPmiLines(
+  plan: CadStepPlan,
+  pmi: CadAssemblyStepPmi,
+  kinds: { face: number; edge: number; vertex: number },
+): { lines: Map<string, string[][]>; report: CadAssemblyStepPmiWritten } {
+  const report: CadAssemblyStepPmiWritten = {
+    ...noPmiWritten(),
+    assembly: { written: 0, shared: 0, across: 0, stale: 0, unwritable: 0 },
+    presentationOneFrame: 0,
+  };
+  const lines = new Map<string, string[][]>();
+  const datumNames = new Set<string>();
+  const add = (key: string, more: string[]) => {
+    // Each spec numbers its datums from 0, so specs are never joined (`OCJS.addPmi` per spec).
+    if (more.length) lines.set(key, [...(lines.get(key) ?? []), more]);
+  };
+  // What no file can write: counted once per version, however often it is placed.
+  const counted = new Set<string>();
+  const shaped = plan.products.filter((p) => p.shape);
+  for (const product of shaped) {
+    const hash = product.shape!.contentHash;
+    const brep: CadBrepPmi | undefined = pmi.products[hash];
+    if (!brep) continue;
+    if (!counted.has(hash)) {
+      counted.add(hash);
+      const r = brep.report;
+      report.stale += r.stale;
+      report.views += r.views;
+      report.unsupportedBuild += r.unsupportedBuild;
+    }
+    for (const body of brep.bodies) {
+      if (!body.pmi) continue;
+      const tracking = body.tracking.find((t) => t.featureId === body.pmi!.featureId);
+      add(
+        product.key,
+        pmiWriteSpec(
+          body.pmi.asset,
+          new Map(body.pmi.states),
+          kinds,
+          (t) => (tracking ? cadPmiTrackedIndex(tracking, t) : undefined),
+          body.pmi.placements,
+          report,
+          datumNames,
+        ),
+      );
+    }
+  }
+  const own = pmi.assembly;
+  if (own) {
+    // The assembly's saved views are not written, like a part's.
+    report.views += own.asset.views?.length ?? 0;
+    const times = placements(plan);
+    const states = new Map(own.states);
+    const componentsOf = (i: CadPmiItem) =>
+      new Set(
+        [...i.targets, ...(i.kind === 'dimension' ? (i.targets2 ?? []) : [])].map(
+          (t) => t.component,
+        ),
+      );
+    const byId = new Map(own.asset.items.map((i) => [i.id, i]));
+    // Each item's one component, with the datums it references; undefined: not one.
+    const oneComponent = (i: CadPmiItem): string | undefined => {
+      const all = componentsOf(i);
+      if (i.kind === 'geometric-tolerance')
+        for (const r of i.references)
+          for (const d of r.datums) {
+            const datum = byId.get(d);
+            if (!datum) return undefined;
+            for (const c of componentsOf(datum)) all.add(c);
+          }
+      return all.size === 1 ? [...all][0] : undefined;
+    };
+    const groups = new Map<string, CadPmiItem[]>();
+    for (const item of own.asset.items) {
+      if (states.get(item.id)?.current !== true) {
+        report.assembly.stale++;
+        continue;
+      }
+      const component = oneComponent(item);
+      const hash = component === undefined ? undefined : own.components[component];
+      if (component === undefined || hash === undefined) {
+        report.assembly.across++;
+        continue;
+      }
+      if (times.get(hash) !== 1) {
+        report.assembly.shared++;
+        continue;
+      }
+      groups.set(component, [...(groups.get(component) ?? []), item]);
+    }
+    for (const [component, items] of groups) {
+      const hash = own.components[component]!;
+      const product = plan.products.find((p) => p.key === hash);
+      // A component that is an assembly has no shape of its own to write them on.
+      if (!product?.shape) {
+        report.assembly.unwritable += items.length;
+        continue;
+      }
+      const brep = pmi.products[hash];
+      // The version's one tracked import: the sub-shapes the asset's indices are of.
+      const tracked = brep?.bodies.flatMap((b) => b.tracking.map((t) => ({ t, body: b }))) ?? [];
+      const one = tracked.length === 1 ? tracked[0] : undefined;
+      const tracking = one?.t;
+      const read = own.asset.parts[component];
+      const strip = (ts: readonly CadPmiTarget[]) => ts.map(({ component: _, ...t }) => t);
+      const asset: CadPmiAsset = {
+        version: 1,
+        items: items.map((i) => ({
+          ...i,
+          targets: strip(i.targets),
+          ...(i.kind === 'dimension' && i.targets2 ? { targets2: strip(i.targets2) } : {}),
+        })) as CadPmiItem[],
+      };
+      const before = { ...report.written };
+      const unwritable = report.unwritable;
+      const itemStates = new Map<string, CadPmiItemState>(
+        items.map((i) => [i.id, { current: true }]),
+      );
+      add(
+        product.key,
+        pmiWriteSpec(
+          asset,
+          itemStates,
+          kinds,
+          (t) => (tracking ? cadPmiTrackedIndex(tracking, t) : undefined),
+          // The lines are in the assembly's frame; the part's shape is where the pose places it from.
+          read ? [inverse(read.pose)] : undefined,
+          report,
+          datumNames,
+        ),
+      );
+      // Moved from the bodies' counts to the assembly's.
+      const n = (Object.keys(before) as (keyof typeof before)[]).reduce(
+        (k, kind) => k + report.written[kind] - before[kind],
+        0,
+      );
+      report.written = before;
+      report.assembly.written += n;
+      report.assembly.unwritable += report.unwritable - unwritable;
+      report.unwritable = unwritable;
+    }
+  }
+  // OCCT 7.6's writer puts every presentation line of the file in one draughting model, in the
+  // frame of one product (the last item's it writes, found on the JAMA files, PMI-5d): another
+  // product's lines would be read in that product's frame. So lines are written only when one
+  // product carries all of the file's PMI.
+  const carrying = [...lines].filter(([, specs]) => specs.some((spec) => spec.length));
+  const only = carrying.length === 1 ? carrying[0]![0] : undefined;
+  for (const [key, specs] of lines) {
+    if (key === only) continue;
+    for (const spec of specs)
+      spec.forEach((line, i) => {
+        const at = line.indexOf(' prs ');
+        if (at < 0) return;
+        spec[i] = line.slice(0, at);
+        report.presented--;
+        report.presentationOneFrame++;
+      });
+  }
+  return { lines, report };
 }
 
 function readBrep(
@@ -189,20 +423,22 @@ export function p21String(value: string): string {
   return `'${out}'`;
 }
 /**
- * The file with each placeholder replaced: a product's id and name, an instance's name. The
- * file holds no other names, and one pass never reads the text it puts in.
+ * The file with each placeholder replaced: a product's id and name, an instance's name. Only
+ * those fields are read (PMI-5c: a datum's name is the file's too, and may look like one), and
+ * one pass never reads the text it puts in.
  */
 function named(bytes: Uint8Array, plan: CadStepPlan, instances: readonly string[]): Uint8Array {
   // OCCT writes the file in ASCII.
   const text = new TextDecoder('latin1').decode(bytes);
   const renamed = text.replace(
-    /PRODUCT\('R2B5P(\d+)','R2B5P\1'|'R2B5([PI])(\d+)'/g,
-    (_, both: string | undefined, kind: string | undefined, i: string | undefined) => {
-      if (both !== undefined) {
-        const product = plan.products[Number(both)]!;
-        return `PRODUCT(${p21String(product.id)},${p21String(product.name)}`;
+    /PRODUCT\('R2B5P(\d+)','R2B5P\1'|(NEXT_ASSEMBLY_USAGE_OCCURRENCE\('(?:[^']|'')*',)'R2B5I(\d+)'/g,
+    (match, product: string | undefined, usage: string | undefined, i: string | undefined) => {
+      if (product !== undefined) {
+        const p = plan.products[Number(product)];
+        return p ? `PRODUCT(${p21String(p.id)},${p21String(p.name)}` : match;
       }
-      return p21String(kind === 'P' ? plan.products[Number(i)]!.name : instances[Number(i)]!);
+      const name = instances[Number(i)];
+      return name === undefined ? match : `${usage}${p21String(name)}`;
     },
   );
   return new TextEncoder().encode(renamed);

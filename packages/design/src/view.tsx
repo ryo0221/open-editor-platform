@@ -10,6 +10,7 @@ import { MangaBoundaryOverlay } from './manga-boundaries';
 import { useDesignWorkspace, type DesignWorkspaceProps } from './workspace';
 export type { DesignWorkspace, DesignWorkspaceTransition } from './workspace';
 import { DesignPagePanel } from './page-panel';
+import { designPageToFit } from './page-fit';
 import { designExportPaintBounds } from './paint-bounds';
 import { designPathPoint } from './path';
 import { useDesignPathEditor } from './path-editor';
@@ -132,7 +133,11 @@ export interface DesignSurfaceExtension {
   inspector?(context: DesignExtensionContext): ReactNode;
   toolbar?(context: DesignExtensionContext): ReactNode;
   render?(element: DesignElement, bounds: Bounds): ReactNode;
-  beforeGraphicExport?(ids: string[]): void;
+  /**
+   * Refuse a graphic export by throwing. `subtree`: the IDs are roots whose descendants are drawn.
+   * `exact`: exactly these elements are drawn (frame areas), so descendants not listed are not.
+   */
+  beforeGraphicExport?(ids: string[], scope: 'subtree' | 'exact'): void;
   /** An opaque Host element paints its slot subtree once; the native tree stays editable. */
   canvasOwner?(element: DesignElement): string | undefined;
 }
@@ -481,6 +486,14 @@ function DesignSurfaceEditor({
       },
     });
   }
+  /** The page to fit: the one holding the selection, else the page nearest the viewport centre. */
+  function currentPage(): string | undefined {
+    const rect = viewport.current?.getBoundingClientRect();
+    return designPageToFit(content, ids, {
+      x: rect ? (rect.width / 2 - view.pan.x) / view.zoom : 0,
+      y: rect ? (rect.height / 2 - view.pan.y) / view.zoom : 0,
+    });
+  }
   async function output(format: 'svg' | 'png', scope: string) {
     try {
       guardExport?.();
@@ -740,6 +753,17 @@ function DesignSurfaceEditor({
               disabled={!ids.length}
               onClick={() => fit(ids)}
             />
+            {!!content.pagination?.pages.length && (
+              // A manga spread fits all pages at a few percent; read one page at a time.
+              <IconButton
+                icon={Scan}
+                label="Fit page"
+                onClick={() => {
+                  const page = currentPage();
+                  if (page) fit([page]);
+                }}
+              />
+            )}
             <span className="ep-spacer" />
             <CanvasControls
               view={view}

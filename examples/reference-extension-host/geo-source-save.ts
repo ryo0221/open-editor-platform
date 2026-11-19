@@ -799,6 +799,6 @@ addEventListener(
   },
   { once: true },
 );
-addEventListener('pageshow', (event) => {
+window.addEventListener('pageshow', (event) => {
   if (event.persisted) location.reload();
 });

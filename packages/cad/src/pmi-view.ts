@@ -73,8 +73,11 @@ export class PmiLineCache {
     viewId?: string,
     /** PMI-4a: after a change of the shape, only the current items are drawn. */
     states?: ReadonlyMap<string, CadPmiItemState>,
+    /** PMI-5b-2: only these items, when given (an assembly's items at their import pose). */
+    only?: readonly string[],
   ): { segments: Float32Array; color: string }[] {
     const key = JSON.stringify([
+      only ?? null,
       this.idOf(asset),
       states ? this.idOf(states) : null,
       placements,
@@ -111,11 +114,13 @@ export class PmiLineCache {
       }
       return out;
     };
+    const allowed = only && new Set(only);
     const shown = asset.items.filter(
       (i) =>
         i.presentation &&
         (viewId === undefined || i.views?.includes(viewId)) &&
-        (!states || states.get(i.id)?.current === true),
+        (!states || states.get(i.id)?.current === true) &&
+        (!allowed || allowed.has(i.id)),
     );
     const focused = shown.filter((i) => i.id === focusId);
     const rest = shown.filter((i) => i.id !== focusId);

@@ -1,0 +1,23 @@
+{
+  "name": "@editor-platform/drawing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css",
+    "./project-worker": "./src/project-worker.ts"
+  },
+  "dependencies": {
+    "@editor-platform/drawing-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@pdf-lib/fontkit": "1.1.1",
+    "lucide-react": "1.51.0",
+    "pdf-lib": "1.17.1",
+    "react": "19.1.1"
+  },
+  "devDependencies": {
+    "react-dom": "19.1.1"
+  }
+}

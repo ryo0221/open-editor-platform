@@ -194,6 +194,24 @@ export function instancesGroup(
   }
   return group;
 }
+/**
+ * #1335: each mesh's outline (the edges past 25°), found once: a view drawn again with the same
+ * meshes (the next day of a schedule, a recording's next frame) reuses them. Finding them was
+ * most of the time a day's change took on a large building.
+ */
+const outlines = new WeakMap<ViewMesh, Float32Array>();
+function outlineOf(mesh: ViewMesh, geometry: BufferGeometry): BufferGeometry {
+  let positions = outlines.get(mesh);
+  if (!positions) {
+    const found = new EdgesGeometry(geometry, 25);
+    positions = found.getAttribute('position').array as Float32Array;
+    found.dispose();
+    outlines.set(mesh, positions);
+  }
+  const edges = new BufferGeometry();
+  edges.setAttribute('position', new BufferAttribute(positions, 3));
+  return edges;
+}
 /** One solid's meshes at its instances; `pickable` keeps the mesh for picks on it, and outlines. */
 function meshesAt(group: Group, part: ViewSolid, meshes: ViewSolidMesh[], pickable: boolean) {
   for (const solidMesh of meshes) {
@@ -235,7 +253,7 @@ function meshesAt(group: Group, part: ViewSolid, meshes: ViewSolidMesh[], pickab
           source,
         ),
       );
-    if (pickable) group.add(...edgesAt(new EdgesGeometry(geometry, 25), part, offset, opacity));
+    if (pickable) group.add(...edgesAt(outlineOf(mesh, geometry), part, offset, opacity));
   }
 }
 /**

@@ -7,8 +7,11 @@
  */
 import { useMemo, useState } from 'react';
 import type { SimulationStudy } from '@editor-platform/simulation-core';
+import { crashJobLimits } from '@editor-platform/geometry-fem';
 import type { RunProgress, StudyRun } from './run';
 import type { StiffnessTestResult } from './stiffness-test';
+import { sealSummary } from './run-seal';
+import { showerSummary } from './run-shower';
 import { aeroSection, aeroStreamlines } from './aero-view';
 import {
   autoDeformationScale,
@@ -19,6 +22,8 @@ import {
   scalarRange,
   type ResultSection,
   type ResultSource,
+  type ResultTimeline,
+  transientTime,
 } from './results';
 
 /** How the Host runs a study (its own Worker); `unavailable` says why it cannot here. */
@@ -37,6 +42,8 @@ export interface SimulationRunner {
     builds?: StudyRun['builds'];
     /** VS4b: the Host also runs wind tunnels, with this solver build. */
     aero?: { solverBuild: string };
+    /** VS8a: the Host also runs crash studies, with this solver build. */
+    crash?: { solverBuild: string };
   };
   run(
     studyId: string,
@@ -69,6 +76,13 @@ const statusLabels = {
 } as const;
 const axes = ['X', 'Y', 'Z'] as const;
 
+/** VS9b: a seal's runs out of range as their total length per status (over 120 mm, gap 40 mm). */
+const outOfRange = (runs: readonly { status: string; lengthMm: number }[]) => {
+  const by = new Map<string, number>();
+  for (const r of runs) by.set(r.status, (by.get(r.status) ?? 0) + r.lengthMm);
+  return [...by].map(([s, l]) => `${s} ${fmt(l)} mm`).join(', ');
+};
+
 export const fmt = (v: number | undefined) =>
   v === undefined || !Number.isFinite(v)
     ? '–'
@@ -94,9 +108,11 @@ export function useResultDisplay(source: ResultSource | undefined) {
   const scale = scaleText === 'auto' || !Number.isFinite(parsed) || parsed < 0 ? auto : parsed;
   const autoRange = useMemo(
     () =>
-      source && scalar
-        ? scalarRange(source, scalar.values, !!section)
-        : ([0, 0] as [number, number]),
+      source?.crash
+        ? source.crash.range
+        : source && scalar
+          ? (scalar.range ?? scalarRange(source, scalar.values, !!section))
+          : ([0, 0] as [number, number]),
     [source, scalar, !!section],
   );
   // CR5d (86T1): the colour range the user gives a field (a load point's peak otherwise sets it);
@@ -215,6 +231,14 @@ export function RunPanel({
   const thermalRun = run?.levels.some((l) => l.metrics['max-temperature'] !== undefined) ?? false;
   // VS4b: a wind tunnel's levels by their cell, fluid cells and coefficients.
   const aeroRun = study?.kind === 'aero' && run?.studyId === study.id;
+  // VS7c-2: a crash run's level by its peak deceleration, OLC and crush.
+  const crashRun =
+    run?.levels.some((l) => l.metrics['occupant-load-criterion'] !== undefined) ?? false;
+  // VS8b: a head impact's by its HIC15, peak acceleration and deflection.
+  const headRun = run?.levels.some((l) => l.metrics.hic15 !== undefined) ?? false;
+  // VS9b: a seal run's level by its point spacing, points and compression range.
+  const sealRun = run?.fields?.kind === 'seal' || run?.fields?.kind === 'shower';
+  const showerRun = run?.fields?.kind === 'shower';
   return (
     <fieldset className="simulation-group" aria-label="Run">
       <legend>Run</legend>
@@ -249,7 +273,16 @@ export function RunPanel({
       </div>
       {host && startOnHost && state.status !== 'running' && (
         <p className="simulation-note" aria-label="What a Host run sends">
-          {study?.kind === 'aero' ? (
+          {study?.kind === 'crash' ? (
+            <>
+              “Run on {host.label}” meshes here, then sends {host.destination} the explicit model as
+              numbers (the shells’ nodes, thickness and materials with their plasticity, the weld
+              points, the added masses, the barrier and the initial velocity) and the run’s
+              settings, nothing else: no CAD document, names or sign-in. The same explicit solver
+              runs there in Node; it takes up to {crashJobLimits.shells.toLocaleString('en')}{' '}
+              shells.
+            </>
+          ) : study?.kind === 'aero' ? (
             <>
               “Run on {host.label}” sends {host.destination} the bodies’ closed surface (triangles,
               mm), the wind speed and yaw, the ground, the mesh sizes, the iterations and the
@@ -262,7 +295,9 @@ export function RunPanel({
               coordinates and elements),{' '}
               {study?.kind === 'modal'
                 ? 'E, ν and the density, the held nodes and the number of modes'
-                : 'E and ν, the held nodes and the nodal forces'}
+                : study?.kind === 'transient-thermal'
+                  ? `the conductivity, density and specific heat, the start temperatures, the time and step, the held nodes and temperatures, the element faces' fluxes, films and radiation with their amplitudes${study.transient.stress ? ', and for the thermal stress E, ν, the expansion, the held nodes and the last temperatures' : ''}`
+                  : 'E and ν, the held nodes and the nodal forces'}
               , nothing else: no CAD document, names or sign-in. It takes up to{' '}
               {host.limits.nodes.toLocaleString('en')} nodes and{' '}
               {host.limits.elements.toLocaleString('en')} elements.
@@ -270,6 +305,10 @@ export function RunPanel({
           )}
           {study?.kind !== 'thermal' &&
             study?.kind !== 'aero' &&
+            study?.kind !== 'crash' &&
+            study?.kind !== 'transient-thermal' &&
+            study?.kind !== 'seal' &&
+            study?.kind !== 'shower' &&
             study?.idealisation === 'shell' &&
             ' A shell goes as 15-node wedges over its wall, about nine nodes for each shell node.'}
         </p>
@@ -277,7 +316,7 @@ export function RunPanel({
       <p className="simulation-note" role="status" aria-live="polite">
         {state.status === 'running'
           ? state.progress
-            ? `Level ${state.progress.level + 1} of ${state.progress.levels}: ${stepLabels[state.progress.step]}${state.progress.on ? ` on ${state.progress.on}` : ''}${state.progress.flow ? ` step ${state.progress.flow.step.toLocaleString('en')} of ${state.progress.flow.steps.toLocaleString('en')}, Cd ${fmt(state.progress.flow.cd)}` : ''}…`
+            ? `Level ${state.progress.level + 1} of ${state.progress.levels}: ${stepLabels[state.progress.step]}${state.progress.on ? ` on ${state.progress.on}` : ''}${state.progress.crash ? ` ${fmt(state.progress.crash.time * 1000)} of ${fmt(state.progress.crash.endTime * 1000)} ms` : ''}${state.progress.flow ? ` step ${state.progress.flow.step.toLocaleString('en')} of ${state.progress.flow.steps.toLocaleString('en')}, Cd ${fmt(state.progress.flow.cd)}` : ''}…`
             : 'Starting the solver…'
           : state.status === 'error'
             ? `The run stopped: ${state.message}`
@@ -305,13 +344,37 @@ export function RunPanel({
           <thead>
             <tr>
               <th>Level</th>
-              <th>{aeroRun ? 'Cell mm' : 'Size mm'}</th>
-              <th>{aeroRun ? 'Cells' : 'Nodes'}</th>
-              {aeroRun ? (
+              <th>{aeroRun ? 'Cell mm' : sealRun ? 'Spacing mm' : 'Size mm'}</th>
+              <th>{aeroRun ? 'Cells' : sealRun ? 'Points' : 'Nodes'}</th>
+              {sealRun ? (
+                <>
+                  <th>Least compression %</th>
+                  <th>Most compression %</th>
+                  <th>Leaks mm</th>
+                  {showerRun && (
+                    <>
+                      <th>Went in mm³</th>
+                      <th>Ponding mm³</th>
+                    </>
+                  )}
+                </>
+              ) : aeroRun ? (
                 <>
                   <th>Cd</th>
                   <th>Cl</th>
                   <th>Cs</th>
+                </>
+              ) : headRun ? (
+                <>
+                  <th>HIC15</th>
+                  <th>Peak g</th>
+                  <th>Deflection mm</th>
+                </>
+              ) : crashRun ? (
+                <>
+                  <th>Peak g</th>
+                  <th>OLC g</th>
+                  <th>Crush mm</th>
                 </>
               ) : modalRun ? (
                 <th>First frequency Hz</th>
@@ -334,11 +397,35 @@ export function RunPanel({
                 <td>{i + 1}</td>
                 <td>{fmt(l.settings.size)}</td>
                 <td>{l.nodes.toLocaleString('en')}</td>
-                {aeroRun ? (
+                {sealRun ? (
+                  <>
+                    <td>{fmt(100 * (l.metrics['min-compression'] ?? 0))}</td>
+                    <td>{fmt(100 * (l.metrics['max-compression'] ?? 0))}</td>
+                    <td>{fmt(l.metrics['leak-length'])}</td>
+                    {showerRun && (
+                      <>
+                        <td>{fmt(l.metrics['entered-volume'])}</td>
+                        <td>{fmt(l.metrics['pond-volume'])}</td>
+                      </>
+                    )}
+                  </>
+                ) : aeroRun ? (
                   <>
                     <td>{fmt(l.metrics['drag-coefficient'])}</td>
                     <td>{fmt(l.metrics['lift-coefficient'])}</td>
                     <td>{fmt(l.metrics['side-force-coefficient'])}</td>
+                  </>
+                ) : headRun ? (
+                  <>
+                    <td>{fmt(l.metrics.hic15)}</td>
+                    <td>{fmt(l.metrics['head-peak-acceleration'])}</td>
+                    <td>{fmt(l.metrics['head-deflection'])}</td>
+                  </>
+                ) : crashRun ? (
+                  <>
+                    <td>{fmt(l.metrics['peak-deceleration'])}</td>
+                    <td>{fmt(l.metrics['occupant-load-criterion'])}</td>
+                    <td>{fmt(l.metrics.crush)}</td>
                   </>
                 ) : modalRun ? (
                   <td>{fmt(l.metrics['first-frequency'])}</td>
@@ -367,12 +454,67 @@ export function RunPanel({
               : `No stiffness: ${test.reason}.`}
         </p>
       )}
+      {run?.fields && run.fields.kind === undefined && run.fields.fatigue && (
+        <FatigueSummary fatigue={run.fields.fatigue} />
+      )}
       {(run?.fields?.kind === 'shell-static' || run?.fields?.kind === 'shell-modal') && (
         <p className="simulation-note" aria-label="Shell midsurface">
           Solved as a shell on the midsurface: {fmt(run.fields.mesh.thickness[0] ?? 0)} mm thick,{' '}
           {(run.fields.mesh.triangles.length / 3).toLocaleString('en')} triangles. Stresses are on
           the top (the side the midsurface normal points to), the middle and the bottom.
         </p>
+      )}
+      {run?.fields?.kind === 'shower' && (
+        <p className="simulation-note" aria-label="Water">
+          {showerSummary(run.fields)}.{' '}
+          {run.fields.entries.length
+            ? `In through ${[...new Set(run.fields.entries.map((e) => e.sealId))]
+                .map((id) => {
+                  const r = (
+                    run.fields as { seals: { sealId: string; name: string }[] }
+                  ).seals.find((x) => x.sealId === id);
+                  return r?.name ?? id;
+                })
+                .join(', ')}.`
+            : 'Nothing went in.'}
+        </p>
+      )}
+      {(run?.fields?.kind === 'seal' || run?.fields?.kind === 'shower') && (
+        <table className="simulation-levels" aria-label="Seals">
+          <thead>
+            <tr>
+              <th>Seal</th>
+              <th>Length mm</th>
+              <th>Pressed %</th>
+              <th>Leaks mm</th>
+              <th>Out of range</th>
+            </tr>
+          </thead>
+          <tbody>
+            {run.fields.seals.map((r) => {
+              const m = r.measurement;
+              return (
+                <tr key={r.sealId} title={sealSummary(r)}>
+                  <td>
+                    {r.name}
+                    {r.angleDeg ? ` (opened ${r.angleDeg}°)` : ''}
+                  </td>
+                  <td>{fmt(m.lengthMm)}</td>
+                  <td>
+                    {m.compression
+                      ? `${fmt(100 * m.compression[0])}–${fmt(100 * m.compression[1])}`
+                      : 'no contact'}
+                  </td>
+                  <td>{fmt(m.leakLengthMm)}</td>
+                  <td>
+                    {m.runs.length ? outOfRange(m.runs) : 'none'}
+                    {m.bends.length ? `; ${m.bends.length} tight bends` : ''}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
       {(run?.fields?.kind === 'modal' || run?.fields?.kind === 'shell-modal') && (
         <table className="simulation-levels" aria-label="Natural frequencies">
@@ -489,6 +631,13 @@ export function ResultPanel({
               ))}
             </select>
           </label>
+          {source.transient && (
+            <TransientTimeline
+              timeline={source.transient}
+              field={display.field}
+              setField={display.setField}
+            />
+          )}
           {/* VS4c: nothing moves a wind tunnel's bodies. */}
           {!source.aero && (
             <label className="simulation-field">
@@ -613,7 +762,7 @@ export function ResultPanel({
               </p>
             </>
           )}
-          {scalar && (
+          {scalar && !scalar.classes && (
             <>
               <label className="simulation-field">
                 <span>
@@ -642,7 +791,22 @@ export function ResultPanel({
               </p>
             </>
           )}
-          {scalar && (
+          {scalar?.classes && (
+            <ul className="simulation-legend-classes" aria-label={`${scalar.label} legend`}>
+              {scalar.classes.map((c, k) => (
+                <li key={k}>
+                  <span
+                    className="simulation-swatch"
+                    style={{
+                      background: `rgb(${c.color.map((v) => Math.round(v * 255)).join(' ')})`,
+                    }}
+                  />
+                  {k} {c.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {scalar && !scalar.classes && (
             <div className="simulation-legend-bar" aria-label={`${scalar.label} legend`}>
               <span className="simulation-gradient" style={{ background: resultGradient }} />
               <span className="simulation-range">
@@ -707,4 +871,96 @@ export function downloadVtu(run: StudyRun, bodyId?: string) {
   a.download = bodyId ? `${run.studyId}-${bodyId}.vtu` : `${run.studyId}.vtu`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * VS11d-2: a transient run's time: a slider over the kept fields (shown with one colour range) and
+ * the highest and lowest temperature of every step, the shown time marked.
+ */
+export function TransientTimeline({
+  timeline,
+  field,
+  setField,
+}: {
+  timeline: ResultTimeline;
+  field: string;
+  setField(id: string): void;
+}) {
+  const at = timeline.fields.indexOf(field);
+  const index = at < 0 ? timeline.fields.length - 1 : at;
+  const { time, max, min } = timeline.history;
+  const t1 = time[time.length - 1] ?? 0;
+  let lo = Infinity,
+    hi = -Infinity;
+  for (let i = 0; i < time.length; i++) {
+    lo = Math.min(lo, min[i]!);
+    hi = Math.max(hi, max[i]!);
+  }
+  if (!(hi > lo)) [lo, hi] = [lo - 0.5, hi + 0.5];
+  const W = 240,
+    H = 96,
+    pad = 4;
+  const x = (t: number) => pad + ((W - 2 * pad) * t) / Math.max(t1, 1e-300);
+  const y = (v: number) => H - pad - ((H - 2 * pad) * (v - lo)) / (hi - lo);
+  const line = (v: ArrayLike<number>) =>
+    Array.from(
+      { length: time.length },
+      (_, i) => `${x(time[i]!).toFixed(1)},${y(v[i]!).toFixed(1)}`,
+    ).join(' ');
+  const shown = timeline.times[index] ?? 0;
+  return (
+    <div className="simulation-timeline">
+      <label className="simulation-field">
+        <span>
+          Time <small>{transientTime(shown)}</small>
+        </span>
+        <input
+          type="range"
+          aria-label="Result time"
+          min={0}
+          max={timeline.fields.length - 1}
+          step={1}
+          value={index}
+          onChange={(e) => setField(timeline.fields[Number(e.currentTarget.value)]!)}
+        />
+      </label>
+      <figure className="simulation-history">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label={`Highest and lowest temperature over ${transientTime(t1)}: ${fmt(lo)} K to ${fmt(hi)} K`}
+        >
+          <rect x={0} y={0} width={W} height={H} className="simulation-history-frame" />
+          <polyline points={line(max)} className="simulation-history-max" />
+          <polyline points={line(min)} className="simulation-history-min" />
+          <line
+            x1={x(shown)}
+            x2={x(shown)}
+            y1={pad}
+            y2={H - pad}
+            className="simulation-history-now"
+          />
+        </svg>
+        <figcaption>
+          Highest (solid) and lowest (dashed) temperature of every step, {fmt(lo)}–{fmt(hi)} K over{' '}
+          {transientTime(t1)}.
+        </figcaption>
+      </figure>
+    </div>
+  );
+}
+
+/** VS13b: a fatigue run's shortest life, in passes of its load history, and where it is. */
+function FatigueSummary({ fatigue }: { fatigue: { damage: Float64Array; life: Float64Array } }) {
+  let worst = 0;
+  for (let n = 1; n < fatigue.damage.length; n++)
+    if (fatigue.damage[n]! > fatigue.damage[worst]!) worst = n;
+  const life = fatigue.life[worst]!;
+  return (
+    <p className="simulation-note" aria-label="Fatigue summary">
+      {Number.isFinite(life)
+        ? `Shortest fatigue life ${life.toPrecision(3)} passes of the load history (damage ${fatigue.damage[worst]!.toPrecision(3)} per pass), at node ${worst}.`
+        : 'No fatigue damage: every stress amplitude is below the endurance limit.'}
+    </p>
+  );
 }

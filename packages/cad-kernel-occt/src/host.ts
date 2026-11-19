@@ -21,7 +21,7 @@ import type {
   CadWorkerRequest,
   CadWorkerResponse,
 } from './protocol';
-import { writeAssemblyStep } from './step-assembly';
+import { writeAssemblyStepPmi } from './step-assembly';
 import { importStep, type CadStepImportResult } from './step-import';
 import { importStepAssembly, type CadStepAssemblyImportResult } from './step-assembly-import';
 
@@ -216,7 +216,11 @@ export function createKernelHost(options: KernelHostOptions) {
       : { status: 'rejected', code: 'step-import-unsupported-build' };
     options.post(
       { type: 'import-result', requestId, result },
-      result.status === 'ok' ? [result.brep.buffer as ArrayBuffer] : [],
+      result.status === 'ok'
+        ? [result.brep, result.sheetBrep]
+            .filter((b): b is Uint8Array => !!b)
+            .map((b) => b.buffer as ArrayBuffer)
+        : [],
     );
   }
   /** R2b-5: one STEP assembly read with the loaded build; the BReps are transferred. */
@@ -236,12 +240,13 @@ export function createKernelHost(options: KernelHostOptions) {
   }
   /** R2b-5: one assembly STEP file from its plan and the products' BReps. */
   async function runStepAssembly(message: Extract<CadWorkerRequest, { type: 'step-assembly' }>) {
-    const { requestId, plan, breps } = message;
+    const { requestId, plan, breps, pmi } = message;
     if (!jobs.take(requestId)) return options.post({ type: 'cancelled', requestId }, []);
     let result: CadStepAssemblyResult;
     try {
       if (!oc) throw new CadKernelError('kernel-build-unavailable');
-      result = { status: 'ok', step: writeAssemblyStep(oc, plan, new Map(Object.entries(breps))) };
+      const written = writeAssemblyStepPmi(oc, plan, new Map(Object.entries(breps)), pmi);
+      result = { status: 'ok', ...written };
     } catch (error) {
       // An OCCT exception is decoded so its object is released.
       if (oc && !(error instanceof CadKernelError)) decodeKernelException(oc, error);

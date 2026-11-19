@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { routeTrip, type Hazard, type SiteRoute } from '@editor-platform/construction-core';
+import {
+  deliveryTrip,
+  routeTrip,
+  type Hazard,
+  type SiteRoute,
+} from '@editor-platform/construction-core';
 import {
   hazardLooks,
   hazardSolid,
   moverSolids,
   newRoutePath,
   clockInDay,
+  playRange,
   playStep,
   routeSolid,
   siteHazardId,
@@ -104,6 +110,23 @@ describe('CS5b people and trucks in the view (ST-550, TS-2086)', () => {
     expect(moverSolids([out], out.end + 1, flat)).toEqual([]);
   });
 
+  it('carries the pieces on the bed until each is lifted, parked facing its way (ST-802#4, TS-2605)', () => {
+    const loads = [
+      { liftId: 'l1', elementId: 'b1', at: 500 },
+      { liftId: 'l2', elementId: 'b2', at: 520 },
+    ];
+    const lorry = deliveryTrip({ ...truck, returns: true }, 500, 520, loads);
+    const top = (t: number) => moverSolids([lorry], t, flat)[0]!;
+    // On the way: both pieces, 800 mm on the bed (2.9 m up); one left after the first lift.
+    expect(top(lorry.start + 0.01).meshes).toHaveLength(2);
+    expect(top(lorry.start + 0.01).bounds[1][2]).toBeCloseTo(1000 + 2900 + 800, 6);
+    expect(top(510).bounds[1][2]).toBeCloseTo(1000 + 2900 + 400, 6);
+    // Empty once the last is lifted, and on the way back.
+    expect(top(520).meshes).toHaveLength(1);
+    // Parked, it keeps the heading it came in on.
+    expect(tripHeading(lorry, 510)).toBeCloseTo(tripHeading(lorry, 499.99), 9);
+  });
+
   it('walks the blocky figure: its legs move with the stride (ST-550#2)', () => {
     const a = walkerMesh(0);
     const b = walkerMesh(0.25);
@@ -132,6 +155,18 @@ describe('CS5b people and trucks in the view (ST-550, TS-2086)', () => {
     expect(clockInDay(1100, [450, 1050])).toBe(1050);
     expect(clockInDay(400, [450, 1050])).toBe(450);
     expect(clockInDay(600, [450, 1050])).toBe(600);
+    // TT3: a delivery driving in before the day starts (or back after it ends) widens the clock.
+    expect(playRange([450, 1050], [])).toEqual([450, 1050]);
+    expect(
+      playRange(
+        [450, 1050],
+        [
+          { start: 444.3, end: 500 },
+          { start: 600, end: 1060.2 },
+        ],
+      ),
+    ).toEqual([444, 1061]);
+    expect(playRange([450, 1050], [{ start: -30, end: 1500 }])).toEqual([0, 1440]);
     // A departure after the end is not jumped to.
     expect(
       playStep(

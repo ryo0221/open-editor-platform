@@ -6,6 +6,7 @@ import {
   type Artifact,
 } from '@editor-platform/artifact-core';
 import { type EditorCommand, type LocalDraftRevision } from '@editor-platform/editor-core';
+import { serializeHostNativeArtifact } from '@editor-platform/editor-host';
 import {
   createDesign,
   designPngInfo,
@@ -350,7 +351,6 @@ export async function layeredArtArtifact(
       null,
       'ネームと作画指示からレイヤーを生成',
     );
-  if (new TextEncoder().encode(JSON.stringify(artifact)).length > 16_000_000)
-    throw Error('原稿JSONが16 MBを超えます。画像を小さくして生成し直してください。');
+  serializeHostNativeArtifact(artifact);
   return artifact;
 }

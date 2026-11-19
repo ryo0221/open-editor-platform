@@ -112,6 +112,61 @@ describe('CadController STEP import (CAD11/CAD13)', () => {
     expect(session.content.assets).toEqual([]);
   });
 
+  it('inserts the shells beside the solid as a second body with its own tolerance (#848)', async () => {
+    // TS-2464
+    const { controller, session, staged } = setup();
+    const c = controller as unknown as {
+      options: { importStep: () => Promise<CadStepImportResult> };
+    };
+    c.options.importStep = async () => {
+      const r = read();
+      if (r.status !== 'ok') throw new Error('read');
+      return {
+        ...r,
+        sheetBrep: new Uint8Array([3, 3, 3]),
+        report: {
+          ...r.report,
+          sheet: {
+            body: {
+              kind: 'sheet',
+              areaMm2: 4,
+              bounds: body.bounds,
+              freeEdges: 4,
+              freeEdgeLengthMm: 8,
+              shells: 2,
+            },
+            faces: 2,
+            maxToleranceMm: 0.005,
+            brep: { sha256: sha('f'), byteLength: 3 },
+          },
+        },
+      } as CadStepImportResult;
+    };
+    await controller.refresh();
+    // A name at the limit: the sheet's name keeps room for its suffix.
+    const long = `${'g'.repeat(260)}.step`;
+    await controller.prepareStepImport(long, new Uint8Array([1, 2, 3]));
+    expect(await controller.adoptStepImport()).toBe(true);
+    expect(staged[0].map((a) => a.ref.kind)).toEqual([
+      'source-step',
+      'normalized-brep',
+      'normalized-brep',
+    ]);
+    const doc = session.content;
+    const imported = doc.features.filter((f) => f.type === 'imported');
+    expect(imported.map((f) => f.args.kind)).toEqual(['solid', 'sheet']);
+    expect(imported[1]!.args.sourceAssetId).toBe(imported[0]!.args.sourceAssetId);
+    // The precise solid records no widened tolerance; the loose sheet keeps its own.
+    expect(imported[0]!.args).not.toHaveProperty('maxToleranceMm');
+    expect(imported[1]!.args).toMatchObject({ maxToleranceMm: 0.005 });
+    expect([...imported[1]!.name]).toHaveLength(256);
+    expect(imported[1]!.name.endsWith(' (surfaces)')).toBe(true);
+    expect(doc.bodies.map((b) => b.name.endsWith(' (surfaces)'))).toEqual([false, true]);
+    // One edit for both bodies.
+    session.undo();
+    expect(session.content.bodies).toEqual([]);
+  });
+
   it('stores the PMI the import kept beside the BRep and names it on the feature (PMI-2)', async () => {
     const { controller, session, staged } = setup();
     const c = controller as unknown as {

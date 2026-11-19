@@ -852,7 +852,7 @@ describe('STEP text scan before the reader (F07, CAD11)', () => {
     expect(ap214.axes[0]).toMatchObject({ axis: 'semantic', read: 1 });
   });
 
-  it('refuses a file over the STEP limit (64 MiB) before the kernel reads it', () => {
+  it('refuses a file over the STEP limit (256 MiB) before the kernel reads it', () => {
     // No kernel needed: the size is checked first.
     expect(importStep({}, new Uint8Array(cadLimits.stepBytes + 1), '')).toEqual({
       status: 'rejected',

@@ -11,6 +11,8 @@ import type { PcbDocument } from '@editor-platform/pcb-core';
 import type { SchematicDocument } from '@editor-platform/schematic-core';
 import type { LadderDocument } from '@editor-platform/ladder-core';
 import type { CosimDocument } from '@editor-platform/cosim-core';
+import type { DrawingDocument } from '@editor-platform/drawing-core';
+import type { FactoryDocument } from '@editor-platform/factory-core';
 import type { AnimationHostContent } from '@editor-platform/animation-core/v2';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type { GeoDocument } from '@editor-platform/geo-core';
@@ -40,6 +42,8 @@ export type NativeContent = Exclude<
   | SchematicDocument
   | LadderDocument
   | CosimDocument
+  | DrawingDocument
+  | FactoryDocument
 >;
 export function nativeContent(content: Content): NativeContent {
   if (validContent('fiction-map', content))
@@ -65,6 +69,8 @@ export function nativeContent(content: Content): NativeContent {
   if (validContent('ladder', content)) throw new Error('Ladder has no template/reuse adapter');
   if (validContent('cosim', content))
     throw new Error('Co-simulation has no template/reuse adapter');
+  if (validContent('drawing', content)) throw new Error('Drawing has no template/reuse adapter');
+  if (validContent('factory', content)) throw new Error('Factory has no template/reuse adapter');
   if (validContent('react-ui', content))
     throw new Error('React UI uses its Host registrations, not native reusable definitions');
   return content as NativeContent;

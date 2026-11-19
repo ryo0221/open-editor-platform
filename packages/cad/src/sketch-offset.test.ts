@@ -4,6 +4,7 @@ import {
   position,
   sketchElement,
   sketchOffset,
+  sketchWithOffset,
   splinePoints,
   type CadSketch,
 } from '@editor-platform/cad-core';
@@ -390,5 +391,24 @@ describe('sketch chain offset (CR3a, 86M5)', () => {
       [180, -30],
     ]);
     expect(addOffset(s, ids, 7)).toEqual(addOffset(s, ids, 7));
+  });
+});
+
+describe('sketchWithOffset ids (CLF10)', () => {
+  it('keeps clear of note ids, which share the sketch’s id space', () => {
+    const circle = addCircle(empty(), { at: [0, 0] }, 10);
+    const taken = ['c1', 'c2', 'c3'].filter((id) => id !== circle.id);
+    const s: CadSketch = {
+      ...circle.sketch,
+      notes: taken.map((id) => ({ id, at: [0, 20] as P, text: 'note', size: 5 })),
+    };
+    const { sketch, ids } = sketchWithOffset(s, [circle.id], 2);
+    const all = [
+      ...sketch.entities.map((e) => e.id),
+      ...sketch.constraints.map((k) => k.id),
+      ...(sketch.notes ?? []).map((n) => n.id),
+    ];
+    expect(new Set(all).size).toBe(all.length);
+    expect(ids.some((id) => taken.includes(id))).toBe(false);
   });
 });

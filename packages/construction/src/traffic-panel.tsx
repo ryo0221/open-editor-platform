@@ -34,6 +34,7 @@ export function TrafficPanel({
   day,
   active,
   clock,
+  range,
   onClock,
   playing,
   onPlay,
@@ -62,6 +63,8 @@ export function TrafficPanel({
   active: boolean;
   /** Minutes of the day shown. */
   clock: number;
+  /** The minutes the clock can show (the working hours when not given). */
+  range?: readonly [number, number];
   onClock(minutes: number): void;
   playing: boolean;
   onPlay(): void;
@@ -252,9 +255,9 @@ export function TrafficPanel({
             <input
               type="range"
               aria-label="Time"
-              min={from}
-              max={to}
-              value={Math.min(to, Math.max(from, Math.round(clock)))}
+              min={range?.[0] ?? from}
+              max={range?.[1] ?? to}
+              value={Math.min(range?.[1] ?? to, Math.max(range?.[0] ?? from, Math.round(clock)))}
               onChange={(e) => onClock(Number(e.target.value))}
             />
             <span aria-label="Clock">{clockText(clock)}</span>
@@ -387,6 +390,9 @@ function RouteForm({
   const [task, setTask] = useState(route.taskId);
   const [departures, setDepartures] = useState(route.departures.join(', '));
   const [returns, setReturns] = useState(!!route.returns);
+  // TT3: a truck that brings the lifts' pieces: lifts a truck, minutes at its stop ahead.
+  const [perTrip, setPerTrip] = useState(route.delivers?.perTrip.toString() ?? '');
+  const [lead, setLead] = useState(route.delivers?.leadMinutes.toString() ?? '');
   const [problem, setProblem] = useState('');
   const dirty =
     name !== route.name ||
@@ -395,7 +401,9 @@ function RouteForm({
     speed !== String(route.speedKmh) ||
     task !== route.taskId ||
     departures !== route.departures.join(', ') ||
-    returns !== !!route.returns;
+    returns !== !!route.returns ||
+    perTrip !== (route.delivers?.perTrip.toString() ?? '') ||
+    lead !== (route.delivers?.leadMinutes.toString() ?? '');
   useDirty(report, dirty);
   return (
     <form
@@ -406,6 +414,12 @@ function RouteForm({
         const points = parsePlanList(path);
         if (typeof points === 'string') return setProblem(points);
         if (!/^\d+(\.\d+)?$/.test(speed.trim())) return setProblem('The speed is km/h.');
+        // Only a truck delivers: the fields are hidden, and left out, for a walking route.
+        const delivers = kind === 'truck' && (perTrip.trim() !== '' || lead.trim() !== '');
+        if (delivers && !/^\d+$/.test(perTrip.trim()))
+          return setProblem('Lifts per truck is a whole number.');
+        if (delivers && !/^\d+(\.\d+)?$/.test(lead.trim() || '0'))
+          return setProblem('At the stop ahead is minutes.');
         setProblem('');
         const next: SiteRoute = {
           id: route.id,
@@ -419,6 +433,14 @@ function RouteForm({
             .map((d) => d.trim())
             .filter(Boolean),
           ...(returns ? { returns: true } : {}),
+          ...(delivers
+            ? {
+                delivers: {
+                  perTrip: Number(perTrip.trim()),
+                  leadMinutes: Number(lead.trim() || '0'),
+                },
+              }
+            : {}),
         };
         if (run({ type: 'putRoute', route: next })) discard();
       }}
@@ -476,6 +498,28 @@ function RouteForm({
           <input type="checkbox" checked={returns} onChange={(e) => setReturns(e.target.checked)} />
           Comes back the same way
         </label>
+        {kind === 'truck' && (
+          <>
+            <Field label="Lifts per truck (brings the lifts' pieces)">
+              <input
+                aria-label="Lifts per truck"
+                inputMode="numeric"
+                placeholder="none"
+                value={perTrip}
+                onChange={(e) => setPerTrip(e.target.value)}
+              />
+            </Field>
+            <Field label="At the stop ahead of the lift (min)">
+              <input
+                aria-label="Delivery lead"
+                inputMode="decimal"
+                placeholder="0"
+                value={lead}
+                onChange={(e) => setLead(e.target.value)}
+              />
+            </Field>
+          </>
+        )}
         {problem && <p role="alert">{problem}</p>}
         <button type="submit" className="primary">
           Save route

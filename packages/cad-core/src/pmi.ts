@@ -1,4 +1,4 @@
-import { cadAssemblyLimits, rotateVector } from './assembly';
+import { cadAssemblyLimits, posesDiffer, rotateVector, type CadSolvedPose } from './assembly';
 import { parameterValues, resolvePosition } from './graph';
 import {
   cadLimits,
@@ -555,6 +555,39 @@ export interface CadPmiPlacement {
   translation: Vec3;
 }
 /**
+ * PMI-5c: the import a body is, placed only by rigid moves (`transform` features from its
+ * result back to one `imported` feature), with those moves from the import outwards. Such a
+ * body has the import's faces, edges and vertices in the import's order, PMI or none: an
+ * assembly's own PMI on a component names them. Undefined when any other feature is between.
+ */
+export function cadBodyRigidImport(
+  doc: CadDocument,
+  bodyId: string,
+): { featureId: string; placements: CadPmiPlacement[] } | undefined {
+  const body = doc.bodies.find((b) => b.id === bodyId);
+  if (!body) return undefined;
+  const byId = new Map(doc.features.map((f) => [f.id, f]));
+  const placements: CadPmiPlacement[] = [];
+  try {
+    const params = parameterValues(doc);
+    let f = byId.get(body.resultFeatureId);
+    for (let steps = 0; f; steps++) {
+      if (steps > doc.features.length) return undefined;
+      if (f.type === 'imported') return { featureId: f.id, placements };
+      if (f.type !== 'transform' || f.inputFeatureIds.length !== 1) return undefined;
+      placements.unshift({
+        rotation: f.args.rotation,
+        translation: resolvePosition(f.args.translation, params),
+      });
+      f = byId.get(f.inputFeatureIds[0]!);
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
  * PMI-3a: the rigid placements (`transform` features) between a body's imported feature and
  * the body, from the import outwards, to draw the presentation where the body is. Empty when
  * the body is the import itself. PMI-4a: past features that change the shape in place, along
@@ -710,6 +743,28 @@ export type CadAssemblyPmiItemState =
    * now (`replacePartSources`, a changed shape); `datum`: a datum it depends on is stale.
    */
   | { current: false; reason: 'component' | 'part' | 'datum' };
+/**
+ * PMI-5b-2 (docs/cad/pmi.md, 一覧・表示): the components an assembly item names that are not where
+ * the import placed them (`parts[id].pose`, within `cadPoseTolerance`). The item's presentation
+ * lines are in the import's frame, so they are drawn only while this is empty; moving a component
+ * never makes the item stale. `poseOf` is where a component is drawn (undefined: not placed).
+ */
+export function cadAssemblyPmiMoved(
+  asset: CadAssemblyPmiAsset,
+  item: CadPmiItem,
+  poseOf: (componentId: string) => CadSolvedPose | undefined,
+): string[] {
+  const named = new Set(
+    [...item.targets, ...(item.kind === 'dimension' ? (item.targets2 ?? []) : [])].flatMap((t) =>
+      t.component === undefined ? [] : [t.component],
+    ),
+  );
+  return [...named].filter((id) => {
+    const at = poseOf(id);
+    const read = asset.parts[id];
+    return !at || !read || posesDiffer(at, read.pose);
+  });
+}
 /**
  * PMI-5b (docs/cad/pmi.md, 検証と失効, PMI-U5): each item of an assembly's asset is current while
  * every component its targets name is in the document and places the part version it placed

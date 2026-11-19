@@ -608,6 +608,60 @@ describe('D2 imported bodies (CAD13 content side)', () => {
     expect(() => applyCadOperation(doc, conflict)).toThrow('asset-conflict');
   });
 
+  it('adds the shells beside the solid as a second, sheet body of the same file (#848, ST-219)', () => {
+    // TS-2462
+    const sheetBrep = { ...assets[1], id: 'a-sheet', sha256: hash('e'), byteLength: 900 };
+    const base = insert() as Extract<CadOperation, { type: 'insertImportedBody' }>;
+    const withSheet = (patch: (f: Loose) => void = () => {}): CadOperation => {
+      const feature = structuredClone(base.feature) as Loose;
+      feature.id = 'imp-sheet';
+      feature.name = 'bracket.step (surfaces)';
+      feature.args.kind = 'sheet';
+      feature.args.brepAssetId = 'a-sheet';
+      patch(feature);
+      return {
+        ...base,
+        assets: [...assets, sheetBrep],
+        sheet: {
+          feature,
+          body: {
+            id: 'body-sheet',
+            name: 'bracket (surfaces)',
+            sourceFeatureId: 'imp-sheet',
+            placementFeatureId: 'imp-sheet-placement',
+            appearance: { color: '#8899aa', opacity: 1 },
+          },
+        },
+      };
+    };
+    const doc = applyCadOperation(f01Empty(), withSheet());
+    expect(doc.features.map((f) => [f.id, f.type])).toEqual([
+      ['imp', 'imported'],
+      ['imp-placement', 'transform'],
+      ['imp-sheet', 'imported'],
+      ['imp-sheet-placement', 'transform'],
+    ]);
+    expect(doc.bodies).toMatchObject([
+      { id: 'body', resultFeatureId: 'imp-placement' },
+      { id: 'body-sheet', resultFeatureId: 'imp-sheet-placement' },
+    ]);
+    expect(codes(doc)).toEqual([]);
+    // The second body must be a sheet of the same source file.
+    expect(() =>
+      applyCadOperation(
+        f01Empty(),
+        withSheet((f) => (f.args.kind = 'solid')),
+      ),
+    ).toThrow('imported-feature');
+    expect(() =>
+      applyCadOperation(
+        f01Empty(),
+        withSheet((f) => (f.args.sourceAssetId = 'a-brep')),
+      ),
+    ).toThrow('imported-feature');
+    expect(() => assertCadOperation(withSheet())).not.toThrow();
+  });
+
   it('validates refs, kinds, sizes, units and an exact closure', () => {
     const doc = imported();
     // CR7f (TS-1828): a STEP file and a BRep at their limits fit the document's asset total.

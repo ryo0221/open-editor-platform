@@ -15,6 +15,8 @@ import {
 } from '@editor-platform/cad-core';
 import {
   applySimulationOperation,
+  f98SealSimulation,
+  showerStudy,
   simulationMaterialPresets,
   type SimulationDocument,
 } from '@editor-platform/simulation-core';
@@ -928,6 +930,115 @@ test('add a modal study, read its natural frequencies and look at each mode (FE7
   await expect(surface.getByText(/\(linear static\)/)).toBeVisible();
 });
 
+// VS9b (docs/cad/vehicle-simulation.md V3, TS-2253): F98 (the gap box) with its lid seal: the seal
+// study runs in the browser and reads 37.5 % all round with no leak; the lid opened 2° on its
+// hinge leaves the front edge gapping.
+test('measure the lid seal of the gap box shut and opened (VS9b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  const fixture = f98SealSimulation();
+  await analysePlate(page, fixture.cad);
+  const empty = await nativeArtifact(page);
+  const made = empty.draft.content as SimulationDocument;
+  const doc: SimulationDocument = {
+    ...fixture.doc,
+    source: { ...made.source, bodyId: 'box' },
+  };
+  await importJson(page, 'seal.json', { ...empty, draft: { ...empty.draft, content: doc } });
+  const surface = page.getByRole('region', { name: 'Structural analysis' });
+  await expect(surface.getByText(/\(seals\): 1 seal measured/)).toBeVisible({ timeout: 90_000 });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const state = surface.getByRole('status').filter({ hasText: /Level|Starting|Reference|Failed/ });
+  const seals = surface.getByRole('table', { name: 'Seals' });
+  await button('Run study').click();
+  await expect(state).toHaveText(/^Reference only/, { timeout: 180_000 });
+  await expect(seals.getByRole('row').nth(1)).toContainText('37.50–37.50');
+  await expect(seals.getByRole('row').nth(1)).toContainText('none');
+
+  // Opened 2° on its hinge: the front (away from the hinge) gaps and leaks.
+  const opened = surface.getByLabel('Lid seal opened', { exact: true });
+  await opened.fill('2');
+  await opened.press('Enter');
+  await expect(state).toContainText('out of date');
+  await button('Run study').click();
+  await expect(state).toHaveText(/^Reference only(?! \(out)/, { timeout: 180_000 });
+  await expect(seals.getByRole('row').nth(1)).toContainText('(opened 2°)');
+  await expect(seals.getByRole('row').nth(1)).toContainText(/gap \d/);
+  await surface
+    .locator('.simulation-viewport canvas')
+    .screenshot({ path: test.info().outputPath('f98-seal-opened.png') });
+});
+
+// VS10b (docs/cad/vehicle-simulation.md V3, TS-2259): a shower on F98 in the browser: a nozzle into
+// the slot in front of the lid on a 5° roll. Shut, nothing goes in; with the lid's seal left
+// short (a 12 mm bulb under the 10 mm lid) the water goes in. The time slider steps the water.
+test('spray the gap box and see where the water goes in (VS10b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  const fixture = f98SealSimulation();
+  const shower = showerStudy('shower');
+  shower.shower = {
+    ...shower.shower,
+    rain: null,
+    nozzles: [
+      {
+        id: 'front',
+        name: 'Front slot',
+        origin: [0, -121, 400],
+        direction: [0, 0, -1],
+        coneDeg: 0,
+        speedMmPerS: 3000,
+        flowLPerMin: 0.1,
+      },
+    ],
+    slopeDeg: [0, -5],
+    particlesPerS: 100,
+    durationS: 3,
+    stepS: 0.002,
+    emitUntilS: 0.5,
+  };
+  await analysePlate(page, fixture.cad);
+  const empty = await nativeArtifact(page);
+  const made = empty.draft.content as SimulationDocument;
+  const doc: SimulationDocument = {
+    ...fixture.doc,
+    source: { ...made.source, bodyId: 'box' },
+    studies: [shower],
+  };
+  await importJson(page, 'shower.json', { ...empty, draft: { ...empty.draft, content: doc } });
+  const surface = page.getByRole('region', { name: 'Structural analysis' });
+  await expect(surface.getByText(/\(shower\): no rain and 1 nozzle/)).toBeVisible({
+    timeout: 90_000,
+  });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const state = surface.getByRole('status').filter({ hasText: /Level|Starting|Reference|Failed/ });
+  const water = surface.getByLabel('Water', { exact: true });
+  await button('Run study').click();
+  await expect(state).toHaveText(/^Reference only/, { timeout: 180_000 });
+  await expect(water).toContainText('50 particles: 0 went in');
+  await expect(water).toContainText('Nothing went in.');
+  const time = surface.getByLabel('Water frame', { exact: true });
+  await time.fill('20');
+  await expect(time.locator('xpath=..')).toContainText(/Water at 0\.\d+ s of 3\.00 s/);
+  // Each kind of water named with its own colour, and no colour range to set (TS-2260).
+  const legend = surface.getByLabel(/^Water \(.*\) legend$/);
+  await expect(legend.getByRole('listitem')).toHaveCount(7);
+  await expect(legend).toContainText('6 went in');
+  await expect(surface.getByLabel('Colour range low', { exact: true })).toHaveCount(0);
+
+  // A 12 mm bulb under the 10 mm lid is pressed 17 %, under its 30 % least: the seal leaks.
+  const height = surface.getByLabel('Lid seal free height', { exact: true });
+  await height.fill('12');
+  await height.press('Enter');
+  await button('Run study').click();
+  await expect(state).toHaveText(/^Reference only(?! \(out)/, { timeout: 180_000 });
+  await expect(water).toContainText('50 particles: 50 went in');
+  await expect(water).toContainText('In through Lid seal.');
+  await surface
+    .locator('.simulation-viewport canvas')
+    .screenshot({ path: test.info().outputPath('f98-shower.png') });
+});
+
 // VS4b (docs/cad/vehicle-simulation.md VS4, TS-2211): a wind tunnel past the plate in the
 // browser: added without any load or constraint, its wind and cell set, run, and its drag, lift
 // and side force read per level as a reference result.
@@ -1000,6 +1111,212 @@ test('add a wind tunnel past the part and read its coefficients (VS4b)', async (
   await set('Wind speed', '41');
   await expect(sweep.getByRole('button', { name: 'Run yaw sweep', exact: true })).toBeVisible();
   await expect(rows).toHaveCount(0);
+});
+
+// VS7c-2 (docs/cad/vehicle-simulation.md VS7, TS-2227): a frontal crash of the F22 panel in the
+// browser: the crash preset's plasticity, the study added and set (no gravity, 60 ms, the
+// accelerometer at the tail), run, and its measures, waveform charts and frames read; the frames
+// play and a WebM video of the view is saved.
+test('crash the panel into the wall and look at its waveform and frames (VS7c-2)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');
+  test.setTimeout(600_000);
+  const surface = await analysePlate(page, f22Split('open', false));
+  await expect(surface.getByText('Click faces in the view to select them.')).toBeVisible({
+    timeout: 90_000,
+  });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const set = async (label: string, value: string) => {
+    const input = surface.getByLabel(label, { exact: true });
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toHaveValue(value);
+  };
+  await surface
+    .getByLabel('Material preset', { exact: true })
+    .selectOption({ label: 'Mild steel SPCC (crash)' });
+  await expect(surface.getByLabel('Plasticity flow curve', { exact: true })).toHaveValue(
+    '0:200, 0.02:265, 0.05:315, 0.1:360, 0.2:410, 0.4:465',
+  );
+  // A curve still being typed is applied by the save boundary before the version is read.
+  const curve = surface.getByLabel('Plasticity flow curve', { exact: true });
+  await curve.fill('0:210, 0.1:370, 0.4:470');
+  await page.keyboard.press('Control+s');
+  await expect
+    .poll(async () => {
+      const r = await nativeArtifact(page);
+      const saved = r.versions.at(-1)?.content as SimulationDocument | undefined;
+      return saved?.materials.find((m) => m.id === saved.materialId)?.plasticity?.stress;
+    })
+    .toEqual([210, 370, 470]);
+  await set('panel-body thickness (mm)', '1.5');
+  await set('Element size (mm)', '10');
+  await button('Add frontal crash').click();
+  await expect(
+    surface.getByText(/\(crash test\): the analysed bodies’ shells into a full-width/),
+  ).toBeVisible();
+  // A crash has no mesh levels or iteration limit, and runs in the browser only.
+  await expect(surface.getByLabel('Convergence mesh levels', { exact: true })).toHaveCount(0);
+  await expect(surface.getByLabel('Speed', { exact: true })).toHaveValue('56');
+  await surface.getByLabel('Gravity', { exact: true }).uncheck();
+  await set('End time', '60');
+  await set('Accelerometer x (mm)', '0');
+  await set('Accelerometer y (mm)', '-30');
+  await set('Accelerometer z (mm)', '0');
+  // Two intrusions, the first renamed and removed: the row left shows its own name.
+  await button('Add intrusion').click();
+  await button('Add intrusion').click();
+  await set('Intrusion 1 name', 'Toe pan');
+  await button('Remove Toe pan').click();
+  await expect(surface.getByLabel('Intrusion 1 name', { exact: true })).toHaveValue('Intrusion 2');
+  await button('Remove Intrusion 2').click();
+  await button('Add intrusion').click();
+  await set('Intrusion 1: point x (mm)', '100');
+  let doc = (await nativeArtifact(page)).draft.content as SimulationDocument;
+  const crash = doc.studies.find((s) => s.kind === 'crash');
+  expect(crash?.kind === 'crash' && crash.crash).toMatchObject({
+    barrier: 'wall',
+    speedKmh: 56,
+    gravity: false,
+    endTimeMs: 60,
+    accelerometer: [0, -30, 0],
+    intrusions: [{ name: 'Intrusion 1', point: [100, -30, 0], reference: [0, -30, 0] }],
+  });
+  // The pole and its line come with the pole barrier and go with the wall.
+  await surface.getByLabel('Barrier', { exact: true }).selectOption('pole');
+  await expect(surface.getByLabel('Pole diameter', { exact: true })).toHaveValue('254');
+  await surface.getByLabel('Barrier', { exact: true }).selectOption('wall');
+  await expect(surface.getByLabel('Pole diameter', { exact: true })).toHaveCount(0);
+  await button('Run study').click();
+  const state = surface
+    .getByRole('status')
+    .filter({ hasText: /Level|Starting|Verified|Reference|Failed/ });
+  await expect(state).toContainText(/ms/, { timeout: 240_000 });
+  await expect(state).toHaveText(/^Reference only/, { timeout: 480_000 });
+  await expect(surface.getByText('crash: crash-test results are for reference')).toBeVisible();
+  const table = surface.locator('.simulation-levels').first();
+  await expect(table.locator('th')).toContainText(['Peak g', 'OLC g', 'Crush mm']);
+  const result = surface.getByRole('group', { name: 'Crash result' });
+  const measures = result.getByRole('table', { name: 'Crash measures' });
+  await expect(measures).toContainText(/Peak deceleration[\d.]+ g CFC 60/);
+  await expect(measures).toContainText(/OLC[\d.]+ g \(free flight to/);
+  await expect(measures).toContainText(/Intrusion: Intrusion 1[\d.]+ mm largest/);
+  await expect(
+    result.getByRole('figure', { name: 'Deceleration at the accelerometer' }),
+  ).toContainText('CFC 180');
+  await expect(result.getByRole('figure', { name: 'Velocity along the travel' })).toBeVisible();
+  // The frames at true size, the last shown first; the slider goes back to the start.
+  await expect(surface.getByLabel('Deformation scale', { exact: true })).toHaveValue('auto');
+  await expect(surface.getByText('(auto 1.000)')).toBeVisible();
+  const frame = result.getByLabel('Crash frame', { exact: true });
+  await expect(frame).toHaveValue('60');
+  const field = surface.getByLabel('Result field', { exact: true });
+  await expect(field).toHaveValue('frame-60');
+  await frame.fill('20');
+  await expect(field).toHaveValue('frame-20');
+  const canvas = surface.locator('.simulation-viewport canvas');
+  await canvas.screenshot({ path: test.info().outputPath('crash-frame-20.png') });
+  await button('Play').click();
+  await expect(field).toHaveValue('frame-60', { timeout: 30_000 });
+  await expect(button('Play')).toBeVisible();
+  await canvas.screenshot({ path: test.info().outputPath('crash-frame-60.png') });
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 60_000 }),
+    button('Save video (WebM)').click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('Frontal-crash-1.webm');
+  const video = Buffer.concat(await (await download.createReadStream()).toArray());
+  // A WebM (EBML) file with the frames in it.
+  expect(video.subarray(0, 4).toString('hex')).toBe('1a45dfa3');
+  expect(video.length).toBeGreaterThan(10_000);
+  doc = (await nativeArtifact(page)).draft.content as SimulationDocument;
+  expect(doc.studies.some((s) => s.kind === 'crash')).toBe(true);
+});
+
+// TS-2234 (ST-623, VS8b-2): a head impact on the F22 panel from the screen: its settings, the
+// barrier switch, a run, its measures and chart, and the recorded HIC15.
+test('strike the panel with the pedestrian headform and read its HIC15 (VS8b-2)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');
+  test.setTimeout(600_000);
+  const surface = await analysePlate(page, f22Split('open', false));
+  await expect(surface.getByText('Click faces in the view to select them.')).toBeVisible({
+    timeout: 90_000,
+  });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const set = async (label: string, value: string) => {
+    const input = surface.getByLabel(label, { exact: true });
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toHaveValue(value);
+  };
+  await surface
+    .getByLabel('Material preset', { exact: true })
+    .selectOption({ label: 'Mild steel SPCC (crash)' });
+  await set('panel-body thickness (mm)', '1');
+  await set('Element size (mm)', '10');
+  await button('Add head impact').click();
+  await expect(surface.getByText(/\(head impact\): the adult headform into the/)).toBeVisible();
+  // The headform's own settings; no gravity, accelerometer or intrusions.
+  await expect(surface.getByLabel('Speed', { exact: true })).toHaveValue('40');
+  await expect(surface.getByLabel('Head angle', { exact: true })).toHaveValue('65');
+  await expect(surface.getByLabel('Gravity', { exact: true })).toHaveCount(0);
+  await expect(surface.getByRole('button', { name: 'Add intrusion' })).toHaveCount(0);
+  await surface.getByLabel('Headform', { exact: true }).selectOption('child');
+  await expect(surface.getByLabel('Head angle', { exact: true })).toHaveValue('50');
+  await surface.getByLabel('Headform', { exact: true }).selectOption('adult');
+  await set('End time', '15');
+  let doc = (await nativeArtifact(page)).draft.content as SimulationDocument;
+  const study = doc.studies.find((s) => s.kind === 'crash');
+  expect(study?.kind === 'crash' && study.crash).toMatchObject({
+    barrier: 'head',
+    speedKmh: 40,
+    gravity: false,
+    endTimeMs: 15,
+    head: { headform: 'adult', angleDeg: 65 },
+  });
+  const head = study?.kind === 'crash' ? study.crash.head : null;
+  expect(head?.holdBeyondMm).toBeGreaterThan(0);
+  // Leaving the head impact drops its headform; coming back brings one.
+  await surface.getByLabel('Barrier', { exact: true }).selectOption('wall');
+  await expect(surface.getByLabel('Headform', { exact: true })).toHaveCount(0);
+  doc = (await nativeArtifact(page)).draft.content as SimulationDocument;
+  const wall = doc.studies.find((s) => s.kind === 'crash');
+  expect(wall?.kind === 'crash' && wall.crash.head).toBeUndefined();
+  await surface.getByLabel('Barrier', { exact: true }).selectOption('head');
+  await expect(surface.getByLabel('Head angle', { exact: true })).toHaveValue('65');
+  await button('Run study').click();
+  const state = surface
+    .getByRole('status')
+    .filter({ hasText: /Level|Starting|Verified|Reference|Failed/ });
+  await expect(state).toHaveText(/^Reference only/, { timeout: 480_000 });
+  const table = surface.locator('.simulation-levels').first();
+  await expect(table.locator('th')).toContainText(['HIC15', 'Peak g', 'Deflection mm']);
+  const result = surface.getByRole('group', { name: 'Head impact result' });
+  const measures = result.getByRole('table', { name: 'Head impact measures' });
+  await expect(measures).toContainText(/HIC15[\d.e+]+ \([\d.]+ to [\d.]+ ms\)/);
+  await expect(measures).toContainText(/Peak acceleration[\d.e+]+ g resultant, CFC 1000/);
+  await expect(result.getByRole('figure', { name: 'Headform acceleration' })).toContainText(
+    'CFC 1000',
+  );
+  await expect(result.getByRole('table', { name: 'Crash measures' })).toHaveCount(0);
+  const frame = result.getByLabel('Crash frame', { exact: true });
+  await frame.fill('20');
+  await surface
+    .locator('.simulation-viewport canvas')
+    .screenshot({ path: test.info().outputPath('head-frame-20.png') });
+  // Recorded, the run keeps the headform's metrics.
+  await button('Record result').click();
+  await expect
+    .poll(async () => {
+      const d = (await nativeArtifact(page)).draft.content as SimulationDocument;
+      return d.runs?.find((r) => r.studyId === study?.id)?.levels[0]?.metrics.hic15 ?? 0;
+    })
+    .toBeGreaterThan(0);
 });
 
 // R3i-5 (docs/cad/r3-analysis.md A3, FE90): the plate without its hole solved as tet10 and then
@@ -1673,9 +1990,170 @@ test('hold a face hot, cool another and look at the temperature (FE80, R3h-2)', 
   expect(vtu).toContain('Name="Heat flux (kW per m²)"');
 });
 
+// VS11d-2 (docs/cad/vehicle-simulation.md, VS11; TS-2281, ST-637): a transient heat study from a
+// face heated up over a minute and a face radiating to the room: its time slider over the kept
+// fields, the history of the highest and lowest temperature, and a VTU of every kept time.
+test('heat a face over a minute, radiate from another and step through time (VS11d-2)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');
+  test.setTimeout(600_000);
+  const surface = await analysePlate(page);
+  const canvas = surface.locator('.simulation-viewport canvas');
+  await expect(surface.getByText('Click faces in the view to select them.')).toBeVisible({
+    timeout: 90_000,
+  });
+  const box = (await canvas.boundingBox())!;
+  const at = (fx: number, fy: number) =>
+    canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const set = async (label: string, value: string) => {
+    const input = surface.getByLabel(label, { exact: true });
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toHaveValue(value);
+  };
+  await expect(button('Add transient heat study')).toBeDisabled();
+  await expect(surface.getByLabel('Specific heat (J/(kg·K))', { exact: true })).toHaveValue('460');
+  await at(0.4, 0.45);
+  await button('Add temperature').click();
+  await set('Temperature 1 temperature (K)', '500');
+  await set('Temperature 1 amplitude', '0:0.6, 60:1');
+  await at(0.455, 0.63);
+  await button('Add radiation to the surroundings').click();
+  await set('Radiation to the surroundings 1 emissivity', '0.9');
+  await set('Element size (mm)', '20');
+  await set('Smallest element size (mm)', '4');
+  await button('Add transient heat study').click();
+  await expect(
+    surface.getByText(/\(transient heat\): 600 s in steps of 10 s, 1 constraint, 1 heat/),
+  ).toBeVisible();
+  await set('End time', '300');
+  await set('Keep every', '10');
+  await expect(surface.getByText(/^30 steps of at most 20,000; 4 kept fields/)).toBeVisible();
+
+  await button('Run study').click();
+  const state = surface
+    .getByRole('status')
+    .filter({ hasText: /Level|Starting|Verified|Reference|Failed/ });
+  await expect(state).toHaveText(/^(Verified|Reference only)/, { timeout: 480_000 });
+  const maxT = Number(
+    await surface.locator('.simulation-levels tbody tr').last().locator('td').nth(3).innerText(),
+  );
+  expect(maxT).toBeCloseTo(500, 6);
+  // The last time first; the slider steps back to the start, on the same colour range.
+  const field = surface.getByLabel('Result field', { exact: true });
+  await expect(field).toHaveValue('temperature-3');
+  const slider = surface.getByLabel('Result time', { exact: true });
+  await expect(slider).toHaveValue('3');
+  await expect(
+    surface.getByRole('img', { name: /^Highest and lowest temperature over 300 s/ }),
+  ).toBeVisible();
+  await canvas.screenshot({ path: test.info().outputPath('transient-300s.png') });
+  await slider.fill('1');
+  await expect(field).toHaveValue('temperature-1');
+  await expect(surface.getByText('Time 100 s', { exact: true })).toBeVisible();
+  await canvas.screenshot({ path: test.info().outputPath('transient-100s.png') });
+  await surface.locator('.simulation-history').screenshot({
+    path: test.info().outputPath('transient-history.png'),
+  });
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    button('Export VTU').click(),
+  ]);
+  const vtu = Buffer.concat(await (await download.createReadStream()).toArray()).toString('utf8');
+  for (const t of ['0 s', '100 s', '200 s', '300 s'])
+    expect(vtu).toContain(`Name="Temperature at ${t} (K)"`);
+  const doc = (await nativeArtifact(page)).draft.content as SimulationDocument;
+  expect(doc.constraints[0]).toMatchObject({ amplitude: { times: [0, 60], factors: [0.6, 1] } });
+  expect(doc.loads[0]).toMatchObject({ kind: 'radiation', emissivity: 0.9 });
+
+  // VS11d-3 (TS-2284): the same study on the reference Host, its every step checked against the
+  // browser's equations; then radiation between faces keeps it in the browser. Only where the dev
+  // server has CalculiX (the browser part above runs without it).
+  if (
+    process.env.SIMULATION_HOST === 'off' ||
+    !/Version \d/.test(`${spawnSync('ccx', ['-v'], { encoding: 'utf8' }).stdout ?? ''}`)
+  )
+    return;
+  const onHost = 'Run on Reference Host (CalculiX)';
+  await expect(surface.getByLabel('What a Host run sends', { exact: true })).toContainText(
+    'specific heat',
+  );
+  await button(onHost).click();
+  await expect(state).toHaveText(/^(Verified|Reference only)/, { timeout: 300_000 });
+  const hostT = Number(
+    await surface.locator('.simulation-levels tbody tr').last().locator('td').nth(3).innerText(),
+  );
+  expect(hostT).toBeCloseTo(500, 6);
+  await surface.getByLabel('Shown view', { exact: true }).selectOption('setup');
+  await at(0.455, 0.63);
+  await button('Add radiation between faces').click();
+  await expect(button(onHost)).toHaveCount(0);
+});
+
 // CR5c (docs/cad/car-design.md, S3・S4): the stiffness tests made from four mounts picked in
 // order: a torsion test's three constraints and study, then (undone) a bending test with the top
 // pushed, which is run and summed up in N/mm (TS-1576, ST-270#5).
+// VS13b (TS-2293, ST-639 #3): fatigue of the plate's static study under the sample road.
+test('turn on fatigue under a rough road and look at the life (VS13b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');
+  test.setTimeout(600_000);
+  const surface = await analysePlate(page);
+  const canvas = surface.locator('.simulation-viewport canvas');
+  await expect(surface.getByText('Click faces in the view to select them.')).toBeVisible({
+    timeout: 90_000,
+  });
+  const box = (await canvas.boundingBox())!;
+  const at = (fx: number, fy: number) =>
+    canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+  const button = (name: string) => surface.getByRole('button', { name, exact: true });
+  const set = async (label: string, value: string) => {
+    const input = surface.getByLabel(label, { exact: true });
+    await input.fill(value);
+    await input.press('Enter');
+    await expect(input).toHaveValue(value);
+  };
+  await at(0.4, 0.45);
+  await button('Add fixed support').click();
+  await at(0.455, 0.63);
+  await button('Add force').click();
+  await set('Element size (mm)', '20');
+  await set('Smallest element size (mm)', '4');
+  await set('Convergence mesh levels', '1');
+  await set('Solver iteration limit', '200000');
+  // On: the sample road and the steel line; the endurance limit off so that every cycle counts.
+  await surface.getByLabel('Fatigue', { exact: true }).check();
+  await expect(surface.getByText(/2000 points/)).toBeVisible();
+  await set('Endurance limit', '0');
+  // A history typed in is applied on leaving the box; a bad one is refused.
+  const history = surface.getByLabel('Load history', { exact: true });
+  await history.fill('0, 1, x');
+  await history.blur();
+  await expect(surface.getByText(/Enter 2 to 100000 factors/)).toBeVisible();
+  await button('Sample rough road').click();
+  await expect(surface.getByText(/2000 points/)).toBeVisible();
+
+  await button('Run study').click();
+  const state = surface
+    .getByRole('status')
+    .filter({ hasText: /Level|Starting|Verified|Reference|Failed/ });
+  await expect(state).toHaveText(/^(Verified|Reference only)/, { timeout: 480_000 });
+  await expect(surface.getByLabel('Fatigue summary', { exact: true })).toHaveText(
+    /^Shortest fatigue life [\d.e+]+ passes of the load history/,
+  );
+  await surface.getByLabel('Result field', { exact: true }).selectOption('fatigue-life');
+  await expect(
+    surface.getByLabel('Fatigue life (log₁₀ passes) legend', { exact: true }),
+  ).toBeVisible();
+  await canvas.screenshot({ path: test.info().outputPath('fatigue-life.png') });
+  await surface.getByLabel('Result field', { exact: true }).selectOption('fatigue-damage');
+  await expect(surface.getByLabel('Fatigue damage per pass legend', { exact: true })).toBeVisible();
+});
+
 test('make torsion and bending tests from picked mounts and run one (CR5c)', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'desktop flow');
   test.skip(!process.env.FEM_MESHER_DIST, 'FEM_MESHER_DIST is not set');

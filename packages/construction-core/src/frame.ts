@@ -724,7 +724,8 @@ export function frameOnDay(
   world: FrameWorld,
   day: string,
 ): ConstructionFrame {
-  const states = siteOnDay(doc, schedule, day).states;
+  const on = siteOnDay(doc, schedule, day);
+  const states = on.states;
   const times = liftTimes(doc, schedule);
   const setBy = new Map<string, string>();
   for (const l of doc.site?.lifts ?? []) {
@@ -732,6 +733,8 @@ export function frameOnDay(
     if (t) setBy.set(l.elementId, t.day);
   }
   const stands = (id: string) => {
+    // TT2: what a raise still has to lift hangs on its jacks, not in the frame.
+    if (on.offsets.has(id)) return false;
     const s = states.get(id) ?? 'existing';
     // Temporary works (shoring, a temporary beam) stand while their task runs.
     if (s === 'built' || s === 'existing' || s === 'removing' || s === 'temporary') return true;
@@ -746,6 +749,8 @@ export function frameOnDay(
     for (const id of load.elementIds) site.set(id, (site.get(id) ?? 0) + load.kNm2 * 1e-3);
   }
   const loaded = (id: string) => {
+    // TT2: nor does it load the frame from its final place.
+    if (on.offsets.has(id)) return false;
     const s = states.get(id) ?? 'existing';
     return (
       s === 'built' || s === 'existing' || s === 'removing' || s === 'building' || s === 'temporary'

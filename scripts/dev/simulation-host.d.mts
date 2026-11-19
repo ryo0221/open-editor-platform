@@ -11,6 +11,8 @@ export function createSimulationJobs(options: {
   resultBytes?: number;
   /** VS3b: wind-tunnel jobs (`kind: 'aero'`); without it they are refused. */
   aero?: AeroRunner;
+  /** VS8a: crash jobs (`kind: 'crash'`); without it they are refused. */
+  crash?: CrashRunner;
 }): {
   handle(req: IncomingMessage, res: ServerResponse, next: () => void): Promise<void>;
   close(): Promise<void>;
@@ -25,6 +27,13 @@ export interface AeroRunner {
   }>;
   read(dir: string, meta: never): Promise<unknown>;
 }
+export interface CrashRunner {
+  prepare(value: never): Promise<{ text: string }>;
+  /** The path of the Node script that runs a job folder. */
+  runner(): Promise<string>;
+  timeoutMs?: number;
+}
+export function referenceCrash(load: (module: string) => Promise<unknown>): CrashRunner;
 export function openFoamBuild(bashrc?: string): string | null;
 export function referenceAero(
   load: (module: string) => Promise<unknown>,

@@ -342,6 +342,20 @@ describe('CS3a cranes and lifts (ST-545, TS-2077)', () => {
       expect(run(doc, under)).toEqual([]);
     });
 
+    it('takes a crossed brace topping out up to 300 mm higher as a support (TT5, ST-804, TS-2608)', () => {
+      const doc = small(
+        [task('a', 'construct', ['e'], 'up')],
+        [tower()],
+        [lift('l', 'a', 'e', [20000, 0, 0])],
+      );
+      const load = box([10000, -500, 0], [11000, 500, 1000]);
+      // The other brace of an X: its tilt caps it a little higher than the load.
+      const near = { e: load, x: box([10400, -500, 0], [10600, 500, 1250]) };
+      expect(run(doc, near)).toEqual([]);
+      const far = { e: load, x: box([10400, -500, 0], [10600, 500, 1350]) };
+      expect(run(doc, far).map((d) => d.code)).toEqual(['load-clash']);
+    });
+
     it('samples the slew by the jib tip, not the hook', () => {
       const doc = small(
         [task('a', 'construct', ['e'], 'up')],

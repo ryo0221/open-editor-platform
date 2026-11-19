@@ -3,9 +3,17 @@
  * `validateCad` after the parameters: what can be checked without a kernel or the closure.
  */
 import { mountedJoints } from './mounts';
-import { cadAssemblyLimits, copyStep, posesDiffer, type CadSolvedPose } from './assembly';
+import {
+  cadAssemblyLimits,
+  cadPartBomKeys,
+  cadPartCostLimits,
+  cadPartSourcings,
+  copyStep,
+  posesDiffer,
+  type CadSolvedPose,
+} from './assembly';
 import { validateJoints, type JointCheck } from './joints-validation';
-import type { Quaternion, Vec3 } from './model';
+import { cadMassLimits, type Quaternion, type Vec3 } from './model';
 
 type Rec = Record<string, unknown>;
 /** The part of validation's `Check` these rules use. */
@@ -37,12 +45,49 @@ export const assemblyKeys = [
   'solvedPoses',
 ] as const;
 
+const within = (v: unknown, [lo, hi]: readonly [number, number]) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+/**
+ * PD2: a part's material (a non-empty name and a density in the body mass range), sourcing class,
+ * unit cost (with the document's currency), currency and supplier note. Each is optional.
+ */
+export function validatePartBomValues(c: AssemblyCheck, props: Rec, path: string) {
+  const m = props.material;
+  if (m !== undefined) {
+    const mp = `${path}.material`;
+    if (!record(m)) c.error('part-material', mp);
+    else if (c.keys(m, ['name', 'densityKgM3'], mp)) {
+      if (typeof m.name !== 'string' || !m.name.trim()) c.error('part-material', `${mp}.name`);
+      else c.name(m.name, `${mp}.name`);
+      if (!within(m.densityKgM3, cadMassLimits.densityKgM3))
+        c.error('mass-density', `${mp}.densityKgM3`);
+    }
+  }
+  if (
+    props.sourcing !== undefined &&
+    !(cadPartSourcings as readonly unknown[]).includes(props.sourcing)
+  )
+    c.error('part-sourcing', `${path}.sourcing`);
+  if (props.unitCost !== undefined) {
+    if (!within(props.unitCost, cadPartCostLimits.unitCost))
+      c.error('part-cost', `${path}.unitCost`);
+    if (props.currency === undefined) c.error('part-cost-currency', `${path}.currency`);
+  }
+  if (
+    props.currency !== undefined &&
+    (typeof props.currency !== 'string' || !cadPartCostLimits.currency.test(props.currency))
+  )
+    c.error('part-currency', `${path}.currency`);
+  if (props.supplier !== undefined) c.name(props.supplier, `${path}.supplier`);
+}
+
 export function validateAssembly(c: AssemblyCheck, value: Rec) {
   const props = value.partProperties;
   if (!record(props)) c.error('part-properties', '$.partProperties');
-  else if (c.keys(props, ['partNumber', 'description'], '$.partProperties')) {
+  else if (c.keys(props, ['partNumber', 'description'], '$.partProperties', [...cadPartBomKeys])) {
     c.name(props.partNumber, '$.partProperties.partNumber');
     c.name(props.description, '$.partProperties.description');
+    validatePartBomValues(c, props, '$.partProperties');
   }
   for (const key of ['parts', 'components', 'componentPatterns', 'joints'])
     if (!Array.isArray(value[key])) return c.error('collection', `$.${key}`);

@@ -15,6 +15,9 @@ import type { CosimDocument } from '@editor-platform/cosim-core';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
 import { validateSimulationSources } from '../simulation/source';
 import { validateConstructionSources } from '../construction/source';
+import { validateFactorySources } from '../factory/source';
+import { validateFactoryLooks } from '../factory/looks';
+import { validateDrawingSources } from '../drawing/sources';
 import { validateCharacterParts } from '../character/parts';
 import type { CadPartRecord } from '../cad/parts';
 import type { CadDocument } from '@editor-platform/cad-core';
@@ -29,6 +32,7 @@ import {
 import { validateGeoRecord } from '../geo/resources';
 import { makeArtifact, validContent, type Content, type StoredArtifact } from '../model';
 import { nativeContent } from './native';
+import { hostNativeArtifactByteLimit } from '@editor-platform/editor-host';
 
 const maxImportBytes = 16_000_000;
 const maxImportFiles = 32;
@@ -118,6 +122,27 @@ async function importedArtifact(
     if (sources !== undefined) record.constructionSources = sources;
     validateConstructionSources(record);
   }
+  if (record.kind === 'factory') {
+    // FT4a: the Building versions it stands in travel in the same file.
+    const sources = (value as StoredArtifact).factorySources;
+    if (sources !== undefined) record.factorySources = sources;
+    validateFactorySources(record);
+    // FT4c: and the CAD versions that give its objects their look.
+    const looks = (value as StoredArtifact).factoryLooks;
+    if (looks !== undefined) record.factoryLooks = looks;
+    validateFactoryLooks(record);
+  }
+  if (record.kind === 'drawing') {
+    // The CAD and building versions the views see travel in the same file (DW1).
+    const sources = (value as StoredArtifact).drawingSources;
+    if (sources !== undefined) record.drawingSources = sources;
+    const assets = (value as StoredArtifact).drawingAssets;
+    if (assets !== undefined) record.drawingAssets = assets;
+    // DW6b: its issues and their PDFs, each naming one of its versions.
+    const issues = (value as StoredArtifact).drawingIssues;
+    if (issues !== undefined) record.drawingIssues = issues;
+    validateDrawingSources(record);
+  }
   if (record.kind === 'simulation') {
     // The analysed CAD versions travel in the same file; a missing or altered one refuses it.
     const sources = (value as StoredArtifact).simulationSources;
@@ -160,6 +185,8 @@ function hasReusableAdapter(kind: string, content: Content) {
     kind !== 'schematic' &&
     kind !== 'ladder' &&
     kind !== 'cosim' &&
+    kind !== 'drawing' &&
+    kind !== 'factory' &&
     kind !== 'fiction-map' &&
     !(isDeck(content) && hasSlideAnimations(content))
   );
@@ -179,10 +206,13 @@ async function readImportFile(
   context: ImportContext,
 ): Promise<{ record: StoredArtifact; originalId?: string }> {
   const native = /\.json$/i.test(file.name);
-  if (file.size > (native ? cadNativeLimit.bytes : maxImportBytes))
+  if (
+    file.size >
+    (native ? Math.max(cadNativeLimit.bytes, hostNativeArtifactByteLimit) : maxImportBytes)
+  )
     throw new Error(
       native
-        ? `Import files must be smaller than 16 MB (${cadNativeLimitText()} for CAD, building and character files)`
+        ? `Native JSON files must not exceed 64 MiB (${cadNativeLimitText()} for CAD, building and character files)`
         : 'Import files must be smaller than 16 MB',
     );
   const text = await file.text();
@@ -210,8 +240,8 @@ async function readImportFile(
       nativeName = imported.name;
       importedArtifactId = imported.originalId;
     }
-    if (file.size > maxImportBytes && !cadNativeKinds.has(record.kind))
-      throw new Error('Import files must be smaller than 16 MB');
+    if (file.size > hostNativeArtifactByteLimit && !cadNativeKinds.has(record.kind))
+      throw new Error('Native JSON files must not exceed 64 MiB');
   }
   for (const content of [record.draft.content, ...record.versions.map((v) => v.content)])
     if (hasReusableAdapter(record.kind, content))

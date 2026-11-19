@@ -158,10 +158,16 @@ export interface VtuReadLimits {
   fields: number;
 }
 export const vtuReadLimits: Readonly<VtuReadLimits> = Object.freeze({
-  bytes: femLimits.bytes,
+  // What this editor writes reads back (Codex on #1285): a transient run's kept temperatures
+  // (`transientLimits.snapshotValues`, 20 million) with its flux and thermal stress on the
+  // largest mesh (`femLimits`) are about 400 million characters of base64. Under the 2^29
+  // characters a browser string holds.
+  bytes: 400 * 1024 * 1024,
   nodes: femLimits.nodes,
   elements: femLimits.elements,
-  fields: 32,
+  // A transient run's kept temperatures (up to `transientLimits.snapshots`, 400) and the rest
+  // (Codex on #1264).
+  fields: 448,
 });
 
 const decodeTable = new Int16Array(128).fill(-1);

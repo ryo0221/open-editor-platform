@@ -28,6 +28,7 @@ export {
 } from './port';
 export {
   BimController,
+  partAvailable as bimPartAvailable,
   type BimAssetStore,
   type BimControllerOptions,
   type BimNotice,

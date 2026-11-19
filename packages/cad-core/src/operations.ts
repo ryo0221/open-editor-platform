@@ -47,7 +47,7 @@ import {
   type Position3,
   type Quaternion,
 } from './model';
-import { CadSketchError, solveSketch, type CadSketch } from './sketch';
+import { CadSketchError, solveSketch, type CadSketch, type CadSketchNote } from './sketch';
 import {
   applyJointOperation,
   fixAtStoredPose,
@@ -63,6 +63,20 @@ import {
   pruneProportions,
   type CadProportionsOperation,
 } from './proportions';
+import {
+  applyDesignTargetsOperation,
+  pruneDesignTargets,
+  type CadDesignTargetsOperation,
+} from './design-targets';
+import {
+  applySightChecksOperation,
+  pruneSightChecks,
+  type CadSightChecksOperation,
+} from './sight-checks';
+import {
+  applyToleranceStacksOperation,
+  type CadToleranceStacksOperation,
+} from './tolerance-stacks';
 import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
@@ -105,7 +119,8 @@ export type CadOperation =
     }
   /**
    * A sketch's plane, elements and constraints replaced; `solved` seeds the solver (the last
-   * solution, with positions for new points) and the result is what is stored.
+   * solution, with positions for new points) and the result is what is stored. CLF10: `notes`
+   * replaces the notes too (an empty list removes them); left out, they are kept.
    */
   | {
       type: 'updateSketch';
@@ -114,6 +129,7 @@ export type CadOperation =
       entities: CadSketch['entities'];
       constraints: CadSketch['constraints'];
       solved: CadSketch['solved'];
+      notes?: CadSketchNote[];
     }
   | {
       type: 'transformBody';
@@ -223,6 +239,8 @@ export type CadOperation =
       assets: CadAssetRef[];
       feature: Extract<CadFeature, { type: 'imported' }>;
       body: CadNewBody;
+      /** #848: the file's shells beside its solid, a second imported sheet body in the same edit. */
+      sheet?: { feature: Extract<CadFeature, { type: 'imported' }>; body: CadNewBody };
     }
   | CadAssemblyOperation
   | CadJointOperation
@@ -230,6 +248,9 @@ export type CadOperation =
   | CadMountOperation
   | CadGearMeshOperation
   | CadProportionsOperation
+  | CadDesignTargetsOperation
+  | CadSightChecksOperation
+  | CadToleranceStacksOperation
   | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
@@ -300,6 +321,10 @@ const dropViewsFor = (doc: CadDocument, removed: Set<string>) => {
   }
   // CLF3: a removed body leaves its proportion role.
   pruneProportions(doc, removed);
+  // PD1: and every design target's lists (a target left empty goes).
+  pruneDesignTargets(doc, removed);
+  // PD7: and every sight check's lists (a check left without its bodies goes).
+  pruneSightChecks(doc, removed);
 };
 
 /**
@@ -472,6 +497,14 @@ function apply(
     case 'insertImportedBody': {
       if (op.feature.type !== 'imported' || op.body.sourceFeatureId !== op.feature.id)
         fail('imported-feature');
+      if (
+        op.sheet &&
+        (op.sheet.feature.type !== 'imported' ||
+          op.sheet.feature.args.kind !== 'sheet' ||
+          op.sheet.feature.args.sourceAssetId !== op.feature.args.sourceAssetId ||
+          op.sheet.body.sourceFeatureId !== op.sheet.feature.id)
+      )
+        fail('imported-feature');
       for (const a of op.assets) {
         const same = next.assets.find((x) => x.id === a.id);
         if (!same) next.assets.push(a);
@@ -479,6 +512,10 @@ function apply(
       }
       next.features.push(op.feature);
       addBody(next, op.body);
+      if (op.sheet) {
+        next.features.push(op.sheet.feature);
+        addBody(next, op.sheet.body);
+      }
       return next;
     }
     case 'setParameter': {
@@ -506,6 +543,10 @@ function apply(
       s.entities = op.entities;
       s.constraints = op.constraints;
       s.solved = op.solved;
+      if (op.notes) {
+        if (op.notes.length) s.notes = clone(op.notes);
+        else delete s.notes;
+      }
       resolveSketches(next, new Set([s.id]));
       return next;
     }
@@ -781,6 +822,7 @@ function apply(
       );
       if (!op.cascade && extra.some((id) => !owned.has(id))) fail('delete-has-dependents');
       next.parameters = next.parameters.filter((p) => !closure.parameters.has(p.id));
+      pruneDesignTargets(next, new Set(), closure.parameters);
       next.profiles = next.profiles.filter((p) => !closure.profiles.has(p.id));
       next.sketches = next.sketches.filter((s) => !closure.sketches.has(s.id));
       next.features = next.features.filter((f) => !closure.features.has(f.id));
@@ -905,6 +947,7 @@ function apply(
     case 'insertComponents':
     case 'setComponentPlacement':
     case 'setPartProperties':
+    case 'setPartBomProperties':
     case 'setComponentBom':
     case 'insertComponentPattern':
     case 'updateComponentPattern':
@@ -934,6 +977,12 @@ function apply(
       return applyGearMeshOperation(next, op);
     case 'setProportions':
       return applyProportionsOperation(next, op);
+    case 'setDesignTargets':
+      return applyDesignTargetsOperation(next, op);
+    case 'setSightChecks':
+      return applySightChecksOperation(next, op);
+    case 'setToleranceStacks':
+      return applyToleranceStacksOperation(next, op);
     case 'insertInterferenceAllowance':
     case 'removeInterferenceAllowance':
       return applyInterferenceOperation(next, op);

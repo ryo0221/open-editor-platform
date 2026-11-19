@@ -136,8 +136,18 @@ export function designReactSourceHash(content: DesignContent): string {
   return reuseHash(source);
 }
 /** Graphic renderers have no executable React content; refuse loss at every output entrypoint. */
-export function designReactGraphicProblems(content: DesignContent, roots: string[]): string[] {
-  const included = descendantIds(content.elements, roots);
+/**
+ * External React content a graphic export would lose. `subtree` checks the roots and their
+ * descendants (an element export draws its subtree); `exact` checks only the listed IDs, for an
+ * export that draws exactly those elements (a frame area draws each overlapping element on its
+ * own, so a group that crosses the frame does not bring in its children outside it).
+ */
+export function designReactGraphicProblems(
+  content: DesignContent,
+  roots: string[],
+  scope: 'subtree' | 'exact' = 'subtree',
+): string[] {
+  const included = scope === 'exact' ? new Set(roots) : descendantIds(content.elements, roots);
   const hasOriginal = (componentId: string, seen = new Set<string>()): boolean => {
     if (seen.has(componentId)) return false;
     seen.add(componentId);

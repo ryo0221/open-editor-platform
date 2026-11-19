@@ -18,6 +18,8 @@ import {
 } from '@editor-platform/geometry-fem';
 import type { AeroFlowField, AeroRunFields } from './aero-view';
 import type { RunFields } from './run';
+import { sealRibbonMesh, type SealRunFields } from './run-seal';
+import type { ShowerRunFields } from './run-shower';
 
 /** One nodal scalar a result can be coloured by. */
 export interface ResultScalar {
@@ -27,6 +29,32 @@ export interface ResultScalar {
   values: Float64Array;
   /** R3g: the shape this field moves the mesh by (a mode's), instead of the result's displacement. */
   displacement?: Float64Array;
+  /** VS7c: triangles not shown with this field (1 each: a crash frame's erased shells). */
+  hidden?: Uint8Array;
+  /**
+   * VS11d-2: the colour range of fields shown one after another (a transient run's times share
+   * one, so a colour means the same temperature at every time); without it, the field's own.
+   */
+  range?: [number, number];
+  /**
+   * A field of kinds rather than amounts: value k (rounded) is class k, drawn in its own colour
+   * and named in the legend, whatever the colour range.
+   */
+  classes?: readonly ResultClass[];
+}
+/** VS11d-2: a transient run's times, the field of each, and the history of every step. */
+export interface ResultTimeline {
+  /** s, of each kept field. */
+  times: number[];
+  /** The scalar id of each kept time's field. */
+  fields: string[];
+  /** Every step: its time (s) and the highest and lowest temperature (K). */
+  history: { time: ArrayLike<number>; max: ArrayLike<number>; min: ArrayLike<number> };
+}
+/** One kind a class field names (`ResultScalar.classes`), with its colour (0–1 rgb). */
+export interface ResultClass {
+  label: string;
+  color: readonly [number, number, number];
 }
 /** What a result shows: the mesh's corners, its outward boundary, its fields. */
 export interface ResultSource {
@@ -54,6 +82,14 @@ export interface ResultSource {
   scalars: ResultScalar[];
   /** VS4c: a wind tunnel's bodies (nothing moves them); a browser run's flow, for streamlines and a section of its speed. */
   aero?: { flow?: AeroFlowField };
+  /**
+   * VS7c-2: a crash run's frames: shown at their true size (the auto deformation scale is 1),
+   * and every frame coloured over one range (the largest plastic strain of the run), so its video
+   * does not rescale from frame to frame.
+   */
+  crash?: { range: [number, number] };
+  /** VS11d-2: a transient run's timeline. */
+  transient?: ResultTimeline;
 }
 
 const magnitude = (v: Float64Array) => {
@@ -294,8 +330,211 @@ function aeroResult(fields: AeroRunFields): ResultSource {
   };
 }
 
-export function runResult(fields: RunFields, bodyId?: string): ResultSource {
+/**
+ * VS7c: a crash run's midsurfaces of all bodies (both sides shown). Each frame is a field of its
+ * own, the largest plastic strain through the thickness on each node's triangles, moved by that
+ * frame's displacement (scale 1): stepping through them plays the crash. The last frame first.
+ */
+export function crashResult(fields: Extract<RunFields, { kind: 'crash' }>): ResultSource {
+  const n = fields.nodes.length / 3;
+  const t = fields.triangles;
+  const scalars = fields.frames.map((f, k): ResultScalar => {
+    const values = new Float64Array(n);
+    for (let e = 0; e < t.length / 3; e++) {
+      const p = f.erased[e] ? 0 : f.plasticStrain[e]!;
+      for (let c = 0; c < 3; c++) {
+        const i = t[3 * e + c]!;
+        if (p > values[i]!) values[i] = p;
+      }
+    }
+    return {
+      id: `frame-${k}`,
+      label: `Plastic strain at ${(f.time * 1000).toFixed(1)} ms`,
+      unit: '',
+      values,
+      displacement: Float64Array.from(f.displacement),
+      // The shells erased by then are gone from the frame (a torn sheet shows its tear).
+      ...(f.erased.some((x) => x) ? { hidden: Uint8Array.from(f.erased) } : {}),
+    };
+  });
+  scalars.reverse();
+  let top = 0;
+  for (const s of scalars) for (const v of s.values) if (v > top) top = v;
+  return {
+    origin: 'Run',
+    crash: { range: [0, top > 0 ? top : 1] },
+    nodes: fields.nodes,
+    tets: new Uint32Array(0),
+    triangles: t,
+    twoSided: new Uint8Array(t.length / 3).fill(1),
+    displacement: scalars[0]?.displacement,
+    scalars,
+  };
+}
+
+/**
+ * VS9b: a seal run's seals as ribbons (each point from the base face up to the closure, or the
+ * free height where it does not touch), coloured by compression, gap or leak.
+ */
+function sealResult(fields: SealRunFields): ResultSource {
+  const r = sealRibbonMesh(fields);
+  return {
+    origin: 'Run',
+    nodes: r.nodes,
+    tets: new Uint32Array(0),
+    triangles: r.triangles,
+    scalars: [
+      { id: 'compression', label: 'Seal compression', unit: '%', values: r.compression },
+      { id: 'gap', label: 'Gap past the seal', unit: 'mm', values: r.gap },
+      { id: 'leak', label: 'Leak (1)', unit: '', values: r.leak },
+    ],
+  };
+}
+
+/** The share of the bodies' box diagonal a shower's particle and entry marks span each way. */
+export const showerMarkScale = Object.freeze({ particle: 0.003, entry: 0.01 });
+const octahedronFaces = [
+  [0, 2, 4],
+  [2, 1, 4],
+  [1, 3, 4],
+  [3, 0, 4],
+  [2, 0, 5],
+  [1, 2, 5],
+  [3, 1, 5],
+  [0, 3, 5],
+] as const;
+const boxDiagonal = (points: ArrayLike<number>) => {
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i + 2 < points.length; i += 3)
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k]!, points[i + k]!);
+      hi[k] = Math.max(hi[k]!, points[i + k]!);
+    }
+  return points.length >= 3 ? Math.hypot(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!) : 0;
+};
+/**
+ * The colour of each kind in a shower's water field, apart at a glance: grey body, green seal,
+ * red leak, light blue drop, deep blue film, violet pond and magenta where it went in.
+ */
+export const showerWaterColors: readonly (readonly [number, number, number])[] = Object.freeze([
+  [0.6, 0.64, 0.69],
+  [0.15, 0.6, 0.3],
+  [0.9, 0.12, 0.1],
+  [0.45, 0.78, 1.0],
+  [0.05, 0.3, 0.85],
+  [0.55, 0.25, 0.85],
+  [0.95, 0.1, 0.75],
+] as const);
+
+/** VS10b: what each value of a shower's water field means. */
+export const showerWaterLabels = Object.freeze([
+  'body',
+  'seal',
+  'leaking seal',
+  'drop',
+  'film',
+  'ponding',
+  'went in',
+] as const);
+
+/**
+ * VS10b: a shower run as one triangle mesh with a "water" value per node (`showerWaterLabels`):
+ * the bodies as the water met them, the seals' ribbons, each particle of frame `frame` (the last
+ * by default) as a small mark and each place the water went in as a larger one.
+ */
+export function showerMesh(
+  fields: ShowerRunFields,
+  frame = fields.frames.length - 1,
+  surface = true,
+) {
+  const nodes: number[] = [];
+  const triangles: number[] = [];
+  const water: number[] = [];
+  const s = fields.surface;
+  if (surface) {
+    // Element by element: a large body is past the arguments a spread can pass (Codex on #1271).
+    for (const v of s.points) nodes.push(v);
+    for (const t of s.triangles) triangles.push(t);
+    for (let k = 0; k < s.points.length / 3; k++) water.push(0);
+  } else {
+    // The bodies are drawn beside the result (`showerBodies`); two empty triangles at the corners
+    // of their box keep the view's fit on them whatever the water does.
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < s.points.length; i += 3)
+      for (let k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k]!, s.points[i + k]!);
+        hi[k] = Math.max(hi[k]!, s.points[i + k]!);
+      }
+    if (s.points.length) {
+      nodes.push(...lo, ...lo, ...lo, ...hi, ...hi, ...hi);
+      triangles.push(0, 1, 2, 3, 4, 5);
+      water.push(0, 0, 0, 0, 0, 0);
+    }
+  }
+  const ribbon = sealRibbonMesh({ kind: 'seal', seals: fields.seals });
+  const first = nodes.length / 3;
+  for (const v of ribbon.nodes) nodes.push(v);
+  for (const t of ribbon.triangles) triangles.push(first + t);
+  for (const l of ribbon.leak) water.push(l ? 2 : 1);
+  // Marks sized from the bodies' box, so they show at a car's scale as at a test plate's: a
+  // particle reaches 0.3 % of its diagonal each way (at least 4 mm), an entry 1 % (at least 15 mm).
+  const size = boxDiagonal(s.points);
+  const dropH = Math.max(4, size * showerMarkScale.particle);
+  const entryH = Math.max(15, size * showerMarkScale.entry);
+  /** A small octahedron round p, half-size h: seen from any side, unlike flat marks. */
+  const mark = (p: readonly number[], h: number, value: number) => {
+    const b = nodes.length / 3;
+    const [x, y, z] = p as [number, number, number];
+    nodes.push(x + h, y, z, x - h, y, z, x, y + h, z, x, y - h, z, x, y, z + h, x, y, z - h);
+    // Outward, counter-clockwise from outside.
+    for (const [i, j, k] of octahedronFaces) triangles.push(b + i, b + j, b + k);
+    for (let k = 0; k < 6; k++) water.push(value);
+  };
+  const f = fields.frames[frame];
+  if (f)
+    for (let i = 0; i < f.states.length; i++) {
+      // drop 0 → 3, film 1 → 4, pond 2 → 5, entered 3 → 6; drained ones are not drawn. One that
+      // has gone in by this frame is drawn large where it went in, so an early frame shows no
+      // entry yet (Codex on #1271).
+      if (f.states[i] === 4) continue;
+      const p = [f.positions[3 * i]!, f.positions[3 * i + 1]!, f.positions[3 * i + 2]!];
+      mark(p, f.states[i] === 3 ? entryH : dropH, 3 + f.states[i]!);
+    }
+  else for (const e of fields.entries) mark(e.position, entryH, 6);
+  return {
+    nodes: new Float64Array(nodes),
+    triangles: new Uint32Array(triangles),
+    water: new Float64Array(water),
+  };
+}
+
+function showerResult(fields: ShowerRunFields, frame?: number): ResultSource {
+  const m = showerMesh(fields, frame, false);
+  return {
+    origin: 'Run',
+    nodes: m.nodes,
+    tets: new Uint32Array(0),
+    triangles: m.triangles,
+    twoSided: new Uint8Array(m.triangles.length / 3).fill(1),
+    scalars: [
+      {
+        id: 'water',
+        label: `Water (${showerWaterLabels.map((l, k) => `${k} ${l}`).join(', ')})`,
+        unit: '',
+        values: m.water,
+        classes: showerWaterLabels.map((label, k) => ({ label, color: showerWaterColors[k]! })),
+      },
+    ],
+  };
+}
+
+export function runResult(fields: RunFields, bodyId?: string, frame?: number): ResultSource {
   if (fields.kind === 'aero') return aeroResult(fields);
+  if (fields.kind === 'seal') return sealResult(fields);
+  if (fields.kind === 'shower') return showerResult(fields, frame);
+  if (fields.kind === 'crash') return crashResult(fields);
   // R3j-6c: one body of a bonded run, or every body together.
   if (fields.kind === 'bonded-static' || fields.kind === 'bonded-modal') {
     const one = fields.bodies.find((b) => b.bodyId === bodyId);
@@ -323,6 +562,59 @@ export function runResult(fields: RunFields, bodyId?: string): ResultSource {
     // Each mode is a field: its shape scaled to a largest movement of 1, coloured by its size.
     const scalars = modeScalars(fields.modes);
     return { ...base, displacement: scalars[0]?.displacement, scalars };
+  }
+  // VS11d: each kept time's temperature is a field (the last first), the last flux, and with
+  // thermal stress the stress of the last field on its displacement.
+  if (fields.kind === 'transient-thermal') {
+    const k = fields.times.length - 1;
+    const times = [k, ...Array.from({ length: k }, (_, i) => i)];
+    let lo = Infinity,
+      hi = -Infinity;
+    for (const T of fields.temperatures)
+      for (const v of T) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
+    const range: [number, number] = hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
+    const labels = transientTimeLabels(fields.times);
+    return {
+      ...base,
+      ...(fields.stress ? { displacement: fields.stress.displacement } : {}),
+      transient: {
+        times: fields.times,
+        fields: fields.times.map((_, i) => `temperature-${i}`),
+        history: {
+          time: fields.history.time,
+          max: fields.history.maxTemperature,
+          min: fields.history.minTemperature,
+        },
+      },
+      scalars: [
+        ...times.map((i) => ({
+          id: `temperature-${i}`,
+          label: `Temperature at ${labels[i]!}`,
+          unit: 'K',
+          values: fields.temperatures[i]!,
+          range,
+        })),
+        {
+          id: 'heat-flux',
+          label: 'Heat flux at the end',
+          unit: 'kW/m²',
+          values: fields.fluxMagnitude,
+        },
+        ...(fields.stress
+          ? [
+              {
+                id: 'von-mises',
+                label: 'Thermal von Mises stress',
+                unit: 'MPa',
+                values: fields.stress.vonMises,
+              },
+            ]
+          : []),
+      ],
+    };
   }
   // R3h: a thermal run moves nothing; mW/mm² is kW/m².
   if (fields.kind === 'thermal')
@@ -357,8 +649,57 @@ export function runResult(fields: RunFields, bodyId?: string): ResultSource {
         unit: 'mm',
         values: magnitude(fields.displacement),
       },
+      ...(fields.fatigue
+        ? [
+            {
+              id: 'fatigue-life',
+              label: 'Fatigue life (log₁₀ passes)',
+              unit: '',
+              values: fatigueLogLife(fields.fatigue.life),
+            },
+            {
+              id: 'fatigue-damage',
+              label: 'Fatigue damage per pass',
+              unit: '',
+              values: fatigueDamageShown(fields.fatigue.damage),
+            },
+          ]
+        : []),
     ],
   };
+}
+
+/** VS13: life is shown as log₁₀ passes, an infinite one (no damage) at this cap. */
+export const fatigueLifeCap = 15;
+export function fatigueLogLife(life: Float64Array): Float64Array {
+  return life.map((l) => (l > 0 ? Math.min(Math.log10(l), fatigueLifeCap) : -fatigueLifeCap));
+}
+
+/**
+ * VS13: damage per pass as shown and written: a cycle with its mean at the tensile strength fails
+ * at once (infinite damage), shown at 10^`fatigueLifeCap` so a VTU takes it (Codex on #1283).
+ */
+export function fatigueDamageShown(damage: Float64Array): Float64Array {
+  const top = 10 ** fatigueLifeCap;
+  return damage.map((d) => Math.min(d, top));
+}
+
+/** VS11d: a time as the result names it: seconds to four significant digits. */
+export const transientTime = (t: number) =>
+  `${t >= 1e4 || (t < 1e-2 && t > 0) ? t.toExponential(3).replace('e+', 'e') : Number(t.toPrecision(4))} s`;
+/**
+ * VS11d (Codex on #1264): the kept times' names, each different (a VTU refuses a field name twice):
+ * four digits, or twelve where two would meet (a last step just after a kept time), or the index.
+ */
+export function transientTimeLabels(times: readonly number[]): string[] {
+  const seen = new Set<string>();
+  return times.map((t, i) => {
+    let label = transientTime(t);
+    if (seen.has(label)) label = `${Number(t.toPrecision(12))} s`;
+    if (seen.has(label)) label = `${label} (${i + 1})`;
+    seen.add(label);
+    return label;
+  });
 }
 
 /** A frequency as the result names it: four significant digits, no `+` (VTU names refuse it). */
@@ -498,6 +839,7 @@ export function resultBounds(source: ResultSource): { lo: number[]; hi: number[]
 export function autoDeformationScale(source: ResultSource): number {
   const u = source.displacement;
   if (!u) return 0;
+  if (source.crash) return 1;
   const { lo, hi } = resultBounds(source);
   const size = Math.hypot(hi[0]! - lo[0]!, hi[1]! - lo[1]!, hi[2]! - lo[2]!);
   let max = 0;
@@ -585,6 +927,7 @@ export function resultDisplay(
   /** Whether each shown triangle is seen from both sides, in `indices` order. */
   const sided: boolean[] = [];
   for (let t = 0; t < tris.length; t += 3) {
+    if (chosen?.hidden?.[t / 3]) continue;
     const tri = [tris[t]!, tris[t + 1]!, tris[t + 2]!];
     const d = tri.map(side);
     const two = allTwoSided || source.twoSided?.[t / 3] === 1;
@@ -679,7 +1022,15 @@ export function resultDisplay(
     for (let k = 0; k < 3; k++) normals[v * 3 + k]! /= l;
   }
   const colors = new Float32Array(values.length * 3);
-  values.forEach((x, i) => colors.set(resultColor(span > 0 ? (x - range[0]) / span : 0), i * 3));
+  const classes = chosen?.classes;
+  values.forEach((x, i) =>
+    colors.set(
+      classes
+        ? (classes[Math.round(x)]?.color ?? [0.5, 0.5, 0.5])
+        : resultColor(span > 0 ? (x - range[0]) / span : 0),
+      i * 3,
+    ),
+  );
   return {
     colors,
     values: new Float32Array(values),
@@ -721,6 +1072,26 @@ export function readAt(display: ResultDisplay, point: readonly number[]) {
 
 /** The VTU (ParaView) of a run's finest mesh with its nodal fields, mm and MPa. */
 export const resultVtu = (fields: RunFields, bodyId?: string): string => {
+  // VS10b: the bodies, ribbons and the last frame's water.
+  if (fields.kind === 'shower') {
+    const m = showerMesh(fields);
+    return writeVtu({
+      mesh: { type: 'tri3', nodes: m.nodes, elements: m.triangles },
+      pointData: [{ name: 'Water', components: 1, values: m.water }],
+    });
+  }
+  // VS9b: the seals' ribbons with compression (%), gap (mm) and leak per point.
+  if (fields.kind === 'seal') {
+    const r = sealRibbonMesh(fields);
+    return writeVtu({
+      mesh: { type: 'tri3', nodes: r.nodes, elements: r.triangles },
+      pointData: [
+        { name: 'Compression (%)', components: 1, values: r.compression },
+        { name: 'Gap (mm)', components: 1, values: r.gap },
+        { name: 'Leak', components: 1, values: r.leak },
+      ],
+    });
+  }
   // VS4c: a wind tunnel's bodies as triangles with Cp (and the Host's Cf and h) per point.
   if (fields.kind === 'aero')
     return writeVtu({
@@ -739,6 +1110,20 @@ export const resultVtu = (fields: RunFields, bodyId?: string): string => {
           : []),
       ],
     });
+  // VS7c: a crash run's last frame on all midsurfaces: displacement, plastic strain, erasure.
+  if (fields.kind === 'crash') {
+    const last = fields.frames.at(-1)!;
+    return writeVtu({
+      mesh: { type: 'tri3', nodes: fields.nodes, elements: fields.triangles },
+      pointData: [
+        { name: 'Displacement (mm)', components: 3, values: Float64Array.from(last.displacement) },
+      ],
+      cellData: [
+        { name: 'Plastic strain', components: 1, values: Float64Array.from(last.plasticStrain) },
+        { name: 'Erased', components: 1, values: Float64Array.from(last.erased) },
+      ],
+    });
+  }
   // R3j-6c: one body of a bonded run (a VTU holds one kind of element); the source body's when
   // none is named.
   if (fields.kind === 'bonded-static' || fields.kind === 'bonded-modal')
@@ -790,6 +1175,34 @@ export const resultVtu = (fields: RunFields, bodyId?: string): string => {
         values: m.shape,
       })),
     });
+  // VS11d: every kept temperature, the last flux and the thermal stress.
+  if (fields.kind === 'transient-thermal')
+    return writeVtu({
+      mesh: fields.mesh,
+      pointData: [
+        ...transientTimeLabels(fields.times).map((label, i) => ({
+          name: `Temperature at ${label} (K)`,
+          components: 1 as const,
+          values: fields.temperatures[i]!,
+        })),
+        {
+          name: 'Heat flux at the end (kW per m²)',
+          components: 1 as const,
+          values: fields.fluxMagnitude,
+        },
+        ...(fields.stress
+          ? [
+              {
+                name: 'Displacement (mm)',
+                components: 3 as const,
+                values: fields.stress.displacement,
+              },
+              { name: 'Stress (MPa)', components: 6 as const, values: fields.stress.stress },
+              { name: 'von Mises (MPa)', components: 1 as const, values: fields.stress.vonMises },
+            ]
+          : []),
+      ],
+    });
   // R3h: VTU names take no "/", so the flux's unit is spelled out.
   if (fields.kind === 'thermal')
     return writeVtu({
@@ -809,6 +1222,20 @@ export const resultVtu = (fields: RunFields, bodyId?: string): string => {
       { name: 'Max principal stress (MPa)', components: 1, values: principal.max },
       { name: 'Min principal stress (MPa)', components: 1, values: principal.min },
       { name: 'Reaction (N)', components: 3, values: fields.reaction },
+      ...(fields.fatigue
+        ? [
+            {
+              name: 'Fatigue life (log10 passes)',
+              components: 1 as const,
+              values: fatigueLogLife(fields.fatigue.life),
+            },
+            {
+              name: 'Fatigue damage per pass',
+              components: 1 as const,
+              values: fatigueDamageShown(fields.fatigue.damage),
+            },
+          ]
+        : []),
     ],
   });
 };

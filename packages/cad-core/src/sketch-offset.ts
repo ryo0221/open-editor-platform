@@ -678,7 +678,12 @@ function pathArea(g: SketchPathGeometry): number {
 }
 
 function freeId(s: CadSketch, prefix: string): string {
-  const used = new Set([...s.entities.map((e) => e.id), ...s.constraints.map((k) => k.id)]);
+  // CLF10: notes share the sketch's id space with its curves and constraints.
+  const used = new Set([
+    ...s.entities.map((e) => e.id),
+    ...s.constraints.map((k) => k.id),
+    ...(s.notes ?? []).map((n) => n.id),
+  ]);
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
   return `${prefix}${n}`;

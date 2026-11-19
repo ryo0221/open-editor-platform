@@ -68,6 +68,8 @@ async function fixedFont(): Promise<Uint8Array> {
   });
   return cached;
 }
+/** The fixed Japanese font (Noto Sans CJK JP Regular) the Host serves, checked by its hash. */
+export const fixedPdfFont = fixedFont;
 export async function preparePdfTextFont(pdf: PDFDocument, lines: PrintedTextLine[][]) {
   pdf.registerFontkit(fontkit);
   const bytes = await fixedFont();

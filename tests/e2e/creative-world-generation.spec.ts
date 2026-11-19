@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
 import type { DesignContent } from '@editor-platform/design/model';
 import { contentHash } from '@editor-platform/artifact-core';
+import { hostNativeArtifactByteLimit } from '@editor-platform/editor-host';
 import { test, expect } from './fixtures';
 import { generatedPng } from '../fixtures/creative-host/generated-png';
 import type {} from '../fixtures/creative-world-generation/main';
@@ -26,6 +27,7 @@ async function open(
   mode: 'character' | 'setting' = 'character',
   production = false,
   independent = false,
+  capacity = false,
 ) {
   bundle ??= build({
     entryPoints: ['tests/fixtures/creative-world-generation/main.tsx'],
@@ -54,8 +56,10 @@ async function open(
   await p.goto(
     (independent ? 'http://127.0.0.1:4177' : '') +
       '/cw2-fixture?surface=' +
-      (production ? 'production' : mode),
+      (production ? 'production' : mode) +
+      (capacity ? '&capacity=1' : ''),
   );
+  if (capacity) await p.evaluate(() => window.cw2Ready);
   if (production) await drill(p, mode);
   await expect(
     p.getByRole('heading', {
@@ -98,6 +102,24 @@ async function preview(p: Page) {
 }
 const rows = (p: Page) => p.evaluate(() => window.cw2Fixture.records());
 
+async function waitForWorldAction(p: Page) {
+  // A large real native envelope can keep the action in flight. Wait for its
+  // existing busy state to settle before asserting the resulting alert.
+  await button(p, 'World Hostへ生成を依頼').evaluate((element) => {
+    const fieldset = element.closest('fieldset')!;
+    if (!fieldset.disabled) return;
+    return new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!fieldset.disabled) {
+          observer.disconnect();
+          resolve();
+        }
+      });
+      observer.observe(fieldset, { attributes: true, attributeFilter: ['disabled'] });
+    });
+  });
+}
+
 for (const [label, production, independent] of [
   ['通常Production', true, false],
   ['独立Creative', false, true],
@@ -105,19 +127,25 @@ for (const [label, production, independent] of [
   test(`${label}: oversized result never applies or saves and retry does not generate twice`, async ({
     page,
   }, info) => {
-    await open(page, 'character', production, independent);
+    // Real near-64 MiB history needs the same budget in full and focused runs.
+    test.setTimeout(90_000);
+    await open(page, 'character', production, independent, true);
     await prepare(page);
-    const before = await page.evaluate(() => window.cw2Fixture.artifacts());
+    const before = await page.evaluate(() => window.cw2Fixture.artifactDigests());
+    expect(before.some((artifact) => artifact.bytes > 16 * 1024 * 1024)).toBe(true);
+    expect(before.every((artifact) => artifact.bytes <= hostNativeArtifactByteLimit)).toBe(true);
     await page.evaluate(() => window.cw2Fixture.resultPadding(3200 * 1024));
     await button(page, 'World Hostへ生成を依頼').click();
+    await waitForWorldAction(page);
     const panel = page.getByRole('region', { name: '世界設定を使う清書', exact: true });
     await expect(panel.getByRole('alert')).toContainText('保存候補');
     await expect(button(page, 'World Hostへ生成を依頼')).toBeDisabled();
     await button(page, 'World結果を明示採用').click();
+    await waitForWorldAction(page);
     await expect(panel.getByRole('alert')).toContainText('保存候補');
     await expect(button(page, 'World結果を明示採用')).toBeEnabled();
     expect(await page.evaluate(() => window.cw2Fixture.calls)).toBe(1);
-    expect(await page.evaluate(() => window.cw2Fixture.artifacts())).toEqual(before);
+    expect(await page.evaluate(() => window.cw2Fixture.artifactDigests())).toEqual(before);
     expect((await rows(page))[0]).toMatchObject({ state: 'preview', usages: [] });
     expect((await rows(page))[0].applied).toBeUndefined();
     await page.screenshot({

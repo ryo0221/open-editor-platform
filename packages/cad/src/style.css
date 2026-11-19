@@ -546,6 +546,21 @@
   stroke: #c0392b;
   stroke-width: 2.6px;
 }
+/* CLF10: notes are filled text; selected or named by a problem, they take that colour. */
+.cad-sketch-canvas .cad-sketch-note {
+  fill: #1d2733;
+  stroke: none;
+  font-family: system-ui, sans-serif;
+  user-select: none;
+}
+.cad-sketch-canvas .cad-sketch-note.is-selected {
+  fill: #2f6fb3;
+  stroke: none;
+}
+.cad-sketch-canvas .cad-sketch-note.is-problem {
+  fill: #c0392b;
+  stroke: none;
+}
 .cad-sketch-canvas .cad-sketch-axes line {
   stroke: #c8d0da;
   stroke-width: 1px;
@@ -792,4 +807,97 @@
 }
 .cad-proportions-band {
   flex-wrap: wrap;
+}
+/* PD1: design targets, each with its value and pass / fail / unknown. */
+.cad-targets {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cad-targets-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.cad-targets-list li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cad-targets-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.cad-targets-list li.pass strong {
+  color: #1f7a3a;
+}
+.cad-targets-list li.fail strong {
+  color: #b42318;
+}
+.cad-targets-list li.unknown strong {
+  color: #8a5a00;
+}
+.cad-targets-list li button {
+  justify-self: start;
+}
+.cad-targets-summary {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* PD5: a spring's textbook estimate in the inspector. */
+.cad-spring-estimate {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.cad-spring-estimate dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin: 0;
+}
+.cad-spring-estimate dl > div {
+  display: contents;
+}
+.cad-spring-estimate dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cad-stack-methods {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0;
+}
+.cad-stack-methods dt {
+  color: var(--ep-muted, #5f6368);
+}
+.cad-stack-methods dd {
+  margin: 0;
+  min-width: 0;
+}
+.cad-targets-flag.pass {
+  color: #1f7a3a;
+}
+.cad-targets-flag.fail {
+  color: #b42318;
+}
+.cad-stack-contributors {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 2px;
+}
+.cad-stack-contributors li.stale {
+  color: #8a5a00;
 }

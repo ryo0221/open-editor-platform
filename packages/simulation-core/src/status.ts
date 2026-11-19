@@ -51,6 +51,17 @@ export const studyCheckNames: Readonly<Record<SimulationStudyKind, readonly RunC
     modal: Object.freeze(['mapping', 'mass', 'quality', 'solver', 'orthogonality'] as const),
     thermal: runCheckNames,
     aero: Object.freeze(['surface', 'solver'] as const),
+    crash: Object.freeze([
+      'mapping',
+      'quality',
+      'energy-balance',
+      'hourglass-energy',
+      'mass-scaling',
+    ] as const),
+    // VS11d: the static run's five, `equilibrium` being the energy balance over the run.
+    'transient-thermal': runCheckNames,
+    seal: Object.freeze(['mapping', 'seal'] as const),
+    shower: Object.freeze(['mapping', 'seal', 'shower'] as const),
   });
 
 export type RunStatus = 'verified' | 'reference' | 'failed';
@@ -90,6 +101,13 @@ export function studyStatus(input: StudyStatusInput): StudyStatus {
   const changes: StudyStatus['changes'] = {};
   // VS4a: a wind tunnel's coefficients are for reference in V1, whatever the checks.
   if (input.study.kind === 'aero') reasons.push('aero: wind-tunnel results are for reference');
+  // VS7b: so are a crash test's measures in V2.
+  if (input.study.kind === 'crash') reasons.push('crash: crash-test results are for reference');
+  // VS9: a seal's leaks are candidate places, not amounts (VS-U5).
+  if (input.study.kind === 'seal') reasons.push('seal: leaks are candidate places, for reference');
+  // VS10: the shower's particles find paths, not amounts.
+  if (input.study.kind === 'shower')
+    reasons.push('shower: water paths are candidate places, for reference');
   if (input.levels.length < levels)
     reasons.push(`convergence: ${input.levels.length} of ${levels} levels solved`);
   // One level cannot show mesh convergence, even when the study asks for only one.

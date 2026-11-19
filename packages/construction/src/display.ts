@@ -104,6 +104,80 @@ export function parseLoadChart(text: string): { radius: number; capacityKg: numb
   if (typeof points === 'string') return points.replace('"x, y" in mm', '"radius, kg"');
   return points.map(([radius, capacityKg]) => ({ radius, capacityKg }));
 }
+/**
+ * The fields of a climb line: split at commas, unquoted fields trimmed, a `"…"` field kept as is
+ * (`""` for a quote). Undefined for a quote out of place.
+ */
+function climbFields(line: string): string[] | undefined {
+  const out: string[] = [];
+  let i = 0;
+  for (;;) {
+    while (line[i] === ' ' || line[i] === '\t') i++;
+    if (line[i] === '"') {
+      let field = '';
+      for (i++; ; i++) {
+        if (i >= line.length) return undefined;
+        if (line[i] === '"') {
+          if (line[i + 1] !== '"') break;
+          i++;
+        }
+        field += line[i];
+      }
+      i++;
+      while (line[i] === ' ' || line[i] === '\t') i++;
+      if (i < line.length && line[i] !== ',') return undefined;
+      out.push(field);
+    } else {
+      const j = line.indexOf(',', i);
+      const field = (j < 0 ? line.slice(i) : line.slice(i, j)).trim();
+      if (field.includes('"')) return undefined;
+      out.push(field);
+      i = j < 0 ? line.length : j;
+    }
+    if (i >= line.length) return out;
+    i++;
+  }
+}
+/** TT1: a crane's climbs as lines `task, base height, height[, support …]`. */
+export function formatClimbs(
+  climbs: readonly { taskId: string; baseZ: number; height: number; supportIds?: string[] }[],
+) {
+  // An ID with a comma, a quote or edge spaces is quoted CSV-style, so it reads back the same.
+  const q = (id: string) =>
+    /[",\r\n]/.test(id) || id.trim() !== id ? `"${id.replace(/"/g, '""')}"` : id;
+  return climbs
+    .map((c) => [q(c.taskId), c.baseZ, c.height, ...(c.supportIds ?? []).map(q)].join(', '))
+    .join('\n');
+}
+/** TT1: reads climbs written by `formatClimbs`; the reason when a line is not one. */
+export function parseClimbs(
+  text: string,
+): { taskId: string; baseZ: number; height: number; supportIds?: string[] }[] | string {
+  const out: { taskId: string; baseZ: number; height: number; supportIds?: string[] }[] = [];
+  const num = /^[+-]?\d+(\.\d+)?$/;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = climbFields(line);
+    if (!parts) return `"${line.trim()}" is not "task, base height mm, height mm[, support …]"`;
+    const [taskId, baseZ, height, ...supports] = parts;
+    if (
+      !taskId ||
+      !baseZ ||
+      !height ||
+      !num.test(baseZ) ||
+      !num.test(height) ||
+      supports.some((x) => !x)
+    )
+      return `"${line.trim()}" is not "task, base height mm, height mm[, support …]"`;
+    out.push({
+      taskId,
+      baseZ: Number(baseZ),
+      height: Number(height),
+      ...(supports.length ? { supportIds: supports } : {}),
+    });
+  }
+  return out;
+}
 /** Reads one point `x, y, z` (mm); the reason when it cannot. */
 export function parsePoint3(text: string): [number, number, number] | string {
   const m =

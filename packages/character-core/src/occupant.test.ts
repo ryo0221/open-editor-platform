@@ -285,3 +285,40 @@ describe('the occupant check (CR7d, TS-1817)', () => {
     expect(r.interference).toEqual({ status: 'ok', findings: [] });
   });
 });
+
+describe('F64 reclined 25°: the occupant of CL2’s package (F82, TS-2012)', () => {
+  // cad-core's `f82Occupant` holds these numbers; they are read here from the figure itself.
+  const f = seatedFigure({ spine: -25 });
+  const pose = poseAt(f.doc, f.doc.actions.find((a) => a.id === 'sit')!, 0);
+  const side = occupantFigure(f.doc, f.meshes, pose, {
+    headBone: 'head',
+    hipBone: 'hip',
+    eye: { offset: [0, -110, 150], direction: [0, -1, 0] },
+  });
+  // About the hip, in the car's side view: x rearwards (the figure's +y), z up.
+  const hip = side.hip!;
+  const rel = (p: readonly number[]) => [Math.round(p[1]! - hip[1]), Math.round(p[2]! - hip[2])];
+
+  it('puts the head top, the eye, the back and the feet where F82 has them', () => {
+    expect(rel(side.headTop!)).toEqual([129, 736]);
+    expect(rel(side.eye!.origin)).toEqual([90, 654]);
+    const P = side.figure[0]!.positions;
+    let back = -Infinity;
+    let toe = Infinity;
+    let heel = Infinity;
+    let headFront = Infinity;
+    for (let i = 0; i < P.length; i += 3) {
+      const [x, z] = rel([0, P[i + 1]!, P[i + 2]!]);
+      back = Math.max(back, x!);
+      toe = Math.min(toe, x!);
+      heel = Math.min(heel, z!);
+      if (z! > 560) headFront = Math.min(headFront, x!);
+    }
+    expect({ back, toe, heel, headFront }).toEqual({
+      back: 328,
+      toe: -838,
+      heel: -175,
+      headFront: 129,
+    });
+  });
+});

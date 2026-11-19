@@ -1,0 +1,26 @@
+{
+  "name": "@editor-platform/factory",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./style.css": "./src/style.css"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/bim": "*",
+    "@editor-platform/bim-core": "*",
+    "@editor-platform/character": "*",
+    "@editor-platform/character-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/factory-core": "*",
+    "@editor-platform/geometry-view": "*",
+    "@editor-platform/ladder": "*",
+    "@editor-platform/ladder-core": "*",
+    "lucide-react": "1.51.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  }
+}

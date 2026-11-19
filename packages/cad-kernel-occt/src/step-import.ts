@@ -5,6 +5,7 @@ import {
   cadPmiLimits,
   type CadPmiAsset,
   type CadBodyEvaluation,
+  type CadSheetEvaluation,
   type CadBodyKind,
   type CadLengthUnit,
   type Vec3,
@@ -20,6 +21,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { decodeKernelException, type OcModule } from '@editor-platform/geometry-kernel-occt';
 import { shapeMetrics } from './metrics';
+import { optimalBounds } from './bounds';
 import { sheetTopology } from './sheet-topology';
 import {
   canReadPmi,
@@ -66,7 +68,9 @@ export type CadStepLoss =
   | 'material'
   | 'source-feature-history'
   /** PMI-1: the file's PMI, which the document does not keep yet (report `pmi`). */
-  | 'pmi';
+  | 'pmi'
+  /** #848: curves and points beside the solid (wireframe and construction geometry). */
+  | 'wireframe';
 /**
  * PMI-1 (docs/cad/pmi.md, PMI-U3): a file with PMI is refused (`step-pmi-partial`) unless the
  * user agreed to import its shape without the PMI, which the report then lists as lost.
@@ -90,7 +94,10 @@ export interface CadStepImportReport {
   importerBuildHash: string;
   sourceUnit: CadLengthUnit;
   scaleToMm: number;
-  /** Largest vertex/edge/face tolerance after conversion to mm. */
+  /**
+   * Largest vertex/edge/face tolerance after conversion to mm, of the body (`body`); the second,
+   * sheet body records its own (`sheet.maxToleranceMm`, #848).
+   */
   maxToleranceMm: number;
   body: CadBodyEvaluation;
   brep: { sha256: string; byteLength: number };
@@ -101,6 +108,19 @@ export interface CadStepImportReport {
   pmi?: CadStepPmiReport;
   /** PMI-2: the body's `pmi` asset, when at least one item is kept (the bytes are `pmi`). */
   pmiAsset?: { sha256: string; byteLength: number };
+  /**
+   * #848: the shells beside the one solid (JAMA's castings carry machining or reference faces
+   * this way), kept as a second, sheet body of the same import with its own BRep (`sheetBrep`)
+   * and PMI (`sheetPmi`). Absent when the file has none.
+   */
+  sheet?: {
+    body: CadSheetEvaluation;
+    faces: number;
+    /** The sheet body's own largest tolerance in mm, as measured and as written. */
+    maxToleranceMm: number;
+    brep: { sha256: string; byteLength: number };
+    pmiAsset?: { sha256: string; byteLength: number };
+  };
 }
 export type CadStepImportCode =
   | 'step-too-large'
@@ -139,7 +159,15 @@ export type CadStepImportCode =
   | 'kernel-build-revoked'
   | 'kernel-failure';
 export type CadStepImportResult =
-  | { status: 'ok'; report: CadStepImportReport; brep: Uint8Array; pmi?: Uint8Array }
+  | {
+      status: 'ok';
+      report: CadStepImportReport;
+      brep: Uint8Array;
+      pmi?: Uint8Array;
+      /** #848: the second, sheet body's BRep and PMI (report `sheet`). */
+      sheetBrep?: Uint8Array;
+      sheetPmi?: Uint8Array;
+    }
   | {
       status: 'rejected';
       code: CadStepImportCode;
@@ -219,8 +247,15 @@ export function pmiKept(
   doc: unknown,
   products: Map<string, PmiProduct>,
   options: CadStepImportOptions,
-  /** PMI-5a: adds what an assembly keeps through its paths, before the loss is judged. */
-  extend: (report: CadStepPmiReport) => CadStepPmiReport = (r) => r,
+  /**
+   * PMI-5a: adds what an assembly keeps through its paths, before the loss is judged; with the
+   * callouts read for the parts' items (`linked`, with their `occurrences`) and kept with them
+   * (`shown`), by entity.
+   */
+  extend: (
+    report: CadStepPmiReport,
+    parts: { linked: Set<number>; shown: Set<number>; occurrences: Set<number> },
+  ) => CadStepPmiReport = (r) => r,
 ): { report: CadStepPmiReport; assets: Map<number, CadStepPmiAsset> } | undefined {
   const census = scan.pmi;
   if (!census) return undefined;
@@ -261,7 +296,11 @@ export function pmiKept(
     kept: { ...kept.kept, callout, view: kept.keptViews.size },
   };
   onParts.lossless = pmiLossless(onParts);
-  const report = extend(onParts);
+  const report = extend(onParts, {
+    linked: new Set(linked.map((l) => l.callout.id)),
+    shown,
+    occurrences: new Set(linked.flatMap((l) => l.callout.occurrences)),
+  });
   if (!report.lossless && options.pmi !== 'discard')
     throw new Rejected('step-pmi-partial', report.complete ? 'not-kept' : 'unread', report);
   return { report, assets: pmiAssetFiles(kept.assets) };
@@ -526,6 +565,39 @@ export function writtenTolerance(oc: OcModule, own: <T>(value: T) => T, path: st
   );
 }
 
+/** #848: the shells of a shape outside its solids, as one compound, and their faces. */
+function freeShellsOf(
+  oc: OcModule,
+  shape: unknown,
+  own: <T>(value: T) => T,
+): { compound: unknown; shells: number; faces: number } {
+  const compound = own(new oc.TopoDS_Compound());
+  const builder = own(new oc.BRep_Builder());
+  builder.MakeCompound(compound);
+  let shells = 0,
+    faces = 0;
+  const ex = own(
+    new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+      oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+    ),
+  );
+  for (; ex.More(); ex.Next()) {
+    const shell = own(ex.Current());
+    shells++;
+    builder.Add(compound, shell);
+    const fx = own(
+      new oc.TopExp_Explorer_2(
+        shell,
+        oc.TopAbs_ShapeEnum.TopAbs_FACE,
+        oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+      ),
+    );
+    for (; fx.More(); fx.Next()) faces++;
+  }
+  return { compound, shells, faces };
+}
 /**
  * Reads one STEP file into one exact solid or sheet in mm and writes it as the normalized BRep
  * asset. Refuses rather than heals: anything but one valid solid, or one valid connected shell
@@ -599,42 +671,73 @@ export function importStep(
     );
     const current = own(ex.Current());
     const solid = own(solids ? oc.TopoDS.Solid_1(current) : oc.TopoDS.Shell_1(current));
-    // Free shells, faces, edges or points beside the body are not part of the subset: the
-    // whole shape must have no sub-shape the body does not.
+    // #848: shells beside the one solid become a second, sheet body of the same import (each
+    // shell one connected set of faces). Curves and points outside any face beside it
+    // (wireframe and construction geometry, e.g. JAMA J-CA-27/34) are left out and reported as
+    // a loss. A loose face beside the solid is not part of either body and is still refused.
+    const extras = solids === 1 && count('TopAbs_FACE', 'TopAbs_SHELL') === 0;
+    const free = extras ? count('TopAbs_SHELL', 'TopAbs_SOLID') : 0;
+    const wireframe =
+      extras && count('TopAbs_EDGE', 'TopAbs_FACE') + count('TopAbs_VERTEX', 'TopAbs_EDGE') > 0;
+    const freeShells = free ? freeShellsOf(oc, shape, own) : undefined;
+    const sheetShape = freeShells?.compound;
     for (const sub of ['TopAbs_SHELL', 'TopAbs_FACE', 'TopAbs_EDGE', 'TopAbs_VERTEX'])
-      if (count(sub) !== count(sub, 'TopAbs_SHAPE', solid)) reject('step-not-single-solid', sub);
+      if (
+        count(sub) - (extras ? count(sub, 'TopAbs_SOLID') : 0) !==
+        count(sub, 'TopAbs_SHAPE', solid)
+      )
+        reject('step-not-single-solid', sub);
     const sheet = kind === 'sheet' ? sheetTopology(oc, solid, own) : undefined;
     if (sheet && !sheet.connected) reject('step-multiple-shells', 'faces');
     if (!own(new oc.BRepCheck_Analyzer(solid, true, false)).IsValid_2())
       reject(sheet ? 'step-invalid-sheet' : 'step-invalid-solid');
-    const measuredToleranceMm = own(new oc.ShapeAnalysis_ShapeTolerance()).Tolerance(
-      solid,
-      1,
-      oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
-    );
+    if (sheetShape) {
+      const ex2 = own(
+        new oc.TopExp_Explorer_2(
+          sheetShape,
+          oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+          oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+        ),
+      );
+      for (; ex2.More(); ex2.Next())
+        if (!sheetTopology(oc, own(ex2.Current()), own).connected)
+          reject('step-multiple-shells', 'faces');
+      if (!own(new oc.BRepCheck_Analyzer(sheetShape, true, false)).IsValid_2())
+        reject('step-invalid-sheet');
+    }
+    const toleranceOf = (of: unknown) =>
+      own(new oc.ShapeAnalysis_ShapeTolerance()).Tolerance(of, 1, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+    // #848: each body keeps its own tolerance, so a loose sheet does not limit a precise solid.
+    const solidMeasuredMm = toleranceOf(solid);
+    const sheetMeasuredMm = sheetShape ? toleranceOf(sheetShape) : 0;
+    const measuredToleranceMm = Math.max(solidMeasuredMm, sheetMeasuredMm);
     // #820: the shape is kept with the tolerance it was read with, up to the import limit (no
     // healing). Above the document's result limit its body is placed, never machined.
     if (!(measuredToleranceMm <= cadImportToleranceMm))
       reject('step-tolerance-unsupported', String(measuredToleranceMm));
     const metrics = shapeMetrics(oc, solid, own, !sheet);
     if (!sheet && !(metrics.volumeMm3! > 0)) reject('step-invalid-solid', 'volume');
-    const box = own(new oc.Bnd_Box_1());
-    oc.BRepBndLib.AddOptimal(solid, box, false, false);
-    const [min, max] = [own(box.CornerMin()), own(box.CornerMax())];
-    const bounds: [Vec3, Vec3] = [
-      [min.X(), min.Y(), min.Z()],
-      [max.X(), max.Y(), max.Z()],
-    ];
-    if (bounds.flat().some((v) => !(Math.abs(v) <= cadLimits.coordinateMm)))
+    const boundsOf = (of: unknown): [Vec3, Vec3] => optimalBounds(oc, of, own);
+    const bounds = boundsOf(solid);
+    const sheetBounds = sheetShape ? boundsOf(sheetShape) : undefined;
+    if (
+      [bounds, sheetBounds ?? bounds].flat(2).some((v) => !(Math.abs(v) <= cadLimits.coordinateMm))
+    )
       reject('step-coordinate-range');
-    if (!oc.BRepTools.Write_3(solid, brepPath, own(new oc.Message_ProgressRange_1())))
-      reject('kernel-failure', 'brep-write');
-    const brep = oc.FS.readFile(brepPath) as Uint8Array;
-    if (brep.byteLength > cadLimits.brepBytes) reject('step-too-large', 'brep');
-    // Recorded as written, so the evaluator's check on the read-back body holds.
-    const maxToleranceMm = Math.max(measuredToleranceMm, writtenTolerance(oc, own, brepPath));
-    if (!(maxToleranceMm <= cadImportToleranceMm))
-      reject('step-tolerance-unsupported', String(maxToleranceMm));
+    const write = (of: unknown) => {
+      if (!oc.BRepTools.Write_3(of, brepPath, own(new oc.Message_ProgressRange_1())))
+        reject('kernel-failure', 'brep-write');
+      const written = oc.FS.readFile(brepPath) as Uint8Array;
+      if (written.byteLength > cadLimits.brepBytes) reject('step-too-large', 'brep');
+      // Recorded as written, so the evaluator's check on the read-back body holds.
+      return { written, tolerance: writtenTolerance(oc, own, brepPath) };
+    };
+    const { written: brep, tolerance: brepTolerance } = write(solid);
+    const sheetWritten = sheetShape ? write(sheetShape) : undefined;
+    const maxToleranceMm = Math.max(solidMeasuredMm, brepTolerance);
+    const sheetToleranceMm = sheetWritten ? Math.max(sheetMeasuredMm, sheetWritten.tolerance) : 0;
+    if (!(Math.max(maxToleranceMm, sheetToleranceMm) <= cadImportToleranceMm))
+      reject('step-tolerance-unsupported', String(Math.max(maxToleranceMm, sheetToleranceMm)));
     // Every product of the file holds the one body (a single part has one product).
     const pmi = withPmi
       ? pmiKept(
@@ -642,15 +745,38 @@ export function importStep(
           own,
           scan,
           doc,
-          pmiProducts(oc, own, doc, [{ index: 0, shape: solid }]),
+          pmiProducts(oc, own, doc, [
+            { index: 0, shape: solid },
+            ...(sheetShape ? [{ index: 1, shape: sheetShape }] : []),
+          ]),
           options,
         )
       : undefined;
     const pmiAsset = pmi?.assets.get(0);
+    const sheetPmi = pmi?.assets.get(1);
+    const sheetBody = (): CadSheetEvaluation => {
+      const m = shapeMetrics(oc, sheetShape, own, false);
+      const topology = sheetTopology(oc, sheetShape, own);
+      return {
+        kind: 'sheet',
+        areaMm2: m.areaMm2,
+        bounds: sheetBounds!,
+        centroidMm: m.centroidMm,
+        freeEdges: topology.freeEdges,
+        freeEdgeLengthMm: topology.freeEdgeLengthMm,
+        ...(freeShells!.shells > 1 ? { shells: freeShells!.shells } : {}),
+      };
+    };
+    const assetOf = (b: Uint8Array) => ({
+      sha256: `sha256:${bytesToHex(sha256(b))}`,
+      byteLength: b.byteLength,
+    });
     return {
       status: 'ok',
       brep,
       ...(pmiAsset ? { pmi: pmiAsset.bytes } : {}),
+      ...(sheetWritten ? { sheetBrep: sheetWritten.written } : {}),
+      ...(sheetPmi ? { sheetPmi: sheetPmi.bytes } : {}),
       report: {
         source: {
           sha256: `sha256:${bytesToHex(sha256(bytes))}`,
@@ -681,7 +807,23 @@ export function importStep(
         brep: { sha256: `sha256:${bytesToHex(sha256(brep))}`, byteLength: brep.byteLength },
         healing: 'none',
         // PMI-2: PMI is a loss unless all of it is kept.
-        losses: pmi?.report.lossless ? scan.losses.filter((l) => l !== 'pmi') : scan.losses,
+        losses: [
+          ...(pmi?.report.lossless ? scan.losses.filter((l) => l !== 'pmi') : scan.losses),
+          ...(wireframe ? (['wireframe'] as const) : []),
+        ],
+        ...(sheetWritten
+          ? {
+              sheet: {
+                body: sheetBody(),
+                maxToleranceMm: sheetToleranceMm,
+                faces: freeShells!.faces,
+                brep: assetOf(sheetWritten.written),
+                ...(sheetPmi
+                  ? { pmiAsset: { sha256: sheetPmi.sha256, byteLength: sheetPmi.byteLength } }
+                  : {}),
+              },
+            }
+          : {}),
         ...(pmi ? { pmi: pmi.report } : {}),
         ...(pmiAsset
           ? { pmiAsset: { sha256: pmiAsset.sha256, byteLength: pmiAsset.byteLength } }

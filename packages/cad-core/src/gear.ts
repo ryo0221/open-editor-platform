@@ -9,6 +9,11 @@
  * epicycloid above it, rolled by a circle half the mating gear's pitch radius (so the mating
  * gear's own flanks, made the same way, are radial). A tip that the epicycloids close before the
  * addendum is an ogival point, as watch wheels have.
+ *
+ * DW7a (docs/cad/drawing-editor.md, 動力系): an involute gear can be helical (`helixAngle`: its
+ * transverse tooth, of the normal module and pressure angle, twisted along the axis) or a straight
+ * bevel (`coneAngle`: the back end's tooth scaled toward the cone's apex over the face width along
+ * the pitch cone). Both are shapes to look at and draw from; tooth contact is not analysed.
  */
 import type { Angle, CadFeature, Count, Length, Position3, Quaternion } from './model';
 import { resolveAngle, resolveCount, resolveLength, type ParameterValues } from './graph';
@@ -48,6 +53,16 @@ export interface CadSpurGearArgs {
   /** Bore diameter; 0 mm for none. */
   bore: Length;
   spokes?: CadGearSpokes;
+  /**
+   * DW7a, involute only: the helix angle at the pitch circle, + right hand. `module`,
+   * `pressureAngle`, the coefficients and the shift are then normal ones (as a hob cuts).
+   */
+  helixAngle?: Angle;
+  /**
+   * DW7a, involute only (not with a helix): a straight bevel gear's pitch cone angle. The tooth
+   * is the back end's (at `origin`); `faceWidth` runs along the pitch cone toward the apex.
+   */
+  coneAngle?: Angle;
   /** Gear centre on its back face; the axis is +Z turned by `orientation`. */
   origin: Position3;
   orientation: Quaternion;
@@ -60,6 +75,19 @@ type GearSpecBase = {
   dedendum: number;
   bore: number;
   spokes?: { count: number; rim: number; hub: number; width: number };
+  /**
+   * DW7a: helical. The spec's module, pressure angle, coefficients and shift are then the
+   * transverse ones (so its radii and outline are the transverse section's); `normal` keeps the
+   * given ones, which the ranges apply to.
+   */
+  helix?: {
+    angle: number;
+    normal: Pick<InvoluteGearSpec, 'module' | 'pressureAngle' | 'addendum' | 'dedendum'> & {
+      profileShift: number;
+    };
+  };
+  /** DW7a: a straight bevel's pitch cone angle and face width along the cone (mm). */
+  cone?: { angle: number; faceWidth: number };
 };
 export type InvoluteGearSpec = GearSpecBase & {
   profile?: 'involute';
@@ -89,7 +117,55 @@ export const cadGearLimits = Object.freeze({
   flankPoints: 7,
   /** A tooth tip narrower than this share of the module is refused as pointed. */
   minTipThickness: 0.1,
+  /** DW7a: a helix up to 45° either hand. */
+  helixAngleRad: [-Math.PI / 4, Math.PI / 4] as const,
+  /** DW7a: a bevel's pitch cone angle. */
+  coneAngleRad: [(5 * Math.PI) / 180, (85 * Math.PI) / 180] as const,
+  /** DW7a: a bevel's face width is at most this share of its cone distance. */
+  bevelFace: 1 / 3,
+  /** DW7a: a helical gear's loft has a section at least every this many rad of twist. */
+  helixStepRad: Math.PI / 36,
+  /** DW7a: a helical gear twists at most half a turn over its face (36 sections). */
+  helixMaxTwistRad: Math.PI,
 });
+
+/**
+ * DW7a: a helical gear's transverse spec from its normal one: m_t = m_n / cos β,
+ * tan α_t = tan α_n / cos β, and addendum, dedendum and shift (× module) in transverse modules.
+ */
+export function helicalGear(g: InvoluteGearSpec, angle: number): InvoluteGearSpec {
+  if (!angle) return g;
+  const c = Math.cos(angle);
+  return {
+    ...g,
+    module: g.module / c,
+    pressureAngle: Math.atan(Math.tan(g.pressureAngle) / c),
+    addendum: g.addendum * c,
+    dedendum: g.dedendum * c,
+    profileShift: g.profileShift * c,
+    helix: {
+      angle,
+      normal: {
+        module: g.module,
+        pressureAngle: g.pressureAngle,
+        addendum: g.addendum,
+        dedendum: g.dedendum,
+        profileShift: g.profileShift,
+      },
+    },
+  };
+}
+/** DW7a: a bevel gear's cone distance (apex to the back end's pitch circle) and small-end scale. */
+export function bevelGearCone(g: SpurGearSpec): { distance: number; scale: number } | undefined {
+  if (!g.cone) return undefined;
+  const distance = spurGearRadii(g).pitch / Math.sin(g.cone.angle);
+  return { distance, scale: 1 - g.cone.faceWidth / distance };
+}
+/** DW7a: a helical gear's twist over its face width (rad, + turning counter-clockwise up +Z). */
+export function helicalGearTwist(g: SpurGearSpec, faceWidth: number): number {
+  if (!g.helix) return 0;
+  return (faceWidth * Math.tan(g.helix.angle)) / spurGearRadii(g).pitch;
+}
 
 const inv = (a: number) => Math.tan(a) - a;
 
@@ -117,12 +193,23 @@ export function resolveSpurGear(a: CadSpurGearArgs, params: ParameterValues): Sp
         matingTeeth: resolveCount(a.matingTeeth!, params),
         toothThickness: a.toothThickness!,
       }
-    : {
-        ...common,
-        profile: 'involute',
-        pressureAngle: resolveAngle(a.pressureAngle!, params),
-        profileShift: a.profileShift!,
-      };
+    : withCone(
+        helicalGear(
+          {
+            ...common,
+            profile: 'involute',
+            pressureAngle: resolveAngle(a.pressureAngle!, params),
+            profileShift: a.profileShift!,
+          },
+          a.helixAngle ? resolveAngle(a.helixAngle, params) : 0,
+        ),
+        a.coneAngle ? resolveAngle(a.coneAngle, params) : 0,
+        resolveLength(a.faceWidth, params),
+      );
+}
+/** DW7a: the spec as a bevel gear's, with a cone angle. */
+export function withCone(g: InvoluteGearSpec, angle: number, faceWidth: number): InvoluteGearSpec {
+  return angle ? { ...g, cone: { angle, faceWidth } } : g;
 }
 
 const shiftOf = (g: SpurGearSpec) => (g.profile === 'cycloidal' ? 0 : g.profileShift);
@@ -201,36 +288,51 @@ export function spurGearFlankEnd(g: SpurGearSpec): { radius: number; pointed: bo
 export function spurGearProblem(g: SpurGearSpec): { code: string; path: string } | undefined {
   const L = cadGearLimits;
   const within = (v: number, [lo, hi]: readonly [number, number]) => v >= lo && v <= hi;
-  if (!within(g.module, L.moduleMm)) return { code: 'gear-module', path: 'module' };
+  const cycloidal = g.profile === 'cycloidal';
+  // A helical gear's ranges are its normal values' (as given).
+  const n = (!cycloidal && g.helix?.normal) || g;
+  if (!within(n.module, L.moduleMm)) return { code: 'gear-module', path: 'module' };
   if (!Number.isInteger(g.teeth) || !within(g.teeth, L.teeth))
     return { code: 'gear-teeth', path: 'teeth' };
-  const cycloidal = g.profile === 'cycloidal';
   if (cycloidal) {
     if (!Number.isInteger(g.matingTeeth) || !within(g.matingTeeth, L.teeth))
       return { code: 'gear-mating-teeth', path: 'matingTeeth' };
     if (!Number.isFinite(g.toothThickness) || !within(g.toothThickness, L.toothThickness))
       return { code: 'gear-tooth-thickness', path: 'toothThickness' };
   } else {
-    if (!within(g.pressureAngle, L.pressureAngleRad))
+    const nv = g.helix?.normal ?? g;
+    if (!within(nv.pressureAngle, L.pressureAngleRad))
       return { code: 'gear-pressure-angle', path: 'pressureAngle' };
-    if (!Number.isFinite(g.profileShift) || !within(g.profileShift, L.profileShift))
+    if (!Number.isFinite(nv.profileShift) || !within(nv.profileShift, L.profileShift))
       return { code: 'gear-profile-shift', path: 'profileShift' };
   }
+  if (g.helix) {
+    if (!(Math.abs(g.helix.angle) > 0) || !within(g.helix.angle, L.helixAngleRad))
+      return { code: 'gear-helix-angle', path: 'helixAngle' };
+    if (cycloidal) return { code: 'gear-helix-angle', path: 'helixAngle' };
+    if (g.cone) return { code: 'gear-bevel-helix', path: 'coneAngle' };
+  }
+  if (g.cone) {
+    if (cycloidal || !within(g.cone.angle, L.coneAngleRad))
+      return { code: 'gear-cone-angle', path: 'coneAngle' };
+  }
   if (
-    !Number.isFinite(g.addendum) ||
-    !within(g.addendum, cycloidal ? L.cycloidalAddendum : L.addendum)
+    !Number.isFinite(n.addendum) ||
+    !within(n.addendum, cycloidal ? L.cycloidalAddendum : L.addendum)
   )
     return { code: 'gear-addendum', path: 'addendum' };
   if (
-    !Number.isFinite(g.dedendum) ||
-    !within(g.dedendum, cycloidal ? L.cycloidalDedendum : L.dedendum)
+    !Number.isFinite(n.dedendum) ||
+    !within(n.dedendum, cycloidal ? L.cycloidalDedendum : L.dedendum)
   )
     return { code: 'gear-dedendum', path: 'dedendum' };
   if (!cycloidal) {
     if (g.dedendum <= g.addendum) return { code: 'gear-dedendum', path: 'dedendum' };
     // A rack cutter undercuts the root below this many teeth (with the addendum it cuts with).
     const sin = Math.sin(g.pressureAngle);
-    if (g.teeth < (2 * (g.addendum - g.profileShift)) / (sin * sin))
+    // A bevel gear's tooth is that of its back cone's virtual gear (Tredgold): z / cos δ teeth.
+    const virtual = g.cone ? g.teeth / Math.cos(g.cone.angle) : g.teeth;
+    if (virtual < (2 * (g.addendum - g.profileShift)) / (sin * sin))
       return { code: 'gear-undercut', path: 'teeth' };
   }
   const { base, tip, root } = spurGearRadii(g);
@@ -241,8 +343,15 @@ export function spurGearProblem(g: SpurGearSpec): { code: string; path: string }
   if (spurGearHalfAngle(g, Math.max(root, base)) >= Math.PI / g.teeth)
     return { code: 'gear-root', path: cycloidal ? 'toothThickness' : 'dedendum' };
   if (!(g.bore >= 0)) return { code: 'gear-bore', path: 'bore' };
+  // A twisted or tapered body is lofted whole and bored after: no spoke windows (DW7a).
+  if ((g.helix || g.cone) && g.spokes) return { code: 'gear-spokes', path: 'spokes' };
+  const cone = bevelGearCone(g);
+  if (cone && g.cone!.faceWidth > L.bevelFace * cone.distance)
+    return { code: 'gear-face-width', path: 'faceWidth' };
+  // A bevel's small end is the back end scaled: the bore must clear its root there.
+  const k = cone?.scale ?? 1;
   if (!g.spokes) {
-    if (g.bore / 2 >= root - g.module) return { code: 'gear-bore', path: 'bore' };
+    if (g.bore / 2 >= (root - g.module) * k) return { code: 'gear-bore', path: 'bore' };
     return;
   }
   const s = g.spokes;

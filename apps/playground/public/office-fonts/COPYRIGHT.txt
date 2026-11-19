@@ -2,6 +2,9 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: noto-cjk
 Upstream-Contact: https://github.com/notofonts/noto-cjk/issues
 Source: https://github.com/notofonts/noto-cjk
+Comment: The four extracted font files have a font-specific notice below the
+ historical Files: * paragraph. The original Debian package metadata is retained
+ for provenance.
 Files-Excluded:
  .gitattributes
  .gitignore
@@ -213,6 +216,16 @@ Files-Excluded:
 Files: *
 Copyright: 2010-2012, Google Corporation
 License: SIL-1.1
+
+Files: NotoSansCJKjp-Regular.otf
+ NotoSansCJKjp-Bold.otf
+ NotoSansMonoCJKjp-Regular.otf
+ NotoSansMonoCJKjp-Bold.otf
+Copyright: © 2014-2021 Adobe (http://www.adobe.com/).
+License: SIL-1.1
+Comment: This is the copyright notice retained in the name tables of all four
+ pinned Sans 2.004 faces. The upstream release license is available at
+ https://github.com/notofonts/noto-cjk/blob/523d033d6cb47f4a80c58a35753646f5c3608a78/LICENSE
 
 Files: debian/*
 Copyright: 2013, Vasudev Kamath <kamathvasudev@gmail.com>

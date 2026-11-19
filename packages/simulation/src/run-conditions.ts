@@ -122,7 +122,14 @@ export function solidLoadInput(
 ): LoadInput {
   const { faceAreas, faceVectorAreas, edgeLengths } = measures;
   return loads.flatMap((l, i): LoadInput => {
-    if (l.kind === 'gravity' || l.kind === 'heat-flux' || l.kind === 'convection') return [];
+    if (
+      l.kind === 'gravity' ||
+      l.kind === 'heat-flux' ||
+      l.kind === 'convection' ||
+      l.kind === 'radiation' ||
+      l.kind === 'enclosure'
+    )
+      return [];
     const applied = checks[i]!;
     const faces = of(l.id, 'face');
     const edges = of(l.id, 'edge');

@@ -8,3 +8,6 @@ export * from './wind-tunnel';
 export * from './wind-tunnel-job';
 export * from './gpu-flow';
 export * from './openfoam';
+export * from './triangle-grid';
+export * from './seal';
+export * from './shower';

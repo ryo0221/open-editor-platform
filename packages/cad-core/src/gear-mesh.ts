@@ -7,7 +7,13 @@
  * joints' solved frames; a mesh that does not check is listed and never corrected silently.
  */
 import { composePoses, rotateVector, type CadPartLookup, type CadSolvedPose } from './assembly';
-import { resolveSpurGear, spurGearFlankEnd, spurGearRadii, type SpurGearSpec } from './gear';
+import {
+  bevelGearCone,
+  resolveSpurGear,
+  spurGearFlankEnd,
+  spurGearRadii,
+  type SpurGearSpec,
+} from './gear';
 import { parameterValues, resolveLength, resolvePosition } from './graph';
 import {
   coupledJointValues,
@@ -67,6 +73,15 @@ export type CadGearMeshProblemCode =
   | 'gear-mesh-module'
   | 'gear-mesh-profile'
   | 'gear-mesh-pressure-angle'
+  /** DW7a: helical gears on parallel axes mesh at the same helix angle, of opposite hands. */
+  | 'gear-mesh-helix'
+  /** DW7b: a bevel gear meshes only with a bevel gear (and a spur or helical not with one). */
+  | 'gear-mesh-bevel'
+  /** DW7b: the bevel gears' cone apexes are not at one point. */
+  | 'gear-mesh-apex'
+  /** DW7b: the pitch cones do not roll on each other (angles or cone distances differ). */
+  | 'gear-mesh-cone'
+  | 'gear-mesh-shift'
   /** The centre distance is not the gears' standard one (with their profile shifts). */
   | 'gear-mesh-distance'
   /** The faces do not overlap along the axis. */
@@ -278,7 +293,14 @@ export function checkGearMesh(
     if (norm(cross(g.axis, g.jointAxis)) > sinTol || offAxis > tol.axisMm)
       problems.push({ code: 'gear-mesh-off-axis', side });
   }
+  if (!a.spec.cone !== !b.spec.cone) {
+    problems.push({ code: 'gear-mesh-bevel' });
+    return { status: 'problem', problems };
+  }
+  if (a.spec.cone && b.spec.cone) return checkBevelMesh(doc, mesh, a, b, problems);
   if (norm(cross(a.axis, b.axis)) > sinTol) problems.push({ code: 'gear-mesh-axes' });
+  if (Math.abs((a.spec.helix?.angle ?? 0) + (b.spec.helix?.angle ?? 0)) > 1e-9)
+    problems.push({ code: 'gear-mesh-helix' });
   if (Math.abs(a.spec.module - b.spec.module) > 1e-9 * a.spec.module)
     problems.push({ code: 'gear-mesh-module' });
   if ((a.spec.profile ?? 'involute') !== (b.spec.profile ?? 'involute'))
@@ -338,12 +360,89 @@ export function checkGearMesh(
   const tooth = (g: PlacedGear) => {
     // A gear facing the other way measures its teeth the other way round.
     const t = across(g.tooth, n);
-    return angleAbout(u, unit(t), n);
+    // DW7b: a helical tooth, where the driver's back face cuts it (it turns tan β / r per mm
+    // along its own axis, the same about `n` whichever way it faces).
+    const twist = g.spec.helix
+      ? (Math.tan(g.spec.helix.angle) / spurGearRadii(g.spec).pitch) *
+        dot(sub(a.centre, g.centre), n)
+      : 0;
+    return angleAbout(u, unit(t), n) + twist;
   };
   const pitchB = (2 * Math.PI) / zb;
   // When a tooth of the driver lies on the line of centres, a gap of the driven faces it.
   const want = Math.PI + pitchB / 2 - (za / zb) * tooth(a);
   const turn = wrap(want - tooth(b), pitchB);
+  const values = coupledJointValues(doc, parameterValues(doc));
+  const driver = values.get(mesh.driver.joint)?.angle ?? 0;
+  const driven = values.get(mesh.driven.joint)?.angle ?? 0;
+  const offset = driven + turn * senseB - ratio * driver;
+  return {
+    status: 'ok',
+    coupling: { of: 'angle', from: { joint: mesh.driver.joint, of: 'angle' }, ratio, offset },
+    pitch: pitchB,
+  };
+}
+
+/**
+ * DW7b: a pair of straight bevel gears, each axis pointing from its back face to its cone's apex.
+ * They mesh when the apexes are one point, the axes meet at the sum of the pitch cone angles and
+ * the cone distances agree (the pitch cones roll on each other), and their profile shifts cancel. Turning about its own axis, the
+ * driven gear turns by −z(driver)/z(driven) of the driver (as the cones roll); tooth 0 of each is
+ * measured about its axis from the side the other gear's axis leans away from (the pitch point).
+ */
+function checkBevelMesh(
+  doc: CadDocument,
+  mesh: Pick<CadGearMesh, 'driver' | 'driven'>,
+  a: PlacedGear,
+  b: PlacedGear,
+  problems: CadGearMeshProblem[],
+): CadGearMeshCheck {
+  const tol = cadGearMeshTolerance;
+  if (Math.abs(a.spec.module - b.spec.module) > 1e-9 * a.spec.module)
+    problems.push({ code: 'gear-mesh-module' });
+  if (
+    a.spec.profile !== 'cycloidal' &&
+    b.spec.profile !== 'cycloidal' &&
+    Math.abs(a.spec.pressureAngle - b.spec.pressureAngle) > 1e-9
+  )
+    problems.push({ code: 'gear-mesh-pressure-angle' });
+  const apex = (g: PlacedGear) => {
+    const r = spurGearRadii(g.spec).pitch;
+    return [0, 1, 2].map(
+      (i) => g.centre[i]! + g.axis[i]! * (r / Math.tan(g.spec.cone!.angle)),
+    ) as V;
+  };
+  const gap = norm(sub(apex(a), apex(b)));
+  if (gap > tol.distanceMm)
+    problems.push({
+      code: 'gear-mesh-apex',
+      distanceMm: Math.round(gap * 1e6) / 1e6,
+      expectedMm: 0,
+    });
+  const shaft = Math.acos(Math.max(-1, Math.min(1, dot(a.axis, b.axis))));
+  const coneDistance = (g: PlacedGear) => bevelGearCone(g.spec)!.distance;
+  if (
+    Math.abs(a.spec.cone!.angle + b.spec.cone!.angle - shaft) > tol.angleRad ||
+    Math.abs(coneDistance(a) - coneDistance(b)) > tol.distanceMm
+  )
+    problems.push({ code: 'gear-mesh-cone' });
+  // The pitch cones are fixed (no working cone of their own), so the shifts must cancel: one
+  // gear's teeth thickened as much as the other's are thinned (a high–low pair, x₁ + x₂ = 0).
+  const shift = (g: PlacedGear) => (g.spec.profile === 'cycloidal' ? 0 : g.spec.profileShift);
+  if (Math.abs(shift(a) + shift(b)) > 1e-9) problems.push({ code: 'gear-mesh-shift' });
+  if (problems.length) return { status: 'problem', problems };
+  const za = a.spec.teeth;
+  const zb = b.spec.teeth;
+  const senseA = Math.sign(dot(a.jointAxis, a.axis));
+  const senseB = Math.sign(dot(b.jointAxis, b.axis));
+  const ratio = (-za / zb) * senseA * senseB;
+  // Toward the pitch point: away from the other axis, square to its own.
+  const tooth = (g: PlacedGear, other: PlacedGear) =>
+    angleAbout(unit(across(scale(other.axis, -1), g.axis)), unit(across(g.tooth, g.axis)), g.axis);
+  const pitchB = (2 * Math.PI) / zb;
+  // A tooth of the driver at the pitch point faces a gap of the driven one there.
+  const want = pitchB / 2 - (za / zb) * tooth(a, b);
+  const turn = wrap(want - tooth(b, a), pitchB);
   const values = coupledJointValues(doc, parameterValues(doc));
   const driver = values.get(mesh.driver.joint)?.angle ?? 0;
   const driven = values.get(mesh.driven.joint)?.angle ?? 0;

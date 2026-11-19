@@ -28,6 +28,16 @@ const computeModule = fileURLToPath(
 const cfdModule = fileURLToPath(
   new URL('../../packages/geometry-cfd/src/index.ts', import.meta.url),
 );
+// VS8a (docs/cad/vehicle-simulation.md, VS8・VS-U4): crash jobs (`kind: 'crash'`) run the same
+// TypeScript explicit solver as the browser, in a Node process of their own (bundled from
+// `crash-host-run.ts` when the first one comes), in the same queue. The job is checked by
+// `checkCrashJob` here and again in that process.
+const crashJobModule = fileURLToPath(
+  new URL('../../packages/geometry-fem/src/crash-job.ts', import.meta.url),
+);
+const crashRunEntry = fileURLToPath(
+  new URL('../../packages/geometry-fem/src/crash-host-run.ts', import.meta.url),
+);
 
 /**
  * `openfoam-<version>` of the OpenFOAM a shell file activates (`OPENFOAM_BASHRC`, else the Ubuntu
@@ -88,6 +98,9 @@ export function createSimulationJobs({
   // VS3b: `{ prepare(value) → { files, commands, timeoutMs }, read(dir) → result, bashrc }`;
   // without it an `aero` job is refused.
   aero,
+  // VS8a: `{ prepare(value) → { text }, runner() → path of the bundled run, timeoutMs }`; without
+  // it a `crash` job is refused.
+  crash,
   command = 'ccx',
   limits,
   timeoutMs = 10 * 60_000,
@@ -183,8 +196,77 @@ export function createSimulationJobs({
       finish(job, 'failed', String(e?.message ?? e).slice(0, 500));
     }
   };
+  const runCrash = async (job) => {
+    job.state = 'running';
+    job.phase = 'writing';
+    try {
+      const runner = await crash.runner();
+      job.dir = await mkdtemp(path.join(tmpdir(), 'simulation-crash-'));
+      if (job.state === 'cancelled') return await cleanup(job);
+      await writeFile(path.join(job.dir, 'job.json'), job.text);
+      job.text = null;
+      if (job.state === 'cancelled') return await cleanup(job);
+      job.phase = 'solving';
+      const out = await new Promise((resolve) => {
+        const child = spawn(process.execPath, [runner, job.dir], {
+          cwd: job.dir,
+          env: { PATH: process.env.PATH },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        job.child = child;
+        let line = '';
+        let error = '';
+        let tail = '';
+        child.stdout.on('data', (c) => {
+          line += c.toString('utf8');
+          let k;
+          while ((k = line.indexOf('\n')) >= 0) {
+            const one = line.slice(0, k);
+            line = line.slice(k + 1);
+            const p = /^progress (\S+) (\S+)$/.exec(one);
+            if (p) job.phase = `solving ${Number(p[1])} of ${Number(p[2])} s`;
+            else if (one.startsWith('error ')) error = one.slice(6);
+          }
+        });
+        child.stderr.on('data', (c) => (tail = (tail + c.toString('utf8')).slice(-2000)));
+        const timer = setTimeout(() => {
+          error = 'the crash run took longer than the Host allows';
+          child.kill('SIGKILL');
+        }, crash.timeoutMs ?? timeoutMs);
+        child.on('error', (e) => {
+          clearTimeout(timer);
+          resolve({ code: -1, error: String(e) });
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          resolve({ code, error: error || tail.trim().split('\n').at(-1) || '' });
+        });
+      });
+      job.child = null;
+      if (job.state === 'cancelled') return await cleanup(job);
+      if (out.code !== 0)
+        return finish(
+          job,
+          'failed',
+          (out.error || `the crash run exited ${out.code}`).slice(0, 500),
+        );
+      const size = await stat(path.join(job.dir, 'result.json')).then(
+        (s) => s.size,
+        () => -1,
+      );
+      if (size < 0) return finish(job, 'failed', 'the crash run left no result');
+      if (size > resultBytes) return finish(job, 'failed', 'the result is too large');
+      job.phase = 'done';
+      finish(job, 'done');
+    } catch (e) {
+      job.child = null;
+      if (job.state === 'cancelled') return await cleanup(job);
+      finish(job, 'failed', String(e?.message ?? e).slice(0, 500));
+    }
+  };
   const run = async (job) => {
     if (job.kind === 'aero') return runAero(job);
+    if (job.kind === 'crash') return runCrash(job);
     job.state = 'running';
     job.phase = 'writing';
     try {
@@ -275,6 +357,7 @@ export function createSimulationJobs({
         });
         let inp;
         let prepared;
+        let kind = 'calculix';
         try {
           let value;
           try {
@@ -286,6 +369,11 @@ export function createSimulationJobs({
             if (value?.kind === 'aero') {
               if (!aero) return json(res, 400, { error: 'this Host has no wind tunnel' });
               prepared = await aero.prepare(value);
+              kind = 'aero';
+            } else if (value?.kind === 'crash') {
+              if (!crash) return json(res, 400, { error: 'this Host runs no crash studies' });
+              prepared = await crash.prepare(value);
+              kind = 'crash';
             } else ({ inp } = await toInp(value));
           } catch (e) {
             return json(res, 400, { error: String(e?.message ?? e).slice(0, 500) });
@@ -297,12 +385,13 @@ export function createSimulationJobs({
         const key = randomUUID();
         jobs.set(key, {
           key,
-          kind: prepared ? 'aero' : 'calculix',
+          kind,
           state: 'queued',
           phase: 'queued',
           created: now(),
           inp,
-          prepared,
+          prepared: kind === 'aero' ? prepared : undefined,
+          text: kind === 'crash' ? prepared.text : undefined,
           dir: null,
         });
         next();
@@ -325,7 +414,7 @@ export function createSimulationJobs({
       }
       if (parts.length === 3 && parts[2] === 'result' && req.method === 'GET') {
         if (job.state !== 'done' || !job.dir) return json(res, 409, { error: job.state });
-        const aeroJob = job.kind === 'aero';
+        const aeroJob = job.kind === 'aero' || job.kind === 'crash';
         const text = await readFile(
           path.join(job.dir, aeroJob ? 'result.json' : 'job.frd'),
           'utf8',
@@ -380,6 +469,8 @@ export function simulationReferenceHost({
             endpoint,
             // VS3b: the wind tunnel, when an OpenFOAM is there (aeroLimits in openfoam.ts).
             ...(aeroBuild ? { aero: { solverBuild: aeroBuild } } : {}),
+            // VS8a: crash runs on the explicit solver in Node.
+            crash: { solverBuild: `geometry-fem-node-${process.versions.node}` },
           }
         : null;
     },
@@ -396,6 +487,7 @@ export function simulationReferenceHost({
         ...(descriptor.aero
           ? { aero: referenceAero((m) => server.ssrLoadModule(m), openFoamBashrc) }
           : {}),
+        crash: referenceCrash((m) => server.ssrLoadModule(m)),
       });
       server.middlewares.use((req, res, next) => void jobs.handle(req, res, next));
       server.httpServer?.on('close', () => void jobs.close());
@@ -430,5 +522,41 @@ export function referenceAero(load, bashrc) {
         ...cfd.parseSurfaceSample(out.pressure, out.shear, speed),
       };
     },
+  };
+}
+
+/**
+ * VS8a: the crash runs of the reference Host: a job checked by `checkCrashJob` (loaded through
+ * `load`), run by `crash-host-run.ts` bundled once with esbuild into a temporary folder.
+ */
+export function referenceCrash(load) {
+  let bundled = null;
+  return {
+    // VS8c-2: a whole car (F101, 70,000 shells, 100,000 steps) takes three hours here, more beside other runs.
+    timeoutMs: 8 * 60 * 60_000,
+    prepare: async (value) => {
+      const m = await load(crashJobModule);
+      m.checkCrashJob(value);
+      return { text: JSON.stringify(value) };
+    },
+    runner: () =>
+      (bundled ??= (async () => {
+        const { build } = await import('esbuild');
+        const dir = await mkdtemp(path.join(tmpdir(), 'simulation-crash-run-'));
+        const outfile = path.join(dir, 'crash-run.mjs');
+        await build({
+          entryPoints: [crashRunEntry],
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          target: 'node20',
+          outfile,
+          logLevel: 'silent',
+        });
+        return outfile;
+      })().catch((e) => {
+        bundled = null;
+        throw e;
+      })),
   };
 }

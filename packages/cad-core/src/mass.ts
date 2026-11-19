@@ -10,6 +10,7 @@ import {
   occurrenceAccess,
   rotateVector,
   type CadPartLookup,
+  type CadPartMaterial,
   type CadSolvedPose,
 } from './assembly';
 import type { CadBodyEvaluation } from './coordinator';
@@ -61,14 +62,20 @@ export interface CadMassResult {
 /** kg per (kg/m³ × mm³). */
 const perMm3 = 1e-9;
 
-/** One body's mass and centre in its own document, or why it has none. */
+/**
+ * One body's mass and centre in its own document, or why it has none. PD2: a body without a mass
+ * of its own takes the density of its document's material (`partProperties.material`); a sheet
+ * still needs a thickness of its own.
+ */
 export function bodyMass(
   body: CadBody,
   evaluation: CadBodyEvaluation | undefined,
+  material?: CadPartMaterial,
 ): { massKg: number; centroidMm: Vec3 } | { code: CadMassGap } {
-  if (!body.mass) return { code: 'mass-missing' };
+  const mass = body.mass ?? (material ? { densityKgM3: material.densityKgM3 } : undefined);
+  if (!mass) return { code: 'mass-missing' };
   if (!evaluation?.centroidMm) return { code: 'mass-not-evaluated' };
-  const { densityKgM3, thicknessMm } = body.mass;
+  const { densityKgM3, thicknessMm } = mass;
   if (evaluation.kind === 'sheet') {
     if (thicknessMm === undefined) return { code: 'mass-thickness-missing' };
     return {
@@ -119,7 +126,7 @@ export function cadMass(
   ) => {
     for (const body of content.bodies) {
       if (body.state !== 'active') continue;
-      const m = bodyMass(body, bodies?.[body.id]);
+      const m = bodyMass(body, bodies?.[body.id], content.partProperties.material);
       const base = { path, bodyId: body.id, name: body.name };
       if ('code' in m) leftOut.push({ ...base, code: m.code });
       else

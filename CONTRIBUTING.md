@@ -1,10 +1,10 @@
 # Contributing
 
-This repository has independent public Git history and receives reviewed source snapshots.
-Issues and improvement PRs are welcome. Maintainers reconcile shared-code changes in the
-canonical development source before synchronizing them here; direct edits to generated
-files are detected and must be reconciled before a later synchronization can proceed.
-Public documentation is maintained through the same export configuration.
+This repository is the canonical public development source. Open new issues and
+reviewed pull requests here. Follow [development and releases](DEVELOPMENT.md) for
+branch roles, dependencies, validation and release promotion. Keep confidential
+reports, credentials, personal information and private repository references out
+of public issues, drafts and branches.
 
 Use the [documentation index](docs/README.md) and
 [writing policy](docs/documentation-guide.md) to select the update location.
@@ -25,15 +25,15 @@ shared editing, format fidelity or performance from a local-only demonstration.
 For documentation-only changes, verify references, formatting and snapshot inclusion;
 application tests are required when behavior or API changes warrant them.
 
-The `.open-editor-export.json` file records the generated file set, modes and content
-hashes. It contains no private source revision or Git author metadata. Maintainers keep
-the private source-to-public revision correspondence separately. Synchronization uses
-ordinary review PRs, including deletions; it never merges the private Git history or
-rewrites the public main branch.
+The historical `.open-editor-export.json` records the final imported snapshot,
+not changes made by normal development after the cutover. Do not regenerate it for
+ordinary PRs. The old snapshot synchronization path is retired and must not
+overwrite public changes. Existing public commits, tags and release assets remain
+unchanged.
 
 ## Licensing and contributions
 
-The planned public source license is GNU AGPLv3-only, with an optional
+The public source license is GNU AGPLv3-only, with an optional
 **separate commercial/OEM license** for users requiring rights beyond AGPL.
 AGPL allows fee-based software and SaaS when its terms are met. Earlier MIT
 grants remain valid for copies lawfully received under MIT.

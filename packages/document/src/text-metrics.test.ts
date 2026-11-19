@@ -22,7 +22,12 @@ it('matches whole-text counts for paragraphs, tables, Japanese and empty blocks'
   const expected = [...new Intl.Segmenter(undefined, { granularity: 'word' }).segment(text)].filter(
     (s) => s.isWordLike,
   ).length;
-  expect(createDocumentTextMetrics()(blocks)).toEqual({ words: expected, characters: text.length });
+  expect(createDocumentTextMetrics()(blocks)).toEqual({
+    words: expected,
+    characters: text.length,
+    cjkCharacters: [...text.matchAll(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu)]
+      .length,
+  });
 });
 it('segments only changed owned blocks while observing mutable edits', () => {
   const segment = vi.spyOn(Intl.Segmenter.prototype, 'segment');
@@ -46,4 +51,11 @@ it('segments only changed owned blocks while observing mutable edits', () => {
   } finally {
     segment.mockRestore();
   }
+});
+it('counts Japanese characters so the status shows characters instead of words', () => {
+  const metrics = createDocumentTextMetrics()([
+    { id: 'a', type: 'paragraph', text: '放課後の部室で、ねむが寝ている。' },
+  ]);
+  expect(metrics.cjkCharacters).toBe(14);
+  expect(metrics.cjkCharacters * 2).toBeGreaterThan(metrics.characters);
 });

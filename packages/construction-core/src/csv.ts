@@ -73,6 +73,7 @@ export const constructionCsvColumns = [
   'actual_start',
   'actual_finish',
   'percent',
+  'raise_mm',
 ] as const;
 
 export interface ConstructionCsvResult {
@@ -85,9 +86,10 @@ export interface ConstructionCsvResult {
  * Reads tasks from CSV text with a header row (column order free, names as in
  * `constructionCsvColumns`, case ignored):
  * - `predecessors`: task IDs separated by `;`, each optionally with a lag in working days in brackets, `t1;t2(3);t4(-1)`
- * - `action`: `construct` (default), `remove` or `temporary`
+ * - `action`: `construct` (default), `remove`, `temporary` or `raise`
  * - `elements`: BIM element IDs separated by `;`
  * - `actual_start`, `actual_finish` (YYYY-MM-DD) and `percent` (0–100): progress typed in on site
+ * - `raise_mm`: how far a `raise` task lifts its elements (TT2)
  * The tasks are checked as a document would check them only when they replace a document's tasks.
  */
 export function readConstructionCsv(text: string): ConstructionCsvResult {
@@ -158,6 +160,9 @@ export function readConstructionCsv(text: string): ConstructionCsvResult {
         bad(line, 'percent', `percent "${percent}" is not a number`);
       actual.percent = Number(percent);
     }
+    const raise = get('raise_mm');
+    if (raise && !/^\d+(\.\d+)?$/.test(raise))
+      bad(line, 'raise', `raise_mm "${raise}" is not a number`);
     return {
       id: get('id'),
       name: get('name'),
@@ -166,6 +171,7 @@ export function readConstructionCsv(text: string): ConstructionCsvResult {
       action,
       elementIds: list(get('elements')),
       ...(Object.keys(actual).length ? { actual } : {}),
+      ...(raise ? { raiseMm: Number(raise) } : {}),
     };
   });
   return { tasks, diagnostics };
@@ -194,6 +200,7 @@ export function writeConstructionCsv(tasks: readonly ConstructionTask[]): string
         t.actual?.start ?? '',
         t.actual?.finish ?? '',
         t.actual?.percent === undefined ? '' : String(t.actual.percent),
+        t.raiseMm === undefined ? '' : String(t.raiseMm),
       ]
         .map(q)
         .join(','),

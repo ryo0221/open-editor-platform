@@ -177,8 +177,8 @@ export function createCadBinding(options: CadBindingOptions): CadBinding {
     exportBrep: (request) => port.exportBrep(request),
     renderMeshes: (request, quality) => port.renderMeshes(request, quality),
     cancelRender: (requestId) => port.cancel(requestId),
-    exportAssemblyStep: (profile, requestId, plan, breps) =>
-      port.exportAssemblyStep(profile, requestId, plan, breps),
+    exportAssemblyStep: (profile, requestId, plan, breps, pmi) =>
+      port.exportAssemblyStep(profile, requestId, plan, breps, pmi),
     importStepAssembly: (profile, requestId, bytes, options) =>
       port.importStepAssembly(profile, requestId, bytes, options),
     ...(options.parts ? { store: options.parts } : {}),

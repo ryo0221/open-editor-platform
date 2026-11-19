@@ -516,6 +516,7 @@ describe.skipIf(!dist)(
           targets2?: { instance: number; part: string; centroid: number[] }[];
         }[];
         datums: { kind: 'datum'; name: string; targets: unknown[] }[];
+        presentation: Record<string, number[]>;
       };
       // F43's distance across two parts is still not kept (no path): refused unless agreed.
       const refused = importStepAssembly(oc, file, buildHash);
@@ -544,9 +545,37 @@ describe.skipIf(!dist)(
           ['datum-system', 2, 2],
         ]),
       );
-      expect(report.complete).toBe(true);
+      // PMI-5b-2 (TS-1443): the callouts in the assembly's frame are read with the items they
+      // present; the block's flatness callout is listed only in the block part's frame, not the
+      // item's, so it is not read (never placed by guess) and the file is not complete.
+      expect(rows('presentation')).toEqual([
+        ['callout', 3, 2],
+        ['annotation', 4, 3],
+      ]);
+      expect(report.kept.callout).toBe(2);
+      expect(report.complete).toBe(false);
       expect(report.lossless).toBe(false);
       const asset = result.read.assemblyPmi!;
+      const lines = Object.fromEntries(
+        asset.items.flatMap((i) =>
+          i.presentation
+            ? [
+                [
+                  `${'type' in i ? i.type : i.kind} ${i.kind === 'dimension' ? i.values[0] : i.kind === 'geometric-tolerance' ? i.value : ''}`,
+                  i.presentation.segments,
+                ],
+              ]
+            : [],
+        ),
+      );
+      expect(lines).toEqual(expected.presentation);
+      expect(
+        asset.items.find((i) => 'value' in i && i.value === 0.04)?.presentation?.plane,
+      ).toEqual({
+        origin: [40, 85, 15],
+        z: [0, -1, 0],
+        x: [1, 0, 0],
+      });
       expect(asset.items.map((i) => i.kind)).toEqual([
         'datum',
         'geometric-tolerance',

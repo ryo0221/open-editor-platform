@@ -3,7 +3,9 @@ import { f87OfficeCranes, type Crane } from '@editor-platform/construction-core'
 import {
   beamBox,
   craneSolid,
+  formatClimbs,
   formatLoadChart,
+  parseClimbs,
   formatTonnes,
   nextLiftId,
   parseLoadChart,
@@ -91,6 +93,23 @@ describe('CS3b crane view and forms (ST-546, TS-2078)', () => {
     expect(formatLoadChart(chart)).toBe('25000, 10000\n50000, 5000');
     expect(parseLoadChart('25000,10000; 50000 5000')).toEqual(chart);
     expect(parseLoadChart('far, 1')).toBe('"far, 1" is not "radius, kg"');
+    // TT1: climbs, one a line, supports after the heights.
+    const climbs = [
+      { taskId: 'col-3', baseZ: 8000, height: 22000, supportIds: ['s-3', 's-3b'] },
+      { taskId: 'col-5', baseZ: 0, height: 30000 },
+    ];
+    expect(formatClimbs(climbs)).toBe('col-3, 8000, 22000, s-3, s-3b\ncol-5, 0, 30000');
+    expect(parseClimbs(formatClimbs(climbs) + '\n\n')).toEqual(climbs);
+    expect(parseClimbs('col-3, high, 1')).toBe(
+      '"col-3, high, 1" is not "task, base height mm, height mm[, support …]"',
+    );
+    expect(parseClimbs('col-3, 0, 1, ')).toMatch(/is not/);
+    // IDs with commas or quotes are quoted, and read back the same.
+    const odd = [{ taskId: 'col,3', baseZ: 0, height: 1, supportIds: ['slab,3', 'a "b"', ' s '] }];
+    expect(formatClimbs(odd)).toBe('"col,3", 0, 1, "slab,3", "a ""b""", " s "');
+    expect(parseClimbs(formatClimbs(odd))).toEqual(odd);
+    expect(parseClimbs('"col-3, 0, 1')).toMatch(/is not/);
+    expect(parseClimbs('col"3, 0, 1')).toMatch(/is not/);
     expect(parsePoint3(' 52000, 11000 , 1000 ')).toEqual([52000, 11000, 1000]);
     expect(parsePoint3('1, 2')).toBe('"1, 2" is not "x, y, z" in mm');
     expect(formatTonnes(3456)).toBe('3.5 t');

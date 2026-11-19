@@ -3,10 +3,15 @@ import {
   earthworkVolumes,
   f85OfficeSchedule,
   f86OfficeSite,
+  f87Building,
   f87OfficeCranes,
+  f160ClimbingCrane,
+  f161RaisedRoof,
   f88Building,
   f88OfficeFrame,
   f89OfficeTraffic,
+  deliveriesOnDay,
+  liftTimes,
   scheduleConstruction,
   writeConstructionCsv,
   type ConstructionDocument,
@@ -507,6 +512,321 @@ test('put up a crane, plan the lifts, play a day, find a crane out of reach (ST-
       pick: [52000, 11000, 1000],
     },
   ]);
+});
+
+// TT1: a crane that climbs onto the 3F slab and is lengthened later, through its form; a climb
+// onto a slab not yet cast is reported.
+test('climb a crane through its form, find a climb onto an uncast slab (ST-800, TS-2601)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'bim');
+  await bimReady(page);
+  const empty = await nativeArtifact(page);
+  await importJson(page, 'office.json', {
+    ...empty,
+    name: 'Office',
+    draft: { ...empty.draft, content: f87Building() },
+  });
+  await bimReady(page);
+  await save(page, 1);
+
+  await create(page, 'construction');
+  await expect(surface(page)).toBeVisible();
+  const f160 = f160ClimbingCrane();
+  await page.getByLabel('Task CSV', { exact: true }).setInputFiles({
+    name: 'office.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(writeConstructionCsv(f160.tasks)),
+  });
+  await page.getByText('Calendar', { exact: true }).click();
+  await page.getByLabel('Start date', { exact: true }).fill(f160.startDate);
+  await page.getByLabel('Holidays', { exact: true }).fill(f160.calendar.holidays.join('\n'));
+  await page.getByRole('button', { name: 'Set calendar', exact: true }).click();
+  await expect(summary(page)).toContainText('28 tasks');
+  await expect(page.getByText('Evaluating the building…')).toBeHidden({ timeout: 120_000 });
+
+  const crane = f160.site!.cranes![0]!;
+  const climbs = (list: typeof crane.climbs) =>
+    list!.map((c) => [c.taskId, c.baseZ, c.height, ...(c.supportIds ?? [])].join(', ')).join('\n');
+  await page.getByText('Cranes', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add crane', exact: true }).click();
+  await page.getByLabel('Crane name', { exact: true }).fill(crane.name);
+  await page.getByLabel('Crane base', { exact: true }).fill(crane.base.join(', '));
+  await page.getByLabel('Crane height', { exact: true }).fill(String(crane.height));
+  await page.getByLabel('Jib length', { exact: true }).fill(String(crane.jibLength));
+  await page.getByLabel('Smallest radius', { exact: true }).fill(String(crane.minRadius));
+  await page
+    .getByLabel('Load chart', { exact: true })
+    .fill(crane.loadChart.map((r) => `${r.radius}, ${r.capacityKg}`).join('\n'));
+  await page.getByLabel('Crane put up by', { exact: true }).selectOption(crane.fromTaskId);
+  await page.getByLabel('Crane taken down after', { exact: true }).selectOption(crane.untilTaskId!);
+  // A climb line that is not one is refused.
+  await page.getByLabel('Crane climbs', { exact: true }).fill('col-3, high, 22000');
+  await page.getByRole('button', { name: 'Save crane', exact: true }).click();
+  await expect(surface(page).getByRole('alert').first()).toContainText(
+    'is not "task, base height mm, height mm[, support …]"',
+  );
+  // Before any lift, a climb onto the 3F slab when the 2F beams start is found: not cast yet.
+  const plan = scheduleConstruction(f160);
+  const early = crane.climbs!.map((c) => (c.supportIds ? { ...c, taskId: 'beam-2' } : c));
+  const problems = page.getByLabel('Crane problems', { exact: true });
+  await page.getByLabel('Crane climbs', { exact: true }).fill(climbs(early));
+  await page.getByRole('button', { name: 'Save crane', exact: true }).click();
+  await expect(problems).toContainText(
+    `${crane.name} stands on s-3 on ${plan.byId.get('beam-2')!.start}, not built then`,
+    { timeout: 60_000 },
+  );
+  await page.getByLabel('Crane climbs', { exact: true }).fill(climbs(crane.climbs));
+  await page.getByRole('button', { name: 'Save crane', exact: true }).click();
+  await expect(page.getByText(/未確定の入力があります/)).toBeHidden();
+  await expect(problems).toBeHidden({ timeout: 60_000 });
+
+  // The 3F columns are lifted cleanly from the climbed crane.
+  await page.getByLabel('Pick point', { exact: true }).fill('52000, 11000, 1000');
+  for (const t of ['col-1', 'col-3', 'col-5']) {
+    await page.getByLabel('Lift task', { exact: true }).selectOption(t);
+    await page.getByRole('button', { name: 'Add lifts for task', exact: true }).click();
+  }
+  await expect(page.getByText('105 lifts planned')).toBeVisible();
+  await expect(page.getByText('Checking the lifts…')).toBeHidden({ timeout: 60_000 });
+  await expect(problems).toBeHidden();
+  for (const [t, name] of [
+    ['col-1', 'tt1-before'],
+    ['col-3', 'tt1-on-slab'],
+    ['col-5', 'tt1-lengthened'],
+  ] as const) {
+    await page.getByLabel('Date', { exact: true }).fill(plan.byId.get(t)!.start);
+    if (shots) {
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: `${shots}/${name}.png` });
+    }
+  }
+
+  // Climbing onto the 3F slab when the 2F beams start, with the lifts: still found.
+  await page.getByLabel('Crane climbs', { exact: true }).fill(climbs(early));
+  await page.getByRole('button', { name: 'Save crane', exact: true }).click();
+  await expect(problems).toContainText(
+    `${crane.name} stands on s-3 on ${plan.byId.get('beam-2')!.start}, not built then`,
+    { timeout: 60_000 },
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(problems).toBeHidden({ timeout: 60_000 });
+
+  await save(page, 1);
+  await page.reload();
+  const record = await nativeArtifact(page);
+  const kept = (record.draft.content as ConstructionDocument).site!;
+  expect(kept.cranes).toEqual([{ ...crane, id: 'crane-1' }]);
+});
+
+// TT2: the roof built low and jacked up in two raises; the Raise form checks its distance, and a
+// raise started before its load is built is a site problem.
+test('raise a roof built low, find a raise before its load is built (ST-801, TS-2603)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'bim');
+  await bimReady(page);
+  const empty = await nativeArtifact(page);
+  await importJson(page, 'office.json', {
+    ...empty,
+    name: 'Office',
+    draft: { ...empty.draft, content: f87Building() },
+  });
+  await bimReady(page);
+  await save(page, 1);
+
+  await create(page, 'construction');
+  await expect(surface(page)).toBeVisible();
+  const f161 = f161RaisedRoof();
+  await page.getByLabel('Task CSV', { exact: true }).setInputFiles({
+    name: 'office.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(writeConstructionCsv(f161.tasks)),
+  });
+  await page.getByText('Calendar', { exact: true }).click();
+  await page.getByLabel('Start date', { exact: true }).fill(f161.startDate);
+  await page.getByLabel('Holidays', { exact: true }).fill(f161.calendar.holidays.join('\n'));
+  await page.getByRole('button', { name: 'Set calendar', exact: true }).click();
+  await expect(summary(page)).toContainText('30 tasks');
+  await expect(page.getByText('Evaluating the building…')).toBeHidden({ timeout: 120_000 });
+  await expect(siteProblems(page)).toBeHidden();
+
+  // The raise holds its distance in the form; a distance that is not one is refused.
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'Jack the roof up 3 m' })
+    .getByRole('button')
+    .click();
+  await expect(page.getByLabel('Action', { exact: true })).toHaveValue('raise');
+  await expect(page.getByLabel('Raise', { exact: true })).toHaveValue('3000');
+  await page.getByLabel('Raise', { exact: true }).fill('high');
+  await page.getByRole('button', { name: 'Save task', exact: true }).click();
+  await expect(surface(page).getByRole('alert').first()).toContainText(
+    'Raise must be a distance in mm',
+  );
+  await page.getByLabel('Raise', { exact: true }).fill('3000');
+  await page.getByRole('button', { name: 'Save task', exact: true }).click();
+  await expect(page.getByText(/未確定の入力があります/)).toBeHidden();
+  // Another action has no distance.
+  await page.getByLabel('Action', { exact: true }).selectOption('construct');
+  await expect(page.getByLabel('Raise', { exact: true })).toBeHidden();
+  await page
+    .getByRole('form', { name: 'Task' })
+    .getByRole('button', { name: 'Discard', exact: true })
+    .click();
+  await expect(page.getByLabel('Raise', { exact: true })).toBeVisible();
+
+  // Built low, rising, up.
+  const plan = scheduleConstruction(f161);
+  const up1 = plan.byId.get('roof-up-1')!;
+  const up2 = plan.byId.get('roof-up-2')!;
+  for (const [day, name] of [
+    [addDays(up1.start, -1)!, 'tt2-low'],
+    [up1.start, 'tt2-rising'],
+    [addDays(up2.finish, 1)!, 'tt2-up'],
+  ] as const) {
+    await page.getByLabel('Date', { exact: true }).fill(day);
+    if (shots) {
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: `${shots}/${name}.png` });
+    }
+  }
+  await page.getByLabel('Date', { exact: true }).fill(up1.start);
+  await expect(page.getByLabel('Running tasks', { exact: true })).toContainText(
+    'Jack the roof up 3 m',
+  );
+
+  // Started with the 5F beams, the first raise jacks a roof not built yet.
+  await page.getByLabel('Predecessors', { exact: true }).fill('beam-5');
+  await page.getByRole('button', { name: 'Save task', exact: true }).click();
+  const early = structuredClone(f161);
+  early.tasks.find((t) => t.id === 'roof-up-1')!.predecessors = [{ taskId: 'beam-5', lagDays: 0 }];
+  const start = scheduleConstruction(early).byId.get('roof-up-1')!.start;
+  await expect(siteProblems(page)).toContainText(
+    `Jack the roof up 3 m starts on ${start} before r-roof is built`,
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(siteProblems(page)).toBeHidden();
+
+  await save(page, 1);
+  await page.reload();
+  const record = await nativeArtifact(page);
+  const kept = (record.draft.content as ConstructionDocument).tasks;
+  expect(kept.find((t) => t.id === 'roof-up-2')).toEqual(
+    f161.tasks.find((t) => t.id === 'roof-up-2'),
+  );
+});
+
+// TT3: the steel truck brings the 2F beams: its route made a delivery through its form, the beams'
+// lifts re-added as brought by it. The day's trucks follow the lifts, pass the gate and carry the
+// pieces; a lead before the site opens is a site problem.
+test('bring the beams by truck to their lifts, find a truck due before the day (ST-802, TS-2606)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'bim');
+  await bimReady(page);
+  const emptyBim = await nativeArtifact(page);
+  await importJson(page, 'office.json', {
+    ...emptyBim,
+    name: 'Office',
+    draft: { ...emptyBim.draft, content: f88Building() },
+  });
+  await bimReady(page);
+  await save(page, 1);
+  await create(page, 'construction');
+  await expect(surface(page)).toBeVisible();
+  const empty = await nativeArtifact(page);
+  const source = (empty.draft.content as ConstructionDocument).source;
+  const f89 = f89OfficeTraffic();
+  await importJson(page, 'traffic.json', {
+    ...empty,
+    name: 'Office traffic',
+    draft: { ...empty.draft, content: { ...f89, source } },
+  });
+  await expect(summary(page)).toContainText('28 tasks');
+  await expect(page.getByText('Evaluating the building…')).toBeHidden({ timeout: 120_000 });
+
+  // The steel route delivers, 3 beams a truck, with no fixed trips.
+  await page.getByRole('table', { name: 'Routes' }).getByText('Steel delivery').click();
+  await page.getByLabel('Lifts per truck', { exact: true }).fill('three');
+  await page.getByRole('button', { name: 'Save route', exact: true }).click();
+  await expect(surface(page).getByRole('alert').first()).toContainText(
+    'Lifts per truck is a whole number.',
+  );
+  await page.getByLabel('Lifts per truck', { exact: true }).fill('3');
+  await page.getByLabel('Delivery lead', { exact: true }).fill('0');
+  await page.getByLabel('Route departures', { exact: true }).fill('');
+  await page.getByRole('button', { name: 'Save route', exact: true }).click();
+  await expect(page.getByText(/未確定の入力があります/)).toBeHidden();
+
+  // The 2F beams' lifts again, now brought by the truck and picked where it stops.
+  await page.getByLabel('Lift task', { exact: true }).selectOption('beam-2');
+  await page.getByRole('button', { name: 'Remove lifts of task', exact: true }).click();
+  await page.getByLabel('Pick point', { exact: true }).fill('52000, 2500, 2900');
+  await page.getByLabel('Lift delivery', { exact: true }).selectOption('truck-steel');
+  await page.getByRole('button', { name: 'Add lifts for task', exact: true }).click();
+  await expect(page.getByText('Checking the lifts…')).toBeHidden({ timeout: 60_000 });
+
+  const doc = structuredClone(f89);
+  const route = doc.site!.routes![0]!;
+  route.delivers = { perTrip: 3, leadMinutes: 0 };
+  route.departures = [];
+  for (const l of doc.site!.lifts!)
+    if (l.taskId === 'beam-2') Object.assign(l, { routeId: route.id, pick: [52000, 2500, 2900] });
+  // The lifts were re-added at the end of the list: the order of a day follows the document.
+  const beams = doc.site!.lifts!.filter((l) => l.taskId === 'beam-2');
+  doc.site!.lifts = [...doc.site!.lifts!.filter((l) => l.taskId !== 'beam-2'), ...beams];
+  const plan = scheduleConstruction(doc);
+  const day = liftTimes(doc, plan).get(beams[0]!.id)!.day;
+  const trips = deliveriesOnDay(doc, plan, day);
+  expect(trips.length).toBeGreaterThan(1);
+  await page.getByLabel('Date', { exact: true }).fill(day);
+  await expect(page.getByLabel('Gate counts', { exact: true })).toHaveText(
+    `Gate: ${trips.length} trucks, 0 walking`,
+  );
+  await expect(siteProblems(page)).toBeHidden();
+  // The clock reaches back to the first truck's drive in, before the day starts.
+  await expect(page.getByLabel('Time', { exact: true })).toHaveAttribute(
+    'min',
+    String(Math.floor(trips[0]!.start)),
+  );
+  // The second truck on its way in, loaded, and parked while its first beam goes up.
+  for (const [t, name] of [
+    [trips[1]!.start + 0.1, 'tt3-coming'],
+    [trips[1]!.arrives! + 5, 'tt3-unloading'],
+  ] as const) {
+    await page.getByLabel('Time', { exact: true }).fill(String(Math.round(t)));
+    if (shots) {
+      await page.waitForTimeout(1200);
+      await page.screenshot({ path: `${shots}/${name}.png` });
+    }
+  }
+
+  // Half an hour at the stop ahead: the first truck of the day is due before the site opens.
+  // The steel route's form is still open.
+  await page.getByLabel('Delivery lead', { exact: true }).fill('30');
+  await page.getByRole('button', { name: 'Save route', exact: true }).click();
+  await expect(siteProblems(page)).toContainText(
+    `Steel delivery on ${day}: the truck for ${trips[0]!.loads![0]!.liftId} arrives at 07:00, before the day starts at 07:30`,
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(siteProblems(page)).toBeHidden();
+
+  await save(page, 1);
+  await page.reload();
+  const record = await nativeArtifact(page);
+  const kept = (record.draft.content as ConstructionDocument).site!;
+  expect(kept.routes![0]!.delivers).toEqual({ perTrip: 3, leadMinutes: 0 });
+  expect(kept.lifts!.filter((l) => l.routeId === 'truck-steel')).toHaveLength(beams.length);
 });
 
 // CS4b: the frame of the day of the 4F casting is solved on the Reference Host (CalculiX) and

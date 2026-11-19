@@ -41,7 +41,9 @@ import {
   Aperture,
   Package,
   Cog,
+  Shell,
 } from 'lucide-react';
+import { SpringFields } from './spring-fields';
 import {
   CommitInput,
   Dialog,
@@ -125,11 +127,7 @@ import {
   type CadMesh,
   type CadStepPmiReport,
 } from '@editor-platform/cad-kernel-occt';
-import {
-  CadViewport,
-  type CadMeasurePoint,
-  type CadShading,
-} from './viewport';
+import { CadViewport, type CadMeasurePoint, type CadShading } from './viewport';
 import {
   cadRenderMeshQuality,
   type CadAssembly,
@@ -140,6 +138,9 @@ import { AssemblyPmiLayer, selectedPartPresented } from './assembly-pmi-panel';
 import { PmiLineCache, pmiKindTitles, pmiMarks, targetCount } from './pmi-view';
 import { PartPropertiesSection } from './bom-panel';
 import { ProportionsSection } from './proportions-panel';
+import { DesignTargetsSection } from './design-targets-panel';
+import { SightChecksSection } from './sight-checks-panel';
+import { ToleranceStacksSection, useToleranceStacks } from './tolerance-stacks-panel';
 import { modelTree, type CadTreeNode } from './model-tree';
 import { compareSizes, initialView, standardViews, type CadStandardView } from './view-math';
 import { SketchCanvas, SketchPanel, SketchTools, type SketchTool } from './sketch-mode';
@@ -154,16 +155,29 @@ import {
 } from './dimension-fields';
 import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
 import { sketchUnderlay } from './sketch-underlay';
+import { sketchDisplay } from './sketch-display';
 import {
+  aeroColor,
+  aeroColors,
+  aeroLimits,
+  diffuserAngle,
   draftColor,
   draftSummary,
   finishOf,
+  flowIncidence,
+  flowLeavesOf,
+  frontalArea,
+  incidenceSummary,
+  outwardFrom,
   partCheckColors,
   partCheckColorsOf,
   partCheckLimits,
   partDraft,
   partThickness,
   thicknessColor,
+  type AeroClass,
+  type AeroFlow,
+  type AeroSpot,
   type DraftSummary,
   type ThicknessResult,
   rayDiagramLimits,
@@ -241,8 +255,11 @@ function Viewport({
   onDrawn,
   overlay,
   assembly,
+  sketches,
 }: {
   controller: CadController;
+  /** CLF11: the sketches drawn in the view (view state, by ID). */
+  sketches: ReadonlySet<string>;
   /** R2b: placed parts drawn beside the bodies. */
   assembly?: CadAssembly;
   gpuBytes?: number;
@@ -335,8 +352,22 @@ function Viewport({
   useEffect(() => view.current?.setGpuBudget(gpuBytes), [view, gpuBytes]);
   // Shading (R2a-4): display only, never part of the content.
   const [shading, setShading] = useState<
-    'shaded' | 'realistic' | 'silhouette' | 'zebra' | 'mean' | 'gauss' | 'thickness' | 'draft'
+    | 'shaded'
+    | 'realistic'
+    | 'silhouette'
+    | 'zebra'
+    | 'mean'
+    | 'gauss'
+    | 'thickness'
+    | 'draft'
+    | 'aero'
   >('shaded');
+  /** CLF4 (CL7b): the aero shading's flow direction, slope and smallest bend; display only. */
+  const [aero, setAero] = useState<AeroSettings>({
+    flow: 1,
+    slopeDeg: aeroLimits.slopeDefault,
+    radiusMm: aeroLimits.radiusDefault,
+  });
   /** CR6c: the ray diagram's fan, when shown; display only. */
   const [rayFan, setRayFan] = useState<RayFanSettings | undefined>();
   /** CR6b: the wanted wall thickness (mm) and the draft check's settings; display only. */
@@ -350,6 +381,48 @@ function Viewport({
   const [zebraAxis, setZebraAxis] = useState<'x' | 'y' | 'z'>('z');
   /** Zebra on the selected body only; the others keep their colour. */
   const [zebraSelected, setZebraSelected] = useState(false);
+  /**
+   * CLF5: the zebra drawn on finer meshes of the same shapes (a render's, `renderMeshes`), so
+   * a large sheet's stripes follow its surface, not the display mesh's facets. View only.
+   */
+  const [zebraFine, setZebraFine] = useState(false);
+  const [fine, setFine] = useState<
+    | { hash: string; status: 'calculating' | 'failed' }
+    | { hash: string; status: 'done'; bodies: ReadonlyMap<string, CadMesh> }
+  >();
+  const fineHash = snapshot.meshes?.current ? snapshot.meshes.contentHash : undefined;
+  const fineWanted = shading === 'zebra' && zebraFine && !!assembly && !!fineHash;
+  useEffect(() => {
+    // Off, or the content changed: let the finer meshes go (the assembly keeps what its
+    // budget allows for a render).
+    if (!fineWanted || !assembly || !fineHash) {
+      setFine(undefined);
+      return;
+    }
+    const control = { cancelled: false };
+    setFine({ hash: fineHash, status: 'calculating' });
+    assembly.renderMeshes(cadRenderMeshQuality, { control }).then(
+      (r) => {
+        if (control.cancelled) return;
+        // The assembly answers with no meshes when it cannot make them (an older build, a
+        // failed job): that is a failure, and the display meshes stay, pickable.
+        setFine(
+          r.bodies.size
+            ? { hash: fineHash, status: 'done', bodies: r.bodies }
+            : { hash: fineHash, status: 'failed' },
+        );
+      },
+      () => {
+        if (!control.cancelled) setFine({ hash: fineHash, status: 'failed' });
+      },
+    );
+    return () => {
+      control.cancelled = true;
+    };
+  }, [fineWanted, assembly, fineHash]);
+  /** The finer meshes in use: only for the current content's meshes, while asked for. */
+  const finer =
+    fineWanted && fine?.status === 'done' && fine.hash === fineHash ? fine.bodies : undefined;
   /** The ground grid at z = 0 (display only): off for models that sit on their own ground. */
   const [grid, setGrid] = useState(true);
   useEffect(() => view.current?.setGrid(grid), [view, grid, restored]);
@@ -405,7 +478,7 @@ function Viewport({
   const range = autoRange && autoRange * 2 ** rangeStep;
   // CR6b: the part checks on the current meshes of the shown bodies (sheets have no wall).
   const checkMeshes = useMemo(() => {
-    if (shading !== 'thickness' && shading !== 'draft') return undefined;
+    if (shading !== 'thickness' && shading !== 'draft' && shading !== 'aero') return undefined;
     if (!snapshot.meshes?.current) return undefined;
     return snapshot.meshes.meshes.filter((m) => shownIds.has(m.bodyId) && !m.lod);
   }, [shading, snapshot.meshes, shownIds]);
@@ -435,7 +508,49 @@ function Viewport({
       };
     });
   }, [shading, checkMeshes, draft]);
+  // CLF4 (CL7b): the aero indicators on the shown bodies' current meshes.
+  const aeros = useMemo((): AeroResults | undefined => {
+    if (shading !== 'aero' || !checkMeshes) return undefined;
+    // A sheet's normals may point either way: turned to look away from the shown bodies' middle.
+    const lo = [Infinity, Infinity, Infinity];
+    const hi = [-Infinity, -Infinity, -Infinity];
+    for (const m of checkMeshes)
+      for (let v = 0; v < m.positions.length; v += 3)
+        for (let k = 0; k < 3; k++) {
+          const x = m.origin[k]! + m.positions[v + k]!;
+          lo[k] = Math.min(lo[k]!, x);
+          hi[k] = Math.max(hi[k]!, x);
+        }
+    const middle = [0, 1, 2].map((k) => (lo[k]! + hi[k]!) / 2) as [number, number, number];
+    const meshes = checkMeshes.map((m) =>
+      kinds.get(m.bodyId) === 'sheet' ? { ...m, ...outwardFrom(m, middle) } : m,
+    );
+    const incidences = meshes.map((m) => flowIncidence(m, aero.flow));
+    const leaves = flowLeavesOf(meshes, incidences, aero.flow, aero.radiusMm);
+    const bodies = meshes.map((m, i) => ({
+      bodyId: m.bodyId,
+      incidence: incidences[i]!,
+      flags: leaves[i]!.flags,
+      spots: leaves[i]!.spots,
+      summary: incidenceSummary(m, incidences[i]!, aero.slopeDeg),
+      diffuser: diffuserAngle(m, aero.flow),
+    }));
+    return {
+      bodies,
+      frontal: frontalArea(checkMeshes),
+      components: snapshot.content.components.length,
+    };
+  }, [shading, checkMeshes, aero, kinds, snapshot.content.components.length]);
   const checkColors = useMemo(() => {
+    if (aeros)
+      return new Map(
+        aeros.bodies.map((b) => {
+          const out = new Float32Array(b.incidence.length * 3);
+          for (let i = 0; i < b.incidence.length; i++)
+            out.set(aeroColor(b.incidence[i]!, b.flags[i] === 1, aero.slopeDeg), i * 3);
+          return [b.bodyId, out] as const;
+        }),
+      );
     if (thicknesses)
       return new Map(
         thicknesses.map((t) => [
@@ -453,7 +568,7 @@ function Viewport({
         ]),
       );
     return undefined;
-  }, [thicknesses, drafts, thickness, draft]);
+  }, [thicknesses, drafts, thickness, draft, aeros, aero.slopeDeg]);
   // CR6c: the fan traced through the shown bodies' current meshes.
   const rayResult = useMemo(() => {
     if (!rayFan || !snapshot.meshes?.current) return undefined;
@@ -480,6 +595,12 @@ function Viewport({
   useEffect(() => {
     view.current?.showRays(rayResult?.rays ? rayLines(rayResult.rays) : undefined);
   }, [view, rayResult, restored]);
+  // CLF11: the shown sketches, again whenever the content (a sketch, a parameter) changes.
+  useEffect(() => {
+    view.current?.showSketches(
+      sketches.size ? sketchDisplay(snapshot.content, sketches) : undefined,
+    );
+  }, [view, sketches, snapshot.content, restored]);
   // Asks for the curvature once per content while a curvature shading is chosen.
   const asked = useRef('');
   useEffect(() => {
@@ -560,7 +681,10 @@ function Viewport({
       return lines.length ? lines : undefined;
     };
     view.current?.show(
-      (meshes?.meshes ?? []).flatMap((mesh) => {
+      (meshes?.meshes ?? []).flatMap((display) => {
+        // CLF5: the finer mesh in its place; picks and marks (on the display mesh's faces and
+        // edges) are left out while it is drawn.
+        const mesh = finer?.get(display.bodyId) ?? display;
         const body = bodies.get(mesh.bodyId);
         if (!body && meshes?.current) return [];
         if (body && !shown.has(body.id)) return [];
@@ -584,17 +708,18 @@ function Viewport({
             ...(checkColors?.has(mesh.bodyId) && !mesh.lod
               ? { colors: checkColors.get(mesh.bodyId)! }
               : {}),
-            ...(picked?.id === mesh.bodyId && picked.contentHash === meshes?.contentHash
+            ...(!finer && picked?.id === mesh.bodyId && picked.contentHash === meshes?.contentHash
               ? { highlight: { bodyId: mesh.bodyId, kind: picked.kind, id: picked.pick } }
               : {}),
-            ...(pmiFocus?.bodyId === mesh.bodyId && meshes?.current && !mesh.lod
+            ...(!finer && pmiFocus?.bodyId === mesh.bodyId && meshes?.current && !mesh.lod
               ? { marks: pmiMarks(mesh, pmiFocus.item, controller.bodyPmi(mesh.bodyId).tracking) }
               : {}),
             ...(annotations(mesh) ? { annotations: annotations(mesh) } : {}),
           },
         ];
       }),
-      !!meshes?.current,
+      // Nothing is picked on the finer meshes: their faces and edges are not the pick table's.
+      !!meshes?.current && !finer,
       !meshes?.current && !meshes?.preview,
     );
     // Every image the bodies draw was asked for: free the others (a replaced texture).
@@ -619,6 +744,7 @@ function Viewport({
     shading,
     zebraAxis,
     zebraSelected,
+    finer,
     stripes,
     values,
     range,
@@ -849,7 +975,33 @@ function Viewport({
                   onChange={(e) => setZebraSelected(e.target.checked)}
                 />{' '}
                 Selected body only
-              </label>
+              </label>{' '}
+              {assembly && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={zebraFine}
+                    onChange={(e) => setZebraFine(e.target.checked)}
+                    data-testid="cad-zebra-fine"
+                  />{' '}
+                  Finer surfaces
+                </label>
+              )}
+              {zebraFine && fine?.hash === fineHash && fine?.status === 'calculating' && (
+                <p className="cad-muted" role="status">
+                  Calculating finer surfaces…
+                </p>
+              )}
+              {zebraFine && fine?.hash === fineHash && fine?.status === 'failed' && (
+                <p className="cad-muted" role="status">
+                  The finer surfaces could not be calculated; the stripes stay on the display mesh.
+                </p>
+              )}
+              {finer && (
+                <p className="cad-muted" data-testid="cad-zebra-fine-shown">
+                  Stripes on finer surfaces. Faces and edges are not picked while they are shown.
+                </p>
+              )}
               {zebraSelected && snapshot.selection?.kind !== 'body' && (
                 <p className="cad-muted">bodyを選ぶと、そのbodyだけに縞を表示します。</p>
               )}
@@ -884,6 +1036,14 @@ function Viewport({
               results={thicknesses}
               names={snapshot.content.bodies}
               sheets={(checkMeshes ?? []).filter((m) => kinds.get(m.bodyId) === 'sheet').length}
+            />
+          )}
+          {shading === 'aero' && (
+            <AeroLegend
+              settings={aero}
+              onSettings={setAero}
+              results={aeros}
+              names={snapshot.content.bodies}
             />
           )}
           {shading === 'draft' && (
@@ -972,6 +1132,7 @@ function Viewport({
             <option value="gauss">Gauss curvature</option>
             <option value="thickness">Wall thickness</option>
             <option value="draft">Draft angle</option>
+            <option value="aero">Aero (flow)</option>
           </select>
         </label>
         {views.length > 0 && (
@@ -1157,6 +1318,136 @@ function ThicknessLegend({
         <p className="cad-muted">
           {sheets} shown sheet{sheets === 1 ? '' : 's'}: a sheet has no wall to measure.
         </p>
+      )}
+    </section>
+  );
+}
+/** CLF4 (CL7b): the aero shading's settings. */
+interface AeroSettings {
+  flow: AeroFlow;
+  slopeDeg: number;
+  radiusMm: number;
+}
+interface AeroResults {
+  bodies: {
+    bodyId: string;
+    incidence: Float32Array;
+    flags: Uint8Array;
+    spots: AeroSpot[];
+    summary: Record<AeroClass, number>;
+    diffuser: ReturnType<typeof diffuserAngle>;
+  }[];
+  frontal: ReturnType<typeof frontalArea>;
+  /** Placed parts, which the indicators do not read (they are drawn by the assembly layer). */
+  components: number;
+}
+/**
+ * CLF4 (CL7b): simple aero indicators, geometry only (no flow solution): each node's incidence
+ * to the flow along X (orange facing the oncoming air, green along it, blue turning away more
+ * steeply than the slope a flow is taken to follow), red where the surface turns away sharply
+ * (a convex bend tighter than the radius, or a convex edge into a face looking away), the
+ * shown bodies' frontal area and each body's underside rise toward the tail.
+ */
+function AeroLegend({
+  settings,
+  onSettings,
+  results,
+  names,
+}: {
+  settings: AeroSettings;
+  onSettings(s: AeroSettings): void;
+  results: AeroResults | undefined;
+  names: CadBody[];
+}) {
+  const name = (id: string) => names.find((b) => b.id === id)?.name ?? id;
+  const c = aeroColors;
+  const pct = (part: number, all: number) => (all > 0 ? `${fmt((part / all) * 100)}%` : '0%');
+  const range = ([a, b]: [number, number]) =>
+    Math.abs(b - a) < 0.5 ? fmt(a) : `${fmt(a)}–${fmt(b)}`;
+  const spot = (s: AeroSpot) =>
+    `${s.kind === 'bend' ? 'bend' : 'edge'} at x ${range(s.x)} mm, z ${range(s.z)} mm`;
+  return (
+    <section aria-label="Aero indicators" data-testid="cad-aero">
+      <p className="cad-muted">
+        Simple indicators from the shape alone, not a flow solution. {checkNote}
+      </p>
+      <label>
+        Air moves toward{' '}
+        <select
+          value={settings.flow > 0 ? '+x' : '-x'}
+          onChange={(e) => onSettings({ ...settings, flow: e.target.value === '-x' ? -1 : 1 })}
+        >
+          <option value="+x">+X (the car drives toward −X)</option>
+          <option value="-x">−X (the car drives toward +X)</option>
+        </select>
+      </label>
+      <CheckNumber
+        label="Steepest slope away (°)"
+        value={settings.slopeDeg}
+        limits={aeroLimits.slope}
+        step={1}
+        onValue={(slopeDeg) => onSettings({ ...settings, slopeDeg })}
+      />
+      <CheckNumber
+        label="Tightest bend away (mm)"
+        value={settings.radiusMm}
+        limits={aeroLimits.radius}
+        step={10}
+        onValue={(radiusMm) => onSettings({ ...settings, radiusMm })}
+      />
+      <p className="cad-legend-labels">
+        <span style={{ color: cssColor(c.facing) }}>■ facing</span>
+        <span style={{ color: cssColor(c.along) }}>■ along</span>
+        <span style={{ color: cssColor(c.away) }}>■ away over {fmt(settings.slopeDeg)}°</span>
+        <span style={{ color: cssColor(c.leaves) }}>■ the air may leave</span>
+      </p>
+      {!results && (
+        <p className="cad-muted">The indicators are shown once the shape is evaluated.</p>
+      )}
+      {results && (
+        <>
+          {results.components > 0 && (
+            <p className="cad-muted" data-testid="cad-aero-components">
+              {results.components} placed part{results.components === 1 ? ' is' : 's are'} not read:
+              the indicators and the frontal area cover this document&apos;s own bodies only. Open a
+              placed part on its own to check it.
+            </p>
+          )}
+          <p data-testid="cad-aero-frontal">
+            Frontal area of this document&apos;s shown bodies:{' '}
+            {results.frontal
+              ? `${results.frontal.mm2 >= 1e4 ? `${fmt(results.frontal.mm2 / 1e6)} m²` : `${fmt(results.frontal.mm2)} mm²`} (${fmt(results.frontal.y[1] - results.frontal.y[0])} × ${fmt(results.frontal.z[1] - results.frontal.z[0])} mm across, ${fmt(results.frontal.cellMm)} mm grid)`
+              : 'none'}
+          </p>
+          <details open={results.bodies.length <= 4}>
+            <summary>
+              {results.bodies.length} bod{results.bodies.length === 1 ? 'y' : 'ies'},{' '}
+              {results.bodies.reduce((n, b) => n + b.spots.length, 0)} places the air may leave
+            </summary>
+            <ul data-testid="cad-aero-results">
+              {results.bodies.map((b) => {
+                const s = b.summary;
+                const all = s.facing + s.along + s.away;
+                return (
+                  <li key={b.bodyId}>
+                    {name(b.bodyId)}: faces the air {pct(s.facing, all)}, along {pct(s.along, all)},
+                    away {pct(s.away, all)}
+                    {b.diffuser
+                      ? `; underside rises toward the tail ${fmt(b.diffuser.meanDeg)}° (up to ${fmt(b.diffuser.maxDeg)}°) over x ${range(b.diffuser.x)} mm`
+                      : ''}
+                    {b.spots.length > 0 && (
+                      <ul>
+                        {b.spots.map((sp, i) => (
+                          <li key={i}>{spot(sp)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        </>
       )}
     </section>
   );
@@ -1995,6 +2286,8 @@ function FeatureArgs({
       );
     case 'spurGear':
       return <GearFields args={feature.args} doc={doc} onCommit={update} />;
+    case 'spring':
+      return <SpringFields args={feature.args} doc={doc} onCommit={update} />;
     case 'extrude':
       return (
         <>
@@ -3272,7 +3565,16 @@ function MassSection({
   metrics: CadBodyEvaluation | undefined;
 }) {
   const m = body.mass;
-  const weighed = bodyMass(body, metrics);
+  // PD2: without a density of its own, the body weighs with its part's material.
+  const material = controller.getSnapshot().content.partProperties.material;
+  const weighed = bodyMass(body, metrics, material);
+  const inherited =
+    !m && material ? (
+      <p className="cad-muted" data-testid="cad-body-mass-material">
+        Density from the part material: {material.name} ({fmtGrouped(material.densityKgM3, 0)}{' '}
+        kg/m³)
+      </p>
+    ) : null;
   const total =
     'code' in weighed ? (
       <p className="cad-muted" data-testid="cad-body-mass">
@@ -3307,6 +3609,7 @@ function MassSection({
             </>
           )}
         </dl>
+        {inherited}
         {total}
       </Section>
     );
@@ -3366,6 +3669,7 @@ function MassSection({
             }}
           />
         )}
+        {inherited}
         {total}
       </div>
     </Section>
@@ -5372,16 +5676,29 @@ function Navigator({
   narrow,
   shown,
   onToggle,
+  sketchesShown,
+  onToggleSketch,
+  assembly,
+  name,
 }: {
   controller: CadController;
   snapshot: CadSnapshot;
   narrow: boolean;
+  /** PD1: for a whole document's mass target (what it places). */
+  assembly?: CadAssembly;
+  /** The document's name, for exported files. */
+  name: string;
   /** Bodies drawn in the viewport now. */
   shown: ReadonlySet<string>;
   /** Shows or hides a body in the viewport only: never an edit, so readOnly allows it too. */
   onToggle(id: string): void;
+  /** CLF11: sketches drawn in the viewport, and their eye (view state as the bodies'). */
+  sketchesShown: ReadonlySet<string>;
+  onToggleSketch(id: string): void;
 }) {
   const { content: doc, selection } = snapshot;
+  // PD3: worked out once for the stacks' panel and the design targets that read them.
+  const stacks = useToleranceStacks(controller, snapshot);
   // Sketching is desktop work: on a narrow root the entries stay, disabled, with the reason.
   const sketchReason = narrow
     ? 'Sketching needs a wider window (over 800 px). Sketches can still be viewed here.'
@@ -5456,6 +5773,27 @@ function Navigator({
         snapshot={snapshot}
         editable={!snapshot.readOnly && snapshot.canEdit}
       />
+      <ToleranceStacksSection
+        controller={controller}
+        snapshot={snapshot}
+        name={name}
+        results={stacks}
+        editable={!snapshot.readOnly && snapshot.canEdit}
+      />
+      <DesignTargetsSection
+        controller={controller}
+        snapshot={snapshot}
+        assembly={assembly}
+        name={name}
+        stacks={stacks}
+        editable={!snapshot.readOnly && snapshot.canEdit}
+      />
+      <SightChecksSection
+        controller={controller}
+        snapshot={snapshot}
+        name={name}
+        editable={!snapshot.readOnly && snapshot.canEdit}
+      />
       <Section title="Model tree" open={false}>
         <ModelTree doc={doc} item={item} />
       </Section>
@@ -5490,6 +5828,24 @@ function Navigator({
           {doc.sketches.map((s) => (
             <li key={s.id} className="cad-row">
               <span>{s.name}</span>
+              <label
+                className="cad-eye"
+                title={
+                  sketchesShown.has(s.id) ? 'Hide in the view' : 'Show in the view and the board'
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={sketchesShown.has(s.id)}
+                  aria-label={`Show sketch ${s.name}`}
+                  onChange={() => onToggleSketch(s.id)}
+                />
+                {sketchesShown.has(s.id) ? (
+                  <Eye size={16} strokeWidth={1.7} aria-hidden="true" />
+                ) : (
+                  <EyeOff size={16} strokeWidth={1.7} aria-hidden="true" />
+                )}
+              </label>
               {!snapshot.readOnly && (
                 <button
                   type="button"
@@ -5830,6 +6186,7 @@ const lossText: Record<string, string> = {
   material: 'material',
   pmi: 'PMI the import could not keep (saved views, presentation it could not tie to a kept item, or items it could not match to a part)',
   nesting: 'nested sub-assemblies (flattened; each path stays in the component name)',
+  wireframe: 'curves and points outside the faces (wireframe and construction geometry)',
 };
 const pmiFamilyText: Record<string, string> = {
   dimension: 'Dimensions',
@@ -6044,6 +6401,17 @@ function StepImportDialog({
   const { report } = preview;
   const b = report.body;
   const size = b.bounds[1].map((max, i) => fmt(max - b.bounds[0][i], 3)).join(' × ');
+  // #848: each body records its own tolerance; the report shows the larger.
+  const tolerance = Math.max(report.maxToleranceMm, report.sheet?.maxToleranceMm ?? 0);
+  const solidLoose = report.maxToleranceMm > preview.resultLimitMm;
+  const sheetLoose = (report.sheet?.maxToleranceMm ?? 0) > preview.resultLimitMm;
+  const loose = !report.sheet
+    ? 'the body'
+    : solidLoose && sheetLoose
+      ? 'both bodies'
+      : solidLoose
+        ? 'the solid body'
+        : 'the surface body';
   return (
     <Dialog title="Import STEP" onClose={() => controller.cancelStepImport()}>
       <div className="cad-export">
@@ -6067,7 +6435,13 @@ function StepImportDialog({
               : `${report.sourceUnit} → mm (× ${report.scaleToMm}, applied once)`}
           </dd>
           <dt>Bodies</dt>
-          <dd>{b.kind === 'solid' ? '1 solid' : '1 surface'}</dd>
+          <dd>
+            {b.kind === 'solid' ? '1 solid' : '1 surface'}
+            {report.sheet &&
+              ` and 1 surface body beside it (${report.sheet.body.shells ?? 1} ${
+                (report.sheet.body.shells ?? 1) === 1 ? 'shell' : 'shells'
+              }, ${report.sheet.faces} ${report.sheet.faces === 1 ? 'face' : 'faces'}; the file's surfaces outside the solid)`}
+          </dd>
           {b.kind === 'solid' ? (
             <>
               <dt>Volume</dt>
@@ -6079,13 +6453,19 @@ function StepImportDialog({
               <dd>{fmtQuantity(b.areaMm2, 'mm²')}</dd>
             </>
           )}
+          {report.sheet && (
+            <>
+              <dt>Surface area</dt>
+              <dd>{fmtQuantity(report.sheet.body.areaMm2, 'mm²')}</dd>
+            </>
+          )}
           <dt>Size</dt>
           <dd>{size} mm</dd>
           <dt>Largest tolerance</dt>
           <dd>
-            {report.maxToleranceMm.toExponential(2)} mm
-            {report.maxToleranceMm > preview.resultLimitMm &&
-              ` (above this document's limit of ${preview.resultLimitMm} mm: the body can be placed, measured and exported, but not used in Booleans or other features)`}
+            {tolerance.toExponential(2)} mm
+            {tolerance > preview.resultLimitMm &&
+              ` (above this document's limit of ${preview.resultLimitMm} mm: ${loose} can be placed, measured and exported, but not used in Booleans or other features)`}
           </dd>
           <dt>Healing</dt>
           <dd>None (the solid is kept as read)</dd>
@@ -6099,7 +6479,7 @@ function StepImportDialog({
         </p>
         <div className="cad-row">
           <button type="button" onClick={() => void controller.adoptStepImport()}>
-            Insert body
+            {report.sheet ? 'Insert bodies' : 'Insert body'}
           </button>
           <button type="button" onClick={() => controller.cancelStepImport()}>
             Cancel
@@ -6208,7 +6588,7 @@ export interface CadSurfaceProps {
   onExportPng?(png: Blob, options: { background: boolean }): void;
   /** Receives an exported STL/GLB with its report; without it the Surface offers a download. */
   onExportFile?(file: Blob, options: { fileName: string; report: CadExportReport }): void;
-  /** Receives an exported BOM (R2b-3); without it the Surface offers a download. */
+  /** Receives an exported BOM (R2b-3 CSV, PD2 JSON); without it the Surface offers a download. */
   onExportCsv?(csv: Blob, options: { fileName: string }): void;
   /** GPU budget for the shown shape; a Host may make it smaller than `cadBudgets.gpuBytes`. */
   gpuBytes?: number;
@@ -6283,6 +6663,19 @@ function Surface({
   };
   const toggleBody = (id: string) =>
     setToggled((t) => {
+      const next = new Set(t);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  // CLF11: sketches drawn in the view; none until their eye is turned on. A removed sketch drops.
+  const [sketchesToggled, setSketchesToggled] = useState<ReadonlySet<string>>(new Set());
+  const sketchesShown = useMemo(
+    () =>
+      new Set(snapshot.content.sketches.flatMap((s) => (sketchesToggled.has(s.id) ? [s.id] : []))),
+    [snapshot.content.sketches, sketchesToggled],
+  );
+  const toggleSketch = (id: string) =>
+    setSketchesToggled((t) => {
       const next = new Set(t);
       if (!next.delete(id)) next.add(id);
       return next;
@@ -6548,6 +6941,13 @@ function Surface({
                   onClick={() => void controller.addGear()}
                 />
                 <IconButton
+                  icon={Shell}
+                  label="Add spring"
+                  reason="Coil or spiral spring with its rate, stress and running time"
+                  disabled={disabled}
+                  onClick={() => void controller.addSpring()}
+                />
+                <IconButton
                   icon={RectangleHorizontal}
                   label="Add plate"
                   reason="Extruded rectangle with a width parameter"
@@ -6694,6 +7094,10 @@ function Surface({
               narrow={narrow}
               shown={new Set(shownIds)}
               onToggle={toggleBody}
+              sketchesShown={sketchesShown}
+              onToggleSketch={toggleSketch}
+              assembly={assembly}
+              name={name}
             />
           </>
         }
@@ -6787,6 +7191,7 @@ function Surface({
           picking={inspectable ? pickTool : undefined}
           gpuBytes={gpuBytes}
           assembly={assembly}
+          sketches={sketchesShown}
           onDrawn={setDrawn}
           overlay={
             sketching && (

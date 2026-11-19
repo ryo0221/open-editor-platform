@@ -240,7 +240,33 @@ export function solveThermal(input: ThermalInput): ThermalResult {
     }
   });
 
-  // Flux at the nodes of each element, averaged.
+  const { flux, fluxMagnitude } = nodalHeatFlux(mesh, k, T);
+  return {
+    temperature: T,
+    flux,
+    fluxMagnitude,
+    conditionChecks: heat.map((h, i) => ({ heat: h, measure: measures[i]! })),
+    constrainedNodes,
+    balance: heat.reduce((s, h) => s + h, 0),
+    heatScale: Math.max(0, ...heat.map(Math.abs)),
+    iterations: solved.iterations,
+    residual: solved.residual,
+    converged: solved.converged,
+  };
+}
+
+/**
+ * The heat flux q = −k ∇T at the nodes of each element (tet10 corners and mid-edges), averaged
+ * over the elements around a node (mW/mm², x y z), and |q|.
+ */
+export function nodalHeatFlux(
+  mesh: FemMesh,
+  k: number,
+  T: ArrayLike<number>,
+): { flux: Float64Array; fluxMagnitude: Float64Array } {
+  const npe = nodesPerElement(mesh.type);
+  const n = mesh.nodes.length / 3;
+  const m = mesh.elements.length / npe;
   const flux = new Float64Array(3 * n);
   const count = new Uint32Array(n);
   // Corners, then the mid-edge nodes in `tet10Edges` order (the element connectivity's).
@@ -260,16 +286,5 @@ export function solveThermal(input: ThermalInput): ThermalResult {
     for (let d = 0; d < 3; d++) flux[p * 3 + d]! /= Math.max(1, count[p]!);
     fluxMagnitude[p] = Math.hypot(flux[p * 3]!, flux[p * 3 + 1]!, flux[p * 3 + 2]!);
   }
-  return {
-    temperature: T,
-    flux,
-    fluxMagnitude,
-    conditionChecks: heat.map((h, i) => ({ heat: h, measure: measures[i]! })),
-    constrainedNodes,
-    balance: heat.reduce((s, h) => s + h, 0),
-    heatScale: Math.max(0, ...heat.map(Math.abs)),
-    iterations: solved.iterations,
-    residual: solved.residual,
-    converged: solved.converged,
-  };
+  return { flux, fluxMagnitude };
 }

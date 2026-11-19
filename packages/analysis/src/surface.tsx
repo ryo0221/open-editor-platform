@@ -211,14 +211,19 @@ export function AnalysisSurface(props: AnalysisSurfaceProps) {
     let active = true;
     setVerified('');
     if (currentRun && readable)
-      void controller
-        .verifiedOutput(currentRun.id, Object.keys(currentRun.results)[0])
-        .then(() => {
-          if (active) setVerified(signature);
-        })
-        .catch((e) => {
-          if (active) setError(String(e));
-        });
+      // Verification flushes Host inputs. Hosts may synchronize React state there,
+      // so start after this effect commits, and never touch a superseded owner.
+      queueMicrotask(() => {
+        if (!active) return;
+        void controller
+          .verifiedOutput(currentRun.id, Object.keys(currentRun.results)[0])
+          .then(() => {
+            if (active) setVerified(signature);
+          })
+          .catch((e) => {
+            if (active) setError(String(e));
+          });
+      });
     return () => {
       active = false;
     };

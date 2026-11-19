@@ -31,30 +31,35 @@ export const designPathLimits = Object.freeze({
   subpaths: 128,
   anchors: 4096,
   segments: 4096,
-  totalAnchors: 16384,
-  totalSegments: 16384,
+  // Design 全体：Codex で描いた漫画 1 ページ（約 6,000 点・path JSON 約 1.3 MB）を 24 ページ持てる量
+  // （manga-creation/design.md の「既存上限」）。1 要素の path JSON は 8 MiB のまま。
+  totalAnchors: 196_608,
+  totalSegments: 196_608,
   bytes: 8 * 1024 * 1024,
+  totalBytes: 96 * 1024 * 1024,
   coordinate: 1_000_000,
 });
+// 漫画のページは点が多い（Design 全体で 20 万点近く）ので、記述子をまとめて作らず 1 つずつ見る。
+function plainFields(v: object, keys: (string | symbol)[]) {
+  for (const k of keys) {
+    if (typeof k === 'symbol') return false;
+    const d = Object.getOwnPropertyDescriptor(v, k)!;
+    if (!('value' in d) || !d.enumerable) return false;
+  }
+  return true;
+}
 function object(v: unknown): v is Record<string, unknown> {
-  return (
-    !!v &&
-    typeof v === 'object' &&
-    !Array.isArray(v) &&
-    [Object.prototype, null].includes(Object.getPrototypeOf(v)) &&
-    Object.getOwnPropertySymbols(v).length === 0 &&
-    Object.values(Object.getOwnPropertyDescriptors(v)).every((d) => 'value' in d && d.enumerable)
-  );
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return (proto === Object.prototype || proto === null) && plainFields(v, Reflect.ownKeys(v));
 }
 function plainArray(v: unknown, limit: number): v is unknown[] {
-  if (!Array.isArray(v) || v.length > limit || Object.getOwnPropertySymbols(v).length) return false;
-  const fields = Object.entries(Object.getOwnPropertyDescriptors(v)).filter(
-    ([k]) => k !== 'length',
-  );
-  return (
-    fields.length === v.length &&
-    fields.every(([k, d], i) => k === String(i) && 'value' in d && d.enumerable)
-  );
+  if (!Array.isArray(v) || v.length > limit) return false;
+  // 自分の鍵は添字（0 から順）と length だけ
+  const own = Reflect.ownKeys(v);
+  if (own.length !== v.length + 1 || own[v.length] !== 'length') return false;
+  for (let i = 0; i < v.length; i++) if (own[i] !== String(i)) return false;
+  return plainFields(v, own.slice(0, v.length));
 }
 function keys(v: Record<string, unknown>, fields: string[]) {
   return Object.keys(v).every((k) => fields.includes(k));

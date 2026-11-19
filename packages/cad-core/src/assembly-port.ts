@@ -41,6 +41,8 @@ export type CadPartState = 'available' | 'substitute' | 'unavailable' | 'failed'
 export interface CadVersionEvaluation {
   state: CadPartState;
   code?: string;
+  /** #847: the part's feature (or sketch, body) the failure names, in the part's document. */
+  featureId?: string;
   /** A failure that may pass on another try (a timeout, a crashed Worker): never cached. */
   retryable?: true;
   /** Build that evaluated it. */
@@ -529,6 +531,7 @@ export class CadAssemblyPort implements CadKernelPort {
           : {
               state: 'failed',
               code: result.code,
+              ...(result.featureId ? { featureId: result.featureId } : {}),
               ...(result.retryable ? { retryable: true } : {}),
             };
     // A retryable failure (cancelled, superseded, a crash) is tried again next time.

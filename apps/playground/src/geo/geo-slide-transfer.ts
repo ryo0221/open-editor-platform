@@ -1,6 +1,7 @@
 /** Host-owned static image handoff using the existing public Slide native file format.
  * Geo never changes Slide's schema or creates an editable/live map embed. */
-import { commitVersion, createArtifact, serializeArtifact } from '@editor-platform/artifact-core';
+import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
+import { serializeHostNativeArtifact } from '@editor-platform/editor-host';
 import type { GeoPngBundle } from '@editor-platform/geo-inspector/import-experiment';
 export async function geoSlideImageArtifact(bundle: GeoPngBundle) {
   if (!/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(bundle.dataUrl))
@@ -37,8 +38,6 @@ export async function geoSlideImageArtifact(bundle: GeoPngBundle) {
     null,
     'Place fixed geographic PNG',
   );
-  const text = serializeArtifact(artifact);
-  if (new TextEncoder().encode(text).length > 16_000_000)
-    throw Error('Slide native file exceeds import budget');
+  const text = serializeHostNativeArtifact(artifact);
   return { name: 'geographic-map.slide.json', text };
 }

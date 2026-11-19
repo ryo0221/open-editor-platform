@@ -248,7 +248,7 @@ describe('createCadAssetStore', () => {
     const ref = { ...r.step, sha256: await sha256Ref(big), byteLength: big.length };
     await expect(store.stage([{ ref, bytes: big }])).rejects.toThrow('16 MB');
     expect(get().cadResources).toEqual([]);
-    expect(nativeLimit).toBe(256_000_000);
+    expect(nativeLimit).toBe(400_000_000);
   });
 
   it('decodes a 6 MB asset without growing the stack, and refuses malformed text', () => {

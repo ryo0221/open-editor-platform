@@ -79,15 +79,16 @@ See [assets and verification](docs/repository-assets.md) for additional environm
 
 ## Updates and contributions
 
-This repository receives reviewed, sanitized snapshots with independent Git history.
-See [CONTRIBUTING](CONTRIBUTING.md). Maintainers reconcile shared changes in the
-canonical source before synchronization. A snapshot update does not certify all
-release, performance or external-product acceptance checks.
+This repository is the canonical public development source for Open Editor Platform.
+Start new issues and pull requests here. Use short-lived branches and reviewed pull
+requests into main; see [development and releases](DEVELOPMENT.md) and
+[CONTRIBUTING](CONTRIBUTING.md). Main is an integrated development version; stable
+releases have their own acceptance scope and immutable tags.
 Third-party notices and provenance remain attached to their assets.
 
 ## License
 
-Open Editor Platform is proposed for licensing under **GNU AGPLv3-only**
+The public source distribution is licensed under **GNU AGPLv3-only**
 ([LICENSE](LICENSE)) **or** an alternative written commercial/OEM agreement
 from duly authorized rightsholders. AGPLv3 permits **commercial use, sale,
 redistribution and SaaS** when its terms are satisfied, without a license fee
@@ -98,7 +99,7 @@ See [dual licensing](DUAL-LICENSING.md), [license guide](LICENSE-GUIDE.md),
 [commercial OEM](COMMERCIAL-LICENSING.md), [third-party scope](LICENSE-SCOPE.md),
 and [the proposed, not-yet-adopted independent Editor exception](ADDITIONAL-PERMISSION-DRAFT.md).
 Prior MIT copies keep their earlier license; project dependencies, fonts and
-fixtures keep their own notices. This repository's release is not yet approved.
+fixtures keep their own notices. Public source availability does not certify a stable release or a commercial agreement.
 
 ## Preview release and support
 

@@ -249,6 +249,54 @@ export function f87OfficeCranes(bim: BimDocument = f87Building()): ConstructionD
   return doc;
 }
 
+/**
+ * F160 (TT1): F87 with a crane that climbs. It is put up with its jib at 14 m (under the upper
+ * floors) and climbs twice: when the 3F columns start it stands on the 3F slab (8 m) with its jib
+ * 22 m above it, and when the 5F columns start it is lengthened on the ground to 30 m.
+ */
+export function f160ClimbingCrane(bim: BimDocument = f87Building()): ConstructionDocument {
+  const doc = f87OfficeCranes(bim);
+  const crane = doc.site!.cranes![0]!;
+  crane.height = 14000;
+  crane.climbs = [
+    { taskId: 'col-5', baseZ: 0, height: 30000 },
+    { taskId: 'col-3', baseZ: 8000, height: 22000, supportIds: ['s-3'] },
+  ];
+  return doc;
+}
+
+/**
+ * F161 (TT2): F87 whose roof is assembled one storey low, on the 5F slab, and jacked 4 m up onto
+ * the columns in two raises (3 m, then 1 m) after it is built.
+ */
+export function f161RaisedRoof(bim: BimDocument = f87Building()): ConstructionDocument {
+  const doc = f87OfficeCranes(bim);
+  const roof = doc.tasks.findIndex((t) => t.id === 'roof');
+  doc.tasks.splice(
+    roof + 1,
+    0,
+    {
+      id: 'roof-up-1',
+      name: 'Jack the roof up 3 m',
+      durationDays: 4,
+      predecessors: [{ taskId: 'roof', lagDays: 0 }],
+      action: 'raise',
+      elementIds: ['r-roof'],
+      raiseMm: 3000,
+    },
+    {
+      id: 'roof-up-2',
+      name: 'Jack the roof up 1 m',
+      durationDays: 2,
+      predecessors: [{ taskId: 'roof-up-1', lagDays: 0 }],
+      action: 'raise',
+      elementIds: ['r-roof'],
+      raiseMm: 1000,
+    },
+  );
+  return doc;
+}
+
 /** F88 (CS4): F87's building with stiffness: concrete 24,000 MPa (ν 0.2), metal 205,000 (ν 0.3). */
 export function f88Building(bim: BimDocument = f37Office()): BimDocument {
   const doc = f87Building(bim);
@@ -339,5 +387,37 @@ export function f89OfficeTraffic(bim: BimDocument = f88Building()): Construction
       hours: ['13:00', '15:00'],
     },
   ];
+  return doc;
+}
+
+/**
+ * F162 (TT3): F89 with a truck that brings the beams. Each beam lift names the route; a truck
+ * carries 3 beams, is at its stop when the first of them is lifted and waits there until the last
+ * is picked off its bed (the lifts pick where it stops).
+ */
+export function f162DeliveredBeams(bim: BimDocument = f88Building()): ConstructionDocument {
+  const doc = f89OfficeTraffic(bim);
+  const site = doc.site!;
+  site.routes!.push({
+    id: 'truck-beams',
+    name: 'Beam delivery',
+    kind: 'truck',
+    path: [
+      [23000, -14700],
+      [23000, -10500],
+      [52000, -10500],
+      [52000, 8000],
+    ],
+    speedKmh: 10,
+    taskId: 'beam-1',
+    departures: [],
+    returns: true,
+    delivers: { perTrip: 3, leadMinutes: 0 },
+  });
+  for (const l of site.lifts!)
+    if (l.taskId.startsWith('beam-')) {
+      l.routeId = 'truck-beams';
+      l.pick = [52000, 8000, 2900];
+    }
   return doc;
 }

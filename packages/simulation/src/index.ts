@@ -5,3 +5,7 @@ export type { SimulationRunner } from './run-panel';
 export * from './results';
 export * from './compute';
 export * from './stiffness-test';
+export * from './nagi-crash';
+export * from './brake';
+export * from './exhaust';
+export * from './aero-film';

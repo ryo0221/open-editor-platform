@@ -15,6 +15,9 @@ and then installed. An existing wrong hash stops instead of silently replacing i
 commands include preflight; there is no substitute font.
 
 Both profiles are Noto CJK 2.004 under the retained [OFL notice](COPYRIGHT.txt).
+The four extracted faces carry `© 2014-2021 Adobe (http://www.adobe.com/).`
+in their name tables. The notice includes a filename-specific paragraph for
+these faces and retains the historical Debian package attribution separately.
 `manifest.json` is the proportional Japanese face (TTC face 0);
 `mono-manifest.json` is the Japanese monospace face (TTC face 5) used for DOCX code.
 The historical files originated in signed Debian `fonts-noto-cjk` TTC files;

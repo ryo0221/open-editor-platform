@@ -23,10 +23,19 @@ import type { CadTopologyRef } from './topology';
  * sketch points; its knots are uniform, clamped to pass through the first and last pole, or
  * periodic when `closed` (then it is a loop by itself, as a circle is). It adds no unknowns: its
  * shape follows its poles. Construction elements take part in constraints but never in a region.
+ * CLF9 (docs/cad/car-look-process.md): a curve may carry a line `color` (`#rrggbb`), used only to
+ * draw it; the shape, the regions and the solver never read it.
  */
 export type CadSketchEntity =
   | { type: 'point'; id: string }
-  | { type: 'line'; id: string; start: string; end: string; construction?: boolean }
+  | {
+      type: 'line';
+      id: string;
+      start: string;
+      end: string;
+      construction?: boolean;
+      color?: string;
+    }
   | {
       type: 'arc';
       id: string;
@@ -35,8 +44,9 @@ export type CadSketchEntity =
       end: string;
       clockwise: boolean;
       construction?: boolean;
+      color?: string;
     }
-  | { type: 'circle'; id: string; center: string; construction?: boolean }
+  | { type: 'circle'; id: string; center: string; construction?: boolean; color?: string }
   | {
       type: 'spline';
       id: string;
@@ -44,7 +54,11 @@ export type CadSketchEntity =
       degree: 2 | 3 | 5;
       closed?: boolean;
       construction?: boolean;
+      color?: string;
     };
+
+/** CLF9: a sketch curve's line colour, `#rrggbb`. */
+export const cadSketchColor = /^#[0-9a-f]{6}$/i;
 type Rule<T extends string, X> = { id: string; type: T } & X;
 /**
  * Geometric and dimensional constraints. `a`/`b` name points, lines or curves (arcs and circles)
@@ -80,6 +94,19 @@ export interface CadSketch {
    * for each circle, keyed by element ID. Evaluation reads only these.
    */
   solved: Record<string, [number, number]>;
+  /** CLF10: text notes on the drawing, drawn only; IDs share the elements' namespace. */
+  notes?: CadSketchNote[];
+}
+/**
+ * CLF10 (docs/cad/car-look-process.md): a note on a sketch. `at` is the text's lower-left corner
+ * on the plane (mm, as `solved`), `size` its height in mm; nothing in the shape reads it.
+ */
+export interface CadSketchNote {
+  id: string;
+  at: [number, number];
+  text: string;
+  size: number;
+  color?: string;
 }
 /** A closed area: element IDs of one outer loop and 0–64 holes, each loop a chain or one circle. */
 export interface CadSketchRegion {
@@ -101,6 +128,10 @@ export const cadSketchLimits = Object.freeze({
   /** Control points of one spline (and at least its degree + 1). */
   splinePoles: [4, 256] as const,
   splineDegrees: [2, 3, 5] as const,
+  /** CLF10: notes on one sketch, characters of one note, and a note's height (mm). */
+  notes: 256,
+  noteText: 200,
+  noteSize: [1, 2000] as const,
 });
 
 /**

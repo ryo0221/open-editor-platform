@@ -19,6 +19,8 @@ import type { EditorInputBoundary } from '@editor-platform/editor-core';
 import {
   checkBuildingInSite,
   checkConstructionSource,
+  checkDeliveries,
+  checkRaises,
   checkSite,
   earthworkVolumes,
   siteTerrain,
@@ -40,8 +42,9 @@ import {
   type ConstructionDiagnostic,
   type SiteFootprint,
   type ConstructionSite,
-  checkCranes,
+  checkCranesInSlices,
   craneBaseZ,
+  craneOnDay,
   craneStands,
   liftScene,
   liftTimes,
@@ -89,6 +92,7 @@ import {
   hazardSolid,
   moverSolids,
   clockInDay,
+  playRange,
   playStep,
   routeSolid,
   siteHazardId,
@@ -157,6 +161,7 @@ const actionLabels: Record<ConstructionAction, string> = {
   construct: 'Build',
   remove: 'Remove',
   temporary: 'Temporary',
+  raise: 'Raise',
 };
 const dayIndex = (day: string) => utcDay(day) ?? 0;
 /** Not built objects: rooms and the openings cut by doors and windows. */
@@ -321,7 +326,13 @@ export function ConstructionSurface({
     [doc.site, terrain, progressKey, siteItem],
   );
   const siteProblems = useMemo(
-    () => (valid ? checkSite(doc, schedule) : []),
+    () =>
+      valid
+        ? [
+            ...checkSite(doc, schedule),
+            ...(schedule ? [...checkRaises(doc, schedule), ...checkDeliveries(doc, schedule)] : []),
+          ]
+        : [],
     [doc, schedule, valid],
   );
   const [buildingProblems, setBuildingProblems] = useState<ConstructionDiagnostic[]>([]);
@@ -348,15 +359,23 @@ export function ConstructionSurface({
     world: CraneWorld;
     problems: ConstructionDiagnostic[];
   }>();
-  const hasCranes = !!doc.site?.lifts?.length || (doc.site?.cranes?.length ?? 0) > 1;
+  // TT1: a climb's supports are checked with or without lifts.
+  const hasCranes =
+    !!doc.site?.lifts?.length ||
+    (doc.site?.cranes?.length ?? 0) > 1 ||
+    !!doc.site?.cranes?.some((c) => c.climbs?.some((m) => m.supportIds?.length));
   useEffect(() => {
     if (!schedule || !world || !hasCranes) return;
-    // After the frame is drawn: the check takes a moment on a whole building.
-    const timer = setTimeout(
-      () => setCraneProblems({ doc, world, problems: checkCranes(doc, schedule, world) }),
-      0,
+    // #1334: in slices, giving the page back between them: on a whole tower the check takes a
+    // minute, and the screen stays live meanwhile. A newer document or building stops it.
+    const abort = new AbortController();
+    checkCranesInSlices(doc, schedule, world, { signal: abort.signal }).then(
+      (problems) => setCraneProblems({ doc, world, problems }),
+      (e) => {
+        if (!abort.signal.aborted) throw e;
+      },
     );
-    return () => clearTimeout(timer);
+    return () => abort.abort();
   }, [doc, schedule, world, hasCranes]);
   const craneChecking =
     hasCranes && !!world && (craneProblems?.doc !== doc || craneProblems.world !== world);
@@ -415,24 +434,36 @@ export function ConstructionSurface({
   const current = play ? liftsToday[play.index] : undefined;
   const scene = useMemo(() => {
     if (!current || !schedule || !world || !times) return undefined;
-    const crane = doc.site?.cranes?.find((c) => c.id === current.lift.craneId);
+    const own = doc.site?.cranes?.find((c) => c.id === current.lift.craneId);
     const body = world.bodies.get(current.lift.elementId);
     const time = times.get(current.lift.id);
-    if (!crane || !body || !time) return undefined;
+    if (!own || !body || !time) return undefined;
+    // TT1: the crane as it stands on the lift's day.
+    const crane = craneOnDay(doc, schedule, own, time.day);
     return { crane, ...liftScene(doc, schedule, world, current.lift, crane, body, time) };
   }, [current, doc, schedule, world, times]);
   const craneState: CraneState | undefined = scene && play ? scene.motion.at(play.u) : undefined;
-  const moved =
+  // TT2: elements a raise has not yet lifted stand lower; the load on the hook moves with it
+  // (its place already lowered by its own offset).
+  const hooked =
     scene && craneState && current
       ? {
           id: current.lift.elementId,
           offset: [
             craneState.hook[0] - scene.motion.placeHook[0],
             craneState.hook[1] - scene.motion.placeHook[1],
-            craneState.hook[2] - scene.motion.placeHook[2],
+            craneState.hook[2] -
+              scene.motion.placeHook[2] +
+              (site?.offsets.get(current.lift.elementId) ?? 0),
           ] as Point3,
         }
       : undefined;
+  const moved = [
+    ...[...(site?.offsets ?? [])]
+      .filter(([id]) => id !== hooked?.id)
+      .map(([id, dz]) => ({ id, offset: [0, 0, dz] as Point3 })),
+    ...(hooked ? [hooked] : []),
+  ];
   // During playback the day's lifts stand once lifted, and are not there yet before.
   const playLook = new Map<string, 'lifted' | 'waiting'>();
   if (play)
@@ -453,6 +484,8 @@ export function ConstructionSurface({
     terrain && doc.site?.cranes
       ? doc.site.cranes
           .filter((c) => standingCranes.has(c.id))
+          // TT1: each crane at the height of its climb on the shown day.
+          .map((c) => (schedule && shown ? craneOnDay(doc, schedule, c, shown) : c))
           .map((c) =>
             craneSolid(
               c,
@@ -510,7 +543,6 @@ export function ConstructionSurface({
     !!doc.site?.earthworks.some((w) => w.kind === 'cut');
   // Hours changed under the clock: keep it within the new day.
   const [dayStart, dayEnd] = valid ? siteHours(doc) : [480, 1020];
-  useEffect(() => setClock((c) => clockInDay(c, [dayStart, dayEnd])), [dayStart, dayEnd]);
   const traffic = useMemo(() => {
     if (!schedule || !shown || !hasTraffic) return undefined;
     const gates = gateCounts(doc, schedule, shown);
@@ -532,10 +564,13 @@ export function ConstructionSurface({
       liftsPast,
     };
   }, [doc, schedule, shown, hazardWorld, hasTraffic]);
+  // The clock runs over the working hours and any trip outside them (a delivery's drive in).
+  const [playFrom, playTo] = playRange([dayStart, dayEnd], traffic?.trips ?? []);
+  useEffect(() => setClock((c) => clockInDay(c, [playFrom, playTo])), [playFrom, playTo]);
   // Play time: ten times as fast, skipping the minutes when no one moves; stops at the day's end.
   useEffect(() => {
     if (gait === undefined || !traffic) return;
-    const [, end] = siteHours(doc);
+    const end = playTo;
     let frame = 0;
     let last = performance.now();
     const step = (now: number) => {
@@ -551,7 +586,7 @@ export function ConstructionSurface({
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [gait !== undefined, traffic, doc]);
+  }, [gait !== undefined, traffic, playTo]);
   // People and trucks stand on the ground shown for the day (cuts dug and fills made so far).
   const dayGround =
     doc.site && terrain && works
@@ -1055,7 +1090,12 @@ export function ConstructionSurface({
             const p = playLook.get(id);
             if (p === 'lifted') return undefined;
             if (p === 'waiting') return stateLook('absent', ghost);
-            const standing = site ? elementState(site, id) : undefined;
+            // TT2: what a raise moves today shows as work in progress.
+            const standing = site
+              ? site.raising.has(id)
+                ? 'building'
+                : elementState(site, id)
+              : undefined;
             // Coloured by the analysis: only the members that stand on the day.
             return analysedLook(
               standing,
@@ -1216,6 +1256,7 @@ export function ConstructionSurface({
             day={shown}
             active={!!traffic}
             clock={clock}
+            range={[playFrom, playTo]}
             onClock={(t) => {
               if (recordingNow.current) return;
               setGait(undefined);
@@ -1329,8 +1370,8 @@ function BuildingView({
   boundary: ConstructionSite['boundary'] | undefined;
   /** The building elements standing over the site boundary. */
   onBuildingProblems(problems: ConstructionDiagnostic[]): void;
-  /** CS3b: an element drawn moved by an offset (the load on the hook). */
-  moved?: { id: string; offset: Point3 };
+  /** CS3b: elements drawn moved by an offset (the load on the hook, TT2 raises to come). */
+  moved?: { id: string; offset: Point3 }[];
   /** CS3b: each element's evaluated body (world bounds and triangles), for the crane checks. */
   onBodies?(
     bodies:
@@ -1427,7 +1468,7 @@ function BuildingView({
     };
   }, [bim, evaluator]);
   const selected = selection.join('\u0000');
-  const movedKey = moved ? `${moved.id}|${moved.offset.join()}` : '';
+  const movedKey = (moved ?? []).map((m) => `${m.id}|${m.offset.join()}`).join('\u0000');
   const framed = useRef<string | undefined>(undefined);
   const buildingFramed = useRef(false);
   useEffect(() => {
@@ -1436,28 +1477,32 @@ function BuildingView({
       bim && evaluation
         ? bimViewSolids(bim, evaluation, { selection: new Set(selection), tint: look, hiddenKinds })
         : [];
-    // The load on the hook: its instance moved with the hook.
-    const building = moved
-      ? drawn.map((s) =>
-          s.instances.some((i) => i.path[0] === moved.id)
-            ? {
-                ...s,
-                instances: s.instances.map((i) => {
-                  if (i.path[0] !== moved.id) return i;
-                  const m = [...i.matrix];
-                  m[12] = m[12]! + moved.offset[0];
-                  m[13] = m[13]! + moved.offset[1];
-                  m[14] = m[14]! + moved.offset[2];
-                  return { ...i, matrix: m };
-                }),
-                // Moved, its solid's bounds no longer hold: widen them by the move.
-                bounds: [
-                  s.bounds[0].map((x, k) => x + Math.min(0, moved.offset[k]!)),
-                  s.bounds[1].map((x, k) => x + Math.max(0, moved.offset[k]!)),
-                ] as Bounds,
-              }
-            : s,
-        )
+    // The load on the hook and what a raise has not yet lifted: their instances moved.
+    const moves = new Map((moved ?? []).map((m) => [m.id, m.offset]));
+    const building = moves.size
+      ? drawn.map((s) => {
+          const offsets = s.instances
+            .map((i) => moves.get(i.path[0] ?? ''))
+            .filter((o): o is Point3 => !!o);
+          if (!offsets.length) return s;
+          return {
+            ...s,
+            instances: s.instances.map((i) => {
+              const o = moves.get(i.path[0] ?? '');
+              if (!o) return i;
+              const m = [...i.matrix];
+              m[12] = m[12]! + o[0];
+              m[13] = m[13]! + o[1];
+              m[14] = m[14]! + o[2];
+              return { ...i, matrix: m };
+            }),
+            // Moved, its solid's bounds no longer hold: widen them by the moves.
+            bounds: [
+              s.bounds[0].map((x, k) => x + Math.min(0, ...offsets.map((o) => o[k]!))),
+              s.bounds[1].map((x, k) => x + Math.max(0, ...offsets.map((o) => o[k]!))),
+            ] as Bounds,
+          };
+        })
       : drawn;
     const own = bim && evaluation ? bimViewBounds(evaluation, bim) : undefined;
     const bounds = own && site?.bounds ? union(own, site.bounds) : (own ?? site?.bounds);
@@ -1692,6 +1737,7 @@ function TaskForm({
   const [days, setDays] = useState(String(task.durationDays));
   const [links, setLinks] = useState(formatLinks(task.predecessors));
   const [action, setAction] = useState(task.action);
+  const [raise, setRaise] = useState(task.raiseMm?.toString() ?? '');
   const [elements, setElements] = useState(task.elementIds);
   const [actualStart, setActualStart] = useState(task.actual?.start ?? '');
   const [actualFinish, setActualFinish] = useState(task.actual?.finish ?? '');
@@ -1702,6 +1748,7 @@ function TaskForm({
     days !== String(task.durationDays) ||
     links !== formatLinks(task.predecessors) ||
     action !== task.action ||
+    raise !== (task.raiseMm?.toString() ?? '') ||
     elements.join('\u0000') !== task.elementIds.join('\u0000') ||
     actualStart !== (task.actual?.start ?? '') ||
     actualFinish !== (task.actual?.finish ?? '') ||
@@ -1715,6 +1762,8 @@ function TaskForm({
     if (!/^\d+$/.test(days.trim())) return setProblem('Days must be a whole number');
     if (percent.trim() && !(Number(percent) >= 0 && Number(percent) <= 100))
       return setProblem('Percent must be 0–100');
+    if (action === 'raise' && !/^\d+(\.\d+)?$/.test(raise.trim()))
+      return setProblem('Raise must be a distance in mm');
     const actual = {
       ...(actualStart ? { start: actualStart } : {}),
       ...(actualFinish ? { finish: actualFinish } : {}),
@@ -1729,6 +1778,7 @@ function TaskForm({
       action,
       elementIds: elements,
       ...(Object.keys(actual).length ? { actual } : {}),
+      ...(action === 'raise' ? { raiseMm: Number(raise) } : {}),
     });
   };
   return (
@@ -1782,6 +1832,16 @@ function TaskForm({
             ))}
           </select>
         </Field>
+        {action === 'raise' && (
+          <Field label="Raise (mm)">
+            <input
+              aria-label="Raise"
+              inputMode="decimal"
+              value={raise}
+              onChange={(e) => setRaise(e.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Elements">
           <span className="construction-elements">
             {elements.length} elements

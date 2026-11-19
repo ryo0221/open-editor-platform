@@ -245,7 +245,22 @@ export function featureReads(f: CadFeature): {
       lengths.push(a.module, a.teeth, a.faceWidth, a.bore, ...a.origin);
       if (a.pressureAngle) lengths.push(a.pressureAngle);
       if (a.matingTeeth) lengths.push(a.matingTeeth);
+      if (a.helixAngle) lengths.push(a.helixAngle);
+      if (a.coneAngle) lengths.push(a.coneAngle);
       if (a.spokes) lengths.push(a.spokes.count, a.spokes.rim, a.spokes.hub, a.spokes.width);
+      break;
+    }
+    case 'spring': {
+      const a = f.args;
+      lengths.push(...a.origin);
+      if (a.form === 'coil') {
+        lengths.push(a.wireDiameter, a.meanDiameter, a.pitch);
+        if (a.deflection) lengths.push(a.deflection);
+      } else {
+        lengths.push(a.thickness, a.height, a.innerRadius, a.pitch);
+        if (a.barrel) lengths.push(a.barrel.innerRadius, a.barrel.arborRadius);
+      }
+      if (a.angle) lengths.push(a.angle);
       break;
     }
     case 'extrude':

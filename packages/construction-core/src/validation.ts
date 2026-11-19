@@ -154,7 +154,7 @@ export function validateConstruction(value: unknown): ConstructionDiagnostic[] {
     if (!record(t)) return bad('task', p);
     onlyKeys(
       t,
-      ['id', 'name', 'durationDays', 'predecessors', 'action', 'elementIds', 'actual'],
+      ['id', 'name', 'durationDays', 'predecessors', 'action', 'elementIds', 'actual', 'raiseMm'],
       p,
       out,
     );
@@ -162,6 +162,12 @@ export function validateConstruction(value: unknown): ConstructionDiagnostic[] {
     if (!text(t.name)) bad('name', `${p}.name`);
     if (!int(t.durationDays, 0, L.durationDays)) bad('duration', `${p}.durationDays`);
     if (!constructionActions.includes(t.action as never)) bad('action', `${p}.action`);
+    // TT2: a raise says how far; no other action has a distance.
+    if (t.action === 'raise') {
+      const r = t.raiseMm;
+      if (!(typeof r === 'number' && Number.isFinite(r) && r > 0 && r <= L.raiseMm))
+        bad('raise', `${p}.raiseMm`, `above 0 and at most ${L.raiseMm} mm`);
+    } else if (t.raiseMm !== undefined) bad('raise', `${p}.raiseMm`, 'only a raise task has one');
     const preds = t.predecessors;
     if (!Array.isArray(preds) || preds.length > L.predecessors)
       bad('predecessors', `${p}.predecessors`);
@@ -234,9 +240,16 @@ export function validateConstruction(value: unknown): ConstructionDiagnostic[] {
           });
     out.push(...validateSite(value.site, ids, constructionId, text, tasks));
   }
-  // One element: at most one construct, at most one remove; temporary works stand alone.
+  // One element: at most one construct, at most one remove; temporary works stand alone. A raise
+  // (TT2, any number of them) lifts an element some task builds.
   for (const [element, list] of holders) {
     const count = (a: string) => list.filter((h) => h.action === a).length;
+    if (count('raise') && !count('construct'))
+      bad(
+        'raise-unbuilt',
+        list.find((h) => h.action === 'raise')!.path,
+        `${element}: no task builds what this raises`,
+      );
     for (const a of ['construct', 'remove', 'temporary'])
       if (count(a) > 1)
         bad(

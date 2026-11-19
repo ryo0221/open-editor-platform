@@ -7,12 +7,14 @@
  */
 import { useState, useSyncExternalStore } from 'react';
 import {
+  cadCoverageLimits,
   cadRangeLimits,
   expandAssembly,
   inactiveJointIds,
   interferenceKey,
   ownJointValueKeys,
   type CadClearanceReport,
+  type CadCoverageReport,
   type CadDocument,
   type CadJointValueKey,
   type CadSweepReport,
@@ -47,6 +49,12 @@ interface RangeRun {
   values: number[];
   report: CadSweepReport;
 }
+interface CoverageRun {
+  content: CadDocument;
+  joint: string;
+  of: CadJointValueKey;
+  report: CadCoverageReport;
+}
 interface ClearanceRun {
   content: CadDocument;
   a: string;
@@ -75,8 +83,17 @@ export function RangeSection({
   const [atOf, setAtOf] = useState<CadJointValueKey | ''>('');
   const [atValue, setAtValue] = useState('0');
   const [clearance, setClearance] = useState<ClearanceRun>();
-  const [running, setRunning] = useState<'range' | 'clearance'>();
-  const [error, setError] = useState<{ of: 'range' | 'clearance'; code: string }>();
+  const [motionJoint, setMotionJoint] = useState('');
+  const [motionOf, setMotionOf] = useState<CadJointValueKey | ''>('');
+  const [motionFrom, setMotionFrom] = useState('');
+  const [motionTo, setMotionTo] = useState('');
+  const [stepMm, setStepMm] = useState(String(cadCoverageLimits.defaultStepMm));
+  const [stepDeg, setStepDeg] = useState(
+    String((cadCoverageLimits.defaultStepRad * 180) / Math.PI),
+  );
+  const [coverage, setCoverage] = useState<CoverageRun>();
+  const [running, setRunning] = useState<'range' | 'coverage' | 'clearance'>();
+  const [error, setError] = useState<{ of: 'range' | 'coverage' | 'clearance'; code: string }>();
   if (!doc.components.length) return null;
   // Each direct component and pattern copy (first path steps), and each occurrence's name.
   const occurrences = expandAssembly(doc, assembly.lookup).occurrences;
@@ -121,6 +138,60 @@ export function RangeSection({
   // Only a joint's own values (a coupled one follows its driver).
   const off = inactiveJointIds(doc);
   const atJoints = doc.joints.filter((j) => !off.has(j.id) && ownJointValueKeys(j).length > 0);
+  // PD6: any own value of a joint in effect, from and to typed (a limit's ends by default).
+  const motionJointOf = atJoints.find((j) => j.id === motionJoint) ?? atJoints[0];
+  const motionKeys = motionJointOf ? ownJointValueKeys(motionJointOf) : [];
+  const motionKey = motionOf && motionKeys.includes(motionOf) ? motionOf : motionKeys[0];
+  const motionLimit = motionJointOf?.limits.find((l) => l.of === motionKey);
+  const shown = (v: number) =>
+    String(Math.round((motionKey && isAngle(motionKey) ? (v * 180) / Math.PI : v) * 1e6) / 1e6);
+  const fromText = motionFrom || (motionLimit ? shown(motionLimit.min) : '0');
+  const toText =
+    motionTo ||
+    (motionLimit ? shown(motionLimit.max) : motionKey && isAngle(motionKey) ? '360' : '100');
+  const checkCoverage = () => {
+    if (!motionJointOf || !motionKey) return;
+    const unit = isAngle(motionKey) ? Math.PI / 180 : 1;
+    const driver = {
+      joint: motionJointOf.id,
+      of: motionKey,
+      from: Number(fromText) * unit,
+      to: Number(toText) * unit,
+    };
+    const bounds = { stepMm: Number(stepMm), stepRad: (Number(stepDeg) * Math.PI) / 180 };
+    setRunning('coverage');
+    setError(undefined);
+    void assembly.checkMotionCoverage(driver, bounds).then((r) => {
+      setRunning(undefined);
+      if ('error' in r) setError({ of: 'coverage', code: r.error });
+      else setCoverage({ ...r, joint: driver.joint, of: motionKey });
+    });
+  };
+  const coverageNow = coverage && coverage.content === doc ? coverage : undefined;
+  const cv = coverageNow?.report;
+  const cvFirst = cv?.status === 'ok' ? cv.hits[0] : undefined;
+  const deg = (rad: number) => `${fmtGrouped((rad * 180) / Math.PI, 2)}°`;
+  const coverageText = (run: CoverageRun, r: Extract<CadCoverageReport, { status: 'ok' }>) => {
+    const span = `${jointName(run.joint)}（${valueText(run.of, r.driver.from)}〜${valueText(run.of, r.driver.to)}）`;
+    const moves = r.parts
+      .map(
+        (p) =>
+          `${name(p.path)} ${p.stepMm === undefined ? '—' : `${fmtGrouped(p.stepMm, 2)} mm`}・${deg(p.stepRad)}`,
+      )
+      .join('、');
+    const at = (tick: number) => valueText(run.of, r.values[tick]!);
+    return `${span}：${fmtGrouped(r.steps, 0)}刻み（${fmtGrouped(r.values.length, 0)}姿勢）。1刻みで動く最大：${moves || '動く部品はありません'}。${
+      cvFirst
+        ? `${at(cvFirst.tick)}で初めて干渉します。干渉する姿勢 ${fmtGrouped(r.hits.length, 0)}/${fmtGrouped(r.values.length, 0)}。`
+        : r.unchecked.length
+          ? '調べた部品の間に干渉はありません。'
+          : '干渉はありません。'
+    }${
+      r.unmeasured.length
+        ? `${r.unmeasured.map(name).join('・')}は形状が無いため、jointの刻みだけで見ています。`
+        : ''
+    }${r.unchecked.length ? `${r.unchecked.map(name).join('・')}は形状が無いため調べていません。` : ''}`;
+  };
   const atJointOf = atJoints.find((j) => j.id === atJoint);
   const atKeys = atJointOf ? ownJointValueKeys(atJointOf) : [];
   const atKey = atOf && atKeys.includes(atOf) ? atOf : atKeys[0];
@@ -224,6 +295,110 @@ export function RangeSection({
           {first && (
             <ul aria-label="First overlap in the range">
               {first.findings.map((f) => (
+                <li key={`${interferenceKey(f.a)} ${interferenceKey(f.b)}`}>
+                  {name(f.a)} と {name(f.b)}
+                  <small className="cad-muted"> 深さ約{fmtGrouped(f.depthMm, 1)} mm</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+      {atJoints.length > 0 && (
+        <>
+          <h3>Through a motion with step bounds</h3>
+          <div className="cad-row">
+            <label className="ep-field">
+              Motion joint
+              <select
+                value={motionJointOf?.id ?? ''}
+                onChange={(e) => {
+                  setMotionJoint(e.target.value);
+                  setMotionFrom('');
+                  setMotionTo('');
+                }}
+              >
+                {atJoints.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {motionKeys.length > 1 && (
+              <label className="ep-field">
+                Motion value
+                <select
+                  value={motionKey}
+                  onChange={(e) => {
+                    setMotionOf(e.target.value as CadJointValueKey);
+                    setMotionFrom('');
+                    setMotionTo('');
+                  }}
+                >
+                  {motionKeys.map((k) => (
+                    <option key={k} value={k}>
+                      {k}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {motionKey && (
+              <>
+                <label className="ep-field">
+                  {isAngle(motionKey) ? 'From (°)' : 'From (mm)'}
+                  <input
+                    type="number"
+                    value={fromText}
+                    onChange={(e) => setMotionFrom(e.target.value)}
+                  />
+                </label>
+                <label className="ep-field">
+                  {isAngle(motionKey) ? 'To (°)' : 'To (mm)'}
+                  <input
+                    type="number"
+                    value={toText}
+                    onChange={(e) => setMotionTo(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            <label className="ep-field">
+              Max step (mm)
+              <input
+                type="number"
+                min={cadCoverageLimits.minStepMm}
+                value={stepMm}
+                onChange={(e) => setStepMm(e.target.value)}
+              />
+            </label>
+            <label className="ep-field">
+              Max turn (°)
+              <input type="number" value={stepDeg} onChange={(e) => setStepDeg(e.target.value)} />
+            </label>
+            <button type="button" disabled={busy} onClick={checkCoverage}>
+              Check through the motion
+            </button>
+          </div>
+          <p className="cad-muted" role="status" data-testid="cad-coverage-status">
+            {running === 'coverage'
+              ? '刻みの上限を守って動かし、干渉を調べています…'
+              : error?.of === 'coverage'
+                ? describeCode(error.code)
+                : !coverage
+                  ? `jointの値を動かし、どの部品も1刻みで最大の移動（mm）と回転（°）を超えないように刻みを決めて干渉を調べます。連動する部品の速さも含めます（姿勢は${fmtGrouped(cadCoverageLimits.samples, 0)}まで）。`
+                  : !coverageNow
+                    ? '内容が変わりました。もう一度調べてください。'
+                    : cv!.status === 'refused'
+                      ? `${describeCode(cv!.code)}${
+                          cv!.needed ? `（必要な姿勢 ${fmtGrouped(cv!.needed, 0)}）` : ''
+                        }`
+                      : coverageText(coverageNow, cv!)}
+          </p>
+          {cvFirst && (
+            <ul aria-label="First overlap in the motion">
+              {cvFirst.findings.map((f) => (
                 <li key={`${interferenceKey(f.a)} ${interferenceKey(f.b)}`}>
                   {name(f.a)} と {name(f.b)}
                   <small className="cad-muted"> 深さ約{fmtGrouped(f.depthMm, 1)} mm</small>

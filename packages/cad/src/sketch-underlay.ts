@@ -37,7 +37,7 @@ const conjugate = (q: Quaternion): Quaternion => [-q[0], -q[1], -q[2], q[3]];
  * A datum plane's frame in mm, or undefined for a sketch on a face (its frame is only known to
  * the kernel's evaluation; such a sketch has no underlay).
  */
-function frameOf(doc: CadDocument, sketch: CadSketch): Frame | undefined {
+export function frameOf(doc: CadDocument, sketch: CadSketch): Frame | undefined {
   if ('face' in sketch.plane) return undefined;
   const values = parameterValues(doc);
   return {

@@ -44,7 +44,7 @@ export type CalculixElementType = 'tet4' | 'tet10' | 'wedge15';
 export const calculixNodesPerElement: Readonly<Record<CalculixElementType, number>> = Object.freeze(
   { tet4: 4, tet10: 10, wedge15: 15 },
 );
-const calculixElementName: Readonly<Record<CalculixElementType, string>> = {
+export const calculixElementName: Readonly<Record<CalculixElementType, string>> = {
   tet4: 'C3D4',
   tet10: 'C3D10',
   wedge15: 'C3D15',
@@ -55,7 +55,7 @@ export interface CalculixPart {
   type: CalculixElementType;
   elements: ArrayLike<number>;
   /** R3j-5c: `density` (t/mm³) only for a modal model. */
-  material: { youngsModulus: number; poissonsRatio: number; density?: number };
+  material: { youngsModulus: number; poissonsRatio: number; density?: number; expansion?: number };
 }
 
 /**
@@ -87,6 +87,12 @@ export interface CalculixModel {
    * (in a static one their weight is already in `force`).
    */
   masses?: readonly (readonly [number, number])[];
+  /**
+   * VS11c: a static model's temperature per node (K) and the strain-free temperature: written as
+   * `*EXPANSION, ZERO=` (each part's `expansion`, 1/K), the initial temperature and the step's
+   * `*TEMPERATURE`, so CalculiX loads the expansion itself (not in `force`).
+   */
+  thermal?: { temperature: ArrayLike<number>; reference: number };
 }
 /** [DOF, coefficient] terms of one equation. */
 export type CalculixEquation = readonly (readonly [number, number])[];
@@ -128,6 +134,17 @@ export function writeCalculixModel(model: CalculixModel): string {
     for (let d = 0; d < model.force.length; d++)
       if (model.force[d] !== 0) throw new RangeError(`force on DOF ${d} in a modal model`);
   }
+  const thermal = model.thermal;
+  if (thermal) {
+    if (modal) throw new RangeError('a modal model has no temperature');
+    if (thermal.temperature.length !== n) throw new RangeError('temperature length');
+    if (!Number.isFinite(thermal.reference)) throw new RangeError('reference temperature');
+    model.parts.forEach((p, k) => {
+      const a = p.material.expansion;
+      if (!(a !== undefined && Number.isFinite(a) && a >= 0))
+        throw new RangeError(`part ${k}: a thermal model needs an expansion ≥ 0`);
+    });
+  }
   const out: string[] = [
     `** editor-platform ${modal ? 'modal' : 'linear static'} study (R3f, R3j-5)`,
     '*NODE, NSET=NALL',
@@ -161,6 +178,12 @@ export function writeCalculixModel(model: CalculixModel): string {
       '*ELASTIC',
       `${calculixNumber(part.material.youngsModulus * s.stress)}, ${calculixNumber(part.material.poissonsRatio)}`,
       ...(modal ? ['*DENSITY', calculixNumber(part.material.density!)] : []),
+      ...(thermal
+        ? [
+            `*EXPANSION, ZERO=${calculixNumber(thermal.reference)}`,
+            calculixNumber(part.material.expansion!),
+          ]
+        : []),
       `*SOLID SECTION, ELSET=P${k + 1}, MATERIAL=M${k + 1}`,
     ),
   );
@@ -201,6 +224,8 @@ export function writeCalculixModel(model: CalculixModel): string {
           .join(', '),
       );
   }
+  if (thermal)
+    out.push('*INITIAL CONDITIONS, TYPE=TEMPERATURE', `NALL, ${calculixNumber(thermal.reference)}`);
   out.push('*STEP', ...(modal ? ['*FREQUENCY', `${model.modes}`] : ['*STATIC']), '*BOUNDARY');
   for (const [d, v] of [...model.prescribed].sort((a, b) => a[0] - b[0])) {
     if (!Number.isInteger(d) || d < 0 || d >= 3 * n) throw new RangeError(`prescribed DOF ${d}`);
@@ -215,6 +240,14 @@ export function writeCalculixModel(model: CalculixModel): string {
   // Appended one by one: a spread of 10⁵ records would pass the engine's argument limit.
   if (loads.length) out.push('*CLOAD');
   for (const l of loads) out.push(l);
+  if (thermal) {
+    out.push('*TEMPERATURE');
+    for (let p = 0; p < n; p++) {
+      const t = thermal.temperature[p]!;
+      if (!Number.isFinite(t)) throw new RangeError(`temperature of node ${p}`);
+      out.push(`${p + 1}, ${calculixNumber(t)}`);
+    }
+  }
   // A modal step writes each mode's shape and its internal forces K φ (for the checks).
   out.push('*NODE FILE', 'U, RF', ...(modal ? [] : ['*EL FILE', 'S']), '*END STEP', '');
   return out.join('\n');
@@ -258,11 +291,12 @@ export interface FrdReadLimits {
 /** CR5f-8: F29's torsion result is 278 MB; the cap stays under V8's longest string (2^29). */
 export const frdReadLimits: Readonly<FrdReadLimits> = Object.freeze({ bytes: 480 * 1024 * 1024 });
 
-const blocks = { DISP: 3, STRESS: 6, FORC: 3 } as const;
+// VS11d-3: NDTEMP, the nodal temperature of a heat transfer step.
+const blocks = { DISP: 3, STRESS: 6, FORC: 3, NDTEMP: 1 } as const;
 type BlockName = keyof typeof blocks;
 
 /** One known result block of a `.frd`, with the `100C` header line it came under. */
-interface FrdBlock {
+export interface FrdBlock {
   name: BlockName;
   frame: string;
   data: Float64Array;
@@ -272,7 +306,7 @@ interface FrdBlock {
  * Every DISP, STRESS and FORC block of an ASCII `.frd` on `nodes` nodes, in order, each with every
  * node exactly once and finite values; other blocks are skipped without keeping their values.
  */
-function scanFrd(text: string, nodes: number, limits: Readonly<FrdReadLimits>): FrdBlock[] {
+export function scanFrd(text: string, nodes: number, limits: Readonly<FrdReadLimits>): FrdBlock[] {
   if (text.length > limits.bytes) refuse('too-large', `${text.length} characters`);
   const lines = text.split(/\r?\n/);
   const found: FrdBlock[] = [];
@@ -391,7 +425,7 @@ export function readCalculixFrd(
   const lastFrame = all.at(-1)?.frame ?? null;
   // All three from the last result frame: a later step with only some of them is not mixed with
   // an earlier one.
-  for (const name of Object.keys(blocks) as BlockName[])
+  for (const name of ['DISP', 'STRESS', 'FORC'] as const)
     if (found.get(name)?.frame !== lastFrame)
       refuse('missing', `no ${name} block in the last result frame`);
   // A finite value in m or Pa can overflow in mm or MPa: checked again after the conversion.
@@ -435,7 +469,7 @@ export function readCalculixModes(
   const pending = new Map<string, { DISP?: Float64Array; FORC?: Float64Array }>();
   const order: string[] = [];
   for (const b of scanFrd(text, nodes, limits)) {
-    if (b.name === 'STRESS') continue;
+    if (b.name === 'STRESS' || b.name === 'NDTEMP') continue;
     if (!pending.has(b.frame)) {
       pending.set(b.frame, {});
       order.push(b.frame);

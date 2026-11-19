@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { base64, boxTetMesh, readVtu, unbase64, VtuError, writeVtu } from './index';
+import {
+  base64,
+  boxTetMesh,
+  femLimits,
+  readVtu,
+  transientLimits,
+  unbase64,
+  vtuReadLimits,
+  VtuError,
+  writeVtu,
+} from './index';
 
 function decodeBlock(b64: string) {
   const raw = Uint8Array.from(Buffer.from(b64, 'base64'));
@@ -101,6 +111,50 @@ describe('VTU', () => {
     }
     for (const bad of ['QQ', 'QQ=a', 'Q===', 'QU*=', 'Q=QQ'])
       expect(() => unbase64(bad)).toThrow(VtuError);
+  });
+
+  it('reads back the largest transient export it writes (Codex on #1285)', () => {
+    // Characters of one binary block: a UInt32 length and the bytes, in base64.
+    const block = (bytes: number) => 4 * Math.ceil((4 + bytes) / 3);
+    // Every block of a tet10 VTU: point fields (components per node), points, cells.
+    const payload = (n: number, m: number, components: number[]) =>
+      components.reduce((a, c) => a + block(n * c * 8), 0) +
+      block(n * 3 * 8) +
+      block(m * 10 * 4) +
+      block(m * 4) +
+      block(m);
+    const mesh = boxTetMesh({ size: [2, 1, 1], divisions: [2, 1, 1], type: 'tet10' });
+    const n = mesh.nodes.length / 3;
+    const m = mesh.elements.length / 10;
+    // Kept temperatures, the flux, then displacement, stress and von Mises.
+    const kept = 3;
+    const components = [...new Array<number>(kept).fill(1), 1, 3, 6, 1];
+    const text = writeVtu({
+      mesh,
+      pointData: components.map((c, i) => ({
+        name: `Field ${i} at 1234.5 s (K)`,
+        components: c as 1 | 3 | 6,
+        values: new Float64Array(n * c),
+      })),
+    });
+    const markup = text.length - payload(n, m, components);
+    expect(markup).toBeGreaterThan(0);
+    expect(markup).toBeLessThan(2_000);
+    // The largest: every kept value the solver allows, on the largest mesh the format holds.
+    const big = femLimits.nodes;
+    const keptBig = Math.floor(transientLimits.snapshotValues / big);
+    expect(keptBig).toBeLessThanOrEqual(transientLimits.snapshots);
+    const most =
+      payload(big, femLimits.elements, [...new Array<number>(keptBig).fill(1), 1, 3, 6, 1]) +
+      (markup / components.length) * (keptBig + 4) +
+      markup;
+    expect(most).toBeLessThanOrEqual(vtuReadLimits.bytes);
+    // Codex's example: 300 kept temperatures on 30,000 nodes.
+    expect(payload(30_000, 20_000, new Array<number>(300).fill(1))).toBeLessThanOrEqual(
+      vtuReadLimits.bytes,
+    );
+    // A browser's string holds 2^29 - 24 characters.
+    expect(vtuReadLimits.bytes).toBeLessThan(2 ** 29 - 24);
   });
 
   it('refuses what it does not read, and anything that does not fit', () => {

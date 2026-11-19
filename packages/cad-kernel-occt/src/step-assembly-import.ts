@@ -23,6 +23,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import { decodeKernelException, type OcModule } from '@editor-platform/geometry-kernel-occt';
 import { shapeMetrics } from './metrics';
+import { optimalBounds } from './bounds';
 import { sheetTopology } from './sheet-topology';
 import {
   pmiKept,
@@ -377,13 +378,7 @@ export function importStepAssembly(
         reject('step-tolerance-unsupported', String(tolerance));
       if (!sheet && !(shapeMetrics(oc, shape, own, true).volumeMm3! > 0))
         reject('step-invalid-solid', 'volume');
-      const box = own(new oc.Bnd_Box_1());
-      oc.BRepBndLib.AddOptimal(shape, box, false, false);
-      const [min, max] = [own(box.CornerMin()), own(box.CornerMax())];
-      const bounds: [Vec3, Vec3] = [
-        [min.X(), min.Y(), min.Z()],
-        [max.X(), max.Y(), max.Z()],
-      ];
+      const bounds = optimalBounds(oc, shape, own);
       if (bounds.flat().some((v) => !(Math.abs(v) <= cadLimits.coordinateMm)))
         reject('step-coordinate-range');
       return { bounds, tolerance };
@@ -484,11 +479,15 @@ export function importStepAssembly(
               ]),
             ),
             (datum) => scan.pmiPath!.datumFeatures.get(datum) ?? 0,
+            scan.pmiPresentation,
           )
         : undefined;
-    if (path?.asset && !assemblyPmiWithinLimits(path.asset)) reject('step-too-large', 'pmi');
+    if (path?.tooLarge || (path?.asset && !assemblyPmiWithinLimits(path.asset)))
+      reject('step-too-large', 'pmi');
     const pmi = withPmi
-      ? pmiKept(oc, own, scan, doc, pmiProducts, options, (r) => (path ? withPathPmi(r, path) : r))
+      ? pmiKept(oc, own, scan, doc, pmiProducts, options, (r, parts) =>
+          path ? withPathPmi(r, path, parts, scan.pmiPresentation?.relationships ?? []) : r,
+        )
       : undefined;
     if (path?.asset) read.assemblyPmi = path.asset;
     const pmis = read.shapes.map((shape, i) => {

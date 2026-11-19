@@ -30,12 +30,14 @@ export interface CadResource {
 /**
  * The native file must stay importable: the same limit as the Playground's native import of a
  * CAD, building, character or construction-schedule file (a schedule keeps its building versions). CR7f raised it from 16 MB to 256 MB so that a whole car read
- * from a STEP file of up to 64 MiB (its source file and its parts' BReps) can be kept. Anything
+ * from a STEP file of up to 64 MiB (its source file and its parts' BReps) can be kept. #1292
+ * raised it to 400 MB for an assembly read from a STEP file of up to 256 MiB (JAMA J-IP-00 read
+ * back is 341 MB): the file is one string, and V8 strings stop at about 536 M characters. Anything
  * that would cross it is refused before it is stored.
  */
 export const cadNativeLimit = {
   /** Unit tests lower it to keep their records small; nothing else changes it. */
-  bytes: 256_000_000,
+  bytes: 400_000_000,
 };
 /** The kinds whose native files may be that large; the others keep the Host's 64 MiB. */
 export const cadNativeKinds: ReadonlySet<string> = new Set([
@@ -43,6 +45,8 @@ export const cadNativeKinds: ReadonlySet<string> = new Set([
   'bim',
   'character',
   'construction',
+  // DW3c-2: a drawing keeps the asset bytes of the CAD versions it draws.
+  'drawing',
 ]);
 /** The Host's native JSON limit for a record of this kind (undefined: the Host's own). */
 export const hostNativeLimitOf = (kind: string) =>
@@ -88,7 +92,11 @@ export function decodeBytes(text: string): Uint8Array {
     throw new Error('CAD resource encoding');
   const raw = atob(text);
   if (btoa(raw) !== text) throw new Error('CAD resource encoding');
-  return Uint8Array.from(raw, (ch) => ch.charCodeAt(0));
+  // #1292: a loop, not `Uint8Array.from(raw, …)`, which first lists every character: on a
+  // 169 MB asset that ran out of memory (in Node at a 4 GB heap, and in Chromium's tab).
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
 }
 export async function sha256Ref(bytes: Uint8Array) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));

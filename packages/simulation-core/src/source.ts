@@ -35,6 +35,10 @@ export function simulationTargets(
     b.follower.forEach((t, k) => out.push({ path: `$.bonds[${i}].follower[${k}]`, target: t }));
     b.on.forEach((t, k) => out.push({ path: `$.bonds[${i}].on[${k}]`, target: t }));
   });
+  (doc.seals ?? []).forEach((s, i) => {
+    for (const side of ['line', 'base', 'mating'] as const)
+      s[side].forEach((t, k) => out.push({ path: `$.seals[${i}].${side}[${k}]`, target: t }));
+  });
   return out;
 }
 

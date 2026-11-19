@@ -25,7 +25,7 @@ import {
   type CadJointCreation,
   type CadPartCandidate,
 } from './assembly';
-import { describeCode, type CadSnapshot } from './controller';
+import { cadFailureReport, describeCode, type CadSnapshot } from './controller';
 import type { ViewportPart } from './assembly-view';
 import { validJointFields } from './joint-values';
 import { BomDialog } from './bom-panel';
@@ -697,9 +697,11 @@ export function AssemblyPanel({
               </small>
             </p>
             {state?.code && (
-              <p className="cad-diagnostic" role="note">
-                {describeCode(state.code)}
-              </p>
+              <PartFailure
+                code={state.code}
+                featureId={state.featureId}
+                doc={state.contentHash ? assembly.lookup(state.contentHash) : undefined}
+              />
             )}
             {(() => {
               const latest = assembly.newerVersion(part.id);
@@ -832,5 +834,44 @@ export function AssemblyPanel({
         />
       )}
     </nav>
+  );
+}
+
+/**
+ * #847: why a component's part cannot be shown, at the level of a body's failure (#589): the
+ * plain reason, then the code and the feature, sketch or body of the part it names.
+ */
+export function PartFailure({
+  code,
+  featureId,
+  doc,
+}: {
+  code: string;
+  featureId?: string;
+  doc?: CadDocument;
+}) {
+  const report = doc ? cadFailureReport(doc, { code, featureId }) : undefined;
+  // The feature or sketch it stopped on, with its body; or only the body the kernel names.
+  const at = report?.featureName
+    ? `feature「${report.featureName}」（${report.operation}）`
+    : report?.sketchName
+      ? `sketch「${report.sketchName}」`
+      : undefined;
+  const body = report?.bodyName ? `body「${report.bodyName}」` : undefined;
+  const where = at ? `${at}${body ? `（${body}）` : ''}` : body;
+  return (
+    <div className="cad-diagnostic" role="note" data-testid="cad-part-failure">
+      <p>{describeCode(code)}</p>
+      <p className="cad-muted">
+        {where && `部品の${where}で止まりました。`}
+        理由のcode：<code>{code.split(/[:@]/)[0]}</code>
+      </p>
+      {report?.kernelReason && (
+        <details className="cad-kernel-reason">
+          <summary>Kernel detail</summary>
+          <code>{report.kernelReason}</code>
+        </details>
+      )}
+    </div>
   );
 }

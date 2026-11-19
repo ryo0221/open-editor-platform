@@ -76,6 +76,7 @@ describe('BOM (R2b-3, CAD49)', () => {
       description: '',
       quantity: 4,
       reference: { artifactId: 'wheel', versionId: 'v1' },
+      contentHash: f.wheel.contentHash,
       unavailable: true,
     });
     expect(rows.some((r) => r.item === '4.1')).toBe(false);
@@ -133,9 +134,10 @@ describe('BOM (R2b-3, CAD49)', () => {
     const hash = cadContentHash(f.assembly);
     const csv = bomCsv(bomRows(f.assembly, lookup, 'hierarchical'));
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('Item,Part number,Name,Description,Quantity,Artifact,Version');
-    expect(lines).toContain(`4.2,'=B-M8,"Bolt ""M8"", long",'-M8 x 40,2,bolt,v1`);
-    expect(lines).toContain('3,PL-100,Plate,"Base plate, rev B",1,plate,v2');
+    // PD2 added the material, sourcing, mass and cost columns after the R2b-3 ones.
+    expect(lines[0]).toMatch(/^Item,Part number,Name,Description,Quantity,Artifact,Version,/);
+    expect(lines).toContain(`4.2,'=B-M8,"Bolt ""M8"", long",'-M8 x 40,2,bolt,v1,,,,,,,,`);
+    expect(lines).toContain('3,PL-100,Plate,"Base plate, rev B",1,plate,v2,,,,,,,,');
     expect(csv.endsWith('\r\n')).toBe(true);
     expect(lines).toHaveLength(1 + 7 + 1);
     expect(cadContentHash(f.assembly)).toBe(hash);

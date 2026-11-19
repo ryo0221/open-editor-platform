@@ -6,7 +6,16 @@ import {
   IconButton,
   isTextInput,
 } from '@editor-platform/editor-ui';
-import { Circle, MousePointer2, PenLine, Scan, Spline, SplinePointer, Waves } from 'lucide-react';
+import {
+  Circle,
+  MousePointer2,
+  PenLine,
+  Scan,
+  Spline,
+  SplinePointer,
+  Type,
+  Waves,
+} from 'lucide-react';
 import {
   cadCurvature,
   cadLimits,
@@ -22,11 +31,13 @@ import {
   type CadSketch,
   type CadSketchConstraint,
   type CadSketchEntity,
+  type CadSketchNote,
   type Length,
 } from '@editor-platform/cad-core';
 import type { CadController, CadSketchView } from './controller';
 import { readCadInput } from './expression-input';
 import { constraintTargets, currentLength, type SketchConstraintInput } from './sketch-draft';
+import { noteEms } from './sketch-note-width';
 import { Output } from './status-role';
 import type { CadSketchUnderlay } from './sketch-underlay';
 
@@ -36,7 +47,8 @@ import type { CadSketchUnderlay } from './sketch-underlay';
  * Desktop only; nothing here is an edit until Finish.
  */
 /** `through`: a spline drawn through the clicked points instead of on them (SC-5). */
-export type SketchTool = 'select' | 'line' | 'arc' | 'circle' | 'spline' | 'through';
+/** `note`: a click places a text note (CLF10). */
+export type SketchTool = 'select' | 'line' | 'arc' | 'circle' | 'spline' | 'through' | 'note';
 type Pt = [number, number];
 /** Pointer tolerance for snapping and picking, in screen pixels. */
 const snapPx = 8;
@@ -48,6 +60,11 @@ const radiusOf = (s: CadSketch, e: Extract<CadSketchEntity, { type: 'circle' | '
     ? (s.solved[e.id]?.[0] ?? 0)
     : Math.hypot(at(s, e.start)[0] - at(s, e.center)[0], at(s, e.start)[1] - at(s, e.center)[1]);
 const dist = (a: Pt, b: Pt) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+/** CLF10: a note's box on the plane (lower-left, upper-right), as wide as its text is drawn. */
+const noteBox = (n: CadSketchNote): [Pt, Pt] => [
+  n.at,
+  [n.at[0] + n.size * noteEms(n.text), n.at[1] + n.size],
+];
 
 /** The u/v box the drawing covers, at least 200 mm across, with a margin. */
 /**
@@ -83,6 +100,7 @@ function fitBox(
       }
     }
   }
+  for (const n of s.notes ?? []) pts.push(...noteBox(n));
   // CLF1a: an empty sketch opens on what lies under it, if anything.
   if (!pts.length && around) pts.push([around[0], around[1]], [around[2], around[3]]);
   if (!pts.length) return [-100, -100, 200, 200];
@@ -230,7 +248,7 @@ export function SketchCanvas({
   const shadow = useMemo(() => underlay && shadowImage(underlay), [underlay]);
   const [pending, setPending] = useState<{ id?: string; at: Pt }[]>([]);
   const [cursor, setCursor] = useState<Pt>();
-  const [drag, setDrag] = useState<{ id: string; at: Pt }>();
+  const [drag, setDrag] = useState<{ id: string; at: Pt; grab?: Pt }>();
   const [width, setWidth] = useState(800);
   useEffect(() => {
     const element = svg.current!;
@@ -307,7 +325,15 @@ export function SketchCanvas({
       const d = hitDistance(sketch, e, p);
       if (d <= snap && (!best || d < best.d)) best = { id: e.id, d };
     }
-    return best?.id;
+    if (best) return best.id;
+    // CLF10: a click inside a note's box picks it.
+    // The last drawn (topmost) note wins.
+    return [...(sketch.notes ?? [])].reverse().find((n) => {
+      const [a, b] = noteBox(n);
+      return (
+        p[0] >= a[0] - snap && p[0] <= b[0] + snap && p[1] >= a[1] - snap && p[1] <= b[1] + snap
+      );
+    })?.id;
   };
   const input = (p: Pt) => {
     const id = pointNear(p);
@@ -320,14 +346,26 @@ export function SketchCanvas({
     const p = toSketch(e);
     if (tool === 'select') {
       const hit = elementNear(p);
+      const note = sketch.notes?.find((n) => n.id === hit);
       if (hit && kindOf(sketch, hit) === 'point') {
         setDrag({ id: hit, at: at(sketch, hit) });
+        svg.current!.setPointerCapture?.(e.pointerId);
+      } else if (note) {
+        // A note is dragged by where it was taken, so it does not jump to the pointer.
+        setDrag({ id: note.id, at: note.at, grab: [p[0] - note.at[0], p[1] - note.at[1]] });
         svg.current!.setPointerCapture?.(e.pointerId);
       }
       if (!hit) onSelect([]);
       else if (e.shiftKey || selected.length)
         onSelect(selected.includes(hit) ? selected.filter((x) => x !== hit) : [...selected, hit]);
       else onSelect([hit]);
+      return;
+    }
+    if (tool === 'note') {
+      // A new note a twentieth of the view high, selected for its text to be written.
+      const size = Math.min(2000, Math.max(1, Math.round(box[2] / 20)));
+      const id = controller.sketchNote(p, 'Note', size);
+      if (id) onSelect([id]);
       return;
     }
     const q = input(p);
@@ -357,13 +395,20 @@ export function SketchCanvas({
   function move(e: PointerEvent<SVGSVGElement>) {
     const p = toSketch(e);
     setCursor(p);
-    if (drag) setDrag({ id: drag.id, at: p });
+    if (drag)
+      setDrag({
+        ...drag,
+        at: drag.grab ? [p[0] - drag.grab[0], p[1] - drag.grab[1]] : p,
+      });
   }
   function up() {
     if (!drag) return;
-    const moved = dist(drag.at, at(sketch, drag.id)) > 1e-9;
+    const note = sketch.notes?.find((n) => n.id === drag.id);
+    const moved = dist(drag.at, note ? note.at : at(sketch, drag.id)) > 1e-9;
     setDrag(undefined);
-    if (moved) controller.sketchMove(drag.id, drag.at);
+    if (!moved) return;
+    if (note) controller.sketchEditNote(note.id, { at: drag.at });
+    else controller.sketchMove(drag.id, drag.at);
   }
   function wheel(e: React.WheelEvent<SVGSVGElement>) {
     const p = toSketch(e);
@@ -371,9 +416,15 @@ export function SketchCanvas({
     setBox(([u, v, w, h]) => [p[0] - (p[0] - u) * k, p[1] - (p[1] - v) * k, w * k, h * k]);
   }
 
-  const shown: CadSketch = drag
-    ? { ...sketch, solved: { ...sketch.solved, [drag.id]: drag.at } }
-    : sketch;
+  const dragsNote = !!drag && !!sketch.notes?.some((n) => n.id === drag.id);
+  const shown: CadSketch = !drag
+    ? sketch
+    : dragsNote
+      ? {
+          ...sketch,
+          notes: sketch.notes!.map((n) => (n.id === drag.id ? { ...n, at: drag.at } : n)),
+        }
+      : { ...sketch, solved: { ...sketch.solved, [drag.id]: drag.at } };
   // One scale for every spline, so their teeth compare: the longest is a fifth of its curve's size.
   const combs = useMemo(() => {
     if (comb === undefined) return [];
@@ -486,6 +537,9 @@ export function SketchCanvas({
         ))}
         {shown.entities.map((e) => {
           const cls = `${mark(e.id)} ${construction(e)}`;
+          // CLF9: the curve's own colour, unless it is selected or named by a problem.
+          const style =
+            e.type !== 'point' && e.color && !mark(e.id) ? { stroke: e.color } : undefined;
           if (e.type === 'line') {
             const a = at(shown, e.start);
             const b = at(shown, e.end);
@@ -494,6 +548,7 @@ export function SketchCanvas({
                 key={e.id}
                 data-id={e.id}
                 className={cls}
+                style={style}
                 x1={a[0]}
                 y1={-a[1]}
                 x2={b[0]}
@@ -508,6 +563,7 @@ export function SketchCanvas({
                 key={e.id}
                 data-id={e.id}
                 className={cls}
+                style={style}
                 cx={c[0]}
                 cy={-c[1]}
                 r={radiusOf(shown, e)}
@@ -515,7 +571,9 @@ export function SketchCanvas({
             );
           }
           if (e.type === 'arc')
-            return <path key={e.id} data-id={e.id} className={cls} d={arcPath(shown, e)} />;
+            return (
+              <path key={e.id} data-id={e.id} className={cls} style={style} d={arcPath(shown, e)} />
+            );
           if (e.type === 'spline') {
             const pts = splineCurve(shown, e);
             const d = pts.map(([x, y], i) => `${i ? 'L' : 'M'} ${x} ${-y}`).join(' ');
@@ -528,7 +586,7 @@ export function SketchCanvas({
                     .map(([x, y]) => `${x},${-y}`)
                     .join(' ')}
                 />
-                <path data-id={e.id} className={cls} d={e.closed ? `${d} Z` : d} />
+                <path data-id={e.id} className={cls} style={style} d={e.closed ? `${d} Z` : d} />
               </g>
             );
           }
@@ -549,6 +607,19 @@ export function SketchCanvas({
               />
             );
           })}
+        {shown.notes?.map((n) => (
+          <text
+            key={n.id}
+            data-id={n.id}
+            className={`cad-sketch-note ${mark(n.id)}`}
+            x={n.at[0]}
+            y={-n.at[1]}
+            fontSize={n.size}
+            style={n.color && !mark(n.id) ? { fill: n.color } : undefined}
+          >
+            {n.text}
+          </text>
+        ))}
         {preview}
       </svg>
       <div className="cad-sketch-view-tools">
@@ -597,6 +668,7 @@ export function SketchTools({
       'Draw spline through points',
       'Click 4 or more points on the curve; Enter ends it, a click on the first point closes it',
     ],
+    ['note', Type, 'Add note', 'Click where the text starts; write it in the panel'],
   ];
   return (
     <>
@@ -802,6 +874,13 @@ export function SketchPanel({
   const [offset, setOffset] = useState('5');
   const offsettable = useMemo(() => !!sketchOffsetChain(sketch, selected), [sketch, selected]);
   const problem = new Set(view.problem?.elements ?? []);
+  // CLF9: the selected curves, whose line colour the panel sets.
+  const notes = (sketch.notes ?? []).filter((n) => selected.includes(n.id));
+  const curves = [
+    ...sketch.entities.flatMap((e) => (e.type !== 'point' && selected.includes(e.id) ? [e] : [])),
+    ...notes,
+  ];
+  const note = notes.length === 1 ? notes[0] : undefined;
   const extrudable = Number(distance) > 0 && Number.isFinite(Number(distance));
   return (
     <section className="cad-sketch-panel" aria-label="Sketch" data-testid="cad-sketch-panel">
@@ -899,6 +978,45 @@ export function SketchPanel({
             }}
           >
             Offset
+          </button>
+        </div>
+      )}
+      {note && (
+        // In the fields' context, so Finish commits them first and stays open on a refusal.
+        <EditorInputsContext.Provider value={fields}>
+          <div className="cad-row" role="group" aria-label="Note">
+            <CommitInput
+              key={`${note.id}-text`}
+              label="Note text"
+              value={note.text}
+              onCommit={(text) => controller.sketchEditNote(note.id, { text })}
+            />
+            <CommitInput
+              key={`${note.id}-size`}
+              label="Text height (mm)"
+              value={String(note.size)}
+              onCommit={(size) => controller.sketchEditNote(note.id, { size: Number(size) })}
+            />
+          </div>
+        </EditorInputsContext.Provider>
+      )}
+      {curves.length > 0 && (
+        <div className="cad-row" role="group" aria-label="Line colour">
+          <label>
+            Line colour{' '}
+            <input
+              type="color"
+              aria-label="Line colour"
+              value={curves[0]!.color ?? '#1f2933'}
+              onChange={(e) => controller.sketchColor(selected, e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!curves.some((e) => e.color)}
+            onClick={() => controller.sketchColor(selected, undefined)}
+          >
+            Default colour
           </button>
         </div>
       )}

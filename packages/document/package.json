@@ -11,7 +11,8 @@
     "./text": "./src/text-access.ts",
     "./sequence": "./src/sequence.ts",
     "./manuscript": "./src/manuscript.ts",
-    "./native-host": "./src/native-host.ts"
+    "./native-host": "./src/native-host.ts",
+    "./pdf-text": "./src/pdf-text.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

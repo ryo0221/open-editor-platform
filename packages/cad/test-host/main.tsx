@@ -28,6 +28,7 @@ import {
   position,
   fixtureComponent,
   r2bBom,
+  f151CostedBom,
   r2bJoints,
   m1InterferenceCases,
   m1Robot,
@@ -57,7 +58,7 @@ import {
 } from '../src';
 import { cadPerf } from './perf';
 
-// Standalone host: ?fixture=plate|hub|holes|fillet|bracket|sections|chains|tube|hood|seam|panel|r2b|r2b-joints|r2b-versions|r2b-authoring|r2b-bom|r2b-scale|panel-part|b2-door|mr1-arm|mr2-forms|mr7-tool|m1-robot|tr01-robot|m1-cases, ?persist=1 (the last applied content is kept
+// Standalone host: ?fixture=plate|hub|holes|fillet|bracket|sections|chains|tube|hood|seam|panel|r2b|r2b-joints|r2b-versions|r2b-authoring|r2b-bom|pd2-bom|r2b-scale|panel-part|b2-door|mr1-arm|mr2-forms|mr7-tool|m1-robot|tr01-robot|m1-cases, ?persist=1 (the last applied content is kept
 // in sessionStorage and opened again on reload), ?view=side|far|plan (plate with a saved view), ?readonly=1,
 // ?kernel=missing, ?kernel=reference (an earlier build this Host shows only through an approved
 // substitute), ?pair=1 (two Surfaces).
@@ -113,6 +114,7 @@ const sections = (): CadDocument => ({
 // ?fixture=r2b-bom: F22 (R2b-3), a plate of its own, two plate versions, four wheels (a hub and
 // two bolts each), two bolts, a ring of 8 and a row of 6 bolts (component patterns) and a jig
 // left out of the BOM.
+// ?fixture=pd2-bom: F151 (PD2), F22 with every version's material, sourcing, unit cost and supplier.
 // ?fixture=r2b-scale: F23 (R2b-4), 300 kinds of bracket placed 1,000 times, nested three deep;
 // the parts no joint reads evaluate after the result.
 const r2bAuthoring = (kernel: Parameters<typeof r2bParts>[0]) => {
@@ -184,9 +186,11 @@ const r2bFixture =
                       ? r2bAuthoring
                       : params.get('fixture') === 'r2b-bom'
                         ? r2bBom
-                        : params.get('fixture') === 'r2b-scale'
-                          ? r2bScale
-                          : r2bParts;
+                        : params.get('fixture') === 'pd2-bom'
+                          ? f151CostedBom
+                          : params.get('fixture') === 'r2b-scale'
+                            ? r2bScale
+                            : r2bParts;
 const r2b = r2bFixture({ id: fixtureKernel.id, buildHash });
 const offered =
   'bases' in r2b
@@ -280,6 +284,7 @@ const assemblyFixture =
   fixture === 'r2b-versions' ||
   fixture === 'r2b-authoring' ||
   fixture === 'r2b-bom' ||
+  fixture === 'pd2-bom' ||
   fixture === 'r2b-scale' ||
   fixture === 'panel-part' ||
   fixture === 'mr1-arm' ||

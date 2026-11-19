@@ -80,6 +80,14 @@ export default tseslint.config(
               group: ['@editor-platform/cad', '@editor-platform/cad-*', '@editor-platform/cad/*'],
               message: 'bim and geometry packages do not import CAD packages (ADR 017).',
             },
+            {
+              group: [
+                '@editor-platform/drawing',
+                '@editor-platform/drawing-*',
+                '@editor-platform/drawing/*',
+              ],
+              message: 'Building and geometry packages do not import the drawing domain (ADR 022).',
+            },
           ],
         },
       ],
@@ -120,6 +128,27 @@ export default tseslint.config(
               ],
               message:
                 'pcb, schematic, circuit-sim and ladder packages do not import other domains (ADR 021).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // ADR 022: CAD packages never depend on the drawing domain that reads them.
+    files: ['packages/cad/**/*.{ts,tsx}', 'packages/cad-*/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@editor-platform/drawing',
+                '@editor-platform/drawing-*',
+                '@editor-platform/drawing/*',
+              ],
+              message: 'CAD packages do not import the drawing domain (ADR 022).',
             },
           ],
         },

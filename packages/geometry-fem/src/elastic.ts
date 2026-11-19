@@ -46,7 +46,70 @@ export interface ElasticInput {
   constraints: ElasticConstraint[];
   /** CR5a: added masses on shape faces. */
   masses?: AddedMass[];
+  /** VS11c: a temperature field whose expansion loads the body (thermal stress). */
+  thermal?: ElasticThermal;
   solver: { tolerance: number; maxIterations: number };
+}
+
+/**
+ * VS11c (docs/cad/vehicle-simulation.md, VS11): the thermal strain α (T − T_ref) in every
+ * direction, from a temperature per node (K, e.g. a transient heat result) and the temperature at
+ * which the body is free of strain. α in 1/K (steel 1.2e-5).
+ */
+export interface ElasticThermal {
+  temperature: ArrayLike<number>;
+  reference: number;
+  expansion: number;
+}
+
+/** Refuses a thermal field that does not fit the mesh or is not finite (`material`). */
+export function checkElasticThermal(mesh: FemMesh, thermal: ElasticThermal): void {
+  const n = mesh.nodes.length / 3;
+  if (thermal.temperature.length !== n)
+    throw new ElasticError(
+      'material',
+      `thermal: ${thermal.temperature.length} temperatures for ${n} nodes`,
+    );
+  if (
+    !Number.isFinite(thermal.reference) ||
+    !Number.isFinite(thermal.expansion) ||
+    thermal.expansion < 0
+  )
+    throw new ElasticError('material', 'thermal: finite reference temperature and expansion ≥ 0');
+  for (let p = 0; p < n; p++)
+    if (!Number.isFinite(thermal.temperature[p]!))
+      throw new ElasticError('material', `thermal: node ${p} has no finite temperature`);
+}
+
+/**
+ * The nodal forces of the thermal strain, f_a = ∫ ∇N_a · E/(1 − 2ν) α ΔT dV (N), with ΔT
+ * interpolated by the shape functions; they sum to 0 over the body. Integrated with the
+ * stiffness's own rule (`gaussPoints`), so a uniform rise gives K (α ΔT x) = f exactly, also on
+ * curved tet10 elements: a free body then expands without stress.
+ */
+export function thermalForce(
+  mesh: FemMesh,
+  material: ElasticMaterial,
+  thermal: ElasticThermal,
+): Float64Array {
+  const npe = nodesPerElement(mesh.type);
+  const m = mesh.elements.length / npe;
+  const f = new Float64Array(mesh.nodes.length);
+  const bulk3 = material.youngsModulus / (1 - 2 * material.poissonsRatio);
+  const { temperature: T, reference, expansion } = thermal;
+  for (let e = 0; e < m; e++) {
+    const nodes = mesh.elements.subarray(e * npe, (e + 1) * npe);
+    for (const g of gaussPoints) {
+      const { dN, det } = shapeGradients(mesh, e, npe, g);
+      const N = shapeValues(mesh.type, g[0], g[1], g[2]);
+      let dT = 0;
+      N.forEach((na, a) => (dT += na * (T[nodes[a]!]! - reference)));
+      const s = bulk3 * expansion * dT * det * gaussWeight;
+      for (let a = 0; a < npe; a++)
+        for (let i = 0; i < 3; i++) f[nodes[a]! * 3 + i]! += dN[a]![i]! * s;
+    }
+  }
+  return f;
 }
 
 export interface ElasticResult {
@@ -93,7 +156,9 @@ export type ElasticProblem =
   /** R3j-3: a group of bonded bodies that no constraint holds. */
   | 'body-unconnected'
   /** R3j-5a: a shell the Host's solid wedges cannot carry (a sharp crease, a partly held rotation). */
-  | 'host-shell';
+  | 'host-shell'
+  /** VS11a: a transient heat input beyond `transientLimits` (steps, kept fields, iterations). */
+  | 'limit';
 /** A refusal before solving: nothing is computed. `modes` names the free rigid motions. */
 export class ElasticError extends Error {
   constructor(
@@ -191,7 +256,7 @@ export function shapeGradients(
 }
 
 /** det J at one natural point of an element (no sign check). */
-function detAt(mesh: FemMesh, e: number, npe: number, at: readonly number[]): number {
+export function detAt(mesh: FemMesh, e: number, npe: number, at: readonly number[]): number {
   const dNn = shapeDerivatives(mesh.type, at[0]!, at[1]!, at[2]!);
   const J = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (let a = 0; a < npe; a++) {
@@ -300,7 +365,7 @@ const legendre4 = (() => {
  * A collapsed (Duffy) rule on the reference tetrahedron: exact for polynomials of degree 5,
  * enough for ∫ N_a det J of a curved tet10 (quadratic × cubic). Weights sum to 1/6.
  */
-const tetRule: readonly (readonly [number, number, number, number])[] = (() => {
+export const tetRule: readonly (readonly [number, number, number, number])[] = (() => {
   const out: [number, number, number, number][] = [];
   for (const [u, wu] of legendre4)
     for (const [v, wv] of legendre4)
@@ -317,7 +382,12 @@ const triangleRule: readonly (readonly [number, number, number])[] = (() => {
 })();
 
 /** Shape function values of an element at a natural point, in node order. */
-function shapeValues(type: 'tet4' | 'tet10', xi: number, eta: number, zeta: number): number[] {
+export function shapeValues(
+  type: 'tet4' | 'tet10',
+  xi: number,
+  eta: number,
+  zeta: number,
+): number[] {
   const L = [1 - xi - eta - zeta, xi, eta, zeta];
   if (type === 'tet4') return L;
   return [...L.map((l) => l * (2 * l - 1)), ...tet10Edges.map(([a, b]) => 4 * L[a]! * L[b]!)];
@@ -745,6 +815,11 @@ export function solveElastic(input: ElasticInput): ElasticResult {
   const { mesh, material } = input;
   const { prescribed, force: f, loadChecks, constrainedNodes } = prepareElastic(input);
   const dofs = mesh.nodes.length;
+  if (input.thermal) {
+    checkElasticThermal(mesh, input.thermal);
+    const ft = thermalForce(mesh, material, input.thermal);
+    for (let d = 0; d < dofs; d++) f[d]! += ft[d]!;
+  }
 
   // Assembly.
   const K = assembleStiffness(mesh, material);
@@ -770,7 +845,7 @@ export function solveElastic(input: ElasticInput): ElasticResult {
       number,
     ];
 
-  const { stress, vonMises } = elasticStress(mesh, material, u);
+  const { stress, vonMises } = elasticStress(mesh, material, u, input.thermal);
   return {
     displacement: u,
     stress,
@@ -794,6 +869,8 @@ export function elasticStress(
   mesh: FemMesh,
   material: ElasticMaterial,
   u: Float64Array,
+  /** VS11c: σ = D (ε − α ΔT I), the thermal part at each node from its own temperature. */
+  thermal?: ElasticThermal,
 ): { stress: Float64Array; vonMises: Float64Array } {
   const npe = nodesPerElement(mesh.type);
   const n = mesh.nodes.length / 3;
@@ -809,6 +886,10 @@ export function elasticStress(
       const { dN } = shapeGradients(mesh, e, npe, pt);
       const eps = strainAt(dN, (k, i) => u[nodes[k]! * 3 + i]!);
       const p = nodes[a]!;
+      if (thermal) {
+        const th = thermal.expansion * (thermal.temperature[p]! - thermal.reference);
+        for (let k = 0; k < 3; k++) eps[k]! -= th;
+      }
       for (let r = 0; r < 6; r++)
         stress[p * 6 + r]! += D[r]!.reduce((s, d, k) => s + d * eps[k]!, 0);
       count[p]!++;

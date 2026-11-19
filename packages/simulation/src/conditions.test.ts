@@ -3,6 +3,7 @@ import { faceRef, type CadTopologyTable } from '@editor-platform/cad-core';
 import {
   aeroStudy,
   applySimulationOperation,
+  crashStudy,
   simulationFixture,
   validateSimulation,
   type SimulationDocument,
@@ -17,6 +18,7 @@ import {
   standardGravityMmS2,
   defaultModalStudy,
   defaultThermalStudy,
+  defaultTransientStudy,
   thermalStudyReady,
   localSizeDefault,
   removeConditionOps,
@@ -135,6 +137,20 @@ describe('loads and constraints on picked faces', () => {
     const t = apply(g, [{ type: 'addStudy', study: aeroStudy('tunnel') }]);
     const u = apply(t, removeConditionOps(t, 'loads', c.loads[2]!.id));
     expect(u.studies.map((s) => s.kind)).toEqual(['linear-static', 'aero']);
+    // VS7b (TS-2222, ST-618; Codex on #1208): a crash test takes no new support or load, and
+    // stays when a condition goes; adding a support to the others still works.
+    const k = apply(u, [{ type: 'addStudy', study: crashStudy('front', [0, 0, 0]) }]);
+    const added = apply(k, addConditionOps(k, 'fixed', fixed));
+    expect(added.studies.find((s) => s.kind === 'crash')!.constraintIds).toEqual([]);
+    expect(added.studies[0]!.constraintIds).toHaveLength(u.studies[0]!.constraintIds.length + 1);
+    expect(validateSimulation(added)).toEqual([]);
+    const loadsAdded = apply(added, addConditionOps(added, 'force', loaded));
+    expect(loadsAdded.studies.find((s) => s.kind === 'crash')!.loadIds).toEqual([]);
+    const gone = apply(
+      added,
+      removeConditionOps(added, 'constraints', added.constraints.at(-1)!.id),
+    );
+    expect(gone.studies.map((s) => s.kind)).toContain('crash');
     expect(defaultModalStudy(f).constraintIds).toEqual(
       f.constraints.filter((x) => x.kind === 'fixed').map((x) => x.id),
     );
@@ -478,5 +494,59 @@ describe('added masses on a body’s mesh (CR5a, Codex on #975)', () => {
   it('refuses a mass on a wall’s side face rather than move it onto the other faces', () => {
     const of: TargetsOf = (_, kind) => (kind === 'face' ? [2] : [7]);
     expect(() => addedMasses([mass], of)).toThrow(ConditionRefusal);
+  });
+});
+
+describe('removing a condition next to a transient study (Codex on #1264)', () => {
+  it('keeps a transient study with nothing held, and removes a steady one left unheld', () => {
+    const { doc } = simulationFixture();
+    const fixed = doc.constraints[0]!.targets;
+    const loaded = (doc.loads[0] as { targets: typeof fixed }).targets;
+    const empty: SimulationDocument = {
+      ...doc,
+      materials: [{ ...doc.materials[0]!, conductivity: 50, specificHeat: 4.6e8 }],
+      loads: [],
+      constraints: [],
+      studies: [],
+    };
+    const a = apply(empty, addConditionOps(empty, 'temperature', fixed));
+    const b = apply(a, addConditionOps(a, 'heat-flux', loaded));
+    const transient = { ...defaultTransientStudy(b), constraintIds: [], loadIds: [b.loads[0]!.id] };
+    const c = apply(b, [{ type: 'addStudy', study: transient }]);
+    expect(validateSimulation(c)).toEqual([]);
+    const ops = removeConditionOps(c, 'constraints', c.constraints[0]!.id);
+    expect(ops.filter((o) => o.type === 'removeStudy').map((o) => 'id' in o && o.id)).not.toContain(
+      transient.id,
+    );
+    expect(apply(c, ops).studies.map((s) => s.id)).toContain(transient.id);
+  });
+
+  it('removes a stressed transient study with its last support, and keeps it without a temperature', () => {
+    const { doc } = simulationFixture();
+    const fixed = doc.constraints[0]!.targets;
+    const loaded = (doc.loads[0] as { targets: typeof fixed }).targets;
+    const empty: SimulationDocument = {
+      ...doc,
+      materials: [{ ...doc.materials[0]!, conductivity: 50, specificHeat: 4.6e8 }],
+      loads: [],
+      constraints: [],
+      studies: [],
+    };
+    const a = apply(empty, addConditionOps(empty, 'temperature', loaded));
+    const b = apply(a, addConditionOps(a, 'fixed', fixed));
+    const [temperature, support] = [b.constraints[0]!, b.constraints[1]!];
+    const base = defaultTransientStudy(b);
+    if (base.kind !== 'transient-thermal') throw new Error('not transient');
+    const stressed = {
+      ...base,
+      constraintIds: [temperature.id, support.id],
+      transient: { ...base.transient, stress: { reference: 293.15 } },
+    };
+    const c = apply(b, [{ type: 'addStudy', study: stressed }]);
+    expect(validateSimulation(c)).toEqual([]);
+    const noSupport = apply(c, removeConditionOps(c, 'constraints', support.id));
+    expect(noSupport.studies.map((s) => s.id)).not.toContain(stressed.id);
+    const noTemperature = apply(c, removeConditionOps(c, 'constraints', temperature.id));
+    expect(noTemperature.studies.map((s) => s.id)).toContain(stressed.id);
   });
 });

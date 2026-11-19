@@ -7,13 +7,17 @@
 import {
   cadClearance,
   checkCadInterference,
+  checkCadMotionCoverage,
   checkCadInterferenceAlong,
   type CadClearanceReport,
   type CadConfiguration,
+  type CadCoverageReport,
   type CadDocument,
   type CadInterferenceMesh,
   type CadInterferenceReport,
   type CadJointSolution,
+  type CadMotionBounds,
+  type CadMotionDriver,
   type CadResolvedJointValues,
   type CadSweepReport,
 } from '@editor-platform/cad-core';
@@ -37,8 +41,14 @@ export interface CadInterferenceRequest {
   }[];
   /** CR7c: measure the clearance between two component paths instead (at `values` if given). */
   clearance?: { a: string[]; b: string[]; values?: Record<string, CadResolvedJointValues> };
+  /** PD6: move one joint value with every part within the step bounds instead. */
+  coverage?: { driver: CadMotionDriver; bounds: CadMotionBounds };
 }
-export type CadInterferenceJobReport = CadInterferenceReport | CadSweepReport | CadClearanceReport;
+export type CadInterferenceJobReport =
+  | CadInterferenceReport
+  | CadSweepReport
+  | CadClearanceReport
+  | CadCoverageReport;
 export type CadInterferenceResponse =
   | { id: number; status: 'done'; report: CadInterferenceJobReport }
   | { id: number; status: 'failed'; message: string };
@@ -59,6 +69,8 @@ export function runInterference(request: CadInterferenceRequest): CadInterferenc
       b,
     );
   }
+  if (request.coverage)
+    return checkCadMotionCoverage(input, request.coverage.driver, request.coverage.bounds);
   if (request.samples)
     return checkCadInterferenceAlong(
       input,

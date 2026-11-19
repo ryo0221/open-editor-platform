@@ -54,6 +54,14 @@ import {
   resolveSpurGear,
   spurGearProblem,
   spurGearSketch,
+  resolveSpring,
+  springProblem,
+  spiralSpringSketch,
+  coilSpringPath,
+  bevelGearCone,
+  cadGearLimits,
+  helicalGearTwist,
+  type SpurGearSpec,
   resolvePosition,
   blendFaceName,
   edgeName,
@@ -101,6 +109,7 @@ import {
   pmiAssetProblem,
   cadBodyPmi,
   cadBodyPmiPlacements,
+  cadBodyRigidImport,
   cadPmiItemStates,
   cadPmiTrackedIndex,
   readCadPmiAsset,
@@ -136,6 +145,8 @@ import {
   type CadAnalysisSurfaceRequest,
   type CadAnalysisSurfaceResult,
   type CadBrepExport,
+  type CadBrepPmi,
+  type CadBrepPmiBody,
   type CadCombResult,
   type CadFaceDistanceQuery,
   type CadFaceDistanceResult,
@@ -148,6 +159,7 @@ import {
 import { preparationFaces, type FaceSample } from './preparation';
 import { withToleranceNote } from './formats';
 import { shapeMetrics } from './metrics';
+import { optimalBounds } from './bounds';
 import { sheetTopology } from './sheet-topology';
 import { noPmiWritten, pmiWriteSpec, writePmiStep, type CadStepPmiWritten } from './step-pmi-write';
 
@@ -1705,6 +1717,70 @@ export async function evaluateCad(
         );
       return build(false);
     }
+  }
+  /**
+   * DW7a: a helical or bevel gear in its own frame: the tooth outline (no bore) lofted through
+   * copies turned along the helix, or one copy scaled toward the cone's apex at the small end,
+   * then bored. Sides take the outline's names (命名) like a spur gear's.
+   */
+  function loftedGear(f: Extract<CadFeature, { type: 'spurGear' }>, spec: SpurGearSpec, w: number) {
+    const outline = spurGearSketch({ ...spec, bore: 0, spokes: undefined }, `${f.id}:gear`);
+    const { face, sides } = regionFace(f, outline.sketch, outline.region);
+    const twist = helicalGearTwist(spec, w);
+    // Validation bounds it; a document that skipped it is refused before any section is made.
+    if (!(Math.abs(twist) <= cadGearLimits.helixMaxTwistRad))
+      throw new CadKernelError('gear-helix-twist', f.id);
+    const cone = bevelGearCone(spec);
+    // A bevel: its back end at z 0 and its small end up the axis, the face width along the cone.
+    const height = cone ? w * Math.cos(spec.cone!.angle) : w;
+    const steps = cone ? 1 : Math.max(2, Math.ceil(Math.abs(twist) / cadGearLimits.helixStepRad));
+    const wires: unknown[] = [];
+    let first: { edge: unknown; name: Side['name'] }[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const trsf = own(new oc.gp_Trsf_1());
+      const move = own(new oc.gp_Trsf_1());
+      move.SetTranslation_1(own(new oc.gp_Vec_4(0, 0, height * t)));
+      const turn = own(new oc.gp_Trsf_1());
+      turn.SetRotation_1(
+        own(new oc.gp_Ax1_2(pnt(0, 0, 0), own(new oc.gp_Dir_4(0, 0, 1)))),
+        twist * t,
+      );
+      const scale = own(new oc.gp_Trsf_1());
+      scale.SetScale(pnt(0, 0, 0), cone ? 1 - (1 - cone.scale) * t : 1);
+      trsf.Multiply(move);
+      trsf.Multiply(turn);
+      trsf.Multiply(scale);
+      const builder = own(new oc.BRepBuilderAPI_Transform_2(face, trsf, true));
+      const moved = own(oc.TopoDS.Face_1(own(builder.Shape())));
+      wires.push(own(oc.BRepTools.OuterWire(moved)));
+      if (i === 0) first = sides.map((x) => ({ ...x, edge: own(builder.ModifiedShape(x.edge)) }));
+    }
+    // A bevel's flanks are ruled (straight toward the apex); a helix is smooth through its turns.
+    const loft = thruSections(f.id, wires, true, !!cone);
+    const body = solidOrFail(
+      sweptNames(
+        {
+          FirstShape_1: () => loft.FirstShape(),
+          LastShape_1: () => loft.LastShape(),
+          Generated: (x: unknown) => loft.Generated(x),
+          Shape: () => loft.Shape(),
+        },
+        first as Side[],
+        true,
+      ),
+      'gear-loft-failed',
+      f.id,
+    );
+    if (!(spec.bore > 0)) return body;
+    // A cylinder through both ends, a little past each.
+    const past = 1;
+    const ax = own(new oc.gp_Ax2_3(pnt(0, 0, -past), own(new oc.gp_Dir_4(0, 0, 1))));
+    const bore = named(
+      own(own(new oc.BRepPrimAPI_MakeCylinder_3(ax, spec.bore / 2, height + 2 * past)).Shape()),
+      () => ['bore'],
+    );
+    return combine(f.id, 'cut', body, [bore], ['']);
   }
   /** Sketch point (u, v) of `sketchId` in world space. */
   function worldPoint(sketchId: string, u: number, v: number): Vec3 {
@@ -4154,6 +4230,12 @@ export async function evaluateCad(
         const spec = resolveSpurGear(f.args, params);
         const problem = spurGearProblem(spec);
         if (problem) throw new CadKernelError(problem.code, f.id);
+        if (spec.helix || spec.cone)
+          return place(
+            loftedGear(f, spec, len(f.args.faceWidth)),
+            f.args.orientation,
+            resolvePosition(f.args.origin, params),
+          );
         const { sketch, region } = spurGearSketch(spec, `${f.id}:gear`);
         const { face, sides } = regionFace(f, sketch, region);
         const vec = own(new oc.gp_Vec_4(0, 0, len(f.args.faceWidth)));
@@ -4163,6 +4245,71 @@ export async function evaluateCad(
           f.args.orientation,
           resolvePosition(f.args.origin, params),
         );
+      }
+      case 'spring': {
+        // PD5: a spiral is one region extruded (as a spur gear); a coil is a round wire swept
+        // along a cubic B-spline of its helix.
+        const spec = resolveSpring(f.args, params);
+        const problem = springProblem(spec);
+        if (problem) throw new CadKernelError(problem.code, f.id);
+        const at = resolvePosition(f.args.origin, params);
+        if (spec.form === 'spiral') {
+          const { sketch, region } = spiralSpringSketch(spec, `${f.id}:spring`);
+          const { face, sides } = regionFace(f, sketch, region);
+          const vec = own(new oc.gp_Vec_4(0, 0, spec.height));
+          const prism = own(new oc.BRepPrimAPI_MakePrism_1(face, vec, false, true));
+          return place(
+            solidOrFail(sweptNames(prism, sides, true), 'spring-failed', f.id),
+            f.args.orientation,
+            at,
+          );
+        }
+        const helix = coilSpringPath(spec);
+        const P = own(new oc.TColgp_Array1OfPnt_2(1, helix.poles.length));
+        helix.poles.forEach((p, i) => P.SetValue(i + 1, pnt(...p)));
+        const K = own(new oc.TColStd_Array1OfReal_2(1, helix.knots.length));
+        helix.knots.forEach((k, i) => K.SetValue(i + 1, k));
+        const M = own(new oc.TColStd_Array1OfInteger_2(1, helix.mults.length));
+        helix.mults.forEach((m, i) => M.SetValue(i + 1, m));
+        const curve = own(
+          new oc.Handle_Geom_Curve_2(new oc.Geom_BSplineCurve_1(P, K, M, 3, false)),
+        );
+        const pathEdge = own(new oc.BRepBuilderAPI_MakeEdge_24(curve));
+        if (!pathEdge.IsDone()) throw new CadKernelError('spring-failed', f.id);
+        const path = own(new oc.BRepBuilderAPI_MakeWire_1());
+        path.Add_1(own(pathEdge.Edge()));
+        const frame = own(
+          new oc.gp_Ax2_3(pnt(...helix.poles[0]!), own(new oc.gp_Dir_4(...helix.tangent))),
+        );
+        const circle = own(
+          new oc.BRepBuilderAPI_MakeEdge_8(own(new oc.gp_Circ_2(frame, spec.wireDiameter / 2))),
+        );
+        if (!circle.IsDone()) throw new CadKernelError('spring-failed', f.id);
+        const profile = own(new oc.BRepBuilderAPI_MakeWire_1());
+        profile.Add_1(own(circle.Edge()));
+        const side = own(profile.Edge());
+        const pipe = own(new oc.BRepOffsetAPI_MakePipeShell(own(path.Wire())));
+        // Corrected Frenet: the round section does not care how it turns about the wire.
+        pipe.SetMode_1(false);
+        pipe.Add_1(own(profile.Wire()), false, false);
+        if (!pipe.IsReady()) throw new CadKernelError('spring-failed', f.id);
+        try {
+          pipe.Build(own(new oc.Message_ProgressRange_1()));
+        } catch {
+          throw new CadKernelError('spring-failed', f.id);
+        }
+        if (!pipe.IsDone() || !pipe.MakeSolid()) throw new CadKernelError('spring-failed', f.id);
+        const result = sweptNames(
+          {
+            FirstShape_1: () => pipe.FirstShape(),
+            LastShape_1: () => pipe.LastShape(),
+            Generated: (x: unknown) => pipe.Generated(x),
+            Shape: () => pipe.Shape(),
+          },
+          [{ edge: side, name: ['surface'] }],
+          true,
+        );
+        return place(solidOrFail(result, 'spring-failed', f.id), f.args.orientation, at);
       }
       case 'extrude': {
         const { face, sides, frame } = swept(f);
@@ -5264,6 +5411,105 @@ export async function evaluateCad(
   }
 
   /**
+   * PMI-5c: each body's PMI as the assembly STEP writer takes it, on the compound `writeBrep`
+   * writes (the bodies in order): the body's own sub-shapes are found in the compound's maps.
+   * An imported body that carries no PMI of its own is still tracked from its import when it is
+   * that import moved rigidly (`cadBodyRigidImport`), so a component's assembly PMI can name it.
+   */
+  function brepPmiOf(bodies: { id: string; final: Named }[]): CadBrepPmi | undefined {
+    const report = noPmiWritten();
+    const writer = typeof oc.OCJS?.addPmi === 'function';
+    const builder = own(new oc.BRep_Builder());
+    const compound = own(new oc.TopoDS_Compound());
+    builder.MakeCompound(compound);
+    for (const { final } of bodies) builder.Add(compound, final.shape);
+    const fileMaps = new Map(pmiKinds.map((k) => [k, shapeMap(compound, k)] as const));
+    const fields = {
+      TopAbs_FACE: 'faces',
+      TopAbs_EDGE: 'edges',
+      TopAbs_VERTEX: 'vertices',
+    } as const;
+    let any = false;
+    const out = bodies.map(({ id, final }): CadBrepPmiBody => {
+      // Each import's sub-shapes in the body (1-based map indices), then in the compound. A body
+      // that is its import moved rigidly has them all in the import's order.
+      const rigid = cadBodyRigidImport(doc, id);
+      const byImport = final.origins
+        ? pmiTracking(final, true)
+        : rigid
+          ? [
+              {
+                featureId: rigid.featureId,
+                ...Object.fromEntries(
+                  pmiKinds.map((k) => {
+                    const n = shapeMap(final.shape, k).Size();
+                    return [fields[k], Array.from({ length: n }, (_, i) => [i + 1, i + 1]).flat()];
+                  }),
+                ),
+              } as CadPmiTracking,
+            ]
+          : [];
+      const tracking = byImport.map((t) => {
+        const r = { featureId: t.featureId, faces: [], edges: [], vertices: [] } as CadPmiTracking;
+        for (const kind of pmiKinds) {
+          const body = shapeMap(final.shape, kind);
+          const file = fileMaps.get(kind)!;
+          const list = t[fields[kind]];
+          for (let i = 0; i + 1 < list.length; i += 2) {
+            const at = file.FindIndex(own(body.FindKey(list[i + 1]!)));
+            if (at > 0) r[fields[kind]].push(list[i]!, at);
+          }
+        }
+        return r;
+      });
+      const result: CadBrepPmiBody = {
+        bodyId: id,
+        tracking,
+        ...(rigid ? { placements: rigid.placements } : {}),
+      };
+      const state = cadBodyPmi(doc, id);
+      if (state.status === 'none') return result;
+      const assetOf = (featureId: string, assetId: string) => {
+        const g = doc.features.find((h) => h.id === featureId);
+        return g?.type === 'imported' ? readCadPmiAsset(assetBytes(g, assetId)) : undefined;
+      };
+      if (state.status === 'stale') {
+        const seen = new Set<string>();
+        for (const i of state.imports) {
+          if (seen.has(i.assetId)) continue;
+          seen.add(i.assetId);
+          const asset = assetOf(i.featureId, i.assetId);
+          if (!asset) continue;
+          any = true;
+          report.stale += asset.items.length;
+          report.views += asset.views?.length ?? 0;
+        }
+        return result;
+      }
+      const asset = assetOf(state.featureId, state.assetId);
+      if (!asset) return result;
+      any = true;
+      if (!writer) {
+        report.unsupportedBuild += asset.items.length;
+        report.views += asset.views?.length ?? 0;
+        return result;
+      }
+      const table = final.origins
+        ? pmiTracking(final).find((t) => t.featureId === state.featureId)
+        : undefined;
+      const placements = cadBodyPmiPlacements(doc, id);
+      result.pmi = {
+        featureId: state.featureId,
+        asset,
+        states: [...cadPmiItemStates(asset, table)],
+        ...(placements ? { placements } : {}),
+      };
+      return result;
+    });
+    return any || out.some((b) => b.tracking.length) ? { bodies: out, report, writer } : undefined;
+  }
+
+  /**
    * R3c-2a: the boundary of a body as the analysis mesher takes it (docs/cad/r3-analysis.md): one
    * triangulation at `deflectionMm`, in Float64 and world coordinates, each triangle tagged with
    * its face (topology table order), and each edge's chain of points (its polygon on the first
@@ -6205,7 +6451,14 @@ export async function evaluateCad(
   };
   /** The bodies as one compound in `BRepTools` text, as a STEP import normalizes a body. */
   const writeBrep = (
-    bodies: { id: string; shape: unknown; kind: CadBodyKind; appearance: CadAppearance }[],
+    bodies: {
+      id: string;
+      shape: unknown;
+      kind: CadBodyKind;
+      appearance: CadAppearance;
+      /** #1250: the body's box as measured already; the compound's is their union. */
+      bounds?: readonly [Vec3, Vec3];
+    }[],
   ): CadBrepExport => {
     if (!bodies.length) throw new CadKernelError('brep-empty');
     if (typeof oc.BRepTools?.Write_3 !== 'function')
@@ -6225,9 +6478,18 @@ export async function evaluateCad(
         explore(shape, 'TopAbs_FACE', () => n++);
         return n;
       });
+      // #1250: the exact box of a large part costs tens of seconds (49 s of a 14.5 MiB JAMA
+      // sheet); the union of the bodies' boxes is the same box, measured once.
+      const boxes = bodies.map((b) => b.bounds);
+      const bounds: [Vec3, Vec3] = boxes.every((b) => b !== undefined)
+        ? [
+            [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b![0][k]!))) as Vec3,
+            [0, 1, 2].map((k) => Math.max(...boxes.map((b) => b![1][k]!))) as Vec3,
+          ]
+        : boundsOf(compound);
       return {
         bytes,
-        bounds: boundsOf(compound),
+        bounds,
         kinds: bodies.map((b) => b.kind),
         appearances: bodies.map((b) => ({ ...b.appearance })),
         faces,
@@ -6259,6 +6521,11 @@ export async function evaluateCad(
     limits.set(id, limit);
     return limit;
   };
+  /** #848: an imported sheet, or a placement of one, may hold several separate shells. */
+  const manyShells = (id: string): boolean => {
+    const f = featureById.get(id);
+    return f?.type === 'imported' || (f?.type === 'transform' && manyShells(f.inputFeatureIds[0]!));
+  };
   /**
    * The checks every feature result passes, within the result tolerance: one or more valid
    * solids that do not touch (K1, up to `cadLimits.solidsPerBody`), or for a sheet feature one
@@ -6272,8 +6539,15 @@ export async function evaluateCad(
       let shells = 0;
       explore(shape, 'TopAbs_SHELL', () => shells++);
       if (!shells) throw new CadKernelError('empty-result', featureId);
-      if (shells > 1 || !sheetTopology(oc, shape, own).connected)
+      // #848: an imported sheet (and its placements) may hold several shells, each one
+      // connected; every other sheet is one connected shell.
+      if (shells > 1 ? !manyShells(featureId) : !sheetTopology(oc, shape, own).connected)
         throw new CadKernelError('sheet-disconnected', featureId);
+      if (shells > 1)
+        explore(shape, 'TopAbs_SHELL', (shell) => {
+          if (!sheetTopology(oc, shell, own).connected)
+            throw new CadKernelError('sheet-disconnected', featureId);
+        });
       if (!own(new oc.BRepCheck_Analyzer(shape, true, false)).IsValid_2())
         throw new CadKernelError('invalid-sheet', featureId);
     } else {
@@ -6314,15 +6588,7 @@ export async function evaluateCad(
       )
       .join(' ');
   };
-  const boundsOf = (shape: unknown): [Vec3, Vec3] => {
-    const box = own(new oc.Bnd_Box_1());
-    oc.BRepBndLib.AddOptimal(shape, box, false, false);
-    const [min, max] = [own(box.CornerMin()), own(box.CornerMax())];
-    return [
-      [min.X(), min.Y(), min.Z()],
-      [max.X(), max.Y(), max.Z()],
-    ];
-  };
+  const boundsOf = (shape: unknown): [Vec3, Vec3] => optimalBounds(oc, shape, own);
   const displayDeflection = (bounds: readonly [Vec3, Vec3]) =>
     options.deflectionMm ?? displayDeflectionMm(bounds, options.relativeDeflection);
   /** A failure while building feature or sketch `id`, as the kernel error it reports. */
@@ -6616,6 +6882,8 @@ export async function evaluateCad(
       const [min, max] = bounds;
       if (body.kind === 'sheet') {
         const { freeEdges, freeEdgeLengthMm } = sheetTopology(oc, shape, own);
+        let shells = 0;
+        explore(shape, 'TopAbs_SHELL', () => shells++);
         bodies[body.id] = {
           kind: 'sheet',
           areaMm2: metrics.areaMm2,
@@ -6623,6 +6891,7 @@ export async function evaluateCad(
           centroidMm: metrics.centroidMm,
           freeEdges,
           freeEdgeLengthMm,
+          ...(shells > 1 ? { shells } : {}),
         };
       } else {
         let solids = 0;
@@ -6869,8 +7138,14 @@ export async function evaluateCad(
           shape: finals.get(b.id)!.shape,
           kind: kindOf(b.resultFeatureId),
           appearance: b.appearance,
+          ...(bodies[b.id] ? { bounds: bodies[b.id]!.bounds } : {}),
         })),
       );
+      // PMI-5c: what an assembly's STEP writes of these bodies' PMI.
+      const pmi = active.length
+        ? brepPmiOf(active.map((b) => ({ id: b.id, final: finals.get(b.id)! })))
+        : undefined;
+      if (pmi) brep.pmi = pmi;
     }
     let analysisSurface: CadAnalysisSurfaceResult | undefined;
     if (options.analysisSurface) {

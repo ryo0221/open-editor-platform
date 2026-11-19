@@ -184,6 +184,32 @@ describe('WorkerKernelPort (CAD24)', () => {
     expect(shown).toEqual([]);
   });
 
+  it("gives an assembly's STEP write a job limit that grows with its parts' BReps (#1250)", async () => {
+    // TS-2470
+    const { workers, spawn } = fakeWorkers();
+    const timers = manualTimers();
+    const port = new WorkerKernelPort({ spawn, build, timers, jobTimeoutMs: 30_000 });
+    const plan = { products: [], instances: [] } as never;
+    const write = (id: string, mib: number) =>
+      port.exportAssemblyStep(id, plan, new Map([['h', new Uint8Array(mib * 2 ** 20)]]));
+    const first = write('w1', 10);
+    workers[0]!.send({ type: 'ready', buildHash: build.buildHash });
+    await flush();
+    // 30 s and 4 s for each MiB of BRep.
+    expect(timers.delays.at(-1)).toBe(30_000 + 40_000);
+    workers[0]!.send({
+      type: 'step-assembly-result',
+      requestId: 'w1',
+      result: { status: 'error', code: 'x', retryable: false },
+    } as never);
+    await first;
+    const slow = write('w2', 1);
+    await flush();
+    expect(timers.delays.at(-1)).toBe(34_000);
+    timers.fireAll();
+    expect(await slow).toMatchObject({ status: 'error', code: 'timeout' });
+  });
+
   it("sends the imported features' BRep bytes from the Host and reads STEP as a queued job", async () => {
     const { workers, spawn } = fakeWorkers();
     const brep = new Uint8Array([1, 2, 3]);
@@ -793,7 +819,7 @@ describe('split evaluations (CM-4, P3)', () => {
     expect(await result).toMatchObject({ status: 'error', code: 'timeout' });
   });
 
-  it('gives a STEP read 30 s and 5 s for each MiB of the file (CR7f, #846)', async () => {
+  it('gives a STEP read 30 s and 12 s for each MiB of the file (CR7f #846, #812)', async () => {
     // TS-1827, ST-294
     const { workers, spawn } = fakeWorkers();
     const timers = manualTimers();
@@ -805,6 +831,6 @@ describe('split evaluations (CM-4, P3)', () => {
     void port.importStepAssembly('car', new Uint8Array(64 * 2 ** 20));
     workers[0].send({ type: 'import-result', requestId: 'read', result: {} } as never);
     await flush();
-    expect(timers.delays).toEqual([30_000, 350_000]);
+    expect(timers.delays).toEqual([30_000, 798_000]);
   });
 });

@@ -85,6 +85,10 @@ it('graphic output checks only its selected subtree, including originals inside 
     parentId: 'card-frame',
   });
   expect(designReactGraphicProblems(d, ['card'])).toEqual(['card']);
+  // A frame area draws exactly the overlapping elements: a crossing parent alone is not refused
+  // for its React child outside the frame, and the child itself still is when it is drawn.
+  expect(designReactGraphicProblems(d, ['home'], 'exact')).not.toContain('buy');
+  expect(designReactGraphicProblems(d, ['home', 'buy'], 'exact')).toContain('buy');
   expect(() =>
     exportDesignReact(d, referenceResolution, { mode: 'svg', rootIds: ['card'] }),
   ).toThrow('external');

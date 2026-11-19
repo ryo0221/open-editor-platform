@@ -20,6 +20,9 @@ import {
   f18Hood,
   f19Network,
   f80Package,
+  f150LugTargets,
+  f157SightChecks,
+  f152CenterDistance,
   f80Sample,
   f81TwoView,
   f22Split,
@@ -31,6 +34,7 @@ import {
   f61Mirror,
   f62Steering,
   f63Car,
+  f156HandsOnDial,
   f26Panel,
   f27Windows,
   f24Flare,
@@ -2159,6 +2163,135 @@ test('PMI-5b assembly PMI: instances and parts, highlight, stale, saved and relo
   await expect.poll(() => warmPixels(page)).toBeGreaterThan(30);
 });
 
+// PMI-5b-2 (docs/cad/pmi.md, 一覧・表示): F46's callouts in the assembly's frame are drawn where
+// the import placed the components. Moving the second plate hides the lines of the items that
+// name it (the list says why; the items stay current) and Undo brings them back. The block's
+// flatness has a callout only in the block part's frame: not drawn.
+test('PMI-5b-2 assembly PMI lines at the import pose, hidden while a component is moved (ST-216, CAD86, TS-1442)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await page.getByLabel('Artifact name').fill('Path lines');
+  await page.getByLabel('Artifact name').press('Enter');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-path.step'));
+  await page
+    .getByRole('dialog', { name: 'STEP with PMI' })
+    .getByRole('button', { name: 'Import with the PMI that is kept', exact: true })
+    .click();
+  const importing = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  await importing.getByRole('button', { name: 'Import assembly', exact: true }).click();
+  await expect(importing).toHaveCount(0);
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  const green: [number, number, number] = [43, 138, 62];
+  const shown = page.getByTestId('cad-pmi-shown');
+  await expect(shown).toBeChecked();
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+  await page.screenshot({ path: test.info().outputPath('cad-pmi5b2-lines.png') });
+  await shown.uncheck();
+  await expect.poll(() => viewportPixels(page, green)).toBeLessThan(5);
+  await shown.check();
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+  const own = page.getByTestId('cad-instance-pmi');
+  const flatness = own.getByRole('button', { name: /Flatness 0\.04 mm/ });
+  await expect(flatness).not.toContainText('lines hidden');
+
+  // The second plate moved 30 mm along X: its items' lines are hidden, the items stay current.
+  const plate2 = (await components(page).nth(1).innerText()).split('\n')[0]!;
+  await components(page).nth(1).click();
+  const placement = page.getByRole('form', { name: 'Placement' });
+  const x = Number(await placement.getByLabel('X (mm)').inputValue());
+  await placement.getByLabel('X (mm)').fill(String(x + 30));
+  await placement.getByRole('button', { name: 'Apply placement' }).click();
+  await ready(page);
+  await expect(flatness).toBeEnabled();
+  await expect(flatness).toContainText(`lines hidden (${plate2} moved since the import)`);
+  await expect(own.getByRole('button', { name: /^Distance 5 mm/ })).toContainText('lines hidden');
+  // The block's items name no moved component and carry no lines of their own.
+  await expect(own.getByRole('button', { name: /^Flatness 0\.03 mm/ })).not.toContainText(
+    'lines hidden',
+  );
+  await expect.poll(() => viewportPixels(page, green)).toBeLessThan(5);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(flatness).not.toContainText('lines hidden');
+  await expect.poll(() => viewportPixels(page, green)).toBeGreaterThan(30);
+});
+
+test('PMI-5c assembly STEP AP242 with the PMI, read back with its PMI (ST-217, CAD86, TS-1447)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await page.getByLabel('Artifact name').fill('Path export');
+  await page.getByLabel('Artifact name').press('Enter');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles(f43('pmi-path.step'));
+  await page
+    .getByRole('dialog', { name: 'STEP with PMI' })
+    .getByRole('button', { name: 'Import with the PMI that is kept', exact: true })
+    .click();
+  const importing = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  await importing.getByRole('button', { name: 'Import assembly', exact: true }).click();
+  await expect(importing).toHaveCount(0);
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 120_000 });
+
+  const exporting = page.getByRole('dialog', { name: 'Export 3D file' });
+  const report = exporting.getByLabel('Export report');
+  await (await tool(page, 'Export STEP, STL or GLB')).click();
+  await expect(exporting.getByLabel(/^STEP \(AP242 assembly/)).toBeChecked();
+  await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  await expect(report.locator('dt:has-text("Products") + dd')).toHaveText('3', {
+    timeout: 120_000,
+  });
+  // The plate's part PMI, the block's two flatnesses, and what is not written, by why.
+  await expect(report).toContainText(
+    'PMI is written as semantic GD&T (AP242) on the faces, edges and vertices it was imported on: 2 dimensions, 1 geometric tolerance, 2 datums.',
+  );
+  await expect(report).toContainText("2 of the assembly's own PMI items are written");
+  await expect(report).toContainText('3 assembly PMI items are not written: the component');
+  await expect(report).toContainText('1 assembly PMI item is not written: its faces');
+  await expect(report).toContainText('1 assembly PMI item is not written: a datum whose name');
+  const download = page.waitForEvent('download');
+  await exporting.getByRole('button', { name: 'Save STEP' }).click();
+  const step = await readFile((await (await download).path())!);
+  expect(step.toString('latin1')).toMatch(/AP242/);
+  await page.keyboard.press('Escape');
+
+  // The file read back into a new document: the block now carries the flatnesses as its own.
+  await create(page, 'cad');
+  await page.getByLabel('Artifact name').fill('Path export back');
+  await page.getByLabel('Artifact name').press('Enter');
+  await ready(page);
+  await page.getByLabel('STEP file', { exact: true }).setInputFiles({
+    name: 'path-export.step',
+    mimeType: 'application/step',
+    buffer: step,
+  });
+  const back = page.getByRole('dialog', { name: 'Import STEP assembly' });
+  await back.getByRole('button', { name: 'Import assembly', exact: true }).click();
+  await expect(back).toHaveCount(0);
+  await ready(page);
+  await expect(components(page)).toHaveCount(3);
+  const part = page.getByTestId('cad-part-pmi');
+  const flatnesses = part.getByRole('button', { name: /^Flatness 0\.0[35] mm/ });
+  let block = -1;
+  for (let i = 0; i < 3 && block < 0; i++) {
+    await components(page).nth(i).click();
+    await expect(part.first()).toBeVisible();
+    if ((await flatnesses.count()) === 2) block = i;
+  }
+  expect(block).toBeGreaterThanOrEqual(0);
+  // No assembly items: the file's PMI is all its products' own now.
+  await expect(page.getByTestId('cad-instance-pmi')).toHaveCount(0);
+});
+
 test('R2b-2b assembly: a newer saved version of a part is shown, previewed and taken as one edit (CAD48)', async ({
   page,
 }) => {
@@ -2657,6 +2790,44 @@ test('check a part’s wall thickness and draft angle on the display mesh (CR6b)
   expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
 });
 
+// TS-2029, ST-517 (CLF4, CL7b): the aero shading on a box: incidence classes, the tail's edges
+// where the air may leave, the frontal area; the other flow direction swaps nose and tail.
+// Display only: the document is unchanged.
+test('shows simple aero indicators on a box (CL7b)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add box')).click();
+  await ready(page);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  const shading = page.getByTestId('cad-shading');
+  await shading.selectOption('aero');
+  const aero = page.getByTestId('cad-aero');
+  await expect(aero).toContainText('not a flow solution');
+  // The box's 20 × 10 mm end, on the 5 mm grid.
+  await expect(page.getByTestId('cad-aero-frontal')).toContainText(
+    '200 mm² (20 × 10 mm across, 5 mm grid)',
+  );
+  const results = page.getByTestId('cad-aero-results');
+  await expect(results).toContainText(/faces the air [\d.]+%, along [\d.]+%, away [\d.]+%/);
+  await expect(results).toContainText(/edge at x /);
+  const plus = await results.innerText();
+  console.log('CL7b aero +x', plus, await page.getByTestId('cad-aero-frontal').innerText());
+  await page.screenshot({ path: test.info().outputPath('cl7b-aero.png') });
+  await aero.getByLabel('Air moves toward').selectOption('-x');
+  await expect(results).not.toHaveText(plus);
+  await expect(results).toContainText(/edge at x /);
+  // A slope outside its limits is refused.
+  await page.getByLabel('Steepest slope away (°)').fill('90');
+  await page.getByLabel('Steepest slope away (°)').press('Enter');
+  await expect(aero.getByRole('alert')).toHaveCount(1);
+  await page.getByLabel('Steepest slope away (°)').press('Escape');
+  await shading.selectOption('shaded');
+  await expect(aero).toHaveCount(0);
+  expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+});
+
 // TS-1597, ST-283 (CR6c): a ray diagram over a box made a mirror, a clear lens and a matte
 // plastic in turn: one ray reflected, refracted in and out, and stopped. Display only.
 test('trace a ray diagram through a mirror, a lens and an opaque body (CR6c)', async ({ page }) => {
@@ -2931,6 +3102,12 @@ test('open the seat assembly, slide it and recline its back (CR6f)', async ({ pa
     "traces only this document's bodies",
   );
   await page.getByTestId('cad-rays-shown').uncheck();
+  // TS-2029 (CL7b): nor does the aero shading read them; it says so beside its frontal area.
+  await page.getByTestId('cad-shading').selectOption('aero');
+  await expect(page.getByTestId('cad-aero-components')).toContainText(
+    '5 placed parts are not read',
+  );
+  await page.getByTestId('cad-shading').selectOption('shaded');
   const poses = async () => ((await nativeArtifact(page)).draft.content as CadDocument).solvedPoses;
   const joints = page.getByRole('list', { name: 'Joints' });
   const values = page.getByRole('form', { name: 'Joint values' });
@@ -3106,6 +3283,72 @@ test('switch a gear to the cycloidal watch tooth and back', async ({ page }) => 
   await ready(page);
   expect(await gear()).toMatchObject({ profile: 'involute', profileShift: 0, addendum: 1 });
   expect((await gear()).matingTeeth).toBeUndefined();
+});
+
+// PD5 (docs/cad/product-design.md, PD5 ばね): a coil spring added and pressed, switched to a
+// mainspring in SK-01's barrel, its running time read as a design target, a turn count refused.
+// ST-765, TS-2543.
+test('add a spring, read its estimate and target its running time (PD5)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  await (await tool(page, 'Add spring')).click();
+  await ready(page);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.locator('summary', { hasText: /^History \(/ }).click();
+  await page
+    .getByRole('list', { name: 'Feature history' })
+    .getByRole('button', { name: /^Spring spring$/ })
+    .click();
+  const inspector = page.locator('.cad-inspector');
+  const estimate = inspector.getByTestId('cad-spring-estimate');
+  const spring = async () => {
+    const doc = (await nativeArtifact(page)).draft.content as CadDocument;
+    const f = doc.features.find((x) => x.type === 'spring');
+    if (f?.type !== 'spring') throw new Error('no spring');
+    return f.args;
+  };
+  // 1 mm wire on 8 mm, 6 active turns: k = 79000 / (8 · 512 · 6) = 3.2145 N/mm.
+  await expect(estimate).toContainText('3.2145 N/mm');
+  await expect(estimate).toContainText('Free length17 mm');
+  const deflection = inspector.getByLabel('Working deflection (mm)');
+  await deflection.fill('3');
+  await deflection.press('Enter');
+  await ready(page);
+  expect(await spring()).toMatchObject({ form: 'coil', deflection: { literalMm: 3 } });
+  await expect(estimate).toContainText('Force at working9.644 N');
+  await page.screenshot({ path: test.info().outputPath('pd5-coil.png') });
+
+  await inspector.getByRole('combobox', { name: 'Spring form' }).selectOption('spiral');
+  await ready(page);
+  expect(await spring()).toMatchObject({ form: 'spiral', use: 'mainspring', turns: 13 });
+  await expect(estimate).toContainText('Usable barrel turns8.21');
+  await expect(estimate).toContainText('Running time65.7 h');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath('pd5-mainspring.png') });
+  // Turns that do not fit the barrel are refused with their code; the spring keeps its 13.
+  const turns = inspector.getByLabel('Turns', { exact: true });
+  await turns.fill('31');
+  await turns.press('Enter');
+  await expect(page.getByText(/spring-turns/)).toBeVisible();
+  expect(await spring()).toMatchObject({ form: 'spiral', turns: 13 });
+
+  // The running time as a design target: 40 h of power reserve passes.
+  const panel = page.getByTestId('cad-design-targets');
+  await page.locator('summary', { hasText: /^Design targets \(/ }).click();
+  const add = panel.getByRole('group', { name: 'Add design target' });
+  await add.getByLabel('Target name').fill('Power reserve');
+  await add.getByLabel('Requirement ID').fill('RQ-11');
+  await add.getByLabel('Measure').selectOption('spring');
+  await add.getByLabel('Value').selectOption('runHours');
+  await add.getByLabel('Min').fill('40');
+  await add.getByRole('button', { name: 'Add target' }).click();
+  const row = panel.locator('li[data-target="target-1"]');
+  await expect(row).toHaveAttribute('data-status', 'pass');
+  await expect(page.getByTestId('cad-design-target-target-1')).toHaveText('65.7 h pass');
+  await expect(row).toContainText('Running time of Spring');
+  await panel.screenshot({ path: test.info().outputPath('pd5-target.png') });
 });
 
 // TS-1887, ST-442 (WM2a): a revolute joint and the wheel that follows it at −3 × set to turn
@@ -4174,6 +4417,53 @@ test('check a door through its range and the front wheel’s clearance (CR7c)', 
   await page.screenshot({ path: test.info().outputPath('cr7c-lock.png') });
 });
 
+// TS-2549, ST-766 (PD6): one hour of watch hands, every step within 2 mm and 6°: 60 turns of the
+// second hand at 6° a step, and the pin it sweeps into is found on the way (an even split of 12
+// hours would leave the second hand at one angle).
+test('check watch hands through an hour with bounded steps (PD6)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(1_200_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const hands = f156HandsOnDial({ id, buildHash });
+  await importJson(page, 'hands.json', {
+    ...empty,
+    name: 'Hands',
+    draft: { ...empty.draft, content: hands.doc },
+    cadParts: [...hands.closure].map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(state(page)).toHaveText('Shape up to date', { timeout: 600_000 });
+  const range = page.getByTestId('cad-range');
+  await range.getByLabel('Motion joint').selectOption({ label: 'hour arbor' });
+  await range.getByLabel('From (°)').fill('0');
+  await range.getByLabel('To (°)').fill('30');
+  await range.getByLabel('Max step (mm)').fill('2');
+  await range.getByLabel('Max turn (°)').fill('6');
+  const status = page.getByTestId('cad-coverage-status');
+  // The parts' shapes are calculated in the background: until then the check is not ready.
+  await expect(async () => {
+    await range.getByRole('button', { name: 'Check through the motion' }).click();
+    await expect(status).toContainText('hour arbor（0°〜30°）：3,600刻み（3,601姿勢）', {
+      timeout: 300_000,
+    });
+  }).toPass({ timeout: 900_000 });
+  test.info().annotations.push({ type: 'coverage', description: await status.innerText() });
+  await expect(status).toContainText('で初めて干渉します。');
+  await expect(range.getByRole('list', { name: 'First overlap in the motion' })).toContainText(
+    'pin と second',
+  );
+  await range.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath('pd6-coverage.png'), fullPage: false });
+  // Twelve hours at 1° a step would need 259,201 poses: refused with the count.
+  await range.getByLabel('To (°)').fill('360');
+  await range.getByLabel('Max turn (°)').fill('1');
+  await range.getByRole('button', { name: 'Check through the motion' }).click();
+  await expect(status).toContainText('必要な姿勢 259,201', { timeout: 300_000 });
+});
+
 // TS-2056, ST-530: a render of a sheet and a placed part in the studio light, their shapes
 // calculated again with finer meshes first; the sky light is still offered and lighter.
 test('render a sheet and a part with finer surfaces in the studio and the sky light', async ({
@@ -4240,6 +4530,47 @@ test('render a sheet and a part with finer surfaces in the studio and the sky li
     timeout: 900_000,
   });
   expect(await corner()).toBeGreaterThan(studio + 0.15);
+});
+
+// TS-2026, ST-515 (CLF5): the zebra stripes on finer meshes of the same shapes, view only: they
+// draw differently from the display mesh's, nothing is picked while they are shown, and turning
+// them off brings the display mesh back.
+test('draws the zebra on finer surfaces without picking on them', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(600_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'panel.json', {
+    ...empty,
+    name: 'Panel',
+    draft: { ...empty.draft, content: { ...f26Panel(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Panel');
+  await ready(page);
+  await page.getByTestId('cad-shading').selectOption('zebra');
+  const zebra = page.getByTestId('cad-zebra');
+  await zebra.getByLabel('Stripes').fill('32');
+  const viewport = page.locator('.cad-viewport');
+  await page.waitForTimeout(500);
+  const coarse = await viewport.screenshot();
+  await zebra.getByTestId('cad-zebra-fine').check();
+  await expect(zebra.getByTestId('cad-zebra-fine-shown')).toBeVisible({ timeout: 300_000 });
+  await page.waitForTimeout(500);
+  const fine = await viewport.screenshot();
+  expect(fine.equals(coarse)).toBe(false);
+  // A click on the panel selects nothing while the finer stripes are shown.
+  const box = (await page.locator('.cad-canvas').boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(bodies(page).and(page.locator('[aria-pressed="true"]'))).toHaveCount(0);
+  await zebra.getByTestId('cad-zebra-fine').uncheck();
+  await expect(zebra.getByTestId('cad-zebra-fine-shown')).toHaveCount(0);
+  // On the display mesh again, the same click picks the panel.
+  await page.waitForTimeout(500);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(bodies(page).and(page.locator('[aria-pressed="true"]'))).toHaveCount(1);
 });
 
 // TS-1822, ST-293 (CR7e): the whole car (F63) finished, its panels painted and its side windows
@@ -4382,7 +4713,7 @@ test('write the whole car as STEP AP242 and read it back (CR7f)', async ({ page 
   await expect(report).toContainText(/Parts\s*83(?!\d)/);
   await expect(report).toContainText(/Components\s*96(?!\d)/);
   await expect(report).toContainText(/Units\s*mm \(no conversion\)/);
-  // The Playground keeps native files up to 256 MB (CR7f): the document with the file and its
+  // The Playground keeps native files up to 400 MB (CR7f, #1292): the document with the file and its
   // parts' BReps is stored and every part evaluates again.
   await dialog.getByRole('button', { name: 'Import assembly', exact: true }).click();
   await expect(dialog).toHaveCount(0, { timeout: 900_000 });
@@ -4630,6 +4961,366 @@ test('draw the side, front and plan at one scale, in silhouette (CLF1b)', async 
   await expect.poll(async () => (await quarters()).white).toBeLessThan(0.1);
   // View state only: the document is as it was.
   expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+});
+
+// CLF11 (docs/cad/car-look-process.md, CLF9〜CLF11): a sketch's curves in their colours and its
+// note drawn in the 3D view and on the board, over the silhouette, by the eye in the Sketches
+// list; view state only (ST-510, TS-2021).
+test('show a sketch’s coloured lines and note in the view and on the board (CLF11)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const roof = f81TwoView();
+  const side = roof.sketches.find((s) => 'origin' in s.plane)!;
+  const content = {
+    ...roof,
+    kernelProfile: (empty.draft.content as CadDocument).kernelProfile,
+    sketches: roof.sketches.map((s) =>
+      s.id === side.id
+        ? {
+            ...s,
+            entities: s.entities.map((e) => (e.type === 'point' ? e : { ...e, color: '#e01010' })),
+            notes: [{ id: 'n1', at: [0, 40] as [number, number], text: 'Roof', size: 10 }],
+          }
+        : s,
+    ),
+  };
+  await importJson(page, 'roof-lines.json', {
+    ...empty,
+    name: 'Roof lines',
+    draft: { ...empty.draft, content },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Roof lines');
+  await ready(page);
+  const before = JSON.stringify((await nativeArtifact(page)).draft.content);
+  const host = page.locator('.cad-canvas-host');
+  const curves = side.entities.filter((e) => e.type !== 'point').length;
+  // Red pixels on the canvas (the sketch's own colour), in all and per quarter.
+  const reds = async () => {
+    const png = await page.locator('.cad-viewport canvas').first().screenshot();
+    return page.evaluate(async (data) => {
+      const bitmap = await createImageBitmap(
+        await (await fetch(`data:image/png;base64,${data}`)).blob(),
+      );
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const g = canvas.getContext('2d')!;
+      g.drawImage(bitmap, 0, 0);
+      const { width: w, height: h } = bitmap;
+      const px = g.getImageData(0, 0, w, h).data;
+      const q = [0, 0, 0, 0];
+      for (let i = 0; i < px.length; i += 4)
+        if (px[i]! > 180 && px[i + 1]! < 90 && px[i + 2]! < 90) {
+          const [x, y] = [(i / 4) % w, Math.floor(i / 4 / w)];
+          q[(y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1)]!++;
+        }
+      return q;
+    }, png.toString('base64'));
+  };
+  const red = async () => (await reds()).reduce((a, b) => a + b);
+  expect(await red()).toBe(0);
+  await page.getByRole('checkbox', { name: `Show sketch ${side.name}` }).check();
+  await expect(host).toHaveAttribute('data-sketch-lines', String(curves));
+  await expect(host).toHaveAttribute('data-sketch-notes', '1');
+  await expect.poll(red).toBeGreaterThan(20);
+  // Over the silhouette on the board the lines keep their colour.
+  await page.getByTestId('cad-shading').selectOption('silhouette');
+  await page.getByTestId('cad-three-view-shown').check();
+  await expect.poll(red).toBeGreaterThan(20);
+  // The side sketch faces the side pane only: edge-on in the front and the plan, it is not drawn.
+  const [sidePane, frontPane, planPane] = await reds();
+  expect(sidePane).toBeGreaterThan(20);
+  expect(frontPane! + planPane!).toBe(0);
+  await page.screenshot({ path: test.info().outputPath('clf11-board.png') });
+  // With the body hidden the sketch alone is fitted: zoomed far out, Fit view brings it back.
+  await page.getByTestId('cad-three-view-shown').uncheck();
+  await page.getByRole('checkbox', { name: 'Show roof' }).uncheck();
+  const canvas = page.locator('.cad-viewport canvas').first();
+  const at = (await canvas.boundingBox())!;
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  for (let k = 0; k < 40; k++) await page.mouse.wheel(0, 400);
+  await expect.poll(red).toBeLessThan(20);
+  await page.getByRole('button', { name: 'Fit view' }).click();
+  await expect.poll(red).toBeGreaterThan(100);
+  await page.getByRole('checkbox', { name: 'Show roof' }).check();
+  await page.getByRole('checkbox', { name: `Show sketch ${side.name}` }).uncheck();
+  await expect(host).toHaveAttribute('data-sketch-lines', '0');
+  await expect.poll(red).toBe(0);
+  // View state only: the document is as it was.
+  expect(JSON.stringify((await nativeArtifact(page)).draft.content)).toBe(before);
+});
+
+// PD1 (docs/cad/product-design.md, PD1 設計の目標値): F150's targets read against the kernel's
+// shapes, the lug gap fixed until the lug target passes, a target added, exported and removed.
+// ST-750, TS-2505.
+test('check the design targets, fix the lug gap until it passes, export them (PD1)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'f150.json', {
+    ...empty,
+    name: 'F150',
+    draft: { ...empty.draft, content: f150LugTargets({ id, buildHash }) },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('F150');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(3);
+  const panel = page.getByTestId('cad-design-targets');
+  const row = (target: string) => panel.locator(`li[data-target="${target}"]`);
+  const summary = page.getByTestId('cad-design-targets-summary');
+  await expect(row('lug-width')).toHaveAttribute('data-status', 'fail');
+  await expect(page.getByTestId('cad-design-target-lug-width')).toHaveText('11.2 mm fail');
+  await expect(row('lug-width')).toContainText('RQ-04');
+  await expect(row('case-diameter')).toHaveAttribute('data-status', 'pass');
+  await expect(row('case-mass')).toHaveAttribute('data-status', 'pass');
+  await expect(summary).toHaveText('2 pass · 1 fail · 0 unknown');
+  await panel.screenshot({ path: test.info().outputPath('pd1-targets-fail.png') });
+
+  // The strap needs 16 mm: the lug target passes once the gap is 16 mm.
+  await page
+    .getByRole('list', { name: 'Parameters' })
+    .getByRole('button', { name: /Lug gap/ })
+    .click();
+  const value = page.locator('.cad-inspector').getByLabel('Value (mm)');
+  await value.fill('16');
+  await value.press('Enter');
+  await ready(page);
+  await expect(row('lug-width')).toHaveAttribute('data-status', 'pass');
+  await expect(page.getByTestId('cad-design-target-lug-width')).toHaveText('16 mm pass');
+  await expect(summary).toHaveText('3 pass · 0 fail · 0 unknown');
+
+  // A target added from the form: the lugs' mass, which has no density, is unknown (never a pass).
+  const add = panel.getByRole('group', { name: 'Add design target' });
+  await add.getByLabel('Target name').fill('Lug mass');
+  await add.getByLabel('Requirement ID').fill('RQ-07');
+  await add.getByLabel('Measure').selectOption('mass');
+  await add.getByLabel('Bodies (none: the whole document)').selectOption(['Lug left']);
+  await add.getByLabel('Max').fill('0.01');
+  await add.getByRole('button', { name: 'Add target' }).click();
+  await expect(row('target-4')).toHaveAttribute('data-status', 'unknown');
+  await expect(row('target-4')).toContainText('no mass');
+  await expect(summary).toHaveText('3 pass · 0 fail · 1 unknown');
+  const stored = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).designTargets;
+  expect((await stored())?.[3]).toMatchObject({
+    id: 'target-4',
+    name: 'Lug mass',
+    requirement: 'RQ-07',
+    measure: { kind: 'mass' },
+    max: 0.01,
+  });
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Export targets (JSON)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('F150-design-targets.json');
+  const report = JSON.parse(await readFile((await file.path())!, 'utf8'));
+  expect(report.summary).toEqual({ pass: 3, fail: 0, unknown: 1 });
+  expect(report.targets[0]).toMatchObject({ id: 'lug-width', status: 'pass', unit: 'mm' });
+  await panel.screenshot({ path: test.info().outputPath('pd1-targets-pass.png') });
+
+  await panel.getByRole('button', { name: 'Remove Lug mass' }).click();
+  await expect(row('target-4')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(row('target-4')).toHaveAttribute('data-status', 'unknown');
+});
+
+// PD3 (docs/cad/product-design.md, PD3 公差の積み上げ): F152's centre distance by the worst
+// case, the RSS and a seeded Monte Carlo run, a hole moved until it fails, the design target that
+// reads the stack failing with it, a stack added from the form, exported, removed and undone.
+// ST-758, TS-2524.
+test('stack the tolerances of a centre distance three ways, move a hole until it fails (PD3)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'f152.json', {
+    ...empty,
+    name: 'F152',
+    draft: { ...empty.draft, content: f152CenterDistance({ id, buildHash }) },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('F152');
+  await ready(page);
+  const panel = page.getByTestId('cad-tolerance-stacks');
+  const stack = panel.locator('li[data-stack="center-distance"]');
+  await expect(stack).toHaveAttribute('data-status', 'ok');
+  await expect(stack).toContainText('RQ-11');
+  await expect(page.getByTestId('cad-stack-center-distance-nominal')).toHaveText('8 mm');
+  await expect(page.getByTestId('cad-stack-center-distance-worst')).toHaveText(
+    '7.98 mm – 8.02 mm pass',
+  );
+  await expect(page.getByTestId('cad-stack-center-distance-rss')).toContainText('pass');
+  await expect(page.getByTestId('cad-stack-center-distance-mc')).toContainText(
+    '0/100,000 outside pass',
+  );
+  await expect(page.getByTestId('cad-stack-center-distance-mc')).toContainText('(seed 152)');
+  await expect(stack.locator('li[data-contributor="play-a"]')).toContainText('uniform · 37.5%');
+  const target = page
+    .getByTestId('cad-design-targets')
+    .locator('li[data-target="center-distance-min"]');
+  await expect(target).toHaveAttribute('data-status', 'pass');
+  await panel.screenshot({ path: test.info().outputPath('pd3-stack-pass.png') });
+
+  // Hole B 0.01 mm nearer: the worst case leaves the band, and so does the target that reads it.
+  await page
+    .getByRole('list', { name: 'Parameters' })
+    .getByRole('button', { name: /Hole B x/ })
+    .click();
+  const value = page.locator('.cad-inspector').getByLabel('Value (mm)');
+  await value.fill('3.99');
+  await value.press('Enter');
+  await ready(page);
+  await expect(page.getByTestId('cad-stack-center-distance-nominal')).toHaveText('7.99 mm');
+  await expect(page.getByTestId('cad-stack-center-distance-worst')).toHaveText(
+    '7.97 mm – 8.01 mm fail',
+  );
+  await expect(target).toHaveAttribute('data-status', 'fail');
+
+  // A stack from the form: one parameter with its tolerance.
+  const add = panel.getByRole('group', { name: 'Add tolerance stack' });
+  await add.getByLabel('Stack name').fill('Arbor B position');
+  await add.getByLabel('Band max').fill('4');
+  await add.getByLabel('Runs').fill('1000');
+  await add.getByLabel('Seed').fill('5');
+  await add.getByLabel('Contributor name').fill('Hole B');
+  await add
+    .getByRole('combobox', { name: 'Parameter', exact: true })
+    .selectOption({ label: 'Hole B x' });
+  await add.getByLabel('Lower (mm)').fill('-0.01');
+  await add.getByLabel('Upper (mm)').fill('0.01');
+  await add.getByRole('button', { name: 'Add contributor' }).click();
+  await expect(add.getByRole('list', { name: 'New stack contributors' })).toContainText('Hole B');
+  await add.getByRole('button', { name: 'Add stack' }).click();
+  await expect(panel.locator('li[data-stack]')).toHaveCount(2);
+  const stored = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).toleranceStacks;
+  // IDs come from the document's ID source: unique across the document.
+  const addedId = (await stored())![1]!.id;
+  const added = panel.locator(`li[data-stack="${addedId}"]`);
+  await expect(added).toHaveAttribute('data-status', 'ok');
+  await expect(page.getByTestId(`cad-stack-${addedId}-worst`)).toHaveText('3.98 mm – 4 mm pass');
+  await expect(page.getByTestId(`cad-stack-${addedId}-mc`)).toContainText('/1,000 outside');
+  expect((await stored())?.[1]).toMatchObject({
+    name: 'Arbor B position',
+    max: 4,
+    runs: 1000,
+    seed: 5,
+    contributors: [{ name: 'Hole B', sign: 1, distribution: 'normal' }],
+  });
+
+  // A second stack from the form: its IDs do not clash with the first one's.
+  await add.getByLabel('Stack name').fill('Arbor A position');
+  await add.getByLabel('Contributor name').fill('Hole A');
+  await add
+    .getByRole('combobox', { name: 'Parameter', exact: true })
+    .selectOption({ label: 'Hole A x' });
+  await add.getByLabel('Lower (mm)').fill('-0.01');
+  await add.getByLabel('Upper (mm)').fill('0.01');
+  await add.getByRole('button', { name: 'Add contributor' }).click();
+  await add.getByRole('button', { name: 'Add stack' }).click();
+  await expect(panel.locator('li[data-stack]')).toHaveCount(3);
+  await panel.getByRole('button', { name: 'Remove Arbor A position' }).click();
+  await expect(panel.locator('li[data-stack]')).toHaveCount(2);
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Export stacks (JSON)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('F152-tolerance-stacks.json');
+  const report = JSON.parse(await readFile((await file.path())!, 'utf8'));
+  expect(report.format).toBe('editor-platform/cad-tolerance-stacks@1');
+  expect(report.stacks.map((x: { id: string }) => x.id)).toEqual(['center-distance', addedId]);
+  expect(report.stacks[0]).toMatchObject({ status: 'ok', worst: { status: 'fail' } });
+  await panel.screenshot({ path: test.info().outputPath('pd3-stack-fail.png') });
+
+  await panel.getByRole('button', { name: 'Remove Arbor B position' }).click();
+  await expect(added).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(added).toHaveAttribute('data-status', 'ok');
+});
+
+// PD7 (docs/cad/product-design.md, PD7 見え方の検査): F157's sight checks on the kernel's
+// shapes (A-pillars from both eyes, the balance through the crystal, a lamp's outward turn), a
+// lamp check added, exported, removed and undone. ST-771, TS-2555.
+test('check what the eyes and a lamp see, add a check, export them (PD7)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'f157.json', {
+    ...empty,
+    name: 'F157',
+    draft: { ...empty.draft, content: f157SightChecks({ id, buildHash }) },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('F157');
+  await ready(page);
+  await expect(bodies(page)).toHaveCount(7);
+  const panel = page.getByTestId('cad-sight-checks');
+  const row = (check: string) => panel.locator(`li[data-check="${check}"]`);
+  const summary = page.getByTestId('cad-sight-checks-summary');
+  await expect(summary).toHaveText('3 pass · 1 fail · 0 unknown');
+  await expect(row('pillar-left')).toHaveAttribute('data-status', 'pass');
+  await expect(row('pillar-left')).toContainText('RQ-21');
+  await expect(page.getByTestId('cad-sight-detail-pillar-left')).toContainText('each eye');
+  await expect(row('balance-seen')).toHaveAttribute('data-status', 'pass');
+  await expect(page.getByTestId('cad-sight-check-balance-seen')).toHaveText(
+    /^(4[5-9]|5[0-5])\.\d % pass$/,
+  );
+  await expect(row('lamp-right')).toHaveAttribute('data-status', 'fail');
+  await expect(page.getByTestId('cad-sight-check-lamp-right')).toHaveText(/^18\.[34]° fail$/);
+  await panel.screenshot({ path: test.info().outputPath('pd7-sight-checks.png') });
+
+  // The lamp's other side: nothing stops it within 45°.
+  const add = panel.getByRole('group', { name: 'Add sight check' });
+  await add.getByLabel('Check name').fill('Lamp, inward');
+  await add.getByLabel('Requirement ID').fill('RQ-31');
+  await add.getByLabel('Measure').selectOption('visibleAngle');
+  await add.getByLabel('Light point (mm)').fill('-3000, 0, -500');
+  await add.getByLabel('Toward').selectOption('left');
+  await add.getByLabel('Turn at most (°)').fill('45');
+  await add.getByLabel('Clear bodies').selectOption(['Lamp lens']);
+  await add.getByLabel('Min (°)').fill('30');
+  await add.getByRole('button', { name: 'Add check' }).click();
+  await expect(row('sight-5')).toHaveAttribute('data-status', 'pass');
+  await expect(page.getByTestId('cad-sight-check-sight-5')).toHaveText('45° pass');
+  await expect(summary).toHaveText('4 pass · 1 fail · 0 unknown');
+  const stored = async () =>
+    ((await nativeArtifact(page)).draft.content as CadDocument).sightChecks;
+  expect((await stored())?.[4]).toMatchObject({
+    id: 'sight-5',
+    name: 'Lamp, inward',
+    requirement: 'RQ-31',
+    measure: { kind: 'visibleAngle', from: [-3000, 0, -500], toward: 'left', limitDeg: 45 },
+    min: 30,
+  });
+
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Export sight checks (JSON)' }).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('F157-sight-checks.json');
+  const report = JSON.parse(await readFile((await file.path())!, 'utf8'));
+  expect(report.summary).toEqual({ pass: 4, fail: 1, unknown: 0 });
+  expect(report.basis).toBe('display-meshes');
+  expect(report.checks[0]).toMatchObject({ id: 'pillar-left', status: 'pass', unit: 'deg' });
+  expect(report.checks[0].perEye).toHaveLength(2);
+
+  await panel.getByRole('button', { name: 'Remove Lamp, inward' }).click();
+  await expect(row('sight-5')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(row('sight-5')).toHaveAttribute('data-status', 'pass');
 });
 
 // CLF3 (docs/cad/car-look-process.md, 比率の指標, CLF1〜CLF3の分け方): the proportion indicators

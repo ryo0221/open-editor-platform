@@ -5,9 +5,10 @@ import type { OcModule } from './evaluator';
  * exact for planes and quadrics but misses a solid with B-spline faces by about 5 × 10⁻⁵ (R2a-2);
  * Gauss–Kronrod over the knot spans meets this bound on both. The area keeps the fixed-order
  * integration (the adaptive one strays further on B-spline faces): exact on planes and quadrics,
- * within 5 × 10⁻⁴ of the area on B-spline faces (1.3 × 10⁻⁴ on F16).
+ * within 5 × 10⁻⁴ of the area on B-spline faces (1.3 × 10⁻⁴ on F16). #1265: 10⁻⁷, not 10⁻⁹:
+ * on J-CA-27 (2,066 faces) 10⁻⁹ took 98 s and 10⁻⁷ 53 s, and the two volumes differ by 3 × 10⁻⁸.
  */
-export const cadVolumeRelativeError = 1e-9;
+export const cadVolumeRelativeError = 1e-7;
 
 /**
  * A shape's area (mm²) and, for a solid, its volume (mm³), shared by evaluation and import; with

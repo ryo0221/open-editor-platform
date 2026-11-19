@@ -16,6 +16,10 @@ export {
   f88Building,
   f88OfficeFrame,
   f89OfficeTraffic,
+  f160ClimbingCrane,
+  f161RaisedRoof,
+  f162DeliveredBeams,
 } from './fixtures';
 export * from './ifc';
 export * from './checks';
+export * from './spatial-index';

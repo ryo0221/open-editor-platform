@@ -20,7 +20,42 @@ import type { CadDocument, CadPatternLayout, Position3, Quaternion, Vec3 } from 
 export interface CadPartProperties {
   partNumber: string;
   description: string;
+  /**
+   * PD2 (docs/cad/product-design.md): what the part is made of. Its density is the default of
+   * every active body without a mass of its own (a sheet still needs its own thickness).
+   */
+  material?: CadPartMaterial;
+  /** PD2: made here, made by another company to this drawing, bought, or a standard part. */
+  sourcing?: CadPartSourcing;
+  /** PD2: the cost of one, in `currency` (entered by a person, never estimated). */
+  unitCost?: number;
+  /** PD2: this document's one currency (ISO 4217 letters, e.g. `JPY`); required by `unitCost`. */
+  currency?: string;
+  /** PD2: a note naming the supplier (free text). */
+  supplier?: string;
 }
+/** PD2: the BOM values beyond the part number and description. */
+export type CadPartBomValues = Omit<CadPartProperties, 'partNumber' | 'description'>;
+export const cadPartBomKeys = Object.freeze([
+  'material',
+  'sourcing',
+  'unitCost',
+  'currency',
+  'supplier',
+] as const satisfies readonly (keyof CadPartBomValues)[]);
+/** PD2: a material's name and density (kg/m³, the same range as a body's mass). */
+export interface CadPartMaterial {
+  name: string;
+  densityKgM3: number;
+}
+/** PD2: the four sourcing classes, in the BOM's order. */
+export const cadPartSourcings = Object.freeze(['make', 'outsource', 'buy', 'standard'] as const);
+export type CadPartSourcing = (typeof cadPartSourcings)[number];
+/** PD2: the accepted unit cost (0 to 10¹², any currency's units) and the currency's form. */
+export const cadPartCostLimits = Object.freeze({
+  unitCost: Object.freeze([0, 1e12] as const),
+  currency: /^[A-Z]{3}$/,
+});
 /** A saved version of another `cad` Artifact (immutable; never a draft or "latest"). */
 export interface CadPartVersionSource {
   kind: 'version';

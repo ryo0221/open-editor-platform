@@ -42,6 +42,7 @@ export function SimulationViewport({
   color,
   fitKey,
   onPoint,
+  outline = true,
 }: {
   /** The analysed body's display mesh, or undefined while it is evaluated or when it failed. */
   mesh: CadMesh | undefined;
@@ -62,6 +63,8 @@ export function SimulationViewport({
   fitKey?: string;
   /** R3e-4d: with it, a click on the shown shape gives the point under it (mm), e.g. to read a value. */
   onPoint?(point: [number, number, number]): void;
+  /** The shown body's edge lines; a shower's water is drawn without them, so its colours show. */
+  outline?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<CadViewport | null>(null);
@@ -132,7 +135,11 @@ export function SimulationViewport({
     v.show(
       mesh
         ? [
-            { ...shownBody(mesh, marks, 1, color), ...(colors ? { colors } : {}) },
+            {
+              ...shownBody(mesh, marks, 1, color),
+              ...(colors ? { colors } : {}),
+              ...(outline ? {} : { outline: false }),
+            },
             // A faint body lets the face picks through to the analysed bodies behind it.
             ...(others ?? []).map((b) => ({
               ...shownBody(b.mesh, b.marks, b.faded ? 0.25 : 1, b.color),
@@ -149,7 +156,7 @@ export function SimulationViewport({
       fitted.current = key;
       v.fit({ reset: true });
     }
-  }, [mesh, marks, others, colors, color, fitKey, restored]);
+  }, [mesh, marks, others, colors, color, fitKey, restored, outline]);
   return (
     <div className="cad-viewport simulation-viewport">
       <div ref={host} className="cad-canvas-host" />

@@ -42,6 +42,8 @@ const templateExcludedKinds = [
   'schematic',
   'ladder',
   'cosim',
+  'drawing',
+  'factory',
 ];
 const nonNativeKinds = [
   'analysis',
@@ -60,6 +62,8 @@ const nonNativeKinds = [
   'schematic',
   'ladder',
   'cosim',
+  'drawing',
+  'factory',
 ];
 
 export interface HistoryControls {
@@ -339,7 +343,9 @@ export function MoreActionsMenu({
     active.kind !== 'pcb' &&
     active.kind !== 'schematic' &&
     active.kind !== 'ladder' &&
-    active.kind !== 'cosim';
+    active.kind !== 'cosim' &&
+    active.kind !== 'drawing' &&
+    active.kind !== 'factory';
   return (
     <Menu label="More artifact actions" icon={MoreHorizontal} align="right" closeOnSelect>
       <div className="mobile-history-actions" data-menu-keep-open>
@@ -380,7 +386,9 @@ export function MoreActionsMenu({
             active.kind === 'pcb' ||
             active.kind === 'schematic' ||
             active.kind === 'ladder' ||
-            active.kind === 'cosim'
+            active.kind === 'cosim' ||
+            active.kind === 'drawing' ||
+            active.kind === 'factory'
           }
           aria-expanded={inspector}
           onClick={onToggleInspector}

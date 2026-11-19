@@ -41,12 +41,14 @@ export const ifcWorkMethods: Record<ConstructionAction, string> = {
   construct: 'CONSTRUCT',
   remove: 'REMOVE',
   temporary: 'TEMPORARY',
+  raise: 'RAISE',
 };
 
 const predefinedTypes: Record<ConstructionAction, string> = {
   construct: 'CONSTRUCTION',
   remove: 'DEMOLITION',
   temporary: 'CONSTRUCTION',
+  raise: 'MOVE',
 };
 
 /** One value in P21 form (only what this writer needs). */
@@ -197,7 +199,8 @@ export function writeConstructionIfc(
         str(g),
         $,
         str(t.name),
-        $,
+        // TT2: the raise's distance, read back by readConstructionIfc.
+        t.action === 'raise' && t.raiseMm ? str(`Raised ${t.raiseMm} mm`) : $,
         $,
         str(t.id),
         $,
@@ -402,6 +405,8 @@ export interface IfcScheduleTask {
   predecessors: { taskId: string; lagDays: number }[];
   /** GlobalIds of the products the task is assigned to. */
   products: string[];
+  /** TT2: a raise's distance (mm). */
+  raiseMm?: number;
 }
 
 /** The schedule read back from a file this module wrote: its name and tasks, in file order. */
@@ -436,6 +441,9 @@ export function readConstructionIfc(text: string): { name: string; tasks: IfcSch
       finish: s(time?.args[6]).slice(0, 10),
       predecessors: [],
       products: [],
+      ...(/^Raised (\d+(?:\.\d+)?) mm$/.test(s(e.args[3]))
+        ? { raiseMm: Number(/^Raised (\d+(?:\.\d+)?) mm$/.exec(s(e.args[3]))![1]) }
+        : {}),
     });
   }
   for (const e of ents.values()) {

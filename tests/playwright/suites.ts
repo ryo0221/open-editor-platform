@@ -1089,6 +1089,23 @@ export const suites: Record<string, () => Suite> = {
       },
     ],
   }),
+  // The factory Surface in the ordinary Playground (FT2), on its own port.
+  'factory.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/factory-playground-results',
+    testMatch: /factory-(playground|experiment).spec.ts$/,
+    use: { baseURL: 'http://127.0.0.1:4240', launchOptions: chromiumLaunchOptions() },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4240 --strictPort',
+        url: 'http://127.0.0.1:4240',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
   // The co-simulation Surface in the ordinary Playground (SL8c), on its own port.
   'cosim.playground': () => ({
     timeout: 120_000,
@@ -1101,6 +1118,42 @@ export const suites: Record<string, () => Suite> = {
       {
         command: 'npx vite --host 127.0.0.1 --port 4218 --strictPort',
         url: 'http://127.0.0.1:4218',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The drawing Surface's standalone host (DW1, N06): no Playground, a fixed block version.
+  drawing: () => ({
+    ...playwrightTimeouts,
+    testDir: './packages/drawing/tests',
+    workers: 1,
+    timeout: 60_000,
+    expect: { timeout: 20_000 },
+    outputDir: '/tmp/drawing-surface-results',
+    use: { baseURL: 'http://127.0.0.1:4233', launchOptions: chromiumLaunchOptions() },
+    projects: viewportProjects({ width: 1440, height: 900 }),
+    webServer: [
+      {
+        command: 'npx vite --config packages/drawing/vite.config.ts',
+        url: 'http://127.0.0.1:4233',
+        reuseExistingServer: !ci,
+        timeout: 60_000,
+      },
+    ],
+  }),
+  // The drawing Surface in the ordinary Playground (DW1), on its own port.
+  'drawing.playground': () => ({
+    timeout: 120_000,
+    workers: 1,
+    outputDir: '/tmp/drawing-playground-results',
+    testMatch: /drawing-(playground|views|sets).spec.ts$/,
+    use: { baseURL: 'http://127.0.0.1:4232', launchOptions: chromiumLaunchOptions() },
+    projects: editorProjects(undefined, undefined, true),
+    webServer: [
+      {
+        command: 'npx vite --host 127.0.0.1 --port 4232 --strictPort',
+        url: 'http://127.0.0.1:4232',
         reuseExistingServer: !ci,
         timeout: 60_000,
       },

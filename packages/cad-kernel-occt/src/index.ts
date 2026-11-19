@@ -22,7 +22,7 @@ export {
 export * from './port';
 export * from './formats';
 export * from './catalog';
-export { p21String, writeAssemblyStep } from './step-assembly';
+export { p21String, writeAssemblyStep, writeAssemblyStepPmi } from './step-assembly';
 export { noPmiWritten, type CadStepPmiWritten } from './step-pmi-write';
 export * from './step-assembly-import';
 export {

@@ -20,6 +20,7 @@ import type {
   CadKernelBuild,
   CadMesh,
   CadRenderMeshQuality,
+  CadAssemblyStepPmi,
   CadStepAssemblyResult,
   CadWorkerRequest,
   CadWorkerResponse,
@@ -48,10 +49,16 @@ export interface WorkerKernelPortOptions {
    */
   sliceJobTimeoutMs?: number;
   /**
-   * CR7f (#846): what a STEP read adds to the job limit for each MiB of the file (initial 5 s).
-   * A read cannot pause, and a 64 MiB file (cadLimits.stepBytes) takes longer than 30 s.
+   * CR7f (#846): what a STEP read adds to the job limit for each MiB of the file (12 s).
+   * A read cannot pause, and a 256 MiB file (cadLimits.stepBytes) takes longer than 30 s.
+   * #812: 5 s was too short for JAMA's 62.4 MiB instrument panel, read in about 9.3 s a MiB.
    */
   stepReadMsPerMiB?: number;
+  /**
+   * #1250: what an assembly's STEP write adds to the job limit for each MiB of its parts' BReps
+   * (4 s). A write cannot pause; JAMA's instrument panel (132 MiB of BReps) wrote in 93 s.
+   */
+  stepWriteMsPerMiB?: number;
   /**
    * Receives meshes of every successful evaluation, and of a failed one that shows the bodies
    * outside the failure (U4); ownership of the buffers moves to the callee.
@@ -561,11 +568,19 @@ export class WorkerKernelPort implements CadKernelPort {
     requestId: string,
     plan: CadStepPlan,
     breps: ReadonlyMap<string, Uint8Array>,
+    /** PMI-5c: the products' and the assembly's PMI to write. */
+    pmi?: CadAssemblyStepPmi,
   ): Promise<CadStepAssemblyResult> {
     return new Promise((resolve) =>
       this.enqueueExport({
         requestId,
-        message: { type: 'step-assembly', requestId, plan, breps: Object.fromEntries(breps) },
+        message: {
+          type: 'step-assembly',
+          requestId,
+          plan,
+          breps: Object.fromEntries(breps),
+          ...(pmi ? { pmi } : {}),
+        },
         fail: (code, retryable) => resolve({ status: 'error', code, retryable }),
         done: (data) => {
           if (data.type === 'step-assembly-result') resolve(data.result);
@@ -768,8 +783,16 @@ export class WorkerKernelPort implements CadKernelPort {
     if (message.type === 'import-step' || message.type === 'import-step-assembly')
       return (
         (this.options.jobTimeoutMs ?? 30_000) +
-        Math.round((message.bytes.byteLength / 2 ** 20) * (this.options.stepReadMsPerMiB ?? 5_000))
+        Math.round((message.bytes.byteLength / 2 ** 20) * (this.options.stepReadMsPerMiB ?? 12_000))
       );
+    if (message.type === 'step-assembly') {
+      let bytes = 0;
+      for (const brep of Object.values(message.breps)) bytes += brep.byteLength;
+      return (
+        (this.options.jobTimeoutMs ?? 30_000) +
+        Math.round((bytes / 2 ** 20) * (this.options.stepWriteMsPerMiB ?? 4_000))
+      );
+    }
     if (message.type !== 'evaluate' || !message.slice) return this.options.jobTimeoutMs ?? 30_000;
     const each = this.options.sliceJobTimeoutMs ?? 120_000;
     const left = (this.options.totalTimeoutMs ?? 300_000) - (this.now() - job.began!);

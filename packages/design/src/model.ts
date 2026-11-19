@@ -73,6 +73,7 @@ import {
   type Drawing,
   type Alignment,
   type TransformDelta,
+  rotatedBounds,
   unionBounds,
   validBounds,
   validVisualStyle,
@@ -1786,6 +1787,56 @@ export function exportDesignSvg(
     options.background,
   );
 }
+/** The page extent a frame covers, including its rotation: the frame-area crop and output size. */
+export function designFrameAreaBounds(d: DesignContent, frameId: string): Bounds {
+  const frame = d.elements.find((e) => e.id === frameId && e.type === 'frame');
+  if (!frame) throw new Error(`Frame ${frameId} not found`);
+  return rotatedBounds(frame.bounds, appearance(d, frame).rotation);
+}
+/** Visible elements whose projected paint extent touches the frame, in paint order. */
+export function designFrameAreaElements(d: DesignContent, frameId: string): DesignElement[] {
+  const b = designFrameAreaBounds(d, frameId);
+  const project = designDrawingProjector(d);
+  const touches = (r: Bounds) =>
+    r.x < b.x + b.width && r.x + r.width > b.x && r.y < b.y + b.height && r.y + r.height > b.y;
+  // Projected paint extent for every kind: rotation, strokes, expanded text and instance parts.
+  return designPaintOrder(d).filter(
+    (e) => !e.hidden && touches(designExportPaintBounds(project(e), e.bounds, e.rotation)),
+  );
+}
+/**
+ * The visible area of one frame: every visible drawing whose paint bounds touch the frame,
+ * whether or not it is the frame's descendant, cropped exactly to the frame bounds. Manga panels
+ * keep their art on page-level layers, so a subtree export of a panel was empty. No padding: art
+ * outside the frame has no clip of its own, so the viewport itself is the crop.
+ */
+export function exportDesignFrameAreaSvg(
+  d: DesignContent,
+  frameId: string,
+  options: { background?: string } = {},
+): string {
+  const chosen = designFrameAreaElements(d, frameId);
+  const frame = d.elements.find((e) => e.id === frameId)!,
+    b = designFrameAreaBounds(d, frameId);
+  // Page-level art has no ancestry under this frame: clip it to the frame's own outline
+  // (an oblique panel's polygon, a rotation), not only the rectangular viewport.
+  const look = appearance(d, frame);
+  const clip: NonNullable<Drawing['clipBounds']>[number] = {
+    ...frame.bounds,
+    rotation: look.rotation,
+    // A flipped oblique panel draws its polygon reflected; crop to that outline.
+    ...(look.flipX ? { flipX: true } : {}),
+    ...(look.flipY ? { flipY: true } : {}),
+    ...(frame.panelGeometry ? { polygon: frame.panelGeometry.polygon } : {}),
+  };
+  return drawingSvg(
+    chosen
+      .flatMap(designDrawingProjector(d))
+      .map((drawing) => ({ ...drawing, clipBounds: [...(drawing.clipBounds ?? []), clip] })),
+    { x: b.x, y: b.y, width: b.width, height: b.height },
+    options.background,
+  );
+}
 const paintOrders = new WeakMap<DesignContent, DesignElement[]>();
 /** Native paint order with effective visibility, including hidden ancestor subtrees.
  * Deep-frozen content shares one frozen result; mutable Host content is read again. */
@@ -2101,7 +2152,7 @@ function validPathStorage(d: DesignContent, allow: boolean): boolean {
   return (
     anchors <= designPathLimits.totalAnchors &&
     segments <= designPathLimits.totalSegments &&
-    bytes <= designPathLimits.bytes
+    bytes <= designPathLimits.totalBytes
   );
 }
 function validDesignBody(value: unknown): value is DesignContent {

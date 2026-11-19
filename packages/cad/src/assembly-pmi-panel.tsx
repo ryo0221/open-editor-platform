@@ -165,6 +165,8 @@ function OwnPmi({
                 const s = states?.get(item.id);
                 const on = focus?.source === 'assembly' && focus.itemId === item.id;
                 const named = componentsOf(item).map((id) => names.get(id) ?? 'deleted component');
+                // PMI-5b-2: lines in the import's frame are hidden while a component is moved.
+                const moved = s?.current ? (view.moved?.get(item.id) ?? []) : [];
                 return (
                   <li key={item.id}>
                     <button
@@ -181,6 +183,9 @@ function OwnPmi({
                         {named.length ? `on ${named.join(', ')}` : 'on the assembly'}
                         {targetCount(item) ? ` · ${targetCount(item)}` : ''}
                         {s && !s.current ? ` · ${staleText[s.reason]}` : ''}
+                        {moved.length
+                          ? ` · lines hidden (${moved.map((id) => names.get(id) ?? 'a component').join(', ')} moved since the import)`
+                          : ''}
                       </small>
                     </button>
                   </li>
@@ -230,6 +235,7 @@ export function AssemblyPmiLayer({
 }
 
 type Marks = Parameters<CadViewport['showPartPmi']>[0];
+const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 type Lines = NonNullable<Parameters<CadViewport['showPartPmi']>[1]>;
 
 function assemblyPmiDrawing(
@@ -262,11 +268,11 @@ function assemblyPmiDrawing(
     return mesh && { mesh, matrix: poseMatrix(o.pose), version: o.content };
   };
   if (focus?.source === 'assembly') {
-    const own = assembly.assemblyPmi(content);
-    const asset = own?.asset;
+    const view = assembly.assemblyPmi(content);
+    const asset = view?.asset;
     // Only a current item on the content drawn: a preview's replaced version makes it stale.
     const item =
-      own?.items?.get(focus.itemId)?.current === true
+      view?.items?.get(focus.itemId)?.current === true
         ? asset?.items.find((i) => i.id === focus.itemId)
         : undefined;
     for (const id of item ? componentsOf(item) : []) {
@@ -289,6 +295,36 @@ function assemblyPmiDrawing(
       for (const m of pmiMarks(at.mesh, own))
         marks.push({ ...m, mesh: at.mesh, matrix: at.matrix });
     }
+  }
+  // PMI-5b-2: the assembly's own lines, in the document's frame as the import placed them: each
+  // current item whose named components are all at their import pose and readable.
+  const ownView = assembly.assemblyPmi(content);
+  if (linesShown && ownView?.asset && ownView.items) {
+    const readable = (id: string) => {
+      const i = occurrences.findIndex((x) => x.path.length === 1 && x.path[0] === id);
+      return i >= 0 && allowed[i];
+    };
+    const drawn = ownView.asset.items
+      .filter(
+        (i) =>
+          i.presentation &&
+          ownView.items!.get(i.id)?.current === true &&
+          ownView.moved?.get(i.id)?.length === 0 &&
+          componentsOf(i).every(readable),
+      )
+      .map((i) => i.id);
+    const focusId = focus?.source === 'assembly' ? focus.itemId : undefined;
+    if (drawn.length)
+      for (const l of lineCache.get(
+        ownView.asset,
+        [],
+        [0, 0, 0],
+        focusId,
+        undefined,
+        undefined,
+        drawn,
+      ))
+        lines.push({ ...l, matrix: identity });
   }
   if (selected) {
     for (const { bodyId, view } of assembly.componentPmi(selected, content)) {
@@ -322,15 +358,16 @@ function assemblyPmiDrawing(
 }
 
 /**
- * PMI-5b: whether the selected component's part draws presentation lines, so the view offers
- * its PMI switch in an assembly too.
+ * PMI-5b: whether the assembly (PMI-5b-2) or the selected component's part draws presentation
+ * lines, so the view offers its PMI switch in an assembly too.
  */
 export function selectedPartPresented(assembly: CadAssembly): boolean {
   const selected = assembly.getSnapshot().selected;
   return (
-    !!selected &&
-    assembly
-      .componentPmi(selected)
-      .some(({ view }) => view.asset?.items.some((i) => i.presentation))
+    !!assembly.assemblyPmi()?.asset?.items.some((i) => i.presentation) ||
+    (!!selected &&
+      assembly
+        .componentPmi(selected)
+        .some(({ view }) => view.asset?.items.some((i) => i.presentation)))
   );
 }

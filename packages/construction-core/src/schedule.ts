@@ -228,6 +228,13 @@ export interface SiteDay {
   states: Map<string, Exclude<ElementState, 'existing'>>;
   /** Tasks running on the day, in document order. */
   running: string[];
+  /**
+   * TT2: elements standing lower than their BIM place on the day (mm, below 0): the raises still
+   * to come and the rest of those running. Absent: in place.
+   */
+  offsets: Map<string, number>;
+  /** TT2: elements a raise moves on the day. */
+  raising: Set<string>;
 }
 
 /** What stands on site on one day. */
@@ -245,12 +252,32 @@ export function siteOnDay(
     phase.set(t.id, p);
     if (p === 'running') running.push(t.id);
   }
+  // TT2: each raise not finished leaves its elements lower by what it still has to go.
+  const offsets = new Map<string, number>();
+  const raising = new Set<string>();
+  for (const t of doc.tasks) {
+    if (t.action !== 'raise' || !t.raiseMm) continue;
+    const p = phase.get(t.id);
+    if (!p || p === 'after') continue;
+    let left = t.raiseMm;
+    if (p === 'running') {
+      const span = taskSpan(t, schedule.byId.get(t.id)!);
+      const a = utcDay(span.start)!;
+      const b = utcDay(span.finish)!;
+      const d = utcDay(day)!;
+      // Evenly over the calendar days of the task; done by the end of its last day.
+      left = t.raiseMm * (1 - (d - a + 1) / (b - a + 1));
+      for (const e of t.elementIds) raising.add(e);
+    }
+    if (left > 0) for (const e of t.elementIds) offsets.set(e, (offsets.get(e) ?? 0) - left);
+  }
   const construct = new Map<string, TaskPhase>();
   const remove = new Map<string, TaskPhase>();
   const temporary = new Map<string, TaskPhase>();
   for (const t of doc.tasks) {
     const p = phase.get(t.id);
     if (!p) continue;
+    if (t.action === 'raise') continue;
     const into = t.action === 'construct' ? construct : t.action === 'remove' ? remove : temporary;
     for (const e of t.elementIds) into.set(e, p);
   }
@@ -268,7 +295,61 @@ export function siteOnDay(
     else if (c === 'running') states.set(e, 'building');
     else states.set(e, 'built');
   }
-  return { day, states, running };
+  return { day, states, running, offsets, raising };
+}
+
+/**
+ * TT2: raises that start before what they lift is built (its construct task not finished), or
+ * once it is being removed.
+ */
+export function checkRaises(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+): ConstructionDiagnostic[] {
+  const out: ConstructionDiagnostic[] = [];
+  const span = (id: string) => {
+    const t = doc.tasks.find((x) => x.id === id);
+    const p = schedule.byId.get(id);
+    return t && p ? taskSpan(t, p) : undefined;
+  };
+  const builtBy = new Map<string, string>();
+  const removedBy = new Map<string, string>();
+  for (const t of doc.tasks)
+    for (const e of t.elementIds) {
+      if (t.action === 'construct') builtBy.set(e, t.id);
+      if (t.action === 'remove') removedBy.set(e, t.id);
+    }
+  doc.tasks.forEach((t, i) => {
+    if (t.action !== 'raise') return;
+    const own = span(t.id);
+    if (!own) return;
+    const early: string[] = [];
+    const gone: string[] = [];
+    for (const e of t.elementIds) {
+      // Built by the raise's first day: its construct task is over then (a milestone on that
+      // very day counts, as it does on the site).
+      const b = builtBy.get(e);
+      const bt = b ? doc.tasks.find((x) => x.id === b) : undefined;
+      const bp = b ? schedule.byId.get(b) : undefined;
+      if (bt && bp && taskPhase(bt, bp, own.start) !== 'after') early.push(e);
+      const r = removedBy.get(e);
+      const removed = r ? span(r) : undefined;
+      if (removed && removed.start <= own.finish) gone.push(e);
+    }
+    if (early.length)
+      out.push({
+        code: 'raise-before-built',
+        path: `$.tasks[${i}]`,
+        message: `${t.name || t.id} starts on ${own.start} before ${early.slice(0, 5).join(', ')}${early.length > 5 ? ' …' : ''} ${early.length > 1 ? 'are' : 'is'} built`,
+      });
+    if (gone.length)
+      out.push({
+        code: 'raise-removed',
+        path: `$.tasks[${i}]`,
+        message: `${t.name || t.id} moves ${gone.slice(0, 5).join(', ')} while ${gone.length > 1 ? 'they are' : 'it is'} removed`,
+      });
+  });
+  return out;
 }
 
 /** The state of one element on a day, `existing` when no task holds it. */

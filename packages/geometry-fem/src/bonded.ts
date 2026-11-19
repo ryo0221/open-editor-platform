@@ -646,6 +646,61 @@ function relativeMechanism(
   }
 }
 
+/**
+ * VS8c (Codex on #1317): how far each point is from a side's elements (mm): a spot weld row's
+ * points against its second flange, so a crash run can refuse a row across a gap it does not
+ * bridge (its explicit welds take the nodes near the points, whatever the gap).
+ */
+export function bondPointGaps(
+  part: BondedPart,
+  side: BondSide,
+  points: readonly (readonly [number, number, number])[],
+): number[] {
+  const targets = targetsOf(part, side);
+  if (!targets.length) throw new ElasticError('empty-target', 'the side has no element');
+  return points.map((p) => follow(targets, [p[0], p[1], p[2]]).d);
+}
+
+/**
+ * VS8c: the follower nodes a bond ties (as `solveBonded` takes them: those within the tolerance,
+ * a contact's beyond it skipped), each with the node of the element it follows nearest its foot
+ * on that element (the largest shape weight). Pairs, follower node then followed node.
+ */
+export function bondTiePairs(parts: BondedPart[], bond: Bond, bi = 0): [number, number][] {
+  const fp = parts[bond.follower.part];
+  const op = parts[bond.on.part];
+  if (!fp || !op)
+    throw new ElasticError('target-index', `bond ${bi} names a part the model does not have`);
+  if (!(bond.tolerance >= 0))
+    throw new ElasticError('bond-gap', `bond ${bi}: the tolerance must be ≥ 0`);
+  const targets = targetsOf(op, bond.on);
+  if (!targets.length) throw new ElasticError('empty-target', `bond ${bi} follows no element`);
+  const followers = nodesOf(fp, bond.follower);
+  if (!followers.length) throw new ElasticError('empty-target', `bond ${bi} has no dependent node`);
+  const out: [number, number][] = [];
+  for (const node of followers) {
+    const at = follow(targets, pointOf(fp.mesh.nodes, node));
+    if (at.d > bond.tolerance) {
+      if (bond.contact) continue;
+      throw new ElasticError(
+        'bond-gap',
+        `bond ${bi}: node ${node} is ${at.d.toPrecision(3)} mm from the side it follows (tolerance ${bond.tolerance} mm)`,
+      );
+    }
+    let best = 0;
+    at.N.forEach((w, q) => {
+      if (w > at.N[best]!) best = q;
+    });
+    out.push([node, at.nodes[best]!]);
+  }
+  if (!out.length)
+    throw new ElasticError(
+      'bond-gap',
+      `bond ${bi}: no node of the contact lies within ${bond.tolerance} mm of the side it follows`,
+    );
+  return out;
+}
+
 function bondedSystem(input: Pick<BondedInput, 'parts' | 'bonds'>) {
   const { parts, bonds } = input;
   if (!parts.length) throw new ElasticError('empty-target', 'no part to solve');

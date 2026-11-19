@@ -10,6 +10,7 @@ import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
 import {
   SimulationValidationError,
+  metricsOfStudy,
   simulationLimits,
   type SimulationConstraint,
   type SimulationDocument,
@@ -26,6 +27,7 @@ import {
   type SimulationBond,
   type SimulationMass,
   type SimulationSpotWeld,
+  type SimulationSeal,
   type SimulationIdealisation,
 } from './model';
 import { settingOwners, validateSimulation } from './validation';
@@ -56,7 +58,8 @@ type Collection =
   | 'studies'
   | 'bonds'
   | 'masses'
-  | 'spotWelds';
+  | 'spotWelds'
+  | 'seals';
 /** R3a's edits of the analysis setup. Runs (results) are recorded by later stages. */
 export type SimulationOperation =
   | { type: 'renameDocument'; name: string }
@@ -95,6 +98,10 @@ export type SimulationOperation =
   | { type: 'addSpotWeld'; weld: SimulationSpotWeld }
   | { type: 'updateSpotWeld'; weld: SimulationSpotWeld }
   | { type: 'removeSpotWeld'; id: string }
+  /** VS9: a seal round an opening (schema 2); removing one takes it out of the seal studies. */
+  | { type: 'addSeal'; seal: SimulationSeal }
+  | { type: 'updateSeal'; seal: SimulationSeal }
+  | { type: 'removeSeal'; id: string }
   /** R3j-2: an analysed body's own idealisation, or null for the study's. */
   | { type: 'setBodyIdealisation'; bodyId: string; idealisation: SimulationIdealisation | null }
   /** CR5e: a sheet body's thickness (mm), or null to take it away (schema 2). */
@@ -197,6 +204,25 @@ export function applySimulationOperation(
       const welds = next.spotWelds ?? [];
       welds.splice(at(welds, op.id), 1);
       if (!welds.length) delete next.spotWelds;
+      retire(op.id);
+      break;
+    }
+    case 'addSeal':
+      next.schemaVersion = 2;
+      next.seals = [...(next.seals ?? []), structuredClone(op.seal)];
+      break;
+    case 'updateSeal': {
+      const seals = next.seals ?? [];
+      seals[at(seals, op.seal.id)] = structuredClone(op.seal);
+      break;
+    }
+    case 'removeSeal': {
+      const seals = next.seals ?? [];
+      seals.splice(at(seals, op.id), 1);
+      if (!seals.length) delete next.seals;
+      for (const s of next.studies)
+        if (s.kind === 'seal' || s.kind === 'shower')
+          s.seal.sealIds = s.seal.sealIds.filter((x) => x !== op.id);
       retire(op.id);
       break;
     }
@@ -322,9 +348,20 @@ export function applySimulationOperation(
     case 'addStudy':
       next.studies.push(structuredClone(op.study));
       break;
-    case 'updateStudy':
-      next.studies[at(next.studies, op.study.id)] = structuredClone(op.study);
+    case 'updateStudy': {
+      const k = at(next.studies, op.study.id);
+      const before = metricsOfStudy(next.studies[k]!);
+      next.studies[k] = structuredClone(op.study);
+      // VS8b: a change that measures other metrics (a crash test becoming a head impact, or back)
+      // leaves no recorded run of the old metrics behind.
+      const after = metricsOfStudy(op.study);
+      if (before.length !== after.length || before.some((m, q) => m !== after[q])) {
+        for (const r of next.runs ?? []) if (r.studyId === op.study.id) retire(r.id);
+        next.runs = (next.runs ?? []).filter((r) => r.studyId !== op.study.id);
+        if (!next.runs.length) delete next.runs;
+      }
       break;
+    }
     case 'removeStudy':
       next.studies.splice(at(next.studies, op.id), 1);
       retire(op.id);
@@ -382,6 +419,11 @@ function holdsTarget(doc: SimulationDocument, owner: string, target: SimulationT
   const bond = doc.bonds?.find((x) => x.id === owner);
   const mass = doc.masses?.find((x) => x.id === owner);
   const weld = doc.spotWelds?.find((x) => x.id === owner);
+  const seal = doc.seals?.find((x) => x.id === owner);
+  if (seal) {
+    const form = canonicalJson(target);
+    return [...seal.line, ...seal.base, ...seal.mating].some((t) => canonicalJson(t) === form);
+  }
   if (weld) {
     const form = canonicalJson(target);
     return [...weld.follower, ...weld.on].some((t) => canonicalJson(t) === form);
@@ -420,6 +462,7 @@ export function simulationIds(doc: SimulationDocument): Set<string> {
     ...(doc.bonds ?? []),
     ...(doc.masses ?? []),
     ...(doc.spotWelds ?? []),
+    ...(doc.seals ?? []),
     ...(doc.runs ?? []),
   ])
     out.add(x.id);
@@ -460,6 +503,9 @@ const labels: Record<SimulationOperationType, string> = {
   addSpotWeld: 'Add spot welds',
   updateSpotWeld: 'Edit spot welds',
   removeSpotWeld: 'Remove spot welds',
+  addSeal: 'Add seal',
+  updateSeal: 'Edit seal',
+  removeSeal: 'Remove seal',
   addMass: 'Add mass',
   updateMass: 'Edit mass',
   removeMass: 'Remove mass',

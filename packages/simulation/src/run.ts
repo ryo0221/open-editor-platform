@@ -34,11 +34,19 @@ import {
   type ElasticInput,
   type ElasticLoad,
   type ElasticResult,
+  crashJobLimits,
+  type ExplicitModel,
+  type ExplicitResult,
+  type ExplicitSettings,
   type FemMesh,
   type BondedInput,
   type BondedResult,
   type ShellInput,
   type ShellResult,
+  type TransientInput,
+  type TransientResult,
+  fatigueField,
+  fatigueLimits,
 } from '@editor-platform/geometry-fem';
 import {
   runBondedLevel,
@@ -54,6 +62,8 @@ import {
   type TriangleSurface,
 } from '@editor-platform/geometry-cfd';
 import type { AeroRunFields } from './aero-view';
+import { runSealStudy, type SealRunFields } from './run-seal';
+import { runShowerStudy, type ShowerRunFields } from './run-shower';
 import {
   aeroBrowserCellMm,
   aeroDeflectionMm,
@@ -64,6 +74,8 @@ import {
   type AeroLevelResult,
   type AeroRunEnvironment,
 } from './run-aero';
+import type { CrashRunFields } from './run-crash';
+import { runTransientLevel, type TransientRunFields } from './run-transient';
 import { runShellLevel, type ShellModalRunFields, type ShellStaticRunFields } from './run-shell';
 import {
   addedMasses,
@@ -148,6 +160,22 @@ export interface RunEnvironment {
     solveBondedModal?(input: BondedModalInput): Promise<BondedModalResult>;
     /** VS4b: a wind-tunnel study on the Host (OpenFOAM); without it one is refused with `host`. */
     solveAero?(job: AeroJob): Promise<AeroHostResult>;
+    /**
+     * VS8a: a crash run on the Host (`solveCrashOnHost`), `onTime` getting the solved time; without
+     * it a crash study is refused with `host`.
+     */
+    solveCrash?(
+      model: ExplicitModel,
+      settings: ExplicitSettings,
+      onTime?: (time: number, endTime: number) => void,
+    ): Promise<ExplicitResult>;
+    /**
+     * VS11d-3: a transient heat study on the Host (`solveTransientOnHost`), checked with
+     * `transientResidual` and `transientBalance`; without it one is refused with `host`.
+     */
+    solveTransient?(input: TransientInput): Promise<TransientResult>;
+    transientResidual?: number;
+    transientBalance?: number;
     /** The relative imbalance the equilibrium check allows for its results (default 1e-6). */
     equilibrium?: number;
     /** R3j-5c: what the modal checks allow for its modes (`modalChecks`, default 1e-6). */
@@ -162,6 +190,8 @@ export interface RunProgress {
   on?: string;
   /** VS4b: a browser wind tunnel's flow so far (its step and the drag averaged since the last). */
   flow?: { step: number; steps: number; cd: number };
+  /** VS7c: a crash run's simulated time so far and its end (s). */
+  crash?: { time: number; endTime: number };
 }
 
 /** Why a run left no result. */
@@ -205,13 +235,17 @@ export interface RunLevel {
 /** The finest level's fields, for display and VTU (nodal, mm and MPa). */
 export type RunFields =
   | AeroRunFields
+  | SealRunFields
+  | ShowerRunFields
   | StaticRunFields
   | ModalRunFields
   | ThermalRunFields
+  | TransientRunFields
   | ShellStaticRunFields
   | ShellModalRunFields
   | BondedStaticRunFields
-  | BondedModalRunFields;
+  | BondedModalRunFields
+  | CrashRunFields;
 /** R3h: a thermal run's nodal temperature (K) and heat flux −k∇T (mW/mm², x y z, and |q|). */
 export interface ThermalRunFields {
   kind: 'thermal';
@@ -258,6 +292,8 @@ export interface StaticRunFields {
   stress: Float64Array;
   vonMises: Float64Array;
   reaction: Float64Array;
+  /** VS13: a fatigue study's damage per pass of its history and passes to failure, per node. */
+  fatigue?: { damage: Float64Array; life: Float64Array };
 }
 /** R3g: the modes of a modal run, lowest first. */
 export interface ModalRunFields {
@@ -321,8 +357,10 @@ export async function runStudy(
   if (!study) return failed('study-missing', studyId);
   // R3j-4b: several bodies, or bonds, are solved together (linear static, in the browser).
   const bonded = !!(doc.bodies?.length || doc.bonds?.length || doc.spotWelds?.length);
-  if (bonded && study.kind === 'thermal')
+  if (bonded && (study.kind === 'thermal' || study.kind === 'transient-thermal'))
     return failed('multi-body', 'a thermal study is solved for one body');
+  if (bonded && study.kind === 'linear-static' && study.fatigue)
+    return failed('multi-body', 'fatigue is computed for one solid body');
   if (bonded && env.remote && study.kind === 'linear-static' && !env.remote.solveBonded)
     return failed('host', `${env.remote.name} does not solve bonded bodies`);
   // R3j-4b: removals and local sizes are the source body's only; one on another body is refused
@@ -342,6 +380,15 @@ export async function runStudy(
   if (source.length) return failed('source', source.map((d) => d.code).join(', '));
   // VS4b: a wind-tunnel study takes the bodies' outside only: no material, mesh or condition.
   if (study.kind === 'aero') return runAeroStudy(doc, cad, study, env, failed);
+  // VS7c: a crash study runs the bodies' shells on the explicit solver, in the browser or (VS8a)
+  // on a Host that runs them.
+  const crash = study.kind === 'crash' ? study : undefined;
+  if (crash && env.remote && !env.remote.solveCrash)
+    return failed('host', `${env.remote.name} does not run crash studies`);
+  // VS9b: a seal study measures the bodies' shape: no material, mesh or condition.
+  if (study.kind === 'seal') return runSealStudy(doc, cad, study, env, failed);
+  // VS10b: a shower measures the seals, then runs water over the bodies.
+  if (study.kind === 'shower') return runShowerStudy(doc, cad, study, env, failed);
   const material = doc.materials.find((m) => m.id === doc.materialId);
   if (!material) return failed('material-missing', 'no material on the body');
   const others = (doc.bodies ?? []).map((b) => ({
@@ -428,7 +475,9 @@ export async function runStudy(
    */
   const bodyPointSizes = (bodyId: string, settings: SimulationMeshSettings) => {
     const points = weldAt.get(bodyId);
-    if (!points?.length) return {};
+    // VS8c: a crash run's weld ties the nodes within its radius, or the nearest shell's: it needs
+    // no finer mesh (F101's 1,543 points made 210,000 shells at 30 mm).
+    if (!points?.length || study.kind === 'crash') return {};
     return {
       pointSizes: {
         points,
@@ -448,9 +497,21 @@ export async function runStudy(
     kernelBuild: env.builds.kernel,
   };
   const settingsList = convergenceLevelSettings(doc.mesh, study.convergence.levels);
-  // Thermal studies are solved in the browser only (A2); a modal one there on smaller meshes.
+  // Steady thermal studies are solved in the browser only (A2); a modal one there on smaller
+  // meshes. VS11d-3: a transient one on a Host that solves them, without radiation between faces.
   if (env.remote && study.kind === 'thermal')
     return failed('host', `a ${study.kind} study is solved in the browser, not on a compute Host`);
+  if (env.remote && study.kind === 'transient-thermal') {
+    if (!env.remote.solveTransient)
+      return failed('host', `${env.remote.name} does not solve transient heat`);
+    if (study.loadIds.some((id) => doc.loads.find((l) => l.id === id)?.kind === 'enclosure'))
+      return failed(
+        'host',
+        'radiation between faces is solved in the browser, not on a compute Host',
+      );
+    if (study.transient.theta !== 1)
+      return failed('host', `${env.remote.name} steps backward Euler: θ must be 1`);
+  }
   // CR5e: a sheet body is a shell on itself, at the document's thickness (`checkSimulationSource`
   // refuses one without).
   const sheetMm = (bodyId: string) =>
@@ -463,12 +524,23 @@ export async function runStudy(
   };
   const sourceSheet = sheetMm(doc.source.bodyId) !== undefined;
   if (
-    study.kind === 'thermal' &&
+    (study.kind === 'thermal' || study.kind === 'transient-thermal') &&
     (sourceSheet || others.some((b) => sheetMm(b.bodyId) !== undefined))
   )
     return failed('source', 'a sheet body is solved as a shell, which a thermal study is not');
   // R3i-4: shells too (A3-U3).
-  const shell = study.kind !== 'thermal' && (study.idealisation === 'shell' || sourceSheet);
+  const shell =
+    !!crash ||
+    (study.kind !== 'thermal' &&
+      study.kind !== 'transient-thermal' &&
+      study.kind !== 'crash' &&
+      (study.idealisation === 'shell' || sourceSheet));
+  // VS13: fatigue is computed on solids; a sheet body is a shell without saying so (Codex on #1283).
+  if (shell && study.kind === 'linear-static' && study.fatigue)
+    return failed(
+      'source',
+      'a sheet body is solved as a shell: fatigue is computed on solids only',
+    );
   // R3j-5c: a modal study on a Host that solves its kind of model.
   if (
     env.remote &&
@@ -489,7 +561,10 @@ export async function runStudy(
   if (study.kind === 'thermal' && !(material.conductivity !== undefined))
     return failed('material-missing', `${material.name} has no thermal conductivity`);
   const limits =
-    env.remote?.limits ??
+    // VS8a: a crash on the Host within its crash jobs' sizes.
+    (crash && env.remote
+      ? { nodes: crashJobLimits.nodes, elements: crashJobLimits.shells }
+      : env.remote?.limits) ??
     (study.kind === 'modal'
       ? {
           nodes: simulationLimits.browserModalNodes,
@@ -508,24 +583,53 @@ export async function runStudy(
         step: s,
         ...(s === 'solve' && env.remote ? { on: env.remote.name } : {}),
       });
-    if (bonded) {
+    if (bonded || crash) {
       const request = {
         deflectionMm: runDeflectionMm(settings.minSize),
         clampDeflection: true,
         maxEdgeMm: settings.size,
       };
       const idealisation = (bodyId: string, own?: 'solid' | 'shell') =>
-        sheetMm(bodyId) !== undefined
+        sheetMm(bodyId) !== undefined || crash
           ? 'shell'
-          : (own ?? (study.kind !== 'thermal' ? study.idealisation : undefined) ?? 'solid');
+          : (own ??
+            (study.kind !== 'thermal' &&
+            study.kind !== 'transient-thermal' &&
+            study.kind !== 'crash'
+              ? study.idealisation
+              : undefined) ??
+            'solid');
       const remote = env.remote;
+      const progress = (time: number, endTime: number) =>
+        env.checkpoint?.({
+          level,
+          levels: settingsList.length,
+          step: 'solve',
+          ...(remote ? { on: remote.name } : {}),
+          crash: { time, endTime },
+        });
       let out: Awaited<ReturnType<typeof runBondedLevel>>;
       try {
         out = await runBondedLevel({
           doc,
           cad,
-          kind: study.kind === 'modal' ? 'modal' : 'linear-static',
+          kind: study.kind === 'modal' ? 'modal' : crash ? 'crash' : 'linear-static',
           modes: study.kind === 'modal' ? study.modes : 0,
+          ...(crash
+            ? {
+                crash: {
+                  settings: crash.crash,
+                  progress,
+                  // VS8a: on the Host, its solved time is the progress.
+                  ...(remote?.solveCrash
+                    ? {
+                        solve: (model: ExplicitModel, settings: ExplicitSettings) =>
+                          remote.solveCrash!(model, settings, progress),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
           bodies: [
             {
               bodyId: doc.source.bodyId,
@@ -564,7 +668,8 @@ export async function runStudy(
           weldPoints,
           settings,
           limits,
-          ...(remote
+          // A crash's Host run is its own (`solve` above): no CalculiX wedges.
+          ...(remote && !crash
             ? { remote: levelRemote(remote, remote.solveBonded, remote.solveBondedModal) }
             : {}),
           context,
@@ -681,6 +786,17 @@ export async function runStudy(
     const elements = mesh.elements.length / 10;
     if (nodes > limits.nodes || elements > limits.elements)
       return failed('mesh-too-large', `${nodes} nodes, ${elements} elements`, level);
+    // VS13: the fatigue's work, nodes × history points, before the solve (Codex on #1283).
+    if (
+      study.kind === 'linear-static' &&
+      study.fatigue &&
+      nodes * study.fatigue.history.length > fatigueLimits.work
+    )
+      return failed(
+        'mesh-too-large',
+        `fatigue: ${nodes} nodes × ${study.fatigue.history.length} history points is over ${fatigueLimits.work}`,
+        level,
+      );
     // Element shape (docs/cad/r3-analysis.md, meshingと品質): one element below the limits stops
     // the run; curved tet10s are also judged by their Jacobian (straightened below the minimum).
     const shape = meshShapeQuality(mesh);
@@ -719,6 +835,60 @@ export async function runStudy(
         ),
       ].sort((a, b) => a - b);
     const { faceAreas } = surface.measures;
+
+    if (study.kind === 'transient-thermal') {
+      await step('solve');
+      const remote = env.remote;
+      let out: Awaited<ReturnType<typeof runTransientLevel>>;
+      try {
+        out = await runTransientLevel({
+          mesh,
+          study,
+          material,
+          loads,
+          constraints,
+          of,
+          measures: surface.measures,
+          areaTolerance: loadApplicationTolerance.area,
+          ...(remote?.solveTransient
+            ? {
+                remote: {
+                  name: remote.name,
+                  solveTransient: remote.solveTransient,
+                  solve: remote.solve,
+                  residual: remote.transientResidual ?? 2e-3,
+                  balance: remote.transientBalance ?? 1e-4,
+                },
+              }
+            : {}),
+        });
+      } catch (e) {
+        if (e instanceof RunRefusal) return failed(e.code, e.message, level);
+        throw e;
+      }
+      if ('failure' in out) return failed(out.failure.code, out.failure.detail, level);
+      await step('checks');
+      levels.push({
+        settings,
+        nodes,
+        elements,
+        metrics: out.metrics,
+        checks: [
+          { name: 'mapping', pass: true, detail: `${mapping.length} targets resolved` },
+          out.checks[0]!,
+          {
+            name: 'quality',
+            pass: report.minJacobian >= curvedJacobianMin,
+            detail:
+              `min radius ratio ${shape.minRadiusRatio}, min dihedral ${shape.minDihedralDeg}°, ` +
+              `min Jacobian ratio ${report.minJacobian}, ${report.straightened} mid nodes straightened`,
+          },
+          ...out.checks.slice(1),
+        ],
+      });
+      fields = out.fields;
+      continue;
+    }
 
     if (study.kind === 'thermal') {
       const conditions = [
@@ -1005,6 +1175,30 @@ export async function runStudy(
       vonMises: r.vonMises,
       reaction: r.reaction,
     };
+    // VS13: fatigue of this level's stresses under the study's history.
+    if (study.kind === 'linear-static' && study.fatigue) {
+      const f = study.fatigue;
+      const life = fatigueField({
+        cases: [r.stress],
+        history: [f.history],
+        sn: {
+          reference: { amplitude: f.sn.amplitude, cycles: f.sn.cycles },
+          slope: f.sn.slope,
+          endurance: f.sn.endurance,
+          ultimate: f.sn.ultimate,
+        },
+      });
+      fields.fatigue = { damage: life.damage, life: life.life };
+      const lv = levels.at(-1)!;
+      lv.checks.push({
+        name: 'fatigue',
+        pass: true,
+        detail:
+          life.worst.damage > 0
+            ? `worst node ${life.worst.node}: damage ${life.worst.damage} per pass, ${life.worst.life} passes`
+            : 'no damage: every amplitude below the endurance limit',
+      });
+    }
     measureTest();
   }
   const last = levels[levels.length - 1]!;
@@ -1154,7 +1348,12 @@ async function runAeroStudy(
         clampDeflection: true,
       });
       if (!('surface' in r)) return failed('surface', `${bodyId}: ${r.code}`, level);
-      bodies.push({ positions: r.surface.points, triangles: r.surface.triangles });
+      // VS12c: each triangle's face, so a Host's heat transfer maps onto the faces (VS-U9).
+      bodies.push({
+        positions: r.surface.points,
+        triangles: r.surface.triangles,
+        ...(r.surface.faces ? { faces: Int32Array.from(r.surface.faces) } : {}),
+      });
     }
     let lowest = Infinity;
     try {
@@ -1206,7 +1405,11 @@ async function runAeroStudy(
     const broke = out.checks.find((c) => !c.pass);
     if (broke) return failed('solve', `${broke.name}: ${broke.detail}`, level);
     await step('checks');
-    fields = out.fields;
+    fields = out.fields && {
+      ...out.fields,
+      faces: shape.faces ?? new Int32Array(shape.triangles.length / 3).fill(-1),
+      bodies: { ids: bodyIds, triangles: Uint32Array.from(bodies, (b) => b.triangles.length / 3) },
+    };
     levels.push({
       settings: { ...doc.mesh, size: out.cellMm, minSize: out.cellMm, local: [] },
       nodes: out.cells,

@@ -25,6 +25,34 @@ export interface BimPartKernel {
   exportBrep(document: CadDocument, contentHash: string): Promise<CadBrepExport>;
 }
 
+/**
+ * A placed version's shape, as the building's kernel reads it. Rejects with an Error whose message
+ * is a code. The drawing editor reads the versions it keeps the same way (Codex on #1278).
+ */
+export async function readBimPartShape(
+  doc: CadDocument,
+  contentHash: string,
+  kernel: BimPartKernel | undefined,
+): Promise<BimPartShape> {
+  // A version that places parts or reads imported files needs its own closure; not yet.
+  if (doc.parts?.length) throw new Error('part-assembly-unsupported');
+  // Texture images (#662) are the look, not the shape: the building draws a part's bodies by
+  // their colour and finish, so only imported shapes need a closure here.
+  if (doc.assets.some((a) => a.kind !== 'texture-png' && a.kind !== 'texture-jpeg'))
+    throw new Error('part-assets-unsupported');
+  if (!kernel) throw new Error('kernel-build-unavailable');
+  // One build for the building and every part (R2b-U6).
+  if (doc.kernelProfile.buildHash !== kernel.buildHash) throw new Error('part-build-mismatch');
+  const brep = await kernel.exportBrep(doc, contentHash);
+  return {
+    brep: brep.bytes,
+    bounds: brep.bounds,
+    kinds: brep.kinds,
+    looks: brep.appearances,
+    faces: brep.faces,
+  };
+}
+
 export function createBimPartSource(options: {
   records(): StoredArtifact[];
   /** The building's own record, which keeps the placed versions. */
@@ -45,24 +73,7 @@ export function createBimPartSource(options: {
   const read = async (source: BimPartReference): Promise<BimPartShape> => {
     const doc = content(source);
     if (!doc) throw new Error('part-source-missing');
-    // A version that places parts or reads imported files needs its own closure; not yet.
-    if (doc.parts?.length) throw new Error('part-assembly-unsupported');
-    // Texture images (#662) are the look, not the shape: the building draws a part's bodies by
-    // their colour and finish, so only imported shapes need a closure here.
-    if (doc.assets.some((a) => a.kind !== 'texture-png' && a.kind !== 'texture-jpeg'))
-      throw new Error('part-assets-unsupported');
-    const kernel = options.kernel;
-    if (!kernel) throw new Error('kernel-build-unavailable');
-    // One build for the building and every part (R2b-U6).
-    if (doc.kernelProfile.buildHash !== kernel.buildHash) throw new Error('part-build-mismatch');
-    const brep = await kernel.exportBrep(doc, source.contentHash);
-    return {
-      brep: brep.bytes,
-      bounds: brep.bounds,
-      kinds: brep.kinds,
-      looks: brep.appearances,
-      faces: brep.faces,
-    };
+    return readBimPartShape(doc, source.contentHash, options.kernel);
   };
   return {
     async list() {

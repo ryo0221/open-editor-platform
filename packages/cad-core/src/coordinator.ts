@@ -42,6 +42,8 @@ export interface CadSheetEvaluation {
   centroidMm?: Vec3;
   freeEdges: number;
   freeEdgeLengthMm: number;
+  /** #848: the number of separate shells, when more than one (an imported file's free shells). */
+  shells?: number;
 }
 export type CadBodyEvaluation = CadSolidEvaluation | CadSheetEvaluation;
 /**

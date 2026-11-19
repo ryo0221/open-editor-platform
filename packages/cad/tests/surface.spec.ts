@@ -1292,6 +1292,65 @@ test.describe('with the development kernel', () => {
     await expect(png).toBeDisabled();
   });
 
+  test('shown sketches are refused over the GPU budget and drawn under a larger one (CLF11, CAD26)', async ({
+    page,
+  }) => {
+    test.skip(test.info().project.name !== 'desktop', 'desktop layout');
+    // 100 bytes: fewer than a sketch's first three segments (48 bytes each).
+    await page.goto('/?fixture=sections&gpuBytes=100');
+    await ready(page);
+    const host = page.locator('.cad-canvas-host');
+    await page
+      .getByRole('checkbox', { name: /^Show sketch / })
+      .first()
+      .check();
+    await expect(host).toHaveAttribute('data-sketch-refused', 'true');
+    await expect(host).toHaveAttribute('data-sketch-lines', '0');
+    // The Host is told, and told again when the sketch is hidden (Codex #1233).
+    const note = page.getByText(/^形状が3D表示に使えるメモリーの上限を超えるため/);
+    await expect(note).toBeVisible();
+    const eye = page.getByRole('checkbox', { name: /^Show sketch / }).first();
+    await eye.uncheck();
+    await expect(note).toHaveCount(0);
+    await eye.check();
+    await expect(note).toBeVisible();
+    await page.evaluate(() =>
+      (
+        window as unknown as { cad: { setGpuBytes(bytes: number | undefined): void } }
+      ).cad.setGpuBytes(undefined),
+    );
+    await expect(host).not.toHaveAttribute('data-sketch-refused', 'true');
+    await expect(host).not.toHaveAttribute('data-sketch-lines', '0');
+    await expect(note).toHaveCount(0);
+    // Sketches alone, fitted once: Fit view keeps the direction looked from (Codex #1233).
+    const canvas = page.locator('.cad-canvas');
+    await page.getByTestId('cad-standard-view').selectOption('plan');
+    const plan = await canvas.screenshot();
+    await page.getByRole('button', { name: 'Fit view' }).click();
+    const after = await canvas.screenshot();
+    // The same picture but for the corner's axes (a three-quarter fit moved 1.7% of it).
+    const changed = await page.evaluate(
+      async ([a, b]) => {
+        const pixels = async (data: string) => {
+          const bitmap = await createImageBitmap(
+            await (await fetch(`data:image/png;base64,${data}`)).blob(),
+          );
+          const c = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const g = c.getContext('2d')!;
+          g.drawImage(bitmap, 0, 0);
+          return g.getImageData(0, 0, bitmap.width, bitmap.height).data;
+        };
+        const [p, q] = [await pixels(a!), await pixels(b!)];
+        let n = 0;
+        for (let i = 0; i < p.length; i += 4)
+          if (Math.max(...[0, 1, 2].map((k) => Math.abs(p[i + k]! - q[i + k]!))) > 30) n++;
+        return n / (p.length / 4);
+      },
+      [plan.toString('base64'), after.toString('base64')],
+    );
+    expect(changed).toBeLessThan(0.005);
+  });
+
   test('placed parts follow a changed GPU budget and the native bodies beside them (R2b-1, CAD26)', async ({
     page,
   }) => {
@@ -1862,6 +1921,118 @@ test.describe('Sketch mode (R1d-3, CAD34)', () => {
       (50 * 30 - 40 * 20) * 10,
       2,
     );
+  });
+
+  test('colours two selected lines, keeps the colour through Finish and takes it off (CLF9, ST-508#1)', async ({
+    page,
+  }) => {
+    test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+    test.skip(narrow(), 'sketching is desktop only');
+    await page.goto('/');
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Sketch on XY' }).click();
+    await rectangle(page);
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    const colour = page.getByRole('group', { name: 'Line colour' });
+    await expect(colour).toHaveCount(0);
+    await click(page, 20, 0);
+    await click(page, 20, 20, true);
+    await colour.getByLabel('Line colour').fill('#d1495b');
+    const lines = page.locator('.cad-sketch-canvas line[data-id]');
+    // Selected lines are drawn as selected; the colour shows once they are not.
+    await click(page, 60, 60);
+    await expect(lines.and(page.locator('[style*="stroke"]'))).toHaveCount(2);
+    await page
+      .getByTestId('cad-sketch-panel')
+      .getByRole('button', { name: 'Finish', exact: true })
+      .click();
+    await ready(page);
+    const sketch = (await cadSnapshot(page)).content.sketches.at(-1)!;
+    const colours = sketch.entities.flatMap((e) =>
+      e.type !== 'point' && e.color ? [e.color] : [],
+    );
+    expect(colours).toEqual(['#d1495b', '#d1495b']);
+    await page.getByRole('button', { name: `Edit sketch ${sketch.name}` }).click();
+    await expect(lines.and(page.locator('[style*="stroke"]'))).toHaveCount(2);
+    await click(page, 20, 0);
+    await colour.getByRole('button', { name: 'Default colour' }).click();
+    await click(page, 60, 60);
+    await expect(lines.and(page.locator('[style*="stroke"]'))).toHaveCount(1);
+  });
+
+  test('writes a note, edits its text and height, drags it and removes it (CLF10, ST-509#1)', async ({
+    page,
+  }) => {
+    test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+    test.skip(narrow(), 'sketching is desktop only');
+    await page.goto('/');
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Sketch on XY' }).click();
+    await rectangle(page);
+    await page.getByRole('button', { name: 'Add note', exact: true }).click();
+    await click(page, 0, 40);
+    const note = page.getByRole('group', { name: 'Note' });
+    await note.getByLabel('Note text').fill('ルーフ 1,130');
+    await note.getByLabel('Note text').press('Enter');
+    await note.getByLabel('Text height (mm)').fill('8');
+    await note.getByLabel('Text height (mm)').press('Enter');
+    const text = page.locator('.cad-sketch-canvas text[data-id="n1"]');
+    await expect(text).toHaveText('ルーフ 1,130');
+    await expect(text).toHaveAttribute('font-size', '8');
+    // An empty text is refused with the reason; the note keeps its text.
+    await note.getByLabel('Note text').fill(' ');
+    await note.getByLabel('Note text').press('Enter');
+    await expect(page.getByTestId('cad-sketch-problem')).toContainText('メモの文字');
+    await expect(text).toHaveText('ルーフ 1,130');
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await click(page, 60, 60);
+    // Dragged by its middle, 10 mm to the right.
+    const from = await at(page, 10, 42);
+    const to = await at(page, 20, 42);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 4 });
+    await page.mouse.up();
+    await page
+      .getByTestId('cad-sketch-panel')
+      .getByRole('button', { name: 'Finish', exact: true })
+      .click();
+    await ready(page);
+    const sketch = (await cadSnapshot(page)).content.sketches.at(-1)!;
+    expect(sketch.notes).toHaveLength(1);
+    expect(sketch.notes![0]).toMatchObject({ id: 'n1', text: 'ルーフ 1,130', size: 8 });
+    expect(sketch.notes![0]!.at[0]).toBeCloseTo(10, 0);
+    await page.getByRole('button', { name: `Edit sketch ${sketch.name}` }).click();
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await click(page, 20, 42);
+    await expect(page.getByRole('group', { name: 'Note' })).toBeVisible();
+    // A refused text keeps the sketch open at Finish, the field showing it.
+    await page.getByLabel('Note text').fill(' ');
+    await page
+      .getByTestId('cad-sketch-panel')
+      .getByRole('button', { name: 'Finish', exact: true })
+      .click();
+    await expect(page.getByTestId('cad-sketch-panel')).toBeVisible();
+    await page.getByLabel('Note text').fill('Roof');
+    await page.getByLabel('Note text').press('Enter');
+    await page
+      .getByTestId('cad-sketch-panel')
+      .getByRole('button', { name: 'Finish', exact: true })
+      .click();
+    await ready(page);
+    expect((await cadSnapshot(page)).content.sketches.at(-1)!.notes![0]!.text).toBe('Roof');
+    // Removed and finished: the existing sketch keeps no note.
+    await page.getByRole('button', { name: `Edit sketch ${sketch.name}` }).click();
+    await page.getByRole('button', { name: 'Select', exact: true }).click();
+    await click(page, 20, 42);
+    await page.getByRole('button', { name: 'Remove selected' }).click();
+    await expect(text).toHaveCount(0);
+    await page
+      .getByTestId('cad-sketch-panel')
+      .getByRole('button', { name: 'Finish', exact: true })
+      .click();
+    await ready(page);
+    expect((await cadSnapshot(page)).content.sketches.at(-1)).not.toHaveProperty('notes');
   });
 
   test('draws an open spline with Enter and a closed one on its first point, and extrudes the closed one (R2a-2, CAD40)', async ({
@@ -2939,9 +3110,11 @@ test.describe('bill of materials (R2b-3, CAD49)', () => {
     expect(file.suggestedFilename()).toBe('cad-bom-hierarchical.csv');
     const csv = await readFile((await file.path())!, 'utf8');
     expect(csv.split('\r\n')[0]).toBe(
-      'Item,Part number,Name,Description,Quantity,Artifact,Version',
+      'Item,Part number,Name,Description,Quantity,Artifact,Version,Material,Sourcing,Supplier,' +
+        'Unit mass (kg),Mass (kg),Unit cost,Cost,Currency',
     );
-    expect(csv).toContain(`4.2,'=B-M8,"Bolt ""M8"", long",'-M8 x 40,2,bolt,v1\r\n`);
+    // PD2's columns follow; F22 has no material or cost, and nothing is weighed (no density).
+    expect(csv).toContain(`4.2,'=B-M8,"Bolt ""M8"", long",'-M8 x 40,2,bolt,v1,,,,,,,,\r\n`);
     // Exporting changes nothing.
     expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
     await dialog.getByRole('button', { name: 'Close' }).click();
@@ -3000,6 +3173,128 @@ test.describe('bill of materials (R2b-3, CAD49)', () => {
       await elements.getByText('Part properties', { exact: true }).click();
       await expect(elements.getByRole('textbox', { name: 'Part number' })).toBeDisabled();
     }
+  });
+});
+
+test.describe('BOM material, sourcing, mass and cost (PD2, ST-754, ST-755)', () => {
+  test.skip(!kernel, 'CAD_OCCT_DIST is not set');
+  const rows = (page: Page) =>
+    page
+      .getByRole('table', { name: 'Bill of materials' })
+      .locator('tbody tr')
+      .evaluateAll((trs) =>
+        trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? '')),
+      );
+
+  // TS-2517
+  test('shows F151’s values and totals, exports JSON and CSV, and sets this document’s cost', async ({
+    page,
+  }) => {
+    await page.goto('/?fixture=pd2-bom');
+    await ready(page);
+    const before = await cadSnapshot(page);
+    const elements = await panel(page, 'Elements');
+    await elements.getByRole('button', { name: 'Bill of materials…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Bill of materials' });
+    expect((await rows(page)).map((r) => [r[0], r[6], r[7], r[10], r[11]])).toEqual([
+      ['1', '', '', '', ''],
+      ['2', 'aluminium', 'Make', '1,200 JPY', '6,000 JPY'],
+      ['3', 'aluminium', 'Outsource', '1,500 JPY', '1,500 JPY'],
+      ['4', 'steel', 'Standard', '12.5 JPY', '300 JPY'],
+    ]);
+    // The cart's 500 and the wheels' 4 × 300 of their own work are in the total.
+    await expect(dialog.getByTestId('cad-bom-cost')).toHaveText('9,500 JPY');
+    // The parts weigh once their versions are calculated; the cart's own plate has no density.
+    await expect(dialog.getByTestId('cad-bom-mass')).not.toHaveText('0 kg');
+    await expect(dialog.getByTestId('cad-bom-left-out')).toContainText('Not counted: 1');
+    const bySourcing = await dialog
+      .getByRole('table', { name: 'Parts by sourcing' })
+      .locator('tbody tr')
+      .evaluateAll((trs) =>
+        trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent ?? '')),
+      );
+    expect(bySourcing).toEqual([
+      ['Make', '5', '6,000 JPY'],
+      ['Outsource', '1', '1,500 JPY'],
+      ['Standard', '24', '300 JPY'],
+    ]);
+    const json = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Export JSON' }).click();
+    const jsonFile = await json;
+    expect(jsonFile.suggestedFilename()).toBe('cad-bom.json');
+    const report = JSON.parse(await readFile((await jsonFile.path())!, 'utf8'));
+    expect(report).toMatchObject({
+      format: 'editor-platform.cad-bom',
+      version: 1,
+      mode: 'flat',
+      contentHash: before.contentHash,
+      totals: { cost: 9500, currency: 'JPY' },
+    });
+    const rowMass = report.rows.reduce(
+      (t: number, r: { massKg?: number }) => t + (r.massKg ?? 0),
+      0,
+    );
+    expect(report.totals.massKg).toBeGreaterThan(0);
+    expect(report.totals.massKg).toBeCloseTo(rowMass, 9);
+    const csv = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Export CSV' }).click();
+    const lines = (await readFile((await (await csv).path())!, 'utf8')).split('\r\n');
+    expect(lines[0]).toContain(',Material,Sourcing,Supplier,Unit mass (kg),Mass (kg),');
+    expect(lines.at(-2)).toMatch(/^Total,.*,9500,JPY$/);
+    // Exporting changes nothing.
+    expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
+    await dialog.getByRole('button', { name: 'Close' }).click();
+
+    // This document's material weighs its own plate; its own unit cost adds to the total.
+    await elements.getByText('Part properties', { exact: true }).click();
+    await elements.getByRole('combobox', { name: 'Material', exact: true }).selectOption('steel');
+    await ready(page);
+    expect((await cadSnapshot(page)).content.partProperties).toMatchObject({
+      partNumber: 'CART-1',
+      material: { name: 'steel', densityKgM3: 7850 },
+      currency: 'JPY',
+      unitCost: 500,
+    });
+    const cost = elements.getByRole('textbox', { name: 'Unit cost' });
+    await cost.fill('800');
+    await cost.press('Enter');
+    await ready(page);
+    await elements.getByRole('combobox', { name: 'Sourcing' }).selectOption('make');
+    await ready(page);
+    await elements.getByRole('textbox', { name: 'Supplier' }).fill('Line 2');
+    await elements.getByRole('textbox', { name: 'Supplier' }).press('Enter');
+    await ready(page);
+    expect((await cadSnapshot(page)).content.partProperties).toEqual({
+      partNumber: 'CART-1',
+      description: 'Cart',
+      material: { name: 'steel', densityKgM3: 7850 },
+      sourcing: 'make',
+      unitCost: 800,
+      currency: 'JPY',
+      supplier: 'Line 2',
+    });
+    await elements.getByRole('button', { name: 'Bill of materials…' }).click();
+    await expect(dialog.getByTestId('cad-bom-cost')).toHaveText('9,800 JPY');
+    await expect(dialog.getByTestId('cad-bom-left-out')).toHaveCount(0);
+    expect((await rows(page))[0]![6]).toBe('steel');
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    // Emptying the unit cost clears it; then the currency can be cleared too.
+    await cost.fill('');
+    await cost.press('Enter');
+    await ready(page);
+    const currency = elements.getByRole('textbox', { name: 'Currency' });
+    await currency.fill('');
+    await currency.press('Enter');
+    await ready(page);
+    const cleared = (await cadSnapshot(page)).content.partProperties;
+    expect(cleared).not.toHaveProperty('unitCost');
+    expect(cleared).not.toHaveProperty('currency');
+    // Each value was one edit: six Undos go back to F151.
+    for (let i = 0; i < 6; i++) {
+      await (await tool(page, 'Undo')).click();
+      await ready(page);
+    }
+    expect((await cadSnapshot(page)).contentHash).toBe(before.contentHash);
   });
 });
 

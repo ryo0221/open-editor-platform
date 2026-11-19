@@ -75,6 +75,23 @@ export {
   type ThicknessResult,
 } from './part-checks';
 export {
+  aeroColor,
+  aeroColors,
+  aeroLimits,
+  diffuserAngle,
+  flowIncidence,
+  flowLeaves,
+  flowLeavesOf,
+  frontalArea,
+  outwardFrom,
+  incidenceClass,
+  incidenceSummary,
+  type AeroClass,
+  type AeroFlow,
+  type AeroLeaves,
+  type AeroSpot,
+} from './aero-checks';
+export {
   rayDiagramLimits,
   rayDiagramSegments,
   rayFanDirections,

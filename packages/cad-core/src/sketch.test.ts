@@ -686,6 +686,27 @@ describe('sketch operations', () => {
       ['boss', 'boss-body-placement', 'bracket-extrude', 'bracket-placement'].sort(),
     );
   });
+  it('keeps, replaces and removes a sketch’s notes with its edit (CLF10, TS-2018)', () => {
+    const doc = f11Bracket();
+    const s = doc.sketches[0];
+    const base = {
+      type: 'updateSketch' as const,
+      sketchId: s.id,
+      plane: s.plane,
+      entities: s.entities,
+      constraints: s.constraints,
+      solved: s.solved,
+    };
+    const note = { id: 'n1', at: [0, 40] as [number, number], text: 'Plate', size: 5 };
+    const noted = applyCadOperation(doc, { ...base, notes: [note] });
+    expect(noted.sketches[0].notes).toEqual([note]);
+    expect(validateCad(noted)).toEqual([]);
+    // Left out: kept. Empty: removed.
+    expect(applyCadOperation(noted, base).sketches[0].notes).toEqual([note]);
+    expect(applyCadOperation(noted, { ...base, notes: [] }).sketches[0]).not.toHaveProperty(
+      'notes',
+    );
+  });
   it('edits a sketch in one solve and refuses a redundant constraint', () => {
     const doc = f11Bracket();
     const s = doc.sketches[0];

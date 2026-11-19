@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
       errors.push(`Unexpected request: ${request.url()}`);
   });
   await page.addInitScript(() =>
-    addEventListener('pageshow', (event) => {
+    window.addEventListener('pageshow', (event) => {
       const events = JSON.parse(sessionStorage.getItem('geo-cache-events') ?? '[]');
       events.push({ persisted: event.persisted, url: location.href });
       sessionStorage.setItem('geo-cache-events', JSON.stringify(events));

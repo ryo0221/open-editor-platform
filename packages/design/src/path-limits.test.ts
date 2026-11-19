@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createDesign, isDesignWithPaths, makeDesignElement } from './model';
-import { validDesignPath, type DesignEditablePath } from './path';
+import { designPathLimits, validDesignPath, type DesignEditablePath } from './path';
 import { presetDesignPath } from './path-commands';
 function line(count: number, padding = 0): DesignEditablePath {
   const path = presetDesignPath('line'),
@@ -33,7 +33,8 @@ it('enforces coordinate, subpath, per-shape and whole-document limits independen
   expect(validDesignPath(subpaths)).toBe(true);
   subpaths.subpaths.push(presetDesignPath('line').subpaths[0]);
   expect(validDesignPath(subpaths)).toBe(false);
-  const elements = Array.from({ length: 4 }, () => ({
+  // 全体の点の上限は 4096 点の path で 48 個（漫画 24 ページ分）
+  const elements = Array.from({ length: designPathLimits.totalAnchors / 4096 }, () => ({
     ...makeDesignElement('shape'),
     path: valid,
   }));
@@ -47,13 +48,19 @@ it('enforces coordinate, subpath, per-shape and whole-document limits independen
   ).toBe(false);
   const bytes = line(1024, 600);
   expect(validDesignPath(bytes)).toBe(true);
-  const large = {
+  const size = new TextEncoder().encode(JSON.stringify(bytes)).length;
+  const fit = Math.floor(designPathLimits.totalBytes / size);
+  expect(fit * 1024).toBeLessThanOrEqual(designPathLimits.totalAnchors);
+  const ofBytes = (n: number) => ({
     ...createDesign(),
     schemaVersion: 3 as const,
-    elements: Array.from({ length: 4 }, () => ({ ...makeDesignElement('shape'), path: bytes })),
-  };
-  expect(isDesignWithPaths(large)).toBe(false);
-});
+    elements: Array.from({ length: n }, () => ({ ...makeDesignElement('shape'), path: bytes })),
+  });
+  expect(isDesignWithPaths(ofBytes(fit))).toBe(true);
+  expect(isDesignWithPaths(ofBytes(fit + 1))).toBe(false);
+  // 1 要素の path JSON は 8 MiB まで
+  expect(validDesignPath(line(4096, 1100))).toBe(false);
+}, 60_000);
 it('refuses accessors and sparse native arrays without invoking imported code', () => {
   const path = presetDesignPath('line');
   let invoked = 0;
@@ -69,6 +76,15 @@ it('refuses accessors and sparse native arrays without invoking imported code', 
   const sparse = presetDesignPath('line');
   delete (sparse.subpaths[0].anchors as unknown[])[0];
   expect(validDesignPath(sparse)).toBe(false);
+  const extra = presetDesignPath('line');
+  Object.assign(extra.subpaths[0].anchors, { note: 1 });
+  expect(validDesignPath(extra)).toBe(false);
+  const symbol = presetDesignPath('line');
+  Object.assign(symbol.subpaths[0].anchors[0], { [Symbol('s')]: 1 });
+  expect(validDesignPath(symbol)).toBe(false);
+  const hidden = presetDesignPath('line');
+  Object.defineProperty(hidden.frame, 'x', { value: 0, enumerable: false });
+  expect(validDesignPath(hidden)).toBe(false);
 });
 
 it('rejects finite native coordinates that overflow or exceed the supported projected range', () => {

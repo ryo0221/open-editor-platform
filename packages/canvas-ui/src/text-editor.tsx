@@ -189,6 +189,44 @@ export function CanvasTextEditor({
       handleKeyDown(_view, event) {
         if (event.isComposing || _view.composing) return false;
         if (
+          (event.ctrlKey || event.metaKey) &&
+          !event.altKey &&
+          ['b', 'i', 'u'].includes(event.key.toLowerCase())
+        ) {
+          // Native selectionchange can arrive after the next formatting key.
+          // Read the visible selection before the existing mark keymap runs.
+          const selection = _view.dom.ownerDocument.getSelection();
+          if (
+            callbacks.current.readOnly ||
+            !_view.hasFocus() ||
+            !selection ||
+            selection.rangeCount !== 1 ||
+            !selection.anchorNode ||
+            !selection.focusNode ||
+            !_view.dom.contains(selection.anchorNode) ||
+            !_view.dom.contains(selection.focusNode)
+          )
+            return true;
+          try {
+            const anchor = _view.posAtDOM(selection.anchorNode, selection.anchorOffset),
+              head = _view.posAtDOM(selection.focusNode, selection.focusOffset);
+            const { doc, selection: current } = _view.state;
+            // Keep an already matching AllSelection. For native DOM endpoints
+            // on paragraph boundaries, use the same public text-boundary resolver.
+            if (anchor !== current.anchor || head !== current.head) {
+              const next = TextSelection.between(doc.resolve(anchor), doc.resolve(head));
+              if (!(next instanceof TextSelection))
+                throw Error('文字の選択範囲を確認してから書式を変更してください。');
+              _view.dispatch(_view.state.tr.setSelection(next));
+              if (!next.eq(_view.state.selection))
+                throw Error('文字の選択を更新できませんでした。選択を確認してください。');
+            }
+          } catch (error) {
+            setError(String(error));
+            return true;
+          }
+        }
+        if (
           bridge &&
           !callbacks.current.readOnly &&
           (event.ctrlKey || event.metaKey) &&

@@ -14,9 +14,13 @@ import {
   solveBondedOnHost,
   solveModalOnHost,
   solveOnHost,
+  solveTransientOnHost,
+  computeTransientBalance,
+  computeTransientResidual,
   solveShellModalOnHost,
   solveShellOnHost,
   solveAeroOnHost,
+  solveCrashOnHost,
 } from './compute';
 import { RunRefusal, runStudy } from './run';
 import type { AeroJob, GpuLike } from '@editor-platform/geometry-cfd';
@@ -68,12 +72,15 @@ scope.onmessage = async (event) => {
   if (r?.type !== 'run') return;
   const host = r.compute;
   // VS4b: a wind tunnel's solver is the LBM in the browser, OpenFOAM on a Host that has one.
-  const aero = r.doc.studies.find((s) => s.id === r.studyId)?.kind === 'aero';
+  const kind = r.doc.studies.find((s) => s.id === r.studyId)?.kind;
+  const aero = kind === 'aero';
   const solver = aero
     ? (host?.aero?.solverBuild ?? (host ? 'none' : aeroSolverBuild))
-    : host
-      ? host.solverBuild
-      : simulationSolverBuild;
+    : kind === 'crash' && host
+      ? (host.crash?.solverBuild ?? 'none')
+      : host
+        ? host.solverBuild
+        : simulationSolverBuild;
   const gpu = (self as unknown as { navigator?: { gpu?: GpuLike } }).navigator?.gpu;
   // CR5f-5: the run's evaluations of the version (each body's analysis surface, the spot weld
   // rows) build its features once and read them from here after.
@@ -114,10 +121,26 @@ scope.onmessage = async (event) => {
                   hostCall(() => solveShellModalOnHost(host, input, { signal: abort.signal })),
                 solveBondedModal: (input) =>
                   hostCall(() => solveBondedModalOnHost(host, input, { signal: abort.signal })),
+                // VS11d-3: transient heat, replayed through the browser's equations.
+                solveTransient: (input) =>
+                  hostCall(() => solveTransientOnHost(host, input, { signal: abort.signal })),
+                transientResidual: computeTransientResidual,
+                transientBalance: computeTransientBalance,
                 ...(host.aero
                   ? {
                       solveAero: (job: AeroJob) =>
                         hostCall(() => solveAeroOnHost(host, job, { signal: abort.signal })),
+                    }
+                  : {}),
+                ...(host.crash
+                  ? {
+                      solveCrash: (model, settings, onTime) =>
+                        hostCall(() =>
+                          solveCrashOnHost(host, model, settings, {
+                            signal: abort.signal,
+                            ...(onTime ? { onTime } : {}),
+                          }),
+                        ),
                     }
                   : {}),
               },

@@ -16,6 +16,7 @@ import {
   saveNewNovel,
   type NovelCreationOptions,
 } from './app/novel-workspace';
+import { versionCommit } from './app/version-commit';
 import { createEstimateReferenceAdapter } from '@editor-platform/estimate/references';
 import { playgroundEstimateQuantities } from './app/estimate-bim';
 import { createAnalysisReferenceAdapter } from '@editor-platform/analysis/references';
@@ -33,6 +34,9 @@ import {
 } from './cad/resources';
 import { mergeSimulationSources, portableSimulationRecord } from './simulation/source';
 import { mergeConstructionSources, portableConstructionRecord } from './construction/source';
+import { mergeFactorySources, portableFactoryRecord } from './factory/source';
+import { mergeFactoryLooks, portableFactoryLooks } from './factory/looks';
+import { mergeDrawingSources, portableDrawingRecord } from './drawing/sources';
 import type { ConstructionSourceChoice } from './construction/source';
 import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
 import { assertCharacterHistoryFits } from './character/import-fit';
@@ -300,7 +304,7 @@ export default function App({
   const [view, setView] = useState<'Editor' | 'History' | 'Compare'>('Editor');
   const [selection, setSelection] = useState<Selection>({ addresses: [] });
   const [revealAddress, setRevealAddress] = useState<ElementAddress>();
-  const savingVersion = useRef(false);
+  const savingVersion = versionCommit;
   const [comment, setComment] = useState('');
   const visibleReviewSource = useRef<
     { artifactId: string; source: ReviewVisibleSource } | undefined
@@ -828,6 +832,10 @@ export default function App({
       setError('Co-simulation の入力を確定またはキャンセルしてから履歴を操作してください。');
       return;
     }
+    if (active.kind === 'factory' && (pending.dirty || pending.composing)) {
+      setError('Factory の入力を確定またはキャンセルしてから履歴を操作してください。');
+      return;
+    }
     let privateHistory = false;
     flushSync(() => {
       privateHistory = inputs.history(direction);
@@ -993,6 +1001,9 @@ export default function App({
         ...mergeBimParts(saved, latest),
         ...mergeSimulationSources(saved, latest),
         ...mergeConstructionSources(saved, latest),
+        ...mergeFactorySources(saved, latest),
+        ...mergeFactoryLooks(saved, latest),
+        ...mergeDrawingSources(saved, latest),
         draft: { ...latest.draft, baseVersionId: committed.draft.baseVersionId },
       };
       // A rejected capacity candidate must not enter local immutable history.
@@ -1230,8 +1241,14 @@ export default function App({
         downloadText(
           `${current.name}.artifact.json`,
           serializeArtifact(
-            portableConstructionRecord(
-              portableSimulationRecord(portableBimRecord(portableCadRecord(exported))),
+            portableFactoryLooks(
+              portableFactoryRecord(
+                portableDrawingRecord(
+                  portableConstructionRecord(
+                    portableSimulationRecord(portableBimRecord(portableCadRecord(exported))),
+                  ),
+                ),
+              ),
             ),
           ),
           'application/json',
@@ -1834,7 +1851,9 @@ export default function App({
                           active.kind !== 'pcb' &&
                           active.kind !== 'schematic' &&
                           active.kind !== 'ladder' &&
-                          active.kind !== 'cosim' && (
+                          active.kind !== 'cosim' &&
+                          active.kind !== 'drawing' &&
+                          active.kind !== 'factory' && (
                             <CommentsInspector
                               active={active}
                               content={content}

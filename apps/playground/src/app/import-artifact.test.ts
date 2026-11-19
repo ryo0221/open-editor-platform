@@ -12,6 +12,7 @@ import { createSchedule, type ScheduleDocument } from '@editor-platform/schedule
 import { makeRow, type StructuredData } from '@editor-platform/structured-data/model';
 import { defaultView } from '@editor-platform/structured-data/views';
 import { readImportFiles } from './import-artifact';
+import { hostNativeArtifactByteLimit } from '@editor-platform/editor-host';
 
 function plan(): StructuredData {
   const columns = [
@@ -92,6 +93,28 @@ const context = () => ({
 });
 
 const lane = (content: unknown) => (content as ScheduleDocument).lanes[0].reference;
+
+it('imports native JSON at the current byte boundary, preserves versions and rejects the next byte', async () => {
+  const { data } = await exported();
+  const json = serializeArtifact(data);
+  // Valid JSON whitespace exercises the file boundary without adding invalid
+  // domain content or allocating a giant visible field in the imported editor.
+  const padding = ' '.repeat(hostNativeArtifactByteLimit - new TextEncoder().encode(json).length);
+  const boundary = new File([json, padding], 'boundary.json', { type: 'application/json' });
+  expect(boundary.size).toBe(hostNativeArtifactByteLimit);
+  const [imported] = await readImportFiles([boundary], context());
+  expect(imported.versions).toEqual(
+    data.versions.map((version) => ({ ...version, artifactId: imported.id })),
+  );
+  expect(imported.draft.content).toEqual(data.draft.content);
+  const oversized = new File([boundary, ' '], 'oversized.json', { type: 'application/json' });
+  await expect(readImportFiles([oversized], context())).rejects.toThrow('64 MiB');
+});
+
+it('keeps the separate text/CSV import limit', async () => {
+  const csv = new File([' '.repeat(16_000_001)], 'oversized.csv');
+  await expect(readImportFiles([csv], context())).rejects.toThrow('16 MB');
+});
 
 describe('importing several native files at once (ST-03#5, ST-03#6)', () => {
   it('re-identifies every file and points drafts at the new IDs of the same import', async () => {

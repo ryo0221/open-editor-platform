@@ -29,5 +29,8 @@
 - Generated images, exports, logs, dependencies, fonts and builds stay outside Git.
 - Read docs/status.md and relevant public contracts before changing behavior. Do not
   claim unverified features, performance acceptance or production guarantees.
-- This repository is a generated snapshot. Prepare shared-code improvements as reviewed
-  contributions; maintainers reconcile them before the next synchronization.
+- This repository is the canonical public development source. Read DEVELOPMENT.md for
+  branch roles and validated revisions. Make reviewed PRs into main; the old snapshot
+  synchronization path is retired. Public branches and Draft PRs are public information.
+- Automatic Actions and manual dispatch remain paused until separately authorized.
+  Record local validation against the tested head/base; paused CI is not a test waiver.

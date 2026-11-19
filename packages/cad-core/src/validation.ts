@@ -7,10 +7,21 @@ import {
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { assemblyKeys, validateAssembly } from './assembly-validation';
 import { validateConfigurations } from './configurations';
-import { spurGearProblem, type SpurGearSpec } from './gear';
+import {
+  cadGearLimits,
+  helicalGear,
+  helicalGearTwist,
+  spurGearProblem,
+  withCone,
+  type SpurGearSpec,
+} from './gear';
 import { validateMounts } from './mounts';
 import { validateGearMeshes } from './gear-mesh';
+import { cadSpringLimits, springProblem, type SpringSpec } from './spring';
 import { validateProportions } from './proportions';
+import { validateDesignTargets } from './design-targets';
+import { validateSightChecks } from './sight-checks';
+import { validateToleranceStacks } from './tolerance-stacks';
 import { cadJointLimits } from './joints';
 import { validateInterferenceAllowances } from './interference';
 import {
@@ -75,6 +86,7 @@ import {
   regionExtremes,
   sketchMismatches,
   sketchPath,
+  cadSketchColor,
   sketchRegion,
   sketchElement,
   splineSelfIntersects,
@@ -575,7 +587,7 @@ function validateSketch(
 ): CadSketch | undefined {
   const before = c.d.length;
   if (!record(s)) return void c.error('sketch', path);
-  c.keys(s, ['id', 'name', 'plane', 'entities', 'constraints', 'solved'], path);
+  c.keys(s, ['id', 'name', 'plane', 'entities', 'constraints', 'solved'], path, ['notes']);
   c.id(s.id, `${path}.id`);
   c.name(s.name, `${path}.name`);
   const pl = s.plane;
@@ -613,11 +625,17 @@ function validateSketch(
       e,
       ['id', 'type', ...entityFields[e.type]],
       at,
-      e.type === 'point' ? [] : e.type === 'spline' ? ['closed', 'construction'] : ['construction'],
+      e.type === 'point'
+        ? []
+        : e.type === 'spline'
+          ? ['closed', 'construction', 'color']
+          : ['construction', 'color'],
     );
     if (localId(e.id, `${at}.id`)) types.set(e.id as string, e.type);
     if (Object.hasOwn(e, 'construction') && typeof e.construction !== 'boolean')
       c.error('sketch-entity', `${at}.construction`);
+    if (Object.hasOwn(e, 'color') && (typeof e.color !== 'string' || !cadSketchColor.test(e.color)))
+      c.error('sketch-color', `${at}.color`);
     if (e.type === 'arc' && typeof e.clockwise !== 'boolean')
       c.error('sketch-entity', `${at}.clockwise`);
     if (e.type === 'spline') {
@@ -707,6 +725,7 @@ function validateSketch(
     } else if (!(Math.abs(x) <= cadLimits.coordinateMm && Math.abs(y) <= cadLimits.coordinateMm))
       c.error('coordinate-range', at);
   }
+  if (Object.hasOwn(s, 'notes')) validateNotes(c, s.notes, `${path}.notes`, localId);
   if (c.d.length !== before) return;
   const sketch = s as unknown as CadSketch;
   const p = (id: string) => sketch.solved[id];
@@ -737,6 +756,46 @@ function validateSketch(
   for (const at of sketchMismatches(sketch, c.params))
     c.error('sketch-solution-mismatch', `${path}.${at}`);
   return c.d.length === before ? sketch : undefined;
+}
+
+/**
+ * CLF10: a sketch's notes. Each has a sketch-local ID, a position on the plane within the
+ * coordinate range, 1–200 characters of text without control characters, a height and an
+ * optional colour.
+ */
+function validateNotes(
+  c: Check,
+  notes: unknown,
+  np: string,
+  localId: (v: unknown, at: string) => unknown,
+) {
+  if (!Array.isArray(notes)) return void c.error('collection', np);
+  if (notes.length > cadSketchLimits.notes) c.error('limit-sketch-notes', np);
+  for (const [i, n] of notes.entries()) {
+    const at = `${np}[${i}]`;
+    if (!record(n)) {
+      c.error('sketch-note', at);
+      continue;
+    }
+    c.keys(n, ['id', 'at', 'text', 'size'], at, ['color']);
+    localId(n.id, `${at}.id`);
+    if (!tuple(n.at, 2) || !n.at.every(finite)) c.error('sketch-note', `${at}.at`);
+    else if (!n.at.every((x) => Math.abs(x as number) <= cadLimits.coordinateMm))
+      c.error('coordinate-range', `${at}.at`);
+    if (
+      typeof n.text !== 'string' ||
+      !n.text.trim() ||
+      [...n.text].length > cadSketchLimits.noteText ||
+      // eslint-disable-next-line no-control-regex
+      /[\u0000-\u001f\u007f]/.test(n.text)
+    )
+      c.error('sketch-note-text', `${at}.text`);
+    const [lo, hi] = cadSketchLimits.noteSize;
+    if (!finite(n.size) || (n.size as number) < lo || (n.size as number) > hi)
+      c.error('sketch-note-size', `${at}.size`);
+    if (Object.hasOwn(n, 'color') && (typeof n.color !== 'string' || !cadSketchColor.test(n.color)))
+      c.error('sketch-color', `${at}.color`);
+  }
 }
 
 /** A sketch region of an extrude or revolve, checked against its (valid) sketch. */
@@ -835,13 +894,21 @@ function validateSpurGear(c: Check, a: Rec, ap: string) {
       'orientation',
     ],
     ap,
-    ['spokes'],
+    ['spokes', ...(cycloidal ? [] : ['helixAngle', 'coneAngle'])],
   );
   const m = c.length(a.module, `${ap}.module`, 'dimension');
+  // DW7a: helical or bevel.
+  // Either hand: a left-hand helix is negative; a helix of 0 is a spur gear, written without one.
+  const helix = Object.hasOwn(a, 'helixAngle')
+    ? c.angle(a.helixAngle, `${ap}.helixAngle`, 'joint')
+    : 0;
+  if (helix === 0 && Object.hasOwn(a, 'helixAngle'))
+    c.error('gear-helix-angle', `${ap}.helixAngle`);
+  const cone = Object.hasOwn(a, 'coneAngle') ? c.angle(a.coneAngle, `${ap}.coneAngle`) : 0;
   const z = c.count(a.teeth, `${ap}.teeth`);
   const alpha = cycloidal ? 0 : c.angle(a.pressureAngle, `${ap}.pressureAngle`);
   const mating = cycloidal ? c.count(a.matingTeeth, `${ap}.matingTeeth`) : 0;
-  c.length(a.faceWidth, `${ap}.faceWidth`, 'dimension');
+  const face = c.length(a.faceWidth, `${ap}.faceWidth`, 'dimension');
   const bore = c.length(a.bore, `${ap}.bore`, 'coordinate');
   const codes: Record<string, string> = {
     profileShift: 'gear-profile-shift',
@@ -886,6 +953,9 @@ function validateSpurGear(c: Check, a: Rec, ap: string) {
     alpha === undefined ||
     mating === undefined ||
     bore === undefined ||
+    helix === undefined ||
+    cone === undefined ||
+    face === undefined ||
     !spokesOk
   )
     return;
@@ -901,8 +971,177 @@ function validateSpurGear(c: Check, a: Rec, ap: string) {
   const problem = spurGearProblem(
     cycloidal
       ? { ...common, profile: 'cycloidal', matingTeeth: mating, toothThickness: x }
-      : { ...common, profile: 'involute', pressureAngle: alpha, profileShift: x },
+      : withCone(
+          helicalGear(
+            { ...common, profile: 'involute', pressureAngle: alpha, profileShift: x },
+            helix,
+          ),
+          cone,
+          face,
+        ),
   );
+  if (problem) c.error(problem.code, `${ap}.${problem.path}`);
+  // A helix's loft has a section every 5°: its twist over the face is bounded (Codex on #1248).
+  else if (
+    !cycloidal &&
+    helix &&
+    Math.abs(
+      helicalGearTwist(
+        helicalGear(
+          { ...common, profile: 'involute', pressureAngle: alpha, profileShift: x },
+          helix,
+        ),
+        face,
+      ),
+    ) > cadGearLimits.helixMaxTwistRad
+  )
+    c.error('gear-helix-twist', `${ap}.faceWidth`);
+}
+
+/**
+ * PD5: a spring's arguments, their ranges and its geometry (`springProblem`). Each form has its
+ * own fields; a working deflection belongs to a compression or extension coil, a working angle to
+ * a torsion coil or a spiral, a barrel to a mainspring and an initial tension to an extension.
+ */
+function validateSpring(c: Check, a: Rec, ap: string) {
+  const L = cadSpringLimits;
+  const coil = a.form === 'coil';
+  if (!coil && a.form !== 'spiral') return void c.error('spring-form', `${ap}.form`);
+  const uses = coil ? ['compression', 'extension', 'torsion'] : ['mainspring', 'hairspring'];
+  if (typeof a.use !== 'string' || !uses.includes(a.use)) c.error('spring-use', `${ap}.use`);
+  const torsion = a.use === 'torsion';
+  const common = ['form', 'use', 'pitch', 'material', 'origin', 'orientation'];
+  if (coil)
+    c.keys(
+      a,
+      [...common, 'wireDiameter', 'meanDiameter', 'coils', 'activeCoils', 'hand'],
+      ap,
+      torsion
+        ? ['angle']
+        : a.use === 'extension'
+          ? ['deflection', 'initialTensionN']
+          : ['deflection'],
+    );
+  else
+    c.keys(
+      a,
+      [...common, 'thickness', 'height', 'innerRadius', 'turns'],
+      ap,
+      a.use === 'mainspring' ? ['angle', 'barrel'] : ['angle'],
+    );
+  const len = (k: string) => c.length(a[k], `${ap}.${k}`, 'dimension');
+  const pitch = len('pitch');
+  const range = (k: string, [lo, hi]: readonly [number, number], code: string) => {
+    const v = a[k];
+    if (!finite(v) || v < lo || v > hi) return void c.error(code, `${ap}.${k}`);
+    return v;
+  };
+  // Material: Young's modulus always, shear for a coil that works in shear.
+  const m = a.material;
+  let E: number | undefined;
+  let G: number | undefined;
+  const shear = coil && !torsion;
+  if (!record(m)) c.error('spring-material', `${ap}.material`);
+  else {
+    c.keys(m, ['youngsModulusMpa'], `${ap}.material`, shear ? ['shearModulusMpa'] : []);
+    const mod = (k: string) => {
+      const v = m[k];
+      if (!finite(v) || v < L.modulusMpa[0] || v > L.modulusMpa[1])
+        return void c.error('spring-modulus', `${ap}.material.${k}`);
+      return v;
+    };
+    E = mod('youngsModulusMpa');
+    if (shear) G = mod('shearModulusMpa');
+  }
+  // A working angle may be many turns (a mainspring wound from rest), within `maxAngleRad`.
+  const angle = Object.hasOwn(a, 'angle')
+    ? c.angle(a.angle, `${ap}.angle`, 'continuous')
+    : undefined;
+  if (angle !== undefined && !(angle > 0 && angle <= L.maxAngleRad))
+    c.error('spring-angle', `${ap}.angle`);
+  c.position(a.origin, `${ap}.origin`);
+  c.quaternion(a.orientation, `${ap}.orientation`);
+  let spec: SpringSpec | undefined;
+  if (coil) {
+    const d = len('wireDiameter');
+    const D = len('meanDiameter');
+    const coils = range('coils', L.coils, 'spring-coils');
+    const active = finite(a.activeCoils) && a.activeCoils > 0 ? a.activeCoils : undefined;
+    if (active === undefined) c.error('spring-active-coils', `${ap}.activeCoils`);
+    if (a.hand !== 'right' && a.hand !== 'left') c.error('spring-hand', `${ap}.hand`);
+    const deflection = Object.hasOwn(a, 'deflection') ? len('deflection') : undefined;
+    let F0: number | undefined;
+    if (Object.hasOwn(a, 'initialTensionN')) {
+      const v = a.initialTensionN;
+      if (!finite(v) || v < 0 || v > L.initialTensionN)
+        c.error('spring-initial-tension', `${ap}.initialTensionN`);
+      else F0 = v;
+    }
+    if (
+      [d, D, pitch, coils, active, E].some((v) => v === undefined) ||
+      (shear && G === undefined) ||
+      (Object.hasOwn(a, 'deflection') && deflection === undefined) ||
+      (a.hand !== 'right' && a.hand !== 'left') ||
+      !uses.includes(a.use as string)
+    )
+      return;
+    spec = {
+      form: 'coil',
+      use: a.use as 'compression',
+      wireDiameter: d!,
+      meanDiameter: D!,
+      pitch: pitch!,
+      coils: coils!,
+      activeCoils: active!,
+      hand: a.hand,
+      youngsModulusMpa: E!,
+      ...(G !== undefined && { shearModulusMpa: G }),
+      ...(deflection !== undefined && { deflection }),
+      ...(F0 !== undefined && { initialTensionN: F0 }),
+    };
+  } else {
+    const t = len('thickness');
+    const b = len('height');
+    const r = len('innerRadius');
+    const turns = range('turns', L.turns, 'spring-turns');
+    let barrel: { innerRadius: number; arborRadius: number } | undefined;
+    let barrelOk = true;
+    if (Object.hasOwn(a, 'barrel')) {
+      const x = a.barrel;
+      const bp = `${ap}.barrel`;
+      if (!record(x)) barrelOk = c.error('spring-barrel', bp);
+      else {
+        c.keys(x, ['innerRadius', 'arborRadius'], bp, ['hoursPerTurn']);
+        const R = c.length(x.innerRadius, `${bp}.innerRadius`, 'dimension');
+        const ar = c.length(x.arborRadius, `${bp}.arborRadius`, 'dimension');
+        if (
+          Object.hasOwn(x, 'hoursPerTurn') &&
+          !(finite(x.hoursPerTurn) && x.hoursPerTurn > 0 && x.hoursPerTurn <= L.hoursPerTurn)
+        )
+          c.error('spring-hours-per-turn', `${bp}.hoursPerTurn`);
+        if (R === undefined || ar === undefined) barrelOk = false;
+        else barrel = { innerRadius: R, arborRadius: ar };
+      }
+    }
+    if (
+      [t, b, r, pitch, turns, E].some((v) => v === undefined) ||
+      !barrelOk ||
+      !uses.includes(a.use as string)
+    )
+      return;
+    spec = {
+      form: 'spiral',
+      use: a.use as 'mainspring',
+      thickness: t!,
+      height: b!,
+      innerRadius: r!,
+      pitch: pitch!,
+      turns: turns!,
+      youngsModulusMpa: E!,
+      ...(barrel && { barrel }),
+    };
+  }
+  const problem = springProblem(spec);
   if (problem) c.error(problem.code, `${ap}.${problem.path}`);
 }
 
@@ -923,6 +1162,7 @@ const featureArity: Record<string, [number, number]> = {
   cylinder: [0, 0],
   sphere: [0, 0],
   spurGear: [0, 0],
+  spring: [0, 0],
   extrude: [0, 0],
   revolve: [0, 0],
   loft: [0, 0],
@@ -1182,6 +1422,9 @@ function validateFeature(
       return;
     case 'spurGear':
       validateSpurGear(c, a, ap);
+      return;
+    case 'spring':
+      validateSpring(c, a, ap);
       return;
     case 'extrude':
       if (Object.hasOwn(a, 'sketchId')) {
@@ -1943,6 +2186,9 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       'mounts',
       'gearMeshes',
       'proportions',
+      'designTargets',
+      'sightChecks',
+      'toleranceStacks',
     ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
@@ -2165,6 +2411,32 @@ export function validateCad(value: unknown): CadDiagnostic[] {
 
   const activeIds = new Set(active.map((a) => a.id));
   if (Object.hasOwn(value, 'proportions')) validateProportions(c, value.proportions, activeIds);
+  if (Object.hasOwn(value, 'sightChecks')) validateSightChecks(c, value.sightChecks, activeIds);
+  // PD1/PD3: the parameters by ID with their type, and the stacks a target may measure.
+  const parameterTypes = new Map<string, string>(
+    (Array.isArray(value.parameters) ? value.parameters : []).flatMap((p) =>
+      record(p) && typeof p.id === 'string' ? [[p.id, String(p.type)] as const] : [],
+    ),
+  );
+  if (Object.hasOwn(value, 'toleranceStacks'))
+    validateToleranceStacks(c, value.toleranceStacks, parameterTypes, cadId);
+  if (Object.hasOwn(value, 'designTargets'))
+    validateDesignTargets(
+      c,
+      value.designTargets,
+      activeIds,
+      new Set(parameterTypes.keys()),
+      new Set(
+        (Array.isArray(value.toleranceStacks) ? value.toleranceStacks : []).flatMap((s) =>
+          record(s) && typeof s.id === 'string' ? [s.id] : [],
+        ),
+      ),
+      new Set(
+        (Array.isArray(value.features) ? value.features : []).flatMap((f) =>
+          record(f) && f.type === 'spring' && typeof f.id === 'string' ? [f.id] : [],
+        ),
+      ),
+    );
   for (const [i, v] of (value.namedViews as unknown[]).entries()) {
     const path = `$.namedViews[${i}]`;
     if (!record(v)) {

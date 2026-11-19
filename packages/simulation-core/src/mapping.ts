@@ -213,7 +213,7 @@ function ownedTargets(
   doc: SimulationDocument,
 ): { path: string; target: SimulationTarget; owner: string }[] {
   return simulationTargets(doc).map(({ path, target }) => {
-    const m = /^\$\.(loads|constraints|bonds|masses|spotWelds)\[(\d+)\]/.exec(path);
+    const m = /^\$\.(loads|constraints|bonds|masses|spotWelds|seals)\[(\d+)\]/.exec(path);
     const owner = m
       ? (m[1] === 'bonds'
           ? doc.bonds!
@@ -221,7 +221,9 @@ function ownedTargets(
             ? doc.masses!
             : m[1] === 'spotWelds'
               ? doc.spotWelds!
-              : doc[m[1] as 'loads' | 'constraints'])[Number(m[2])]!.id
+              : m[1] === 'seals'
+                ? doc.seals!
+                : doc[m[1] as 'loads' | 'constraints'])[Number(m[2])]!.id
       : path.startsWith('$.preparation')
         ? 'preparation'
         : 'mesh';

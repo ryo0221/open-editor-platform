@@ -12,6 +12,7 @@ import {
   type CadSketch,
   type CadSketchConstraint,
   type CadSketchEntity,
+  type CadSketchNote,
   type Length,
   type ParameterValues,
 } from '@editor-platform/cad-core';
@@ -37,7 +38,7 @@ export type SketchConstraintInput = Omit<CadSketchConstraint, 'id'>;
  * stranger (AGENTS.md, stable element IDs).
  */
 export function localId(
-  s: Pick<CadSketch, 'entities' | 'constraints'>,
+  s: Pick<CadSketch, 'entities' | 'constraints' | 'notes'>,
   prefix: string,
   retired: ReadonlySet<string> = new Set(),
 ) {
@@ -45,6 +46,7 @@ export function localId(
     ...retired,
     ...s.entities.map((e) => e.id),
     ...s.constraints.map((k) => k.id),
+    ...(s.notes ?? []).map((n) => n.id),
   ]);
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
@@ -257,6 +259,12 @@ const entityPoints = (e: CadSketchEntity): string[] =>
  * built on a removed point, and points nothing uses any more.
  */
 export function removeItem(s: CadSketch, id: string): CadSketch {
+  // CLF10: a note goes alone; the drawing's elements stay as they are.
+  if (s.notes?.some((n) => n.id === id))
+    return withNotes(
+      s,
+      s.notes.filter((n) => n.id !== id),
+    );
   const gone = new Set([id]);
   let entities = s.entities.filter((e) => e.id !== id);
   for (;;) {
@@ -276,6 +284,12 @@ export function removeItem(s: CadSketch, id: string): CadSketch {
   const ids = new Set(entities.map((e) => e.id));
   const solved = Object.fromEntries(Object.entries(s.solved).filter(([k]) => ids.has(k)));
   return { ...s, entities, constraints, solved };
+}
+
+/** `s` with `notes`, the field left out when there are none. */
+function withNotes(s: CadSketch, notes: CadSketchNote[] | undefined): CadSketch {
+  const { notes: _old, ...rest } = s;
+  return notes?.length ? { ...rest, notes } : rest;
 }
 
 /** Sets a dimension's value (a literal or an expression over the document's parameters). */
@@ -310,4 +324,73 @@ export function addOffset(
 ): { sketch: CadSketch; ids: string[] } {
   const r = sketchWithOffset(s, ids, distance, (x, prefix) => localId(x, prefix, retired));
   return { sketch: r.sketch, ids: r.ids };
+}
+
+/**
+ * CLF9: sets the line colour of the curves (and CLF10's notes) among `ids` (points and
+ * constraints are skipped);
+ * `undefined` takes it off, so they are drawn in the default colour again.
+ */
+export function setColor(s: CadSketch, ids: string[], color: string | undefined): CadSketch {
+  const pick = new Set(ids);
+  const notes = s.notes?.map((n) => {
+    if (!pick.has(n.id)) return n;
+    const { color: _old, ...rest } = n;
+    return color ? { ...rest, color } : rest;
+  });
+  return {
+    ...withNotes(s, notes),
+    entities: s.entities.map((e) => {
+      if (e.type === 'point' || !pick.has(e.id)) return e;
+      const { color: _old, ...rest } = e;
+      return (color ? { ...rest, color } : rest) as CadSketchEntity;
+    }),
+  };
+}
+
+/**
+ * CLF10: adds a note reading `text` with its lower-left corner at `at`, `size` mm high. The text
+ * is trimmed; empty, too long or with control characters it is refused as validation would.
+ */
+export function addNote(
+  s: CadSketch,
+  at: [number, number],
+  text: string,
+  size: number,
+  retired?: Retired,
+): SketchAdded {
+  if ((s.notes?.length ?? 0) >= cadSketchLimits.notes)
+    throw new CadSketchError('limit-sketch-notes', s.id, 'notes');
+  const id = localId(s, 'n', retired);
+  const note = checkedNote(s, { id, at, text, size });
+  return { sketch: withNotes(s, [...(s.notes ?? []), note]), id };
+}
+
+/** CLF10: changes a note's text, height or place. */
+export function editNote(
+  s: CadSketch,
+  id: string,
+  patch: Partial<Pick<CadSketchNote, 'at' | 'text' | 'size'>>,
+): CadSketch {
+  return withNotes(
+    s,
+    s.notes?.map((n) => (n.id === id ? checkedNote(s, { ...n, ...patch }) : n)),
+  );
+}
+
+function checkedNote(s: CadSketch, n: CadSketchNote): CadSketchNote {
+  const text = n.text.trim();
+  const at = `notes.${n.id}`;
+  if (
+    !text ||
+    [...text].length > cadSketchLimits.noteText ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(text)
+  )
+    throw new CadSketchError('sketch-note-text', s.id, at);
+  const [lo, hi] = cadSketchLimits.noteSize;
+  if (!(n.size >= lo && n.size <= hi)) throw new CadSketchError('sketch-note-size', s.id, at);
+  if (!n.at.every((x) => Number.isFinite(x) && Math.abs(x) <= cadLimits.coordinateMm))
+    throw new CadSketchError('coordinate-range', s.id, at);
+  return { ...n, text };
 }

@@ -143,6 +143,14 @@ export function routeSolid(
 /** The heading (rad, from +x) a trip moves in at `t` (minutes), from where it is a moment on. */
 export function tripHeading(trip: Trip, t: number): number {
   const dt = Math.min(0.02, (trip.end - trip.start) / 50) || 0.01;
+  // TT3: a delivery parked at its stop keeps the heading it came in with.
+  if (
+    trip.arrives !== undefined &&
+    trip.leaves !== undefined &&
+    t >= trip.arrives &&
+    t <= trip.leaves
+  )
+    t = Math.max(trip.start, trip.arrives - dt);
   const [a, b] = t + dt <= trip.end ? [trip.at(t), trip.at(t + dt)] : [trip.at(t - dt), trip.at(t)];
   return Math.atan2(b[1] - a[1], b[0] - a[0]);
 }
@@ -197,9 +205,25 @@ export function moverSolids(
           2600,
         ),
       ]);
+      // TT3: the pieces still on the bed (each picked off at its lift), stacked 400 mm a piece.
+      const left = trip.loads?.filter((l) => l.at > t).length ?? 0;
+      const tall = Math.min(left, 5) * 400;
+      const cargo = left
+        ? meshOf([
+            beamBox(
+              [p[0] - c * 3000, p[1] - s * 3000, z + 2900 + tall / 2],
+              [p[0] + c * 3000, p[1] + s * 3000, z + 2900 + tall / 2],
+              2200,
+              tall,
+            ),
+          ])
+        : undefined;
       out.push({
-        meshes: [{ mesh, color: '#e2e8f0', opacity: 1, sheet: false }],
-        bounds: boundsOf([mesh]),
+        meshes: [
+          { mesh, color: '#e2e8f0', opacity: 1, sheet: false },
+          ...(cargo ? [{ mesh: cargo, color: '#64748b', opacity: 1, sheet: false }] : []),
+        ],
+        bounds: boundsOf(cargo ? [mesh, cargo] : [mesh]),
         instances: [{ path: [siteMoverId(k)], matrix: identity, selected: false }],
       });
       return;
@@ -253,5 +277,21 @@ export function newRoutePath(start: Plan, to: Plan): [Plan, Plan] {
 }
 
 /** The clock kept within the working day (when the hours change under it). */
+/**
+ * The minutes the clock can show on a day: the working hours, widened (TT3) to the trips that
+ * start before them or end after them, such as a delivery driving in for the first lift.
+ */
+export function playRange(
+  [start, end]: readonly [number, number],
+  trips: readonly Pick<Trip, 'start' | 'end'>[],
+): [number, number] {
+  let a = start;
+  let b = end;
+  for (const t of trips) {
+    a = Math.min(a, t.start);
+    b = Math.max(b, t.end);
+  }
+  return [Math.max(0, Math.floor(a)), Math.min(24 * 60, Math.ceil(b))];
+}
 export const clockInDay = (clock: number, [start, end]: readonly [number, number]) =>
   Math.min(end, Math.max(start, clock));

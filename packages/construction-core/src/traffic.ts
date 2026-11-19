@@ -33,10 +33,28 @@ export interface SiteRoute {
   speedKmh: number;
   /** Taken on every working day this task runs. */
   taskId: string;
-  /** When each trip sets off ("HH:MM"), in order. */
+  /**
+   * When each trip sets off ("HH:MM"), in order. May be empty on a route that delivers: its
+   * trips then come only from its lifts.
+   */
   departures: string[];
   /** Each trip comes back along the way once it reaches the end. */
   returns?: boolean;
+  /**
+   * TT3: a truck route that brings the lifted pieces. The lifts that name it (`Lift.routeId`) make
+   * its trips on their days, whether its task runs or not: one truck for each `perTrip` lifts in
+   * their order, arriving at the end of the way `leadMinutes` before the first of them and waiting
+   * there until the last is picked off its bed.
+   */
+  delivers?: RouteDelivery;
+}
+
+/** TT3: how a route brings its lifts' pieces. */
+export interface RouteDelivery {
+  /** Lifts one truck carries (1 or more). */
+  perTrip: number;
+  /** Minutes the truck is at the end of the way before the first of its lifts. */
+  leadMinutes: number;
 }
 
 export interface SiteZone {
@@ -63,7 +81,13 @@ export const trafficLimits = Object.freeze({
   pathPoints: 200,
   /** km/h. */
   maxSpeed: 100,
+  /** TT3: lifts one truck carries. */
+  perTrip: 50,
+  /** TT3: minutes a truck may arrive before its first lift. */
+  leadMinutes: 600,
 });
+/** TT3: how far (plan, mm) a delivered lift may pick from where its truck stops. */
+export const deliveryReach = 6000;
 
 /** How far a person or a truck keeps from a danger to be clear of it (mm). */
 export const hazardMargin = { worker: 1000, truck: 2000 } as const;
@@ -101,6 +125,7 @@ export function validateTraffic(
   routes: unknown,
   zones: unknown,
   hours: unknown,
+  lifts: unknown,
   taskIds: ReadonlySet<string>,
   ids: Set<string>,
   isId: (v: unknown) => v is string,
@@ -142,7 +167,11 @@ export function validateTraffic(
       routes.forEach((r, i) => {
         const p = `$.site.routes[${i}]`;
         if (!record(r)) return bad('route', p);
-        only(r, ['id', 'name', 'kind', 'path', 'speedKmh', 'taskId', 'departures', 'returns'], p);
+        only(
+          r,
+          ['id', 'name', 'kind', 'path', 'speedKmh', 'taskId', 'departures', 'returns', 'delivers'],
+          p,
+        );
         id(r.id, `${p}.id`);
         if (!isText(r.name)) bad('name', `${p}.name`);
         if (!routeKinds.includes(r.kind as never)) bad('kind', `${p}.kind`);
@@ -161,9 +190,14 @@ export function validateTraffic(
           bad('speed', `${p}.speedKmh`, `above 0, at most ${trafficLimits.maxSpeed} km/h`);
         task(r.taskId, `${p}.taskId`);
         const d = r.departures;
-        if (!Array.isArray(d) || !d.length || d.length > trafficLimits.departures)
-          bad('departures', `${p}.departures`, `1 to ${trafficLimits.departures} times`);
-        else {
+        const delivers = r.delivers !== undefined;
+        if (!Array.isArray(d) || (!d.length && !delivers) || d.length > trafficLimits.departures)
+          bad(
+            'departures',
+            `${p}.departures`,
+            `${delivers ? 0 : 1} to ${trafficLimits.departures} times`,
+          );
+        else if (d.length) {
           const m = d.map(clockMinutes);
           if (m.some((x) => x === undefined))
             bad('departures', `${p}.departures`, 'times are "HH:MM"');
@@ -189,7 +223,48 @@ export function validateTraffic(
         }
         if (r.returns !== undefined && typeof r.returns !== 'boolean')
           bad('returns', `${p}.returns`);
+        if (delivers) {
+          const v = r.delivers;
+          const dp = `${p}.delivers`;
+          if (r.kind !== 'truck') bad('delivers', dp, 'only a truck route delivers');
+          if (!record(v)) bad('delivers', dp);
+          else {
+            only(v, ['perTrip', 'leadMinutes'], dp);
+            if (
+              !(
+                Number.isInteger(v.perTrip) &&
+                (v.perTrip as number) >= 1 &&
+                (v.perTrip as number) <= trafficLimits.perTrip
+              )
+            )
+              bad('delivers', `${dp}.perTrip`, `1 to ${trafficLimits.perTrip} lifts`);
+            if (
+              !(
+                typeof v.leadMinutes === 'number' &&
+                Number.isFinite(v.leadMinutes) &&
+                v.leadMinutes >= 0 &&
+                v.leadMinutes <= trafficLimits.leadMinutes
+              )
+            )
+              bad('delivers', `${dp}.leadMinutes`, `0 to ${trafficLimits.leadMinutes} minutes`);
+          }
+        }
       });
+  }
+  // TT3: a lift brought by a truck names a delivering truck route.
+  if (Array.isArray(lifts)) {
+    const byId = new Map(
+      (Array.isArray(routes) ? routes : []).filter(record).map((r) => [r.id, r] as const),
+    );
+    lifts.forEach((l, i) => {
+      if (!record(l) || l.routeId === undefined) return;
+      const p = `$.site.lifts[${i}].routeId`;
+      if (!isId(l.routeId)) return bad('id', p);
+      const r = byId.get(l.routeId);
+      if (!r) bad('route-missing', p, l.routeId);
+      else if (r.kind !== 'truck' || r.delivers === undefined)
+        bad('route-delivers', p, `${l.routeId} is no truck route that delivers`);
+    });
   }
   if (zones !== undefined) {
     if (!Array.isArray(zones) || zones.length > trafficLimits.zones)
@@ -247,6 +322,11 @@ export interface Trip {
   end: number;
   /** Where it is (plan, mm) at a time of the day within its trip. */
   at(minutes: number): Plan;
+  /** TT3: a delivery: the lifts it carries, in order, and when each is picked off its bed. */
+  loads?: { liftId: string; elementId: string; at: number }[];
+  /** TT3: a delivery reaches the end of the way at this minute, and leaves it at `leaves`. */
+  arrives?: number;
+  leaves?: number;
 }
 
 /** mm a minute at `kmh`. */
@@ -287,20 +367,156 @@ export function routeTrip(route: SiteRoute, start: number): Trip {
   };
 }
 
-/** The trips on `day`: each route's departures, while its task runs on a working day. */
+/**
+ * TT3: a delivery on `route` that reaches the end of its way at `arrives`, waits there until
+ * `leaves`, and comes back when the route returns.
+ */
+export function deliveryTrip(
+  route: SiteRoute,
+  arrives: number,
+  leaves: number,
+  loads: NonNullable<Trip['loads']>,
+): Trip {
+  const one = routeTrip({ ...route, returns: false }, 0);
+  const drive = one.end;
+  const start = arrives - drive;
+  const end = route.returns ? leaves + drive : leaves;
+  const goal = route.path[route.path.length - 1]!;
+  return {
+    routeId: route.id,
+    kind: route.kind,
+    start,
+    end,
+    loads,
+    arrives,
+    leaves,
+    at: (t) => {
+      if (t <= arrives) return one.at(t - start);
+      if (t <= leaves || !route.returns) return [goal[0], goal[1]];
+      // Back along the way: the outward trip run backwards.
+      return one.at(drive - (t - leaves));
+    },
+  };
+}
+
+/**
+ * TT3: when each lift of `day` is made (minutes of the day): one after another from the start of
+ * the working day, `liftMinutes` each. Lifts that do not fit in the day have none.
+ */
+export function liftClock(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  day: string,
+  times?: ReturnType<typeof liftTimes>,
+): Map<string, number> {
+  const [dayStart, dayEnd] = siteHours(doc);
+  const out = new Map<string, number>();
+  liftsOnDay(doc, schedule, day, times)
+    .slice(0, liftsInDay(dayStart, dayEnd))
+    .forEach((l, k) => out.set(l.id, dayStart + k * liftMinutes));
+  return out;
+}
+
+/** TT3: the deliveries of `day`: each delivering route's lifts, `perTrip` to a truck. */
+export function deliveriesOnDay(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  day: string,
+  times?: ReturnType<typeof liftTimes>,
+): Trip[] {
+  const routes = (doc.site?.routes ?? []).filter((r) => r.delivers);
+  if (!routes.length || !doc.site?.lifts?.some((l) => l.routeId)) return [];
+  const all = times ?? liftTimes(doc, schedule);
+  const clock = liftClock(doc, schedule, day, all);
+  const lifts = liftsOnDay(doc, schedule, day, all).filter((l) => clock.has(l.id));
+  const out: Trip[] = [];
+  for (const r of routes) {
+    const mine = lifts.filter((l) => l.routeId === r.id);
+    const { perTrip, leadMinutes } = r.delivers!;
+    for (let k = 0; k < mine.length; k += perTrip) {
+      const load = mine.slice(k, k + perTrip);
+      const loads = load.map((l) => ({
+        liftId: l.id,
+        elementId: l.elementId,
+        at: clock.get(l.id)!,
+      }));
+      out.push(deliveryTrip(r, loads[0]!.at - leadMinutes, loads[loads.length - 1]!.at, loads));
+    }
+  }
+  return out;
+}
+
+/**
+ * The trips on `day`: each route's departures while its task runs on a working day, and (TT3) the
+ * deliveries of the day's lifts.
+ */
 export function tripsOnDay(
   doc: ConstructionDocument,
   schedule: ConstructionSchedule,
   day: string,
 ): Trip[] {
-  if (!workingDay(doc, day)) return [];
   const out: Trip[] = [];
-  for (const r of doc.site?.routes ?? []) {
+  // Departures run on working days only; deliveries follow the lifts, on whatever day they fall.
+  for (const r of workingDay(doc, day) ? (doc.site?.routes ?? []) : []) {
     const task = doc.tasks.find((t) => t.id === r.taskId);
     const planned = schedule.byId.get(r.taskId);
     if (!task || !planned || taskPhase(task, planned, day) !== 'running') continue;
     for (const d of r.departures) out.push(routeTrip(r, clockMinutes(d)!));
   }
+  out.push(...deliveriesOnDay(doc, schedule, day));
+  return out;
+}
+
+/**
+ * TT3: deliveries that do not fit the working day (`delivery-early`: the truck would have to be
+ * at its stop before the day starts, `leadMinutes` before a lift early in the day), and delivered lifts picked too far from where the truck stops
+ * (`delivery-pick`).
+ */
+export function checkDeliveries(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+): ConstructionDiagnostic[] {
+  const out: ConstructionDiagnostic[] = [];
+  const lifts = doc.site?.lifts ?? [];
+  const routes = new Map((doc.site?.routes ?? []).map((r) => [r.id, r]));
+  if (!lifts.some((l) => l.routeId && routes.get(l.routeId)?.delivers)) return out;
+  lifts.forEach((l, i) => {
+    const r = l.routeId ? routes.get(l.routeId) : undefined;
+    if (!r?.delivers) return;
+    const end = r.path[r.path.length - 1]!;
+    const far = Math.hypot(l.pick[0] - end[0], l.pick[1] - end[1]);
+    if (far > deliveryReach)
+      out.push({
+        code: 'delivery-pick',
+        path: `$.site.lifts[${i}].pick`,
+        message: `${l.id} picks ${(far / 1000).toFixed(1)} m from where ${r.name || r.id} stops`,
+      });
+  });
+  const [dayStart] = siteHours(doc);
+  const times = liftTimes(doc, schedule);
+  const days = [...new Set(lifts.filter((l) => l.routeId).map((l) => times.get(l.id)?.day))].filter(
+    (d): d is string => !!d,
+  );
+  days.sort();
+  for (const day of days)
+    for (const trip of deliveriesOnDay(doc, schedule, day, times))
+      if (trip.arrives! < dayStart) {
+        const r = routes.get(trip.routeId)!;
+        out.push({
+          code: 'delivery-early',
+          path: `$.site.routes[${doc.site!.routes!.indexOf(r)}]`,
+          message: `${r.name || r.id} on ${day}: the truck for ${trip.loads![0]!.liftId} arrives at ${clockText(trip.arrives!)}, before the day starts at ${clockText(dayStart)}`,
+        });
+      } else if (trip.start < 0 || trip.end > 24 * 60) {
+        // A trip is drawn and counted on its lift's day only: one leaving the day before or
+        // coming back the day after isn't supported.
+        const r = routes.get(trip.routeId)!;
+        out.push({
+          code: 'delivery-day',
+          path: `$.site.routes[${doc.site!.routes!.indexOf(r)}]`,
+          message: `${r.name || r.id} on ${day}: the truck for ${trip.loads![0]!.liftId} ${trip.start < 0 ? 'would leave the day before' : 'would come back the next day'}`,
+        });
+      }
   return out;
 }
 
@@ -355,8 +571,13 @@ export interface HazardWorld {
 }
 
 /** The lifts made on `day`, in their order. */
-function liftsOnDay(doc: ConstructionDocument, schedule: ConstructionSchedule, day: string) {
-  const times = doc.site?.lifts?.length ? liftTimes(doc, schedule) : new Map();
+function liftsOnDay(
+  doc: ConstructionDocument,
+  schedule: ConstructionSchedule,
+  day: string,
+  given?: ReturnType<typeof liftTimes>,
+) {
+  const times = given ?? (doc.site?.lifts?.length ? liftTimes(doc, schedule) : new Map());
   return (doc.site?.lifts ?? [])
     .filter((l) => times.get(l.id)?.day === day)
     .sort((a, b) => times.get(a.id)!.order - times.get(b.id)!.order);
@@ -797,7 +1018,13 @@ export function approachesOnDay(
     const route = routes.get(trip.routeId)!;
     const margin = hazardMargin[trip.kind];
     const speed = perMinute(route.speedKmh);
-    const travel = speed * (trip.end - trip.start);
+    // (TT3) A delivery stands still while it is unloaded: only the time it moves counts.
+    const moving = (ta: number, tb: number) =>
+      tb - ta -
+      (trip.arrives !== undefined && trip.leaves !== undefined
+        ? Math.max(0, Math.min(tb, trip.leaves) - Math.max(ta, trip.arrives))
+        : 0);
+    const travel = speed * moving(trip.start, trip.end);
     const n = Math.max(1, Math.ceil(travel / tripStep));
     for (const h of hazards) {
       if (h.to <= trip.start || h.from >= trip.end) continue;
@@ -823,7 +1050,10 @@ export function approachesOnDay(
       // end (or the arrival): a short spell can't fall between two samples.
       const t0 = Math.max(trip.start, h.from);
       const t1 = Math.min(trip.end, h.to);
-      const m = Math.max(1, Math.ceil((n * (t1 - t0)) / (trip.end - trip.start || 1)));
+      const m = Math.max(
+        1,
+        Math.ceil((n * moving(t0, t1)) / (moving(trip.start, trip.end) || 1)),
+      );
       const visit = (t: number, d: number) => {
         if (d <= margin) {
           if (!open) open = { t, closest: d };
@@ -834,7 +1064,7 @@ export function approachesOnDay(
       // inside it the way may still get out: the distance changes no faster than the trip
       // moves, so where that could happen within it, look between them (down to `grazeStep`).
       const between = (ta: number, da: number, tb: number, db: number) => {
-        const way = speed * (tb - ta);
+        const way = speed * moving(ta, tb);
         // Where the two straddle the margin, look between them too, so the times it comes in
         // and goes out are found to `crossStep`, not to the samples.
         const crosses = da <= margin !== db <= margin;

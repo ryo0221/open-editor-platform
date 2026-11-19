@@ -9,20 +9,43 @@ import { fixtureComponent, fixturePart, fixtureVersion } from './assembly-fixtur
 import { f02Plate, f03Revolve, fixtureKernel } from './fixtures';
 import { emptyCad, mm, position, type CadDocument, type CadKernelProfile } from './model';
 import { applyCadOperation } from './operations';
+import type { CadPartBomValues } from './assembly';
 
-export function r2bBom(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel) {
-  const on = (doc: CadDocument, partNumber: string, description: string): CadDocument =>
-    applyCadOperation(
+/** PD2: the BOM values F151 gives each version of F22 (absent: F22 as it is). */
+export type R2bBomValues = Partial<
+  Record<'plate1' | 'plate2' | 'bolt' | 'wheel' | 'assembly', CadPartBomValues>
+>;
+export function r2bBom(
+  kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel,
+  values: R2bBomValues = {},
+) {
+  const on = (
+    doc: CadDocument,
+    partNumber: string,
+    description: string,
+    bom?: CadPartBomValues,
+  ): CadDocument => {
+    const named = applyCadOperation(
       { ...doc, kernelProfile: { ...doc.kernelProfile, ...kernel } },
       { type: 'setPartProperties', partNumber, description },
     );
-  const plate1 = fixtureVersion('plate', 'v1', on(f02Plate(), 'PL-100', 'Base plate'));
-  const plate2 = fixtureVersion('plate', 'v2', on(f02Plate(), 'PL-100', 'Base plate, rev B'));
-  const bolt = fixtureVersion('bolt', 'v1', on(f03Revolve(), '=B-M8', '-M8 x 40'));
+    return bom ? applyCadOperation(named, { type: 'setPartBomProperties', ...bom }) : named;
+  };
+  const plate1 = fixtureVersion(
+    'plate',
+    'v1',
+    on(f02Plate(), 'PL-100', 'Base plate', values.plate1),
+  );
+  const plate2 = fixtureVersion(
+    'plate',
+    'v2',
+    on(f02Plate(), 'PL-100', 'Base plate, rev B', values.plate2),
+  );
+  const bolt = fixtureVersion('bolt', 'v1', on(f03Revolve(), '=B-M8', '-M8 x 40', values.bolt));
   const wheel = fixtureVersion(
     'wheel',
     'v1',
-    applyCadOperation(on(emptyCad(kernel), 'W-1', 'Wheel'), {
+    applyCadOperation(on(emptyCad(kernel), 'W-1', 'Wheel', values.wheel), {
       type: 'insertComponents',
       parts: [fixturePart('w-hub', 'Hub', plate1), fixturePart('w-bolt', 'Bolt "M8", long', bolt)],
       components: [
@@ -32,7 +55,7 @@ export function r2bBom(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixt
       ],
     }),
   );
-  const assembly = applyCadOperation(on(f02Plate(), 'CART-1', 'Cart'), {
+  const assembly = applyCadOperation(on(f02Plate(), 'CART-1', 'Cart', values.assembly), {
     type: 'insertComponents',
     parts: [
       fixturePart('part-plate-1', 'Plate', plate1),
@@ -82,3 +105,37 @@ export function r2bBom(kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixt
   );
   return { plate1, plate2, bolt, wheel, assembly: patterned, closure };
 }
+
+/**
+ * F151 (docs/cad/product-design.md, PD2): F22 with every version's material, sourcing class,
+ * unit cost (yen) and supplier note. The plates are aluminium (made here, rev B outsourced), the
+ * bolt a steel standard part, the wheel's own assembly work 300 yen, and the cart its own 500 yen
+ * of assembly work. The cart's own plate has no material of its own (its body has no density).
+ */
+export const f151Values = Object.freeze({
+  plate1: {
+    material: { name: 'aluminium', densityKgM3: 2700 },
+    sourcing: 'make',
+    unitCost: 1200,
+    currency: 'JPY',
+    supplier: 'In-house machining',
+  },
+  plate2: {
+    material: { name: 'aluminium', densityKgM3: 2700 },
+    sourcing: 'outsource',
+    unitCost: 1500,
+    currency: 'JPY',
+    supplier: 'Plate shop "A", Osaka',
+  },
+  bolt: {
+    material: { name: 'steel', densityKgM3: 7850 },
+    sourcing: 'standard',
+    unitCost: 12.5,
+    currency: 'JPY',
+    supplier: 'Fastener catalogue',
+  },
+  wheel: { sourcing: 'make', unitCost: 300, currency: 'JPY' },
+  assembly: { unitCost: 500, currency: 'JPY' },
+} as const satisfies Required<R2bBomValues>);
+export const f151CostedBom = (kernel: Pick<CadKernelProfile, 'id' | 'buildHash'> = fixtureKernel) =>
+  r2bBom(kernel, structuredClone(f151Values) as R2bBomValues);

@@ -149,7 +149,7 @@ declare global {
 window.geoInspectorTest = api;
 // Package-local test Host mirrors the accepted page lifecycle; no shared Host changes.
 addEventListener('pagehide', () => runs.get(currentId)?.handle.revoke('host-close'));
-addEventListener('pageshow', (event) => {
+window.addEventListener('pageshow', (event) => {
   if (event.persisted) location.reload();
 });
 if (sessionStorage.getItem('geo-read-denied')) status.textContent = 'Read permission denied';
