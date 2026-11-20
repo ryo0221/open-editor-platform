@@ -35,12 +35,7 @@ import {
 import { editedPlacement, mirroredPlacement, placementFields, validPlacement } from './placement';
 import { partPath, partsGroup } from './assembly-view';
 import { cadInputState } from './binding';
-import {
-  CadController,
-  cadFailureReport,
-  describeCode,
-  type CadExportStage,
-} from './controller';
+import { CadController, cadFailureReport, describeCode, type CadExportStage } from './controller';
 
 const mesh = (bodyId: string, bytes = 12): CadMesh => ({
   bodyId,
@@ -978,6 +973,17 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     expect(controller.getSnapshot().diagnostic?.code).toBe('export-cancelled');
     expect(heard).toEqual([{ done: 0, total: 3, label: 'Plate' }]);
     expect(written).toHaveLength(0);
+    // A stop during the last stage (the file being written) still gives no file (Codex on #33).
+    const late = new AbortController();
+    expect(
+      await assembly.exportStep('Cart', {
+        signal: late.signal,
+        onStage: (stage) => stage.label === 'STEP file' && late.abort(),
+      }),
+    ).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('export-cancelled');
+    expect(written).toHaveLength(1);
+    written.length = 0;
     breps.length = 0;
     const stages: CadExportStage[] = [];
     const file = await assembly.exportStep('Cart', { onStage: (stage) => stages.push(stage) });

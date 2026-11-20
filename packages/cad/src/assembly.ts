@@ -2271,6 +2271,8 @@ export class CadAssembly {
       pmi,
     );
     if (written.status !== 'ok') return refuse(written.code);
+    // A stop asked for while the file was being written still wins (Codex on #33).
+    if (options.signal?.aborted) return refuse('export-cancelled');
     try {
       return {
         bytes: written.step,
