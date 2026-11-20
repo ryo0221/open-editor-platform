@@ -5696,6 +5696,32 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
   expect(heat).not.toBe(drawn);
   await panel.getByLabel('Show deviation heat').uncheck();
   await expect.poll(frame).toBe(drawn);
+  // In silhouette shading the drawing keeps its own image: only its thin lines are dark, not a
+  // solid plane over the view (Codex on #35).
+  const darkShare = async () => {
+    const shot = (await canvas.screenshot()).toString('base64');
+    return page.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      [c.width, c.height] = [img.width, img.height];
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const px = g.getImageData(0, 0, c.width, c.height).data;
+      let dark = 0;
+      for (let i = 0; i < px.length; i += 4) if (px[i]! + px[i + 1]! + px[i + 2]! < 150) dark++;
+      return dark / (px.length / 4);
+    }, shot);
+  };
+  await page.getByTestId('cad-shading').selectOption('silhouette');
+  await item.getByLabel('Hide underlay').check();
+  await ready(page);
+  const bare = await darkShare();
+  await item.getByLabel('Hide underlay').uncheck();
+  await ready(page);
+  expect((await darkShare()) - bare).toBeLessThan(0.02);
+  await page.getByTestId('cad-shading').selectOption('shaded');
   // Saved with the document and restored on reload, image asset included.
   const saved = (await nativeArtifact(page)).draft.content as CadDocument;
   expect(saved.underlays).toEqual([

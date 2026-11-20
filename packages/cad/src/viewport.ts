@@ -352,6 +352,8 @@ export class CadViewport {
   private readonly rays = new Group();
   /** #15: drawings laid under views, each shown only while the camera looks along its view. */
   private readonly underlays = new Group();
+  /** #15: where the underlays are drawn from when the scene's material is overridden. */
+  private readonly underlayLayer = new Scene();
   private readonly underlayItems: { toward: Vector3; objects: Object3D[] }[] = [];
   /**
    * CLF11: the shown sketches' curves and notes, a scene of their own drawn over the model after
@@ -696,7 +698,7 @@ export class CadViewport {
     const board = this.threeView ? this.board() : undefined;
     this.lastBoard = board ?? [];
     if (!board) {
-      this.renderer.render(this.scene, this.camera);
+      this.renderScene(this.camera);
       this.drawSketches(this.camera, this.host.clientWidth, this.host.clientHeight);
     } else {
       const { clientWidth: width, clientHeight: height } = this.host;
@@ -716,7 +718,7 @@ export class CadViewport {
         this.renderer.setViewport(rect.x, y, rect.width, rect.height);
         this.renderer.setScissor(rect.x, y, rect.width, rect.height);
         this.underlaysFor(camera);
-        this.renderer.render(this.scene, camera);
+        this.renderScene(camera);
         this.drawSketches(camera, rect.width, rect.height, true);
       }
       this.renderer.setScissorTest(false);
@@ -724,6 +726,23 @@ export class CadViewport {
       this.renderer.setClearColor(clear, alpha);
     }
     [this.grid.visible, this.axes.visible] = helpers;
+  }
+  /**
+   * The scene from `camera`. #15: under an override material (silhouette shading) the underlays
+   * are drawn apart afterwards, with their own images and heat, as the sketch layer is (Codex on
+   * #35); the model's depth still hides a drawing behind it.
+   */
+  private renderScene(camera: PerspectiveCamera | OrthographicCamera) {
+    const apart = !!this.scene.overrideMaterial && this.underlays.children.length > 0;
+    if (apart) this.scene.remove(this.underlays);
+    this.renderer.render(this.scene, camera);
+    if (!apart) return;
+    this.underlayLayer.add(this.underlays);
+    const autoClear = this.renderer.autoClear;
+    this.renderer.autoClear = false;
+    this.renderer.render(this.underlayLayer, camera);
+    this.renderer.autoClear = autoClear;
+    this.scene.add(this.underlays);
   }
   /**
    * CLF11: the sketch layer over what was just drawn, in a viewport `width` × `height` px; in a
@@ -1112,7 +1131,7 @@ export class CadViewport {
     this.grid.visible = this.axes.visible = this.marks.visible = this.jointMarks.visible = false;
     this.partPmi.visible = !this.partsPose;
     this.lighting.prepare([this.bodies, this.parts], true);
-    this.renderer.render(this.scene, camera);
+    this.renderScene(camera);
     [this.grid.visible, this.axes.visible, this.marks.visible, this.jointMarks.visible] = shown;
     if (gl.isContextLost()) throw new Error('The 3D view was lost.');
     return this.renderer.domElement;
