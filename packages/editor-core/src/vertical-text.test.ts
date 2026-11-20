@@ -138,6 +138,46 @@ describe('#20 vertical writing', () => {
     ).not.toThrow();
   });
 
+  it("keeps the box's underline and strike on grid text (Codex on #29)", () => {
+    const lines = (writingMode?: 'vertical-rl') => {
+      const d = {
+        id: 't',
+        kind: 'text',
+        bounds: box,
+        text: '漢字《かんじ》',
+        fill: '#111',
+        typography: { fontSize: 20, underline: true, strike: true, writingMode },
+      } as unknown as Drawing;
+      const svg = serializeSvg(drawingPrimitives(d, 'x'));
+      expect(svg).toContain('data-text-decoration="underline line-through"');
+      return [
+        ...svg.matchAll(/<line x1="([\d.-]+)" y1="([\d.-]+)" x2="([\d.-]+)" y2="([\d.-]+)"/g),
+      ].map((m) => m.slice(1).map(Number));
+    };
+    // Horizontal: two lines along the row, 2 cells long
+    const row = lines();
+    expect(row).toHaveLength(2);
+    for (const [x1, y1, x2, y2] of row) {
+      expect(y1).toBe(y2);
+      expect(x2 - x1).toBeCloseTo(40);
+    }
+    // Vertical: two lines down the column
+    const column = lines('vertical-rl');
+    expect(column).toHaveLength(2);
+    for (const [x1, y1, x2, y2] of column) {
+      expect(x1).toBe(x2);
+      expect(y2 - y1).toBeCloseTo(40);
+    }
+    // No decoration, no lines
+    const plain = serializeSvg(
+      drawingPrimitives(
+        { id: 't', kind: 'text', bounds: box, text: '漢字《かんじ》', fill: '#111' } as Drawing,
+        'x',
+      ),
+    );
+    expect(plain).not.toContain('<line');
+  });
+
   it('keeps formatted horizontal runs on the ordinary layout', () => {
     const d = {
       id: 't',

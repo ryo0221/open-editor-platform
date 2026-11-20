@@ -564,6 +564,38 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
     }),
   );
   const ruby = layout.ruby.map((r) => p('text', { x: r.x, y: r.y, 'font-size': r.size }, [r.text]));
+  // The box's underline and strike, drawn as lines along each line of base glyphs: below a row
+  // (beside a column, on the right, in vertical text) and through its middle (Codex on #29).
+  const marks = [...(s.underline ? [size * 0.55] : []), ...(s.strike ? [0] : [])];
+  const decorations = marks.length
+    ? layout.lines.flatMap((line) => {
+        if (!line.glyphs.length) return [];
+        const along = line.glyphs.map((g) => (layout.vertical ? g.y : g.x));
+        const [from, to] = [Math.min(...along) - size / 2, Math.max(...along) + size / 2];
+        const across = layout.vertical ? line.glyphs[0].x : line.glyphs[0].y;
+        return marks.map((m) =>
+          layout.vertical
+            ? p('line', { x1: across + m, y1: from, x2: across + m, y2: to })
+            : p('line', { x1: from, y1: across + m, x2: to, y2: across + m }),
+        );
+      })
+    : [];
+  const color = s.color ?? (d.kind === 'text' ? d.fill : '#253044');
+  const decoration = decorations.length
+    ? [
+        p(
+          'g',
+          {
+            stroke: color,
+            'stroke-width': Math.max(1, size / 14),
+            'data-text-decoration': [s.underline ? 'underline' : '', s.strike ? 'line-through' : '']
+              .filter(Boolean)
+              .join(' '),
+          },
+          decorations,
+        ),
+      ]
+    : [];
   const text = p(
     'g',
     {
@@ -571,14 +603,14 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
       'font-size': size,
       'font-weight': s.bold ? '700' : '400',
       'font-style': s.italic ? 'italic' : 'normal',
-      fill: s.color ?? (d.kind === 'text' ? d.fill : '#253044'),
+      fill: color,
       'text-anchor': 'middle',
       'dominant-baseline': 'central',
       role: 'img',
       'aria-label': parseRubyNotation(d.text).plain,
       'data-writing-mode': layout.vertical ? 'vertical-rl' : 'horizontal-tb',
     },
-    [...glyphs, ...ruby],
+    [...glyphs, ...ruby, ...decoration],
   );
   return s.overflow === 'expand'
     ? [text]
