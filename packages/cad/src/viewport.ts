@@ -2222,7 +2222,7 @@ export class CadViewport {
       const objects: Object3D[] = [];
       if (item.image) objects.push(plane(item.image, far - 1, item.opacity, false));
       if (item.heat) objects.push(plane(item.heat, near + 1, 1, true));
-      this.underlays.add(...objects);
+      if (objects.length) this.underlays.add(...objects);
       this.underlayItems.push({ toward, objects });
     }
     this.render();

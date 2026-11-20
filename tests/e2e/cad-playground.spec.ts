@@ -5674,7 +5674,7 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
   const first = await table.innerText();
   expect(first).toMatch(/\d+\.\d\d mm/);
   await item.getByRole('button', { name: 'Check deviation' }).click();
-  await expect(table).toHaveText(first);
+  await expect.poll(() => table.innerText()).toBe(first);
   // The heat overlay draws over the model and goes with its switch.
   const heat = await frame();
   expect(heat).not.toBe(drawn);
@@ -5699,7 +5699,7 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
     .getByRole('group', { name: 'Underlay front-drawing' });
   await expect(again).toContainText('200 × 100 px');
   await again.getByRole('button', { name: 'Check deviation' }).click();
-  await expect(again.getByRole('table', { name: 'Deviation from front-drawing' })).toHaveText(
-    first,
-  );
+  await expect
+    .poll(() => again.getByRole('table', { name: 'Deviation from front-drawing' }).innerText())
+    .toBe(first);
 });
