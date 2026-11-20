@@ -158,6 +158,13 @@ const inlineMarker = '\u0000part:';
  * prefix in front and read back without it, so ordinary content never reads as a part.
  */
 const escapeMarker = '\u0000esc:';
+/**
+ * Records written with inline-image parts carry this field in the stored stub, and only those are
+ * decoded. An older record stored marker-like strings literally, so it is read back as it is.
+ */
+const inlineEncodingKey = 'inlineEncoding';
+const inlineEncoding = 1;
+type Encoded = StoredArtifact & { [inlineEncodingKey]?: number };
 const needsEscape = (s: string) => s.startsWith(inlineMarker) || s.startsWith(escapeMarker);
 const isInlineImage = (v: unknown): v is string =>
   typeof v === 'string' && v.length >= resourcePartChars && v.startsWith('data:');
@@ -236,20 +243,21 @@ const inlineImageParts: OutOfLineParts<StoredArtifact> = {
         ? markerOf(same.key, s.length)
         : put(`inline-image:draft:${s.length}:${hash53(s)}`, s);
     });
+    // Nothing to encode: stored as it is, and read back as it is (no encoding field).
     if (draftContent === value.draft.content && versions.every((v, i) => v === value.versions[i]))
       return { stub: value, parts };
-    return {
-      stub: {
-        ...value,
-        versions,
-        draft: { ...value.draft, content: draftContent as typeof value.draft.content },
-      },
-      parts,
+    const stub: Encoded = {
+      ...value,
+      versions,
+      draft: { ...value.draft, content: draftContent as typeof value.draft.content },
+      [inlineEncodingKey]: inlineEncoding,
     };
+    return { stub, parts };
   },
   keys(stub) {
     const keys = new Set<string>();
     if (!stub.draft || !Array.isArray(stub.versions)) return [];
+    if ((stub as Encoded)[inlineEncodingKey] !== inlineEncoding) return [];
     for (const content of [stub.draft.content, ...stub.versions.map((v) => v.content)])
       mapStrings(content, (s) => {
         const m = readMarker(s);
@@ -258,8 +266,12 @@ const inlineImageParts: OutOfLineParts<StoredArtifact> = {
       });
     return [...keys];
   },
-  join(stub, parts) {
-    if (!stub.draft || !Array.isArray(stub.versions)) return stub;
+  join(encoded, parts) {
+    if (!encoded.draft || !Array.isArray(encoded.versions)) return encoded;
+    if (!(inlineEncodingKey in encoded)) return encoded;
+    const { [inlineEncodingKey]: encoding, ...stub } = encoded as Encoded;
+    // A record from before this encoding keeps its strings as they were stored.
+    if (encoding !== inlineEncoding) return stub;
     const restore = (s: string) => {
       if (s.startsWith(escapeMarker)) return s.slice(escapeMarker.length);
       const m = readMarker(s);

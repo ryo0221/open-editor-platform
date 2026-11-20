@@ -259,6 +259,18 @@ describe('#22 inline images are stored apart from their record', () => {
     await storage.close();
   });
 
+  it('reads a record stored before the encoding as it was, even with marker-like strings (Codex on #27)', () => {
+    const legacy = design('\u0000part:1:literal', ['\u0000esc:plain']);
+    expect(resourceParts.keys(legacy)).toEqual([]);
+    expect(resourceParts.join(legacy, new Map())).toEqual(legacy);
+    // A record written now carries the encoding in its stub only.
+    const { stub, parts } = resourceParts.split(legacy);
+    expect(stub).toHaveProperty('inlineEncoding', 1);
+    const back = resourceParts.join(stub, parts);
+    expect(back).toEqual(legacy);
+    expect(back).not.toHaveProperty('inlineEncoding');
+  });
+
   it('reads a design back whole through the storage, with a missing part as an empty image', async () => {
     const storage = new IndexedDBStorage<StoredArtifact>(
       `test-${crypto.randomUUID()}`,
