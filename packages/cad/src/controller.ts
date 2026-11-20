@@ -1,4 +1,5 @@
 import { newId } from '@editor-platform/artifact-core';
+import { cadFailureHint, type CadFailureReason } from './failure-hints';
 import {
   defaultCoilSpringArgs,
   type CadBodyKind,
@@ -1027,6 +1028,10 @@ export interface CadFailureReport {
   operation?: string;
   sketchId?: string;
   sketchName?: string;
+  /** #13: the failure class, the elements it is about (stable IDs) and a concrete hint. */
+  reason?: CadFailureReason;
+  elements?: string[];
+  hint?: string;
 }
 /** The active body built from `featureId` (a consumed one if no active body reads it). */
 function bodyOfFeature(doc: CadDocument, featureId: string) {
@@ -1063,6 +1068,7 @@ export function cadFailureReport(
       ? { featureId: feature.id, featureName: feature.name, operation: feature.type }
       : {}),
     ...(sketch ? { sketchId: sketch.id, sketchName: sketch.name } : {}),
+    ...(cadFailureHint(doc, code, elementId) ?? {}),
   };
 }
 /** describeCode plus the part and the operation named by a kernel failure, found in `doc`. */
@@ -1091,7 +1097,8 @@ export function describeFailure(doc: CadDocument, code: string, elementId?: stri
     r.featureId !== undefined && `feature「${r.featureName}」（${r.operation}、ID ${r.featureId}）`,
     r.sketchId !== undefined && `sketch「${r.sketchName}」（ID ${r.sketchId}）`,
   ].filter(Boolean);
-  return where.length ? `${r.message}原因：${where.join('の')}` : r.message;
+  const text = where.length ? `${r.message}原因：${where.join('の')}` : r.message;
+  return r.hint ? `${text}${/[。.]$/.test(text) ? '' : '。'}直し方：${r.hint}` : text;
 }
 
 /**
@@ -2516,7 +2523,8 @@ export class CadController {
       // CR3c: a trim's chains that cut nothing or split the kept sheet are named.
       const chains = trimChains(prepared.candidate, prepared.evaluation);
       if (chains && shown) shown.message += ` 該当する閉じた線：${chains}`;
-    } else if (prepared.status === 'rejected') this.fail(prepared.code);
+    } else if (prepared.status === 'rejected')
+      this.fail(prepared.code, undefined, prepared.candidate);
     // A stale result superseded by a newer run leaves the outcome to it. Cancelled by history or
     // a Host sync instead, it resets the Inspector so no field keeps the cancelled value.
     else if (operation === this.operation) this.rejections++;
