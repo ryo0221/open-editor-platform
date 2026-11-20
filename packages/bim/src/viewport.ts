@@ -26,7 +26,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { bimGridBubbleAt, type BimGridBubbles } from '@editor-platform/bim-core';
+import { bimGridBubbleAt, type BimCamera, type BimGridBubbles } from '@editor-platform/bim-core';
 import {
   disposeInstances,
   instancePath,
@@ -80,10 +80,22 @@ const noRaycast = () => {};
  * The building's 3D view (Three.js, z up, millimetres): the instanced solids of
  * `geometry-view`, orbit/pan/zoom, and a click that names the element under the pointer.
  */
+/**
+ * #19: the near and far planes for a camera `distance` (mm) from what it looks at in a scene of
+ * `sceneRadius` (mm): near a thousandth of the distance (so a part a few millimetres across, seen
+ * from a few centimetres, is not cut), far past the whole scene seen from there.
+ */
+export function bimCameraDepth(distance: number, sceneRadius: number) {
+  const d = distance > 0 && Number.isFinite(distance) ? distance : 1;
+  return { near: Math.max(0.01, d / 1000), far: Math.max(d * 100, (d + sceneRadius) * 2) };
+}
+
 export class BimViewport {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
   private readonly perspective = new PerspectiveCamera(40, 1, 10, 2_000_000);
+  /** #19: half the size of everything shown (mm); the far plane always reaches past it. */
+  private sceneRadius = 1_000_000;
   private readonly orthographic = new OrthographicCamera(-1, 1, 1, -1, 1, 4_000_000);
   private camera: PerspectiveCamera | OrthographicCamera = this.perspective;
   private controls: OrbitControls;
@@ -178,7 +190,9 @@ export class BimViewport {
   fit(bounds: Bounds, keepDirection = false, selected?: ReadonlySet<string>, around?: Bounds) {
     const [lo, hi] = bounds;
     const center = new Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
-    const radius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1_000);
+    // #19: a sub-centimetre part frames as closely as a building (1 mm at least, not 1 m).
+    const radius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1);
+    if (!keepDirection) this.sceneRadius = Math.max(radius, 1_000);
     if (this.plan) {
       center.z = this.plan.elevationMm;
       // The span is the half height; a canvas narrower than tall shows less width than that.
@@ -201,6 +215,7 @@ export class BimViewport {
     }
     this.controls.target.copy(center);
     this.controls.update();
+    this.followDepth();
     this.placeGrid(lo, hi);
     this.render();
   }
@@ -431,8 +446,53 @@ export class BimViewport {
       controls.mouseButtons = { LEFT: MOUSE.PAN, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
       controls.screenSpacePanning = true;
     }
-    controls.addEventListener('change', () => this.render());
+    controls.addEventListener('change', () => {
+      this.followDepth();
+      this.render();
+    });
     return controls;
+  }
+  /**
+   * #19: the near and far planes follow the distance to what the camera looks at, so a tiny part
+   * close up is not cut by the near plane and a kilometre-wide site still fits behind it.
+   */
+  private followDepth() {
+    const { near, far } = bimCameraDepth(
+      this.perspective.position.distanceTo(this.controls.target),
+      this.sceneRadius,
+    );
+    if (near === this.perspective.near && far === this.perspective.far) return;
+    this.perspective.near = near;
+    this.perspective.far = far;
+    this.perspective.updateProjectionMatrix();
+  }
+  /** #19: the 3D camera as it is now, to save under a name (undefined on a plan). */
+  getCamera(): Omit<BimCamera, 'id' | 'name'> | undefined {
+    if (this.plan) return undefined;
+    const v = (x: Vector3) => [x.x, x.y, x.z] as [number, number, number];
+    return {
+      position: v(this.perspective.position),
+      target: v(this.controls.target),
+      up: v(this.perspective.up),
+      fovDeg: this.perspective.fov,
+    };
+  }
+  /** #19: shows a saved camera (in 3D; a plan is left first by the caller). */
+  setCamera(camera: Omit<BimCamera, 'id' | 'name'>) {
+    if (this.plan) return;
+    this.fitted = true;
+    this.perspective.fov = camera.fovDeg;
+    this.perspective.up.set(...camera.up).normalize();
+    this.perspective.position.set(...camera.position);
+    this.controls.target.set(...camera.target);
+    this.controls.update();
+    this.followDepth();
+    this.perspective.updateProjectionMatrix();
+    this.render();
+  }
+  /** #19: the near and far planes now (for tests and diagnostics). */
+  depth() {
+    return { near: this.perspective.near, far: this.perspective.far };
   }
   private ndc(e: { clientX: number; clientY: number }) {
     const rect = this.renderer.domElement.getBoundingClientRect();

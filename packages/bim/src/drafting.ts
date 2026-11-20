@@ -300,7 +300,9 @@ function storeyTop(doc: BimDocument, level: string): BimTop {
   const above = doc.levels
     .filter((l) => l.elevationMm > here.elevationMm)
     .sort((a, b) => a.elevationMm - b.elevationMm)[0];
-  return above ? { level: above.id, offsetMm: 0 } : { heightMm: bodySized(doc, bimDraftDefaults.storeyMm) };
+  return above
+    ? { level: above.id, offsetMm: 0 }
+    : { heightMm: bodySized(doc, bimDraftDefaults.storeyMm) };
 }
 /** The first type of a kind, or the one asked for. */
 function typeOf(doc: BimDocument, kind: string, typeId?: string) {

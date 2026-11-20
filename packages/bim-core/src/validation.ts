@@ -193,6 +193,7 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   c.keys(value, ['schemaVersion', 'units', 'axes', 'project', ...collections], '$', [
     'assets',
     'inhabitantHeightMm',
+    'cameras',
   ]);
   // GV2b: the people the building is for; the body-based rules below scale by it.
   if (Object.hasOwn(value, 'inhabitantHeightMm')) {
@@ -219,6 +220,37 @@ export function validateBim(value: unknown): BimDiagnostic[] {
   for (const k of collections) if (v[k].length > limits[k]) c.error('limit-count', `$.${k}`);
   if (c.d.length) return c.d;
 
+  // #19: saved 3D cameras.
+  if (Object.hasOwn(value, 'cameras')) {
+    const cams = value.cameras;
+    if (!Array.isArray(cams) || !cams.length) c.error('collection', '$.cameras');
+    else if (cams.length > bimLimits.cameras) c.error('limit-count', '$.cameras');
+    else
+      cams.forEach((cam, i) => {
+        const at = `$.cameras[${i}]`;
+        if (!record(cam)) return c.error('camera', at);
+        if (!c.keys(cam, ['id', 'name', 'position', 'target', 'up', 'fovDeg'], at)) return;
+        c.id(cam.id, `${at}.id`);
+        c.name(cam.name, `${at}.name`);
+        c.vec3(cam.position, `${at}.position`);
+        c.vec3(cam.target, `${at}.target`);
+        const up = cam.up;
+        if (
+          !tuple(up, 3) ||
+          ![0, 1, 2].every((k) => finite(up[k])) ||
+          Math.hypot(...(up as number[])) < 1e-6
+        )
+          c.error('camera-up', `${at}.up`);
+        if (!finite(cam.fovDeg) || cam.fovDeg < 1 || cam.fovDeg > 120)
+          c.error('camera-fov', `${at}.fovDeg`);
+        if (
+          tuple(cam.position, 3) &&
+          tuple(cam.target, 3) &&
+          (cam.position as number[]).every((x, k) => x === (cam.target as number[])[k])
+        )
+          c.error('camera-target', `${at}.target`);
+      });
+  }
   const p = value.project;
   if (!record(p)) c.error('project', '$.project');
   else if (c.keys(p, ['name', 'trueNorthRad', 'siteElevationMm'], '$.project')) {
