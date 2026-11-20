@@ -20,6 +20,8 @@ import {
   parsePoint3,
 } from './display';
 import { Field, SiteTable, useDirty, type Report } from './site-panel';
+import type { OperationProgress } from '@editor-platform/editor-core';
+import { ProgressStatus } from '@editor-platform/editor-ui';
 
 const craneKindLabels: Record<CraneKind, string> = { tower: 'Tower crane', mobile: 'Mobile crane' };
 
@@ -40,6 +42,10 @@ export function CranePanel({
   liftsToday,
   problems,
   checking,
+  checkProgress,
+  onStopChecks,
+  checksStopped,
+  onCheckAgain,
   readOnly,
   run,
   setError,
@@ -62,6 +68,12 @@ export function CranePanel({
   problems: readonly ConstructionDiagnostic[];
   /** The crane checks are still running. */
   checking: boolean;
+  /** #16: how far the checks are, while they run. */
+  checkProgress?: OperationProgress;
+  onStopChecks?(): void;
+  /** #16: the checks were stopped for this plan; they run again on asking (or on an edit). */
+  checksStopped?: boolean;
+  onCheckAgain?(): void;
   readOnly: boolean;
   run(ops: ConstructionOperation | ConstructionOperation[]): boolean;
   setError(e: string): void;
@@ -171,6 +183,33 @@ export function CranePanel({
   return (
     <details className="construction-site" open={cranes.length > 0 || undefined}>
       <summary>Cranes</summary>
+      {checking && (
+        <p className="construction-note">
+          {checkProgress ? (
+            <ProgressStatus
+              label="Lift checks"
+              unit="lifts"
+              progress={checkProgress}
+              onCancel={onStopChecks}
+              cancelLabel="Stop checks"
+            />
+          ) : (
+            onStopChecks && (
+              <button type="button" onClick={onStopChecks}>
+                Stop checks
+              </button>
+            )
+          )}
+        </p>
+      )}
+      {checksStopped && (
+        <p className="construction-note" role="status" aria-label="Lift checks">
+          The lift checks were stopped; their problems are not shown.{' '}
+          <button type="button" onClick={onCheckAgain}>
+            Check the lifts again
+          </button>
+        </p>
+      )}
       {(problems.length > 0 || checking) && (
         <ul className="construction-problems" aria-label="Crane problems">
           {checking && <li>Checking the lifts…</li>}

@@ -14,6 +14,7 @@
     "@editor-platform/character-core": "*",
     "@editor-platform/construction-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
     "@editor-platform/geometry-fem": "*",
     "@editor-platform/geometry-view": "*",
     "@editor-platform/time-axis": "*",
