@@ -210,7 +210,8 @@ export const setMangaKeepOut = (id: string, keepOut: boolean): EditorCommand<Des
 
 /**
  * Move every balloon that covers a keep-out region of its panel to the nearest free position.
- * Balloons that have no free position stay where they are and are returned in `stuck`; balloons
+ * Balloons that have no free position, or that a layout holds in place, stay where they are and
+ * are returned in `stuck`; balloons
  * that cannot be moved (locked or hidden, or with a locked part) are returned in `locked`.
  */
 export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
@@ -249,13 +250,22 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
       dw: 0,
       dh: 0,
     });
+    let after: DesignContent;
     try {
-      next = move.apply(next);
+      after = move.apply(next);
     } catch {
       // A locked or hidden balloon (or part of one) stays where it is; the others still move.
       locked.push(id);
       continue;
     }
+    // A row or column layout around the balloon can put it back where it was: only a move that
+    // lands where the search placed it counts (Codex on #28).
+    const landed = mangaBalloonFootprint(after, after.elements.find((e) => e.id === id)!);
+    if (Math.abs(landed.x - to.x) > 1e-6 || Math.abs(landed.y - to.y) > 1e-6) {
+      stuck.push(id);
+      continue;
+    }
+    next = after;
     moves.push(move);
     moved.push(id);
   }

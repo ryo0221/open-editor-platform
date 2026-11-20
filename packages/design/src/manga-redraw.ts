@@ -129,11 +129,18 @@ export function checkPanelRedrawSelection(
   const before = new Map(d.elements.map((e) => [e.id, e]));
   for (const e of next.elements) {
     const was = before.get(e.id);
-    if (!was || was === e || !inside.has(e.id)) continue;
-    const same = (['x', 'y', 'width', 'height'] as const).every(
-      (k) => was.bounds[k] === e.bounds[k],
-    );
-    if (!same && !contains(request.region, mangaCoverBox(e)))
+    if (!was || was === e) continue;
+    const same =
+      (['x', 'y', 'width', 'height'] as const).every((k) => was.bounds[k] === e.bounds[k]) &&
+      (was.rotation ?? 0) === (e.rotation ?? 0);
+    if (same) continue;
+    // A layout around the panel (the page's row, the panel's own hug size) can carry a change
+    // out of it: the panel and everything outside it must keep their place (Codex on #28).
+    if (!inside.has(e.id))
+      throw Error(
+        `A panel redraw cannot move or resize ${e.id}, which is not inside panel ${request.panelId}`,
+      );
+    if (!contains(request.region, mangaCoverBox(e)))
       throw Error(`${e.id} would move outside panel ${request.panelId}`);
   }
 }

@@ -150,6 +150,25 @@ describe('#21 balloons keep off faces and figures', () => {
     const after = command!.apply(d);
     expect(mangaBalloonOverlaps(after).map((o) => o.balloonId)).toEqual([a.elementId]);
   });
+
+  it('reports a balloon a layout holds over the face, and does not count it moved (Codex on #28)', () => {
+    let d = page();
+    d = insertElement('group', {
+      id: 'holder',
+      parentId: 'k1',
+      bounds: { x: 400, y: 40, width: 150, height: 100 },
+    }).apply(d);
+    d = updateElement('holder', {
+      layout: { direction: 'row', gap: 0, padding: 0, align: 'start', sizing: 'fixed' },
+    }).apply(d);
+    const b = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 150, height: 100 }, 'A');
+    d = updateElement(b.elementId, { parentId: 'holder' }).apply(b.apply(d));
+    expect(mangaBalloonOverlaps(d).map((o) => o.balloonId)).toEqual([b.elementId]);
+    const { command, moved, stuck } = moveMangaBalloonsOffKeepOut(d);
+    expect(moved).toEqual([]);
+    expect(stuck).toEqual([b.elementId]);
+    expect(command).toBeUndefined();
+  });
 });
 
 describe('#21 redraw one panel', () => {
@@ -286,6 +305,36 @@ describe('#21 redraw one panel', () => {
       ],
     } as unknown as DesignPageProposalRequest;
     expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(/would move outside panel k1/);
+  });
+
+  it('refuses a redraw whose layout moves the panel or what lies outside it (Codex on #28)', () => {
+    let d = page();
+    d = updateElement('k1', {
+      layout: { direction: 'row', gap: 0, padding: 20, align: 'start', sizing: 'hug' },
+    }).apply(d);
+    d = insertElement('text', {
+      id: 'line',
+      parentId: 'k1',
+      bounds: { x: 40, y: 40, width: 400, height: 40 },
+    }).apply(d);
+    d = updateElement('line', { text: 'あ'.repeat(10), sizing: 'hug' }).apply(d);
+    const asked = designPanelRedrawRequest(d, 'k1', '');
+    const answer = {
+      units: [
+        {
+          id: 'u',
+          label: 'u',
+          requires: [],
+          operations: [
+            { type: 'text', id: 'line', value: 'あ' },
+            { type: 'bounds', id: 'face', value: { x: 390, y: 30, width: 180, height: 160 } },
+          ],
+        },
+      ],
+    } as unknown as DesignPageProposalRequest;
+    expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(
+      /cannot move or resize k1, which is not inside panel k1/,
+    );
   });
 
   it('sees a balloon by all of its parts, for warnings and moves (Codex on #28)', () => {
