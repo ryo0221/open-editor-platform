@@ -120,6 +120,8 @@ export function checkPanelRedrawSelection(
   let next = d;
   for (const id of order)
     for (const op of units.get(id)!.operations) {
+      // Only image, text and bounds changes reach here (checkPanelRedrawProposal refuses others)
+      if (op.type !== 'image' && op.type !== 'text' && op.type !== 'bounds') continue;
       if (!next.elements.some((e) => e.id === op.id)) continue;
       next = designPageEditCommand([op]).apply(next);
     }
