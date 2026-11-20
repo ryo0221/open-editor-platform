@@ -1095,6 +1095,13 @@ export class CadViewport {
     if (gl.isContextLost()) throw new Error('The 3D view was lost.');
     const camera = this.camera.clone();
     if (camera instanceof PerspectiveCamera) camera.aspect = rec.width / rec.height;
+    else {
+      // The view's height is kept and its width follows the video's shape (Codex on #34).
+      const mid = (camera.left + camera.right) / 2;
+      const half = ((camera.top - camera.bottom) / 2) * (rec.width / rec.height);
+      camera.left = mid - half;
+      camera.right = mid + half;
+    }
     camera.updateProjectionMatrix();
     const shown = [
       this.grid.visible,
