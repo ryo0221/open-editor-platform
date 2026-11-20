@@ -7106,6 +7106,7 @@ function Surface({
                 narrow={narrow}
                 name={name}
                 onExportCsv={onExportCsv}
+                view={view}
               />
             )}
             <Navigator

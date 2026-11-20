@@ -21,6 +21,7 @@ import { cadSpringLimits, springProblem, type SpringSpec } from './spring';
 import { validateProportions } from './proportions';
 import { validateDesignTargets } from './design-targets';
 import { validateSightChecks } from './sight-checks';
+import { validateMotions } from './motions';
 import { validateToleranceStacks } from './tolerance-stacks';
 import { cadJointLimits } from './joints';
 import { validateInterferenceAllowances } from './interference';
@@ -2189,6 +2190,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       'designTargets',
       'sightChecks',
       'toleranceStacks',
+      'motions',
     ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
@@ -2412,6 +2414,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
   const activeIds = new Set(active.map((a) => a.id));
   if (Object.hasOwn(value, 'proportions')) validateProportions(c, value.proportions, activeIds);
   if (Object.hasOwn(value, 'sightChecks')) validateSightChecks(c, value.sightChecks, activeIds);
+  if (Object.hasOwn(value, 'motions')) validateMotions(c, value.motions, cadId);
   // PD1/PD3: the parameters by ID with their type, and the stacks a target may measure.
   const parameterTypes = new Map<string, string>(
     (Array.isArray(value.parameters) ? value.parameters : []).flatMap((p) =>

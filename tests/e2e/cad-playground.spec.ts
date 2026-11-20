@@ -50,6 +50,7 @@ import {
   r2bJoints,
   f70GearTrain,
   sk01Watch,
+  mr2ArmWingsForms,
   sk01FinishImages,
   type Sk01Finish,
   gearMeshProblems,
@@ -3790,6 +3791,98 @@ test('WM5b: open the SK-01 watch, recall 分解 and 組立, clear of interferenc
   await ready(page);
   await expect(form('form-assembled').locator('[data-state=current]')).toBeVisible();
   expect((await content()).joints).toEqual(watch.assembly.joints);
+});
+
+// #18: a form-to-form motion with a camera path, made and scrubbed in the editor, saved in the
+// document and recorded to MP4 with progress; a longer recording is stopped part way.
+test('#18 a form-to-form motion with a camera path exports to video', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(600_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const { id, buildHash } = (empty.draft.content as CadDocument).kernelProfile;
+  const arm = mr2ArmWingsForms({ id, buildHash });
+  await importJson(page, 'arm.json', {
+    ...empty,
+    name: 'Arm',
+    draft: { ...empty.draft, content: arm.assembly },
+    // Only the part versions the arm places (the fixture's closure holds others too).
+    cadParts: [...arm.closure]
+      .filter(([contentHash]) => JSON.stringify(arm.assembly).includes(contentHash))
+      .map(([contentHash, content]) => ({ contentHash, content })),
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Arm');
+  await ready(page);
+  await expect(page.getByTestId('cad-parts-progress')).toHaveCount(0, { timeout: 300_000 });
+  const motions = page.getByTestId('cad-motions');
+  await motions.getByRole('button', { name: 'New motion' }).click();
+  const editor = motions.getByRole('group', { name: 'Motion editor' });
+  await editor.getByLabel('Motion name').fill('Fold');
+  await editor.getByLabel('Step 1 seconds').fill('1');
+  await editor.getByLabel('Step 1 easing').selectOption('linear');
+  const canvas = page.locator('canvas.cad-canvas');
+  const time = editor.getByRole('slider', { name: 'Motion time' });
+  const frame = async () =>
+    createHash('sha1')
+      .update(await canvas.screenshot())
+      .digest('hex');
+  await editor.getByRole('button', { name: 'Add camera key' }).click();
+  const start = await frame();
+  // Scrubbed to the end: the arm folds into the Flight form.
+  await time.fill('1000');
+  await expect(editor.getByLabel('Motion time shown')).toHaveText('1.0 s / 1.0 s');
+  await expect.poll(frame).not.toBe(start);
+  await editor.getByRole('button', { name: 'Add camera key' }).click();
+  await expect(editor.getByRole('list', { name: 'Camera keys' }).getByRole('listitem')).toHaveCount(
+    2,
+  );
+  await editor.getByRole('button', { name: 'Play' }).click();
+  await expect(editor.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10_000 });
+  await editor.getByRole('button', { name: 'Save motion' }).click();
+  await expect(page.getByTestId('cad-motion-note')).toHaveText('「Fold」を保存しました。');
+  const saved = (await nativeArtifact(page)).draft.content as CadDocument;
+  expect(saved.motions).toHaveLength(1);
+  expect(saved.motions![0]).toMatchObject({
+    name: 'Fold',
+    startFormId: 'form-stand',
+    steps: [{ formId: 'form-flight', durationMs: 1000, easing: 'linear' }],
+  });
+  expect(saved.motions![0]!.camera!.map((k) => k.atMs)).toEqual([0, 1000]);
+  // The joints are not changed by playing a motion: the document still stands in Stand.
+  expect(saved.joints).toEqual(arm.assembly.joints);
+
+  // One second at 30 fps: 31 frames of 1280 × 720.
+  const download = page.waitForEvent('download', { timeout: 300_000 });
+  await motions
+    .getByRole('group', { name: 'Motion Fold' })
+    .getByRole('button', { name: 'Export video' })
+    .click();
+  const mp4 = await readFile((await (await download).path())!);
+  expect(mp4.subarray(4, 8).toString()).toBe('ftyp');
+  await expect(page.getByTestId('cad-motion-note')).toHaveText(
+    '動画を書き出しました：Arm-Fold-720p.mp4（31フレーム）',
+  );
+  await expect(motions.getByRole('status', { name: 'Video progress' })).toHaveCount(0);
+
+  // A minute long: stopped part way, no file.
+  await motions
+    .getByRole('group', { name: 'Motion Fold' })
+    .getByRole('button', { name: 'Edit' })
+    .click();
+  await editor.getByLabel('Step 1 seconds').fill('60');
+  await editor.getByRole('button', { name: 'Save motion' }).click();
+  await expect(page.getByTestId('cad-motion-note')).toHaveText('「Fold」を保存しました。');
+  await motions
+    .getByRole('group', { name: 'Motion Fold' })
+    .getByRole('button', { name: 'Export video' })
+    .click();
+  const progress = motions.getByRole('status', { name: 'Video progress' });
+  await expect(progress).toContainText(/Frame \d+ of 1801/);
+  await progress.getByRole('button', { name: 'Stop video' }).click();
+  await expect(page.getByTestId('cad-motion-note')).toHaveText('動画の書き出しを中止しました。');
+  await expect(progress).toHaveCount(0);
 });
 
 // WM5c (docs/cad/watch-design.md, WM5): the SK-01 watch written from the Playground's export as

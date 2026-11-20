@@ -1,0 +1,195 @@
+import { describe, expect, it } from 'vitest';
+import { composePoses, stepPose } from './assembly';
+import { assertCadOperation } from './commands';
+import { compareCad } from './diff';
+import { parameterValues } from './graph';
+import { formPoses } from './interference';
+import { invertPose, solveJoints } from './joints';
+import { mr2ArmWingsForms, mr7ToolMount } from './mecha-fixtures';
+import type { CadDocument } from './model';
+import {
+  ease,
+  motionCameraAt,
+  motionDeltas,
+  motionDurationMs,
+  motionSegmentAt,
+  motionStaleForms,
+  motionStateAt,
+  withCameraKey,
+  type CadMotion,
+  type CadMotionCameraKey,
+} from './motions';
+import { applyCadOperation, type CadOperation } from './operations';
+import { validateCad } from './validation';
+
+const deg = Math.PI / 180;
+const codes = (doc: unknown) => validateCad(doc).map((d) => d.code);
+const run = (doc: CadDocument, op: CadOperation) => {
+  assertCadOperation(op);
+  return applyCadOperation(doc, op);
+};
+const motion = (over: Partial<CadMotion> = {}): CadMotion => ({
+  id: 'motion-fold',
+  name: 'Fold',
+  startFormId: 'form-stand',
+  steps: [
+    { formId: 'form-flight', durationMs: 2000, easing: 'linear' },
+    { formId: 'form-stand', durationMs: 1000, easing: 'easeInOut' },
+  ],
+  ...over,
+});
+const key = (atMs: number, x: number, fovDeg = 40): CadMotionCameraKey => ({
+  atMs,
+  camera: { position: [x, -1000, 500], target: [x, 0, 0], up: [0, 0, 1] },
+  fovRad: fovDeg * deg,
+});
+const solutions = (doc: CadDocument, closure: Map<string, CadDocument>) =>
+  solveJoints(
+    doc,
+    parameterValues(doc),
+    (h) => closure.get(h),
+    () => undefined,
+    () => true,
+  ).joints;
+
+describe('#18 motions: form-to-form interpolation and camera paths', () => {
+  it('stores motions as one edit, validates their shape and reports the change', () => {
+    const { assembly } = mr2ArmWingsForms();
+    const next = run(assembly, { type: 'setMotions', motions: [motion({ camera: [key(0, 0)] })] });
+    expect(codes(next)).toEqual([]);
+    expect(compareCad(assembly, next).map((c) => c.elementId)).toEqual(['motions']);
+    expect(() => run(next, { type: 'setMotions', motions: next.motions! })).toThrow(
+      'motions-unchanged',
+    );
+    expect(run(next, { type: 'setMotions', motions: [] }).motions).toBeUndefined();
+  });
+  it('refuses bad steps, easings, durations and camera keys', () => {
+    const { assembly } = mr2ArmWingsForms();
+    const bad = (m: unknown) => codes({ ...assembly, motions: [m] });
+    expect(bad(motion({ steps: [] }))).toContain('motion-steps');
+    expect(
+      bad(motion({ steps: [{ formId: 'form-flight', durationMs: 0, easing: 'linear' }] })),
+    ).toContain('motion-duration');
+    expect(
+      bad(
+        motion({ steps: [{ formId: 'form-flight', durationMs: 10, easing: 'bounce' as never }] }),
+      ),
+    ).toContain('motion-easing');
+    expect(bad(motion({ camera: [key(500, 0), key(500, 1)] }))).toContain('motion-camera-time');
+    expect(bad(motion({ camera: [key(4000, 0)] }))).toContain('motion-camera-time');
+    expect(bad(motion({ camera: [{ ...key(0, 0), fovRad: 0 }] }))).toContain('projection-fov');
+    const along = key(0, 0);
+    along.camera.up = [0, 1, 0];
+    along.camera.target = [0, 1000, 500];
+    expect(bad(motion({ camera: [along] }))).toContain('camera-degenerate');
+    expect(codes({ ...assembly, motions: [motion(), motion()] })).toContain('duplicate-id');
+  });
+  it('eases and finds the step at a time', () => {
+    expect(ease('linear', 0.25)).toBe(0.25);
+    expect(ease('easeInOut', 0)).toBe(0);
+    expect(ease('easeInOut', 0.5)).toBeCloseTo(0.5, 12);
+    expect(ease('easeInOut', 1)).toBeCloseTo(1, 12);
+    expect(ease('easeInOut', 0.1)).toBeLessThan(0.1);
+    const m = motion();
+    expect(motionDurationMs(m)).toBe(3000);
+    expect(motionSegmentAt(m, -5)).toEqual({
+      step: 0,
+      from: 'form-stand',
+      to: 'form-flight',
+      u: 0,
+    });
+    expect(motionSegmentAt(m, 500)).toMatchObject({ step: 0, u: 0.25 });
+    expect(motionSegmentAt(m, 2000)).toEqual({
+      step: 1,
+      from: 'form-flight',
+      to: 'form-stand',
+      u: 0,
+    });
+    expect(motionSegmentAt(m, 2500).u).toBeCloseTo(0.5, 12);
+    expect(motionSegmentAt(m, 9000)).toEqual({
+      step: 1,
+      from: 'form-flight',
+      to: 'form-stand',
+      u: 1,
+    });
+  });
+  it('interpolates every moving joint value between the two forms', () => {
+    const { assembly } = mr2ArmWingsForms();
+    const m = motion();
+    const quarter = motionStateAt(assembly, m, 500)!;
+    // Elbow 45° → 0°, wing 40° → 80°, shoulder angle2 −20° → −80°, a quarter of the way.
+    expect(quarter.values.get('j-elbow')!.angle).toBeCloseTo(33.75 * deg, 12);
+    expect(quarter.values.get('j-wing-l')!.angle).toBeCloseTo(50 * deg, 12);
+    expect(quarter.values.get('j-shoulder')!.angle2).toBeCloseTo(-35 * deg, 12);
+    // The coupled wing is not a form value: it follows through its coupling.
+    expect(quarter.values.has('j-wing-r')).toBe(false);
+    const end = motionStateAt(assembly, m, 2000)!;
+    expect(end.values.get('j-wing-l')!.angle).toBeCloseTo(80 * deg, 12);
+  });
+  it('moves the parts to where the form puts them, at the end of the step', () => {
+    const { assembly, closure } = mr2ArmWingsForms();
+    const joints = solutions(assembly, closure);
+    const state = motionStateAt(assembly, motion(), 2000)!;
+    const deltas = motionDeltas(assembly, joints, state.values, state.mounts);
+    const flight = assembly.configurations!.find((f) => f.id === 'form-flight')!;
+    const want = formPoses(assembly, joints, flight);
+    const params = parameterValues(assembly);
+    for (const id of ['c-upper', 'c-fore', 'c-hand', 'c-wing-l', 'c-wing-r']) {
+      const shown = stepPose(assembly, assembly.solvedPoses, id, params)!;
+      const target = stepPose(assembly, want, id, params)!;
+      const got = composePoses(deltas.get(id)!, shown);
+      for (let i = 0; i < 3; i++)
+        expect(got.translationMm[i]).toBeCloseTo(target.translationMm[i]!, 6);
+      const dq = composePoses(got, invertPose(target)).rotation;
+      expect(Math.abs(dq[3])).toBeCloseTo(1, 9);
+    }
+    // In the form the document stands in, nothing moves.
+    const start = motionStateAt(assembly, motion(), 0)!;
+    expect(motionDeltas(assembly, joints, start.values, start.mounts).size).toBe(0);
+  });
+  it('switches a mount when the step ends', () => {
+    const { assembly } = mr7ToolMount();
+    const doc = structuredClone(assembly);
+    const values = mr2ArmWingsForms().assembly.configurations!;
+    doc.configurations = [
+      { ...values[0]!, mounts: { 'm-tool': 'j-tool-hand' } },
+      { ...values[1]!, mounts: { 'm-tool': 'j-tool-back' } },
+    ];
+    expect(codes(doc)).toEqual([]);
+    const m = motion({ steps: [{ formId: 'form-flight', durationMs: 1000, easing: 'linear' }] });
+    expect(motionStateAt(doc, m, 999)!.mounts).toEqual({ 'm-tool': 'j-tool-hand' });
+    expect(motionStateAt(doc, m, 1000)!.mounts).toEqual({ 'm-tool': 'j-tool-back' });
+  });
+  it('is stale while a form it passes is gone', () => {
+    const { assembly } = mr2ArmWingsForms();
+    const m = motion({ steps: [{ formId: 'form-gone', durationMs: 10, easing: 'linear' }] });
+    expect(motionStaleForms(assembly, m)).toEqual(['form-gone']);
+    expect(motionStateAt(assembly, m, 5)).toBeUndefined();
+  });
+  it('follows the camera keys: held outside them, through each key, smooth between', () => {
+    expect(motionCameraAt(undefined, 0)).toBeUndefined();
+    const keys = [key(0, 0, 30), key(1000, 1000, 50), key(2000, 1000, 50), key(3000, 0, 30)];
+    expect(motionCameraAt(keys, -10)!.camera.position).toEqual([0, -1000, 500]);
+    expect(motionCameraAt(keys, 5000)!.camera.position).toEqual([0, -1000, 500]);
+    const at1 = motionCameraAt(keys, 1000)!;
+    expect(at1.camera.position[0]).toBeCloseTo(1000, 9);
+    expect(at1.fovRad).toBeCloseTo(50 * deg, 12);
+    const mid = motionCameraAt(keys, 500)!;
+    expect(mid.fovRad).toBeCloseTo(40 * deg, 12);
+    // Catmull-Rom: halfway between the first two keys (the missing neighbour extended in line).
+    expect(mid.camera.position[0]).toBeCloseTo(562.5, 9);
+    expect(mid.camera.target[0]).toBeCloseTo(562.5, 9);
+    expect(Math.hypot(...mid.camera.up)).toBeCloseTo(1, 12);
+    // Two keys: a straight line.
+    expect(motionCameraAt([key(0, 0), key(1000, 1000)], 250)!.camera.position[0]).toBeCloseTo(
+      250,
+      9,
+    );
+  });
+  it('adds a camera key in time order, replacing one at the same time', () => {
+    const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
+    expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);
+    const replaced = withCameraKey(keys, key(1000, 9));
+    expect(replaced.map((k) => k.camera.position[0])).toEqual([2, 9]);
+  });
+});

@@ -56,6 +56,7 @@ export * from './gear-mesh';
 export * from './proportions';
 export * from './design-targets';
 export * from './sight-checks';
+export * from './motions';
 export * from './sight-fixtures';
 export * from './tolerance-stacks';
 export * from './product-design-fixtures';

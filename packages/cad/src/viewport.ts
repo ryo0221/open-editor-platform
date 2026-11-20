@@ -406,6 +406,8 @@ export class CadViewport {
    * A joint drag's preview on the parts: kept while the parts shown are those it started from
    * (a released drag until its edit's poses arrive), dropped when they move or it is refused.
    */
+  /** #18: a video being recorded at this size (the view's own drawing waits). */
+  private recording: { width: number; height: number } | undefined;
   private partsPose:
     | { moves: ReadonlySet<string>; delta: Matrix4 | ReadonlyMap<string, Matrix4>; key: string }
     | undefined;
@@ -543,7 +545,7 @@ export class CadViewport {
   }
   private layout() {
     const { clientWidth: w, clientHeight: h } = this.host;
-    if (!w || !h) return;
+    if (!w || !h || this.recording) return;
     this.renderer.setSize(w, h, false);
     this.perspective.aspect = w / h;
     this.perspective.updateProjectionMatrix();
@@ -655,6 +657,8 @@ export class CadViewport {
   }
   private render() {
     cancelAnimationFrame(this.frame);
+    // A recording draws its own frames at the video's size.
+    if (this.recording) return;
     this.frame = requestAnimationFrame(() => {
       // A joint drag's preview moves the parts, not the PMI drawn at their poses: it is hidden
       // until the preview ends.
@@ -977,6 +981,120 @@ export class CadViewport {
     this.partsPose = undefined;
     poseParts(this.parts, new Set());
     this.lighting.invalidate();
+    this.render();
+  }
+  /**
+   * #18: a motion's frame. `deltas` gives each moved first path step's motion from where the
+   * parts are shown (none: all as placed); `camera`, when given, places the perspective camera
+   * with the key's field of view. Ignored during a joint drag. `endMotion` puts the parts back.
+   */
+  showMotion(frame: {
+    deltas?: ReadonlyMap<string, CadSolvedPose>;
+    camera?: { camera: CadCamera; fovRad: number };
+  }) {
+    if (this.jointDrag) return;
+    if (frame.deltas) {
+      const delta = new Map(
+        [...frame.deltas].map(([step, p]) => [
+          step,
+          new Matrix4().compose(
+            new Vector3(...p.translationMm),
+            new Quaternion(...p.rotation),
+            new Vector3(1, 1, 1),
+          ),
+        ]),
+      );
+      const moves = new Set(delta.keys());
+      this.partsPose = { moves, delta, key: movedKey(this.lastParts, moves) };
+      poseParts(this.parts, moves, delta);
+      this.lighting.invalidate();
+    }
+    if (frame.camera) {
+      const { camera, fovRad } = frame.camera;
+      this.fitted = true;
+      this.autoFit = { bodies: true, parts: true };
+      if (this.camera !== this.perspective) {
+        this.use(this.perspective);
+        this.orbit();
+      }
+      const [position, target] = [new Vector3(...camera.position), new Vector3(...camera.target)];
+      this.perspective.fov = (fovRad * 180) / Math.PI;
+      Object.assign(this.perspective, depthRange(position.distanceTo(target), this.modelRadius));
+      // Set directly: rebuilding the orbit controls for each frame's up would be needless work;
+      // `endMotion` hands the last up to them.
+      this.camera.up.set(...camera.up).normalize();
+      this.camera.position.copy(position);
+      this.controls.target.copy(target);
+      this.camera.lookAt(target);
+      this.camera.updateProjectionMatrix();
+    }
+    this.render();
+  }
+  /** #18: the parts back as placed after a motion; the camera stays where the motion left it. */
+  endMotion() {
+    this.orbit();
+    this.controls.update();
+    this.unposeParts();
+    this.render();
+  }
+  /**
+   * #18: draws frames for a video at `width × height` (device pixels) through a copy of the
+   * camera with the video's aspect (the vertical field of view kept). The view stops drawing on
+   * its own meanwhile and shows the recorded frames letterboxed; `endCapture` restores it.
+   * Refused on the drawing board and where the browser cannot draw that size.
+   */
+  beginCapture(width: number, height: number) {
+    if (this.recording) throw new Error('A recording is already running.');
+    if (this.threeView) throw new Error('The drawing board cannot be recorded; leave it first.');
+    cancelAnimationFrame(this.frame);
+    this.recording = { width, height };
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(width, height, false);
+    this.renderer.domElement.classList.add('cad-canvas-capturing');
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) {
+      this.endCapture();
+      throw new Error('The 3D view was lost.');
+    }
+    if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) {
+      const [w, h] = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+      this.endCapture();
+      throw new Error(`This browser can draw at most ${w} × ${h} here.`);
+    }
+  }
+  /**
+   * #18: draws what is shown now as one recorded frame (without the grid, axes and marks) and
+   * returns the canvas holding it, for the caller to take before anything draws again.
+   */
+  captureCanvas(): HTMLCanvasElement {
+    const rec = this.recording;
+    if (!rec) throw new Error('No recording is running.');
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) throw new Error('The 3D view was lost.');
+    const camera = this.camera.clone();
+    if (camera instanceof PerspectiveCamera) camera.aspect = rec.width / rec.height;
+    camera.updateProjectionMatrix();
+    const shown = [
+      this.grid.visible,
+      this.axes.visible,
+      this.marks.visible,
+      this.jointMarks.visible,
+    ];
+    this.grid.visible = this.axes.visible = this.marks.visible = this.jointMarks.visible = false;
+    this.partPmi.visible = !this.partsPose;
+    this.lighting.prepare([this.bodies, this.parts], true);
+    this.renderer.render(this.scene, camera);
+    [this.grid.visible, this.axes.visible, this.marks.visible, this.jointMarks.visible] = shown;
+    if (gl.isContextLost()) throw new Error('The 3D view was lost.');
+    return this.renderer.domElement;
+  }
+  /** #18: ends a recording: the view draws at its own size again. */
+  endCapture() {
+    if (!this.recording) return;
+    this.recording = undefined;
+    this.renderer.domElement.classList.remove('cad-canvas-capturing');
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.layout();
     this.render();
   }
   /**
