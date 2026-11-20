@@ -536,3 +536,13 @@
 .ep-narrow .ep-status-summary {
   display: none;
 }
+/* #16: a heavy operation's progress and Cancel. */
+.ep-progress {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ep-progress progress {
+  width: 120px;
+}

@@ -463,10 +463,25 @@ test('put up a crane, plan the lifts, play a day, find a crane out of reach (ST-
   await page.getByLabel('Lift task', { exact: true }).selectOption('col-1');
   await page.getByRole('button', { name: 'Add lifts for task', exact: true }).click();
   await page.getByLabel('Lift task', { exact: true }).selectOption('beam-1');
+  // #16: on a slowed machine the checks run long enough to watch and stop them.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 40 });
   await page.getByRole('button', { name: 'Add lifts for task', exact: true }).click();
   await expect(page.getByText('93 lifts planned')).toBeVisible();
+  const checks = page.getByRole('status', { name: 'Lift checks', exact: true });
+  await expect(checks).toContainText(/Lift checks: \d+ of \d+ lifts/, { timeout: 30_000 });
+  await checks.getByRole('button', { name: 'Stop checks', exact: true }).click();
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  await expect(checks).toContainText('The lift checks were stopped');
+  await expect(page.getByText('Checking the lifts…')).toBeHidden();
+  await page.getByRole('button', { name: 'Export checks', exact: true }).click();
+  await expect(surface(page).getByRole('alert').first()).toContainText(
+    'The lift checks were stopped',
+  );
+  await checks.getByRole('button', { name: 'Check the lifts again', exact: true }).click();
   // Every lift is within reach and load, and clears what stands.
   await expect(page.getByText('Checking the lifts…')).toBeHidden({ timeout: 60_000 });
+  await expect(checks).toBeHidden();
   await expect(page.getByLabel('Crane problems', { exact: true })).toBeHidden();
 
   // The first column day: its lifts and masses, played back one after another.
