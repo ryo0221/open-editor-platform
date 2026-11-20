@@ -38,20 +38,13 @@ export function DesignPagePanel({
   }
   function dialogue(panelId: string) {
     const panel = content.elements.find((e) => e.id === panelId)!;
-    const placement = mangaDialoguePlacement(panel, 400);
+    // Vertical dialogue is a tall box, fitted against every panel edge as it is (Codex on #29).
+    const placement = vertical
+      ? mangaDialoguePlacement(panel, 140, Math.min(400, panel.bounds.height * 0.8))
+      : mangaDialoguePlacement(panel, 400);
     if (!placement) return;
     const id = newId('dialogue');
-    const b = placement.bounds;
-    // Vertical dialogue stands the same box on end around its centre, inside the panel.
-    const tall = Math.min(b.width, panel.bounds.height * 0.8);
-    const bounds = vertical
-      ? {
-          x: b.x + b.width / 2 - b.height,
-          y: Math.max(panel.bounds.y + 8, b.y + b.height / 2 - tall / 2),
-          width: b.height * 2,
-          height: tall,
-        }
-      : b;
+    const bounds = placement.bounds;
     const insert = insertElement('text', { id, parentId: panelId, bounds });
     if (
       apply(

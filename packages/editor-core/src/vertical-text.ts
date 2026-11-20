@@ -212,11 +212,17 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       if (!first || lastStart === undefined) continue;
       const to = positions.get(lastStart)!.to;
       const chars = [...graphemes.segment(r.text)].map((s) => s.segment);
+      // The line's room along it: a reading that overhangs the box edge is moved in, and one
+      // longer than the whole line is set closer (Codex on #29).
+      const lo = o.vertical ? inner.y : inner.x;
+      const hi = lo + alongSpace;
       const step = Math.min(
         rubySize,
         Math.max(to - first.from, rubySize * chars.length) / chars.length,
+        Math.max(0, hi - lo) / chars.length,
       );
-      const begin = (first.from + to) / 2 - (step * chars.length) / 2;
+      const span = step * chars.length;
+      const begin = Math.min(Math.max((first.from + to) / 2 - span / 2, lo), hi - span);
       chars.forEach((text, k) => {
         const along = begin + step * (k + 0.5);
         rubyOut.push(

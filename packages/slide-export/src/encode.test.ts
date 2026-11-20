@@ -408,6 +408,27 @@ it('includes the cloud curve beyond its bounds and reports unsupported native ta
   }
 });
 
+it('keeps vertical text as a picture instead of horizontal Office text (Codex on #29)', async () => {
+  const deck = contractDeck();
+  const text = deck.slides[0].objects[0];
+  text.text = '台詞';
+  text.runs = [];
+  text.typography = { ...text.typography, writingMode: 'vertical-rl' };
+  const p = await prepare(
+    deck,
+    {
+      rasterize: async (r) =>
+        contractPng(Math.ceil(r.bounds.width * 2), Math.ceil(r.bounds.height * 2)),
+    },
+    { ...contractOptions, fallback: 'element-png' },
+  );
+  expect(p.report.counts.rasterized).toBe(1);
+  expect(p.report.diagnostics.find((d) => d.code === 'ELEMENT_RASTERIZED')?.message).toMatch(
+    /Vertical writing and ruby/,
+  );
+  expect((await encoded(p)).xml()).not.toContain('<p:txBody>');
+});
+
 it('keeps an empty text object as an editable native text box with an output mapping', async () => {
   const deck = contractDeck();
   deck.slides[0].objects[0].text = '';

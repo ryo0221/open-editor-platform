@@ -524,7 +524,6 @@ function largestFont(d: Drawing) {
     ...(d.runs ?? []).map((run) => run.style?.fontSize ?? 0),
   );
 }
-/** Vertical text and text with ruby notation are set glyph by glyph on a cell grid. */
 /**
  * Vertical text, and horizontal text with ruby, are drawn on the cell grid. Horizontal text with
  * formatted runs keeps the ordinary layout, which draws its runs (ruby notation then shows as

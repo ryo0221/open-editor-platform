@@ -201,4 +201,23 @@ describe('#20 brush strokes', () => {
     expect(e).toMatchObject({ name: 'Brush stroke', fill: '#151515', stroke: 'none' });
     expect(() => assertDesignContent(d)).not.toThrow();
   });
+  it('keeps the width of a fast stroke with only two samples (Codex on #29)', () => {
+    const path = designBrushPath(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      6,
+    );
+    const a = path.subpaths[0].anchors;
+    const mid = Math.floor(a.length / 4);
+    expect(Math.abs(a[mid].y - a[a.length - 1 - mid].y)).toBeGreaterThan(5);
+    expect(path.frame.height).toBeGreaterThan(5);
+    // A long sparse stroke stays within the path's anchor limit.
+    const long = designBrushPath(
+      Array.from({ length: 2000 }, (_, i) => ({ x: (i % 2) * 90_000, y: i * 40 })),
+      6,
+    );
+    expect(long.subpaths[0].anchors.length).toBeLessThanOrEqual(4096);
+  });
 });

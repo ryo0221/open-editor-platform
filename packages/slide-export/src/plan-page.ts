@@ -1,6 +1,7 @@
 import {
   layoutDrawingText,
   shapeNames,
+  usesGridText,
   type Drawing,
   type DrawingTextLayout,
 } from '@editor-platform/editor-core';
@@ -357,9 +358,16 @@ function planTableCells(p: PptxPlanner, element: PptxElement, table: TableConten
     y += heights[r];
   }
 }
-/** Mirrored or clipped text cannot stay editable Office text. */
+/** Mirrored, clipped, vertical or ruby text cannot stay editable Office text. */
 async function planTextFallbacks(p: PptxPlanner, element: PptxElement) {
   const { drawing } = element;
+  // Vertical writing and readings are set glyph by glyph on a grid; Office text would set them
+  // as ordinary horizontal lines (Codex on #29).
+  if (usesGridText(drawing) && element.representation !== 'png')
+    await p.fallback(
+      element,
+      'Vertical writing and ruby are set on a grid that Office text cannot keep',
+    );
   if ((drawing.flipX || drawing.flipY) && element.representation !== 'png')
     await p.fallback(element, 'Office keeps native text readable instead of mirroring its glyphs');
   if (

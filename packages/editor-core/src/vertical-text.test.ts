@@ -113,6 +113,16 @@ describe('#20 vertical writing', () => {
     for (const r of l.ruby) expect(r.x + r.size / 2).toBeLessThanOrEqual(box.width + 1e-6);
     const flat = layoutGridText('｜漢字《かんじ》', box, { vertical: false, fontSize: 28 });
     for (const r of flat.ruby) expect(r.y - r.size / 2).toBeGreaterThanOrEqual(-1e-6);
+    // A reading longer than its base at the start of the line stays inside the box too.
+    for (const vertical of [true, false]) {
+      const over = layoutGridText('志《こころざし》', box, { vertical, fontSize: 28 });
+      expect(over.ruby).toHaveLength(5);
+      for (const r of over.ruby) {
+        const along = vertical ? r.y : r.x;
+        expect(along - r.size / 2).toBeGreaterThanOrEqual(-1e-6);
+        expect(along + r.size / 2).toBeLessThanOrEqual((vertical ? box.height : box.width) + 1e-6);
+      }
+    }
     // An unbreakable base longer than the column shrinks until it fits the column.
     const tall = { x: 0, y: 0, width: 200, height: 100 };
     const fit = layoutGridText('｜あいうえおかきくけこ《よみ》', tall, {

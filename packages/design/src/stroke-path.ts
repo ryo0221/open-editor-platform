@@ -125,6 +125,33 @@ export function designBrushPath(raw: readonly DesignBrushSample[], width = 6): D
       points.push({ x: s.x, y: s.y, pressure: s.pressure ?? 0.5 });
   }
   if (points.length < 2) throw Error('Move the pointer to draw a stroke');
+  // Few, far apart samples (a fast stroke) get points in between, so only the ends taper and the
+  // body keeps its width (Codex on #29).
+  {
+    let length = 0;
+    for (let i = 1; i < points.length; i++)
+      length += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    const spacing = Math.max(
+      Math.min(length / 3, width * 4) / 2,
+      // Within the path's anchor limit: the outline has two anchors per point.
+      length / Math.max(1, designPathLimits.anchors / 2 - points.length),
+      1e-9,
+    );
+    const dense: Required<DesignBrushSample>[] = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const [a, b] = [points[i - 1], points[i]];
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / spacing);
+      for (let k = 1; k < n; k++)
+        if (dense.length < designPathLimits.anchors / 2 - (points.length - i))
+          dense.push({
+            x: a.x + ((b.x - a.x) * k) / n,
+            y: a.y + ((b.y - a.y) * k) / n,
+            pressure: a.pressure + ((b.pressure - a.pressure) * k) / n,
+          });
+      dense.push(b);
+    }
+    points.splice(0, points.length, ...dense);
+  }
   // Distance along the stroke drives the taper; pressure is smoothed so a jittery pen stays clean.
   const along = [0];
   for (let i = 1; i < points.length; i++)
