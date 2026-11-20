@@ -19,12 +19,11 @@ test('double-click edits the clicked cell in a grouped grid, also after scrollin
     // so the grid shows two "(empty)" headers apart from each other.
     rows: Array.from({ length: 40 }, (_, i) => ({
       id: `r${i}`,
-      values:
-        i % 4 === 0
-          ? { title: `Task ${i}`, status: '' }
-          : i % 4 === 3
-            ? { title: `Task ${i}` }
-            : { title: `Task ${i}`, status: status[i % 3] },
+      values: (i % 4 === 0
+        ? { title: `Task ${i}`, status: '' }
+        : i % 4 === 3
+          ? { title: `Task ${i}` }
+          : { title: `Task ${i}`, status: status[i % 3] }) as Record<string, string>,
     })),
   };
   data.views = [{ ...defaultView(data), id: 'grouped', name: 'Grouped', groupBy: 'status' }];
