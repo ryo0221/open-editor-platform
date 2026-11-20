@@ -81,13 +81,45 @@ export function checkPanelRedrawProposal(
       if (op.type === 'bounds' && !contains(request.region, op.value))
         throw Error(`${op.id} would move outside panel ${request.panelId}`);
     }
-  // A group's move carries its parts with it: play the moves through and check every element that
-  // moved, as drawn (Codex on #28).
+  // The whole answer played through; the review checks each other selection before its preview
+  // (`checkPanelRedrawSelection`).
+  checkPanelRedrawSelection(
+    d,
+    request,
+    proposal,
+    proposal.units.map((u) => u.id),
+  );
+  return proposal;
+}
+
+/**
+ * The moves of the selected units, played through in the order the review applies them (each
+ * unit after the ones it needs): every element inside the panel that moved, its parts included,
+ * must stay in the panel as drawn. A group's move carries its parts with it, so a selection can
+ * reach outside even when every bounds value is inside (Codex on #28).
+ */
+export function checkPanelRedrawSelection(
+  d: DesignContent,
+  request: DesignPanelRedrawRequest,
+  proposal: DesignPageProposalRequest,
+  selected: readonly string[],
+) {
+  const inside = descendantIds(d.elements, [request.panelId]);
+  inside.delete(request.panelId);
+  const units = new Map(proposal.units.map((u) => [u.id, u]));
+  const order: string[] = [];
+  const visit = (id: string) => {
+    if (order.includes(id) || !units.has(id)) return;
+    units.get(id)!.requires.forEach(visit);
+    order.push(id);
+  };
+  proposal.units.filter((u) => selected.includes(u.id)).forEach((u) => visit(u.id));
   let next = d;
-  for (const unit of proposal.units)
-    for (const op of unit.operations) {
+  for (const id of order)
+    for (const op of units.get(id)!.operations) {
       if (op.type !== 'bounds') continue;
-      const target = next.elements.find((e) => e.id === op.id)!;
+      const target = next.elements.find((e) => e.id === op.id);
+      if (!target) continue;
       next = transformElements([op.id], {
         dx: op.value.x - target.bounds.x,
         dy: op.value.y - target.bounds.y,
@@ -95,17 +127,15 @@ export function checkPanelRedrawProposal(
         dh: op.value.height - target.bounds.height,
       }).apply(next);
     }
-  if (next !== d) {
-    const before = new Map(d.elements.map((e) => [e.id, e]));
-    for (const e of next.elements) {
-      const was = before.get(e.id);
-      if (!was || was === e || !inside.has(e.id)) continue;
-      const same = (['x', 'y', 'width', 'height'] as const).every(
-        (k) => was.bounds[k] === e.bounds[k],
-      );
-      if (!same && !contains(request.region, mangaCoverBox(e)))
-        throw Error(`${e.id} would move outside panel ${request.panelId}`);
-    }
+  if (next === d) return;
+  const before = new Map(d.elements.map((e) => [e.id, e]));
+  for (const e of next.elements) {
+    const was = before.get(e.id);
+    if (!was || was === e || !inside.has(e.id)) continue;
+    const same = (['x', 'y', 'width', 'height'] as const).every(
+      (k) => was.bounds[k] === e.bounds[k],
+    );
+    if (!same && !contains(request.region, mangaCoverBox(e)))
+      throw Error(`${e.id} would move outside panel ${request.panelId}`);
   }
-  return proposal;
 }

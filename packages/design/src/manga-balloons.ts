@@ -99,14 +99,27 @@ function inside(points: { x: number; y: number }[], p: { x: number; y: number })
 /**
  * Where a balloon of `size` fits in the panel without covering a keep-out region or another
  * balloon. Positions closest to where reading starts come first: the top right for right-to-left
- * works, the top left otherwise. Undefined when no position is free.
+ * works, the top left otherwise. A turned balloon (`rotation`, degrees) is placed by the box it
+ * covers as drawn; the bounds returned are its stored bounds, which keep that rotation. Beside
+ * an even grid, the positions touching each obstacle's and the panel's edges are tried, so a gap
+ * just wide enough is found. Undefined when no position is free.
  */
 export function mangaBalloonPlacement(
   d: DesignContent,
   panelId: string,
-  size: { width: number; height: number },
+  stored: { width: number; height: number },
   ignore: readonly string[] = [],
+  rotation = 0,
 ): Bounds | undefined {
+  const cover = mangaCoverBox({ bounds: { x: 0, y: 0, ...stored }, rotation });
+  const size = { width: cover.width, height: cover.height };
+  // The stored bounds of a balloon whose drawn box is at (x, y): the same centre.
+  const toStored = (x: number, y: number): Bounds => ({
+    x: x + (size.width - stored.width) / 2,
+    y: y + (size.height - stored.height) / 2,
+    width: stored.width,
+    height: stored.height,
+  });
   const panel = d.elements.find((e) => e.id === panelId);
   if (!panel) return undefined;
   const b = panel.bounds;
@@ -128,17 +141,24 @@ export function mangaBalloonPlacement(
   if (free.width < 0 || free.height < 0) return undefined;
   const steps = 16;
   const rtl = d.pagination?.direction !== 'ltr';
+  const [x0, y0] = [b.x + margin, b.y + margin];
+  const [x1, y1] = [x0 + free.width, y0 + free.height];
+  const xs = new Set<number>(),
+    ys = new Set<number>();
+  for (let i = 0; i <= steps; i++) {
+    xs.add(x0 + (free.width * i) / steps);
+    ys.add(y0 + (free.height * i) / steps);
+  }
+  // Touching an obstacle on either side: where a gap just wide enough begins and ends.
+  for (const o of blocked.map(mangaCoverBox)) {
+    xs.add(o.x + o.width).add(o.x - size.width);
+    ys.add(o.y + o.height).add(o.y - size.height);
+  }
   const candidates: Bounds[] = [];
-  for (let row = 0; row <= steps; row++)
-    for (let col = 0; col <= steps; col++) {
-      const fx = rtl ? 1 - col / steps : col / steps;
-      candidates.push({
-        x: b.x + margin + free.width * fx,
-        y: b.y + margin + (free.height * row) / steps,
-        width: size.width,
-        height: size.height,
-      });
-    }
+  for (const x of xs)
+    for (const y of ys)
+      if (x >= x0 - 1e-9 && x <= x1 + 1e-9 && y >= y0 - 1e-9 && y <= y1 + 1e-9)
+        candidates.push({ x, y, width: size.width, height: size.height });
   // Nearest to the reading start first (a balloon reads best high in the panel, near its start edge)
   const start = { x: rtl ? b.x + b.width : b.x, y: b.y };
   const distance = (c: Bounds) =>
@@ -156,7 +176,7 @@ export function mangaBalloonPlacement(
       ].every((p) => inside(polygon, p))
     )
       continue;
-    return c;
+    return toStored(c.x, c.y);
   }
   return undefined;
 }
@@ -188,7 +208,13 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
     const descendants = next.elements
       .filter((e) => mangaPanelOf(next, e.id) === panelId && isWithin(next, e.id, id))
       .map((e) => e.id);
-    const to = mangaBalloonPlacement(next, panelId, balloon.bounds, [id, ...descendants]);
+    const to = mangaBalloonPlacement(
+      next,
+      panelId,
+      balloon.bounds,
+      [id, ...descendants],
+      balloon.rotation ?? 0,
+    );
     if (!to) {
       stuck.push(id);
       continue;

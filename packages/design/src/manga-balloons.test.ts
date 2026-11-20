@@ -15,7 +15,11 @@ import {
   moveMangaBalloonsOffKeepOut,
   setMangaKeepOut,
 } from './manga-balloons';
-import { checkPanelRedrawProposal, designPanelRedrawRequest } from './manga-redraw';
+import {
+  checkPanelRedrawProposal,
+  checkPanelRedrawSelection,
+  designPanelRedrawRequest,
+} from './manga-redraw';
 import type { DesignPageProposalRequest } from './page-proposals';
 
 const overlap = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
@@ -222,5 +226,69 @@ describe('#21 redraw one panel', () => {
         proposal([{ type: 'bounds', id: 'g', value: { x: 300, y: 100, width: 100, height: 100 } }]),
       ),
     ).not.toThrow();
+    // A moves the group to the edge (its tail out), B (needing A) brings the tail back: the whole
+    // answer stays in, A alone does not, so selecting A alone is refused (Codex on #28).
+    const parts = {
+      units: [
+        {
+          id: 'a',
+          label: 'a',
+          requires: [],
+          operations: [
+            { type: 'bounds', id: 'g', value: { x: 470, y: 100, width: 100, height: 100 } },
+          ],
+        },
+        {
+          id: 'b',
+          label: 'b',
+          requires: ['a'],
+          operations: [
+            { type: 'bounds', id: 'tail', value: { x: 410, y: 100, width: 160, height: 100 } },
+          ],
+        },
+      ],
+    } as unknown as DesignPageProposalRequest;
+    expect(() => checkPanelRedrawProposal(d, asked, parts)).not.toThrow();
+    expect(() => checkPanelRedrawSelection(d, asked, parts, ['a', 'b'])).not.toThrow();
+    expect(() => checkPanelRedrawSelection(d, asked, parts, ['a'])).toThrow(
+      /tail would move outside panel k1/,
+    );
+  });
+
+  it('moves a turned balloon by where it is drawn (Codex on #28)', () => {
+    let d = page();
+    const b = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 100, height: 150 }, 'A');
+    d = b.apply(d);
+    d = updateElement(b.elementId, { rotation: 90 }).apply(d);
+    const { command, moved } = moveMangaBalloonsOffKeepOut(d);
+    expect(moved).toEqual([b.elementId]);
+    const after = command!.apply(d);
+    const group = after.elements.find((e) => e.id === b.elementId)!;
+    expect(group.rotation).toBe(90);
+    expect(group.bounds).toMatchObject({ width: 100, height: 150 });
+    expect(mangaBalloonOverlaps(after)).toEqual([]);
+    // Drawn 150 wide and 100 tall around the same centre: clear of the face at x = 380.
+    const cx = group.bounds.x + 50;
+    expect(cx + 75).toBeLessThanOrEqual(380 + 1e-9);
+  });
+
+  it('finds a gap just wide enough between two figures (Codex on #28)', () => {
+    let d = page();
+    d = setMangaKeepOut('face', false).apply(d);
+    for (const [id, x, width] of [
+      ['left', 20, 180],
+      ['right', 425, 155],
+    ] as const) {
+      d = insertElement('rectangle', {
+        id,
+        parentId: 'k1',
+        bounds: { x, y: 20, width, height: 360 },
+      }).apply(d);
+      d = setMangaKeepOut(id, true).apply(d);
+    }
+    const at = mangaBalloonPlacement(d, 'k1', { width: 224, height: 144 })!;
+    expect(at).toBeDefined();
+    expect(at.x).toBeGreaterThanOrEqual(200 - 1e-9);
+    expect(at.x + at.width).toBeLessThanOrEqual(425 + 1e-9);
   });
 });

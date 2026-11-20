@@ -4,6 +4,7 @@ import type { DesignContent } from './model';
 import { DesignPageComparison } from './page-comparison';
 import {
   checkPanelRedrawProposal,
+  checkPanelRedrawSelection,
   designPanelRedrawRequest,
   type DesignPanelRedrawRequest,
 } from './manga-redraw';
@@ -41,15 +42,18 @@ export function MangaReview({
   const [notes, setNotes] = useState('');
   const [raw, setRaw] = useState(''),
     [request, setRequest] = useState<DesignPageProposalRequest>(),
+    // The panel a loaded redraw answer must stay in: every selection is checked against it.
+    [redraw, setRedraw] = useState<DesignPanelRedrawRequest>(),
     [selected, setSelected] = useState<string[]>([]),
     [plan, setPlan] = useState<PreparedDesignPageProposal>(),
     [contextJson, setContextJson] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const [comparisonId, setComparisonId] = useState('');
-  function load(value: unknown) {
+  function load(value: unknown, panel?: DesignPanelRedrawRequest) {
     const next = readDesignPageProposal(value);
     setRequest(next);
+    setRedraw(panel);
     setSelected(next.units.map((u) => u.id));
     setPlan(undefined);
   }
@@ -125,7 +129,7 @@ export function MangaReview({
                     const answer = readDesignPageProposal(
                       await host.requestPanelRedraw!(ask, current),
                     );
-                    load(checkPanelRedrawProposal(host.current().content, ask, answer));
+                    load(checkPanelRedrawProposal(host.current().content, ask, answer), ask);
                     setError('');
                   } catch (e) {
                     setError(e instanceof Error ? e.message : String(e));
@@ -226,6 +230,9 @@ export function MangaReview({
                 onClick={() =>
                   run(() => {
                     host.flushInputs();
+                    // A part of a panel redraw stays in the panel too (Codex on #28).
+                    if (redraw)
+                      checkPanelRedrawSelection(host.current().content, redraw, request, selected);
                     setPlan(
                       prepareDesignPageProposal(
                         host.current(),
