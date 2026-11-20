@@ -238,7 +238,7 @@ describe('cad-core fixtures and validation', () => {
     ).toContain('boolean-same-input');
   });
 
-  it('counts 64 active bodies; consumed tools count only toward 1,024 in all (CM-U3)', () => {
+  it('counts cadLimits.bodies active bodies; consumed tools count only toward allBodies (CM-U3, #14)', () => {
     const boxes = (from: number, n: number) => {
       const ids = Array.from({ length: n }, (_, i) => `b${from + i}`);
       return {
@@ -272,25 +272,27 @@ describe('cad-core fixtures and validation', () => {
       booleanFeatureId: 'join',
       placementFeatureId: 'join-placement',
     });
-    // 20 consumed, 20 active: 44 more reach 64 active (84 bodies in all).
-    doc = applyCadOperation(doc, boxes(40, 44));
-    expect(doc.bodies).toHaveLength(84);
+    // 20 consumed, 20 active: the rest reach cadLimits.bodies active (20 more in all).
+    const more = cadLimits.bodies - 20;
+    doc = applyCadOperation(doc, boxes(40, more));
+    expect(doc.bodies).toHaveLength(cadLimits.bodies + 20);
     expect(codes(doc)).toEqual([]);
-    expect(() => applyCadOperation(doc, boxes(84, 1))).toThrow('limit-active-bodies');
-    // The whole list, consumed included, stops at 1,024.
+    expect(() => applyCadOperation(doc, boxes(40 + more, 1))).toThrow('limit-active-bodies');
+    // The whole list, consumed included, stops at cadLimits.allBodies.
     const all = mutate(doc, (d) => {
       const consumed = d.bodies[1];
-      for (let i = 0; i < 941; i++) d.bodies.push({ ...consumed, id: `c${i}` });
+      for (let i = d.bodies.length; i <= cadLimits.allBodies; i++)
+        d.bodies.push({ ...consumed, id: `c${i}` });
     });
     expect(codes(all)).toContain('limit-bodies');
     expect(codes(all)).not.toContain('limit-active-bodies');
   });
 
   it('enforces entity, DAG depth and active-overlap limits', () => {
-    expect(codes(f05Dependencies(126))).toEqual([]);
-    expect(() => f05Dependencies(127)).toThrow('limit-dag-depth');
+    expect(codes(f05Dependencies(cadLimits.dagDepth - 2))).toEqual([]);
+    expect(() => f05Dependencies(cadLimits.dagDepth - 1)).toThrow('limit-dag-depth');
     const many = mutate(f01Empty(), (d) => {
-      d.parameters = Array.from({ length: 513 }, (_, i) => ({
+      d.parameters = Array.from({ length: cadLimits.parameters + 1 }, (_, i) => ({
         id: `p${i}`,
         name: '',
         type: 'length',

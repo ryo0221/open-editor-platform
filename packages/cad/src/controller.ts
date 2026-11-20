@@ -37,6 +37,8 @@ import {
   mm,
   position,
   cadLimits,
+  cadLoftSections,
+  cadSketchLimits,
   type CadAppearance,
   type CadAssetRef,
   type CadTextures,
@@ -440,12 +442,13 @@ export interface CadControllerOptions {
 /**
  * Session budgets (docs/cad/operations.md, Cacheの保持予算; CAD26): main-thread buffers of the
  * current, candidate and history meshes, and GPU buffers of what the viewport shows. The
- * Worker's own limits (64 MiB transferred, one kept evaluation) are enforced in the kernel.
+ * Worker's own limits (cadOutputLimits.bufferBytes transferred, one kept evaluation) are enforced in the kernel.
  */
 export const cadBudgets = Object.freeze({
-  mainBytes: 128 * 1024 * 1024,
+  /** #14: 512 MiB each (was 128 MiB), so a model at the raised output limits stays shown. */
+  mainBytes: 512 * 1024 * 1024,
   mainEntries: 3,
-  gpuBytes: 128 * 1024 * 1024,
+  gpuBytes: 512 * 1024 * 1024,
 });
 /** Bytes of the buffers these meshes hold, each allocation counted once. */
 /** Bytes of node curvature arrays, shared buffers once. */
@@ -564,8 +567,7 @@ const messages: Record<string, string> = {
     'この操作では、1つのbodyが1,024個を超える離れたsolidに分かれるため確定できません。patternの数を減らすか、bodyを分けてください。',
   'solids-touching':
     'この操作では、離れたsolidどうしが辺か頂点だけで接する形になるため確定できません。少し重ねるか、離してください。',
-  'limit-solids':
-    '表示中のbodyのsolidは、合わせて4,096個までです。patternの数を減らすか、いらないbodyを消してください。',
+  'limit-solids': `表示中のbodyのsolidは、合わせて${cadLimits.solids.toLocaleString('en-US')}個までです。patternの数を減らすか、いらないbodyを消してください。`,
   'empty-result': 'この操作では形状が残りません。',
   'boolean-no-overlap':
     '工具のbodyが対象に重なっていないため、差し引けません（接するだけの形を含みます）。',
@@ -604,9 +606,14 @@ const messages: Record<string, string> = {
   'parameter-dependency': 'このparameterの式が読むparameterが正しくありません。',
   'parameter-missing': '式が存在しないparameterを参照しています。',
   'count-range': 'countは1から1,000までの整数にしてください。',
-  'limit-active-bodies':
-    '表示中のbodyは64個までです。Booleanのtoolとして使ったbodyは数えません。いらないbodyを消すか、Booleanでまとめてください。',
-  'limit-bodies': '文書のbodyは、Booleanで使ったものを含めて1,024個までです。',
+  'limit-active-bodies': `表示中のbodyは${cadLimits.bodies.toLocaleString('en-US')}個までです。Booleanのtoolとして使ったbodyは数えません。いらないbodyを消すか、Booleanでまとめるか、部品の版に分けて組立にしてください。`,
+  'limit-bodies': `文書のbodyは、Booleanで使ったものを含めて${cadLimits.allBodies.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-features': `文書のfeatureは${cadLimits.features.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-profiles': `文書のprofileは${cadLimits.profiles.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-sketches': `文書のsketchは${cadSketchLimits.sketches.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-parameters': `文書のparameterは${cadLimits.parameters.toLocaleString('en-US')}個までです。`,
+  'limit-namedViews': `保存した視点は${cadLimits.namedViews.toLocaleString('en-US')}個までです。`,
+  'limit-bytes': `文書の大きさが上限（${cadLimits.contentBytes / 2 ** 20} MiB）を超えます。部品の版に分けて組立にしてください。`,
   'limit-expression-nodes': '式が長すぎます（1式に256項目、文書全体で16,384項目まで）。',
   'limit-expression-depth': '式の入れ子が深すぎます（32段まで）。',
   'limit-parameter-depth': 'parameterの式のつながりが長すぎます（64段まで）。',
@@ -864,7 +871,7 @@ const messages: Record<string, string> = {
   'section-region': '断面のsketchに閉じた領域がありません。',
   'section-holes': 'loft・sweepの断面には穴のない領域を使ってください。',
   'loft-sections': 'loftには2つ以上の断面が要ります。',
-  'limit-loft-sections': 'loftの断面は32個までです。',
+  'limit-loft-sections': `loftの断面は${cadLoftSections}個までです。`,
   'loft-same-sketch': 'loftの断面はそれぞれ別のsketch（別の平面）にしてください。',
   'derived-section-source': '派生断面は、同じloftのそれより前のsketchの断面から作ってください。',
   'derived-section-scale': '派生断面の倍率は0.001〜1000にしてください。',

@@ -111,6 +111,7 @@ import {
   cadProfileKinds,
   type CadProfileKind,
 } from '@editor-platform/cad-core';
+import { limitWarningText } from './limit-warning';
 import {
   describeCode,
   referenceRows,
@@ -7139,6 +7140,16 @@ function Surface({
                 Stop
               </button>
             )}
+            {(() => {
+              const limits = limitWarningText(snapshot.content);
+              return (
+                limits && (
+                  <span role="note" className="cad-diagnostic" data-testid="cad-limit-warning">
+                    {limits}
+                  </span>
+                )
+              );
+            })()}
             {partsLeft && (
               <span data-testid="cad-parts-progress">
                 部品 {partsLeft.done} / {partsLeft.total} を計算中

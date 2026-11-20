@@ -2224,7 +2224,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       return [...c.d, { code: 'collection', path: `$.${key}`, severity: 'error' }];
     if ((value[key] as unknown[]).length > max) c.error(`limit-${key}`, `$.${key}`);
   }
-  // CM-U3: 64 active bodies; consumed tools stay in the history up to `allBodies` in all.
+  // CM-U3: `cadLimits.bodies` active bodies; consumed tools stay in the history up to `allBodies` in all.
   const activeBodies = (value.bodies as unknown[]).filter(
     (b) => !record(b) || b.state !== 'consumed',
   ).length;

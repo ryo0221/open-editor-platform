@@ -41,16 +41,16 @@ export interface WorkerKernelPortOptions {
   build: CadKernelBuild;
   /** Forced stop when a cancel is not acknowledged in time (initial deadline 500 ms). */
   cancelAckMs?: number;
-  /** Forced stop for one job, Worker start-up included (initial limit 30 s). */
+  /** Forced stop for one job, Worker start-up included (`cadKernelTimeouts.jobMs`). */
   jobTimeoutMs?: number;
   /**
-   * SU1: the job limit of a split evaluation (initial 120 s). Its jobs end at a feature boundary
+   * SU1: the job limit of a split evaluation (`cadKernelTimeouts.sliceJobMs`). Its jobs end at a feature boundary
    * after about `sliceMs`, so only one long feature (one large Boolean) runs up to this.
    */
   sliceJobTimeoutMs?: number;
   /**
    * CR7f (#846): what a STEP read adds to the job limit for each MiB of the file (12 s).
-   * A read cannot pause, and a 256 MiB file (cadLimits.stepBytes) takes longer than 30 s.
+   * A read cannot pause, and a file at cadLimits.stepBytes takes longer than the job limit.
    * #812: 5 s was too short for JAMA's 62.4 MiB instrument panel, read in about 9.3 s a MiB.
    */
   stepReadMsPerMiB?: number;
@@ -75,7 +75,7 @@ export interface WorkerKernelPortOptions {
    * at a feature boundary; the job limit still applies to each job.
    */
   sliceMs?: number;
-  /** CM-4: the limit of one evaluation over all its jobs (initial 5 min). */
+  /** CM-4: the limit of one evaluation over all its jobs (`cadKernelTimeouts.totalMs`). */
   totalTimeoutMs?: number;
   /** Milliseconds for `totalTimeoutMs`; `performance.now` by default. */
   now?: () => number;
@@ -103,6 +103,16 @@ export interface WorkerKernelPortOptions {
  * The asset kinds an evaluation reads, sent with the request: the BRep and PMI of an import, and
  * an assembly's `assembly-pmi` (PMI-5b, checked when the assembly evaluates).
  */
+/**
+ * Default job limits (#14, 2026-11-20): one job 2 min (was 30 s), one job of a split evaluation
+ * 5 min (was 2 min), one split evaluation over all its jobs 20 min (was 5 min). A large Boolean
+ * of a whole car body ran past 30 s; a Host may still pass smaller limits.
+ */
+export const cadKernelTimeouts = Object.freeze({
+  jobMs: 120_000,
+  sliceJobMs: 300_000,
+  totalMs: 1_200_000,
+});
 const evaluatedAssetKinds = new Set(['normalized-brep', 'pmi', 'assembly-pmi']);
 
 export class CadEvaluationMemory {
@@ -763,7 +773,7 @@ export class WorkerKernelPort implements CadKernelPort {
     // An edit's evaluation waits for an export to end, as it would for one long job (CAD21).
     if (job.export ? this.waitingExport : this.waiting)
       return this.finish(job, () => job.fail('superseded', true));
-    if (this.now() - job.began! >= (this.options.totalTimeoutMs ?? 300_000)) {
+    if (this.now() - job.began! >= (this.options.totalTimeoutMs ?? cadKernelTimeouts.totalMs)) {
       // The Worker ends the paused evaluation as cancelled.
       this.worker!.postMessage({ type: 'cancel', requestId: job.requestId });
       return this.finish(job, () => job.fail('timeout', false, job.elementId));
@@ -782,20 +792,22 @@ export class WorkerKernelPort implements CadKernelPort {
     const message = job.message;
     if (message.type === 'import-step' || message.type === 'import-step-assembly')
       return (
-        (this.options.jobTimeoutMs ?? 30_000) +
+        (this.options.jobTimeoutMs ?? cadKernelTimeouts.jobMs) +
         Math.round((message.bytes.byteLength / 2 ** 20) * (this.options.stepReadMsPerMiB ?? 12_000))
       );
     if (message.type === 'step-assembly') {
       let bytes = 0;
       for (const brep of Object.values(message.breps)) bytes += brep.byteLength;
       return (
-        (this.options.jobTimeoutMs ?? 30_000) +
+        (this.options.jobTimeoutMs ?? cadKernelTimeouts.jobMs) +
         Math.round((bytes / 2 ** 20) * (this.options.stepWriteMsPerMiB ?? 4_000))
       );
     }
-    if (message.type !== 'evaluate' || !message.slice) return this.options.jobTimeoutMs ?? 30_000;
-    const each = this.options.sliceJobTimeoutMs ?? 120_000;
-    const left = (this.options.totalTimeoutMs ?? 300_000) - (this.now() - job.began!);
+    if (message.type !== 'evaluate' || !message.slice)
+      return this.options.jobTimeoutMs ?? cadKernelTimeouts.jobMs;
+    const each = this.options.sliceJobTimeoutMs ?? cadKernelTimeouts.sliceJobMs;
+    const left =
+      (this.options.totalTimeoutMs ?? cadKernelTimeouts.totalMs) - (this.now() - job.began!);
     return Math.max(0, Math.min(each, left));
   }
   private now() {
