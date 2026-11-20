@@ -127,14 +127,17 @@ export function useDataGrid(props: DataGridProps) {
       );
     }
   }
-  function edit(initial?: string) {
-    if (!at || readOnly) return;
-    const column = data.columns.find((c) => c.id === at.columnId),
-      row = data.rows.find((r) => r.id === at.rowId);
+  /** Edit the active cell, or `cell` when given (a double-click edits the cell it hit, not whatever is active). */
+  function edit(initial?: string, cell?: CellAddress) {
+    const address = cell ?? at;
+    if (!address || readOnly) return;
+    const column = data.columns.find((c) => c.id === address.columnId),
+      row = data.rows.find((r) => r.id === address.rowId);
     if (!column || !row || column.type === 'formula' || column.readOnly) return;
+    if (cell && (cell.rowId !== at?.rowId || cell.columnId !== at?.columnId)) onActive(cell);
     committing.current = false;
     setEditing({
-      address: at,
+      address,
       value: initial ?? displayCell(data, row, column),
       base: canonicalJson(row),
       columns: canonicalJson(data.columns),

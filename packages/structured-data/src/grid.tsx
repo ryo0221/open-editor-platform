@@ -70,20 +70,19 @@ export function DataGrid(props: DataGridProps) {
     >
       <GridHeader grid={grid} view={view} onView={onView} onField={onField} />
       <div style={{ height: start * 36, width: totalWidth }} />
-      {entries
-        .slice(start, end)
-        .map((entry) =>
-          'group' in entry ? (
-            <GridGroupRow
-              key={`group:${entry.group}`}
-              entry={entry}
-              totalWidth={totalWidth}
-              aggregate={view.summary.aggregate}
-            />
-          ) : (
-            <GridRow key={entry.row.id} grid={grid} props={props} row={entry.row} r={entry.index} />
-          ),
-        )}
+      {entries.slice(start, end).map((entry, i) =>
+        'group' in entry ? (
+          <GridGroupRow
+            // Two separate groups can show the same text (raw values that display alike), so the key is the position
+            key={`group:${start + i}:${entry.group}`}
+            entry={entry}
+            totalWidth={totalWidth}
+            aggregate={view.summary.aggregate}
+          />
+        ) : (
+          <GridRow key={entry.row.id} grid={grid} props={props} row={entry.row} r={entry.index} />
+        ),
+      )}
       <div style={{ height: (entries.length - end) * 36, width: totalWidth }} />
       {!rows.length && (
         <div className="ep-data-empty">No records. Add records or paste TSV into this grid.</div>
