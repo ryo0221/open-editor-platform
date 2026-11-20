@@ -4671,6 +4671,10 @@ test('write the whole car as STEP AP242 and read it back (CR7f)', async ({ page 
   await exporting.getByLabel(/^STEP/).check();
   const started = Date.now();
   await exporting.getByRole('button', { name: 'Prepare file' }).click();
+  // #17: written in stages (each part, then the file), each its own kernel job, with progress.
+  await expect(exporting.getByRole('status', { name: 'Export progress' })).toContainText(
+    /Stage \d+ of \d+: /,
+  );
   const exported = exporting.getByLabel('Export report');
   await expect(exported.or(page.locator('.cad-diagnostic[role=alert]')).first()).toBeVisible({
     timeout: 900_000,

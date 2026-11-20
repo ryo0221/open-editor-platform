@@ -35,7 +35,12 @@ import {
 import { editedPlacement, mirroredPlacement, placementFields, validPlacement } from './placement';
 import { partPath, partsGroup } from './assembly-view';
 import { cadInputState } from './binding';
-import { CadController, cadFailureReport, describeCode } from './controller';
+import {
+  CadController,
+  cadFailureReport,
+  describeCode,
+  type CadExportStage,
+} from './controller';
 
 const mesh = (bodyId: string, bytes = 12): CadMesh => ({
   bodyId,
@@ -961,7 +966,26 @@ describe('STEP AP242 export of an assembly (R2b-5, CAD52)', () => {
     expect(await assembly.exportStep('Cart')).toBeUndefined();
     expect(controller.getSnapshot().diagnostic?.message).toBe(describeCode('step-parts-pending'));
     await port.idle();
-    const file = await assembly.exportStep('Cart');
+    // #17: each stage is its own kernel job, heard as it starts; a stop between stages ends it.
+    const stopping = new AbortController();
+    const heard: CadExportStage[] = [];
+    expect(
+      await assembly.exportStep('Cart', {
+        signal: stopping.signal,
+        onStage: (stage) => (heard.push(stage), stopping.abort()),
+      }),
+    ).toBeUndefined();
+    expect(controller.getSnapshot().diagnostic?.code).toBe('export-cancelled');
+    expect(heard).toEqual([{ done: 0, total: 3, label: 'Plate' }]);
+    expect(written).toHaveLength(0);
+    breps.length = 0;
+    const stages: CadExportStage[] = [];
+    const file = await assembly.exportStep('Cart', { onStage: (stage) => stages.push(stage) });
+    expect(stages).toEqual([
+      { done: 0, total: 3, label: 'Plate' },
+      { done: 1, total: 3, label: 'Shaft' },
+      { done: 2, total: 3, label: 'STEP file' },
+    ]);
     // The plate and the shaft have shapes; the pair and the root only place them.
     expect(breps).toEqual([fixture.plate.contentHash, fixture.shaft.contentHash]);
     expect(written).toHaveLength(1);
