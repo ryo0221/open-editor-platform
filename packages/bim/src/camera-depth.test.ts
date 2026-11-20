@@ -14,4 +14,9 @@ describe('near and far planes follow the camera (#19)', () => {
     expect(far).toBeGreaterThanOrEqual(8_000_000);
     for (const d of [0, NaN, -1]) expect(bimCameraDepth(d, 1_000).near).toBeGreaterThan(0);
   });
+  it('reaches a scene that lies beyond a target outside it (Codex on #30)', () => {
+    // A 10 m scene round the origin, seen from 100 m south looking at a point 100 mm ahead.
+    const { far } = bimCameraDepth(100, 10_000, 100_000);
+    expect(far).toBeGreaterThan(110_000);
+  });
 });

@@ -84,10 +84,16 @@ const noRaycast = () => {};
  * #19: the near and far planes for a camera `distance` (mm) from what it looks at in a scene of
  * `sceneRadius` (mm): near a thousandth of the distance (so a part a few millimetres across, seen
  * from a few centimetres, is not cut), far past the whole scene seen from there.
+ * `toScene` is the camera's distance to the scene's centre: a camera looking at a point outside
+ * the scene still sees the scene's far side (Codex on #30).
  */
-export function bimCameraDepth(distance: number, sceneRadius: number) {
+export function bimCameraDepth(distance: number, sceneRadius: number, toScene = 0) {
   const d = distance > 0 && Number.isFinite(distance) ? distance : 1;
-  return { near: Math.max(0.01, d / 1000), far: Math.max(d * 100, (d + sceneRadius) * 2) };
+  const c = toScene > 0 && Number.isFinite(toScene) ? toScene : 0;
+  return {
+    near: Math.max(0.01, d / 1000),
+    far: Math.max(d * 100, (d + sceneRadius) * 2, (c + sceneRadius) * 1.1),
+  };
 }
 
 export class BimViewport {
@@ -96,6 +102,8 @@ export class BimViewport {
   private readonly perspective = new PerspectiveCamera(40, 1, 10, 2_000_000);
   /** #19: half the size of everything shown (mm); the far plane always reaches past it. */
   private sceneRadius = 1_000_000;
+  /** #19: the middle of everything shown (mm). */
+  private readonly sceneCenter = new Vector3();
   private readonly orthographic = new OrthographicCamera(-1, 1, 1, -1, 1, 4_000_000);
   private camera: PerspectiveCamera | OrthographicCamera = this.perspective;
   private controls: OrbitControls;
@@ -178,6 +186,7 @@ export class BimViewport {
     if (bounds) {
       const [lo, hi] = bounds;
       this.sceneRadius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1_000);
+      this.sceneCenter.set((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
       this.followDepth();
     }
     // A plan keeps its framing while drawing; only Fit view or another level reframes it.
@@ -199,7 +208,10 @@ export class BimViewport {
     const center = new Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
     // #19: a sub-centimetre part frames as closely as a building (1 mm at least, not 1 m).
     const radius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1);
-    if (!keepDirection) this.sceneRadius = Math.max(radius, 1_000);
+    if (!keepDirection) {
+      this.sceneRadius = Math.max(radius, 1_000);
+      this.sceneCenter.copy(center);
+    }
     if (this.plan) {
       center.z = this.plan.elevationMm;
       // The span is the half height; a canvas narrower than tall shows less width than that.
@@ -467,6 +479,7 @@ export class BimViewport {
     const { near, far } = bimCameraDepth(
       this.perspective.position.distanceTo(this.controls.target),
       this.sceneRadius,
+      this.perspective.position.distanceTo(this.sceneCenter),
     );
     if (near === this.perspective.near && far === this.perspective.far) return;
     this.perspective.near = near;
