@@ -4,7 +4,7 @@
  * A motion starts in a saved form and moves to each step's form over the step's duration; camera
  * keys are taken from the view at the time on the timeline.
  */
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import {
   cadMotionEasings,
   cadMotionLimits,
@@ -18,6 +18,7 @@ import {
   type CadMotionEasing,
 } from '@editor-platform/cad-core';
 import { browserVideoEncoding, encodeMp4, videoSizes } from '@editor-platform/character/video';
+import { useEditorInput } from '@editor-platform/editor-ui';
 import type { CadAssembly } from './assembly';
 import type { CadSnapshot } from './controller';
 import type { CadViewport } from './viewport';
@@ -30,6 +31,13 @@ const easingLabel: Record<CadMotionEasing, string> = {
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 const fileName = (name: string, motion: string, size: string) =>
   `${`${name}-${motion}`.replace(/[\\/:*?"<>|\s]+/g, '-')}-${size}.mp4`;
+/** The motion with new steps; camera keys past the new end are dropped (Codex on #34). */
+function withSteps(d: CadMotion, steps: CadMotion['steps']): CadMotion {
+  const total = motionDurationMs({ steps });
+  const camera = d.camera?.filter((k) => k.atMs <= total);
+  const { camera: _old, ...rest } = d;
+  return { ...rest, steps, ...(camera?.length ? { camera } : {}) };
+}
 
 export function MotionsSection({
   assembly,
@@ -56,7 +64,26 @@ export function MotionsSection({
   const [recording, setRecording] = useState<{ done: number; total: number }>();
   const stop = useRef<AbortController>(undefined);
   const shown = useRef(false);
+  // Parts still evaluating are drawn as boxes: no video of them yet (Codex on #34).
+  const { progress: partsLeft } = useSyncExternalStore(assembly.subscribe, assembly.getSnapshot);
+  // The content a recording runs on: an edit during it ends the recording (Codex on #34).
+  const contentNow = useRef(snapshot.contentHash);
+  contentNow.current = snapshot.contentHash;
   const disabled = snapshot.readOnly || snapshot.busy || !!recording;
+  // A motion being edited is a pending input: save, export and switching wait for Save motion or
+  // Cancel, so it is never lost unseen (Codex on #34).
+  useEditorInput({
+    label: 'Motion',
+    read: () => ({ dirty: !!draft }),
+    prepare: () => {
+      if (draft)
+        throw new Error(
+          '動きの編集が保存されていません。「Save motion」か「Cancel」を押してから、もう一度操作してください。',
+        );
+      return () => {};
+    },
+    focus: () => document.querySelector<HTMLElement>('[aria-label="Motion name"]')?.focus(),
+  });
 
   /** The motion's frame at `t` in the view; false where it cannot be shown. */
   const show = (m: CadMotion, t: number) => {
@@ -80,9 +107,11 @@ export function MotionsSection({
     if (!draft || recording) return;
     if (!show(draft, timeMs)) endShow();
   }, [draft, timeMs, doc, joints]);
+  const draftTotal = draft ? motionDurationMs(draft) : 0;
+  // The clock restarts from where it is when the steps change, with the new length (Codex on #34).
   useEffect(() => {
     if (!playing || !draft) return;
-    const total = motionDurationMs(draft);
+    const total = draftTotal;
     const start = performance.now() - timeMs;
     let frame = requestAnimationFrame(function tick(now) {
       const t = Math.min(total, now - start);
@@ -91,7 +120,7 @@ export function MotionsSection({
       else frame = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(frame);
-  }, [playing]);
+  }, [playing, draftTotal]);
 
   if (forms.length < 2 && !motions.length) return null;
   const stale = (m: CadMotion) => motionStaleForms(doc, m).length > 0;
@@ -125,15 +154,14 @@ export function MotionsSection({
   const remove = (id: string) => void assembly.setMotions(motions.filter((m) => m.id !== id));
   const patch = (p: Partial<CadMotion>) => setDraft((d) => (d ? { ...d, ...p } : d));
   const patchStep = (i: number, p: Partial<CadMotion['steps'][number]>) =>
-    setDraft((d) => {
-      if (!d) return d;
-      const steps = d.steps.map((s, j) => (j === i ? { ...s, ...p } : s));
-      const total = motionDurationMs({ steps });
-      // Camera keys past the new end are dropped.
-      const camera = d.camera?.filter((k) => k.atMs <= total);
-      const { camera: _old, ...rest } = d;
-      return { ...rest, steps, ...(camera?.length ? { camera } : {}) };
-    });
+    setDraft((d) =>
+      d
+        ? withSteps(
+            d,
+            d.steps.map((s, j) => (j === i ? { ...s, ...p } : s)),
+          )
+        : d,
+    );
   const addKey = () => {
     const v = view.current?.currentView();
     if (!v || !draft) return;
@@ -153,6 +181,9 @@ export function MotionsSection({
     const v = view.current;
     const dims = videoSizes.find((s) => s.label === size) ?? videoSizes[0];
     if (!v || !joints) return;
+    if (assembly.getSnapshot().progress)
+      return setNote('部品の形を計算中です。計算が終わってから、もう一度書き出してください。');
+    const startHash = snapshot.contentHash;
     const total = motionDurationMs(m);
     const ticks = Array.from({ length: Math.floor((total / 1000) * fps) + 1 }, (_, i) => i);
     const ctl = new AbortController();
@@ -166,6 +197,8 @@ export function MotionsSection({
         {
           begin: (w, h) => v.beginCapture(w, h),
           frame: async (tick, timestamp, duration) => {
+            if (contentNow.current !== startHash || assembly.getSnapshot().progress)
+              throw new Error('書き出しの途中で組立てが変わりました。もう一度書き出してください。');
             if (!show(m, Math.min(total, (tick * 1000) / fps)))
               throw new Error('この動きは表示できません。');
             return new VideoFrame(v.captureCanvas(), { timestamp, duration });
@@ -222,7 +255,7 @@ export function MotionsSection({
                 </button>
                 <button
                   type="button"
-                  disabled={disabled || !!draft || stale(m) || !joints}
+                  disabled={disabled || !!draft || stale(m) || !joints || !!partsLeft}
                   onClick={() => void record(m)}
                 >
                   Export video
@@ -315,9 +348,14 @@ export function MotionsSection({
                 <button
                   type="button"
                   disabled={!!recording || draft.steps.length < 2}
-                  onClick={() =>
-                    setDraft({ ...draft, steps: draft.steps.filter((_, j) => j !== i) })
-                  }
+                  onClick={() => {
+                    const next = withSteps(
+                      draft,
+                      draft.steps.filter((_, j) => j !== i),
+                    );
+                    setDraft(next);
+                    setTimeMs((t) => Math.min(t, motionDurationMs(next)));
+                  }}
                 >
                   Remove step {i + 1}
                 </button>
