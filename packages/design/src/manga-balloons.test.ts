@@ -255,6 +255,56 @@ describe('#21 redraw one panel', () => {
     );
   });
 
+  it('plays text changes too, so text that grows past the panel is refused (Codex on #28)', () => {
+    let d = page();
+    d = insertElement('group', {
+      id: 'row',
+      parentId: 'k1',
+      bounds: { x: 40, y: 220, width: 100, height: 40 },
+    }).apply(d);
+    d = updateElement('row', {
+      layout: { direction: 'row', gap: 0, padding: 0, align: 'start', sizing: 'hug' },
+    }).apply(d);
+    d = insertElement('text', {
+      id: 'line',
+      parentId: 'row',
+      bounds: { x: 40, y: 220, width: 100, height: 40 },
+    }).apply(d);
+    d = updateElement('line', { text: 'あ', sizing: 'hug' }).apply(d);
+    const asked = designPanelRedrawRequest(d, 'k1', '');
+    const answer = {
+      units: [
+        {
+          id: 'u',
+          label: 'u',
+          requires: [],
+          operations: [
+            { type: 'text', id: 'line', value: 'あ'.repeat(200) },
+            { type: 'bounds', id: 'face', value: { x: 390, y: 30, width: 180, height: 160 } },
+          ],
+        },
+      ],
+    } as unknown as DesignPageProposalRequest;
+    expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(/would move outside panel k1/);
+  });
+
+  it('sees a balloon by all of its parts, for warnings and moves (Codex on #28)', () => {
+    let d = page();
+    const b = insertDesignSpeechBalloon('k1', { x: 200, y: 40, width: 150, height: 100 }, 'A');
+    d = b.apply(d);
+    const outline = d.elements.find((e) => e.parentId === b.elementId && e.type !== 'text')!;
+    d = updateElement(outline.id, {
+      bounds: { ...outline.bounds, width: 300 },
+    }).apply(d);
+    expect(mangaBalloonOverlaps(d).map((o) => o.balloonId)).toEqual([b.elementId]);
+    const { command, moved } = moveMangaBalloonsOffKeepOut(d);
+    expect(moved).toEqual([b.elementId]);
+    const after = command!.apply(d);
+    expect(mangaBalloonOverlaps(after)).toEqual([]);
+    const widened = after.elements.find((e) => e.id === outline.id)!;
+    expect(widened.bounds.x + widened.bounds.width).toBeLessThanOrEqual(380 + 1e-9);
+  });
+
   it('moves a turned balloon by where it is drawn (Codex on #28)', () => {
     let d = page();
     const b = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 100, height: 150 }, 'A');

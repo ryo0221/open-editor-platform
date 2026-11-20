@@ -1,5 +1,6 @@
 import { descendantIds, type Bounds } from '@editor-platform/editor-core';
-import { transformElements, type DesignContent } from './model';
+import type { DesignContent } from './model';
+import { designPageEditCommand } from './pagination';
 import { isMangaBalloon, isMangaKeepOut, mangaCoverBox } from './manga-balloons';
 import type { DesignPageProposalRequest } from './page-proposals';
 
@@ -114,18 +115,13 @@ export function checkPanelRedrawSelection(
     order.push(id);
   };
   proposal.units.filter((u) => selected.includes(u.id)).forEach((u) => visit(u.id));
+  // Every selected change, played as the review applies it: a text change relays out the text
+  // around it, so it can move or grow elements too (Codex on #28).
   let next = d;
   for (const id of order)
     for (const op of units.get(id)!.operations) {
-      if (op.type !== 'bounds') continue;
-      const target = next.elements.find((e) => e.id === op.id);
-      if (!target) continue;
-      next = transformElements([op.id], {
-        dx: op.value.x - target.bounds.x,
-        dy: op.value.y - target.bounds.y,
-        dw: op.value.width - target.bounds.width,
-        dh: op.value.height - target.bounds.height,
-      }).apply(next);
+      if (!next.elements.some((e) => e.id === op.id)) continue;
+      next = designPageEditCommand([op]).apply(next);
     }
   if (next === d) return;
   const before = new Map(d.elements.map((e) => [e.id, e]));
