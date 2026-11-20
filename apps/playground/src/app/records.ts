@@ -153,6 +153,12 @@ const cadResourceParts: OutOfLineParts<StoredArtifact> = {
  * image the same as a version's shares that part, and any other is keyed by its own hash.
  */
 const inlineMarker = '\u0000part:';
+/**
+ * A content string that itself starts like a marker (or like an escaped one) is stored with this
+ * prefix in front and read back without it, so ordinary content never reads as a part.
+ */
+const escapeMarker = '\u0000esc:';
+const needsEscape = (s: string) => s.startsWith(inlineMarker) || s.startsWith(escapeMarker);
 const isInlineImage = (v: unknown): v is string =>
   typeof v === 'string' && v.length >= resourcePartChars && v.startsWith('data:');
 /** The same value with each string `map` changes replaced; unchanged branches keep their identity. */
@@ -212,6 +218,7 @@ const inlineImageParts: OutOfLineParts<StoredArtifact> = {
     const versions = value.versions.map((v) => {
       let n = 0;
       const content = mapStrings(v.content, (s) => {
+        if (needsEscape(s)) return escapeMarker + s;
         if (!isInlineImage(s)) return undefined;
         const key = `inline-image:${v.versionId}:${n++}`;
         const same = known.get(s.length) ?? [];
@@ -222,13 +229,15 @@ const inlineImageParts: OutOfLineParts<StoredArtifact> = {
       return content === v.content ? v : { ...v, content: content as typeof v.content };
     });
     const draftContent = mapStrings(value.draft.content, (s) => {
+      if (needsEscape(s)) return escapeMarker + s;
       if (!isInlineImage(s)) return undefined;
       const same = known.get(s.length)?.find((k) => k.text === s);
       return same
         ? markerOf(same.key, s.length)
         : put(`inline-image:draft:${s.length}:${hash53(s)}`, s);
     });
-    if (!parts.size && draftContent === value.draft.content) return { stub: value, parts };
+    if (draftContent === value.draft.content && versions.every((v, i) => v === value.versions[i]))
+      return { stub: value, parts };
     return {
       stub: {
         ...value,
@@ -252,6 +261,7 @@ const inlineImageParts: OutOfLineParts<StoredArtifact> = {
   join(stub, parts) {
     if (!stub.draft || !Array.isArray(stub.versions)) return stub;
     const restore = (s: string) => {
+      if (s.startsWith(escapeMarker)) return s.slice(escapeMarker.length);
       const m = readMarker(s);
       if (!m) return undefined;
       const chunks = chunkKeys(m.key, m.chars).map((k) => parts.get(k));

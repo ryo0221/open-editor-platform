@@ -226,6 +226,27 @@ describe('#22 inline images are stored apart from their record', () => {
     expect(resourceParts.split(small).stub).toBe(small);
   });
 
+  it('keeps content that looks like a marker unchanged (Codex on #27)', () => {
+    const literals = ['\u0000part:1:literal', '\u0000esc:\u0000part:2:x', '\u0000esc:plain'];
+    for (const text of literals) {
+      const value = design(text, [text]);
+      const { stub, parts } = resourceParts.split(value);
+      expect(parts.size).toBe(0);
+      expect(resourceParts.keys(stub)).toEqual([]);
+      expect(resourceParts.join(stub, parts)).toEqual(value);
+    }
+    // Next to a real part too.
+    const big = image('A', resourcePartChars);
+    const value = design(big, [big]);
+    (value.draft.content as { elements: { id: string; src: string }[] }).elements.push({
+      id: 'note',
+      src: literals[0]!,
+    });
+    const { stub, parts } = resourceParts.split(value);
+    expect(resourceParts.keys(stub)).toEqual(['inline-image:v0:0']);
+    expect(resourceParts.join(stub, parts)).toEqual(value);
+  });
+
   it('reads a design back whole through the storage, with a missing part as an empty image', async () => {
     const storage = new IndexedDBStorage<StoredArtifact>(
       `test-${crypto.randomUUID()}`,
