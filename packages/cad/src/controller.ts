@@ -2516,7 +2516,8 @@ export class CadController {
       // CR3c: a trim's chains that cut nothing or split the kept sheet are named.
       const chains = trimChains(prepared.candidate, prepared.evaluation);
       if (chains && shown) shown.message += ` 該当する閉じた線：${chains}`;
-    } else if (prepared.status === 'rejected') this.fail(prepared.code);
+    } else if (prepared.status === 'rejected')
+      this.fail(prepared.code, undefined, prepared.candidate);
     // A stale result superseded by a newer run leaves the outcome to it. Cancelled by history or
     // a Host sync instead, it resets the Inspector so no field keeps the cancelled value.
     else if (operation === this.operation) this.rejections++;

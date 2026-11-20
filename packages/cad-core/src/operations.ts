@@ -1127,6 +1127,15 @@ function generatedName(prefix: string, name: string, suffix: string) {
   return `${prefix}${[...name].slice(0, room).join('')}${suffix}`;
 }
 export function applyCadOperation(doc: CadDocument, op: CadOperation): CadDocument {
+  const next = draftCadOperation(doc, op);
+  assertCad(next);
+  return next;
+}
+/**
+ * The document an operation produces, before validation: for explaining why a refused edit was
+ * refused (#13). Never store or evaluate it; `applyCadOperation` is the validated form.
+ */
+export function draftCadOperation(doc: CadDocument, op: CadOperation): CadDocument {
   const solved = op.type === 'withSolvedPoses' ? op : undefined;
   const next = apply(
     doc,
@@ -1136,6 +1145,5 @@ export function applyCadOperation(doc: CadDocument, op: CadOperation): CadDocume
   settleMass(doc, next);
   settleAssembly(next);
   if (solved) writeSolvedPoses(next, solved.poses);
-  assertCad(next);
   return next;
 }

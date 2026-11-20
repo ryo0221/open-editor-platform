@@ -127,6 +127,16 @@ describe('CadCoordinator prepare / apply (CAD03)', () => {
       status: 'rejected',
       code: expect.stringContaining('dimension-range'),
     });
+    // #13: a validation refusal carries the refused document (unvalidated) so it can be explained.
+    const refused = await coordinator.prepare({
+      type: 'setParameter',
+      parameterId: 'W',
+      value: -1,
+    });
+    expect(
+      refused.status === 'rejected' && refused.candidate?.parameters.find((p) => p.id === 'W'),
+    ).toMatchObject({ id: 'W' });
+    expect(refused.status === 'rejected' && refused.candidate).not.toBe(session.content);
     expect(session.canUndo).toBe(false);
   });
 });

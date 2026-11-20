@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { f14Patterns, f15Loft, f16Sketch, type CadDocument } from '@editor-platform/cad-core';
+import {
+  f14Patterns,
+  f15Loft,
+  f16Sketch,
+  type CadDocument,
+  type CadSketch,
+} from '@editor-platform/cad-core';
 import { cadFailureHint, regionCrossing } from './failure-hints';
 import { cadFailureReport, describeFailure } from './controller';
 
@@ -61,6 +67,41 @@ describe('#13 shape-evaluation failures as a typed reason, elements and hint', (
     ).toBeUndefined();
   });
 
+  it('a spline joined to the next element shares its end there: the real crossing is named, not the join', () => {
+    const doc = bowTie();
+    const s = doc.sketches.find((x) => x.id === 'loft-base')!;
+    const i = s.entities.findIndex((e) => e.id === 'l0');
+    s.entities[i] = {
+      type: 'spline',
+      id: 'l0',
+      poles: ['p0', 'pm', 'p1'],
+      degree: 2,
+    } as CadSketch['entities'][number];
+    s.solved.pm = [-5, -5];
+    expect(regionCrossing(s, { outer: ['l0', 'l1', 'l2', 'l3'], holes: [] })).toMatchObject({
+      a: 'l0',
+      b: 'l2',
+    });
+  });
+
+  it('a refused edit names no element: the validator path finds the feature and its crossing', () => {
+    const r = cadFailureHint(
+      bowTie(),
+      'cad-invalid:region-self-intersection@$.features[0].args.sections[0].region.outer[0]',
+    );
+    expect(r).toMatchObject({ reason: 'profile-crossing', elements: ['l0', 'l2'] });
+  });
+
+  it('loft starts are compared in world space: a top sketch turned 180° about Z with its start turned too is aligned', () => {
+    const doc = turnedTop();
+    const top = doc.sketches.find((x) => x.id === 'loft-top')!;
+    if (!('orientation' in top.plane)) throw new Error('plane');
+    top.plane.orientation = [0, 0, 1, 0];
+    expect(cadFailureHint(doc, 'kernel-exception:BRepFill', 'loft-feature')).toMatchObject({
+      reason: 'loft-sections',
+    });
+  });
+
   it('a self-crossing spline names the spline', () => {
     const sketch = f16Sketch('crossing');
     const doc = { ...f15Loft(), sketches: [sketch] } as CadDocument;
@@ -73,6 +114,11 @@ describe('#13 shape-evaluation failures as a typed reason, elements and hint', (
     const mirror = doc.features.find((f) => f.type === 'mirror')!;
     const r = cadFailureHint(doc, 'kernel-exception:BOPAlgo', mirror.id);
     expect(r).toMatchObject({ reason: 'mirrored-part', elements: [mirror.id] });
+    // Two mirrors (m1 then m2): a failure of m2 names m2, not the earlier m1.
+    expect(cadFailureHint(doc, 'kernel-exception:BOPAlgo', 'm2')).toMatchObject({
+      reason: 'mirrored-part',
+      elements: ['m2'],
+    });
     // Unknown classes have no hint.
     expect(cadFailureHint(f15Loft(), 'output-limit', 'loft-feature')).toBeUndefined();
   });

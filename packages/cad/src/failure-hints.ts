@@ -61,24 +61,39 @@ const angleOf = (pts: Pt[]) => {
   const c = pts.reduce<Pt>((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
   return Math.atan2(pts[0]![1] - c[1], pts[0]![0] - c[0]);
 };
-const gap = (a: number, b: number) => {
-  const d = Math.abs(a - b) % (2 * Math.PI);
-  return d > Math.PI ? 2 * Math.PI - d : d;
-};
 /** How far apart (radians, about the loop's centre) a section's start may be from its neighbour's. */
 export const LOFT_START_TOLERANCE = Math.PI / 4;
 
+/** `v` rotated by the unit quaternion `q` = [x, y, z, w]. */
+function rotate(q: [number, number, number, number], v: [number, number, number]) {
+  const [x, y, z, w] = q;
+  const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+  return [
+    v[0] + w * t[0]! + (y * t[2]! - z * t[1]!),
+    v[1] + w * t[1]! + (z * t[0]! - x * t[2]!),
+    v[2] + w * t[2]! + (x * t[1]! - y * t[0]!),
+  ] as [number, number, number];
+}
+
 function loftHint(doc: CadDocument, f: Extract<CadFeature, { type: 'loft' }>): CadFailureHint {
+  // Each section's start direction (from its loop's centre) in world space: local UV angles of
+  // sketches on differently oriented planes are not comparable. A sketch on a face has no frame
+  // here, so no start diagnosis is made for it.
   const starts = f.args.sections.map((sec) => {
     if (!('sketchId' in sec)) return undefined;
     const s = doc.sketches.find((x) => x.id === sec.sketchId);
-    const pts = s && loopPoints(s, sec.region.outer);
-    return pts?.length ? angleOf(pts) : undefined;
+    if (!s || !('orientation' in s.plane)) return undefined;
+    const pts = loopPoints(s, sec.region.outer);
+    if (!pts?.length) return undefined;
+    const a = angleOf(pts);
+    return rotate(s.plane.orientation, [Math.cos(a), Math.sin(a), 0]);
   });
   const off: number[] = [];
   for (let i = 1; i < starts.length; i++) {
     const [a, b] = [starts[i - 1], starts[i]];
-    if (a !== undefined && b !== undefined && gap(a, b) > LOFT_START_TOLERANCE) off.push(i);
+    if (!a || !b) continue;
+    const cos = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b));
+    if (Math.acos(Math.max(-1, Math.min(1, cos))) > LOFT_START_TOLERANCE) off.push(i);
   }
   if (off.length) {
     const names = off.map((i) => `sections[${i}]`);
@@ -104,17 +119,17 @@ export function regionCrossing(
   if (!('code' in r) || (r.code !== 'region-self-intersection' && r.code !== 'region-overlap'))
     return;
   const ids = [region.outer, ...region.holes].flat();
-  const polys = ids.map((id) => ({
-    id,
-    pts: (() => {
-      const e = sketchElement(s, id);
-      return e ? (sketchElementPoints(e) as Pt[]) : [];
-    })(),
-    ends:
-      (s.entities.find((x) => x.id === id) as { start?: string; end?: string } | undefined) ?? {},
-  }));
-  const endPts = (p: (typeof polys)[number]) =>
-    [p.ends.start, p.ends.end].filter((x): x is string => !!x).map((k) => s.solved[k] as Pt);
+  // End points by the IDs the element exposes (`ends`), so a spline's ends (its first and last
+  // poles) count as shared joins like a line's.
+  const polys = ids.map((id) => {
+    const e = sketchElement(s, id);
+    return {
+      id,
+      pts: e ? (sketchElementPoints(e) as Pt[]) : [],
+      ends: ((e as { ends?: string[] } | undefined)?.ends ?? []).filter((k) => s.solved[k]),
+    };
+  });
+  const endPts = (p: (typeof polys)[number]) => p.ends.map((k) => s.solved[k] as Pt);
   for (let i = 0; i < polys.length; i++)
     for (let j = i + 1; j < polys.length; j++) {
       const shared = endPts(polys[i]!).filter((p) =>
@@ -169,8 +184,19 @@ export function cadFailureHint(
   elementId?: string,
 ): CadFailureHint | undefined {
   const base = code.replace(/^cad-invalid:/, '').split(/[:@]/)[0]!;
-  const feature = doc.features.find((f) => f.id === elementId);
-  const sketch = doc.sketches.find((s) => s.id === elementId);
+  // A refused edit names no element: the validator's path (`@features[i]…`) says which one.
+  const indexIn = (list: string) => {
+    const i = new RegExp(`@(?:\\$\\.)?${list}\\[(\\d+)\\]`).exec(code)?.[1];
+    return i === undefined ? undefined : Number(i);
+  };
+  const fi = indexIn('features'),
+    si = indexIn('sketches');
+  const feature =
+    doc.features.find((f) => f.id === elementId) ??
+    (elementId === undefined && fi !== undefined ? doc.features[fi] : undefined);
+  const sketch =
+    doc.sketches.find((s) => s.id === elementId) ??
+    (elementId === undefined && si !== undefined ? doc.sketches[si] : undefined);
   if (feature?.type === 'loft' && (base === 'kernel-exception' || base.startsWith('loft')))
     return loftHint(doc, feature);
   if (base === 'sketch-self-intersection') {
@@ -204,10 +230,14 @@ export function cadFailureHint(
     };
   }
   if (feature) {
+    // The failing mirror itself, else the mirror nearest upstream (the last one before it).
+    const isMirror = (f: CadFeature) => f.type === 'mirror' || f.type === 'mirrorCopy';
     const chain = upstreamFeatures(doc.features, [feature.id]);
-    const mirror = doc.features.find(
-      (f) => chain.has(f.id) && (f.type === 'mirror' || f.type === 'mirrorCopy'),
-    );
+    const mirror = isMirror(feature)
+      ? feature
+      : [...doc.features]
+          .reverse()
+          .find((f) => f.id !== feature.id && chain.has(f.id) && isMirror(f));
     if (mirror)
       return {
         reason: 'mirrored-part',
