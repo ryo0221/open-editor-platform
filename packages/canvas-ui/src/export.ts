@@ -129,12 +129,23 @@ export async function exportPages(
       new Blob([new Uint8Array(zipSync(files))], { type: 'application/zip' }),
     );
 }
+/**
+ * Image import limits (#22). Page art and reference images are often 20–60 MiB, so one image may be up
+ * to 64 MiB. It is kept in the document as a data URL (about 4/3 of the file size).
+ */
+export const imageImportLimits = Object.freeze({ bytes: 64 * 1024 * 1024 });
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+/** Why an image file cannot be imported, or undefined when it can. */
+export function imageImportRefusal(file: { type: string; size: number }): string | undefined {
+  if (!IMAGE_TYPES.includes(file.type))
+    return 'Choose a PNG, JPEG, WebP or GIF image. SVG imports require sanitizing before use.';
+  if (file.size > imageImportLimits.bytes)
+    return `Image exceeds ${imageImportLimits.bytes / 1024 / 1024} MiB (this one is ${(file.size / 1024 / 1024).toFixed(1)} MiB)`;
+  return undefined;
+}
 export async function readImage(file: File): Promise<string> {
-  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type))
-    throw new Error(
-      'Choose a PNG, JPEG, WebP or GIF image. SVG imports require sanitizing before use.',
-    );
-  if (file.size > 16_000_000) throw new Error('Image exceeds 16 MB');
+  const refused = imageImportRefusal(file);
+  if (refused) throw new Error(refused);
   const result = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result));
