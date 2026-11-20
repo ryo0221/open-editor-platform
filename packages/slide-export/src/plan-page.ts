@@ -302,6 +302,17 @@ async function planTable(p: PptxPlanner, element: PptxElement) {
     );
   else if (table.merges?.length)
     await p.fallback(element, 'Slide merged tables require element rendering');
+  // Cells are drawn as text boxes, so a cell with ruby (or a vertical table) is set on the grid
+  // too, which a native Office table cell cannot keep (Codex on #29).
+  else if (
+    table.rows.some((row) =>
+      row.some((text) => usesGridText({ text, typography: drawing.typography })),
+    )
+  )
+    await p.fallback(
+      element,
+      'Vertical writing and ruby are set on a grid that Office text cannot keep',
+    );
   else if ((drawing.opacity ?? 1) < 1 || (exportColor(drawing.stroke ?? '#8e9eb5')?.alpha ?? 1) < 1)
     await p.fallback(
       element,

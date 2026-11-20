@@ -192,4 +192,34 @@ describe('#20 vertical writing', () => {
     expect(svg).not.toContain('data-writing-mode');
     expect(svg).toContain('#c00');
   });
+
+  it('keeps plain runs on the grid and bullets on a grid list (Codex on #29)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: box,
+      text: '漢字《かんじ》',
+      fill: '#111',
+      typography: { fontSize: 20 },
+      runs: [{ text: '漢字《かんじ》' }],
+    } as unknown as Drawing;
+    const svg = serializeSvg(drawingPrimitives(d, 'x'));
+    expect(svg).toContain('data-writing-mode');
+    expect(svg).not.toContain('《');
+    const list = serializeSvg(
+      drawingPrimitives({ ...d, typography: { fontSize: 20, list: true } } as Drawing, 'x'),
+    );
+    expect(list).toContain('•');
+  });
+
+  it('keeps a reading on a digit that starts or ends inside an upright pair (Codex on #29)', () => {
+    for (const [notation, readings] of [
+      ['1｜2《に》', ['に']],
+      ['｜1《いち》｜2《に》', ['いち', 'に']],
+    ] as const) {
+      const l = layoutGridText(notation, box, { vertical: true, fontSize: 20, padding: 0 });
+      expect(l.ruby.map((r) => r.text).join('')).toBe(readings.join(''));
+      expect(text(l).join('')).toBe('12');
+    }
+  });
 });

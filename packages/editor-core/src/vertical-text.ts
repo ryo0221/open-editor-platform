@@ -115,11 +115,21 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     width: Math.max(1, box.width - pad * 2),
     height: Math.max(1, box.height - pad * 2),
   };
+  // A two-digit group that a ruby base starts or ends inside is set one digit a cell, so each
+  // annotated base keeps a glyph of its own (Codex on #29).
+  const cuts = new Set(ruby.flatMap((r) => [r.start, r.end]));
   const upright = o.vertical
     ? Array.from(plain.matchAll(/(?<![0-9])[0-9]{1,2}(?![0-9])/gu), (m) => ({
         start: m.index,
         end: m.index + m[0].length,
-      }))
+      })).flatMap((r) =>
+        r.end - r.start > 1 && cuts.has(r.start + 1)
+          ? [
+              { start: r.start, end: r.start + 1 },
+              { start: r.start + 1, end: r.end },
+            ]
+          : [r],
+      )
     : [];
   const uprightAt = new Map(upright.map((r) => [r.start, r]));
   const uprightOf = new Set(

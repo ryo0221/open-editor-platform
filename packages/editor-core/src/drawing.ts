@@ -530,11 +530,24 @@ function largestFont(d: Drawing) {
  * typed), so adding a reading never drops formatting (Codex on #29).
  */
 export const usesGridText = (d: Pick<Drawing, 'text' | 'typography' | 'runs'>) =>
-  d.typography?.writingMode === 'vertical-rl' || (!d.runs?.length && hasRubyNotation(d.text ?? ''));
+  d.typography?.writingMode === 'vertical-rl' ||
+  (!hasRunFormatting(d.runs) && hasRubyNotation(d.text ?? ''));
+/** Runs that set some style of their own; plain runs (as text entry leaves them) do not count. */
+const hasRunFormatting = (runs: readonly TextRun[] | undefined) =>
+  (runs ?? []).some(
+    (run) => run.style && Object.values(run.style).some((value) => value !== undefined),
+  );
 function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
-  const layout = layoutGridText(d.text, b, {
+  // A list keeps its bullets on the grid too, one before each paragraph (Codex on #29).
+  const source = s.list
+    ? (d.text ?? '')
+        .split('\n')
+        .map((line) => `• ${line}`)
+        .join('\n')
+    : d.text;
+  const layout = layoutGridText(source, b, {
     vertical: s.writingMode === 'vertical-rl',
     fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
     lineHeight: s.lineHeight,

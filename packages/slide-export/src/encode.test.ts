@@ -429,6 +429,36 @@ it('keeps vertical text as a picture instead of horizontal Office text (Codex on
   expect((await encoded(p)).xml()).not.toContain('<p:txBody>');
 });
 
+it('keeps a table with ruby in a cell as a picture (Codex on #29)', async () => {
+  const table = {
+    id: 'table',
+    type: 'table' as const,
+    text: '',
+    fill: '#fff',
+    stroke: '#0050b4',
+    bounds: { x: 40, y: 50, width: 300, height: 120 },
+    table: {
+      rows: [
+        ['項目', '値'],
+        ['漢字《かんじ》', '6'],
+      ],
+    },
+  };
+  const p = await prepare(
+    contractDeck([table]),
+    {
+      rasterize: async (r) =>
+        contractPng(Math.ceil(r.bounds.width * 2), Math.ceil(r.bounds.height * 2)),
+    },
+    { ...contractOptions, fallback: 'element-png' },
+  );
+  expect(p.report.counts.rasterized).toBe(1);
+  expect(p.report.diagnostics.find((d) => d.code === 'ELEMENT_RASTERIZED')?.message).toMatch(
+    /Vertical writing and ruby/,
+  );
+  expect((await encoded(p)).xml()).not.toContain('<a:tbl>');
+});
+
 it('keeps an empty text object as an editable native text box with an output mapping', async () => {
   const deck = contractDeck();
   deck.slides[0].objects[0].text = '';
