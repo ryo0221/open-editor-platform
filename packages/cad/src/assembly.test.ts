@@ -35,12 +35,7 @@ import {
 import { editedPlacement, mirroredPlacement, placementFields, validPlacement } from './placement';
 import { partPath, partsGroup } from './assembly-view';
 import { cadInputState } from './binding';
-import {
-  CadController,
-  cadFailureReport,
-  describeCode,
-  type CadExportStage,
-} from './controller';
+import { CadController, cadFailureReport, describeCode, type CadExportStage } from './controller';
 
 const mesh = (bodyId: string, bytes = 12): CadMesh => ({
   bodyId,
