@@ -113,7 +113,7 @@ export function insertDesignSpeechBalloon(
   });
   const batch = transaction('Insert speech balloon', [
     group,
-    updateElement(group.elementId, { name: 'Speech balloon' }),
+    updateElement(group.elementId, { name: 'Speech balloon', mangaRole: 'balloon' }),
     path,
     updateElement(path.elementId, {
       name: 'Balloon outline',

@@ -16,6 +16,8 @@
     "./division": "./src/division.ts",
     "./page-proposals": "./src/page-proposals.ts",
     "./manga-proposal-diff": "./src/manga-proposal-diff.ts",
+    "./manga-balloons": "./src/manga-balloons.ts",
+    "./manga-redraw": "./src/manga-redraw.ts",
     "./creative-proposal-diff": "./src/creative-proposal-diff.ts",
     "./native-host": "./src/native-host.ts"
   },

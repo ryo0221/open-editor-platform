@@ -1,0 +1,195 @@
+import { transaction, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
+import { transformElements, updateElement, type DesignContent, type DesignElement } from './model';
+
+/**
+ * #21 Balloons and the regions they must not cover.
+ *
+ * A balloon is a speech balloon group (`mangaRole: 'balloon'`, or a group named "Speech balloon"
+ * from before the role existed). A keep-out region is any element in the panel marked
+ * `mangaRole: 'keep-out'` — usually a rectangle drawn over a face or a figure. Bounds are world
+ * coordinates, as everywhere in a design.
+ */
+export const isMangaBalloon = (e: DesignElement) =>
+  e.mangaRole === 'balloon' ||
+  (e.mangaRole === undefined && e.type === 'group' && e.name === 'Speech balloon');
+export const isMangaKeepOut = (e: DesignElement) => e.mangaRole === 'keep-out';
+
+export interface MangaBalloonOverlap {
+  balloonId: string;
+  keepOutId: string;
+  panelId: string;
+  /** Area covered, in world units², and as a share of the keep-out region. */
+  area: number;
+  share: number;
+}
+
+const overlapArea = (a: Bounds, b: Bounds) =>
+  Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *
+  Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+
+function panelIds(d: DesignContent) {
+  return new Set((d.pagination?.pages ?? []).flatMap((p) => p.panelIds));
+}
+/** The panel an element sits in (nearest panel ancestor), or undefined. */
+export function mangaPanelOf(d: DesignContent, id: string): string | undefined {
+  const panels = panelIds(d);
+  const index = new Map(d.elements.map((e) => [e.id, e]));
+  for (
+    let e = index.get(id), n = 0;
+    e && n < 256;
+    e = e.parentId ? index.get(e.parentId) : undefined, n++
+  )
+    if (panels.has(e.id) && e.id !== id) return e.id;
+  return undefined;
+}
+const inPanel = (d: DesignContent, panelId: string, pick: (e: DesignElement) => boolean) =>
+  d.elements.filter((e) => pick(e) && mangaPanelOf(d, e.id) === panelId);
+
+/** Every balloon that covers part of a keep-out region of its own panel. */
+export function mangaBalloonOverlaps(d: DesignContent): MangaBalloonOverlap[] {
+  const out: MangaBalloonOverlap[] = [];
+  for (const balloon of d.elements.filter(isMangaBalloon)) {
+    const panelId = mangaPanelOf(d, balloon.id);
+    if (!panelId) continue;
+    for (const k of inPanel(d, panelId, isMangaKeepOut)) {
+      const area = overlapArea(balloon.bounds, k.bounds);
+      if (area > 0)
+        out.push({
+          balloonId: balloon.id,
+          keepOutId: k.id,
+          panelId,
+          area,
+          share: area / Math.max(1, k.bounds.width * k.bounds.height),
+        });
+    }
+  }
+  return out;
+}
+
+function inside(points: { x: number; y: number }[], p: { x: number; y: number }) {
+  let hit = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const a = points[i],
+      b = points[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x)
+      hit = !hit;
+  }
+  return hit;
+}
+
+/**
+ * Where a balloon of `size` fits in the panel without covering a keep-out region or another
+ * balloon. Positions closest to where reading starts come first: the top right for right-to-left
+ * works, the top left otherwise. Undefined when no position is free.
+ */
+export function mangaBalloonPlacement(
+  d: DesignContent,
+  panelId: string,
+  size: { width: number; height: number },
+  ignore: readonly string[] = [],
+): Bounds | undefined {
+  const panel = d.elements.find((e) => e.id === panelId);
+  if (!panel) return undefined;
+  const b = panel.bounds;
+  const margin = Math.max(8, panel.strokeWidth ?? 0);
+  const polygon = panel.panelGeometry?.polygon.map((p) => ({
+    x: b.x + p.x * b.width,
+    y: b.y + p.y * b.height,
+  }));
+  const blocked = d.elements.filter(
+    (e) =>
+      !ignore.includes(e.id) &&
+      (isMangaKeepOut(e) || isMangaBalloon(e)) &&
+      mangaPanelOf(d, e.id) === panelId,
+  );
+  const free = {
+    width: b.width - 2 * margin - size.width,
+    height: b.height - 2 * margin - size.height,
+  };
+  if (free.width < 0 || free.height < 0) return undefined;
+  const steps = 16;
+  const rtl = d.pagination?.direction !== 'ltr';
+  const candidates: Bounds[] = [];
+  for (let row = 0; row <= steps; row++)
+    for (let col = 0; col <= steps; col++) {
+      const fx = rtl ? 1 - col / steps : col / steps;
+      candidates.push({
+        x: b.x + margin + free.width * fx,
+        y: b.y + margin + (free.height * row) / steps,
+        width: size.width,
+        height: size.height,
+      });
+    }
+  // Nearest to the reading start first (a balloon reads best high in the panel, near its start edge)
+  const start = { x: rtl ? b.x + b.width : b.x, y: b.y };
+  const distance = (c: Bounds) =>
+    Math.hypot((rtl ? c.x + c.width : c.x) - start.x, (c.y - start.y) * 1.5);
+  candidates.sort((p, q) => distance(p) - distance(q));
+  for (const c of candidates) {
+    if (blocked.some((e) => overlapArea(c, e.bounds) > 0)) continue;
+    if (
+      polygon &&
+      ![
+        { x: c.x, y: c.y },
+        { x: c.x + c.width, y: c.y },
+        { x: c.x, y: c.y + c.height },
+        { x: c.x + c.width, y: c.y + c.height },
+      ].every((p) => inside(polygon, p))
+    )
+      continue;
+    return c;
+  }
+  return undefined;
+}
+
+/** Mark an element as a region balloons must not cover (or clear the mark). */
+export const setMangaKeepOut = (id: string, keepOut: boolean): EditorCommand<DesignContent> =>
+  updateElement(id, { mangaRole: keepOut ? 'keep-out' : undefined });
+
+/**
+ * Move every balloon that covers a keep-out region of its panel to the nearest free position.
+ * Balloons that have no free position stay where they are and are returned in `stuck`.
+ */
+export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
+  command?: EditorCommand<DesignContent>;
+  moved: string[];
+  stuck: string[];
+} {
+  const overlapping = [...new Set(mangaBalloonOverlaps(d).map((o) => o.balloonId))];
+  const moves: EditorCommand<DesignContent>[] = [];
+  const moved: string[] = [],
+    stuck: string[] = [];
+  let next = d;
+  for (const id of overlapping) {
+    const balloon = next.elements.find((e) => e.id === id)!;
+    const panelId = mangaPanelOf(next, id)!;
+    const descendants = next.elements
+      .filter((e) => mangaPanelOf(next, e.id) === panelId && isWithin(next, e.id, id))
+      .map((e) => e.id);
+    const to = mangaBalloonPlacement(next, panelId, balloon.bounds, [id, ...descendants]);
+    if (!to) {
+      stuck.push(id);
+      continue;
+    }
+    const move = transformElements([id], {
+      dx: to.x - balloon.bounds.x,
+      dy: to.y - balloon.bounds.y,
+      dw: 0,
+      dh: 0,
+    });
+    next = move.apply(next);
+    moves.push(move);
+    moved.push(id);
+  }
+  return {
+    ...(moves.length ? { command: transaction('Move balloons off faces and figures', moves) } : {}),
+    moved,
+    stuck,
+  };
+}
+function isWithin(d: DesignContent, id: string, ancestor: string) {
+  const index = new Map(d.elements.map((e) => [e.id, e]));
+  for (let e = index.get(id)?.parentId, n = 0; e && n < 256; e = index.get(e)?.parentId, n++)
+    if (e === ancestor) return true;
+  return false;
+}

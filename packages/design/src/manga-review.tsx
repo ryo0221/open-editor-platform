@@ -3,6 +3,11 @@ import { useState } from 'react';
 import type { DesignContent } from './model';
 import { DesignPageComparison } from './page-comparison';
 import {
+  checkPanelRedrawProposal,
+  designPanelRedrawRequest,
+  type DesignPanelRedrawRequest,
+} from './manga-redraw';
+import {
   checkDesignPageProposal,
   prepareDesignPageProposal,
   readDesignPageProposal,
@@ -16,15 +21,24 @@ export interface DesignPageReviewHost {
   flushInputs(): void;
   accept(plan: PreparedDesignPageProposal): void;
   requestProposals?(context: DesignPageProposalContext): Promise<unknown>;
+  /** Redraw one panel (#21). Answers with a page proposal that changes only that panel. */
+  requestPanelRedraw?(
+    request: DesignPanelRedrawRequest,
+    context: DesignPageProposalContext,
+  ): Promise<unknown>;
 }
 /** Inline review in the manga workspace. Host owns generation and authority. */
 export function MangaReview({
   host,
   content,
+  panelId,
 }: {
   host?: DesignPageReviewHost;
   content: DesignContent;
+  /** The panel being edited, for a panel-only redraw. */
+  panelId?: string;
 }) {
+  const [notes, setNotes] = useState('');
   const [raw, setRaw] = useState(''),
     [request, setRequest] = useState<DesignPageProposalRequest>(),
     [selected, setSelected] = useState<string[]>([]),
@@ -89,6 +103,40 @@ export function MangaReview({
             >
               Hostに提案を依頼
             </button>
+          )}
+          {host.requestPanelRedraw && panelId && (
+            <div role="group" aria-label="このコマだけ描き直す">
+              <label>
+                このコマで直すこと
+                <textarea
+                  aria-label="このコマで直すこと"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </label>
+              <button
+                disabled={busy || !notes.trim()}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    host.flushInputs();
+                    const current = host.current();
+                    const ask = designPanelRedrawRequest(current.content, panelId, notes.trim());
+                    const answer = readDesignPageProposal(
+                      await host.requestPanelRedraw!(ask, current),
+                    );
+                    load(checkPanelRedrawProposal(host.current().content, ask, answer));
+                    setError('');
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                このコマだけ描き直しを頼む
+              </button>
+            </div>
           )}
           <details>
             <summary>提案データを読み込む</summary>

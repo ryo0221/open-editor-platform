@@ -4,6 +4,16 @@ import { transaction, type EditorCommand } from '@editor-platform/editor-core';
 import { insertElement, updateElement, type DesignContent } from './model';
 import { insertDesignPage, insertDesignPanel, setDesignPagination } from './pagination';
 import { mangaDialoguePlacement } from './manga-dialogue';
+import {
+  isMangaBalloon,
+  isMangaKeepOut,
+  mangaBalloonOverlaps,
+  mangaBalloonPlacement,
+  mangaPanelOf,
+  moveMangaBalloonsOffKeepOut,
+  setMangaKeepOut,
+} from './manga-balloons';
+import { useState } from 'react';
 
 /** Generic native page controls, shared by ordinary and independent Design Surfaces. */
 export function DesignPagePanel({
@@ -11,13 +21,27 @@ export function DesignPagePanel({
   apply,
   choose,
   readOnly,
+  selected = [],
 }: {
   content: DesignContent;
   apply: (cmd: EditorCommand<DesignContent>) => boolean;
   choose: (ids: string[]) => void;
   readOnly: boolean;
+  /** The selection, for marking a face or figure that balloons keep off. */
+  selected?: string[];
 }) {
   const pagination = content.pagination;
+  const [stuck, setStuck] = useState(0);
+  const overlaps = mangaBalloonOverlaps(content);
+  const target =
+    selected.length === 1 ? content.elements.find((e) => e.id === selected[0]) : undefined;
+  const markable =
+    target && !isMangaBalloon(target) && mangaPanelOf(content, target.id) ? target : undefined;
+  function moveBalloons() {
+    const { command, stuck } = moveMangaBalloonsOffKeepOut(content);
+    setStuck(stuck.length);
+    if (command) apply(command);
+  }
   function addPage() {
     const x = Math.max(0, ...content.elements.map((e) => e.bounds.x + e.bounds.width)) + 40;
     const cmd = insertDesignPage({ x, y: 0, width: 600, height: 800 });
@@ -60,12 +84,20 @@ export function DesignPagePanel({
   }
   function artwork(panelId: string, kind: 'line' | 'cubic' | 'balloon') {
     const panel = content.elements.find((e) => e.id === panelId)!;
-    const bounds = {
+    const fallback = {
       x: panel.bounds.x + panel.bounds.width * 0.1,
       y: panel.bounds.y + panel.bounds.height * 0.1,
       width: panel.bounds.width * 0.7,
       height: panel.bounds.height * 0.65,
     };
+    // A new balloon goes where it covers no face, figure or other balloon (#21).
+    const bounds =
+      (kind === 'balloon' &&
+        mangaBalloonPlacement(content, panelId, {
+          width: panel.bounds.width * 0.4,
+          height: panel.bounds.height * 0.4,
+        })) ||
+      fallback;
     const cmd =
       kind === 'balloon'
         ? insertDesignSpeechBalloon(panelId, bounds, 'Dialogue')
@@ -174,6 +206,38 @@ export function DesignPagePanel({
               </li>
             ))}
           </ol>
+          {markable && (
+            <button
+              disabled={readOnly}
+              onClick={() => apply(setMangaKeepOut(markable.id, !isMangaKeepOut(markable)))}
+            >
+              {isMangaKeepOut(markable)
+                ? '吹き出しを避ける範囲から外す'
+                : '吹き出しを避ける範囲にする（顔・人物）'}
+            </button>
+          )}
+          {!!overlaps.length && (
+            <div role="alert" aria-label="Balloon overlaps">
+              <p>{`吹き出しが顔・人物にかかっています（${overlaps.length} 件）`}</p>
+              <ul>
+                {overlaps.map((o) => (
+                  <li key={`${o.balloonId}:${o.keepOutId}`}>
+                    <button onClick={() => choose([o.balloonId, o.keepOutId])}>
+                      {`${content.elements.find((e) => e.id === o.balloonId)?.name ?? o.balloonId} → ${
+                        content.elements.find((e) => e.id === o.keepOutId)?.name ?? o.keepOutId
+                      }（${Math.round(o.share * 100)}%）`}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button disabled={readOnly} onClick={moveBalloons}>
+                吹き出しをよける
+              </button>
+            </div>
+          )}
+          {!!stuck && (
+            <p role="status">{`${stuck} 個の吹き出しはコマの中に空きがなく、動かせませんでした`}</p>
+          )}
           <p>
             Horizontal text and native paths. Balloon paths require vector capture; vertical text
             and ruby are unsupported.

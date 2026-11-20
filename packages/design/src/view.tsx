@@ -726,6 +726,7 @@ function DesignSurfaceEditor({
                 apply={apply}
                 choose={choose}
                 readOnly={readOnly}
+                selected={ids}
               />
               {left}
             </div>
@@ -736,7 +737,11 @@ function DesignSurfaceEditor({
           <>
             {extension?.workspaceReferences?.(extensionContext)}
             <div hidden={work.displayed !== 'manga'}>
-              <MangaReview host={pageReview} content={renderContent} />
+              <MangaReview
+                host={pageReview}
+                content={renderContent}
+                panelId={mangaContext.panel?.id}
+              />
               {mangaReadOnlyReason && <p role="status">{mangaReadOnlyReason}</p>}
             </div>
             {inspector}
