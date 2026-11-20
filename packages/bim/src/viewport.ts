@@ -173,6 +173,13 @@ export class BimViewport {
     this.lighting.invalidate();
     this.group = instancesGroup(solids);
     this.scene.add(this.group);
+    // The depth range follows the whole scene as it is now, however the camera was framed
+    // (an edit may have grown it since the last fit) (Codex on #30).
+    if (bounds) {
+      const [lo, hi] = bounds;
+      this.sceneRadius = Math.max(new Vector3(...hi).distanceTo(new Vector3(...lo)) / 2, 1_000);
+      this.followDepth();
+    }
     // A plan keeps its framing while drawing; only Fit view or another level reframes it.
     if (bounds && !this.fitted && !this.plan) {
       this.fit(bounds);

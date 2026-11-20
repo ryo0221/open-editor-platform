@@ -232,8 +232,18 @@ export function validateBim(value: unknown): BimDiagnostic[] {
         if (!c.keys(cam, ['id', 'name', 'position', 'target', 'up', 'fovDeg'], at)) return;
         c.id(cam.id, `${at}.id`);
         c.name(cam.name, `${at}.name`);
-        c.vec3(cam.position, `${at}.position`);
-        c.vec3(cam.target, `${at}.target`);
+        // A camera stands where it frames the model from, which may be beyond the model's own
+        // coordinate range (Codex on #30).
+        for (const k of ['position', 'target'] as const) {
+          const v = cam[k];
+          if (
+            !tuple(v, 3) ||
+            ![0, 1, 2].every(
+              (n) => finite(v[n]) && Math.abs(v[n] as number) <= bimLimits.cameraCoordinateMm,
+            )
+          )
+            c.error(`camera-${k}`, `${at}.${k}`);
+        }
         const up = cam.up;
         if (
           !tuple(up, 3) ||

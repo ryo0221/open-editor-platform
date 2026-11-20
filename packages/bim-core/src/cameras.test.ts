@@ -36,12 +36,20 @@ describe('saved cameras (#19)', () => {
       [{ fovDeg: 170 }, 'camera-fov'],
       [{ target: [-12_000, -16_000, 9_000] }, 'camera-target'],
       [{ extra: 1 }, ''],
+      [{ position: [2e9, 0, 0] }, 'camera-position'],
     ];
     for (const [patch, code] of broken) {
       const diagnostics = validateBim({ ...base, cameras: [{ ...camera('c-1'), ...patch }] });
       expect(diagnostics.length).toBeGreaterThan(0);
       if (code) expect(diagnostics.map((d) => d.code)).toContain(code);
     }
+    // A fitted view of a large site stands beyond the model's ±1,000,000 mm (Codex on #30).
+    expect(
+      validateBim({
+        ...base,
+        cameras: [{ ...camera('c-1'), position: [-1_981_002, -2_701_366, 1_622_320] }],
+      }),
+    ).toEqual([]);
     expect(validateBim({ ...base, cameras: [] }).length).toBeGreaterThan(0);
     const many = Array.from({ length: bimLimits.cameras + 1 }, (_, i) => camera(`c-${i}`));
     expect(validateBim({ ...base, cameras: many }).map((d) => d.code)).toContain('limit-count');

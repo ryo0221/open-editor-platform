@@ -498,6 +498,8 @@ export const bimLimits = Object.freeze({
   views: 64,
   /** #19: saved 3D cameras. */
   cameras: 64,
+  /** A saved camera may stand further out than the model reaches (a fitted view of a site). */
+  cameraCoordinateMm: 1_000_000_000,
   loopVertices: 1_024,
   holes: 16,
   openingsPerHost: 64,

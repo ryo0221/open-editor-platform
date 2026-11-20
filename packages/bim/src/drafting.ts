@@ -154,6 +154,7 @@ export function bimNewId(doc: BimDocument, prefix: string, taken: Set<string> = 
     ...doc.views.map((x) => x.id),
     ...doc.propertySets.map((x) => x.id),
     ...(doc.assets ?? []).map((x) => x.id),
+    ...(doc.cameras ?? []).map((x) => x.id),
   ]);
   for (let n = 1; ; n++) if (!used.has(`${prefix}-${n}`)) return `${prefix}-${n}`;
 }

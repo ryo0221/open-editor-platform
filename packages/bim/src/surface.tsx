@@ -80,6 +80,7 @@ import {
   useNarrow,
 } from './draft-tools';
 import {
+  bimNewId,
   bimWorkingPlan,
   draftLevel,
   draftPlanView,
@@ -2391,13 +2392,12 @@ function CamerasPanel({
     const at = current();
     if (!at) return setNote('The 3D view is not ready.');
     const label = name.trim() || `Camera ${cameras.length + 1}`;
-    const ids = new Set(cameras.map((c) => c.id));
-    let n = cameras.length + 1;
-    while (ids.has(`camera-${n}`)) n++;
+    // From the document's whole ID space: a camera's ID is unique among every entity's.
+    const id = bimNewId(doc, 'camera');
     const kept = cameras.filter((c) => c.name !== label);
     const error = controller.apply({
       type: 'setCameras',
-      cameras: [...kept, { id: `camera-${n}`, name: label, ...at }],
+      cameras: [...kept, { id, name: label, ...at }],
     });
     setNote(typeof error === 'string' ? error : `Saved ${label}.`);
     if (typeof error !== 'string') setName('');
