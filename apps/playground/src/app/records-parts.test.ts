@@ -181,3 +181,61 @@ describe('bytes too long for one IndexedDB value are stored in chunks (#1292, ST
     await storage.close();
   });
 });
+
+describe('#22 inline images are stored apart from their record', () => {
+  const image = (fill: string, chars: number) => `data:image/png;base64,${fill.repeat(chars)}`;
+  const design = (draftSrc: string, versionSrcs: string[]) =>
+    ({
+      id: 'design-1',
+      kind: 'design',
+      draft: {
+        content: { elements: [{ id: 'art', src: draftSrc, provenance: { src: draftSrc } }] },
+        baseVersionId: null,
+        updatedAt: 't',
+      },
+      versions: versionSrcs.map((src, i) =>
+        Object.freeze({
+          versionId: `v${i}`,
+          content: {
+            elements: [
+              { id: 'art', src },
+              { id: 'small', src: 'data:image/png;base64,AA' },
+            ],
+          },
+        }),
+      ),
+    }) as unknown as StoredArtifact;
+
+  it('moves large data URLs out, shares one part between a draft and its version, and joins back', () => {
+    const big = image('A', resourcePartChars),
+      edited = image('B', resourcePartChars);
+    const value = design(big, [big]);
+    const { stub, parts } = resourceParts.split(value);
+    expect(JSON.stringify(stub).length).toBeLessThan(2000);
+    expect([...parts.keys()]).toEqual(['inline-image:v0:0']);
+    expect(resourceParts.keys(stub)).toEqual(['inline-image:v0:0']);
+    expect(resourceParts.join(stub, parts)).toEqual(value);
+    // An edited draft image gets its own part, named by its hash
+    const changed = resourceParts.split(design(edited, [big]));
+    expect([...changed.parts.keys()].sort()).toEqual(
+      ['inline-image:v0:0', expect.stringMatching(/^inline-image:draft:\d+:[0-9a-z]+$/)].sort(),
+    );
+    expect(resourceParts.split(design(image('C', resourcePartChars), [])).parts.size).toBe(1);
+    // Small images stay inline
+    const small = design('data:image/png;base64,AA', []);
+    expect(resourceParts.split(small).stub).toBe(small);
+  });
+
+  it('reads a design back whole through the storage, with a missing part as an empty image', async () => {
+    const storage = new IndexedDBStorage<StoredArtifact>(
+      `test-${crypto.randomUUID()}`,
+      resourceParts,
+    );
+    const value = design(image('A', resourcePartChars * 3), [image('A', resourcePartChars * 3)]);
+    await storage.put(value);
+    expect(await storage.get('design-1')).toEqual(value);
+    const { stub } = resourceParts.split(value);
+    const joined = resourceParts.join(stub, new Map());
+    expect((joined.draft.content as { elements: { src: string }[] }).elements[0].src).toBe('');
+  });
+});

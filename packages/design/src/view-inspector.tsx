@@ -6,7 +6,7 @@ import {
 import { newId } from '@editor-platform/artifact-core';
 import { command, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
 import { CommitInput, Section } from '@editor-platform/editor-ui';
-import { VisualInspector, readImage } from '@editor-platform/canvas-ui';
+import { VisualInspector, imageImportLimits, readImage } from '@editor-platform/canvas-ui';
 import { DesignInteractionSettings, DesignPrototypeSettings } from './prototype-settings';
 import { setDesignInteractions } from './prototype';
 import {
@@ -103,7 +103,7 @@ export function DesignInspector({
           onPatch={(patch) => apply(patchDesign(ids, patch))}
           onGeometry={geometry}
           onReplace={(file) => {
-            void readImage(file)
+            void readImage(file, imageImportLimits.design)
               .then((src) => apply(patchDesign(ids, { src, reference: undefined })))
               .catch((e) => setError(String(e)));
           }}

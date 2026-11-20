@@ -130,21 +130,34 @@ export async function exportPages(
     );
 }
 /**
- * Image import limits (#22). Page art and reference images are often 20–60 MiB, so one image may be up
- * to 64 MiB. It is kept in the document as a data URL (about 4/3 of the file size).
+ * Image import limits (#22). An image is kept in the content as a data URL (about 4/3 of the file
+ * size), in the draft and again in each version. Slides, boards and documents keep the Host's
+ * 64 MiB native record, so one image stays at 16 MiB there. A design (manga pages) has a larger
+ * native record and keeps its images apart in storage, so page art and references of 20–60 MiB fit:
+ * one image may be up to 64 MiB.
  */
-export const imageImportLimits = Object.freeze({ bytes: 64 * 1024 * 1024 });
+export const imageImportLimits = Object.freeze({
+  bytes: 16 * 1024 * 1024,
+  design: 64 * 1024 * 1024,
+});
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 /** Why an image file cannot be imported, or undefined when it can. */
-export function imageImportRefusal(file: { type: string; size: number }): string | undefined {
+export function imageImportRefusal(
+  file: { type: string; size: number },
+  limit: number = imageImportLimits.bytes,
+): string | undefined {
   if (!IMAGE_TYPES.includes(file.type))
     return 'Choose a PNG, JPEG, WebP or GIF image. SVG imports require sanitizing before use.';
-  if (file.size > imageImportLimits.bytes)
-    return `Image exceeds ${imageImportLimits.bytes / 1024 / 1024} MiB (this one is ${(file.size / 1024 / 1024).toFixed(1)} MiB)`;
+  if (file.size > limit)
+    return `Image exceeds ${limit / 1024 / 1024} MiB (this one is ${(file.size / 1024 / 1024).toFixed(1)} MiB)`;
   return undefined;
 }
-export async function readImage(file: File): Promise<string> {
-  const refused = imageImportRefusal(file);
+/** Reads an image file as a data URL; `limit` is the consuming editor's per-image limit. */
+export async function readImage(
+  file: File,
+  limit: number = imageImportLimits.bytes,
+): Promise<string> {
+  const refused = imageImportRefusal(file, limit);
   if (refused) throw new Error(refused);
   const result = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();

@@ -4,7 +4,7 @@ import { createArtifact } from '@editor-platform/artifact-core';
 import { createDesign, type DesignContent } from '@editor-platform/design/model';
 import { test, expect, nativeArtifact, save } from './fixtures';
 
-const imageImportLimits = { bytes: 64 * 1024 * 1024 }; // packages/canvas-ui/src/export.ts
+const imageImportLimits = { design: 64 * 1024 * 1024 }; // packages/canvas-ui/src/export.ts
 
 // #22: page art and reference images of tens of MiB import into a design.
 const crcTable = Array.from({ length: 256 }, (_, n) => {
@@ -43,7 +43,7 @@ function png(mib: number) {
   ]);
 }
 
-test('a 40 MiB image imports into a design; an image over the limit is refused with the limit named', async ({
+test('a 60 MiB image imports into a design and saves a version; an image over the limit is refused with the limit named', async ({
   page,
 }, info) => {
   test.setTimeout(120_000);
@@ -54,12 +54,14 @@ test('a 40 MiB image imports into a design; an image over the limit is refused w
     buffer: Buffer.from(JSON.stringify(createArtifact('design', 'Page art', createDesign()))),
   });
   await expect(page.getByLabel('Artifact name', { exact: true })).toHaveValue('Page art');
-  const art = png(40);
-  expect(art.length).toBeGreaterThan(40 * 1024 * 1024);
-  expect(art.length).toBeLessThanOrEqual(imageImportLimits.bytes);
-  await page
-    .getByLabel('Insert image file', { exact: true })
-    .setInputFiles({ name: 'page-art.png', mimeType: 'image/png', buffer: art });
+  // 60 MiB is about 80 MB as a data URL: the draft and its version together pass Chromium's
+  // one-value IndexedDB ceiling, so the Playground has to keep the image apart from the record.
+  const art = png(60);
+  expect(art.length).toBeGreaterThan(60 * 1024 * 1024);
+  expect(art.length).toBeLessThanOrEqual(imageImportLimits.design);
+  const artPath = info.outputPath('page-art.png');
+  writeFileSync(artPath, art);
+  await page.getByLabel('Insert image file', { exact: true }).setInputFiles(artPath);
   await expect
     .poll(
       async () =>
@@ -75,11 +77,24 @@ test('a 40 MiB image imports into a design; an image over the limit is refused w
   expect((image as { src: string }).src.length).toBeGreaterThan((art.length * 4) / 3);
   // The design with the image saves as a version (the Playground keeps designs up to its large-file limit)
   await save(page, 1);
+  // …and reads back whole after a reload
+  await page.reload();
+  await expect
+    .poll(
+      async () =>
+        (
+          ((await nativeArtifact(page)).draft.content as DesignContent).elements.find(
+            (e) => e.type === 'image',
+          ) as { src: string } | undefined
+        )?.src.length ?? 0,
+      { timeout: 60_000 },
+    )
+    .toBe((image as { src: string }).src.length);
   // Over 50 MB Playwright takes a file path, not a buffer
   const tooBig = info.outputPath('too-big.png');
   writeFileSync(
     tooBig,
-    Buffer.concat([art, Buffer.alloc(imageImportLimits.bytes - art.length + 1)]),
+    Buffer.concat([art, Buffer.alloc(imageImportLimits.design - art.length + 1)]),
   );
   await page.getByLabel('Insert image file', { exact: true }).setInputFiles(tooBig);
   await expect(page.getByText(/Image exceeds 64 MiB \(this one is 64\.0 MiB\)/)).toBeVisible();

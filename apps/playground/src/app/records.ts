@@ -96,7 +96,7 @@ const payloads: {
  * its metadata and an empty `bytes`; a missing part leaves it empty, and the resource checks
  * then refuse it like any other damaged asset.
  */
-export const resourceParts: OutOfLineParts<StoredArtifact> = {
+const cadResourceParts: OutOfLineParts<StoredArtifact> = {
   split(value) {
     const parts = new Map<string, unknown>();
     let stub = value;
@@ -144,6 +144,143 @@ export const resourceParts: OutOfLineParts<StoredArtifact> = {
     }
     return value;
   },
+};
+/**
+ * #22: images kept inline as data URLs in the content (a design's page art and references of up
+ * to 64 MiB, about 85 MB as a data URL) are stored apart too, or a draft and its versions would
+ * pass Chromium's one-value ceiling. In the stub each such string becomes a marker naming its part.
+ * A version's content never changes, so its images are keyed by version and position; a draft
+ * image the same as a version's shares that part, and any other is keyed by its own hash.
+ */
+const inlineMarker = '\u0000part:';
+const isInlineImage = (v: unknown): v is string =>
+  typeof v === 'string' && v.length >= resourcePartChars && v.startsWith('data:');
+/** The same value with each string `map` changes replaced; unchanged branches keep their identity. */
+function mapStrings(value: unknown, map: (s: string) => string | undefined): unknown {
+  if (typeof value === 'string') return map(value) ?? value;
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    let changed = false;
+    const out = value.map((v) => {
+      const m = mapStrings(v, map);
+      changed ||= m !== v;
+      return m;
+    });
+    return changed ? out : value;
+  }
+  let out: Record<string, unknown> | undefined;
+  for (const [k, v] of Object.entries(value)) {
+    const m = mapStrings(v, map);
+    if (m !== v) (out ??= { ...(value as Record<string, unknown>) })[k] = m;
+  }
+  return out ?? value;
+}
+/** A 53-bit hash of the whole string (cyrb53); with the length it names a draft image. */
+function hash53(text: string) {
+  let h1 = 0xdeadbeef,
+    h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+const markerOf = (key: string, chars: number) => `${inlineMarker}${chars}:${key}`;
+function readMarker(s: string) {
+  if (!s.startsWith(inlineMarker)) return undefined;
+  const rest = s.slice(inlineMarker.length),
+    colon = rest.indexOf(':');
+  return { chars: Number(rest.slice(0, colon)), key: rest.slice(colon + 1) };
+}
+const inlineImageParts: OutOfLineParts<StoredArtifact> = {
+  split(value) {
+    const parts = new Map<string, unknown>();
+    if (!value.draft || !Array.isArray(value.versions)) return { stub: value, parts };
+    const put = (key: string, s: string) => {
+      chunkKeys(key, s.length).forEach((k, i, all) =>
+        parts.set(
+          k,
+          all.length === 1 ? s : s.slice(i * resourceChunks.chars, (i + 1) * resourceChunks.chars),
+        ),
+      );
+      return markerOf(key, s.length);
+    };
+    const known = new Map<number, { text: string; key: string }[]>();
+    const versions = value.versions.map((v) => {
+      let n = 0;
+      const content = mapStrings(v.content, (s) => {
+        if (!isInlineImage(s)) return undefined;
+        const key = `inline-image:${v.versionId}:${n++}`;
+        const same = known.get(s.length) ?? [];
+        same.push({ text: s, key });
+        known.set(s.length, same);
+        return put(key, s);
+      });
+      return content === v.content ? v : { ...v, content: content as typeof v.content };
+    });
+    const draftContent = mapStrings(value.draft.content, (s) => {
+      if (!isInlineImage(s)) return undefined;
+      const same = known.get(s.length)?.find((k) => k.text === s);
+      return same
+        ? markerOf(same.key, s.length)
+        : put(`inline-image:draft:${s.length}:${hash53(s)}`, s);
+    });
+    if (!parts.size && draftContent === value.draft.content) return { stub: value, parts };
+    return {
+      stub: {
+        ...value,
+        versions,
+        draft: { ...value.draft, content: draftContent as typeof value.draft.content },
+      },
+      parts,
+    };
+  },
+  keys(stub) {
+    const keys = new Set<string>();
+    if (!stub.draft || !Array.isArray(stub.versions)) return [];
+    for (const content of [stub.draft.content, ...stub.versions.map((v) => v.content)])
+      mapStrings(content, (s) => {
+        const m = readMarker(s);
+        if (m) chunkKeys(m.key, m.chars).forEach((k) => keys.add(k));
+        return undefined;
+      });
+    return [...keys];
+  },
+  join(stub, parts) {
+    if (!stub.draft || !Array.isArray(stub.versions)) return stub;
+    const restore = (s: string) => {
+      const m = readMarker(s);
+      if (!m) return undefined;
+      const chunks = chunkKeys(m.key, m.chars).map((k) => parts.get(k));
+      // A missing part leaves an empty image, which the content checks then report.
+      return chunks.every((c): c is string => typeof c === 'string') ? chunks.join('') : '';
+    };
+    const versions = stub.versions.map((v) => {
+      const content = mapStrings(v.content, restore);
+      return content === v.content ? v : { ...v, content: content as typeof v.content };
+    });
+    const content = mapStrings(stub.draft.content, restore);
+    return content === stub.draft.content && versions.every((v, i) => v === stub.versions[i])
+      ? stub
+      : {
+          ...stub,
+          versions,
+          draft: { ...stub.draft, content: content as typeof stub.draft.content },
+        };
+  },
+};
+/** CAD/drawing assets and inline images, each stored as their own IndexedDB values. */
+export const resourceParts: OutOfLineParts<StoredArtifact> = {
+  split(value) {
+    const a = cadResourceParts.split(value),
+      b = inlineImageParts.split(a.stub);
+    return { stub: b.stub, parts: new Map([...a.parts, ...b.parts]) };
+  },
+  keys: (stub) => [...cadResourceParts.keys(stub), ...inlineImageParts.keys(stub)],
+  join: (stub, parts) => cadResourceParts.join(inlineImageParts.join(stub, parts), parts),
 };
 export const storage = new IndexedDBStorage<StoredArtifact>('editor-platform', resourceParts);
 
