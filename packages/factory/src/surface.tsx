@@ -60,6 +60,7 @@ import {
   type FactoryFleet,
   type FactoryPaths,
   factoryVehicleStates,
+  type FactoryRunProgress,
   type FactoryRunResult,
 } from '@editor-platform/factory-core';
 import type { BimKernel } from '@editor-platform/bim';
@@ -103,7 +104,7 @@ const noticeWords: Record<string, string> = {
   'not-found': 'It is gone.',
   stopped: 'The run was stopped.',
   running: 'A run is going on.',
-  'event-limit': 'The run took more than 10 million events.',
+  'event-limit': 'The run took more than a billion events.',
   'duplicate-link': 'These two objects are linked already.',
   'link-from-drain': 'A drain has no exit.',
   'link-to-source': 'A source has no entry.',
@@ -462,7 +463,9 @@ export function FactorySurface({
         status={
           <span className="fac-status" data-testid="fac-status">
             {state.running
-              ? 'Running…'
+              ? state.runProgress
+                ? runProgressText(state.runProgress)
+                : 'Running…'
               : result
                 ? `${fresh ? 'Result' : 'Result of an earlier model'}: ${result.produced} produced, ${result.throughputPerHour.toFixed(1)}/h`
                 : 'Not run'}
@@ -2077,4 +2080,24 @@ function LinkInspector({
       </fieldset>
     </Section>
   );
+}
+
+/** #17: "Running: 120 of 365 days simulated · about 4 min left" (hours for a run under 3 days). */
+function runProgressText(p: FactoryRunProgress & { startedAt: number }) {
+  const day = 86_400_000;
+  const unit = p.endMs >= 3 * day ? day : 3_600_000;
+  const total = Math.max(1, Math.ceil(p.endMs / unit));
+  const done = Math.min(total, Math.floor(p.simMs / unit));
+  const text = `Running: ${done} of ${total} ${unit === day ? 'days' : 'hours'} simulated`;
+  const spent = performance.now() - p.startedAt;
+  if (!(p.simMs > 0) || spent < 1000) return text;
+  const left = (spent / p.simMs) * (p.endMs - p.simMs);
+  const minutes = Math.round(left / 60_000);
+  return `${text} · ${
+    left < 60_000
+      ? 'under a minute'
+      : minutes < 60
+        ? `about ${minutes} min`
+        : `about ${Math.floor(minutes / 60)} h ${minutes % 60} min`
+  } left`;
 }

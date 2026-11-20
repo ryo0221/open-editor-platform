@@ -6,13 +6,14 @@ import {
   factoryEditorCommand,
   freshFactoryId,
   readFactoryTimesCsv,
-  runFactory,
+  startFactoryRun,
   type FactoryDocument,
   type FactoryLink,
   type FactoryObject,
   type FactoryObjectKind,
   type FactoryOperation,
   type FactoryPlacement,
+  type FactoryRunProgress,
   type FactoryRunResult,
   factoryExperimentOf,
   factoryExperimentSize,
@@ -34,6 +35,8 @@ export type FactorySession = Pick<EditorSession<FactoryDocument>, 'content' | 'e
 export type FactoryRunner = (
   doc: FactoryDocument,
   signal: AbortSignal,
+  /** #17: how far a long run has come, between its slices. */
+  onProgress?: (p: FactoryRunProgress) => void,
 ) => Promise<FactoryRunResult>;
 
 /**
@@ -60,7 +63,19 @@ export const factoryLocalExperimentRunner: FactoryExperimentRunner = async (
 };
 
 /** In-thread runner (tests and small models). */
-export const factoryLocalRunner: FactoryRunner = async (doc) => runFactory(doc, { record: true });
+export const factoryLocalRunner: FactoryRunner = async (doc, signal, onProgress) => {
+  // #17: in slices, giving the page back between them.
+  const run = startFactoryRun(doc, { record: true });
+  let p = run.progress();
+  while (!p.done) {
+    p = run.advance(200_000);
+    if (p.done) break;
+    onProgress?.(p);
+    await new Promise((r) => setTimeout(r, 0));
+    if (signal.aborted) throw new Error('stopped');
+  }
+  return run.finish();
+};
 
 export interface FactoryControllerOptions {
   session: FactorySession;
@@ -86,6 +101,8 @@ export interface FactorySurfaceState {
   notice?: FactoryNotice;
   readOnly: boolean;
   running: boolean;
+  /** #17: how far the run going on has come, and when it started (`performance.now()`). */
+  runProgress?: FactoryRunProgress & { startedAt: number };
   /** The last run, and the content key it ran on. */
   result?: { key: string; value: FactoryRunResult };
   /** FT5: an experiment is going on. */
@@ -339,15 +356,23 @@ export class FactoryController {
     const runKey = this.current.key;
     const abort = new AbortController();
     this.abort = abort;
-    this.set({ running: true, notice: undefined });
+    const startedAt = performance.now();
+    this.set({ running: true, notice: undefined, runProgress: undefined });
     try {
-      const value = await (this.options.runner ?? factoryLocalRunner)(content, abort.signal);
+      const value = await (this.options.runner ?? factoryLocalRunner)(
+        content,
+        abort.signal,
+        (p) => {
+          if (!abort.signal.aborted && this.abort === abort)
+            this.set({ runProgress: { ...p, startedAt } });
+        },
+      );
       if (abort.signal.aborted) return 'stopped';
-      this.set({ running: false, result: { key: runKey, value } });
+      this.set({ running: false, runProgress: undefined, result: { key: runKey, value } });
       return undefined;
     } catch (error) {
       if (abort.signal.aborted) return 'stopped';
-      this.set({ running: false });
+      this.set({ running: false, runProgress: undefined });
       return this.refuse(noticeOf(error));
     } finally {
       if (this.abort === abort) this.abort = undefined;
@@ -406,6 +431,6 @@ export class FactoryController {
     if (!this.abort) return;
     this.abort.abort();
     this.abort = undefined;
-    this.set({ running: false, notice: { code: 'stopped' } });
+    this.set({ running: false, runProgress: undefined, notice: { code: 'stopped' } });
   }
 }

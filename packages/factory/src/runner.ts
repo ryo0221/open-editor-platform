@@ -1,12 +1,13 @@
 import {
   FactoryValidationError,
   type FactoryExperimentRun,
+  type FactoryRunProgress,
   type FactoryRunResult,
 } from '@editor-platform/factory-core';
 import type { FactoryExperimentRunner, FactoryRunner } from './controller';
 
 /** A runner that starts one Worker per run and ends it when the run stops (FT-U5). */
-export const factoryWorkerRunner: FactoryRunner = (doc, signal) =>
+export const factoryWorkerRunner: FactoryRunner = (doc, signal, onProgress) =>
   new Promise<FactoryRunResult>((resolve, reject) => {
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
     const end = () => worker.terminate();
@@ -16,9 +17,12 @@ export const factoryWorkerRunner: FactoryRunner = (doc, signal) =>
     });
     worker.onmessage = (
       e: MessageEvent<
-        { ok: true; result: FactoryRunResult } | { ok: false; code: string; message: string }
+        | { ok: true; result: FactoryRunResult }
+        | { ok: false; code: string; message: string }
+        | { ok?: undefined; progress: FactoryRunProgress }
       >,
     ) => {
+      if (e.data.ok === undefined) return onProgress?.(e.data.progress);
       end();
       if (e.data.ok) resolve(e.data.result);
       else reject(new FactoryValidationError(e.data.code, e.data.message));
