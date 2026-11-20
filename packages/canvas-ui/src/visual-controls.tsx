@@ -641,7 +641,8 @@ function TextLayoutFields({
       </label>
       <p className="hint">
         Clip keeps the box; expand draws beyond it; fit reduces font size to 8 px minimum. All
-        outputs share these rules. Ruby: ｜漢字《かんじ》 or 漢字《かんじ》.
+        outputs share these rules. Ruby: ｜漢字《かんじ》 or 漢字《かんじ》 (in horizontal text with
+        formatting, the notation shows as typed).
       </p>
     </>
   );

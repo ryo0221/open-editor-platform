@@ -107,4 +107,39 @@ describe('#20 vertical writing', () => {
     expect(svg).toContain('>き</text>');
     expect(svg).not.toContain('《');
   });
+
+  it('keeps readings inside the box, fits a long base, survives no advance (Codex on #29)', () => {
+    const l = layoutGridText('漢字《かんじ》', box, { vertical: true, fontSize: 28 });
+    for (const r of l.ruby) expect(r.x + r.size / 2).toBeLessThanOrEqual(box.width + 1e-6);
+    const flat = layoutGridText('｜漢字《かんじ》', box, { vertical: false, fontSize: 28 });
+    for (const r of flat.ruby) expect(r.y - r.size / 2).toBeGreaterThanOrEqual(-1e-6);
+    // An unbreakable base longer than the column shrinks until it fits the column.
+    const tall = { x: 0, y: 0, width: 200, height: 100 };
+    const fit = layoutGridText('｜あいうえおかきくけこ《よみ》', tall, {
+      vertical: true,
+      fontSize: 28,
+      fit: true,
+    });
+    expect(fit.fontSize).toBeLessThan(28);
+    expect(fit.along).toBeLessThanOrEqual(100 - 8 + 1e-6);
+    // A letter spacing of minus the font size still lays out.
+    expect(() =>
+      layoutGridText('台詞', box, { vertical: true, fontSize: 28, letterSpacing: -28 }),
+    ).not.toThrow();
+  });
+
+  it('keeps formatted horizontal runs on the ordinary layout', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: box,
+      text: '漢字《かんじ》と太字',
+      fill: '#111',
+      typography: { fontSize: 20 },
+      runs: [{ text: '漢字《かんじ》と' }, { text: '太字', style: { color: '#c00' } }],
+    } as unknown as Drawing;
+    const svg = serializeSvg(drawingPrimitives(d, 'x'));
+    expect(svg).not.toContain('data-writing-mode');
+    expect(svg).toContain('#c00');
+  });
 });

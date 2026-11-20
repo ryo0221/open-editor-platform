@@ -107,7 +107,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   const rubySize = size * 0.5;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
   const pitch = size * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
-  const cell = size + (o.letterSpacing ?? 0);
+  // A letter spacing of minus the font size (or less) would leave no advance (Codex on #29).
+  const cell = Math.max(size * 0.1, size + (o.letterSpacing ?? 0));
   const inner = {
     x: box.x + pad,
     y: box.y + pad,
@@ -152,7 +153,10 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     }
     return { start: line.start, end: line.end, glyphs };
   });
-  const across = lines.length * pitch - (pitch - size);
+  // Readings sit outside the first line (right of the first column, above the first row): the
+  // block keeps room for them there, so they are not clipped at the box edge (Codex on #29).
+  const rubyRoom = ruby.length ? pitch - size : 0;
+  const across = lines.length * pitch - (pitch - size) + rubyRoom;
   const longest = Math.max(0, ...lines.map((l) => l.glyphs.reduce((n, g) => n + g.advance, 0)));
   // Place lines: `a` is the centre across lines, `s` the start along the line.
   const acrossSpace = o.vertical ? inner.width : inner.height;
@@ -179,8 +183,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
           ? alongSpace - (o.vertical ? longest : used)
           : 0;
     const lineCentre = o.vertical
-      ? inner.x + inner.width - blockShift - size / 2 - i * pitch
-      : inner.y + blockShift + (ruby.length ? pitch - size : 0) + size / 2 + i * pitch;
+      ? inner.x + inner.width - blockShift - rubyRoom - size / 2 - i * pitch
+      : inner.y + blockShift + rubyRoom + size / 2 + i * pitch;
     const start = (o.vertical ? inner.y : inner.x) + alongShift;
     for (const g of line.glyphs) {
       const along = start + g.y;
@@ -239,9 +243,12 @@ export function layoutGridText(text: string, box: Bounds, o: GridTextOptions): G
   let size = o.fontSize;
   let layout = layoutOnce(text, box, o, size);
   const pad = (o.padding ?? 4) * 2;
-  const room = () => (o.vertical ? box.width - pad : box.height - pad);
+  const across = o.vertical ? box.width - pad : box.height - pad;
+  const along = o.vertical ? box.height - pad : box.width - pad;
+  // Both ways: a reading's base cannot break, so a long one may need a smaller size to fit its
+  // line (Codex on #29).
   if (o.fit)
-    while (size > 8 && layout.across > room()) {
+    while (size > 8 && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
       size = Math.max(8, size - 1);
       layout = layoutOnce(text, box, o, size);
     }

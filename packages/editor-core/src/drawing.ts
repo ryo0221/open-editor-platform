@@ -525,8 +525,13 @@ function largestFont(d: Drawing) {
   );
 }
 /** Vertical text and text with ruby notation are set glyph by glyph on a cell grid. */
-export const usesGridText = (d: Pick<Drawing, 'text' | 'typography'>) =>
-  d.typography?.writingMode === 'vertical-rl' || hasRubyNotation(d.text ?? '');
+/**
+ * Vertical text, and horizontal text with ruby, are drawn on the cell grid. Horizontal text with
+ * formatted runs keeps the ordinary layout, which draws its runs (ruby notation then shows as
+ * typed), so adding a reading never drops formatting (Codex on #29).
+ */
+export const usesGridText = (d: Pick<Drawing, 'text' | 'typography' | 'runs'>) =>
+  d.typography?.writingMode === 'vertical-rl' || (!d.runs?.length && hasRubyNotation(d.text ?? ''));
 function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
