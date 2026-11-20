@@ -102,6 +102,53 @@ describe('#13 shape-evaluation failures as a typed reason, elements and hint', (
     });
   });
 
+  it('a section whose edge is split into many short lines has the same centre: aligned starts are not reported', () => {
+    const doc = structuredClone(f15Loft('square'));
+    const rect = (s: CadSketch, split: number) => {
+      const pts: [number, number][] = [
+        [0, 0],
+        [100, 0],
+        [100, 10],
+        [0, 10],
+      ];
+      for (let i = 1; i < split; i++) pts.push([0, 10 - (10 * i) / split]);
+      s.entities = [
+        ...pts.map((_, i) => ({ type: 'point', id: `p${i}` })),
+        ...pts.map((_, i) => ({
+          type: 'line',
+          id: `l${i}`,
+          start: `p${i}`,
+          end: `p${(i + 1) % pts.length}`,
+        })),
+      ] as CadSketch['entities'];
+      s.solved = Object.fromEntries(pts.map((p, i) => [`p${i}`, p]));
+      return pts.map((_, i) => `l${i}`);
+    };
+    const loft = doc.features.find((f) => f.id === 'loft-feature')!;
+    if (loft.type !== 'loft') throw new Error('loft');
+    const [a, b] = loft.args.sections;
+    if (!a || !b || !('sketchId' in a) || !('sketchId' in b)) throw new Error('sections');
+    a.region = { outer: rect(doc.sketches[0]!, 1), holes: [] };
+    b.region = { outer: rect(doc.sketches[1]!, 100), holes: [] };
+    expect(cadFailureHint(doc, 'kernel-exception:BRepFill', 'loft-feature')).toMatchObject({
+      reason: 'loft-sections',
+    });
+  });
+
+  it('a refused draft in an unexpected shape gives no hint instead of an error; limits never get the mirror diagnosis', () => {
+    const doc = structuredClone(f15Loft('square'));
+    const loft = doc.features.find((f) => f.id === 'loft-feature')!;
+    (loft.args as unknown as { sections: null }).sections = null;
+    expect(() =>
+      cadFailureHint(doc, 'cad-invalid:loft-sections@$.features[0].args.sections'),
+    ).not.toThrow();
+    const mirrored = f14Patterns('mirror');
+    expect(cadFailureHint(mirrored, 'limit-solids', 'm2')).toBeUndefined();
+    expect(cadFailureHint(mirrored, 'kernel-exception:BOPAlgo', 'm2')).toMatchObject({
+      reason: 'mirrored-part',
+    });
+  });
+
   it('a self-crossing spline names the spline', () => {
     const sketch = f16Sketch('crossing');
     const doc = { ...f15Loft(), sketches: [sketch] } as CadDocument;

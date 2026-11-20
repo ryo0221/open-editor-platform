@@ -57,8 +57,29 @@ function loopPoints(s: CadSketch, ids: string[]): Pt[] | undefined {
   }
   return out;
 }
+/**
+ * The loop's area centroid (shoelace), so how finely its edges are split does not move it; a
+ * degenerate loop falls back to the centre of its bounding box.
+ */
+function centreOf(pts: Pt[]): Pt {
+  let a = 0,
+    cx = 0,
+    cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i]!,
+      [x1, y1] = pts[(i + 1) % pts.length]!;
+    const k = x0 * y1 - x1 * y0;
+    a += k;
+    cx += (x0 + x1) * k;
+    cy += (y0 + y1) * k;
+  }
+  if (Math.abs(a) > 1e-9) return [cx / (3 * a), cy / (3 * a)];
+  const xs = pts.map((p) => p[0]),
+    ys = pts.map((p) => p[1]);
+  return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+}
 const angleOf = (pts: Pt[]) => {
-  const c = pts.reduce<Pt>((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
+  const c = centreOf(pts);
   return Math.atan2(pts[0]![1] - c[1], pts[0]![0] - c[0]);
 };
 /** How far apart (radians, about the loop's centre) a section's start may be from its neighbour's. */
@@ -174,6 +195,22 @@ function regionsOf(f: CadFeature): { sketchId: string; region: CadSketchRegion }
   return out;
 }
 
+const NON_GEOMETRIC = new Set([
+  'cancelled',
+  'memory-budget',
+  'output-limit',
+  'timeout',
+  'job-timeout',
+  'permission-denied',
+  'sketch-open',
+]);
+const nonGeometric = (code: string, base: string) =>
+  code.startsWith('cad-invalid:') ||
+  base.startsWith('limit-') ||
+  base.endsWith('-range') ||
+  base.endsWith('-limit') ||
+  NON_GEOMETRIC.has(base);
+
 /**
  * The typed reason, elements and hint for a failure at `elementId` (a feature or a sketch), or
  * undefined when the failure is none of the known classes.
@@ -183,6 +220,15 @@ export function cadFailureHint(
   code: string,
   elementId?: string,
 ): CadFailureHint | undefined {
+  // A refused edit's draft is unvalidated: a part of it in an unexpected shape gives no hint
+  // rather than an error, so the refusal itself is still shown.
+  try {
+    return hintFor(doc, code, elementId);
+  } catch {
+    return undefined;
+  }
+}
+function hintFor(doc: CadDocument, code: string, elementId?: string): CadFailureHint | undefined {
   const base = code.replace(/^cad-invalid:/, '').split(/[:@]/)[0]!;
   // A refused edit names no element: the validator's path (`@features[i]…`) says which one.
   const indexIn = (list: string) => {
@@ -197,7 +243,11 @@ export function cadFailureHint(
   const sketch =
     doc.sketches.find((s) => s.id === elementId) ??
     (elementId === undefined && si !== undefined ? doc.sketches[si] : undefined);
-  if (feature?.type === 'loft' && (base === 'kernel-exception' || base.startsWith('loft')))
+  if (
+    feature?.type === 'loft' &&
+    Array.isArray((feature.args as { sections?: unknown } | undefined)?.sections) &&
+    (base === 'kernel-exception' || base.startsWith('loft'))
+  )
     return loftHint(doc, feature);
   if (base === 'sketch-self-intersection') {
     const at = /entities\[(\d+)\]/.exec(code)?.[1];
@@ -229,7 +279,9 @@ export function cadFailureHint(
       hint: 'スケッチの輪の中で交わっている線を探し、交わらないように端点を動かしてください。',
     };
   }
-  if (feature) {
+  // A refusal for a limit, a range, a cancellation or the document's shape says nothing about the
+  // reflected geometry, so it never gets the mirror diagnosis.
+  if (feature && !nonGeometric(code, base)) {
     // The failing mirror itself, else the mirror nearest upstream (the last one before it).
     const isMirror = (f: CadFeature) => f.type === 'mirror' || f.type === 'mirrorCopy';
     const chain = upstreamFeatures(doc.features, [feature.id]);
