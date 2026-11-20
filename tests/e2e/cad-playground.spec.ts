@@ -3853,8 +3853,21 @@ test('#18 a form-to-form motion with a camera path exports to video', async ({ p
   // The joints are not changed by playing a motion: the document still stands in Stand.
   expect(saved.joints).toEqual(arm.assembly.joints);
 
-  // A step added with a camera key at its end, then removed: the key past the new end goes too,
-  // so the motion still saves (Codex on #34).
+  // One second at 30 fps: 31 frames of 1280 × 720.
+  const download = page.waitForEvent('download', { timeout: 300_000 });
+  await motions
+    .getByRole('group', { name: 'Motion Fold' })
+    .getByRole('button', { name: 'Export video' })
+    .click();
+  const mp4 = await readFile((await (await download).path())!);
+  expect(mp4.subarray(4, 8).toString()).toBe('ftyp');
+  await expect(page.getByTestId('cad-motion-note')).toHaveText(
+    '動画を書き出しました：Arm-Fold-720p.mp4（31フレーム）',
+  );
+  await expect(motions.getByRole('status', { name: 'Video progress' })).toHaveCount(0);
+
+  // A minute long: stopped part way, no file. First a step is added with a camera key at its
+  // end and removed again: the key past the new end goes too, so the motion saves (Codex on #34).
   await motions
     .getByRole('group', { name: 'Motion Fold' })
     .getByRole('button', { name: 'Edit' })
@@ -3869,6 +3882,7 @@ test('#18 a form-to-form motion with a camera path exports to video', async ({ p
   await editor.getByRole('button', { name: 'Remove step 2' }).click();
   await expect(keys).toHaveCount(2);
   await expect(editor.getByLabel('Motion time shown')).toHaveText('1.0 s / 1.0 s');
+  await editor.getByLabel('Step 1 seconds').fill('60');
   await editor.getByRole('button', { name: 'Save motion' }).click();
   await expect(page.getByTestId('cad-motion-note')).toHaveText('「Fold」を保存しました。');
   expect(
@@ -3876,28 +3890,6 @@ test('#18 a form-to-form motion with a camera path exports to video', async ({ p
       (k) => k.atMs,
     ),
   ).toEqual([0, 1000]);
-
-  // One second at 30 fps: 31 frames of 1280 × 720.
-  const download = page.waitForEvent('download', { timeout: 300_000 });
-  await motions
-    .getByRole('group', { name: 'Motion Fold' })
-    .getByRole('button', { name: 'Export video' })
-    .click();
-  const mp4 = await readFile((await (await download).path())!);
-  expect(mp4.subarray(4, 8).toString()).toBe('ftyp');
-  await expect(page.getByTestId('cad-motion-note')).toHaveText(
-    '動画を書き出しました：Arm-Fold-720p.mp4（31フレーム）',
-  );
-  await expect(motions.getByRole('status', { name: 'Video progress' })).toHaveCount(0);
-
-  // A minute long: stopped part way, no file.
-  await motions
-    .getByRole('group', { name: 'Motion Fold' })
-    .getByRole('button', { name: 'Edit' })
-    .click();
-  await editor.getByLabel('Step 1 seconds').fill('60');
-  await editor.getByRole('button', { name: 'Save motion' }).click();
-  await expect(page.getByTestId('cad-motion-note')).toHaveText('「Fold」を保存しました。');
   await motions
     .getByRole('group', { name: 'Motion Fold' })
     .getByRole('button', { name: 'Export video' })
