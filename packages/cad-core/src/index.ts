@@ -18,6 +18,7 @@ export * from './coordinator';
 export * from './expression';
 export * from './topology';
 export * from './sketch';
+export * from './limit-usage';
 export * from './gear';
 export * from './spring';
 export * from './machine-elements';

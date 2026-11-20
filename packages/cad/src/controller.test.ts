@@ -2,6 +2,7 @@ import { EditorSession } from '@editor-platform/editor-core';
 import { describe, expect, it } from 'vitest';
 import {
   applyCadOperation,
+  cadLimits,
   k5aBars,
   cadToleranceSets,
   f02Plate,
@@ -293,7 +294,7 @@ describe('CadController', () => {
   it('explains disconnected results, the tolerance and known kernel exceptions with what to change (ST-85#1)', () => {
     expect(describeCode('multiple-solids')).toContain('1,024');
     // K1 (CM-5): the other refusals of a body of several solids.
-    expect(describeCode('limit-solids')).toContain('4,096');
+    expect(describeCode('limit-solids')).toContain(cadLimits.solids.toLocaleString('en-US'));
     expect(describeCode('solids-touching')).toContain('接する');
     expect(describeCode('shell-multiple-solids')).toContain('殻にできません');
     expect(describeCode('result-tolerance')).toContain('0.0001 mm');

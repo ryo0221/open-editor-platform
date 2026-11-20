@@ -116,11 +116,11 @@ export interface CadSketchRegion {
 
 export const cadSketchLimits = Object.freeze({
   /**
-   * CR0d (docs/cad/car-design.md, E4): 256, the feature limit, so every feature can have a sketch
-   * of its own (a car body's sections and paths). A safety limit, not a measured one: the
-   * document's 4 MiB content, 1,024 entities a sketch and the 30 s job (sliced) still bound it.
+   * CR0d (docs/cad/car-design.md, E4): the feature limit (2,048 since #14), so every feature can
+   * have a sketch of its own (a car body's sections and paths). A safety limit, not a measured
+   * one: the document's content bytes, 1,024 entities a sketch and the job limits still bound it.
    */
-  sketches: 256,
+  sketches: 2_048,
   entities: 1024,
   constraints: 2048,
   holes: 64,

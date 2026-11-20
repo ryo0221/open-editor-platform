@@ -448,9 +448,9 @@ export type CadWorkerResponse =
 
 /** Initial evaluation output limits (docs/cad/model.md). Exceeding them is an explicit error. */
 export const cadOutputLimits = Object.freeze({
-  faces: 50_000,
-  triangles: 500_000,
-  bufferBytes: 64 * 1024 * 1024,
+  faces: 200_000,
+  triangles: 2_000_000,
+  bufferBytes: 256 * 1024 * 1024,
 });
 /**
  * The pick table's size as held in memory: its numbers as doubles and its names as UTF-16.

@@ -1,6 +1,6 @@
 import type { GeometryGraph } from '@editor-platform/geometry-core';
 import { describe, expect, it } from 'vitest';
-import { WorkerBimKernel, type BimWorkerLike } from './port';
+import { bimKernelLimits, WorkerBimKernel, type BimWorkerLike } from './port';
 import type { BimWorkerRequest, BimWorkerResponse } from './protocol';
 
 /** A Worker double: answers `init` at once and lets the test answer each `run`. */
@@ -93,7 +93,7 @@ describe('bim Worker kernel port (R2c-3c)', () => {
     });
     const a = kernel.run(graph, [], new Map());
     await tick();
-    timers.fire(30_000);
+    timers.fire(bimKernelLimits.jobTimeoutMs);
     expect(await a).toEqual({ status: 'timeout' });
     expect(workers[0]!.terminated).toBe(true);
     const b = kernel.run(graph, [], new Map());
@@ -115,7 +115,7 @@ describe('bim Worker kernel port (R2c-3c)', () => {
     let settled = false;
     void a.then(() => (settled = true));
     await tick();
-    timers.fire(30_000);
+    timers.fire(bimKernelLimits.jobTimeoutMs);
     await tick();
     expect(settled).toBe(false);
     timers.fire(300_000);
@@ -127,7 +127,7 @@ describe('bim Worker kernel port (R2c-3c)', () => {
     const kernel = new WorkerBimKernel({ spawn: () => new FakeWorker('silent'), build, timers });
     const a = kernel.run(graph, [], new Map());
     await tick();
-    timers.fire(30_000);
+    timers.fire(bimKernelLimits.jobTimeoutMs);
     expect(await a).toEqual({ status: 'timeout' });
   });
 
