@@ -1,6 +1,6 @@
 import { insertDesignPagePath, insertDesignSpeechBalloon } from './page-artwork';
 import { newId } from '@editor-platform/artifact-core';
-import { transaction, type EditorCommand } from '@editor-platform/editor-core';
+import { transaction, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
 import { insertElement, updateElement, type DesignContent } from './model';
 import { insertDesignPage, insertDesignPanel, setDesignPagination } from './pagination';
 import { mangaDialoguePlacement } from './manga-dialogue';
@@ -32,14 +32,17 @@ export function DesignPagePanel({
 }) {
   const pagination = content.pagination;
   const [stuck, setStuck] = useState(0);
+  const [locked, setLocked] = useState(0);
+  const [noRoom, setNoRoom] = useState(false);
   const overlaps = mangaBalloonOverlaps(content);
   const target =
     selected.length === 1 ? content.elements.find((e) => e.id === selected[0]) : undefined;
   const markable =
     target && !isMangaBalloon(target) && mangaPanelOf(content, target.id) ? target : undefined;
   function moveBalloons() {
-    const { command, stuck } = moveMangaBalloonsOffKeepOut(content);
+    const { command, stuck, locked } = moveMangaBalloonsOffKeepOut(content);
     setStuck(stuck.length);
+    setLocked(locked.length);
     if (command) apply(command);
   }
   function addPage() {
@@ -84,20 +87,22 @@ export function DesignPagePanel({
   }
   function artwork(panelId: string, kind: 'line' | 'cubic' | 'balloon') {
     const panel = content.elements.find((e) => e.id === panelId)!;
-    const fallback = {
+    let bounds: Bounds | undefined = {
       x: panel.bounds.x + panel.bounds.width * 0.1,
       y: panel.bounds.y + panel.bounds.height * 0.1,
       width: panel.bounds.width * 0.7,
       height: panel.bounds.height * 0.65,
     };
-    // A new balloon goes where it covers no face, figure or other balloon (#21).
-    const bounds =
-      (kind === 'balloon' &&
-        mangaBalloonPlacement(content, panelId, {
-          width: panel.bounds.width * 0.4,
-          height: panel.bounds.height * 0.4,
-        })) ||
-      fallback;
+    // A new balloon goes where it covers no face, figure or other balloon (#21); with no such
+    // place it is not added, rather than put over one (Codex on #28).
+    if (kind === 'balloon') {
+      bounds = mangaBalloonPlacement(content, panelId, {
+        width: panel.bounds.width * 0.4,
+        height: panel.bounds.height * 0.4,
+      });
+      setNoRoom(!bounds);
+      if (!bounds) return;
+    }
     const cmd =
       kind === 'balloon'
         ? insertDesignSpeechBalloon(panelId, bounds, 'Dialogue')
@@ -237,6 +242,14 @@ export function DesignPagePanel({
           )}
           {!!stuck && (
             <p role="status">{`${stuck} 個の吹き出しはコマの中に空きがなく、動かせませんでした`}</p>
+          )}
+          {!!locked && (
+            <p role="status">{`${locked} 個の吹き出しはロックか非表示のため、動かせませんでした`}</p>
+          )}
+          {noRoom && (
+            <p role="status">
+              このコマには顔や人物、ほかの吹き出しに重ならない空きがないため、吹き出しを入れませんでした
+            </p>
           )}
           <p>
             Horizontal text and native paths. Balloon paths require vector capture; vertical text

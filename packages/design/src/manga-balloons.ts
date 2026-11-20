@@ -27,6 +27,23 @@ const overlapArea = (a: Bounds, b: Bounds) =>
   Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *
   Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
 
+/**
+ * The world box an element covers as drawn: its bounds turned by its rotation (degrees, about the
+ * centre), so a turned face or figure is avoided where it shows (Codex on #28).
+ */
+export function mangaCoverBox(e: Pick<DesignElement, 'bounds' | 'rotation'>): Bounds {
+  const b = e.bounds;
+  const turn = (((e.rotation ?? 0) % 360) * Math.PI) / 180;
+  if (!turn) return b;
+  const cos = Math.abs(Math.cos(turn)),
+    sin = Math.abs(Math.sin(turn));
+  const width = b.width * cos + b.height * sin,
+    height = b.width * sin + b.height * cos;
+  const cx = b.x + b.width / 2,
+    cy = b.y + b.height / 2;
+  return { x: cx - width / 2, y: cy - height / 2, width, height };
+}
+
 function panelIds(d: DesignContent) {
   return new Set((d.pagination?.pages ?? []).flatMap((p) => p.panelIds));
 }
@@ -51,15 +68,17 @@ export function mangaBalloonOverlaps(d: DesignContent): MangaBalloonOverlap[] {
   for (const balloon of d.elements.filter(isMangaBalloon)) {
     const panelId = mangaPanelOf(d, balloon.id);
     if (!panelId) continue;
+    const cover = mangaCoverBox(balloon);
     for (const k of inPanel(d, panelId, isMangaKeepOut)) {
-      const area = overlapArea(balloon.bounds, k.bounds);
+      const box = mangaCoverBox(k);
+      const area = overlapArea(cover, box);
       if (area > 0)
         out.push({
           balloonId: balloon.id,
           keepOutId: k.id,
           panelId,
           area,
-          share: area / Math.max(1, k.bounds.width * k.bounds.height),
+          share: area / Math.max(1, box.width * box.height),
         });
     }
   }
@@ -126,7 +145,7 @@ export function mangaBalloonPlacement(
     Math.hypot((rtl ? c.x + c.width : c.x) - start.x, (c.y - start.y) * 1.5);
   candidates.sort((p, q) => distance(p) - distance(q));
   for (const c of candidates) {
-    if (blocked.some((e) => overlapArea(c, e.bounds) > 0)) continue;
+    if (blocked.some((e) => overlapArea(c, mangaCoverBox(e)) > 0)) continue;
     if (
       polygon &&
       ![
@@ -148,17 +167,20 @@ export const setMangaKeepOut = (id: string, keepOut: boolean): EditorCommand<Des
 
 /**
  * Move every balloon that covers a keep-out region of its panel to the nearest free position.
- * Balloons that have no free position stay where they are and are returned in `stuck`.
+ * Balloons that have no free position stay where they are and are returned in `stuck`; balloons
+ * that cannot be moved (locked or hidden, or with a locked part) are returned in `locked`.
  */
 export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
   command?: EditorCommand<DesignContent>;
   moved: string[];
   stuck: string[];
+  locked: string[];
 } {
   const overlapping = [...new Set(mangaBalloonOverlaps(d).map((o) => o.balloonId))];
   const moves: EditorCommand<DesignContent>[] = [];
   const moved: string[] = [],
-    stuck: string[] = [];
+    stuck: string[] = [],
+    locked: string[] = [];
   let next = d;
   for (const id of overlapping) {
     const balloon = next.elements.find((e) => e.id === id)!;
@@ -177,7 +199,13 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
       dw: 0,
       dh: 0,
     });
-    next = move.apply(next);
+    try {
+      next = move.apply(next);
+    } catch {
+      // A locked or hidden balloon (or part of one) stays where it is; the others still move.
+      locked.push(id);
+      continue;
+    }
     moves.push(move);
     moved.push(id);
   }
@@ -185,6 +213,7 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
     ...(moves.length ? { command: transaction('Move balloons off faces and figures', moves) } : {}),
     moved,
     stuck,
+    locked,
   };
 }
 function isWithin(d: DesignContent, id: string, ancestor: string) {

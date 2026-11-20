@@ -1,6 +1,6 @@
 import { descendantIds, type Bounds } from '@editor-platform/editor-core';
-import type { DesignContent } from './model';
-import { isMangaBalloon, isMangaKeepOut } from './manga-balloons';
+import { transformElements, type DesignContent } from './model';
+import { isMangaBalloon, isMangaKeepOut, mangaCoverBox } from './manga-balloons';
 import type { DesignPageProposalRequest } from './page-proposals';
 
 /**
@@ -81,5 +81,31 @@ export function checkPanelRedrawProposal(
       if (op.type === 'bounds' && !contains(request.region, op.value))
         throw Error(`${op.id} would move outside panel ${request.panelId}`);
     }
+  // A group's move carries its parts with it: play the moves through and check every element that
+  // moved, as drawn (Codex on #28).
+  let next = d;
+  for (const unit of proposal.units)
+    for (const op of unit.operations) {
+      if (op.type !== 'bounds') continue;
+      const target = next.elements.find((e) => e.id === op.id)!;
+      next = transformElements([op.id], {
+        dx: op.value.x - target.bounds.x,
+        dy: op.value.y - target.bounds.y,
+        dw: op.value.width - target.bounds.width,
+        dh: op.value.height - target.bounds.height,
+      }).apply(next);
+    }
+  if (next !== d) {
+    const before = new Map(d.elements.map((e) => [e.id, e]));
+    for (const e of next.elements) {
+      const was = before.get(e.id);
+      if (!was || was === e || !inside.has(e.id)) continue;
+      const same = (['x', 'y', 'width', 'height'] as const).every(
+        (k) => was.bounds[k] === e.bounds[k],
+      );
+      if (!same && !contains(request.region, mangaCoverBox(e)))
+        throw Error(`${e.id} would move outside panel ${request.panelId}`);
+    }
+  }
   return proposal;
 }

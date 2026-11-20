@@ -116,6 +116,36 @@ describe('#21 balloons keep off faces and figures', () => {
     const crowded = blocked.apply(setMangaKeepOut('crowd', true).apply(full));
     expect(moveMangaBalloonsOffKeepOut(crowded).stuck).toEqual([blocked.elementId]);
   });
+
+  it('sees a turned face where it is drawn (Codex on #28)', () => {
+    let d = page();
+    // 200 × 20 turned a quarter: drawn as 20 wide and 200 tall around the same centre.
+    d = insertElement('rectangle', {
+      id: 'arm',
+      parentId: 'k1',
+      bounds: { x: 100, y: 120, width: 200, height: 20 },
+    }).apply(d);
+    d = setMangaKeepOut('arm', true).apply(updateElement('arm', { rotation: 90 }).apply(d));
+    const b = insertDesignSpeechBalloon('k1', { x: 190, y: 40, width: 20, height: 40 }, 'A');
+    d = b.apply(d);
+    expect(mangaBalloonOverlaps(d).map((o) => o.keepOutId)).toEqual(['arm']);
+    const at = mangaBalloonPlacement(d, 'k1', { width: 60, height: 60 }, [b.elementId])!;
+    expect(overlap(at, { x: 190, y: 30, width: 20, height: 200 })).toBe(false);
+  });
+
+  it('leaves a locked balloon in place, says so, and still moves the others (Codex on #28)', () => {
+    let d = page();
+    const a = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 80, height: 60 }, 'A');
+    d = a.apply(d);
+    const b = insertDesignSpeechBalloon('k1', { x: 450, y: 100, width: 80, height: 60 }, 'B');
+    d = b.apply(d);
+    d = updateElement(a.elementId, { locked: true }).apply(d);
+    const { command, moved, locked } = moveMangaBalloonsOffKeepOut(d);
+    expect(locked).toEqual([a.elementId]);
+    expect(moved).toEqual([b.elementId]);
+    const after = command!.apply(d);
+    expect(mangaBalloonOverlaps(after).map((o) => o.balloonId)).toEqual([a.elementId]);
+  });
 });
 
 describe('#21 redraw one panel', () => {
@@ -166,5 +196,31 @@ describe('#21 redraw one panel', () => {
         proposal([{ type: 'pageOrder', before: ['p1'], after: ['p1'] }]),
       ),
     ).toThrow(/cannot change pageOrder/);
+    // A group moved to the panel edge carries a part that reaches past the group (Codex on #28).
+    d = insertElement('group', {
+      id: 'g',
+      parentId: 'k1',
+      bounds: { x: 100, y: 100, width: 100, height: 100 },
+    }).apply(d);
+    d = insertElement('rectangle', {
+      id: 'tail',
+      parentId: 'g',
+      bounds: { x: 100, y: 100, width: 160, height: 100 },
+    }).apply(d);
+    const asked = designPanelRedrawRequest(d, 'k1', '');
+    expect(() =>
+      checkPanelRedrawProposal(
+        d,
+        asked,
+        proposal([{ type: 'bounds', id: 'g', value: { x: 470, y: 100, width: 100, height: 100 } }]),
+      ),
+    ).toThrow(/tail would move outside panel k1/);
+    expect(() =>
+      checkPanelRedrawProposal(
+        d,
+        asked,
+        proposal([{ type: 'bounds', id: 'g', value: { x: 300, y: 100, width: 100, height: 100 } }]),
+      ),
+    ).not.toThrow();
   });
 });
