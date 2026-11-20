@@ -39,6 +39,22 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import type { CadSketchDisplay } from './sketch-display';
+/** #15: one underlay as the viewport draws it (the Surface decodes the images). */
+export interface CadViewportUnderlay {
+  id: string;
+  axes: {
+    u: [number, number, number];
+    v: [number, number, number];
+    toward: [number, number, number];
+  };
+  /** The (u, v) box the image covers. */
+  box: [number, number, number, number];
+  opacity: number;
+  /** The drawing; absent while hidden (its heat may still show). */
+  image?: TexImageSource;
+  /** The deviation heat overlay, the same box. */
+  heat?: TexImageSource;
+}
 import {
   disposeViewTextures,
   setViewFinish,
@@ -334,6 +350,9 @@ export class CadViewport {
   private readonly spotWelds = new Group();
   /** CR6c: the ray diagram's lines. */
   private readonly rays = new Group();
+  /** #15: drawings laid under views, each shown only while the camera looks along its view. */
+  private readonly underlays = new Group();
+  private readonly underlayItems: { toward: Vector3; objects: Object3D[] }[] = [];
   /**
    * CLF11: the shown sketches' curves and notes, a scene of their own drawn over the model after
    * it, so the silhouette's override material leaves their colours and they show over the bodies.
@@ -454,6 +473,7 @@ export class CadViewport {
       this.gapFlushes,
       this.spotWelds,
       this.rays,
+      this.underlays,
     );
     this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0.6 });
     this.controls = this.makeControls();
@@ -669,6 +689,7 @@ export class CadViewport {
   }
   /** One frame: the current camera's, or the drawing board's three panes (CLF1b). */
   private draw() {
+    this.underlaysFor(this.camera);
     const helpers = [this.grid.visible, this.axes.visible];
     // CLF6: the outline alone, without the grid and the axes.
     if (this.shading.mode === 'silhouette') this.grid.visible = this.axes.visible = false;
@@ -694,6 +715,7 @@ export class CadViewport {
         const y = height - rect.y - rect.height;
         this.renderer.setViewport(rect.x, y, rect.width, rect.height);
         this.renderer.setScissor(rect.x, y, rect.width, rect.height);
+        this.underlaysFor(camera);
         this.renderer.render(this.scene, camera);
         this.drawSketches(camera, rect.width, rect.height, true);
       }
@@ -2139,6 +2161,77 @@ export class CadViewport {
         );
       }
     return box;
+  }
+  /**
+   * #15: the underlays to draw. Each image lies in its view's plane behind the shown model (as
+   * seen from that view), its heat overlay in front; both show only while the camera looks along
+   * that view (within about 2.5°). Display only: never picked, never part of a fit.
+   */
+  setUnderlays(items: readonly CadViewportUnderlay[]) {
+    for (const o of [...this.underlays.children]) {
+      this.underlays.remove(o);
+      const mesh = o as Mesh<PlaneGeometry, MeshBasicMaterial>;
+      mesh.geometry.dispose();
+      mesh.material.map?.dispose();
+      mesh.material.dispose();
+    }
+    this.underlayItems.length = 0;
+    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    for (const item of items) {
+      const u = new Vector3(...item.axes.u),
+        v = new Vector3(...item.axes.v),
+        toward = new Vector3(...item.axes.toward);
+      // How far along `toward` the model reaches, behind and in front.
+      let [near, far] = [0, 0];
+      if (!box.isEmpty()) {
+        const ds = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+          new Vector3(
+            i & 1 ? box.max.x : box.min.x,
+            i & 2 ? box.max.y : box.min.y,
+            i & 4 ? box.max.z : box.min.z,
+          ).dot(toward),
+        );
+        [far, near] = [Math.min(...ds), Math.max(...ds)];
+      }
+      const [u0, v0, u1, v1] = item.box;
+      const center = (depth: number) =>
+        new Vector3()
+          .addScaledVector(u, (u0 + u1) / 2)
+          .addScaledVector(v, (v0 + v1) / 2)
+          .addScaledVector(toward, depth);
+      const plane = (image: TexImageSource, depth: number, opacity: number, front: boolean) => {
+        const texture = new CanvasTexture(image as HTMLCanvasElement);
+        texture.colorSpace = 'srgb';
+        const material = new MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity,
+          depthWrite: false,
+          depthTest: !front,
+          side: DoubleSide,
+        });
+        const mesh = new Mesh(new PlaneGeometry(u1 - u0, v1 - v0), material);
+        // Local X along the view's right, Y along its up, Z toward the viewer.
+        mesh.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(u, v, toward));
+        mesh.position.copy(center(depth));
+        mesh.renderOrder = front ? 10 : -10;
+        mesh.userData.underlay = item.id;
+        mesh.raycast = () => {};
+        return mesh;
+      };
+      const objects: Object3D[] = [];
+      if (item.image) objects.push(plane(item.image, far - 1, item.opacity, false));
+      if (item.heat) objects.push(plane(item.heat, near + 1, 1, true));
+      this.underlays.add(...objects);
+      this.underlayItems.push({ toward, objects });
+    }
+    this.render();
+  }
+  private underlaysFor(camera: PerspectiveCamera | OrthographicCamera) {
+    if (!this.underlayItems.length) return;
+    const look = camera.getWorldDirection(new Vector3()).negate();
+    for (const item of this.underlayItems)
+      for (const o of item.objects) o.visible = look.dot(item.toward) > 0.999;
   }
   /** Shows a saved camera. Opening with it replaces the first automatic fit. */
   setView({ camera, projection }: CadViewportView) {

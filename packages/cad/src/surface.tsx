@@ -157,6 +157,7 @@ import {
 } from './dimension-fields';
 import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
 import { sketchUnderlay } from './sketch-underlay';
+import { UnderlaysSection } from './underlay-panel';
 import { sketchDisplay } from './sketch-display';
 import {
   aeroColor,
@@ -7119,6 +7120,13 @@ function Surface({
               onToggleSketch={toggleSketch}
               assembly={assembly}
               name={name}
+            />
+            <UnderlaysSection
+              controller={controller}
+              snapshot={snapshot}
+              view={view}
+              shown={new Set(shownIds)}
+              editable={!snapshot.readOnly && snapshot.canEdit}
             />
           </>
         }

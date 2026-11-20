@@ -47,6 +47,7 @@ import {
   cadImportToleranceMm,
   cadTolerance,
   cadTextureKind,
+  type CadUnderlay,
   type CadBody,
   type CadBodyEvaluation,
   type CadDocument,
@@ -2456,6 +2457,58 @@ export class CadController {
       appearance,
       assets: staged.map((a) => a.ref).filter((r) => !held.has(r.id)),
     });
+  }
+  /**
+   * #15: lays a drawing under a view. The image is stored with the Host first (as a texture is),
+   * then one `setUnderlays` adds it to the list. Its pixel size is read by the caller.
+   */
+  async addUnderlay(
+    file: { bytes: Uint8Array; mediaType: string },
+    underlay: Omit<CadUnderlay, 'id' | 'assetId'>,
+  ): Promise<boolean> {
+    const refuse = (code: string, message?: string) => {
+      this.fail(code);
+      if (message && this.diagnostic) this.diagnostic.message = message;
+      this.emit();
+      return false;
+    };
+    const { assets } = this.options;
+    if (!assets) return refuse('texture-unavailable');
+    if (!this.options.canEdit()) return refuse('permission-denied');
+    const kind = cadTextureKind(file.mediaType);
+    if (!kind) return refuse('texture-media-type');
+    const digest = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', file.bytes as BufferSource),
+    );
+    const sha256 = `sha256:${Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    const content = this.coordinator.content;
+    const ref: CadAssetRef = content.assets.find((a) => a.kind === kind && a.sha256 === sha256) ?? {
+      id: this.id('asset'),
+      kind,
+      sha256,
+      byteLength: file.bytes.byteLength,
+      mediaType: cadAssetMediaTypes[kind],
+    };
+    try {
+      await assets.stage([{ ref, bytes: file.bytes }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return refuse('asset-stage-failed', `${describeCode('texture-stage-failed')}${message}`);
+    }
+    // Built on the content as it is now (an edit while the image was stored is kept).
+    const now = this.coordinator.content;
+    const held = now.assets.find((a) => a.id === ref.id);
+    if (held && held.sha256 !== ref.sha256) return refuse('texture-stale');
+    const list = now.underlays ?? [];
+    return this.run({
+      type: 'setUnderlays',
+      underlays: [...list, { ...underlay, id: this.id('underlay'), assetId: ref.id }],
+      ...(held ? {} : { assets: [ref] }),
+    });
+  }
+  /** #15: the whole underlay list after a change in the panel (empty removes them all). */
+  setUnderlays(underlays: CadUnderlay[]) {
+    return this.run({ type: 'setUnderlays', underlays });
   }
   /** Discards the read file; nothing was stored. */
   cancelStepImport() {

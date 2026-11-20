@@ -6,6 +6,7 @@ import type { CadProportions } from './proportions';
 import type { CadDesignTarget } from './design-targets';
 import type { CadSightCheck } from './sight-checks';
 import type { CadMotion } from './motions';
+import type { CadUnderlay } from './underlays';
 import type { CadToleranceStack } from './tolerance-stacks';
 import type {
   CadComponent,
@@ -822,6 +823,8 @@ export interface CadDocument {
   toleranceStacks?: CadToleranceStack[];
   /** #18: form-to-form motions with camera paths, 1–32 when present. */
   motions?: CadMotion[];
+  /** #15: 2D drawings laid under views, 1–64 when present. */
+  underlays?: CadUnderlay[];
 }
 export interface CadDiagnostic {
   code: string;

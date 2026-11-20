@@ -79,6 +79,7 @@ import {
 } from './tolerance-stacks';
 import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
 import { applyMotionsOperation, type CadMotionsOperation } from './motions';
+import { applyUnderlaysOperation, type CadUnderlaysOperation } from './underlays';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
 import { assertCad, cadId, record, validateCadAppearance } from './validation';
@@ -253,6 +254,7 @@ export type CadOperation =
   | CadSightChecksOperation
   | CadToleranceStacksOperation
   | CadMotionsOperation
+  | CadUnderlaysOperation
   | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
@@ -397,6 +399,8 @@ function pruneAssets(doc: CadDocument) {
     ),
     // #662: texture images, by every body that names them (consumed ones too).
     ...doc.bodies.flatMap((b) => Object.values(b.appearance.textures?.maps ?? {})),
+    // #15: the images laid under views.
+    ...(doc.underlays ?? []).map((u) => u.assetId),
     // PMI-5a: an assembly's PMI of particular instances.
     ...(doc.assemblyPmiAssetId === undefined ? [] : [doc.assemblyPmiAssetId]),
   ]);
@@ -987,6 +991,8 @@ function apply(
       return applyToleranceStacksOperation(next, op);
     case 'setMotions':
       return applyMotionsOperation(next, op);
+    case 'setUnderlays':
+      return applyUnderlaysOperation(next, op);
     case 'insertInterferenceAllowance':
     case 'removeInterferenceAllowance':
       return applyInterferenceOperation(next, op);

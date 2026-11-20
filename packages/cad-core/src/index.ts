@@ -57,6 +57,7 @@ export * from './proportions';
 export * from './design-targets';
 export * from './sight-checks';
 export * from './motions';
+export * from './underlays';
 export * from './sight-fixtures';
 export * from './tolerance-stacks';
 export * from './product-design-fixtures';

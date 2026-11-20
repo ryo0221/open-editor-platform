@@ -22,6 +22,7 @@ import { validateProportions } from './proportions';
 import { validateDesignTargets } from './design-targets';
 import { validateSightChecks } from './sight-checks';
 import { validateMotions } from './motions';
+import { validateUnderlays } from './underlays';
 import { validateToleranceStacks } from './tolerance-stacks';
 import { cadJointLimits } from './joints';
 import { validateInterferenceAllowances } from './interference';
@@ -2191,6 +2192,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       'sightChecks',
       'toleranceStacks',
       'motions',
+      'underlays',
     ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
@@ -2279,6 +2281,12 @@ export function validateCad(value: unknown): CadDiagnostic[] {
         else usedAssets.add(id as string);
       }
     });
+  // #15: underlays name image assets of the content.
+  if (Object.hasOwn(value, 'underlays'))
+    for (const id of validateUnderlays(c, value.underlays, (id) =>
+      textureKinds.has(assets.get(id as string)),
+    ))
+      usedAssets.add(id);
   // The closure is exact: an asset no feature or body reads is not kept in the content.
   if (Array.isArray(value.assets))
     value.assets.forEach(
