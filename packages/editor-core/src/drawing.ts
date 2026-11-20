@@ -1,5 +1,6 @@
 import { escapeXml, type Bounds } from './geometry';
 import { layoutTextRuns } from './text';
+import { hasRubyNotation, layoutGridText, parseRubyNotation } from './vertical-text';
 import { newId } from '@editor-platform/artifact-core';
 export const defaultDrawingFontFamily = 'Noto Sans CJK JP, sans-serif';
 export const shapeNames = [
@@ -45,6 +46,8 @@ export interface TextStyle {
   padding?: number;
   list?: boolean;
   overflow?: 'clip' | 'expand' | 'fit';
+  /** Vertical writing (縦書き): columns right to left, set on a cell grid. */
+  writingMode?: 'horizontal-tb' | 'vertical-rl';
 }
 export interface TextRun {
   text: string;
@@ -521,11 +524,71 @@ function largestFont(d: Drawing) {
     ...(d.runs ?? []).map((run) => run.style?.fontSize ?? 0),
   );
 }
+/** Vertical text and text with ruby notation are set glyph by glyph on a cell grid. */
+export const usesGridText = (d: Pick<Drawing, 'text' | 'typography'>) =>
+  d.typography?.writingMode === 'vertical-rl' || hasRubyNotation(d.text ?? '');
+function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const layout = layoutGridText(d.text, b, {
+    vertical: s.writingMode === 'vertical-rl',
+    fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
+    lineHeight: s.lineHeight,
+    padding: s.padding ?? (d.kind === 'text' ? 4 : 10),
+    letterSpacing: s.letterSpacing,
+    align: s.align,
+    verticalAlign: s.verticalAlign,
+    fit: s.overflow === 'fit',
+  });
+  const size = layout.fontSize;
+  const glyphs = layout.lines.flatMap((line) =>
+    line.glyphs.map((g) => {
+      // 、。 and small kana move from the lower left of a horizontal cell to the upper right.
+      const shift = g.kind === 'punctuation' ? size * 0.55 : g.kind === 'small' ? size * 0.1 : 0;
+      return p(
+        'text',
+        {
+          x: g.x + shift,
+          y: g.y - shift,
+          ...(g.kind === 'rotated' ? { transform: `rotate(90 ${g.x} ${g.y})` } : {}),
+          ...(g.kind === 'upright' && g.text.length > 1
+            ? { 'font-size': size * 0.8, textLength: size * 0.9, lengthAdjust: 'spacingAndGlyphs' }
+            : {}),
+        },
+        [g.text],
+      );
+    }),
+  );
+  const ruby = layout.ruby.map((r) => p('text', { x: r.x, y: r.y, 'font-size': r.size }, [r.text]));
+  const text = p(
+    'g',
+    {
+      'font-family': s.fontFamily ?? defaultDrawingFontFamily,
+      'font-size': size,
+      'font-weight': s.bold ? '700' : '400',
+      'font-style': s.italic ? 'italic' : 'normal',
+      fill: s.color ?? (d.kind === 'text' ? d.fill : '#253044'),
+      'text-anchor': 'middle',
+      'dominant-baseline': 'central',
+      role: 'img',
+      'aria-label': parseRubyNotation(d.text).plain,
+      'data-writing-mode': layout.vertical ? 'vertical-rl' : 'horizontal-tb',
+    },
+    [...glyphs, ...ruby],
+  );
+  return s.overflow === 'expand'
+    ? [text]
+    : [
+        p('clipPath', { id: `text-${d.id}` }, [p('rect', { ...b })]),
+        p('g', { 'clip-path': `url(#text-${d.id})` }, [text]),
+      ];
+}
 export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
   if (options.screenScale !== undefined && largestFont(d) * options.screenScale < hiddenBelowPixels)
     return [];
+  if (usesGridText(d)) return gridTextPrimitives(d);
   const { fontSize: font, lines, startY: start, x } = layoutDrawingText(d);
   const margin = 4 * lines.reduce((size, line) => Math.max(size, line.ascent), font);
   let offset = 0;

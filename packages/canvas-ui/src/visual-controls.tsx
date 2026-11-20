@@ -605,6 +605,24 @@ function TextLayoutFields({
         </select>
       </label>
       <label className="ep-field">
+        Writing mode
+        <select
+          aria-label="Writing mode"
+          value={mixedStyle('writingMode') ? '' : (style.writingMode ?? 'horizontal-tb')}
+          onChange={(e) =>
+            typography({ writingMode: e.target.value as 'horizontal-tb' | 'vertical-rl' })
+          }
+        >
+          {mixedStyle('writingMode') && (
+            <option value="" disabled>
+              Mixed
+            </option>
+          )}
+          <option value="horizontal-tb">Horizontal</option>
+          <option value="vertical-rl">Vertical (縦書き)</option>
+        </select>
+      </label>
+      <label className="ep-field">
         Text overflow
         <select
           aria-label="Text overflow"
@@ -623,7 +641,7 @@ function TextLayoutFields({
       </label>
       <p className="hint">
         Clip keeps the box; expand draws beyond it; fit reduces font size to 8 px minimum. All
-        outputs share these rules.
+        outputs share these rules. Ruby: ｜漢字《かんじ》 or 漢字《かんじ》.
       </p>
     </>
   );

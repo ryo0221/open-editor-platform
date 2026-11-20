@@ -83,3 +83,112 @@ export function insertDesignStroke(
     elementId: insert.elementId,
   };
 }
+
+export interface DesignBrushSample {
+  x: number;
+  y: number;
+  /** Pen pressure 0–1. A mouse reports 0.5 while pressed, which gives an even line. */
+  pressure?: number;
+}
+/** Widest a brush stroke may be, in world units. */
+export const designBrushLimits = Object.freeze({ samples: 2000, width: 200 });
+
+/**
+ * Brush ink (#20): the stroke becomes a filled outline whose width follows pen pressure, with
+ * tapered start and end (入り・抜き) so even a mouse stroke reads as a brush line. The outline is
+ * an ordinary native path, editable and exported like any other.
+ */
+export function designBrushPath(raw: readonly DesignBrushSample[], width = 6): DesignEditablePath {
+  if (!Number.isFinite(width) || width <= 0 || width > designBrushLimits.width)
+    throw Error(`Brush width must be between 0 and ${designBrushLimits.width}`);
+  const samples = captureDesignData(raw, true);
+  if (!Array.isArray(samples) || samples.length < 2 || samples.length > designBrushLimits.samples)
+    throw Error(`A brush stroke needs 2–${designBrushLimits.samples} samples`);
+  const points: Required<DesignBrushSample>[] = [];
+  for (const s of samples) {
+    const keys = Object.keys(s ?? {})
+      .sort()
+      .join(',');
+    if (
+      !s ||
+      (keys !== 'x,y' && keys !== 'pressure,x,y') ||
+      ![s.x, s.y].every(
+        (v) =>
+          typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= designPathLimits.coordinate,
+      ) ||
+      (s.pressure !== undefined &&
+        (typeof s.pressure !== 'number' || !(s.pressure >= 0 && s.pressure <= 1)))
+    )
+      throw Error('Invalid brush sample');
+    const previous = points.at(-1);
+    if (!previous || previous.x !== s.x || previous.y !== s.y)
+      points.push({ x: s.x, y: s.y, pressure: s.pressure ?? 0.5 });
+  }
+  if (points.length < 2) throw Error('Move the pointer to draw a stroke');
+  // Distance along the stroke drives the taper; pressure is smoothed so a jittery pen stays clean.
+  const along = [0];
+  for (let i = 1; i < points.length; i++)
+    along.push(
+      along[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y),
+    );
+  const total = along.at(-1)!;
+  const taper = Math.min(total / 3, width * 4);
+  let smooth = points[0].pressure;
+  const half = points.map((p, i) => {
+    smooth = smooth * 0.6 + p.pressure * 0.4;
+    const ends = Math.min(1, along[i] / taper, (total - along[i]) / taper);
+    return (width / 2) * (0.3 + 1.4 * smooth) * Math.max(0.08, Math.sqrt(Math.max(0, ends)));
+  });
+  const left: { x: number; y: number }[] = [],
+    right: { x: number; y: number }[] = [];
+  points.forEach((p, i) => {
+    const a = points[Math.max(0, i - 1)],
+      b = points[Math.min(points.length - 1, i + 1)];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const nx = -(b.y - a.y) / len,
+      ny = (b.x - a.x) / len;
+    left.push({ x: p.x + nx * half[i], y: p.y + ny * half[i] });
+    right.push({ x: p.x - nx * half[i], y: p.y - ny * half[i] });
+  });
+  const outline = [...left, ...right.reverse()];
+  const x = Math.min(...outline.map((p) => p.x)),
+    y = Math.min(...outline.map((p) => p.y));
+  return {
+    frame: {
+      x,
+      y,
+      width: Math.max(1, Math.max(...outline.map((p) => p.x)) - x),
+      height: Math.max(1, Math.max(...outline.map((p) => p.y)) - y),
+    },
+    fillRule: 'nonzero',
+    subpaths: [
+      {
+        id: 'brush',
+        closed: true,
+        anchors: outline.map((p, i) => ({ id: `a${i}`, ...p, mode: 'corner' })),
+        segments: outline.map((_, i) => ({
+          id: `e${i}`,
+          type: 'line',
+          from: `a${i}`,
+          to: `a${(i + 1) % outline.length}`,
+        })),
+      },
+    ],
+  };
+}
+export function insertDesignBrushStroke(
+  samples: readonly DesignBrushSample[],
+  parentId?: string,
+  width = 6,
+  writable = () => true,
+): EditorCommand<DesignContent> & { elementId: string } {
+  const path = designBrushPath(samples, width),
+    insert = insertDesignPath(path, path.frame, parentId, writable);
+  return {
+    ...transaction('Draw brush stroke', [
+      insert,
+      updateElement(insert.elementId, { name: 'Brush stroke', fill: '#151515', stroke: 'none' }),
+    ]),
+    elementId: insert.elementId,
+  };
+}

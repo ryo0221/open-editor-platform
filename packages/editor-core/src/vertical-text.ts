@@ -1,0 +1,249 @@
+import { breakJapaneseLines } from './japanese-lines';
+import type { Bounds } from './geometry';
+
+/**
+ * Japanese text set on a grid of square cells, for vertical writing (縦書き) and for ruby (ルビ).
+ * Columns run right to left; 、。 sit in the upper right of their cell, brackets, long vowel
+ * marks and Latin lie on their side, two-digit numbers stand upright side by side (縦中横), and
+ * line breaks follow the kinsoku rules of `breakJapaneseLines`. Everything is placed glyph by
+ * glyph, so the screen, SVG and PNG/PDF exports show the same layout without relying on a
+ * browser's vertical text support.
+ */
+
+/**
+ * Ruby is written in the text itself, in the notation Japanese writers already use:
+ * `｜漢字《かんじ》` (or `|漢字《かんじ》`) marks the base explicitly, and `漢字《かんじ》` takes the
+ * run of kanji just before the reading. `plain` is the text with the notation removed.
+ */
+export interface RubyNotation {
+  plain: string;
+  ruby: { start: number; end: number; text: string }[];
+}
+const rubyPattern =
+  /[｜|]([^｜|《》\n]{1,256})《([^《》\n]{1,64})》|([\p{Script=Han}々〆ヶ]{1,256})《([^《》\n]{1,64})》/gu;
+export function parseRubyNotation(text: string): RubyNotation {
+  let plain = '',
+    last = 0;
+  const ruby: RubyNotation['ruby'] = [];
+  for (const m of text.matchAll(rubyPattern)) {
+    plain += text.slice(last, m.index);
+    const base = m[1] ?? m[3],
+      reading = m[2] ?? m[4];
+    ruby.push({ start: plain.length, end: plain.length + base.length, text: reading });
+    plain += base;
+    last = m.index + m[0].length;
+  }
+  plain += text.slice(last);
+  return { plain, ruby };
+}
+export const hasRubyNotation = (text: string) => parseRubyNotation(text).ruby.length > 0;
+
+export type GridGlyphKind = 'plain' | 'rotated' | 'punctuation' | 'small' | 'upright';
+const rotatedGlyph =
+  /^[「」『』（）〔〕［］｛｝〈〉《》【】〘〙〖〗ー～〜…‥—―－‐−=＝<>＜＞(){}[\]]$/u;
+const punctuationGlyph = /^[、。，．]$/u;
+const smallGlyph = /^[ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ]$/u;
+const wideGlyph =
+  /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303f\uff01-\uff60\uffe0-\uffe6ー]/u;
+const uprightSymbol = /\p{Extended_Pictographic}|\u20e3|\ufe0f/u;
+const isWide = (g: string) => wideGlyph.test(g) || uprightSymbol.test(g);
+/** How a grapheme sits in a vertical column. */
+export function verticalGlyphKind(g: string): Exclude<GridGlyphKind, 'upright'> {
+  return punctuationGlyph.test(g)
+    ? 'punctuation'
+    : smallGlyph.test(g)
+      ? 'small'
+      : rotatedGlyph.test(g) || !isWide(g)
+        ? 'rotated'
+        : 'plain';
+}
+const graphemes = new Intl.Segmenter('ja', { granularity: 'grapheme' });
+/** Latin and other narrow glyphs take part of a cell (the same estimate as horizontal text). */
+const narrowCells = (g: string) => (/[il.,' ]/.test(g) ? 0.3 : 0.58);
+
+export interface GridGlyph {
+  text: string;
+  /** Centre of the glyph. */
+  x: number;
+  y: number;
+  kind: GridGlyphKind;
+  /** Length along the line. */
+  advance: number;
+}
+export interface GridRuby {
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+}
+export interface GridTextLayout {
+  vertical: boolean;
+  fontSize: number;
+  rubySize: number;
+  /** Lines in reading order: columns right to left, or rows top to bottom. */
+  lines: { start: number; end: number; glyphs: GridGlyph[] }[];
+  ruby: GridRuby[];
+  /** The extent the text needs across lines and along the longest line. */
+  across: number;
+  along: number;
+}
+export interface GridTextOptions {
+  vertical: boolean;
+  fontSize: number;
+  /** Line pitch as a multiple of the font size. */
+  lineHeight?: number;
+  padding?: number;
+  letterSpacing?: number;
+  /** Horizontal block position: in vertical text the block of columns moves, in horizontal text each row. */
+  align?: 'left' | 'center' | 'right';
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  /** Shrink the font until the text fits the box (to 8 at least). */
+  fit?: boolean;
+}
+
+function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
+  const { plain, ruby } = parseRubyNotation(text);
+  const pad = o.padding ?? 4;
+  const rubySize = size * 0.5;
+  // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
+  const pitch = size * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
+  const cell = size + (o.letterSpacing ?? 0);
+  const inner = {
+    x: box.x + pad,
+    y: box.y + pad,
+    width: Math.max(1, box.width - pad * 2),
+    height: Math.max(1, box.height - pad * 2),
+  };
+  const upright = o.vertical
+    ? Array.from(plain.matchAll(/(?<![0-9])[0-9]{1,2}(?![0-9])/gu), (m) => ({
+        start: m.index,
+        end: m.index + m[0].length,
+      }))
+    : [];
+  const uprightAt = new Map(upright.map((r) => [r.start, r]));
+  const uprightOf = new Set(
+    upright.flatMap((r) => Array.from({ length: r.end - r.start }, (_, k) => r.start + k)),
+  );
+  const cells = (g: string, offset: number) =>
+    uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g);
+  const length = Math.max(1, Math.floor((o.vertical ? inner.height : inner.width) / cell));
+  const broken = breakJapaneseLines(plain, {
+    lineLength: length,
+    hanging: true,
+    unbreakable: [...ruby, ...upright],
+    measure: cells,
+  });
+  const lines: GridTextLayout['lines'] = broken.map((line) => {
+    const glyphs: GridGlyph[] = [];
+    let along = 0;
+    for (const { segment, index } of graphemes.segment(plain.slice(line.start, line.end))) {
+      const offset = line.start + index;
+      if (uprightOf.has(offset) && !uprightAt.has(offset)) continue;
+      const group = uprightAt.get(offset);
+      const advance = cells(segment, offset) * cell;
+      glyphs.push({
+        text: group ? plain.slice(group.start, group.end) : segment,
+        x: 0,
+        y: along + advance / 2,
+        kind: !o.vertical ? 'plain' : group ? 'upright' : verticalGlyphKind(segment),
+        advance,
+      });
+      along += advance;
+    }
+    return { start: line.start, end: line.end, glyphs };
+  });
+  const across = lines.length * pitch - (pitch - size);
+  const longest = Math.max(0, ...lines.map((l) => l.glyphs.reduce((n, g) => n + g.advance, 0)));
+  // Place lines: `a` is the centre across lines, `s` the start along the line.
+  const acrossSpace = o.vertical ? inner.width : inner.height;
+  const alongSpace = o.vertical ? inner.height : inner.width;
+  const blockShift = o.vertical
+    ? o.align === 'left'
+      ? acrossSpace - across
+      : o.align === 'center'
+        ? (acrossSpace - across) / 2
+        : 0
+    : o.verticalAlign === 'middle'
+      ? (acrossSpace - across) / 2
+      : o.verticalAlign === 'bottom'
+        ? acrossSpace - across
+        : 0;
+  const rubyOut: GridRuby[] = [];
+  lines.forEach((line, i) => {
+    const used = line.glyphs.reduce((n, g) => n + g.advance, 0);
+    const alignOf = o.vertical ? o.verticalAlign : o.align;
+    const alongShift =
+      alignOf === 'middle' || alignOf === 'center'
+        ? (alongSpace - (o.vertical ? longest : used)) / 2
+        : alignOf === 'bottom' || alignOf === 'right'
+          ? alongSpace - (o.vertical ? longest : used)
+          : 0;
+    const lineCentre = o.vertical
+      ? inner.x + inner.width - blockShift - size / 2 - i * pitch
+      : inner.y + blockShift + (ruby.length ? pitch - size : 0) + size / 2 + i * pitch;
+    const start = (o.vertical ? inner.y : inner.x) + alongShift;
+    for (const g of line.glyphs) {
+      const along = start + g.y;
+      if (o.vertical) {
+        g.x = lineCentre;
+        g.y = along;
+      } else {
+        g.x = along;
+        g.y = lineCentre;
+      }
+    }
+    // Readings beside the base: right of a column, above a row. A reading longer than its base
+    // overhangs it equally on both ends.
+    let offset = 0;
+    const positions = new Map<number, { from: number; to: number }>();
+    for (const g of line.glyphs) {
+      const from = (o.vertical ? g.y : g.x) - g.advance / 2;
+      positions.set(line.start + offset, { from, to: from + g.advance });
+      offset += g.text.length;
+    }
+    for (const r of ruby) {
+      if (r.start < line.start || r.start >= Math.max(line.end, line.start + 1)) continue;
+      const first = positions.get(r.start);
+      const lastStart = [...positions.keys()].filter((k) => k < r.end).at(-1);
+      if (!first || lastStart === undefined) continue;
+      const to = positions.get(lastStart)!.to;
+      const chars = [...graphemes.segment(r.text)].map((s) => s.segment);
+      const step = Math.min(
+        rubySize,
+        Math.max(to - first.from, rubySize * chars.length) / chars.length,
+      );
+      const begin = (first.from + to) / 2 - (step * chars.length) / 2;
+      chars.forEach((text, k) => {
+        const along = begin + step * (k + 0.5);
+        rubyOut.push(
+          o.vertical
+            ? { text, x: lineCentre + size / 2 + rubySize * 0.6, y: along, size: step }
+            : { text, x: along, y: lineCentre - size / 2 - rubySize * 0.6, size: step },
+        );
+      });
+    }
+  });
+  return {
+    vertical: o.vertical,
+    fontSize: size,
+    rubySize,
+    lines,
+    ruby: rubyOut,
+    across,
+    along: longest,
+  };
+}
+
+/** Lay out text on a cell grid inside `box`. */
+export function layoutGridText(text: string, box: Bounds, o: GridTextOptions): GridTextLayout {
+  let size = o.fontSize;
+  let layout = layoutOnce(text, box, o, size);
+  const pad = (o.padding ?? 4) * 2;
+  const room = () => (o.vertical ? box.width - pad : box.height - pad);
+  if (o.fit)
+    while (size > 8 && layout.across > room()) {
+      size = Math.max(8, size - 1);
+      layout = layoutOnce(text, box, o, size);
+    }
+  return layout;
+}

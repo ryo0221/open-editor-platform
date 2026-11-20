@@ -24,7 +24,8 @@ export function validTextStyle(value: unknown): boolean {
     optional(value.letterSpacing, finite) &&
     optional(value.align, (v) => ['left', 'center', 'right'].includes(String(v))) &&
     optional(value.verticalAlign, (v) => ['top', 'middle', 'bottom'].includes(String(v))) &&
-    optional(value.overflow, (v) => ['clip', 'expand', 'fit'].includes(String(v)))
+    optional(value.overflow, (v) => ['clip', 'expand', 'fit'].includes(String(v))) &&
+    optional(value.writingMode, (v) => ['horizontal-tb', 'vertical-rl'].includes(String(v)))
   );
 }
 export function validVisualStyle(value: unknown): boolean {
