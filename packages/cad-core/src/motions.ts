@@ -11,7 +11,11 @@
  * stale and cannot be played or exported until its steps are changed.
  */
 import { composePoses, componentCopies, stepPose, type CadSolvedPose } from './assembly';
-import { configurationStale, type CadConfiguration } from './configurations';
+import {
+  configurationLimitViolations,
+  configurationStale,
+  type CadConfiguration,
+} from './configurations';
 import { parameterValues } from './graph';
 import {
   invertPose,
@@ -102,13 +106,19 @@ export function motionSegmentAt(m: Pick<CadMotion, 'startFormId' | 'steps'>, tMs
   return { step: -1, from, to: from, u: 1 };
 }
 
-/** The forms a motion names that are gone or no longer fit the joints. */
+/**
+ * The forms a motion names that are gone, no longer fit the joints, or drive a value (coupled
+ * followers included) past the joints' limits now: recall refuses those, so playback does too
+ * (Codex on #34). Between two forms within the limits the values stay within them.
+ */
 export function motionStaleForms(doc: CadDocument, m: Pick<CadMotion, 'startFormId' | 'steps'>) {
   const forms = new Map((doc.configurations ?? []).map((f) => [f.id, f]));
   const ids = [...new Set([m.startFormId, ...m.steps.map((s) => s.formId)])];
   return ids.filter((id) => {
     const f = forms.get(id);
-    return !f || configurationStale(doc, f);
+    return (
+      !f || configurationStale(doc, f) || configurationLimitViolations(doc, f.values).length > 0
+    );
   });
 }
 

@@ -194,7 +194,9 @@ export function MotionsSection({
       return setNote('部品の形を計算中です。計算が終わってから、もう一度書き出してください。');
     const startHash = snapshot.contentHash;
     const total = motionDurationMs(m);
-    const ticks = Array.from({ length: Math.floor((total / 1000) * fps) + 1 }, (_, i) => i);
+    // The last tick reaches the end even when the length is not a whole number of frames: the
+    // destination pose (and a mount switched there) is always in the video (Codex on #34).
+    const ticks = Array.from({ length: Math.ceil((total / 1000) * fps - 1e-9) + 1 }, (_, i) => i);
     const ctl = new AbortController();
     stop.current = ctl;
     setPlaying(false);
@@ -208,6 +210,12 @@ export function MotionsSection({
           frame: async (tick, timestamp, duration) => {
             if (contentNow.current !== startHash || assembly.getSnapshot().progress)
               throw new Error('書き出しの途中で組立てが変わりました。もう一度書き出してください。');
+            // A joint drag holds the view's pose: a frame taken now would not be the motion's
+            // (Codex on #34).
+            if (v.draggingJoint)
+              throw new Error(
+                '書き出しの途中でジョイントが動かされました。もう一度書き出してください。',
+              );
             if (!show(m, Math.min(total, (tick * 1000) / fps)))
               throw new Error('この動きは表示できません。');
             return new VideoFrame(v.captureCanvas(), { timestamp, duration });
@@ -254,7 +262,7 @@ export function MotionsSection({
                 </small>
                 {stale(m) && (
                   <small className="cad-part-state" data-state="stale">
-                    形態が見つからないか古くなっています
+                    形態が見つからないか、古くなっているか、ジョイントの範囲を外れています
                   </small>
                 )}
               </div>
@@ -452,7 +460,7 @@ export function MotionsSection({
           )}
           {draftStale && (
             <p className="cad-diagnostic" role="note">
-              この動きが通る形態が見つからないか古くなっています。手順の形態を選び直してください。
+              この動きが通る形態が見つからないか、古くなっているか、ジョイントの範囲を外れています。手順の形態を選び直してください。
             </p>
           )}
           <div className="cad-row">
