@@ -26,4 +26,8 @@ function PcbSurface({ host }: HostSurfaceProps<PcbDocument>) {
   );
 }
 
-export const pcbSurface = hostKind(pcbKind, { Surface: PcbSurface, session: 'local' });
+export const pcbSurface = hostKind(pcbKind, {
+  Surface: PcbSurface,
+  session: 'local',
+  hooks: { comments: false },
+});

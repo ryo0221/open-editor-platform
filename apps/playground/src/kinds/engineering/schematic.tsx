@@ -30,4 +30,11 @@ function SchematicSurface({ host }: HostSurfaceProps<SchematicDocument>) {
 export const schematicSurface = hostKind(schematicKind, {
   Surface: SchematicSurface,
   session: 'local',
+  hooks: {
+    // A draft its commit refused would be lost when Undo or Redo removes or changes its item.
+    pendingInputs: {
+      refusal: 'Schematic の入力を確定またはキャンセルしてから履歴を操作してください。',
+    },
+    comments: false,
+  },
 });

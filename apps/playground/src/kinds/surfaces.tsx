@@ -3,7 +3,7 @@
 import { validContent, type Content } from '../model';
 import { engineeringDefinitions } from './engineering';
 import { engineeringSurfaces, estimateGeometry } from './engineering/surfaces';
-import { pairSurfaces, type HostKindEntry } from './host-kind';
+import { ordinaryHooks, pairSurfaces, type HostKindEntry, type KindHooks } from './host-kind';
 import { officeDefinitions } from './office';
 import { officeSurfaces } from './office/surfaces';
 import type { SurfaceHost } from './surface-host';
@@ -38,4 +38,9 @@ export function EditorSurfaces({
   rendered: RenderedContent | undefined;
 }) {
   return <>{rendered?.entry.render(host, rendered.content)}</>;
+}
+
+/** The Playground behaviour of a stored kind; a kind this Host does not know behaves ordinarily. */
+export function kindHooks(kind: string | undefined): KindHooks {
+  return (kind === undefined ? undefined : surfaces.get(kind)?.hooks) ?? ordinaryHooks;
 }

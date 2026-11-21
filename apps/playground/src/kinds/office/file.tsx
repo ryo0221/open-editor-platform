@@ -5,6 +5,7 @@ import { storage } from '../../app/records';
 import { createLocalSession, makeArtifact } from '../../model';
 import { hostKind, type HostSurfaceProps, type KindContent } from '../host-kind';
 import { latestRecord } from '../surface-host';
+import { downloadFile } from '../../model';
 
 function FileHost({ host, content }: HostSurfaceProps<KindContent<typeof fileKind>>) {
   const { active, readOnly } = host;
@@ -74,4 +75,7 @@ function FileHost({ host, content }: HostSurfaceProps<KindContent<typeof fileKin
   );
 }
 
-export const fileSurface = hostKind(fileKind, { Surface: FileHost });
+export const fileSurface = hostKind(fileKind, {
+  Surface: FileHost,
+  hooks: { exports: { download: downloadFile } },
+});

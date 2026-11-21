@@ -3,6 +3,7 @@ import { SlideSurface } from '@editor-platform/slide';
 import { slideAnimationSources, slideDataSnapshots } from '../../app/surface-sources';
 import { hostKind, type HostSurfaceProps, type KindContent } from '../host-kind';
 import { latestRecord } from '../surface-host';
+import { hasSlideAnimations } from '@editor-platform/slide';
 
 function SlideHost({ host, content }: HostSurfaceProps<KindContent<typeof slideKind>>) {
   const { sharedSession, revealAddress } = host;
@@ -44,4 +45,7 @@ function SlideHost({ host, content }: HostSurfaceProps<KindContent<typeof slideK
   );
 }
 
-export const slideSurface = hostKind(slideKind, { Surface: SlideHost });
+export const slideSurface = hostKind(slideKind, {
+  Surface: SlideHost,
+  hooks: { nativeReuse: (content) => !hasSlideAnimations(content) },
+});

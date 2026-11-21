@@ -5,6 +5,8 @@ import { ScheduleSurface } from '@editor-platform/schedule/view';
 import { scheduleDefinition } from '../office';
 import { hostKind } from '../host-kind';
 import type { SurfaceHost } from '../surface-host';
+import { stepScheduleHistory } from '@editor-platform/schedule/history';
+import type { EditorSession } from '@editor-platform/editor-core';
 
 function ScheduleHost({ host, content }: { host: SurfaceHost; content: ScheduleDocument }) {
   const { references, savedRecords } = host;
@@ -37,4 +39,15 @@ function ScheduleHost({ host, content }: { host: SurfaceHost; content: ScheduleD
   );
 }
 
-export const scheduleSurface = hostKind(scheduleDefinition, { Surface: ScheduleHost });
+export const scheduleSurface = hostKind(scheduleDefinition, {
+  Surface: ScheduleHost,
+  hooks: {
+    // Removing a Schedule event while details hold refused text could lose it: refused.
+    history({ session, direction, pending }) {
+      const local = session as unknown as EditorSession<ScheduleDocument>;
+      const step = stepScheduleHistory(local, direction, local.content, pending);
+      return 'refused' in step ? { refused: step.refused } : { content: step.content };
+    },
+    flushBeforeReadOnly: true,
+  },
+});

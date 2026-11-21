@@ -137,4 +137,5 @@ export const documentSurface = hostKind(documentKind, {
   // A shared preview is its own Surface, so leaving it restores the confirmed text.
   surfaceKey: ({ active, sharedPreview }) =>
     sharedPreview ? `preview:${sharedPreview.id}:${sharedPreview.preview.token}` : active.id,
+  hooks: { exports: { documentText: true } },
 });

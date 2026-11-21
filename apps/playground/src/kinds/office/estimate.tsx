@@ -100,12 +100,13 @@ function PlaygroundEstimate({
 
 /**
  * Estimate with the Host's CAD/BIM quantity reading. The office list does not import engineering
- * code: the reading comes from kinds/engineering/surfaces.ts through kinds/surfaces.ts, and
+ * code: the reading comes from kinds/engineering/surfaces.ts through kinds/surfaces.tsx, and
  * without it the quantity panels are not shown.
  */
 export function estimateSurface(geometry: GeometryQuantitySources | undefined) {
   return hostKind(estimateKind, {
     Surface: ({ host }) => <PlaygroundEstimate host={host} geometry={geometry} />,
     session: 'local',
+    hooks: { comments: false },
   });
 }

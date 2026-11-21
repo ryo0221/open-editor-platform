@@ -54,4 +54,5 @@ export const dataSurface = hostKind(dataKind, {
   Surface: DataHost,
   // Older readable schemas are listed and exported; the Surface opens only the current one.
   accepts: isStructuredData,
+  hooks: { exports: { csv: true } },
 });

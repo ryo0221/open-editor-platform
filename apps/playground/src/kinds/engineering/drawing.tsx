@@ -30,4 +30,8 @@ function DrawingSurface({ host }: HostSurfaceProps<DrawingDocument>) {
   );
 }
 
-export const drawingSurface = hostKind(drawingKind, { Surface: DrawingSurface, session: 'local' });
+export const drawingSurface = hostKind(drawingKind, {
+  Surface: DrawingSurface,
+  session: 'local',
+  hooks: { comments: false },
+});
