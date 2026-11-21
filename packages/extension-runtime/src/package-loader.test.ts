@@ -3,7 +3,11 @@ import { build } from 'esbuild';
 import { command } from '@editor-platform/editor-core';
 import { createArtifact, type Artifact } from '@editor-platform/artifact-core';
 import { ArtifactEditor, type EditorHostAdapter } from '@editor-platform/editor-host';
-import { CONTRACT_VERSION, OPERATIONS_ADDON } from '@editor-platform/extension-contract';
+import {
+  CONTRACT_VERSION,
+  CREATE_ADDON,
+  OPERATIONS_ADDON,
+} from '@editor-platform/extension-contract';
 import { counterExtension, createCounter, setCounter } from '@editor-platform/extension-sample';
 import { ExtensionRegistry } from './index';
 import { artifactEditorHost } from './editor-host';
@@ -167,6 +171,60 @@ export function definition(packageHash) {
     handle.operations!.prepare(op, { item: 'a' }).commit();
     expect(content.items[0].done).toBe(true);
     registration.uninstall();
+  });
+
+  it('carries the create add-on from verified bytes and makes the first content through the registry', async () => {
+    const m = manifest({
+      id: 'example.checklist-create',
+      artifactKind: 'example.checklist',
+      addons: { create: { version: CREATE_ADDON } },
+    });
+    const source = `const manifest = ${JSON.stringify(m)};
+export function definition(packageHash) {
+  return {
+    manifest: { ...manifest, packageHash },
+    validate: (v) => !!v && Array.isArray(v.items) && v.items.length <= 1,
+    create() { return { items: [{ id: 'first', done: false }] }; },
+  };
+}`;
+    const input: ExtensionPackage = {
+      manifest: structuredClone(m),
+      entry: 'entry.js',
+      files: [{ path: 'entry.js', bytes: encode(source) }],
+    };
+    const { lookup } = await pinned(input);
+    const loaded = await loadVerifiedExtension<Checklist>(
+      await verifyExtensionPackage(input, lookup),
+      { importModule: importData },
+    );
+    expect(loaded.manifest.addons?.create).toEqual({ version: 'create@0-draft' });
+    const registration = installVerifiedExtension(new ExtensionRegistry(), loaded);
+    expect(registration.create!()).toEqual({ items: [{ id: 'first', done: false }] });
+    registration.uninstall();
+    expect(() => registration.create!()).toThrow('Registration revoked');
+
+    // A package without the add-on must not smuggle a create function past the manifest.
+    const plain = manifest({ id: 'example.checklist-plain', artifactKind: 'example.checklist' });
+    const smuggled: ExtensionPackage = {
+      manifest: structuredClone(plain),
+      entry: 'entry.js',
+      files: [
+        {
+          path: 'entry.js',
+          bytes: encode(`const manifest = ${JSON.stringify(plain)};
+export function definition(packageHash) {
+  return { manifest: { ...manifest, packageHash }, validate: () => true, create: () => ({ items: [] }) };
+}`),
+        },
+      ],
+    };
+    const other = await loadVerifiedExtension<Checklist>(
+      await verifyExtensionPackage(smuggled, (await pinned(smuggled)).lookup),
+      { importModule: importData },
+    );
+    expect(() => installVerifiedExtension(new ExtensionRegistry(), other)).toThrow(
+      'Create add-on/adapter mismatch',
+    );
   });
 
   it('loads the bundled Counter from verified bytes and installs it with the verified hash', async () => {
