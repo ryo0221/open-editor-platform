@@ -5,6 +5,7 @@ import { GeoSurface } from '../../geo/surface';
 import type { Content } from '../../model';
 import { hostKind } from '../host-kind';
 import { latestRecord, type SurfaceHost } from '../surface-host';
+import { validateGeoRecord } from '../../geo/resources';
 
 function GeoHost({ host }: { host: SurfaceHost }) {
   const { active, savedRecords, readOnly } = host;
@@ -43,4 +44,13 @@ function GeoHost({ host }: { host: SurfaceHost }) {
   );
 }
 
-export const geoSurface = hostKind(geoKind, { Surface: GeoHost, session: 'local' });
+export const geoSurface = hostKind(geoKind, {
+  Surface: GeoHost,
+  session: 'local',
+  hooks: {
+    beforeVersion: validateGeoRecord,
+    // Geo resource admission keeps strict identity checks on every version.
+    strictCapture: true,
+    comments: false,
+  },
+});

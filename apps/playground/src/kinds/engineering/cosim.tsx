@@ -28,4 +28,13 @@ function CosimSurface({ host }: HostSurfaceProps<CosimDocument>) {
   );
 }
 
-export const cosimSurface = hostKind(cosimKind, { Surface: CosimSurface, session: 'local' });
+export const cosimSurface = hostKind(cosimKind, {
+  Surface: CosimSurface,
+  session: 'local',
+  hooks: {
+    pendingInputs: {
+      refusal: 'Co-simulation の入力を確定またはキャンセルしてから履歴を操作してください。',
+    },
+    comments: false,
+  },
+});

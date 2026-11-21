@@ -69,4 +69,19 @@ function AnimationHost({ host, content }: { host: SurfaceHost; content: Animatio
   );
 }
 
-export const animationSurface = hostKind(animationKind, { Surface: AnimationHost, session: 'any' });
+export const animationSurface = hostKind(animationKind, {
+  Surface: AnimationHost,
+  session: 'any',
+  hooks: {
+    holdsEditsWhileSaving: true,
+    pendingInputs: {
+      refusal: 'Animation の入力を適用またはキャンセルしてから履歴を操作してください。',
+      disablesHistory: true,
+    },
+    comments: false,
+    flushBeforeReadOnly: true,
+    nativeReuse: () => false,
+    feedsAnimationCatalog: true,
+    readsAnimationCatalog: true,
+  },
+});

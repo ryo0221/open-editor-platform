@@ -32,4 +32,5 @@ function SimulationSurface({ host }: HostSurfaceProps<SimulationDocument>) {
 export const simulationSurface = hostKind(simulationKind, {
   Surface: SimulationSurface,
   session: 'local',
+  hooks: { comments: false },
 });

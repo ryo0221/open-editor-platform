@@ -14,6 +14,7 @@ import {
 import { reactUiDefinition } from '../office';
 import { hostKind } from '../host-kind';
 import type { SurfaceHost } from '../surface-host';
+import type { EditorSession } from '@editor-platform/editor-core';
 
 const referenceReactExamples = [
   { name: 'Product page', document: createReferenceDocument('product') },
@@ -58,4 +59,13 @@ function ReactUiHost({ host, content }: { host: SurfaceHost; content: ReactUiDoc
   );
 }
 
-export const reactUiSurface = hostKind(reactUiDefinition, { Surface: ReactUiHost });
+export const reactUiSurface = hostKind(reactUiDefinition, {
+  Surface: ReactUiHost,
+  hooks: {
+    history: ({ session, direction }) => ({
+      content: (session as unknown as EditorSession<ReactUiDocument>)[
+        direction === 'undo' ? 'undoView' : 'redoView'
+      ](),
+    }),
+  },
+});

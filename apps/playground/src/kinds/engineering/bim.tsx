@@ -5,6 +5,8 @@ import { bimKind } from '@editor-platform/bim/kind';
 import { editedDraft } from '../../app/records';
 import { hostKind, type HostSurfaceProps } from '../host-kind';
 import { latestRecord } from '../surface-host';
+import { portableBimRecord, validateBimParts } from '../../bim/parts';
+import { portableCadRecord, validateCadRecord } from '../../cad/resources';
 
 // The building Surface and its kernel Worker load only when a building opens.
 const BimHost = lazy(() => import('../../bim/host'));
@@ -29,4 +31,15 @@ function BimSurface({ host }: HostSurfaceProps<BimDocument>) {
   );
 }
 
-export const bimSurface = hostKind(bimKind, { Surface: BimSurface, session: 'local' });
+export const bimSurface = hostKind(bimKind, {
+  Surface: BimSurface,
+  session: 'local',
+  hooks: {
+    // A building's version may only place CAD versions the record keeps.
+    async beforeVersion(record) {
+      validateBimParts(portableBimRecord(record));
+      await validateCadRecord(portableCadRecord(record));
+    },
+    comments: false,
+  },
+});

@@ -30,4 +30,13 @@ function FactorySurface({ host }: HostSurfaceProps<FactoryDocument>) {
   );
 }
 
-export const factorySurface = hostKind(factoryKind, { Surface: FactorySurface, session: 'local' });
+export const factorySurface = hostKind(factoryKind, {
+  Surface: FactorySurface,
+  session: 'local',
+  hooks: {
+    pendingInputs: {
+      refusal: 'Factory の入力を確定またはキャンセルしてから履歴を操作してください。',
+    },
+    comments: false,
+  },
+});

@@ -9,6 +9,8 @@ import { graphProfileFor } from '../../app/graph-templates';
 import type { Content } from '../../model';
 import { graphDefinition } from '../office';
 import { hostKind, type HostSurfaceProps, type KindContent } from '../host-kind';
+import { readGraphDocument } from '@editor-platform/structured-graph';
+import { clone } from '@editor-platform/artifact-core';
 
 function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphDefinition>>) {
   return (
@@ -28,4 +30,10 @@ export const graphSurface = hostKind(graphDefinition, {
   Surface: GraphHost,
   // Older stored schemas validate because they upgrade; the Surface opens only the current one.
   accepts: isGraphDocument,
+  hooks: {
+    // An older Graph version is restored as the current schema.
+    restore: (_record, content) => readGraphDocument(clone(content)),
+    adoptsOpenedContent: true,
+    comments: false,
+  },
 });

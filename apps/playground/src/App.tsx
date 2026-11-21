@@ -1,9 +1,3 @@
-import { verifyFictionMapArtifact } from '@editor-platform/fiction-map/host';
-import {
-  undoFictionMap,
-  redoFictionMap,
-  type FictionMapSession,
-} from '@editor-platform/fiction-map/model';
 import {
   makeMangaArtifact,
   saveNewManga,
@@ -24,13 +18,11 @@ import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './app/estima
 import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { serializeHostNativeArtifact } from '@editor-platform/editor-host';
 import { savedAnimationCatalog } from './animation-library';
-import { validateGeoRecord } from './geo/resources';
 import {
   assertCadNativeFits,
   hostNativeLimitOf,
   mergeCadResources,
   portableCadRecord,
-  validateCadRecord,
 } from './cad/resources';
 import { mergeSimulationSources, portableSimulationRecord } from './simulation/source';
 import { mergeConstructionSources, portableConstructionRecord } from './construction/source';
@@ -38,26 +30,15 @@ import { mergeFactorySources, portableFactoryRecord } from './factory/source';
 import { mergeFactoryLooks, portableFactoryLooks } from './factory/looks';
 import { mergeDrawingSources, portableDrawingRecord } from './drawing/sources';
 import type { ConstructionSourceChoice } from './construction/source';
-import { assertBimNativeFits, portableBimRecord, validateBimParts } from './bim/parts';
-import { assertCharacterHistoryFits } from './character/import-fit';
-import type { CharacterDocument } from '@editor-platform/character-core';
-import { assertCadContentFits } from './cad/native-size';
+import { assertBimNativeFits, portableBimRecord } from './bim/parts';
 import { mergeCadParts } from './cad/parts';
 import { mergeBimParts } from './character/parts';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { artifactReferenceItems, captureArtifactReferences } from './artifact-references';
 import type { PrivateVideoEntry } from './private-video/catalog';
-import {
-  relationProfile,
-  isGraphDocument,
-  readGraphDocument,
-  validateGraph,
-} from '@editor-platform/structured-graph';
+import { relationProfile, isGraphDocument, validateGraph } from '@editor-platform/structured-graph';
 import { flushSync } from 'react-dom';
-import type { ScheduleDocument } from '@editor-platform/schedule/model';
-import type { CadDocument } from '@editor-platform/cad-core';
-import { stepScheduleHistory } from '@editor-platform/schedule/history';
 import { OfficeExportHost } from '@editor-platform/office-export-ui/host';
 import {
   applyLocalTemplate,
@@ -130,13 +111,8 @@ import {
   type DataView,
   defaultView,
 } from '@editor-platform/structured-data';
+import { type ReviewVisibleSource } from '@editor-platform/review-surfaces';
 import {
-  isFile,
-  type FileContent,
-  type ReviewVisibleSource,
-} from '@editor-platform/review-surfaces';
-import {
-  downloadFile,
   downloadText,
   makeArtifact,
   type PcbTemplateId,
@@ -146,7 +122,6 @@ import {
   type StoredArtifact,
 } from './model';
 import type { SimulationSourceChoice } from './simulation/source';
-import { hasSlideAnimations, isDeck } from '@editor-platform/slide';
 import {
   type ArtifactMenuAction,
   ExportMenu,
@@ -178,7 +153,7 @@ import {
   type TemplateAuthoring,
 } from './app/artifact-dialogs';
 import { nativeContent, nativeShared } from './app/native';
-import { EditorSurfaces, checkedContent } from './kinds/surfaces';
+import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
@@ -437,7 +412,7 @@ export default function App({
         // (the surfaces read the record). Saved versions keep their stored content.
         values = values.map((a) => {
           const content = opened.get(a.id)?.content;
-          return a.kind === 'structured-graph' && content && content !== a.draft.content
+          return kindHooks(a.kind).adoptsOpenedContent && content && content !== a.draft.content
             ? { ...a, draft: { ...a.draft, content } }
             : a;
         });
@@ -484,7 +459,7 @@ export default function App({
         const priorSource = referenceSavedRecords.current.get(record.id);
         referenceSavedRecords.current.set(record.id, record);
         if (
-          record.kind === 'animation' &&
+          kindHooks(record.kind).feedsAnimationCatalog &&
           (priorSource?.name !== record.name || priorSource?.versions !== record.versions)
         )
           setAnimationCatalogEpoch((epoch) => epoch + 1);
@@ -791,7 +766,11 @@ export default function App({
     activate(a.id);
   }
   function execute<T extends Content>(cmd: EditorCommand<T>) {
-    if (!active || readOnly || (active.kind === 'animation' && (savingVersion.current || busy)))
+    if (
+      !active ||
+      readOnly ||
+      (kindHooks(active.kind).holdsEditsWhileSaving && (savingVersion.current || busy))
+    )
       return false;
     try {
       if (sharedSession) {
@@ -811,34 +790,17 @@ export default function App({
     }
   }
   function history(direction: 'undo' | 'redo') {
+    const hooks = kindHooks(active?.kind);
     if (
       !active ||
       !session ||
       readOnly ||
-      (active.kind === 'animation' && (savingVersion.current || busy))
+      (hooks.holdsEditsWhileSaving && (savingVersion.current || busy))
     )
       return;
     const pending = inputs.getSnapshot();
-    if (active.kind === 'animation' && (pending.dirty || pending.composing)) {
-      setError('Animation の入力を適用またはキャンセルしてから履歴を操作してください。');
-      return;
-    }
-    // A schematic Inspector draft (one its commit refused, say) would be lost when Undo or Redo
-    // removes or changes its item: settle it first.
-    if (active.kind === 'schematic' && (pending.dirty || pending.composing)) {
-      setError('Schematic の入力を確定またはキャンセルしてから履歴を操作してください。');
-      return;
-    }
-    if (active.kind === 'ladder' && (pending.dirty || pending.composing)) {
-      setError('Ladder の入力を確定またはキャンセルしてから履歴を操作してください。');
-      return;
-    }
-    if (active.kind === 'cosim' && (pending.dirty || pending.composing)) {
-      setError('Co-simulation の入力を確定またはキャンセルしてから履歴を操作してください。');
-      return;
-    }
-    if (active.kind === 'factory' && (pending.dirty || pending.composing)) {
-      setError('Factory の入力を確定またはキャンセルしてから履歴を操作してください。');
+    if (hooks.pendingInputs && (pending.dirty || pending.composing)) {
+      setError(hooks.pendingInputs.refusal);
       return;
     }
     let privateHistory = false;
@@ -852,64 +814,19 @@ export default function App({
     }
     const local = session as EditorSession<Content>;
     let content: Content;
-    if (active.kind === 'fiction-map') {
-      if (pending.dirty || pending.composing) {
-        setError('Apply or cancel Fiction Map input before history.');
-        return;
-      }
-      const step = (direction === 'undo' ? undoFictionMap : redoFictionMap)(
-        local as unknown as FictionMapSession,
-        () => !currentTarget.current.readOnly && currentTarget.current.activeId === active.id,
-      );
-      if (!step.ok) {
-        setError(step.diagnostic.code);
-        return;
-      }
-      if (!step.value.changed) return;
-      content = step.value.content;
-    } else if (active.kind === 'schedule') {
-      // Removing a Schedule event while details hold refused text could lose it: refused.
-      const step = stepScheduleHistory(
-        local as unknown as EditorSession<ScheduleDocument>,
+    if (hooks.history) {
+      const step = hooks.history({
+        session: local,
         direction,
-        local.content as unknown as ScheduleDocument,
+        record: recordsRef.current.find((r) => r.id === active.id) ?? active,
         pending,
-      );
+        canEdit: () =>
+          !currentTarget.current.readOnly && currentTarget.current.activeId === active.id,
+      });
       if ('refused' in step) return setError(step.refused);
-      content = step.content as unknown as Content;
-    } else if (active.kind === 'character') {
-      const record = recordsRef.current.find((r) => r.id === active.id) ?? active;
-      try {
-        const candidate = local.peekHistory(direction);
-        if (candidate !== undefined)
-          assertCharacterHistoryFits(record, candidate as unknown as CharacterDocument);
-        content = local[direction]();
-      } catch (e) {
-        return setError(
-          `${direction === 'undo' ? 'Undo' : 'Redo'} not applied: ${(e as Error).message}`,
-        );
-      }
-    } else if (active.kind === 'cad') {
-      // CAD Undo/Redo is admitted like an edit: the native file must still import (CAD23).
-      // The history entry itself is checked, so content counted before is not encoded again.
-      const record = recordsRef.current.find((r) => r.id === active.id) ?? active;
-      try {
-        const candidate = local.peekHistory(direction);
-        if (candidate !== undefined)
-          assertCadContentFits(
-            record,
-            candidate as unknown as CadDocument,
-            direction === 'undo' ? 'Undoする' : 'Redoする',
-          );
-        content = local[direction]();
-      } catch (e) {
-        return setError((e as Error).message);
-      }
-    } else
-      content =
-        active.kind === 'react-ui'
-          ? local[direction === 'undo' ? 'undoView' : 'redoView']()
-          : local[direction]();
+      if ('unchanged' in step) return;
+      content = step.content;
+    } else content = local[direction]();
     persist({
       ...editedDraft(active, content),
       annotations: active.annotations,
@@ -971,22 +888,12 @@ export default function App({
     try {
       await verifyEstimateArtifact(saved);
       await verifyAnalysisArtifact(saved);
-      if (saved.kind === 'fiction-map') await verifyFictionMapArtifact(saved);
-      if (saved.kind === 'geo') await validateGeoRecord(saved);
-      // A version may only name CAD assets the record keeps.
-      if (saved.kind === 'cad') await validateCadRecord(portableCadRecord(saved));
-      // A building's version may only place CAD versions the record keeps.
-      // A character's version may only name assets the record keeps.
-      if (saved.kind === 'character') await validateCadRecord(portableCadRecord(saved));
-      if (saved.kind === 'bim') {
-        validateBimParts(portableBimRecord(saved));
-        await validateCadRecord(portableCadRecord(saved));
-      }
+      await kindHooks(saved.kind).beforeVersion?.(saved);
       const captured = await captureArtifactReferences(saved.draft.content, references);
       // Plain native versions can commit their owned capture while later native edits remain
       // in the draft. References and Geo resource admission retain strict identity checks.
       const plainCapture =
-        saved.kind !== 'geo' &&
+        !kindHooks(saved.kind).strictCapture &&
         !artifactReferenceItems(saved.draft.content).some((item) => item.reference);
       assertReferenceCaptureCurrent(saved.id, saved.draft.content, true, plainCapture);
       const committed = await commitVersion(
@@ -1340,16 +1247,10 @@ export default function App({
   // Storage/connection status changes do not change the native content. Keep
   // validation and the heavy surfaces tied to their actual content/permission inputs.
   const rendered = useMemo(() => checkedContent(content, active?.kind), [content, active?.kind]);
-  const nativeReuseSupported =
-    rendered?.kind !== 'fiction-map' &&
-    rendered?.kind !== 'animation' &&
-    !(
-      rendered?.kind === 'slide' &&
-      isDeck(rendered.content) &&
-      hasSlideAnimations(rendered.content)
-    );
-  const animationHistoryPending =
-    active?.kind === 'animation' && !!(inputStatus.dirty || inputStatus.composing);
+  const activeHooks = kindHooks(active?.kind);
+  const nativeReuseSupported = !rendered || rendered.entry.hooks.nativeReuse(rendered.content);
+  const historyHeldByInputs =
+    !!activeHooks.pendingInputs?.disablesHistory && !!(inputStatus.dirty || inputStatus.composing);
   const exported = useMemo(
     () => (exportContent === content ? rendered : checkedContent(exportContent, active?.kind)),
     [exportContent, content, rendered, active?.kind],
@@ -1400,16 +1301,14 @@ export default function App({
   );
   const animationCatalog = useMemo(
     () =>
-      active?.kind === 'animation'
+      activeHooks.readsAnimationCatalog
         ? savedAnimationCatalog([...referenceSavedRecords.current.values()])
         : { sources: [], unavailable: [] },
-    [active?.kind, animationCatalogEpoch],
+    [activeHooks, animationCatalogEpoch],
   );
   const historyControls = {
-    undoDisabled:
-      (!session?.canUndo && !inputStatus.canUndo) || readOnly || animationHistoryPending,
-    redoDisabled:
-      (!session?.canRedo && !inputStatus.canRedo) || readOnly || animationHistoryPending,
+    undoDisabled: (!session?.canUndo && !inputStatus.canUndo) || readOnly || historyHeldByInputs,
+    redoDisabled: (!session?.canRedo && !inputStatus.canRedo) || readOnly || historyHeldByInputs,
     undo: () => history('undo'),
     redo: () => history('redo'),
   };
@@ -1628,16 +1527,19 @@ export default function App({
                         }}
                       />
                       <ExportMenu
-                        documentText={exported?.kind === 'document'}
-                        csv={exported?.kind === 'data'}
+                        documentText={!!exported?.entry.hooks.exports.documentText}
+                        csv={!!exported?.entry.hooks.exports.csv}
                         onJson={nativeExport}
                         onDocumentText={(format) => void documentTextExport(format)}
                         onCsv={() => {
                           if (flushInputs()) setCsvExportOpen(true);
                         }}
                         onDownloadFile={
-                          exported?.kind === 'file' && isFile(exported.content)
-                            ? () => downloadFile(exported.content as FileContent)
+                          exported?.entry.hooks.exports.download
+                            ? (
+                                (download, file) => () =>
+                                  download(file)
+                              )(exported.entry.hooks.exports.download, exported.content)
                             : undefined
                         }
                       />
@@ -1672,11 +1574,7 @@ export default function App({
                         onToggleInspector={() => setInspector(!inspector)}
                         onReadOnlyChange={(checked) => {
                           // Switching to read-only replaces text inputs: commit or keep them first.
-                          if (
-                            (active.kind === 'animation' || active.kind === 'schedule') &&
-                            !flushInputs()
-                          )
-                            return;
+                          if (activeHooks.flushBeforeReadOnly && !flushInputs()) return;
                           setReadOnly(checked);
                         }}
                         setPreview={setSharedPreview}
@@ -1803,25 +1701,14 @@ export default function App({
                                 }
                                 execute(
                                   command('artifact.restore', 'Restore version to draft', () => {
-                                    if (active.kind === 'cad')
-                                      assertCadContentFits(
-                                        recordsRef.current.find((r) => r.id === active.id) ??
-                                          active,
-                                        v.content as unknown as CadDocument,
-                                        'この版に戻す',
-                                      );
-                                    if (active.kind === 'character')
-                                      assertCharacterHistoryFits(
-                                        recordsRef.current.find((r) => r.id === active.id) ??
-                                          active,
-                                        v.content as unknown as CharacterDocument,
-                                      );
-                                    // An older Graph version is restored as the current schema.
-                                    if (active.kind === 'structured-graph')
-                                      return readGraphDocument(
-                                        clone(v.content),
-                                      ) as unknown as Content;
-                                    return clone(v.content);
+                                    const restore = kindHooks(active.kind).restore;
+                                    return restore
+                                      ? restore(
+                                          recordsRef.current.find((r) => r.id === active.id) ??
+                                            active,
+                                          clone(v.content),
+                                        )
+                                      : clone(v.content);
                                   }),
                                 );
                                 setView('Editor');
@@ -1848,52 +1735,36 @@ export default function App({
                             setError={setError}
                           />
                         )}
-                        {inspector &&
-                          active.kind !== 'animation' &&
-                          active.kind !== 'structured-graph' &&
-                          active.kind !== 'analysis' &&
-                          active.kind !== 'estimate' &&
-                          active.kind !== 'geo' &&
-                          active.kind !== 'cad' &&
-                          active.kind !== 'bim' &&
-                          active.kind !== 'character' &&
-                          active.kind !== 'simulation' &&
-                          active.kind !== 'construction' &&
-                          active.kind !== 'pcb' &&
-                          active.kind !== 'schematic' &&
-                          active.kind !== 'ladder' &&
-                          active.kind !== 'cosim' &&
-                          active.kind !== 'drawing' &&
-                          active.kind !== 'factory' && (
-                            <CommentsInspector
-                              active={active}
-                              content={content}
-                              selection={selection}
-                              comment={comment}
-                              readOnly={readOnly}
-                              showResolved={showResolved}
-                              canAnnotateFromSettings={
-                                ['review', 'file'].includes(active.kind) &&
-                                !!templateViewSettings[active.id]?.$annotation
-                              }
-                              onCommentChange={setComment}
-                              onShowResolvedChange={setShowResolved}
-                              onAddComment={() => addComment()}
-                              onAnnotateFromSettings={() =>
-                                setReusableAnnotation(clone(selection.addresses[0]))
-                              }
-                              onClose={() => setInspector(false)}
-                              onJump={(a) => {
-                                setRevealAddress({ ...a.anchor.addresses[0] });
-                                setSelection(a.anchor);
-                                setView('Editor');
-                              }}
-                              onToggleResolved={(a) => toggleThreadResolved(threadContext!, a)}
-                              onReply={(a, body) => replyToThread(threadContext!, a, body)}
-                            >
-                              {inspectorSlot}
-                            </CommentsInspector>
-                          )}
+                        {inspector && activeHooks.comments && (
+                          <CommentsInspector
+                            active={active}
+                            content={content}
+                            selection={selection}
+                            comment={comment}
+                            readOnly={readOnly}
+                            showResolved={showResolved}
+                            canAnnotateFromSettings={
+                              ['review', 'file'].includes(active.kind) &&
+                              !!templateViewSettings[active.id]?.$annotation
+                            }
+                            onCommentChange={setComment}
+                            onShowResolvedChange={setShowResolved}
+                            onAddComment={() => addComment()}
+                            onAnnotateFromSettings={() =>
+                              setReusableAnnotation(clone(selection.addresses[0]))
+                            }
+                            onClose={() => setInspector(false)}
+                            onJump={(a) => {
+                              setRevealAddress({ ...a.anchor.addresses[0] });
+                              setSelection(a.anchor);
+                              setView('Editor');
+                            }}
+                            onToggleResolved={(a) => toggleThreadResolved(threadContext!, a)}
+                            onReply={(a, body) => replyToThread(threadContext!, a, body)}
+                          >
+                            {inspectorSlot}
+                          </CommentsInspector>
+                        )}
                       </div>
                     </>
                   )}
