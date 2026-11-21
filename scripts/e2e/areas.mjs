@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 
 // Areas of the workspace and of the browser specs in tests/e2e, used to run only the
 // specs a change can affect (scripts/e2e/affected.mjs) and to split the full run into
@@ -216,6 +216,7 @@ export const defaultPorts = [4175, 4176, 4180, 5173, 5174];
 
 const portPattern = /(?:127\.0\.0\.1|localhost):(\d{4,5})/g;
 const importPattern = /from\s+['"]@editor-platform\/([a-z0-9-]+)/g;
+const relativePattern = /['"`]((?:\.\.\/)+[\w@./-]+)['"`]/g;
 const helperPattern = /from\s+['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
 
 /** Local helper modules (tests/e2e/*.ts) a spec or helper imports, transitively. */
@@ -232,7 +233,8 @@ function helpers(dir, file, seen = new Set()) {
 
 /**
  * Every spec in tests/e2e with its area, owners (rule owners plus the workspace packages
- * the spec imports), local helpers and the ports it opens
+ * the spec imports), local helpers, fixture paths outside tests/e2e (`paths`, prefixes)
+ * and the ports it opens
  * beyond the development servers (`needs`).
  * @param {string} root repository root
  */
@@ -247,10 +249,20 @@ export function classifySpecs(root) {
       const local = [...helpers(dir, file)].sort();
       const ports = new Set();
       const owners = new Set(rule.owners ?? []);
+      const paths = new Set();
       for (const source of [file, ...local]) {
         const text = readFileSync(join(dir, source), 'utf8');
         for (const [, port] of text.matchAll(portPattern))
           if (!defaultPorts.includes(Number(port))) ports.add(Number(port));
+        // Fixtures outside tests/e2e that a spec bundles or reads ('../fixtures/spatial/host.tsx').
+        for (const [, relative] of text.matchAll(relativePattern)) {
+          const target = posix.join('tests/e2e', relative);
+          const fixture = /^tests\/fixtures\/[^/]+/.exec(target);
+          const pkg = /^packages\/([^/]+)\//.exec(target);
+          if (fixture) paths.add(`${fixture[0]}/`);
+          else if (pkg && existsSync(join(root, 'packages', pkg[1]))) owners.add(pkg[1]);
+          else if (target.startsWith('scripts/fixtures/')) paths.add(target);
+        }
         // Packages a spec imports directly are owners too (fixtures, models, helpers).
         if (source === file)
           for (const [, name] of text.matchAll(importPattern))
@@ -265,6 +277,7 @@ export function classifySpecs(root) {
         owners: [...owners].sort(),
         suite: rule.suite,
         helpers: local.map((helper) => `tests/e2e/${helper}`),
+        paths: [...paths].sort(),
         needs: [...ports].sort((a, b) => a - b),
       };
     });

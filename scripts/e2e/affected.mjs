@@ -35,7 +35,7 @@ const playgroundAliases = {
 
 /**
  * What a changed path means for browser specs.
- * @returns {{kind:'package', name:string} | {kind:'spec'|'helper', file:string} |
+ * @returns {{kind:'package', name:string} | {kind:'spec'|'helper'|'fixture', file:string} |
  *   {kind:'everything'|'playground'|'office'|'none'}}
  */
 export function classifyPath(path, packages) {
@@ -52,8 +52,17 @@ export function classifyPath(path, packages) {
     return packages.has(name) ? { kind: 'package', name } : { kind: 'playground' };
   }
   if (path.startsWith('apps/playground/')) return { kind: 'playground' };
+  // The reference Artifact Host mounts CAD, BIM, estimate and office surfaces side by side.
+  match = /^apps\/artifact-host\/src\/([^/.]+)/.exec(path);
+  if (match) {
+    if (/\.test\.tsx?$/.test(path)) return { kind: 'none' };
+    const name = [match[1], match[1].split('-')[0]].find((entry) => packages.has(entry));
+    return name ? { kind: 'package', name } : { kind: 'playground' };
+  }
+  if (path.startsWith('apps/artifact-host/')) return { kind: 'playground' };
   if (path.startsWith('apps/'))
     return /\.test\.tsx?$/.test(path) ? { kind: 'none' } : { kind: 'office' };
+  if (/^(?:tests|scripts)\/fixtures\//.test(path)) return { kind: 'fixture', file: path };
   if (/^tests\/e2e\/[^/]+\.spec\.ts$/.test(path)) return { kind: 'spec', file: path };
   if (/^tests\/e2e\/[^/]+\.ts$/.test(path)) return { kind: 'helper', file: path };
   return { kind: 'none' };
@@ -72,6 +81,7 @@ export function planRun(changed, specs, graph, options = {}) {
   const direct = new Set();
   const changedSpecs = new Set();
   const changedHelpers = new Set();
+  const changedFixtures = [];
   let everything = !!options.all,
     playground = false,
     office = false;
@@ -80,11 +90,17 @@ export function planRun(changed, specs, graph, options = {}) {
     if (what.kind === 'package') direct.add(what.name);
     else if (what.kind === 'spec') changedSpecs.add(what.file);
     else if (what.kind === 'helper') changedHelpers.add(what.file);
+    else if (what.kind === 'fixture') changedFixtures.push(what.file);
     else if (what.kind === 'everything') everything = true;
     else if (what.kind === 'playground') playground = true;
     else if (what.kind === 'office') office = true;
   }
   for (const name of direct) if (packageArea(name) !== 'engineering') office = true;
+  const usesFixture = (spec, file) => spec.paths.some((prefix) => file.startsWith(prefix));
+  // A browser fixture no tests/e2e spec names may serve another suite: run every light spec.
+  for (const file of changedFixtures)
+    if (file.startsWith('tests/') && !specs.some((spec) => usesFixture(spec, file)))
+      playground = true;
   const affected = dependents(graph, [...direct]);
   const engineering = dependents(
     graph,
@@ -99,6 +115,7 @@ export function planRun(changed, specs, graph, options = {}) {
       playground ||
       own ||
       spec.helpers.some((helper) => changedHelpers.has(helper)) ||
+      changedFixtures.some((file) => usesFixture(spec, file)) ||
       spec.owners.some((owner) => affected.has(owner)) ||
       (spec.broad && office);
     if (!reached) continue;
@@ -119,6 +136,7 @@ export function planRun(changed, specs, graph, options = {}) {
   if (playground) reasons.push('shared Playground source changed');
   if (direct.size) reasons.push(`packages: ${[...direct].sort().join(', ')}`);
   if (changedSpecs.size) reasons.push(`specs: ${changedSpecs.size}`);
+  if (changedFixtures.length) reasons.push(`fixtures: ${changedFixtures.length}`);
   if (changedHelpers.size) reasons.push(`spec helpers: ${[...changedHelpers].sort().join(', ')}`);
   return { reasons, run, deferred };
 }

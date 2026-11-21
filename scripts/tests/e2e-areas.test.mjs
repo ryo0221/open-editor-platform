@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { URL, fileURLToPath } from 'node:url';
 import { classifySpecs, corePackages, engineeringPackages, workspaceGraph } from '../e2e/areas.mjs';
 import { planRun } from '../e2e/affected.mjs';
-import { compareStatuses, testStatuses } from '../e2e/compare.mjs';
+import { compareStatuses, runErrors, testStatuses } from '../e2e/compare.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const specs = classifySpecs(root);
@@ -61,6 +61,23 @@ test('specs, helpers, Playground sources, shared configuration and documents', (
   assert.deepEqual(plan('docs/README.md', 'apps/playground/src/model.test.ts').run, []);
 });
 
+test('Artifact Host sources reach the specs of the surface they mount', () => {
+  assert(names(plan('apps/artifact-host/src/bim.tsx').run).includes('bim-hosts'));
+  assert(names(plan('apps/artifact-host/src/estimate-bim.ts').run).includes('estimate-editor'));
+  const shared = plan('apps/artifact-host/src/HostApp.tsx');
+  assert(names(shared.run).includes('bim-hosts'));
+  assert(names(shared.deferred).includes('cad-hosts'));
+});
+
+test('fixtures outside tests/e2e reach the specs that bundle or read them', () => {
+  const spatial = names(plan('tests/fixtures/spatial/host.css').run).sort();
+  assert.deepEqual(spatial, ['spatial-wasm', 'spatial-wasm-mobile']);
+  assert(names(plan('scripts/fixtures/gulliver-people.ts').run).includes('gulliver-people'));
+  // A fixture directory no tests/e2e spec names: every light spec, to be safe.
+  const unknown = plan('tests/fixtures/react-ui-scale/x.ts');
+  assert.equal(unknown.run.length, specs.filter((spec) => !spec.heavy).length);
+});
+
 test('comparison counts only failures that happen on the branch alone', () => {
   const report = (statuses) => ({
     suites: [
@@ -84,4 +101,13 @@ test('comparison counts only failures that happen on the branch alone', () => {
   assert.deepEqual(result.both, ['desktop › a.spec.ts › two']);
   assert.deepEqual(result.fixed, ['desktop › a.spec.ts › three']);
   assert.deepEqual(result.notOnBase, ['desktop › a.spec.ts › four']);
+  const partial = compareStatuses(
+    testStatuses(report({ one: 'expected' })),
+    testStatuses(report({ one: 'expected', two: 'expected' })),
+  );
+  assert.deepEqual(partial.notOnBranch, ['desktop › a.spec.ts › two']);
+  assert.deepEqual(
+    runErrors({ errors: [{ message: 'Process from config.webServer exited\nmore' }] }),
+    ['Process from config.webServer exited'],
+  );
 });

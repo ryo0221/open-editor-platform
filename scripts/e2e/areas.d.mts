@@ -15,6 +15,7 @@ export interface Spec {
   owners: string[];
   suite?: string;
   helpers: string[];
+  paths: string[];
   needs: number[];
 }
 export interface WorkspaceGraph {
