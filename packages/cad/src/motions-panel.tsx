@@ -13,6 +13,7 @@ import {
   motionDurationMs,
   motionStaleForms,
   motionStateAt,
+  motionUnsolvedJoints,
   withCameraKey,
   type CadMotion,
   type CadMotionEasing,
@@ -90,6 +91,14 @@ export function MotionsSection({
     const v = view.current;
     const state = joints && motionStateAt(doc, m, t);
     if (!v || !state || !joints) return false;
+    // A joint that has not solved would stand still while the rest moves (Codex on #34).
+    const unsolved = motionUnsolvedJoints(doc, joints, state.mounts);
+    if (unsolved.length) {
+      setNote(
+        `ジョイント ${unsolved.join('、')} が解けていないため、この動きは表示できません。ジョイントを直してから、もう一度試してください。`,
+      );
+      return false;
+    }
     v.showMotion({
       deltas: motionDeltas(doc, joints, state.values, state.mounts),
       ...(m.camera ? { camera: motionCameraAt(m.camera, t)! } : {}),
@@ -365,7 +374,9 @@ export function MotionsSection({
           <div className="cad-row">
             <button
               type="button"
-              disabled={!!recording || draft.steps.length >= cadMotionLimits.steps}
+              disabled={
+                !!recording || forms.length < 2 || draft.steps.length >= cadMotionLimits.steps
+              }
               onClick={() =>
                 setDraft({
                   ...draft,
