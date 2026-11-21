@@ -17,6 +17,8 @@ import type { Bounds } from './geometry';
  */
 export interface RubyNotation {
   plain: string;
+  /** For each UTF-16 unit of `plain`, its index in the notated text. */
+  source: number[];
   ruby: { start: number; end: number; text: string }[];
 }
 const rubyPattern =
@@ -25,16 +27,22 @@ export function parseRubyNotation(text: string): RubyNotation {
   let plain = '',
     last = 0;
   const ruby: RubyNotation['ruby'] = [];
+  const source: number[] = [];
+  const take = (from: number, to: number) => {
+    plain += text.slice(from, to);
+    for (let i = from; i < to; i++) source.push(i);
+  };
   for (const m of text.matchAll(rubyPattern)) {
-    plain += text.slice(last, m.index);
+    take(last, m.index);
     const base = m[1] ?? m[3],
       reading = m[2] ?? m[4];
+    const at = m.index + (m[1] !== undefined ? 1 : 0);
     ruby.push({ start: plain.length, end: plain.length + base.length, text: reading });
-    plain += base;
+    take(at, at + base.length);
     last = m.index + m[0].length;
   }
-  plain += text.slice(last);
-  return { plain, ruby };
+  take(last, text.length);
+  return { plain, source, ruby };
 }
 export const hasRubyNotation = (text: string) => parseRubyNotation(text).ruby.length > 0;
 
@@ -69,6 +77,8 @@ export interface GridGlyph {
   kind: GridGlyphKind;
   /** Length along the line. */
   advance: number;
+  /** Where the glyph starts in the text without ruby notation. */
+  offset: number;
 }
 export interface GridRuby {
   text: string;
@@ -167,6 +177,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
         y: along + advance / 2,
         kind: !o.vertical ? 'plain' : group ? 'upright' : verticalGlyphKind(segment),
         advance,
+        offset,
       });
       along += advance;
     }

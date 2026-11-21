@@ -205,6 +205,32 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
       9,
     );
   });
+  it('keeps a camera between keys on opposite sides of the target or with opposite ups (Codex on #37)', () => {
+    const cam = (atMs: number, position: [number, number, number], up: [number, number, number]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const valid = (c: NonNullable<ReturnType<typeof motionCameraAt>>['camera']) => {
+      const view = c.position.map((v, i) => v - c.target[i]!);
+      const d = Math.hypot(...view);
+      expect(d).toBeGreaterThan(1);
+      expect(Math.hypot(...c.up)).toBeCloseTo(1, 9);
+      // The up is not along the view.
+      expect(Math.abs(c.up.reduce((n, v, i) => n + v * view[i]!, 0) / d)).toBeLessThan(1e-6);
+    };
+    const across = [cam(0, [0, -1000, 0], [0, 0, 1]), cam(1000, [0, 1000, 0], [0, 0, 1])];
+    for (const t of [250, 500, 750]) valid(motionCameraAt(across, t)!.camera);
+    const mid = motionCameraAt(across, 500)!.camera;
+    // Halfway round about the up, at the keys' distance.
+    expect(Math.hypot(...mid.position)).toBeCloseTo(1000, 6);
+    expect(mid.position[2]).toBeCloseTo(0, 6);
+    const flipped = [cam(0, [0, -1000, 0], [0, 0, 1]), cam(1000, [0, -1000, 0], [0, 0, -1])];
+    for (const t of [250, 500, 750]) valid(motionCameraAt(flipped, t)!.camera);
+    // The up turns about the view: halfway it is at right angles to both keys' ups.
+    expect(motionCameraAt(flipped, 500)!.camera.up[2]).toBeCloseTo(0, 9);
+  });
   it('adds a camera key in time order, replacing one at the same time', () => {
     const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
     expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);

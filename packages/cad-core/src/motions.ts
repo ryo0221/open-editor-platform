@@ -211,11 +211,6 @@ export function motionDeltas(
 }
 
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
-const lerp3 = (a: Vec3, b: Vec3, u: number): Vec3 => [
-  lerp(a[0], b[0], u),
-  lerp(a[1], b[1], u),
-  lerp(a[2], b[2], u),
-];
 /** Uniform Catmull-Rom between p1 and p2 (p0, p3 their neighbours). */
 const catmull = (p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, u: number): Vec3 => {
   const u2 = u * u;
@@ -258,14 +253,63 @@ export function motionCameraAt(
   const mirror = (a: Vec3, b: Vec3): Vec3 => [2 * a[0] - b[0], 2 * a[1] - b[1], 2 * a[2] - b[2]];
   const along = (f: (k: CadMotionCameraKey) => Vec3) =>
     catmull(k0 ? f(k0) : mirror(f(k1), f(k2)), f(k1), f(k2), k3 ? f(k3) : mirror(f(k2), f(k1)), u);
+  const target = along((k) => k.camera.target);
+  const view1 = sub(k1.camera.position, k1.camera.target),
+    view2 = sub(k2.camera.position, k2.camera.target);
+  let position = along((k) => k.camera.position);
+  // The curve can pass through its target (keys on opposite sides of it): the view then turns
+  // from one key's direction to the other's, about the up, at a distance between theirs
+  // (Codex on #37).
+  const reach = Math.min(Math.hypot(...view1), Math.hypot(...view2));
+  if (Math.hypot(...sub(position, target)) < reach * 0.05) {
+    const dir = turn(unit(view1), unit(view2), u, unit(k1.camera.up));
+    const dist = lerp(Math.hypot(...view1), Math.hypot(...view2), u);
+    position = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
+  }
+  const view = unit(sub(position, target));
+  // The up turns between the keys' ups about the view (opposite ups included), and is kept off
+  // the view direction so `lookAt` always has an orientation (Codex on #37).
+  let up = turn(unit(k1.camera.up), unit(k2.camera.up), u, view);
+  up = sub(up, scale3(view, dot(up, view)));
+  if (Math.hypot(...up) < 1e-6) {
+    const keyUp = u < 0.5 ? k1.camera.up : k2.camera.up;
+    up = sub(unit(keyUp), scale3(view, dot(unit(keyUp), view)));
+  }
+  if (Math.hypot(...up) < 1e-6) up = perpendicular(view);
   return {
-    camera: {
-      position: along((k) => k.camera.position),
-      target: along((k) => k.camera.target),
-      up: unit(lerp3(unit(k1.camera.up), unit(k2.camera.up), u)),
-    },
+    camera: { position, target, up: unit(up) },
     fovRad: lerp(k1.fovRad, k2.fovRad, u),
   };
+}
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
+/** A unit vector at right angles to `v`. */
+const perpendicular = (v: Vec3): Vec3 =>
+  unit(cross(v, Math.abs(v[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+/**
+ * Unit `a` turned towards unit `b` by the fraction `u` of the angle between them. Opposite
+ * vectors turn about `axis` (or, if that is along them, about any axis at right angles).
+ */
+function turn(a: Vec3, b: Vec3, u: number, axis: Vec3): Vec3 {
+  const c = Math.max(-1, Math.min(1, dot(a, b)));
+  const angle = Math.acos(c) * u;
+  let n = cross(a, b);
+  if (Math.hypot(...n) < 1e-9) {
+    if (c > 0) return a;
+    n = sub(axis, scale3(a, dot(axis, a)));
+    if (Math.hypot(...n) < 1e-9) n = perpendicular(a);
+  }
+  n = unit(n);
+  // Rodrigues: a rotated about n (at right angles to a) by angle.
+  const w = cross(n, a);
+  const [cs, sn] = [Math.cos(angle), Math.sin(angle)];
+  return unit([a[0] * cs + w[0] * sn, a[1] * cs + w[1] * sn, a[2] * cs + w[2] * sn]);
 }
 
 /** A camera key added (or replaced at the same time) in time order. */

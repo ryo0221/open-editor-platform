@@ -10,10 +10,12 @@ describe('#20 ruby notation', () => {
   it('reads explicit and kanji-run ruby and removes the notation', () => {
     expect(parseRubyNotation('｜小人国《リリパット》の王')).toEqual({
       plain: '小人国の王',
+      source: [1, 2, 3, 11, 12],
       ruby: [{ start: 0, end: 3, text: 'リリパット' }],
     });
     expect(parseRubyNotation('巨人《きょじん》が|来た《きた》')).toEqual({
       plain: '巨人が来た',
+      source: [0, 1, 8, 10, 11],
       ruby: [
         { start: 0, end: 2, text: 'きょじん' },
         { start: 3, end: 5, text: 'きた' },
@@ -230,6 +232,43 @@ describe('#20 vertical writing', () => {
       drawingPrimitives({ ...d, typography: { fontSize: 20, list: true } } as Drawing, 'x'),
     );
     expect(list).toContain('•');
+  });
+
+  it('keeps run formatting on vertical text (Codex on #37)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: box,
+      text: '巨人《きょじん》が来た',
+      fill: '#111',
+      typography: { fontSize: 20, writingMode: 'vertical-rl' },
+      runs: [
+        { text: '巨人《きょじん》' },
+        { text: 'が', style: { bold: true, color: '#c00', underline: true } },
+        { text: '来た', style: { fontSize: 30, italic: true, fontFamily: 'serif' } },
+      ],
+    } as unknown as Drawing;
+    const svg = serializeSvg(drawingPrimitives(d, 'x'));
+    expect(svg).toContain('data-writing-mode="vertical-rl"');
+    const glyph = (g: string) => svg.match(new RegExp(`<text[^>]*>${g}</text>`))?.[0] ?? '';
+    expect(glyph('が')).toContain('font-weight="700"');
+    expect(glyph('が')).toContain('fill="#c00"');
+    expect(glyph('来')).toContain('font-size="30"');
+    expect(glyph('来')).toContain('font-style="italic"');
+    expect(glyph('来')).toContain('font-family="serif"');
+    expect(glyph('巨')).not.toContain('font-weight');
+    // Only が is underlined, in its own colour.
+    expect(svg).toContain('data-text-decoration="underline"');
+    expect(svg.match(/<line[^>]*stroke="#c00"/g)).toHaveLength(1);
+    // A list's bullets do not shift the runs onto other glyphs.
+    const list = serializeSvg(
+      drawingPrimitives(
+        { ...d, typography: { fontSize: 20, writingMode: 'vertical-rl', list: true } } as Drawing,
+        'x',
+      ),
+    );
+    expect(list.match(/<text[^>]*>が<\/text>/)?.[0]).toContain('font-weight="700"');
+    expect(list.match(/<text[^>]*>•<\/text>/)?.[0]).not.toContain('font-weight');
   });
 
   it('keeps a keycap emoji whole instead of standing its digit upright (Codex on #29)', () => {
