@@ -53,6 +53,7 @@ import {
   type CadComponentPlacement,
   type CadComponentPattern,
   type CadDocument,
+  type CadMotion,
   type CadEvaluateRequest,
   type CadInterferenceAllowance,
   type CadInterferenceMesh,
@@ -2594,6 +2595,13 @@ export class CadAssembly {
       values,
       ...(mounts ? { mounts } : {}),
     });
+  }
+  newMotionId() {
+    return this.options.controller.newId('motion');
+  }
+  /** #18: the assembly's motions replaced by `motions` (one edit; empty removes them). */
+  setMotions(motions: CadMotion[]) {
+    return this.options.controller.run({ type: 'setMotions', motions });
   }
   renameForm(id: string, name: string) {
     return this.options.controller.run({ type: 'renameConfiguration', id, name });

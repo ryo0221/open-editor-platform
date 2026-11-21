@@ -25,6 +25,10 @@
   display: block;
   touch-action: none;
 }
+/* #18: a video being recorded shows its frames letterboxed. */
+.cad-canvas.cad-canvas-capturing {
+  object-fit: contain;
+}
 /* CLF1b: the drawing board's pane lines and labels over the canvas (display only). */
 .cad-three-view {
   position: absolute;
