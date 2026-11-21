@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
 // Areas of the workspace and of the browser specs in tests/e2e, used to run only the
@@ -189,8 +189,14 @@ export const specRules = [
   },
   { match: /^templates?-/, area: 'office', owners: ['templates', 'template-ui'] },
   { match: /^templates$/, area: 'office', owners: ['templates', 'template-ui'] },
-  // These skip every test unless baseURL is the Artifact Host (4177): E2E_SUITE=host.
-  { match: /^host-api$/, area: 'office', broad: true, suite: 'host', needs: [4177] },
+  // These skip, or open the Artifact Host's own UI, unless baseURL is 4177: E2E_SUITE=host.
+  {
+    match: /^host-(?:api|integration)$/,
+    area: 'office',
+    broad: true,
+    suite: 'host',
+    needs: [4177],
+  },
   {
     match: /^authoring$/,
     area: 'office',
@@ -237,6 +243,32 @@ const importPattern = /(?:from\s+|import\(\s*)['"]@editor-platform\/([a-z0-9-]+)
 const relativePattern = /['"`]((?:\.\.\/)+[\w@./-]+)['"`]/g;
 /** Local helpers, static (`from './…'`) or literal dynamic (`import('./…')`). */
 const helperPattern = /(?:from\s+|import\(\s*)['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
+
+/**
+ * A scripts/fixtures module and the sibling fixture modules it imports, transitively
+ * (gulliver-brobdingnag.ts builds on gulliver-lilliput.ts), with their package imports.
+ * @returns {{paths: string[], packages: string[]}}
+ */
+function scriptFixtureClosure(root, target) {
+  const paths = new Set(),
+    packages = new Set();
+  const queue = [target.replace(/\.[cm]?[jt]sx?$/, '')];
+  while (queue.length) {
+    const stem = queue.pop();
+    if (paths.has(stem)) continue;
+    paths.add(stem);
+    const file = ['.ts', '.tsx', '.mjs', '.js', '']
+      .map((ext) => stem + ext)
+      .find((path) => existsSync(join(root, path)));
+    if (!file || !statSync(join(root, file)).isFile()) continue;
+    const text = readFileSync(join(root, file), 'utf8');
+    for (const [, name] of text.matchAll(helperPattern))
+      queue.push(posix.join(posix.dirname(stem), name.replace(/\.[cm]?[jt]sx?$/, '')));
+    for (const [, name] of text.matchAll(importPattern))
+      if (existsSync(join(root, 'packages', name))) packages.add(name);
+  }
+  return { paths: [...paths], packages: [...packages] };
+}
 
 const fixtureCache = new Map();
 /** Workspace packages imported anywhere under a tests/fixtures directory. */
@@ -303,7 +335,11 @@ export function classifySpecs(root) {
             // Packages the bundled or loaded fixture sources import are owners as well.
             for (const name of fixtureImports(root, fixture[0])) owners.add(name);
           } else if (pkg && existsSync(join(root, 'packages', pkg[1]))) owners.add(pkg[1]);
-          else if (target.startsWith('scripts/fixtures/')) paths.add(target);
+          else if (target.startsWith('scripts/fixtures/')) {
+            const closure = scriptFixtureClosure(root, target);
+            for (const path of closure.paths) paths.add(path);
+            for (const name of closure.packages) owners.add(name);
+          }
         }
         // Packages the spec or its helpers import are owners too (fixtures, models).
         for (const [, name] of text.matchAll(importPattern))

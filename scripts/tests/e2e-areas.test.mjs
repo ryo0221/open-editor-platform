@@ -73,6 +73,16 @@ test('fixtures outside tests/e2e reach the specs that bundle or read them', () =
   const spatial = names(plan('tests/fixtures/spatial/host.css').run).sort();
   assert.deepEqual(spatial, ['spatial-wasm', 'spatial-wasm-mobile']);
   assert(names(plan('scripts/fixtures/gulliver-people.ts').run).includes('gulliver-people'));
+  // Fixture modules that build on another one (brobdingnag imports lilliput).
+  const lilliput = plan('scripts/fixtures/gulliver-lilliput.ts');
+  const reached = names([...lilliput.run, ...lilliput.deferred]);
+  for (const name of [
+    'gulliver-lilliput',
+    'gulliver-brobdingnag',
+    'gulliver-houyhnhnm',
+    'gulliver-lagado',
+  ])
+    assert(reached.includes(name), name);
   // A fixture directory no tests/e2e spec names: every light spec, to be safe.
   const unknown = plan('tests/fixtures/react-ui-scale/x.ts');
   assert.equal(unknown.run.length, specs.filter((spec) => !spec.heavy).length);
@@ -92,7 +102,7 @@ test('Host Vite configurations and helper imports reach their specs', () => {
 });
 
 test('Host-only specs go to E2E_SUITE=host; reference apps reach their surface specs', () => {
-  for (const name of ['host-api', 'authoring', 'novel-workspace']) {
+  for (const name of ['host-api', 'host-integration', 'authoring', 'novel-workspace']) {
     const spec = specs.find((entry) => entry.name === name);
     assert.equal(spec.suite, 'host', name);
     assert.deepEqual(spec.needs, [4177], name);
