@@ -131,11 +131,11 @@ function largestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
   const pad = o.padding ?? 4;
-  const rubySize = size * 0.5;
   const scaleAt = (offset: number) => o.scaleAt?.(offset) ?? 1;
-  // Lines are as wide as their largest characters (Codex on #38).
+  // Lines are as wide as their largest characters, and readings follow that size (Codex on #38).
   const largest = largestScale(plain, o.scaleAt);
   const big = size * largest;
+  const rubySize = big * 0.5;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
   const pitch = big * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
   // A letter spacing of minus the font size (or less) would leave no advance (Codex on #29).
@@ -178,12 +178,22 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   const cells = (g: string, offset: number) =>
     (uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g)) *
     scaleAt(offset);
-  const length = Math.max(1, Math.floor((o.vertical ? inner.height : inner.width) / cell));
+  // Lines are measured in the smallest drawn cell, so a line of small runs holds what fits in
+  // its length and no more (Codex on #38). Without runs this is the box's whole cells, as before.
+  let smallest = 1;
+  if (o.scaleAt && plain.length) {
+    smallest = Infinity;
+    for (let k = 0; k < plain.length; k++)
+      if (scaleAt(k) > 0) smallest = Math.min(smallest, scaleAt(k));
+    if (!Number.isFinite(smallest)) smallest = 1;
+  }
+  const room = (o.vertical ? inner.height : inner.width) / cell;
+  const length = o.scaleAt ? Math.max(1, room / smallest) : Math.max(1, Math.floor(room));
   const broken = breakJapaneseLines(plain, {
     lineLength: length,
     hanging: true,
     unbreakable: [...ruby, ...upright],
-    measure: cells,
+    measure: o.scaleAt ? (g, offset) => cells(g, offset) / smallest : cells,
   });
   const lines: GridTextLayout['lines'] = broken.map((line) => {
     const glyphs: GridGlyph[] = [];

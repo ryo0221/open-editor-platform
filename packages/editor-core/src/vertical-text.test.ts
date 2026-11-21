@@ -331,6 +331,39 @@ describe('#20 vertical writing', () => {
     expect((l.fontSize * 10) / 60).toBeCloseTo(10, 6);
   });
 
+  it('breaks and annotates small runs at their own size (Codex on #38)', () => {
+    const base = {
+      id: 't',
+      kind: 'text',
+      fill: '#111',
+      typography: { fontSize: 60, writingMode: 'vertical-rl', overflow: 'fit' },
+    };
+    const col = {
+      ...base,
+      bounds: { x: 0, y: 0, width: 100, height: 40 },
+      text: '天地玄黄宇宙',
+      runs: [{ text: '天地玄黄宇宙', style: { fontSize: 10 } }],
+    } as unknown as Drawing;
+    const l = gridTextLayout(col);
+    const drawn = (l.fontSize * 10) / 60;
+    expect(drawn).toBeCloseTo(10, 6);
+    for (const g of l.lines.flatMap((line) => line.glyphs))
+      expect(g.y + drawn / 2).toBeLessThanOrEqual(40 + 1e-6);
+    const ruby = {
+      ...base,
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      typography: { fontSize: 60, writingMode: 'vertical-rl' },
+      text: '天《てん》',
+      runs: [{ text: '天《てん》', style: { fontSize: 10 } }],
+    } as unknown as Drawing;
+    const r = gridTextLayout(ruby);
+    // Readings at half the drawn size, inside the room the layout reports.
+    for (const x of r.ruby) {
+      expect(x.size).toBeLessThanOrEqual(5 + 1e-6);
+      expect(x.x + x.size / 2).toBeLessThanOrEqual(100 + 1e-6);
+    }
+  });
+
   it('moves punctuation by its own size (Codex on #38)', () => {
     const d = {
       id: 't',
