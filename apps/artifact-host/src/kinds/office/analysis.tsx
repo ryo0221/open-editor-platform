@@ -1,4 +1,3 @@
-import { artifactEstimateQuantities, evaluateEstimateBim } from './estimate-bim';
 import { useRef } from 'react';
 import {
   canonicalJson,
@@ -8,17 +7,11 @@ import {
   type StorageAdapter,
 } from '@editor-platform/artifact-core';
 import type { ArtifactEditor } from '@editor-platform/editor-host';
-import {
-  EstimateSurface,
-  estimateSources,
-  estimateCadSources,
-  estimateBimSources,
-  type EstimatePort,
-} from '@editor-platform/estimate';
-import { isEstimate } from '@editor-platform/estimate-core';
-import '@editor-platform/estimate/styles.css';
-import { domainExecute, type HostContent } from './model';
-export function ArtifactEstimate({
+import { AnalysisSurface, analysisSources, type AnalysisPort } from '@editor-platform/analysis';
+import { isAnalysis } from '@editor-platform/analysis-core';
+import '@editor-platform/analysis/styles.css';
+import { domainExecute, type HostContent } from '../../model';
+export function ArtifactAnalysis({
   host,
   artifacts,
   storage,
@@ -35,11 +28,10 @@ export function ArtifactEstimate({
       value: host.snapshot.readOnly,
       generation: permission.current.generation + 1,
     };
-  const port: EstimatePort = {
-    quantityVerification: artifactEstimateQuantities,
+  const port: AnalysisPort = {
     read: () => {
       const c = host.content;
-      if (!isEstimate(c)) throw Error('Not Estimate');
+      if (!isAnalysis(c)) throw Error('Not Analysis');
       return c;
     },
     revision: () => canonicalJson(host.revision),
@@ -49,15 +41,12 @@ export function ArtifactEstimate({
     canExport: () => true,
     inputsReady: () => true,
     flush: () => host.flushInputs(),
-    execute: domainExecute(host, isEstimate),
+    execute: domainExecute(host, isAnalysis),
   };
   return (
-    <EstimateSurface
+    <AnalysisSurface
       port={port}
-      sources={estimateSources(artifacts)}
-      quantitySources={estimateCadSources(artifacts)}
-      bimSources={estimateBimSources(artifacts)}
-      evaluateBim={evaluateEstimateBim}
+      sources={analysisSources(artifacts)}
       registerInput={(boundary) =>
         host.registerInputBoundary(() => {
           if (boundary.read().composing) throw Error('IME変換を確定してください。');
@@ -72,7 +61,7 @@ export function ArtifactEstimate({
       copyData={async (content, id) => {
         const created = await createArtifactIfAbsent(
           storage,
-          { ...createArtifact<HostContent>('data', '見積結果（静的コピー）', content), id },
+          { ...createArtifact<HostContent>('data', '分析結果（静的コピー）', content), id },
           canonicalJson(content),
           (a) => canonicalJson(a.draft.content),
         );

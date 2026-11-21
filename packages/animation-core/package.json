@@ -8,10 +8,11 @@
     "./v2": "./src/scene2/index.ts"
   },
   "dependencies": {
-    "@noble/hashes": "1.8.0",
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/easing": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/geometry-core": "*",
-    "@editor-platform/reuse-core": "*"
+    "@editor-platform/reuse-core": "*",
+    "@noble/hashes": "1.8.0"
   }
 }

@@ -5,7 +5,7 @@ import { Dialog } from '@editor-platform/editor-ui';
 import { exportDesignSvg, isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { decodeDesignPng } from '@editor-platform/design/raster-canvas';
 import { createLocalSession, downloadText, type StoredArtifact } from '../../../model';
-import type { SurfaceHost } from '../../editor-surfaces';
+import type { SurfaceHost } from '../../../kinds/surface-host';
 import {
   type ArtSubject,
   makeLayeredArtRequest,

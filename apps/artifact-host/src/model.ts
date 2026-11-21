@@ -1,103 +1,25 @@
-import { createFictionMap, type FictionMapContent } from '@editor-platform/fiction-map/model';
-import { fictionMapHostAdapter, parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
-import { createEstimate, isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
-import { verifyArtifactEstimate as verifyEstimateArtifact } from './estimate-bim';
-import { createAnalysis, isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
-import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
+import { createFictionMap } from '@editor-platform/fiction-map/model';
+import { createEstimate } from '@editor-platform/estimate-core';
+import { createAnalysis } from '@editor-platform/analysis-core';
 import { createArtifact, type Artifact, type StorageAdapter } from '@editor-platform/artifact-core';
-import { command, type EditorCommand } from '@editor-platform/editor-core';
-import {
-  ArtifactEditor,
-  loadHostArtifact,
-  type EditorHostAdapter,
-} from '@editor-platform/editor-host';
-import {
-  createDeck,
-  isDeck,
-  hasSlideAnimations,
-  exportSlideSvg,
-  type SlideContent,
-} from '@editor-platform/slide/model';
-import {
-  createWhiteboard,
-  isWhiteboard,
-  exportWhiteboardSvg,
-  type WhiteboardContent,
-} from '@editor-platform/whiteboard/model';
-import {
-  createDesign,
-  isDesignWithPaths,
-  makeDesignElement,
-  type DesignContent,
-} from '@editor-platform/design/model';
-import {
-  createData,
-  isStructuredData as isData,
-  exportCsv,
-  type StructuredData,
-} from '@editor-platform/structured-data/model';
-import {
-  f02Plate,
-  isCadDocument,
-  type CadDocument,
-  type CadKernelProfile,
-} from '@editor-platform/cad-core';
-import { f31BoxBuilding, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
-import { sealReactEnvironment, type ReactRuntimeResolution } from '@editor-platform/react-ui-core';
-import { exportDesignReact } from '@editor-platform/design-react-core';
-export interface CodeContent {
-  schemaVersion: 1;
-  domain: 'host-code';
-  fileId: string;
-  filename: string;
-  source: string;
-}
-export type HostContent =
-  | FictionMapContent
-  | EstimateDocument
-  | AnalysisDocument
-  | SlideContent
-  | WhiteboardContent
-  | DesignContent
-  | StructuredData
-  | CodeContent
-  | CadDocument
-  | BimDocument;
-export const isCode = (v: unknown): v is CodeContent => {
-  if (!v || typeof v !== 'object') return false;
-  const c = v as Partial<CodeContent>;
-  return (
-    c.schemaVersion === 1 &&
-    c.domain === 'host-code' &&
-    typeof c.fileId === 'string' &&
-    /^[\w-]{1,128}$/.test(c.fileId) &&
-    typeof c.filename === 'string' &&
-    /^[\w-]+\.tsx$/.test(c.filename) &&
-    typeof c.source === 'string' &&
-    c.source.length <= 150000
-  );
-};
-export function codeSource(source: string): EditorCommand<CodeContent> {
-  return command('host-code.source', 'Edit TSX source', (c) => ({ ...c, source }), {
-    origin: 'local',
-    transactionId: crypto.randomUUID(),
-    mergeKey: 'host-code.source',
-  });
-}
-export const nativeEnvironment = sealReactEnvironment({
-  schemaVersion: 1,
-  ref: { id: 'artifact-host', version: '1.0.0' },
-  reactVersion: '19.1.1',
-  dependencies: [],
-  providerOrder: [],
-  stylePolicy: 'allow-literals',
-  tokenVariables: {},
-});
-export const nativeResolution: ReactRuntimeResolution = {
-  environment: nativeEnvironment.ref,
-  components: [],
-  dependencies: [],
-};
+import type { EditorCommand } from '@editor-platform/editor-core';
+import { ArtifactEditor } from '@editor-platform/editor-host';
+import { createDeck } from '@editor-platform/slide/model';
+import { createWhiteboard } from '@editor-platform/whiteboard/model';
+import { createDesign, makeDesignElement, type DesignContent } from '@editor-platform/design/model';
+import { createData } from '@editor-platform/structured-data/model';
+import { f02Plate, type CadKernelProfile } from '@editor-platform/cad-core';
+import { f31BoxBuilding } from '@editor-platform/bim-core';
+export {
+  isCode,
+  codeSource,
+  nativeEnvironment,
+  nativeResolution,
+  isStaticSlide,
+  type CodeContent,
+  type HostContent,
+} from './content';
+import { nativeEnvironment, type HostContent } from './content';
 export function productDesign(title = 'Your product'): DesignContent {
   const native = (
     id: string,
@@ -145,137 +67,9 @@ export function productDesign(title = 'Your product'): DesignContent {
     },
   };
 }
-/** This reference Host provides static SVG export and saved-page previews. */
-export const isStaticSlide = (value: unknown): value is SlideContent =>
-  isDeck(value) && !hasSlideAnimations(value);
-export const hostAdapters: Record<string, EditorHostAdapter<HostContent>> = {
-  'fiction-map': fictionMapHostAdapter as EditorHostAdapter<HostContent>,
-  estimate: {
-    kind: 'estimate',
-    validate: isEstimate,
-    preflight: verifyEstimateArtifact,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: [],
-      preview: 'none',
-      shared: false,
-      proposals: true,
-    },
-  },
-  analysis: {
-    kind: 'analysis',
-    validate: isAnalysis,
-    preflight: verifyAnalysisArtifact,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: [],
-      preview: 'none',
-      shared: false,
-      proposals: true,
-    },
-  },
-  slide: {
-    kind: 'slide',
-    validate: isStaticSlide,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: ['svg'],
-      preview: 'none',
-      shared: false,
-    },
-    async export(_format, c) {
-      if (!isStaticSlide(c)) throw Error('このHostは Animation を含む Slide に対応していません。');
-      return c.slides.map((s) => ({ filename: s.id + '.svg', text: exportSlideSvg(c, s) }));
-    },
-  },
-  whiteboard: {
-    kind: 'whiteboard',
-    validate: isWhiteboard,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: ['svg'],
-      preview: 'none',
-      shared: false,
-    },
-    async export(_format, c) {
-      if (!isWhiteboard(c)) throw Error('Not Whiteboard');
-      return exportWhiteboardSvg(c);
-    },
-  },
-  design: {
-    kind: 'design',
-    validate: isDesignWithPaths,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: ['react'],
-      preview: 'host-isolated',
-      shared: false,
-    },
-    async export(_format, c) {
-      if (!isDesignWithPaths(c)) throw Error('Not Design');
-      return exportDesignReact(c, nativeResolution);
-    },
-  },
-  code: {
-    kind: 'code',
-    validate: isCode,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: ['tsx'],
-      preview: 'host-isolated',
-      shared: false,
-    },
-    async export(_format, c) {
-      if (!isCode(c)) throw Error('Not Code');
-      return c.source;
-    },
-  },
-  cad: {
-    kind: 'cad',
-    validate: isCadDocument,
-    // PNG comes from the Surface viewport (exact evaluated shape); no headless renderer here.
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: [],
-      preview: 'none',
-      shared: false,
-    },
-  },
-  bim: {
-    kind: 'bim',
-    validate: isBimDocument,
-    // Drawings and IFC come with R2c-5 and R2c-6.
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: [],
-      preview: 'none',
-      shared: false,
-    },
-  },
-  data: {
-    kind: 'data',
-    validate: isData,
-    capabilities: {
-      undo: true,
-      nativeJson: true,
-      formats: ['csv'],
-      preview: 'none',
-      shared: false,
-    },
-    async export(_format, c) {
-      if (!isData(c)) throw Error('Not Data');
-      return exportCsv(c);
-    },
-  },
-};
+/** The Host adapter of each kind (kinds/index.ts, from the shared definitions). */
+export { hostAdapters } from './kinds';
+import { hostAdapters, readNativeArtifact } from './kinds';
 export function domainExecute<T extends HostContent>(
   host: ArtifactEditor<HostContent>,
   valid: (v: unknown) => v is T,
@@ -358,10 +152,7 @@ export class BrowserArtifactStorage implements StorageAdapter<Artifact<HostConte
     const kind = raw && typeof raw === 'object' && 'kind' in raw ? String(raw.kind) : '';
     const adapter = hostAdapters[kind];
     if (!adapter) throw Error('Unsupported saved artifact kind');
-    const artifact =
-      kind === 'fiction-map'
-        ? await parseFictionMapArtifact(text)
-        : await loadHostArtifact(text, adapter);
+    const artifact = await readNativeArtifact(kind, text);
     if (artifact.id !== id) throw Error('Stored artifact ID mismatch');
     return artifact;
   }

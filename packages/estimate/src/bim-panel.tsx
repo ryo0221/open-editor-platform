@@ -1,28 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
 import { newId } from '@editor-platform/artifact-core';
-import { isBimDocument } from '@editor-platform/bim-core';
-import { pinKey } from '@editor-platform/calculation-core';
-import type { EstimateDocument, RetainedSource } from '@editor-platform/estimate-core';
+import {
+  pinKey,
+  type BimQuantityMetric,
+  type GeometryQuantitySources,
+  type SourceElement,
+} from '@editor-platform/calculation-core';
+import type { EstimateDocument } from '@editor-platform/estimate-core';
 import type { EstimatePort } from './host';
 import type { EstimateGeometrySourceOption } from './sources';
-import {
-  retainBimSource,
-  bimQuantity,
-  type EstimateBimMetric,
-  type EstimateBimEvaluator,
-} from './bim-source';
-import { retainCadSource } from './cad-source';
+import { measuredQuantity } from './geometry-quantities';
 import { useStatusProps } from './status-role';
 export function EstimateBimPanel({
   port,
   sources,
-  evaluate,
+  geometry,
   edit,
   trial,
 }: {
   port: EstimatePort;
   sources: EstimateGeometrySourceOption[];
-  evaluate?: EstimateBimEvaluator;
+  geometry: GeometryQuantitySources;
   edit(next: EstimateDocument, label: string): void;
   trial(next: EstimateDocument): Promise<void>;
 }) {
@@ -30,33 +28,28 @@ export function EstimateBimPanel({
   useEffect(() => () => request.current?.abort(), []);
   const [selected, setSelected] = useState(0),
     [element, setElement] = useState(''),
-    [metric, setMetric] = useState<EstimateBimMetric>('netVolume'),
+    [metric, setMetric] = useState<BimQuantityMetric>('netVolume'),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const notice = useStatusProps();
-  const option = sources[selected],
-    native = option && isBimDocument(option.content) ? option.content : undefined;
+  const option = sources[selected];
+  const [elements, setElements] = useState<SourceElement[]>();
+  useEffect(() => {
+    let live = true;
+    setElements(undefined);
+    if (option)
+      void geometry.bimElements(option.content).then(
+        (found) => live && setElements(found),
+        () => live && setElements(undefined),
+      );
+    return () => {
+      live = false;
+    };
+  }, [geometry, option]);
   const retain = async (input: EstimateGeometrySourceOption) => {
-    if (!isBimDocument(input.content)) throw Error('invalid-bim-source');
-    const collected = new Map<string, RetainedSource>();
-    for (const type of input.content.types)
-      if (type.kind === 'part') {
-        const content = input.closure.find(
-          (c) => c.contentHash === type.source.contentHash,
-        )?.content;
-        if (!content) throw Error('missing-bim-cad-closure');
-        for (const source of await retainCadSource(
-          { domain: 'cad', ...type.source },
-          content,
-          (h) => input.closure.find((c) => c.contentHash === h)?.content,
-        ))
-          collected.set(source.key, source);
-      }
-    const root = await retainBimSource(input.pin, input.content, [...collected.values()]);
-    collected.set(root.key, root);
-    const sources = [...collected.values()];
-    if (sources.some((s) => !port.canRead(s.pin))) throw Error('source-access-denied');
-    return { root, sources };
+    const retained = await geometry.retainBim(input);
+    if (retained.sources.some((s) => !port.canRead(s.pin))) throw Error('source-access-denied');
+    return retained;
   };
   const prepare = async (oldKey?: string) => {
     request.current?.abort();
@@ -88,12 +81,10 @@ export function EstimateBimPanel({
       if (oldKey) {
         for (const q of next.quantities)
           if (q.source?.snapshotKey === oldKey) {
-            const updated = await bimQuantity(
+            const updated = await geometry.measureBim(
               retained.root,
               q.source.identity,
-              q.source.metric as EstimateBimMetric,
-              q.id,
-              evaluate,
+              q.source.metric as BimQuantityMetric,
               abort.signal,
             );
             q.value = updated.value;
@@ -103,13 +94,9 @@ export function EstimateBimPanel({
           }
       } else
         next.quantities.push(
-          await bimQuantity(
-            retained.root,
-            element,
-            metric,
+          measuredQuantity(
+            await geometry.measureBim(retained.root, element, metric, abort.signal),
             newId('quantity'),
-            evaluate,
-            abort.signal,
           ),
         );
       if (abort.signal.aborted) throw Error('cancelled');
@@ -161,7 +148,7 @@ export function EstimateBimPanel({
           BIM要素
           <select value={element} onChange={(e) => setElement(e.target.value)}>
             <option value="">選択</option>
-            {native?.elements.map((el) => (
+            {elements?.map((el) => (
               <option key={el.id} value={el.id}>
                 {el.name ?? el.id} · {el.kind}
               </option>
@@ -170,7 +157,7 @@ export function EstimateBimPanel({
         </label>
         <label>
           数量metric
-          <select value={metric} onChange={(e) => setMetric(e.target.value as EstimateBimMetric)}>
+          <select value={metric} onChange={(e) => setMetric(e.target.value as BimQuantityMetric)}>
             {['length', 'grossArea', 'netArea', 'grossVolume', 'netVolume'].map((m) => (
               <option key={m}>{m}</option>
             ))}

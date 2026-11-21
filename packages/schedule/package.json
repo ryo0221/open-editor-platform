@@ -10,9 +10,11 @@
     "./host": "./src/host.ts",
     "./mock-host": "./src/mock-host.ts",
     "./view": "./src/view.tsx",
-    "./proposal-diff": "./src/proposal-diff.ts"
+    "./proposal-diff": "./src/proposal-diff.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-references": "*",
     "@editor-platform/editor-core": "*",

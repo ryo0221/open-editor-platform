@@ -6,9 +6,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/headless.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",

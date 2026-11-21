@@ -8,9 +8,11 @@
     "./host": "./src/host.ts",
     "./sources": "./src/sources.ts",
     "./references": "./src/references.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/analysis-core": "*",
     "@editor-platform/calculation-core": "*",
     "@editor-platform/artifact-core": "*",

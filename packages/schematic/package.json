@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./style.css": "./src/style.css"
+    "./style.css": "./src/style.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/circuit-sim-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",

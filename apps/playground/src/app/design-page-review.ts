@@ -4,7 +4,7 @@ import { isDesignWithPaths, type DesignPageReviewHost } from '@editor-platform/d
 import { designPageProposalCommand } from '@editor-platform/design/page-proposals';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type { Content } from '../model';
-import type { SurfaceHost } from './editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 
 /** The normal Host keeps authority/session reads live across preview and submission. */
 export function designPageReviewHost(

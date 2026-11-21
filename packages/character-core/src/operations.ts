@@ -7,7 +7,7 @@ import {
 } from '@editor-platform/editor-core';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex } from '@noble/hashes/utils';
-import type { Easing } from '@editor-platform/animation-core';
+import type { Easing } from '@editor-platform/easing';
 import type { GeometryTextureRole } from '@editor-platform/geometry-core';
 import {
   CharacterValidationError,

@@ -1,4 +1,4 @@
-import type { Rational } from '@editor-platform/animation-core';
+import type { Rational } from '@editor-platform/easing';
 import type { CharacterDocument } from '@editor-platform/character-core';
 import { mp4Overhead, writeMp4, type Mp4Sample } from './mp4-writer';
 import {

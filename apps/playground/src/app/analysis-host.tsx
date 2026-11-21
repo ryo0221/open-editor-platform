@@ -9,7 +9,7 @@ import type { EditorInputBoundary } from '@editor-platform/editor-core';
 import { isAnalysis } from '@editor-platform/analysis-core';
 import '@editor-platform/analysis/styles.css';
 import { storage } from './records';
-import type { SurfaceHost } from './editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 import type { StoredArtifact } from '../model';
 export function PlaygroundAnalysis({ host }: { host: SurfaceHost }) {
   const latest = useRef(host);

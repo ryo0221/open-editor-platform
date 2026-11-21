@@ -1,14 +1,3 @@
-import { parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
-import { FictionMapArtifactSurface } from '@editor-platform/fiction-map/artifact-surface';
-import '@editor-platform/fiction-map/styles.css';
-import {
-  undoFictionMap,
-  redoFictionMap,
-  type FictionMapSession,
-  type FictionMapContent,
-} from '@editor-platform/fiction-map/model';
-import { ArtifactEstimate } from './estimate';
-import { ArtifactAnalysis } from './analysis';
 import {
   lazy,
   Suspense,
@@ -34,59 +23,25 @@ import {
   HostAccessDisplay,
   scheduleAccessExpiry,
   hostNativeArtifactByteLimit,
-  loadHostArtifact,
   type HostAccessAdapter,
 } from '@editor-platform/editor-host';
-import { SlideSurface } from '@editor-platform/slide';
-import { exportSlideSvg } from '@editor-platform/slide/model';
 import type { Region } from '@editor-platform/editor-core';
-import { WhiteboardSurface } from '@editor-platform/whiteboard';
-import { isWhiteboard } from '@editor-platform/whiteboard/model';
-import { DesignSurface } from '@editor-platform/design';
-import {
-  isDesign,
-  isDesignWithPaths,
-  updateElement,
-  type DesignContent,
-} from '@editor-platform/design/model';
-import { DataSurface } from '@editor-platform/structured-data';
-import { isStructuredData } from '@editor-platform/structured-data/model';
-import { exportDesignReact, acceptDesignConversion } from '@editor-platform/design-react-core';
-import { OfficeExportHost } from '@editor-platform/office-export-ui/host';
 import {
   EditorExportGuardContext,
   EditorUncommittedInputContext,
 } from '@editor-platform/editor-ui';
-import {
-  hostAdapters,
-  domainExecute,
-  isCode,
-  codeSource,
-  nativeResolution,
-  isStaticSlide,
-  type HostContent,
-} from './model';
-import { isBimDocument } from '@editor-platform/bim-core';
+import { hostAdapters, type HostContent } from './model';
 import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
-import { isCadDocument } from '@editor-platform/cad-core';
 import type { CadCatalogBuild, CadKernelCatalog } from '@editor-platform/cad-kernel-occt';
 import { compileProject } from './compiler';
 import { PreviewFrame } from './PreviewFrame';
+import { kindLabel, readNativeArtifact } from './kinds';
+import { surfaceFor } from './kinds/surfaces';
 import './host.css';
 
-// Three.js and the kernel adapter load only when a CAD artifact opens.
-const CadArtifactView = lazy(() => import('./cad'));
-const BimArtifactView = lazy(() => import('./bim'));
 const BimIfcLossDialog = lazy(() =>
   import('@editor-platform/bim/ifc-import').then((m) => ({ default: m.BimIfcLossDialog })),
 );
-
-function compileDesignPreview(content: DesignContent, files: Record<string, string>) {
-  const pages = content.web?.pages;
-  const page = pages?.find((p) => p.path === '/') ?? pages?.[0];
-  if (!page) throw Error('Designに宣言されたページがありません。');
-  return compileProject(files, `${page.symbol}.tsx`, page.symbol);
-}
 export function download(name: string, text: string, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement('a');
@@ -95,17 +50,6 @@ export function download(name: string, text: string, type = 'application/json') 
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-const labels: Record<string, string> = {
-  estimate: '見積・積算',
-  analysis: '計算・分析ノート',
-  slide: 'Slide',
-  whiteboard: 'Whiteboard',
-  design: 'React / Design',
-  code: 'Code (Host拡張)',
-  data: 'Data / Kanban',
-  cad: '3D CAD',
-  bim: 'Building',
-};
 export interface HostAppProps {
   samples: Artifact<HostContent>[];
   storage: StorageAdapter<Artifact<HostContent>>;
@@ -141,7 +85,6 @@ function EditorView({
 }) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
   useEffect(() => host.attach(refresh), [host]);
-  const { content, readOnly } = host.snapshot;
   const select = (ids: string[], region?: Region) =>
     host.select({
       addresses: ids.map((elementId) => ({
@@ -162,218 +105,21 @@ function EditorView({
     },
     defaultPanels: { left: true, right: window.innerWidth > 1050 },
   };
-  if (host.artifact.kind === 'fiction-map')
-    return (
-      <FictionMapArtifactSurface
-        host={host as unknown as ArtifactEditor<FictionMapContent>}
-        onError={onError}
-      />
-    );
-  if (host.artifact.kind === 'estimate')
-    return (
-      <ArtifactEstimate host={host} artifacts={artifacts} storage={storage} onCreated={onCreated} />
-    );
-  if (host.artifact.kind === 'analysis')
-    return (
-      <ArtifactAnalysis host={host} artifacts={artifacts} storage={storage} onCreated={onCreated} />
-    );
-  if (host.artifact.kind === 'slide' && isStaticSlide(content))
-    return (
-      <OfficeExportHost
-        formats={{ pptx: false, reason: 'Office出力はこのHostの対象外です。SVGをご利用ください。' }}
-        capture={() => {
-          throw Error('Office出力はこのHostの対象外です。SVGをご利用ください。');
-        }}
-      >
-        <SlideSurface
-          content={content}
-          readOnly={readOnly}
-          execute={domainExecute(host, isStaticSlide)}
-          select={(ids, region) => select(Array.isArray(ids) ? ids : [ids], region)}
-          layout={layout}
-        />
-      </OfficeExportHost>
-    );
-  if (host.artifact.kind === 'whiteboard' && isWhiteboard(content))
-    return (
-      <WhiteboardSurface
-        content={content}
-        readOnly={readOnly}
-        execute={domainExecute(host, isWhiteboard)}
-        select={select}
-        layout={layout}
-      />
-    );
-  if (host.artifact.kind === 'data' && isStructuredData(content))
-    return (
-      <DataSurface
-        content={content}
-        readOnly={readOnly}
-        execute={domainExecute(host, isStructuredData)}
-        select={(id, region) => select([id], region)}
-        layout={layout}
-      />
-    );
-  if (host.artifact.kind === 'design' && isDesignWithPaths(content))
-    return (
-      <DesignSurface
-        content={content}
-        readOnly={readOnly}
-        execute={domainExecute(host, isDesignWithPaths)}
-        select={select}
-        layout={layout}
-      />
-    );
-  if (host.artifact.kind === 'code' && isCode(content))
-    return codeSurface ? (
-      codeSurface(host)
-    ) : (
-      <CodeView host={host} previewDocument={previewDocument} />
-    );
-  if (host.artifact.kind === 'cad' && isCadDocument(content))
-    return (
-      <Suspense fallback={<p>3D CADを読み込んでいます…</p>}>
-        <CadArtifactView
-          host={host}
-          kernel={cadKernel ?? null}
-          kernels={cadKernels}
-          onError={onError}
-        />
-      </Suspense>
-    );
-  if (host.artifact.kind === 'bim' && isBimDocument(content))
-    return (
-      <Suspense fallback={<p>建物を読み込んでいます…</p>}>
-        <BimArtifactView host={host} kernel={cadKernel ?? null} onError={onError} />
-      </Suspense>
-    );
-  return <p role="alert">このnative contentを表示できません。</p>;
-}
-function CodeView({
-  host,
-  previewDocument,
-}: {
-  host: ArtifactEditor<HostContent>;
-  previewDocument: string;
-}) {
-  const { content, readOnly } = host.snapshot;
-  const [project, setProject] = useState<ReturnType<typeof compileProject>>(),
-    [error, setError] = useState('');
-  const caret = useRef<[number, number]>([0, 0]);
-  if (!isCode(content)) return null;
   return (
-    <div className="host-code">
-      <label>
-        React TSXソース
-        <textarea
-          aria-label="React TSXソース"
-          readOnly={readOnly}
-          value={content.source}
-          maxLength={150000}
-          onSelect={(e) => {
-            const next: [number, number] = [
-              e.currentTarget.selectionStart,
-              e.currentTarget.selectionEnd,
-            ];
-            if (next.some((value, i) => value !== caret.current[i])) host.breakHistoryGroup();
-            caret.current = next;
-          }}
-          onBlur={() => host.flushInputs()}
-          onChange={(e) => {
-            caret.current = [e.currentTarget.selectionStart, e.currentTarget.selectionEnd];
-            try {
-              domainExecute(host, isCode)(codeSource(e.target.value));
-              setError('');
-            } catch (e) {
-              setError(String(e));
-            }
-          }}
-        />
-      </label>
-      <button
-        onClick={() => {
-          try {
-            host.flushInputs();
-            setProject(compileProject({ [content.filename]: content.source }, content.filename));
-            setError('');
-          } catch (e) {
-            setError(String(e));
-          }
-        }}
-      >
-        隔離プレビューを実行
-      </button>
-      {error && <p role="alert">{error}</p>}
-      {project && (
-        <PreviewFrame
-          project={project}
-          previewDocument={previewDocument}
-          title="Code隔離プレビュー"
-        />
-      )}
-    </div>
+    surfaceFor(host.artifact.kind)?.render(host, {
+      previewDocument,
+      codeSurface,
+      cadKernel,
+      cadKernels,
+      onError,
+      artifacts,
+      storage,
+      onCreated,
+      select,
+      layout,
+    }) ?? <p role="alert">このnative contentを表示できません。</p>
   );
 }
-function DesignTools({
-  host,
-  previewDocument,
-  onError,
-}: {
-  host: ArtifactEditor<HostContent>;
-  previewDocument: string;
-  onError(e: unknown): void;
-}) {
-  const { content, readOnly } = host.snapshot;
-  const [project, setProject] = useState<ReturnType<typeof compileProject>>();
-  if (!isDesign(content)) return null;
-  const title = content.elements.find((e) => e.id === 'product-heading');
-  return (
-    <div className="host-design-tools">
-      {title && (
-        <label>
-          ページ見出し
-          <input
-            aria-label="ページ見出し"
-            value={title.text}
-            readOnly={readOnly}
-            onChange={(e) =>
-              domainExecute(
-                host,
-                isDesignWithPaths,
-              )(updateElement(title.id, { text: e.target.value }))
-            }
-          />
-        </label>
-      )}
-      <button
-        disabled={readOnly}
-        onClick={() => {
-          try {
-            host.flushInputs();
-            const current = host.snapshot.content;
-            if (!isDesign(current)) throw Error('Not native Design');
-            const bundle = exportDesignReact(current, nativeResolution);
-            const compiled = compileDesignPreview(current, bundle.files);
-            domainExecute(host, isDesignWithPaths)(acceptDesignConversion(bundle));
-            setProject(compiled);
-          } catch (e) {
-            onError(e);
-          }
-        }}
-      >
-        React生成を採用・プレビュー
-      </button>
-      {project && (
-        <PreviewFrame
-          project={project}
-          previewDocument={previewDocument}
-          title="Designから生成したReact"
-        />
-      )}
-    </div>
-  );
-}
-
 /** Independent reference Host; samples, routes, persistence, permission and runtime are injectable. */
 export function HostApp({
   samples,
@@ -446,14 +192,11 @@ export function HostApp({
       (stored) => {
         if (!cancelled) {
           setArtifacts([...samples.filter((a) => !stored.some((s) => s.id === a.id)), ...stored]);
-          const savedDesign = stored.find((a) => a.kind === 'design' && a.versions.length > 0);
-          if (savedDesign && isDesign(savedDesign.draft.content)) {
+          const saved = stored.find((a) => a.versions.length > 0 && surfaceFor(a.kind)?.reusable);
+          if (saved) {
             try {
-              const output = exportDesignReact(savedDesign.draft.content, nativeResolution);
-              setReused({
-                id: savedDesign.id,
-                project: compileDesignPreview(savedDesign.draft.content, output.files),
-              });
+              const project = surfaceFor(saved.kind)?.reusePreview(saved.draft.content);
+              if (project) setReused({ id: saved.id, project });
             } catch (e) {
               fail(e);
             }
@@ -575,18 +318,13 @@ export function HostApp({
       setArtifacts((values) =>
         values.map((a) => (a.id === result.artifactId ? result.artifact : a)),
       );
-      if (result.kind === 'design' && isDesign(result.artifact.draft.content)) {
-        try {
-          const bundle = exportDesignReact(result.artifact.draft.content, nativeResolution);
-          setReused({
-            id: result.artifactId,
-            project: compileDesignPreview(result.artifact.draft.content, bundle.files),
-          });
-        } catch (e) {
-          fail(e);
-          setNotice('保存済み。React再利用の診断を修正してください。');
-          return;
-        }
+      try {
+        const project = surfaceFor(result.kind)?.reusePreview(result.artifact.draft.content);
+        if (project) setReused({ id: result.artifactId, project });
+      } catch (e) {
+        fail(e);
+        setNotice('保存済み。React再利用の診断を修正してください。');
+        return;
       }
       if (result.dirty) {
         setNotice('保存中に追加した編集が未保存です。再度保存できます。');
@@ -641,12 +379,7 @@ export function HostApp({
       const text = await selected.text(),
         raw: unknown = JSON.parse(text);
       const kind = raw && typeof raw === 'object' && 'kind' in raw ? String(raw.kind) : '';
-      const adapter = hostAdapters[kind];
-      if (!adapter) throw Error('Unknown artifact kind');
-      const imported =
-        kind === 'fiction-map'
-          ? await parseFictionMapArtifact(text)
-          : await loadHostArtifact(text, adapter);
+      const imported = await readNativeArtifact(kind, text);
       const current = sessions.current.get(imported.id);
       const existing = current?.artifact ?? artifactsRef.current.find((a) => a.id === imported.id);
       if (permissions.current.get(imported.id) === false || current?.snapshot.readOnly)
@@ -675,6 +408,7 @@ export function HostApp({
     }
   }
   const snap = host?.snapshot;
+  const Tools = host ? surfaceFor(host.artifact.kind)?.Tools : undefined;
   return (
     <main className="artifact-host">
       {header ?? (
@@ -703,7 +437,7 @@ export function HostApp({
               const current = sessions.current.get(a.id)?.snapshot;
               return (
                 <article key={a.id} data-artifact-id={a.id}>
-                  <span>{labels[a.kind]}</span>
+                  <span>{kindLabel(a.kind)}</span>
                   <h2>{a.name}</h2>
                   <small>{a.id}</small>
                   <p>
@@ -716,25 +450,7 @@ export function HostApp({
                           : 'Hostサンプル'}{' '}
                     · {a.versions.length} versions
                   </p>
-                  {a.kind === 'slide' &&
-                    a.versions.length > 0 &&
-                    isStaticSlide(a.draft.content) &&
-                    a.draft.content.slides.length > 0 && (
-                      <figure className="host-saved-slide">
-                        <img
-                          alt={'保存した企画書 ' + a.id}
-                          src={
-                            'data:image/svg+xml;charset=utf-8,' +
-                            encodeURIComponent(
-                              exportSlideSvg(a.draft.content, a.draft.content.slides[0]),
-                            )
-                          }
-                        />
-                        <figcaption>
-                          {a.draft.content.slides.length} pages · 保存したnative内容のプレビュー
-                        </figcaption>
-                      </figure>
-                    )}
+                  {surfaceFor(a.kind)?.listPreview(a)}
                   <button
                     disabled={!ready}
                     onClick={() => open(a.id)}
@@ -803,13 +519,9 @@ export function HostApp({
               disabled={!snap?.canUndo || snap.readOnly}
               onClick={() => {
                 try {
-                  if (host.artifact.kind === 'fiction-map') {
-                    const r = undoFictionMap(
-                      host as unknown as FictionMapSession,
-                      () => !host.readOnly,
-                    );
-                    if (!r.ok) throw Error(r.diagnostic.code);
-                  } else host.undo();
+                  const history = surfaceFor(host.artifact.kind)?.history;
+                  if (history) history(host, 'undo');
+                  else host.undo();
                 } catch (e) {
                   fail(e);
                 }
@@ -822,13 +534,9 @@ export function HostApp({
               disabled={!snap?.canRedo || snap.readOnly}
               onClick={() => {
                 try {
-                  if (host.artifact.kind === 'fiction-map') {
-                    const r = redoFictionMap(
-                      host as unknown as FictionMapSession,
-                      () => !host.readOnly,
-                    );
-                    if (!r.ok) throw Error(r.diagnostic.code);
-                  } else host.redo();
+                  const history = surfaceFor(host.artifact.kind)?.history;
+                  if (history) history(host, 'redo');
+                  else host.redo();
                 } catch (e) {
                   fail(e);
                 }
@@ -939,9 +647,8 @@ export function HostApp({
           <div
             ref={contentArea}
             className={
-              host.artifact.kind === 'code' && codeSurface
-                ? 'host-surface host-custom-code'
-                : 'host-surface'
+              surfaceFor(host.artifact.kind)?.surfaceClass({ codeSurface: !!codeSurface }) ??
+              'host-surface'
             }
             onCompositionStartCapture={() => {
               composing.current = true;
@@ -969,13 +676,8 @@ export function HostApp({
               </EditorExportGuardContext.Provider>
             </EditorUncommittedInputContext.Provider>
           </div>
-          {host.artifact.kind === 'design' && (
-            <DesignTools
-              key={host.id}
-              host={host}
-              previewDocument={previewDocument}
-              onError={fail}
-            />
+          {Tools && (
+            <Tools key={host.id} host={host} previewDocument={previewDocument} onError={fail} />
           )}
           <p className="host-capabilities">
             能力：local Undo / native JSON / {host.capabilities.formats.join(', ')} ·

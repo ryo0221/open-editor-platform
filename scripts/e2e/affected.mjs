@@ -4,7 +4,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { classifySpecs, dependents, packageArea, workspaceGraph } from './areas.mjs';
+import {
+  classifySpecs,
+  dependents,
+  kindSourcePackages,
+  packageArea,
+  workspaceGraph,
+} from './areas.mjs';
 
 // Select the tests/e2e specs a change can affect, from the files changed since a base
 // revision. See docs/developer-guide.md ("Playwrightのスイート").
@@ -41,11 +47,16 @@ const referenceApps = {
 
 /**
  * What a changed path means for browser specs.
- * @returns {{kind:'package', name:string} | {kind:'spec'|'helper'|'fixture', file:string} |
+ * @param {string} [root] repository root, to read a Host's kind lists (kindSourcePackages)
+ * @returns {{kind:'package', name:string} | {kind:'kinds', names:string[]} |
+ *   {kind:'spec'|'helper'|'fixture', file:string} |
  *   {kind:'everything'|'playground'|'office'|'none'}}
  */
-export function classifyPath(path, packages) {
+export function classifyPath(path, packages, root = process.cwd()) {
   if (everythingPattern.test(path)) return { kind: 'everything' };
+  // A Host's per-kind file or area list: the kind's packages (kindPackages) or the list's.
+  const kinds = kindSourcePackages(root, path);
+  if (kinds) return kinds.length ? { kind: 'kinds', names: kinds } : { kind: 'none' };
   if (officeServerPattern.test(path)) return { kind: 'office' };
   let match = /^packages\/([^/]+)\//.exec(path);
   if (match) return packages.has(match[1]) ? { kind: 'package', name: match[1] } : { kind: 'none' };
@@ -83,8 +94,9 @@ export function classifyPath(path, packages) {
  * @param {string[]} changed repository-relative paths
  * @param {ReturnType<typeof classifySpecs>} specs
  * @param {ReturnType<typeof workspaceGraph>} graph
- * @param {{heavy?: boolean, all?: boolean}} [options] heavy: also run heavy specs a broad
- *   change reaches; all: the full run (every spec, heavy ones included)
+ * @param {{heavy?: boolean, all?: boolean, root?: string}} [options] heavy: also run heavy
+ *   specs a broad change reaches; all: the full run (every spec, heavy ones included); root:
+ *   the repository root (default: the current directory)
  */
 export function planRun(changed, specs, graph, options = {}) {
   const packages = new Set(graph.users.keys());
@@ -92,12 +104,20 @@ export function planRun(changed, specs, graph, options = {}) {
   const changedSpecs = new Set();
   const changedHelpers = new Set();
   const changedFixtures = [];
+  // Core packages a kind source names stand for their own kind: owners only, not dependents.
+  const ownedOnly = new Set();
   let everything = !!options.all,
     playground = false,
     office = false;
   for (const path of changed) {
-    const what = classifyPath(path, packages);
+    const what = classifyPath(path, packages, options.root);
     if (what.kind === 'package') direct.add(what.name);
+    else if (what.kind === 'kinds')
+      for (const name of what.names.filter((entry) => packages.has(entry))) {
+        if (packageArea(name) === 'core') ownedOnly.add(name);
+        else direct.add(name);
+        if (packageArea(name) !== 'engineering') office = true;
+      }
     else if (what.kind === 'spec') changedSpecs.add(what.file);
     else if (what.kind === 'helper') changedHelpers.add(what.file);
     else if (what.kind === 'fixture') changedFixtures.push(what.file);
@@ -126,7 +146,7 @@ export function planRun(changed, specs, graph, options = {}) {
       own ||
       spec.helpers.some((helper) => changedHelpers.has(helper)) ||
       changedFixtures.some((file) => usesFixture(spec, file)) ||
-      spec.owners.some((owner) => affected.has(owner)) ||
+      spec.owners.some((owner) => affected.has(owner) || ownedOnly.has(owner)) ||
       (spec.broad && office);
     if (!reached) continue;
     // Heavy specs follow their own packages (and their engineering dependencies) only.
@@ -145,6 +165,7 @@ export function planRun(changed, specs, graph, options = {}) {
   else if (everything) reasons.push('shared configuration changed');
   if (playground) reasons.push('shared Playground source changed');
   if (direct.size) reasons.push(`packages: ${[...direct].sort().join(', ')}`);
+  if (ownedOnly.size) reasons.push(`kinds of core packages: ${[...ownedOnly].sort().join(', ')}`);
   if (changedSpecs.size) reasons.push(`specs: ${changedSpecs.size}`);
   if (changedFixtures.length) reasons.push(`fixtures: ${changedFixtures.length}`);
   if (changedHelpers.size) reasons.push(`spec helpers: ${[...changedHelpers].sort().join(', ')}`);

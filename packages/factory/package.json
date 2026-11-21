@@ -5,9 +5,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./style.css": "./src/style.css"
+    "./style.css": "./src/style.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/bim": "*",
     "@editor-platform/bim-core": "*",

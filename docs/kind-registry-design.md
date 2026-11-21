@@ -190,3 +190,27 @@ KR5 と KR6 は共有ファイルを大きく触るので、e2e は段階1の `-
 - **U2=A：** 共有の定義（`<package>/kind`）と Host ごとの接続（`apps/<host>/src/kinds/`）を分ける。
 - **U3：** engineering を外した Playground は今回作らない。
 - 受け入れ条件に「既存の種類ごとの e2e 対象を過少選択しないこと」を加える（上の「過少選択の確認」）。
+
+## 実装で決めたこと（KR4〜KR7）
+
+- **一覧と Surface は別ファイル、同じ定義オブジェクトで対にする：**
+  - 定義の一覧（`kinds/office.ts`、`kinds/engineering.ts`）は React なしで、保存・読み込み（`model.ts`）から使います。
+  - Surface の一覧（`kinds/surfaces.tsx`、`kinds/<area>/surfaces.ts(x)`）は別ファイルです。
+  - 起動時に `pairKinds()`（`artifact-kinds`）が両者を対にします。種類ごとに Surface が一つだけあり、それが一覧と同じ定義オブジェクトから作られていることを確かめ、違えば例外にします。
+- **読み込み方：** office の Surface はすぐに読み込みます。遅延読み込みにするのは engineering（CAD、BIM など）だけです。
+- **`accepts`：** 定義の `validate` に加えて、Host が開く範囲をさらに絞ります。
+  - Data と Graph は今のスキーマだけを開きます（古いデータの読み替えは別の場所で行います）。
+  - Artifact Host の Slide は、Animation を含まない資料だけを開きます。
+- **Code は Artifact Host だけの種類：** `apps/artifact-host/src/kinds/code.ts` に置き、package の `./kind` は持ちません。
+- **Host ごとの振る舞いはフックで渡す（種類名での分岐はしない）：**
+  - Playground は次の2つです。どの種類がどのフックを使うかは `kinds/surfaces.test.ts` で固定しています。
+    - `hostKind()` の `HostKindHooks`：履歴、入力の保留、書き出し、共有など。
+    - `recordKind()` の `RecordKindHooks`：保存版の確認、native の読み込み、再利用など。
+  - Artifact Host は `artifactSurface()` の部品です：`history`、`ListPreview`、`Tools`、`surfaceClass`、`reusePreview`。
+    - Fiction Map、Estimate、Analysis は、adapter が読み込んだ内容をそのまま開きます（`opens: 'any'`）。これは今までの動作と同じです。
+- **e2e の選択（`scripts/e2e/areas.mjs` の `kindSourcePackages`）：**
+  - **種類ごとのファイル**（`kinds/<area>/<kind>.tsx`）は、`kindPackages` に書いた package の変更として扱います。
+  - **一覧として扱うもの：** `kinds/<area>.ts` と、同じディレクトリにある種類名でないファイル（Surface の一覧、records、Host だけの種類）。これらの変更は、そのファイル群が並べる package と、そこから import している連携ファイル（`hostConnectionFiles`）の package の変更として扱います。
+  - **core の package**（`review` を定義する `review-surfaces`）は、ここではその種類としてだけ数えます。spec の owner には一致させますが、逆依存はたどりません。
+  - **それ以外の `kinds/` 直下の共有ファイル**は、今までどおり light spec 全部を選びます。
+  - **過少選択の確認：** `scripts/tests/e2e-stage1-selection.json` に段階1の選択を固定しています（main の 177fa91d で作成）。新しい規則による選択はこれと比べます。選択が減ってよいのは、`removedDependencies` に挙げた依存の切り離し（KR2、KR3）で説明できる場合だけです。

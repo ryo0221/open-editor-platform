@@ -1,5 +1,3 @@
-import { playgroundEstimateQuantities, evaluateEstimateBim } from './estimate-bim';
-import { estimateWorkPublication } from './estimate-publication';
 import { useCallback, useRef } from 'react';
 import {
   canonicalJson,
@@ -15,18 +13,28 @@ import {
 } from '@editor-platform/estimate';
 import type { EditorInputBoundary } from '@editor-platform/editor-core';
 import { isEstimate } from '@editor-platform/estimate-core';
+import { estimateKind } from '@editor-platform/estimate/kind';
+import type { GeometryQuantitySources } from '@editor-platform/calculation-core';
 import '@editor-platform/estimate/styles.css';
-import { storage } from './records';
-import type { SurfaceHost } from './editor-surfaces';
-import type { StoredArtifact } from '../model';
-export function PlaygroundEstimate({ host }: { host: SurfaceHost }) {
+import { estimateWorkPublication } from '../../app/estimate-publication';
+import { storage } from '../../app/records';
+import type { StoredArtifact } from '../../model';
+import { hostKind } from '../host-kind';
+import type { SurfaceHost } from '../surface-host';
+function PlaygroundEstimate({
+  host,
+  geometry,
+}: {
+  host: SurfaceHost;
+  geometry: GeometryQuantitySources | undefined;
+}) {
   const latest = useRef(host);
   latest.current = host;
   const permission = useRef({ value: host.readOnly, generation: 0 });
   if (permission.current.value !== host.readOnly)
     permission.current = { value: host.readOnly, generation: permission.current.generation + 1 };
   const port = useRef<EstimatePort>({
-    quantityVerification: playgroundEstimateQuantities,
+    quantityVerification: geometry?.verification,
     read: () => {
       const content = latest.current.session!.content;
       if (!isEstimate(content)) throw Error('Not Estimate');
@@ -58,7 +66,7 @@ export function PlaygroundEstimate({ host }: { host: SurfaceHost }) {
       sources={estimateSources([...host.savedRecords.current.values()])}
       quantitySources={estimateCadSources([...host.savedRecords.current.values()])}
       bimSources={estimateBimSources([...host.savedRecords.current.values()])}
-      evaluateBim={evaluateEstimateBim}
+      geometry={geometry}
       registerInput={registerInput}
       save={async () => {
         const before = host.savedRecords.current.get(host.active.id)?.versions.length ?? 0;
@@ -88,4 +96,20 @@ export function PlaygroundEstimate({ host }: { host: SurfaceHost }) {
       }}
     />
   );
+}
+
+/**
+ * Estimate with the Host's CAD/BIM quantity reading. The office list does not import engineering
+ * code: the reading comes from kinds/engineering/surfaces.ts through kinds/surfaces.tsx, and
+ * without it the quantity panels are not shown.
+ */
+export function estimateSurface(geometry: GeometryQuantitySources | undefined) {
+  return hostKind(estimateKind, {
+    Surface: ({ host }) => <PlaygroundEstimate host={host} geometry={geometry} />,
+    session: 'local',
+    hooks: {
+      sharedSessions: false,
+      comments: false,
+    },
+  });
 }

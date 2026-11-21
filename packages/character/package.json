@@ -8,11 +8,13 @@
     "./weights": "./src/weights-entry.ts",
     "./bake": "./src/bake-entry.ts",
     "./video": "./src/video-entry.ts",
-    "./style.css": "./src/style.css"
+    "./style.css": "./src/style.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/animation-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/character-core": "*",
+    "@editor-platform/easing": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/geometry-mesh": "*",

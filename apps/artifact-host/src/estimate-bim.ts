@@ -1,8 +1,10 @@
 import type { Artifact } from '@editor-platform/artifact-core';
 import { contentHash } from '@editor-platform/artifact-core';
 import { verifyEstimateArtifact } from '@editor-platform/estimate/host';
-import type { QuantityVerification } from '@editor-platform/estimate-core';
-import type { EstimateBimEvaluator } from '@editor-platform/estimate/bim-source';
+import {
+  geometryQuantitySources,
+  type EstimateBimEvaluator,
+} from '@editor-platform/estimate-engineering';
 import cadKernel from 'virtual:cad-kernel-build';
 /** Evaluation is Host-owned. Only requested BIM snapshots load the existing kernel Worker. */
 export const evaluateEstimateBim: EstimateBimEvaluator = async (document, pin, signal) => {
@@ -44,15 +46,8 @@ export const evaluateEstimateBim: EstimateBimEvaluator = async (document, pin, s
     kernel.dispose();
   }
 };
-export const artifactEstimateQuantities: QuantityVerification = {
-  async verifySource(source, sources) {
-    const { bimQuantityVerification } = await import('@editor-platform/estimate/bim-source');
-    return bimQuantityVerification(evaluateEstimateBim).verifySource(source, sources);
-  },
-  async verifyQuantities(quantities, sources) {
-    const { bimQuantityVerification } = await import('@editor-platform/estimate/bim-source');
-    return bimQuantityVerification(evaluateEstimateBim).verifyQuantities(quantities, sources);
-  },
-};
+/** CAD/BIM quantity reading for Estimate; the CAD/BIM code loads on first use. */
+export const artifactEstimateGeometry = geometryQuantitySources(evaluateEstimateBim);
+export const artifactEstimateQuantities = artifactEstimateGeometry.verification;
 export const verifyArtifactEstimate = (artifact: Artifact<unknown>) =>
   verifyEstimateArtifact(artifact, artifactEstimateQuantities);

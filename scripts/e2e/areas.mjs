@@ -8,11 +8,13 @@ import { join, posix } from 'node:path';
 /** Platform packages every editor builds on. A change here affects every non-heavy spec. */
 export const corePackages = [
   'artifact-core',
+  'artifact-kinds',
   'artifact-output',
   'artifact-references',
   'calculation-core',
   'canvas-ui',
   'collaboration-core',
+  'easing',
   'editor-core',
   'editor-host',
   'editor-ui',
@@ -45,6 +47,7 @@ export const engineeringPackages = [
   'cosim-core',
   'drawing',
   'drawing-core',
+  'estimate-engineering',
   'factory',
   'factory-core',
   'fem-mesher',
@@ -141,10 +144,15 @@ export const specRules = [
   {
     match: /^estimate-editor$/,
     area: 'office',
-    owners: ['estimate'],
+    // KR3 cut estimate's CAD/BIM dependency: the integration is named here instead.
+    owners: ['estimate', 'estimate-engineering', 'cad-core', 'bim-core'],
     suite: 'estimate.production',
   },
-  { match: /^estimate-/, area: 'office', owners: ['estimate'] },
+  {
+    match: /^estimate-/,
+    area: 'office',
+    owners: ['estimate', 'estimate-engineering', 'cad-core', 'bim-core'],
+  },
   { match: /^external-sources$/, area: 'office', owners: ['reference-adapters'] },
   { match: /^fiction-map-/, area: 'office', owners: ['fiction-map'] },
   { match: /^geo-/, area: 'office', owners: ['geo-core', 'geo-inspector'] },
@@ -233,6 +241,132 @@ export const specRules = [
   // Cross-editor flows: audits, issue regressions, practical, reuse, host and usability specs.
   { match: /./, area: 'office', broad: true },
 ];
+
+/**
+ * The packages behind each kind: the one with its shared definition (`<package>/kind`) and the
+ * ones whose Surface a Host mounts for it. A Host's per-kind file
+ * (`apps/<host>/src/kinds/<area>/<kind>.tsx`) counts as a change to these packages. Kind names
+ * and package names differ (`data` is `structured-data`).
+ */
+export const kindPackages = {
+  analysis: ['analysis'],
+  animation: ['animation', 'animation-adapters'],
+  bim: ['bim'],
+  cad: ['cad'],
+  character: ['character'],
+  construction: ['construction'],
+  cosim: ['cosim'],
+  data: ['structured-data', 'structured-data-graph'],
+  design: ['design', 'design-react', 'design-react-core'],
+  document: ['document'],
+  drawing: ['drawing'],
+  estimate: ['estimate'],
+  factory: ['factory'],
+  'fiction-map': ['fiction-map'],
+  file: ['review-surfaces'],
+  geo: ['geo-inspector'],
+  ladder: ['ladder'],
+  pcb: ['pcb'],
+  'react-ui': ['react-ui'],
+  review: ['review-surfaces'],
+  schedule: ['schedule'],
+  schematic: ['schematic'],
+  simulation: ['simulation'],
+  slide: ['slide'],
+  'structured-graph': ['structured-graph'],
+  whiteboard: ['whiteboard'],
+};
+
+/**
+ * Host files that connect office kinds to engineering code (Estimate's CAD/BIM reading), relative
+ * to `apps/<host>/src/`. An area list reaches them through its Host parts.
+ */
+export const hostConnectionFiles = ['app/estimate-bim.ts', 'estimate-bim.ts'];
+
+/**
+ * Dependencies cut on purpose, and where the code went. A change to `from` may stop selecting
+ * the specs that reached it only through `user`; a change to `to` must select both sides.
+ */
+export const removedDependencies = [
+  { stage: 'KR2', user: 'character', from: 'animation-core', to: 'easing' },
+  { stage: 'KR3', user: 'estimate', from: 'cad-core', to: 'estimate-engineering' },
+  { stage: 'KR3', user: 'estimate', from: 'bim-core', to: 'estimate-engineering' },
+];
+
+const relativeImportPattern =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|^\s*import\s+|\bexport\s+[^'";]*?\bfrom\s*)['"](\.[^'"]+)['"]/gm;
+
+/**
+ * The workspace packages a kind source names: every `<package>/kind` definition, and the other
+ * non-core packages it imports (core helpers such as artifact-core are not what it lists).
+ */
+function listedPackages(text) {
+  const found = new Set();
+  for (const [, name] of text.matchAll(importPattern))
+    if (packageArea(name) !== 'core') found.add(name);
+  for (const [, name] of text.matchAll(kindImportPattern)) found.add(name);
+  return found;
+}
+const kindImportPattern = /['"]@editor-platform\/([a-z0-9-]+)\/kind['"]/g;
+
+function listFiles(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return listFiles(path);
+    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+  });
+}
+
+/**
+ * What a change to a Host's kind source means, as workspace packages, or undefined when the
+ * path is not a per-kind file or area list (shared kinds/ files keep the Playground rule).
+ *
+ * - `kinds/<area>/<kind>.tsx`: the kind's packages (`kindPackages`).
+ * - `kinds/<area>.ts`, or another file in `kinds/<area>/` (its Surface list, records, a
+ *   Host-local kind): the area list. Every package whose definition it lists and every non-core
+ *   package it and its Host parts (`kinds/<area>/**`) import, and those of the Host connection
+ *   files they import. Not narrowed by area: `kinds/engineering.ts` reaches Estimate through
+ *   `app/estimate-bim.ts`. A core package named here (review-surfaces defines `review`) stands
+ *   for its own kind only: affected.mjs matches it against spec owners, not its dependents.
+ * @param {string} root repository root
+ * @param {string} path repository-relative path
+ * @returns {string[] | undefined}
+ */
+export function kindSourcePackages(root, path) {
+  const match = /^apps\/([^/]+)\/src\/kinds\/(office|engineering)(?:\.ts|\/(.+))$/.exec(path);
+  if (!match) return undefined;
+  const [, app, area, rest] = match;
+  if (rest !== undefined) {
+    if (/\.test\.tsx?$/.test(rest)) return [];
+    const kind = /^([\w-]+)\.tsx?$/.exec(rest)?.[1];
+    if (kind && Object.hasOwn(kindPackages, kind)) return [...kindPackages[kind]];
+  }
+  const src = join(root, 'apps', app, 'src');
+  const listFile = join(src, 'kinds', `${area}.ts`);
+  const files = [
+    ...(existsSync(listFile) ? [listFile] : []),
+    ...listFiles(join(src, 'kinds', area)),
+  ];
+  const found = new Set();
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8');
+    for (const name of listedPackages(text)) found.add(name);
+    for (const [, specifier] of text.matchAll(relativeImportPattern)) {
+      const target = posix.relative(
+        src.split('\\').join('/'),
+        posix.join(posix.dirname(file.split('\\').join('/')), specifier),
+      );
+      const connection = hostConnectionFiles.find(
+        (entry) => entry === target || entry === `${target}.ts`,
+      );
+      if (!connection) continue;
+      for (const name of listedPackages(readFileSync(join(src, connection), 'utf8')))
+        found.add(name);
+    }
+  }
+  return [...found].sort();
+}
 
 /** Servers the default (development) suite starts; see tests/playwright/suites.ts. */
 export const defaultPorts = [4175, 4176, 4180, 5173, 5174];

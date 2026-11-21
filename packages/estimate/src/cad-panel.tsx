@@ -1,27 +1,35 @@
 import { EstimateCadUpdates } from './cad-updates';
 import { useState } from 'react';
 import { newId } from '@editor-platform/artifact-core';
-import { pinKey } from '@editor-platform/calculation-core';
+import {
+  pinKey,
+  type GeometryQuantitySources,
+  type MeasuredQuantity,
+  type SourceQuantityRow,
+} from '@editor-platform/calculation-core';
 import type { RetainedSource, Quantity, EstimateDocument } from '@editor-platform/estimate-core';
 import type { EstimatePort } from './host';
 import type { EstimateGeometrySourceOption } from './sources';
-import { retainCadSource, cadSourceProjection, cadQuantity } from './cad-source';
+import { measuredQuantity } from './geometry-quantities';
 interface Review {
   base: EstimateDocument;
   revision: string;
   generation: number;
   sources: RetainedSource[];
   root: RetainedSource;
-  rows: ReturnType<typeof cadSourceProjection>['rows'];
+  rows: SourceQuantityRow[];
+  measured: Map<string, MeasuredQuantity>;
 }
 export function EstimateCadPanel({
   port,
   sources,
+  geometry,
   edit,
   trial,
 }: {
   port: EstimatePort;
   sources: EstimateGeometrySourceOption[];
+  geometry: GeometryQuantitySources;
   edit(next: EstimateDocument, label: string): void;
   trial(next: EstimateDocument): Promise<void>;
 }) {
@@ -46,24 +54,16 @@ export function EstimateCadPanel({
         generation = port.generation(),
         base = structuredClone(port.read());
       if (!port.canRead(option.pin)) throw Error('source-access-denied');
-      const retained = await retainCadSource(
-        option.pin,
-        option.content,
-        (hash) => option.closure.find((s) => s.contentHash === hash)?.content,
-      );
+      const { root, sources: retained } = await geometry.retainCad(option);
+      const rows = await geometry.cadRows(root, retained);
+      const measured = new Map<string, MeasuredQuantity>();
+      for (const row of rows)
+        measured.set(row.identity, await geometry.measureCad(root, retained, row.identity));
       guard();
       if (revision !== port.revision() || generation !== port.generation())
         throw Error('数量取得中に見積または権限が変わりました。');
       if (retained.some((s) => !port.canRead(s.pin))) throw Error('source-access-denied');
-      const root = retained.find((s) => s.key === pinKey(option.pin))!;
-      setReview({
-        base,
-        revision,
-        generation,
-        sources: retained,
-        root,
-        rows: cadSourceProjection(root, retained).rows,
-      });
+      setReview({ base, revision, generation, sources: retained, root, rows, measured });
       setModes({});
     } catch (e) {
       setError(String(e));
@@ -85,7 +85,7 @@ export function EstimateCadPanel({
       const prefix = (parent: string[], child: string[]) =>
         parent.length < child.length && parent.every((x, i) => x === child[i]);
       const quantities: Quantity[] = review.rows.map((row) => {
-        const q = cadQuantity(review.root, review.sources, row.identity, newId('quantity'));
+        const q = measuredQuantity(review.measured.get(row.identity)!, newId('quantity'));
         const covered = review.rows.some((parent) => {
           if (parent.kind === 'body') return false;
           const purchased = parent.kind === 'part' || modes[parent.identity] === 'buy';
@@ -120,7 +120,7 @@ export function EstimateCadPanel({
   };
   return (
     <section aria-label="CAD数量の取得">
-      <EstimateCadUpdates port={port} sources={sources} trial={trial} />
+      <EstimateCadUpdates port={port} sources={sources} geometry={geometry} trial={trial} />
       <h3>保存CADから数量を取得</h3>
       <p>countのみ。購入/製作と除外を確認してから追加し、費目・単価へ対応付けます。</p>
       <fieldset disabled={!port.canEdit() || busy}>

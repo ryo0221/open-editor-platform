@@ -10,6 +10,7 @@
     "@editor-platform/react-ui": "*",
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-host": "*",
     "@editor-platform/document": "*",
@@ -38,6 +39,7 @@
     "@editor-platform/structured-graph": "*",
     "@editor-platform/structured-data-graph": "*",
     "@editor-platform/canvas-ui": "*",
+    "@editor-platform/calculation-core": "*",
     "@editor-platform/reuse-core": "*",
     "@editor-platform/extension-runtime": "*",
     "lucide-react": "1.51.0",
@@ -74,6 +76,7 @@
     "@editor-platform/analysis-core": "*",
     "@editor-platform/estimate": "*",
     "@editor-platform/estimate-core": "*",
+    "@editor-platform/estimate-engineering": "*",
     "@editor-platform/fiction-map": "*",
     "@editor-platform/reference-artifact-host": "*"
   }

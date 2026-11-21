@@ -101,6 +101,8 @@ npx playwright install --with-deps chromium
 npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.spec.ts
 ```
 
+`npm run test:tooling`は、packageの依存がcore / office / engineeringの領域を越えていないことも確認します（`npm run check:areas`で単独実行。許可する例外は[`scripts/check-area-boundaries.mjs`](../scripts/check-area-boundaries.mjs)の`knownCrossings`、方針は[種類の登録と領域境界](kind-registry-design.md)）。
+
 最後の行は既存の埋め込み・mobile検証の例です。新Editorのspecと必要な関連回帰を加え、desktop/mobile双方の対象を実行してください。production buildの確認とdev serverの確認は区別して記録します。全回帰を実施したと記載するには、実際の全対象・project・設定を報告します。
 
 ### Playwrightのスイート
@@ -140,6 +142,8 @@ E2E_SUITE=production npx playwright test tests/e2e/collaboration.spec.ts
 | 名前付きスイート    | Artifact Host、Animation Host、独立CAD/BIM Hostなどが要るspec。`affected.mjs --all`が一覧する |
 
 変更の受け入れでは、変更が届くspecだけを流し、同じspecをmainでも流して、ブランチだけで失敗するものを確認します。依存関係は各`package.json`の`dependencies`から逆にたどります。共通パッケージ（`editor-core`など）やPlaygroundの共通部分の変更は軽いspec全部を選び、`engineering-heavy`は自分のパッケージかそのエンジニアリング系の依存が変わったときだけ選びます（`--heavy`で常に含めます）。
+
+Hostの種類ごとのファイル（`apps/<host>/src/kinds/<area>/<kind>.tsx`）は、`kindPackages`に書いたその種類のパッケージの変更として扱います。領域の一覧（`kinds/office.ts`、`kinds/engineering.ts`と、同じディレクトリの種類名でないファイル）は、一覧が並べるパッケージと連携ファイル（`app/estimate-bim.ts`など）の変更として扱います。`npm run test:tooling`が、パッケージの変更ごとの選択を段階1の固定値（`scripts/tests/e2e-stage1-selection.json`）と比べます。依存を意図して切ったとき（`removedDependencies`）以外に選択が減ると失敗します。
 
 ```sh
 npm run test:e2e:affected                                   # origin/mainからの変更で選ばれるspecを表示

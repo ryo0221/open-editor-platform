@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/calculation-core": "*",
     "@editor-platform/bim": "*",
     "@editor-platform/bim-core": "*",
     "@editor-platform/cad": "*",
@@ -46,6 +48,7 @@
     "@editor-platform/analysis-core": "*",
     "@editor-platform/estimate": "*",
     "@editor-platform/estimate-core": "*",
+    "@editor-platform/estimate-engineering": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/document-export": "*",
     "@editor-platform/fiction-map": "*",

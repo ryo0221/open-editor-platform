@@ -1,17 +1,19 @@
 import { useState } from 'react';
 import { newId } from '@editor-platform/artifact-core';
-import { pinKey } from '@editor-platform/calculation-core';
+import type { GeometryQuantitySources } from '@editor-platform/calculation-core';
 import type { EstimateDocument } from '@editor-platform/estimate-core';
 import type { EstimatePort } from './host';
 import type { EstimateGeometrySourceOption } from './sources';
-import { retainCadSource, proposeCadSourceUpdate, type CadUpdateDifference } from './cad-source';
+import { proposeCadSourceUpdate, type CadUpdateDifference } from './geometry-quantities';
 export function EstimateCadUpdates({
   port,
   sources,
+  geometry,
   trial,
 }: {
   port: EstimatePort;
   sources: EstimateGeometrySourceOption[];
+  geometry: GeometryQuantitySources;
   trial(document: EstimateDocument): Promise<void>;
 }) {
   const [proposal, setProposal] = useState<{
@@ -41,18 +43,15 @@ export function EstimateCadUpdates({
       );
       if (!update) throw Error('新しい保存版はありません。');
       if (!port.canRead(old.pin) || !port.canRead(update.pin)) throw Error('source-access-denied');
-      const retained = await retainCadSource(
-        update.pin,
-        update.content,
-        (h) => update.closure.find((c) => c.contentHash === h)?.content,
-      );
+      const { root, sources: retained } = await geometry.retainCad(update);
       if (retained.some((s) => !port.canRead(s.pin))) throw Error('source-access-denied');
       const result = await proposeCadSourceUpdate(
         base,
         key,
-        retained.find((s) => s.key === pinKey(update.pin))!,
+        root,
         retained,
         () => newId('quantity'),
+        geometry,
       );
       port.flush();
       if (revision !== port.revision() || generation !== port.generation() || !port.canEdit())
