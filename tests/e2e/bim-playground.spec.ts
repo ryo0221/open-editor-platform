@@ -624,6 +624,55 @@ test('focuses a 6 mm part 900 m away, saves named cameras, shows them again afte
   expect(((await nativeArtifact(page)).draft.content as BimDocument).cameras).toBeUndefined();
 });
 
+// #19 (Codex on #37): a saved camera with another up vector orbits around that up: a sideways
+// drag after showing a Y-up camera keeps its height along Y, not along Z.
+test('orbits a shown Y-up camera around its own up (#19)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'bim');
+  await ready(page);
+  const template = await nativeArtifact(page);
+  const doc = f33Types();
+  doc.cameras = [
+    {
+      id: 'cam-y',
+      name: 'Y up',
+      position: [10_000, 5_000, 10_000],
+      target: [0, 0, 0],
+      up: [0, 1, 0],
+      fovDeg: 50,
+    },
+  ];
+  await importJson(page, 'yup.json', {
+    ...template,
+    name: 'Y up',
+    draft: { ...template.draft, content: doc },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Y up');
+  await ready(page);
+  await panel(page, 'Inspector');
+  await inspector(page).getByRole('tab', { name: 'Drawings' }).click();
+  const cameras = page.getByTestId('bim-cameras');
+  await cameras.getByRole('button', { name: 'Show Y up', exact: true }).click();
+  const box = (await page.getByTestId('bim-viewport').boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 150, y, { steps: 10 });
+  await page.mouse.up();
+  await cameras.getByLabel('Camera name', { exact: true }).fill('After drag');
+  await cameras.getByRole('button', { name: 'Save camera', exact: true }).click();
+  await expect(cameras.getByRole('button', { name: 'Show After drag', exact: true })).toBeVisible();
+  const saved = ((await nativeArtifact(page)).draft.content as BimDocument).cameras!.find(
+    (c) => c.name === 'After drag',
+  )!;
+  expect(saved.up).toEqual([0, 1, 0]);
+  // Around Y the height along Y stays; around a stale Z axis it would be Z that stayed.
+  expect(saved.position[1]).toBeCloseTo(5_000, -1);
+  expect(Math.abs(saved.position[2] - 10_000)).toBeGreaterThan(500);
+});
+
 test("sets a wall's lean in the Inspector, back to upright, Undo, saves and reloads (LR2c)", async ({
   page,
 }) => {

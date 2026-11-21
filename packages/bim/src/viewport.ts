@@ -507,8 +507,15 @@ export class BimViewport {
     if (this.plan) return;
     this.fitted = true;
     this.perspective.fov = camera.fovDeg;
-    this.perspective.up.set(...camera.up).normalize();
+    const up = new Vector3(...camera.up).normalize();
     this.perspective.position.set(...camera.position);
+    // OrbitControls takes its orbit axis from camera.up when it is made: another up needs new
+    // controls, or navigation would still orbit around the old axis (Codex on #37).
+    if (!up.equals(this.perspective.up)) {
+      this.perspective.up.copy(up);
+      this.controls.dispose();
+      this.controls = this.makeControls();
+    }
     this.controls.target.set(...camera.target);
     this.controls.update();
     this.followDepth();
