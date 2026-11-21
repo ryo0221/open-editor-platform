@@ -5699,17 +5699,16 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
   expect(first).toMatch(/\d+\.\d\d mm/);
   await item.getByRole('button', { name: 'Check deviation' }).click();
   await expect.poll(() => table.innerText()).toBe(first);
-  // Hiding a compared body makes the result stale; showing it again makes it current (Codex on #35).
-  await page.getByLabel('Show plate', { exact: true }).uncheck();
-  await expect(table.locator('caption')).toHaveText(/check again/);
-  await page.getByLabel('Show plate', { exact: true }).check();
-  await expect(table.locator('caption')).toHaveText(/^Cell /);
-  await ready(page);
   // The heat overlay draws over the model and goes with its switch.
   const heat = await frame();
   expect(heat).not.toBe(drawn);
   await panel.getByLabel('Show deviation heat').uncheck();
   await expect.poll(frame).toBe(drawn);
+  // Hiding a compared body makes the result stale; showing it again makes it current (Codex on #35).
+  await page.getByLabel('Show plate', { exact: true }).uncheck();
+  await expect(table.locator('caption')).toHaveText(/check again/);
+  await page.getByLabel('Show plate', { exact: true }).check();
+  await expect(table.locator('caption')).toHaveText(/^Cell /);
   // In silhouette shading the drawing keeps its own image: only its thin lines are dark, not a
   // solid plane over the view (Codex on #35).
   const darkShare = async () => {
