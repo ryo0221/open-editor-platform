@@ -7,13 +7,15 @@
     ".": "./src/index.ts",
     "./point-edit": "./src/point-edit-entry.ts",
     "./point-save": "./src/point-save-entry.ts",
-    "./import-experiment": "./src/import-experiment-entry.ts"
+    "./import-experiment": "./src/import-experiment-entry.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/geo-core": "*",
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/editor-core": "*",
-    "@editor-platform/extension-contract": "*"
+    "@editor-platform/extension-contract": "*",
+    "@editor-platform/geo-core": "*"
   },
   "devDependencies": {
     "@editor-platform/extension-runtime": "*"

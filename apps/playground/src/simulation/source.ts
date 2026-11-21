@@ -4,11 +4,8 @@
  * keeps each analysed version's content beside the record, by hash, as it keeps placed parts.
  */
 import { cadContentHash, isCadDocument, type CadDocument } from '@editor-platform/cad-core';
-import {
-  emptySimulation,
-  simulationMaterialPresets,
-  type SimulationDocument,
-} from '@editor-platform/simulation-core';
+import type { SimulationDocument } from '@editor-platform/simulation-core';
+import { newSimulation as newSimulationOf } from '@editor-platform/simulation/kind';
 import type { StoredArtifact } from '../model';
 import type { CadPartRecord } from '../cad/parts';
 
@@ -102,29 +99,11 @@ export function portableSimulationRecord<
 }
 
 /** A new analysis of the choice: steel on the body, the default mesh, nothing loaded yet. */
-export function newSimulation(
+/** A new analysis of the choice (the Structural analysis kind, KR4). */
+export const newSimulation: (
   choice: Pick<SimulationSourceChoice, 'artifactId' | 'versionId' | 'bodyId' | 'content'>,
   name: string,
-): { doc: SimulationDocument; retained: CadPartRecord } {
-  const contentHash = cadContentHash(choice.content);
-  const doc = emptySimulation(
-    {
-      artifactId: choice.artifactId,
-      versionId: choice.versionId,
-      contentHash,
-      bodyId: choice.bodyId,
-    },
-    name,
-  );
-  doc.materials.push({ id: 'steel', ...simulationMaterialPresets[0]! });
-  doc.materialId = 'steel';
-  // CR5e: a sheet starts as a 1 mm shell, its thickness edited in the Bodies list.
-  if (choice.content.bodies.find((b) => b.id === choice.bodyId)?.kind === 'sheet') {
-    doc.schemaVersion = 2;
-    doc.sheets = [{ bodyId: choice.bodyId, thicknessMm: 1 }];
-  }
-  return { doc, retained: { contentHash, content: structuredClone(choice.content) } };
-}
+) => { doc: SimulationDocument; retained: CadPartRecord } = newSimulationOf;
 
 const roots = (record: Pick<StoredArtifact, 'draft' | 'versions'>) =>
   [record.draft.content, ...record.versions.map((v) => v.content)] as SimulationDocument[];

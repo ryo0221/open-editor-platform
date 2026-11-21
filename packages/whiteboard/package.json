@@ -7,15 +7,17 @@
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
     "./sections": "./src/sections.ts",
-    "./proposal-diff": "./src/proposal-diff.ts"
+    "./proposal-diff": "./src/proposal-diff.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/reuse-core": "*",
     "@editor-platform/artifact-core": "*",
-    "@editor-platform/editor-core": "*",
-    "@editor-platform/canvas-ui": "*",
-    "@editor-platform/editor-ui": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-references": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/reuse-core": "*",
     "lucide-react": "1.51.0"
   },
   "peerDependencies": {

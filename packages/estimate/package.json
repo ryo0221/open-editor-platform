@@ -10,16 +10,18 @@
     "./styles.css": "./src/styles.css",
     "./outputs": "./src/outputs.ts",
     "./geometry-quantities": "./src/geometry-quantities.ts",
-    "./references": "./src/references.ts"
+    "./references": "./src/references.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/estimate-core": "*",
-    "@editor-platform/calculation-core": "*",
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/calculation-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-host": "*",
-    "@editor-platform/structured-data": "*",
-    "@editor-platform/artifact-references": "*"
+    "@editor-platform/estimate-core": "*",
+    "@editor-platform/structured-data": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1"

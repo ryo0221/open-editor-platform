@@ -8,9 +8,11 @@
     "./surface": "./src/surface.tsx",
     "./viewport": "./src/viewport.tsx",
     "./run-worker": "./src/run-worker.ts",
-    "./style.css": "./src/style.css"
+    "./style.css": "./src/style.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/cad": "*",
     "@editor-platform/cad-core": "*",
     "@editor-platform/cad-kernel-occt": "*",

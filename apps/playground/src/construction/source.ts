@@ -5,7 +5,8 @@
  * The CAD parts a building places are not kept with the schedule: they show as boxes.
  */
 import { bimContentHash, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
-import { newConstruction, type ConstructionDocument } from '@editor-platform/construction-core';
+import type { ConstructionDocument } from '@editor-platform/construction-core';
+import { newConstructionSchedule as newConstructionScheduleOf } from '@editor-platform/construction/kind';
 import type { StoredArtifact } from '../model';
 import type { BimPartRecord } from '../character/parts';
 
@@ -52,26 +53,12 @@ export function constructionVersionChoices(
 }
 
 /** Today in the browser's zone (YYYY-MM-DD), the start date of a new schedule. */
-const today = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
-
-/** A new schedule of the choice: no tasks, starting today, Monday to Saturday worked. */
-export function newConstructionSchedule(
+/** A new schedule of the choice, starting today (the Construction schedule kind, KR4). */
+export const newConstructionSchedule: (
   choice: Pick<ConstructionSourceChoice, 'artifactId' | 'versionId' | 'content'>,
   name: string,
-  startDate = today(),
-): { doc: ConstructionDocument; retained: BimPartRecord } {
-  const contentHash = bimContentHash(choice.content);
-  const doc = newConstruction(
-    name,
-    { artifactId: choice.artifactId, versionId: choice.versionId, contentHash },
-    startDate,
-  );
-  return { doc, retained: { contentHash, content: structuredClone(choice.content) } };
-}
+  startDate?: string,
+) => { doc: ConstructionDocument; retained: BimPartRecord } = newConstructionScheduleOf;
 
 /** The record with `content` kept as a source (by hash, once), before an edit names it. */
 export function stageConstructionSource<T extends Pick<StoredArtifact, 'constructionSources'>>(

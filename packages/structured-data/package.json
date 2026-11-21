@@ -12,18 +12,20 @@
     "./proposal-diff": "./src/proposal-diff.ts",
     "./host": "./src/host.ts",
     "./mock-host": "./src/mock-host.ts",
-    "./native-host": "./src/native-host.ts"
+    "./native-host": "./src/native-host.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
-    "@editor-platform/reuse-core": "*",
-    "@editor-platform/editor-core": "*",
-    "@editor-platform/editor-ui": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/canvas-ui": "*",
-    "lucide-react": "1.51.0",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/editor-ui": "*",
     "@editor-platform/property-input": "*",
+    "@editor-platform/reuse-core": "*",
     "@editor-platform/time-axis": "*",
-    "@editor-platform/editor-host": "*"
+    "lucide-react": "1.51.0"
   },
   "peerDependencies": {
     "react": "^19.1.1"

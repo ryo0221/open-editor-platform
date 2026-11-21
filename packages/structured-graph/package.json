@@ -6,10 +6,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/headless.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/property-input": "*"

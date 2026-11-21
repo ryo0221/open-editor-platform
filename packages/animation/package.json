@@ -13,18 +13,20 @@
     "./viewer": "./src/viewer.tsx",
     "./v2": "./src/scene2/surface.tsx",
     "./host": "./src/scene2/host.tsx",
-    "./player-v2": "./src/scene2/viewer.tsx"
+    "./player-v2": "./src/scene2/viewer.tsx",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
     "@editor-platform/animation-core": "*",
     "@editor-platform/animation-player": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "@editor-platform/artifact-core": "*",
+    "@editor-platform/extension-contract": "*",
     "@editor-platform/reuse-core": "*",
-    "@editor-platform/canvas-ui": "*",
-    "react": "19.1.1",
-    "@editor-platform/extension-contract": "*"
+    "react": "19.1.1"
   },
   "devDependencies": {
     "react-dom": "19.1.1"

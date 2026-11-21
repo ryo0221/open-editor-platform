@@ -5,14 +5,16 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./model": "./src/model.ts"
+    "./model": "./src/model.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "pdfjs-dist": "6.2.108",
-    "lucide-react": "1.51.0"
+    "lucide-react": "1.51.0",
+    "pdfjs-dist": "6.2.108"
   },
   "peerDependencies": {
     "react": "^19.1.1"

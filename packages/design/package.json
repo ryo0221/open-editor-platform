@@ -19,19 +19,21 @@
     "./manga-balloons": "./src/manga-balloons.ts",
     "./manga-redraw": "./src/manga-redraw.ts",
     "./creative-proposal-diff": "./src/creative-proposal-diff.ts",
-    "./native-host": "./src/native-host.ts"
+    "./native-host": "./src/native-host.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
-    "@editor-platform/editor-core": "*",
-    "@editor-platform/geometry-core": "*",
-    "@editor-platform/canvas-ui": "*",
-    "@editor-platform/editor-ui": "*",
-    "@editor-platform/reuse-core": "*",
-    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-references": "*",
-    "lucide-react": "1.51.0",
-    "@editor-platform/editor-host": "*"
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/geometry-core": "*",
+    "@editor-platform/react-ui-core": "*",
+    "@editor-platform/reuse-core": "*",
+    "lucide-react": "1.51.0"
   },
   "peerDependencies": {
     "react-dom": "^19.1.1",

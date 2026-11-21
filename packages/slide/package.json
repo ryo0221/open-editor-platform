@@ -5,19 +5,21 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./model": "./src/model.ts"
+    "./model": "./src/model.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/reuse-core": "*",
-    "@editor-platform/artifact-core": "*",
-    "@editor-platform/editor-core": "*",
-    "@editor-platform/canvas-ui": "*",
-    "@editor-platform/editor-ui": "*",
-    "@editor-platform/office-export-ui": "*",
-    "@editor-platform/artifact-references": "*",
+    "@editor-platform/animation": "*",
     "@editor-platform/animation-core": "*",
     "@editor-platform/animation-player": "*",
-    "@editor-platform/animation": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/office-export-ui": "*",
+    "@editor-platform/reuse-core": "*",
     "lucide-react": "1.51.0"
   },
   "peerDependencies": {
