@@ -1,4 +1,5 @@
 import {
+  rotatedBounds,
   transaction,
   unionBounds,
   type Bounds,
@@ -61,12 +62,17 @@ export function mangaCoverBox(e: Pick<DesignElement, 'bounds' | 'rotation'>): Bo
 /** `mangaCoverBox` with the rotation it is drawn with, a shared style's included (Codex on #28). */
 export function mangaDrawnBox(d: DesignContent, e: DesignElement): Bounds {
   const box = mangaCoverBox({ bounds: e.bounds, rotation: appearance(d, e).rotation });
-  if (e.type !== 'text' && !e.path) return box;
-  // Text set to expand paints past its box, and an edited path past its frame (the outline is
-  // drawn unclipped), so the laid-out lines and the path's own paint extent count too (Codex on
-  // #28).
+  if (e.type !== 'text' && !e.path && e.type !== 'instance') return box;
+  // Text set to expand paints past its box, an edited path past its frame (the outline is drawn
+  // unclipped) and a component instance's parts past the instance, so the laid-out lines, the
+  // path's own paint extent and the projected parts count too (Codex on #28).
   const drawn = designDrawings(d, e)
-    .map((drawing) => drawing.path?.paintBounds ?? designTextExtent(drawing))
+    .map(
+      (drawing) =>
+        drawing.path?.paintBounds ??
+        designTextExtent(drawing) ??
+        rotatedBounds(drawing.bounds, drawing.rotation),
+    )
     .filter((b): b is Bounds => !!b);
   return drawn.length ? unionBounds([box, ...drawn]) : box;
 }

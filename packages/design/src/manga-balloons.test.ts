@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertDesignContent,
+  createComponent,
   createDesign,
   insertElement,
   updateElement,
@@ -566,6 +567,28 @@ describe('#21 redraw one panel', () => {
       parentId: 'figure',
       bounds: { x: 200, y: 30, width: 370, height: 160 },
     }).apply(d);
+    d = setMangaKeepOut('figure', true).apply(d);
+    const at = mangaBalloonPlacement(d, 'k1', { width: 150, height: 100 })!;
+    expect(overlap(at, { x: 200, y: 30, width: 370, height: 160 })).toBe(false);
+    const b = insertDesignSpeechBalloon('k1', { x: 230, y: 40, width: 150, height: 100 }, 'A');
+    expect(mangaBalloonOverlaps(b.apply(d)).map((o) => o.keepOutId)).toEqual(['figure']);
+  });
+
+  it('sees a marked component instance by its drawn parts (Codex on #28)', () => {
+    let d = page();
+    d = setMangaKeepOut('face', false).apply(d);
+    d = insertElement('group', {
+      id: 'figure',
+      parentId: 'k1',
+      bounds: { x: 380, y: 30, width: 190, height: 160 },
+    }).apply(d);
+    d = insertElement('rectangle', {
+      id: 'arm',
+      parentId: 'figure',
+      bounds: { x: 200, y: 30, width: 370, height: 160 },
+    }).apply(d);
+    d = createComponent('figure').apply(d);
+    expect(d.elements.find((e) => e.id === 'figure')!.type).toBe('instance');
     d = setMangaKeepOut('figure', true).apply(d);
     const at = mangaBalloonPlacement(d, 'k1', { width: 150, height: 100 })!;
     expect(overlap(at, { x: 200, y: 30, width: 370, height: 160 })).toBe(false);
