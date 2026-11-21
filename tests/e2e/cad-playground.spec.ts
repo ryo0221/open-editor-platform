@@ -5757,4 +5757,22 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
   await expect
     .poll(() => again.getByRole('table', { name: 'Deviation from front-drawing' }).innerText())
     .toBe(first);
+  // Edits go one at a time: a new scale committed on blur, then Hide at once, keeps both (Codex
+  // on #35).
+  await again.getByLabel('Underlay mm per pixel').fill('2');
+  await again.getByLabel('Underlay mm per pixel').blur();
+  await again.getByLabel('Hide underlay').check();
+  await ready(page);
+  await expect
+    .poll(async () => {
+      const u = ((await nativeArtifact(page)).draft.content as CadDocument).underlays?.[0];
+      return u && { mmPerPixel: u.mmPerPixel, hidden: u.hidden };
+    })
+    .toEqual({ mmPerPixel: 2, hidden: true });
+  await expect(again.getByLabel('Underlay mm per pixel')).toHaveValue('2');
+  // A removed drawing's decoded image is let go (Codex on #35).
+  const underlays = page.getByTestId('cad-underlays');
+  await expect(underlays).toHaveAttribute('data-decoded', '1');
+  await again.getByRole('button', { name: 'Remove underlay' }).click();
+  await expect(underlays).toHaveAttribute('data-decoded', '0');
 });

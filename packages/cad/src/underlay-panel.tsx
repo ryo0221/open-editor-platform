@@ -4,7 +4,7 @@
  * silhouettes from each drawing's lines, per body in mm with a heat overlay. The numbers come
  * from `underlayDeviation`, which needs no GPU, so a headless run gives the same ones.
  */
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { CommitInput, Section } from '@editor-platform/editor-ui';
 import {
   cadUnderlayAxes,
@@ -86,6 +86,43 @@ export function UnderlaysSection({
     ReadonlyMap<string, { contentHash: string; shown: string; result: CadUnderlayDeviation }>
   >(new Map());
   const [heatOn, setHeatOn] = useState(true);
+  // One list edit at a time: each replaces the whole list, so a second one started before the
+  // first lands would build on the old list and cancel the first (Codex on #35). A refused edit
+  // resets the fields to the saved values (`revision` remounts them).
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const [revision, setRevision] = useState(0);
+  const busy = pending;
+  const apply = async (next: CadUnderlay[] | (() => Promise<boolean>)) => {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setPending(true);
+    try {
+      const ok = await (typeof next === 'function' ? next() : controller.setUnderlays(next));
+      if (!ok) {
+        setRevision((r) => r + 1);
+        setNote('The underlay change was not applied');
+      }
+      return ok;
+    } finally {
+      inFlight.current = false;
+      setPending(false);
+    }
+  };
+
+  // Drop decoded images no underlay uses any more: each keeps a full-size canvas and its pixels
+  // (Codex on #35).
+  useEffect(() => {
+    const used = new Set(
+      list.flatMap((u) => doc.assets.filter((a) => a.id === u.assetId).map((a) => a.sha256)),
+    );
+    setDecoded((m) =>
+      [...m.keys()].every((k) => used.has(k)) ? m : new Map([...m].filter(([k]) => used.has(k))),
+    );
+    setFailed((f) =>
+      [...f].every((k) => used.has(k)) ? f : new Set([...f].filter((k) => used.has(k))),
+    );
+  }, [list, doc.assets]);
 
   // Decode each underlay's image once (by asset), from the bytes the Host keeps.
   useEffect(() => {
@@ -150,7 +187,7 @@ export function UnderlaysSection({
       if (patch.hidden === undefined && 'hidden' in patch) delete merged.hidden;
       return merged;
     });
-    void controller.setUnderlays(next);
+    void apply(next);
   };
   const lookFrom = (u: CadUnderlay) => {
     const { u: right, v: up, toward } = cadUnderlayAxes(u.view);
@@ -205,23 +242,27 @@ export function UnderlaysSection({
     if (w > cadUnderlayLimits.pixels || h > cadUnderlayLimits.pixels)
       return setNote(`The image is too large (at most ${cadUnderlayLimits.pixels} pixels a side)`);
     // Centred on the origin of the view at first; the origin fields move it.
-    const ok = await controller.addUnderlay(
-      { bytes, mediaType: file.type },
-      {
-        name: file.name.replace(/\.[^.]+$/, '') || viewLabel[addView],
-        view: addView,
-        pixels: [w, h],
-        mmPerPixel: scale,
-        originMm: [(-w * scale) / 2, (h * scale) / 2],
-        opacity: 0.6,
-      },
-    );
+    let ok = false;
+    await apply(async () => {
+      ok = await controller.addUnderlay(
+        { bytes, mediaType: file.type },
+        {
+          name: file.name.replace(/\.[^.]+$/, '') || viewLabel[addView],
+          view: addView,
+          pixels: [w, h],
+          mmPerPixel: scale,
+          originMm: [(-w * scale) / 2, (h * scale) / 2],
+          opacity: 0.6,
+        },
+      );
+      return ok;
+    });
     setNote(ok ? `${file.name} laid under the ${viewLabel[addView]} view` : '');
   };
 
   return (
     <Section title={`Underlays (${list.length})`} open={list.length > 0}>
-      <div data-testid="cad-underlays">
+      <div data-testid="cad-underlays" data-decoded={decoded.size}>
         <ul aria-label="Underlays">
           {list.map((u) => {
             const r = results.get(u.id);
@@ -238,7 +279,7 @@ export function UnderlaysSection({
                   {missing && <span role="alert">The image data is missing</span>}
                 </div>
                 {editable && (
-                  <div className="cad-row">
+                  <fieldset className="cad-row" disabled={busy} key={revision}>
                     <label>
                       View
                       <select
@@ -263,6 +304,7 @@ export function UnderlaysSection({
                       step={0.001}
                       value={u.mmPerPixel}
                       onCommit={(text) => {
+                        if (inFlight.current) return false;
                         const v = Number(text);
                         if (v !== u.mmPerPixel) change(u.id, { mmPerPixel: v });
                       }}
@@ -275,6 +317,7 @@ export function UnderlaysSection({
                         step={0.001}
                         value={u.originMm[i]!}
                         onCommit={(text) => {
+                          if (inFlight.current) return false;
                           const v = Number(text);
                           if (v === u.originMm[i]) return;
                           const originMm: [number, number] = [...u.originMm];
@@ -312,7 +355,7 @@ export function UnderlaysSection({
                       />
                       Hide
                     </label>
-                  </div>
+                  </fieldset>
                 )}
                 <div className="cad-row">
                   <button type="button" onClick={() => lookFrom(u)}>
@@ -324,7 +367,8 @@ export function UnderlaysSection({
                   {editable && (
                     <button
                       type="button"
-                      onClick={() => void controller.setUnderlays(list.filter((x) => x !== u))}
+                      disabled={busy}
+                      onClick={() => void apply(list.filter((x) => x !== u))}
                     >
                       Remove underlay
                     </button>
@@ -417,7 +461,7 @@ export function UnderlaysSection({
                 aria-label="Underlay image"
                 type="file"
                 accept="image/png,image/jpeg"
-                disabled={snapshot.busy}
+                disabled={snapshot.busy || busy}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = '';
