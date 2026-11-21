@@ -220,7 +220,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     // apart: pushed along the line, and all set closer when together they need more room.
     const lo = o.vertical ? inner.y : inner.x;
     const hi = lo + alongSpace;
-    const items: { chars: string[]; step: number; begin: number }[] = [];
+    const items: { chars: string[]; step: number; begin: number; base: number }[] = [];
     for (const r of ruby) {
       if (r.start < line.start || r.start >= Math.max(line.end, line.start + 1)) continue;
       const first = positions.get(r.start);
@@ -233,9 +233,15 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
         rubySize,
         Math.max(to - first.from, rubySize * chars.length) / chars.length,
       );
-      items.push({ chars, step, begin: (first.from + to) / 2 - (step * chars.length) / 2 });
+      items.push({
+        chars,
+        step,
+        begin: (first.from + to) / 2 - (step * chars.length) / 2,
+        base: first.from,
+      });
     }
-    items.sort((a, b) => a.begin - b.begin);
+    // Readings keep their bases' order, even when a long one would start before an earlier one.
+    items.sort((a, b) => a.base - b.base);
     const room = Math.max(0, hi - lo);
     const total = items.reduce((n, it) => n + it.step * it.chars.length, 0);
     if (total > room)

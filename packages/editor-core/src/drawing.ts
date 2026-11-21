@@ -1,4 +1,4 @@
-import { escapeXml, type Bounds } from './geometry';
+import { escapeXml, unionBounds, type Bounds } from './geometry';
 import { layoutTextRuns } from './text';
 import { hasRubyNotation, layoutGridText, parseRubyNotation } from './vertical-text';
 import { newId } from '@editor-platform/artifact-core';
@@ -544,7 +544,8 @@ const hasRunFormatting = (runs: readonly TextRun[] | undefined, box: TextStyle |
         (key) => run.style![key] !== undefined && run.style![key] !== box?.[key],
       ),
   );
-function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
+/** The grid layout a grid text box draws, as `textPrimitives` sets it. */
+export function gridTextLayout(d: Drawing) {
   const s = d.typography ?? {},
     b = d.bounds;
   // A list keeps its bullets on the grid too, one before each paragraph (Codex on #29).
@@ -554,7 +555,7 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
         .map((line) => `• ${line}`)
         .join('\n')
     : d.text;
-  const layout = layoutGridText(source, b, {
+  return layoutGridText(source, b, {
     vertical: s.writingMode === 'vertical-rl',
     fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
     lineHeight: s.lineHeight,
@@ -564,6 +565,31 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
     verticalAlign: s.verticalAlign,
     fit: s.overflow === 'fit',
   });
+}
+/** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
+export function gridTextExtent(d: Drawing): Bounds {
+  const layout = gridTextLayout(d);
+  const cells = [
+    ...layout.lines.flatMap((line) =>
+      line.glyphs.map((g) => ({ x: g.x, y: g.y, size: layout.fontSize })),
+    ),
+    ...layout.ruby,
+  ];
+  if (!cells.length) return d.bounds;
+  return unionBounds([
+    d.bounds,
+    ...cells.map((c) => ({
+      x: c.x - c.size,
+      y: c.y - c.size,
+      width: 2 * c.size,
+      height: 2 * c.size,
+    })),
+  ]);
+}
+function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const layout = gridTextLayout(d);
   const size = layout.fontSize;
   const glyphs = layout.lines.flatMap((line) =>
     line.glyphs.map((g) => {

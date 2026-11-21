@@ -136,6 +136,13 @@ describe('#20 vertical writing', () => {
           (pair.ruby[k]!.size + pair.ruby[k - 1]!.size) / 2 - 1e-6,
         );
     }
+    // A long reading after a short one stays after it (Codex on #29).
+    for (const vertical of [true, false]) {
+      const l = layoutGridText('日《ひ》志《こころざしの》', box, { vertical, fontSize: 28 });
+      const along = l.ruby.map((r) => (vertical ? r.y : r.x));
+      expect(l.ruby[0]!.text).toBe('ひ');
+      for (let k = 1; k < along.length; k++) expect(along[k]!).toBeGreaterThan(along[k - 1]!);
+    }
     // An unbreakable base longer than the column shrinks until it fits the column.
     const tall = { x: 0, y: 0, width: 200, height: 100 };
     const fit = layoutGridText('｜あいうえおかきくけこ《よみ》', tall, {
