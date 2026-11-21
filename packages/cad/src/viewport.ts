@@ -357,6 +357,8 @@ export class CadViewport {
   /** #15: where the underlays are drawn from when the scene's material is overridden. */
   private readonly underlayLayer = new Scene();
   private readonly underlayItems: { toward: Vector3; objects: Object3D[] }[] = [];
+  /** The shown model changed since the underlays' depths were set. */
+  private underlayDepthStale = false;
   /**
    * CLF11: the shown sketches' curves and notes, a scene of their own drawn over the model after
    * it, so the silhouette's override material leaves their colours and they show over the bodies.
@@ -1644,6 +1646,7 @@ export class CadViewport {
   /** `dim` (default: not current) draws an earlier content's meshes faded. */
   show(bodies: ViewportBody[], current: boolean, dim = !current) {
     this.lastShown = { bodies, current, dim };
+    this.underlayDepthStale = true;
     this.clear();
     this.lighting.invalidate();
     this.pickable = current;
@@ -2218,7 +2221,6 @@ export class CadViewport {
       mesh.material.dispose();
     }
     this.underlayItems.length = 0;
-    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
     // The drawings and their heat take at most their share of the GPU budget: set coarser when
     // they would pass it, before anything is uploaded (Codex on #35).
     const images = items
@@ -2247,25 +2249,11 @@ export class CadViewport {
       const u = new Vector3(...item.axes.u),
         v = new Vector3(...item.axes.v),
         toward = new Vector3(...item.axes.toward);
-      // How far along `toward` the model reaches, behind and in front.
-      let [near, far] = [0, 0];
-      if (!box.isEmpty()) {
-        const ds = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
-          new Vector3(
-            i & 1 ? box.max.x : box.min.x,
-            i & 2 ? box.max.y : box.min.y,
-            i & 4 ? box.max.z : box.min.z,
-          ).dot(toward),
-        );
-        [far, near] = [Math.min(...ds), Math.max(...ds)];
-      }
       const [u0, v0, u1, v1] = item.box;
-      const center = (depth: number) =>
-        new Vector3()
-          .addScaledVector(u, (u0 + u1) / 2)
-          .addScaledVector(v, (v0 + v1) / 2)
-          .addScaledVector(toward, depth);
-      const plane = (image: TexImageSource, depth: number, opacity: number, front: boolean) => {
+      const center = new Vector3()
+        .addScaledVector(u, (u0 + u1) / 2)
+        .addScaledVector(v, (v0 + v1) / 2);
+      const plane = (image: TexImageSource, opacity: number, front: boolean) => {
         const texture = new CanvasTexture(scaled(image) as HTMLCanvasElement);
         texture.colorSpace = 'srgb';
         const material = new MeshBasicMaterial({
@@ -2279,18 +2267,22 @@ export class CadViewport {
         const mesh = new Mesh(new PlaneGeometry(u1 - u0, v1 - v0), material);
         // Local X along the view's right, Y along its up, Z toward the viewer.
         mesh.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(u, v, toward));
-        mesh.position.copy(center(depth));
+        // Its depth along the view is set from the shown model (`placeUnderlays`).
+        mesh.position.copy(center);
         mesh.renderOrder = front ? 10 : -10;
         mesh.userData.underlay = item.id;
+        mesh.userData.underlayCenter = center;
+        mesh.userData.underlayFront = front;
         mesh.raycast = () => {};
         return mesh;
       };
       const objects: Object3D[] = [];
-      if (item.image) objects.push(plane(item.image, far - 1, item.opacity, false));
-      if (item.heat) objects.push(plane(item.heat, near + 1, 1, true));
+      if (item.image) objects.push(plane(item.image, item.opacity, false));
+      if (item.heat) objects.push(plane(item.heat, 1, true));
       if (objects.length) this.underlays.add(...objects);
       this.underlayItems.push({ toward, objects });
     }
+    this.placeUnderlays();
     // What they take now counts against the bodies, parts and sketches: admit those again when
     // it changed.
     const bytes = this.bufferBytes(this.underlays);
@@ -2301,7 +2293,40 @@ export class CadViewport {
     }
     this.render();
   }
+  /**
+   * Each image just behind the shown model as seen from its view, its heat just in front. Set
+   * again whenever the shown bodies or parts change, so a drawing stays behind a model that moved
+   * after the drawings were set (Codex on #35).
+   */
+  private placeUnderlays() {
+    this.underlayDepthStale = false;
+    if (!this.underlayItems.length) return void delete this.host.dataset.underlayDepths;
+    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const depths: number[] = [];
+    for (const item of this.underlayItems) {
+      // How far along `toward` the model reaches, behind and in front.
+      let [near, far] = [0, 0];
+      if (!box.isEmpty()) {
+        const ds = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+          new Vector3(
+            i & 1 ? box.max.x : box.min.x,
+            i & 2 ? box.max.y : box.min.y,
+            i & 4 ? box.max.z : box.min.z,
+          ).dot(item.toward),
+        );
+        [far, near] = [Math.min(...ds), Math.max(...ds)];
+      }
+      for (const o of item.objects)
+        o.position
+          .copy(o.userData.underlayCenter as Vector3)
+          .addScaledVector(item.toward, o.userData.underlayFront ? near + 1 : far - 1);
+      depths.push(Math.round((far - 1) * 1000) / 1000);
+    }
+    // Where each drawing lies along its view, for a Host's diagnostics and the E2E.
+    this.host.dataset.underlayDepths = depths.join(' ');
+  }
   private underlaysFor(camera: PerspectiveCamera | OrthographicCamera) {
+    if (this.underlayDepthStale) this.placeUnderlays();
     if (!this.underlayItems.length) return;
     const look = camera.getWorldDirection(new Vector3()).negate();
     for (const item of this.underlayItems)
@@ -2409,6 +2434,7 @@ export class CadViewport {
    */
   showParts(parts: ViewportPart[]): boolean {
     this.lastParts = parts;
+    this.underlayDepthStale = true;
     this.lighting.invalidate();
     this.scene.remove(this.parts);
     disposeParts(this.parts);

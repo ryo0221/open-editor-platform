@@ -5757,6 +5757,23 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
   await expect
     .poll(() => again.getByRole('table', { name: 'Deviation from front-drawing' }).innerText())
     .toBe(first);
+  // Laid under the bottom view, the drawing sits just past the plate's top face (5 mm), and moves
+  // with it when the plate gets thicker, though the drawings were set before the new model was
+  // shown (Codex on #35).
+  const viewport = page.locator('[data-underlay-scale]');
+  await again.getByLabel('Underlay view').selectOption('bottom');
+  await ready(page);
+  await expect(viewport).toHaveAttribute('data-underlay-depths', '-6');
+  const params = page.getByRole('list', { name: 'Parameters' });
+  await params.getByRole('button', { name: /^Thickness/ }).click();
+  const thickness = page.locator('.cad-inspector').getByLabel(/^Value/);
+  await thickness.fill('25');
+  await thickness.press('Enter');
+  await ready(page);
+  await expect(params).toContainText(/Thickness\s*25 mm/);
+  await expect(viewport).toHaveAttribute('data-underlay-depths', '-26');
+  await again.getByLabel('Underlay view').selectOption('front');
+  await ready(page);
   // Edits go one at a time: a new scale committed on blur, then Hide at once, keeps both (Codex
   // on #35).
   await again.getByLabel('Underlay mm per pixel').fill('2');
