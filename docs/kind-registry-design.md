@@ -71,7 +71,7 @@ export function createKindRegistry<H>(
 
 ### 境界越えの解消
 
-1. **Easing と Rational を core へ。** `Easing`、`Rational`、`easingProgress` を core の `time-axis` へ移します。`animation-core` は同じ名前で re-export するので、animation 側の呼び出しは変わりません。`character` と `character-core` は `time-axis` を使うようにし、`animation-core` への依存を外します。
+1. **Easing と Rational を core へ。** `Easing`、`Rational`、`easingProgress` を新しい core package `@editor-platform/easing` へ移します（既存の `time-axis` は工程表の日付軸で、用途が違うため使いません）。`animation-core` は同じ名前で re-export するので、animation 側の呼び出しは変わりません。`character` と `character-core` は `easing` を使うようにし、`animation-core` への依存を外します。
 2. **estimate の CAD/BIM 連携を engineering 側へ。** `cad-source.ts`、`bim-source.ts`、`bim-panel.tsx` を新しい engineering package `@editor-platform/estimate-engineering` へ移します。`estimate` の Surface は、数量の取り込み元を `quantitySources` として Host から受け取ります（今は `./bim-panel` を直接 lazy import している）。Playground と Artifact Host は、engineering の一覧からこの取り込み元を渡します。`estimate` の `cad-core`、`bim-core` への依存はなくなります。
 3. **Host の直接import。** 上の登録制で、Host本体（`App.tsx` など）が直接参照するのは `kinds/{office,engineering}.ts` の2つだけになります。
 
@@ -96,7 +96,7 @@ export function createKindRegistry<H>(
 | 段階 | 内容                                                                                                  | 確認                                                                              |
 | ---- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | KR1  | 境界の確認スクリプト（今の3つは許可一覧に入れる）                                                     | tooling テスト                                                                    |
-| KR2  | Easing/Rational を `time-axis` へ。character の `animation-core` 依存を外す                           | unit、character と animation の e2e（影響範囲）                                   |
+| KR2  | Easing/Rational を `easing` へ。character の `animation-core` 依存を外す                              | unit、character と animation の e2e（影響範囲）                                   |
 | KR3  | `estimate-engineering` を作り、estimate の CAD/BIM 依存を外す                                         | unit、estimate-editor と bim-hosts の e2e                                         |
 | KR4  | `artifact-kinds` package と、Playground の作成・検証・表示名の登録制（`model.ts`）                    | unit、作成と検証の全種類テスト、影響範囲の e2e                                    |
 | KR5  | Playground の描画を登録制に（`editor-surfaces.tsx`、`App.tsx`）。office と engineering の一覧を分ける | 影響範囲の e2e（共有ファイルを触るので office と engineering の light spec 全部） |
