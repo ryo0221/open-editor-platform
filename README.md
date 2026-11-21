@@ -1,5 +1,16 @@
 # Open Editor Platform
 
+[![Project status: development preview](https://img.shields.io/badge/status-development%20preview-orange)](DEVELOPMENT.md#release-labels-and-github-releases)
+[![Beta release: not yet published](https://img.shields.io/badge/beta-not%20yet%20released-lightgrey)](DEVELOPMENT.md#release-labels-and-github-releases)
+[![Commercial beta: planned](https://img.shields.io/badge/commercial%20beta-planned%20not%20open-lightgrey)](BETA-COMMERCIAL-POLICY.md)
+[![Source license: AGPLv3](https://img.shields.io/badge/source%20license-AGPLv3--only-blue)](LICENSE)
+
+> **Release status:** This public repository is in active development; a GitHub beta
+> release and a stable GA release have **not been declared**. The planned zero-fee
+> proprietary commercial beta program is **not yet open**. AGPLv3-compliant
+> commercial use remains available without an OEM fee. See the [release status rules](DEVELOPMENT.md#release-labels-and-github-releases)
+> and [beta commercial policy](BETA-COMMERCIAL-POLICY.md).
+
 A host-independent editor workspace for documents, structured data, graphs,
 text review, file inspection, whiteboards, design, slides, registered React UI,
 2D animation and local geographic data.
