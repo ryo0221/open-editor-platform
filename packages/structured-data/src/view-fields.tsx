@@ -1,28 +1,32 @@
 import { useRef, useState } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
-import { useEditorInput } from '@editor-platform/editor-ui';
+import { useEditorInput, T, useWording } from '@editor-platform/editor-ui';
 import { columnTypes, parseCell, type StructuredData, type Column } from './model';
 import { previewColumn, readableFormula, type ChartConfig, type AggregateFunction } from './views';
 import { aggregates } from './view-model';
 
 export function Pick({
   label,
+  display,
   value,
   onChange,
   columns,
   empty = 'None',
 }: {
   label: string;
+  /** Visible wording when it is not a plain lookup of `label`. */
+  display?: string;
   value: string;
   onChange: (value: string) => void;
   columns: Column[];
   empty?: string;
 }) {
+  const t = useWording();
   return (
     <label className="ep-field">
-      {label}
+      {display ?? t(label)}
       <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">{empty}</option>
+        <option value="">{t(empty)}</option>
         {columns.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
@@ -42,17 +46,20 @@ export function ChartSettings({
   onChange: (value: ChartConfig) => void;
 }) {
   const patch = (p: Partial<ChartConfig>) => onChange({ ...value, ...p });
+  const t = useWording();
   return (
     <>
       <label className="ep-field">
-        Chart type
+        <T>Chart type</T>
         <select
           aria-label="Chart type"
           value={value.type}
           onChange={(e) => patch({ type: e.target.value as ChartConfig['type'] })}
         >
-          {['bar', 'line', 'pie'].map((t) => (
-            <option key={t}>{t}</option>
+          {['bar', 'line', 'pie'].map((v) => (
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
       </label>
@@ -70,38 +77,44 @@ export function ChartSettings({
         onChange={(series) => patch({ series })}
       />
       <label className="ep-field">
-        Aggregation
+        <T>Aggregation</T>
         <select
           aria-label="Chart aggregation"
           value={value.aggregate}
           onChange={(e) => patch({ aggregate: e.target.value as AggregateFunction })}
         >
           {aggregates.map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
       </label>
       <label className="ep-field">
-        Chart order
+        <T>Chart order</T>
         <select
           aria-label="Chart order"
           value={value.sort}
           onChange={(e) => patch({ sort: e.target.value as ChartConfig['sort'] })}
         >
           {['label', 'ascending', 'descending'].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
       </label>
       <label className="ep-field">
-        Axis format
+        <T>Axis format</T>
         <select
           aria-label="Axis format"
           value={value.format}
           onChange={(e) => patch({ format: e.target.value as ChartConfig['format'] })}
         >
           {['number', 'currency', 'percent'].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
       </label>
@@ -111,7 +124,7 @@ export function ChartSettings({
           checked={value.legend}
           onChange={(e) => patch({ legend: e.target.checked })}
         />{' '}
-        Show legend
+        <T>Show legend</T>
       </label>
       <label>
         <input
@@ -119,7 +132,7 @@ export function ChartSettings({
           checked={value.labels}
           onChange={(e) => patch({ labels: e.target.checked })}
         />{' '}
-        Show values
+        <T>Show values</T>
       </label>
     </>
   );
@@ -241,7 +254,7 @@ function FieldValueSettings({ data, f }: { data: StructuredData; f: FieldDraft }
   return draft.type === 'formula' ? (
     <>
       <label className="ep-field">
-        Formula
+        <T>Formula</T>
         <textarea
           aria-label="Field formula"
           value={draft.formula ?? ''}
@@ -260,7 +273,7 @@ function FieldValueSettings({ data, f }: { data: StructuredData; f: FieldDraft }
     </>
   ) : (
     <label className="ep-field">
-      Default value
+      <T>Default value</T>
       <input
         aria-label="Field default"
         value={String(draft.defaultValue ?? '')}
@@ -272,23 +285,24 @@ function FieldValueSettings({ data, f }: { data: StructuredData; f: FieldDraft }
 
 function NumberFormatSettings({ f }: { f: FieldDraft }) {
   const { draft, patch } = f;
+  const t = useWording();
   return (
     <>
       <label className="ep-field">
-        Number format
+        <T>Number format</T>
         <select
           aria-label="Number format"
           value={draft.format ?? ''}
           onChange={(e) => patch({ format: e.target.value as Column['format'] })}
         >
-          <option value="">General</option>
-          <option value="decimal">Decimal</option>
-          <option value="currency">Currency</option>
-          <option value="percent">Percent</option>
+          <option value="">{t('General')}</option>
+          <option value="decimal">{t('Decimal')}</option>
+          <option value="currency">{t('Currency')}</option>
+          <option value="percent">{t('Percent')}</option>
         </select>
       </label>
       <label className="ep-field">
-        Decimal places
+        <T>Decimal places</T>
         <input
           ref={f.decimalInput}
           aria-label="Decimal places"
@@ -302,7 +316,7 @@ function NumberFormatSettings({ f }: { f: FieldDraft }) {
       </label>
       {draft.format === 'currency' && (
         <label className="ep-field">
-          Currency
+          <T>Currency</T>
           <select
             aria-label="Currency"
             value={draft.currency ?? 'USD'}
@@ -326,7 +340,8 @@ function FieldPreviewMessages({ f }: { f: FieldDraft }) {
       {submitError && <p role="alert">{submitError}</p>}
       {preview && (
         <p className="ep-muted">
-          {preview.changed} values will convert · {preview.errors.length} invalid records
+          <T args={[preview.changed]}>{'{0} values will convert'}</T> ·{' '}
+          <T args={[preview.errors.length]}>{'{0} invalid records'}</T>
         </p>
       )}
       {preview?.errors.slice(0, 5).map((e) => (
@@ -353,6 +368,7 @@ export function FieldSettings({
 }) {
   const f = useFieldSettingsDraft({ data, field, onSave, readOnly });
   const { draft, patch, error, preview } = f;
+  const t = useWording();
   return (
     <form
       ref={f.root}
@@ -365,7 +381,7 @@ export function FieldSettings({
     >
       <fieldset disabled={readOnly}>
         <label className="ep-field">
-          Field name
+          <T>Field name</T>
           <input
             aria-label="Field name"
             value={draft.name}
@@ -373,14 +389,16 @@ export function FieldSettings({
           />
         </label>
         <label className="ep-field">
-          Field type
+          <T>Field type</T>
           <select
             aria-label="Field type"
             value={draft.type}
             onChange={(e) => patch({ type: e.target.value as Column['type'] })}
           >
-            {columnTypes.map((t) => (
-              <option key={t}>{t}</option>
+            {columnTypes.map((type) => (
+              <option key={type} value={type}>
+                {t(type)}
+              </option>
             ))}
           </select>
         </label>
@@ -390,7 +408,7 @@ export function FieldSettings({
             checked={!!draft.required}
             onChange={(e) => patch({ required: e.target.checked })}
           />{' '}
-          Required field
+          <T>Required field</T>
         </label>
         <label>
           <input
@@ -398,11 +416,11 @@ export function FieldSettings({
             checked={!!draft.readOnly}
             onChange={(e) => patch({ readOnly: e.target.checked })}
           />{' '}
-          Read only field
+          <T>Read only field</T>
         </label>
         {draft.type === 'select' && (
           <label className="ep-field">
-            Options (one per line)
+            <T>Options (one per line)</T>
             <textarea
               aria-label="Field options"
               rows={5}
@@ -415,10 +433,10 @@ export function FieldSettings({
         {['number', 'formula'].includes(draft.type) && <NumberFormatSettings f={f} />}
         <FieldPreviewMessages f={f} />
         <button disabled={!!error || !!preview?.errors.length} type="submit">
-          Apply field settings
+          <T>Apply field settings</T>
         </button>
         <button type="button" onClick={onDelete}>
-          Delete field
+          <T>Delete field</T>
         </button>
       </fieldset>
     </form>

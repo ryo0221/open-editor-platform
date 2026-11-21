@@ -21,24 +21,33 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import { useEditorInput } from './inputs';
+import { useWording } from './wording';
 export * from './inputs';
 export * from './workspace';
 export * from './progress';
+export * from './wording';
 export { PanelLeft, PanelRight, Maximize2, X, MoreHorizontal, ChevronDown };
 export function IconButton({
   icon: Icon,
   label,
+  display,
   shortcut,
   reason,
   children,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   icon: LucideIcon;
+  /** Accessible name. The tooltip shows its wording in the Surface's locale. */
   label: string;
+  /** Tooltip wording when it is not a plain lookup of `label` (a composed sentence). */
+  display?: string;
   shortcut?: string;
   reason?: string;
 }) {
-  const title = [label, shortcut, props.disabled ? reason : undefined].filter(Boolean).join(' · ');
+  const t = useWording();
+  const title = [display ?? t(label), shortcut, props.disabled ? reason : undefined]
+    .filter(Boolean)
+    .join(' · ');
   return (
     <span className="ep-icon-wrap" data-tooltip={title}>
       <button
@@ -228,6 +237,7 @@ export function Dialog({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const t = useWording();
   useEffect(() => {
     const before = document.activeElement as HTMLElement;
     ref.current?.showModal();
@@ -250,8 +260,13 @@ export function Dialog({
       }}
     >
       <div className="ep-dialog-heading">
-        <h2>{title}</h2>
-        <IconButton icon={X} label={`Close ${title}`} onClick={onClose} />
+        <h2>{t(title)}</h2>
+        <IconButton
+          icon={X}
+          label={`Close ${title}`}
+          display={t('Close {0}', t(title))}
+          onClick={onClose}
+        />
       </div>
       {children}
     </dialog>
@@ -320,6 +335,7 @@ export function EditorLayout({
       ...saved,
     };
   });
+  const t = useWording();
   const state = panels ?? local;
   const { left: leftOpen, right: rightOpen, rightWidth, tab, focus } = state;
   const panelState = useMemo(
@@ -409,6 +425,7 @@ export function EditorLayout({
             <IconButton
               icon={PanelLeft}
               label={`Toggle ${leftLabel}`}
+              display={t('Toggle {0}', t(leftLabel))}
               aria-pressed={state.left && !state.focus}
               onClick={() => toggle('left')}
             />
@@ -436,6 +453,7 @@ export function EditorLayout({
             <IconButton
               icon={PanelRight}
               label={`Toggle ${inspectorLabel}`}
+              display={t('Toggle {0}', t(inspectorLabel))}
               aria-pressed={state.right && !state.focus}
               onClick={() => toggle('right')}
             />
@@ -458,8 +476,13 @@ export function EditorLayout({
             hidden={!state.left || state.focus || !left}
           >
             <div className="ep-panel-heading">
-              <strong>{leftLabel}</strong>
-              <IconButton icon={X} label={`Close ${leftLabel}`} onClick={() => close('left')} />
+              <strong>{t(leftLabel)}</strong>
+              <IconButton
+                icon={X}
+                label={`Close ${leftLabel}`}
+                display={t('Close {0}', t(leftLabel))}
+                onClick={() => close('left')}
+              />
             </div>
             <div className="ep-panel-content">{left}</div>
           </aside>
@@ -498,10 +521,11 @@ export function EditorLayout({
               }}
             />
             <div className="ep-panel-heading">
-              <strong>{inspectorLabel}</strong>
+              <strong>{t(inspectorLabel)}</strong>
               <IconButton
                 icon={X}
                 label={`Close ${inspectorLabel}`}
+                display={t('Close {0}', t(inspectorLabel))}
                 onClick={() => close('right')}
               />
             </div>
@@ -522,9 +546,10 @@ export function Section({
   children: ReactNode;
   open?: boolean;
 }) {
+  const t = useWording();
   return (
     <details className="ep-section" open={open}>
-      <summary>{title}</summary>
+      <summary>{t(title)}</summary>
       <div>{children}</div>
     </details>
   );
@@ -549,6 +574,7 @@ export function CommitInput({
   step?: number;
   placeholder?: string;
 }) {
+  const t = useWording();
   const incoming = String(value);
   const [draft, setDraft] = useState(incoming);
   const [observed, setObserved] = useState(incoming);
@@ -595,7 +621,7 @@ export function CommitInput({
   }
   return (
     <label className="ep-field">
-      {label}
+      {t(label)}
       <input
         ref={input}
         aria-label={label}
@@ -603,7 +629,7 @@ export function CommitInput({
         min={min}
         max={max}
         step={step}
-        placeholder={placeholder}
+        placeholder={placeholder && t(placeholder)}
         value={draft}
         onFocus={() => {
           focused.current = true;

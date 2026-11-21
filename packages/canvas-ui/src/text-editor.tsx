@@ -11,7 +11,12 @@ import {
   type TextRun,
   type TextStyle,
 } from '@editor-platform/editor-core';
-import { EditorUncommittedInputContext, useEditorInput } from '@editor-platform/editor-ui';
+import {
+  EditorUncommittedInputContext,
+  useEditorInput,
+  T,
+  useWording,
+} from '@editor-platform/editor-ui';
 import { canvasTextLayout } from './text-layout';
 
 import {
@@ -67,6 +72,7 @@ export function CanvasTextEditor({
   onExpand?: () => void;
   stale?: boolean;
 }) {
+  const t = useWording();
   const bridgeFactory = useContext(CanvasTextContext);
   const privateInputs = useContext(EditorUncommittedInputContext);
   const bridge = bridgeFactory?.(elementId);
@@ -404,10 +410,12 @@ export function CanvasTextEditor({
         onChange={(e) => format('fontSize', Number(e.target.value))}
       >
         <option value="" disabled>
-          Size
+          {t('Size')}
         </option>
         {[12, 18, 24, 32, 48, 64].map((size) => (
-          <option key={size}>{size}</option>
+          <option key={size} value={size}>
+            {size}
+          </option>
         ))}
       </select>
       {onExpand && (
@@ -420,7 +428,7 @@ export function CanvasTextEditor({
         </button>
       )}
       <button onMouseDown={(e) => e.preventDefault()} onClick={() => finish()}>
-        Done
+        <T>Done</T>
       </button>
     </div>
   );

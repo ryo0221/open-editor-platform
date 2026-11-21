@@ -1,5 +1,5 @@
 import { type Region, type EditorCommand, type EditorInputs } from '@editor-platform/editor-core';
-import { Dialog } from '@editor-platform/editor-ui';
+import { Dialog, T, useWording } from '@editor-platform/editor-ui';
 import {
   addColumn,
   columnTypes,
@@ -34,7 +34,9 @@ export function DeletedRecordDrafts({
     .filter(([id]) => !data.rows.some((row) => row.id === id))
     .map(([id, draft]) => (
       <details key={id}>
-        <summary>削除されたレコードの未確定入力があります</summary>
+        <summary>
+          <T>削除されたレコードの未確定入力があります</T>
+        </summary>
         <textarea
           aria-label="Retained deleted record input"
           readOnly
@@ -47,7 +49,7 @@ export function DeletedRecordDrafts({
             onError('');
           }}
         >
-          Discard deleted record input
+          <T>Discard deleted record input</T>
         </button>
       </details>
     ));
@@ -62,7 +64,7 @@ function NewFieldValueInput({
 }) {
   return newField.type === 'formula' ? (
     <label className="ep-field">
-      Formula
+      <T>Formula</T>
       <input
         aria-label="New field formula"
         value={newField.formula ?? ''}
@@ -71,7 +73,7 @@ function NewFieldValueInput({
     </label>
   ) : (
     <label className="ep-field">
-      Default
+      <T>Default</T>
       <input
         aria-label="New field default"
         value={String(newField.defaultValue ?? '')}
@@ -104,6 +106,7 @@ export function AddFieldDialog({
   onCreated: (id: string) => void;
   onClose: () => void;
 }) {
+  const t = useWording();
   function create() {
     const c = {
       ...newField,
@@ -131,7 +134,7 @@ export function AddFieldDialog({
         }}
       >
         <label className="ep-field">
-          Field name
+          <T>Field name</T>
           <input
             aria-label="New field name"
             value={newField.name}
@@ -140,21 +143,23 @@ export function AddFieldDialog({
           />
         </label>
         <label className="ep-field">
-          Type
+          <T>Type</T>
           <select
             aria-label="New field type"
             value={newField.type}
             onChange={(e) => onNewField({ ...newField, type: e.target.value as Column['type'] })}
           >
-            {columnTypes.map((t) => (
-              <option key={t}>{t}</option>
+            {columnTypes.map((type) => (
+              <option key={type} value={type}>
+                {t(type)}
+              </option>
             ))}
           </select>
         </label>
         <NewFieldValueInput newField={newField} onNewField={onNewField} />
         {newField.type === 'select' && (
           <label className="ep-field">
-            Options
+            <T>Options</T>
             <input
               aria-label="New field options"
               value={newField.options?.join(',') ?? ''}
@@ -173,10 +178,12 @@ export function AddFieldDialog({
             checked={!!newField.required}
             onChange={(e) => onNewField({ ...newField, required: e.target.checked })}
           />{' '}
-          Required
+          <T>Required</T>
         </label>
         {error && <p className="ep-field-error">{error}</p>}
-        <button disabled={!newField.name.trim() || readOnly}>Create field</button>
+        <button disabled={!newField.name.trim() || readOnly}>
+          <T>Create field</T>
+        </button>
       </form>
     </Dialog>
   );
@@ -217,7 +224,7 @@ export function RecordDetailsDialog({
           if (apply(deleteRows([rowId]))) onClose();
         }}
       >
-        Delete record
+        <T>Delete record</T>
       </button>
     </Dialog>
   );
@@ -238,7 +245,9 @@ export function FieldDefinitionDialog({
 }) {
   return (
     <Dialog title="データ定義 · Field settings" onClose={onClose}>
-      <p>所有元: Structured Data · 値の編集はForm、項目名・型の編集はこの定義画面です。</p>
+      <p>
+        <T>所有元: Structured Data · 値の編集はForm、項目名・型の編集はこの定義画面です。</T>
+      </p>
       <FieldSettings
         key={columnId}
         data={data}
@@ -259,6 +268,7 @@ export function FieldDefinitionDialog({
 
 function CsvColumnHeader({ data, imp, c }: { data: StructuredData; imp: CsvImport; c: Column }) {
   const { csv, csvAppend, appendPreview, csvTargets, setCsvTargets, setCsv, csvHeader } = imp;
+  const t = useWording();
   if (!csv) return null;
   const index = csv.data.columns.indexOf(c);
   const target = appendPreview?.columns[index];
@@ -277,7 +287,7 @@ function CsvColumnHeader({ data, imp, c }: { data: StructuredData; imp: CsvImpor
               })
             }
           >
-            <option value="">Choose target field</option>
+            <option value="">{t('Choose target field')}</option>
             {data.columns.map((column) => (
               <option key={column.id} value={column.id}>
                 {column.name} ({column.type})
@@ -289,7 +299,7 @@ function CsvColumnHeader({ data, imp, c }: { data: StructuredData; imp: CsvImpor
             {target?.type} ·{' '}
             {target?.id} ·{' '}
             {target?.options?.join(', ')}
-            {target?.type === 'relation' ? ' · existing record IDs' : ''}
+            {target?.type === 'relation' ? ` · ${t('existing record IDs')}` : ''}
           </p>
         </>
       ) : (
@@ -300,8 +310,10 @@ function CsvColumnHeader({ data, imp, c }: { data: StructuredData; imp: CsvImpor
             setCsv(retypeCsvColumn(csv, c, e.target.value as Column['type'], csvHeader))
           }
         >
-          {['text', 'number', 'boolean', 'date'].map((t) => (
-            <option key={t}>{t}</option>
+          {['text', 'number', 'boolean', 'date'].map((type) => (
+            <option key={type} value={type}>
+              {t(type)}
+            </option>
           ))}
         </select>
       )}
@@ -356,11 +368,12 @@ export function CsvImportDialog({
   onCommit: () => void;
 }) {
   const { csv, setCsv, csvHeader, setCsvHeader, csvAppend, setCsvAppend, csvErrors } = imp;
+  const t = useWording();
   if (!csv) return null;
   return (
     <Dialog title="CSV import preview" onClose={() => setCsv(null)}>
       <p>
-        {csv.name} · UTF-8 · {csv.data.rows.length} records · CRLF/LF supported
+        {csv.name} · UTF-8 · {t('{0} records', csv.data.rows.length)} · {t('CRLF/LF supported')}
       </p>
       <label>
         <input
@@ -372,7 +385,7 @@ export function CsvImportDialog({
             setCsv(csvWithHeader(csv, header));
           }}
         />{' '}
-        First row is a header
+        <T>First row is a header</T>
       </label>
       <label>
         <input
@@ -380,11 +393,12 @@ export function CsvImportDialog({
           checked={csv.decodeFormulaGuard ?? false}
           onChange={(e) => setCsv(csvWithFormulaGuard(csv, e.target.checked, csvHeader))}
         />{' '}
-        Restore formula-like text from this editor’s CSV export
+        <T>Restore formula-like text from this editor’s CSV export</T>
       </label>
       <p>
-        Enable only for an unchanged export from this editor. Other CSV files keep apostrophes as
-        written.
+        {t(
+          'Enable only for an unchanged export from this editor. Other CSV files keep apostrophes as written.',
+        )}
       </p>
       <label>
         <input
@@ -392,17 +406,23 @@ export function CsvImportDialog({
           checked={csvAppend}
           onChange={(e) => setCsvAppend(e.target.checked)}
         />{' '}
-        Append to matching fields
+        <T>Append to matching fields</T>
       </label>
       <CsvPreviewTable data={data} imp={imp} />
       {csvErrors.length > 0 && (
         <div className="ep-field-error" role="status">
-          {csvErrors.length} invalid values in the preview.
+          {t('{0} invalid values in the preview.', csvErrors.length)}
           <ul>
             {csvErrors.map((error, index) => (
               <li key={index}>
-                Row {error.row}, field {error.column} {error.name} · value{' '}
-                {JSON.stringify(error.raw)}: {error.message}. CSVまたは列対応を修正してください。
+                {t(
+                  'Row {0}, field {1} {2} · value {3}: {4}. CSVまたは列対応を修正してください。',
+                  error.row,
+                  error.column,
+                  error.name,
+                  JSON.stringify(error.raw),
+                  error.message,
+                )}
               </li>
             ))}
           </ul>
@@ -410,12 +430,14 @@ export function CsvImportDialog({
       )}
       {error && <p className="ep-field-error">{error}</p>}
       <p>
-        {csvAppend
-          ? 'Existing records are retained.'
-          : 'All current rows and fields will be replaced; Undo restores them.'}
+        {t(
+          csvAppend
+            ? 'Existing records are retained.'
+            : 'All current rows and fields will be replaced; Undo restores them.',
+        )}
       </p>
       <button disabled={readOnly || csvErrors.length > 0} onClick={onCommit}>
-        Import records
+        <T>Import records</T>
       </button>
     </Dialog>
   );

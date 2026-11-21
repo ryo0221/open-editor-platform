@@ -850,5 +850,6 @@ export function CanvasStage({
   );
 }
 export * from './layers';
+export { canvasUiWording } from './wording';
 
 export { CanvasTextContext, type CanvasTextBridge } from './text-editor';

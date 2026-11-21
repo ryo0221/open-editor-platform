@@ -24,7 +24,7 @@ import {
   ReferenceTools,
   type ReferenceSurfaceProps,
 } from '@editor-platform/artifact-references/react';
-import { IconButton, Menu } from '@editor-platform/editor-ui';
+import { IconButton, Menu, useWording } from '@editor-platform/editor-ui';
 import { type DocumentActions } from './view-actions';
 import { type DocumentExportFormat } from './view-hooks';
 import { hasDocumentMark, textStyleValue } from './view-model';
@@ -52,6 +52,7 @@ function TextStyleSelect({
   readOnly: boolean;
   textStyle: DocumentActions['textStyle'];
 }) {
+  const t = useWording();
   return (
     <select
       aria-label="Text style"
@@ -59,13 +60,13 @@ function TextStyleSelect({
       value={textStyleValue(engineState)}
       onChange={(e) => textStyle(e.target.value)}
     >
-      <option value="paragraph">Paragraph</option>
+      <option value="paragraph">{t('Paragraph')}</option>
       {[1, 2, 3, 4, 5, 6].map((n) => (
         <option key={n} value={`heading-${n}`}>
-          Heading {n}
+          {t('Heading {0}', n)}
         </option>
       ))}
-      <option value="code_block">Code</option>
+      <option value="code_block">{t('Code')}</option>
     </select>
   );
 }
@@ -77,8 +78,9 @@ function ImageUpload({
   readOnly: boolean;
   imageFile: DocumentActions['imageFile'];
 }) {
+  const t = useWording();
   return (
-    <label className="ep-upload" title="Insert image">
+    <label className="ep-upload" title={t('Insert image')}>
       <ImagePlus size={19} />
       <input
         type="file"
@@ -209,23 +211,25 @@ export function DocumentExportMenu({
   openDocx: () => void;
   exportFile: (format: DocumentExportFormat) => Promise<void>;
 }) {
+  const t = useWording();
   return (
     <Menu label="Export document" icon={Download}>
-      <button onClick={() => void printPreview()}>Print preview</button>
+      <button onClick={() => void printPreview()}>{t('Print preview')}</button>
       <button
         disabled={!docx}
-        title={!docx ? (docxReason ?? 'Hostはこの形式の出力を提供していません。') : undefined}
+        title={!docx ? (docxReason ?? t('Hostはこの形式の出力を提供していません。')) : undefined}
         onClick={openDocx}
       >
-        Export DOCX
+        {t('Export {0}', 'DOCX')}
       </button>
       <p>
-        PDFの本文・表は検索/コピーできます。図・画像内の文字は画像です。Tagged
-        PDFは未対応です。大きい画像は1ページへ縮小し、表は行または文字行で分割します。
+        {t(
+          'PDFの本文・表は検索/コピーできます。図・画像内の文字は画像です。Tagged PDFは未対応です。大きい画像は1ページへ縮小し、表は行または文字行で分割します。',
+        )}
       </p>
       {(['md', 'html', 'pdf'] as const).map((format) => (
         <button key={format} disabled={exporting} onClick={() => void exportFile(format)}>
-          Export {format.toUpperCase()}
+          {t('Export {0}', format.toUpperCase())}
         </button>
       ))}
     </Menu>

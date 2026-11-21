@@ -5,7 +5,7 @@ import {
 } from '@editor-platform/artifact-references/react';
 import { newId } from '@editor-platform/artifact-core';
 import { command, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
-import { CommitInput, Section } from '@editor-platform/editor-ui';
+import { CommitInput, Section, T, useWording } from '@editor-platform/editor-ui';
 import { VisualInspector, imageImportLimits, readImage } from '@editor-platform/canvas-ui';
 import { DesignInteractionSettings, DesignPrototypeSettings } from './prototype-settings';
 import { setDesignInteractions } from './prototype';
@@ -135,10 +135,11 @@ export function DesignInspector({
   );
 }
 function HtmlSemanticsSection({ element, apply }: SectionProps) {
+  const t = useWording();
   return (
     <Section title="HTML semantics">
       <label>
-        HTML meaning
+        <T>HTML meaning</T>
         <select
           aria-label="Element HTML meaning"
           value={element.web?.tag ?? ''}
@@ -155,7 +156,9 @@ function HtmlSemanticsSection({ element, apply }: SectionProps) {
         >
           <option value="">意味を選択</option>
           {designWebTagsFor(element.type).map((tag) => (
-            <option key={tag}>{tag}</option>
+            <option key={tag} value={tag}>
+              {t(tag)}
+            </option>
           ))}
         </select>
       </label>
@@ -172,6 +175,7 @@ function ElementSettingsSection({
   apply,
   setPreset,
 }: SectionProps & { setPreset: (preset: FramePresetRequest) => void }) {
+  const t = useWording();
   return (
     <Section title={`${element.type} settings`}>
       <CommitInput
@@ -180,13 +184,13 @@ function ElementSettingsSection({
         onCommit={(name) => apply(patchDesign(ids, { name }))}
       />
       <label className="ep-field">
-        Parent frame / group
+        <T>Parent frame / group</T>
         <select
           aria-label="Parent layer"
           value={element.parentId ?? ''}
           onChange={(e) => apply(reparentElement(element.id, e.target.value || undefined))}
         >
-          <option value="">Root</option>
+          <option value="">{t('Root')}</option>
           {content.elements
             .filter((e) => ['frame', 'group'].includes(e.type) && e.id !== element.id)
             .map((e) => (
@@ -199,7 +203,7 @@ function ElementSettingsSection({
       {element.type === 'frame' && (
         <>
           <label className="ep-field">
-            Frame preset
+            <T>Frame preset</T>
             <select
               aria-label="Frame preset"
               onChange={(e) => {
@@ -216,10 +220,10 @@ function ElementSettingsSection({
                   : ''
               }
             >
-              <option value="">Custom</option>
-              <option value="390x844">Phone · 390×844</option>
-              <option value="1440x900">Desktop · 1440×900</option>
-              <option value="800x600">Card sheet · 800×600</option>
+              <option value="">{t('Custom')}</option>
+              <option value="390x844">{t('Phone')} · 390×844</option>
+              <option value="1440x900">{t('Desktop')} · 1440×900</option>
+              <option value="800x600">{t('Card sheet')} · 800×600</option>
             </select>
           </label>
           <label>
@@ -228,7 +232,7 @@ function ElementSettingsSection({
               checked={element.clipContent ?? false}
               onChange={(e) => apply(patchDesign(ids, { clipContent: e.target.checked }))}
             />{' '}
-            Clip frame content
+            <T>Clip frame content</T>
           </label>
         </>
       )}
@@ -236,10 +240,11 @@ function ElementSettingsSection({
   );
 }
 function AutoLayoutSection({ element, ids, apply }: SectionProps) {
+  const t = useWording();
   return (
     <Section title="Auto layout">
       <label className="ep-field">
-        Direction
+        <T>Direction</T>
         <select
           aria-label="Layout direction"
           value={element.layout?.direction ?? 'absolute'}
@@ -259,7 +264,9 @@ function AutoLayoutSection({ element, ids, apply }: SectionProps) {
           }
         >
           {['absolute', 'row', 'column'].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
         </select>
       </label>
@@ -290,7 +297,7 @@ function AutoLayoutSection({ element, ids, apply }: SectionProps) {
             />
           </div>
           <label className="ep-field">
-            Alignment
+            <T>Alignment</T>
             <select
               aria-label="Layout alignment"
               value={element.layout.align}
@@ -306,12 +313,14 @@ function AutoLayoutSection({ element, ids, apply }: SectionProps) {
               }
             >
               {['start', 'center', 'end'].map((v) => (
-                <option key={v}>{v}</option>
+                <option key={v} value={v}>
+                  {t(v)}
+                </option>
               ))}
             </select>
           </label>
           <label className="ep-field">
-            Container sizing
+            <T>Container sizing</T>
             <select
               aria-label="Container sizing"
               value={element.layout.sizing}
@@ -326,8 +335,8 @@ function AutoLayoutSection({ element, ids, apply }: SectionProps) {
                 )
               }
             >
-              <option>fixed</option>
-              <option>hug</option>
+              <option value="fixed">{t('fixed')}</option>
+              <option value="hug">{t('hug')}</option>
             </select>
           </label>
         </>
@@ -336,6 +345,7 @@ function AutoLayoutSection({ element, ids, apply }: SectionProps) {
   );
 }
 function SizeBehaviorSection({ content, element, ids, apply }: SectionProps) {
+  const t = useWording();
   return (
     <Section title="Size behavior" open={false}>
       <select
@@ -345,14 +355,14 @@ function SizeBehaviorSection({ content, element, ids, apply }: SectionProps) {
           apply(patchDesign(ids, { sizing: e.target.value as 'fixed' | 'hug' | 'fill' }))
         }
       >
-        <option>fixed</option>
-        <option>hug</option>
-        <option>fill</option>
+        <option value="fixed">{t('fixed')}</option>
+        <option value="hug">{t('hug')}</option>
+        <option value="fill">{t('fill')}</option>
       </select>
       {content.elements.some((p) => p.id === element.parentId && p.type === 'frame') &&
         (['horizontal', 'vertical'] as const).map((axis) => (
           <label key={axis} className="ep-field">
-            {axis} constraint
+            <T>{axis === 'horizontal' ? 'horizontal constraint' : 'vertical constraint'}</T>
             <select
               aria-label={`${axis} constraint`}
               value={element.constraints?.[axis] ?? (axis === 'horizontal' ? 'left' : 'top')}
@@ -373,7 +383,9 @@ function SizeBehaviorSection({ content, element, ids, apply }: SectionProps) {
                 ? ['left', 'right', 'center', 'stretch', 'scale']
                 : ['top', 'bottom', 'center', 'stretch', 'scale']
               ).map((rule) => (
-                <option key={rule}>{rule}</option>
+                <option key={rule} value={rule}>
+                  {t(rule)}
+                </option>
               ))}
             </select>
           </label>
@@ -393,19 +405,24 @@ function ComponentInstanceSection({
   definition: boolean;
   setDefinition: (definition: boolean) => void;
 }) {
+  const t = useWording();
   const instanceParts = component.elements
     ? new Map(designInstanceElements(content, element, (id) => id).map((p) => [p.id, p]))
     : undefined;
   return (
     <Section title="Component instance">
       <p>
-        {component.name} · {definition ? 'Editing shared definition' : 'Instance overrides only'}
+        {component.name} · {t(definition ? 'Editing shared definition' : 'Instance overrides only')}
       </p>
       <button aria-pressed={definition} onClick={() => setDefinition(!definition)}>
-        Edit shared definition
+        <T>Edit shared definition</T>
       </button>
-      <button onClick={() => apply(resetInstance(element.id))}>Reset overrides</button>
-      <button onClick={() => apply(detachInstance(element.id))}>Detach instance</button>
+      <button onClick={() => apply(resetInstance(element.id))}>
+        <T>Reset overrides</T>
+      </button>
+      <button onClick={() => apply(detachInstance(element.id))}>
+        <T>Detach instance</T>
+      </button>
       {(component.elements ?? [{ id: 'root', name: component.name, ...component.template }]).map(
         (part) => {
           const override = element.overrides?.[part.id];
@@ -461,16 +478,17 @@ function ComponentInstanceSection({
   );
 }
 function SharedStylesSection({ content, element, ids, apply }: SectionProps) {
+  const t = useWording();
   return (
     <Section title="Shared styles">
       <label className="ep-field">
-        Style
+        <T>Style</T>
         <select
           aria-label="Shared style"
           value={element.styleId ?? ''}
           onChange={(e) => apply(patchDesign(ids, { styleId: e.target.value || undefined }))}
         >
-          <option value="">Local appearance</option>
+          <option value="">{t('Local appearance')}</option>
           {content.styles?.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -500,13 +518,14 @@ function SharedStylesSection({ content, element, ids, apply }: SectionProps) {
           );
         }}
       >
-        Create style from selection
+        <T>Create style from selection</T>
       </button>
       {element.styleId && (
         <>
           <p className="hint">
-            Updates affect all{' '}
-            {content.elements.filter((e) => e.styleId === element.styleId).length} linked elements.
+            <T args={[content.elements.filter((e) => e.styleId === element.styleId).length]}>
+              {'Updates affect all {0} linked elements.'}
+            </T>
           </p>
           <CommitInput
             label="Shared style fill"

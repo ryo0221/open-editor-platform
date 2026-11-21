@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Dialog } from '@editor-platform/editor-ui';
+import { Dialog, useWording } from '@editor-platform/editor-ui';
 import { rubyLimits, safeLink, type BlockType, type DocumentContent } from './model';
 import { type DocumentActions } from './view-actions';
 import { type useFindReplace } from './view-hooks';
@@ -19,6 +19,7 @@ export function DocumentFindBar({
   readOnly: boolean;
 }) {
   const { matches, matchIndex } = finder;
+  const t = useWording();
   return (
     <div className="ep-find">
       <input
@@ -26,9 +27,9 @@ export function DocumentFindBar({
         value={finder.search}
         onChange={(e) => finder.changeSearch(e.target.value)}
       />
-      <span>{matches.length} matches</span>
+      <span>{t('{0} matches', matches.length)}</span>
       <button disabled={!matches.length} onClick={() => finder.find(matchIndex + 1)}>
-        Next match
+        {t('Next match')}
       </button>
       <input
         aria-label="Replacement text"
@@ -36,12 +37,12 @@ export function DocumentFindBar({
         onChange={(e) => finder.setReplace(e.target.value)}
       />
       <button disabled={readOnly || !matches.length} onClick={() => finder.replaceMatches(false)}>
-        Replace
+        {t('Replace')}
       </button>
       <button disabled={readOnly || !matches.length} onClick={() => finder.replaceMatches(true)}>
-        Replace all
+        {t('Replace all')}
       </button>
-      <button onClick={() => finder.setFindOpen(false)}>Close find</button>
+      <button onClick={() => finder.setFindOpen(false)}>{t('Close find')}</button>
     </div>
   );
 }
@@ -55,8 +56,9 @@ export function DocumentDocxExport({
   onClose: () => void;
   onNavigate: (blockId: string) => void;
 }) {
+  const t = useWording();
   return (
-    <Suspense fallback={<p role="status">Loading DOCX export…</p>}>
+    <Suspense fallback={<p role="status">{t('Loading DOCX export…')}</p>}>
       <DocumentDocxDialog
         content={content}
         onClose={onClose}
@@ -76,12 +78,13 @@ export function PrintPreviewDialog({
   printPages: string[] | null;
   onClose: () => void;
 }) {
+  const t = useWording();
   return (
     <Dialog title="Document print preview" onClose={onClose}>
       <p>
         {printPages
-          ? `${printPages.length} pages · Same pagination as exported PDF`
-          : 'Rendering print pages…'}
+          ? t('{0} pages · Same pagination as exported PDF', printPages.length)
+          : t('Rendering print pages…')}
       </p>
       <div className="ep-print-pages">
         {printPages?.map((src, i) => (
@@ -99,12 +102,13 @@ export function InsertBlockDialog({
   onClose: () => void;
   insert: DocumentActions['insert'];
 }) {
+  const t = useWording();
   return (
     <Dialog title="Insert document block" onClose={onClose}>
       <div className="ep-block-picker">
         {Object.entries(blockLabels).map(([type, label]) => (
           <button key={type} onClick={() => insert(type as BlockType)}>
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
@@ -154,16 +158,17 @@ export function LinkDialog({
   setLink: (href: string) => void;
   actions: DocumentActions;
 }) {
+  const t = useWording();
   return (
     <Dialog title="Edit link" onClose={actions.closeLink}>
       <label>
-        Link URL
+        {t('Link URL')}
         <input aria-label="Link URL" value={link} onChange={(e) => setLink(e.target.value)} />
       </label>
       <button disabled={!safeLink(link)} onClick={() => actions.setLink(link)}>
-        Apply link
+        {t('Apply link')}
       </button>
-      <button onClick={() => actions.setLink(null)}>Remove link</button>
+      <button onClick={() => actions.setLink(null)}>{t('Remove link')}</button>
     </Dialog>
   );
 }

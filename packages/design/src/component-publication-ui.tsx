@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import { type EditorCommand } from '@editor-platform/editor-core';
-import { Dialog, useEditorInput } from '@editor-platform/editor-ui';
+import { Dialog, useEditorInput, T, useWording } from '@editor-platform/editor-ui';
 import { publicationParts, publishDesignComponent } from './component-publication';
 import { type DesignContent, type DesignElement } from './model';
 import { designWebTagsFor, type DesignWebComponent, type DesignWebTag } from './web-contract';
@@ -63,6 +63,7 @@ function PartSemantics({
   tags: Tags;
   setTags: (tags: Tags) => void;
 }) {
+  const t = useWording();
   return nativeParts(parts).map((part) => (
     <label key={part.id}>
       {part.name}
@@ -73,7 +74,9 @@ function PartSemantics({
       >
         <option value="">意味を選択</option>
         {designWebTagsFor(part.type).map((tag) => (
-          <option key={tag}>{tag}</option>
+          <option key={tag} value={tag}>
+            {t(tag)}
+          </option>
         ))}
       </select>
     </label>
@@ -85,6 +88,7 @@ interface WebSetter {
 }
 /** Published props and the draft for adding one; the draft lives only while the dialog is open. */
 function PublicPropsEditor({ parts, web, setWeb }: WebSetter & { parts: DesignElement[] }) {
+  const t = useWording();
   const [propName, setPropName] = useState('text');
   const [propPart, setPropPart] = useState(parts[0]?.id ?? '');
   const [propField, setPropField] = useState('text');
@@ -135,7 +139,9 @@ function PublicPropsEditor({ parts, web, setWeb }: WebSetter & { parts: DesignEl
           onChange={(event) => setPropField(event.target.value)}
         >
           {['text', 'fill', 'src', 'alt'].map((field) => (
-            <option key={field}>{field}</option>
+            <option key={field} value={field}>
+              {t(field)}
+            </option>
           ))}
         </select>
       </label>
@@ -157,7 +163,7 @@ function PublicPropsEditor({ parts, web, setWeb }: WebSetter & { parts: DesignEl
           });
         }}
       >
-        Add public prop
+        <T>Add public prop</T>
       </button>
     </>
   );
@@ -277,7 +283,7 @@ function PublicSlotsEditor({
           })
         }
       >
-        Add public slot
+        <T>Add public slot</T>
       </button>
     </>
   );
@@ -366,7 +372,7 @@ export function ComponentPublicationDialog({
         {readOnlyReason && <p role="status">{readOnlyReason}</p>}
         <fieldset disabled={readOnly}>
           <label>
-            React symbol
+            <T>React symbol</T>
             <input
               aria-label="Publication symbol"
               value={web.symbol}
@@ -424,9 +430,11 @@ export function ComponentPublicationDialog({
             }
           }}
         >
-          Save React publication settings
+          <T>Save React publication settings</T>
         </button>
-        <button onClick={onClose}>Cancel publication settings</button>
+        <button onClick={onClose}>
+          <T>Cancel publication settings</T>
+        </button>
       </div>
     </Dialog>
   );

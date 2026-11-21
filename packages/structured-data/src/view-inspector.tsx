@@ -1,4 +1,4 @@
-import { CommitInput, Section } from '@editor-platform/editor-ui';
+import { CommitInput, Section, T, useWording } from '@editor-platform/editor-ui';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { removeColumn, type Column, type StructuredData } from './model';
 import { updateColumn, type AggregateFunction, type DataView } from './views';
@@ -22,12 +22,13 @@ function WidgetSettings({
   widget,
   numeric,
 }: ViewProps & { widget: Widget; numeric: Column[] }) {
+  const wording = useWording();
   const update = (next: Partial<Widget>) =>
     patch({ widgets: view.widgets.map((w) => (w.id === widget.id ? { ...w, ...next } : w)) });
   return (
     <>
       <label className="ep-field">
-        Widget title
+        <T>Widget title</T>
         <input
           aria-label="Widget title"
           value={widget.title}
@@ -49,14 +50,16 @@ function WidgetSettings({
             onChange={(columnId) => update({ columnId })}
           />
           <label className="ep-field">
-            Metric function
+            <T>Metric function</T>
             <select
               aria-label="Metric function"
               value={widget.aggregate ?? 'sum'}
               onChange={(e) => update({ aggregate: e.target.value as AggregateFunction })}
             >
               {aggregates.map((a) => (
-                <option key={a}>{a}</option>
+                <option key={a} value={a}>
+                  {wording(a)}
+                </option>
               ))}
             </select>
           </label>
@@ -74,6 +77,7 @@ function DashboardInspector({
   numeric,
   onWidget,
 }: ViewProps & { widget: Widget | undefined; numeric: Column[]; onWidget: (id: string) => void }) {
+  const wording = useWording();
   return (
     <Section title="Dashboard">
       {(['metric', 'chart', 'table'] as const).map((type) => (
@@ -85,7 +89,7 @@ function DashboardInspector({
             onWidget(next.id);
           }}
         >
-          Add {type} widget
+          {wording('Add {0} widget', wording(type))}
         </button>
       ))}
       {widget && (
@@ -103,6 +107,7 @@ function TimelineInspector({
   readOnly,
   apply,
 }: ViewProps & { dates: Column[]; readOnly: boolean; apply: Apply }) {
+  const wording = useWording();
   const timeline = (next: Partial<DataView['timeline']>) =>
     patch({ timeline: { ...view.timeline, ...next } });
   // Calendar reads the same date fields; grouping, scale and range belong to Timeline.
@@ -121,7 +126,7 @@ function TimelineInspector({
               if (apply(command)) timeline({ start: start.id, end: end.id });
             }}
           >
-            Add start and end date fields
+            <T>Add start and end date fields</T>
           </button>
         </>
       )}
@@ -151,14 +156,16 @@ function TimelineInspector({
             onChange={(group) => timeline({ group })}
           />
           <label className="ep-field">
-            Time scale
+            <T>Time scale</T>
             <select
               aria-label="Time scale"
               value={view.timeline.scale}
               onChange={(e) => timeline({ scale: e.target.value as 'day' | 'week' | 'month' })}
             >
               {['day', 'week', 'month'].map((t) => (
-                <option key={t}>{t}</option>
+                <option key={t} value={t}>
+                  {wording(t)}
+                </option>
               ))}
             </select>
           </label>
@@ -185,6 +192,7 @@ function SummaryInspector({
   patch,
   numeric,
 }: Omit<ViewProps, 'data'> & { numeric: Column[] }) {
+  const wording = useWording();
   return (
     <Section title="Summary">
       <Pick
@@ -194,7 +202,7 @@ function SummaryInspector({
         onChange={(columnId) => patch({ summary: { ...view.summary, columnId } })}
       />
       <label className="ep-field">
-        Summary function
+        <T>Summary function</T>
         <select
           aria-label="Summary function"
           value={view.summary.aggregate}
@@ -205,7 +213,9 @@ function SummaryInspector({
           }
         >
           {aggregates.map((a) => (
-            <option key={a}>{a}</option>
+            <option key={a} value={a}>
+              {wording(a)}
+            </option>
           ))}
         </select>
       </label>
@@ -283,7 +293,9 @@ function FieldInspector({
           if (apply(removeColumn(field.id))) onField('');
         }}
       />
-      <button onClick={() => onField('')}>Back to view settings</button>
+      <button onClick={() => onField('')}>
+        <T>Back to view settings</T>
+      </button>
     </Section>
   );
 }

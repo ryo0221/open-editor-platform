@@ -1,7 +1,7 @@
 import { ArrowUp } from 'lucide-react';
 import { clone, newId } from '@editor-platform/artifact-core';
 import { type EditorCommand, type EditorInputs } from '@editor-platform/editor-core';
-import { CommitInput, IconButton, Section } from '@editor-platform/editor-ui';
+import { CommitInput, IconButton, Section, T, useWording } from '@editor-platform/editor-ui';
 import { type StructuredData } from './model';
 import { reorderColumn, saveView, type DataProjection } from './views';
 import { type DataViewDraft } from './view-hooks';
@@ -62,7 +62,7 @@ function NamedViews({
             if (apply(saveView(view))) acceptViewDraft(view);
           }}
         >
-          Save view
+          <T>Save view</T>
         </button>
         <button
           disabled={readOnly}
@@ -74,7 +74,7 @@ function NamedViews({
             }
           }}
         >
-          Save as
+          <T>Save as</T>
         </button>
       </div>
     </Section>
@@ -82,23 +82,26 @@ function NamedViews({
 }
 
 function UnsavedViewChanges({ draft }: { draft: DataViewDraft }) {
+  const wording = useWording();
   const { view, viewDirty, viewEdit, viewHistory, acceptViewDraft, setView } = draft;
   return (
     <Section title="Unsaved view changes">
       <p role="status">
-        {viewDirty
-          ? 'Dashboard構成が未保存です。保存/閉じる時は名前付きビューへ確定します。'
-          : 'ビュー編集を取り消しました。'}
+        {wording(
+          viewDirty
+            ? 'Dashboard構成が未保存です。保存/閉じる時は名前付きビューへ確定します。'
+            : 'ビュー編集を取り消しました。',
+        )}
       </p>
       <button
         data-view-draft
         disabled={!viewEdit.current.past.length}
         onClick={() => viewHistory('undo')}
       >
-        Undo view edit
+        <T>Undo view edit</T>
       </button>
       <button disabled={!viewEdit.current.future.length} onClick={() => viewHistory('redo')}>
-        Redo view edit
+        <T>Redo view edit</T>
       </button>
       <button
         onClick={() => {
@@ -107,7 +110,7 @@ function UnsavedViewChanges({ draft }: { draft: DataViewDraft }) {
           setView(next);
         }}
       >
-        Discard view changes
+        <T>Discard view changes</T>
       </button>
     </Section>
   );
@@ -128,6 +131,7 @@ function FieldList({
   fieldId: string;
   onField: (id: string) => void;
 }) {
+  const wording = useWording();
   const { view, patch } = draft;
   return (
     <Section title="Fields">
@@ -145,7 +149,7 @@ function FieldList({
               })
             }
           >
-            {view.hidden.includes(c.id) ? 'Show' : 'Hide'}
+            {wording(view.hidden.includes(c.id) ? 'Show' : 'Hide')}
           </button>
           <IconButton
             icon={ArrowUp}
@@ -182,6 +186,7 @@ export function DataNavigator({
   onError: (error: string) => void;
   changeProjection: (projection: DataProjection) => boolean;
 }) {
+  const wording = useWording();
   const { view, viewDirty, viewEdit } = draft;
   return (
     <>
@@ -192,7 +197,7 @@ export function DataNavigator({
             className={`ep-view-item ${view.projection === p ? 'active' : ''}`}
             onClick={() => changeProjection(p)}
           >
-            {p}
+            {wording(p)}
           </button>
         ))}
       </Section>

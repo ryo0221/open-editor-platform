@@ -28,11 +28,16 @@ import {
   type EditorLayoutProps,
   type EditorWorkspaceProps,
   type EditorWorkspaceTransition,
+  EditorWordingProvider,
+  editorUiWording,
+  useWording,
+  type EditorWordingProps,
 } from '@editor-platform/editor-ui';
 import { activeBlock, jumpToBlock } from './engine';
 import { createLocalDocumentCommand, sameDocumentProjection } from './local-engine-command';
 import { isVerticalDocument, type DocumentContent } from './model';
 import { documentActions } from './view-actions';
+import { documentWording } from './wording';
 import {
   DocumentDocxExport,
   DocumentFindBar,
@@ -73,10 +78,11 @@ import 'prosemirror-tables/style/tables.css';
 import './styles.css';
 
 export { blockLabels, type DocumentTextBridge } from './view-model';
+export { documentWording } from './wording';
 export type { DocumentNovelOptions, DocumentWorkspace } from './novel-workspace';
 export type DocumentWorkspaceTransition = EditorWorkspaceTransition<DocumentWorkspace>;
 
-export interface DocumentSurfaceProps
+interface DocumentSurfaceBodyProps
   extends ReferenceSurfaceProps,
     EditorWorkspaceProps<DocumentWorkspace> {
   textEngine?: DocumentTextBridge;
@@ -91,7 +97,18 @@ export interface DocumentSurfaceProps
   /** Host-owned inputs of the novel workspace. Passing it or `workspace` shows the switch. */
   novel?: DocumentNovelOptions;
 }
-export function DocumentSurface({
+type DocumentSurfaceProps = DocumentSurfaceBodyProps & EditorWordingProps;
+export type { DocumentSurfaceProps };
+const wordingSets = [editorUiWording, documentWording];
+/** The Document Surface. `locale` and `labels` choose its visible wording. */
+export function DocumentSurface({ locale, labels, ...props }: DocumentSurfaceProps) {
+  return (
+    <EditorWordingProvider locale={locale} sets={wordingSets} labels={labels}>
+      <DocumentSurfaceBody {...props} />
+    </EditorWordingProvider>
+  );
+}
+function DocumentSurfaceBody({
   references,
   content: hostContent,
   execute,
@@ -106,7 +123,8 @@ export function DocumentSurface({
   onWorkspaceRequest,
   onWorkspaceTransition,
   novel,
-}: DocumentSurfaceProps) {
+}: DocumentSurfaceBodyProps) {
+  const t = useWording();
   const emitted = useRef<EmittedProjection>(null);
   const previousContent = emitted.current?.content;
   // A Host may return a mutable clone of the exact content just emitted. Compare
@@ -385,7 +403,7 @@ export function DocumentSurface({
           )}
         </>
       }
-      status={documentStatus(textMetrics, content, readOnly)}
+      status={documentStatus(textMetrics, content, readOnly, t)}
       toolbar={
         !novelShown && (
           <DocumentToolbar

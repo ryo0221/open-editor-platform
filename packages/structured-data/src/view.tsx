@@ -5,8 +5,15 @@ import {
   EditorExportGuardContext,
   EditorInputsContext,
   EditorLayout,
+  EditorWordingProvider,
+  T,
+  editorUiWording,
+  useWording,
   type EditorLayoutProps,
+  type EditorWordingProps,
 } from '@editor-platform/editor-ui';
+import { dataWording } from './wording';
+export { dataWording } from './wording';
 import { downloadBlob } from '@editor-platform/canvas-ui';
 import {
   defaultView,
@@ -36,7 +43,7 @@ import {
 } from './view-dialogs';
 import './styles.css';
 export type { DataProjection } from './views';
-export interface DataSurfaceProps {
+interface DataSurfaceBodyProps {
   content: StructuredData;
   execute: (c: EditorCommand<StructuredData>) => void | boolean;
   /** Optional independent projection; Data owns records, commands and history. */
@@ -56,7 +63,17 @@ export interface DataSurfaceProps {
   readOnly?: boolean;
   layout?: Pick<EditorLayoutProps, 'viewKey' | 'panels' | 'defaultPanels' | 'onPanelsChange'>;
 }
-export function DataSurface({
+export type DataSurfaceProps = DataSurfaceBodyProps & EditorWordingProps;
+const wordingSets = [editorUiWording, dataWording];
+/** The Structured Data Surface. `locale` and `labels` choose its visible wording. */
+export function DataSurface({ locale, labels, ...props }: DataSurfaceProps) {
+  return (
+    <EditorWordingProvider locale={locale} sets={wordingSets} labels={labels}>
+      <DataSurfaceBody {...props} />
+    </EditorWordingProvider>
+  );
+}
+function DataSurfaceBody({
   content: data,
   execute,
   select,
@@ -66,14 +83,15 @@ export function DataSurface({
   initialView,
   onViewChange,
   onViewDraftChange,
-}: DataSurfaceProps) {
+}: DataSurfaceBodyProps) {
+  const wording = useWording();
   const guardExport = useContext(EditorExportGuardContext);
   const inputs = useContext(EditorInputsContext);
   const formDrafts = useRef(new Map<string, RecordDraft>());
   const [error, setError] = useState('');
   function apply(cmd: EditorCommand<StructuredData>) {
     if (readOnly) {
-      setError('This surface is read only');
+      setError(wording('This surface is read only'));
       return false;
     }
     try {
@@ -250,8 +268,10 @@ export function DataSurface({
       <div className="ep-data-body">
         {error && (
           <div role="alert" className="ep-error">
-            {error}
-            <button onClick={() => setError('')}>Dismiss</button>
+            {wording(error)}
+            <button onClick={() => setError('')}>
+              <T>Dismiss</T>
+            </button>
           </div>
         )}
         <DeletedRecordDrafts
