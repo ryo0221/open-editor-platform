@@ -82,6 +82,10 @@ test('Host Vite configurations and helper imports reach their specs', () => {
   const host = plan('vite.artifact-host.config.ts');
   assert(names(host.run).includes('bim-hosts') && names(host.deferred).includes('cad-hosts'));
   assert(names(plan('packages/templates/src/index.ts').run).includes('design-reuse-graphics'));
+  // A literal dynamic import, and the packages a bundled fixture host mounts.
+  assert(names(plan('packages/design/src/index.ts').run).includes('animation-2d'));
+  const whiteboard = names(plan('packages/whiteboard/src/index.ts').run);
+  assert(whiteboard.includes('spatial-wasm') && whiteboard.includes('spatial-wasm-mobile'));
 });
 
 test('comparison counts only failures that happen on the branch alone', () => {

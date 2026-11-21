@@ -215,9 +215,30 @@ export const specRules = [
 export const defaultPorts = [4175, 4176, 4180, 5173, 5174];
 
 const portPattern = /(?:127\.0\.0\.1|localhost):(\d{4,5})/g;
-const importPattern = /from\s+['"]@editor-platform\/([a-z0-9-]+)/g;
+/** Static (`from '…'`) and literal dynamic (`import('…')`) workspace imports. */
+const importPattern = /(?:from\s+|import\(\s*)['"]@editor-platform\/([a-z0-9-]+)/g;
 const relativePattern = /['"`]((?:\.\.\/)+[\w@./-]+)['"`]/g;
 const helperPattern = /from\s+['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
+
+const fixtureCache = new Map();
+/** Workspace packages imported anywhere under a tests/fixtures directory. */
+function fixtureImports(root, dir) {
+  if (fixtureCache.has(dir)) return fixtureCache.get(dir);
+  const found = new Set();
+  const walk = (path) => {
+    if (!existsSync(path)) return;
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) walk(child);
+      else if (/\.(?:[cm]?[jt]sx?)$/.test(entry.name))
+        for (const [, name] of readFileSync(child, 'utf8').matchAll(importPattern))
+          if (existsSync(join(root, 'packages', name))) found.add(name);
+    }
+  };
+  walk(join(root, dir));
+  fixtureCache.set(dir, found);
+  return found;
+}
 
 /** Local helper modules (tests/e2e/*.ts) a spec or helper imports, transitively. */
 function helpers(dir, file, seen = new Set()) {
@@ -259,8 +280,11 @@ export function classifySpecs(root) {
           const target = posix.join('tests/e2e', relative);
           const fixture = /^tests\/fixtures\/[^/]+/.exec(target);
           const pkg = /^packages\/([^/]+)\//.exec(target);
-          if (fixture) paths.add(`${fixture[0]}/`);
-          else if (pkg && existsSync(join(root, 'packages', pkg[1]))) owners.add(pkg[1]);
+          if (fixture) {
+            paths.add(`${fixture[0]}/`);
+            // Packages the bundled or loaded fixture sources import are owners as well.
+            for (const name of fixtureImports(root, fixture[0])) owners.add(name);
+          } else if (pkg && existsSync(join(root, 'packages', pkg[1]))) owners.add(pkg[1]);
           else if (target.startsWith('scripts/fixtures/')) paths.add(target);
         }
         // Packages the spec or its helpers import are owners too (fixtures, models).
