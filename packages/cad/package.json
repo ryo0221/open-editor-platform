@@ -11,8 +11,8 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/cad-core": "*",
     "@editor-platform/cad-kernel-occt": "*",
     "@editor-platform/character": "*",

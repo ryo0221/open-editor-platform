@@ -9,12 +9,12 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "lucide-react": "1.51.0",
-    "pdfjs-dist": "6.2.108"
+    "pdfjs-dist": "6.2.108",
+    "lucide-react": "1.51.0"
   },
   "peerDependencies": {
     "react": "^19.1.1"

@@ -17,16 +17,16 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/animation-core": "*",
     "@editor-platform/animation-player": "*",
-    "@editor-platform/artifact-core": "*",
-    "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "@editor-platform/extension-contract": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/reuse-core": "*",
-    "react": "19.1.1"
+    "@editor-platform/canvas-ui": "*",
+    "react": "19.1.1",
+    "@editor-platform/extension-contract": "*"
   },
   "devDependencies": {
     "react-dom": "19.1.1"

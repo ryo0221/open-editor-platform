@@ -9,10 +9,10 @@
   },
   "dependencies": {
     "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/react-ui-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
-    "@editor-platform/react-ui-core": "*",
-    "@editor-platform/reuse-core": "*",
     "fflate": "0.8.3"
   },
   "peerDependencies": {

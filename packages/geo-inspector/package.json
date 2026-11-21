@@ -11,11 +11,11 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/geo-core": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
-    "@editor-platform/extension-contract": "*",
-    "@editor-platform/geo-core": "*"
+    "@editor-platform/extension-contract": "*"
   },
   "devDependencies": {
     "@editor-platform/extension-runtime": "*"

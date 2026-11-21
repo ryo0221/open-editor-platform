@@ -9,8 +9,8 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/ladder-core": "*",

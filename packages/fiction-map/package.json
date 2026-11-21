@@ -19,13 +19,13 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "0.1.0",
     "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/canvas-ui": "0.1.0",
+    "@editor-platform/artifact-core": "0.1.0",
     "@editor-platform/editor-core": "0.1.0",
-    "@editor-platform/editor-host": "0.1.0",
+    "@editor-platform/geometry-core": "0.0.0",
+    "@editor-platform/canvas-ui": "0.1.0",
     "@editor-platform/editor-ui": "0.2.0",
-    "@editor-platform/geometry-core": "0.0.0"
+    "@editor-platform/editor-host": "0.1.0"
   },
   "peerDependencies": {
     "react": "^19.1.1",

@@ -16,12 +16,10 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/artifact-references": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-core": "*",
-    "@editor-platform/editor-host": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/office-export-ui": "*",
     "@editor-platform/reuse-core": "*",
@@ -37,7 +35,9 @@
     "prosemirror-state": "1.4.4",
     "prosemirror-tables": "1.8.5",
     "prosemirror-transform": "1.12.2",
-    "prosemirror-view": "1.42.6"
+    "prosemirror-view": "1.42.6",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/editor-host": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1",

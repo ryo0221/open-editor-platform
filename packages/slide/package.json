@@ -9,17 +9,17 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/animation": "*",
-    "@editor-platform/animation-core": "*",
-    "@editor-platform/animation-player": "*",
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/artifact-references": "*",
-    "@editor-platform/canvas-ui": "*",
+    "@editor-platform/reuse-core": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/office-export-ui": "*",
-    "@editor-platform/reuse-core": "*",
+    "@editor-platform/artifact-references": "*",
+    "@editor-platform/animation-core": "*",
+    "@editor-platform/animation-player": "*",
+    "@editor-platform/animation": "*",
     "lucide-react": "1.51.0"
   },
   "peerDependencies": {

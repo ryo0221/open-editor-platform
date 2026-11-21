@@ -16,16 +16,16 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/canvas-ui": "*",
-    "@editor-platform/editor-core": "*",
-    "@editor-platform/editor-host": "*",
-    "@editor-platform/editor-ui": "*",
-    "@editor-platform/property-input": "*",
+    "@editor-platform/artifact-core": "*",
     "@editor-platform/reuse-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
+    "@editor-platform/canvas-ui": "*",
+    "lucide-react": "1.51.0",
+    "@editor-platform/property-input": "*",
     "@editor-platform/time-axis": "*",
-    "lucide-react": "1.51.0"
+    "@editor-platform/editor-host": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1"

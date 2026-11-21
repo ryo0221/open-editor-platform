@@ -12,11 +12,11 @@
     "./kind": "./src/kind.ts"
   },
   "dependencies": {
-    "@editor-platform/analysis-core": "*",
-    "@editor-platform/artifact-core": "*",
     "@editor-platform/artifact-kinds": "*",
-    "@editor-platform/artifact-references": "*",
+    "@editor-platform/analysis-core": "*",
     "@editor-platform/calculation-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-references": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-host": "*",
     "@editor-platform/structured-data": "*"
