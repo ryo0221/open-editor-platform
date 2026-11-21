@@ -45,11 +45,12 @@ export function mangaCoverBox(e: Pick<DesignElement, 'bounds' | 'rotation'>): Bo
 }
 
 /**
- * The world box a balloon covers as drawn, its parts included: an outline or dialogue edited on
- * its own can reach past the group's bounds, which are not recomputed (Codex on #28).
+ * The world box an element covers as drawn, its parts included: a balloon's outline or dialogue,
+ * or a part of a marked face or figure group, edited on its own can reach past the group's bounds,
+ * which are not recomputed (Codex on #28).
  */
-export function mangaBalloonFootprint(d: DesignContent, balloon: DesignElement): Bounds {
-  const boxes = [balloon, ...d.elements.filter((e) => isWithin(d, e.id, balloon.id))].map(
+export function mangaFootprint(d: DesignContent, element: DesignElement): Bounds {
+  const boxes = [element, ...d.elements.filter((e) => isWithin(d, e.id, element.id))].map(
     mangaCoverBox,
   );
   const x = Math.min(...boxes.map((b) => b.x)),
@@ -61,9 +62,8 @@ export function mangaBalloonFootprint(d: DesignContent, balloon: DesignElement):
     height: Math.max(...boxes.map((b) => b.y + b.height)) - y,
   };
 }
-/** What an obstacle covers: a balloon with its parts, anything else by its own drawn box. */
-const obstacleBox = (d: DesignContent, e: DesignElement) =>
-  isMangaBalloon(e) ? mangaBalloonFootprint(d, e) : mangaCoverBox(e);
+/** A balloon's footprint: the group with its outline and dialogue. */
+export const mangaBalloonFootprint = mangaFootprint;
 
 function panelIds(d: DesignContent) {
   return new Set((d.pagination?.pages ?? []).flatMap((p) => p.panelIds));
@@ -91,7 +91,7 @@ export function mangaBalloonOverlaps(d: DesignContent): MangaBalloonOverlap[] {
     if (!panelId) continue;
     const cover = mangaBalloonFootprint(d, balloon);
     for (const k of inPanel(d, panelId, isMangaKeepOut)) {
-      const box = mangaCoverBox(k);
+      const box = mangaFootprint(d, k);
       const area = overlapArea(cover, box);
       if (area > 0)
         out.push({
@@ -156,7 +156,7 @@ export function mangaBalloonPlacement(
         (isMangaKeepOut(e) || isMangaBalloon(e)) &&
         mangaPanelOf(d, e.id) === panelId,
     )
-    .map((e) => obstacleBox(d, e));
+    .map((e) => mangaFootprint(d, e));
   const free = {
     width: b.width - 2 * margin - size.width,
     height: b.height - 2 * margin - size.height,
