@@ -3879,6 +3879,14 @@ test('#18 a form-to-form motion with a camera path exports to video', async ({ p
   await editor.getByRole('button', { name: 'Add camera key' }).click();
   const keys = editor.getByRole('list', { name: 'Camera keys' }).getByRole('listitem');
   await expect(keys).toHaveCount(3);
+  // Shortening step 2 drops the key at 2 s and moves the time to the new end, so a key added
+  // now lands inside the motion (Codex on #34).
+  await editor.getByLabel('Step 2 seconds').fill('0.5');
+  await expect(keys).toHaveCount(2);
+  await expect(editor.getByLabel('Motion time shown')).toHaveText('1.5 s / 1.5 s');
+  await editor.getByRole('button', { name: 'Add camera key' }).click();
+  await expect(keys).toHaveCount(3);
+  await expect(keys.nth(2)).toHaveText(/Camera at 1\.5 s/);
   await editor.getByRole('button', { name: 'Remove step 2' }).click();
   await expect(keys).toHaveCount(2);
   await expect(editor.getByLabel('Motion time shown')).toHaveText('1.0 s / 1.0 s');

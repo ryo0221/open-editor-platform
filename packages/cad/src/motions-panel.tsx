@@ -122,7 +122,7 @@ export function MotionsSection({
     return () => cancelAnimationFrame(frame);
   }, [playing, draftTotal]);
 
-  if (forms.length < 2 && !motions.length) return null;
+  if (forms.length < 2 && !motions.length && !draft) return null;
   const stale = (m: CadMotion) => motionStaleForms(doc, m).length > 0;
   const edit = (m: CadMotion) => {
     setDraft(structuredClone(m));
@@ -153,15 +153,15 @@ export function MotionsSection({
   };
   const remove = (id: string) => void assembly.setMotions(motions.filter((m) => m.id !== id));
   const patch = (p: Partial<CadMotion>) => setDraft((d) => (d ? { ...d, ...p } : d));
-  const patchStep = (i: number, p: Partial<CadMotion['steps'][number]>) =>
-    setDraft((d) =>
-      d
-        ? withSteps(
-            d,
-            d.steps.map((s, j) => (j === i ? { ...s, ...p } : s)),
-          )
-        : d,
+  const patchStep = (i: number, p: Partial<CadMotion['steps'][number]>) => {
+    if (!draft) return;
+    const next = withSteps(
+      draft,
+      draft.steps.map((s, j) => (j === i ? { ...s, ...p } : s)),
     );
+    setDraft(next);
+    setTimeMs((t) => Math.min(t, motionDurationMs(next)));
+  };
   const addKey = () => {
     const v = view.current?.currentView();
     if (!v || !draft) return;
@@ -171,7 +171,7 @@ export function MotionsSection({
       return setNote(`カメラキーは${cadMotionLimits.cameraKeys}個までです。`);
     patch({
       camera: withCameraKey(draft.camera, {
-        atMs: Math.round(timeMs),
+        atMs: Math.round(Math.min(timeMs, motionDurationMs(draft))),
         camera: v.camera,
         fovRad: v.projection.fovRad,
       }),
