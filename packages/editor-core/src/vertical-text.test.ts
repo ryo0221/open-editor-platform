@@ -316,6 +316,23 @@ describe('#20 vertical writing', () => {
     ).toEqual(['第', '12', '話']);
   });
 
+  it('moves punctuation by its own size (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: { x: 0, y: 0, width: 200, height: 100 },
+      text: '。',
+      fill: '#111',
+      typography: { fontSize: 60, writingMode: 'vertical-rl' },
+      runs: [{ text: '。', style: { fontSize: 10 } }],
+    } as unknown as Drawing;
+    const g = gridTextLayout(d).lines[0]!.glyphs[0]!;
+    const svg = serializeSvg(drawingPrimitives(d, 'x'));
+    const m = svg.match(/<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>。<\/text>/)!;
+    expect(Number(m[1]) - g.x).toBeCloseTo(5.5, 6);
+    expect(Number(m[2])).toBeGreaterThan(0);
+  });
+
   it('fits a run much larger than the box font (Codex on #38)', () => {
     const d = {
       id: 't',

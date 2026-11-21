@@ -284,15 +284,15 @@ export function motionCameraAt(
     position = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
   }
   const view = unit(sub(position, target));
-  // Each key's up is carried along with the view (turned by the least rotation that takes the
-  // key's view to this one), then the two carried ups are blended about the view. The up so moves
-  // with the view and never crosses it (Codex on #37/#38).
-  const hint = unit(k1.camera.up);
-  const carried = (keyView: Vec3, keyUp: Vec3) => {
-    const v = rotateLike(unit(keyView), view, unit(keyUp), hint);
-    return unit(sub(v, scale3(view, dot(v, view))));
-  };
-  let up = turn(carried(view1, k1.camera.up), carried(view2, k2.camera.up), u, view);
+  // The orientation turns from one key's to the other's as one rotation (a quaternion slerp,
+  // the shorter way), so the up moves continuously through the segment; it is then kept off the
+  // view the curve gives (Codex on #37/#38).
+  const q = slerp(keyFrame(view1, k1.camera.up), keyFrame(view2, k2.camera.up), u);
+  let up: Vec3 = [
+    2 * (q[0] * q[1] - q[3] * q[2]),
+    1 - 2 * (q[0] * q[0] + q[2] * q[2]),
+    2 * (q[1] * q[2] + q[3] * q[0]),
+  ];
   up = sub(up, scale3(view, dot(up, view)));
   if (Math.hypot(...up) < 1e-6) {
     const keyUp = u < 0.5 ? k1.camera.up : k2.camera.up;
@@ -315,26 +315,66 @@ const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
 /** A unit vector at right angles to `v`. */
 const perpendicular = (v: Vec3): Vec3 =>
   unit(cross(v, Math.abs(v[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
-/** `v` turned by the least rotation that takes unit `a` to unit `b` (about `axis` when opposite). */
-function rotateLike(a: Vec3, b: Vec3, v: Vec3, axis: Vec3): Vec3 {
-  const c = Math.max(-1, Math.min(1, dot(a, b)));
-  let n = cross(a, b);
-  if (Math.hypot(...n) < 1e-9) {
-    if (c > 0) return v;
-    n = sub(axis, scale3(a, dot(axis, a)));
-    if (Math.hypot(...n) < 1e-9) n = perpendicular(a);
-  }
-  n = unit(n);
-  const angle = Math.acos(c);
-  const [cs, sn] = [Math.cos(angle), Math.sin(angle)];
-  // Rodrigues.
-  const w = cross(n, v);
-  const k = dot(n, v) * (1 - cs);
-  return [
-    v[0] * cs + w[0] * sn + n[0] * k,
-    v[1] * cs + w[1] * sn + n[1] * k,
-    v[2] * cs + w[2] * sn + n[2] * k,
+type Quat = [number, number, number, number];
+/** A key's camera orientation (x right, y up, z from the target to the camera) as a quaternion. */
+function keyFrame(view: Vec3, upHint: Vec3): Quat {
+  const b = unit(view);
+  let r = cross(unit(upHint), b);
+  if (Math.hypot(...r) < 1e-9) r = perpendicular(b);
+  r = unit(r);
+  const y = cross(b, r);
+  const [m00, m01, m02, m10, m11, m12, m20, m21, m22] = [
+    r[0],
+    y[0],
+    b[0],
+    r[1],
+    y[1],
+    b[1],
+    r[2],
+    y[2],
+    b[2],
   ];
+  const tr = m00 + m11 + m22;
+  let x: number, yq: number, z: number, w: number;
+  if (tr > 0) {
+    const k = Math.sqrt(tr + 1) * 2;
+    w = k / 4;
+    x = (m21 - m12) / k;
+    yq = (m02 - m20) / k;
+    z = (m10 - m01) / k;
+  } else if (m00 > m11 && m00 > m22) {
+    const k = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    w = (m21 - m12) / k;
+    x = k / 4;
+    yq = (m01 + m10) / k;
+    z = (m02 + m20) / k;
+  } else if (m11 > m22) {
+    const k = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    w = (m02 - m20) / k;
+    x = (m01 + m10) / k;
+    yq = k / 4;
+    z = (m12 + m21) / k;
+  } else {
+    const k = Math.sqrt(1 + m22 - m00 - m11) * 2;
+    w = (m10 - m01) / k;
+    x = (m02 + m20) / k;
+    yq = (m12 + m21) / k;
+    z = k / 4;
+  }
+  return [x, yq, z, w];
+}
+function slerp(a: Quat, b: Quat, u: number): Quat {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const c: Quat = d < 0 ? [-b[0], -b[1], -b[2], -b[3]] : [...b];
+  d = Math.abs(d);
+  let [ka, kb] = [1 - u, u];
+  if (d < 0.9995) {
+    const t = Math.acos(Math.min(1, d));
+    [ka, kb] = [Math.sin((1 - u) * t) / Math.sin(t), Math.sin(u * t) / Math.sin(t)];
+  }
+  const out = a.map((v, i) => ka * v + kb * c[i]!) as Quat;
+  const l = Math.hypot(...out) || 1;
+  return out.map((v) => v / l) as Quat;
 }
 /**
  * Unit `a` turned towards unit `b` by the fraction `u` of the angle between them. Opposite

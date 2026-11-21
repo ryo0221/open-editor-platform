@@ -666,8 +666,9 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   const glyphs = layout.lines.flatMap((line) =>
     line.glyphs.map((g) => {
       // 、。 and small kana move from the lower left of a horizontal cell to the upper right.
-      const shift = g.kind === 'punctuation' ? size * 0.55 : g.kind === 'small' ? size * 0.1 : 0;
       const own = glyphSize(g);
+      // The offsets follow the glyph's own size (Codex on #38).
+      const shift = g.kind === 'punctuation' ? own * 0.55 : g.kind === 'small' ? own * 0.1 : 0;
       return p(
         'text',
         {

@@ -271,6 +271,34 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
     // Through each key, its own up.
     expect(shown(999.999).reduce((n, v, i) => n + v * shown(1000)[i]!, 0)).toBeGreaterThan(0.999);
   });
+  it('keeps the roll continuous through three keys (Codex on #38)', () => {
+    const k = (atMs: number, position: number[], up: number[]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const keys = [
+      k(0, [0, 0, 1000], [0, 1, 0]),
+      k(1000, [1000, 0, 0], [0, -Math.cos(0.05), -Math.sin(0.05)]),
+      k(2000, [0, 1000, 1000], [0, 0, 1]),
+    ];
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 2000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+  });
   it('adds a camera key in time order, replacing one at the same time', () => {
     const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
     expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);
