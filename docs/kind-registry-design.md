@@ -15,7 +15,7 @@
 段階2では、種類ごとの定義を登録制にして、Hostは登録された定義を順に使うだけにします。あわせて上の3つの境界越えを解消し、境界を守っているかを `npm run test:tooling` で確認できるようにします。これで次のことが成り立ちます。
 
 - 共有ファイルの変更が全種類へ広がらず、その種類の定義ファイルの変更はその種類のspecだけを選ぶ。
-- officeの変更でengineeringのspecが選ばれない。逆も同じ。
+- office だけで閉じた変更では、engineering だけの spec を選ばない（逆も同じ）。両方の領域をつなぐ連携の spec（Estimate の CAD/BIM 数量など）は残す。
 - 段階3（engineeringを別リポジトリに分ける）を選んだとき、engineering側の定義一式をそのまま移せる。
 
 ## 対象外
@@ -60,8 +60,11 @@ export interface KindDefinition<C> {
   validate(content: unknown): content is C;
 }
 
-/** 型付きの定義を作る。content の型 C は validate の型ガードと create の戻り値で固定される */
-export function defineKind<C>(definition: KindDefinition<C>): RegisteredKind;
+/** 型付きの定義を作る（型はそのまま返す）。C は validate の型ガードと create の戻り値で固定される */
+export function defineKind<C>(definition: KindDefinition<C>): KindDefinition<C>;
+
+/** 登録の直前に型を消す。ここから先は C を取り戻せない */
+export function registerKind<C>(definition: KindDefinition<C>): RegisteredKind;
 
 /** 登録用に型を消した形。content は validate を通したものだけを扱う */
 export interface RegisteredKind {
@@ -76,7 +79,8 @@ export interface RegisteredKind {
 export function createKindRegistry(kinds: RegisteredKind[]): KindRegistry;
 ```
 
-- 種類ごとに content の型が違うので、配列に入れるときは `defineKind` で `RegisteredKind` に変換します。`KindDefinition<C>` をそのまま `KindDefinition<unknown>[]` に入れると、`validate` の型ガードと `create` の戻り値の型が消えるか、関数引数の変性で型エラーになるためです。`RegisteredKind` から content を取り出すのは、`validate` を通した後だけにします。
+- 型を消す順序は「`defineKind` で型付きの定義を作る → Host が型付きのまま `hostKind` で Surface と組む → 一覧に並べるときに `registerKind`（Host 側は `hostKind` の戻り値）で型を消す」です。`RegisteredKind` に変換した後から `C` は取り戻せないので、Surface との組み合わせは必ず変換の前に行います。
+- 種類ごとに content の型が違うので、配列に入れるときは `RegisteredKind` に変換します。`KindDefinition<C>` をそのまま `KindDefinition<unknown>[]` に入れると、`validate` の型ガードと `create` の戻り値の型が消えるか、関数引数の変性で型エラーになるためです。`RegisteredKind` から content を取り出すのは、`validate` を通した後だけにします。
 - 型の扱いは、`artifact-kinds` のテストに `@ts-expect-error` を使ったコンパイルテストを置いて確かめます。誤った型の `create`、`validate` で絞り込む前の content の利用、同じ種類名の2回登録が、それぞれ型エラーか実行時エラーになることを確認します。
 - `KindRegistry` は、種類名から定義を引く、作成できる種類を並べる、内容を検証する、の3つを提供します。同じ種類名を2回登録したら、起動時にエラーにします。
 
@@ -98,7 +102,23 @@ export function createKindRegistry(kinds: RegisteredKind[]): KindRegistry;
 | `apps/playground/src/kinds/{office,engineering}.ts` | 共有の定義と Host の部品を組にして並べる                                                           |
 | `apps/artifact-host/src/kinds/`                     | Artifact Host の Surface と hook。共有の定義は Playground と同じものを使う                         |
 
-Host 側の組は `hostKind(definition, { Surface, hooks })` で作ります。`Surface` の props の content 型は `definition` の `C` から決まるので、別の種類の Surface を組むと型エラーになります。
+Host 側の組は、型付きの定義から作ります。
+
+```ts
+// apps/<host>/src/kinds/host-kind.ts（Host ごと）
+export interface HostSurfaceProps<C> {
+  content: C;
+  /* 保存・読み取り専用・入力の登録など、Host が Surface に渡すもの */
+}
+export interface HostKindParts<C> {
+  Surface: LazyExoticComponent<ComponentType<HostSurfaceProps<C>>>;
+  hooks?: HostKindHooks<C>; // 取り込み・書き出し・記録の分割保存など
+}
+/** 型付きの定義と Host の部品を組にしてから型を消す */
+export function hostKind<C>(definition: KindDefinition<C>, parts: HostKindParts<C>): HostKindEntry;
+```
+
+`parts` の content 型は `definition` の `C` から決まるので、別の種類の Surface を組むと型エラーになります。コンパイルテストで、Document の定義に CAD の Surface を組むと `@ts-expect-error` が成り立つこと（＝型エラーになること）を確かめます。
 
 `App.tsx`、`model.ts`、`app/editor-surfaces.tsx` からは種類ごとの分岐をなくし、登録された組を使います。種類に固有の処理で hook に収まらないものは、移行中に見つけた時点で一覧にして、この文書に追記します。
 
@@ -133,10 +153,20 @@ Host 側の組は `hostKind(definition, { Surface, hooks })` で作ります。`
 
 - **種類 → package：** 各種類の定義を持つ package と、Surface を持つ package（`kindPackages`）。`apps/*/src/kinds/<area>/<kind>.tsx` の変更は、その種類の package の変更として扱います。
 - **連携 → spec：** 依存を切った連携を、spec の owner に明示します。たとえば `estimate-*` の spec の owner に `estimate-engineering`、`cad-core`、`bim-core` を加えます。
+- **領域の一覧 → package：** `kinds/office.ts` と `kinds/engineering.ts` の変更は、その一覧が並べる package と Host の部品（`kinds/<area>/*.tsx`、Host の連携ファイル `app/estimate-bim.ts` など）すべての変更として扱い、そこから owner と逆依存をたどります。領域で絞り込むことはしません。このため、`kinds/engineering.ts` で `geometrySources` の接続が変わったときも、office に属する `estimate-editor`（CAD数量 ES11、BIM数量 ES16）が選ばれます。
 
-`kinds/office.ts` の変更は office の light spec 全部、`kinds/engineering.ts` は engineering の spec 全部を選びます（どちらも、今の「Playground共有ファイル → 全light spec」より狭い）。
+結果として、一覧の変更が選ぶ spec は「その一覧の package と、それらにつながる連携の spec」になり、今の「Playground共有ファイル → 全light spec」より狭くなります。
 
-**過少選択の確認（KR7の受け入れ条件）：** 段階1（main）の選択規則で、各 package の変更が選ぶ spec の一覧を固定値として保存します。新しい規則で同じ変更が選ぶ spec がその一覧を含むこと（減ってよいのは、Playground 共有ファイルの広い規則でだけ選ばれていたものに限り、その理由を一覧で示す）を tooling テストで確認します。
+**過少選択の確認（KR7の受け入れ条件）：** 段階1（main）の選択規則で、各 package の変更が選ぶ spec の一覧を固定値として保存し、新しい規則で同じ変更が選ぶ spec と比べる tooling テストを置きます。新しい規則で減ってよい spec は、次の2つで説明できるものだけです。
+
+1. **Playground 共有ファイルの広い規則でだけ選ばれていたもの。**
+2. **意図して外した依存によるもの。** 外した依存と移動先を許可差分として一覧にします（例：`character → animation-core` を外して `easing` へ移した KR2、`estimate → cad-core / bim-core` を外して `estimate-engineering` へ移した KR3）。外した依存の先（`animation-core`）の変更では、その依存を通じてだけ選ばれていた spec（`character-laputa-range` など）が減ってよい。そのかわり、移動先（`easing`）の変更は、外した両側の spec（animation と character）を選ばなければならない。
+
+どちらでも説明できない減少があれば、テストは失敗します。あわせて次の個別の確認を置きます。
+
+- `kinds/engineering.ts` の変更で `estimate-editor` が選ばれる。
+- `animation-core` の変更で character の spec が選ばれず、`easing` の変更で animation と character の両方の spec が選ばれる。
+- `estimate-engineering`、`cad-core`、`bim-core` の変更で `estimate-*` の spec が選ばれる。
 
 ## 段階的な実装計画
 
@@ -150,7 +180,7 @@ Host 側の組は `hostKind(definition, { Surface, hooks })` で作ります。`
 | KR4  | `artifact-kinds`（Reactなし）と各 package の `./kind`。Playground の作成・検証・表示名を登録制に（`model.ts`） | 全26種類の作成結果（content・名前・付随データ）が今と同じこと、保存→再読込で同じになること、型のコンパイルテスト、影響範囲の e2e |
 | KR5  | Playground の描画を登録制に（`editor-surfaces.tsx`、`App.tsx`）。office と engineering の一覧を分ける          | 影響範囲の e2e（共有ファイルを触るので office と engineering の light spec 全部）                                                |
 | KR6  | Artifact Host を同じ形に                                                                                       | host、bim.hosts、cad.hosts の各スイート                                                                                          |
-| KR7  | `affected.mjs` を `kinds/` と `kindPackages` に対応させる。受け入れPR                                          | 過少選択の確認テスト、tooling、mainとの比較（段階1の手順）                                                                       |
+| KR7  | `affected.mjs` を `kinds/` と `kindPackages` に対応させる。受け入れPR                                          | 過少選択の確認テスト（許可差分つき）と個別の確認、tooling、mainとの比較（段階1の手順）                                           |
 
 KR5 と KR6 は共有ファイルを大きく触るので、e2e は段階1の `--from-json` と `compare.mjs` で main と比べ、ブランチだけで落ちるテストがないことを確認します。重い CAD/解析の spec は、そのPRで engineering の定義を変えたときだけ走らせます。
 
