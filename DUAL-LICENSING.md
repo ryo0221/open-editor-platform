@@ -20,6 +20,9 @@ This is an **alternative licensing choice**, not a cumulative obligation. The co
 - Commercial license offers depend on chain of title and contributor authority. Copyright ownership is not automatically transferred to the project by a PR.
 - A company that fully satisfies AGPL is **not** required to buy the commercial license simply because it sells a product.
 
+### Planned beta and GA terms
+The intended alternative license is **free of license fees for a contractually authorized beta release** until the GA transition, with **no fixed beta deadline**. Newly granted commercial/OEM licenses for GA are **paid**. GA and the commercial transition must be announced **at least three calendar months and 90 days beforehand**. Signed beta-license rights, including the treatment of already distributed copies, require express contract terms; an announcement does not automatically revoke granted rights or impose retroactive fees. There is **no automatically granted proprietary beta license** while the commercial program remains unopened. See [Beta Commercial Policy](BETA-COMMERCIAL-POLICY.md) and [Commercial/OEM gate](docs/release/COMMERCIAL-OEM-GATE.md).
+
 ## Independent Editor extensions
 
 The project intends to allow independently authored Editors to be kept proprietary and sold without forcing the extension author to open the extension source solely because it uses documented editor interfaces. **The legal boundaries of an AGPL-covered combined work must be assessed; interface use alone does not categorically resolve the issue.**
