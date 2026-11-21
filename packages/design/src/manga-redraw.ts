@@ -171,7 +171,9 @@ export function checkPanelRedrawSelection(
     const same =
       (['x', 'y', 'width', 'height'] as const).every((k) => was.bounds[k] === e.bounds[k]) &&
       (was.rotation ?? 0) === (e.rotation ?? 0);
-    if (same) continue;
+    // Changed text inside the panel is checked where it paints even in the same box: text set to
+    // expand runs past its box (Codex on #28).
+    if (same && (e.type !== 'text' || !inside.has(e.id))) continue;
     // A layout around the panel (the page's row, the panel's own hug size) can carry a change
     // out of it: the panel and everything outside it must keep their place (Codex on #28).
     if (!inside.has(e.id))

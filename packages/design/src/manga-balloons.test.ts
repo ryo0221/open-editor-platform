@@ -213,6 +213,36 @@ describe('#21 balloons keep off faces and figures', () => {
     expect(stuck).toEqual([b.elementId]);
     expect(command).toBeUndefined();
   });
+
+  it('does not take a move that carries another balloon onto it (Codex on #28)', () => {
+    let d = page();
+    d = insertElement('group', {
+      id: 'holder',
+      parentId: 'k1',
+      bounds: { x: 230, y: 28, width: 150, height: 100 },
+    }).apply(d);
+    d = updateElement('holder', {
+      layout: { direction: 'row', gap: 0, padding: 0, align: 'start', sizing: 'fixed' },
+    }).apply(d);
+    const b = insertDesignSpeechBalloon('k1', { x: 230, y: 28, width: 150, height: 100 }, 'B');
+    d = updateElement(b.elementId, { parentId: 'holder' }).apply(b.apply(d));
+    const a = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 150, height: 100 }, 'A');
+    d = a.apply(d);
+    // B's stored place is stale (lower left); its row puts it back at (230, 28) on the next edit,
+    // which is the free place the search finds for A.
+    const inB = (id: string) =>
+      id === b.elementId || d.elements.find((e) => e.id === id)?.parentId === b.elementId;
+    d = {
+      ...d,
+      elements: d.elements.map((e) =>
+        inB(e.id) ? { ...e, bounds: { ...e.bounds, x: e.bounds.x - 200, y: e.bounds.y + 220 } } : e,
+      ),
+    };
+    const { command, moved, stuck } = moveMangaBalloonsOffKeepOut(d);
+    expect(moved).toEqual([]);
+    expect(stuck).toEqual([a.elementId]);
+    expect(command).toBeUndefined();
+  });
 });
 
 describe('#21 redraw one panel', () => {
@@ -349,6 +379,27 @@ describe('#21 redraw one panel', () => {
       ],
     } as unknown as DesignPageProposalRequest;
     expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(/would move outside panel k1/);
+  });
+
+  it('checks where changed text paints when it expands past its box (Codex on #28)', () => {
+    let d = page();
+    d = insertElement('text', {
+      id: 'words',
+      parentId: 'k1',
+      bounds: { x: 50, y: 320, width: 150, height: 40 },
+    }).apply(d);
+    d = updateElement('words', { text: 'あ', typography: { overflow: 'expand' } }).apply(d);
+    const asked = designPanelRedrawRequest(d, 'k1', '');
+    const answer = (value: string) =>
+      ({
+        units: [
+          { id: 'u', label: 'u', requires: [], operations: [{ type: 'text', id: 'words', value }] },
+        ],
+      }) as unknown as DesignPageProposalRequest;
+    expect(() => checkPanelRedrawProposal(d, asked, answer('い'))).not.toThrow();
+    expect(() =>
+      checkPanelRedrawProposal(d, asked, answer(Array(10).fill('セリフ').join('\n'))),
+    ).toThrow(/would move outside panel k1/);
   });
 
   it('keeps a redraw inside a slanted panel, not just its bounds (Codex on #28)', () => {

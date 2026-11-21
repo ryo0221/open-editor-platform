@@ -1,6 +1,13 @@
-import { transaction, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
+import {
+  transaction,
+  unionBounds,
+  type Bounds,
+  type EditorCommand,
+} from '@editor-platform/editor-core';
+import { designTextExtent } from './paint-bounds';
 import {
   appearance,
+  designDrawings,
   transformElements,
   updateElement,
   type DesignContent,
@@ -52,7 +59,13 @@ export function mangaCoverBox(e: Pick<DesignElement, 'bounds' | 'rotation'>): Bo
 
 /** `mangaCoverBox` with the rotation it is drawn with, a shared style's included (Codex on #28). */
 export function mangaDrawnBox(d: DesignContent, e: DesignElement): Bounds {
-  return mangaCoverBox({ bounds: e.bounds, rotation: appearance(d, e).rotation });
+  const box = mangaCoverBox({ bounds: e.bounds, rotation: appearance(d, e).rotation });
+  if (e.type !== 'text') return box;
+  // Text set to expand paints past its box, so its laid-out lines count too (Codex on #28).
+  const text = designDrawings(d, e)
+    .map(designTextExtent)
+    .filter((b): b is Bounds => !!b);
+  return text.length ? unionBounds([box, ...text]) : box;
 }
 
 /**
@@ -279,7 +292,8 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
       Math.abs(landed.y - to.y) > 1e-6 ||
       Math.abs(landed.width - footprint.width) > 1e-6 ||
       Math.abs(landed.height - footprint.height) > 1e-6 ||
-      mangaBalloonOverlaps(after).some((o) => o.balloonId === id)
+      mangaBalloonOverlaps(after).some((o) => o.balloonId === id) ||
+      movesOtherBalloons(next, after, id)
     ) {
       stuck.push(id);
       continue;
@@ -294,6 +308,22 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
     stuck,
     locked,
   };
+}
+/**
+ * Whether moving balloon `id` also moved another balloon: a row or column layout shared with it
+ * can carry the others, even onto where it went, so such a move is not taken (Codex on #28).
+ */
+function movesOtherBalloons(before: DesignContent, after: DesignContent, id: string) {
+  const was = new Map(before.elements.map((e) => [e.id, e]));
+  return after.elements.some((e) => {
+    if (e.id === id || !isMangaBalloon(e) || isWithin(after, e.id, id) || isWithin(after, id, e.id))
+      return false;
+    const old = was.get(e.id);
+    if (!old) return true;
+    const a = mangaBalloonFootprint(before, old),
+      b = mangaBalloonFootprint(after, e);
+    return (['x', 'y', 'width', 'height'] as const).some((k) => Math.abs(a[k] - b[k]) > 1e-6);
+  });
 }
 function isWithin(d: DesignContent, id: string, ancestor: string) {
   const index = new Map(d.elements.map((e) => [e.id, e]));
