@@ -176,6 +176,15 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
     expect(motionStaleForms(assembly, m)).toEqual(['form-gone']);
     expect(motionStateAt(assembly, m, 5)).toBeUndefined();
   });
+  it('is stale while a form it passes is past the joint limits now (Codex on #34)', () => {
+    const { assembly } = mr2ArmWingsForms();
+    const doc = structuredClone(assembly);
+    doc.configurations![1]!.values['j-elbow'] = { angle: { literalRad: 170 * deg } };
+    const m = motion();
+    expect(motionStaleForms(doc, m)).toEqual(['form-flight']);
+    expect(motionStateAt(doc, m, 500)).toBeUndefined();
+    expect(motionStaleForms(assembly, m)).toEqual([]);
+  });
   it('follows the camera keys: held outside them, through each key, smooth between', () => {
     expect(motionCameraAt(undefined, 0)).toBeUndefined();
     const keys = [key(0, 0, 30), key(1000, 1000, 50), key(2000, 1000, 50), key(3000, 0, 30)];
