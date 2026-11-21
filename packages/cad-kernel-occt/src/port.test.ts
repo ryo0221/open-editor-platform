@@ -814,10 +814,32 @@ describe('split evaluations (CM-4, P3)', () => {
     tick(1_150_000);
     worker.send(continued(r, 3));
     // The first job had the split job limit; the next one only the 50 s left of the 20 min.
-    expect(cadKernelTimeouts).toEqual({ jobMs: 120_000, sliceJobMs: 300_000, totalMs: 1_200_000 });
+    expect(cadKernelTimeouts).toMatchObject({
+      jobMs: 120_000,
+      sliceJobMs: 300_000,
+      totalMs: 1_200_000,
+    });
     expect(timers.delays).toEqual([300_000, 50_000]);
     timers.fireAll();
     expect(await result).toMatchObject({ status: 'error', code: 'timeout' });
+  });
+
+  it("keeps a render's finer meshes at 2 min a job and 5 min in all (#14)", async () => {
+    const { workers, spawn } = fakeWorkers();
+    const timers = manualTimers();
+    let clock = 0;
+    const port = new WorkerKernelPort({ spawn, build, timers, sliceMs: 5000, now: () => clock });
+    const r = request('render');
+    const result = port.renderMeshes(r, { relativeDeflection: 0.0002, angularDeflectionRad: 0.1 });
+    workers[0].send({ type: 'ready', buildHash: build.buildHash });
+    await flush();
+    clock += 250_000;
+    workers[0].send(continued(r, 3));
+    // A render's job has 2 min, and the next one only the 50 s left of its 5 min.
+    expect(cadKernelTimeouts).toMatchObject({ renderSliceJobMs: 120_000, renderTotalMs: 300_000 });
+    expect(timers.delays).toEqual([120_000, 50_000]);
+    timers.fireAll();
+    expect((await result).evaluation).toMatchObject({ status: 'error', code: 'timeout' });
   });
 
   it('gives a STEP read the job limit (2 min, #14) and 12 s for each MiB of the file (CR7f #846, #812)', async () => {

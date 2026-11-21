@@ -453,6 +453,16 @@ export const cadOutputLimits = Object.freeze({
   bufferBytes: 256 * 1024 * 1024,
 });
 /**
+ * The output limits of a render's finer meshes (`renderMesh`): triangles and buffers kept at their
+ * values from before #14. A render re-meshes every shown version finer and the path tracer holds
+ * all of them at once, so a version past these keeps its display meshes.
+ */
+export const cadRenderOutputLimits = Object.freeze({
+  faces: 200_000,
+  triangles: 500_000,
+  bufferBytes: 64 * 1024 * 1024,
+});
+/**
  * The pick table's size as held in memory: its numbers as doubles and its names as UTF-16.
  * Names are bounded by the face limit and the name limits (cadTopologyLimits).
  */
