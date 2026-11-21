@@ -4,7 +4,7 @@ import { referenceExportManifest } from '@editor-platform/artifact-references';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import type { ReferenceSurfaceProps } from '@editor-platform/artifact-references/react';
 import { descendantIds, type EditorCommand } from '@editor-platform/editor-core';
-import { CommitInput, Dialog, Menu, Section } from '@editor-platform/editor-ui';
+import { CommitInput, Dialog, Menu, Section, T } from '@editor-platform/editor-ui';
 import { LayerNavigator, exportPages, type CanvasTarget } from '@editor-platform/canvas-ui';
 import {
   appearance,
@@ -212,7 +212,7 @@ export function DesignExportMenu({
           checked={transparent}
           onChange={(e) => setTransparent(e.target.checked)}
         />{' '}
-        Transparent background
+        <T>Transparent background</T>
       </label>
       <select
         aria-label="Design export scale"
@@ -257,8 +257,12 @@ export function DesignNavigator({
   return (
     <>
       <div className="navigator-tabs">
-        <button onClick={() => setTab('layers')}>Layers</button>
-        <button onClick={() => setTab('components')}>Components</button>
+        <button onClick={() => setTab('layers')}>
+          <T>Layers</T>
+        </button>
+        <button onClick={() => setTab('components')}>
+          <T>Components</T>
+        </button>
       </div>
       {tab === 'layers' ? (
         <LayerNavigator
@@ -332,7 +336,7 @@ export function FramePresetDialog({
           if (apply(applyFramePreset(preset.id, preset.width, preset.height))) close();
         }}
       >
-        Use fixed frame size
+        <T>Use fixed frame size</T>
       </button>
       <button
         disabled={readOnly || !flow}
@@ -340,7 +344,7 @@ export function FramePresetDialog({
           if (apply(applyFramePreset(preset.id, preset.width, preset.height, true))) close();
         }}
       >
-        Fit children to fixed frame
+        <T>Fit children to fixed frame</T>
       </button>
       {!flow && (
         <p>
@@ -348,7 +352,9 @@ export function FramePresetDialog({
           sizeでフレーム寸法を変更してください。
         </p>
       )}
-      <button onClick={close}>Cancel preset</button>
+      <button onClick={close}>
+        <T>Cancel preset</T>
+      </button>
     </Dialog>
   );
 }

@@ -1,3 +1,4 @@
+import { T, useWording } from '@editor-platform/editor-ui';
 import { chartPoints, chartSvg } from './charts';
 import { type StructuredData, type DataRow } from './model';
 import { type ChartConfig } from './views';
@@ -16,6 +17,7 @@ export function DataChart({
   width?: number;
   height?: number;
 }) {
+  const t = useWording();
   const points = chartPoints(data, rows, config);
   const total = points.reduce((sum, point) => sum + (point.value ?? 0), 0);
   return (
@@ -24,19 +26,28 @@ export function DataChart({
         dangerouslySetInnerHTML={{ __html: chartSvg(data, rows, config, width, height, accent) }}
       />
       <details>
-        <summary>Chart aggregate table / 集計表</summary>
+        <summary>{t('Chart aggregate table / 集計表')}</summary>
         <table>
           <caption>
-            {config.aggregate} · {rows.length} records ·{' '}
-            {data.columns.find((column) => column.id === config.x)?.name ?? 'All records'} /{' '}
-            {data.columns.find((column) => column.id === config.y)?.name ?? 'Records'} · series{' '}
-            {data.columns.find((column) => column.id === config.series)?.name ?? 'none'}
+            {config.aggregate} · {t('{0} records', rows.length)} ·{' '}
+            {data.columns.find((column) => column.id === config.x)?.name ?? t('All records')} /{' '}
+            {data.columns.find((column) => column.id === config.y)?.name ?? t('Records')} ·{' '}
+            {t(
+              'series {0}',
+              data.columns.find((column) => column.id === config.series)?.name ?? t('none'),
+            )}
           </caption>
           <thead>
             <tr>
-              <th scope="col">Category</th>
-              <th scope="col">Series</th>
-              <th scope="col">Value</th>
+              <th scope="col">
+                <T>Category</T>
+              </th>
+              <th scope="col">
+                <T>Series</T>
+              </th>
+              <th scope="col">
+                <T>Value</T>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -50,7 +61,9 @@ export function DataChart({
           </tbody>
           <tfoot>
             <tr>
-              <th scope="row">Sum of displayed aggregates</th>
+              <th scope="row">
+                <T>Sum of displayed aggregates</T>
+              </th>
               <td />
               <td>{total}</td>
             </tr>

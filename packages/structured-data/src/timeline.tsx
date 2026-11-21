@@ -1,3 +1,4 @@
+import { T, useWording } from '@editor-platform/editor-ui';
 import { useState } from 'react';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { type StructuredData, type DataRow, displayCell } from './model';
@@ -18,6 +19,7 @@ export function Timeline({
   readOnly: boolean;
   onSelect: (id: string) => void;
 }) {
+  const wording = useWording();
   const [drag, setDrag] = useState<{
       id: string;
       mode: 'move' | 'start' | 'end';
@@ -66,7 +68,11 @@ export function Timeline({
       ),
     ];
   if (!config.start || !config.end)
-    return <p className="ep-data-empty">Choose start and end date fields in the inspector.</p>;
+    return (
+      <p className="ep-data-empty">
+        <T>Choose start and end date fields in the inspector.</T>
+      </p>
+    );
   function begin(
     e: React.PointerEvent,
     id: string,
@@ -121,7 +127,7 @@ export function Timeline({
       </div>
       {groups.map((groupName) => (
         <section key={groupName}>
-          <h3>{groupName}</h3>
+          <h3>{group && groupName !== '(empty)' ? groupName : wording(groupName)}</h3>
           {entries
             .filter(
               (e) =>
@@ -144,7 +150,7 @@ export function Timeline({
                       setEndInput(String(entry.row.values[config.end] ?? ''));
                     }}
                   >
-                    {String(entry.row.values[data.columns[0]?.id] ?? 'Record')}
+                    {String(entry.row.values[data.columns[0]?.id] ?? wording('Record'))}
                   </button>
                   <div className="ep-timeline-track" style={grid}>
                     {valid ? (
@@ -199,9 +205,11 @@ export function Timeline({
                       </div>
                     ) : (
                       <span className="ep-field-error">
-                        {entry.start === null || entry.end === null
-                          ? 'Date missing or invalid'
-                          : 'End precedes start'}
+                        {wording(
+                          entry.start === null || entry.end === null
+                            ? 'Date missing or invalid'
+                            : 'End precedes start',
+                        )}
                       </span>
                     )}
                   </div>
@@ -218,7 +226,7 @@ export function Timeline({
             const s = utcDay(startInput),
               t = utcDay(endInput);
             if (s === null || t === null || t < s) {
-              setError('Choose valid dates with end on or after start');
+              setError(wording('Choose valid dates with end on or after start'));
               return;
             }
             try {
@@ -229,7 +237,7 @@ export function Timeline({
           }}
         >
           <label>
-            Start date
+            <T>Start date</T>
             <input
               aria-label="Timeline start date"
               type="date"
@@ -239,7 +247,7 @@ export function Timeline({
             />
           </label>
           <label>
-            End date
+            <T>End date</T>
             <input
               aria-label="Timeline end date"
               type="date"
@@ -248,9 +256,11 @@ export function Timeline({
               disabled={readOnly}
             />
           </label>
-          <button disabled={readOnly}>Apply dates</button>
+          <button disabled={readOnly}>
+            <T>Apply dates</T>
+          </button>
           <button type="button" onClick={() => setEditing(null)}>
-            Cancel dates
+            <T>Cancel dates</T>
           </button>
         </form>
       )}

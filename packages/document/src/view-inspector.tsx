@@ -4,7 +4,7 @@ import {
   ReferenceInspector,
   type ReferenceSurfaceProps,
 } from '@editor-platform/artifact-references/react';
-import { Section, CommitInput } from '@editor-platform/editor-ui';
+import { Section, CommitInput, useWording } from '@editor-platform/editor-ui';
 import { type DocumentBlock, type DocumentContent } from './model';
 import { type DocumentActions } from './view-actions';
 import { blockLabels, documentTableActions } from './view-model';
@@ -22,6 +22,7 @@ function BlockFields({
   toolButton: ToolButton;
 }) {
   const { patchBlock, mark } = actions;
+  const t = useWording();
   return selected.type === 'image' ? (
     <>
       <CommitInput
@@ -46,6 +47,7 @@ function BlockFields({
   ) : sourceTypes.includes(selected.type) ? (
     <SourceInput
       label={`${blockLabels[selected.type]} source`}
+      display={t('{0} source', t(blockLabels[selected.type]))}
       value={selected.text}
       onCommit={(text) => patchBlock({ text })}
     />
@@ -63,7 +65,7 @@ function BlockFields({
         {toolButton('Align right', AlignRight, () => patchBlock({ align: 'right' }))}
       </div>
       <label className="ep-field">
-        Text color
+        {t('Text color')}
         <input
           aria-label="Document text color"
           type="color"
@@ -88,11 +90,12 @@ function BlockSection({
   actions: DocumentActions;
   toolButton: ToolButton;
 }) {
+  const t = useWording();
   return (
     <Section title="Block">
       {selected ? (
         <>
-          <p>{blockLabels[selected.type]}</p>
+          <p>{t(blockLabels[selected.type])}</p>
           <div className="ep-inline">
             {toolButton('Move block up', ArrowUp, () => actions.move(-1))}
             {toolButton('Move block down', ArrowDown, () => actions.move(1))}
@@ -110,7 +113,7 @@ function BlockSection({
           </fieldset>
         </>
       ) : (
-        <p>Select a block.</p>
+        <p>{t('Select a block.')}</p>
       )}
     </Section>
   );
@@ -125,6 +128,7 @@ function TableSection({
   engineState: EditorState | null;
   run: DocumentActions['run'];
 }) {
+  const t = useWording();
   return (
     <Section title="Table">
       <div className="ep-action-grid">
@@ -135,7 +139,7 @@ function TableSection({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => run(cmd)}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </div>
@@ -152,11 +156,12 @@ function PageSection({
   readOnly: boolean;
   pageSetting: DocumentActions['pageSetting'];
 }) {
+  const t = useWording();
   return (
     <Section title="Page">
       <fieldset disabled={readOnly}>
         <label className="ep-field">
-          Paper size
+          {t('Paper size')}
           <select
             aria-label="Paper size"
             value={content.page?.size ?? 'A4'}
@@ -167,7 +172,7 @@ function PageSection({
           </select>
         </label>
         <label className="ep-field">
-          Writing mode
+          {t('Writing mode')}
           <select
             aria-label="Writing mode"
             value={content.page?.writingMode ?? 'horizontal-tb'}
@@ -175,8 +180,8 @@ function PageSection({
               pageSetting({ writingMode: e.target.value as 'horizontal-tb' | 'vertical-rl' })
             }
           >
-            <option value="horizontal-tb">横書き</option>
-            <option value="vertical-rl">縦書き</option>
+            <option value="horizontal-tb">{t('横書き')}</option>
+            <option value="vertical-rl">{t('縦書き')}</option>
           </select>
         </label>
         <CommitInput

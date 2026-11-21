@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, useWording, T } from '@editor-platform/editor-ui';
 import { makeRow, type Column, type DataRow, type StructuredData } from './model';
 import {
   formatCell,
@@ -59,9 +59,10 @@ function KanbanCard({
   row: DataRow;
   i: number;
 }) {
+  const wording = useWording();
   const { data, view, readOnly, apply, groups } = p;
   const { groupColumn, groupNames, groupRows } = groups;
-  const title = String(row.values[data.columns[0]?.id] ?? 'Record');
+  const title = String(row.values[data.columns[0]?.id] ?? wording('Record'));
   return (
     <article
       className="ep-kanban-card"
@@ -90,7 +91,7 @@ function KanbanCard({
         })}
       <div className="ep-card-actions">
         <label>
-          Move to
+          <T>Move to</T>
           <select
             aria-label={`Move ${title} to`}
             disabled={readOnly || !groupColumn}
@@ -112,7 +113,9 @@ function KanbanCard({
             }}
           >
             {groupNames.map((v) => (
-              <option key={v}>{v}</option>
+              <option key={v} value={v}>
+                {wording(v)}
+              </option>
             ))}
           </select>
         </label>
@@ -204,7 +207,7 @@ function KanbanColumn({ p, name }: { p: DataProjectionProps; name: string }) {
           if (apply(insertRows([row]))) p.onRecordDialog(row.id);
         }}
       >
-        Add card
+        <T>Add card</T>
       </button>
     </section>
   );
@@ -256,16 +259,23 @@ function summaryContent(p: DataProjectionProps) {
   const names = view.groupBy ? groups.groupNames : ['All records'];
   return (
     <>
-      <h2>Summary</h2>
+      <h2>
+        <T>Summary</T>
+      </h2>
       <p>
-        {rows.length} of {data.rows.length} records · {view.filters.length} filter conditions ·
-        empty numeric values excluded
+        <T args={[rows.length, data.rows.length]}>{'{0} of {1} records'}</T> ·{' '}
+        <T args={[view.filters.length]}>{'{0} filter conditions'}</T> ·{' '}
+        <T>empty numeric values excluded</T>
       </p>
       <table className="ep-summary">
         <thead>
           <tr>
-            <th>Group</th>
-            <th>Records</th>
+            <th>
+              <T>Group</T>
+            </th>
+            <th>
+              <T>Records</T>
+            </th>
             <th>{view.summary.aggregate}</th>
           </tr>
         </thead>
@@ -274,14 +284,16 @@ function summaryContent(p: DataProjectionProps) {
             const items = view.groupBy ? groups.groupRows(name) : rows;
             return (
               <tr key={name}>
-                <td>{name}</td>
+                <td>{view.groupBy ? name : <T>{name}</T>}</td>
                 <td>{items.length}</td>
                 <td>{summaryValue(data, items, view.summary.columnId, view.summary.aggregate)}</td>
               </tr>
             );
           })}
           <tr>
-            <th>Total</th>
+            <th>
+              <T>Total</T>
+            </th>
             <td>{rows.length}</td>
             <td>{summaryValue(data, rows, view.summary.columnId, view.summary.aggregate)}</td>
           </tr>
@@ -314,7 +326,7 @@ function WidgetTable({ p }: { p: DataProjectionProps }) {
         </tbody>
       </table>
       <p>
-        First {Math.min(20, rows.length)} of {rows.length} records
+        <T args={[Math.min(20, rows.length), rows.length]}>{'First {0} of {1} records'}</T>
       </p>
     </div>
   );
@@ -385,7 +397,7 @@ function dashboardContent(p: DataProjectionProps) {
       </div>
       {!view.widgets.length && (
         <p className="ep-data-empty">
-          Add a metric, chart or table from the inspector. Widgets read this dataset.
+          <T>Add a metric, chart or table from the inspector. Widgets read this dataset.</T>
         </p>
       )}
     </>
@@ -421,7 +433,7 @@ function graphProjection(p: DataProjectionProps): ReactNode {
     })
   ) : (
     <p role="alert">
-      This Host has not registered a Graph projection. The original Data is retained.
+      <T>This Host has not registered a Graph projection. The original Data is retained.</T>
     </p>
   );
 }
@@ -454,7 +466,9 @@ export function dataProjection(p: DataProjectionProps): ReactNode {
       return p.record ? (
         <div className="ep-data-scroll">{formContent(p, p.record)}</div>
       ) : (
-        <div className="ep-data-empty">Add a record to open the form.</div>
+        <div className="ep-data-empty">
+          <T>Add a record to open the form.</T>
+        </div>
       );
     case 'Chart':
       return (

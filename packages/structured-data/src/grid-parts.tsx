@@ -1,3 +1,4 @@
+import { T } from '@editor-platform/editor-ui';
 import { type CSSProperties } from 'react';
 import { type DataRow } from './model';
 import { formatCell, tsv, deleteRows, reorderRow, type DataView } from './views';
@@ -248,7 +249,7 @@ export function GridCellMenu({
           setContext(null);
         }}
       >
-        Copy range
+        <T>Copy range</T>
       </button>
       <button
         role="menuitem"
@@ -258,7 +259,7 @@ export function GridCellMenu({
           setContext(null);
         }}
       >
-        Clear range
+        <T>Clear range</T>
       </button>
       <button
         role="menuitem"
@@ -268,7 +269,7 @@ export function GridCellMenu({
           setContext(null);
         }}
       >
-        Fill down
+        <T>Fill down</T>
       </button>
       <button
         role="menuitem"
@@ -278,10 +279,10 @@ export function GridCellMenu({
           setContext(null);
         }}
       >
-        Delete selected records
+        <T>Delete selected records</T>
       </button>
       <button role="menuitem" onClick={() => setContext(null)}>
-        Close
+        <T>Close</T>
       </button>
     </div>
   );

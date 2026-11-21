@@ -33,7 +33,7 @@ import {
   Download,
   Square,
 } from 'lucide-react';
-import { IconButton, Menu, Section, CommitInput } from '@editor-platform/editor-ui';
+import { IconButton, Menu, Section, CommitInput, T, useWording } from '@editor-platform/editor-ui';
 import {
   shapeNames,
   shapePrimitives,
@@ -47,6 +47,7 @@ import {
   type VisualStyle,
 } from '@editor-platform/editor-core';
 export function ShapePicker({ onPick }: { onPick: (shape: ShapeKind) => void }) {
+  const t = useWording();
   const [search, setSearch] = useState(''),
     [category, setCategory] = useState('All'),
     [recent, setRecent] = useState<ShapeKind[]>(() => {
@@ -68,7 +69,7 @@ export function ShapePicker({ onPick }: { onPick: (shape: ShapeKind) => void }) 
     <div className="shape-picker">
       <input
         aria-label="Search shapes"
-        placeholder="Search shapes"
+        placeholder={t('Search shapes')}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
@@ -78,7 +79,9 @@ export function ShapePicker({ onPick }: { onPick: (shape: ShapeKind) => void }) 
         onChange={(e) => setCategory(e.target.value)}
       >
         {['All', 'Recent', 'Basic', 'Arrows', 'Lines', 'Callouts'].map((c) => (
-          <option key={c}>{c}</option>
+          <option key={c} value={c}>
+            {t(c)}
+          </option>
         ))}
       </select>
       <div className="shape-grid">
@@ -191,6 +194,7 @@ export function ArrangeMenu({
   onReference?: (s: string) => void;
   readOnly?: boolean;
 }) {
+  const t = useWording();
   return (
     <Menu label="Arrange" icon={AlignStartVertical}>
       <div className="ep-fields">
@@ -207,14 +211,14 @@ export function ArrangeMenu({
       </div>
       {onReference && (
         <label className="ep-field">
-          Align relative to
+          <T>Align relative to</T>
           <select
             aria-label="Alignment reference"
             value={reference}
             onChange={(e) => onReference(e.target.value)}
           >
-            <option value="selection">Selection bounds</option>
-            <option value="page">Page / parent frame</option>
+            <option value="selection">{t('Selection bounds')}</option>
+            <option value="page">{t('Page / parent frame')}</option>
           </select>
         </label>
       )}
@@ -304,7 +308,9 @@ export function EditMenu({
           {label}
         </button>
       ))}
-      <p className="hint">Clipboard stays inside this editor when system access is unavailable.</p>
+      <p className="hint">
+        <T>Clipboard stays inside this editor when system access is unavailable.</T>
+      </p>
     </Menu>
   );
 }
@@ -404,7 +410,7 @@ function GeometrySection(props: {
       </div>
       <label>
         <input type="checkbox" checked={ratio} onChange={(e) => props.onRatio(e.target.checked)} />{' '}
-        Lock aspect ratio
+        <T>Lock aspect ratio</T>
       </label>
       <CommitInput
         label="Rotation (°)"
@@ -427,6 +433,7 @@ function AppearanceSection({
   items: Drawing[];
   onPatch(patch: InspectorPatch): void;
 }) {
+  const t = useWording();
   const first = items[0],
     mixed = (key: keyof Drawing) => mixedValue(items, key);
   return (
@@ -467,7 +474,7 @@ function AppearanceSection({
           onCommit={(v) => onPatch({ radius: Number(v) })}
         />
         <label className="ep-field">
-          Dash
+          <T>Dash</T>
           <select
             aria-label="Stroke dash"
             value={mixed('dash') ? 'mixed' : (first.dash ?? '')}
@@ -475,19 +482,19 @@ function AppearanceSection({
           >
             {mixed('dash') && (
               <option value="mixed" disabled>
-                Mixed
+                {t('Mixed')}
               </option>
             )}
-            <option value="">Solid</option>
-            <option value="8 4">Dashed</option>
-            <option value="2 3">Dotted</option>
+            <option value="">{t('Solid')}</option>
+            <option value="8 4">{t('Dashed')}</option>
+            <option value="2 3">{t('Dotted')}</option>
           </select>
         </label>
         {items.every(
           (i) => i.kind === 'shape' && ['line', 'arrow', 'double-arrow'].includes(i.shape ?? ''),
         ) && (
           <label className="ep-field">
-            Direction
+            <T>Direction</T>
             <select
               aria-label="Line direction"
               value={mixed('lineDirection') ? 'mixed' : (first.lineDirection ?? 'horizontal')}
@@ -495,13 +502,13 @@ function AppearanceSection({
             >
               {mixed('lineDirection') && (
                 <option value="mixed" disabled>
-                  Mixed
+                  {t('Mixed')}
                 </option>
               )}
-              <option value="horizontal">Horizontal →</option>
-              <option value="vertical">Vertical ↓</option>
-              <option value="down">Diagonal ↘</option>
-              <option value="up">Diagonal ↗</option>
+              <option value="horizontal">{t('Horizontal')} →</option>
+              <option value="vertical">{t('Vertical')} ↓</option>
+              <option value="down">{t('Diagonal')} ↘</option>
+              <option value="up">{t('Diagonal')} ↗</option>
             </select>
           </label>
         )}
@@ -564,12 +571,13 @@ function TextLayoutFields({
   items: Drawing[];
   typography(patch: Partial<InspectorTypography>): void;
 }) {
+  const t = useWording();
   const style = items[0].typography ?? {},
     mixedStyle = (key: keyof InspectorTypography) => mixedTypography(items, key);
   return (
     <>
       <label className="ep-field">
-        Text alignment
+        <T>Text alignment</T>
         <select
           aria-label="Text alignment"
           value={mixedStyle('align') ? '' : (style.align ?? 'left')}
@@ -577,16 +585,18 @@ function TextLayoutFields({
         >
           {mixedStyle('align') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
           {['left', 'center', 'right'].map((k) => (
-            <option key={k}>{k}</option>
+            <option key={k} value={k}>
+              {t(k)}
+            </option>
           ))}
         </select>
       </label>
       <label className="ep-field">
-        Vertical alignment
+        <T>Vertical alignment</T>
         <select
           aria-label="Vertical alignment"
           value={mixedStyle('verticalAlign') ? '' : (style.verticalAlign ?? 'top')}
@@ -596,16 +606,18 @@ function TextLayoutFields({
         >
           {mixedStyle('verticalAlign') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
           {['top', 'middle', 'bottom'].map((k) => (
-            <option key={k}>{k}</option>
+            <option key={k} value={k}>
+              {t(k)}
+            </option>
           ))}
         </select>
       </label>
       <label className="ep-field">
-        Writing mode
+        <T>Writing mode</T>
         <select
           aria-label="Writing mode"
           value={mixedStyle('writingMode') ? '' : (style.writingMode ?? 'horizontal-tb')}
@@ -615,15 +627,15 @@ function TextLayoutFields({
         >
           {mixedStyle('writingMode') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
-          <option value="horizontal-tb">Horizontal</option>
-          <option value="vertical-rl">Vertical (縦書き)</option>
+          <option value="horizontal-tb">{t('Horizontal')}</option>
+          <option value="vertical-rl">{t('Vertical (縦書き)')}</option>
         </select>
       </label>
       <label className="ep-field">
-        Text overflow
+        <T>Text overflow</T>
         <select
           aria-label="Text overflow"
           value={mixedStyle('overflow') ? '' : (style.overflow ?? 'clip')}
@@ -631,11 +643,13 @@ function TextLayoutFields({
         >
           {mixedStyle('overflow') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
           {['clip', 'expand', 'fit'].map((k) => (
-            <option key={k}>{k}</option>
+            <option key={k} value={k}>
+              {t(k)}
+            </option>
           ))}
         </select>
       </label>
@@ -652,6 +666,7 @@ function TypographySection(props: {
   textBridge: React.ContextType<typeof CanvasTextContext>;
   onPatch(patch: InspectorPatch): void;
 }) {
+  const t = useWording();
   const { items, textBridge, onPatch } = props;
   const first = items[0];
   const style = first.typography ?? {};
@@ -675,7 +690,7 @@ function TypographySection(props: {
         }}
       />
       <label className="ep-field">
-        Font family
+        <T>Font family</T>
         <select
           aria-label="Font family"
           value={mixedStyle('fontFamily') ? '' : (style.fontFamily ?? 'Arial, sans-serif')}
@@ -683,11 +698,11 @@ function TypographySection(props: {
         >
           {mixedStyle('fontFamily') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
-          <option>Arial, sans-serif</option>
-          <option>Georgia, serif</option>
+          <option>{t('Arial, sans-serif')}</option>
+          <option>{t('Georgia, serif')}</option>
           <option>monospace</option>
         </select>
       </label>
@@ -721,7 +736,9 @@ function ImageCropEditor(props: {
   const { first, crop } = props;
   return (
     <div>
-      <p>Crop adjustment — apply to commit</p>
+      <p>
+        <T>Crop adjustment — apply to commit</T>
+      </p>
       <img
         alt="Crop preview"
         style={{
@@ -749,9 +766,11 @@ function ImageCropEditor(props: {
           props.onCrop(undefined);
         }}
       >
-        Apply crop
+        <T>Apply crop</T>
       </button>
-      <button onClick={() => props.onCrop(undefined)}>Cancel crop</button>
+      <button onClick={() => props.onCrop(undefined)}>
+        <T>Cancel crop</T>
+      </button>
     </div>
   );
 }
@@ -762,6 +781,7 @@ function ImageSection(props: {
   onPatch(patch: InspectorPatch): void;
   onReplace?: (file: File) => void;
 }) {
+  const t = useWording();
   const { items, crop, onCrop, onPatch } = props;
   const first = items[0],
     mixed = (key: keyof Drawing) => mixedValue(items, key);
@@ -774,7 +794,7 @@ function ImageSection(props: {
         onCommit={(alt) => onPatch({ alt })}
       />
       <label className="ep-field">
-        Image fit
+        <T>Image fit</T>
         <select
           aria-label="Image fit"
           value={mixed('imageFit') ? '' : (first.imageFit ?? 'fill')}
@@ -782,15 +802,15 @@ function ImageSection(props: {
         >
           {mixed('imageFit') && (
             <option value="" disabled>
-              Mixed
+              {t('Mixed')}
             </option>
           )}
-          <option value="fit">Fit entire image</option>
-          <option value="fill">Fill and crop</option>
+          <option value="fit">{t('Fit entire image')}</option>
+          <option value="fill">{t('Fill and crop')}</option>
         </select>
       </label>
       <label className="ep-field">
-        Replace image
+        <T>Replace image</T>
         <input
           type="file"
           aria-label="Replace image file"
@@ -801,7 +821,9 @@ function ImageSection(props: {
           }}
         />
       </label>
-      <button onClick={() => onCrop(first.crop ?? { x: 0, y: 0, scale: 1 })}>Crop image</button>
+      <button onClick={() => onCrop(first.crop ?? { x: 0, y: 0, scale: 1 })}>
+        <T>Crop image</T>
+      </button>
       {crop && <ImageCropEditor first={first} crop={crop} onCrop={onCrop} onPatch={onPatch} />}
       <button
         onClick={() =>
@@ -813,7 +835,7 @@ function ImageSection(props: {
           })
         }
       >
-        Reset image
+        <T>Reset image</T>
       </button>
     </Section>
   );
@@ -837,7 +859,7 @@ export function VisualInspector({
   if (!items.length)
     return (
       <p className="hint">
-        Select an object to edit its appearance. Double-click text to edit on the canvas.
+        <T>Select an object to edit its appearance. Double-click text to edit on the canvas.</T>
       </p>
     );
   return (
@@ -872,20 +894,21 @@ export function ExportMenu({
   onExport: (format: 'svg' | 'png' | 'pdf', scope: string, scale: number) => void;
   children?: ReactNode;
 }) {
+  const t = useWording();
   const [scope, setScope] = useState('current'),
     [scale, setScale] = useState(1);
   return (
     <Menu label="Export visual" icon={Download} align="right">
       <label className="ep-field">
-        Scope
+        <T>Scope</T>
         <select aria-label="Export scope" value={scope} onChange={(e) => setScope(e.target.value)}>
-          <option value="current">Current page / frame</option>
-          <option value="selected">Selected</option>
-          <option value="all">All</option>
+          <option value="current">{t('Current page / frame')}</option>
+          <option value="selected">{t('Selected')}</option>
+          <option value="all">{t('All')}</option>
         </select>
       </label>
       <label className="ep-field">
-        Resolution
+        <T>Resolution</T>
         <select
           aria-label="Export resolution"
           value={scale}

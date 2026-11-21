@@ -1,3 +1,4 @@
+import { T, useWording } from '@editor-platform/editor-ui';
 import { insertDesignPagePath, insertDesignSpeechBalloon } from './page-artwork';
 import { newId } from '@editor-platform/artifact-core';
 import { transaction, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
@@ -30,6 +31,7 @@ export function DesignPagePanel({
   /** The selection, for marking a face or figure that balloons keep off. */
   selected?: string[];
 }) {
+  const t = useWording();
   const pagination = content.pagination;
   const [stuck, setStuck] = useState(0);
   const [locked, setLocked] = useState(0);
@@ -114,14 +116,16 @@ export function DesignPagePanel({
   }
   return (
     <section aria-label="Page reading order">
-      <h3>Pages</h3>
+      <h3>
+        <T>Pages</T>
+      </h3>
       <button disabled={readOnly} onClick={addPage}>
-        Add page
+        <T>Add page</T>
       </button>
       {pagination && (
         <>
           <label>
-            Reading direction{' '}
+            <T>Reading direction</T>{' '}
             <select
               aria-label="Reading direction"
               value={pagination.direction}
@@ -135,8 +139,8 @@ export function DesignPagePanel({
                 )
               }
             >
-              <option value="rtl">Right to left</option>
-              <option value="ltr">Left to right</option>
+              <option value="rtl">{t('Right to left')}</option>
+              <option value="ltr">{t('Left to right')}</option>
             </select>
           </label>
           <label>
@@ -168,7 +172,7 @@ export function DesignPagePanel({
                   onClick={() => addPanel(p.frameId)}
                   aria-label={`Add panel to page ${index + 1}`}
                 >
-                  Add panel
+                  <T>Add panel</T>
                 </button>
                 <ol>
                   {p.panelIds.map((id, i) => (
@@ -197,11 +201,11 @@ export function DesignPagePanel({
                           readOnly ||
                           !mangaDialoguePlacement(content.elements.find((e) => e.id === id)!, 400)
                         }
-                        title="小さすぎるコマには台詞を配置できません"
+                        title={t('小さすぎるコマには台詞を配置できません')}
                         onClick={() => dialogue(id)}
                         aria-label={`Add dialogue to panel ${index + 1}.${i + 1}`}
                       >
-                        Add dialogue
+                        <T>Add dialogue</T>
                       </button>
                       {(['line', 'cubic', 'balloon'] as const).map((kind) => (
                         <button
@@ -211,10 +215,10 @@ export function DesignPagePanel({
                           onClick={() => artwork(id, kind)}
                         >
                           {kind === 'balloon'
-                            ? 'Balloon with tail'
+                            ? t('Balloon with tail')
                             : kind === 'cubic'
-                              ? 'Curve'
-                              : 'Line'}
+                              ? t('Curve')
+                              : t('Line')}
                         </button>
                       ))}
                     </li>
