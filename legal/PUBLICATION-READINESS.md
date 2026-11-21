@@ -25,7 +25,7 @@ See [OSS Preview Release Checklist](../docs/release/OSS-PREVIEW-GATE.md) for exa
 
 See [Commercial OEM Launch Gate](../docs/release/COMMERCIAL-OEM-GATE.md).
 
-Until that gate is complete: no signed paid proprietary licenses, fee representations, warranty/indemnity promise or unsupported assertion of patent sublicense authority. Customer use under AGPLv3 remains available if compliant.
+The planned [beta-to-GA commercial policy](../BETA-COMMERCIAL-POLICY.md) sets a zero-fee beta offer without a fixed end date, followed by paid GA rights with at least three calendar months/90 days of notice. **This is not an operative license grant.** Until the [commercial launch gate](../docs/release/COMMERCIAL-OEM-GATE.md) is complete, do not issue even a zero-fee proprietary beta contract, offer paid GA rights, quote a binding fee, promise warranty/indemnity or assert unsupported patent sublicensing authority. Customer use under AGPLv3 remains available if compliant.
 
 ## Community contribution policy until legal intake is ready
 
