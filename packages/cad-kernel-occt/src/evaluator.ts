@@ -138,6 +138,7 @@ import { spotWeldPoints } from './spot-weld';
 import { edgeComb, nodeCurvature } from './curvature';
 import {
   cadOutputLimits,
+  cadRenderOutputLimits,
   meshBytes,
   type CadAnalysisPreparation,
   type CadAnalysisMeasures,
@@ -541,6 +542,8 @@ export async function evaluateCad(
   faceDistances?: CadFaceDistanceResult[];
   analysisSurface?: CadAnalysisSurfaceResult;
 }> {
+  // A render's finer meshes have their own, smaller output limits.
+  const outputLimits = options.renderMesh ? cadRenderOutputLimits : cadOutputLimits;
   // Every Embind wrapper is owned, including ones returned by builders (.Shape(), ex.Current()):
   // deleting a builder does not delete them. A Set keeps own() idempotent.
   const owned = new Set<{ delete(): void; isDeleted?(): boolean }>();
@@ -6926,9 +6929,9 @@ export async function evaluateCad(
       if (options.timing) options.timing('mesh', body.id, performance.now() - started!);
       const triangles = meshes.reduce((n, x) => n + x.indices.length / 3, 0);
       if (
-        base.faces > cadOutputLimits.faces ||
-        triangles > cadOutputLimits.triangles ||
-        meshBytes(meshes) > cadOutputLimits.bufferBytes
+        base.faces > outputLimits.faces ||
+        triangles > outputLimits.triangles ||
+        meshBytes(meshes) > outputLimits.bufferBytes
       )
         throw new CadKernelError('output-limit', body.id);
     }
@@ -6950,8 +6953,8 @@ export async function evaluateCad(
         meshes.push(coarseMesh(body.id, shape, centre, bounds, at));
       }
       if (
-        meshes.reduce((n, x) => n + x.indices.length / 3, 0) > cadOutputLimits.triangles ||
-        meshBytes(meshes) > cadOutputLimits.bufferBytes
+        meshes.reduce((n, x) => n + x.indices.length / 3, 0) > outputLimits.triangles ||
+        meshBytes(meshes) > outputLimits.bufferBytes
       )
         throw failure;
       return { evaluation: errorEvaluation(failure, bodies), meshes };
@@ -7264,8 +7267,8 @@ export async function evaluateCad(
       coarse.push(make());
       const all = [...meshes, ...coarse];
       if (
-        all.reduce((n, x) => n + x.indices.length / 3, 0) > cadOutputLimits.triangles ||
-        meshBytes(all) > cadOutputLimits.bufferBytes
+        all.reduce((n, x) => n + x.indices.length / 3, 0) > outputLimits.triangles ||
+        meshBytes(all) > outputLimits.bufferBytes
       ) {
         coarse = [];
         break;

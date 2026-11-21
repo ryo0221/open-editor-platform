@@ -112,6 +112,14 @@ export const cadKernelTimeouts = Object.freeze({
   jobMs: 120_000,
   sliceJobMs: 300_000,
   totalMs: 1_200_000,
+  /**
+   * A render's finer meshes keep the limits from before #14 (2 min a job, 5 min in all): a render
+   * re-meshes every shown version, and a version that runs past them keeps its display meshes.
+   * At the raised limits the finer meshing of a whole car's large parts ran on until it filled
+   * the page's memory.
+   */
+  renderSliceJobMs: 120_000,
+  renderTotalMs: 300_000,
 });
 const evaluatedAssetKinds = new Set(['normalized-brep', 'pmi', 'assembly-pmi']);
 
@@ -773,7 +781,7 @@ export class WorkerKernelPort implements CadKernelPort {
     // An edit's evaluation waits for an export to end, as it would for one long job (CAD21).
     if (job.export ? this.waitingExport : this.waiting)
       return this.finish(job, () => job.fail('superseded', true));
-    if (this.now() - job.began! >= (this.options.totalTimeoutMs ?? cadKernelTimeouts.totalMs)) {
+    if (this.now() - job.began! >= this.totalLimit(job)) {
       // The Worker ends the paused evaluation as cancelled.
       this.worker!.postMessage({ type: 'cancel', requestId: job.requestId });
       return this.finish(job, () => job.fail('timeout', false, job.elementId));
@@ -805,10 +813,20 @@ export class WorkerKernelPort implements CadKernelPort {
     }
     if (message.type !== 'evaluate' || !message.slice)
       return this.options.jobTimeoutMs ?? cadKernelTimeouts.jobMs;
-    const each = this.options.sliceJobTimeoutMs ?? cadKernelTimeouts.sliceJobMs;
-    const left =
-      (this.options.totalTimeoutMs ?? cadKernelTimeouts.totalMs) - (this.now() - job.began!);
+    const render = !!message.renderMesh;
+    const each = Math.min(
+      this.options.sliceJobTimeoutMs ?? cadKernelTimeouts.sliceJobMs,
+      render ? cadKernelTimeouts.renderSliceJobMs : Infinity,
+    );
+    const left = this.totalLimit(job) - (this.now() - job.began!);
     return Math.max(0, Math.min(each, left));
+  }
+  /** A split evaluation's limit over all its jobs (a render's finer meshes: their own). */
+  private totalLimit(job: Job) {
+    const total = this.options.totalTimeoutMs ?? cadKernelTimeouts.totalMs;
+    return job.message.type === 'evaluate' && job.message.renderMesh
+      ? Math.min(total, cadKernelTimeouts.renderTotalMs)
+      : total;
   }
   private now() {
     return this.options.now?.() ?? performance.now();
