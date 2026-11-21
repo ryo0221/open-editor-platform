@@ -252,10 +252,25 @@ async function readImportFile(
     context.references,
   );
   record.name = nativeName ?? file.name.replace(/\.(md|csv|json)$/i, '');
+  const template = record.provenance?.template;
+  if (
+    template !== undefined &&
+    (!template ||
+      typeof template.id !== 'string' ||
+      !template.id ||
+      !Number.isSafeInteger(template.version) ||
+      template.version < 1 ||
+      typeof template.hash !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(template.hash))
+  )
+    throw new Error('Invalid template provenance');
   record.provenance = {
     source: 'imported',
     format: file.name.split('.').pop(),
     importedAt: new Date().toISOString(),
+    ...(template
+      ? { template: { id: template.id, version: template.version, hash: template.hash } }
+      : {}),
   };
   return { record, originalId: importedArtifactId };
 }

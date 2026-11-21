@@ -127,7 +127,8 @@ export async function applyInstantiation(
     storage,
     prepared.artifact,
     prepared.fingerprint,
-    (stored) => stored.provenance.template?.fingerprint,
+    (stored) =>
+      stored.provenance.source === 'created' ? stored.provenance.template?.fingerprint : undefined,
     problem,
   );
   prepared.state = 'applied';

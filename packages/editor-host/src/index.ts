@@ -4,6 +4,7 @@ import {
   newId,
   commitVersion,
   deserializeArtifact,
+  DuplicateArtifactVersionError,
   contentHash,
   serializeArtifact,
   updateDraft,
@@ -194,12 +195,25 @@ export interface HostProposalHooks<T> {
   /** Observation only. Failure cannot roll back the native commit; Host records/retries separately. */
   onApplied?(event: HostProposalApplied<T>): void | Promise<void>;
 }
+function readEnvelope(json: string) {
+  try {
+    return deserializeArtifact(json);
+  } catch (error) {
+    if (error instanceof DuplicateArtifactVersionError)
+      throw new EditorHostError(
+        'invalid-artifact',
+        error.artifactId,
+        'Invalid retained version identity',
+      );
+    throw error;
+  }
+}
 /** Envelope validation is separate from a domain's native validator. */
 function checkArtifact<T>(
   artifact: Artifact<unknown>,
   adapter: EditorHostAdapter<T>,
 ): asserts artifact is Artifact<T> {
-  const checked = deserializeArtifact(serializeArtifact(artifact));
+  const checked = readEnvelope(serializeArtifact(artifact));
   if (
     !checked.id ||
     checked.kind !== adapter.kind ||
@@ -227,8 +241,12 @@ function checkArtifact<T>(
         !text(provenance.template.id) ||
         !Number.isInteger(provenance.template.version) ||
         !text(provenance.template.hash) ||
-        !text(provenance.template.requestId) ||
-        !text(provenance.template.fingerprint))) ||
+        !(
+          (text(provenance.template.requestId) && text(provenance.template.fingerprint)) ||
+          (provenance.source === 'imported' &&
+            provenance.template.requestId === undefined &&
+            provenance.template.fingerprint === undefined)
+        ))) ||
     (provenance.officeImport !== undefined &&
       (!provenance.officeImport ||
         typeof provenance.officeImport !== 'object' ||
@@ -248,7 +266,6 @@ function checkArtifact<T>(
   const parents = new Map(checked.versions.map((v) => [v.versionId, v.parentVersionId]));
   if (
     ids.some((id) => typeof id !== 'string' || !id.trim()) ||
-    new Set(ids).size !== ids.length ||
     checked.versions.some(
       (v) =>
         v.parentVersionId !== null &&
@@ -300,7 +317,7 @@ export async function loadHostArtifact<T>(
   adapter: EditorHostAdapter<T>,
 ): Promise<Artifact<T>> {
   assertNativeSize(json, '');
-  const artifact = deserializeArtifact(json);
+  const artifact = readEnvelope(json);
   checkArtifact(artifact, adapter);
   for (const version of artifact.versions)
     if (version.contentHash !== (await contentHash(version.content)))
