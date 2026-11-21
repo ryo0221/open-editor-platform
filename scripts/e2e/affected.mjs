@@ -36,6 +36,7 @@ const playgroundAliases = {
 const referenceApps = {
   'animation-reference': 'animation', // vite.animation-host.config.ts (4189)
   'react-ui-reference': 'react-ui', // vite.react-ui.config.ts
+  'graph-reference': 'structured-graph', // Playground graph-host.tsx, structured-graph specs
 };
 
 /**

@@ -115,6 +115,7 @@ test('Host-only specs go to E2E_SUITE=host; reference apps reach their surface s
   for (const name of ['animation-2d', 'animation-connection', 'animation-layer-actions'])
     assert(animation.includes(name), name);
   assert(!animation.some((name) => /^(cad|bim|pcb)-/.test(name)), animation.join());
+  assert(names(plan('apps/graph-reference/src/host.tsx').run).includes('structured-graph'));
 });
 
 test('comparison counts only failures that happen on the branch alone', () => {
