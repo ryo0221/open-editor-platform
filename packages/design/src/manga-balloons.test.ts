@@ -9,6 +9,7 @@ import {
 import { designDivisionCommand } from './division';
 import { insertDesignPage, insertDesignPanel } from './pagination';
 import { insertDesignSpeechBalloon } from './page-artwork';
+import { moveDesignPathPoint, replaceDesignPath } from './path-commands';
 import {
   isMangaBalloon,
   mangaBalloonOverlaps,
@@ -73,7 +74,8 @@ describe('#21 balloons keep off faces and figures', () => {
     const found = mangaBalloonOverlaps(d);
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ balloonId: b.elementId, keepOutId: 'face', panelId: 'k1' });
-    expect(found[0].share).toBeCloseTo((150 * 100) / (190 * 160));
+    // The outline's stroke (1 unit each side) is drawn too
+    expect(found[0].share).toBeCloseTo((152 * 102) / (190 * 160));
   });
 
   it('places a new balloon near the reading start without covering the face', () => {
@@ -469,6 +471,22 @@ describe('#21 redraw one panel', () => {
     expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(
       /cannot move or resize k1, which is not inside panel k1/,
     );
+  });
+
+  it('sees a balloon outline where its edited path is drawn, past its frame (Codex on #28)', () => {
+    let d = page();
+    const b = insertDesignSpeechBalloon('k1', { x: 200, y: 40, width: 150, height: 100 }, 'A');
+    d = b.apply(d);
+    expect(mangaBalloonOverlaps(d)).toEqual([]);
+    const outline = d.elements.find((e) => e.parentId === b.elementId && e.path)!;
+    const sub = outline.path!.subpaths[0]!;
+    const far = { x: outline.bounds.width * 2.5, y: outline.bounds.height / 2 };
+    d = replaceDesignPath(
+      d,
+      outline.id,
+      moveDesignPathPoint(outline.path!, { subpathId: sub.id, anchorId: sub.anchors[0]!.id }, far),
+    ).apply(d);
+    expect(mangaBalloonOverlaps(d).map((o) => o.balloonId)).toEqual([b.elementId]);
   });
 
   it('sees a balloon by all of its parts, for warnings and moves (Codex on #28)', () => {
