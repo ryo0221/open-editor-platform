@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { URL, fileURLToPath } from 'node:url';
 import { classifySpecs, corePackages, engineeringPackages, workspaceGraph } from '../e2e/areas.mjs';
-import { planRun } from '../e2e/affected.mjs';
+import { planCommands, planRun } from '../e2e/affected.mjs';
 import { compareStatuses, runErrors, testStatuses } from '../e2e/compare.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -86,6 +86,22 @@ test('Host Vite configurations and helper imports reach their specs', () => {
   assert(names(plan('packages/design/src/index.ts').run).includes('animation-2d'));
   const whiteboard = names(plan('packages/whiteboard/src/index.ts').run);
   assert(whiteboard.includes('spatial-wasm') && whiteboard.includes('spatial-wasm-mobile'));
+});
+
+test('Host-only specs go to E2E_SUITE=host; reference apps reach their surface specs', () => {
+  for (const name of ['host-api', 'authoring', 'novel-workspace']) {
+    const spec = specs.find((entry) => entry.name === name);
+    assert.equal(spec.suite, 'host', name);
+    assert.deepEqual(spec.needs, [4177], name);
+  }
+  const commands = planCommands(planRun([], specs, graph, { all: true }));
+  const host = commands.named.find((entry) => entry.suite === 'host');
+  assert(host.files.includes('tests/e2e/host-api.spec.ts'));
+  assert(!commands.dev.includes('tests/e2e/host-api.spec.ts'));
+  const animation = names(plan('apps/animation-reference/src/main.tsx').run);
+  for (const name of ['animation-2d', 'animation-connection', 'animation-layer-actions'])
+    assert(animation.includes(name), name);
+  assert(!animation.some((name) => /^(cad|bim|pcb)-/.test(name)), animation.join());
 });
 
 test('comparison counts only failures that happen on the branch alone', () => {

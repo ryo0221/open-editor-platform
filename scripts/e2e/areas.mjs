@@ -76,7 +76,8 @@ export function packageArea(name) {
  * office editors at once and run for any core or office change. `heavy` specs compute
  * real geometry (minutes per test) and run only when their own packages change, or
  * nightly. `suite` names the tests/playwright/suites.ts suite that starts the extra
- * servers a spec needs beyond the development set.
+ * servers a spec needs beyond the development set. `needs` lists those servers' ports for
+ * specs that reach them only through the suite's baseURL (no literal URL in the source).
  */
 export const specRules = [
   { match: /^cad-hosts$/, area: 'engineering', heavy: true, owners: ['cad'], suite: 'cad.hosts' },
@@ -188,6 +189,22 @@ export const specRules = [
   },
   { match: /^templates?-/, area: 'office', owners: ['templates', 'template-ui'] },
   { match: /^templates$/, area: 'office', owners: ['templates', 'template-ui'] },
+  // These skip every test unless baseURL is the Artifact Host (4177): E2E_SUITE=host.
+  { match: /^host-api$/, area: 'office', broad: true, suite: 'host', needs: [4177] },
+  {
+    match: /^authoring$/,
+    area: 'office',
+    owners: ['design', 'document'],
+    suite: 'host',
+    needs: [4177],
+  },
+  {
+    match: /^novel-workspace$/,
+    area: 'office',
+    owners: ['document'],
+    suite: 'host',
+    needs: [4177],
+  },
   {
     match: /^(manga-|playground-(ink|raster)$|authoring)/,
     area: 'office',
@@ -268,7 +285,7 @@ export function classifySpecs(root) {
       const name = file.slice(0, -'.spec.ts'.length);
       const rule = specRules.find((entry) => entry.match.test(name));
       const local = [...helpers(dir, file)].sort();
-      const ports = new Set();
+      const ports = new Set(rule.needs ?? []);
       const owners = new Set(rule.owners ?? []);
       const paths = new Set();
       for (const source of [file, ...local]) {

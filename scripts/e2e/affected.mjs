@@ -32,6 +32,11 @@ const playgroundAliases = {
   template: 'templates',
   'artifact-references': 'artifact-references',
 };
+/** Reference apps the e2e suites serve, and the package whose surface each one mounts. */
+const referenceApps = {
+  'animation-reference': 'animation', // vite.animation-host.config.ts (4189)
+  'react-ui-reference': 'react-ui', // vite.react-ui.config.ts
+};
 
 /**
  * What a changed path means for browser specs.
@@ -60,8 +65,12 @@ export function classifyPath(path, packages) {
     return name ? { kind: 'package', name } : { kind: 'playground' };
   }
   if (path.startsWith('apps/artifact-host/')) return { kind: 'playground' };
-  if (path.startsWith('apps/'))
-    return /\.test\.tsx?$/.test(path) ? { kind: 'none' } : { kind: 'office' };
+  match = /^apps\/([^/]+)\//.exec(path);
+  if (match) {
+    if (/\.test\.tsx?$/.test(path)) return { kind: 'none' };
+    const name = referenceApps[match[1]];
+    return name && packages.has(name) ? { kind: 'package', name } : { kind: 'office' };
+  }
   if (/^(?:tests|scripts)\/fixtures\//.test(path)) return { kind: 'fixture', file: path };
   if (/^tests\/e2e\/[^/]+\.spec\.ts$/.test(path)) return { kind: 'spec', file: path };
   if (/^tests\/e2e\/[^/]+\.ts$/.test(path)) return { kind: 'helper', file: path };

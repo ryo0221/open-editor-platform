@@ -143,7 +143,7 @@ E2E_SUITE=production npx playwright test tests/e2e/collaboration.spec.ts
 
 ```sh
 npm run test:e2e:affected                                   # origin/mainからの変更で選ばれるspecを表示
-npm run test:e2e:affected -- --json > work/e2e/plan.json    # 同じ選択を保存
+npm run --silent test:e2e:affected -- --json > work/e2e/plan.json    # 同じ選択を保存
 npm run test:e2e:affected -- --run --out work/e2e/branch.json
 # mainの別checkout（npm ci済み）で、同じspecを流す
 node <branch checkout>/scripts/e2e/affected.mjs --from-json work/e2e/plan.json --run --out work/e2e/main.json

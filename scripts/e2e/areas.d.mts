@@ -5,6 +5,7 @@ export interface SpecRule {
   broad?: boolean;
   owners?: string[];
   suite?: string;
+  needs?: number[];
 }
 export interface Spec {
   file: string;
