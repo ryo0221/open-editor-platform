@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { devices, type PlaywrightTestConfig, type Project } from '@playwright/test';
+import { classifySpecs, developmentSpecs, type Spec } from '../../scripts/e2e/areas.mjs';
 import { chromiumLaunchOptions } from './chromium';
 
 // Named Playwright suites selected by E2E_SUITE in playwright.config.ts. Each suite
@@ -278,6 +279,29 @@ function packagePreview(
   };
 }
 
+/**
+ * Specs of tests/e2e that run on the development servers alone (scripts/e2e/areas.mjs).
+ * Specs that open the Artifact Host, Animation Hosts or a standalone CAD/BIM Host need
+ * those servers and run in their named suites instead.
+ */
+function areaSpecs(filter: (spec: Spec) => boolean = () => true): Suite['projects'] {
+  const specs = developmentSpecs(classifySpecs(process.cwd())).filter(filter);
+  // Spec names are lower-case words and hyphens, so they need no escaping.
+  const pattern = (names: string[]) =>
+    names.length ? new RegExp(`(?:^|/)(?:${names.join('|')})\\.spec\\.ts$`) : /^$/;
+  const names = specs.map((spec) => spec.name);
+  return editorProjects(pattern(names), pattern(names.filter((name) => name.endsWith('mobile'))));
+}
+
+/** Development servers shared by the default suite and the area suites. */
+const developmentServers = [
+  server.designExport,
+  server.reactUiExport,
+  server.reactUiDev,
+  server.dev,
+  server.collaboration,
+];
+
 /** Suites by name. Functions run only for the selected suite. */
 export const suites: Record<string, () => Suite> = {
   'playground-raster': () =>
@@ -422,18 +446,30 @@ export const suites: Record<string, () => Suite> = {
     outputDir: '/tmp/editor-design-path-results',
     webServer: [server.preview, server.artifactHost],
   }),
-  // Development servers; the full desktop/mobile suite (`npm run test:e2e`).
+  // Development servers: every spec that needs no other server (`npm run test:e2e`).
   default: () => ({
     reporter: [['list'], ['html', { open: 'never' }]],
     use: { baseURL: 'http://127.0.0.1:5173' },
-    projects: editorProjects(),
-    webServer: [
-      server.designExport,
-      server.reactUiExport,
-      server.reactUiDev,
-      server.dev,
-      server.collaboration,
-    ],
+    projects: areaSpecs(),
+    webServer: developmentServers,
+  }),
+  // The default suite by area, for splitting the full run (docs/developer-guide.md).
+  office: () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: areaSpecs((spec) => spec.area === 'office'),
+    webServer: developmentServers,
+  }),
+  engineering: () => ({
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: areaSpecs((spec) => spec.area === 'engineering' && !spec.heavy),
+    webServer: developmentServers,
+  }),
+  // CAD, analysis, sheet-set and character specs that compute real geometry: one worker.
+  'engineering-heavy': () => ({
+    workers: 1,
+    use: { baseURL: 'http://127.0.0.1:5173' },
+    projects: areaSpecs((spec) => spec.heavy),
+    webServer: developmentServers,
   }),
 
   'creative-map': () => ({
