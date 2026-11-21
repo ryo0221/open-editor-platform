@@ -48,7 +48,7 @@ export default function CosimHost({
           persistRef.current(content);
         },
       }),
-    // One controller per artifact: the Surface is keyed by it (editor-surfaces).
+    // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
     [session],
   );
   useEffect(() => controller.accessChanged(), [controller, readOnly]);

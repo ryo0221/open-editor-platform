@@ -130,7 +130,11 @@ import {
   type DataView,
   defaultView,
 } from '@editor-platform/structured-data';
-import { type ReviewVisibleSource } from '@editor-platform/review-surfaces';
+import {
+  isFile,
+  type FileContent,
+  type ReviewVisibleSource,
+} from '@editor-platform/review-surfaces';
 import {
   downloadFile,
   downloadText,
@@ -142,7 +146,7 @@ import {
   type StoredArtifact,
 } from './model';
 import type { SimulationSourceChoice } from './simulation/source';
-import { hasSlideAnimations } from '@editor-platform/slide';
+import { hasSlideAnimations, isDeck } from '@editor-platform/slide';
 import {
   type ArtifactMenuAction,
   ExportMenu,
@@ -174,7 +178,8 @@ import {
   type TemplateAuthoring,
 } from './app/artifact-dialogs';
 import { nativeContent, nativeShared } from './app/native';
-import { EditorSurfaces, checkedContent, type SurfaceHost } from './app/editor-surfaces';
+import { EditorSurfaces, checkedContent } from './kinds/surfaces';
+import type { SurfaceHost } from './kinds/surface-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
 export const editorEvents = new EditorEventBus();
@@ -1336,9 +1341,13 @@ export default function App({
   // validation and the heavy surfaces tied to their actual content/permission inputs.
   const rendered = useMemo(() => checkedContent(content, active?.kind), [content, active?.kind]);
   const nativeReuseSupported =
-    !rendered.fictionMap &&
-    !rendered.animation &&
-    !(rendered.slide && hasSlideAnimations(rendered.slide));
+    rendered?.kind !== 'fiction-map' &&
+    rendered?.kind !== 'animation' &&
+    !(
+      rendered?.kind === 'slide' &&
+      isDeck(rendered.content) &&
+      hasSlideAnimations(rendered.content)
+    );
   const animationHistoryPending =
     active?.kind === 'animation' && !!(inputStatus.dirty || inputStatus.composing);
   const exported = useMemo(
@@ -1619,15 +1628,17 @@ export default function App({
                         }}
                       />
                       <ExportMenu
-                        documentText={!!exported.document}
-                        csv={!!exported.data}
+                        documentText={exported?.kind === 'document'}
+                        csv={exported?.kind === 'data'}
                         onJson={nativeExport}
                         onDocumentText={(format) => void documentTextExport(format)}
                         onCsv={() => {
                           if (flushInputs()) setCsvExportOpen(true);
                         }}
                         onDownloadFile={
-                          exported.file ? () => downloadFile(exported.file!) : undefined
+                          exported?.kind === 'file' && isFile(exported.content)
+                            ? () => downloadFile(exported.content as FileContent)
+                            : undefined
                         }
                       />
                       <MoreActionsMenu
