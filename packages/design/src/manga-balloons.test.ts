@@ -6,6 +6,7 @@ import {
   updateElement,
   type DesignContent,
 } from './model';
+import { designDivisionCommand } from './division';
 import { insertDesignPage, insertDesignPanel } from './pagination';
 import { insertDesignSpeechBalloon } from './page-artwork';
 import {
@@ -305,6 +306,45 @@ describe('#21 redraw one panel', () => {
       ],
     } as unknown as DesignPageProposalRequest;
     expect(() => checkPanelRedrawProposal(d, asked, answer)).toThrow(/would move outside panel k1/);
+  });
+
+  it('keeps a redraw inside a slanted panel, not just its bounds (Codex on #28)', () => {
+    let d = insertDesignPage({ x: 0, y: 0, width: 600, height: 800 }, 'p1').apply(createDesign());
+    // One region cut along its diagonal: panel a is the top-left triangle.
+    const n = Math.SQRT1_2;
+    d = designDivisionCommand({
+      type: 'startDivision',
+      pageId: 'p1',
+      region: { x: 0, y: 0, width: 600, height: 600 },
+      root: {
+        dividerId: 'cut',
+        line: { nx: n, ny: n, offset: 300 * Math.SQRT2 },
+        gap: 0,
+        a: { panelId: 'a' },
+        b: { panelId: 'b' },
+      },
+    }).apply(d);
+    d = insertElement('rectangle', {
+      id: 'art',
+      parentId: 'a',
+      bounds: { x: 20, y: 20, width: 50, height: 50 },
+    }).apply(d);
+    const asked = designPanelRedrawRequest(d, 'a', '');
+    expect(asked.region).toEqual({ x: 0, y: 0, width: 600, height: 600 });
+    expect(asked.polygon).toHaveLength(3);
+    const move = (value: { x: number; y: number; width: number; height: number }) =>
+      ({
+        units: [
+          { id: 'u', label: 'u', requires: [], operations: [{ type: 'bounds', id: 'art', value }] },
+        ],
+      }) as unknown as DesignPageProposalRequest;
+    // Inside the bounds, in the corner the diagonal cuts off
+    expect(() =>
+      checkPanelRedrawProposal(d, asked, move({ x: 450, y: 450, width: 50, height: 50 })),
+    ).toThrow(/art would move outside panel a/);
+    expect(() =>
+      checkPanelRedrawProposal(d, asked, move({ x: 40, y: 40, width: 50, height: 50 })),
+    ).not.toThrow();
   });
 
   it('refuses a redraw whose layout moves the panel or what lies outside it (Codex on #28)', () => {

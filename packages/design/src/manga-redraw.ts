@@ -1,4 +1,4 @@
-import { descendantIds, type Bounds } from '@editor-platform/editor-core';
+import { descendantIds, type Bounds, type Point } from '@editor-platform/editor-core';
 import type { DesignContent } from './model';
 import { designPageEditCommand } from './pagination';
 import { isMangaBalloon, isMangaKeepOut, mangaCoverBox } from './manga-balloons';
@@ -17,6 +17,8 @@ export interface DesignPanelRedrawRequest {
   panel: number;
   /** World bounds of the panel. */
   region: Bounds;
+  /** World outline of a divided (possibly slanted) panel; its bounds are the region. */
+  polygon?: Point[];
   notes: string;
   /** Images inside the panel, which a redraw replaces. */
   imageIds: string[];
@@ -46,6 +48,7 @@ export function designPanelRedrawRequest(
     page: pageIndex + 1,
     panel: pages[pageIndex].panelIds.indexOf(panelId) + 1,
     region: { ...panel.bounds },
+    ...(panelOutline(d, panelId) ? { polygon: panelOutline(d, panelId) } : {}),
     notes,
     imageIds: within.filter((e) => e.type === 'image').map((e) => e.id),
     keepOut: within.filter(isMangaKeepOut).map((e) => ({ id: e.id, bounds: { ...e.bounds } })),
@@ -53,11 +56,46 @@ export function designPanelRedrawRequest(
   };
 }
 
-const contains = (outer: Bounds, b: Bounds) =>
+/** A divided panel's outline in world coordinates (its polygon is stored relative to its bounds). */
+function panelOutline(d: DesignContent, panelId: string): Point[] | undefined {
+  const panel = d.elements.find((e) => e.id === panelId);
+  const polygon = panel?.panelGeometry?.polygon;
+  if (!panel || !polygon) return undefined;
+  const b = panel.bounds;
+  return polygon.map((p) => ({ x: b.x + p.x * b.width, y: b.y + p.y * b.height }));
+}
+const boxInside = (outer: Bounds, b: Bounds) =>
   b.x >= outer.x - 1e-6 &&
   b.y >= outer.y - 1e-6 &&
   b.x + b.width <= outer.x + outer.width + 1e-6 &&
   b.y + b.height <= outer.y + outer.height + 1e-6;
+/**
+ * Inside the panel as drawn: within its bounds and, for a divided panel, within its (convex)
+ * outline, so a box cannot sit in the corner a slanted edge cuts off (Codex on #28).
+ */
+function insidePanel(d: DesignContent, request: DesignPanelRedrawRequest, b: Bounds) {
+  if (!boxInside(request.region, b)) return false;
+  const outline = panelOutline(d, request.panelId);
+  if (!outline) return true;
+  const area = outline.reduce((sum, a, i) => {
+    const c = outline[(i + 1) % outline.length]!;
+    return sum + a.x * c.y - c.x * a.y;
+  }, 0);
+  const sign = area < 0 ? -1 : 1;
+  const corners = [
+    { x: b.x, y: b.y },
+    { x: b.x + b.width, y: b.y },
+    { x: b.x + b.width, y: b.y + b.height },
+    { x: b.x, y: b.y + b.height },
+  ];
+  return outline.every((a, i) => {
+    const c = outline[(i + 1) % outline.length]!;
+    const length = Math.hypot(c.x - a.x, c.y - a.y) || 1;
+    return corners.every(
+      (p) => (sign * ((c.x - a.x) * (p.y - a.y) - (c.y - a.y) * (p.x - a.x))) / length >= -1e-6,
+    );
+  });
+}
 
 /**
  * Refuse a redraw answer that reaches outside the panel: only image, text and bounds changes to
@@ -79,7 +117,7 @@ export function checkPanelRedrawProposal(
         throw Error(
           `A panel redraw can only change elements in panel ${request.panelId} (${op.id})`,
         );
-      if (op.type === 'bounds' && !contains(request.region, op.value))
+      if (op.type === 'bounds' && !insidePanel(d, request, op.value))
         throw Error(`${op.id} would move outside panel ${request.panelId}`);
     }
   // The whole answer played through; the review checks each other selection before its preview
@@ -140,7 +178,7 @@ export function checkPanelRedrawSelection(
       throw Error(
         `A panel redraw cannot move or resize ${e.id}, which is not inside panel ${request.panelId}`,
       );
-    if (!contains(request.region, mangaCoverBox(e)))
+    if (!insidePanel(d, request, mangaCoverBox(e)))
       throw Error(`${e.id} would move outside panel ${request.panelId}`);
   }
 }
