@@ -101,6 +101,8 @@ npx playwright install --with-deps chromium
 npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.spec.ts
 ```
 
+`npm run test:tooling`は、packageの依存がcore / office / engineeringの領域を越えていないことも確認します（`npm run check:areas`で単独実行。許可する例外は[`scripts/check-area-boundaries.mjs`](../scripts/check-area-boundaries.mjs)の`knownCrossings`、方針は[種類の登録と領域境界](kind-registry-design.md)）。
+
 最後の行は既存の埋め込み・mobile検証の例です。新Editorのspecと必要な関連回帰を加え、desktop/mobile双方の対象を実行してください。production buildの確認とdev serverの確認は区別して記録します。全回帰を実施したと記載するには、実際の全対象・project・設定を報告します。
 
 ### Playwrightのスイート
