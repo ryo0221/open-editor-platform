@@ -58,12 +58,11 @@ interface MindmapContent {
   id: string; // 文書ID
   rootId: string;
   layout: MindmapLayout;
-  nextSeq: number; // 次に発行するノード番号。減らさない
   nodes: Record<string, MindmapNode>;
 }
 
 interface MindmapNode {
-  id: string; // `n<seq>`。根も同じ形式
+  id: string; // `n-`＋ランダムな英数字（16〜64文字）。根も同じ形式
   text: string; // 1行。改行を含めない
   children: string[]; // 順序付き。順序が意味を持つ
   side?: 'left' | 'right'; // 根の直接の子だけ。radialで左右の振り分けを固定
@@ -77,7 +76,7 @@ interface MindmapNode {
 
 - Content schemaは1から始める。Artifact envelopeの`schemaVersion`とは別の契約で、envelopeは既存のArtifact Coreのまま。未知のschema（2以上）は理由付きで拒否する。
 - 木の不変条件: 根は一つで親を持たない。根以外の全ノードはちょうど一つの親の`children`に一回だけ現れる。根から到達できないノード、循環、重複を拒否する。`side`は根の直接の子だけが持てる。
-- IDの発行: `n${nextSeq}`を発行し`nextSeq`を増やす。削除しても番号を戻さないため、削除したノードのIDが別のノードに再利用されない（保持版・annotationの旧参照が新ノードへ結び付かない）。Undoは発行前のcontentへ戻すので、Undo後に発行したIDは保持版に存在しない限り再び使われうる。保持版との衝突を避けるため、発行時は`max(nextSeq, 保持版を含む最大番号+1)`をHostの読取から渡せるようにする（M1でAPIを決める）。
+- IDの発行: 新しいノードのIDは、command（純関数）の外でHostが渡すID発行関数（既定は`crypto.getRandomValues`による128 bitのランダム値）で作り、commandの引数として渡す。contentに通し番号の`nextSeq`を持たないので、Undoでcontentを戻しても発行済みのIDが巻き戻らず、Undoで消したノード・削除したノードのIDが別のノードに再び使われない。そのため、contentとは別に保存されるannotation（`Annotation.anchor`）や保持版の旧参照が、新しいノードへ黙って結び付かない（orphanのまま残る）。発行したIDが現在のcontentに既にあればcommandは拒否し、発行関数を呼び直す。Redoは記録した同じIDで再適用する。テストでは決定的な発行関数を差し込む。
 - 複製・貼り付け・importでのID: Markdown importと貼り付けは常に新しいIDを発行する。Native candidate（AIの提案や段階的な詳細化）は既存IDを保ったまま差し替える。
 - 座標を保存しない: 位置は`layout`・木の順序・`side`・`collapsed`・文字の大きさから毎回決定的に計算する。手でずらした位置は持たない（Whiteboardへ書き出してから自由に動かす）。
 - 保存する見た目とprivate view stateの境界: `layout`・`collapsed`・`color`・`marks`は版とhashに含む（共有した図の見え方として保存）。camera（pan/zoom）・選択・編集中のbuffer・hover・Viewerでの一時的な展開は保存しない。Read-onlyのViewerでは折りたたみの切替をprivate stateで上書きでき、contentを変えない。
@@ -184,5 +183,5 @@ Integration branch `feat/mindmap`（mainから）に段階PRを入れ、全段�
 - 合意を求める範囲: 新しいkind `mindmap`（Structured Graphの拡張にしない）、座標を保存しない自動配置、`collapsed`・色・印を保存する見た目にすること、local-only。
 - 意図的に先送りするもの: 共同編集、template/reuse、OPML等の外部形式、ノード間の交差リンク、画像の添付、全周の放射状配置、Slideでの枝ごとの登場（E4）、版への固定参照（E5）、mindmapからHostの項目を直接編集する経路。
 - 未決定・リスク: 画面とSVGの改行位置の差（推定幅）、Undo後に発行するIDと保持版の衝突回避のAPI（M1で確定）、実OS IMEと実機touchの検証環境。
-- 機能受け入れを妨げる条件: N01–N14と宣言したC01・C02・C03・C07・C10のFAIL/NOT RUN（NOT RUNは理由と範囲を明記したうえで受け入れの可否を判断する）。Performance・releaseは別の判断。
+- 機能受け入れを妨げる条件: N01–N14と宣言したC01・C02・C03・C07・C10のうち適用される条件にFAILかNOT RUNが一つでも残れば、その範囲をlocal機能受け入れ済みにしない（[受け入れ条件](../editor-acceptance.md#段階ごとの受け入れ)）。例えば実OS日本語IMEがNOT RUNなら、C01を宣言から外すのではなく、受け入れ済みと説明しない。integration branchやmainへprototypeとして入れるかどうかは、露出範囲・未検証の条件・影響を明記した別の判断として扱い、受け入れとは混同しない。Performance・releaseも別の判断。
 - 見直す契約: 候補contentの段階での部分採用で足りない場合はC03とproposal-reviewの契約を、projectionの要件が増えた場合はHost統合の契約を見直す。
