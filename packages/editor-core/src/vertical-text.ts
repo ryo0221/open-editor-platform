@@ -122,37 +122,40 @@ export interface GridTextOptions {
  * The largest size multiple among the characters drawn: a box whose runs are all smaller than its
  * font reserves only their room (Codex on #38). 1 without runs or characters.
  */
-// Scales of the characters that draw a glyph; line breaks draw nothing (Codex on #38).
-function drawnScales(plain: string, scaleAt: GridTextOptions['scaleAt']) {
-  const out: number[] = [];
-  if (!scaleAt) return out;
-  for (let k = 0; k < plain.length; k++) {
-    if (plain[k] === '\n' || plain[k] === '\r') continue;
-    const s = scaleAt(k);
-    if (s > 0) out.push(s);
-  }
-  return out;
+// Only characters that draw a glyph count; line breaks draw nothing (Codex on #38). Counted in
+// one pass, so long text needs no argument list per character.
+function scaleRange(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  let largest = 0;
+  let smallest = Infinity;
+  if (scaleAt)
+    for (let k = 0; k < plain.length; k++) {
+      if (plain[k] === '\n' || plain[k] === '\r') continue;
+      const s = scaleAt(k);
+      if (s > 0) {
+        if (s > largest) largest = s;
+        if (s < smallest) smallest = s;
+      }
+    }
+  return largest > 0 ? { largest, smallest } : { largest: 1, smallest: 1 };
 }
 function largestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
-  const scales = drawnScales(plain, scaleAt);
-  return scales.length ? Math.max(...scales) : 1;
-}
-function smallestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
-  const scales = drawnScales(plain, scaleAt);
-  return scales.length ? Math.min(...scales) : 1;
+  return scaleRange(plain, scaleAt).largest;
 }
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
   const pad = o.padding ?? 4;
   const scaleAt = (offset: number) => o.scaleAt?.(offset) ?? 1;
   // Lines are as wide as their largest characters, and readings follow that size (Codex on #38).
-  const largest = largestScale(plain, o.scaleAt);
+  const { largest, smallest } = scaleRange(plain, o.scaleAt);
   const big = size * largest;
   const rubySize = big * 0.5;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
   const pitch = big * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
   // A letter spacing of minus the font size (or less) would leave no advance (Codex on #29).
-  const cell = Math.max(size * 0.1, size + (o.letterSpacing ?? 0));
+  // A run's size scales its glyph, not the spacing between glyphs (Codex on #38).
+  const cellAt = (scale: number) =>
+    Math.max(size * scale * 0.1, size * scale + (o.letterSpacing ?? 0));
+  const cell = cellAt(1);
   const inner = {
     x: box.x + pad,
     y: box.y + pad,
@@ -189,18 +192,20 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     upright.flatMap((r) => Array.from({ length: r.end - r.start }, (_, k) => r.start + k)),
   );
   const cells = (g: string, offset: number) =>
-    (uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g)) *
-    scaleAt(offset);
+    uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g);
+  // The drawn advance: the glyph's cells at its run's size, with the box's letter spacing.
+  const advanceOf = (g: string, offset: number) =>
+    cells(g, offset) * (o.scaleAt ? cellAt(scaleAt(offset)) : cell);
   // Lines are measured in the smallest drawn cell, so a line of small runs holds what fits in
   // its length and no more (Codex on #38). Without runs this is the box's whole cells, as before.
-  const smallest = smallestScale(plain, o.scaleAt);
-  const room = (o.vertical ? inner.height : inner.width) / cell;
-  const length = o.scaleAt ? Math.max(1, room / smallest) : Math.max(1, Math.floor(room));
+  const unit = cellAt(smallest);
+  const room = o.vertical ? inner.height : inner.width;
+  const length = o.scaleAt ? Math.max(1, room / unit) : Math.max(1, Math.floor(room / cell));
   const broken = breakJapaneseLines(plain, {
     lineLength: length,
     hanging: true,
     unbreakable: [...ruby, ...upright],
-    measure: o.scaleAt ? (g, offset) => cells(g, offset) / smallest : cells,
+    measure: o.scaleAt ? (g, offset) => advanceOf(g, offset) / unit : cells,
   });
   const lines: GridTextLayout['lines'] = broken.map((line) => {
     const glyphs: GridGlyph[] = [];
@@ -209,7 +214,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       const offset = line.start + index;
       if (uprightOf.has(offset) && !uprightAt.has(offset)) continue;
       const group = uprightAt.get(offset);
-      const advance = cells(segment, offset) * cell;
+      const advance = advanceOf(segment, offset);
       glyphs.push({
         text: group ? plain.slice(group.start, group.end) : segment,
         x: 0,

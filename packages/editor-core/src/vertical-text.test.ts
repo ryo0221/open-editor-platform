@@ -331,6 +331,29 @@ describe('#20 vertical writing', () => {
     expect((l.fontSize * 10) / 60).toBeCloseTo(10, 6);
   });
 
+  it('keeps letter spacing apart from run sizes, and lays out long text (Codex on #38)', () => {
+    const base = { id: 't', kind: 'text', fill: '#111' };
+    const spaced = {
+      ...base,
+      bounds: { x: 0, y: 0, width: 80, height: 148 },
+      typography: { fontSize: 20, letterSpacing: 10, writingMode: 'vertical-rl', overflow: 'fit' },
+      text: '天地',
+      runs: [{ text: '天地', style: { fontSize: 60 } }],
+    } as unknown as Drawing;
+    const l = gridTextLayout(spaced);
+    expect((l.fontSize * 60) / 20).toBeCloseTo(60, 6);
+    expect(l.lines[0].glyphs.map((g) => g.advance)).toEqual([70, 70]);
+    const long = '天'.repeat(130_000);
+    const big = {
+      ...base,
+      bounds: { x: 0, y: 0, width: 2000, height: 2000 },
+      typography: { fontSize: 20, writingMode: 'vertical-rl' },
+      text: long,
+      runs: [{ text: long, style: { fontSize: 20 } }],
+    } as unknown as Drawing;
+    expect(() => gridTextLayout(big)).not.toThrow();
+  });
+
   it('leaves line breaks out of the run sizes (Codex on #38)', () => {
     const d = {
       id: 't',
