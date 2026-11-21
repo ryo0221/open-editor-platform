@@ -7,6 +7,7 @@ import {
 } from '@editor-platform/artifact-core';
 export * from './text';
 export * from './japanese-lines';
+export * from './vertical-text';
 export * from './validation';
 export * from './describe';
 export * from './visual-patch';

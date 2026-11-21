@@ -43,11 +43,17 @@ it.each([
     bounds: { x: 700, y: -200, width: 540, height: 740 },
     panelGeometry: { polygon },
   };
-  for (const width of [300, 400]) {
-    const placement = mangaDialoguePlacement(parent, width)!;
+  // Horizontal boxes, and the tall box of vertical dialogue (Codex on #29).
+  for (const [width, height] of [
+    [300, 70],
+    [400, 70],
+    [140, 400],
+  ]) {
+    const placement = mangaDialoguePlacement(parent, width, height)!;
     expect(placement).toBeDefined();
     expect(placement.typography.fontSize).toBeGreaterThanOrEqual(8);
     expect(placement.bounds.width).toBeLessThanOrEqual(width);
+    expect(placement.bounds.width / placement.bounds.height).toBeCloseTo(width / height);
     const points = polygon.map((p) => ({ x: p.x * 540 + 700, y: p.y * 740 - 200 }));
     for (const corner of rectanglePolygon(placement.bounds))
       for (const [i, a] of points.entries()) {

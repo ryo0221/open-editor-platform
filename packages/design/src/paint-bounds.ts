@@ -1,5 +1,7 @@
 import {
+  gridTextExtent,
   rotatedBounds,
+  usesGridText,
   layoutDrawingText,
   unionBounds,
   type Bounds,
@@ -50,13 +52,29 @@ export function designExportPaintBounds(
   const text = drawings
     .filter((d) => d.text && d.typography?.overflow === 'expand')
     .map((d) => {
-      const layout = layoutDrawingText(d),
-        b = d.bounds;
-      const margin = 4 * Math.max(layout.fontSize, ...layout.lines.map((line) => line.ascent));
-      const left = b.x - margin,
-        right = b.x + b.width + margin,
-        top = Math.min(b.y, layout.startY) - margin,
-        bottom = Math.max(b.y + b.height, layout.startY + layout.totalHeight) + margin;
+      const b = d.bounds;
+      let left: number, right: number, top: number, bottom: number;
+      if (usesGridText(d)) {
+        // Vertical and ruby text is set on the cell grid, which can run past the box on any side
+        // (Codex on #29).
+        const e = gridTextExtent(d);
+        const margin = 4 * (d.typography?.fontSize ?? 28);
+        [left, right, top, bottom] = [
+          e.x - margin,
+          e.x + e.width + margin,
+          e.y - margin,
+          e.y + e.height + margin,
+        ];
+      } else {
+        const layout = layoutDrawingText(d);
+        const margin = 4 * Math.max(layout.fontSize, ...layout.lines.map((line) => line.ascent));
+        [left, right, top, bottom] = [
+          b.x - margin,
+          b.x + b.width + margin,
+          Math.min(b.y, layout.startY) - margin,
+          Math.max(b.y + b.height, layout.startY + layout.totalHeight) + margin,
+        ];
+      }
       const angle = ((d.rotation ?? 0) * Math.PI) / 180,
         cos = Math.cos(angle),
         sin = Math.sin(angle),

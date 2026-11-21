@@ -10,6 +10,7 @@ import {
 import {
   shapePath,
   layoutDrawingText,
+  usesGridText,
   rotatedBounds,
   type Drawing,
 } from '@editor-platform/editor-core';
@@ -261,6 +262,10 @@ export function captureDesignAnimation(
             (style.verticalAlign && style.verticalAlign !== 'top')
           )
             throw Error('Unsupported text alignment, spacing or padding');
+          // Animation text is set in horizontal lines: vertical writing and ruby would change
+          // their layout, so they are refused rather than converted (Codex on #29).
+          if (usesGridText(d))
+            throw Error('Vertical writing and ruby cannot be converted to Animation text yet');
           const textLayout = layoutDrawingText(d),
             padding = textLayout.padding;
           common.transform.anchorX -= padding;

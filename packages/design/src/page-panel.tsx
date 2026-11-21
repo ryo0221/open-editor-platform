@@ -4,6 +4,7 @@ import { transaction, type EditorCommand } from '@editor-platform/editor-core';
 import { insertElement, updateElement, type DesignContent } from './model';
 import { insertDesignPage, insertDesignPanel, setDesignPagination } from './pagination';
 import { mangaDialoguePlacement } from './manga-dialogue';
+import { useState } from 'react';
 
 /** Generic native page controls, shared by ordinary and independent Design Surfaces. */
 export function DesignPagePanel({
@@ -18,6 +19,7 @@ export function DesignPagePanel({
   readOnly: boolean;
 }) {
   const pagination = content.pagination;
+  const [vertical, setVertical] = useState(false);
   function addPage() {
     const x = Math.max(0, ...content.elements.map((e) => e.bounds.x + e.bounds.width)) + 40;
     const cmd = insertDesignPage({ x, y: 0, width: 600, height: 800 });
@@ -36,20 +38,22 @@ export function DesignPagePanel({
   }
   function dialogue(panelId: string) {
     const panel = content.elements.find((e) => e.id === panelId)!;
-    const placement = mangaDialoguePlacement(panel, 400);
+    // Vertical dialogue is a tall box, fitted against every panel edge as it is (Codex on #29).
+    const placement = vertical
+      ? mangaDialoguePlacement(panel, 140, Math.min(400, panel.bounds.height * 0.8))
+      : mangaDialoguePlacement(panel, 400);
     if (!placement) return;
     const id = newId('dialogue');
-    const insert = insertElement('text', {
-      id,
-      parentId: panelId,
-      bounds: placement.bounds,
-    });
+    const bounds = placement.bounds;
+    const insert = insertElement('text', { id, parentId: panelId, bounds });
     if (
       apply(
         transaction('Insert dialogue', [
           insert,
           updateElement(id, {
-            typography: placement.typography,
+            typography: vertical
+              ? { ...placement.typography, writingMode: 'vertical-rl', align: 'center' }
+              : placement.typography,
             text: 'Dialogue',
             fill: '#111111',
           }),
@@ -68,7 +72,7 @@ export function DesignPagePanel({
     };
     const cmd =
       kind === 'balloon'
-        ? insertDesignSpeechBalloon(panelId, bounds, 'Dialogue')
+        ? insertDesignSpeechBalloon(panelId, bounds, vertical ? '台詞' : 'Dialogue', { vertical })
         : insertDesignPagePath(panelId, kind, bounds);
     if (apply(cmd)) choose([cmd.elementId]);
   }
@@ -98,6 +102,15 @@ export function DesignPagePanel({
               <option value="rtl">Right to left</option>
               <option value="ltr">Left to right</option>
             </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={vertical}
+              disabled={readOnly}
+              onChange={(e) => setVertical(e.target.checked)}
+            />
+            台詞を縦書きで入れる
           </label>
           <ol>
             {pagination.pages.map((p, index) => (
@@ -175,8 +188,8 @@ export function DesignPagePanel({
             ))}
           </ol>
           <p>
-            Horizontal text and native paths. Balloon paths require vector capture; vertical text
-            and ruby are unsupported.
+            Native text and paths. Vertical writing (縦書き) is set per text box in the inspector;
+            ruby is written as ｜漢字《かんじ》. Balloon paths require vector capture.
           </p>
         </>
       )}
