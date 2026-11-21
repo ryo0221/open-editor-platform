@@ -331,6 +331,25 @@ describe('#20 vertical writing', () => {
     expect((l.fontSize * 10) / 60).toBeCloseTo(10, 6);
   });
 
+  it('leaves line breaks out of the run sizes (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      fill: '#111',
+      bounds: { x: 0, y: 0, width: 40, height: 20 },
+      typography: { fontSize: 60, writingMode: 'vertical-rl', overflow: 'fit' },
+      text: '天\n地',
+      runs: [
+        { text: '天', style: { fontSize: 10 } },
+        { text: '\n' },
+        { text: '地', style: { fontSize: 10 } },
+      ],
+    } as unknown as Drawing;
+    const l = gridTextLayout(d);
+    expect((l.fontSize * 10) / 60).toBeCloseTo(10, 6);
+    expect(l.lines.filter((line) => line.glyphs.length)).toHaveLength(2);
+  });
+
   it('breaks and annotates small runs at their own size (Codex on #38)', () => {
     const base = {
       id: 't',

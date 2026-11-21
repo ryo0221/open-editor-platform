@@ -122,11 +122,24 @@ export interface GridTextOptions {
  * The largest size multiple among the characters drawn: a box whose runs are all smaller than its
  * font reserves only their room (Codex on #38). 1 without runs or characters.
  */
+// Scales of the characters that draw a glyph; line breaks draw nothing (Codex on #38).
+function drawnScales(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  const out: number[] = [];
+  if (!scaleAt) return out;
+  for (let k = 0; k < plain.length; k++) {
+    if (plain[k] === '\n' || plain[k] === '\r') continue;
+    const s = scaleAt(k);
+    if (s > 0) out.push(s);
+  }
+  return out;
+}
 function largestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
-  if (!scaleAt || !plain.length) return 1;
-  let largest = 0;
-  for (let k = 0; k < plain.length; k++) largest = Math.max(largest, scaleAt(k));
-  return largest > 0 ? largest : 1;
+  const scales = drawnScales(plain, scaleAt);
+  return scales.length ? Math.max(...scales) : 1;
+}
+function smallestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  const scales = drawnScales(plain, scaleAt);
+  return scales.length ? Math.min(...scales) : 1;
 }
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
@@ -180,13 +193,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     scaleAt(offset);
   // Lines are measured in the smallest drawn cell, so a line of small runs holds what fits in
   // its length and no more (Codex on #38). Without runs this is the box's whole cells, as before.
-  let smallest = 1;
-  if (o.scaleAt && plain.length) {
-    smallest = Infinity;
-    for (let k = 0; k < plain.length; k++)
-      if (scaleAt(k) > 0) smallest = Math.min(smallest, scaleAt(k));
-    if (!Number.isFinite(smallest)) smallest = 1;
-  }
+  const smallest = smallestScale(plain, o.scaleAt);
   const room = (o.vertical ? inner.height : inner.width) / cell;
   const length = o.scaleAt ? Math.max(1, room / smallest) : Math.max(1, Math.floor(room));
   const broken = breakJapaneseLines(plain, {
