@@ -13,6 +13,7 @@ import { makeRow, type StructuredData } from '@editor-platform/structured-data/m
 import { defaultView } from '@editor-platform/structured-data/views';
 import { readImportFiles } from './import-artifact';
 import { hostNativeArtifactByteLimit } from '@editor-platform/editor-host';
+import { builtinTemplates, prepareInstantiation } from '@editor-platform/templates';
 
 function plan(): StructuredData {
   const columns = [
@@ -109,6 +110,24 @@ it('imports native JSON at the current byte boundary, preserves versions and rej
   expect(imported.draft.content).toEqual(data.draft.content);
   const oversized = new File([boundary, ' '], 'oversized.json', { type: 'application/json' });
   await expect(readImportFiles([oversized], context())).rejects.toThrow('64 MiB');
+});
+
+it('retains the fixed Design template through repeated native imports', async () => {
+  const template = builtinTemplates.find((t) => t.templateId === 'design-dashboard')!;
+  const prepared = await prepareInstantiation(template, template.sample, 'dashboard-test');
+  const saved = await commitVersion(prepared.artifact, null, 'first');
+  const [first] = await readImportFiles([file(saved)], context());
+  const [second] = await readImportFiles([file(first)], context());
+  expect(new Set([saved.id, first.id, second.id]).size).toBe(3);
+  for (const imported of [first, second]) {
+    expect(imported.provenance.source).toBe('imported');
+    expect(imported.provenance.template).toEqual({
+      id: template.templateId,
+      version: template.templateVersion,
+      hash: template.hash,
+    });
+    expect(imported.versions[0].contentHash).toBe(saved.versions[0].contentHash);
+  }
 });
 
 it('keeps the separate text/CSV import limit', async () => {

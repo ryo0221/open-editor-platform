@@ -18,6 +18,8 @@ never update existing artifacts. Pack import verifies hashes, schemas, bindings,
 internal references before saving; conflicting immutable versions reject. Local catalog
 storage persists definitions and recent choices. Generated artifacts contain native content
 and minimal template identity/version/hash provenance, without an ongoing catalog dependency.
+The Playground keeps this identity on native re-import. The creation request ID and retry
+fingerprint belong to the original creation and are omitted from the imported copy.
 
 Each domain retains its semantics: ordered Slide pages, Whiteboard Sections/membership and
 connectors, Design Frames/layout/components, Document semantic blocks and Data typed fields,

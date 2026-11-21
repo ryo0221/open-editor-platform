@@ -18,6 +18,8 @@ Both profiles are Noto CJK 2.004 under the retained [OFL notice](COPYRIGHT.txt).
 The four extracted faces carry `© 2014-2021 Adobe (http://www.adobe.com/).`
 in their name tables. The notice includes a filename-specific paragraph for
 these faces and retains the historical Debian package attribution separately.
+New Video title assets embed this font-specific notice. When reopening an older
+asset, Video verifies and preserves the exact notice stored with its font.
 `manifest.json` is the proportional Japanese face (TTC face 0);
 `mono-manifest.json` is the Japanese monospace face (TTC face 5) used for DOCX code.
 The historical files originated in signed Debian `fonts-noto-cjk` TTC files;
