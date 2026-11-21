@@ -587,9 +587,16 @@ export function gridTextLayout(d: Drawing) {
 /** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
 export function gridTextExtent(d: Drawing): Bounds {
   const layout = gridTextLayout(d);
+  const runs = gridPlainRuns(d);
+  const scale = layout.fontSize / (d.typography?.fontSize ?? (d.kind === 'text' ? 28 : 18));
+  const glyphSize = (g: GridGlyph) => {
+    const own = runs[g.offset]?.fontSize;
+    return own !== undefined ? own * scale : layout.fontSize;
+  };
   const cells = [
     ...layout.lines.flatMap((line) =>
-      line.glyphs.map((g) => ({ x: g.x, y: g.y, size: layout.fontSize })),
+      // Each glyph at its run's size, as drawn (Codex on #38).
+      line.glyphs.map((g) => ({ x: g.x, y: g.y, size: glyphSize(g) })),
     ),
     ...layout.ruby,
   ];
@@ -687,8 +694,7 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
         ((r.underline !== undefined && r.underline !== !!s.underline) ||
           (r.strike !== undefined && r.strike !== !!s.strike) ||
           ((s.underline || s.strike || r.underline || r.strike) &&
-            r.color !== undefined &&
-            r.color !== s.color))
+            ((r.color !== undefined && r.color !== s.color) || r.fontSize !== undefined)))
       );
     }),
   );
@@ -724,7 +730,8 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
             ? [g.y - g.advance / 2, g.y + g.advance / 2]
             : [g.x - g.advance / 2, g.x + g.advance / 2];
           const stroke = r?.color ?? color;
-          return [...(underline ? [size * 0.55] : []), ...(strike ? [0] : [])].map((m) =>
+          // The underline sits beside the glyph at its own size (Codex on #38).
+          return [...(underline ? [glyphSize(g) * 0.55] : []), ...(strike ? [0] : [])].map((m) =>
             layout.vertical
               ? p('line', { x1: g.x + m, y1: from, x2: g.x + m, y2: to, stroke })
               : p('line', { x1: from, y1: g.y + m, x2: to, y2: g.y + m, stroke }),

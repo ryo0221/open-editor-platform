@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { layoutGridText, parseRubyNotation, verticalGlyphKind } from './vertical-text';
-import { drawingPrimitives, gridTextLayout, serializeSvg, type Drawing } from './drawing';
+import {
+  drawingPrimitives,
+  gridTextExtent,
+  gridTextLayout,
+  serializeSvg,
+  type Drawing,
+} from './drawing';
 
 const box = { x: 0, y: 0, width: 200, height: 260 };
 const text = (l: ReturnType<typeof layoutGridText>) =>
@@ -308,6 +314,25 @@ describe('#20 vertical writing', () => {
         line.glyphs.map((g) => g.text),
       ),
     ).toEqual(['第', '12', '話']);
+  });
+
+  it('underlines and measures run glyphs at their own size (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      text: '天',
+      fill: '#111',
+      typography: { fontSize: 20, writingMode: 'vertical-rl', underline: true, overflow: 'expand' },
+      runs: [{ text: '天', style: { fontSize: 200 } }],
+    } as unknown as Drawing;
+    const g = gridTextLayout(d).lines[0]!.glyphs[0]!;
+    const svg = serializeSvg(drawingPrimitives(d, 'x'));
+    const x1 = Number(svg.match(/<line[^>]*x1="([-\d.]+)"/)?.[1]);
+    expect(x1 - g.x).toBeCloseTo(200 * 0.55, 6);
+    const e = gridTextExtent(d);
+    expect(e.x).toBeLessThanOrEqual(g.x - 100);
+    expect(e.y + e.height).toBeGreaterThanOrEqual(g.y + 100);
   });
 
   it('keeps a keycap emoji whole instead of standing its digit upright (Codex on #29)', () => {
