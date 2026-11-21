@@ -223,8 +223,8 @@ exports[`a new Artifact of every kind (KR4 baseline) > cad: name, content and ex
     "joints": [],
     "kernelProfile": {
       "angularToleranceRad": 1e-9,
-      "buildHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-      "id": "unavailable",
+      "buildHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "id": "kr4-baseline-kernel",
       "linearToleranceMm": 0.000001,
       "maxResultLinearToleranceMm": 0.0001,
       "semanticsVersion": 2,

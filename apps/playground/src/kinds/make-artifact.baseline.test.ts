@@ -12,6 +12,12 @@ import { kinds, makeArtifact, validContent, type Kind, type StoredArtifact } fro
 import { simulationSourceChoices } from '../simulation/source';
 import { constructionSourceChoices } from '../construction/source';
 
+// A fixed kernel build, so the CAD baseline does not depend on CAD_OCCT_DIST.
+vi.mock('virtual:cad-kernel-build', () => ({
+  default: { id: 'kr4-baseline-kernel', buildHash: `sha256:${'1'.repeat(64)}` },
+  kernels: [],
+}));
+
 // KR4 acceptance (docs/kind-registry-design.md): what a new Artifact of every kind is today, and
 // that it saves and reloads unchanged. The kind registry must reproduce these records exactly.
 
@@ -29,6 +35,13 @@ function deterministic() {
       `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}` as `${string}-${string}-${string}-${string}-${string}`,
   );
   vi.useFakeTimers({ now: new Date('2026-11-21T00:00:00Z'), toFake: ['Date'] });
+  // A new schedule takes the machine's time zone; fix it so the baseline holds anywhere.
+  const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
+  vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
+    this: Intl.DateTimeFormat,
+  ) {
+    return { ...resolved.call(this), timeZone: 'UTC' };
+  });
 }
 
 async function sources() {
