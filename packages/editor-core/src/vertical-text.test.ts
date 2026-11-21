@@ -316,6 +316,21 @@ describe('#20 vertical writing', () => {
     ).toEqual(['第', '12', '話']);
   });
 
+  it('reserves only the room of runs smaller than the box font (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: { x: 0, y: 0, width: 20, height: 20 },
+      text: '天',
+      fill: '#111',
+      typography: { fontSize: 60, writingMode: 'vertical-rl', overflow: 'fit' },
+      runs: [{ text: '天', style: { fontSize: 10 } }],
+    } as unknown as Drawing;
+    const l = gridTextLayout(d);
+    // The 10px glyph already fits the 12×12 inside of the box: fit leaves it as it is.
+    expect((l.fontSize * 10) / 60).toBeCloseTo(10, 6);
+  });
+
   it('moves punctuation by its own size (Codex on #38)', () => {
     const d = {
       id: 't',

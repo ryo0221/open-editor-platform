@@ -118,14 +118,23 @@ export interface GridTextOptions {
   cuts?: readonly number[];
 }
 
+/**
+ * The largest size multiple among the characters drawn: a box whose runs are all smaller than its
+ * font reserves only their room (Codex on #38). 1 without runs or characters.
+ */
+function largestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  if (!scaleAt || !plain.length) return 1;
+  let largest = 0;
+  for (let k = 0; k < plain.length; k++) largest = Math.max(largest, scaleAt(k));
+  return largest > 0 ? largest : 1;
+}
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
   const pad = o.padding ?? 4;
   const rubySize = size * 0.5;
   const scaleAt = (offset: number) => o.scaleAt?.(offset) ?? 1;
   // Lines are as wide as their largest characters (Codex on #38).
-  let largest = 1;
-  if (o.scaleAt) for (let k = 0; k < plain.length; k++) largest = Math.max(largest, scaleAt(k));
+  const largest = largestScale(plain, o.scaleAt);
   const big = size * largest;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
   const pitch = big * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
@@ -325,11 +334,7 @@ export function layoutGridText(text: string, box: Bounds, o: GridTextOptions): G
   // line (Codex on #29).
   // The floor and the step are for the largest characters drawn: a run much larger than the box's
   // font still shrinks until it fits, down to 8 (Codex on #38).
-  let largest = 1;
-  if (o.scaleAt) {
-    const n = parseRubyNotation(text).plain.length;
-    for (let k = 0; k < n; k++) largest = Math.max(largest, o.scaleAt(k));
-  }
+  const largest = largestScale(parseRubyNotation(text).plain, o.scaleAt);
   const floor = 8 / largest;
   if (o.fit)
     while (size > floor && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
