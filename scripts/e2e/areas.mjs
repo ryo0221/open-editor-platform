@@ -13,6 +13,7 @@ export const corePackages = [
   'calculation-core',
   'canvas-ui',
   'collaboration-core',
+  'easing',
   'editor-core',
   'editor-host',
   'editor-ui',

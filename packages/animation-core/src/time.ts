@@ -1,8 +1,8 @@
+import { easingProgress } from '@editor-platform/easing';
 import {
   requireAnimation as check,
   type Rational,
   type TimeMapping,
-  type Easing,
   type Keyframe,
 } from './model';
 import { tick } from './validate';
@@ -53,25 +53,8 @@ export function mapNestedTick(
   if (time.after === 'hold') return time.sourceOut - 1;
   return time.sourceIn + Number(offset % length);
 }
-function curve(t: number, a: number, b: number) {
-  return 3 * (1 - t) * (1 - t) * t * a + 3 * (1 - t) * t * t * b + t * t * t;
-}
-/** The eased progress (0–1) of a segment at linear progress `t`, as the Player samples keys. */
-export function easingProgress(e: Easing, t: number): number {
-  return ease(e, t);
-}
-function ease(e: Easing, t: number): number {
-  if (e.type === 'hold') return 0;
-  if (e.type === 'linear' || t === 0 || t === 1) return t;
-  let low = 0,
-    high = 1;
-  for (let i = 0; i < 52; i++) {
-    const mid = (low + high) / 2;
-    if (curve(mid, e.x1, e.x2) < t) low = mid;
-    else high = mid;
-  }
-  return curve((low + high) / 2, e.y1, e.y2);
-}
+export { easingProgress };
+const ease = easingProgress;
 /** Called only on validator-owned, nonempty sorted tracks. */
 export function sampleKeys(keys: readonly Keyframe[], tick: number): number {
   if (tick <= keys[0].tick) return keys[0].value;

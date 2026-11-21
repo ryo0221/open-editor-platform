@@ -1,13 +1,11 @@
+import type { Easing, Rational } from '@editor-platform/easing';
+export type { Easing, Rational } from '@editor-platform/easing';
 /** Provisional schema: never register as production Animation v1. */
 export const SCHEMA = 'animation-prototype-0' as const;
 export const EVALUATOR = 'animation-evaluator-prototype-0' as const;
 export const SCHEMA_V1 = 1 as const;
 export const TICKS_PER_SECOND_V1 = 240000 as const;
 export const EVALUATOR_V1 = 'animation-evaluator-rectangle-1' as const;
-export interface Rational {
-  numerator: number;
-  denominator: number;
-}
 export interface SourceRef {
   artifactId: string;
   versionId: string;
@@ -31,10 +29,6 @@ export interface Transform {
   opacity: number;
 }
 export type Property = keyof Transform;
-export type Easing =
-  | { type: 'hold' }
-  | { type: 'linear' }
-  | { type: 'bezier'; x1: number; y1: number; x2: number; y2: number };
 export interface Keyframe {
   id: string;
   tick: number;

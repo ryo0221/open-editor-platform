@@ -1,4 +1,4 @@
-import type { Easing, Rational } from '@editor-platform/animation-core';
+import type { Easing, Rational } from '@editor-platform/easing';
 import type { GeometryTextureRole } from '@editor-platform/geometry-core';
 
 /** x, y, z (mm for positions). */

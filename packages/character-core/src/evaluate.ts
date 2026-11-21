@@ -1,4 +1,4 @@
-import { easingProgress } from '@editor-platform/animation-core';
+import { easingProgress } from '@editor-platform/easing';
 import type { EpmMesh } from '@editor-platform/geometry-mesh';
 import { composeMat4, identityMat4, multiplyMat4, slerpQuat, type Mat4 } from './math';
 import { ikChainBones, solveIk } from './ik';

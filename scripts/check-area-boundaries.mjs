@@ -22,8 +22,6 @@ const allowed = {
  * that no longer exists is reported too, so the list shrinks with the code.
  */
 export const knownCrossings = [
-  'character -> animation-core', // KR2: Easing/Rational move to time-axis
-  'character-core -> animation-core', // KR2
   'estimate -> cad-core', // KR3: CAD/BIM sources move to estimate-engineering
   'estimate -> bim-core', // KR3
   'extension-sample -> animation-core', // the sample extension shows an Animation surface

@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import type { Easing } from '@editor-platform/animation-core';
+import type { Easing } from '@editor-platform/easing';
 import type {
   CharacterAction,
   CharacterDocument,

@@ -11,8 +11,8 @@
     "./style.css": "./src/style.css"
   },
   "dependencies": {
-    "@editor-platform/animation-core": "*",
     "@editor-platform/character-core": "*",
+    "@editor-platform/easing": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/geometry-mesh": "*",
