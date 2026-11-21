@@ -14,6 +14,7 @@ import {
   isMangaBalloon,
   mangaBalloonOverlaps,
   mangaBalloonPlacement,
+  mangaSpeechBalloonPlacement,
   moveMangaBalloonsOffKeepOut,
   setMangaKeepOut,
 } from './manga-balloons';
@@ -93,6 +94,15 @@ describe('#21 balloons keep off faces and figures', () => {
     )!;
     expect(ltr.x).toBeLessThan(60);
     expect(mangaBalloonPlacement(d, 'k1', { width: 900, height: 100 })).toBeUndefined();
+  });
+
+  it('places a new speech balloon clear of the face, its outline stroke included (Codex on #28)', () => {
+    let d = page();
+    const size = { width: 224, height: 144 };
+    const at = mangaSpeechBalloonPlacement(d, 'k1', size)!;
+    expect(at).toMatchObject(size);
+    d = insertDesignSpeechBalloon('k1', at, 'A').apply(d);
+    expect(mangaBalloonOverlaps(d)).toEqual([]);
   });
 
   it('moves covering balloons off and reports balloons with no room', () => {

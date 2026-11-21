@@ -8,7 +8,7 @@ import {
   isMangaBalloon,
   isMangaKeepOut,
   mangaBalloonOverlaps,
-  mangaBalloonPlacement,
+  mangaSpeechBalloonPlacement,
   mangaPanelOf,
   moveMangaBalloonsOffKeepOut,
   setMangaKeepOut,
@@ -99,7 +99,7 @@ export function DesignPagePanel({
     // A new balloon goes where it covers no face, figure or other balloon (#21); with no such
     // place it is not added, rather than put over one (Codex on #28).
     if (kind === 'balloon') {
-      bounds = mangaBalloonPlacement(content, panelId, {
+      bounds = mangaSpeechBalloonPlacement(content, panelId, {
         width: panel.bounds.width * 0.4,
         height: panel.bounds.height * 0.4,
       });

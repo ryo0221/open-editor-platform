@@ -5,6 +5,7 @@ import {
   type EditorCommand,
 } from '@editor-platform/editor-core';
 import { designTextExtent } from './paint-bounds';
+import { designSpeechBalloonStroke } from './page-artwork';
 import {
   appearance,
   designDrawings,
@@ -144,6 +145,19 @@ function inside(points: { x: number; y: number }[], p: { x: number; y: number })
 }
 
 /**
+ * Where a new speech balloon of this stored size goes: searched with its outline's stroke, which
+ * paints past the bounds, so it does not touch a face or figure it was placed next to (Codex on
+ * #28).
+ */
+export function mangaSpeechBalloonPlacement(
+  d: DesignContent,
+  panelId: string,
+  stored: { width: number; height: number },
+) {
+  return mangaBalloonPlacement(d, panelId, stored, [], 0, designSpeechBalloonStroke / 2);
+}
+
+/**
  * Where a balloon of `size` fits in the panel without covering a keep-out region or another
  * balloon. Positions closest to where reading starts come first: the top right for right-to-left
  * works, the top left otherwise. A turned balloon (`rotation`, degrees) is placed by the box it
@@ -157,9 +171,11 @@ export function mangaBalloonPlacement(
   stored: { width: number; height: number },
   ignore: readonly string[] = [],
   rotation = 0,
+  /** Paint past the stored bounds on every side (a new balloon's outline stroke). */
+  paint = 0,
 ): Bounds | undefined {
   const cover = mangaCoverBox({ bounds: { x: 0, y: 0, ...stored }, rotation });
-  const size = { width: cover.width, height: cover.height };
+  const size = { width: cover.width + 2 * paint, height: cover.height + 2 * paint };
   // The stored bounds of a balloon whose drawn box is at (x, y): the same centre.
   const toStored = (x: number, y: number): Bounds => ({
     x: x + (size.width - stored.width) / 2,

@@ -92,6 +92,8 @@ function speechBalloonPath(): DesignEditablePath {
     ],
   };
 }
+/** The stroke width of a new speech balloon's outline: it paints half of it outside the bounds. */
+export const designSpeechBalloonStroke = 2;
 export function insertDesignSpeechBalloon(
   panelId: string,
   bounds: Bounds,
@@ -126,7 +128,7 @@ export function insertDesignSpeechBalloon(
       name: 'Balloon outline',
       fill: '#ffffff',
       stroke: '#111111',
-      strokeWidth: 2,
+      strokeWidth: designSpeechBalloonStroke,
     }),
     dialogue,
     updateElement(dialogue.elementId, {
