@@ -7,7 +7,7 @@
 段階1（#45）で、e2eは変更の影響範囲だけを走らせられるようになりました。ただし、次の2点で選択が広がっています。
 
 1. **Playground と Artifact Host が全種類を1か所で分岐している。** `apps/playground/src` には `kind === '…'` が288か所（33ファイル）あり、`model.ts` の作成・検証・表示名と `app/editor-surfaces.tsx` の描画が全26種類を並べています。`App.tsx` などの共有ファイルを触ると、全種類のspecが選ばれます。Artifact Host の `HostApp.tsx` も同じ形です。
-2. **領域をまたぐ依存が3つある。** core / office / engineering の3領域（段階1の `scripts/e2e/areas.mjs`）のうち、次の依存が境界を越えています。
+2. **領域をまたぐ依存が3つある**（このほか、見本の拡張機能 `extension-sample`（core）が Animation の表示に `animation-core` と `animation-player` を使っています。見本なので境界の確認では例外として残します）。 core / office / engineering の3領域（段階1の `scripts/e2e/areas.mjs`）のうち、次の依存が境界を越えています。
    - `character` と `character-core`（engineering）が `animation-core`（office）を使う。使うのは `Easing`、`Rational`、`easingProgress` だけ。
    - `estimate`（office）が `cad-core` と `bim-core`（engineering）に依存する。使うのは `cad-source.ts`、`bim-source.ts`、`bim-panel.tsx` の3ファイル（631行）。
    - Playground と Artifact Host が、両方の領域の全packageを直接importする。
