@@ -9,11 +9,20 @@ export type FixedFontWeight = 'regular' | 'bold';
 export const VIDEO_FONT_PROFILE = 'noto-cjk-jp-2.004' as const;
 const pins = {
   manifest: '8470b7aaa2f9d45395796e69442b0f3bd5779a218308e06a2c34981f7837e43d',
-  notice: '849f4ea9c214fa4ac3593b770c699f387534b11ce671264c1b10d85bdcb5997b',
   regular: '828bf816295d2f293f5f25f09777b3be53ff981df1ec1d7a57cc66f12b50ab55',
   bold: '137ca65a894da3c1854f406151c15046c1ecc48435451c6566d3e7fa3504ca8b',
 };
-const sizes = { regular: 16467712, bold: 17032596, manifest: 81840, notice: 14712 };
+const sizes = { regular: 16467712, bold: 17032596, manifest: 81840 };
+const currentNotice = {
+  size: 15318,
+  hash: '35039c85b177f4cef55e9aefd4e07db4a5f4efe1c74bd4327344417778069eb5',
+};
+// Older Video projects hold the original Debian notice. New assets include the font-specific attribution.
+const retainedNotices = [
+  currentNotice,
+  { size: 14712, hash: '849f4ea9c214fa4ac3593b770c699f387534b11ce671264c1b10d85bdcb5997b' },
+];
+const noticeForSize = (size?: number) => retainedNotices.find((notice) => notice.size === size);
 export interface FontInterpretationV3 {
   format: 'video-font-interpretation-v3';
   profile: 'font-v3';
@@ -41,6 +50,7 @@ async function verifyFiles(
   files: Record<string, Uint8Array>,
   weight: FixedFontWeight,
   signal: AbortSignal,
+  notice = currentNotice,
 ) {
   signal.throwIfAborted();
   if (Object.keys(files).sort().join() !== 'COPYRIGHT.txt,font.otf,manifest.json')
@@ -48,7 +58,7 @@ async function verifyFiles(
   for (const [file, pin, size] of [
     ['font.otf', pins[weight], sizes[weight]],
     ['manifest.json', pins.manifest, sizes.manifest],
-    ['COPYRIGHT.txt', pins.notice, sizes.notice],
+    ['COPYRIGHT.txt', notice.hash, notice.size],
   ] as const) {
     if (files[file].length !== size || (await hashExportBytes(files[file])) !== pin)
       throw Error(`Fixed font bytes/notice mismatch: ${file}`);
@@ -74,14 +84,19 @@ export async function readFixedFontAsset(
           : entry.name === 'manifest.json'
             ? sizes.manifest
             : entry.name === 'COPYRIGHT.txt'
-              ? sizes.notice
+              ? (noticeForSize(entry.originalSize)?.size ?? 0)
               : 0;
       if (!limit || entry.originalSize !== limit || entry.compression !== 0)
         throw Error('Fixed font asset entry budget/format');
       return true;
     },
   });
-  const manifest = await verifyFiles(files, plan.weight, signal);
+  const manifest = await verifyFiles(
+    files,
+    plan.weight,
+    signal,
+    noticeForSize(files['COPYRIGHT.txt']?.length),
+  );
   const canonical = pack({
     'font.otf': files['font.otf'],
     'manifest.json': files['manifest.json'],
@@ -100,7 +115,7 @@ export async function loadFixedFontAsset(
   const files: Record<string, Uint8Array> = {};
   for (const [entry, file, limit] of [
     ['manifest.json', 'manifest.json', sizes.manifest],
-    ['COPYRIGHT.txt', 'COPYRIGHT.txt', sizes.notice],
+    ['COPYRIGHT.txt', 'COPYRIGHT.txt', currentNotice.size],
     [
       'font.otf',
       weight === 'regular' ? 'NotoSansCJKjp-Regular.otf' : 'NotoSansCJKjp-Bold.otf',
