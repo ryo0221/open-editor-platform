@@ -1,7 +1,7 @@
 import { descendantIds, type Bounds, type Point } from '@editor-platform/editor-core';
 import type { DesignContent } from './model';
 import { designPageEditCommand } from './pagination';
-import { isMangaBalloon, isMangaKeepOut, mangaCoverBox } from './manga-balloons';
+import { isMangaBalloon, isMangaKeepOut, mangaDrawnBox } from './manga-balloons';
 import type { DesignPageProposalRequest } from './page-proposals';
 
 /**
@@ -178,7 +178,7 @@ export function checkPanelRedrawSelection(
       throw Error(
         `A panel redraw cannot move or resize ${e.id}, which is not inside panel ${request.panelId}`,
       );
-    if (!insidePanel(d, request, mangaCoverBox(e)))
+    if (!insidePanel(d, request, mangaDrawnBox(next, e)))
       throw Error(`${e.id} would move outside panel ${request.panelId}`);
   }
 }

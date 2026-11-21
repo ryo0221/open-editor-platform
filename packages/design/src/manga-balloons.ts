@@ -1,5 +1,11 @@
 import { transaction, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
-import { transformElements, updateElement, type DesignContent, type DesignElement } from './model';
+import {
+  appearance,
+  transformElements,
+  updateElement,
+  type DesignContent,
+  type DesignElement,
+} from './model';
 
 /**
  * #21 Balloons and the regions they must not cover.
@@ -44,14 +50,19 @@ export function mangaCoverBox(e: Pick<DesignElement, 'bounds' | 'rotation'>): Bo
   return { x: cx - width / 2, y: cy - height / 2, width, height };
 }
 
+/** `mangaCoverBox` with the rotation it is drawn with, a shared style's included (Codex on #28). */
+export function mangaDrawnBox(d: DesignContent, e: DesignElement): Bounds {
+  return mangaCoverBox({ bounds: e.bounds, rotation: appearance(d, e).rotation });
+}
+
 /**
  * The world box an element covers as drawn, its parts included: a balloon's outline or dialogue,
  * or a part of a marked face or figure group, edited on its own can reach past the group's bounds,
  * which are not recomputed (Codex on #28).
  */
 export function mangaFootprint(d: DesignContent, element: DesignElement): Bounds {
-  const boxes = [element, ...d.elements.filter((e) => isWithin(d, e.id, element.id))].map(
-    mangaCoverBox,
+  const boxes = [element, ...d.elements.filter((e) => isWithin(d, e.id, element.id))].map((e) =>
+    mangaDrawnBox(d, e),
   );
   const x = Math.min(...boxes.map((b) => b.x)),
     y = Math.min(...boxes.map((b) => b.y));
@@ -260,8 +271,16 @@ export function moveMangaBalloonsOffKeepOut(d: DesignContent): {
     }
     // A row or column layout around the balloon can put it back where it was: only a move that
     // lands where the search placed it counts (Codex on #28).
+    // A layout inside it can also grow it as it moves: the whole footprint must land as searched,
+    // clear of what it keeps off (Codex on #28).
     const landed = mangaBalloonFootprint(after, after.elements.find((e) => e.id === id)!);
-    if (Math.abs(landed.x - to.x) > 1e-6 || Math.abs(landed.y - to.y) > 1e-6) {
+    if (
+      Math.abs(landed.x - to.x) > 1e-6 ||
+      Math.abs(landed.y - to.y) > 1e-6 ||
+      Math.abs(landed.width - footprint.width) > 1e-6 ||
+      Math.abs(landed.height - footprint.height) > 1e-6 ||
+      mangaBalloonOverlaps(after).some((o) => o.balloonId === id)
+    ) {
       stuck.push(id);
       continue;
     }

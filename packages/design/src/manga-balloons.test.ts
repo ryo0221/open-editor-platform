@@ -138,6 +138,49 @@ describe('#21 balloons keep off faces and figures', () => {
     expect(overlap(at, { x: 190, y: 30, width: 20, height: 200 })).toBe(false);
   });
 
+  it('sees a face turned by a shared style where it is drawn (Codex on #28)', () => {
+    let d = page();
+    d = insertElement('rectangle', {
+      id: 'arm',
+      parentId: 'k1',
+      bounds: { x: 100, y: 120, width: 200, height: 20 },
+    }).apply(d);
+    d = setMangaKeepOut('arm', true).apply(d);
+    d = {
+      ...d,
+      styles: [{ id: 'turned', name: 'Turned', appearance: { rotation: 90 } }],
+      elements: d.elements.map((e) => (e.id === 'arm' ? { ...e, styleId: 'turned' } : e)),
+    };
+    const b = insertDesignSpeechBalloon('k1', { x: 190, y: 40, width: 20, height: 40 }, 'A');
+    d = b.apply(d);
+    expect(mangaBalloonOverlaps(d).map((o) => o.keepOutId)).toEqual(['arm']);
+  });
+
+  it('keeps a balloon in place when a layout inside it grows as it moves (Codex on #28)', () => {
+    let d = page();
+    const b = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 150, height: 100 }, 'A');
+    d = b.apply(d);
+    d = insertElement('frame', {
+      id: 'column',
+      parentId: b.elementId,
+      bounds: { x: 410, y: 50, width: 100, height: 60 },
+    }).apply(d);
+    d = updateElement('column', {
+      layout: { direction: 'column', gap: 0, padding: 0, align: 'start', sizing: 'hug' },
+    }).apply(d);
+    d = insertElement('text', {
+      id: 'long',
+      parentId: 'column',
+      bounds: { x: 410, y: 50, width: 100, height: 60 },
+    }).apply(d);
+    d = updateElement('long', { text: 'ながいセリフ'.repeat(30), sizing: 'hug' }).apply(d);
+    // Moved off the face, the hug-sized column lays its text out and grows past what was searched.
+    const { moved, stuck, command } = moveMangaBalloonsOffKeepOut(d);
+    expect(moved).toEqual([]);
+    expect(stuck).toEqual([b.elementId]);
+    expect(command).toBeUndefined();
+  });
+
   it('leaves a locked balloon in place, says so, and still moves the others (Codex on #28)', () => {
     let d = page();
     const a = insertDesignSpeechBalloon('k1', { x: 400, y: 40, width: 80, height: 60 }, 'A');
