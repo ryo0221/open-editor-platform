@@ -461,6 +461,37 @@ test('reviews a dependency-closed boundary change, keeps unselected dialogue and
   await expect(review.getByRole('alert')).toContainText('draft changed');
 });
 
+test('#21 a balloon over a marked figure is flagged and stays put when the panel has no room', async ({
+  page,
+  baseURL,
+}, info) => {
+  const independent = host(baseURL),
+    panel = await open(page, independent);
+  await panel.getByRole('button', { name: '連動コマ割りをプレビュー', exact: true }).click();
+  await panel.getByRole('button', { name: 'このコマ割りを採用', exact: true }).click();
+  await panel
+    .getByRole('button', { name: /^Add balloon to panel / })
+    .first()
+    .click();
+  // A figure drawn over most of the panel, marked as a region balloons keep off
+  await panel
+    .getByRole('button', { name: /^Add line to panel / })
+    .first()
+    .click();
+  await panel
+    .getByRole('button', { name: '吹き出しを避ける範囲にする（顔・人物）', exact: true })
+    .click();
+  const alert = panel.getByRole('alert', { name: 'Balloon overlaps' });
+  await expect(alert).toContainText('吹き出しが顔・人物にかかっています（1 件）');
+  await page.screenshot({ path: info.outputPath('manga-balloon-overlap.png'), fullPage: true });
+  await alert.getByRole('button', { name: '吹き出しをよける', exact: true }).click();
+  await expect(panel.getByRole('status').filter({ hasText: '動かせませんでした' })).toBeVisible();
+  await closeTools(page);
+  const content = (await native(page, independent)).draft.content;
+  expect(content.elements.filter((e) => e.mangaRole === 'balloon')).toHaveLength(1);
+  expect(content.elements.filter((e) => e.mangaRole === 'keep-out')).toHaveLength(1);
+});
+
 test('#20 vertical balloon dialogue renders column by column and saves', async ({
   page,
   baseURL,

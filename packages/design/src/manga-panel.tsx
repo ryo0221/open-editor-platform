@@ -342,6 +342,7 @@ export function MangaPanel({
         apply={apply}
         choose={choose}
         readOnly={readOnly || !!pending}
+        selected={selected}
       />
     </section>
   );
