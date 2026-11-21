@@ -1,4 +1,4 @@
-import type { Easing } from '@editor-platform/animation-core';
+import type { Easing } from '@editor-platform/easing';
 import {
   characterJointValueKeys,
   type CharacterJointValueKey,

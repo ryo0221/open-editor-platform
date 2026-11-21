@@ -8,8 +8,8 @@
     "./gltf-fixtures": "./src/gltf-fixtures.ts"
   },
   "dependencies": {
-    "@editor-platform/animation-core": "*",
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/easing": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/geometry-core": "*",
     "@editor-platform/geometry-mesh": "*",

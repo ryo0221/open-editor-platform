@@ -1,4 +1,4 @@
-import type { Easing } from '@editor-platform/animation-core';
+import type { Easing } from '@editor-platform/easing';
 import { characterLimits } from './model';
 import type { PropTransformKey } from './prop-transform';
 

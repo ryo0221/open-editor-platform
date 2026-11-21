@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Rational } from '@editor-platform/animation-core';
+import type { Rational } from '@editor-platform/easing';
 import type { CharacterAction } from '@editor-platform/character-core';
 import { ticksPerSecond } from './playback';
 import {

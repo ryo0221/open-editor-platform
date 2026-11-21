@@ -1,5 +1,5 @@
 import { Zip, ZipPassThrough } from 'fflate';
-import type { Rational } from '@editor-platform/animation-core';
+import type { Rational } from '@editor-platform/easing';
 import type { CharacterDocument } from '@editor-platform/character-core';
 import { ticksPerSecond } from './playback';
 
