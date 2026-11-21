@@ -1,4 +1,4 @@
-import { artifactEstimateQuantities, evaluateEstimateBim } from './estimate-bim';
+import { artifactEstimateQuantities, artifactEstimateGeometry } from './estimate-bim';
 import { useRef } from 'react';
 import {
   canonicalJson,
@@ -57,7 +57,7 @@ export function ArtifactEstimate({
       sources={estimateSources(artifacts)}
       quantitySources={estimateCadSources(artifacts)}
       bimSources={estimateBimSources(artifacts)}
-      evaluateBim={evaluateEstimateBim}
+      geometry={artifactEstimateGeometry}
       registerInput={(boundary) =>
         host.registerInputBoundary(() => {
           if (boundary.read().composing) throw Error('IME変換を確定してください。');

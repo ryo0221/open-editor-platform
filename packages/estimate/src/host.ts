@@ -21,17 +21,6 @@ import {
   type Calculation,
   type QuantityVerification,
 } from '@editor-platform/estimate-core';
-/** Domain adapters load only when a retained geometric source requires verification. */
-const quantityVerification: QuantityVerification = {
-  verifySource: async (source, sources) => {
-    const { bimQuantityVerification } = await import('./bim-source');
-    return bimQuantityVerification().verifySource(source, sources);
-  },
-  verifyQuantities: async (quantities, sources) => {
-    const { bimQuantityVerification } = await import('./bim-source');
-    return bimQuantityVerification().verifyQuantities(quantities, sources);
-  },
-};
 export interface EstimatePort extends EstimateGuard {
   quantityVerification?: QuantityVerification;
   read(): EstimateDocument;
@@ -191,12 +180,7 @@ export class EstimateController {
         'calculation-capacity',
         '計算記録を追加すると2 MiBの容量上限を超えます。現在の結果を保存し、「作業中の記録を置換」で再試算してください。入力だけで上限に近い場合は見積を分割してください。',
       );
-    await verifyEstimate(
-      next,
-      undefined,
-      true,
-      this.port.quantityVerification ?? quantityVerification,
-    );
+    await verifyEstimate(next, undefined, true, this.port.quantityVerification);
     fresh();
     if (
       (raw as Calculation).id !== id ||
@@ -272,12 +256,7 @@ export class EstimateController {
     if (this.closed || !this.port.canExport() || !this.port.inputsReady())
       throw new CalculationError('export-denied');
     assertEstimateAccess(document, this.port);
-    await verifyEstimate(
-      document,
-      undefined,
-      true,
-      this.port.quantityVerification ?? quantityVerification,
-    );
+    await verifyEstimate(document, undefined, true, this.port.quantityVerification);
     if (
       this.closed ||
       revision !== this.port.revision() ||
@@ -295,7 +274,8 @@ export class EstimateController {
 }
 export async function verifyEstimateArtifact(
   artifact: Artifact<unknown>,
-  verifier: QuantityVerification = quantityVerification,
+  /** Re-derives CAD/BIM sources; without it they fail with quantity-verifier-required. */
+  verifier?: QuantityVerification,
 ) {
   if (artifact.kind !== 'estimate') return;
   const identities = new Map<string, string>();

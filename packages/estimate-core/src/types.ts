@@ -1,5 +1,10 @@
 import type { WorkRule, WorkPlan, WorkResult } from './work';
-import type { Rounding, SourcePin } from '@editor-platform/calculation-core';
+import type {
+  QuantitySourceRef,
+  RetainedSource,
+  Rounding,
+} from '@editor-platform/calculation-core';
+export type { RetainedSource } from '@editor-platform/calculation-core';
 export interface Override {
   value: string;
   reason: string;
@@ -10,14 +15,7 @@ export interface Quantity {
   unit: string;
   value: string | null;
   quality: 'manual' | 'cad' | 'analytic' | 'kernel';
-  source?: {
-    snapshotKey: string;
-    identity: string;
-    metric: string;
-    scope: 'whole';
-    coverage: string[];
-    extractionBasis: string;
-  };
+  source?: QuantitySourceRef;
   evidence: string;
   override?: Override;
   inclusion: 'include' | 'exclude' | 'pending';
@@ -60,12 +58,6 @@ export interface Scenario {
   rates: { id: string; value: string; reason: string }[];
   waste: { id: string; value: string }[];
   workRules: WorkRule[];
-}
-export interface RetainedSource {
-  key: string;
-  pin: SourcePin;
-  nativeContent: unknown;
-  dependencies: string[];
 }
 export interface EstimateRecipe {
   currency: { code: string; minorDigits: number };

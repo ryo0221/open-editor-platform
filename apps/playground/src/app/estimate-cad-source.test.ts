@@ -10,9 +10,14 @@ import {
 import {
   retainCadSource,
   cadSourceProjection,
-  cadQuantity,
+  cadMeasurement,
   cadQuantityVerification,
-} from './cad-source';
+} from '@editor-platform/estimate-engineering/cad-source';
+import { geometryQuantitySources } from '@editor-platform/estimate-engineering';
+import {
+  measuredQuantity,
+  proposeCadSourceUpdate,
+} from '@editor-platform/estimate/geometry-quantities';
 it('ES11/12/15 retains exact CAD closure, verifies quantities and rejects hash/value/coverage forgery', async () => {
   const f = r2bBom(),
     pin = {
@@ -28,7 +33,7 @@ it('ES11/12/15 retains exact CAD closure, verifies quantities and rejects hash/v
   )!;
   const doc = createEstimate();
   doc.retainedSources = sources;
-  doc.quantities = [cadQuantity(root, sources, row.identity, 'material')];
+  doc.quantities = [measuredQuantity(cadMeasurement(root, sources, row.identity), 'material')];
   await expect(
     verifyEstimate(doc, undefined, false, cadQuantityVerification),
   ).resolves.toBeDefined();
@@ -48,8 +53,8 @@ it('ES11/12/15 retains exact CAD closure, verifies quantities and rejects hash/v
     (r) => r.kind === 'body' && parent.coverage.includes(r.identity),
   )!;
   doc.quantities = [
-    cadQuantity(root, sources, parent.identity, 'parent'),
-    cadQuantity(root, sources, child.identity, 'child'),
+    measuredQuantity(cadMeasurement(root, sources, parent.identity), 'parent'),
+    measuredQuantity(cadMeasurement(root, sources, child.identity), 'child'),
   ];
   doc.rates = [
     {
@@ -81,7 +86,6 @@ it('ES11/12/15 retains exact CAD closure, verifies quantities and rejects hash/v
   expect(evaluateEstimate(makeEstimateBasis(doc)).total).toBe('2');
 });
 it('ES13/14 source updates keep line notes, overrides and stable IDs, while additions/removals remain pending', async () => {
-  const { proposeCadSourceUpdate } = await import('./cad-source');
   const f = r2bBom(),
     pin = {
       domain: 'cad' as const,
@@ -94,7 +98,7 @@ it('ES13/14 source updates keep line notes, overrides and stable IDs, while addi
   const doc = createEstimate();
   doc.retainedSources = sources;
   doc.quantities = cadSourceProjection(root, sources).rows.map((row, i) =>
-    cadQuantity(root, sources, row.identity, `q${i}`),
+    measuredQuantity(cadMeasurement(root, sources, row.identity), `q${i}`),
   );
   doc.quantities[0].override = { value: '2', reason: 'manual adjustment' };
   const changed = structuredClone(f.assembly);
@@ -109,6 +113,7 @@ it('ES13/14 source updates keep line notes, overrides and stable IDs, while addi
     replacement,
     closure,
     () => `new${id++}`,
+    geometryQuantitySources(),
   );
   expect(proposed.document.quantities[0].id).toBe(doc.quantities[0].id);
   expect(proposed.document.quantities[0].override).toEqual(doc.quantities[0].override);

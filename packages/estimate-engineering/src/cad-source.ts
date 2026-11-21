@@ -9,13 +9,12 @@ import {
   CalculationError,
   inspectSavedSource,
   pinKey,
+  type GeometrySourceInput,
+  type MeasuredQuantity,
+  type QuantityVerification,
+  type RetainedSource,
   type SourcePin,
 } from '@editor-platform/calculation-core';
-import type {
-  RetainedSource,
-  Quantity,
-  QuantityVerification,
-} from '@editor-platform/estimate-core';
 
 const fail = (code: string): never => {
   throw new CalculationError(code);
@@ -86,23 +85,21 @@ export function cadSourceProjection(source: RetainedSource, sources: RetainedSou
   );
   return cadQuantityRows(source.pin.artifactId, content, (hash) => lookup.get(hash));
 }
-export function cadQuantity(
+/** The count of one CAD row, as the calculation stores it. */
+export function cadMeasurement(
   source: RetainedSource,
   sources: RetainedSource[],
   identity: string,
-  id: string,
-): Quantity {
+): MeasuredQuantity {
   const row = cadSourceProjection(source, sources).rows.find((r) => r.identity === identity);
   if (!row) return fail('missing-quantity-identity');
   return {
-    id,
     name: row.name,
     unit: 'count',
     value: String(row.count),
     quality: 'cad',
     evidence: '保存CADの部品/本体数量。形状から重量・加工時間を推定しません。',
-    inclusion: row.excluded ? 'exclude' : 'include',
-    exclusionReason: row.excluded ? 'CAD BOMの除外指定' : '',
+    excluded: row.excluded,
     source: {
       snapshotKey: source.key,
       identity: row.identity,
@@ -112,6 +109,15 @@ export function cadQuantity(
       extractionBasis: `cad-count-1:${source.pin.contentHash}`,
     },
   };
+}
+/** Retain a saved CAD and its saved part closure; `root` is the CAD itself. */
+export async function retainCadInput(input: GeometrySourceInput) {
+  const sources = await retainCadSource(
+    input.pin,
+    input.content,
+    (hash) => input.closure.find((c) => c.contentHash === hash)?.content,
+  );
+  return { root: sources.find((s) => s.key === pinKey(input.pin))!, sources };
 }
 export const cadQuantityVerification: QuantityVerification = {
   async verifySource(source, sources) {
@@ -142,98 +148,15 @@ export const cadQuantityVerification: QuantityVerification = {
         if (quantity.quality !== 'cad') fail('unsupported-quantity-source');
         const source = sources.find((s) => s.key === quantity.source!.snapshotKey);
         if (!source || source.pin.domain !== 'cad') return fail('missing-quantity-source');
-        const expected = cadQuantity(source, sources, quantity.source.identity, quantity.id);
+        const expected = cadMeasurement(source, sources, quantity.source.identity);
         if (
           canonicalJson(quantity.source) !== canonicalJson(expected.source) ||
           quantity.value !== expected.value ||
           quantity.unit !== expected.unit
         )
           fail('quantity-source-mismatch');
-        if (expected.inclusion === 'exclude' && quantity.inclusion !== 'exclude')
+        if (expected.excluded && quantity.inclusion !== 'exclude')
           fail('source-exclusion-mismatch');
       }
   },
 };
-export interface CadUpdateDifference {
-  id: string;
-  state: 'unchanged' | 'changed' | 'added' | 'removed' | 'ambiguous';
-  before: string | null;
-  after: string | null;
-}
-/** Prepare only. Removed/ambiguous rows remain pending and never silently lose their line mapping. */
-export async function proposeCadSourceUpdate(
-  document: import('@editor-platform/estimate-core').EstimateDocument,
-  oldKey: string,
-  replacement: RetainedSource,
-  closure: RetainedSource[],
-  allocateId: () => string,
-) {
-  const next = structuredClone(document),
-    old = next.retainedSources.find((s) => s.key === oldKey);
-  if (
-    !old ||
-    old.pin.artifactId !== replacement.pin.artifactId ||
-    old.pin.domain !== 'cad' ||
-    replacement.pin.domain !== 'cad'
-  )
-    fail('quantity-update-source-mismatch');
-  const merged = new Map(next.retainedSources.map((s) => [s.key, s]));
-  for (const s of closure) merged.set(s.key, s);
-  merged.set(replacement.key, replacement);
-  next.retainedSources = [...merged.values()];
-  for (const source of closure)
-    await cadQuantityVerification.verifySource(source, next.retainedSources);
-  const oldRows = new Map(
-    cadSourceProjection(old!, next.retainedSources).rows.map((r) => [r.identity, r]),
-  );
-  const newRows = new Map(
-    cadSourceProjection(replacement, next.retainedSources).rows.map((r) => [r.identity, r]),
-  );
-  const differences: CadUpdateDifference[] = [];
-  const identities = new Set<string>();
-  for (const q of next.quantities)
-    if (q.source?.snapshotKey === oldKey) {
-      identities.add(q.source.identity);
-      const before = oldRows.get(q.source.identity),
-        after = newRows.get(q.source.identity);
-      if (!before) fail('missing-old-quantity-identity');
-      if (!after) {
-        q.inclusion = 'pending';
-        differences.push({ id: q.id, state: 'removed', before: q.value, after: null });
-        continue;
-      }
-      if (before!.reference?.artifactId !== after.reference?.artifactId) {
-        q.inclusion = 'pending';
-        differences.push({
-          id: q.id,
-          state: 'ambiguous',
-          before: q.value,
-          after: String(after.count),
-        });
-        continue;
-      }
-      const updated = cadQuantity(replacement, next.retainedSources, after.identity, q.id);
-      differences.push({
-        id: q.id,
-        state: canonicalJson(before) === canonicalJson(after) ? 'unchanged' : 'changed',
-        before: q.value,
-        after: updated.value,
-      });
-      q.value = updated.value;
-      q.unit = updated.unit;
-      q.source = updated.source;
-      if (after.excluded) {
-        q.inclusion = 'exclude';
-        q.exclusionReason = 'CAD BOMの除外指定';
-      }
-      // Names, notes, price bindings, allocation, user override and explicit exclusion remain owned by Estimate.
-    }
-  for (const row of newRows.values())
-    if (!identities.has(row.identity)) {
-      const q = cadQuantity(replacement, next.retainedSources, row.identity, allocateId());
-      if (!row.excluded) q.inclusion = 'pending';
-      next.quantities.push(q);
-      differences.push({ id: q.id, state: 'added', before: null, after: q.value });
-    }
-  return { document: next, differences };
-}

@@ -4,10 +4,11 @@ import { bimStarter, f39Roofs } from '@editor-platform/bim-core';
 import { createEstimate, calculateEstimate, verifyEstimate } from '@editor-platform/estimate-core';
 import {
   retainBimSource,
-  bimQuantity,
+  bimMeasurement,
   bimQuantityVerification,
   type EstimateBimEvaluator,
-} from './bim-source';
+} from '@editor-platform/estimate-engineering/bim-source';
+import { measuredQuantity } from '@editor-platform/estimate/geometry-quantities';
 it('ES16 EF4 keeps gross/net distinct and converts 550000000 mm3 to 0.55 m3 / 11000 JPY', async () => {
   const doc = bimStarter(),
     type = doc.types.find((t) => t.id === 't-wall-200')!;
@@ -38,15 +39,13 @@ it('ES16 EF4 keeps gross/net distinct and converts 550000000 mm3 to 0.55 m3 / 11
       contentHash: await contentHash(doc),
     },
     source = await retainBimSource(pin, doc);
-  const net = await bimQuantity(source, 'wall', 'netVolume', 'q');
+  const net = await bimMeasurement(source, 'wall', 'netVolume');
   expect(net.value).toBe('0.55');
   expect(net.unit).toBe('m3');
-  expect((await bimQuantity(source, 'wall', 'grossVolume', 'gross')).value).toBe('0.6');
-  await expect(bimQuantity(source, 'wall', 'grossArea', 'area')).rejects.toThrow(
-    'missing-bim-metric',
-  );
+  expect((await bimMeasurement(source, 'wall', 'grossVolume')).value).toBe('0.6');
+  await expect(bimMeasurement(source, 'wall', 'grossArea')).rejects.toThrow('missing-bim-metric');
   const estimate = createEstimate();
-  estimate.quantities = [net];
+  estimate.quantities = [measuredQuantity(net, 'q')];
   estimate.retainedSources = [source];
   estimate.rates = [
     {
@@ -97,21 +96,21 @@ it('ES17/19 never trusts global ok, stale basis, missing gross or a persisted ke
     elements: new Map([['w-east', { status: 'ok' }]]),
     quantities: new Map([['w-east', { netVolume: 550000000 }]]),
   });
-  expect((await bimQuantity(source, 'w-east', 'netVolume', 'q', valid)).value).toBe('0.55');
-  await expect(bimQuantity(source, 'w-east', 'grossVolume', 'q', valid)).rejects.toThrow(
+  expect((await bimMeasurement(source, 'w-east', 'netVolume', valid)).value).toBe('0.55');
+  await expect(bimMeasurement(source, 'w-east', 'grossVolume', valid)).rejects.toThrow(
     'missing-bim-metric',
   );
-  await expect(bimQuantity(source, 'w-east', 'netVolume', 'q')).rejects.toThrow(
+  await expect(bimMeasurement(source, 'w-east', 'netVolume')).rejects.toThrow(
     'bim-kernel-verifier-required',
   );
   await expect(
-    bimQuantity(source, 'w-east', 'netVolume', 'q', async (d, p) => ({
+    bimMeasurement(source, 'w-east', 'netVolume', async (d, p) => ({
       ...(await valid(d, p)),
       elements: new Map([['w-east', { status: 'error' }]]),
     })),
   ).rejects.toThrow('bim-element-evaluation-failed');
   await expect(
-    bimQuantity(source, 'w-east', 'netVolume', 'q', async (d, p) => ({
+    bimMeasurement(source, 'w-east', 'netVolume', async (d, p) => ({
       ...(await valid(d, p)),
       contentHash: '0'.repeat(64),
     })),
@@ -119,7 +118,7 @@ it('ES17/19 never trusts global ok, stale basis, missing gross or a persisted ke
 });
 it('ES18 refuses CAD part placement metrics instead of counting the same placed part twice', async () => {
   const { f02Plate, cadContentHash } = await import('@editor-platform/cad-core');
-  const { retainCadSource } = await import('./cad-source');
+  const { retainCadSource } = await import('@editor-platform/estimate-engineering/cad-source');
   const cad = f02Plate();
   const partPin = { artifactId: 'cad-part', versionId: 'v1', contentHash: cadContentHash(cad) };
   const cadSources = await retainCadSource({ domain: 'cad', ...partPin }, cad, () => undefined);
@@ -148,10 +147,10 @@ it('ES18 refuses CAD part placement metrics instead of counting the same placed 
     contentHash: await contentHash(doc),
   };
   const source = await retainBimSource(pin, doc, cadSources);
-  await expect(bimQuantity(source, 'placed', 'netVolume', 'q')).rejects.toThrow(
+  await expect(bimMeasurement(source, 'placed', 'netVolume')).rejects.toThrow(
     'bim-quantity-unavailable',
   );
-  await expect(bimQuantity(source, 'placed', 'length', 'q')).rejects.toThrow(
+  await expect(bimMeasurement(source, 'placed', 'length')).rejects.toThrow(
     'bim-quantity-unavailable',
   );
 });
@@ -183,7 +182,7 @@ it('ES19 aborts a delayed kernel request even when its evaluator returns a valid
       quantities: new Map([['w-east', { netVolume: 550000000 }]]),
     };
   };
-  const pending = bimQuantity(source, 'w-east', 'netVolume', 'q', evaluator, abort.signal);
+  const pending = bimMeasurement(source, 'w-east', 'netVolume', evaluator, abort.signal);
   await entered;
   abort.abort();
   await expect(pending).rejects.toThrow('cancelled');
