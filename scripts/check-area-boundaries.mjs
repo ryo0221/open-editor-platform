@@ -61,8 +61,9 @@ function sourceFiles(dir) {
 
 /**
  * Imports from a Host's office kinds (`src/kinds/office.ts`, `src/kinds/office/**`) that reach
- * engineering code: an engineering package, the Host's engineering kinds, a Host directory named
- * after an engineering package (`src/cad/`), or a Host connection file. Engineering connections
+ * engineering code: an engineering package, the Host's engineering kinds, a Host directory or
+ * top-level file named after an engineering package (`src/cad/`, `src/bim.tsx`), or a Host
+ * connection file. Engineering connections
  * reach office kinds only as arguments (kinds/surfaces.ts).
  */
 export function officeKindImports(root) {
@@ -92,7 +93,7 @@ export function officeKindImports(root) {
         const [top, next] = target.split('/');
         if (
           (top === 'kinds' && (next === 'engineering' || next === 'engineering.ts')) ||
-          (next !== undefined && engineeringHostDir(top)) ||
+          engineeringHostDir(next === undefined ? top.replace(/\.tsx?$/, '') : top) ||
           hostConnectionFiles.some((entry) => `${target}.ts` === entry || target === entry)
         )
           found.push(`${name} -> ${specifier}`);

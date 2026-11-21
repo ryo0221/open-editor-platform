@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { KindDefinition } from '@editor-platform/artifact-kinds';
 import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import type { Content, StoredArtifact } from '../model';
-import { pairKinds } from './pair-kinds';
+import { pairKinds } from '@editor-platform/artifact-kinds';
 import type { SurfaceHost } from './surface-host';
 
 /** What the Playground passes to a kind's Surface: its Host state and the checked content. */

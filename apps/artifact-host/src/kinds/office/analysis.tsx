@@ -10,7 +10,7 @@ import type { ArtifactEditor } from '@editor-platform/editor-host';
 import { AnalysisSurface, analysisSources, type AnalysisPort } from '@editor-platform/analysis';
 import { isAnalysis } from '@editor-platform/analysis-core';
 import '@editor-platform/analysis/styles.css';
-import { domainExecute, type HostContent } from './model';
+import { domainExecute, type HostContent } from '../../model';
 export function ArtifactAnalysis({
   host,
   artifacts,

@@ -1,4 +1,4 @@
-import { artifactEstimateQuantities, artifactEstimateGeometry } from './estimate-bim';
+import type { GeometryQuantitySources } from '@editor-platform/calculation-core';
 import { useRef } from 'react';
 import {
   canonicalJson,
@@ -17,13 +17,16 @@ import {
 } from '@editor-platform/estimate';
 import { isEstimate } from '@editor-platform/estimate-core';
 import '@editor-platform/estimate/styles.css';
-import { domainExecute, type HostContent } from './model';
+import { domainExecute, type HostContent } from '../../model';
 export function ArtifactEstimate({
   host,
   artifacts,
   storage,
   onCreated,
+  geometry,
 }: {
+  /** CAD/BIM quantity reading, from the Host's engineering connection (kinds/surfaces.tsx). */
+  geometry: GeometryQuantitySources | undefined;
   host: ArtifactEditor<HostContent>;
   artifacts: Artifact<HostContent>[];
   storage: StorageAdapter<Artifact<HostContent>>;
@@ -36,7 +39,7 @@ export function ArtifactEstimate({
       generation: permission.current.generation + 1,
     };
   const port: EstimatePort = {
-    quantityVerification: artifactEstimateQuantities,
+    quantityVerification: geometry?.verification,
     read: () => {
       const c = host.content;
       if (!isEstimate(c)) throw Error('Not Estimate');
@@ -57,7 +60,7 @@ export function ArtifactEstimate({
       sources={estimateSources(artifacts)}
       quantitySources={estimateCadSources(artifacts)}
       bimSources={estimateBimSources(artifacts)}
-      geometry={artifactEstimateGeometry}
+      geometry={geometry}
       registerInput={(boundary) =>
         host.registerInputBoundary(() => {
           if (boundary.read().composing) throw Error('IME変換を確定してください。');

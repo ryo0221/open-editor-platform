@@ -61,6 +61,8 @@ test('an office kind importing engineering code is reported', () => {
       "import { cadSurface } from '../engineering/cad';",
       "const CadHost = import('../../cad/host');",
       "import { GeoSurface } from '../../geo/surface';",
+      "const BimView = import('../../bim');",
+      "import { ArtifactEstimate } from '../../estimate';",
       "export { x } from '@editor-platform/bim';",
     ].join('\n'),
   );
@@ -72,6 +74,7 @@ test('an office kind importing engineering code is reported', () => {
     'apps/host/src/kinds/office/estimate.tsx -> ../engineering',
     'apps/host/src/kinds/office/estimate.tsx -> ../engineering/cad',
     'apps/host/src/kinds/office/estimate.tsx -> ../../cad/host',
+    'apps/host/src/kinds/office/estimate.tsx -> ../../bim',
     'apps/host/src/kinds/office/estimate.tsx -> @editor-platform/bim',
   ]);
 });
