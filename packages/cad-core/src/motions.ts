@@ -284,9 +284,15 @@ export function motionCameraAt(
     position = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
   }
   const view = unit(sub(position, target));
-  // The up turns between the keys' ups about the view (opposite ups included), and is kept off
-  // the view direction so `lookAt` always has an orientation (Codex on #37).
-  let up = turn(unit(k1.camera.up), unit(k2.camera.up), u, view);
+  // Each key's up is carried along with the view (turned by the least rotation that takes the
+  // key's view to this one), then the two carried ups are blended about the view. The up so moves
+  // with the view and never crosses it (Codex on #37/#38).
+  const hint = unit(k1.camera.up);
+  const carried = (keyView: Vec3, keyUp: Vec3) => {
+    const v = rotateLike(unit(keyView), view, unit(keyUp), hint);
+    return unit(sub(v, scale3(view, dot(v, view))));
+  };
+  let up = turn(carried(view1, k1.camera.up), carried(view2, k2.camera.up), u, view);
   up = sub(up, scale3(view, dot(up, view)));
   if (Math.hypot(...up) < 1e-6) {
     const keyUp = u < 0.5 ? k1.camera.up : k2.camera.up;
@@ -309,6 +315,27 @@ const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
 /** A unit vector at right angles to `v`. */
 const perpendicular = (v: Vec3): Vec3 =>
   unit(cross(v, Math.abs(v[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+/** `v` turned by the least rotation that takes unit `a` to unit `b` (about `axis` when opposite). */
+function rotateLike(a: Vec3, b: Vec3, v: Vec3, axis: Vec3): Vec3 {
+  const c = Math.max(-1, Math.min(1, dot(a, b)));
+  let n = cross(a, b);
+  if (Math.hypot(...n) < 1e-9) {
+    if (c > 0) return v;
+    n = sub(axis, scale3(a, dot(axis, a)));
+    if (Math.hypot(...n) < 1e-9) n = perpendicular(a);
+  }
+  n = unit(n);
+  const angle = Math.acos(c);
+  const [cs, sn] = [Math.cos(angle), Math.sin(angle)];
+  // Rodrigues.
+  const w = cross(n, v);
+  const k = dot(n, v) * (1 - cs);
+  return [
+    v[0] * cs + w[0] * sn + n[0] * k,
+    v[1] * cs + w[1] * sn + n[1] * k,
+    v[2] * cs + w[2] * sn + n[2] * k,
+  ];
+}
 /**
  * Unit `a` turned towards unit `b` by the fraction `u` of the angle between them. Opposite
  * vectors turn about `axis` (or, if that is along them, about any axis at right angles).

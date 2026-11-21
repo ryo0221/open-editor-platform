@@ -238,6 +238,39 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
     // The up turns about the view: halfway it is at right angles to both keys' ups.
     expect(motionCameraAt(flipped, 500)!.camera.up[2]).toBeCloseTo(0, 9);
   });
+  it('carries the up with the view so the camera never rolls over (Codex on #38)', () => {
+    const [c, sn] = [Math.cos(Math.PI / 8), Math.sin(Math.PI / 8)];
+    const keys = [
+      {
+        atMs: 0,
+        camera: { position: [1000 * c, 1000 * sn, -250], target: [0, 0, 0], up: [1, 0, 0] },
+        fovRad: 40 * deg,
+      },
+      {
+        atMs: 1000,
+        camera: { position: [1000 * c, 1000 * sn, 750], target: [0, 0, 0], up: [0, 1, 0] },
+        fovRad: 40 * deg,
+      },
+    ] as CadMotionCameraKey[];
+    // The up as the camera shows it: off the view, as `lookAt` takes it.
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 1000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+    // Through each key, its own up.
+    expect(shown(999.999).reduce((n, v, i) => n + v * shown(1000)[i]!, 0)).toBeGreaterThan(0.999);
+  });
   it('adds a camera key in time order, replacing one at the same time', () => {
     const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
     expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);

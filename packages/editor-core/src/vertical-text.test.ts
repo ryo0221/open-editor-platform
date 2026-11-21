@@ -316,6 +316,27 @@ describe('#20 vertical writing', () => {
     ).toEqual(['第', '12', '話']);
   });
 
+  it('fits a run much larger than the box font (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      text: '天地',
+      fill: '#111',
+      typography: { fontSize: 20, writingMode: 'vertical-rl', overflow: 'fit' },
+      runs: [{ text: '天地', style: { fontSize: 200 } }],
+    } as unknown as Drawing;
+    const l = gridTextLayout(d);
+    const drawn = (l.fontSize * 200) / 20;
+    expect(drawn).toBeGreaterThanOrEqual(8);
+    for (const g of l.lines.flatMap((line) => line.glyphs)) {
+      expect(g.x - drawn / 2).toBeGreaterThanOrEqual(-1e-6);
+      expect(g.x + drawn / 2).toBeLessThanOrEqual(100 + 1e-6);
+      expect(g.y - drawn / 2).toBeGreaterThanOrEqual(-1e-6);
+      expect(g.y + drawn / 2).toBeLessThanOrEqual(100 + 1e-6);
+    }
+  });
+
   it('underlines and measures run glyphs at their own size (Codex on #38)', () => {
     const d = {
       id: 't',

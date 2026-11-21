@@ -323,9 +323,17 @@ export function layoutGridText(text: string, box: Bounds, o: GridTextOptions): G
   const along = o.vertical ? box.height - pad : box.width - pad;
   // Both ways: a reading's base cannot break, so a long one may need a smaller size to fit its
   // line (Codex on #29).
+  // The floor and the step are for the largest characters drawn: a run much larger than the box's
+  // font still shrinks until it fits, down to 8 (Codex on #38).
+  let largest = 1;
+  if (o.scaleAt) {
+    const n = parseRubyNotation(text).plain.length;
+    for (let k = 0; k < n; k++) largest = Math.max(largest, o.scaleAt(k));
+  }
+  const floor = 8 / largest;
   if (o.fit)
-    while (size > 8 && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
-      size = Math.max(8, size - 1);
+    while (size > floor && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
+      size = Math.max(floor, size - 1 / largest);
       layout = layoutOnce(text, box, o, size);
     }
   return layout;
