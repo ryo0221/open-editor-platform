@@ -14,7 +14,7 @@
 | 成果物間の参照・ファイル出力を使う      | [参照契約](artifact-references.md)・[出力契約](artifact-output-contract.md)                                                                                                        |
 | Officeファイルを扱う                    | [出力UIと対応形式](office-export-ui.md)・[取り込み](office-import.md)                                                                                                              |
 | React UI・DesignのReact出力を使う       | [React UI組み込み](react-ui-integration.md)・[移植手順](react-ui-portability.md)・[Design連携](design-react-contract.md)                                                           |
-| 外部の参照元を読む（Geo・Data・GitHub） | 読取契約・ADR 016                                                              |
+| 外部の参照元を読む（Geo・Data・GitHub） | 読取契約・ADR 016                                                                                                                                                                  |
 | 外部の提案をdomainの差分で確かめる      | [提案のdomain別の差分](proposal-review.md)                                                                                                                                         |
 | Graph・Designの機能を組み込む           | [Graph契約](structured-graph-contract.md)・[Graph表示設計](graph-reading-design.md)・[Design headless操作](design-headless-contract.md)・[prototype](design-prototype-contract.md) |
 | Animation・Geoを使う                    | [Animation 2D](animation/production-2d-design.md)・[Geoガイド](geo-guide.md)                                                                                                       |
@@ -23,14 +23,14 @@
 
 計算領域の設計：[共通計算](calculation/design.md)・[分析ノート](analysis-notebook/design.md)・[見積・積算・工程](design-estimation/design.md)。初期設計の検証記録と現在の実装記録は区別します。
 
-| 目的                            | 文書                                                                                                                                                             |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 開発に参加する                  | [開発者ガイド](developer-guide.md)・[作業ルール](../AGENTS.md)                                                                                                   |
-| 全体の構成を理解する            | [アーキテクチャ](architecture.md)                                                                                                                                |
-| Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)                                                                                  |
-| Fiction Mapの操作・pure native  | [操作ガイド](fiction-map/user-guide.md) / [headless model API](../packages/fiction-map/README.md) / 設定から作る制作デモ計画 |
-| Designのパス編集・曲線APIを使う | [操作ガイド](vector-authoring/guide.md)・[設計と受け入れ条件](vector-authoring/design.md)・[実装計画](vector-authoring/implementation-plan.md)                   |
-| 設計・検証を記録する            | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md)           |
+| 目的                            | 文書                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 開発に参加する                  | [開発者ガイド](developer-guide.md)・[作業ルール](../AGENTS.md)                                                                                         |
+| 全体の構成を理解する            | [アーキテクチャ](architecture.md)・[種類の登録と領域境界（設計）](kind-registry-design.md)                                                             |
+| Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)                                                                        |
+| Fiction Mapの操作・pure native  | [操作ガイド](fiction-map/user-guide.md) / [headless model API](../packages/fiction-map/README.md) / 設定から作る制作デモ計画                           |
+| Designのパス編集・曲線APIを使う | [操作ガイド](vector-authoring/guide.md)・[設計と受け入れ条件](vector-authoring/design.md)・[実装計画](vector-authoring/implementation-plan.md)         |
+| 設計・検証を記録する            | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md) |
 
 ## 検証・運用・履歴
 
