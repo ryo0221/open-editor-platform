@@ -1,5 +1,6 @@
 import { clone, canonicalJson } from '@editor-platform/artifact-core';
 import { reuseHash } from '@editor-platform/reuse-core';
+import { usesGridText } from '@editor-platform/editor-core';
 import {
   appearance,
   type DesignContent,
@@ -379,6 +380,8 @@ function instanceNodeParts(state: ConversionState, scope: BuildScope, e: DesignE
 
 /** Features that a semantic HTML primitive cannot render faithfully. */
 const unsupportedPrimitiveVisuals: ((e: DesignElement) => unknown)[] = [
+  // Vertical writing and ruby are set on a grid HTML text would lose (Codex on #29).
+  (e) => usesGridText(e),
   (e) => e.typography?.italic,
   (e) => e.typography?.underline,
   (e) => e.typography?.strike,
