@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layoutGridText, parseRubyNotation, verticalGlyphKind } from './vertical-text';
-import { drawingPrimitives, serializeSvg, type Drawing } from './drawing';
+import { drawingPrimitives, gridTextLayout, serializeSvg, type Drawing } from './drawing';
 
 const box = { x: 0, y: 0, width: 200, height: 260 };
 const text = (l: ReturnType<typeof layoutGridText>) =>
@@ -269,6 +269,45 @@ describe('#20 vertical writing', () => {
     );
     expect(list.match(/<text[^>]*>が<\/text>/)?.[0]).toContain('font-weight="700"');
     expect(list.match(/<text[^>]*>•<\/text>/)?.[0]).not.toContain('font-weight');
+  });
+
+  it('gives larger runs their room and keeps digit groups within a run (Codex on #38)', () => {
+    const d = {
+      id: 't',
+      kind: 'text',
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      text: '天地',
+      fill: '#111',
+      typography: { fontSize: 20, writingMode: 'vertical-rl', overflow: 'fit' },
+      runs: [{ text: '天地', style: { fontSize: 60 } }],
+    } as unknown as Drawing;
+    const l = gridTextLayout(d);
+    const [a, b] = l.lines.flatMap((line) => line.glyphs);
+    const drawn = (l.fontSize * 60) / 20;
+    // Glyphs as large as drawn do not overlap, and fit keeps them in the box.
+    expect(Math.abs(b!.y - a!.y)).toBeGreaterThanOrEqual(drawn - 1e-6);
+    for (const g of [a!, b!]) {
+      expect(g.y - drawn / 2).toBeGreaterThanOrEqual(-1e-6);
+      expect(g.y + drawn / 2).toBeLessThanOrEqual(100 + 1e-6);
+      expect(g.x - drawn / 2).toBeGreaterThanOrEqual(-1e-6);
+    }
+    const digits = {
+      ...d,
+      text: '第12話',
+      typography: { fontSize: 20, writingMode: 'vertical-rl' },
+      runs: [{ text: '第' }, { text: '1', style: { bold: true, color: '#c00' } }, { text: '2話' }],
+    } as unknown as Drawing;
+    const glyphs = gridTextLayout(digits).lines.flatMap((line) => line.glyphs.map((g) => g.text));
+    expect(glyphs).toEqual(['第', '1', '2', '話']);
+    const svg = serializeSvg(drawingPrimitives(digits, 'x'));
+    expect(svg.match(/<text[^>]*>1<\/text>/)?.[0]).toContain('fill="#c00"');
+    expect(svg.match(/<text[^>]*>2<\/text>/)?.[0]).not.toContain('#c00');
+    // Without runs, the two digits still stand together.
+    expect(
+      gridTextLayout({ ...digits, runs: undefined } as Drawing).lines.flatMap((line) =>
+        line.glyphs.map((g) => g.text),
+      ),
+    ).toEqual(['第', '12', '話']);
   });
 
   it('keeps a keycap emoji whole instead of standing its digit upright (Codex on #29)', () => {

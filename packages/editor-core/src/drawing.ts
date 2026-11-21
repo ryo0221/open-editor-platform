@@ -549,18 +549,31 @@ const hasRunFormatting = (runs: readonly TextRun[] | undefined, box: TextStyle |
         (key) => run.style![key] !== undefined && run.style![key] !== box?.[key],
       ),
   );
-/** The grid layout a grid text box draws, as `textPrimitives` sets it. */
-export function gridTextLayout(d: Drawing) {
-  const s = d.typography ?? {},
-    b = d.bounds;
-  // A list keeps its bullets on the grid too, one before each paragraph (Codex on #29).
-  const source = s.list
+/** The text a grid text box lays out: a list keeps its bullets on the grid too (Codex on #29). */
+const gridSource = (d: Drawing) =>
+  d.typography?.list
     ? (d.text ?? '')
         .split('\n')
         .map((line) => `• ${line}`)
         .join('\n')
-    : d.text;
-  return layoutGridText(source, b, {
+    : (d.text ?? '');
+/** The run style of each character of a grid text box, by offset without ruby notation. */
+function gridPlainRuns(d: Drawing): (TextStyle | undefined)[] {
+  const styles = gridRunStyles(d);
+  return parseRubyNotation(gridSource(d)).source.map((i) => styles[i]);
+}
+/** The grid layout a grid text box draws, as `textPrimitives` sets it. */
+export function gridTextLayout(d: Drawing) {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const base = s.fontSize ?? (d.kind === 'text' ? 28 : 18);
+  // Run font sizes take their room on the grid, and digit groups do not span runs (Codex on #38).
+  const runs = gridPlainRuns(d);
+  const cuts = runs.flatMap((r, k) => (k > 0 && r !== runs[k - 1] ? [k] : []));
+  const sized = runs.some((r) => r?.fontSize !== undefined);
+  return layoutGridText(gridSource(d), b, {
+    ...(sized ? { scaleAt: (k: number) => (runs[k]?.fontSize ?? base) / base } : {}),
+    ...(cuts.length ? { cuts } : {}),
     vertical: s.writingMode === 'vertical-rl',
     fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
     lineHeight: s.lineHeight,
@@ -620,17 +633,9 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   const size = layout.fontSize;
   // Formatted runs keep their formatting on the grid (Codex on #37): each glyph draws the style
   // of the run it comes from, with font sizes scaled as the box's own is by `fit`.
-  const runStyles = gridRunStyles(d);
-  const source = parseRubyNotation(
-    s.list
-      ? (d.text ?? '')
-          .split('\n')
-          .map((line) => `• ${line}`)
-          .join('\n')
-      : (d.text ?? ''),
-  ).source;
+  const runs = gridPlainRuns(d);
   const scale = size / (s.fontSize ?? (d.kind === 'text' ? 28 : 18));
-  const runOf = (g: GridGlyph) => runStyles[source[g.offset]];
+  const runOf = (g: GridGlyph) => runs[g.offset];
   const glyphStyle = (g: GridGlyph) => {
     const r = runOf(g);
     if (!r) return {};
@@ -649,7 +654,7 @@ function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   };
   const glyphSize = (g: GridGlyph) => {
     const own = runOf(g)?.fontSize;
-    return own !== undefined ? Math.max(8, own * scale) : size;
+    return own !== undefined ? own * scale : size;
   };
   const glyphs = layout.lines.flatMap((line) =>
     line.glyphs.map((g) => {

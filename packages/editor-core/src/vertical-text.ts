@@ -109,14 +109,26 @@ export interface GridTextOptions {
   verticalAlign?: 'top' | 'middle' | 'bottom';
   /** Shrink the font until the text fits the box (to 8 at least). */
   fit?: boolean;
+  /**
+   * The font size of the character at each offset of the text without ruby notation, as a
+   * multiple of `fontSize` (formatted runs); 1 when absent. Advances and line pitch follow it.
+   */
+  scaleAt?: (offset: number) => number;
+  /** Offsets (without ruby notation) that an upright digit group may not span: run boundaries. */
+  cuts?: readonly number[];
 }
 
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
   const pad = o.padding ?? 4;
   const rubySize = size * 0.5;
+  const scaleAt = (offset: number) => o.scaleAt?.(offset) ?? 1;
+  // Lines are as wide as their largest characters (Codex on #38).
+  let largest = 1;
+  if (o.scaleAt) for (let k = 0; k < plain.length; k++) largest = Math.max(largest, scaleAt(k));
+  const big = size * largest;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
-  const pitch = size * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
+  const pitch = big * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
   // A letter spacing of minus the font size (or less) would leave no advance (Codex on #29).
   const cell = Math.max(size * 0.1, size + (o.letterSpacing ?? 0));
   const inner = {
@@ -127,7 +139,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   };
   // A two-digit group that a ruby base starts or ends inside is set one digit a cell, so each
   // annotated base keeps a glyph of its own (Codex on #29).
-  const cuts = new Set(ruby.flatMap((r) => [r.start, r.end]));
+  const cuts = new Set([...ruby.flatMap((r) => [r.start, r.end]), ...(o.cuts ?? [])]);
   // Only digits that are whole graphemes of their own: a keycap such as 1️⃣ keeps its sequence
   // (Codex on #29).
   const bounds = new Set([...Array.from(graphemes.segment(plain), (g) => g.index), plain.length]);
@@ -155,7 +167,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
     upright.flatMap((r) => Array.from({ length: r.end - r.start }, (_, k) => r.start + k)),
   );
   const cells = (g: string, offset: number) =>
-    uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g);
+    (uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g)) *
+    scaleAt(offset);
   const length = Math.max(1, Math.floor((o.vertical ? inner.height : inner.width) / cell));
   const broken = breakJapaneseLines(plain, {
     lineLength: length,
@@ -185,8 +198,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   });
   // Readings sit outside the first line (right of the first column, above the first row): the
   // block keeps room for them there, so they are not clipped at the box edge (Codex on #29).
-  const rubyRoom = ruby.length ? pitch - size : 0;
-  const across = lines.length * pitch - (pitch - size) + rubyRoom;
+  const rubyRoom = ruby.length ? pitch - big : 0;
+  const across = lines.length * pitch - (pitch - big) + rubyRoom;
   const longest = Math.max(0, ...lines.map((l) => l.glyphs.reduce((n, g) => n + g.advance, 0)));
   // Place lines: `a` is the centre across lines, `s` the start along the line.
   const acrossSpace = o.vertical ? inner.width : inner.height;
@@ -213,8 +226,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
           ? alongSpace - (o.vertical ? longest : used)
           : 0;
     const lineCentre = o.vertical
-      ? inner.x + inner.width - blockShift - rubyRoom - size / 2 - i * pitch
-      : inner.y + blockShift + rubyRoom + size / 2 + i * pitch;
+      ? inner.x + inner.width - blockShift - rubyRoom - big / 2 - i * pitch
+      : inner.y + blockShift + rubyRoom + big / 2 + i * pitch;
     const start = (o.vertical ? inner.y : inner.x) + alongShift;
     for (const g of line.glyphs) {
       const along = start + g.y;
@@ -285,8 +298,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
         const along = begin + step * (k + 0.5);
         rubyOut.push(
           o.vertical
-            ? { text, x: lineCentre + size / 2 + rubySize * 0.6, y: along, size: step }
-            : { text, x: along, y: lineCentre - size / 2 - rubySize * 0.6, size: step },
+            ? { text, x: lineCentre + big / 2 + rubySize * 0.6, y: along, size: step }
+            : { text, x: along, y: lineCentre - big / 2 - rubySize * 0.6, size: step },
         );
       });
   });

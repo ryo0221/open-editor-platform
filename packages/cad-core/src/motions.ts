@@ -256,12 +256,29 @@ export function motionCameraAt(
   const target = along((k) => k.camera.target);
   const view1 = sub(k1.camera.position, k1.camera.target),
     view2 = sub(k2.camera.position, k2.camera.target);
-  let position = along((k) => k.camera.position);
-  // The curve can pass through its target (keys on opposite sides of it): the view then turns
-  // from one key's direction to the other's, about the up, at a distance between theirs
-  // (Codex on #37).
+  // When the curve between two keys passes (near) through its target (keys on opposite sides
+  // of it), the whole segment instead turns the view from one key's direction to the other's,
+  // about the up, at a distance between theirs, so the path stays continuous (Codex on #37/#38).
   const reach = Math.min(Math.hypot(...view1), Math.hypot(...view2));
-  if (Math.hypot(...sub(position, target)) < reach * 0.05) {
+  const curveAt = (w: number) => {
+    const at = (f: (k: CadMotionCameraKey) => Vec3) =>
+      catmull(
+        k0 ? f(k0) : mirror(f(k1), f(k2)),
+        f(k1),
+        f(k2),
+        k3 ? f(k3) : mirror(f(k2), f(k1)),
+        w,
+      );
+    return sub(
+      at((k) => k.camera.position),
+      at((k) => k.camera.target),
+    );
+  };
+  const orbit = Array.from({ length: 65 }, (_, j) => j / 64).some(
+    (w) => Math.hypot(...curveAt(w)) < reach * 0.05,
+  );
+  let position = along((k) => k.camera.position);
+  if (orbit) {
     const dir = turn(unit(view1), unit(view2), u, unit(k1.camera.up));
     const dist = lerp(Math.hypot(...view1), Math.hypot(...view2), u);
     position = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];

@@ -226,6 +226,13 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
     // Halfway round about the up, at the keys' distance.
     expect(Math.hypot(...mid.position)).toBeCloseTo(1000, 6);
     expect(mid.position[2]).toBeCloseTo(0, 6);
+    // The path is continuous: no jump between neighbouring frames (Codex on #38).
+    let was = motionCameraAt(across, 0)!.camera.position;
+    for (let t = 1; t <= 1000; t++) {
+      const now = motionCameraAt(across, t)!.camera.position;
+      expect(Math.hypot(...now.map((v, i) => v - was[i]!))).toBeLessThan(10);
+      was = now;
+    }
     const flipped = [cam(0, [0, -1000, 0], [0, 0, 1]), cam(1000, [0, -1000, 0], [0, 0, -1])];
     for (const t of [250, 500, 750]) valid(motionCameraAt(flipped, t)!.camera);
     // The up turns about the view: halfway it is at right angles to both keys' ups.
