@@ -17,6 +17,8 @@ import type { Bounds } from './geometry';
  */
 export interface RubyNotation {
   plain: string;
+  /** For each UTF-16 unit of `plain`, its index in the notated text. */
+  source: number[];
   ruby: { start: number; end: number; text: string }[];
 }
 const rubyPattern =
@@ -25,16 +27,22 @@ export function parseRubyNotation(text: string): RubyNotation {
   let plain = '',
     last = 0;
   const ruby: RubyNotation['ruby'] = [];
+  const source: number[] = [];
+  const take = (from: number, to: number) => {
+    plain += text.slice(from, to);
+    for (let i = from; i < to; i++) source.push(i);
+  };
   for (const m of text.matchAll(rubyPattern)) {
-    plain += text.slice(last, m.index);
+    take(last, m.index);
     const base = m[1] ?? m[3],
       reading = m[2] ?? m[4];
+    const at = m.index + (m[1] !== undefined ? 1 : 0);
     ruby.push({ start: plain.length, end: plain.length + base.length, text: reading });
-    plain += base;
+    take(at, at + base.length);
     last = m.index + m[0].length;
   }
-  plain += text.slice(last);
-  return { plain, ruby };
+  take(last, text.length);
+  return { plain, source, ruby };
 }
 export const hasRubyNotation = (text: string) => parseRubyNotation(text).ruby.length > 0;
 
@@ -69,6 +77,8 @@ export interface GridGlyph {
   kind: GridGlyphKind;
   /** Length along the line. */
   advance: number;
+  /** Where the glyph starts in the text without ruby notation. */
+  offset: number;
 }
 export interface GridRuby {
   text: string;
@@ -99,16 +109,53 @@ export interface GridTextOptions {
   verticalAlign?: 'top' | 'middle' | 'bottom';
   /** Shrink the font until the text fits the box (to 8 at least). */
   fit?: boolean;
+  /**
+   * The font size of the character at each offset of the text without ruby notation, as a
+   * multiple of `fontSize` (formatted runs); 1 when absent. Advances and line pitch follow it.
+   */
+  scaleAt?: (offset: number) => number;
+  /** Offsets (without ruby notation) that an upright digit group may not span: run boundaries. */
+  cuts?: readonly number[];
 }
 
+/**
+ * The largest size multiple among the characters drawn: a box whose runs are all smaller than its
+ * font reserves only their room (Codex on #38). 1 without runs or characters.
+ */
+// Only characters that draw a glyph count; line breaks draw nothing (Codex on #38). Counted in
+// one pass, so long text needs no argument list per character.
+function scaleRange(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  let largest = 0;
+  let smallest = Infinity;
+  if (scaleAt)
+    for (let k = 0; k < plain.length; k++) {
+      if (plain[k] === '\n' || plain[k] === '\r') continue;
+      const s = scaleAt(k);
+      if (s > 0) {
+        if (s > largest) largest = s;
+        if (s < smallest) smallest = s;
+      }
+    }
+  return largest > 0 ? { largest, smallest } : { largest: 1, smallest: 1 };
+}
+function largestScale(plain: string, scaleAt: GridTextOptions['scaleAt']) {
+  return scaleRange(plain, scaleAt).largest;
+}
 function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number): GridTextLayout {
   const { plain, ruby } = parseRubyNotation(text);
   const pad = o.padding ?? 4;
-  const rubySize = size * 0.5;
+  const scaleAt = (offset: number) => o.scaleAt?.(offset) ?? 1;
+  // Lines are as wide as their largest characters, and readings follow that size (Codex on #38).
+  const { largest, smallest } = scaleRange(plain, o.scaleAt);
+  const big = size * largest;
+  const rubySize = big * 0.5;
   // Ruby needs room beside (or above) its base, so the line pitch grows to fit it.
-  const pitch = size * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
+  const pitch = big * Math.max(o.lineHeight ?? (o.vertical ? 1.5 : 1.3), ruby.length ? 1.6 : 0);
   // A letter spacing of minus the font size (or less) would leave no advance (Codex on #29).
-  const cell = Math.max(size * 0.1, size + (o.letterSpacing ?? 0));
+  // A run's size scales its glyph, not the spacing between glyphs (Codex on #38).
+  const cellAt = (scale: number) =>
+    Math.max(size * scale * 0.1, size * scale + (o.letterSpacing ?? 0));
+  const cell = cellAt(1);
   const inner = {
     x: box.x + pad,
     y: box.y + pad,
@@ -117,7 +164,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   };
   // A two-digit group that a ruby base starts or ends inside is set one digit a cell, so each
   // annotated base keeps a glyph of its own (Codex on #29).
-  const cuts = new Set(ruby.flatMap((r) => [r.start, r.end]));
+  const cuts = new Set([...ruby.flatMap((r) => [r.start, r.end]), ...(o.cuts ?? [])]);
   // Only digits that are whole graphemes of their own: a keycap such as 1️⃣ keeps its sequence
   // (Codex on #29).
   const bounds = new Set([...Array.from(graphemes.segment(plain), (g) => g.index), plain.length]);
@@ -146,12 +193,19 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   );
   const cells = (g: string, offset: number) =>
     uprightAt.has(offset) ? 1 : uprightOf.has(offset) ? 0 : isWide(g) ? 1 : narrowCells(g);
-  const length = Math.max(1, Math.floor((o.vertical ? inner.height : inner.width) / cell));
+  // The drawn advance: the glyph's cells at its run's size, with the box's letter spacing.
+  const advanceOf = (g: string, offset: number) =>
+    cells(g, offset) * (o.scaleAt ? cellAt(scaleAt(offset)) : cell);
+  // Lines are measured in the smallest drawn cell, so a line of small runs holds what fits in
+  // its length and no more (Codex on #38). Without runs this is the box's whole cells, as before.
+  const unit = cellAt(smallest);
+  const room = o.vertical ? inner.height : inner.width;
+  const length = o.scaleAt ? Math.max(1, room / unit) : Math.max(1, Math.floor(room / cell));
   const broken = breakJapaneseLines(plain, {
     lineLength: length,
     hanging: true,
     unbreakable: [...ruby, ...upright],
-    measure: cells,
+    measure: o.scaleAt ? (g, offset) => advanceOf(g, offset) / unit : cells,
   });
   const lines: GridTextLayout['lines'] = broken.map((line) => {
     const glyphs: GridGlyph[] = [];
@@ -160,13 +214,14 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       const offset = line.start + index;
       if (uprightOf.has(offset) && !uprightAt.has(offset)) continue;
       const group = uprightAt.get(offset);
-      const advance = cells(segment, offset) * cell;
+      const advance = advanceOf(segment, offset);
       glyphs.push({
         text: group ? plain.slice(group.start, group.end) : segment,
         x: 0,
         y: along + advance / 2,
         kind: !o.vertical ? 'plain' : group ? 'upright' : verticalGlyphKind(segment),
         advance,
+        offset,
       });
       along += advance;
     }
@@ -174,8 +229,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   });
   // Readings sit outside the first line (right of the first column, above the first row): the
   // block keeps room for them there, so they are not clipped at the box edge (Codex on #29).
-  const rubyRoom = ruby.length ? pitch - size : 0;
-  const across = lines.length * pitch - (pitch - size) + rubyRoom;
+  const rubyRoom = ruby.length ? pitch - big : 0;
+  const across = lines.length * pitch - (pitch - big) + rubyRoom;
   const longest = Math.max(0, ...lines.map((l) => l.glyphs.reduce((n, g) => n + g.advance, 0)));
   // Place lines: `a` is the centre across lines, `s` the start along the line.
   const acrossSpace = o.vertical ? inner.width : inner.height;
@@ -202,8 +257,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
           ? alongSpace - (o.vertical ? longest : used)
           : 0;
     const lineCentre = o.vertical
-      ? inner.x + inner.width - blockShift - rubyRoom - size / 2 - i * pitch
-      : inner.y + blockShift + rubyRoom + size / 2 + i * pitch;
+      ? inner.x + inner.width - blockShift - rubyRoom - big / 2 - i * pitch
+      : inner.y + blockShift + rubyRoom + big / 2 + i * pitch;
     const start = (o.vertical ? inner.y : inner.x) + alongShift;
     for (const g of line.glyphs) {
       const along = start + g.y;
@@ -274,8 +329,8 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
         const along = begin + step * (k + 0.5);
         rubyOut.push(
           o.vertical
-            ? { text, x: lineCentre + size / 2 + rubySize * 0.6, y: along, size: step }
-            : { text, x: along, y: lineCentre - size / 2 - rubySize * 0.6, size: step },
+            ? { text, x: lineCentre + big / 2 + rubySize * 0.6, y: along, size: step }
+            : { text, x: along, y: lineCentre - big / 2 - rubySize * 0.6, size: step },
         );
       });
   });
@@ -299,9 +354,13 @@ export function layoutGridText(text: string, box: Bounds, o: GridTextOptions): G
   const along = o.vertical ? box.height - pad : box.width - pad;
   // Both ways: a reading's base cannot break, so a long one may need a smaller size to fit its
   // line (Codex on #29).
+  // The floor and the step are for the largest characters drawn: a run much larger than the box's
+  // font still shrinks until it fits, down to 8 (Codex on #38).
+  const largest = largestScale(parseRubyNotation(text).plain, o.scaleAt);
+  const floor = 8 / largest;
   if (o.fit)
-    while (size > 8 && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
-      size = Math.max(8, size - 1);
+    while (size > floor && (layout.across > across + 1e-6 || layout.along > along + 1e-6)) {
+      size = Math.max(floor, size - 1 / largest);
       layout = layoutOnce(text, box, o, size);
     }
   return layout;

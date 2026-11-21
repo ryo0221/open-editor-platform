@@ -211,11 +211,6 @@ export function motionDeltas(
 }
 
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
-const lerp3 = (a: Vec3, b: Vec3, u: number): Vec3 => [
-  lerp(a[0], b[0], u),
-  lerp(a[1], b[1], u),
-  lerp(a[2], b[2], u),
-];
 /** Uniform Catmull-Rom between p1 and p2 (p0, p3 their neighbours). */
 const catmull = (p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, u: number): Vec3 => {
   const u2 = u * u;
@@ -258,14 +253,112 @@ export function motionCameraAt(
   const mirror = (a: Vec3, b: Vec3): Vec3 => [2 * a[0] - b[0], 2 * a[1] - b[1], 2 * a[2] - b[2]];
   const along = (f: (k: CadMotionCameraKey) => Vec3) =>
     catmull(k0 ? f(k0) : mirror(f(k1), f(k2)), f(k1), f(k2), k3 ? f(k3) : mirror(f(k2), f(k1)), u);
+  const target = along((k) => k.camera.target);
+  const view1 = sub(k1.camera.position, k1.camera.target),
+    view2 = sub(k2.camera.position, k2.camera.target);
+  // The view is one rotation from one key's frame to the other's (a quaternion slerp, the shorter
+  // way): the camera looks along the slerped frame from a distance between the keys', at a target
+  // on the curve through the keys' targets. Direction and up so turn together and continuously,
+  // and the up is always at right angles to the view (Codex on #37/#38).
+  const q = slerp(keyFrame(view1, k1.camera.up), keyFrame(view2, k2.camera.up), u);
+  const back: Vec3 = [
+    2 * (q[0] * q[2] + q[3] * q[1]),
+    2 * (q[1] * q[2] - q[3] * q[0]),
+    1 - 2 * (q[0] * q[0] + q[1] * q[1]),
+  ];
+  const up: Vec3 = [
+    2 * (q[0] * q[1] - q[3] * q[2]),
+    1 - 2 * (q[0] * q[0] + q[2] * q[2]),
+    2 * (q[1] * q[2] + q[3] * q[0]),
+  ];
+  const reach = (k: CadMotionCameraKey): Vec3 => [
+    Math.hypot(...sub(k.camera.position, k.camera.target)),
+    0,
+    0,
+  ];
+  const dist = Math.max(
+    0.05 * Math.min(Math.hypot(...view1), Math.hypot(...view2)),
+    along(reach)[0],
+  );
+  const position: Vec3 = [
+    target[0] + back[0] * dist,
+    target[1] + back[1] * dist,
+    target[2] + back[2] * dist,
+  ];
   return {
-    camera: {
-      position: along((k) => k.camera.position),
-      target: along((k) => k.camera.target),
-      up: unit(lerp3(unit(k1.camera.up), unit(k2.camera.up), u)),
-    },
+    camera: { position, target, up: unit(up) },
     fovRad: lerp(k1.fovRad, k2.fovRad, u),
   };
+}
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+/** A unit vector at right angles to `v`. */
+const perpendicular = (v: Vec3): Vec3 =>
+  unit(cross(v, Math.abs(v[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+type Quat = [number, number, number, number];
+/** A key's camera orientation (x right, y up, z from the target to the camera) as a quaternion. */
+function keyFrame(view: Vec3, upHint: Vec3): Quat {
+  const b = unit(view);
+  let r = cross(unit(upHint), b);
+  if (Math.hypot(...r) < 1e-9) r = perpendicular(b);
+  r = unit(r);
+  const y = cross(b, r);
+  const [m00, m01, m02, m10, m11, m12, m20, m21, m22] = [
+    r[0],
+    y[0],
+    b[0],
+    r[1],
+    y[1],
+    b[1],
+    r[2],
+    y[2],
+    b[2],
+  ];
+  const tr = m00 + m11 + m22;
+  let x: number, yq: number, z: number, w: number;
+  if (tr > 0) {
+    const k = Math.sqrt(tr + 1) * 2;
+    w = k / 4;
+    x = (m21 - m12) / k;
+    yq = (m02 - m20) / k;
+    z = (m10 - m01) / k;
+  } else if (m00 > m11 && m00 > m22) {
+    const k = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    w = (m21 - m12) / k;
+    x = k / 4;
+    yq = (m01 + m10) / k;
+    z = (m02 + m20) / k;
+  } else if (m11 > m22) {
+    const k = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    w = (m02 - m20) / k;
+    x = (m01 + m10) / k;
+    yq = k / 4;
+    z = (m12 + m21) / k;
+  } else {
+    const k = Math.sqrt(1 + m22 - m00 - m11) * 2;
+    w = (m10 - m01) / k;
+    x = (m02 + m20) / k;
+    yq = (m12 + m21) / k;
+    z = k / 4;
+  }
+  return [x, yq, z, w];
+}
+function slerp(a: Quat, b: Quat, u: number): Quat {
+  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+  const c: Quat = d < 0 ? [-b[0], -b[1], -b[2], -b[3]] : [...b];
+  d = Math.abs(d);
+  let [ka, kb] = [1 - u, u];
+  if (d < 0.9995) {
+    const t = Math.acos(Math.min(1, d));
+    [ka, kb] = [Math.sin((1 - u) * t) / Math.sin(t), Math.sin(u * t) / Math.sin(t)];
+  }
+  const out = a.map((v, i) => ka * v + kb * c[i]!) as Quat;
+  const l = Math.hypot(...out) || 1;
+  return out.map((v) => v / l) as Quat;
 }
 
 /** A camera key added (or replaced at the same time) in time order. */

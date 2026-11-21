@@ -205,6 +205,131 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
       9,
     );
   });
+  it('keeps a camera between keys on opposite sides of the target or with opposite ups (Codex on #37)', () => {
+    const cam = (atMs: number, position: [number, number, number], up: [number, number, number]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const valid = (c: NonNullable<ReturnType<typeof motionCameraAt>>['camera']) => {
+      const view = c.position.map((v, i) => v - c.target[i]!);
+      const d = Math.hypot(...view);
+      expect(d).toBeGreaterThan(1);
+      expect(Math.hypot(...c.up)).toBeCloseTo(1, 9);
+      // The up is not along the view.
+      expect(Math.abs(c.up.reduce((n, v, i) => n + v * view[i]!, 0) / d)).toBeLessThan(1e-6);
+    };
+    const across = [cam(0, [0, -1000, 0], [0, 0, 1]), cam(1000, [0, 1000, 0], [0, 0, 1])];
+    for (const t of [250, 500, 750]) valid(motionCameraAt(across, t)!.camera);
+    const mid = motionCameraAt(across, 500)!.camera;
+    // Halfway round about the up, at the keys' distance.
+    expect(Math.hypot(...mid.position)).toBeCloseTo(1000, 6);
+    expect(mid.position[2]).toBeCloseTo(0, 6);
+    // The path is continuous: no jump between neighbouring frames (Codex on #38).
+    let was = motionCameraAt(across, 0)!.camera.position;
+    for (let t = 1; t <= 1000; t++) {
+      const now = motionCameraAt(across, t)!.camera.position;
+      expect(Math.hypot(...now.map((v, i) => v - was[i]!))).toBeLessThan(10);
+      was = now;
+    }
+    const flipped = [cam(0, [0, -1000, 0], [0, 0, 1]), cam(1000, [0, -1000, 0], [0, 0, -1])];
+    for (const t of [250, 500, 750]) valid(motionCameraAt(flipped, t)!.camera);
+    // The up turns about the view: halfway it is at right angles to both keys' ups.
+    expect(motionCameraAt(flipped, 500)!.camera.up[2]).toBeCloseTo(0, 9);
+  });
+  it('carries the up with the view so the camera never rolls over (Codex on #38)', () => {
+    const [c, sn] = [Math.cos(Math.PI / 8), Math.sin(Math.PI / 8)];
+    const keys = [
+      {
+        atMs: 0,
+        camera: { position: [1000 * c, 1000 * sn, -250], target: [0, 0, 0], up: [1, 0, 0] },
+        fovRad: 40 * deg,
+      },
+      {
+        atMs: 1000,
+        camera: { position: [1000 * c, 1000 * sn, 750], target: [0, 0, 0], up: [0, 1, 0] },
+        fovRad: 40 * deg,
+      },
+    ] as CadMotionCameraKey[];
+    // The up as the camera shows it: off the view, as `lookAt` takes it.
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 1000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+    // Through each key, its own up.
+    expect(shown(999.999).reduce((n, v, i) => n + v * shown(1000)[i]!, 0)).toBeGreaterThan(0.999);
+  });
+  it('keeps the roll continuous through three keys (Codex on #38)', () => {
+    const k = (atMs: number, position: number[], up: number[]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const keys = [
+      k(0, [0, 0, 1000], [0, 1, 0]),
+      k(1000, [1000, 0, 0], [0, -Math.cos(0.05), -Math.sin(0.05)]),
+      k(2000, [0, 1000, 1000], [0, 0, 1]),
+    ];
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 2000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+  });
+  it('keeps the roll continuous when the curve and the keys disagree (Codex on #38)', () => {
+    const k = (atMs: number, position: number[], up: number[]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const keys = [
+      k(0, [0, 0, 1500], [0, 1, 0]),
+      k(1000, [0, 0, 1500], [0, -1, 0]),
+      k(2000, [16000, -16000, 65500], [0, 1, 0]),
+    ];
+    // The up as the camera shows it: off the view, as `lookAt` takes it.
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      // Between keys the up is already at right angles to the view.
+      if (t % 1000) expect(Math.abs(d)).toBeLessThan(1e-6);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 2000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+  });
   it('adds a camera key in time order, replacing one at the same time', () => {
     const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
     expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);
