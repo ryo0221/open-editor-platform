@@ -18,6 +18,8 @@ This document records the planned commercial offering. It does **not** authorize
 
 “Beta” means a release explicitly designated as beta by the project; “GA” means the first release explicitly designated as a generally available production product. A preview, release candidate, public main-branch commit, or beta feature acceptance is not automatically GA. Neither the beta offer nor a GA date is currently announced as launched/scheduled.
 
+The README badges and GitHub Releases pre-release flag describe the **technical release state**, not a proprietary license grant. Follow the [release labeling rules](DEVELOPMENT.md#release-labels-and-github-releases). A beta pre-release may be published before the commercial beta program is open, and a badge update does not start a GA notice period.
+
 ## Notice of GA and pricing
 
 Before the earliest GA date, publish a dated, accessible announcement that identifies:
