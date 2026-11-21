@@ -299,6 +299,37 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
       was = now;
     }
   });
+  it('keeps the roll continuous when the curve and the keys disagree (Codex on #38)', () => {
+    const k = (atMs: number, position: number[], up: number[]) =>
+      ({
+        atMs,
+        camera: { position, target: [0, 0, 0], up },
+        fovRad: 40 * deg,
+      }) as CadMotionCameraKey;
+    const keys = [
+      k(0, [0, 0, 1500], [0, 1, 0]),
+      k(1000, [0, 0, 1500], [0, -1, 0]),
+      k(2000, [16000, -16000, 65500], [0, 1, 0]),
+    ];
+    // The up as the camera shows it: off the view, as `lookAt` takes it.
+    const shown = (t: number) => {
+      const cam = motionCameraAt(keys, t)!.camera;
+      const view = cam.position.map((v, i) => v - cam.target[i]!);
+      const l = Math.hypot(...view);
+      const d = cam.up.reduce((n, v, i) => n + (v * view[i]!) / l, 0);
+      // Between keys the up is already at right angles to the view.
+      if (t % 1000) expect(Math.abs(d)).toBeLessThan(1e-6);
+      const up = cam.up.map((v, i) => v - (d * view[i]!) / l);
+      const m = Math.hypot(...up);
+      return up.map((v) => v / m);
+    };
+    let was = shown(0);
+    for (let t = 0.5; t <= 2000; t += 0.5) {
+      const now = shown(t);
+      expect(now.reduce((n, v, i) => n + v * was[i]!, 0)).toBeGreaterThan(0.99);
+      was = now;
+    }
+  });
   it('adds a camera key in time order, replacing one at the same time', () => {
     const keys = withCameraKey(withCameraKey(undefined, key(1000, 1)), key(0, 2));
     expect(keys.map((k) => k.atMs)).toEqual([0, 1000]);
