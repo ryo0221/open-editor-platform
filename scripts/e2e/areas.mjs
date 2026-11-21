@@ -8,6 +8,7 @@ import { join, posix } from 'node:path';
 /** Platform packages every editor builds on. A change here affects every non-heavy spec. */
 export const corePackages = [
   'artifact-core',
+  'artifact-kinds',
   'artifact-output',
   'artifact-references',
   'calculation-core',
