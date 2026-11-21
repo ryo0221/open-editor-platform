@@ -116,6 +116,7 @@ import {
   retainedBytes,
   type CadController,
   type CadBodyPmiView,
+  type CadExportStage,
   type CadMeshExport,
 } from './controller';
 import {
@@ -2170,7 +2171,18 @@ export class CadAssembly {
    * written once from its exact shapes (one export job per version), then the products and
    * instances. `name` names the root product. Refuses with a diagnostic, else the file.
    */
-  async exportStep(name: string): Promise<CadMeshExport | undefined> {
+  /**
+   * #17: writes the assembly as STEP in stages, each its own kernel job with its own time limit:
+   * one per distinct part (its exact shape), then the file. `onStage` hears each stage as it
+   * starts; `signal` stops the export between stages (`export-cancelled`).
+   */
+  async exportStep(
+    name: string,
+    options: {
+      onStage?(stage: CadExportStage): void;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<CadMeshExport | undefined> {
     const { controller } = this.options;
     const refuse = (code: string, parts: string[] = []) => {
       controller.report(withComponents(describeCode(code), parts), code);
@@ -2197,9 +2209,15 @@ export class CadAssembly {
     const { plan } = planned;
     const breps = new Map<string, Uint8Array>();
     const products: Record<string, CadBrepPmi> = {};
+    const shapes = [
+      ...new Set(plan.products.flatMap((p) => (p.shape?.contentHash ? [p.shape.contentHash] : []))),
+    ];
+    const total = shapes.length + 1;
     for (const product of plan.products) {
       const hash = product.shape?.contentHash;
       if (!hash || breps.has(hash)) continue;
+      if (options.signal?.aborted) return refuse('export-cancelled');
+      options.onStage?.({ done: breps.size, total, label: product.name });
       const document = hash === contentHash ? content : this.lookup(hash);
       if (!document) return refuse('step-part-missing');
       const exported = await this.options.exportBrep({
@@ -2243,6 +2261,8 @@ export class CadAssembly {
               : {}),
           }
         : undefined;
+    if (options.signal?.aborted) return refuse('export-cancelled');
+    options.onStage?.({ done: total - 1, total, label: 'STEP file' });
     const written = await this.options.exportAssemblyStep(
       content.kernelProfile,
       controller.newId('export'),
@@ -2251,6 +2271,8 @@ export class CadAssembly {
       pmi,
     );
     if (written.status !== 'ok') return refuse(written.code);
+    // A stop asked for while the file was being written still wins (Codex on #33).
+    if (options.signal?.aborted) return refuse('export-cancelled');
     try {
       return {
         bytes: written.step,
