@@ -92,9 +92,11 @@ export function UnderlaysSection({
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
   const [revision, setRevision] = useState(0);
-  const busy = pending;
+  // A model edit still evaluating counts too: an underlay edit started then would cancel it
+  // (Codex on #35).
+  const busy = pending || snapshot.busy;
   const apply = async (next: CadUnderlay[] | (() => Promise<boolean>)) => {
-    if (inFlight.current) return false;
+    if (inFlight.current || snapshot.busy) return false;
     inFlight.current = true;
     setPending(true);
     try {
@@ -304,7 +306,7 @@ export function UnderlaysSection({
                       step={0.001}
                       value={u.mmPerPixel}
                       onCommit={(text) => {
-                        if (inFlight.current) return false;
+                        if (inFlight.current || snapshot.busy) return false;
                         const v = Number(text);
                         if (v !== u.mmPerPixel) change(u.id, { mmPerPixel: v });
                       }}
@@ -317,7 +319,7 @@ export function UnderlaysSection({
                         step={0.001}
                         value={u.originMm[i]!}
                         onCommit={(text) => {
-                          if (inFlight.current) return false;
+                          if (inFlight.current || snapshot.busy) return false;
                           const v = Number(text);
                           if (v === u.originMm[i]) return;
                           const originMm: [number, number] = [...u.originMm];
@@ -461,7 +463,7 @@ export function UnderlaysSection({
                 aria-label="Underlay image"
                 type="file"
                 accept="image/png,image/jpeg"
-                disabled={snapshot.busy || busy}
+                disabled={busy}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   e.target.value = '';
