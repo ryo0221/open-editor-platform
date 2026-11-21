@@ -89,7 +89,7 @@ import {
 } from './display';
 import { AnalysisPanel } from './analysis-panel';
 import { analysedLook, analysisLooks, type FrameAnalysis, type FrameSolver } from './analysis-view';
-import { CranePanel, type LiftOfDay } from './crane-panel';
+import { CranePanel, progressCell, type LiftOfDay } from './crane-panel';
 import { craneSolid, siteCraneId } from './crane-view';
 import { SitePanel, type SiteItem } from './site-panel';
 import { TrafficPanel, type TrafficItem } from './traffic-panel';
@@ -370,7 +370,8 @@ export function ConstructionSurface({
     (doc.site?.cranes?.length ?? 0) > 1 ||
     !!doc.site?.cranes?.some((c) => c.climbs?.some((m) => m.supportIds?.length));
   // #16: how far the crane checks are, and a way to stop them (until asked again).
-  const [craneProgress, setCraneProgress] = useState<OperationProgress>();
+  // Kept in a cell: a progress update redraws only the progress line (see `progressCell`).
+  const craneProgress = useMemo(progressCell, []);
   const [craneStopped, setCraneStopped] = useState<{
     doc: ConstructionDocument;
     world: CraneWorld;
@@ -386,15 +387,15 @@ export function ConstructionSurface({
     craneAbort.current = abort;
     const started = performance.now();
     let shown = started;
-    setCraneProgress(undefined);
+    craneProgress.set(undefined);
     checkCranesInSlices(doc, schedule, world, {
       signal: abort.signal,
-      // At most a few updates a second: each redraws the whole surface.
+      // At most a few updates a second.
       onProgress: (done, total) => {
         const t = performance.now();
         if (t - shown < 500) return;
         shown = t;
-        setCraneProgress({ done, total, startedAt: started });
+        craneProgress.set({ done, total, startedAt: started });
       },
     }).then(
       (problems) => setCraneProblems({ doc, world, problems }),
@@ -406,7 +407,7 @@ export function ConstructionSurface({
       abort.abort();
       if (craneAbort.current === abort) craneAbort.current = undefined;
     };
-  }, [doc, schedule, world, hasCranes, stoppedNow, craneRun]);
+  }, [doc, schedule, world, hasCranes, stoppedNow, craneRun, craneProgress]);
   const craneChecking =
     hasCranes &&
     !!world &&
