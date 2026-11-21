@@ -51,16 +51,14 @@ function Fixture() {
       <button onClick={() => setAdapter(newAccess)}>Replace access adapter</button>
       <button
         onClick={() =>
-          oldReads
-            .splice(0)
-            .forEach((resolve) =>
-              resolve({
-                scope: 'owner-only',
-                revision: 1,
-                expiresAt: Date.now() + 60000,
-                source: 'old fixture',
-              }),
-            )
+          oldReads.splice(0).forEach((resolve) =>
+            resolve({
+              scope: 'owner-only',
+              revision: 1,
+              expiresAt: Date.now() + 60000,
+              source: 'old fixture',
+            }),
+          )
         }
       >
         Finish old access reads

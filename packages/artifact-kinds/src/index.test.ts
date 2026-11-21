@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createKindRegistry, defineKind, registerKind, type KindDefinition } from './index';
+import {
+  createKindRegistry,
+  defineKind,
+  pairKinds,
+  registerKind,
+  type KindDefinition,
+} from './index';
 
 interface Note {
   text: string;
@@ -80,5 +86,33 @@ describe('kind registry', () => {
     const erased = registerKind(note);
     // @ts-expect-error an erased definition no longer carries its content type
     pair(erased, (content: Note) => content.text);
+  });
+});
+
+describe('pairKinds', () => {
+  const definitions = [note, part] as readonly KindDefinition<unknown>[];
+  const entry = (definition: KindDefinition<unknown>) => ({ kind: definition.kind, definition });
+
+  it('maps each listed definition to the one entry built from that same object', () => {
+    const paired = pairKinds(definitions, [entry(part), entry(note)], 'Surface');
+    expect([...paired.keys()]).toEqual(['part', 'note']);
+    expect(paired.get('note')?.definition).toBe(note);
+  });
+
+  it('refuses a missing, doubled, foreign or unlisted entry', () => {
+    expect(() => pairKinds(definitions, [entry(note)], 'Surface')).toThrow(
+      'No Surface for kind: part',
+    );
+    expect(() =>
+      pairKinds(definitions, [entry(note), entry(note), entry(part)], 'Surface'),
+    ).toThrow('Surface registered twice: note');
+    const copy = defineKind<Note>({ ...note });
+    expect(() => pairKinds(definitions, [entry(copy), entry(part)], 'Surface')).toThrow(
+      'Surface for note uses another definition',
+    );
+    const extra = defineKind<Note>({ ...note, kind: 'extra' });
+    expect(() =>
+      pairKinds(definitions, [entry(note), entry(part), entry(extra)], 'Surface'),
+    ).toThrow('Surface without a registered kind: extra');
   });
 });

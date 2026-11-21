@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
+    "@editor-platform/artifact-kinds": "*",
+    "@editor-platform/calculation-core": "*",
     "@editor-platform/bim": "*",
     "@editor-platform/bim-core": "*",
     "@editor-platform/cad": "*",

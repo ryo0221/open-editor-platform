@@ -4,7 +4,7 @@ import { engineeringDefinitions } from './engineering';
 import { engineeringRecords } from './engineering/records';
 import { officeDefinitions } from './office';
 import { officeRecords } from './office/records';
-import { pairKinds } from './pair-kinds';
+import { pairKinds } from '@editor-platform/artifact-kinds';
 import { ordinaryRecordHooks, type RecordKindEntry } from './record-kind';
 
 const records = pairKinds(
