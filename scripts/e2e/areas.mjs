@@ -263,10 +263,9 @@ export function classifySpecs(root) {
           else if (pkg && existsSync(join(root, 'packages', pkg[1]))) owners.add(pkg[1]);
           else if (target.startsWith('scripts/fixtures/')) paths.add(target);
         }
-        // Packages a spec imports directly are owners too (fixtures, models, helpers).
-        if (source === file)
-          for (const [, name] of text.matchAll(importPattern))
-            if (existsSync(join(root, 'packages', name))) owners.add(name);
+        // Packages the spec or its helpers import are owners too (fixtures, models).
+        for (const [, name] of text.matchAll(importPattern))
+          if (existsSync(join(root, 'packages', name))) owners.add(name);
       }
       return {
         file: `tests/e2e/${file}`,

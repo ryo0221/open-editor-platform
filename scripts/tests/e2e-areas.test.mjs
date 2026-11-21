@@ -78,6 +78,12 @@ test('fixtures outside tests/e2e reach the specs that bundle or read them', () =
   assert.equal(unknown.run.length, specs.filter((spec) => !spec.heavy).length);
 });
 
+test('Host Vite configurations and helper imports reach their specs', () => {
+  const host = plan('vite.artifact-host.config.ts');
+  assert(names(host.run).includes('bim-hosts') && names(host.deferred).includes('cad-hosts'));
+  assert(names(plan('packages/templates/src/index.ts').run).includes('design-reuse-graphics'));
+});
+
 test('comparison counts only failures that happen on the branch alone', () => {
   const report = (statuses) => ({
     suites: [

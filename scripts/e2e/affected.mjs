@@ -17,12 +17,12 @@ import { classifySpecs, dependents, packageArea, workspaceGraph } from './areas.
 //
 // Run in the checkout under test: the current directory is the repository root.
 
-/** Files that change how every browser suite starts or resolves modules. */
+/** Files that change how browser suites start, bundle or resolve modules (Host Vite configs too). */
 const everythingPattern =
-  /^(?:package(?:-lock)?\.json|playwright\.config\.ts|tsconfig\.json|vite\.config\.ts|tests\/playwright\/|scripts\/dev\/)/;
+  /^(?:package(?:-lock)?\.json|playwright\.config\.ts|tsconfig\.json|vite(?:\.[\w-]+)?\.config\.ts|tests\/playwright\/|scripts\/dev\/)/;
 /** Development-server helpers used by the default suite's servers. */
 const officeServerPattern =
-  /^scripts\/(?:design-react-export|react-ui-export|collaboration)-[\w-]+\.mjs$|^vite\.react-ui\.config\.ts$/;
+  /^scripts\/(?:design-react-export|react-ui-export|collaboration)-[\w-]+\.mjs$/;
 /** Playground source names that are not package directory names. */
 const playgroundAliases = {
   geo: 'geo-inspector',
