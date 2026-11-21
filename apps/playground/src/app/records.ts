@@ -1,4 +1,3 @@
-import { verifyFictionMapArtifact } from '@editor-platform/fiction-map/host';
 import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './estimate-bim';
 import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import {
@@ -7,16 +6,10 @@ import {
   IndexedDBStorage,
   type OutOfLineParts,
 } from '@editor-platform/artifact-core';
-import { graphSchemaMessage, readGraphDocument } from '@editor-platform/structured-graph/model';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import { validateArtifactReferenceHistory } from '../artifact-references';
-import { validateGeoRecord } from '../geo/resources';
-import { validateSimulationSources } from '../simulation/source';
-import { validateConstructionSources } from '../construction/source';
-import { validateFactorySources } from '../factory/source';
-import { validateFactoryLooks } from '../factory/looks';
-import { validateDrawingSources } from '../drawing/sources';
 import { createLocalSession, validContent, type Content, type StoredArtifact } from '../model';
+import { recordHooks } from '../kinds/records';
 
 /** A resource's bytes from this length on are kept as their own IndexedDB value (#812). */
 export const resourcePartChars = 64 * 1024;
@@ -314,54 +307,19 @@ export function editedDraft(record: StoredArtifact, content: Content): StoredArt
 
 /** Validates a stored record (freezing its versions) and opens its local draft session. */
 export async function openStoredRecord(record: StoredArtifact, references: ReferenceResolver) {
+  const hooks = recordHooks(record.kind);
   if (!validContent(record.kind, record.draft.content))
-    throw new Error(
-      // A newer Graph schema gets its own reason; the record stays exportable.
-      record.kind === 'structured-graph'
-        ? graphSchemaMessage(record.draft.content)
-        : 'Invalid stored content',
-    );
+    throw new Error(hooks.invalidReason?.(record.draft.content) ?? 'Invalid stored content');
   if (record.versions.some((v) => !validContent(record.kind, v.content)))
     throw new Error('Invalid stored version');
-  if (
-    record.kind === 'design' ||
-    record.kind === 'estimate' ||
-    record.kind === 'analysis' ||
-    record.kind === 'structured-graph' ||
-    record.kind === 'animation' ||
-    record.kind === 'cad' ||
-    record.kind === 'bim' ||
-    record.kind === 'character' ||
-    record.kind === 'simulation' ||
-    record.kind === 'construction' ||
-    record.kind === 'pcb' ||
-    record.kind === 'schematic' ||
-    record.kind === 'ladder' ||
-    record.kind === 'cosim' ||
-    record.kind === 'drawing' ||
-    record.kind === 'factory'
-  ) {
+  if (hooks.storedVersionHashes)
     for (const v of record.versions)
       if ((await contentHash(v.content)) !== v.contentHash)
         throw new Error('Stored version hash mismatch');
-  }
-  if (record.kind === 'fiction-map') await verifyFictionMapArtifact(record);
-  if (record.kind === 'geo') await validateGeoRecord(record);
-  if (record.kind === 'simulation') validateSimulationSources(record, { stored: true });
-  if (record.kind === 'construction') validateConstructionSources(record, { stored: true });
-  if (record.kind === 'factory') {
-    validateFactorySources(record, { stored: true });
-    validateFactoryLooks(record, { stored: true });
-  }
-  if (record.kind === 'drawing') validateDrawingSources(record, { stored: true });
+  await hooks.verifyStored?.(record);
   await verifyAnalysisArtifact(record);
   await verifyEstimateArtifact(record);
   record.versions.forEach(deepFreeze);
   await validateArtifactReferenceHistory(record, references);
-  // An older Graph schema opens as the current one; its saved versions are not rewritten.
-  return createLocalSession(
-    record.kind === 'structured-graph'
-      ? (readGraphDocument(record.draft.content) as unknown as Content)
-      : record.draft.content,
-  );
+  return createLocalSession(hooks.openContent(record.draft.content));
 }

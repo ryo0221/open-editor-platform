@@ -35,6 +35,8 @@ export const bimSurface = hostKind(bimKind, {
   Surface: BimSurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     // A building's version may only place CAD versions the record keeps.
     async beforeVersion(record) {
       validateBimParts(portableBimRecord(record));

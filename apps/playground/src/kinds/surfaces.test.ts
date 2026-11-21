@@ -55,6 +55,44 @@ it('keeps the Playground behaviour each kind had in App.tsx', () => {
   expect(where((h) => h.exports.documentText)).toEqual(['document']);
   expect(where((h) => h.exports.csv)).toEqual(['data']);
   expect(where((h) => h.exports.download)).toEqual(['file']);
+  expect(where((h) => !h.sharedSessions).sort()).toEqual(
+    [
+      'structured-graph',
+      'analysis',
+      'estimate',
+      'geo',
+      'schedule',
+      'cad',
+      'bim',
+      'character',
+      'simulation',
+      'construction',
+      'pcb',
+      'schematic',
+      'ladder',
+      'cosim',
+      'drawing',
+      'factory',
+    ].sort(),
+  );
+  expect(where((h) => h.annotationSurface).sort()).toEqual(['file', 'review']);
+  expect(where((h) => h.commentsButton === 'hidden')).toEqual(['animation']);
+  expect(where((h) => h.commentsButton === 'disabled').sort()).toEqual(
+    [
+      'structured-graph',
+      'cad',
+      'bim',
+      'character',
+      'simulation',
+      'construction',
+      'pcb',
+      'schematic',
+      'ladder',
+      'cosim',
+      'drawing',
+      'factory',
+    ].sort(),
+  );
   expect(kindHooks('unknown-kind').comments).toBe(true);
 });
 
@@ -62,9 +100,52 @@ it('native reuse is off for Fiction Map and Animation, on for every other starte
   const { makeArtifact } = await import('../model');
   // Simulation and Construction need a saved source to be created; their content is never reused.
   for (const kind of kinds.filter((k) => k !== 'simulation' && k !== 'construction')) {
-    const content = makeArtifact(kind, 1).draft.content;
+    const content = makeArtifact(kind as Parameters<typeof makeArtifact>[0], 1).draft.content;
     expect(kindHooks(kind).nativeReuse(content), kind).toBe(
       kind !== 'fiction-map' && kind !== 'animation',
     );
   }
+});
+
+// The per-kind branches app/records.ts and app/import-artifact.ts had before KR5b-2.
+it('keeps the record handling each kind had in records and import', async () => {
+  const { recordHooks } = await import('./records');
+  const pick = (p: (h: ReturnType<typeof recordHooks>) => unknown) =>
+    kinds.filter((kind) => p(recordHooks(kind))).sort();
+  const engineering = [
+    'cad',
+    'bim',
+    'character',
+    'simulation',
+    'construction',
+    'pcb',
+    'schematic',
+    'ladder',
+    'cosim',
+    'drawing',
+    'factory',
+  ];
+  expect(pick((h) => h.storedVersionHashes)).toEqual(
+    ['design', 'estimate', 'analysis', 'structured-graph', 'animation', ...engineering].sort(),
+  );
+  expect(pick((h) => h.verifyStored)).toEqual(
+    ['fiction-map', 'geo', 'simulation', 'construction', 'factory', 'drawing'].sort(),
+  );
+  expect(pick((h) => h.invalidReason)).toEqual(['structured-graph']);
+  expect(pick((h) => h.parseNative)).toEqual(['fiction-map']);
+  expect(pick((h) => h.importKeepsId)).toEqual(['geo']);
+  expect(pick((h) => h.importExtras)).toEqual(
+    ['geo', 'cad', 'character', 'bim', 'construction', 'factory', 'drawing', 'simulation'].sort(),
+  );
+  expect(pick((h) => h.relink)).toEqual(['cosim']);
+  const { makeArtifact } = await import('../model');
+  const checked = kinds.filter((k) => k !== 'simulation' && k !== 'construction');
+  expect(
+    checked.filter((kind) =>
+      recordHooks(kind).reusableAdapter(
+        makeArtifact(kind as Parameters<typeof makeArtifact>[0], 1).draft.content,
+      ),
+    ),
+  ).toEqual(['document', 'data', 'review', 'file', 'whiteboard', 'design', 'slide']);
+  expect(recordHooks('unknown-kind').storedVersionHashes).toBe(false);
 });

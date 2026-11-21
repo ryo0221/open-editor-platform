@@ -5,6 +5,7 @@ import type { ExtensionAction, Selection } from '@editor-platform/editor-core';
 import type { SharedPlaygroundConnection } from './types';
 import type { SharedPreviewState } from './proposal-views';
 import { downloadText, hasUnsupportedSharedAnimation, type StoredArtifact } from '../model';
+import { kindHooks } from '../kinds/surfaces';
 
 export type ArtifactView = 'Editor' | 'History' | 'Compare';
 
@@ -200,7 +201,7 @@ function SharedSessionMenuItems({
 }) {
   const fail = (e: unknown) => setError(String(e));
   const session = shared.session;
-  const annotationSurface = active.kind === 'review' || active.kind === 'file';
+  const annotationSurface = kindHooks(active.kind).annotationSurface;
   const attempt = (run: () => void) => () => {
     try {
       run();
@@ -330,22 +331,7 @@ export function MoreActionsMenu({
     !shared &&
     onStartShared &&
     !hasUnsupportedSharedAnimation(active) &&
-    active.kind !== 'structured-graph' &&
-    active.kind !== 'analysis' &&
-    active.kind !== 'estimate' &&
-    active.kind !== 'geo' &&
-    active.kind !== 'schedule' &&
-    active.kind !== 'cad' &&
-    active.kind !== 'bim' &&
-    active.kind !== 'character' &&
-    active.kind !== 'simulation' &&
-    active.kind !== 'construction' &&
-    active.kind !== 'pcb' &&
-    active.kind !== 'schematic' &&
-    active.kind !== 'ladder' &&
-    active.kind !== 'cosim' &&
-    active.kind !== 'drawing' &&
-    active.kind !== 'factory';
+    kindHooks(active.kind).sharedSessions;
   return (
     <Menu label="More artifact actions" icon={MoreHorizontal} align="right" closeOnSelect>
       <div className="mobile-history-actions" data-menu-keep-open>
@@ -374,22 +360,9 @@ export function MoreActionsMenu({
         />
       )}
 
-      {active.kind !== 'animation' && (
+      {kindHooks(active.kind).commentsButton !== 'hidden' && (
         <button
-          disabled={
-            active.kind === 'structured-graph' ||
-            active.kind === 'cad' ||
-            active.kind === 'bim' ||
-            active.kind === 'character' ||
-            active.kind === 'simulation' ||
-            active.kind === 'construction' ||
-            active.kind === 'pcb' ||
-            active.kind === 'schematic' ||
-            active.kind === 'ladder' ||
-            active.kind === 'cosim' ||
-            active.kind === 'drawing' ||
-            active.kind === 'factory'
-          }
+          disabled={kindHooks(active.kind).commentsButton === 'disabled'}
           aria-expanded={inspector}
           onClick={onToggleInspector}
         >

@@ -34,5 +34,9 @@ function ConstructionSurface({ host }: HostSurfaceProps<ConstructionDocument>) {
 export const constructionSurface = hostKind(constructionKind, {
   Surface: ConstructionSurface,
   session: 'local',
-  hooks: { comments: false },
+  hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
+    comments: false,
+  },
 });

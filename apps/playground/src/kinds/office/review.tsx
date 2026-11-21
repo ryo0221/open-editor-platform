@@ -56,4 +56,7 @@ function ReviewHost({ host, content }: HostSurfaceProps<KindContent<typeof revie
   );
 }
 
-export const reviewSurface = hostKind(reviewKind, { Surface: ReviewHost });
+export const reviewSurface = hostKind(reviewKind, {
+  Surface: ReviewHost,
+  hooks: { annotationSurface: true },
+});

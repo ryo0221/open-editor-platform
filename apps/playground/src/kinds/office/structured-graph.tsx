@@ -31,6 +31,8 @@ export const graphSurface = hostKind(graphDefinition, {
   // Older stored schemas validate because they upgrade; the Surface opens only the current one.
   accepts: isGraphDocument,
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     // An older Graph version is restored as the current schema.
     restore: (_record, content) => readGraphDocument(clone(content)),
     adoptsOpenedContent: true,

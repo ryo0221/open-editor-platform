@@ -31,6 +31,8 @@ export const ladderSurface = hostKind(ladderKind, {
   Surface: LadderSurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     pendingInputs: {
       refusal: 'Ladder の入力を確定またはキャンセルしてから履歴を操作してください。',
     },

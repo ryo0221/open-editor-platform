@@ -73,6 +73,7 @@ export const animationSurface = hostKind(animationKind, {
   Surface: AnimationHost,
   session: 'any',
   hooks: {
+    commentsButton: 'hidden',
     holdsEditsWhileSaving: true,
     pendingInputs: {
       refusal: 'Animation の入力を適用またはキャンセルしてから履歴を操作してください。',

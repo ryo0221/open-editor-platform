@@ -1,4 +1,3 @@
-import { parseFictionMapArtifact } from '@editor-platform/fiction-map/host';
 import { verifyPlaygroundEstimate as verifyEstimateArtifact } from './estimate-bim';
 import { verifyAnalysisArtifact } from '@editor-platform/analysis/host';
 import { clone, contentHash, deserializeArtifact, newId } from '@editor-platform/artifact-core';
@@ -6,31 +5,17 @@ import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import { isAnnotation } from '@editor-platform/editor-core';
 import { isDesignWithPaths } from '@editor-platform/design';
 import { importMarkdown } from '@editor-platform/document';
-import { hasSlideAnimations, isDeck } from '@editor-platform/slide';
 import { importCsv, isStructuredData } from '@editor-platform/structured-data';
-import { graphSchemaMessage, readGraphDocument } from '@editor-platform/structured-graph/model';
 import { validateNativeReusableDefinitions, type Domain } from '@editor-platform/templates';
 import { artifactReferenceItems, validateArtifactReferenceHistory } from '../artifact-references';
-import type { CosimDocument } from '@editor-platform/cosim-core';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
-import { validateSimulationSources } from '../simulation/source';
-import { validateConstructionSources } from '../construction/source';
-import { validateFactorySources } from '../factory/source';
-import { validateFactoryLooks } from '../factory/looks';
-import { validateDrawingSources } from '../drawing/sources';
-import { validateCharacterParts } from '../character/parts';
 import type { CadPartRecord } from '../cad/parts';
 import type { CadDocument } from '@editor-platform/cad-core';
 import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
 import type { BimPartReference } from '@editor-platform/bim';
-import {
-  cadNativeKinds,
-  cadNativeLimit,
-  cadNativeLimitText,
-  validateCadRecord,
-} from '../cad/resources';
-import { validateGeoRecord } from '../geo/resources';
+import { cadNativeKinds, cadNativeLimit, cadNativeLimitText } from '../cad/resources';
 import { makeArtifact, validContent, type Content, type StoredArtifact } from '../model';
+import { recordHooks } from '../kinds/records';
 import { nativeContent } from './native';
 import { hostNativeArtifactByteLimit } from '@editor-platform/editor-host';
 
@@ -44,32 +29,30 @@ async function importedArtifact(
   exists: (id: string) => boolean,
 ): Promise<{ record: StoredArtifact; name: string; originalId: string }> {
   const parsed = deserializeArtifact(text);
-  const artifact = parsed.kind === 'fiction-map' ? await parseFictionMapArtifact(text) : parsed;
+  const hooks = recordHooks(parsed.kind);
+  const artifact = hooks.parseNative ? await hooks.parseNative(text) : parsed;
   const invalid = [artifact.draft.content, ...artifact.versions.map((v) => v.content)].find(
     (content) => !validContent(artifact.kind, content),
   );
   if (invalid !== undefined)
     throw new Error(
       // A newer Graph schema gets its own reason, as when it is opened from storage.
-      artifact.kind === 'structured-graph' ? graphSchemaMessage(invalid) : 'Invalid domain content',
+      hooks.invalidReason?.(invalid) ?? 'Invalid domain content',
     );
   for (const version of artifact.versions)
     if ((await contentHash(version.content)) !== version.contentHash)
       throw new Error('Version content hash mismatch');
   await verifyEstimateArtifact(artifact);
   await verifyAnalysisArtifact(artifact);
-  const id = artifact.kind === 'geo' ? artifact.id : newId('artifact');
-  if (artifact.kind === 'geo' && exists(id))
-    throw Error('This Geo artifact already exists. Open it from the artifact list.');
+  const id = hooks.importKeepsId ? artifact.id : newId('artifact');
+  if (hooks.importKeepsId && exists(id)) throw Error(hooks.importKeepsId.duplicate);
   const record: StoredArtifact = {
     ...artifact,
     id,
     draft: {
       ...artifact.draft,
-      // An older Graph schema is imported as the current one; versions keep their bytes.
-      content: (artifact.kind === 'structured-graph'
-        ? readGraphDocument(artifact.draft.content)
-        : artifact.draft.content) as Content,
+      // An older schema is imported as the current one; versions keep their bytes.
+      content: hooks.openContent(artifact.draft.content),
     },
     versions: artifact.versions.map((v) => ({
       ...v,
@@ -78,77 +61,8 @@ async function importedArtifact(
     })),
     annotations: [],
   };
-  if (record.kind === 'geo') {
-    const rawGeo = value as StoredArtifact;
-    record.geoResources = rawGeo.geoResources;
-    record.geoDataInputs = rawGeo.geoDataInputs;
-    await validateGeoRecord(record);
-  }
-  if (record.kind === 'cad') {
-    // The asset closure travels in the same file; a missing or altered asset refuses the file.
-    const raw = (value as StoredArtifact).cadResources;
-    if (raw !== undefined) record.cadResources = raw;
-    // The part closure too (R2b): a missing or altered version refuses the file.
-    const parts = (value as StoredArtifact).cadParts;
-    if (parts !== undefined) record.cadParts = parts;
-    await validateCadRecord(record);
-  }
-  if (record.kind === 'character') {
-    // Its mesh and texture assets travel in the same file; a missing or altered one refuses it.
-    const raw = (value as StoredArtifact).cadResources;
-    if (raw !== undefined) record.cadResources = raw;
-    // The CAD versions its props place too (C2b): a missing or altered one refuses the file.
-    const parts = (value as StoredArtifact).cadParts;
-    if (parts !== undefined) record.cadParts = parts;
-    // And the buildings (C8p), with the CAD versions they place in `cadParts`.
-    const buildings = (value as StoredArtifact).bimParts;
-    if (buildings !== undefined) record.bimParts = buildings;
-    validateCharacterParts(record);
-    await validateCadRecord(record);
-  }
-  if (record.kind === 'bim') {
-    // The CAD versions the building places travel in the same file (its retained closure).
-    const parts = (value as StoredArtifact).cadParts;
-    if (parts !== undefined) record.cadParts = parts;
-    validateBimParts(record);
-    // Its materials' texture images (#662), checked as CAD assets are.
-    const raw = (value as StoredArtifact).cadResources;
-    if (raw !== undefined) record.cadResources = raw;
-    await validateCadRecord(record);
-  }
-  if (record.kind === 'construction') {
-    // The scheduled BIM versions travel in the same file; a missing or altered one refuses it.
-    const sources = (value as StoredArtifact).constructionSources;
-    if (sources !== undefined) record.constructionSources = sources;
-    validateConstructionSources(record);
-  }
-  if (record.kind === 'factory') {
-    // FT4a: the Building versions it stands in travel in the same file.
-    const sources = (value as StoredArtifact).factorySources;
-    if (sources !== undefined) record.factorySources = sources;
-    validateFactorySources(record);
-    // FT4c: and the CAD versions that give its objects their look.
-    const looks = (value as StoredArtifact).factoryLooks;
-    if (looks !== undefined) record.factoryLooks = looks;
-    validateFactoryLooks(record);
-  }
-  if (record.kind === 'drawing') {
-    // The CAD and building versions the views see travel in the same file (DW1).
-    const sources = (value as StoredArtifact).drawingSources;
-    if (sources !== undefined) record.drawingSources = sources;
-    const assets = (value as StoredArtifact).drawingAssets;
-    if (assets !== undefined) record.drawingAssets = assets;
-    // DW6b: its issues and their PDFs, each naming one of its versions.
-    const issues = (value as StoredArtifact).drawingIssues;
-    if (issues !== undefined) record.drawingIssues = issues;
-    validateDrawingSources(record);
-  }
-  if (record.kind === 'simulation') {
-    // The analysed CAD versions travel in the same file; a missing or altered one refuses it.
-    const sources = (value as StoredArtifact).simulationSources;
-    if (sources !== undefined) record.simulationSources = sources;
-    validateSimulationSources(record);
-  }
+  // The data that travels beside the content in the same file (kinds/*/records.ts).
+  await hooks.importExtras?.(record, value as StoredArtifact);
   const raw = value as { annotations?: unknown };
   if (raw.annotations !== undefined) {
     if (!Array.isArray(raw.annotations) || !raw.annotations.every(isAnnotation))
@@ -168,28 +82,7 @@ async function importedArtifact(
 }
 
 function hasReusableAdapter(kind: string, content: Content) {
-  return (
-    kind !== 'analysis' &&
-    kind !== 'estimate' &&
-    kind !== 'react-ui' &&
-    kind !== 'structured-graph' &&
-    kind !== 'geo' &&
-    kind !== 'animation' &&
-    kind !== 'schedule' &&
-    kind !== 'cad' &&
-    kind !== 'bim' &&
-    kind !== 'character' &&
-    kind !== 'simulation' &&
-    kind !== 'construction' &&
-    kind !== 'pcb' &&
-    kind !== 'schematic' &&
-    kind !== 'ladder' &&
-    kind !== 'cosim' &&
-    kind !== 'drawing' &&
-    kind !== 'factory' &&
-    kind !== 'fiction-map' &&
-    !(isDeck(content) && hasSlideAnimations(content))
-  );
+  return recordHooks(kind).reusableAdapter(content);
 }
 
 interface ImportContext {
@@ -288,15 +181,7 @@ function relink(record: StoredArtifact, ids: Map<string, string>): StoredArtifac
         snapshot: { ...reference.snapshot, artifactId: id },
       };
   }
-  // A co-simulation names its schematic and ladder versions by artifact (SL8c): follow them too.
-  if (record.kind === 'cosim') {
-    const doc = content as CosimDocument;
-    for (const key of ['schematic', 'ladder'] as const) {
-      const ref = doc[key];
-      const id = ref && ids.get(ref.artifactId);
-      if (ref && id) doc[key] = { ...ref, artifactId: id };
-    }
-  }
+  recordHooks(record.kind).relink?.(content, ids);
   return {
     ...record,
     draft: { ...record.draft, content },

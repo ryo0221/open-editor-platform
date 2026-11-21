@@ -77,5 +77,8 @@ function FileHost({ host, content }: HostSurfaceProps<KindContent<typeof fileKin
 
 export const fileSurface = hostKind(fileKind, {
   Surface: FileHost,
-  hooks: { exports: { download: downloadFile } },
+  hooks: {
+    annotationSurface: true,
+    exports: { download: downloadFile },
+  },
 });
