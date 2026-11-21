@@ -118,18 +118,27 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   // A two-digit group that a ruby base starts or ends inside is set one digit a cell, so each
   // annotated base keeps a glyph of its own (Codex on #29).
   const cuts = new Set(ruby.flatMap((r) => [r.start, r.end]));
+  // Only digits that are whole graphemes of their own: a keycap such as 1️⃣ keeps its sequence
+  // (Codex on #29).
+  const bounds = new Set([...Array.from(graphemes.segment(plain), (g) => g.index), plain.length]);
   const upright = o.vertical
     ? Array.from(plain.matchAll(/(?<![0-9])[0-9]{1,2}(?![0-9])/gu), (m) => ({
         start: m.index,
         end: m.index + m[0].length,
-      })).flatMap((r) =>
-        r.end - r.start > 1 && cuts.has(r.start + 1)
-          ? [
-              { start: r.start, end: r.start + 1 },
-              { start: r.start + 1, end: r.end },
-            ]
-          : [r],
-      )
+      }))
+        .filter((r) =>
+          Array.from({ length: r.end - r.start + 1 }, (_, k) => r.start + k).every((k) =>
+            bounds.has(k),
+          ),
+        )
+        .flatMap((r) =>
+          r.end - r.start > 1 && cuts.has(r.start + 1)
+            ? [
+                { start: r.start, end: r.start + 1 },
+                { start: r.start + 1, end: r.end },
+              ]
+            : [r],
+        )
     : [];
   const uprightAt = new Map(upright.map((r) => [r.start, r]));
   const uprightOf = new Set(

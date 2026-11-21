@@ -232,6 +232,16 @@ describe('#20 vertical writing', () => {
     expect(list).toContain('•');
   });
 
+  it('keeps a keycap emoji whole instead of standing its digit upright (Codex on #29)', () => {
+    const l = layoutGridText('第1️⃣話12', box, { vertical: true, fontSize: 28 });
+    expect(l.lines.flatMap((line) => line.glyphs.map((g) => g.text))).toEqual([
+      '第',
+      '1️⃣',
+      '話',
+      '12',
+    ]);
+  });
+
   it('keeps a reading on a digit that starts or ends inside an upright pair (Codex on #29)', () => {
     for (const [notation, readings] of [
       ['1｜2《に》', ['に']],
