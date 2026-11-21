@@ -100,7 +100,7 @@ export default function CadHost({
         },
       },
     });
-    // One binding per artifact: the Surface is keyed by it (editor-surfaces).
+    // One binding per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
   }, [session]);
   const { controller } = binding;
   useEffect(() => () => binding.dispose(), [binding]);

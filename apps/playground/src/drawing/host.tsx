@@ -593,7 +593,7 @@ export default function DrawingHost({
         },
       },
     });
-    // One controller per artifact: the Surface is keyed by it (editor-surfaces).
+    // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
   }, [session, services, bimDrawings]);
   useEffect(() => () => controller.dispose(), [controller]);
   useEffect(() => controller.accessChanged(), [controller, readOnly]);

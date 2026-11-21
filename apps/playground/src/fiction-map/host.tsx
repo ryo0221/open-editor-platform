@@ -15,7 +15,7 @@ import {
   type FictionMapBase,
   type FictionMapResult,
 } from '@editor-platform/fiction-map/model';
-import type { SurfaceHost } from '../app/editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 import { editedDraft } from '../app/records';
 import { playgroundArtifactRefHost } from './artifact-refs';
 /** Same Session as the Playground toolbar/history/storage. No second EditorSession. */

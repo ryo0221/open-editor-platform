@@ -4,7 +4,7 @@ import { EditorSession } from '@editor-platform/editor-core';
 import { calculateEstimate } from '@editor-platform/estimate-core';
 import { estimateFixture } from '../../../../packages/estimate-core/src/fixtures';
 import type { EstimatePort } from '@editor-platform/estimate';
-import type { SurfaceHost } from './editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 import type { StoredArtifact } from '../model';
 vi.mock('./records', async () => {
   const { MemoryStorage } = await import('@editor-platform/artifact-core');

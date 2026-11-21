@@ -39,6 +39,7 @@
     "@editor-platform/structured-graph": "*",
     "@editor-platform/structured-data-graph": "*",
     "@editor-platform/canvas-ui": "*",
+    "@editor-platform/calculation-core": "*",
     "@editor-platform/reuse-core": "*",
     "@editor-platform/extension-runtime": "*",
     "lucide-react": "1.51.0",

@@ -54,7 +54,7 @@ export default function PcbHost({
           persistRef.current(content);
         },
       }),
-    // One controller per artifact: the Surface is keyed by it (editor-surfaces).
+    // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
     [session],
   );
   const kernel = useMemo(

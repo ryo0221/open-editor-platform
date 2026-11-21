@@ -1,6 +1,6 @@
 // The Playground's office kinds, in the order the Playground lists them. Each shared definition
 // comes from its package's `./kind`; only Host data (templates, time zone) is supplied here.
-import { registerKind } from '@editor-platform/artifact-kinds';
+import { registerKind, type KindDefinition } from '@editor-platform/artifact-kinds';
 import { analysisKind } from '@editor-platform/analysis/kind';
 import { animationKind } from '@editor-platform/animation/kind';
 import { designKind } from '@editor-platform/design/kind';
@@ -18,25 +18,33 @@ import { whiteboardKind } from '@editor-platform/whiteboard/kind';
 import { createReferenceDocument } from '../../../react-ui-reference/src/catalog';
 import { graphProfileFor, graphTemplates } from '../app/graph-templates';
 
-export const officeKinds = [
-  registerKind(estimateKind),
-  registerKind(analysisKind),
-  registerKind(animationKind),
-  registerKind(fictionMapKind),
-  registerKind(geoKind),
-  registerKind(
-    structuredGraphKind({
-      create: (template = 'relations') => graphTemplates.find((t) => t.id === template)!.create(),
-      profileFor: graphProfileFor,
-    }),
-  ),
-  registerKind(reactUiKind(() => createReferenceDocument())),
-  registerKind(documentKind),
-  registerKind(dataKind),
-  registerKind(reviewKind),
-  registerKind(fileKind),
-  registerKind(whiteboardKind),
-  registerKind(designKind),
-  registerKind(slideKind),
-  registerKind(scheduleKind(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')),
+/** The kinds built from Host data; kinds/office/*.tsx pairs these same objects with Surfaces. */
+export const graphDefinition = structuredGraphKind({
+  create: (template = 'relations') => graphTemplates.find((t) => t.id === template)!.create(),
+  profileFor: graphProfileFor,
+});
+export const reactUiDefinition = reactUiKind(() => createReferenceDocument());
+export const scheduleDefinition = scheduleKind(
+  () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+);
+
+/** The typed definitions, in list order (kinds/surfaces.ts checks each has one Surface). */
+export const officeDefinitions: readonly KindDefinition<unknown>[] = [
+  estimateKind,
+  analysisKind,
+  animationKind,
+  fictionMapKind,
+  geoKind,
+  graphDefinition,
+  reactUiDefinition,
+  documentKind,
+  dataKind,
+  reviewKind,
+  fileKind,
+  whiteboardKind,
+  designKind,
+  slideKind,
+  scheduleDefinition,
 ];
+
+export const officeKinds = officeDefinitions.map((definition) => registerKind(definition));

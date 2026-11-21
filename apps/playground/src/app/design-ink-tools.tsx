@@ -14,7 +14,7 @@ import {
   type DesignContent,
 } from '@editor-platform/design';
 import { insertDesignPage, insertDesignPanel } from '@editor-platform/design/pagination';
-import type { SurfaceHost } from './editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 import { downloadText } from '../model';
 import {
   inkLayers,

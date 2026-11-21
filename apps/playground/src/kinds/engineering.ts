@@ -1,6 +1,6 @@
 // The Playground's engineering kinds, in the order the Playground lists them. Only Host data
 // (the CAD kernel build) is supplied here; the definitions come from each package's `./kind`.
-import { registerKind } from '@editor-platform/artifact-kinds';
+import { registerKind, type KindDefinition } from '@editor-platform/artifact-kinds';
 import { bimKind } from '@editor-platform/bim/kind';
 import { cadKind } from '@editor-platform/cad/kind';
 import { characterKind } from '@editor-platform/character/kind';
@@ -14,16 +14,24 @@ import { schematicKind } from '@editor-platform/schematic/kind';
 import { simulationKind } from '@editor-platform/simulation/kind';
 import { cadKernelProfile } from './kernel';
 
-export const engineeringKinds = [
-  registerKind(cadKind(cadKernelProfile)),
-  registerKind(bimKind),
-  registerKind(characterKind),
-  registerKind(simulationKind),
-  registerKind(constructionKind),
-  registerKind(pcbKind),
-  registerKind(schematicKind),
-  registerKind(ladderKind),
-  registerKind(cosimKind),
-  registerKind(drawingKind),
-  registerKind(factoryKind),
+/** CAD is built from the Host's kernel build; kinds/engineering/cad.tsx pairs this same object. */
+export const cadDefinition = cadKind(cadKernelProfile);
+
+/** The typed definitions, in list order (kinds/surfaces.ts checks each has one Surface). */
+export const engineeringDefinitions: readonly KindDefinition<unknown>[] = [
+  cadDefinition,
+  bimKind,
+  characterKind,
+  simulationKind,
+  constructionKind,
+  pcbKind,
+  schematicKind,
+  ladderKind,
+  cosimKind,
+  drawingKind,
+  factoryKind,
 ];
+
+export const engineeringKinds = engineeringDefinitions.map((definition) =>
+  registerKind(definition),
+);

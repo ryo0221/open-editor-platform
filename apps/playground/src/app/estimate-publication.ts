@@ -15,7 +15,7 @@ import {
   type WorkPublicationReceipt,
 } from '@editor-platform/estimate/outputs';
 import type { EstimatePort } from '@editor-platform/estimate';
-import type { SurfaceHost } from './editor-surfaces';
+import type { SurfaceHost } from '../kinds/surface-host';
 import { createLocalSession, type StoredArtifact } from '../model';
 import { storage, editedDraft } from './records';
 interface Ledger {

@@ -73,7 +73,7 @@ export default function BimHost({
       },
     });
     return { controller, kernel, parts };
-    // One controller per artifact: the Surface is keyed by it (editor-surfaces).
+    // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
   }, [session]);
   useEffect(
     () => () => {
