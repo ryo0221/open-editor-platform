@@ -114,7 +114,7 @@ function KanbanCard({
           >
             {groupNames.map((v) => (
               <option key={v} value={v}>
-                {wording(v)}
+                {groupColumn && groupValue(v) !== null ? v : wording(v)}
               </option>
             ))}
           </select>
@@ -168,6 +168,7 @@ function KanbanBoard({ children }: { children: ReactNode }) {
 function KanbanColumn({ p, name }: { p: DataProjectionProps; name: string }) {
   const { data, readOnly, apply, groups } = p;
   const { groupColumn, groupRows } = groups;
+  const wording = useWording();
   // The (empty) column stays as a drop target, but steps back while no card is in it.
   const quiet = groupColumn && groupValue(name) === null && groupRows(name).length === 0;
   return (
@@ -193,7 +194,7 @@ function KanbanColumn({ p, name }: { p: DataProjectionProps; name: string }) {
       }}
     >
       <h3>
-        {name}
+        {groupColumn && groupValue(name) !== null ? name : wording(name)}
         <span>{groupRows(name).length}</span>
       </h3>
       {groupRows(name).map((row, i) => (

@@ -701,8 +701,8 @@ function TypographySection(props: {
               {t('Mixed')}
             </option>
           )}
-          <option>{t('Arial, sans-serif')}</option>
-          <option>{t('Georgia, serif')}</option>
+          <option value="Arial, sans-serif">{t('Arial, sans-serif')}</option>
+          <option value="Georgia, serif">{t('Georgia, serif')}</option>
           <option>monospace</option>
         </select>
       </label>
