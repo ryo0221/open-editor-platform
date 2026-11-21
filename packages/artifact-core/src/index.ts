@@ -35,7 +35,10 @@ export interface Provenance {
     targetReaderPin?: string;
     converterPin?: string;
   };
-  template?: { id: string; version: number; hash: string; requestId: string; fingerprint: string };
+  template?: { id: string; version: number; hash: string } & (
+    | { requestId: string; fingerprint: string }
+    | { requestId?: never; fingerprint?: never }
+  );
   source: 'created' | 'imported';
   officeImport?: {
     requestId: string;
@@ -214,6 +217,11 @@ export async function commitVersion<T>(
 export function serializeArtifact<T>(artifact: Artifact<T>): string {
   return JSON.stringify(artifact, null, 2);
 }
+export class DuplicateArtifactVersionError extends Error {
+  constructor(readonly artifactId: ArtifactId) {
+    super('Duplicate artifact version ID');
+  }
+}
 export function deserializeArtifact(text: string): Artifact<unknown> {
   const value: unknown = JSON.parse(text);
   if (!value || typeof value !== 'object') throw new Error('Expected an artifact object');
@@ -228,7 +236,8 @@ export function deserializeArtifact(text: string): Artifact<unknown> {
     !Array.isArray(a.versions)
   )
     throw new Error('Unsupported or invalid artifact envelope');
-  for (const v of a.versions)
+  const versionIds = new Set<string>();
+  for (const v of a.versions) {
     if (
       !v ||
       v.artifactId !== a.id ||
@@ -238,6 +247,9 @@ export function deserializeArtifact(text: string): Artifact<unknown> {
       typeof v.contentHash !== 'string'
     )
       throw new Error('Invalid artifact version');
+    if (versionIds.has(v.versionId)) throw new DuplicateArtifactVersionError(a.id);
+    versionIds.add(v.versionId);
+  }
   return clone(a as Artifact<unknown>);
 }
 export interface StorageAdapter<T extends { id: string }> {
