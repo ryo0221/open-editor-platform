@@ -66,6 +66,8 @@ import {
 } from '@editor-platform/geometry-view';
 import type { GeometryEmission } from '@editor-platform/geometry-core';
 import {
+  cadUnderlayGpuShare,
+  cadUnderlayTextureSizes,
   combTip,
   curvatureColor,
   type CadCamera,
@@ -384,6 +386,8 @@ export class CadViewport {
   private readonly resize: ResizeObserver;
   private pickable = false;
   private gpuBudget: number | undefined;
+  /** #15: the GPU bytes the underlay textures took when last set. */
+  private underlayBytes = 0;
   /** The last placed parts, admitted again when the budget or the native geometry changes. */
   private lastParts: ViewportPart[] = [];
   /** R2b-4: each part instance's level (LOD) as drawn, by its path. */
@@ -935,6 +939,11 @@ export class CadViewport {
     // A drag under way keeps the tool it started with; turning drags off cancels it.
     if (!tool) this.endJointDrag(false);
     this.jointTool = tool;
+  }
+  /** The view's width over its height (1 before it has a size). */
+  get aspect() {
+    const { clientWidth: w, clientHeight: h } = this.host;
+    return w && h ? w / h : 1;
   }
   /** Whether a joint's value is being dragged: its shown poses are not committed content. */
   get draggingJoint() {
@@ -1609,7 +1618,8 @@ export class CadViewport {
     this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
   }
   get gpuBytes(): number {
-    return this.bufferBytes(this.bodies);
+    // The drawings under the views share the budget with the bodies, parts and sketches.
+    return this.bufferBytes(this.bodies) + this.underlayBytes;
   }
   /** The GPU buffers a group's meshes and lines upload, each array and image once. */
   private bufferBytes(group: Object3D, seen = new Set<unknown>()): number {
@@ -2209,6 +2219,30 @@ export class CadViewport {
     }
     this.underlayItems.length = 0;
     const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    // The drawings and their heat take at most their share of the GPU budget: set coarser when
+    // they would pass it, before anything is uploaded (Codex on #35).
+    const images = items
+      .flatMap((item) => [item.image, item.heat])
+      .filter(Boolean) as TexImageSource[];
+    const sizeOf = (image: TexImageSource) => {
+      const { width, height } = image as { width: number; height: number };
+      return [width, height] as [number, number];
+    };
+    const fitted = cadUnderlayTextureSizes(
+      images.map(sizeOf),
+      (this.gpuBudget ?? cadBudgets.gpuBytes) * cadUnderlayGpuShare,
+    );
+    const sized = new Map(images.map((image, i) => [image, fitted.sizes[i]!]));
+    const scaled = (image: TexImageSource): TexImageSource => {
+      const [w, h] = sized.get(image)!;
+      const [w0, h0] = sizeOf(image);
+      if (w === w0 && h === h0) return image;
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [w, h];
+      canvas.getContext('2d')?.drawImage(image as CanvasImageSource, 0, 0, w, h);
+      return canvas;
+    };
+    this.host.dataset.underlayScale = String(fitted.scale);
     for (const item of items) {
       const u = new Vector3(...item.axes.u),
         v = new Vector3(...item.axes.v),
@@ -2232,7 +2266,7 @@ export class CadViewport {
           .addScaledVector(v, (v0 + v1) / 2)
           .addScaledVector(toward, depth);
       const plane = (image: TexImageSource, depth: number, opacity: number, front: boolean) => {
-        const texture = new CanvasTexture(image as HTMLCanvasElement);
+        const texture = new CanvasTexture(scaled(image) as HTMLCanvasElement);
         texture.colorSpace = 'srgb';
         const material = new MeshBasicMaterial({
           map: texture,
@@ -2256,6 +2290,14 @@ export class CadViewport {
       if (item.heat) objects.push(plane(item.heat, near + 1, 1, true));
       if (objects.length) this.underlays.add(...objects);
       this.underlayItems.push({ toward, objects });
+    }
+    // What they take now counts against the bodies, parts and sketches: admit those again when
+    // it changed.
+    const bytes = this.bufferBytes(this.underlays);
+    if (bytes !== this.underlayBytes) {
+      this.underlayBytes = bytes;
+      if (this.lastShown.bodies.length || this.lastParts.length)
+        return this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
     }
     this.render();
   }

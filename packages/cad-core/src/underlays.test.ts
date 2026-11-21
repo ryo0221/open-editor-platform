@@ -10,6 +10,9 @@ import {
   cadUnderlayUv,
   cadUnderlayViews,
   type CadUnderlay,
+  cadUnderlayGpuShare,
+  cadUnderlayTextureBytes,
+  cadUnderlayTextureSizes,
 } from './underlays';
 import { validateCad } from './validation';
 
@@ -101,4 +104,20 @@ describe('#15 underlays: drawings laid under views', () => {
     expect(cadUnderlayUv('top', [10, 20, 99])).toEqual([10, 20]);
     expect(cadUnderlayBox(underlay())).toEqual([-50, -20, 150, 80]);
   });
+});
+
+it('sets drawings coarser to fit their share of the GPU budget (Codex on #35)', () => {
+  const two8k = [
+    [8192, 8192],
+    [8192, 8192],
+  ] as const;
+  const share = 512 * 2 ** 20 * cadUnderlayGpuShare;
+  expect(2 * cadUnderlayTextureBytes(8192, 8192)).toBeGreaterThan(512 * 2 ** 20);
+  const fit = cadUnderlayTextureSizes(two8k, share);
+  expect(fit.scale).toBeLessThan(1);
+  expect(fit.sizes.reduce((n, [w, h]) => n + cadUnderlayTextureBytes(w, h), 0)).toBeLessThanOrEqual(
+    share,
+  );
+  // Small drawings keep their pixels.
+  expect(cadUnderlayTextureSizes([[200, 100]], share)).toEqual({ scale: 1, sizes: [[200, 100]] });
 });

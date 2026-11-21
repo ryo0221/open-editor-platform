@@ -5,7 +5,7 @@
  * from `underlayDeviation`, which needs no GPU, so a headless run gives the same ones.
  */
 import { useEffect, useMemo, useState, type RefObject } from 'react';
-import { Section } from '@editor-platform/editor-ui';
+import { CommitInput, Section } from '@editor-platform/editor-ui';
 import {
   cadUnderlayAxes,
   cadUnderlayBox,
@@ -164,7 +164,12 @@ export function UnderlaysSection({
         target,
         up,
       },
-      projection: { type: 'orthographic', spanMm: (v1 - v0) * 1.1 },
+      // The span is the view's height: a drawing wider than the view's shape is fitted by its
+      // width instead, so all of it shows (Codex on #35).
+      projection: {
+        type: 'orthographic',
+        spanMm: Math.max(v1 - v0, (u1 - u0) / (view.current?.aspect ?? 1)) * 1.1,
+      },
     });
   };
   const check = (u: CadUnderlay) => {
@@ -248,38 +253,35 @@ export function UnderlaysSection({
                         ))}
                       </select>
                     </label>
-                    <label>
-                      mm per pixel
-                      <input
-                        aria-label="Underlay mm per pixel"
+                    {/* Committed fields: saving or switching first applies a value still being
+                        typed, as the other inspector fields do (Codex on #35). */}
+                    <CommitInput
+                      label="Underlay mm per pixel"
+                      type="number"
+                      min={cadUnderlayLimits.minMmPerPixel}
+                      max={cadUnderlayLimits.maxMmPerPixel}
+                      step={0.001}
+                      value={u.mmPerPixel}
+                      onCommit={(text) => {
+                        const v = Number(text);
+                        if (v !== u.mmPerPixel) change(u.id, { mmPerPixel: v });
+                      }}
+                    />
+                    {(['u', 'v'] as const).map((axis, i) => (
+                      <CommitInput
+                        key={axis}
+                        label={`Underlay origin ${axis}`}
                         type="number"
-                        step="any"
-                        key={`s-${u.mmPerPixel}`}
-                        defaultValue={u.mmPerPixel}
-                        onBlur={(e) => {
-                          const v = Number(e.target.value);
-                          if (v !== u.mmPerPixel && v > 0) change(u.id, { mmPerPixel: v });
+                        step={0.001}
+                        value={u.originMm[i]!}
+                        onCommit={(text) => {
+                          const v = Number(text);
+                          if (v === u.originMm[i]) return;
+                          const originMm: [number, number] = [...u.originMm];
+                          originMm[i] = v;
+                          change(u.id, { originMm });
                         }}
                       />
-                    </label>
-                    {(['u', 'v'] as const).map((axis, i) => (
-                      <label key={axis}>
-                        Top-left {axis === 'u' ? 'right' : 'up'} (mm)
-                        <input
-                          aria-label={`Underlay origin ${axis}`}
-                          type="number"
-                          step="any"
-                          key={`${axis}-${u.originMm[i]}`}
-                          defaultValue={u.originMm[i]}
-                          onBlur={(e) => {
-                            const v = Number(e.target.value);
-                            if (!Number.isFinite(v) || v === u.originMm[i]) return;
-                            const originMm: [number, number] = [...u.originMm];
-                            originMm[i] = v;
-                            change(u.id, { originMm });
-                          }}
-                        />
-                      </label>
                     ))}
                     <label>
                       Opacity

@@ -49,6 +49,41 @@ export const cadUnderlayLimits = Object.freeze({
   minOpacity: 0.05,
 });
 
+/** The share of the view's GPU budget the drawings and their heat may take together. */
+export const cadUnderlayGpuShare = 0.25;
+/** An RGBA texture's bytes with its mipmaps. */
+export const cadUnderlayTextureBytes = (width: number, height: number) =>
+  Math.ceil((width * height * 4 * 4) / 3);
+/**
+ * The one scale (at most 1) that brings the underlay images (pixel sizes) within `bytes`, and each
+ * image's size at that scale: drawings are set coarser rather than pass the GPU budget (Codex on
+ * #35).
+ */
+export function cadUnderlayTextureSizes(
+  sizes: readonly (readonly [number, number])[],
+  bytes: number,
+): { scale: number; sizes: [number, number][] } {
+  const total = sizes.reduce((n, [w, h]) => n + cadUnderlayTextureBytes(w, h), 0);
+  let scale = total > bytes && total > 0 ? Math.sqrt(Math.max(0, bytes) / total) : 1;
+  const at = (k: number) =>
+    sizes.map(([w, h]) => [Math.max(1, Math.floor(w * k)), Math.max(1, Math.floor(h * k))]) as [
+      number,
+      number,
+    ][];
+  // Rounding a side up to one pixel can still pass: shrink until the sizes fit (or are 1 × 1).
+  let out = at(scale);
+  for (
+    let n = 0;
+    n < 64 && out.reduce((t, [w, h]) => t + cadUnderlayTextureBytes(w, h), 0) > bytes;
+    n++
+  ) {
+    if (out.every(([w, h]) => w === 1 && h === 1)) break;
+    scale *= 0.9;
+    out = at(scale);
+  }
+  return { scale, sizes: out };
+}
+
 /** Right, up and toward-the-viewer axes of a view, in model space. */
 export function cadUnderlayAxes(view: CadUnderlayView): { u: Vec3; v: Vec3; toward: Vec3 } {
   switch (view) {
