@@ -32,6 +32,8 @@ export const cosimSurface = hostKind(cosimKind, {
   Surface: CosimSurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     pendingInputs: {
       refusal: 'Co-simulation の入力を確定またはキャンセルしてから履歴を操作してください。',
     },

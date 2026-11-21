@@ -107,6 +107,9 @@ export function estimateSurface(geometry: GeometryQuantitySources | undefined) {
   return hostKind(estimateKind, {
     Surface: ({ host }) => <PlaygroundEstimate host={host} geometry={geometry} />,
     session: 'local',
-    hooks: { comments: false },
+    hooks: {
+      sharedSessions: false,
+      comments: false,
+    },
   });
 }

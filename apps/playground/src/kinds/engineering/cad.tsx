@@ -42,6 +42,8 @@ export const cadSurface = hostKind(cadDefinition, {
   Surface: CadSurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     // CAD Undo/Redo is admitted like an edit: the native file must still import (CAD23).
     // The history entry itself is checked, so content counted before is not encoded again.
     history({ session, direction, record }) {

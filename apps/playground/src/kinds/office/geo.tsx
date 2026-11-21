@@ -48,6 +48,7 @@ export const geoSurface = hostKind(geoKind, {
   Surface: GeoHost,
   session: 'local',
   hooks: {
+    sharedSessions: false,
     beforeVersion: validateGeoRecord,
     // Geo resource admission keeps strict identity checks on every version.
     strictCapture: true,

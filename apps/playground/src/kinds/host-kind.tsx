@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import type { KindDefinition } from '@editor-platform/artifact-kinds';
 import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import type { Content, StoredArtifact } from '../model';
+import { pairKinds } from './pair-kinds';
 import type { SurfaceHost } from './surface-host';
 
 /** What the Playground passes to a kind's Surface: its Host state and the checked content. */
@@ -81,6 +82,12 @@ export interface HostKindHooks<C> {
   feedsAnimationCatalog?: boolean;
   /** The Surface reads the saved Animation catalog (it is built only for such a kind). */
   readsAnimationCatalog?: boolean;
+  /** The kind cannot open in a shared (collaborative) session. */
+  sharedSessions?: false;
+  /** Shared-session annotations address the Surface's own regions (Review, File). */
+  annotationSurface?: boolean;
+  /** The toolbar's Comments button is hidden, or shown but disabled. Absent, it works. */
+  commentsButton?: 'hidden' | 'disabled';
 }
 
 /** The hooks with the content type erased; content reaches them only after `validate`. */
@@ -98,6 +105,9 @@ export interface KindHooks {
   exports: { documentText: boolean; csv: boolean; download?(content: unknown): void };
   feedsAnimationCatalog: boolean;
   readsAnimationCatalog: boolean;
+  sharedSessions: boolean;
+  annotationSurface: boolean;
+  commentsButton?: 'hidden' | 'disabled';
 }
 
 /** The ordinary Playground behaviour, for a kind without hooks or a kind this Host does not know. */
@@ -111,6 +121,8 @@ export const ordinaryHooks: KindHooks = Object.freeze({
   exports: Object.freeze({ documentText: false, csv: false }),
   feedsAnimationCatalog: false,
   readsAnimationCatalog: false,
+  sharedSessions: true,
+  annotationSurface: false,
 });
 
 function eraseHooks<C>(definition: KindDefinition<C>, hooks: HostKindHooks<C> = {}): KindHooks {
@@ -142,6 +154,9 @@ function eraseHooks<C>(definition: KindDefinition<C>, hooks: HostKindHooks<C> = 
     },
     feedsAnimationCatalog: !!hooks.feedsAnimationCatalog,
     readsAnimationCatalog: !!hooks.readsAnimationCatalog,
+    sharedSessions: hooks.sharedSessions !== false,
+    annotationSurface: !!hooks.annotationSurface,
+    commentsButton: hooks.commentsButton,
   };
   return Object.freeze(erased);
 }
@@ -190,31 +205,10 @@ export function hostKind<C>(
   });
 }
 
-/**
- * One Surface per registered kind, made from the same definition object the registry lists.
- * A kind without a Surface, a second Surface or a Surface made from another definition is an
- * error at start-up, like a kind registered twice.
- */
+/** One Surface per registered kind, made from the same definition object (see pairKinds). */
 export function pairSurfaces(
   definitions: readonly KindDefinition<unknown>[],
   entries: readonly HostKindEntry[],
 ): ReadonlyMap<string, HostKindEntry> {
-  const byKind = new Map<string, HostKindEntry>();
-  for (const entry of entries) {
-    if (byKind.has(entry.kind)) throw new Error(`Surface registered twice: ${entry.kind}`);
-    byKind.set(entry.kind, entry);
-  }
-  for (const definition of definitions) {
-    const entry = byKind.get(definition.kind);
-    if (!entry) throw new Error(`No Surface for kind: ${definition.kind}`);
-    if (entry.definition !== definition)
-      throw new Error(`Surface for ${definition.kind} uses another definition`);
-  }
-  if (byKind.size !== definitions.length)
-    throw new Error(
-      `Surface without a registered kind: ${[...byKind.keys()]
-        .filter((kind) => !definitions.some((definition) => definition.kind === kind))
-        .join(', ')}`,
-    );
-  return byKind;
+  return pairKinds(definitions, entries, 'Surface');
 }

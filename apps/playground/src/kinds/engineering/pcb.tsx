@@ -29,5 +29,9 @@ function PcbSurface({ host }: HostSurfaceProps<PcbDocument>) {
 export const pcbSurface = hostKind(pcbKind, {
   Surface: PcbSurface,
   session: 'local',
-  hooks: { comments: false },
+  hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
+    comments: false,
+  },
 });

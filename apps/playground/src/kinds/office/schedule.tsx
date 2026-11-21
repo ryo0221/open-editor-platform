@@ -42,6 +42,7 @@ function ScheduleHost({ host, content }: { host: SurfaceHost; content: ScheduleD
 export const scheduleSurface = hostKind(scheduleDefinition, {
   Surface: ScheduleHost,
   hooks: {
+    sharedSessions: false,
     // Removing a Schedule event while details hold refused text could lose it: refused.
     history({ session, direction, pending }) {
       const local = session as unknown as EditorSession<ScheduleDocument>;

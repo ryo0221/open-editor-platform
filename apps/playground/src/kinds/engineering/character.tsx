@@ -35,6 +35,8 @@ export const characterSurface = hostKind(characterKind, {
   Surface: CharacterSurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     history({ session, direction, record }) {
       try {
         const candidate = session.peekHistory(direction);

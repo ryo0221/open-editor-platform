@@ -34,6 +34,8 @@ export const factorySurface = hostKind(factoryKind, {
   Surface: FactorySurface,
   session: 'local',
   hooks: {
+    sharedSessions: false,
+    commentsButton: 'disabled',
     pendingInputs: {
       refusal: 'Factory の入力を確定またはキャンセルしてから履歴を操作してください。',
     },
