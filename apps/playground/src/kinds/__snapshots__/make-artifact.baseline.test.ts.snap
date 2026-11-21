@@ -1,0 +1,3760 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`a new Artifact of every kind (KR4 baseline) > analysis: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "blocks": [],
+    "domain": "analysis",
+    "inputs": [],
+    "outputs": [],
+    "parameters": [],
+    "retainedSources": [],
+    "runs": [],
+    "scenarios": [],
+    "schemaVersion": 1,
+    "steps": [],
+    "title": "計算・分析ノート",
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "analysis",
+  "name": "計算・分析ノート 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > animation: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "assets": [],
+    "compositions": [
+      {
+        "duration": 960000,
+        "frameRate": {
+          "denominator": 1,
+          "numerator": 30,
+        },
+        "height": 360,
+        "id": "root",
+        "layers": [],
+        "name": "Main",
+        "tracks": [],
+        "width": 640,
+      },
+    ],
+    "provenance": [],
+    "publicInputs": [],
+    "rootCompositionId": "root",
+    "schemaVersion": 2,
+    "sources": [],
+    "ticksPerSecond": 240000,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "animation",
+  "name": "Animation 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > bim: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "axes": "right-handed-z-up",
+    "elements": [],
+    "grids": [],
+    "joins": [],
+    "levels": [
+      {
+        "elevationMm": 0,
+        "id": "l-1f",
+        "name": "1F",
+      },
+      {
+        "elevationMm": 3000,
+        "id": "l-2f",
+        "name": "2F",
+      },
+      {
+        "elevationMm": 6000,
+        "id": "l-rf",
+        "name": "RF",
+      },
+    ],
+    "materials": [
+      {
+        "category": "concrete",
+        "id": "m-concrete",
+        "name": "Concrete",
+      },
+      {
+        "category": "finish",
+        "id": "m-finish",
+        "name": "Plaster",
+      },
+      {
+        "category": "metal",
+        "id": "m-steel",
+        "name": "Steel",
+      },
+    ],
+    "project": {
+      "name": "Project",
+      "siteElevationMm": 0,
+      "trueNorthRad": 0,
+    },
+    "propertySets": [],
+    "schemaVersion": 1,
+    "types": [
+      {
+        "common": {
+          "isExternal": true,
+          "loadBearing": true,
+        },
+        "id": "t-wall-200",
+        "kind": "wall",
+        "layers": [
+          {
+            "materialId": "m-concrete",
+            "thicknessMm": 180,
+          },
+          {
+            "materialId": "m-finish",
+            "thicknessMm": 20,
+          },
+        ],
+        "name": "RC 180 + plaster 20",
+      },
+      {
+        "id": "t-slab-200",
+        "kind": "slab",
+        "layers": [
+          {
+            "materialId": "m-concrete",
+            "thicknessMm": 200,
+          },
+        ],
+        "name": "RC slab 200",
+      },
+      {
+        "id": "t-roof-200",
+        "kind": "roof",
+        "layers": [
+          {
+            "materialId": "m-concrete",
+            "thicknessMm": 200,
+          },
+        ],
+        "name": "RC roof 200",
+      },
+      {
+        "id": "t-column-600",
+        "kind": "column",
+        "materialId": "m-concrete",
+        "name": "RC column 600",
+        "profile": {
+          "depthMm": 600,
+          "shape": "rect",
+          "widthMm": 600,
+        },
+      },
+      {
+        "id": "t-beam-400x700",
+        "kind": "beam",
+        "materialId": "m-concrete",
+        "name": "RC beam 400×700",
+        "profile": {
+          "depthMm": 700,
+          "shape": "rect",
+          "widthMm": 400,
+        },
+      },
+      {
+        "heightMm": 2100,
+        "id": "t-door-900",
+        "kind": "door",
+        "name": "Door 900",
+        "widthMm": 900,
+      },
+      {
+        "heightMm": 1500,
+        "id": "t-window-1800",
+        "kind": "window",
+        "name": "Window 1800",
+        "widthMm": 1800,
+      },
+    ],
+    "units": "mm",
+    "views": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "bim",
+  "name": "Building 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > cad: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "assets": [],
+    "axes": "right-handed-z-up",
+    "bodies": [],
+    "componentPatterns": [],
+    "components": [],
+    "features": [],
+    "joints": [],
+    "kernelProfile": {
+      "angularToleranceRad": 1e-9,
+      "buildHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "id": "unavailable",
+      "linearToleranceMm": 0.000001,
+      "maxResultLinearToleranceMm": 0.0001,
+      "semanticsVersion": 2,
+    },
+    "namedViews": [],
+    "parameters": [],
+    "partProperties": {
+      "description": "",
+      "partNumber": "",
+    },
+    "parts": [],
+    "profiles": [],
+    "schemaVersion": 2,
+    "sketches": [],
+    "solvedPoses": {},
+    "units": "mm",
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "cad",
+  "name": "3D CAD 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > character: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "actions": [
+      {
+        "duration": 240000,
+        "frameRate": {
+          "denominator": 1,
+          "numerator": 30,
+        },
+        "id": "wave",
+        "name": "Wave",
+        "tracks": [
+          {
+            "id": "wave-arm",
+            "keys": [
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "wave-arm-0",
+                "tick": 0,
+                "value": [
+                  0,
+                  0,
+                  0,
+                  1,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "wave-arm-1",
+                "tick": 120000,
+                "value": [
+                  0,
+                  0.5646424733950354,
+                  0,
+                  0.8253356149096783,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "wave-arm-2",
+                "tick": 240000,
+                "value": [
+                  0,
+                  0,
+                  0,
+                  1,
+                ],
+              },
+            ],
+            "target": {
+              "id": "arm.R",
+              "kind": "bone",
+              "property": "rotation",
+            },
+          },
+          {
+            "id": "wave-chest",
+            "keys": [
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "wave-chest-0",
+                "tick": 0,
+                "value": 0,
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "wave-chest-1",
+                "tick": 120000,
+                "value": 1,
+              },
+              {
+                "easing": {
+                  "type": "hold",
+                },
+                "id": "wave-chest-2",
+                "tick": 240000,
+                "value": 0,
+              },
+            ],
+            "target": {
+              "id": "chest-wide",
+              "kind": "morph",
+              "property": "weight",
+            },
+          },
+        ],
+      },
+      {
+        "duration": 240000,
+        "frameRate": {
+          "denominator": 1,
+          "numerator": 30,
+        },
+        "id": "walk",
+        "name": "Walk",
+        "tracks": [
+          {
+            "id": "walk-thigh-L",
+            "keys": [
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-L-0",
+                "tick": 0,
+                "value": [
+                  0.24740395925452294,
+                  0,
+                  0,
+                  0.9689124217106447,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-L-1",
+                "tick": 120000,
+                "value": [
+                  -0.24740395925452294,
+                  -0,
+                  -0,
+                  0.9689124217106447,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-L-2",
+                "tick": 240000,
+                "value": [
+                  0.24740395925452294,
+                  0,
+                  0,
+                  0.9689124217106447,
+                ],
+              },
+            ],
+            "target": {
+              "id": "thigh.L",
+              "kind": "bone",
+              "property": "rotation",
+            },
+          },
+          {
+            "id": "walk-thigh-R",
+            "keys": [
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-R-0",
+                "tick": 0,
+                "value": [
+                  -0.24740395925452294,
+                  -0,
+                  -0,
+                  0.9689124217106447,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-R-1",
+                "tick": 120000,
+                "value": [
+                  0.24740395925452294,
+                  0,
+                  0,
+                  0.9689124217106447,
+                ],
+              },
+              {
+                "easing": {
+                  "type": "linear",
+                },
+                "id": "walk-R-2",
+                "tick": 240000,
+                "value": [
+                  -0.24740395925452294,
+                  -0,
+                  -0,
+                  0.9689124217106447,
+                ],
+              },
+            ],
+            "target": {
+              "id": "thigh.R",
+              "kind": "bone",
+              "property": "rotation",
+            },
+          },
+        ],
+      },
+    ],
+    "assets": [
+      {
+        "byteLength": 4752,
+        "id": "mesh-body",
+        "kind": "mesh-epm",
+        "mediaType": "model/x-editor-platform-mesh",
+        "sha256": "sha256:2c78fcc48d7a98fd4d3b1743833d837426bfcb3c6e555579b6a5f196eb5a2238",
+      },
+    ],
+    "axes": "right-handed-z-up",
+    "materials": [
+      {
+        "color": "#4a7bd0",
+        "doubleSided": false,
+        "id": "mat-body",
+        "maps": {},
+        "metalness": 0,
+        "name": "Body",
+        "opacity": 1,
+        "roughness": 0.6,
+      },
+      {
+        "color": "#f0c8a0",
+        "doubleSided": false,
+        "id": "mat-face",
+        "maps": {},
+        "metalness": 0,
+        "name": "Face",
+        "opacity": 1,
+        "roughness": 0.6,
+      },
+    ],
+    "morphs": [
+      {
+        "id": "chest-wide",
+        "name": "Chest wide",
+        "partId": "body",
+        "weight": 0,
+      },
+    ],
+    "name": "Blocky figure",
+    "parts": [
+      {
+        "id": "body",
+        "materials": [
+          "mat-body",
+          "mat-face",
+        ],
+        "mesh": "mesh-body",
+        "name": "Body",
+        "parentId": null,
+        "transform": {
+          "rotation": [
+            0,
+            0,
+            0,
+            1,
+          ],
+          "scale": [
+            1,
+            1,
+            1,
+          ],
+          "translation": [
+            0,
+            0,
+            0,
+          ],
+        },
+        "visible": true,
+      },
+    ],
+    "props": [],
+    "schemaVersion": 1,
+    "skeletons": [
+      {
+        "bones": [
+          {
+            "id": "hip",
+            "name": "hip",
+            "parentId": null,
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                0,
+                0,
+                950,
+              ],
+            },
+          },
+          {
+            "id": "spine",
+            "name": "spine",
+            "parentId": "hip",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                0,
+                0,
+                200,
+              ],
+            },
+          },
+          {
+            "id": "head",
+            "name": "head",
+            "parentId": "spine",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                0,
+                0,
+                300,
+              ],
+            },
+          },
+          {
+            "id": "arm.L",
+            "name": "arm.L",
+            "parentId": "spine",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                200,
+                0,
+                250,
+              ],
+            },
+          },
+          {
+            "id": "forearm.L",
+            "name": "forearm.L",
+            "parentId": "arm.L",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                280,
+                0,
+                0,
+              ],
+            },
+          },
+          {
+            "id": "arm.R",
+            "name": "arm.R",
+            "parentId": "spine",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                -200,
+                0,
+                250,
+              ],
+            },
+          },
+          {
+            "id": "forearm.R",
+            "name": "forearm.R",
+            "parentId": "arm.R",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                -280,
+                0,
+                0,
+              ],
+            },
+          },
+          {
+            "id": "thigh.L",
+            "name": "thigh.L",
+            "parentId": "hip",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                100,
+                0,
+                -50,
+              ],
+            },
+          },
+          {
+            "id": "shin.L",
+            "name": "shin.L",
+            "parentId": "thigh.L",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                0,
+                0,
+                -420,
+              ],
+            },
+          },
+          {
+            "id": "thigh.R",
+            "name": "thigh.R",
+            "parentId": "hip",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                -100,
+                0,
+                -50,
+              ],
+            },
+          },
+          {
+            "id": "shin.R",
+            "name": "shin.R",
+            "parentId": "thigh.R",
+            "rest": {
+              "rotation": [
+                0,
+                0,
+                0,
+                1,
+              ],
+              "scale": [
+                1,
+                1,
+                1,
+              ],
+              "translation": [
+                0,
+                0,
+                -420,
+              ],
+            },
+          },
+        ],
+        "id": "rig",
+        "name": "Rig",
+        "parentPartId": null,
+      },
+    ],
+    "skins": [
+      {
+        "id": "skin-body",
+        "inverseBind": [
+          {
+            "boneId": "hip",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              -950,
+              1,
+            ],
+          },
+          {
+            "boneId": "spine",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              -1150,
+              1,
+            ],
+          },
+          {
+            "boneId": "head",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              -1450,
+              1,
+            ],
+          },
+          {
+            "boneId": "arm.L",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              -200,
+              0,
+              -1400,
+              1,
+            ],
+          },
+          {
+            "boneId": "forearm.L",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              -480,
+              0,
+              -1400,
+              1,
+            ],
+          },
+          {
+            "boneId": "arm.R",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              200,
+              0,
+              -1400,
+              1,
+            ],
+          },
+          {
+            "boneId": "forearm.R",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              480,
+              0,
+              -1400,
+              1,
+            ],
+          },
+          {
+            "boneId": "thigh.L",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              -100,
+              0,
+              -900,
+              1,
+            ],
+          },
+          {
+            "boneId": "shin.L",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              -100,
+              0,
+              -480,
+              1,
+            ],
+          },
+          {
+            "boneId": "thigh.R",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              100,
+              0,
+              -900,
+              1,
+            ],
+          },
+          {
+            "boneId": "shin.R",
+            "matrix": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              100,
+              0,
+              -480,
+              1,
+            ],
+          },
+        ],
+        "partId": "body",
+        "skeletonId": "rig",
+      },
+    ],
+    "ticksPerSecond": 240000,
+    "units": "mm",
+  },
+  "extras": [
+    "cadResources",
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "2f336632aad987a4f02a2a4d99614f64e73e40ef58b07c3a117e9a9e5af265a4",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "character",
+  "name": "Character 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > construction: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "calendar": {
+      "holidays": [],
+      "workWeekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+      ],
+    },
+    "name": "Construction schedule 1",
+    "schemaVersion": 1,
+    "source": {
+      "artifactId": "artifact_00000000-0000-4000-8000-000000000003",
+      "contentHash": "709882235e504481fa52f142ce8af66290d8ad4a905cbea05395c71a98acc70c",
+      "versionId": "version_00000000-0000-4000-8000-000000000004",
+    },
+    "startDate": "2026-11-21",
+    "tasks": [],
+  },
+  "extras": [
+    "constructionSources",
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "7863f351fccfd54934418c2ccb8ec587099658ded07952366c643ddd0567e49e",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "construction",
+  "name": "Construction schedule 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > cosim: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "bindings": [],
+    "name": "Co-simulation",
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "cosim",
+  "name": "Co-simulation 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > data: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "columns": [
+      {
+        "defaultValue": "New record",
+        "id": "col_00000000-0000-4000-8000-000000000005",
+        "name": "Name",
+        "required": true,
+        "type": "text",
+      },
+      {
+        "defaultValue": "Planned",
+        "id": "col_00000000-0000-4000-8000-000000000006",
+        "name": "Status",
+        "options": [
+          "Planned",
+          "Active",
+          "Done",
+        ],
+        "type": "select",
+      },
+      {
+        "defaultValue": 1,
+        "id": "col_00000000-0000-4000-8000-000000000007",
+        "name": "Quantity",
+        "type": "number",
+      },
+      {
+        "defaultValue": 10,
+        "id": "col_00000000-0000-4000-8000-000000000008",
+        "name": "Price",
+        "type": "number",
+      },
+      {
+        "formula": "Quantity * Price",
+        "id": "col_00000000-0000-4000-8000-000000000009",
+        "name": "Total",
+        "type": "formula",
+      },
+    ],
+    "rows": [],
+    "schemaVersion": 2,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000010",
+  "kind": "data",
+  "name": "Structured Data 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > design: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "components": [],
+    "elements": [],
+    "schemaVersion": 2,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "design",
+  "name": "Design 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > document: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "blocks": [
+      {
+        "id": "block_00000000-0000-4000-8000-000000000005",
+        "level": 1,
+        "text": "Untitled document",
+        "type": "heading",
+      },
+      {
+        "id": "block_00000000-0000-4000-8000-000000000006",
+        "text": "",
+        "type": "paragraph",
+      },
+    ],
+    "schemaVersion": 2,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000007",
+  "kind": "document",
+  "name": "Document 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > drawing: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "annotations": [],
+    "name": "Drawing",
+    "projection": "third-angle",
+    "schemaVersion": 1,
+    "sheets": [
+      {
+        "filing": false,
+        "id": "sheet-1",
+        "name": "Sheet 1",
+        "orientation": "landscape",
+        "revisions": [],
+        "size": "A3",
+        "title": {
+          "approvedBy": "",
+          "checkedBy": "",
+          "date": "",
+          "drawingNumber": "",
+          "drawnBy": "",
+          "material": "",
+          "organization": "",
+          "project": "",
+          "quantity": "",
+          "title": "Sheet 1",
+        },
+      },
+    ],
+    "sources": [],
+    "views": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "drawing",
+  "name": "Drawing 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > estimate: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "adjustments": [],
+    "calculations": [],
+    "currency": {
+      "code": "JPY",
+      "minorDigits": 0,
+    },
+    "description": "",
+    "domain": "estimate",
+    "lines": [],
+    "quantities": [],
+    "rates": [],
+    "retainedSources": [],
+    "rounding": "half-up",
+    "scenarios": [],
+    "schemaVersion": 1,
+    "title": "見積・積算",
+    "workRules": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "estimate",
+  "name": "見積・積算 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > factory: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "links": [],
+    "name": "Factory",
+    "objects": [],
+    "products": [
+      {
+        "id": "part",
+        "name": "Part",
+      },
+    ],
+    "run": {
+      "durationMs": 28800000,
+      "seed": 1,
+    },
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "factory",
+  "name": "Factory 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > fiction-map: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "coordinateSpace": {
+      "bounds": {
+        "maxX": 1024,
+        "maxY": 1024,
+        "minX": 0,
+        "minY": 0,
+      },
+      "kind": "local-plane",
+      "unit": {
+        "name": "map-unit",
+      },
+      "yAxis": "down",
+    },
+    "features": [],
+    "kind": "fiction-map",
+    "layers": [],
+    "namedViews": [],
+    "precision": {
+      "minEdgeLength": 0,
+      "minPolygonArea": 0,
+    },
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "fiction-map",
+  "name": "Fiction Map 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > file: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "data": "12:00:00  INFO  Editor initialized
+12:00:01  INFO  Artifact loaded
+12:00:02  INFO  Ready to review",
+    "id": "asset_00000000-0000-4000-8000-000000000005",
+    "mime": "text/plain",
+    "name": "session.log",
+    "schemaVersion": 2,
+    "size": 98,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000006",
+  "kind": "file",
+  "name": "File Viewer 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > geo: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "layers": [],
+    "schemaVersion": 1,
+    "sources": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "geo",
+  "name": "Geo 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > ladder: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "name": "Ladder",
+    "rungs": [],
+    "scanMs": 10,
+    "schemaVersion": 1,
+    "variables": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "ladder",
+  "name": "Ladder 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > pcb: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "board": {
+      "copperLayers": 2,
+      "cutouts": [],
+      "edgeClearanceMm": 0.3,
+      "finish": "hasl",
+      "holeClearanceMm": 0.25,
+      "maskColor": "green",
+      "minAnnularRingMm": 0.13,
+      "minDrillMm": 0.3,
+      "minTrackWidthMm": 0.15,
+      "outline": [
+        [
+          1,
+          0,
+        ],
+        [
+          99,
+          0,
+          0.41421356237309503,
+        ],
+        [
+          100,
+          1,
+        ],
+        [
+          100,
+          79,
+          0.41421356237309503,
+        ],
+        [
+          99,
+          80,
+        ],
+        [
+          1,
+          80,
+          0.41421356237309503,
+        ],
+        [
+          0,
+          79,
+        ],
+        [
+          0,
+          1,
+          0.41421356237309503,
+        ],
+      ],
+      "silkColor": "white",
+      "thicknessMm": 1.6,
+    },
+    "components": [],
+    "footprints": [],
+    "holes": [],
+    "netClasses": [
+      {
+        "clearanceMm": 0.15,
+        "id": "nc-default",
+        "name": "Default",
+        "trackWidthMm": 0.15,
+        "viaDiameterMm": 0.6,
+        "viaDrillMm": 0.3,
+      },
+    ],
+    "nets": [],
+    "schemaVersion": 1,
+    "stack": [],
+    "tracks": [],
+    "units": "mm",
+    "vias": [],
+    "zones": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "pcb",
+  "name": "Circuit board 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > react-ui: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "breakpoints": [
+      {
+        "id": "desktop",
+        "minWidth": 1024,
+      },
+      {
+        "id": "wide",
+        "minWidth": 1400,
+      },
+    ],
+    "callbacks": {},
+    "components": [
+      {
+        "controlledInputs": [],
+        "events": {},
+        "import": {
+          "export": "named",
+          "name": "Card",
+          "source": "@reference/ui",
+        },
+        "layout": "className",
+        "name": "Card",
+        "props": {},
+        "ref": {
+          "componentId": "Card",
+          "contractHash": "a62d53377a78853eb737cb6846a57148ffd63eb7e237d99e2aef403f5569d4a1",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "requires": [
+          "ui-package",
+          "theme-css",
+          "theme-provider",
+        ],
+        "sampleProps": {},
+        "schemaVersion": 1,
+        "slots": {
+          "body": {
+            "accepts": [
+              {
+                "componentId": "Card",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Button",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Text",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Image",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Input",
+                "registryId": "reference",
+              },
+            ],
+            "maximum": 32,
+            "minimum": 0,
+            "prop": "children",
+          },
+          "footer": {
+            "accepts": [
+              {
+                "componentId": "Card",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Button",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Text",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Image",
+                "registryId": "reference",
+              },
+              {
+                "componentId": "Input",
+                "registryId": "reference",
+              },
+            ],
+            "maximum": 4,
+            "minimum": 0,
+            "prop": "footer",
+          },
+        },
+      },
+      {
+        "controlledInputs": [],
+        "events": {
+          "onPress": {
+            "parameters": [],
+            "returns": "void",
+          },
+        },
+        "import": {
+          "export": "named",
+          "name": "Button",
+          "source": "@reference/ui",
+        },
+        "layout": "className",
+        "name": "Button",
+        "props": {
+          "label": {
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "type": "string",
+            },
+          },
+          "variant": {
+            "default": "secondary",
+            "required": false,
+            "schema": {
+              "type": "enum",
+              "values": [
+                "primary",
+                "secondary",
+              ],
+            },
+          },
+        },
+        "ref": {
+          "componentId": "Button",
+          "contractHash": "5124b12429e6b645030870105c107a7323241f4f456854b8c18ce7496af5e42c",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "requires": [
+          "ui-package",
+          "theme-css",
+          "theme-provider",
+        ],
+        "sampleProps": {
+          "label": "Continue",
+          "variant": "primary",
+        },
+        "schemaVersion": 1,
+        "slots": {},
+      },
+      {
+        "controlledInputs": [],
+        "events": {},
+        "import": {
+          "export": "named",
+          "name": "Text",
+          "source": "@reference/ui",
+        },
+        "layout": "className",
+        "name": "Text",
+        "props": {
+          "text": {
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "type": "string",
+            },
+          },
+        },
+        "ref": {
+          "componentId": "Text",
+          "contractHash": "770fe5a1eed6b31263dc8c7ad4c36fdab2548d7c90b8a1de7c525d3f9293f64e",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "requires": [
+          "ui-package",
+          "theme-css",
+          "theme-provider",
+        ],
+        "sampleProps": {
+          "text": "New text",
+        },
+        "schemaVersion": 1,
+        "slots": {},
+      },
+      {
+        "controlledInputs": [],
+        "events": {},
+        "import": {
+          "export": "named",
+          "name": "Image",
+          "source": "@reference/ui",
+        },
+        "layout": "className",
+        "name": "Image",
+        "props": {
+          "alt": {
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "type": "string",
+            },
+          },
+          "source": {
+            "required": true,
+            "schema": {
+              "type": "asset",
+            },
+          },
+        },
+        "ref": {
+          "componentId": "Image",
+          "contractHash": "343740fabea71bfb20c40eb9ac8fe936ecdc0d68bc870b816cfed4e378145a18",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "requires": [
+          "ui-package",
+          "theme-css",
+          "product-image",
+        ],
+        "sampleProps": {
+          "alt": "Color study",
+          "source": "product-image",
+        },
+        "schemaVersion": 1,
+        "slots": {},
+      },
+      {
+        "controlledInputs": [
+          {
+            "argumentIndex": 0,
+            "eventProp": "onChange",
+            "valueProp": "value",
+          },
+        ],
+        "events": {
+          "onChange": {
+            "parameters": [
+              {
+                "maxLength": 80,
+                "type": "string",
+              },
+            ],
+            "returns": "void",
+          },
+        },
+        "import": {
+          "export": "named",
+          "name": "Input",
+          "source": "@reference/ui",
+        },
+        "layout": "className",
+        "name": "Input",
+        "props": {
+          "label": {
+            "default": "Name",
+            "required": false,
+            "schema": {
+              "maxLength": 80,
+              "type": "string",
+            },
+          },
+          "value": {
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "type": "string",
+            },
+          },
+        },
+        "ref": {
+          "componentId": "Input",
+          "contractHash": "8ddcb449a47711a639802ce8b92952d9a0e61db90c89d9612a2c57dc5034aa3e",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "requires": [
+          "ui-package",
+          "theme-css",
+          "theme-provider",
+        ],
+        "sampleProps": {
+          "label": "Name",
+          "value": "",
+        },
+        "schemaVersion": 1,
+        "slots": {},
+      },
+    ],
+    "domain": "react-ui",
+    "environment": {
+      "dependencies": [
+        {
+          "hash": "ab0b9b0c736e8be69830959c7a4059085d077f24a484cf55bc443ebbcd056f97",
+          "id": "ui-revision",
+          "kind": "package",
+          "name": "@reference/ui-revision",
+          "version": "2.0.0",
+        },
+        {
+          "hash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "id": "ui-package",
+          "kind": "package",
+          "name": "@reference/ui",
+          "version": "1.0.0",
+        },
+        {
+          "hash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+          "id": "theme-css",
+          "kind": "css",
+          "path": "styles/tokens.css",
+        },
+        {
+          "hash": "b1d87b40dd00e80f697f0d61fe4d7029cde4add30818adb071d4b9ca585babc4",
+          "id": "product-image",
+          "kind": "asset",
+          "mediaType": "image/png",
+          "path": "assets/product.png",
+        },
+        {
+          "hash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "id": "theme-provider",
+          "import": {
+            "export": "named",
+            "name": "ThemeProvider",
+            "source": "@reference/ui",
+          },
+          "kind": "provider",
+          "props": {
+            "theme": "light",
+          },
+        },
+      ],
+      "providerOrder": [
+        "theme-provider",
+      ],
+      "reactVersion": "19.1.1",
+      "ref": {
+        "hash": "b78f66c16a95e74a9bfb670917afbe6a16aa2a6354974978b14f30885158db43",
+        "id": "reference-react",
+        "version": "1.0.0",
+      },
+      "schemaVersion": 1,
+      "stylePolicy": "allow-literals",
+      "tokenVariables": {},
+    },
+    "fixture": {},
+    "inputs": {},
+    "nodes": [
+      {
+        "bindings": {},
+        "component": {
+          "componentId": "Card",
+          "contractHash": "a62d53377a78853eb737cb6846a57148ffd63eb7e237d99e2aef403f5569d4a1",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "id": "card",
+        "layout": {
+          "base": {
+            "display": {
+              "kind": "literal",
+              "value": "flex",
+            },
+            "flexDirection": {
+              "kind": "literal",
+              "value": "column",
+            },
+            "gap": {
+              "kind": "literal",
+              "value": 16,
+            },
+          },
+          "breakpoints": {
+            "desktop": {
+              "display": {
+                "kind": "literal",
+                "value": "grid",
+              },
+              "gridTemplateColumns": {
+                "kind": "literal",
+                "value": "repeat(2, minmax(0, 1fr))",
+              },
+            },
+          },
+        },
+        "props": {},
+        "slots": {
+          "body": [
+            "image",
+            "title",
+            "buy",
+          ],
+          "footer": [
+            "footer",
+          ],
+        },
+      },
+      {
+        "bindings": {},
+        "component": {
+          "componentId": "Text",
+          "contractHash": "770fe5a1eed6b31263dc8c7ad4c36fdab2548d7c90b8a1de7c525d3f9293f64e",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "id": "title",
+        "layout": {
+          "base": {},
+          "breakpoints": {},
+        },
+        "props": {
+          "text": "Color study",
+        },
+        "slots": {},
+      },
+      {
+        "bindings": {},
+        "component": {
+          "componentId": "Button",
+          "contractHash": "5124b12429e6b645030870105c107a7323241f4f456854b8c18ce7496af5e42c",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "id": "buy",
+        "layout": {
+          "base": {},
+          "breakpoints": {},
+        },
+        "props": {
+          "label": "Add to cart",
+          "variant": "primary",
+        },
+        "slots": {},
+      },
+      {
+        "bindings": {},
+        "component": {
+          "componentId": "Text",
+          "contractHash": "770fe5a1eed6b31263dc8c7ad4c36fdab2548d7c90b8a1de7c525d3f9293f64e",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "id": "footer",
+        "layout": {
+          "base": {},
+          "breakpoints": {},
+        },
+        "props": {
+          "text": "Powered by original React components",
+        },
+        "slots": {},
+      },
+      {
+        "bindings": {},
+        "component": {
+          "componentId": "Image",
+          "contractHash": "343740fabea71bfb20c40eb9ac8fe936ecdc0d68bc870b816cfed4e378145a18",
+          "implementationHash": "07832fc87f05cc610bfede16a21d17557efeb3c95ad36a6887e9f8701e715d27",
+          "registryId": "reference",
+          "version": "1.0.0",
+        },
+        "id": "image",
+        "layout": {
+          "base": {},
+          "breakpoints": {},
+        },
+        "props": {
+          "alt": "Color study",
+          "source": "product-image",
+        },
+        "slots": {},
+      },
+    ],
+    "roots": [
+      "card",
+    ],
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "react-ui",
+  "name": "React UI 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > review: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "files": [
+      {
+        "id": "file_00000000-0000-4000-8000-000000000005",
+        "name": "example.ts",
+        "newText": "export function greet(name: string) {
+  return \`Hello, \${name}!\`;
+}
+",
+        "oldText": "export function greet(name: string) {
+  return "Hello " + name;
+}
+",
+      },
+      {
+        "id": "file_00000000-0000-4000-8000-000000000006",
+        "name": "notes.md",
+        "newText": "# Notes
+Reviewed draft",
+        "oldText": "# Notes
+First draft",
+      },
+    ],
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000007",
+  "kind": "review",
+  "name": "Code Review 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > schedule: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "events": [],
+    "lanes": [],
+    "schemaVersion": 1,
+    "timeZone": "UTC",
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "schedule",
+  "name": "Schedule 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > schematic: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "junctions": [],
+    "labels": [],
+    "parts": [],
+    "powers": [],
+    "schemaVersion": 1,
+    "sheet": {
+      "orientation": "landscape",
+      "size": "A4",
+      "title": "Schematic",
+    },
+    "symbols": [
+      {
+        "generator": {
+          "kind": "resistor",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "filled": false,
+            "from": [
+              -3.81,
+              -1.016,
+            ],
+            "kind": "rect",
+            "to": [
+              3.81,
+              1.016,
+            ],
+          },
+        ],
+        "id": "sym-resistor",
+        "name": "Resistor",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 1.27,
+            "name": "~",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              5.08,
+              0,
+            ],
+            "lengthMm": 1.27,
+            "name": "~",
+            "number": "2",
+            "side": "left",
+            "type": "passive",
+          },
+        ],
+        "prefix": "R",
+      },
+      {
+        "generator": {
+          "kind": "capacitor",
+          "params": {
+            "polarized": false,
+          },
+        },
+        "graphics": [
+          {
+            "kind": "line",
+            "points": [
+              [
+                -0.508,
+                -2.032,
+              ],
+              [
+                -0.508,
+                2.032,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0.508,
+                -2.032,
+              ],
+              [
+                0.508,
+                2.032,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-capacitor",
+        "name": "Capacitor",
+        "pins": [
+          {
+            "at": [
+              -3.81,
+              0,
+            ],
+            "lengthMm": 3.302,
+            "name": "~",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              3.81,
+              0,
+            ],
+            "lengthMm": 3.302,
+            "name": "~",
+            "number": "2",
+            "side": "left",
+            "type": "passive",
+          },
+        ],
+        "prefix": "C",
+      },
+      {
+        "generator": {
+          "kind": "inductor",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "kind": "line",
+            "points": [
+              [
+                -3.81,
+                0,
+              ],
+              [
+                -3.682,
+                -0.476,
+              ],
+              [
+                -3.334,
+                -0.825,
+              ],
+              [
+                -2.857,
+                -0.952,
+              ],
+              [
+                -2.381,
+                -0.825,
+              ],
+              [
+                -2.033,
+                -0.476,
+              ],
+              [
+                -1.905,
+                0,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.905,
+                0,
+              ],
+              [
+                -1.777,
+                -0.476,
+              ],
+              [
+                -1.429,
+                -0.825,
+              ],
+              [
+                -0.952,
+                -0.952,
+              ],
+              [
+                -0.476,
+                -0.825,
+              ],
+              [
+                -0.128,
+                -0.476,
+              ],
+              [
+                0,
+                0,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0,
+                0,
+              ],
+              [
+                0.128,
+                -0.476,
+              ],
+              [
+                0.476,
+                -0.825,
+              ],
+              [
+                0.953,
+                -0.952,
+              ],
+              [
+                1.429,
+                -0.825,
+              ],
+              [
+                1.777,
+                -0.476,
+              ],
+              [
+                1.905,
+                0,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                1.905,
+                0,
+              ],
+              [
+                2.033,
+                -0.476,
+              ],
+              [
+                2.381,
+                -0.825,
+              ],
+              [
+                2.858,
+                -0.952,
+              ],
+              [
+                3.334,
+                -0.825,
+              ],
+              [
+                3.682,
+                -0.476,
+              ],
+              [
+                3.81,
+                0,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-inductor",
+        "name": "Inductor",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 1.27,
+            "name": "~",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              5.08,
+              0,
+            ],
+            "lengthMm": 1.27,
+            "name": "~",
+            "number": "2",
+            "side": "left",
+            "type": "passive",
+          },
+        ],
+        "prefix": "L",
+      },
+      {
+        "generator": {
+          "kind": "diode",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "filled": false,
+            "kind": "polygon",
+            "points": [
+              [
+                -1.27,
+                -1.27,
+              ],
+              [
+                -1.27,
+                1.27,
+              ],
+              [
+                1.27,
+                0,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                1.27,
+                -1.27,
+              ],
+              [
+                1.27,
+                1.27,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-diode",
+        "name": "Diode",
+        "pins": [
+          {
+            "at": [
+              5.08,
+              0,
+            ],
+            "lengthMm": 3.81,
+            "name": "K",
+            "number": "1",
+            "side": "left",
+            "type": "passive",
+          },
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 3.81,
+            "name": "A",
+            "number": "2",
+            "side": "right",
+            "type": "passive",
+          },
+        ],
+        "prefix": "D",
+      },
+      {
+        "generator": {
+          "kind": "led",
+          "params": {
+            "color": "red",
+          },
+        },
+        "graphics": [
+          {
+            "filled": false,
+            "kind": "polygon",
+            "points": [
+              [
+                -1.27,
+                -1.27,
+              ],
+              [
+                -1.27,
+                1.27,
+              ],
+              [
+                1.27,
+                0,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                1.27,
+                -1.27,
+              ],
+              [
+                1.27,
+                1.27,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0,
+                -1.778,
+              ],
+              [
+                1.016,
+                -2.794,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0.762,
+                -1.524,
+              ],
+              [
+                1.778,
+                -2.54,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-led",
+        "name": "LED (red)",
+        "pins": [
+          {
+            "at": [
+              5.08,
+              0,
+            ],
+            "lengthMm": 3.81,
+            "name": "K",
+            "number": "1",
+            "side": "left",
+            "type": "passive",
+          },
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 3.81,
+            "name": "A",
+            "number": "2",
+            "side": "right",
+            "type": "passive",
+          },
+        ],
+        "prefix": "D",
+      },
+      {
+        "generator": {
+          "kind": "bjt",
+          "params": {
+            "polarity": "npn",
+          },
+        },
+        "graphics": [
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.27,
+                -1.905,
+              ],
+              [
+                -1.27,
+                1.905,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.27,
+                -0.635,
+              ],
+              [
+                1.27,
+                -2.54,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.27,
+                0.635,
+              ],
+              [
+                1.27,
+                2.54,
+              ],
+            ],
+          },
+          {
+            "filled": true,
+            "kind": "polygon",
+            "points": [
+              [
+                0.635,
+                1.524,
+              ],
+              [
+                1.27,
+                2.54,
+              ],
+              [
+                0.127,
+                2.286,
+              ],
+            ],
+          },
+          {
+            "center": [
+              0,
+              0,
+            ],
+            "filled": false,
+            "kind": "circle",
+            "radiusMm": 3.175,
+          },
+        ],
+        "id": "sym-bjt",
+        "name": "NPN transistor",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 3.81,
+            "name": "B",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              1.27,
+              -5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "C",
+            "number": "2",
+            "side": "down",
+            "type": "passive",
+          },
+          {
+            "at": [
+              1.27,
+              5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "E",
+            "number": "3",
+            "side": "up",
+            "type": "passive",
+          },
+        ],
+        "prefix": "Q",
+      },
+      {
+        "generator": {
+          "kind": "mosfet",
+          "params": {
+            "channel": "n",
+          },
+        },
+        "graphics": [
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.778,
+                -1.905,
+              ],
+              [
+                -1.778,
+                1.905,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                -2.54,
+              ],
+              [
+                -1.016,
+                -1.27,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                -0.635,
+              ],
+              [
+                -1.016,
+                0.635,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                1.27,
+              ],
+              [
+                -1.016,
+                2.54,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                -1.905,
+              ],
+              [
+                1.27,
+                -1.905,
+              ],
+              [
+                1.27,
+                -2.54,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                1.905,
+              ],
+              [
+                1.27,
+                1.905,
+              ],
+              [
+                1.27,
+                2.54,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                0,
+              ],
+              [
+                1.27,
+                0,
+              ],
+              [
+                1.27,
+                1.905,
+              ],
+            ],
+          },
+          {
+            "filled": true,
+            "kind": "polygon",
+            "points": [
+              [
+                -1.016,
+                0,
+              ],
+              [
+                -0.254,
+                -0.508,
+              ],
+              [
+                -0.254,
+                0.508,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-mosfet",
+        "name": "N-channel MOSFET",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 3.302,
+            "name": "G",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              1.27,
+              -5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "D",
+            "number": "2",
+            "side": "down",
+            "type": "passive",
+          },
+          {
+            "at": [
+              1.27,
+              5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "S",
+            "number": "3",
+            "side": "up",
+            "type": "passive",
+          },
+        ],
+        "prefix": "Q",
+      },
+      {
+        "generator": {
+          "kind": "switch",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "center": [
+              -2.032,
+              0,
+            ],
+            "filled": false,
+            "kind": "circle",
+            "radiusMm": 0.508,
+          },
+          {
+            "center": [
+              2.032,
+              0,
+            ],
+            "filled": false,
+            "kind": "circle",
+            "radiusMm": 0.508,
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -2.54,
+                -1.778,
+              ],
+              [
+                2.54,
+                -1.778,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0,
+                -1.778,
+              ],
+              [
+                0,
+                -3.556,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-switch",
+        "name": "Push button",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 2.54,
+            "name": "1",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              5.08,
+              0,
+            ],
+            "lengthMm": 2.54,
+            "name": "2",
+            "number": "2",
+            "side": "left",
+            "type": "passive",
+          },
+        ],
+        "prefix": "SW",
+      },
+      {
+        "generator": {
+          "kind": "battery",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "kind": "line",
+            "points": [
+              [
+                -2.032,
+                -0.508,
+              ],
+              [
+                2.032,
+                -0.508,
+              ],
+            ],
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                -1.016,
+                0.508,
+              ],
+              [
+                1.016,
+                0.508,
+              ],
+            ],
+          },
+          {
+            "at": [
+              1.524,
+              -1.778,
+            ],
+            "kind": "text",
+            "sizeMm": 1.27,
+            "text": "+",
+          },
+        ],
+        "id": "sym-battery",
+        "name": "Battery",
+        "pins": [
+          {
+            "at": [
+              0,
+              -5.08,
+            ],
+            "lengthMm": 4.572,
+            "name": "+",
+            "number": "1",
+            "side": "down",
+            "type": "passive",
+          },
+          {
+            "at": [
+              0,
+              5.08,
+            ],
+            "lengthMm": 4.572,
+            "name": "-",
+            "number": "2",
+            "side": "up",
+            "type": "passive",
+          },
+        ],
+        "prefix": "BT",
+      },
+      {
+        "generator": {
+          "kind": "vsource",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "center": [
+              0,
+              0,
+            ],
+            "filled": false,
+            "kind": "circle",
+            "radiusMm": 2.54,
+          },
+          {
+            "at": [
+              0,
+              -0.889,
+            ],
+            "kind": "text",
+            "sizeMm": 1.27,
+            "text": "+",
+          },
+          {
+            "at": [
+              0,
+              1.651,
+            ],
+            "kind": "text",
+            "sizeMm": 1.27,
+            "text": "-",
+          },
+        ],
+        "id": "sym-vsource",
+        "name": "Voltage source",
+        "pins": [
+          {
+            "at": [
+              0,
+              -5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "+",
+            "number": "1",
+            "side": "down",
+            "type": "passive",
+          },
+          {
+            "at": [
+              0,
+              5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "-",
+            "number": "2",
+            "side": "up",
+            "type": "passive",
+          },
+        ],
+        "prefix": "V",
+      },
+      {
+        "generator": {
+          "kind": "isource",
+          "params": {},
+        },
+        "graphics": [
+          {
+            "center": [
+              0,
+              0,
+            ],
+            "filled": false,
+            "kind": "circle",
+            "radiusMm": 2.54,
+          },
+          {
+            "kind": "line",
+            "points": [
+              [
+                0,
+                1.524,
+              ],
+              [
+                0,
+                -1.016,
+              ],
+            ],
+          },
+          {
+            "filled": true,
+            "kind": "polygon",
+            "points": [
+              [
+                0,
+                -1.778,
+              ],
+              [
+                -0.508,
+                -0.762,
+              ],
+              [
+                0.508,
+                -0.762,
+              ],
+            ],
+          },
+        ],
+        "id": "sym-isource",
+        "name": "Current source",
+        "pins": [
+          {
+            "at": [
+              0,
+              -5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "+",
+            "number": "1",
+            "side": "down",
+            "type": "passive",
+          },
+          {
+            "at": [
+              0,
+              5.08,
+            ],
+            "lengthMm": 2.54,
+            "name": "-",
+            "number": "2",
+            "side": "up",
+            "type": "passive",
+          },
+        ],
+        "prefix": "I",
+      },
+      {
+        "generator": {
+          "kind": "connector",
+          "params": {
+            "pins": 2,
+          },
+        },
+        "graphics": [
+          {
+            "filled": false,
+            "from": [
+              -2.54,
+              -1.27,
+            ],
+            "kind": "rect",
+            "to": [
+              2.54,
+              3.81,
+            ],
+          },
+        ],
+        "id": "sym-connector",
+        "name": "Connector 1×2",
+        "pins": [
+          {
+            "at": [
+              -5.08,
+              0,
+            ],
+            "lengthMm": 2.54,
+            "name": "1",
+            "number": "1",
+            "side": "right",
+            "type": "passive",
+          },
+          {
+            "at": [
+              -5.08,
+              2.54,
+            ],
+            "lengthMm": 2.54,
+            "name": "2",
+            "number": "2",
+            "side": "right",
+            "type": "passive",
+          },
+        ],
+        "prefix": "J",
+      },
+      {
+        "generator": {
+          "kind": "ic",
+          "params": {
+            "left": "IN",
+            "name": "IC",
+            "right": "OUT:output",
+          },
+        },
+        "graphics": [
+          {
+            "filled": false,
+            "from": [
+              -7.62,
+              -2.54,
+            ],
+            "kind": "rect",
+            "to": [
+              7.62,
+              2.54,
+            ],
+          },
+          {
+            "at": [
+              0,
+              -3.81,
+            ],
+            "kind": "text",
+            "sizeMm": 1.27,
+            "text": "IC",
+          },
+        ],
+        "id": "sym-ic",
+        "name": "IC",
+        "pins": [
+          {
+            "at": [
+              -10.16,
+              0,
+            ],
+            "lengthMm": 2.54,
+            "name": "IN",
+            "number": "1",
+            "side": "right",
+            "type": "bidirectional",
+          },
+          {
+            "at": [
+              10.16,
+              0,
+            ],
+            "lengthMm": 2.54,
+            "name": "OUT",
+            "number": "2",
+            "side": "left",
+            "type": "output",
+          },
+        ],
+        "prefix": "U",
+      },
+    ],
+    "units": "mm",
+    "wires": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "schematic",
+  "name": "Schematic 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > simulation: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "constraints": [],
+    "loads": [],
+    "materialId": "steel",
+    "materials": [
+      {
+        "conductivity": 50,
+        "density": 7.85e-9,
+        "expansion": 0.000012,
+        "id": "steel",
+        "model": "linear-elastic-isotropic",
+        "name": "Structural steel",
+        "poissonsRatio": 0.3,
+        "specificHeat": 460000000,
+        "youngsModulus": 210000,
+      },
+    ],
+    "mesh": {
+      "grading": 1.5,
+      "local": [],
+      "minSize": 0.5,
+      "order": 2,
+      "size": 5,
+    },
+    "name": "Structural analysis 1",
+    "preparation": {
+      "removeFaces": [],
+      "removeFilletsBelow": null,
+      "removeHolesBelow": null,
+    },
+    "schemaVersion": 1,
+    "source": {
+      "artifactId": "artifact_00000000-0000-4000-8000-000000000001",
+      "bodyId": "plate",
+      "contentHash": "f9700670933a23957f349b6030f30522fd4a991aa38d50083685ecb12ca8b671",
+      "versionId": "version_00000000-0000-4000-8000-000000000002",
+    },
+    "studies": [],
+    "units": "mm-N-MPa-t-s",
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+    "simulationSources",
+  ],
+  "extrasHash": "a0746938bc3032650a8ac0dcbae01dae25dbdc03c832039f30a04a538fea488e",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "simulation",
+  "name": "Structural analysis 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > slide: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "height": 540,
+    "schemaVersion": 2,
+    "slides": [
+      {
+        "background": "#ffffff",
+        "id": "slide_00000000-0000-4000-8000-000000000005",
+        "objects": [],
+        "title": "Slide 1",
+      },
+    ],
+    "width": 960,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000007",
+  "kind": "slide",
+  "name": "Slide Deck 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > structured-graph: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "attributes": {
+      "notes": "A generic typed relation graph",
+      "title": "Resource map",
+    },
+    "edges": [
+      {
+        "attributes": {
+          "label": "supports",
+          "weight": 1,
+        },
+        "from": "resource-a",
+        "id": "relation-a-b",
+        "to": "resource-b",
+        "type": "related",
+      },
+    ],
+    "id": "graph_00000000-0000-4000-8000-000000000005",
+    "nodes": [
+      {
+        "attributes": {
+          "active": true,
+          "category": "Resource",
+          "details": {
+            "description": "Public example",
+          },
+          "name": "Research",
+          "score": 1,
+          "tags": [
+            "sample",
+          ],
+        },
+        "id": "resource-a",
+        "type": "entity",
+      },
+      {
+        "attributes": {
+          "active": false,
+          "category": "Topic",
+          "name": "Planning",
+          "score": 2,
+        },
+        "id": "resource-b",
+        "type": "entity",
+      },
+    ],
+    "presentation": {
+      "nodes": {
+        "resource-a": {
+          "x": 40,
+          "y": 60,
+        },
+        "resource-b": {
+          "x": 360,
+          "y": 160,
+        },
+      },
+      "sections": {},
+    },
+    "profile": {
+      "edges": {
+        "related": {
+          "connection": {
+            "allowCycles": true,
+            "allowParallel": true,
+            "allowSelf": true,
+          },
+          "schema": {
+            "label": {
+              "type": "string",
+            },
+            "weight": {
+              "minimum": 0,
+              "type": "number",
+            },
+          },
+          "ui": {
+            "label": "Related",
+            "labelField": "label",
+          },
+        },
+      },
+      "graph": {
+        "schema": {
+          "notes": {
+            "type": "string",
+          },
+          "title": {
+            "required": true,
+            "type": "string",
+          },
+        },
+        "ui": {
+          "fields": {
+            "notes": {
+              "label": "Notes",
+            },
+            "title": {
+              "label": "Title",
+            },
+          },
+          "order": [
+            "title",
+            "notes",
+          ],
+        },
+      },
+      "id": "relations",
+      "nodes": {
+        "authority": {
+          "schema": {
+            "country": {
+              "type": "string",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+            "role": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "country": {
+                "label": "Country or region",
+              },
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+              "role": {
+                "label": "Role",
+              },
+            },
+            "label": "Government or regulator",
+            "labelField": "name",
+            "order": [
+              "name",
+              "role",
+              "country",
+              "notes",
+            ],
+          },
+        },
+        "company": {
+          "schema": {
+            "country": {
+              "type": "string",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+            "role": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "country": {
+                "label": "Country or region",
+              },
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+              "role": {
+                "label": "Role",
+              },
+            },
+            "label": "Company",
+            "labelField": "name",
+            "order": [
+              "name",
+              "role",
+              "country",
+              "notes",
+            ],
+          },
+        },
+        "entity": {
+          "schema": {
+            "active": {
+              "type": "boolean",
+            },
+            "category": {
+              "enum": [
+                "Resource",
+                "Topic",
+              ],
+              "type": "enum",
+            },
+            "details": {
+              "properties": {
+                "description": {
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "score": {
+              "minimum": 0,
+              "type": "number",
+            },
+            "tags": {
+              "items": {
+                "type": "string",
+              },
+              "maxItems": 20,
+              "type": "array",
+            },
+          },
+          "ui": {
+            "iconBy": "category",
+            "icons": {
+              "Resource": "cube",
+              "Topic": "list",
+            },
+            "label": "Entity",
+            "labelField": "name",
+            "order": [
+              "name",
+              "category",
+              "active",
+              "score",
+              "tags",
+              "details",
+            ],
+          },
+        },
+        "financier": {
+          "schema": {
+            "country": {
+              "type": "string",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+            "role": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "country": {
+                "label": "Country or region",
+              },
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+              "role": {
+                "label": "Role",
+              },
+            },
+            "label": "Bank or financier",
+            "labelField": "name",
+            "order": [
+              "name",
+              "role",
+              "country",
+              "notes",
+            ],
+          },
+        },
+        "organization": {
+          "schema": {
+            "country": {
+              "type": "string",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+            "role": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "country": {
+                "label": "Country or region",
+              },
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+              "role": {
+                "label": "Role",
+              },
+            },
+            "label": "Organization",
+            "labelField": "name",
+            "order": [
+              "name",
+              "role",
+              "country",
+              "notes",
+            ],
+          },
+        },
+        "person": {
+          "schema": {
+            "country": {
+              "type": "string",
+            },
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+            "role": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "country": {
+                "label": "Country or region",
+              },
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+              "role": {
+                "label": "Role",
+              },
+            },
+            "icon": "person",
+            "label": "Person",
+            "labelField": "name",
+            "order": [
+              "name",
+              "role",
+              "country",
+              "notes",
+            ],
+          },
+        },
+      },
+      "schemaVersion": 2,
+      "sections": {
+        "group": {
+          "schema": {
+            "name": {
+              "required": true,
+              "type": "string",
+            },
+            "notes": {
+              "type": "string",
+            },
+          },
+          "ui": {
+            "fields": {
+              "name": {
+                "label": "Name",
+              },
+              "notes": {
+                "label": "Notes",
+              },
+            },
+            "label": "Group",
+            "labelField": "name",
+            "order": [
+              "name",
+              "notes",
+            ],
+          },
+        },
+      },
+      "version": 1,
+    },
+    "schemaVersion": 3,
+    "sections": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000006",
+  "kind": "structured-graph",
+  "name": "Structured Graph 1",
+  "versions": 0,
+}
+`;
+
+exports[`a new Artifact of every kind (KR4 baseline) > whiteboard: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "connectors": [],
+    "nodes": [],
+    "schemaVersion": 3,
+    "sections": [],
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000005",
+  "kind": "whiteboard",
+  "name": "Whiteboard 1",
+  "versions": 0,
+}
+`;
