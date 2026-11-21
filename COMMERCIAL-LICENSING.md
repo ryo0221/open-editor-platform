@@ -4,6 +4,11 @@
 1. **AGPLv3-only:** Commercial redistribution and commercial SaaS are permitted without an OEM fee when the actual combined work and deployment meet AGPLv3 requirements, including corresponding source and network user provisions where applicable.
 2. **Separate signed commercial/OEM agreement:** For businesses that require additional rights to create or distribute closed-source covered combinations or use the software outside AGPL conditions. Permissions exist only once all required rights holders have authorized the relevant commercial deal.
 
+## Beta-to-GA commercial policy (planned; not yet available)
+The proposed beta commercial/OEM program is **zero-fee under a signed agreement**, without a fixed calendar end date. After an explicitly declared general-availability (GA) release, newly granted proprietary commercial/OEM rights are **paid**. The project will announce the earliest GA date and transition/pricing information at least **three calendar months and 90 days** in advance. No automatic billing or retroactive charges apply to properly licensed beta activities. Pre-GA recipients and existing installations need express survival and downstream-rights terms in the signed agreement; policy text alone does not create them.
+
+See [Beta Commercial Policy](BETA-COMMERCIAL-POLICY.md) for notice mechanics, protected existing uses, version scope and launch conditions. **No beta commercial/OEM agreement is currently offered:** the rights and contract checks in the [commercial gate](docs/release/COMMERCIAL-OEM-GATE.md) must first be completed.
+
 ## Product-focused, low-overhead business model
 The intended commercial offer is a per-product negotiated license, potentially an annual flat fee. The licensor does not undertake dedicated integration, customer support, a response-time SLA, routine bug fixing, security maintenance, or hosting by default. Licensees carry out integration, tests, end-customer support, security remediation, operations and certifications themselves. Any warranty, support or indemnity must be separately written and explicitly priced.
 
