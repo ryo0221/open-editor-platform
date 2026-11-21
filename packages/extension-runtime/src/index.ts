@@ -105,6 +105,12 @@ export interface ExtensionOperations<T> {
 }
 export interface Registration<T> {
   readonly manifest: ExtensionManifest;
+  /**
+   * Present only when the manifest declares `create@0-draft`. Returns new, frozen content of the
+   * artifact kind, taken as JSON data, that passed the package validator. Throws when the validator
+   * refuses it. Nothing is opened, stored or saved.
+   */
+  readonly create?: () => T;
   open(host: HostAdapter<T>): ExtensionHandle<T>;
   uninstall(): void;
 }
@@ -150,6 +156,9 @@ export class ExtensionRegistry {
       throw new Error('Operations add-on/adapter mismatch');
     if (operationsAdapter && !manifest.capabilities.includes('local-edit'))
       throw new Error('Operations require local-edit');
+    const makeEmpty = definition.create;
+    if (!!manifest.addons?.create !== (typeof makeEmpty === 'function'))
+      throw new Error('Create add-on/adapter mismatch');
     const checkInput = operationsAdapter?.checkInput,
       makeCommand = operationsAdapter?.command;
     const trusted = admission.assertTrusted;
@@ -191,8 +200,20 @@ export class ExtensionRegistry {
     };
     previous?.revoke();
     this.entries.set(manifest.id, entry);
+    const create = makeEmpty
+      ? (): T => {
+          this.assertIdle();
+          assertActive();
+          // The package runs once. Only its JSON data form is kept, and it must pass the validator.
+          const value = JSON.parse(canonicalJson(makeEmpty.call(definition))) as unknown;
+          if (!validate(value)) throw new Error('Invalid domain content');
+          assertActive();
+          return deepFreeze(value);
+        }
+      : undefined;
     return Object.freeze({
       manifest,
+      ...(create ? { create } : {}),
       uninstall: () =>
         this.transition(() => {
           entry.revoke();

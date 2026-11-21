@@ -172,9 +172,11 @@ export async function loadVerifiedExtension<T>(
   // alter what installVerifiedExtension registers.
   const validate = returned.validate,
     mount = returned.mount,
-    ops = returned.operations;
+    ops = returned.operations,
+    create = returned.create;
   if (typeof validate !== 'function') throw Error('Missing domain validator');
   if (mount !== undefined && typeof mount !== 'function') throw Error('Invalid surface adapter');
+  if (create !== undefined && typeof create !== 'function') throw Error('Invalid create adapter');
   let operations: ExtensionDefinition<T>['operations'];
   if (ops !== undefined) {
     const checkInput = ops?.checkInput,
@@ -191,6 +193,7 @@ export async function loadVerifiedExtension<T>(
     validate,
     ...(mount ? { mount } : {}),
     ...(operations ? { operations } : {}),
+    ...(create ? { create: () => create.call(returned) } : {}),
   });
   const loaded: LoadedExtension<T> = Object.freeze({
     manifest: verified.manifest,

@@ -27,7 +27,7 @@
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 開発に参加する                  | [開発者ガイド](developer-guide.md)・[作業ルール](../AGENTS.md)                                                                                         |
 | 全体の構成を理解する            | [アーキテクチャ](architecture.md)・[種類の登録と領域境界（設計）](kind-registry-design.md)                                                             |
-| Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)                                                                        |
+| Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)・[Extensionのadd-on](extension-addons.md)                              |
 | Fiction Mapの操作・pure native  | [操作ガイド](fiction-map/user-guide.md) / [headless model API](../packages/fiction-map/README.md) / 設定から作る制作デモ計画                           |
 | Designのパス編集・曲線APIを使う | [操作ガイド](vector-authoring/guide.md)・[設計と受け入れ条件](vector-authoring/design.md)・[実装計画](vector-authoring/implementation-plan.md)         |
 | 設計・検証を記録する            | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md) |
