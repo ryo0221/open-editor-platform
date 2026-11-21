@@ -90,8 +90,13 @@ const noRaycast = () => {};
 export function bimCameraDepth(distance: number, sceneRadius: number, toScene = 0) {
   const d = distance > 0 && Number.isFinite(distance) ? distance : 1;
   const c = toScene > 0 && Number.isFinite(toScene) ? toScene : 0;
+  // The near plane stays well short of the scene too: a camera looking at a target far beyond
+  // the model still sees the model in between (Codex on #30). Inside the scene's sphere it stays
+  // within the scene's size.
+  const gap = c > 0 ? c - sceneRadius : Infinity;
+  const ref = gap > 0 ? Math.min(d, gap) : Math.min(d, Math.max(sceneRadius, 1));
   return {
-    near: Math.max(0.01, d / 1000),
+    near: Math.max(0.01, ref / 1000),
     far: Math.max(d * 100, (d + sceneRadius) * 2, (c + sceneRadius) * 1.1),
   };
 }

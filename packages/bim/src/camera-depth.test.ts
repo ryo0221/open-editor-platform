@@ -19,4 +19,11 @@ describe('near and far planes follow the camera (#19)', () => {
     const { far } = bimCameraDepth(100, 10_000, 100_000);
     expect(far).toBeGreaterThan(110_000);
   });
+  it('keeps the scene in front of the near plane when the target is far beyond it (Codex on #30)', () => {
+    // A 20 m building round the origin, the camera 100 m south looking at a target 1,000 km away.
+    const { near } = bimCameraDepth(1_000_000_000, 10_000, 100_000);
+    expect(near).toBeLessThan(90_000);
+    // Inside the scene's sphere, the near plane stays within the scene's size.
+    expect(bimCameraDepth(1_000_000_000, 10_000, 5_000).near).toBeLessThanOrEqual(10);
+  });
 });
