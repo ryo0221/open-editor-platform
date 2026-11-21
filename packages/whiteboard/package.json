@@ -7,9 +7,11 @@
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
     "./sections": "./src/sections.ts",
-    "./proposal-diff": "./src/proposal-diff.ts"
+    "./proposal-diff": "./src/proposal-diff.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/reuse-core": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",

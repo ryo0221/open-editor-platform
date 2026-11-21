@@ -10,9 +10,11 @@
     "./styles.css": "./src/styles.css",
     "./outputs": "./src/outputs.ts",
     "./geometry-quantities": "./src/geometry-quantities.ts",
-    "./references": "./src/references.ts"
+    "./references": "./src/references.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/estimate-core": "*",
     "@editor-platform/calculation-core": "*",
     "@editor-platform/artifact-core": "*",

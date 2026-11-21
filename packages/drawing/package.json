@@ -6,9 +6,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./style.css": "./src/style.css",
-    "./project-worker": "./src/project-worker.ts"
+    "./project-worker": "./src/project-worker.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/drawing-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-ui": "*",

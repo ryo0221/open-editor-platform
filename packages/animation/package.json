@@ -13,9 +13,11 @@
     "./viewer": "./src/viewer.tsx",
     "./v2": "./src/scene2/surface.tsx",
     "./host": "./src/scene2/host.tsx",
-    "./player-v2": "./src/scene2/viewer.tsx"
+    "./player-v2": "./src/scene2/viewer.tsx",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/animation-core": "*",
     "@editor-platform/animation-player": "*",
     "@editor-platform/editor-core": "*",

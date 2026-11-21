@@ -12,9 +12,11 @@
     "./sequence": "./src/sequence.ts",
     "./manuscript": "./src/manuscript.ts",
     "./native-host": "./src/native-host.ts",
-    "./pdf-text": "./src/pdf-text.ts"
+    "./pdf-text": "./src/pdf-text.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/canvas-ui": "*",
     "@editor-platform/editor-core": "*",

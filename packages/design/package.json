@@ -19,9 +19,11 @@
     "./manga-balloons": "./src/manga-balloons.ts",
     "./manga-redraw": "./src/manga-redraw.ts",
     "./creative-proposal-diff": "./src/creative-proposal-diff.ts",
-    "./native-host": "./src/native-host.ts"
+    "./native-host": "./src/native-host.ts",
+    "./kind": "./src/kind.ts"
   },
   "dependencies": {
+    "@editor-platform/artifact-kinds": "*",
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/geometry-core": "*",
