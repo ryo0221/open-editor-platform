@@ -1,6 +1,6 @@
 import type { EstimateSettlement } from './settlement';
 import { EstimateBrowse, formatAmount as format } from './browse';
-import type { EstimateBimEvaluator } from './bim-source';
+import type { GeometryQuantitySources } from '@editor-platform/calculation-core';
 import type { WorkPublicationHost, WorkPublicationPreview } from './publication';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { canonicalJson, newId } from '@editor-platform/artifact-core';
@@ -46,7 +46,12 @@ export interface EstimateSurfaceProps {
   sources?: EstimateSourceOption[];
   quantitySources?: EstimateGeometrySourceOption[];
   bimSources?: EstimateGeometrySourceOption[];
-  evaluateBim?: EstimateBimEvaluator;
+  /**
+   * CAD/BIM quantity reading for `quantitySources` and `bimSources`. Engineering Hosts pass
+   * `geometryQuantitySources()` from @editor-platform/estimate-engineering; without it the
+   * geometric sources are not offered.
+   */
+  geometry?: GeometryQuantitySources;
   worker?: EstimateWorkerFactory;
   registerInput?(boundary: EditorInputBoundary): () => void;
   save(): Promise<void>;
@@ -614,11 +619,12 @@ function Surface(props: Omit<EstimateSurfaceProps, 'statusRole'>) {
               </button>
             </section>
           )}
-          {props.quantitySources && (
+          {props.quantitySources && props.geometry && (
             <Suspense fallback={<p>数量操作を読み込み中…</p>}>
               <EstimateCadPanel
                 port={port}
                 sources={props.quantitySources}
+                geometry={props.geometry}
                 edit={editing}
                 trial={async (next) => {
                   setCandidate(await controller().prepare(scenario || null, next, retention));
@@ -626,12 +632,12 @@ function Surface(props: Omit<EstimateSurfaceProps, 'statusRole'>) {
               />
             </Suspense>
           )}
-          {props.bimSources && (
+          {props.bimSources && props.geometry && (
             <Suspense fallback={<p>BIM数量操作を読み込み中…</p>}>
               <EstimateBimPanel
                 port={port}
                 sources={props.bimSources}
-                evaluate={props.evaluateBim}
+                geometry={props.geometry}
                 edit={editing}
                 trial={async (next) => {
                   setCandidate(await controller().prepare(scenario || null, next, retention));

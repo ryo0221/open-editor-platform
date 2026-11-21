@@ -1,5 +1,5 @@
 import { canonicalJson } from '@editor-platform/artifact-core';
-import { assertBim, deriveBim, type BimDocument } from '@editor-platform/bim-core';
+import { assertBim, deriveBim, isBimDocument, type BimDocument } from '@editor-platform/bim-core';
 import {
   CalculationError,
   inspectSavedSource,
@@ -9,14 +9,14 @@ import {
   formatDecimal,
   assertPersistable,
   pinKey,
+  type BimQuantityMetric,
+  type GeometrySourceInput,
+  type MeasuredQuantity,
+  type QuantityVerification,
+  type RetainedSource,
   type SourcePin,
 } from '@editor-platform/calculation-core';
-import type {
-  Quantity,
-  RetainedSource,
-  QuantityVerification,
-} from '@editor-platform/estimate-core';
-import { cadQuantityVerification } from './cad-source';
+import { cadQuantityVerification, retainCadSource } from './cad-source';
 export interface BimQuantityEvaluation {
   contentHash: string;
   engine: string;
@@ -33,14 +33,14 @@ export type EstimateBimEvaluator = (
 const fail = (code: string): never => {
   throw new CalculationError(code);
 };
-const metricUnits = {
+const metricUnits: Record<BimQuantityMetric, readonly [string, string]> = {
   length: ['mm', 'm'],
   grossArea: ['mm2', 'm2'],
   netArea: ['mm2', 'm2'],
   grossVolume: ['mm3', 'm3'],
   netVolume: ['mm3', 'm3'],
-} as const;
-export type EstimateBimMetric = keyof typeof metricUnits;
+};
+export type EstimateBimMetric = BimQuantityMetric;
 function bim(value: unknown): BimDocument {
   assertBim(value);
   return value;
@@ -74,14 +74,14 @@ export async function retainBimSource(
     dependencies,
   };
 }
-export async function bimQuantity(
+/** One metric of one BIM element, as the calculation stores it. */
+export async function bimMeasurement(
   source: RetainedSource,
   elementId: string,
   metric: EstimateBimMetric,
-  id: string,
   evaluate?: EstimateBimEvaluator,
   signal?: AbortSignal,
-): Promise<Quantity> {
+): Promise<MeasuredQuantity> {
   if (signal?.aborted) fail('cancelled');
   if (source.pin.domain !== 'bim') fail('unsupported-quantity-source');
   const doc = bim(source.nativeContent),
@@ -125,14 +125,12 @@ export async function bimQuantity(
     value = convert(decimal(numberDecimal(values[metric])), from, unit);
   assertPersistable(value);
   return {
-    id,
     name: element!.name ?? elementId,
     unit,
     value: formatDecimal(value),
     quality: quantity.source,
     evidence: `BIM ${quantity.source} · ${elementId} · ${metric} (${from}→${unit})。幾何計測の数値精度は元評価に依存します。`,
-    inclusion: 'include',
-    exclusionReason: '',
+    excluded: false,
     source: {
       snapshotKey: source.key,
       identity: elementId,
@@ -160,11 +158,10 @@ export function bimQuantityVerification(evaluate?: EstimateBimEvaluator): Quanti
         if (q.source && q.quality !== 'cad') {
           const source = sources.find((s) => s.key === q.source!.snapshotKey);
           if (!source) return fail('missing-quantity-source');
-          const expected = await bimQuantity(
+          const expected = await bimMeasurement(
             source,
             q.source.identity,
             q.source.metric as EstimateBimMetric,
-            q.id,
             evaluate,
           );
           if (
@@ -177,4 +174,28 @@ export function bimQuantityVerification(evaluate?: EstimateBimEvaluator): Quanti
         }
     },
   };
+}
+/** The elements a quantity can be read from, or undefined when the content is not BIM. */
+export function bimElements(content: unknown) {
+  if (!isBimDocument(content)) return undefined;
+  return content.elements.map((e) => ({ id: e.id, name: e.name, kind: e.kind }));
+}
+/** Retain a saved BIM with the saved CAD parts its types place; `root` is the BIM itself. */
+export async function retainBimInput(input: GeometrySourceInput) {
+  if (!isBimDocument(input.content)) throw Error('invalid-bim-source');
+  const collected = new Map<string, RetainedSource>();
+  for (const type of input.content.types)
+    if (type.kind === 'part') {
+      const content = input.closure.find((c) => c.contentHash === type.source.contentHash)?.content;
+      if (!content) throw Error('missing-bim-cad-closure');
+      for (const source of await retainCadSource(
+        { domain: 'cad', ...type.source },
+        content,
+        (h) => input.closure.find((c) => c.contentHash === h)?.content,
+      ))
+        collected.set(source.key, source);
+    }
+  const root = await retainBimSource(input.pin, input.content, [...collected.values()]);
+  collected.set(root.key, root);
+  return { root, sources: [...collected.values()] };
 }

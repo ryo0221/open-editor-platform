@@ -1,4 +1,4 @@
-import { playgroundEstimateQuantities, evaluateEstimateBim } from './estimate-bim';
+import { playgroundEstimateQuantities, playgroundEstimateGeometry } from './estimate-bim';
 import { estimateWorkPublication } from './estimate-publication';
 import { useCallback, useRef } from 'react';
 import {
@@ -58,7 +58,7 @@ export function PlaygroundEstimate({ host }: { host: SurfaceHost }) {
       sources={estimateSources([...host.savedRecords.current.values()])}
       quantitySources={estimateCadSources([...host.savedRecords.current.values()])}
       bimSources={estimateBimSources([...host.savedRecords.current.values()])}
-      evaluateBim={evaluateEstimateBim}
+      geometry={playgroundEstimateGeometry}
       registerInput={registerInput}
       save={async () => {
         const before = host.savedRecords.current.get(host.active.id)?.versions.length ?? 0;

@@ -8,9 +8,8 @@
     "./host": "./src/host.ts",
     "./sources": "./src/sources.ts",
     "./styles.css": "./src/styles.css",
-    "./cad-source": "./src/cad-source.ts",
     "./outputs": "./src/outputs.ts",
-    "./bim-source": "./src/bim-source.ts",
+    "./geometry-quantities": "./src/geometry-quantities.ts",
     "./references": "./src/references.ts"
   },
   "dependencies": {
@@ -20,8 +19,6 @@
     "@editor-platform/editor-core": "*",
     "@editor-platform/editor-host": "*",
     "@editor-platform/structured-data": "*",
-    "@editor-platform/cad-core": "*",
-    "@editor-platform/bim-core": "*",
     "@editor-platform/artifact-references": "*"
   },
   "peerDependencies": {

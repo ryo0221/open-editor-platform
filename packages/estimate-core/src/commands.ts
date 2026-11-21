@@ -1,10 +1,14 @@
 import { canonicalJson, contentHash } from '@editor-platform/artifact-core';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
-import { CalculationError, type SourcePin } from '@editor-platform/calculation-core';
+import {
+  CalculationError,
+  type QuantityVerification,
+  type SourcePin,
+} from '@editor-platform/calculation-core';
 import { assertEstimate } from './validate';
 import { evaluateEstimate } from './evaluate';
 import { assertRateSources, retainPriceData } from './sources';
-import { ENGINE, type EstimateDocument, type RetainedSource, type Quantity } from './types';
+import { ENGINE, type EstimateDocument } from './types';
 export interface EstimateGuard {
   canEdit(): boolean;
   canRead(pin: SourcePin): boolean;
@@ -43,10 +47,7 @@ export function replaceEstimate(
     return structuredClone(replacement);
   });
 }
-export interface QuantityVerification {
-  verifySource(source: RetainedSource, sources: RetainedSource[]): Promise<void>;
-  verifyQuantities(quantities: Quantity[], sources: RetainedSource[]): Promise<void>;
-}
+export type { QuantityVerification } from '@editor-platform/calculation-core';
 export async function verifyEstimate(
   value: unknown,
   ownArtifactId?: string,
