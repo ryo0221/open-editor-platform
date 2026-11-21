@@ -108,7 +108,7 @@ recorded rights/provenance, security, export-integrity and reproducible build/te
 checks before becoming public. See [the OSS Preview release gate](docs/release/OSS-PREVIEW-GATE.md)
 and [the current publication checklist](legal/PUBLICATION-READINESS.md).
 
-Separate proprietary commercial/OEM licensing is **not yet being offered**;
+A future **zero-fee beta commercial/OEM program** (no preset beta end date, paid GA licenses, and at least three calendar months/90 days of GA notice) is described in the [beta commercial policy](BETA-COMMERCIAL-POLICY.md). The policy alone is not a license grant. Separate proprietary commercial/OEM licensing is **not yet being offered**;
 [its launch gate](docs/release/COMMERCIAL-OEM-GATE.md) is independent of
 AGPL-compliant usage. The [Independent Editor additional-permission draft](ADDITIONAL-PERMISSION-DRAFT.md)
 is not an effective exception. The project provides no guaranteed security
