@@ -235,7 +235,8 @@ const portPattern = /(?:127\.0\.0\.1|localhost):(\d{4,5})/g;
 /** Static (`from '…'`) and literal dynamic (`import('…')`) workspace imports. */
 const importPattern = /(?:from\s+|import\(\s*)['"]@editor-platform\/([a-z0-9-]+)/g;
 const relativePattern = /['"`]((?:\.\.\/)+[\w@./-]+)['"`]/g;
-const helperPattern = /from\s+['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
+/** Local helpers, static (`from './…'`) or literal dynamic (`import('./…')`). */
+const helperPattern = /(?:from\s+|import\(\s*)['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
 
 const fixtureCache = new Map();
 /** Workspace packages imported anywhere under a tests/fixtures directory. */

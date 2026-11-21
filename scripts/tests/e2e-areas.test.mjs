@@ -82,6 +82,9 @@ test('Host Vite configurations and helper imports reach their specs', () => {
   const host = plan('vite.artifact-host.config.ts');
   assert(names(host.run).includes('bim-hosts') && names(host.deferred).includes('cad-hosts'));
   assert(names(plan('packages/templates/src/index.ts').run).includes('design-reuse-graphics'));
+  // A helper another helper imports dynamically.
+  const view = names(plan('tests/e2e/reuse-view-fixtures.ts').run);
+  assert(view.includes('template-structure') && view.includes('template-structure-mobile'));
   // A literal dynamic import, and the packages a bundled fixture host mounts.
   assert(names(plan('packages/design/src/index.ts').run).includes('animation-2d'));
   const whiteboard = names(plan('packages/whiteboard/src/index.ts').run);
