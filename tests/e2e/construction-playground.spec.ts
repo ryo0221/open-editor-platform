@@ -1121,6 +1121,8 @@ test('export the schedule as IFC and the checks as CSV (ST-552, TS-2090)', async
   await expect(
     page.getByRole('table', { name: 'Approaches to danger' }).locator('tbody tr'),
   ).toHaveCount(7, { timeout: 60_000 });
+  // The lift checks may still be running when the approaches show; export refuses until they finish.
+  await expect(page.getByText('Checking the lifts…')).toHaveCount(0, { timeout: 120_000 });
   const csvDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export checks', exact: true }).click();
   const csv = await readFile((await (await csvDownload).path())!, 'utf8');
