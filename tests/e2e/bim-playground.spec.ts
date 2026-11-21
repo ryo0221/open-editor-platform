@@ -1,6 +1,7 @@
 import {
   bimStarter,
   f31BoxBuilding,
+  f33Types,
   f37Office,
   f40Lattice,
   f47Taper,
@@ -31,6 +32,29 @@ async function importFile(page: Page, name: string, mimeType: string, buffer: Bu
     await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
   await input.setInputFiles({ name, mimeType, buffer });
 }
+/** The largest standard deviation of a PNG's colour channels, decoded in the page. */
+const spread = (page: Page, png: Buffer) =>
+  page.evaluate(async (b64) => {
+    const bitmap = await createImageBitmap(
+      await (await fetch(`data:image/png;base64,${b64}`)).blob(),
+    );
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const g = canvas.getContext('2d')!;
+    g.drawImage(bitmap, 0, 0);
+    const px = g.getImageData(0, 0, bitmap.width, bitmap.height).data;
+    let best = 0;
+    for (let c = 0; c < 3; c++) {
+      let sum = 0,
+        sq = 0;
+      for (let i = c; i < px.length; i += 4) {
+        sum += px[i]!;
+        sq += px[i]! * px[i]!;
+      }
+      const n = px.length / 4;
+      best = Math.max(best, Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)));
+    }
+    return best;
+  }, png.toString('base64'));
 const importJson = (page: Page, name: string, value: unknown) =>
   importFile(page, name, 'application/json', Buffer.from(JSON.stringify(value)));
 
@@ -507,6 +531,146 @@ test('zooms to the selection in 3D and in a plan (FU1)', async ({ page }) => {
   await zoom.click();
   await expect.poll(async () => (await view.screenshot()).equals(plan)).toBe(false);
   expect(near.equals(whole)).toBe(false);
+});
+
+test('focuses a 6 mm part 900 m away, saves named cameras, shows them again after reload (#19)', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'bim');
+  await ready(page);
+  const template = await nativeArtifact(page);
+  const doc = f33Types();
+  const column = doc.types.find((t) => t.kind === 'column')!;
+  doc.types.push({
+    ...column,
+    id: 't-pin',
+    name: 'Pin 6',
+    profile: { shape: 'rect', widthMm: 6, depthMm: 6 },
+  } as typeof column);
+  doc.elements.push({
+    id: 'c-pin',
+    kind: 'column',
+    typeId: 't-pin',
+    at: { xy: [900_000, 0] },
+    rotationRad: 0,
+    base: { level: doc.levels[0]!.id, offsetMm: 0 },
+    top: { heightMm: 8 },
+  });
+  await importJson(page, 'pin.json', {
+    ...template,
+    name: 'Pin',
+    draft: { ...template.draft, content: doc },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Pin');
+  await ready(page);
+  const view = page.getByTestId('bim-viewport');
+  await page.getByRole('button', { name: 'Fit view', exact: true }).click();
+  const whole = await view.screenshot();
+  await panel(page, 'Elements');
+  await elements(page).getByRole('button', { name: 'c-pin', exact: true }).click();
+  await page.getByRole('button', { name: 'Zoom to selection', exact: true }).click();
+  await expect.poll(async () => (await view.screenshot()).equals(whole)).toBe(false);
+  // The pin fills the middle of the view: the centre is not all one colour (the near plane
+  // would have cut it away, and a 1 m framing would have left it a dot).
+  const box = (await view.boundingBox())!;
+  const middle = await page.screenshot({
+    clip: {
+      x: box.x + box.width * 0.4,
+      y: box.y + box.height * 0.4,
+      width: box.width * 0.2,
+      height: box.height * 0.2,
+    },
+  });
+  expect(await spread(page, middle)).toBeGreaterThan(8);
+  const near = await view.screenshot();
+
+  await panel(page, 'Inspector');
+  await inspector(page).getByRole('tab', { name: 'Drawings' }).click();
+  const cameras = page.getByTestId('bim-cameras');
+  await cameras.getByLabel('Camera name', { exact: true }).fill('Pin close up');
+  await cameras.getByRole('button', { name: 'Save camera', exact: true }).click();
+  await expect(
+    cameras.getByRole('button', { name: 'Show Pin close up', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Fit view', exact: true }).click();
+  await expect.poll(async () => (await view.screenshot()).equals(near)).toBe(false);
+  await save(page, 1);
+  await page.reload();
+  await ready(page);
+  const kept = (await nativeArtifact(page)).versions[0]!.content as BimDocument;
+  expect(kept.cameras).toEqual([
+    expect.objectContaining({ name: 'Pin close up', fovDeg: expect.any(Number) }),
+  ]);
+  await panel(page, 'Inspector');
+  await inspector(page).getByRole('tab', { name: 'Drawings' }).click();
+  const fitted = await view.screenshot();
+  await cameras.getByRole('button', { name: 'Show Pin close up', exact: true }).click();
+  await expect.poll(async () => (await view.screenshot()).equals(fitted)).toBe(false);
+  const shown = await page.screenshot({
+    clip: {
+      x: box.x + box.width * 0.4,
+      y: box.y + box.height * 0.4,
+      width: box.width * 0.2,
+      height: box.height * 0.2,
+    },
+  });
+  expect(await spread(page, shown)).toBeGreaterThan(8);
+  // Deleted, the model no longer keeps any camera.
+  await cameras.getByRole('button', { name: 'Delete Pin close up', exact: true }).click();
+  await expect(cameras.getByText('No saved cameras.', { exact: false })).toBeVisible();
+  expect(((await nativeArtifact(page)).draft.content as BimDocument).cameras).toBeUndefined();
+});
+
+// #19 (Codex on #37): a saved camera with another up vector orbits around that up: a sideways
+// drag after showing a Y-up camera keeps its height along Y, not along Z.
+test('orbits a shown Y-up camera around its own up (#19)', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  await page.goto('/');
+  await create(page, 'bim');
+  await ready(page);
+  const template = await nativeArtifact(page);
+  const doc = f33Types();
+  doc.cameras = [
+    {
+      id: 'cam-y',
+      name: 'Y up',
+      position: [10_000, 5_000, 10_000],
+      target: [0, 0, 0],
+      up: [0, 1, 0],
+      fovDeg: 50,
+    },
+  ];
+  await importJson(page, 'yup.json', {
+    ...template,
+    name: 'Y up',
+    draft: { ...template.draft, content: doc },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Y up');
+  await ready(page);
+  await panel(page, 'Inspector');
+  await inspector(page).getByRole('tab', { name: 'Drawings' }).click();
+  const cameras = page.getByTestId('bim-cameras');
+  await cameras.getByRole('button', { name: 'Show Y up', exact: true }).click();
+  const box = (await page.getByTestId('bim-viewport').boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 150, y, { steps: 10 });
+  await page.mouse.up();
+  await cameras.getByLabel('Camera name', { exact: true }).fill('After drag');
+  await cameras.getByRole('button', { name: 'Save camera', exact: true }).click();
+  await expect(cameras.getByRole('button', { name: 'Show After drag', exact: true })).toBeVisible();
+  const saved = ((await nativeArtifact(page)).draft.content as BimDocument).cameras!.find(
+    (c) => c.name === 'After drag',
+  )!;
+  expect(saved.up).toEqual([0, 1, 0]);
+  // Around Y the height along Y stays; around a stale Z axis it would be Z that stayed.
+  expect(saved.position[1]).toBeCloseTo(5_000, -1);
+  expect(Math.abs(saved.position[2] - 10_000)).toBeGreaterThan(500);
 });
 
 test("sets a wall's lean in the Inspector, back to upright, Undo, saves and reloads (LR2c)", async ({

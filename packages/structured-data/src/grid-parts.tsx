@@ -128,7 +128,7 @@ function GridCell({
         if (editing && !grid.commit()) return;
         grid.choose(r, c, e.shiftKey);
       }}
-      onDoubleClick={() => grid.edit()}
+      onDoubleClick={() => grid.edit(undefined, { rowId: row.id, columnId: column.id })}
       title={formatCell(data, row, column)}
     >
       {editingHere ? (

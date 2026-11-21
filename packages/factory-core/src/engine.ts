@@ -2132,13 +2132,25 @@ class Sim {
       this.forward(node);
     }
   }
-  run(end: number, maxEvents: number): number {
-    let events = 0;
+  /** Events handled so far, over every slice of the run. */
+  handled = 0;
+  /** True once the run reached its end or a deadlock. */
+  ended = false;
+  /**
+   * #17: handles events up to `end`, at most `budget` of them in this call, and stops with
+   * `event-limit` past `maxEvents` in all. A later call goes on from the next event: a run handled
+   * in slices takes the same steps as one handled at once.
+   */
+  advance(end: number, maxEvents: number, budget = Infinity): boolean {
+    let here = 0;
     for (;;) {
       const e = this.queue.peek();
       if (!e || e.time > end) break;
+      // Shifts at one instant are taken together (see below), so a slice never ends between them.
+      if (here >= budget && !(e.kind === 'shift' && this.inShifts)) return false;
       this.queue.pop();
-      if (++events > maxEvents)
+      here++;
+      if (++this.handled > maxEvents)
         throw new FactoryValidationError('event-limit', `more than ${maxEvents} events`);
       this.now = e.time;
       if (e.kind === 'warmup') this.startMeasuring();
@@ -2150,16 +2162,24 @@ class Sim {
       // Every calendar that changes at this instant changes before any part moves (shift events
       // come first at equal times), so the order of the calendars cannot change the result.
       const next = this.queue.peek();
-      if (e.kind === 'shift' && next?.kind === 'shift' && next.time === e.time) continue;
+      this.inShifts = e.kind === 'shift' && next?.kind === 'shift' && next.time === e.time;
+      if (this.inShifts) continue;
       this.drain();
       if (this.deadlock) {
         // Stopped in the warm-up: the measured period is empty, at the deadlock.
         if (!this.measuring) this.startMeasuring();
-        return events;
+        this.ended = true;
+        return true;
       }
     }
     this.now = end;
-    return events;
+    this.ended = true;
+    return true;
+  }
+  private inShifts = false;
+  run(end: number, maxEvents: number): number {
+    this.advance(end, maxEvents);
+    return this.handled;
   }
   private startMeasuring() {
     this.measuring = true;
@@ -2408,11 +2428,7 @@ function intersect(x: [number, number][], y: [number, number][]): [number, numbe
 }
 const length = (list: [number, number][]) => list.reduce((t, [a, b]) => t + b - a, 0);
 
-/** Runs the model once. Refuses an invalid document (`FactoryValidationError`). */
-export function runFactory(
-  doc: FactoryDocument,
-  options: FactoryRunOptions = {},
-): FactoryRunResult {
+function prepareRun(doc: FactoryDocument, options: FactoryRunOptions) {
   const problems = validateFactory(doc);
   if (problems.length)
     throw new FactoryValidationError(problems[0]!.code, problems[0]!.message, problems);
@@ -2443,7 +2459,69 @@ export function runFactory(
       ? Math.max(0, Math.min(Math.floor(options.maxRecords!), 2_000_000))
       : 2_000_000
     : undefined;
-  const sim = new Sim(doc, seed, warmup, maxRecords);
-  const events = sim.run(warmup + duration, maxEvents);
-  return sim.finish(Math.min(warmup, sim.now), events, seed);
+  return {
+    sim: new Sim(doc, seed, warmup, maxRecords),
+    seed,
+    warmup,
+    end: warmup + duration,
+    maxEvents,
+  };
+}
+
+/** Runs the model once. Refuses an invalid document (`FactoryValidationError`). */
+export function runFactory(
+  doc: FactoryDocument,
+  options: FactoryRunOptions = {},
+): FactoryRunResult {
+  const run = startFactoryRun(doc, options);
+  run.advance();
+  return run.finish();
+}
+
+/** #17: how far a run handled in slices has come. */
+export interface FactoryRunProgress {
+  done: boolean;
+  /** Events handled so far. */
+  events: number;
+  /** Simulated time reached, and where the run ends (ms, warm-up included). */
+  simMs: number;
+  endMs: number;
+}
+
+/**
+ * #17: a run handled in slices. Each `advance(events)` handles at most that many more events and
+ * keeps the run's whole state for the next one, so a long run (a simulated year) is taken in
+ * chunks with progress between them, and gives the same result as one handled at once.
+ */
+export interface FactoryRunHandle {
+  advance(events?: number): FactoryRunProgress;
+  progress(): FactoryRunProgress;
+  /** The result, once `advance` reported `done`. */
+  finish(): FactoryRunResult;
+}
+
+/** #17: starts a run to be handled in slices. Refuses an invalid document as `runFactory` does. */
+export function startFactoryRun(
+  doc: FactoryDocument,
+  options: FactoryRunOptions = {},
+): FactoryRunHandle {
+  const { sim, seed, warmup, end, maxEvents } = prepareRun(doc, options);
+  let finished: FactoryRunResult | undefined;
+  const progress = (): FactoryRunProgress => ({
+    done: sim.ended,
+    events: sim.handled,
+    simMs: sim.ended ? sim.now : Math.min(sim.now, end),
+    endMs: end,
+  });
+  return {
+    advance(events = Infinity) {
+      if (!sim.ended) sim.advance(end, maxEvents, Math.max(1, events));
+      return progress();
+    },
+    progress,
+    finish() {
+      if (!sim.ended) throw new Error('The run has not finished');
+      return (finished ??= sim.finish(Math.min(warmup, sim.now), sim.handled, seed));
+    },
+  };
 }

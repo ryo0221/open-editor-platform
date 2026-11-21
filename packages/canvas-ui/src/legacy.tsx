@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { imageImportLimits } from './export';
 import { type Bounds } from '@editor-platform/editor-core';
 export function downloadSvg(name: string, svg: string) {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })),
@@ -97,8 +98,8 @@ export function ImageProperty({
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (!file) return;
-          if (file.size > 8_000_000) {
-            setError('Use an image smaller than 8 MB');
+          if (file.size > imageImportLimits.bytes) {
+            setError(`Use an image of ${imageImportLimits.bytes / 1024 / 1024} MiB or less`);
             return;
           }
           const reader = new FileReader();

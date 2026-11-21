@@ -3,6 +3,12 @@ import { useState } from 'react';
 import type { DesignContent } from './model';
 import { DesignPageComparison } from './page-comparison';
 import {
+  checkPanelRedrawProposal,
+  checkPanelRedrawSelection,
+  designPanelRedrawRequest,
+  type DesignPanelRedrawRequest,
+} from './manga-redraw';
+import {
   checkDesignPageProposal,
   prepareDesignPageProposal,
   readDesignPageProposal,
@@ -16,26 +22,38 @@ export interface DesignPageReviewHost {
   flushInputs(): void;
   accept(plan: PreparedDesignPageProposal): void;
   requestProposals?(context: DesignPageProposalContext): Promise<unknown>;
+  /** Redraw one panel (#21). Answers with a page proposal that changes only that panel. */
+  requestPanelRedraw?(
+    request: DesignPanelRedrawRequest,
+    context: DesignPageProposalContext,
+  ): Promise<unknown>;
 }
 /** Inline review in the manga workspace. Host owns generation and authority. */
 export function MangaReview({
   host,
   content,
+  panelId,
 }: {
   host?: DesignPageReviewHost;
   content: DesignContent;
+  /** The panel being edited, for a panel-only redraw. */
+  panelId?: string;
 }) {
+  const [notes, setNotes] = useState('');
   const [raw, setRaw] = useState(''),
     [request, setRequest] = useState<DesignPageProposalRequest>(),
+    // The panel a loaded redraw answer must stay in: every selection is checked against it.
+    [redraw, setRedraw] = useState<DesignPanelRedrawRequest>(),
     [selected, setSelected] = useState<string[]>([]),
     [plan, setPlan] = useState<PreparedDesignPageProposal>(),
     [contextJson, setContextJson] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const [comparisonId, setComparisonId] = useState('');
-  function load(value: unknown) {
+  function load(value: unknown, panel?: DesignPanelRedrawRequest) {
     const next = readDesignPageProposal(value);
     setRequest(next);
+    setRedraw(panel);
     setSelected(next.units.map((u) => u.id));
     setPlan(undefined);
   }
@@ -89,6 +107,40 @@ export function MangaReview({
             >
               Hostに提案を依頼
             </button>
+          )}
+          {host.requestPanelRedraw && panelId && (
+            <div role="group" aria-label="このコマだけ描き直す">
+              <label>
+                このコマで直すこと
+                <textarea
+                  aria-label="このコマで直すこと"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </label>
+              <button
+                disabled={busy || !notes.trim()}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    host.flushInputs();
+                    const current = host.current();
+                    const ask = designPanelRedrawRequest(current.content, panelId, notes.trim());
+                    const answer = readDesignPageProposal(
+                      await host.requestPanelRedraw!(ask, current),
+                    );
+                    load(checkPanelRedrawProposal(host.current().content, ask, answer), ask);
+                    setError('');
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                このコマだけ描き直しを頼む
+              </button>
+            </div>
           )}
           <details>
             <summary>提案データを読み込む</summary>
@@ -178,6 +230,9 @@ export function MangaReview({
                 onClick={() =>
                   run(() => {
                     host.flushInputs();
+                    // A part of a panel redraw stays in the panel too (Codex on #28).
+                    if (redraw)
+                      checkPanelRedrawSelection(host.current().content, redraw, request, selected);
                     setPlan(
                       prepareDesignPageProposal(
                         host.current(),

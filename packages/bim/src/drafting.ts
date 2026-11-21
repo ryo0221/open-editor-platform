@@ -154,6 +154,7 @@ export function bimNewId(doc: BimDocument, prefix: string, taken: Set<string> = 
     ...doc.views.map((x) => x.id),
     ...doc.propertySets.map((x) => x.id),
     ...(doc.assets ?? []).map((x) => x.id),
+    ...(doc.cameras ?? []).map((x) => x.id),
   ]);
   for (let n = 1; ; n++) if (!used.has(`${prefix}-${n}`)) return `${prefix}-${n}`;
 }
@@ -300,7 +301,9 @@ function storeyTop(doc: BimDocument, level: string): BimTop {
   const above = doc.levels
     .filter((l) => l.elevationMm > here.elevationMm)
     .sort((a, b) => a.elevationMm - b.elevationMm)[0];
-  return above ? { level: above.id, offsetMm: 0 } : { heightMm: bodySized(doc, bimDraftDefaults.storeyMm) };
+  return above
+    ? { level: above.id, offsetMm: 0 }
+    : { heightMm: bodySized(doc, bimDraftDefaults.storeyMm) };
 }
 /** The first type of a kind, or the one asked for. */
 function typeOf(doc: BimDocument, kind: string, typeId?: string) {

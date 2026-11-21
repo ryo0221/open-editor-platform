@@ -15,7 +15,12 @@ import {
   type BimDocument,
   type BimElementKind,
 } from '@editor-platform/bim-core';
-import type { EditorInputBoundary } from '@editor-platform/editor-core';
+import {
+  startProgress,
+  type EditorInputBoundary,
+  type OperationProgress,
+} from '@editor-platform/editor-core';
+import { ProgressStatus } from '@editor-platform/editor-ui';
 import {
   checkBuildingInSite,
   checkConstructionSource,
@@ -84,7 +89,7 @@ import {
 } from './display';
 import { AnalysisPanel } from './analysis-panel';
 import { analysedLook, analysisLooks, type FrameAnalysis, type FrameSolver } from './analysis-view';
-import { CranePanel, type LiftOfDay } from './crane-panel';
+import { CranePanel, progressCell, type LiftOfDay } from './crane-panel';
 import { craneSolid, siteCraneId } from './crane-view';
 import { SitePanel, type SiteItem } from './site-panel';
 import { TrafficPanel, type TrafficItem } from './traffic-panel';
@@ -364,25 +369,63 @@ export function ConstructionSurface({
     !!doc.site?.lifts?.length ||
     (doc.site?.cranes?.length ?? 0) > 1 ||
     !!doc.site?.cranes?.some((c) => c.climbs?.some((m) => m.supportIds?.length));
+  // #16: how far the crane checks are, and a way to stop them (until asked again).
+  // Kept in a cell: a progress update redraws only the progress line (see `progressCell`).
+  const craneProgress = useMemo(progressCell, []);
+  const [craneStopped, setCraneStopped] = useState<{
+    doc: ConstructionDocument;
+    world: CraneWorld;
+  }>();
+  const [craneRun, setCraneRun] = useState(0);
+  const craneAbort = useRef<AbortController | undefined>(undefined);
+  const stoppedNow = !!world && craneStopped?.doc === doc && craneStopped.world === world;
   useEffect(() => {
-    if (!schedule || !world || !hasCranes) return;
+    if (!schedule || !world || !hasCranes || stoppedNow) return;
     // #1334: in slices, giving the page back between them: on a whole tower the check takes a
     // minute, and the screen stays live meanwhile. A newer document or building stops it.
     const abort = new AbortController();
-    checkCranesInSlices(doc, schedule, world, { signal: abort.signal }).then(
+    craneAbort.current = abort;
+    const started = performance.now();
+    let shown = started;
+    craneProgress.set(undefined);
+    checkCranesInSlices(doc, schedule, world, {
+      signal: abort.signal,
+      // At most a few updates a second.
+      onProgress: (done, total) => {
+        const t = performance.now();
+        if (t - shown < 500) return;
+        shown = t;
+        craneProgress.set({ done, total, startedAt: started });
+      },
+    }).then(
       (problems) => setCraneProblems({ doc, world, problems }),
       (e) => {
         if (!abort.signal.aborted) throw e;
       },
     );
-    return () => abort.abort();
-  }, [doc, schedule, world, hasCranes]);
+    return () => {
+      abort.abort();
+      if (craneAbort.current === abort) craneAbort.current = undefined;
+    };
+  }, [doc, schedule, world, hasCranes, stoppedNow, craneRun, craneProgress]);
   const craneChecking =
-    hasCranes && !!world && (craneProblems?.doc !== doc || craneProblems.world !== world);
+    hasCranes &&
+    !!world &&
+    !stoppedNow &&
+    (craneProblems?.doc !== doc || craneProblems.world !== world);
   const shownCraneProblems =
     hasCranes && craneProblems?.doc === doc && craneProblems.world === world
       ? craneProblems.problems
       : [];
+  const stopCraneChecks = () => {
+    if (!world) return;
+    craneAbort.current?.abort();
+    setCraneStopped({ doc, world });
+  };
+  const checkCranesAgain = () => {
+    setCraneStopped(undefined);
+    setCraneRun((n) => n + 1);
+  };
   const [selectedCrane, setSelectedCrane] = useState<string>();
   const craneHeld = () => {
     if (!pending.current.has('crane')) return false;
@@ -700,7 +743,7 @@ export function ConstructionSurface({
   // The still being rendered: its file name, fixed when the dialog opens.
   const [rendering, setRendering] = useState<string>();
   const [video, setVideo] = useState<ScheduleVideoSettings>();
-  const [recording, setRecording] = useState<{ done: number; total: number }>();
+  const [recording, setRecording] = useState<OperationProgress>();
   const recordAbort = useRef<AbortController | undefined>(undefined);
   const videoProblems = video && range ? scheduleVideoProblems(range, video) : [];
   // Closing the schedule stops a recording.
@@ -726,7 +769,8 @@ export function ConstructionSurface({
     setPlay(undefined);
     setGait(undefined);
     setError('');
-    setRecording({ done: 0, total: frames.ticks.length });
+    const recordStart = performance.now();
+    setRecording(startProgress(frames.ticks.length, recordStart));
     setExportNote('');
     let last: string | undefined;
     const building = bimNow.current;
@@ -767,7 +811,7 @@ export function ConstructionSurface({
           end: () => view.end(),
         },
         browserVideoEncoding(),
-        (done, total) => setRecording({ done, total }),
+        (done, total) => setRecording({ done, total, startedAt: recordStart }),
         abort.signal,
       );
       const name = scheduleVideoFileName(doc.name, settings);
@@ -799,6 +843,8 @@ export function ConstructionSurface({
       return setError(
         'The checks are still running (the building or the lifts): export them when they finish.',
       );
+    if (hasCranes && stoppedNow)
+      return setError('The lift checks were stopped: check the lifts again before exporting.');
     const rows: CheckRow[] = [
       ...diagnosticRows('schedule', [...sourceProblems, ...(schedule?.diagnostics ?? [])]),
       ...diagnosticRows('site', [...siteProblems, ...buildingProblems]),
@@ -995,12 +1041,13 @@ export function ConstructionSurface({
         </button>
         {recording && (
           <>
-            <span className="construction-note" role="status" aria-label="Recording">
-              Recording: {recording.done} of {recording.total} frames
-            </span>
-            <button type="button" onClick={() => recordAbort.current?.abort()}>
-              Cancel recording
-            </button>
+            <ProgressStatus
+              label="Recording"
+              unit="frames"
+              progress={recording}
+              onCancel={() => recordAbort.current?.abort()}
+              cancelLabel="Cancel recording"
+            />
           </>
         )}
         {exportNote && (
@@ -1227,6 +1274,10 @@ export function ConstructionSurface({
             liftsToday={liftsToday}
             problems={shownCraneProblems}
             checking={craneChecking}
+            checkProgress={craneProgress}
+            onStopChecks={stopCraneChecks}
+            checksStopped={hasCranes && stoppedNow}
+            onCheckAgain={checkCranesAgain}
             readOnly={readOnly}
             run={run}
             setError={setError}

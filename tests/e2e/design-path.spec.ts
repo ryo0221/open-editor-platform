@@ -648,7 +648,11 @@ test('ordinary Playground: paste into schema2 and Cut/Paste keep native path ide
   expect(((await nativeArtifact(page)).draft.content as DesignContent).elements).toHaveLength(1);
 });
 
-test('Playground capacity failure retains draft/Undo without growing immutable history and retries after correction', async ({
+// #22: a design keeps page art of up to 64 MiB in its versions, so its native record has the
+// Playground's large native limit rather than the Host's 64 MiB. A path record whose next version
+// passes 64 MiB, which the Host refused before, now saves; the draft, Undo and Redo stay as they were.
+// (A failed local write keeping the draft and retrying is issue2-persistence's test.)
+test('Playground saves a design path record past the Host 64 MiB limit and keeps draft/Undo (#22)', async ({
   page,
 }, info) => {
   test.setTimeout(120000);
@@ -700,20 +704,13 @@ test('Playground capacity failure retains draft/Undo without growing immutable h
   await page.goto('/');
   await page.getByLabel('Import artifact', { exact: true }).setInputFiles(input);
   await expect(page.getByLabel('Artifact name')).toHaveValue(/capacity/i);
-  for (let i = 0; i < 2; i++) {
-    await page.getByRole('button', { name: 'Save version', exact: true }).click();
-    await page
-      .getByRole('dialog', { name: 'Save immutable version', exact: true })
-      .getByRole('button', { name: 'この版を保存', exact: true })
-      .click();
-    await expect(page.locator('.save-status')).toContainText('Not saved');
-    const failed = await nativeArtifact(page);
-    expect(failed.versions.map((v) => v.versionId)).toEqual(
-      record.versions.map((v) => v.versionId),
-    );
-    expect(failed.draft.baseVersionId).toBe(record.draft.baseVersionId);
-    expect(await contentHash(failed.draft.content)).toBe(record.versions[1].contentHash);
-  }
+  await save(page, retainedCount + 1);
+  const saved = await nativeArtifact(page);
+  expect(saved.versions.slice(0, retainedCount).map((v) => v.versionId)).toEqual(
+    record.versions.map((v) => v.versionId),
+  );
+  expect(Buffer.byteLength(JSON.stringify(saved))).toBeGreaterThan(hostNativeArtifactByteLimit);
+  expect(await contentHash(saved.draft.content)).toBe(record.versions[1].contentHash);
   await page.getByRole('button', { name: 'Design object Editable path', exact: true }).click();
   const stage = page.getByRole('application', { name: 'Design canvas', exact: true });
   await stage.focus();
@@ -723,8 +720,8 @@ test('Playground capacity failure retains draft/Undo without growing immutable h
     record.versions[1].contentHash,
   );
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await save(page, retainedCount + 1);
-  expect((await nativeArtifact(page)).versions).toHaveLength(retainedCount + 1);
+  await save(page, retainedCount + 2);
+  expect((await nativeArtifact(page)).versions).toHaveLength(retainedCount + 2);
 });
 
 test('plain EditorSession: a paste exceeding the aggregate anchor limit preserves content and Undo', async ({

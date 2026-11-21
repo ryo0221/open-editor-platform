@@ -19,7 +19,7 @@ export interface GridKeyContext {
   setAnchor: (address: CellAddress | null) => void;
   setContext: (context: null) => void;
   choose: (r: number, c: number, extend?: boolean) => void;
-  edit: (initial?: string) => void;
+  edit: (initial?: string, cell?: { rowId: string; columnId: string }) => void;
   fill: () => void;
   clear: () => void;
   deleteSelectedRows: () => void;

@@ -34,6 +34,7 @@ import { InterferenceSection } from './interference-panel';
 import { MassSection } from './mass-panel';
 import { RangeSection } from './range-panel';
 import { JointsSection } from './joints-panel';
+import { MotionsSection } from './motions-panel';
 import { AssemblyPmiSection } from './assembly-pmi-panel';
 import { useStatusProps } from './status-role';
 import { UpdatePartsDialog } from './part-update-panel';
@@ -555,12 +556,15 @@ export function AssemblyPanel({
   narrow,
   name,
   onExportCsv,
+  view,
 }: {
   assembly: CadAssembly;
   snapshot: CadSnapshot;
   narrow: boolean;
   /** The Artifact's name, for exported files. */
   name: string;
+  /** #18: the 3D view, for playing and recording motions. */
+  view?: RefObject<CadViewport | null>;
   onExportCsv?: (csv: Blob, options: { fileName: string }) => void;
 }) {
   const parts = useSyncExternalStore(assembly.subscribe, assembly.getSnapshot);
@@ -806,6 +810,7 @@ export function AssemblyPanel({
         )}
         {pattern && <PatternInspector assembly={assembly} snapshot={snapshot} pattern={pattern} />}
         <JointsSection assembly={assembly} snapshot={snapshot} narrow={narrow} />
+        {view && <MotionsSection assembly={assembly} snapshot={snapshot} view={view} name={name} />}
         <InterferenceSection assembly={assembly} snapshot={snapshot} />
         <RangeSection assembly={assembly} snapshot={snapshot} />
         <MassSection assembly={assembly} snapshot={snapshot} />

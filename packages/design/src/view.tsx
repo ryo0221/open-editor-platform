@@ -71,6 +71,7 @@ import {
   ArrangeMenu,
   EditMenu,
   readImage,
+  imageImportLimits,
   type CanvasView,
   type CanvasTarget,
 } from '@editor-platform/canvas-ui';
@@ -394,7 +395,7 @@ function DesignSurfaceEditor({
   }
   async function image(file: File) {
     try {
-      add('image', { src: await readImage(file), alt: file.name });
+      add('image', { src: await readImage(file, imageImportLimits.design), alt: file.name });
     } catch (e) {
       setError((e as Error).message);
     }
@@ -726,6 +727,7 @@ function DesignSurfaceEditor({
                 apply={apply}
                 choose={choose}
                 readOnly={readOnly}
+                selected={ids}
               />
               {left}
             </div>
@@ -736,7 +738,11 @@ function DesignSurfaceEditor({
           <>
             {extension?.workspaceReferences?.(extensionContext)}
             <div hidden={work.displayed !== 'manga'}>
-              <MangaReview host={pageReview} content={renderContent} />
+              <MangaReview
+                host={pageReview}
+                content={renderContent}
+                panelId={mangaContext.panel?.id}
+              />
               {mangaReadOnlyReason && <p role="status">{mangaReadOnlyReason}</p>}
             </div>
             {inspector}

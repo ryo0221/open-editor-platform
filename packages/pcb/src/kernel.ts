@@ -120,7 +120,7 @@ export interface PcbWorkerLike {
 
 export const pcbKernelLimits = Object.freeze({
   /** A board's whole model is one job; the same limit as a CAD or building job. */
-  jobTimeoutMs: 30_000,
+  jobTimeoutMs: 120_000,
   cancelAckMs: 500,
 });
 

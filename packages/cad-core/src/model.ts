@@ -5,6 +5,8 @@
 import type { CadProportions } from './proportions';
 import type { CadDesignTarget } from './design-targets';
 import type { CadSightCheck } from './sight-checks';
+import type { CadMotion } from './motions';
+import type { CadUnderlay } from './underlays';
 import type { CadToleranceStack } from './tolerance-stacks';
 import type {
   CadComponent,
@@ -199,7 +201,7 @@ export type CadFeature =
     })
   | (FeatureBase & {
       /**
-       * A solid through 2–32 sections in order (docs/cad/r1-modeling.md, Loft・sweep), each a
+       * A solid through 2–`cadLoftSections` sections in order (docs/cad/r1-modeling.md, Loft・sweep), each a
        * region without holes of its own sketch. `ruled` joins neighbouring sections by straight
        * faces; otherwise one smooth surface passes through them all.
        */
@@ -239,7 +241,7 @@ export type CadFeature =
     })
   | (FeatureBase & {
       /**
-       * R2a: a sheet through 2–32 chains in order, each of its own sketch, all open or all
+       * R2a: a sheet through 2–`cadLoftSections` chains in order, each of its own sketch, all open or all
        * closed. Faces take the first chain's element names; `ruled` as for a loft.
        */
       type: 'surfaceLoft';
@@ -819,6 +821,10 @@ export interface CadDocument {
   sightChecks?: CadSightCheck[];
   /** PD3 (docs/cad/product-design.md): tolerance stacks, 1–64 when present. */
   toleranceStacks?: CadToleranceStack[];
+  /** #18: form-to-form motions with camera paths, 1–32 when present. */
+  motions?: CadMotion[];
+  /** #15: 2D drawings laid under views, 1–64 when present. */
+  underlays?: CadUnderlay[];
 }
 export interface CadDiagnostic {
   code: string;
@@ -831,7 +837,11 @@ export interface CadDiagnostic {
   nodes?: string[];
 }
 
-/** Initial safety limits (model.md). Not performance claims. */
+/**
+ * Safety limits (model.md). Not performance claims. #14 (2026-11-20): raised from the initial
+ * values (64 active bodies, 256 features, 64 profiles, 4 MiB content, 256 MiB STEP) so a whole
+ * vehicle or robot fits one document; `cadLimitUsage` warns before a model reaches them.
+ */
 export const cadLimits = Object.freeze({
   /**
    * ±10 km (#589): civil works (a long bridge, a river reach) in mm. Display meshes are 32-bit
@@ -842,35 +852,35 @@ export const cadLimits = Object.freeze({
   maxDimensionMm: 10_000_000,
   affineScale: 1_000_000,
   /** Active bodies (docs/cad/complex-models.md, CM-U3); consumed tools count only in `allBodies`. */
-  bodies: 64,
-  allBodies: 1_024,
+  bodies: 512,
+  allBodies: 4_096,
   /**
    * Solids of one solid body, and of all active bodies (docs/cad/complex-models.md, K1): the
    * disjoint solids a Boolean, a pattern or a mirror's union leaves.
    */
   solidsPerBody: 1_024,
-  solids: 4_096,
-  features: 256,
-  profiles: 64,
-  parameters: 512,
-  namedViews: 16,
+  solids: 16_384,
+  features: 2_048,
+  profiles: 512,
+  parameters: 2_048,
+  namedViews: 64,
   verticesPerProfile: 256,
-  vertices: 4_096,
-  dagDepth: 128,
+  vertices: 65_536,
+  dagDepth: 1_024,
   idCodePoints: 128,
   nameCodePoints: 256,
-  contentBytes: 4 * 1024 * 1024,
+  contentBytes: 32 * 1024 * 1024,
   jsonDepth: 32,
   /** D2 asset limits per document (model.md); the Host's total admission comes first. */
-  assets: 128,
-  /** #1250 (Ryo, 2026-11-15): 256 MiB read and written; was 64 MiB (CR7f). */
-  stepBytes: 256 * 1024 * 1024,
-  brepBytes: 32 * 1024 * 1024,
+  assets: 512,
+  /** #14: 512 MiB read and written; was 256 MiB (before that 64 MiB, CR7f). */
+  stepBytes: 512 * 1024 * 1024,
+  brepBytes: 128 * 1024 * 1024,
   /**
    * CR7f: an imported part version keeps the whole STEP file and its own BRep, so the total fits
    * a STEP file and a BRep at their limits.
    */
-  assetBytes: 288 * 1024 * 1024,
+  assetBytes: 640 * 1024 * 1024,
 });
 /** Tools one Boolean applies at once (docs/cad/r1-modeling.md, 上限). */
 export const cadBooleanTools = 256;
@@ -896,7 +906,7 @@ export const cadPressLineDepthMm = [0.1, 20] as const;
 /** CR6d: a groove's radius (mm). */
 export const cadGrooveRadiusMm = [0.1, 10] as const;
 /** Sections of one loft (docs/cad/r1-modeling.md, 上限). */
-export const cadLoftSections = 32;
+export const cadLoftSections = 128;
 /** Curves of a boundary surface and of a fill (docs/cad/r2a-freeform.md, 上限). */
 export const cadBoundaryCurves = Object.freeze({ surface: [3, 4], fill: [3, 16] } as const);
 /** CR1d: curves each way of a curve network, and the meeting tolerance (mm). */

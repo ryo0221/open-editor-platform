@@ -34,6 +34,8 @@ export function compareCad(before: CadDocument, after: CadDocument): Change[] {
     'designTargets',
     'sightChecks',
     'toleranceStacks',
+    'motions',
+    'underlays',
   ] as const)
     if (!canonicalEqual(before[key] ?? null, after[key] ?? null))
       changes.push({

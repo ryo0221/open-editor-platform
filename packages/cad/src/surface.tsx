@@ -111,12 +111,14 @@ import {
   cadProfileKinds,
   type CadProfileKind,
 } from '@editor-platform/cad-core';
+import { limitWarningText } from './limit-warning';
 import {
   describeCode,
   referenceRows,
   type CadCollectedEdge,
   type CadController,
   type CadMigrationPreview,
+  type CadExportStage,
   type CadMeshExport,
   type CadSnapshot,
   type CadStepImportPreview,
@@ -155,6 +157,7 @@ import {
 } from './dimension-fields';
 import { Output, StatusRoleContext, useStatusProps, type CadStatusRole } from './status-role';
 import { sketchUnderlay } from './sketch-underlay';
+import { UnderlaysSection } from './underlay-panel';
 import { sketchDisplay } from './sketch-display';
 import {
   aeroColor,
@@ -6010,6 +6013,10 @@ function ExportFileDialog({
   const [unitsConfirmed, setUnitsConfirmed] = useState(false);
   const [prepared, setPrepared] = useState<CadMeshExport | 'preparing' | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // #17: the stage a staged STEP export is at, and how to stop it between stages.
+  const [stage, setStage] = useState<CadExportStage>();
+  const stopExport = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => stopExport.current?.abort(), []);
   async function prepare() {
     setError(undefined);
     try {
@@ -6020,14 +6027,19 @@ function ExportFileDialog({
       return setError(e instanceof Error ? e.message : String(e));
     }
     setPrepared('preparing');
+    const abort = new AbortController();
+    stopExport.current = abort;
+    setStage(undefined);
     const result =
       placing && assembly && format === 'glb'
         ? await assembly.exportGlb()
         : format !== 'step'
           ? await controller.exportMesh(format, { deflectionMm })
           : placing && assembly
-            ? await assembly.exportStep(name)
+            ? await assembly.exportStep(name, { onStage: setStage, signal: abort.signal })
             : await controller.exportStep();
+    if (stopExport.current === abort) stopExport.current = undefined;
+    setStage(undefined);
     setPrepared(result);
     if (!result) setError(controller.getSnapshot().diagnostic?.message);
   }
@@ -6151,6 +6163,15 @@ function ExportFileDialog({
             <dt>Not kept</dt>
             <dd>{ready.report.losses.join(' ')}</dd>
           </dl>
+        )}
+        {prepared === 'preparing' && stage && (
+          <p role="status" aria-label="Export progress" className="cad-muted">
+            <progress value={stage.done} max={stage.total} /> Stage {stage.done + 1} of{' '}
+            {stage.total}: {stage.label}{' '}
+            <button type="button" onClick={() => stopExport.current?.abort()}>
+              Stop export
+            </button>
+          </p>
         )}
         {error && (
           <p role="alert" className="cad-diagnostic">
@@ -7086,6 +7107,7 @@ function Surface({
                 narrow={narrow}
                 name={name}
                 onExportCsv={onExportCsv}
+                view={view}
               />
             )}
             <Navigator
@@ -7098,6 +7120,13 @@ function Surface({
               onToggleSketch={toggleSketch}
               assembly={assembly}
               name={name}
+            />
+            <UnderlaysSection
+              controller={controller}
+              snapshot={snapshot}
+              view={view}
+              shown={new Set(shownIds)}
+              editable={!snapshot.readOnly && snapshot.canEdit}
             />
           </>
         }
@@ -7139,6 +7168,16 @@ function Surface({
                 Stop
               </button>
             )}
+            {(() => {
+              const limits = limitWarningText(snapshot.content);
+              return (
+                limits && (
+                  <span role="note" className="cad-diagnostic" data-testid="cad-limit-warning">
+                    {limits}
+                  </span>
+                )
+              );
+            })()}
             {partsLeft && (
               <span data-testid="cad-parts-progress">
                 部品 {partsLeft.done} / {partsLeft.total} を計算中

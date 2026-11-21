@@ -78,6 +78,8 @@ import {
   type CadToleranceStacksOperation,
 } from './tolerance-stacks';
 import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
+import { applyMotionsOperation, type CadMotionsOperation } from './motions';
+import { applyUnderlaysOperation, type CadUnderlaysOperation } from './underlays';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
 import { assertCad, cadId, record, validateCadAppearance } from './validation';
@@ -251,6 +253,8 @@ export type CadOperation =
   | CadDesignTargetsOperation
   | CadSightChecksOperation
   | CadToleranceStacksOperation
+  | CadMotionsOperation
+  | CadUnderlaysOperation
   | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
@@ -395,6 +399,8 @@ function pruneAssets(doc: CadDocument) {
     ),
     // #662: texture images, by every body that names them (consumed ones too).
     ...doc.bodies.flatMap((b) => Object.values(b.appearance.textures?.maps ?? {})),
+    // #15: the images laid under views.
+    ...(doc.underlays ?? []).map((u) => u.assetId),
     // PMI-5a: an assembly's PMI of particular instances.
     ...(doc.assemblyPmiAssetId === undefined ? [] : [doc.assemblyPmiAssetId]),
   ]);
@@ -983,6 +989,10 @@ function apply(
       return applySightChecksOperation(next, op);
     case 'setToleranceStacks':
       return applyToleranceStacksOperation(next, op);
+    case 'setMotions':
+      return applyMotionsOperation(next, op);
+    case 'setUnderlays':
+      return applyUnderlaysOperation(next, op);
     case 'insertInterferenceAllowance':
     case 'removeInterferenceAllowance':
       return applyInterferenceOperation(next, op);
@@ -1127,6 +1137,15 @@ function generatedName(prefix: string, name: string, suffix: string) {
   return `${prefix}${[...name].slice(0, room).join('')}${suffix}`;
 }
 export function applyCadOperation(doc: CadDocument, op: CadOperation): CadDocument {
+  const next = draftCadOperation(doc, op);
+  assertCad(next);
+  return next;
+}
+/**
+ * The document an operation produces, before validation: for explaining why a refused edit was
+ * refused (#13). Never store or evaluate it; `applyCadOperation` is the validated form.
+ */
+export function draftCadOperation(doc: CadDocument, op: CadOperation): CadDocument {
   const solved = op.type === 'withSolvedPoses' ? op : undefined;
   const next = apply(
     doc,
@@ -1136,6 +1155,5 @@ export function applyCadOperation(doc: CadDocument, op: CadOperation): CadDocume
   settleMass(doc, next);
   settleAssembly(next);
   if (solved) writeSolvedPoses(next, solved.poses);
-  assertCad(next);
   return next;
 }

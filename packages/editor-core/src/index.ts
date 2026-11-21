@@ -7,11 +7,13 @@ import {
 } from '@editor-platform/artifact-core';
 export * from './text';
 export * from './japanese-lines';
+export * from './vertical-text';
 export * from './validation';
 export * from './describe';
 export * from './visual-patch';
 export * from './arrange';
 export * from './inputs';
+export * from './progress';
 export type Region =
   | { type: 'text'; start: number; end: number; sourceText?: string }
   | { type: 'cell'; columnId: string; endRowId?: string; endColumnId?: string }
