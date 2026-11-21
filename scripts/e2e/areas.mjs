@@ -1,0 +1,321 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Areas of the workspace and of the browser specs in tests/e2e, used to run only the
+// specs a change can affect (scripts/e2e/affected.mjs) and to split the full run into
+// suites (tests/playwright/suites.ts). Packages not listed below are in the office area.
+
+/** Platform packages every editor builds on. A change here affects every non-heavy spec. */
+export const corePackages = [
+  'artifact-core',
+  'artifact-output',
+  'artifact-references',
+  'calculation-core',
+  'canvas-ui',
+  'collaboration-core',
+  'editor-core',
+  'editor-host',
+  'editor-ui',
+  'export-core',
+  'extension-contract',
+  'extension-runtime',
+  'extension-sample',
+  'geometry-core',
+  'property-input',
+  'review-surfaces',
+  'reuse-core',
+  'spatial-index',
+  'time-axis',
+];
+
+/** CAD, building, analysis, character, circuit and drawing packages and their geometry. */
+export const engineeringPackages = [
+  'bim',
+  'bim-core',
+  'bim-ifc',
+  'cad',
+  'cad-core',
+  'cad-kernel-occt',
+  'character',
+  'character-core',
+  'circuit-sim-core',
+  'construction',
+  'construction-core',
+  'cosim',
+  'cosim-core',
+  'drawing',
+  'drawing-core',
+  'factory',
+  'factory-core',
+  'fem-mesher',
+  'geometry-cfd',
+  'geometry-fem',
+  'geometry-kernel-occt',
+  'geometry-mesh',
+  'geometry-view',
+  'ladder',
+  'ladder-core',
+  'pcb',
+  'pcb-core',
+  'schematic',
+  'schematic-core',
+  'simulation',
+  'simulation-core',
+];
+
+/** @param {string} name workspace directory name under packages/ */
+export function packageArea(name) {
+  if (corePackages.includes(name)) return 'core';
+  if (engineeringPackages.includes(name)) return 'engineering';
+  return 'office';
+}
+
+/**
+ * Spec families, first match wins. `owners` are the packages whose UI the specs drive;
+ * the dependency graph adds everything those packages use. `broad` specs exercise many
+ * office editors at once and run for any core or office change. `heavy` specs compute
+ * real geometry (minutes per test) and run only when their own packages change, or
+ * nightly. `suite` names the tests/playwright/suites.ts suite that starts the extra
+ * servers a spec needs beyond the development set.
+ */
+export const specRules = [
+  { match: /^cad-hosts$/, area: 'engineering', heavy: true, owners: ['cad'], suite: 'cad.hosts' },
+  { match: /^cad-playground$/, area: 'engineering', heavy: true, owners: ['cad'] },
+  { match: /^simulation-/, area: 'engineering', heavy: true, owners: ['simulation'] },
+  { match: /^drawing-sets$/, area: 'engineering', heavy: true, owners: ['drawing'] },
+  { match: /^character-playground$/, area: 'engineering', heavy: true, owners: ['character'] },
+  { match: /^character-laputa-range$/, area: 'engineering', owners: ['character', 'bim'] },
+  { match: /^bim-hosts$/, area: 'engineering', owners: ['bim'], suite: 'bim.hosts' },
+  { match: /^bim-/, area: 'engineering', owners: ['bim'] },
+  { match: /^gulliver-/, area: 'engineering', owners: ['bim', 'cad', 'character'] },
+  { match: /^construction-/, area: 'engineering', owners: ['construction'] },
+  { match: /^(circuit|cosim)-/, area: 'engineering', owners: ['cosim'] },
+  { match: /^drawing-/, area: 'engineering', owners: ['drawing'] },
+  { match: /^factory-/, area: 'engineering', owners: ['factory'] },
+  { match: /^ladder-/, area: 'engineering', owners: ['ladder'] },
+  { match: /^pcb-/, area: 'engineering', owners: ['pcb'] },
+  { match: /^schematic-/, area: 'engineering', owners: ['schematic'] },
+  { match: /^analysis-/, area: 'office', owners: ['analysis'], suite: 'analysis.production' },
+  { match: /^animation-2d$/, area: 'office', owners: ['animation'], suite: 'animation-2d' },
+  {
+    match: /^animation-connection$/,
+    area: 'office',
+    owners: ['animation', 'animation-adapters'],
+    suite: 'animation-connection',
+  },
+  {
+    match: /^animation-layer-actions$/,
+    area: 'office',
+    owners: ['animation'],
+    suite: 'animation-layer-actions',
+  },
+  { match: /^artifact-references/, area: 'office', owners: ['artifact-references'] },
+  {
+    match: /^(editor-)?collaboration/,
+    area: 'office',
+    owners: ['collaboration-adapters', 'collaboration-core'],
+  },
+  { match: /^creative-map$/, area: 'office', broad: true, suite: 'creative-map' },
+  {
+    match: /^creative-world-generation$/,
+    area: 'office',
+    broad: true,
+    suite: 'creative-world-generation',
+  },
+  {
+    match: /^creative-world-context/,
+    area: 'office',
+    broad: true,
+    suite: 'creative-world-context',
+  },
+  { match: /^(csv-|data-)/, area: 'office', owners: ['structured-data'] },
+  {
+    match: /^design-react/,
+    area: 'office',
+    owners: ['design-react', 'design-react-core', 'design-react-preview', 'react-ui'],
+  },
+  { match: /^design-path$/, area: 'office', owners: ['design'], suite: 'design-path.production' },
+  { match: /^design-/, area: 'office', owners: ['design'] },
+  { match: /^document-/, area: 'office', owners: ['document'] },
+  {
+    match: /^estimate-editor$/,
+    area: 'office',
+    owners: ['estimate'],
+    suite: 'estimate.production',
+  },
+  { match: /^estimate-/, area: 'office', owners: ['estimate'] },
+  { match: /^external-sources$/, area: 'office', owners: ['reference-adapters'] },
+  { match: /^fiction-map-/, area: 'office', owners: ['fiction-map'] },
+  { match: /^geo-/, area: 'office', owners: ['geo-core', 'geo-inspector'] },
+  { match: /^import-batch$/, area: 'office', owners: ['office-import-ui'] },
+  {
+    match: /^office-docx-ui$/,
+    area: 'office',
+    owners: ['office-export-ui', 'document-export'],
+    suite: 'ci',
+  },
+  {
+    match: /^office-/,
+    area: 'office',
+    owners: [
+      'document-export',
+      'document-import',
+      'office-adapters',
+      'office-export-ui',
+      'office-import-core',
+      'office-import-ui',
+      'slide-export',
+      'slide-import',
+    ],
+  },
+  { match: /^react-ui/, area: 'office', owners: ['react-ui', 'react-ui-core', 'react-ui-tooling'] },
+  { match: /^review-viewer-/, area: 'office', owners: ['review-surfaces'] },
+  { match: /^schedule/, area: 'office', owners: ['schedule'] },
+  { match: /^slide-animation-/, area: 'office', owners: ['slide', 'animation'] },
+  { match: /^spatial-wasm/, area: 'office', owners: ['spatial-index'] },
+  { match: /^story-board/, area: 'office', broad: true, suite: 'story-board' },
+  {
+    match: /^whiteboard-add-sticky$/,
+    area: 'office',
+    owners: ['whiteboard'],
+    suite: 'story-board',
+  },
+  { match: /^story-timeline/, area: 'office', broad: true, suite: 'story-timeline' },
+  {
+    match: /^structured-graph/,
+    area: 'office',
+    owners: ['structured-graph', 'structured-data-graph'],
+  },
+  { match: /^templates?-/, area: 'office', owners: ['templates', 'template-ui'] },
+  { match: /^templates$/, area: 'office', owners: ['templates', 'template-ui'] },
+  {
+    match: /^(manga-|playground-(ink|raster)$|authoring)/,
+    area: 'office',
+    owners: ['design', 'document'],
+  },
+  { match: /^novel-/, area: 'office', owners: ['document'] },
+  {
+    match: /^(canvas-|issue2-(arrange|canvas|geometry|group-review|layout|rich-canvas)$)/,
+    area: 'office',
+    owners: ['canvas-ui', 'design', 'whiteboard'],
+  },
+  { match: /^issue2-document$/, area: 'office', owners: ['document'] },
+  { match: /^issue2-slide$/, area: 'office', owners: ['slide'] },
+  { match: /^issue2-data$/, area: 'office', owners: ['structured-data'] },
+  {
+    match: /^reuse-/,
+    area: 'office',
+    owners: ['reuse-core', 'design', 'document', 'slide', 'structured-data', 'whiteboard'],
+  },
+  // Cross-editor flows: audits, issue regressions, practical, reuse, host and usability specs.
+  { match: /./, area: 'office', broad: true },
+];
+
+/** Servers the default (development) suite starts; see tests/playwright/suites.ts. */
+export const defaultPorts = [4175, 4176, 4180, 5173, 5174];
+
+const portPattern = /(?:127\.0\.0\.1|localhost):(\d{4,5})/g;
+const importPattern = /from\s+['"]@editor-platform\/([a-z0-9-]+)/g;
+const helperPattern = /from\s+['"]\.\/([\w.-]+?)(?:\.ts)?['"]/g;
+
+/** Local helper modules (tests/e2e/*.ts) a spec or helper imports, transitively. */
+function helpers(dir, file, seen = new Set()) {
+  const text = readFileSync(join(dir, file), 'utf8');
+  for (const [, name] of text.matchAll(helperPattern)) {
+    const helper = `${name}.ts`;
+    if (seen.has(helper) || !existsSync(join(dir, helper))) continue;
+    seen.add(helper);
+    helpers(dir, helper, seen);
+  }
+  return seen;
+}
+
+/**
+ * Every spec in tests/e2e with its area, owners (rule owners plus the workspace packages
+ * the spec imports), local helpers and the ports it opens
+ * beyond the development servers (`needs`).
+ * @param {string} root repository root
+ */
+export function classifySpecs(root) {
+  const dir = join(root, 'tests/e2e');
+  return readdirSync(dir)
+    .filter((file) => file.endsWith('.spec.ts'))
+    .sort()
+    .map((file) => {
+      const name = file.slice(0, -'.spec.ts'.length);
+      const rule = specRules.find((entry) => entry.match.test(name));
+      const local = [...helpers(dir, file)].sort();
+      const ports = new Set();
+      const owners = new Set(rule.owners ?? []);
+      for (const source of [file, ...local]) {
+        const text = readFileSync(join(dir, source), 'utf8');
+        for (const [, port] of text.matchAll(portPattern))
+          if (!defaultPorts.includes(Number(port))) ports.add(Number(port));
+        // Packages a spec imports directly are owners too (fixtures, models, helpers).
+        if (source === file)
+          for (const [, name] of text.matchAll(importPattern))
+            if (existsSync(join(root, 'packages', name))) owners.add(name);
+      }
+      return {
+        file: `tests/e2e/${file}`,
+        name,
+        area: rule.area,
+        heavy: !!rule.heavy,
+        broad: !!rule.broad,
+        owners: [...owners].sort(),
+        suite: rule.suite,
+        helpers: local.map((helper) => `tests/e2e/${helper}`),
+        needs: [...ports].sort((a, b) => a - b),
+      };
+    });
+}
+
+/** Specs the default development suite can run: no server beyond the development set. */
+export function developmentSpecs(specs) {
+  return specs.filter((spec) => spec.needs.length === 0);
+}
+
+/**
+ * Workspace dependency graph from package.json (dependencies and peerDependencies on
+ * @editor-platform/*; test-only devDependencies do not reach a browser), keyed by
+ * directory name, with the reverse edges.
+ * @param {string} root repository root
+ */
+export function workspaceGraph(root) {
+  const deps = new Map();
+  const dirs = new Map();
+  for (const group of ['packages', 'apps'])
+    for (const name of readdirSync(join(root, group))) {
+      const manifest = join(root, group, name, 'package.json');
+      if (!existsSync(manifest)) continue;
+      const pkg = JSON.parse(readFileSync(manifest, 'utf8'));
+      dirs.set(pkg.name, name);
+      deps.set(
+        name,
+        [pkg.dependencies, pkg.peerDependencies]
+          .filter(Boolean)
+          .flatMap(Object.keys)
+          .filter((dep) => dep.startsWith('@editor-platform/')),
+      );
+    }
+  const users = new Map([...deps.keys()].map((name) => [name, new Set()]));
+  for (const [name, list] of deps)
+    for (const dep of list) {
+      const target = dirs.get(dep);
+      if (target && target !== name) users.get(target).add(name);
+    }
+  return { users };
+}
+
+/** The packages that use `names`, directly or through others, including `names`. */
+export function dependents(graph, names) {
+  const seen = new Set(names);
+  const queue = [...names];
+  while (queue.length)
+    for (const user of graph.users.get(queue.pop()) ?? [])
+      if (!seen.has(user)) {
+        seen.add(user);
+        queue.push(user);
+      }
+  return seen;
+}

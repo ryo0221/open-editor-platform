@@ -105,7 +105,7 @@ npm run test:e2e -- tests/e2e/issue2-embedding.spec.ts tests/e2e/issue2-mobile.s
 
 ### Playwrightのスイート
 
-Playwrightの設定は[`playwright.config.ts`](../playwright.config.ts)の1つだけです。対象spec・project・server・出力先の組み合わせは[`tests/playwright/suites.ts`](../tests/playwright/suites.ts)に名前付きスイートとして定義し、環境変数`E2E_SUITE`で選びます。未指定時は`default`（dev serverでの全desktop/mobile E2E）です。
+Playwrightの設定は[`playwright.config.ts`](../playwright.config.ts)の1つだけです。対象spec・project・server・出力先の組み合わせは[`tests/playwright/suites.ts`](../tests/playwright/suites.ts)に名前付きスイートとして定義し、環境変数`E2E_SUITE`で選びます。未指定時は`default`（dev serverだけで動く全desktop/mobile E2E。追加サーバーが要るspecは下の名前付きスイート）です。
 
 ```sh
 npm run build
@@ -126,6 +126,33 @@ E2E_SUITE=production npx playwright test tests/e2e/collaboration.spec.ts
 | `apps/extension-reference/playwright.config.ts`            | `E2E_SUITE=extension-reference`              |
 
 新しいspecを特定のスイートに含めるときは`suites.ts`の対象を更新し、`E2E_SUITE=<name> npx playwright test --list`で検出数を確認します。新しい設定ファイルは追加しません。
+
+### 領域別スイートと影響範囲の実行
+
+`tests/e2e`のspecは[`scripts/e2e/areas.mjs`](../scripts/e2e/areas.mjs)で領域に分かれます。specの名前の規則で領域と持ち主のパッケージ（spec自身がimportするパッケージを含む）を決め、spec本文と補助モジュールに書かれたポートから、開発サーバー以外に必要なサーバーを読み取ります。新しいspecは既存の名前の規則に合わせるか、`specRules`に規則を足します。`npm run test:tooling`が、持ち主の実在と、追加サーバーが要るspecに名前付きスイートがあることを検査します。
+
+| スイート            | 対象                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `default`           | 開発サーバーだけで動く全spec（下の3つの合計）                                                 |
+| `office`            | 文書・スライド・デザイン・アニメーションなどと、複数Editorにまたがるspec                      |
+| `engineering`       | BIM・建設・工場・PCB・回路・ラダー・図面などのspec                                            |
+| `engineering-heavy` | 実際に形状を計算するCAD・解析・図面セット・キャラクターのspec。1 worker                       |
+| 名前付きスイート    | Artifact Host、Animation Host、独立CAD/BIM Hostなどが要るspec。`affected.mjs --all`が一覧する |
+
+変更の受け入れでは、変更が届くspecだけを流し、同じspecをmainでも流して、ブランチだけで失敗するものを確認します。依存関係は各`package.json`の`dependencies`から逆にたどります。共通パッケージ（`editor-core`など）やPlaygroundの共通部分の変更は軽いspec全部を選び、`engineering-heavy`は自分のパッケージかそのエンジニアリング系の依存が変わったときだけ選びます（`--heavy`で常に含めます）。
+
+```sh
+npm run test:e2e:affected                                   # origin/mainからの変更で選ばれるspecを表示
+npm run test:e2e:affected -- --json > work/e2e/plan.json    # 同じ選択を保存
+npm run test:e2e:affected -- --run --out work/e2e/branch.json
+# mainの別checkout（npm ci済み）で、同じspecを流す
+node <branch checkout>/scripts/e2e/affected.mjs --from-json work/e2e/plan.json --run --out work/e2e/main.json
+npm run test:e2e:compare -- work/e2e/branch.json work/e2e/main.json
+```
+
+`--run`は開発サーバーで動くspecだけを流します。追加サーバーが要るspecは、表示された`E2E_SUITE=<name>`で別に流します（`.production`のスイートは先に`npm run build`）。mainのcheckoutは`node_modules`を共有せず、その場で`npm ci`します。workspaceのlinkが元のcheckoutを指し、mainではなくブランチのコードを検査してしまうためです。
+
+全件は`npm run test:e2e:affected -- --all`が示す`default`（または`office`・`engineering`・`engineering-heavy`）と名前付きスイートの合計で、変更ごとではなく夜間などにまとめて実行します。
 
 文書だけの変更では、記載したAPI・コマンド・リンク、format、公開snapshotへの収録と残留チェックを確認します。実施していないunit/browser検証を文書変更の結果として再掲しません。PRを作成したことや自動CIが存在することも検証の実施を意味しません。
 
