@@ -1,10 +1,5 @@
 import { easingProgress } from '@editor-platform/easing';
-import {
-  requireAnimation as check,
-  type Rational,
-  type TimeMapping,
-  type Keyframe,
-} from './model';
+import { requireAnimation as check, type Rational, type TimeMapping, type Keyframe } from './model';
 import { tick } from './validate';
 export function frameTick(frame: number, timebase: number, fps: Rational): number {
   tick(frame);
