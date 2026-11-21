@@ -143,6 +143,8 @@ E2E_SUITE=production npx playwright test tests/e2e/collaboration.spec.ts
 
 変更の受け入れでは、変更が届くspecだけを流し、同じspecをmainでも流して、ブランチだけで失敗するものを確認します。依存関係は各`package.json`の`dependencies`から逆にたどります。共通パッケージ（`editor-core`など）やPlaygroundの共通部分の変更は軽いspec全部を選び、`engineering-heavy`は自分のパッケージかそのエンジニアリング系の依存が変わったときだけ選びます（`--heavy`で常に含めます）。
 
+Hostの種類ごとのファイル（`apps/<host>/src/kinds/<area>/<kind>.tsx`）は、`kindPackages`に書いたその種類のパッケージの変更として扱います。領域の一覧（`kinds/office.ts`、`kinds/engineering.ts`と、同じディレクトリの種類名でないファイル）は、一覧が並べるパッケージと連携ファイル（`app/estimate-bim.ts`など）の変更として扱います。`npm run test:tooling`が、パッケージの変更ごとの選択を段階1の固定値（`scripts/tests/e2e-stage1-selection.json`）と比べます。依存を意図して切ったとき（`removedDependencies`）以外に選択が減ると失敗します。
+
 ```sh
 npm run test:e2e:affected                                   # origin/mainからの変更で選ばれるspecを表示
 npm run --silent test:e2e:affected -- --json > work/e2e/plan.json    # 同じ選択を保存

@@ -1,8 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
-import { classifySpecs, corePackages, engineeringPackages, workspaceGraph } from '../e2e/areas.mjs';
+import {
+  classifySpecs,
+  corePackages,
+  dependents,
+  engineeringPackages,
+  kindPackages,
+  removedDependencies,
+  workspaceGraph,
+} from '../e2e/areas.mjs';
 import { planCommands, planRun } from '../e2e/affected.mjs';
 import { compareStatuses, runErrors, testStatuses } from '../e2e/compare.mjs';
 
@@ -116,6 +125,89 @@ test('Host-only specs go to E2E_SUITE=host; reference apps reach their surface s
     assert(animation.includes(name), name);
   assert(!animation.some((name) => /^(cad|bim|pcb)-/.test(name)), animation.join());
   assert(names(plan('apps/graph-reference/src/host.tsx').run).includes('structured-graph'));
+});
+
+const reached = (...changed) => {
+  const result = plan(...changed);
+  return new Set(names([...result.run, ...result.deferred]));
+};
+const packageChange = (name) => reached(`packages/${name}/src/index.ts`);
+
+test('every kind a Host lists maps to its definition package', () => {
+  for (const app of ['playground', 'artifact-host'])
+    for (const area of ['office', 'engineering']) {
+      const file = join(root, 'apps', app, 'src/kinds', `${area}.ts`);
+      const text = readFileSync(file, 'utf8');
+      for (const [, pkg] of text.matchAll(/@editor-platform\/([a-z0-9-]+)\/kind['"]/g)) {
+        const kind = readFileSync(join(root, 'packages', pkg, 'src/kind.ts'), 'utf8');
+        for (const [, name] of kind.matchAll(/^\s*kind: '([\w-]+)'/gm)) {
+          assert(kindPackages[name], `${app} ${area}: no kindPackages entry for ${name}`);
+          assert(kindPackages[name].includes(pkg), `kindPackages.${name} lacks ${pkg}`);
+        }
+      }
+    }
+  for (const list of Object.values(kindPackages))
+    for (const name of list) assert(graph.users.has(name), name);
+});
+
+test('a Host kind file selects its kind, an area list the packages it lists', () => {
+  const data = reached('apps/playground/src/kinds/office/data.tsx');
+  assert(data.has('issue2-data') && !data.has('cad-playground'), [...data].join());
+  assert(!data.has('document-performance'), 'data.tsx selects document specs');
+  const review = reached('apps/playground/src/kinds/office/review.tsx');
+  assert(
+    review.has('review-viewer-pdf') || [...review].some((name) => /^review-viewer-/.test(name)),
+  );
+  assert(!review.has('cad-playground'), 'a core kind package stands for its own kind only');
+  // Ryo's review (#46): the engineering list reaches Estimate through app/estimate-bim.ts.
+  const engineering = reached('apps/playground/src/kinds/engineering.ts');
+  for (const name of ['estimate-editor', 'cad-playground', 'bim-hosts', 'pcb-playground'])
+    assert(engineering.has(name), name);
+  const office = reached('apps/playground/src/kinds/office.ts');
+  assert(office.has('document-performance') && office.has('fiction-map-r0'));
+  assert(!office.has('pcb-playground'), 'the office list selects engineering specs');
+  const host = reached('apps/artifact-host/src/kinds/office/surfaces.tsx');
+  assert(host.has('estimate-editor') && host.has('host-integration'));
+  assert(reached('apps/artifact-host/src/kinds/engineering/surfaces.tsx').has('bim-hosts'));
+  assert.deepEqual([...reached('apps/playground/src/kinds/office/data.test.ts')], []);
+  // Shared kinds files keep the Playground rule: every light spec.
+  const shared = plan('apps/playground/src/kinds/surfaces.tsx');
+  assert.equal(shared.run.length, specs.filter((spec) => !spec.heavy).length);
+});
+
+test('cut dependencies: the moved-to package selects both sides', () => {
+  // KR2: character no longer uses animation-core for easing (video export still does).
+  assert(!packageChange('animation-core').has('character-laputa-range'));
+  const easing = packageChange('easing');
+  for (const name of ['animation-2d', 'character-laputa-range', 'character-playground'])
+    assert(easing.has(name), name);
+  for (const name of ['estimate-engineering', 'cad-core', 'bim-core']) {
+    const selected = packageChange(name);
+    for (const spec of specs.filter((entry) => /^estimate-/.test(entry.name)))
+      assert(selected.has(spec.name), `${name} -> ${spec.name}`);
+  }
+});
+
+test('no package change selects fewer specs than stage 1, except through a cut dependency', () => {
+  const stage1 = JSON.parse(readFileSync(join(root, 'scripts/tests/e2e-stage1-selection.json')));
+  const current = new Set(names(specs));
+  const unexplained = [];
+  for (const [name, before] of Object.entries(stage1.packages)) {
+    assert(graph.users.has(name), `${name} is gone: update the snapshot on purpose`);
+    const now = packageChange(name);
+    for (const spec of before.filter((entry) => current.has(entry) && !now.has(entry))) {
+      // Allowed only where a listed cut explains it: the package reaches the cut dependency (or
+      // is it), the spec stays on the user's side and the moved-to package still selects it.
+      const cut = removedDependencies.find(
+        (entry) =>
+          dependents(graph, [name]).has(entry.from) &&
+          packageChange(entry.user).has(spec) &&
+          packageChange(entry.to).has(spec),
+      );
+      if (!cut) unexplained.push(`${name} -> ${spec}`);
+    }
+  }
+  assert.deepEqual(unexplained, []);
 });
 
 test('comparison counts only failures that happen on the branch alone', () => {
