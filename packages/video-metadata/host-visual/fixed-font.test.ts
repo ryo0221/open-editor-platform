@@ -6,17 +6,14 @@ import { unzipSync, zipSync } from 'fflate';
 import { loadFixedFontAsset, readFixedFontAsset, assertFixedText } from './fixed-font';
 const signal = () => new AbortController().signal;
 it('retains exact existing font, glyph manifest and notice; rejects mutation and fallback glyphs', async () => {
-  vi.stubGlobal(
-    'fetch',
-    async (url: URL) =>
-      new Response(
-        new Uint8Array(
-          readFileSync(
-            path.join('apps/playground/public/office-fonts', path.basename(url.pathname)),
-          ),
-        ),
-      ),
-  );
+  const root = 'apps/playground/public/office-fonts';
+  let hostedNotice = readFileSync(path.join(root, 'COPYRIGHT.txt'));
+  vi.stubGlobal('fetch', async (url: URL) => {
+    const filename = path.basename(url.pathname);
+    const data =
+      filename === 'COPYRIGHT.txt' ? hostedNotice : readFileSync(path.join(root, filename));
+    return new Response(new Uint8Array(data));
+  });
   try {
     const { bytes, plan } = await loadFixedFontAsset(
       'https://local.test/office-fonts/manifest.json',
@@ -44,6 +41,18 @@ it('retains exact existing font, glyph manifest and notice; rejects mutation and
     await expect(
       readFixedFontAsset(bytes, { ...plan, weight: 'bold' }, signal()),
     ).rejects.toThrow();
+
+    // The public a9e7083 snapshot supplied this original notice for saved Video assets.
+    hostedNotice = readFileSync(
+      new URL('./fixtures/noto-cjk-original-notice.txt', import.meta.url),
+    );
+    files['COPYRIGHT.txt'] = hostedNotice;
+    const archived = zipSync(files, { level: 0, mtime: new Date(1980, 0, 1) });
+    const reopened = await readFixedFontAsset(archived, plan, signal());
+    expect(Buffer.from(reopened.notice)).toEqual(hostedNotice);
+    await expect(
+      loadFixedFontAsset('https://local.test/office-fonts/manifest.json', 'regular', signal()),
+    ).rejects.toThrow('notice mismatch');
   } finally {
     vi.unstubAllGlobals();
   }

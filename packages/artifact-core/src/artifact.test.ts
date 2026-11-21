@@ -65,6 +65,22 @@ describe('artifact lifecycle', () => {
     expect(() => deserializeArtifact('{"schemaVersion":99}')).toThrow();
     expect(() => deserializeArtifact('null')).toThrow();
   });
+  it('rejects repeated saved version IDs even when each content hash is valid', async () => {
+    const first = await commitVersion(
+      createArtifact('test', 'Example', { text: 'first' }),
+      null,
+      null,
+    );
+    const second = await commitVersion(updateDraft(first, { text: 'second' }), null, null);
+    for (const version of second.versions) {
+      const duplicate = { ...version, versionId: first.versions[0].versionId };
+      expect(() =>
+        deserializeArtifact(
+          serializeArtifact({ ...first, versions: [...first.versions, duplicate] }),
+        ),
+      ).toThrow('Duplicate artifact version ID');
+    }
+  });
 });
 for (const kind of ['memory', 'indexeddb'])
   describe(`${kind} storage contract`, () => {
