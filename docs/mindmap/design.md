@@ -182,6 +182,6 @@ Integration branch `feat/mindmap`（mainから）に段階PRを入れ、全段�
 
 - 合意を求める範囲: 新しいkind `mindmap`（Structured Graphの拡張にしない）、座標を保存しない自動配置、`collapsed`・色・印を保存する見た目にすること、local-only。
 - 意図的に先送りするもの: 共同編集、template/reuse、OPML等の外部形式、ノード間の交差リンク、画像の添付、全周の放射状配置、Slideでの枝ごとの登場（E4）、版への固定参照（E5）、mindmapからHostの項目を直接編集する経路。
-- 未決定・リスク: 画面とSVGの改行位置の差（推定幅）、Undo後に発行するIDと保持版の衝突回避のAPI（M1で確定）、実OS IMEと実機touchの検証環境。
+- 未決定・リスク: 画面とSVGの改行位置の差（推定幅）、実OS IMEと実機touchの検証環境。
 - 機能受け入れを妨げる条件: N01–N14と宣言したC01・C02・C03・C07・C10のうち適用される条件にFAILかNOT RUNが一つでも残れば、その範囲をlocal機能受け入れ済みにしない（[受け入れ条件](../editor-acceptance.md#段階ごとの受け入れ)）。例えば実OS日本語IMEがNOT RUNなら、C01を宣言から外すのではなく、受け入れ済みと説明しない。integration branchやmainへprototypeとして入れるかどうかは、露出範囲・未検証の条件・影響を明記した別の判断として扱い、受け入れとは混同しない。Performance・releaseも別の判断。
 - 見直す契約: 候補contentの段階での部分採用で足りない場合はC03とproposal-reviewの契約を、projectionの要件が増えた場合はHost統合の契約を見直す。
