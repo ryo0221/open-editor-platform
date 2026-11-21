@@ -123,6 +123,19 @@ describe('#20 vertical writing', () => {
         expect(along + r.size / 2).toBeLessThanOrEqual((vertical ? box.height : box.width) + 1e-6);
       }
     }
+    // Neighbouring readings longer than their bases do not overlap (Codex on #29).
+    for (const vertical of [true, false]) {
+      const pair = layoutGridText('志《こころざし》志《こころざし》', box, {
+        vertical,
+        fontSize: 28,
+      });
+      expect(pair.ruby).toHaveLength(10);
+      const along = pair.ruby.map((r) => (vertical ? r.y : r.x));
+      for (let k = 1; k < along.length; k++)
+        expect(along[k]! - along[k - 1]!).toBeGreaterThanOrEqual(
+          (pair.ruby[k]!.size + pair.ruby[k - 1]!.size) / 2 - 1e-6,
+        );
+    }
     // An unbreakable base longer than the column shrinks until it fits the column.
     const tall = { x: 0, y: 0, width: 200, height: 100 };
     const fit = layoutGridText('｜あいうえおかきくけこ《よみ》', tall, {

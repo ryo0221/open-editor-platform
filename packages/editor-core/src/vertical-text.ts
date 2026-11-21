@@ -215,6 +215,12 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       positions.set(line.start + offset, { from, to: from + g.advance });
       offset += g.text.length;
     }
+    // The line's room along it: a reading that overhangs the box edge is moved in, and one
+    // longer than the whole line is set closer (Codex on #29). Neighbouring readings are kept
+    // apart: pushed along the line, and all set closer when together they need more room.
+    const lo = o.vertical ? inner.y : inner.x;
+    const hi = lo + alongSpace;
+    const items: { chars: string[]; step: number; begin: number }[] = [];
     for (const r of ruby) {
       if (r.start < line.start || r.start >= Math.max(line.end, line.start + 1)) continue;
       const first = positions.get(r.start);
@@ -222,17 +228,33 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       if (!first || lastStart === undefined) continue;
       const to = positions.get(lastStart)!.to;
       const chars = [...graphemes.segment(r.text)].map((s) => s.segment);
-      // The line's room along it: a reading that overhangs the box edge is moved in, and one
-      // longer than the whole line is set closer (Codex on #29).
-      const lo = o.vertical ? inner.y : inner.x;
-      const hi = lo + alongSpace;
+      if (!chars.length) continue;
       const step = Math.min(
         rubySize,
         Math.max(to - first.from, rubySize * chars.length) / chars.length,
-        Math.max(0, hi - lo) / chars.length,
       );
-      const span = step * chars.length;
-      const begin = Math.min(Math.max((first.from + to) / 2 - span / 2, lo), hi - span);
+      items.push({ chars, step, begin: (first.from + to) / 2 - (step * chars.length) / 2 });
+    }
+    items.sort((a, b) => a.begin - b.begin);
+    const room = Math.max(0, hi - lo);
+    const total = items.reduce((n, it) => n + it.step * it.chars.length, 0);
+    if (total > room)
+      for (const it of items) {
+        const centre = it.begin + (it.step * it.chars.length) / 2;
+        it.step *= room / total;
+        it.begin = centre - (it.step * it.chars.length) / 2;
+      }
+    let end = lo;
+    for (const it of items) {
+      it.begin = Math.max(it.begin, end);
+      end = it.begin + it.step * it.chars.length;
+    }
+    let bound = hi;
+    for (const it of [...items].reverse()) {
+      it.begin = Math.min(it.begin, bound - it.step * it.chars.length);
+      bound = it.begin;
+    }
+    for (const { chars, step, begin } of items)
       chars.forEach((text, k) => {
         const along = begin + step * (k + 0.5);
         rubyOut.push(
@@ -241,7 +263,6 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
             : { text, x: along, y: lineCentre - size / 2 - rubySize * 0.6, size: step },
         );
       });
-    }
   });
   return {
     vertical: o.vertical,

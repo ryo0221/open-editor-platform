@@ -531,11 +531,18 @@ function largestFont(d: Drawing) {
  */
 export const usesGridText = (d: Pick<Drawing, 'text' | 'typography' | 'runs'>) =>
   d.typography?.writingMode === 'vertical-rl' ||
-  (!hasRunFormatting(d.runs) && hasRubyNotation(d.text ?? ''));
-/** Runs that set some style of their own; plain runs (as text entry leaves them) do not count. */
-const hasRunFormatting = (runs: readonly TextRun[] | undefined) =>
+  (!hasRunFormatting(d.runs, d.typography) && hasRubyNotation(d.text ?? ''));
+/**
+ * Runs that set some style of their own. Plain runs (as text entry leaves them) do not count, nor
+ * does a run value equal to the box's own, as export font normalisation writes (Codex on #29).
+ */
+const hasRunFormatting = (runs: readonly TextRun[] | undefined, box: TextStyle | undefined) =>
   (runs ?? []).some(
-    (run) => run.style && Object.values(run.style).some((value) => value !== undefined),
+    (run) =>
+      run.style &&
+      (Object.keys(run.style) as (keyof TextStyle)[]).some(
+        (key) => run.style![key] !== undefined && run.style![key] !== box?.[key],
+      ),
   );
 function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
   const s = d.typography ?? {},
