@@ -1133,6 +1133,9 @@ export class CadViewport {
     ];
     this.grid.visible = this.axes.visible = this.marks.visible = this.jointMarks.visible = false;
     this.partPmi.visible = !this.partsPose;
+    // Drawing is suspended while recording, so each frame's underlays follow its own camera here
+    // (Codex on #35).
+    this.underlaysFor(camera);
     this.lighting.prepare([this.bodies, this.parts], true);
     this.renderScene(camera);
     [this.grid.visible, this.axes.visible, this.marks.visible, this.jointMarks.visible] = shown;

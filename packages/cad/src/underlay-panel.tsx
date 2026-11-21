@@ -83,7 +83,7 @@ export function UnderlaysSection({
   const [note, setNote] = useState('');
   const [tolerance, setTolerance] = useState('1');
   const [results, setResults] = useState<
-    ReadonlyMap<string, { contentHash: string; result: CadUnderlayDeviation }>
+    ReadonlyMap<string, { contentHash: string; shown: string; result: CadUnderlayDeviation }>
   >(new Map());
   const [heatOn, setHeatOn] = useState(true);
 
@@ -112,6 +112,11 @@ export function UnderlaysSection({
     return asset ? decoded.get(asset.sha256) : undefined;
   };
   const tol = Math.max(0.001, Number(tolerance) || 1);
+  // A result holds for the content and the shown bodies it compared: hiding a body or changing
+  // the named view makes it stale too (Codex on #35).
+  const shownKey = [...shown].sort().join('\u0000');
+  const current = (r: { contentHash: string; shown: string } | undefined) =>
+    !!r && r.contentHash === snapshot.contentHash && r.shown === shownKey;
   const meshes =
     snapshot.meshes?.contentHash === snapshot.contentHash ? snapshot.meshes.meshes : undefined;
 
@@ -120,10 +125,7 @@ export function UnderlaysSection({
     const items: CadViewportUnderlay[] = list.flatMap((u) => {
       const d = imageOf(u);
       const r = results.get(u.id);
-      const heat =
-        heatOn && r && r.contentHash === snapshot.contentHash
-          ? heatCanvas(r.result, tol)
-          : undefined;
+      const heat = heatOn && r && current(r) ? heatCanvas(r.result, tol) : undefined;
       if (!d && !heat) return [];
       return [
         {
@@ -138,7 +140,7 @@ export function UnderlaysSection({
     });
     view.current?.setUnderlays(items);
     // imageOf reads `decoded`
-  }, [list, decoded, results, heatOn, tol, snapshot.contentHash, meshes, view]);
+  }, [list, decoded, results, heatOn, tol, snapshot.contentHash, shownKey, meshes, view]);
   useEffect(() => () => view.current?.setUnderlays([]), [view]);
 
   const change = (id: string, patch: Partial<CadUnderlay>) => {
@@ -170,7 +172,10 @@ export function UnderlaysSection({
     if (!d || !meshes) return;
     try {
       const result = underlayDeviation(u, d.image, meshes, shown);
-      setResults((m) => new Map([...m, [u.id, { contentHash: snapshot.contentHash, result }]]));
+      setResults(
+        (m) =>
+          new Map([...m, [u.id, { contentHash: snapshot.contentHash, shown: shownKey, result }]]),
+      );
       setNote(
         result.bodies.length
           ? `Compared with ${u.name} (${result.bodies.length} bodies)`
@@ -215,7 +220,7 @@ export function UnderlaysSection({
         <ul aria-label="Underlays">
           {list.map((u) => {
             const r = results.get(u.id);
-            const stale = r && r.contentHash !== snapshot.contentHash;
+            const stale = r && !current(r);
             const asset = doc.assets.find((a) => a.id === u.assetId);
             const missing = asset && failed.has(asset.sha256);
             return (
@@ -326,7 +331,9 @@ export function UnderlaysSection({
                 {r && (
                   <table aria-label={`Deviation from ${u.name}`}>
                     <caption>
-                      {stale ? 'The model changed: check again' : `Cell ${mm(r.result.cellMm)}`}
+                      {stale
+                        ? 'The model or the shown bodies changed: check again'
+                        : `Cell ${mm(r.result.cellMm)}`}
                     </caption>
                     <thead>
                       <tr>

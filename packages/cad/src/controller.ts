@@ -2489,12 +2489,22 @@ export class CadController {
       byteLength: file.bytes.byteLength,
       mediaType: cadAssetMediaTypes[kind],
     };
+    // Storing the image is pending work, as for textures: a document switch waits for it rather
+    // than dropping the underlay into a disposed kernel (Codex on #35).
+    const operation = ++this.operation;
+    this.busy = true;
+    this.staging = true;
+    this.emit();
     try {
       await assets.stage([{ ref, bytes: file.bytes }]);
     } catch (error) {
+      this.staging = false;
+      if (operation === this.operation) this.busy = false;
       const message = error instanceof Error ? error.message : String(error);
       return refuse('asset-stage-failed', `${describeCode('texture-stage-failed')}${message}`);
     }
+    this.staging = false;
+    if (operation === this.operation) this.busy = false;
     // Built on the content as it is now (an edit while the image was stored is kept).
     const now = this.coordinator.content;
     const held = now.assets.find((a) => a.id === ref.id);
