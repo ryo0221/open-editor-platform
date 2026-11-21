@@ -47,6 +47,8 @@ export const cadNativeKinds: ReadonlySet<string> = new Set([
   'construction',
   // DW3c-2: a drawing keeps the asset bytes of the CAD versions it draws.
   'drawing',
+  // #22: a design (manga pages) keeps page art and reference images of up to 64 MiB each in its versions.
+  'design',
 ]);
 /** The Host's native JSON limit for a record of this kind (undefined: the Host's own). */
 export const hostNativeLimitOf = (kind: string) =>

@@ -199,7 +199,9 @@ export function viewRows(
   if (view.groupBy) {
     const groups = new Map<string, DataRow[]>();
     for (const row of rows) {
-      const key = String(value(data, row, view.groupBy) ?? '(empty)');
+      // An empty text and a missing value are the same "(empty)" group (the grid shows both as "(empty)")
+      const v = value(data, row, view.groupBy);
+      const key = v === null || v === undefined || v === '' ? '(empty)' : String(v);
       const group = groups.get(key) ?? [];
       group.push(row);
       groups.set(key, group);

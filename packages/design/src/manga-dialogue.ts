@@ -2,7 +2,7 @@ import type { DesignElement } from './model';
 import { rectanglePolygon } from './division-geometry';
 
 /** Fit a horizontal text box inside every edge of the convex panel, in world coordinates. */
-export function mangaDialoguePlacement(parent: DesignElement, width = 300) {
+export function mangaDialoguePlacement(parent: DesignElement, width = 300, height = 70) {
   const b = parent.bounds;
   const points = parent.panelGeometry
     ? parent.panelGeometry.polygon.map((p) => ({ x: p.x * b.width, y: p.y * b.height }))
@@ -12,7 +12,6 @@ export function mangaDialoguePlacement(parent: DesignElement, width = 300) {
     x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
     y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
   };
-  const height = 70;
   const margin = Math.max(8, parent.strokeWidth ?? 0);
   let scale = 1;
   for (const [i, a] of points.entries()) {

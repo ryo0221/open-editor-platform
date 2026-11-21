@@ -479,8 +479,11 @@ export const factoryLimits = Object.freeze({
   maxTimeMs: 31_536_000_000,
   maxLengthMm: 10_000_000,
   maxSpeedMmS: 100_000,
-  /** One simulation run stops with `event-limit` after this many events. */
-  events: 10_000_000,
+  /**
+   * One simulation run stops with `event-limit` after this many events. #17: a year of a busy
+   * line takes hundreds of millions; such a run is handled in slices (`startFactoryRun`).
+   */
+  events: 1_000_000_000,
   calendars: 20,
   workerPools: 50,
   pathNodes: 2000,

@@ -89,8 +89,18 @@ it('refuses a duplicated page above the metadata limit without leaving copied el
   expect(canonicalJson(session.content)).toBe(before);
   expect(session.canUndo).toBe(false);
 });
+it('#20 captures inherited vertical writing, drawn glyph by glyph', async () => {
+  const d = fixture();
+  d.elements = d.elements.map((e) => (e.id === 'dialogue' ? { ...e, styleId: 'shared' } : e));
+  d.styles = [
+    { id: 'shared', name: 'vertical', appearance: { typography: { writingMode: 'vertical-rl' } } },
+  ] as unknown as DesignContent['styles'];
+  const saved = await commitVersion(createArtifact('design', 'vertical', d), null, 'fixture');
+  const result = await captureDesignPages(saved, saved.versions[0].versionId);
+  expect(result.ok).toBe(true);
+  expect(result.manifest.diagnostics.filter((x) => x.severity === 'error')).toEqual([]);
+});
 for (const [name, appearance] of [
-  ['writing-mode', { typography: { writingMode: 'vertical-rl' } }],
   ['ruby-run', { runs: [{ text: '漢字', style: { ruby: 'かんじ' } }] }],
   ['rotation', { rotation: 20 }],
 ] as const)

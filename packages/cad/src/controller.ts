@@ -555,6 +555,13 @@ export interface CadRebindView {
   /** Content hash of the previewed choice, whose meshes the viewport shows. */
   previewHash?: string;
 }
+/** #17: a staged export's stage starting now: `done` of `total` stages are finished. */
+export interface CadExportStage {
+  done: number;
+  total: number;
+  /** What this stage writes (a part's name, or "STEP file"). */
+  label: string;
+}
 /** A mesh file of exactly the confirmed content, with what it keeps and loses. */
 export interface CadMeshExport {
   bytes: Uint8Array;
@@ -629,6 +636,7 @@ const messages: Record<string, string> = {
     '水平面をほぼ真横から見ているため、dragでは位置が定まりません。視点を傾けるか、Inspectorの座標で移動してください。',
   'export-no-shape': '出力できる形状がありません。',
   'export-busy': '形状を計算中です。計算が終わってから、もう一度操作してください。',
+  'export-cancelled': '書き出しを取り消しました。',
   'png-not-drawn':
     '形状を3D表示していないため、PNGは書き出せません（表示のメモリー上限か、3D表示を利用できない状態）。STEP・STL・GLBは書き出せます。',
   'export-mismatch': '出力用の計算結果が現在の形状と一致しないため、出力しませんでした。',

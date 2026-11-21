@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   createArtifact,
   commitVersion,
@@ -14,6 +14,9 @@ import {
   insertDesignStroke,
   designStrokePath,
   designStrokeParent,
+  designBrushPath,
+  insertDesignBrushStroke,
+  assertDesignContent,
   replaceDesignPath,
   moveDesignPathPoint,
   type DesignContent,
@@ -153,4 +156,68 @@ it('rejects invalid or no-movement strokes and locked/readOnly insertions withou
     ).apply(initial),
   ).toThrow('read only');
   expect(initial.elements).toHaveLength(1);
+});
+
+describe('#20 brush strokes', () => {
+  const line = (pressure?: (i: number) => number) =>
+    Array.from({ length: 41 }, (_, i) => ({
+      x: i * 5,
+      y: 100,
+      ...(pressure ? { pressure: pressure(i) } : {}),
+    }));
+  const widthAt = (path: ReturnType<typeof designBrushPath>, i: number) => {
+    const a = path.subpaths[0].anchors;
+    return Math.abs(a[i].y - a[a.length - 1 - i].y);
+  };
+  it('outlines a closed filled path that tapers at both ends', () => {
+    const path = designBrushPath(line(), 8);
+    const s = path.subpaths[0];
+    expect(s.closed).toBe(true);
+    expect(s.anchors).toHaveLength(82);
+    expect(s.segments).toHaveLength(82);
+    expect(widthAt(path, 0)).toBeLessThan(widthAt(path, 20) / 3);
+    expect(widthAt(path, 40)).toBeLessThan(widthAt(path, 20) / 3);
+    expect(widthAt(path, 20)).toBeCloseTo(8 * (0.3 + 1.4 * 0.5), 0);
+  });
+  it('follows pen pressure and refuses bad samples', () => {
+    const light = designBrushPath(
+        line(() => 0.1),
+        8,
+      ),
+      heavy = designBrushPath(
+        line(() => 1),
+        8,
+      );
+    expect(widthAt(heavy, 20)).toBeGreaterThan(widthAt(light, 20) * 2.5);
+    expect(() =>
+      designBrushPath([
+        { x: 0, y: 0, pressure: 2 },
+        { x: 1, y: 1 },
+      ]),
+    ).toThrow(/Invalid/);
+    expect(() => designBrushPath(line(), 0)).toThrow(/width/);
+    const d = insertDesignBrushStroke(line(), undefined, 8).apply(createDesign());
+    const e = d.elements.at(-1)!;
+    expect(e).toMatchObject({ name: 'Brush stroke', fill: '#151515', stroke: 'none' });
+    expect(() => assertDesignContent(d)).not.toThrow();
+  });
+  it('keeps the width of a fast stroke with only two samples (Codex on #29)', () => {
+    const path = designBrushPath(
+      [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+      6,
+    );
+    const a = path.subpaths[0].anchors;
+    const mid = Math.floor(a.length / 4);
+    expect(Math.abs(a[mid].y - a[a.length - 1 - mid].y)).toBeGreaterThan(5);
+    expect(path.frame.height).toBeGreaterThan(5);
+    // A long sparse stroke stays within the path's anchor limit.
+    const long = designBrushPath(
+      Array.from({ length: 2000 }, (_, i) => ({ x: (i % 2) * 90_000, y: i * 40 })),
+      6,
+    );
+    expect(long.subpaths[0].anchors.length).toBeLessThanOrEqual(4096);
+  });
 });

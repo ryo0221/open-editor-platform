@@ -344,3 +344,41 @@ it('reports unsupported and changed source captures without partially applying t
     captureDesignAnimation({ ...ref, contentHash: '0'.repeat(64) }, source, ['frame']),
   ).toThrow('hash mismatch');
 });
+it('refuses vertical and ruby text instead of converting it horizontally (Codex on #29)', () => {
+  const font = {
+    id: 'font',
+    contentHash: '0'.repeat(64),
+    mediaType: 'font/ttf' as const,
+    base64: 'AA==',
+    attribution: 'test',
+    license: 'own',
+  };
+  for (const typography of [{ writingMode: 'vertical-rl' as const }, {}]) {
+    const source = fixture();
+    source.elements.push({
+      id: 'line',
+      type: 'text',
+      name: 'Line',
+      bounds: { x: 120, y: 200, width: 100, height: 100 },
+      text: typography.writingMode ? '台詞' : '漢字《かんじ》',
+      fill: '#111111',
+      parentId: 'frame',
+      typography,
+    } as DesignContent['elements'][number]);
+    const ref = {
+      artifactId: 'design',
+      versionId: 'v1',
+      compositionId: 'frame',
+      contentHash: reuseHash(source),
+    };
+    const plan = captureDesignAnimation(ref, source, ['frame'], font);
+    expect(plan.content).toBeUndefined();
+    expect(plan.diagnostics).toContainEqual(
+      expect.objectContaining({
+        sourceId: 'line',
+        severity: 'error',
+        message: expect.stringContaining('Vertical writing and ruby'),
+      }),
+    );
+  }
+});

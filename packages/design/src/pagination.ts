@@ -216,7 +216,7 @@ export async function captureDesignPages(
       code: 'raster-pdf',
       severity: 'warning',
       message:
-        'PNG/PDF are derived raster representations; native editing, annotations, typography and vector fidelity are not preserved. Vertical text and ruby are unsupported.' +
+        'PNG/PDF are derived raster representations; native editing, annotations, typography and vector fidelity are not preserved. Vertical text and ruby are drawn glyph by glyph.' +
         (settings.mode === 'm0' ? ' Balloon paths require explicit vector capture.' : ''),
     },
   ];
@@ -241,6 +241,7 @@ export async function captureDesignPages(
     'padding',
     'list',
     'overflow',
+    'writingMode',
   ];
   const pages = d.pagination.pages.map((p) => {
     const frame = d.elements.find((e) => e.id === p.frameId)!;
@@ -257,7 +258,7 @@ export async function captureDesignPages(
           code: 'text-style',
           severity: 'error',
           elementId: e.id,
-          message: 'Unknown text features (including vertical text/ruby) are unsupported',
+          message: 'Unknown text features are unsupported',
         });
       const paint =
         settings.mode === 'vector' && e.id !== frame.id

@@ -78,6 +78,7 @@ import {
   type CadToleranceStacksOperation,
 } from './tolerance-stacks';
 import { applyInterferenceOperation, type CadInterferenceOperation } from './interference';
+import { applyMotionsOperation, type CadMotionsOperation } from './motions';
 import { jointRefPath } from './joints';
 import { remapTopoName, type CadTopologyRef } from './topology';
 import { assertCad, cadId, record, validateCadAppearance } from './validation';
@@ -251,6 +252,7 @@ export type CadOperation =
   | CadDesignTargetsOperation
   | CadSightChecksOperation
   | CadToleranceStacksOperation
+  | CadMotionsOperation
   | CadInterferenceOperation
   /**
    * An edit with its joint children's poses solved from the candidate's part evaluations
@@ -983,6 +985,8 @@ function apply(
       return applySightChecksOperation(next, op);
     case 'setToleranceStacks':
       return applyToleranceStacksOperation(next, op);
+    case 'setMotions':
+      return applyMotionsOperation(next, op);
     case 'insertInterferenceAllowance':
     case 'removeInterferenceAllowance':
       return applyInterferenceOperation(next, op);

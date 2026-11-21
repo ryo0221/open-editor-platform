@@ -491,3 +491,26 @@ test('#21 a balloon over a marked figure is flagged and stays put when the panel
   expect(content.elements.filter((e) => e.mangaRole === 'balloon')).toHaveLength(1);
   expect(content.elements.filter((e) => e.mangaRole === 'keep-out')).toHaveLength(1);
 });
+
+test('#20 vertical balloon dialogue renders column by column and saves', async ({
+  page,
+  baseURL,
+}, info) => {
+  const independent = host(baseURL),
+    panel = await open(page, independent);
+  await panel.getByRole('button', { name: '連動コマ割りをプレビュー', exact: true }).click();
+  await panel.getByRole('button', { name: 'このコマ割りを採用', exact: true }).click();
+  await panel.getByLabel('台詞を縦書きで入れる', { exact: true }).check();
+  await panel
+    .getByRole('button', { name: /^Add balloon to panel / })
+    .first()
+    .click();
+  await closeTools(page);
+  const before = (await native(page, independent)).draft.content;
+  const dialogue = before.elements.find(
+    (e) => e.type === 'text' && e.typography?.writingMode === 'vertical-rl',
+  )!;
+  expect(dialogue.text).toBe('台詞');
+  await expect(page.locator('[data-writing-mode="vertical-rl"]').first()).toBeVisible();
+  await page.screenshot({ path: info.outputPath('manga-vertical-balloon.png'), fullPage: true });
+});

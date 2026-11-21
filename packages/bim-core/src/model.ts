@@ -429,6 +429,20 @@ export interface BimDocument {
    * this over 1,750 (`bimBodyLimits`); coordinates, the 1 mm minimum and materials do not.
    */
   inhabitantHeightMm?: number;
+  /** #19: named 3D cameras to come back to (absent when none). */
+  cameras?: BimCamera[];
+}
+/**
+ * #19: a saved 3D camera: where it stands, what it looks at, which way is up (world mm, z up)
+ * and its vertical field of view.
+ */
+export interface BimCamera {
+  id: string;
+  name: string;
+  position: Vec3;
+  target: Vec3;
+  up: Vec3;
+  fovDeg: number;
 }
 
 export interface BimDiagnostic {
@@ -482,6 +496,10 @@ export const bimLimits = Object.freeze({
   elements: 10_000,
   joins: 20_000,
   views: 64,
+  /** #19: saved 3D cameras. */
+  cameras: 64,
+  /** A saved camera may stand further out than the model reaches (a fitted view of a site). */
+  cameraCoordinateMm: 1_000_000_000,
   loopVertices: 1_024,
   holes: 16,
   openingsPerHost: 64,

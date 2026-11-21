@@ -1,5 +1,6 @@
-import { escapeXml, type Bounds } from './geometry';
+import { escapeXml, unionBounds, type Bounds } from './geometry';
 import { layoutTextRuns } from './text';
+import { hasRubyNotation, layoutGridText, parseRubyNotation } from './vertical-text';
 import { newId } from '@editor-platform/artifact-core';
 export const defaultDrawingFontFamily = 'Noto Sans CJK JP, sans-serif';
 export const shapeNames = [
@@ -45,6 +46,8 @@ export interface TextStyle {
   padding?: number;
   list?: boolean;
   overflow?: 'clip' | 'expand' | 'fit';
+  /** Vertical writing (縦書き): columns right to left, set on a cell grid. */
+  writingMode?: 'horizontal-tb' | 'vertical-rl';
 }
 export interface TextRun {
   text: string;
@@ -521,11 +524,153 @@ function largestFont(d: Drawing) {
     ...(d.runs ?? []).map((run) => run.style?.fontSize ?? 0),
   );
 }
+/**
+ * Vertical text, and horizontal text with ruby, are drawn on the cell grid. Horizontal text with
+ * formatted runs keeps the ordinary layout, which draws its runs (ruby notation then shows as
+ * typed), so adding a reading never drops formatting (Codex on #29).
+ */
+export const usesGridText = (d: Pick<Drawing, 'text' | 'typography' | 'runs'>) =>
+  d.typography?.writingMode === 'vertical-rl' ||
+  (!hasRunFormatting(d.runs, d.typography) && hasRubyNotation(d.text ?? ''));
+/**
+ * Runs that set some style of their own. Plain runs (as text entry leaves them) do not count, nor
+ * does a run value equal to the box's own, as export font normalisation writes (Codex on #29).
+ */
+const hasRunFormatting = (runs: readonly TextRun[] | undefined, box: TextStyle | undefined) =>
+  (runs ?? []).some(
+    (run) =>
+      run.style &&
+      (Object.keys(run.style) as (keyof TextStyle)[]).some(
+        (key) => run.style![key] !== undefined && run.style![key] !== box?.[key],
+      ),
+  );
+/** The grid layout a grid text box draws, as `textPrimitives` sets it. */
+export function gridTextLayout(d: Drawing) {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  // A list keeps its bullets on the grid too, one before each paragraph (Codex on #29).
+  const source = s.list
+    ? (d.text ?? '')
+        .split('\n')
+        .map((line) => `• ${line}`)
+        .join('\n')
+    : d.text;
+  return layoutGridText(source, b, {
+    vertical: s.writingMode === 'vertical-rl',
+    fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
+    lineHeight: s.lineHeight,
+    padding: s.padding ?? (d.kind === 'text' ? 4 : 10),
+    letterSpacing: s.letterSpacing,
+    align: s.align,
+    verticalAlign: s.verticalAlign,
+    fit: s.overflow === 'fit',
+  });
+}
+/** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
+export function gridTextExtent(d: Drawing): Bounds {
+  const layout = gridTextLayout(d);
+  const cells = [
+    ...layout.lines.flatMap((line) =>
+      line.glyphs.map((g) => ({ x: g.x, y: g.y, size: layout.fontSize })),
+    ),
+    ...layout.ruby,
+  ];
+  if (!cells.length) return d.bounds;
+  return unionBounds([
+    d.bounds,
+    ...cells.map((c) => ({
+      x: c.x - c.size,
+      y: c.y - c.size,
+      width: 2 * c.size,
+      height: 2 * c.size,
+    })),
+  ]);
+}
+function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const layout = gridTextLayout(d);
+  const size = layout.fontSize;
+  const glyphs = layout.lines.flatMap((line) =>
+    line.glyphs.map((g) => {
+      // 、。 and small kana move from the lower left of a horizontal cell to the upper right.
+      const shift = g.kind === 'punctuation' ? size * 0.55 : g.kind === 'small' ? size * 0.1 : 0;
+      return p(
+        'text',
+        {
+          x: g.x + shift,
+          y: g.y - shift,
+          ...(g.kind === 'rotated' ? { transform: `rotate(90 ${g.x} ${g.y})` } : {}),
+          ...(g.kind === 'upright' && g.text.length > 1
+            ? { 'font-size': size * 0.8, textLength: size * 0.9, lengthAdjust: 'spacingAndGlyphs' }
+            : {}),
+        },
+        [g.text],
+      );
+    }),
+  );
+  const ruby = layout.ruby.map((r) => p('text', { x: r.x, y: r.y, 'font-size': r.size }, [r.text]));
+  // The box's underline and strike, drawn as lines along each line of base glyphs: below a row
+  // (beside a column, on the right, in vertical text) and through its middle (Codex on #29).
+  const marks = [...(s.underline ? [size * 0.55] : []), ...(s.strike ? [0] : [])];
+  const decorations = marks.length
+    ? layout.lines.flatMap((line) => {
+        if (!line.glyphs.length) return [];
+        const along = line.glyphs.map((g) => (layout.vertical ? g.y : g.x));
+        const [from, to] = [Math.min(...along) - size / 2, Math.max(...along) + size / 2];
+        const across = layout.vertical ? line.glyphs[0].x : line.glyphs[0].y;
+        return marks.map((m) =>
+          layout.vertical
+            ? p('line', { x1: across + m, y1: from, x2: across + m, y2: to })
+            : p('line', { x1: from, y1: across + m, x2: to, y2: across + m }),
+        );
+      })
+    : [];
+  const color = s.color ?? (d.kind === 'text' ? d.fill : '#253044');
+  const decoration = decorations.length
+    ? [
+        p(
+          'g',
+          {
+            stroke: color,
+            'stroke-width': Math.max(1, size / 14),
+            'data-text-decoration': [s.underline ? 'underline' : '', s.strike ? 'line-through' : '']
+              .filter(Boolean)
+              .join(' '),
+          },
+          decorations,
+        ),
+      ]
+    : [];
+  const text = p(
+    'g',
+    {
+      'font-family': s.fontFamily ?? defaultDrawingFontFamily,
+      'font-size': size,
+      'font-weight': s.bold ? '700' : '400',
+      'font-style': s.italic ? 'italic' : 'normal',
+      fill: color,
+      'text-anchor': 'middle',
+      'dominant-baseline': 'central',
+      role: 'img',
+      'aria-label': parseRubyNotation(d.text).plain,
+      'data-writing-mode': layout.vertical ? 'vertical-rl' : 'horizontal-tb',
+    },
+    [...glyphs, ...ruby, ...decoration],
+  );
+  return s.overflow === 'expand'
+    ? [text]
+    : [
+        p('clipPath', { id: `text-${d.id}` }, [p('rect', { ...b })]),
+        p('g', { 'clip-path': `url(#text-${d.id})` }, [text]),
+      ];
+}
 export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
   if (options.screenScale !== undefined && largestFont(d) * options.screenScale < hiddenBelowPixels)
     return [];
+  if (usesGridText(d)) return gridTextPrimitives(d);
   const { fontSize: font, lines, startY: start, x } = layoutDrawingText(d);
   const margin = 4 * lines.reduce((size, line) => Math.max(size, line.ascent), font);
   let offset = 0;

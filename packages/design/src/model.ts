@@ -470,6 +470,7 @@ const textStyleFields = [
   'padding',
   'list',
   'overflow',
+  'writingMode',
 ];
 /** Close native envelopes only. Public props, slot/breakpoint maps and retained
  * foreign content keep their declared dictionary/domain-owned semantics. Web,

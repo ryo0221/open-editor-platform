@@ -7,6 +7,7 @@ import { bimWallAxis } from './solids';
 import {
   bimTolerance,
   type BimAssetRef,
+  type BimCamera,
   type BimDocument,
   type BimElement,
   type BimPoint,
@@ -57,7 +58,9 @@ export type BimOperation =
    * GV2b: the height of the building's people (mm); without `heightMm`, back to 1,750 mm. A
    * building whose levels, steps or openings break the new rules is refused, as any edit is.
    */
-  | { type: 'setInhabitantHeight'; heightMm?: number };
+  | { type: 'setInhabitantHeight'; heightMm?: number }
+  /** #19: the saved 3D cameras, all at once (an empty list removes them). */
+  | { type: 'setCameras'; cameras: BimCamera[] };
 export type BimOperationType = BimOperation['type'];
 
 export class BimOperationError extends Error {
@@ -196,6 +199,10 @@ export function applyBimOperation(doc: BimDocument, op: BimOperation): BimDocume
       if (op.heightMm === undefined) delete next.inhabitantHeightMm;
       else next.inhabitantHeightMm = op.heightMm;
       break;
+    case 'setCameras':
+      if (op.cameras.length) next.cameras = structuredClone(op.cameras);
+      else delete next.cameras;
+      break;
   }
   pruneAssets(next);
   assertBim(next);
@@ -239,7 +246,9 @@ export function assertBimOperation(op: unknown): asserts op is BimOperation {
             ? keys === 'project,type' && record(op.project)
             : op.type === 'setInhabitantHeight'
               ? keys === 'type' || (keys === 'heightMm,type' && typeof op.heightMm === 'number')
-              : undefined;
+              : op.type === 'setCameras'
+                ? keys === 'cameras,type' && Array.isArray(op.cameras)
+                : undefined;
   if (ok === undefined) throw new Error('unsupported-operation');
   if (!ok) throw new Error('operation-schema');
 }

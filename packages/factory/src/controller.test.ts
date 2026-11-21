@@ -140,6 +140,24 @@ describe('factory Surface controller (TS-2653)', () => {
     expect(s.controller.state.running).toBe(false);
     expect(s.controller.state.notice?.code).toBe('stopped');
   });
+
+  it('shows how far a long run has come and can stop it between slices (#17)', async () => {
+    const doc = f170SmallLine();
+    doc.run = { warmupMs: 3_600_000, durationMs: 60 * 86_400_000, seed: 1 };
+    const { controller } = setup(doc);
+    const seen: number[] = [];
+    const off = controller.subscribe(() => {
+      const p = controller.state.runProgress;
+      if (p) seen.push(p.simMs);
+      if (seen.length === 2) controller.stop();
+    });
+    expect(await controller.run()).toBe('stopped');
+    off();
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    expect(seen[1]).toBeGreaterThan(seen[0]!);
+    expect(controller.state.runProgress).toBeUndefined();
+    expect(controller.state.result).toBeUndefined();
+  }, 60_000);
 });
 
 // TS-2676: FT5 experiments in the factory Surface's controller (no DOM).

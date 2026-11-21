@@ -118,6 +118,7 @@ import {
   type CadCollectedEdge,
   type CadController,
   type CadMigrationPreview,
+  type CadExportStage,
   type CadMeshExport,
   type CadSnapshot,
   type CadStepImportPreview,
@@ -6011,6 +6012,10 @@ function ExportFileDialog({
   const [unitsConfirmed, setUnitsConfirmed] = useState(false);
   const [prepared, setPrepared] = useState<CadMeshExport | 'preparing' | undefined>();
   const [error, setError] = useState<string | undefined>();
+  // #17: the stage a staged STEP export is at, and how to stop it between stages.
+  const [stage, setStage] = useState<CadExportStage>();
+  const stopExport = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => stopExport.current?.abort(), []);
   async function prepare() {
     setError(undefined);
     try {
@@ -6021,14 +6026,19 @@ function ExportFileDialog({
       return setError(e instanceof Error ? e.message : String(e));
     }
     setPrepared('preparing');
+    const abort = new AbortController();
+    stopExport.current = abort;
+    setStage(undefined);
     const result =
       placing && assembly && format === 'glb'
         ? await assembly.exportGlb()
         : format !== 'step'
           ? await controller.exportMesh(format, { deflectionMm })
           : placing && assembly
-            ? await assembly.exportStep(name)
+            ? await assembly.exportStep(name, { onStage: setStage, signal: abort.signal })
             : await controller.exportStep();
+    if (stopExport.current === abort) stopExport.current = undefined;
+    setStage(undefined);
     setPrepared(result);
     if (!result) setError(controller.getSnapshot().diagnostic?.message);
   }
@@ -6152,6 +6162,15 @@ function ExportFileDialog({
             <dt>Not kept</dt>
             <dd>{ready.report.losses.join(' ')}</dd>
           </dl>
+        )}
+        {prepared === 'preparing' && stage && (
+          <p role="status" aria-label="Export progress" className="cad-muted">
+            <progress value={stage.done} max={stage.total} /> Stage {stage.done + 1} of{' '}
+            {stage.total}: {stage.label}{' '}
+            <button type="button" onClick={() => stopExport.current?.abort()}>
+              Stop export
+            </button>
+          </p>
         )}
         {error && (
           <p role="alert" className="cad-diagnostic">
@@ -7087,6 +7106,7 @@ function Surface({
                 narrow={narrow}
                 name={name}
                 onExportCsv={onExportCsv}
+                view={view}
               />
             )}
             <Navigator

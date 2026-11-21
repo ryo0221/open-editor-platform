@@ -284,7 +284,10 @@ export interface OutOfLineParts<T> {
   split(value: T): { stub: T; parts: Map<string, unknown> };
   /** The parts the stub names. */
   keys(stub: T): string[];
-  /** The record again; a part that is missing is not in the map. */
+  /**
+   * The record again; a part that is missing is not in the map. Called for every stored record,
+   * with an empty map when it names no parts.
+   */
   join(stub: T, parts: Map<string, unknown>): T;
 }
 const partsStore = 'parts';
@@ -352,7 +355,10 @@ export class IndexedDBStorage<T extends { id: string }> implements StorageAdapte
   private async joined(stubs: T[]): Promise<T[]> {
     if (!this.outOfLine || !this.partsDb) return stubs;
     const wanted = stubs.map((stub) => this.outOfLine!.keys(stub));
-    if (!wanted.some((keys) => keys.length)) return stubs;
+    // Every stub is joined, one without parts too: `split` may have changed more than the parts
+    // it took out (an escaped string), and `join` restores it.
+    if (!wanted.some((keys) => keys.length))
+      return stubs.map((stub) => this.outOfLine!.join(stub, new Map()));
     const tx = (await this.partsDb).transaction(partsStore, 'readonly');
     const store = tx.objectStore(partsStore);
     const found = stubs.map(() => new Map<string, unknown>());
@@ -365,9 +371,7 @@ export class IndexedDBStorage<T extends { id: string }> implements StorageAdapte
       }
     });
     await done(tx);
-    return stubs.map((stub, i) =>
-      wanted[i]!.length ? this.outOfLine!.join(stub, found[i]!) : stub,
-    );
+    return stubs.map((stub, i) => this.outOfLine!.join(stub, found[i]!));
   }
   /** Writes the parts of these records that are not stored yet; returns their stubs. */
   private async writeParts(values: T[]): Promise<T[]> {
