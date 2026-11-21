@@ -5770,9 +5770,11 @@ test('#15 a drawing laid under the front view is kept, drawn and checked for dev
     })
     .toEqual({ mmPerPixel: 2, hidden: true });
   await expect(again.getByLabel('Underlay mm per pixel')).toHaveValue('2');
-  // A removed drawing's decoded image is let go (Codex on #35).
+  // A removed drawing's decoded image and deviation result are let go (Codex on #35).
   const underlays = page.getByTestId('cad-underlays');
   await expect(underlays).toHaveAttribute('data-decoded', '1');
+  await expect(underlays).toHaveAttribute('data-results', '1');
   await again.getByRole('button', { name: 'Remove underlay' }).click();
   await expect(underlays).toHaveAttribute('data-decoded', '0');
+  await expect(underlays).toHaveAttribute('data-results', '0');
 });

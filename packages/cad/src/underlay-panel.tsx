@@ -121,6 +121,11 @@ export function UnderlaysSection({
     setDecoded((m) =>
       [...m.keys()].every((k) => used.has(k)) ? m : new Map([...m].filter(([k]) => used.has(k))),
     );
+    // and deviation results of removed underlays, each holding its distance grid
+    const ids = new Set(list.map((u) => u.id));
+    setResults((m) =>
+      [...m.keys()].every((k) => ids.has(k)) ? m : new Map([...m].filter(([k]) => ids.has(k))),
+    );
     setFailed((f) =>
       [...f].every((k) => used.has(k)) ? f : new Set([...f].filter((k) => used.has(k))),
     );
@@ -264,7 +269,7 @@ export function UnderlaysSection({
 
   return (
     <Section title={`Underlays (${list.length})`} open={list.length > 0}>
-      <div data-testid="cad-underlays" data-decoded={decoded.size}>
+      <div data-testid="cad-underlays" data-decoded={decoded.size} data-results={results.size}>
         <ul aria-label="Underlays">
           {list.map((u) => {
             const r = results.get(u.id);
