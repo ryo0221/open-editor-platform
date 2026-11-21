@@ -22,7 +22,7 @@ import {
   type CadResolvedJointValues,
 } from './joints';
 import type { CadCamera, CadDocument, Vec3 } from './model';
-import { mountChoice } from './mounts';
+import { activeJoints, mountChoice } from './mounts';
 
 export type CadMotionEasing = 'linear' | 'easeInOut';
 export const cadMotionEasings: readonly CadMotionEasing[] = Object.freeze(['linear', 'easeInOut']);
@@ -144,6 +144,21 @@ export function motionStateAt(doc: CadDocument, m: CadMotion, tMs: number) {
   }
   const mounts = seg.u >= 1 ? b.mounts : a.mounts;
   return { values, ...(mounts ? { mounts } : {}), segment: seg };
+}
+
+/**
+ * The joints in effect for `mounts` whose solution is not solved. A frame needs all of them: an
+ * unsolved joint would leave its child (and what hangs from it) standing still while the rest
+ * moves (Codex on #34).
+ */
+export function motionUnsolvedJoints(
+  doc: CadDocument,
+  joints: Record<string, CadJointSolution>,
+  mounts?: Record<string, string>,
+): string[] {
+  return activeJoints(doc, mounts ? mountChoice(mounts) : undefined)
+    .filter((j) => joints[j.id]?.status !== 'solved')
+    .map((j) => j.id);
 }
 
 /**

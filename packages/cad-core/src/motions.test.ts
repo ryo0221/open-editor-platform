@@ -11,6 +11,7 @@ import {
   ease,
   motionCameraAt,
   motionDeltas,
+  motionUnsolvedJoints,
   motionDurationMs,
   motionSegmentAt,
   motionStaleForms,
@@ -146,6 +147,15 @@ describe('#18 motions: form-to-form interpolation and camera paths', () => {
     // In the form the document stands in, nothing moves.
     const start = motionStateAt(assembly, motion(), 0)!;
     expect(motionDeltas(assembly, joints, start.values, start.mounts).size).toBe(0);
+  });
+  it('names the joints in effect that have not solved (Codex on #34)', () => {
+    const { assembly, closure } = mr2ArmWingsForms();
+    const joints = solutions(assembly, closure);
+    expect(motionUnsolvedJoints(assembly, joints)).toEqual([]);
+    const broken = { ...joints, 'j-elbow': { status: 'unavailable' as const } };
+    expect(motionUnsolvedJoints(assembly, broken)).toEqual(['j-elbow']);
+    const { 'j-wing-r': _gone, ...missing } = joints;
+    expect(motionUnsolvedJoints(assembly, missing)).toEqual(['j-wing-r']);
   });
   it('switches a mount when the step ends', () => {
     const { assembly } = mr7ToolMount();

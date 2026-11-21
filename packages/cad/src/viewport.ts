@@ -1027,6 +1027,9 @@ export class CadViewport {
       this.controls.target.copy(target);
       this.camera.lookAt(target);
       this.camera.updateProjectionMatrix();
+      // The keyed camera moves without orbit events: the parts' detail levels follow it here, so a
+      // close-up is not drawn with the coarse meshes of a distant start (Codex on #34).
+      this.levelParts();
     }
     this.render();
   }
