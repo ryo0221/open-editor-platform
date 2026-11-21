@@ -39,6 +39,7 @@ import {
   bimScheduleCsv,
   bimSurfaceMaterialId,
   type BimAppearance,
+  type BimCamera,
   type BimDocument,
   type BimDrawingScale,
   type BimGridBubbles,
@@ -79,6 +80,7 @@ import {
   useNarrow,
 } from './draft-tools';
 import {
+  bimNewId,
   bimWorkingPlan,
   draftLevel,
   draftPlanView,
@@ -211,6 +213,9 @@ export function BimSurface({
   const [axesShown, setAxesShown] = useState(true);
   const [typeId, setTypeId] = useState<string | undefined>();
   const [fit, setFit] = useState(0);
+  /** #19: the 3D view's camera, read to save one; a saved camera to show (counted per press). */
+  const cameraNow = useRef<() => Omit<BimCamera, 'id' | 'name'> | undefined>(undefined);
+  const [showCamera, setShowCamera] = useState<{ camera: BimCamera; n: number }>();
   // FU1: a press of Zoom to selection; framed when the selection has a shape.
   const [zoom, setZoom] = useState(0);
   const canZoom = useMemo(
@@ -441,14 +446,26 @@ export function BimSurface({
             ) : tab === 'schedule' ? (
               <SchedulePanel state={state} building={name} />
             ) : (
-              <DrawingsPanel
-                controller={controller}
-                state={state}
-                selected={viewId}
-                onSelect={(id) => settle(() => setViewId(id))}
-                open={openView?.id}
-                onOpen={setOpenViewId}
-              />
+              <>
+                <DrawingsPanel
+                  controller={controller}
+                  state={state}
+                  selected={viewId}
+                  onSelect={(id) => settle(() => setViewId(id))}
+                  open={openView?.id}
+                  onOpen={setOpenViewId}
+                />
+                <CamerasPanel
+                  controller={controller}
+                  state={state}
+                  current={() => cameraNow.current?.()}
+                  onShow={(camera) => {
+                    setOpenViewId(undefined);
+                    setPlan(false);
+                    setShowCamera((was) => ({ camera, n: (was?.n ?? 0) + 1 }));
+                  }}
+                />
+              </>
             )}
           </div>
         }
@@ -472,6 +489,8 @@ export function BimSurface({
             zoom={zoom}
             realistic={realistic}
             renderSource={renderSource}
+            cameraNow={cameraNow}
+            showCamera={showCamera}
             plan={planView}
             drawing={activeTool !== 'select'}
             onPlan={draft.onPlan}
@@ -511,6 +530,8 @@ function Viewport({
   zoom,
   realistic,
   renderSource,
+  cameraNow,
+  showCamera,
   plan,
   drawing,
   onPlan,
@@ -525,6 +546,8 @@ function Viewport({
   zoom: number;
   realistic: boolean;
   renderSource: { current: (() => PathRenderSource | undefined) | undefined };
+  cameraNow: { current: (() => Omit<BimCamera, 'id' | 'name'> | undefined) | undefined };
+  showCamera: { camera: BimCamera; n: number } | undefined;
   /** The working plan with its depth (TW0b); the viewport takes its level and cut. */
   plan: (BimPlanView & { depthMm: number }) | undefined;
   drawing: boolean;
@@ -560,12 +583,14 @@ function Viewport({
       setFailure('This browser cannot draw the 3D view (WebGL is unavailable).');
     }
     renderSource.current = () => view.current?.renderSource();
+    cameraNow.current = () => view.current?.getCamera();
     return () => {
       renderSource.current = undefined;
+      cameraNow.current = undefined;
       view.current?.dispose();
       view.current = undefined;
     };
-  }, [controller, renderSource]);
+  }, [controller, renderSource, cameraNow]);
   // #662: each texture image decoded once by hash; the view is drawn again as each is ready.
   const [texturesLoaded, setTexturesLoaded] = useState(0);
   const textureCache = useMemo(
@@ -625,6 +650,10 @@ function Viewport({
     if (b) view.current?.fit(b, true, framed, fitBounds.current);
   }, [zoom]);
   useEffect(() => view.current?.setPlan(plan, fitBounds.current), [plan]);
+  // #19: after the plan is left (the effect above), so its fit does not move the saved camera.
+  useEffect(() => {
+    if (showCamera) view.current?.setCamera(showCamera.camera);
+  }, [showCamera]);
   useEffect(() => view.current?.setRealistic(realistic), [realistic]);
   useEffect(() => {
     if (view.current) view.current.drawing = drawing;
@@ -2343,6 +2372,95 @@ const viewKindLabels: Record<BimView['kind'], string> = { plan: 'Plan', section:
  * The building's views (R2c-5b): plans of a level and sections drawn on the plan. A view is
  * part of the document; its drawing is derived and never saved.
  */
+/** #19: named cameras saved with the model, shown again in the 3D view. */
+function CamerasPanel({
+  controller,
+  state,
+  current,
+  onShow,
+}: {
+  controller: BimController;
+  state: BimState;
+  current(): Omit<BimCamera, 'id' | 'name'> | undefined;
+  onShow(camera: BimCamera): void;
+}) {
+  const { content: doc, readOnly } = state;
+  const cameras = doc.cameras ?? [];
+  const [name, setName] = useState('');
+  const [note, setNote] = useState<string>();
+  const save = () => {
+    const at = current();
+    if (!at) return setNote('The 3D view is not ready.');
+    const label = name.trim() || `Camera ${cameras.length + 1}`;
+    // From the document's whole ID space: a camera's ID is unique among every entity's.
+    const id = bimNewId(doc, 'camera');
+    const kept = cameras.filter((c) => c.name !== label);
+    const error = controller.apply({
+      type: 'setCameras',
+      cameras: [...kept, { id, name: label, ...at }],
+    });
+    setNote(typeof error === 'string' ? error : `Saved ${label}.`);
+    if (typeof error !== 'string') setName('');
+  };
+  return (
+    <div className="bim-panel" data-testid="bim-cameras">
+      <section className="bim-kind" aria-label="Cameras">
+        <h3>Cameras ({cameras.length})</h3>
+        {cameras.length ? (
+          <ul>
+            {cameras.map((c) => (
+              <li key={c.id} className="bim-camera">
+                <button
+                  className="bim-item"
+                  onClick={() => onShow(c)}
+                  aria-label={`Show ${c.name}`}
+                >
+                  {c.name}
+                </button>
+                {!readOnly && (
+                  <IconButton
+                    label={`Delete ${c.name}`}
+                    icon={Trash2}
+                    onClick={() =>
+                      controller.apply({
+                        type: 'setCameras',
+                        cameras: cameras.filter((x) => x.id !== c.id),
+                      })
+                    }
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="bim-hint">No saved cameras. Saving one keeps the 3D view with the model.</p>
+        )}
+        {!readOnly && cameras.length < bimLimits.cameras && (
+          <div className="bim-camera-save">
+            <label className="ep-field">
+              Camera name
+              <input
+                aria-label="Camera name"
+                value={name}
+                maxLength={120}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <button className="bim-button" onClick={save}>
+              <Aperture size={15} aria-hidden="true" /> Save camera
+            </button>
+          </div>
+        )}
+        {note && (
+          <p className="bim-hint" role="status">
+            {note}
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function DrawingsPanel({
   controller,
   state,
