@@ -12,7 +12,7 @@ import {
   faceRef,
 } from './fixtures';
 import { dependencyOrder, featureReads, parameterValues } from './graph';
-import { identityQuaternion, mm, position, type CadDocument } from './model';
+import { cadLimits, identityQuaternion, mm, position, type CadDocument } from './model';
 import {
   applyCadOperation,
   cadContentHash,
@@ -465,8 +465,9 @@ describe('stored solution checks (CAD33)', () => {
       } as never;
       return codes(many);
     };
-    // TS-1473 (ST-241#1): 256 sketches, one per feature (CR0d, a car body's sections).
-    expect(cadSketchLimits.sketches).toBe(256);
+    // TS-1473 (ST-241#1): one sketch per feature (CR0d, a car body's sections); 2,048 since #14.
+    expect(cadSketchLimits.sketches).toBe(2_048);
+    expect(cadSketchLimits.sketches).toBe(cadLimits.features);
     expect(sketches(cadSketchLimits.sketches)).not.toContain('limit-sketches@$.sketches');
     expect(sketches(cadSketchLimits.sketches + 1)).toContain('limit-sketches@$.sketches');
     const entities = (n: number) =>

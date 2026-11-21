@@ -1,5 +1,11 @@
-import { escapeXml, type Bounds } from './geometry';
+import { escapeXml, unionBounds, type Bounds } from './geometry';
 import { layoutTextRuns } from './text';
+import {
+  hasRubyNotation,
+  layoutGridText,
+  parseRubyNotation,
+  type GridGlyph,
+} from './vertical-text';
 import { newId } from '@editor-platform/artifact-core';
 export const defaultDrawingFontFamily = 'Noto Sans CJK JP, sans-serif';
 export const shapeNames = [
@@ -45,6 +51,8 @@ export interface TextStyle {
   padding?: number;
   list?: boolean;
   overflow?: 'clip' | 'expand' | 'fit';
+  /** Vertical writing (縦書き): columns right to left, set on a cell grid. */
+  writingMode?: 'horizontal-tb' | 'vertical-rl';
 }
 export interface TextRun {
   text: string;
@@ -521,11 +529,265 @@ function largestFont(d: Drawing) {
     ...(d.runs ?? []).map((run) => run.style?.fontSize ?? 0),
   );
 }
+/**
+ * Vertical text, and horizontal text with ruby, are drawn on the cell grid. Horizontal text with
+ * formatted runs keeps the ordinary layout, which draws its runs (ruby notation then shows as
+ * typed), so adding a reading never drops formatting (Codex on #29).
+ */
+export const usesGridText = (d: Pick<Drawing, 'text' | 'typography' | 'runs'>) =>
+  d.typography?.writingMode === 'vertical-rl' ||
+  (!hasRunFormatting(d.runs, d.typography) && hasRubyNotation(d.text ?? ''));
+/**
+ * Runs that set some style of their own. Plain runs (as text entry leaves them) do not count, nor
+ * does a run value equal to the box's own, as export font normalisation writes (Codex on #29).
+ */
+const hasRunFormatting = (runs: readonly TextRun[] | undefined, box: TextStyle | undefined) =>
+  (runs ?? []).some(
+    (run) =>
+      run.style &&
+      (Object.keys(run.style) as (keyof TextStyle)[]).some(
+        (key) => run.style![key] !== undefined && run.style![key] !== box?.[key],
+      ),
+  );
+/** The text a grid text box lays out: a list keeps its bullets on the grid too (Codex on #29). */
+const gridSource = (d: Drawing) =>
+  d.typography?.list
+    ? (d.text ?? '')
+        .split('\n')
+        .map((line) => `• ${line}`)
+        .join('\n')
+    : (d.text ?? '');
+/** The run style of each character of a grid text box, by offset without ruby notation. */
+function gridPlainRuns(d: Drawing): (TextStyle | undefined)[] {
+  const styles = gridRunStyles(d);
+  return parseRubyNotation(gridSource(d)).source.map((i) => styles[i]);
+}
+/** The grid layout a grid text box draws, as `textPrimitives` sets it. */
+export function gridTextLayout(d: Drawing) {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const base = s.fontSize ?? (d.kind === 'text' ? 28 : 18);
+  // Run font sizes take their room on the grid, and digit groups do not span runs (Codex on #38).
+  const runs = gridPlainRuns(d);
+  const cuts = runs.flatMap((r, k) => (k > 0 && r !== runs[k - 1] ? [k] : []));
+  const sized = runs.some((r) => r?.fontSize !== undefined);
+  return layoutGridText(gridSource(d), b, {
+    ...(sized ? { scaleAt: (k: number) => (runs[k]?.fontSize ?? base) / base } : {}),
+    ...(cuts.length ? { cuts } : {}),
+    vertical: s.writingMode === 'vertical-rl',
+    fontSize: s.fontSize ?? (d.kind === 'text' ? 28 : 18),
+    lineHeight: s.lineHeight,
+    padding: s.padding ?? (d.kind === 'text' ? 4 : 10),
+    letterSpacing: s.letterSpacing,
+    align: s.align,
+    verticalAlign: s.verticalAlign,
+    fit: s.overflow === 'fit',
+  });
+}
+/** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
+export function gridTextExtent(d: Drawing): Bounds {
+  const layout = gridTextLayout(d);
+  const runs = gridPlainRuns(d);
+  const scale = layout.fontSize / (d.typography?.fontSize ?? (d.kind === 'text' ? 28 : 18));
+  const glyphSize = (g: GridGlyph) => {
+    const own = runs[g.offset]?.fontSize;
+    return own !== undefined ? own * scale : layout.fontSize;
+  };
+  const cells = [
+    ...layout.lines.flatMap((line) =>
+      // Each glyph at its run's size, as drawn (Codex on #38).
+      line.glyphs.map((g) => ({ x: g.x, y: g.y, size: glyphSize(g) })),
+    ),
+    ...layout.ruby,
+  ];
+  if (!cells.length) return d.bounds;
+  return unionBounds([
+    d.bounds,
+    ...cells.map((c) => ({
+      x: c.x - c.size,
+      y: c.y - c.size,
+      width: 2 * c.size,
+      height: 2 * c.size,
+    })),
+  ]);
+}
+/**
+ * The style of the run under each character of a grid text box's source (the text the grid lays
+ * out, with list bullets), or none. Runs are used only when they spell the box's text.
+ */
+function gridRunStyles(d: Drawing): (TextStyle | undefined)[] {
+  const text = d.text ?? '';
+  const runs = d.runs ?? [];
+  const at: (TextStyle | undefined)[] = [];
+  if (runs.map((r) => r.text).join('') === text)
+    for (const run of runs) for (let i = 0; i < run.text.length; i++) at.push(run.style);
+  if (!d.typography?.list) return at;
+  // Bullets take the style of the first character of their paragraph.
+  const out: (TextStyle | undefined)[] = [];
+  let i = 0;
+  for (const line of text.split('\n')) {
+    out.push(at[i], at[i]);
+    for (let k = 0; k < line.length; k++) out.push(at[i + k]);
+    i += line.length;
+    if (i < text.length) out.push(at[i++]);
+  }
+  return out;
+}
+function gridTextPrimitives(d: Drawing): SvgPrimitive[] {
+  const s = d.typography ?? {},
+    b = d.bounds;
+  const layout = gridTextLayout(d);
+  const size = layout.fontSize;
+  // Formatted runs keep their formatting on the grid (Codex on #37): each glyph draws the style
+  // of the run it comes from, with font sizes scaled as the box's own is by `fit`.
+  const runs = gridPlainRuns(d);
+  const scale = size / (s.fontSize ?? (d.kind === 'text' ? 28 : 18));
+  const runOf = (g: GridGlyph) => runs[g.offset];
+  const glyphStyle = (g: GridGlyph) => {
+    const r = runOf(g);
+    if (!r) return {};
+    return {
+      ...(r.fontFamily !== undefined && r.fontFamily !== s.fontFamily
+        ? { 'font-family': r.fontFamily }
+        : {}),
+      ...(r.bold !== undefined && r.bold !== !!s.bold
+        ? { 'font-weight': r.bold ? '700' : '400' }
+        : {}),
+      ...(r.italic !== undefined && r.italic !== !!s.italic
+        ? { 'font-style': r.italic ? 'italic' : 'normal' }
+        : {}),
+      ...(r.color !== undefined && r.color !== s.color ? { fill: r.color } : {}),
+    };
+  };
+  const glyphSize = (g: GridGlyph) => {
+    const own = runOf(g)?.fontSize;
+    return own !== undefined ? own * scale : size;
+  };
+  const glyphs = layout.lines.flatMap((line) =>
+    line.glyphs.map((g) => {
+      // 、。 and small kana move from the lower left of a horizontal cell to the upper right.
+      const own = glyphSize(g);
+      // The offsets follow the glyph's own size (Codex on #38).
+      const shift = g.kind === 'punctuation' ? own * 0.55 : g.kind === 'small' ? own * 0.1 : 0;
+      return p(
+        'text',
+        {
+          x: g.x + shift,
+          y: g.y - shift,
+          ...(g.kind === 'rotated' ? { transform: `rotate(90 ${g.x} ${g.y})` } : {}),
+          ...(own !== size ? { 'font-size': own } : {}),
+          ...glyphStyle(g),
+          ...(g.kind === 'upright' && g.text.length > 1
+            ? { 'font-size': own * 0.8, textLength: own * 0.9, lengthAdjust: 'spacingAndGlyphs' }
+            : {}),
+        },
+        [g.text],
+      );
+    }),
+  );
+  const ruby = layout.ruby.map((r) => p('text', { x: r.x, y: r.y, 'font-size': r.size }, [r.text]));
+  // Runs that set their own underline, strike or colour draw their marks glyph by glyph.
+  const runMarks = layout.lines.some((line) =>
+    line.glyphs.some((g) => {
+      const r = runOf(g);
+      return (
+        !!r &&
+        ((r.underline !== undefined && r.underline !== !!s.underline) ||
+          (r.strike !== undefined && r.strike !== !!s.strike) ||
+          ((s.underline || s.strike || r.underline || r.strike) &&
+            ((r.color !== undefined && r.color !== s.color) || r.fontSize !== undefined)))
+      );
+    }),
+  );
+  // The box's underline and strike, drawn as lines along each line of base glyphs: below a row
+  // (beside a column, on the right, in vertical text) and through its middle (Codex on #29).
+  const marks = [...(s.underline ? [size * 0.55] : []), ...(s.strike ? [0] : [])];
+  const decorations = runMarks
+    ? []
+    : marks.length
+      ? layout.lines.flatMap((line) => {
+          if (!line.glyphs.length) return [];
+          const along = line.glyphs.map((g) => (layout.vertical ? g.y : g.x));
+          const [from, to] = [Math.min(...along) - size / 2, Math.max(...along) + size / 2];
+          const across = layout.vertical ? line.glyphs[0].x : line.glyphs[0].y;
+          return marks.map((m) =>
+            layout.vertical
+              ? p('line', { x1: across + m, y1: from, x2: across + m, y2: to })
+              : p('line', { x1: from, y1: across + m, x2: to, y2: across + m }),
+          );
+        })
+      : [];
+  const color = s.color ?? (d.kind === 'text' ? d.fill : '#253044');
+  const usedMarks = { underline: false, strike: false };
+  const glyphMarks = runMarks
+    ? layout.lines.flatMap((line) =>
+        line.glyphs.flatMap((g) => {
+          const r = runOf(g);
+          const underline = r?.underline ?? !!s.underline,
+            strike = r?.strike ?? !!s.strike;
+          usedMarks.underline ||= underline;
+          usedMarks.strike ||= strike;
+          const [from, to] = layout.vertical
+            ? [g.y - g.advance / 2, g.y + g.advance / 2]
+            : [g.x - g.advance / 2, g.x + g.advance / 2];
+          const stroke = r?.color ?? color;
+          // The underline sits beside the glyph at its own size (Codex on #38).
+          return [...(underline ? [glyphSize(g) * 0.55] : []), ...(strike ? [0] : [])].map((m) =>
+            layout.vertical
+              ? p('line', { x1: g.x + m, y1: from, x2: g.x + m, y2: to, stroke })
+              : p('line', { x1: from, y1: g.y + m, x2: to, y2: g.y + m, stroke }),
+          );
+        }),
+      )
+    : [];
+  if (glyphMarks.length) decorations.push(...glyphMarks);
+  const decoration = decorations.length
+    ? [
+        p(
+          'g',
+          {
+            stroke: color,
+            'stroke-width': Math.max(1, size / 14),
+            'data-text-decoration': [
+              (runMarks ? usedMarks.underline : s.underline) ? 'underline' : '',
+              (runMarks ? usedMarks.strike : s.strike) ? 'line-through' : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
+          },
+          decorations,
+        ),
+      ]
+    : [];
+  const text = p(
+    'g',
+    {
+      'font-family': s.fontFamily ?? defaultDrawingFontFamily,
+      'font-size': size,
+      'font-weight': s.bold ? '700' : '400',
+      'font-style': s.italic ? 'italic' : 'normal',
+      fill: color,
+      'text-anchor': 'middle',
+      'dominant-baseline': 'central',
+      role: 'img',
+      'aria-label': parseRubyNotation(d.text).plain,
+      'data-writing-mode': layout.vertical ? 'vertical-rl' : 'horizontal-tb',
+    },
+    [...glyphs, ...ruby, ...decoration],
+  );
+  return s.overflow === 'expand'
+    ? [text]
+    : [
+        p('clipPath', { id: `text-${d.id}` }, [p('rect', { ...b })]),
+        p('g', { 'clip-path': `url(#text-${d.id})` }, [text]),
+      ];
+}
 export function textPrimitives(d: Drawing, options: DrawingRenderOptions = {}): SvgPrimitive[] {
   const s = d.typography ?? {},
     b = d.bounds;
   if (options.screenScale !== undefined && largestFont(d) * options.screenScale < hiddenBelowPixels)
     return [];
+  if (usesGridText(d)) return gridTextPrimitives(d);
   const { fontSize: font, lines, startY: start, x } = layoutDrawingText(d);
   const margin = 4 * lines.reduce((size, line) => Math.max(size, line.ascent), font);
   let offset = 0;

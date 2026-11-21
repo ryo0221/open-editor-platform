@@ -134,6 +134,7 @@ import { evaluateGeometry } from '@editor-platform/geometry-kernel-occt';
 import { checkClosedMesh, stepReport, writeStl } from './formats';
 import { CadEvaluationCancelled, evaluateCad, FeatureCache, PlacementCache } from './evaluator';
 import { optimalBounds } from './bounds';
+import { cadOutputLimits, cadRenderOutputLimits } from './protocol';
 import { createKernelHost, kernelLoadMarks, loadVerifiedBuild } from './host';
 import type {
   CadFaceDistanceQuery,
@@ -7078,6 +7079,23 @@ describe.skipIf(!dist)('OCCT kernel host with the development build', () => {
     // The display evaluation that follows is the display one, not the render's (no cache kept it).
     expect(after.meshes).toEqual(before.meshes);
   });
+
+  it("keeps a render's finer meshes within the render output limits, not the editing ones (#14)", async () => {
+    const doc = pinned(sphere('render-limit-ball', 55, 0));
+    const hash = cadContentHash(doc);
+    const quality = { relativeDeflection: 0.000001, angularDeflectionRad: 0.1 };
+    const triangles = (meshes: { indices: ArrayLike<number> }[]) =>
+      meshes.reduce((n, m) => n + m.indices.length / 3, 0);
+    // Meshed this finely for the screen, the ball is past the render limit but inside the
+    // editing ones: a display evaluation takes it.
+    const display = await evaluateCad(oc, doc, hash, quality);
+    expect(display.evaluation.status).toBe('ok');
+    expect(triangles(display.meshes)).toBeGreaterThan(cadRenderOutputLimits.triangles);
+    expect(triangles(display.meshes)).toBeLessThan(cadOutputLimits.triangles);
+    // For a render it is refused as output-limit, so the render keeps the display meshes.
+    const render = await evaluateCad(oc, doc, hash, { ...quality, renderMesh: true });
+    expect(render.evaluation).toMatchObject({ status: 'error', code: 'output-limit' });
+  }, 120_000);
 
   // PD1 (docs/cad/product-design.md, PD1): F150's targets on the kernel's evaluation and display
   // meshes. ST-750, TS-2504.

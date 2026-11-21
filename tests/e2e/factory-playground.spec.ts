@@ -168,6 +168,32 @@ test('import the F170 line, run it, import times from CSV, refuse bad content', 
   await expect(page.getByLabel('Artifact name')).toHaveValue('F170 line');
 });
 
+test('#17 a year-long run shows the simulated days, then its result, and can be stopped', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(240_000);
+  await page.goto('/');
+  await create(page, 'factory');
+  const record = await nativeArtifact(page);
+  const year = f170SmallLine();
+  year.run = { warmupMs: 3_600_000, durationMs: 31_536_000_000 - 3_600_000, seed: 1 };
+  await importJson(page, 'year.json', {
+    ...record,
+    name: 'A year',
+    draft: { ...record.draft, content: year },
+    versions: [],
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('A year');
+  await tool(page, 'Run').click();
+  await expect(status(page)).toContainText(/Running: \d+ of 365 days simulated/);
+  // Stopped part of the way, it leaves no result.
+  await tool(page, 'Stop').click();
+  await expect(status(page)).toContainText('Not run');
+  await tool(page, 'Run').click();
+  await expect(status(page)).toContainText(/Result: \d+ produced/, { timeout: 200_000 });
+});
+
 test('FT3a: a shift calendar and breakdowns from the inspector', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'desktop flow');
   await page.goto('/');

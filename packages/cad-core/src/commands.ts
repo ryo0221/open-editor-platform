@@ -93,6 +93,8 @@ const operationKeys: Record<
   setDesignTargets: { required: ['type', 'targets'], ids: [] },
   setSightChecks: { required: ['type', 'checks'], ids: [] },
   setToleranceStacks: { required: ['type', 'stacks'], ids: [] },
+  setMotions: { required: ['type', 'motions'], ids: [] },
+  setUnderlays: { required: ['type', 'underlays'], optional: ['assets'], ids: [] },
   reorderFeatures: { required: ['type', 'featureIds'], ids: [] },
   setKernelBuild: { required: ['type', 'kernelId', 'buildHash'], ids: ['kernelId'] },
   setToleranceSet: { required: ['type', 'set'], ids: [] },
@@ -263,137 +265,158 @@ export function assertCadOperation(op: unknown): asserts op is CadOperation {
                                                                   : op.type === 'setDesignTargets'
                                                                     ? Array.isArray(op.targets) &&
                                                                       op.targets.every(record)
-                                                                    : op.type ===
-                                                                        'setToleranceStacks'
-                                                                      ? Array.isArray(op.stacks) &&
-                                                                        op.stacks.every(record)
-                                                                      : op.type ===
-                                                                          'reorderFeatures'
-                                                                        ? idList(op.featureIds)
+                                                                    : op.type === 'setMotions'
+                                                                      ? Array.isArray(op.motions) &&
+                                                                        op.motions.every(record)
+                                                                      : op.type === 'setUnderlays'
+                                                                        ? Array.isArray(
+                                                                            op.underlays,
+                                                                          ) &&
+                                                                          op.underlays.every(
+                                                                            record,
+                                                                          ) &&
+                                                                          (op.assets ===
+                                                                            undefined ||
+                                                                            (Array.isArray(
+                                                                              op.assets,
+                                                                            ) &&
+                                                                              op.assets.every(
+                                                                                record,
+                                                                              )))
                                                                         : op.type ===
-                                                                            'setKernelBuild'
-                                                                          ? typeof op.buildHash ===
-                                                                            'string'
+                                                                            'setToleranceStacks'
+                                                                          ? Array.isArray(
+                                                                              op.stacks,
+                                                                            ) &&
+                                                                            op.stacks.every(record)
                                                                           : op.type ===
-                                                                              'setToleranceSet'
-                                                                            ? typeof op.set ===
-                                                                              'string'
+                                                                              'reorderFeatures'
+                                                                            ? idList(op.featureIds)
                                                                             : op.type ===
-                                                                                'insertImportedBody'
-                                                                              ? Array.isArray(
-                                                                                  op.assets,
-                                                                                ) &&
-                                                                                record(
-                                                                                  op.feature,
-                                                                                ) &&
-                                                                                record(op.body)
+                                                                                'setKernelBuild'
+                                                                              ? typeof op.buildHash ===
+                                                                                'string'
                                                                               : op.type ===
-                                                                                  'insertComponents'
-                                                                                ? Array.isArray(
-                                                                                    op.parts,
-                                                                                  ) &&
-                                                                                  Array.isArray(
-                                                                                    op.components,
-                                                                                  ) &&
-                                                                                  op.components
-                                                                                    .length > 0 &&
-                                                                                  (op.assemblyPmi ===
-                                                                                    undefined ||
-                                                                                    record(
-                                                                                      op.assemblyPmi,
-                                                                                    ))
+                                                                                  'setToleranceSet'
+                                                                                ? typeof op.set ===
+                                                                                  'string'
                                                                                 : op.type ===
-                                                                                    'setComponentPlacement'
-                                                                                  ? record(
-                                                                                      op.placement,
-                                                                                    )
+                                                                                    'insertImportedBody'
+                                                                                  ? Array.isArray(
+                                                                                      op.assets,
+                                                                                    ) &&
+                                                                                    record(
+                                                                                      op.feature,
+                                                                                    ) &&
+                                                                                    record(op.body)
                                                                                   : op.type ===
-                                                                                      'replacePartSources'
+                                                                                      'insertComponents'
                                                                                     ? Array.isArray(
                                                                                         op.parts,
                                                                                       ) &&
-                                                                                      op.parts
+                                                                                      Array.isArray(
+                                                                                        op.components,
+                                                                                      ) &&
+                                                                                      op.components
                                                                                         .length >
                                                                                         0 &&
-                                                                                      op.parts.every(
-                                                                                        (p) =>
-                                                                                          record(
-                                                                                            p,
-                                                                                          ) &&
-                                                                                          cadId(
-                                                                                            p.partId,
-                                                                                          ) &&
-                                                                                          record(
-                                                                                            p.source,
-                                                                                          ) &&
-                                                                                          record(
-                                                                                            p.hint,
-                                                                                          ),
-                                                                                      )
+                                                                                      (op.assemblyPmi ===
+                                                                                        undefined ||
+                                                                                        record(
+                                                                                          op.assemblyPmi,
+                                                                                        ))
                                                                                     : op.type ===
-                                                                                          'insertComponentPattern' ||
-                                                                                        op.type ===
-                                                                                          'updateComponentPattern'
+                                                                                        'setComponentPlacement'
                                                                                       ? record(
-                                                                                          op.pattern,
+                                                                                          op.placement,
                                                                                         )
                                                                                       : op.type ===
-                                                                                          'setComponentBom'
-                                                                                        ? op.bom ===
-                                                                                            'include' ||
-                                                                                          op.bom ===
-                                                                                            'exclude'
-                                                                                        : op.type ===
-                                                                                            'setPartProperties'
-                                                                                          ? typeof op.partNumber ===
-                                                                                              'string' &&
-                                                                                            typeof op.description ===
-                                                                                              'string'
-                                                                                          : op.type ===
-                                                                                              'setPartBomProperties'
-                                                                                            ? op.material ===
-                                                                                                undefined ||
+                                                                                          'replacePartSources'
+                                                                                        ? Array.isArray(
+                                                                                            op.parts,
+                                                                                          ) &&
+                                                                                          op.parts
+                                                                                            .length >
+                                                                                            0 &&
+                                                                                          op.parts.every(
+                                                                                            (p) =>
                                                                                               record(
-                                                                                                op.material,
-                                                                                              )
+                                                                                                p,
+                                                                                              ) &&
+                                                                                              cadId(
+                                                                                                p.partId,
+                                                                                              ) &&
+                                                                                              record(
+                                                                                                p.source,
+                                                                                              ) &&
+                                                                                              record(
+                                                                                                p.hint,
+                                                                                              ),
+                                                                                          )
+                                                                                        : op.type ===
+                                                                                              'insertComponentPattern' ||
+                                                                                            op.type ===
+                                                                                              'updateComponentPattern'
+                                                                                          ? record(
+                                                                                              op.pattern,
+                                                                                            )
+                                                                                          : op.type ===
+                                                                                              'setComponentBom'
+                                                                                            ? op.bom ===
+                                                                                                'include' ||
+                                                                                              op.bom ===
+                                                                                                'exclude'
                                                                                             : op.type ===
-                                                                                                'updateFeature'
-                                                                                              ? record(
-                                                                                                  op.args,
-                                                                                                )
+                                                                                                'setPartProperties'
+                                                                                              ? typeof op.partNumber ===
+                                                                                                  'string' &&
+                                                                                                typeof op.description ===
+                                                                                                  'string'
                                                                                               : op.type ===
-                                                                                                  'updateSketch'
-                                                                                                ? record(
-                                                                                                    op.plane,
-                                                                                                  ) &&
-                                                                                                  Array.isArray(
-                                                                                                    op.entities,
-                                                                                                  ) &&
-                                                                                                  Array.isArray(
-                                                                                                    op.constraints,
-                                                                                                  ) &&
-                                                                                                  record(
-                                                                                                    op.solved,
-                                                                                                  ) &&
-                                                                                                  (op.notes ===
+                                                                                                  'setPartBomProperties'
+                                                                                                ? op.material ===
                                                                                                     undefined ||
-                                                                                                    Array.isArray(
-                                                                                                      op.notes,
-                                                                                                    ))
+                                                                                                  record(
+                                                                                                    op.material,
+                                                                                                  )
                                                                                                 : op.type ===
-                                                                                                    'setSightChecks'
-                                                                                                  ? Array.isArray(
-                                                                                                      op.checks,
-                                                                                                    ) &&
-                                                                                                    op.checks.every(
-                                                                                                      record,
+                                                                                                    'updateFeature'
+                                                                                                  ? record(
+                                                                                                      op.args,
                                                                                                     )
-                                                                                                  : record(
-                                                                                                      op.plane,
-                                                                                                    ) &&
-                                                                                                    record(
-                                                                                                      op.shape,
-                                                                                                    );
+                                                                                                  : op.type ===
+                                                                                                      'updateSketch'
+                                                                                                    ? record(
+                                                                                                        op.plane,
+                                                                                                      ) &&
+                                                                                                      Array.isArray(
+                                                                                                        op.entities,
+                                                                                                      ) &&
+                                                                                                      Array.isArray(
+                                                                                                        op.constraints,
+                                                                                                      ) &&
+                                                                                                      record(
+                                                                                                        op.solved,
+                                                                                                      ) &&
+                                                                                                      (op.notes ===
+                                                                                                        undefined ||
+                                                                                                        Array.isArray(
+                                                                                                          op.notes,
+                                                                                                        ))
+                                                                                                    : op.type ===
+                                                                                                        'setSightChecks'
+                                                                                                      ? Array.isArray(
+                                                                                                          op.checks,
+                                                                                                        ) &&
+                                                                                                        op.checks.every(
+                                                                                                          record,
+                                                                                                        )
+                                                                                                      : record(
+                                                                                                          op.plane,
+                                                                                                        ) &&
+                                                                                                        record(
+                                                                                                          op.shape,
+                                                                                                        );
   if (!ok) throw new Error('operation-schema');
 }
 
@@ -427,6 +450,8 @@ const labels: Record<CadOperationType, string> = {
   setDesignTargets: 'Design targets',
   setSightChecks: 'Sight checks',
   setToleranceStacks: 'Tolerance stacks',
+  setMotions: 'Motions',
+  setUnderlays: 'Underlays',
   reorderFeatures: 'Reorder features',
   setKernelBuild: 'Change kernel build',
   setToleranceSet: 'Change tolerance set',

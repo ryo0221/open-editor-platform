@@ -447,6 +447,30 @@ it('default-equal Design overrides survive adoption while unowned font fields up
   expect(templateCodec('design').validate(mapped.content)).toBe(true);
   expect(await materializeComponent(value.definition, value.closure)).toBeDefined();
 });
+it('Design adoption carries a vertical writing mode to instances (Codex on #29)', async () => {
+  const value = await designComponent(),
+    content = await insert(value, createDesign());
+  const partId = value.definition.payload.contract.properties.find((p) => p.id === 'size')!
+    .targets[0].partId;
+  const update = await revision(value.definition, (d) => {
+    const part = d.payload.contract.parts.find((p) => p.id === partId)!;
+    patchReusablePart(d.payload.template.content!, part.nativeId, {
+      typography: { writingMode: 'vertical-rl' },
+    });
+  });
+  const preview = await previewComponentUpdate({
+    ...basis(content),
+    ...update,
+    selections: [{ instanceId: 'reuse_first', choice: 'adopt' }],
+  });
+  expect(preview.conflicts).toEqual([]);
+  const next = applyLocalTemplate(preview.prepared!, content),
+    instance = retainedComponent(next, 'reuse_first').instance;
+  expect(reusableParts(next).get(instance.parts[partId])?.typography).toMatchObject({
+    writingMode: 'vertical-rl',
+    fontSize: 16,
+  });
+});
 it('Design adopts component basis dimensions once, preserves placement and refuses hidden fan-out to unselected native instances', async () => {
   const value = await designComponent(),
     content = await insert(value, createDesign());

@@ -13,6 +13,22 @@ import {
   designReactCanvasOwner,
 } from './convert';
 
+it('diagnoses vertical writing and ruby in semantic React output (Codex on #29)', () => {
+  for (const patch of [
+    { typography: { writingMode: 'vertical-rl' as const } },
+    { text: '漢字《かんじ》' },
+  ]) {
+    const content = designReactFixture();
+    const target = content.elements.find((e) => e.id === 'heading')!;
+    Object.assign(target, patch);
+    expect(
+      convertDesignToReact(content).diagnostics.some(
+        (d) => d.code === 'visual-unsupported' && d.path === target.id,
+      ),
+    ).toBe(true);
+  }
+});
+
 it('diagnoses vector loss in semantic React output instead of silently exporting a rectangle', () => {
   const content = designReactFixture();
   const target = content.elements.find((e) => e.id === 'heading')!;

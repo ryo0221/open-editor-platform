@@ -1,6 +1,7 @@
 import {
   layoutDrawingText,
   shapeNames,
+  usesGridText,
   type Drawing,
   type DrawingTextLayout,
 } from '@editor-platform/editor-core';
@@ -301,6 +302,17 @@ async function planTable(p: PptxPlanner, element: PptxElement) {
     );
   else if (table.merges?.length)
     await p.fallback(element, 'Slide merged tables require element rendering');
+  // Cells are drawn as text boxes, so a cell with ruby (or a vertical table) is set on the grid
+  // too, which a native Office table cell cannot keep (Codex on #29).
+  else if (
+    table.rows.some((row) =>
+      row.some((text) => usesGridText({ text, typography: drawing.typography })),
+    )
+  )
+    await p.fallback(
+      element,
+      'Vertical writing and ruby are set on a grid that Office text cannot keep',
+    );
   else if ((drawing.opacity ?? 1) < 1 || (exportColor(drawing.stroke ?? '#8e9eb5')?.alpha ?? 1) < 1)
     await p.fallback(
       element,
@@ -357,9 +369,16 @@ function planTableCells(p: PptxPlanner, element: PptxElement, table: TableConten
     y += heights[r];
   }
 }
-/** Mirrored or clipped text cannot stay editable Office text. */
+/** Mirrored, clipped, vertical or ruby text cannot stay editable Office text. */
 async function planTextFallbacks(p: PptxPlanner, element: PptxElement) {
   const { drawing } = element;
+  // Vertical writing and readings are set glyph by glyph on a grid; Office text would set them
+  // as ordinary horizontal lines (Codex on #29).
+  if (usesGridText(drawing) && element.representation !== 'png')
+    await p.fallback(
+      element,
+      'Vertical writing and ruby are set on a grid that Office text cannot keep',
+    );
   if ((drawing.flipX || drawing.flipY) && element.representation !== 'png')
     await p.fallback(element, 'Office keeps native text readable instead of mirroring its glyphs');
   if (

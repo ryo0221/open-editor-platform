@@ -115,9 +115,13 @@ export type DesignElementType =
   | 'instance'
   | 'shape'
   | 'react';
+export const designMangaRoles = ['balloon', 'keep-out'] as const;
+export type DesignMangaRole = (typeof designMangaRoles)[number];
 export interface DesignElement extends VisualStyle {
   provenance?: DesignRasterProvenance;
   panelGeometry?: DesignPanelGeometry;
+  /** Manga lettering role: a speech balloon, or a region (a face, a figure) balloons keep off. */
+  mangaRole?: DesignMangaRole;
   /** Reference source is canonical; src is a retained rendering cache. */
   reference?: EmbeddedReference;
   /** Colorable path geometry belongs to native Design shapes. */
@@ -392,6 +396,7 @@ function targetComponent(d: DesignContent, id: string): DesignComponent {
   return c;
 }
 const elementFields = new Set([
+  'mangaRole',
   'type',
   'name',
   'bounds',
@@ -465,6 +470,7 @@ const textStyleFields = [
   'padding',
   'list',
   'overflow',
+  'writingMode',
 ];
 /** Close native envelopes only. Public props, slot/breakpoint maps and retained
  * foreign content keep their declared dictionary/domain-owned semantics. Web,
@@ -1931,6 +1937,7 @@ const elementChecks: [field: string, check: (e: DesignElement) => boolean][] = [
   ['bounds', (e) => validBounds(e.bounds)],
   ['layout', (e) => optional(e.layout, validLayout)],
   ['sizing', (e) => optional(e.sizing, oneOf(['fixed', 'hug', 'fill']))],
+  ['mangaRole', (e) => optional(e.mangaRole, oneOf(designMangaRoles))],
   ['clipContent', (e) => optional(e.clipContent, (v) => typeof v === 'boolean')],
   ['shape', (e) => optional(e.shape, oneOf(shapeNames))],
   ['imageFit', (e) => optional(e.imageFit, oneOf(['fit', 'fill']))],

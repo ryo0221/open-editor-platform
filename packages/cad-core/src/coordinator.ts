@@ -7,7 +7,12 @@ import {
 import type { CadAssemblyEvaluation } from './assembly-port';
 import { cadEditorCommand, assertCadOperation } from './commands';
 import type { CadDocument, Vec3 } from './model';
-import { applyCadOperation, cadContentHash, type CadOperation } from './operations';
+import {
+  applyCadOperation,
+  cadContentHash,
+  draftCadOperation,
+  type CadOperation,
+} from './operations';
 import { poseOf, posesDiffer, stepPose } from './assembly';
 import {
   jointRefPath,
@@ -19,7 +24,7 @@ import {
 } from './joints';
 import { parameterValues, resolvePosition, type ParameterValues } from './graph';
 import type { CadReferenceProblem, CadTopoName, CadTopologyRef } from './topology';
-import { assertCad } from './validation';
+import { assertCad, CadValidationError } from './validation';
 import { inactiveJointIds } from './mounts';
 
 export interface CadSolidEvaluation {
@@ -159,7 +164,12 @@ export type CadPrepareResult =
       candidate: CadDocument;
       evaluation: CadEvaluation & { status: 'ok' };
     }
-  | { status: 'rejected'; code: string }
+  | {
+      status: 'rejected';
+      code: string;
+      /** A document the validator refused, unvalidated, so the refusal can name its elements (#13). */
+      candidate?: CadDocument;
+    }
   | {
       status: 'geometry-error';
       evaluation: CadEvaluation & { status: 'error' };
@@ -291,7 +301,13 @@ export class CadCoordinator {
       snapshot = structuredClone(op);
       candidate = applyCadOperation(session.content, snapshot);
     } catch (error) {
-      return { status: 'rejected', code: (error as Error).message };
+      const code = (error as Error).message;
+      if (!(error instanceof CadValidationError)) return { status: 'rejected', code };
+      try {
+        return { status: 'rejected', code, candidate: draftCadOperation(session.content, op) };
+      } catch {
+        return { status: 'rejected', code };
+      }
     }
     const generation = this.generation;
     const base = session.revision;

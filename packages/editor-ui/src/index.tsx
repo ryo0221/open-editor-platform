@@ -23,6 +23,7 @@ import './styles.css';
 import { useEditorInput } from './inputs';
 export * from './inputs';
 export * from './workspace';
+export * from './progress';
 export { PanelLeft, PanelRight, Maximize2, X, MoreHorizontal, ChevronDown };
 export function IconButton({
   icon: Icon,

@@ -18,7 +18,7 @@ import {
   f26Panel,
   f27Windows,
 } from './fixtures';
-import { mm, position, type CadDocument } from './model';
+import { cadLoftSections, mm, position, type CadDocument } from './model';
 import {
   applyCadOperation,
   dependencyClosure,
@@ -558,7 +558,10 @@ describe('lofted and swept sheets (R2a-2b, CAD41)', () => {
     });
     expect(codes(one)).toEqual(['loft-sections@$.features[0].args.sections']);
     const many = changed(f17Surfaces('loft'), (d) => {
-      loftOf(d).sections = Array.from({ length: 33 }, () => loftOf(d).sections[0]!);
+      loftOf(d).sections = Array.from(
+        { length: cadLoftSections + 1 },
+        () => loftOf(d).sections[0]!,
+      );
     });
     expect(codes(many)).toEqual(['limit-loft-sections@$.features[0].args.sections']);
     const gap = changed(f17Surfaces('closed'), (d) => {

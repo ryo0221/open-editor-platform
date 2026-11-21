@@ -1,4 +1,5 @@
 import { newId } from '@editor-platform/artifact-core';
+import { cadFailureHint, type CadFailureReason } from './failure-hints';
 import {
   defaultCoilSpringArgs,
   type CadBodyKind,
@@ -37,6 +38,8 @@ import {
   mm,
   position,
   cadLimits,
+  cadLoftSections,
+  cadSketchLimits,
   type CadAppearance,
   type CadAssetRef,
   type CadTextures,
@@ -44,6 +47,7 @@ import {
   cadImportToleranceMm,
   cadTolerance,
   cadTextureKind,
+  type CadUnderlay,
   type CadBody,
   type CadBodyEvaluation,
   type CadDocument,
@@ -440,12 +444,13 @@ export interface CadControllerOptions {
 /**
  * Session budgets (docs/cad/operations.md, Cacheの保持予算; CAD26): main-thread buffers of the
  * current, candidate and history meshes, and GPU buffers of what the viewport shows. The
- * Worker's own limits (64 MiB transferred, one kept evaluation) are enforced in the kernel.
+ * Worker's own limits (cadOutputLimits.bufferBytes transferred, one kept evaluation) are enforced in the kernel.
  */
 export const cadBudgets = Object.freeze({
-  mainBytes: 128 * 1024 * 1024,
+  /** #14: 512 MiB each (was 128 MiB), so a model at the raised output limits stays shown. */
+  mainBytes: 512 * 1024 * 1024,
   mainEntries: 3,
-  gpuBytes: 128 * 1024 * 1024,
+  gpuBytes: 512 * 1024 * 1024,
 });
 /** Bytes of the buffers these meshes hold, each allocation counted once. */
 /** Bytes of node curvature arrays, shared buffers once. */
@@ -551,6 +556,13 @@ export interface CadRebindView {
   /** Content hash of the previewed choice, whose meshes the viewport shows. */
   previewHash?: string;
 }
+/** #17: a staged export's stage starting now: `done` of `total` stages are finished. */
+export interface CadExportStage {
+  done: number;
+  total: number;
+  /** What this stage writes (a part's name, or "STEP file"). */
+  label: string;
+}
 /** A mesh file of exactly the confirmed content, with what it keeps and loses. */
 export interface CadMeshExport {
   bytes: Uint8Array;
@@ -564,8 +576,7 @@ const messages: Record<string, string> = {
     'この操作では、1つのbodyが1,024個を超える離れたsolidに分かれるため確定できません。patternの数を減らすか、bodyを分けてください。',
   'solids-touching':
     'この操作では、離れたsolidどうしが辺か頂点だけで接する形になるため確定できません。少し重ねるか、離してください。',
-  'limit-solids':
-    '表示中のbodyのsolidは、合わせて4,096個までです。patternの数を減らすか、いらないbodyを消してください。',
+  'limit-solids': `表示中のbodyのsolidは、合わせて${cadLimits.solids.toLocaleString('en-US')}個までです。patternの数を減らすか、いらないbodyを消してください。`,
   'empty-result': 'この操作では形状が残りません。',
   'boolean-no-overlap':
     '工具のbodyが対象に重なっていないため、差し引けません（接するだけの形を含みます）。',
@@ -604,9 +615,14 @@ const messages: Record<string, string> = {
   'parameter-dependency': 'このparameterの式が読むparameterが正しくありません。',
   'parameter-missing': '式が存在しないparameterを参照しています。',
   'count-range': 'countは1から1,000までの整数にしてください。',
-  'limit-active-bodies':
-    '表示中のbodyは64個までです。Booleanのtoolとして使ったbodyは数えません。いらないbodyを消すか、Booleanでまとめてください。',
-  'limit-bodies': '文書のbodyは、Booleanで使ったものを含めて1,024個までです。',
+  'limit-active-bodies': `表示中のbodyは${cadLimits.bodies.toLocaleString('en-US')}個までです。Booleanのtoolとして使ったbodyは数えません。いらないbodyを消すか、Booleanでまとめるか、部品の版に分けて組立にしてください。`,
+  'limit-bodies': `文書のbodyは、Booleanで使ったものを含めて${cadLimits.allBodies.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-features': `文書のfeatureは${cadLimits.features.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-profiles': `文書のprofileは${cadLimits.profiles.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-sketches': `文書のsketchは${cadSketchLimits.sketches.toLocaleString('en-US')}個までです。部品の版に分けて組立にしてください。`,
+  'limit-parameters': `文書のparameterは${cadLimits.parameters.toLocaleString('en-US')}個までです。`,
+  'limit-namedViews': `保存した視点は${cadLimits.namedViews.toLocaleString('en-US')}個までです。`,
+  'limit-bytes': `文書の大きさが上限（${cadLimits.contentBytes / 2 ** 20} MiB）を超えます。部品の版に分けて組立にしてください。`,
   'limit-expression-nodes': '式が長すぎます（1式に256項目、文書全体で16,384項目まで）。',
   'limit-expression-depth': '式の入れ子が深すぎます（32段まで）。',
   'limit-parameter-depth': 'parameterの式のつながりが長すぎます（64段まで）。',
@@ -621,6 +637,7 @@ const messages: Record<string, string> = {
     '水平面をほぼ真横から見ているため、dragでは位置が定まりません。視点を傾けるか、Inspectorの座標で移動してください。',
   'export-no-shape': '出力できる形状がありません。',
   'export-busy': '形状を計算中です。計算が終わってから、もう一度操作してください。',
+  'export-cancelled': '書き出しを取り消しました。',
   'png-not-drawn':
     '形状を3D表示していないため、PNGは書き出せません（表示のメモリー上限か、3D表示を利用できない状態）。STEP・STL・GLBは書き出せます。',
   'export-mismatch': '出力用の計算結果が現在の形状と一致しないため、出力しませんでした。',
@@ -864,7 +881,7 @@ const messages: Record<string, string> = {
   'section-region': '断面のsketchに閉じた領域がありません。',
   'section-holes': 'loft・sweepの断面には穴のない領域を使ってください。',
   'loft-sections': 'loftには2つ以上の断面が要ります。',
-  'limit-loft-sections': 'loftの断面は32個までです。',
+  'limit-loft-sections': `loftの断面は${cadLoftSections}個までです。`,
   'loft-same-sketch': 'loftの断面はそれぞれ別のsketch（別の平面）にしてください。',
   'derived-section-source': '派生断面は、同じloftのそれより前のsketchの断面から作ってください。',
   'derived-section-scale': '派生断面の倍率は0.001〜1000にしてください。',
@@ -1020,6 +1037,10 @@ export interface CadFailureReport {
   operation?: string;
   sketchId?: string;
   sketchName?: string;
+  /** #13: the failure class, the elements it is about (stable IDs) and a concrete hint. */
+  reason?: CadFailureReason;
+  elements?: string[];
+  hint?: string;
 }
 /** The active body built from `featureId` (a consumed one if no active body reads it). */
 function bodyOfFeature(doc: CadDocument, featureId: string) {
@@ -1056,6 +1077,7 @@ export function cadFailureReport(
       ? { featureId: feature.id, featureName: feature.name, operation: feature.type }
       : {}),
     ...(sketch ? { sketchId: sketch.id, sketchName: sketch.name } : {}),
+    ...(cadFailureHint(doc, code, elementId) ?? {}),
   };
 }
 /** describeCode plus the part and the operation named by a kernel failure, found in `doc`. */
@@ -1084,7 +1106,8 @@ export function describeFailure(doc: CadDocument, code: string, elementId?: stri
     r.featureId !== undefined && `feature「${r.featureName}」（${r.operation}、ID ${r.featureId}）`,
     r.sketchId !== undefined && `sketch「${r.sketchName}」（ID ${r.sketchId}）`,
   ].filter(Boolean);
-  return where.length ? `${r.message}原因：${where.join('の')}` : r.message;
+  const text = where.length ? `${r.message}原因：${where.join('の')}` : r.message;
+  return r.hint ? `${text}${/[。.]$/.test(text) ? '' : '。'}直し方：${r.hint}` : text;
 }
 
 /**
@@ -2435,6 +2458,68 @@ export class CadController {
       assets: staged.map((a) => a.ref).filter((r) => !held.has(r.id)),
     });
   }
+  /**
+   * #15: lays a drawing under a view. The image is stored with the Host first (as a texture is),
+   * then one `setUnderlays` adds it to the list. Its pixel size is read by the caller.
+   */
+  async addUnderlay(
+    file: { bytes: Uint8Array; mediaType: string },
+    underlay: Omit<CadUnderlay, 'id' | 'assetId'>,
+  ): Promise<boolean> {
+    const refuse = (code: string, message?: string) => {
+      this.fail(code);
+      if (message && this.diagnostic) this.diagnostic.message = message;
+      this.emit();
+      return false;
+    };
+    const { assets } = this.options;
+    if (!assets) return refuse('texture-unavailable');
+    if (!this.options.canEdit()) return refuse('permission-denied');
+    const kind = cadTextureKind(file.mediaType);
+    if (!kind) return refuse('texture-media-type');
+    const digest = new Uint8Array(
+      await crypto.subtle.digest('SHA-256', file.bytes as BufferSource),
+    );
+    const sha256 = `sha256:${Array.from(digest, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+    const content = this.coordinator.content;
+    const ref: CadAssetRef = content.assets.find((a) => a.kind === kind && a.sha256 === sha256) ?? {
+      id: this.id('asset'),
+      kind,
+      sha256,
+      byteLength: file.bytes.byteLength,
+      mediaType: cadAssetMediaTypes[kind],
+    };
+    // Storing the image is pending work, as for textures: a document switch waits for it rather
+    // than dropping the underlay into a disposed kernel (Codex on #35).
+    const operation = ++this.operation;
+    this.busy = true;
+    this.staging = true;
+    this.emit();
+    try {
+      await assets.stage([{ ref, bytes: file.bytes }]);
+    } catch (error) {
+      this.staging = false;
+      if (operation === this.operation) this.busy = false;
+      const message = error instanceof Error ? error.message : String(error);
+      return refuse('asset-stage-failed', `${describeCode('texture-stage-failed')}${message}`);
+    }
+    this.staging = false;
+    if (operation === this.operation) this.busy = false;
+    // Built on the content as it is now (an edit while the image was stored is kept).
+    const now = this.coordinator.content;
+    const held = now.assets.find((a) => a.id === ref.id);
+    if (held && held.sha256 !== ref.sha256) return refuse('texture-stale');
+    const list = now.underlays ?? [];
+    return this.run({
+      type: 'setUnderlays',
+      underlays: [...list, { ...underlay, id: this.id('underlay'), assetId: ref.id }],
+      ...(held ? {} : { assets: [ref] }),
+    });
+  }
+  /** #15: the whole underlay list after a change in the panel (empty removes them all). */
+  setUnderlays(underlays: CadUnderlay[]) {
+    return this.run({ type: 'setUnderlays', underlays });
+  }
   /** Discards the read file; nothing was stored. */
   cancelStepImport() {
     this.stepImport = undefined;
@@ -2509,7 +2594,8 @@ export class CadController {
       // CR3c: a trim's chains that cut nothing or split the kept sheet are named.
       const chains = trimChains(prepared.candidate, prepared.evaluation);
       if (chains && shown) shown.message += ` 該当する閉じた線：${chains}`;
-    } else if (prepared.status === 'rejected') this.fail(prepared.code);
+    } else if (prepared.status === 'rejected')
+      this.fail(prepared.code, undefined, prepared.candidate);
     // A stale result superseded by a newer run leaves the outcome to it. Cancelled by history or
     // a Host sync instead, it resets the Inspector so no field keeps the cancelled value.
     else if (operation === this.operation) this.rejections++;

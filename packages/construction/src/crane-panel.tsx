@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import {
   craneKinds,
   craneReach,
@@ -20,6 +20,53 @@ import {
   parsePoint3,
 } from './display';
 import { Field, SiteTable, useDirty, type Report } from './site-panel';
+import type { OperationProgress } from '@editor-platform/editor-core';
+import { ProgressStatus } from '@editor-platform/editor-ui';
+
+/**
+ * How far a running check is, kept apart from the surface's state: setting it redraws only the
+ * progress line, not the whole surface (whose 3D view rebuilds its scene on each redraw).
+ */
+export interface ProgressCell {
+  get(): OperationProgress | undefined;
+  set(progress: OperationProgress | undefined): void;
+  subscribe(listener: () => void): () => void;
+}
+export function progressCell(): ProgressCell {
+  let value: OperationProgress | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => value,
+    set(progress) {
+      value = progress;
+      for (const l of listeners) l();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+function CheckProgress({ cell, onStop }: { cell?: ProgressCell; onStop?(): void }) {
+  const progress = useSyncExternalStore(cell?.subscribe ?? noSubscribe, cell?.get ?? noProgress);
+  return progress ? (
+    <ProgressStatus
+      label="Lift checks"
+      unit="lifts"
+      progress={progress}
+      onCancel={onStop}
+      cancelLabel="Stop checks"
+    />
+  ) : (
+    onStop && (
+      <button type="button" onClick={onStop}>
+        Stop checks
+      </button>
+    )
+  );
+}
+const noSubscribe = () => () => {};
+const noProgress = () => undefined;
 
 const craneKindLabels: Record<CraneKind, string> = { tower: 'Tower crane', mobile: 'Mobile crane' };
 
@@ -40,6 +87,10 @@ export function CranePanel({
   liftsToday,
   problems,
   checking,
+  checkProgress,
+  onStopChecks,
+  checksStopped,
+  onCheckAgain,
   readOnly,
   run,
   setError,
@@ -62,6 +113,12 @@ export function CranePanel({
   problems: readonly ConstructionDiagnostic[];
   /** The crane checks are still running. */
   checking: boolean;
+  /** #16: how far the checks are, while they run. */
+  checkProgress?: ProgressCell;
+  onStopChecks?(): void;
+  /** #16: the checks were stopped for this plan; they run again on asking (or on an edit). */
+  checksStopped?: boolean;
+  onCheckAgain?(): void;
   readOnly: boolean;
   run(ops: ConstructionOperation | ConstructionOperation[]): boolean;
   setError(e: string): void;
@@ -171,6 +228,19 @@ export function CranePanel({
   return (
     <details className="construction-site" open={cranes.length > 0 || undefined}>
       <summary>Cranes</summary>
+      {checking && (
+        <p className="construction-note">
+          <CheckProgress cell={checkProgress} onStop={onStopChecks} />
+        </p>
+      )}
+      {checksStopped && (
+        <p className="construction-note" role="status" aria-label="Lift checks">
+          The lift checks were stopped; their problems are not shown.{' '}
+          <button type="button" onClick={onCheckAgain}>
+            Check the lifts again
+          </button>
+        </p>
+      )}
       {(problems.length > 0 || checking) && (
         <ul className="construction-problems" aria-label="Crane problems">
           {checking && <li>Checking the lifts…</li>}

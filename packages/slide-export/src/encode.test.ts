@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
 import { build } from 'esbuild';
 import { contentHash } from '@editor-platform/artifact-core';
-import { shapeNames } from '@editor-platform/editor-core';
+import { shapeNames, usesGridText, type Drawing } from '@editor-platform/editor-core';
 import {
   captureSlideExportSnapshot,
   prepareSlidePptx,
@@ -406,6 +406,79 @@ it('includes the cloud curve beyond its bounds and reports unsupported native ta
     expect(transformed.xml().match(/<p:pic>/g)).toHaveLength(1);
     expect(transformed.xml()).not.toContain('<a:tbl>');
   }
+});
+
+it('keeps vertical text as a picture instead of horizontal Office text (Codex on #29)', async () => {
+  const deck = contractDeck();
+  const text = deck.slides[0].objects[0];
+  text.text = '台詞';
+  text.runs = [];
+  text.typography = { ...text.typography, writingMode: 'vertical-rl' };
+  const p = await prepare(
+    deck,
+    {
+      rasterize: async (r) =>
+        contractPng(Math.ceil(r.bounds.width * 2), Math.ceil(r.bounds.height * 2)),
+    },
+    { ...contractOptions, fallback: 'element-png' },
+  );
+  expect(p.report.counts.rasterized).toBe(1);
+  expect(p.report.diagnostics.find((d) => d.code === 'ELEMENT_RASTERIZED')?.message).toMatch(
+    /Vertical writing and ruby/,
+  );
+  expect((await encoded(p)).xml()).not.toContain('<p:txBody>');
+});
+
+it('keeps horizontal ruby with plain runs on the grid through export fonts (Codex on #29)', async () => {
+  const deck = contractDeck();
+  const text = deck.slides[0].objects[0];
+  text.text = '漢字《かんじ》';
+  text.runs = [{ text: '漢字《かんじ》' }];
+  const drawings: Drawing[] = [];
+  const p = await prepare(
+    deck,
+    {
+      rasterize: async (r) => {
+        drawings.push(r.drawing);
+        return contractPng(Math.ceil(r.bounds.width * 2), Math.ceil(r.bounds.height * 2));
+      },
+    },
+    { ...contractOptions, fallback: 'element-png' },
+  );
+  expect(p.report.counts.rasterized).toBe(1);
+  // The export font is written onto the runs too, and the drawing still lays out on the grid.
+  expect(drawings[0]!.runs![0]!.style?.fontFamily).toBe(drawings[0]!.typography?.fontFamily);
+  expect(usesGridText(drawings[0]!)).toBe(true);
+});
+
+it('keeps a table with ruby in a cell as a picture (Codex on #29)', async () => {
+  const table = {
+    id: 'table',
+    type: 'table' as const,
+    text: '',
+    fill: '#fff',
+    stroke: '#0050b4',
+    bounds: { x: 40, y: 50, width: 300, height: 120 },
+    table: {
+      rows: [
+        ['項目', '値'],
+        ['漢字《かんじ》', '6'],
+      ],
+    },
+  };
+  const p = await prepare(
+    contractDeck([table]),
+    {
+      rasterize: async (r) =>
+        contractPng(Math.ceil(r.bounds.width * 2), Math.ceil(r.bounds.height * 2)),
+    },
+    { ...contractOptions, fallback: 'element-png' },
+  );
+  expect(p.report.counts.rasterized).toBe(1);
+  expect(p.report.diagnostics.find((d) => d.code === 'ELEMENT_RASTERIZED')?.message).toMatch(
+    /Vertical writing and ruby/,
+  );
+  expect((await encoded(p)).xml()).not.toContain('<a:tbl>');
 });
 
 it('keeps an empty text object as an editable native text box with an output mapping', async () => {

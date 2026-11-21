@@ -448,7 +448,17 @@ export type CadWorkerResponse =
 
 /** Initial evaluation output limits (docs/cad/model.md). Exceeding them is an explicit error. */
 export const cadOutputLimits = Object.freeze({
-  faces: 50_000,
+  faces: 200_000,
+  triangles: 2_000_000,
+  bufferBytes: 256 * 1024 * 1024,
+});
+/**
+ * The output limits of a render's finer meshes (`renderMesh`): triangles and buffers kept at their
+ * values from before #14. A render re-meshes every shown version finer and the path tracer holds
+ * all of them at once, so a version past these keeps its display meshes.
+ */
+export const cadRenderOutputLimits = Object.freeze({
+  faces: 200_000,
   triangles: 500_000,
   bufferBytes: 64 * 1024 * 1024,
 });

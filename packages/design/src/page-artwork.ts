@@ -92,37 +92,60 @@ function speechBalloonPath(): DesignEditablePath {
     ],
   };
 }
+/** The stroke width of a new speech balloon's outline: it paints half of it outside the bounds. */
+export const designSpeechBalloonStroke = 2;
 export function insertDesignSpeechBalloon(
   panelId: string,
   bounds: Bounds,
   text: string,
+  options: { vertical?: boolean } = {},
 ): EditorCommand<DesignContent> & { elementId: string; pathId: string; textId: string } {
   if (typeof text !== 'string' || text.length > 20000)
     throw Error('Balloon dialogue exceeds 20000 UTF-16 units');
   bounds = ownedBounds(bounds);
   const group = insertElement('group', { parentId: panelId, bounds });
   const path = insertDesignPath(speechBalloonPath(), bounds, group.elementId);
-  const dialogue = insertElement('text', {
-    parentId: group.elementId,
-    bounds: {
-      x: bounds.x + bounds.width * 0.15,
-      y: bounds.y + bounds.height * 0.12,
-      width: bounds.width * 0.7,
-      height: bounds.height * 0.45,
-    },
-  });
+  // Vertical dialogue (縦書き) fills the body of the balloon above the tail, columns centred.
+  const textBounds = options.vertical
+    ? {
+        x: bounds.x + bounds.width * 0.18,
+        y: bounds.y + bounds.height * 0.1,
+        width: bounds.width * 0.64,
+        height: bounds.height * 0.55,
+      }
+    : {
+        x: bounds.x + bounds.width * 0.15,
+        y: bounds.y + bounds.height * 0.12,
+        width: bounds.width * 0.7,
+        height: bounds.height * 0.45,
+      };
+  const dialogue = insertElement('text', { parentId: group.elementId, bounds: textBounds });
   const batch = transaction('Insert speech balloon', [
     group,
-    updateElement(group.elementId, { name: 'Speech balloon' }),
+    updateElement(group.elementId, { name: 'Speech balloon', mangaRole: 'balloon' }),
     path,
     updateElement(path.elementId, {
       name: 'Balloon outline',
       fill: '#ffffff',
       stroke: '#111111',
-      strokeWidth: 2,
+      strokeWidth: designSpeechBalloonStroke,
     }),
     dialogue,
-    updateElement(dialogue.elementId, { text, fill: '#111111' }),
+    updateElement(dialogue.elementId, {
+      text,
+      fill: '#111111',
+      ...(options.vertical
+        ? {
+            typography: {
+              writingMode: 'vertical-rl' as const,
+              fontSize: Math.max(8, Math.min(28, textBounds.height / 6)),
+              align: 'center' as const,
+              padding: 4,
+              overflow: 'fit' as const,
+            },
+          }
+        : {}),
+    }),
   ]);
   return {
     ...withCommandReads(

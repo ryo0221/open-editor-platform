@@ -14,14 +14,14 @@ export interface WorkerBimKernelOptions {
   spawn(): BimWorkerLike;
   /** The Host's verified build; undefined when none is configured. */
   build: KernelBuild | undefined;
-  /** Forced stop for one job, Worker start-up included (30 s, as in CAD). */
+  /** Forced stop for one job, Worker start-up included (2 min, as in CAD since #14). */
   jobTimeoutMs?: number;
   /** Forced stop when a cancel is not acknowledged in time (500 ms, as in CAD). */
   cancelAckMs?: number;
   timers?: { set(fn: () => void, ms: number): unknown; clear(id: unknown): void };
 }
 export const bimKernelLimits = Object.freeze({
-  jobTimeoutMs: 30_000,
+  jobTimeoutMs: 120_000,
   cancelAckMs: 500,
   /**
    * A drawing's projection: hidden lines need every seen solid in one job, so it cannot be

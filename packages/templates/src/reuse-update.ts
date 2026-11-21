@@ -67,7 +67,7 @@ const designFields =
   );
 const nestedFields: Record<string, string[]> = {
   typography:
-    'fontFamily fontSize bold italic underline strike color lineHeight letterSpacing align verticalAlign padding list overflow'.split(
+    'fontFamily fontSize bold italic underline strike color lineHeight letterSpacing align verticalAlign padding list overflow writingMode'.split(
       ' ',
     ),
   layout: 'direction gap padding align sizing'.split(' '),

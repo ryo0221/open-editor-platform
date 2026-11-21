@@ -21,6 +21,8 @@ import { cadSpringLimits, springProblem, type SpringSpec } from './spring';
 import { validateProportions } from './proportions';
 import { validateDesignTargets } from './design-targets';
 import { validateSightChecks } from './sight-checks';
+import { validateMotions } from './motions';
+import { validateUnderlays } from './underlays';
 import { validateToleranceStacks } from './tolerance-stacks';
 import { cadJointLimits } from './joints';
 import { validateInterferenceAllowances } from './interference';
@@ -2189,6 +2191,8 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       'designTargets',
       'sightChecks',
       'toleranceStacks',
+      'motions',
+      'underlays',
     ],
   );
   if (value.units !== 'mm') c.error('units', '$.units');
@@ -2224,7 +2228,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
       return [...c.d, { code: 'collection', path: `$.${key}`, severity: 'error' }];
     if ((value[key] as unknown[]).length > max) c.error(`limit-${key}`, `$.${key}`);
   }
-  // CM-U3: 64 active bodies; consumed tools stay in the history up to `allBodies` in all.
+  // CM-U3: `cadLimits.bodies` active bodies; consumed tools stay in the history up to `allBodies` in all.
   const activeBodies = (value.bodies as unknown[]).filter(
     (b) => !record(b) || b.state !== 'consumed',
   ).length;
@@ -2277,6 +2281,12 @@ export function validateCad(value: unknown): CadDiagnostic[] {
         else usedAssets.add(id as string);
       }
     });
+  // #15: underlays name image assets of the content.
+  if (Object.hasOwn(value, 'underlays'))
+    for (const id of validateUnderlays(c, value.underlays, (id) =>
+      textureKinds.has(assets.get(id as string)),
+    ))
+      usedAssets.add(id);
   // The closure is exact: an asset no feature or body reads is not kept in the content.
   if (Array.isArray(value.assets))
     value.assets.forEach(
@@ -2412,6 +2422,7 @@ export function validateCad(value: unknown): CadDiagnostic[] {
   const activeIds = new Set(active.map((a) => a.id));
   if (Object.hasOwn(value, 'proportions')) validateProportions(c, value.proportions, activeIds);
   if (Object.hasOwn(value, 'sightChecks')) validateSightChecks(c, value.sightChecks, activeIds);
+  if (Object.hasOwn(value, 'motions')) validateMotions(c, value.motions, cadId);
   // PD1/PD3: the parameters by ID with their type, and the stacks a target may measure.
   const parameterTypes = new Map<string, string>(
     (Array.isArray(value.parameters) ? value.parameters : []).flatMap((p) =>

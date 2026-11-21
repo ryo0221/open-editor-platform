@@ -9,7 +9,7 @@ import {
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type { DesignContent } from './model';
-import { insertDesignStroke } from './stroke-path';
+import { designBrushLimits, insertDesignBrushStroke, insertDesignStroke } from './stroke-path';
 
 export function useDesignStrokeInput(options: {
   enabled: boolean;
@@ -23,7 +23,12 @@ export function useDesignStrokeInput(options: {
   error(message: string): void;
 }) {
   const [active, setActive] = useState(false),
-    [preview, setPreview] = useState<{ x: number; y: number }[]>();
+    [preview, setPreview] = useState<{ x: number; y: number }[]>(),
+    // 'brush' (#20): width follows pen pressure, ends taper; 'pen' keeps an even line.
+    [tool, setTool] = useState<'pen' | 'brush'>('pen'),
+    [brushWidth, setBrushWidth] = useState(6);
+  const settings = useRef({ tool, brushWidth });
+  settings.current = { tool, brushWidth };
   const latest = useRef(options);
   latest.current = options;
   const gesture = useRef<
@@ -32,7 +37,7 @@ export function useDesignStrokeInput(options: {
         parentId?: string;
         pointerId: number;
         target: SVGRectElement;
-        points: { x: number; y: number }[];
+        points: { x: number; y: number; pressure?: number }[];
       }
     | undefined
   >(undefined);
@@ -87,7 +92,11 @@ export function useDesignStrokeInput(options: {
       Math.abs(p.y) > 1_000_000
     )
       return;
-    return { x: p.x, y: p.y };
+    // Pen pressure for the brush; a mouse reports 0.5 while pressed.
+    const pressure = event.pointerType === 'mouse' ? undefined : event.pressure;
+    return pressure !== undefined && pressure > 0 && pressure <= 1
+      ? { x: p.x, y: p.y, pressure }
+      : { x: p.x, y: p.y };
   }
   function keyDown(event: KeyboardEvent) {
     if (event.nativeEvent.isComposing) return;
@@ -151,9 +160,10 @@ export function useDesignStrokeInput(options: {
           if (!p) return;
           const last = g.points.at(-1)!;
           if (Math.hypot(last.x - p.x, last.y - p.y) < 0.4) return;
-          if (g.points.length >= 2048) {
+          const max = settings.current.tool === 'brush' ? designBrushLimits.samples : 2048;
+          if (g.points.length >= max) {
             cancel();
-            options.error('Ink stroke exceeds 2048 samples; draw a shorter stroke');
+            options.error(`Ink stroke exceeds ${max} samples; draw a shorter stroke`);
             return;
           }
           g.points.push(p);
@@ -173,11 +183,20 @@ export function useDesignStrokeInput(options: {
           if (latest.current.readOnly || g.base !== latest.current.content) return;
           if (g.points.length < 2) return;
           try {
-            const command = insertDesignStroke(
-              g.points,
-              g.parentId,
-              () => !latest.current.readOnly,
-            );
+            const writable = () => !latest.current.readOnly;
+            const command =
+              settings.current.tool === 'brush'
+                ? insertDesignBrushStroke(
+                    g.points,
+                    g.parentId,
+                    settings.current.brushWidth,
+                    writable,
+                  )
+                : insertDesignStroke(
+                    g.points.map(({ x, y }) => ({ x, y })),
+                    g.parentId,
+                    writable,
+                  );
             if (latest.current.apply(command)) latest.current.created(command.elementId);
           } catch (error) {
             options.error(String(error));
@@ -195,29 +214,60 @@ export function useDesignStrokeInput(options: {
           d={preview.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y}`).join(' ')}
           fill="none"
           stroke="#151515"
-          strokeWidth={2.5}
+          strokeWidth={tool === 'brush' ? brushWidth : 2.5}
+          strokeLinecap="round"
           pointerEvents="none"
         />
       )}
     </g>
   ) : undefined;
   const controls = options.enabled ? (
-    <button
-      type="button"
-      aria-pressed={active}
-      disabled={options.readOnly || options.blocked}
-      onClick={() => {
-        try {
-          inputs?.flush();
-          cancel();
-          setActive(!active);
-        } catch (error) {
-          options.error(String(error));
-        }
-      }}
-    >
-      {active ? 'Finish drawing strokes' : 'Draw ink stroke'}
-    </button>
+    <>
+      <label>
+        Ink tool
+        <select
+          aria-label="Ink tool"
+          value={tool}
+          disabled={options.readOnly || options.blocked}
+          onChange={(e) => setTool(e.target.value as 'pen' | 'brush')}
+        >
+          <option value="pen">Pen (even line)</option>
+          <option value="brush">Brush (pressure, tapered ends)</option>
+        </select>
+      </label>
+      {tool === 'brush' && (
+        <label>
+          Brush width
+          <input
+            aria-label="Brush width"
+            type="number"
+            min={1}
+            max={designBrushLimits.width}
+            value={brushWidth}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v) && v >= 1 && v <= designBrushLimits.width) setBrushWidth(v);
+            }}
+          />
+        </label>
+      )}
+      <button
+        type="button"
+        aria-pressed={active}
+        disabled={options.readOnly || options.blocked}
+        onClick={() => {
+          try {
+            inputs?.flush();
+            cancel();
+            setActive(!active);
+          } catch (error) {
+            options.error(String(error));
+          }
+        }}
+      >
+        {active ? 'Finish drawing strokes' : 'Draw ink stroke'}
+      </button>
+    </>
   ) : undefined;
   return { active: drawing, busy: () => !!gesture.current, keyDown, overlay, controls };
 }
