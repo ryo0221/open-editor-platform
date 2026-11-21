@@ -75,8 +75,13 @@ export function MotionsSection({
   // Cancel, so it is never lost unseen (Codex on #34).
   useEditorInput({
     label: 'Motion',
-    read: () => ({ dirty: !!draft }),
+    // A video being recorded is pending work too: leaving would drop it unseen (Codex on #35).
+    read: () => ({ dirty: !!draft || !!recording }),
     prepare: () => {
+      if (recording)
+        throw new Error(
+          '動画を書き出しています。終わるか「Stop video」を押してから、もう一度操作してください。',
+        );
       if (draft)
         throw new Error(
           '動きの編集が保存されていません。「Save motion」か「Cancel」を押してから、もう一度操作してください。',

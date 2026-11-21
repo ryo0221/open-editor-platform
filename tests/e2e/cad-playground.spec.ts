@@ -5633,3 +5633,165 @@ test('take the F80 package through the roof, the underlay, the board and the pro
   await panel.screenshot({ path: test.info().outputPath('clf-s-proportions.png') });
   await page.screenshot({ path: test.info().outputPath('clf-s-shaded.png') });
 });
+
+test('#15 a drawing laid under the front view is kept, drawn and checked for deviation', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'desktop flow');
+  test.setTimeout(300_000);
+  await page.goto('/');
+  await create(page, 'cad');
+  await ready(page);
+  const empty = await nativeArtifact(page);
+  const kernelProfile = (empty.draft.content as CadDocument).kernelProfile;
+  await importJson(page, 'plate.json', {
+    ...empty,
+    name: 'Plate',
+    versions: [],
+    draft: { ...empty.draft, content: { ...f02Plate(), kernelProfile } },
+  });
+  await expect(page.getByLabel('Artifact name')).toHaveValue('Plate');
+  await ready(page);
+  // A drawing: a black rectangle outline on white, 200 × 100 px.
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 200;
+    c.height = 100;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#fff';
+    g.fillRect(0, 0, 200, 100);
+    g.strokeStyle = '#000';
+    g.lineWidth = 2;
+    g.strokeRect(50, 40, 100, 20);
+    return c.toDataURL('image/png').split(',')[1]!;
+  });
+  const panel = page.getByTestId('cad-underlays');
+  await page.getByText(/^Underlays \(0\)$/).click();
+  await panel.getByLabel('New underlay view').selectOption('front');
+  await panel.getByLabel('New underlay mm per pixel').fill('1');
+  await panel.getByLabel('Underlay image').setInputFiles({
+    name: 'front-drawing.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(png, 'base64'),
+  });
+  await expect(panel.getByRole('status')).toHaveText('front-drawing.png laid under the Front view');
+  const item = panel.getByRole('group', { name: 'Underlay front-drawing' });
+  await expect(item).toContainText('200 × 100 px');
+  await ready(page);
+  const canvas = page.locator('canvas.cad-canvas');
+  const frame = async () =>
+    createHash('sha1')
+      .update(await canvas.screenshot())
+      .digest('hex');
+  await item.getByRole('button', { name: 'Look from Front' }).click();
+  const drawn = await frame();
+  await item.getByLabel('Hide underlay').check();
+  await ready(page);
+  await expect.poll(frame).not.toBe(drawn);
+  await item.getByLabel('Hide underlay').uncheck();
+  await ready(page);
+  await expect.poll(frame).toBe(drawn);
+  // The deviation per body, in mm; the same again when checked again.
+  await item.getByRole('button', { name: 'Check deviation' }).click();
+  const table = item.getByRole('table', { name: 'Deviation from front-drawing' });
+  await expect(table.getByRole('row')).toHaveCount(2);
+  const first = await table.innerText();
+  expect(first).toMatch(/\d+\.\d\d mm/);
+  await item.getByRole('button', { name: 'Check deviation' }).click();
+  await expect.poll(() => table.innerText()).toBe(first);
+  // The heat overlay draws over the model and goes with its switch.
+  const heat = await frame();
+  expect(heat).not.toBe(drawn);
+  await panel.getByLabel('Show deviation heat').uncheck();
+  await expect.poll(frame).toBe(drawn);
+  // Hiding a compared body makes the result stale; showing it again makes it current (Codex on #35).
+  await page.getByLabel('Show plate', { exact: true }).uncheck();
+  await expect(table.locator('caption')).toHaveText(/check again/);
+  await page.getByLabel('Show plate', { exact: true }).check();
+  await expect(table.locator('caption')).toHaveText(/^Cell /);
+  // In silhouette shading the drawing keeps its own image: only its thin lines are dark, not a
+  // solid plane over the view (Codex on #35).
+  const darkShare = async () => {
+    const shot = (await canvas.screenshot()).toString('base64');
+    return page.evaluate(async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      [c.width, c.height] = [img.width, img.height];
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const px = g.getImageData(0, 0, c.width, c.height).data;
+      let dark = 0;
+      for (let i = 0; i < px.length; i += 4) if (px[i]! + px[i + 1]! + px[i + 2]! < 150) dark++;
+      return dark / (px.length / 4);
+    }, shot);
+  };
+  await page.getByTestId('cad-shading').selectOption('silhouette');
+  await item.getByLabel('Hide underlay').check();
+  await ready(page);
+  const bare = await darkShare();
+  await item.getByLabel('Hide underlay').uncheck();
+  await ready(page);
+  expect((await darkShare()) - bare).toBeLessThan(0.02);
+  await page.getByTestId('cad-shading').selectOption('shaded');
+  // Saved with the document and restored on reload, image asset included.
+  const saved = (await nativeArtifact(page)).draft.content as CadDocument;
+  expect(saved.underlays).toEqual([
+    expect.objectContaining({
+      name: 'front-drawing',
+      view: 'front',
+      pixels: [200, 100],
+      mmPerPixel: 1,
+      originMm: [-100, 50],
+    }),
+  ]);
+  expect(saved.assets.map((a) => a.id)).toContain(saved.underlays![0]!.assetId);
+  await page.reload();
+  await ready(page);
+  const again = page
+    .getByTestId('cad-underlays')
+    .getByRole('group', { name: 'Underlay front-drawing' });
+  await expect(again).toContainText('200 × 100 px');
+  await again.getByRole('button', { name: 'Check deviation' }).click();
+  await expect
+    .poll(() => again.getByRole('table', { name: 'Deviation from front-drawing' }).innerText())
+    .toBe(first);
+  // Laid under the bottom view, the drawing sits just past the plate's top face (5 mm), and moves
+  // with it when the plate gets thicker, though the drawings were set before the new model was
+  // shown (Codex on #35).
+  const viewport = page.locator('[data-underlay-scale]');
+  await again.getByLabel('Underlay view').selectOption('bottom');
+  await ready(page);
+  await expect(viewport).toHaveAttribute('data-underlay-depths', '-6');
+  const params = page.getByRole('list', { name: 'Parameters' });
+  await params.getByRole('button', { name: /^Thickness/ }).click();
+  const thickness = page.locator('.cad-inspector').getByLabel(/^Value/);
+  await thickness.fill('25');
+  await thickness.press('Enter');
+  await ready(page);
+  await expect(params).toContainText(/Thickness\s*25 mm/);
+  await expect(viewport).toHaveAttribute('data-underlay-depths', '-26');
+  await again.getByLabel('Underlay view').selectOption('front');
+  await ready(page);
+  // Edits go one at a time: a new scale committed on blur, then Hide at once, keeps both (Codex
+  // on #35).
+  await again.getByLabel('Underlay mm per pixel').fill('2');
+  await again.getByLabel('Underlay mm per pixel').blur();
+  await again.getByLabel('Hide underlay').check();
+  await ready(page);
+  await expect
+    .poll(async () => {
+      const u = ((await nativeArtifact(page)).draft.content as CadDocument).underlays?.[0];
+      return u && { mmPerPixel: u.mmPerPixel, hidden: u.hidden };
+    })
+    .toEqual({ mmPerPixel: 2, hidden: true });
+  await expect(again.getByLabel('Underlay mm per pixel')).toHaveValue('2');
+  // A removed drawing's decoded image and deviation result are let go (Codex on #35).
+  const underlays = page.getByTestId('cad-underlays');
+  await expect(underlays).toHaveAttribute('data-decoded', '1');
+  await expect(underlays).toHaveAttribute('data-results', '1');
+  await again.getByRole('button', { name: 'Remove underlay' }).click();
+  await expect(underlays).toHaveAttribute('data-decoded', '0');
+  await expect(underlays).toHaveAttribute('data-results', '0');
+});

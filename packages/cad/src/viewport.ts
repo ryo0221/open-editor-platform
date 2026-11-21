@@ -39,6 +39,22 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import type { CadSketchDisplay } from './sketch-display';
+/** #15: one underlay as the viewport draws it (the Surface decodes the images). */
+export interface CadViewportUnderlay {
+  id: string;
+  axes: {
+    u: [number, number, number];
+    v: [number, number, number];
+    toward: [number, number, number];
+  };
+  /** The (u, v) box the image covers. */
+  box: [number, number, number, number];
+  opacity: number;
+  /** The drawing; absent while hidden (its heat may still show). */
+  image?: TexImageSource;
+  /** The deviation heat overlay, the same box. */
+  heat?: TexImageSource;
+}
 import {
   disposeViewTextures,
   setViewFinish,
@@ -50,6 +66,8 @@ import {
 } from '@editor-platform/geometry-view';
 import type { GeometryEmission } from '@editor-platform/geometry-core';
 import {
+  cadUnderlayGpuShare,
+  cadUnderlayTextureSizes,
   combTip,
   curvatureColor,
   type CadCamera,
@@ -334,6 +352,13 @@ export class CadViewport {
   private readonly spotWelds = new Group();
   /** CR6c: the ray diagram's lines. */
   private readonly rays = new Group();
+  /** #15: drawings laid under views, each shown only while the camera looks along its view. */
+  private readonly underlays = new Group();
+  /** #15: where the underlays are drawn from when the scene's material is overridden. */
+  private readonly underlayLayer = new Scene();
+  private readonly underlayItems: { toward: Vector3; objects: Object3D[] }[] = [];
+  /** The shown model changed since the underlays' depths were set. */
+  private underlayDepthStale = false;
   /**
    * CLF11: the shown sketches' curves and notes, a scene of their own drawn over the model after
    * it, so the silhouette's override material leaves their colours and they show over the bodies.
@@ -363,6 +388,8 @@ export class CadViewport {
   private readonly resize: ResizeObserver;
   private pickable = false;
   private gpuBudget: number | undefined;
+  /** #15: the GPU bytes the underlay textures took when last set. */
+  private underlayBytes = 0;
   /** The last placed parts, admitted again when the budget or the native geometry changes. */
   private lastParts: ViewportPart[] = [];
   /** R2b-4: each part instance's level (LOD) as drawn, by its path. */
@@ -454,6 +481,7 @@ export class CadViewport {
       this.gapFlushes,
       this.spotWelds,
       this.rays,
+      this.underlays,
     );
     this.lighting = new ViewLighting(this.scene, this.renderer, { ambient: 0.6 });
     this.controls = this.makeControls();
@@ -669,13 +697,14 @@ export class CadViewport {
   }
   /** One frame: the current camera's, or the drawing board's three panes (CLF1b). */
   private draw() {
+    this.underlaysFor(this.camera);
     const helpers = [this.grid.visible, this.axes.visible];
     // CLF6: the outline alone, without the grid and the axes.
     if (this.shading.mode === 'silhouette') this.grid.visible = this.axes.visible = false;
     const board = this.threeView ? this.board() : undefined;
     this.lastBoard = board ?? [];
     if (!board) {
-      this.renderer.render(this.scene, this.camera);
+      this.renderScene(this.camera);
       this.drawSketches(this.camera, this.host.clientWidth, this.host.clientHeight);
     } else {
       const { clientWidth: width, clientHeight: height } = this.host;
@@ -694,7 +723,8 @@ export class CadViewport {
         const y = height - rect.y - rect.height;
         this.renderer.setViewport(rect.x, y, rect.width, rect.height);
         this.renderer.setScissor(rect.x, y, rect.width, rect.height);
-        this.renderer.render(this.scene, camera);
+        this.underlaysFor(camera);
+        this.renderScene(camera);
         this.drawSketches(camera, rect.width, rect.height, true);
       }
       this.renderer.setScissorTest(false);
@@ -702,6 +732,23 @@ export class CadViewport {
       this.renderer.setClearColor(clear, alpha);
     }
     [this.grid.visible, this.axes.visible] = helpers;
+  }
+  /**
+   * The scene from `camera`. #15: under an override material (silhouette shading) the underlays
+   * are drawn apart afterwards, with their own images and heat, as the sketch layer is (Codex on
+   * #35); the model's depth still hides a drawing behind it.
+   */
+  private renderScene(camera: PerspectiveCamera | OrthographicCamera) {
+    const apart = !!this.scene.overrideMaterial && this.underlays.children.length > 0;
+    if (apart) this.scene.remove(this.underlays);
+    this.renderer.render(this.scene, camera);
+    if (!apart) return;
+    this.underlayLayer.add(this.underlays);
+    const autoClear = this.renderer.autoClear;
+    this.renderer.autoClear = false;
+    this.renderer.render(this.underlayLayer, camera);
+    this.renderer.autoClear = autoClear;
+    this.scene.add(this.underlays);
   }
   /**
    * CLF11: the sketch layer over what was just drawn, in a viewport `width` × `height` px; in a
@@ -894,6 +941,11 @@ export class CadViewport {
     // A drag under way keeps the tool it started with; turning drags off cancels it.
     if (!tool) this.endJointDrag(false);
     this.jointTool = tool;
+  }
+  /** The view's width over its height (1 before it has a size). */
+  get aspect() {
+    const { clientWidth: w, clientHeight: h } = this.host;
+    return w && h ? w / h : 1;
   }
   /** Whether a joint's value is being dragged: its shown poses are not committed content. */
   get draggingJoint() {
@@ -1092,8 +1144,11 @@ export class CadViewport {
     ];
     this.grid.visible = this.axes.visible = this.marks.visible = this.jointMarks.visible = false;
     this.partPmi.visible = !this.partsPose;
+    // Drawing is suspended while recording, so each frame's underlays follow its own camera here
+    // (Codex on #35).
+    this.underlaysFor(camera);
     this.lighting.prepare([this.bodies, this.parts], true);
-    this.renderer.render(this.scene, camera);
+    this.renderScene(camera);
     [this.grid.visible, this.axes.visible, this.marks.visible, this.jointMarks.visible] = shown;
     if (gl.isContextLost()) throw new Error('The 3D view was lost.');
     return this.renderer.domElement;
@@ -1565,7 +1620,8 @@ export class CadViewport {
     this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
   }
   get gpuBytes(): number {
-    return this.bufferBytes(this.bodies);
+    // The drawings under the views share the budget with the bodies, parts and sketches.
+    return this.bufferBytes(this.bodies) + this.underlayBytes;
   }
   /** The GPU buffers a group's meshes and lines upload, each array and image once. */
   private bufferBytes(group: Object3D, seen = new Set<unknown>()): number {
@@ -1590,6 +1646,7 @@ export class CadViewport {
   /** `dim` (default: not current) draws an earlier content's meshes faded. */
   show(bodies: ViewportBody[], current: boolean, dim = !current) {
     this.lastShown = { bodies, current, dim };
+    this.underlayDepthStale = true;
     this.clear();
     this.lighting.invalidate();
     this.pickable = current;
@@ -2150,6 +2207,131 @@ export class CadViewport {
       }
     return box;
   }
+  /**
+   * #15: the underlays to draw. Each image lies in its view's plane behind the shown model (as
+   * seen from that view), its heat overlay in front; both show only while the camera looks along
+   * that view (within about 2.5°). Display only: never picked, never part of a fit.
+   */
+  setUnderlays(items: readonly CadViewportUnderlay[]) {
+    for (const o of [...this.underlays.children]) {
+      this.underlays.remove(o);
+      const mesh = o as Mesh<PlaneGeometry, MeshBasicMaterial>;
+      mesh.geometry.dispose();
+      mesh.material.map?.dispose();
+      mesh.material.dispose();
+    }
+    this.underlayItems.length = 0;
+    // The drawings and their heat take at most their share of the GPU budget: set coarser when
+    // they would pass it, before anything is uploaded (Codex on #35).
+    const images = items
+      .flatMap((item) => [item.image, item.heat])
+      .filter(Boolean) as TexImageSource[];
+    const sizeOf = (image: TexImageSource) => {
+      const { width, height } = image as { width: number; height: number };
+      return [width, height] as [number, number];
+    };
+    const fitted = cadUnderlayTextureSizes(
+      images.map(sizeOf),
+      (this.gpuBudget ?? cadBudgets.gpuBytes) * cadUnderlayGpuShare,
+    );
+    const sized = new Map(images.map((image, i) => [image, fitted.sizes[i]!]));
+    const scaled = (image: TexImageSource): TexImageSource => {
+      const [w, h] = sized.get(image)!;
+      const [w0, h0] = sizeOf(image);
+      if (w === w0 && h === h0) return image;
+      const canvas = document.createElement('canvas');
+      [canvas.width, canvas.height] = [w, h];
+      canvas.getContext('2d')?.drawImage(image as CanvasImageSource, 0, 0, w, h);
+      return canvas;
+    };
+    this.host.dataset.underlayScale = String(fitted.scale);
+    for (const item of items) {
+      const u = new Vector3(...item.axes.u),
+        v = new Vector3(...item.axes.v),
+        toward = new Vector3(...item.axes.toward);
+      const [u0, v0, u1, v1] = item.box;
+      const center = new Vector3()
+        .addScaledVector(u, (u0 + u1) / 2)
+        .addScaledVector(v, (v0 + v1) / 2);
+      const plane = (image: TexImageSource, opacity: number, front: boolean) => {
+        const texture = new CanvasTexture(scaled(image) as HTMLCanvasElement);
+        texture.colorSpace = 'srgb';
+        const material = new MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity,
+          depthWrite: false,
+          depthTest: !front,
+          side: DoubleSide,
+        });
+        const mesh = new Mesh(new PlaneGeometry(u1 - u0, v1 - v0), material);
+        // Local X along the view's right, Y along its up, Z toward the viewer.
+        mesh.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(u, v, toward));
+        // Its depth along the view is set from the shown model (`placeUnderlays`).
+        mesh.position.copy(center);
+        mesh.renderOrder = front ? 10 : -10;
+        mesh.userData.underlay = item.id;
+        mesh.userData.underlayCenter = center;
+        mesh.userData.underlayFront = front;
+        mesh.raycast = () => {};
+        return mesh;
+      };
+      const objects: Object3D[] = [];
+      if (item.image) objects.push(plane(item.image, item.opacity, false));
+      if (item.heat) objects.push(plane(item.heat, 1, true));
+      if (objects.length) this.underlays.add(...objects);
+      this.underlayItems.push({ toward, objects });
+    }
+    this.placeUnderlays();
+    // What they take now counts against the bodies, parts and sketches: admit those again when
+    // it changed.
+    const bytes = this.bufferBytes(this.underlays);
+    if (bytes !== this.underlayBytes) {
+      this.underlayBytes = bytes;
+      if (this.lastShown.bodies.length || this.lastParts.length)
+        return this.show(this.lastShown.bodies, this.lastShown.current, this.lastShown.dim);
+    }
+    this.render();
+  }
+  /**
+   * Each image just behind the shown model as seen from its view, its heat just in front. Set
+   * again whenever the shown bodies or parts change, so a drawing stays behind a model that moved
+   * after the drawings were set (Codex on #35).
+   */
+  private placeUnderlays() {
+    this.underlayDepthStale = false;
+    if (!this.underlayItems.length) return void delete this.host.dataset.underlayDepths;
+    const box = new Box3().setFromObject(this.bodies).union(new Box3().setFromObject(this.parts));
+    const depths: number[] = [];
+    for (const item of this.underlayItems) {
+      // How far along `toward` the model reaches, behind and in front.
+      let [near, far] = [0, 0];
+      if (!box.isEmpty()) {
+        const ds = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+          new Vector3(
+            i & 1 ? box.max.x : box.min.x,
+            i & 2 ? box.max.y : box.min.y,
+            i & 4 ? box.max.z : box.min.z,
+          ).dot(item.toward),
+        );
+        [far, near] = [Math.min(...ds), Math.max(...ds)];
+      }
+      for (const o of item.objects)
+        o.position
+          .copy(o.userData.underlayCenter as Vector3)
+          .addScaledVector(item.toward, o.userData.underlayFront ? near + 1 : far - 1);
+      depths.push(Math.round((far - 1) * 1000) / 1000);
+    }
+    // Where each drawing lies along its view, for a Host's diagnostics and the E2E.
+    this.host.dataset.underlayDepths = depths.join(' ');
+  }
+  private underlaysFor(camera: PerspectiveCamera | OrthographicCamera) {
+    if (this.underlayDepthStale) this.placeUnderlays();
+    if (!this.underlayItems.length) return;
+    const look = camera.getWorldDirection(new Vector3()).negate();
+    for (const item of this.underlayItems)
+      for (const o of item.objects) o.visible = look.dot(item.toward) > 0.999;
+  }
   /** Shows a saved camera. Opening with it replaces the first automatic fit. */
   setView({ camera, projection }: CadViewportView) {
     this.fitted = true;
@@ -2252,6 +2434,7 @@ export class CadViewport {
    */
   showParts(parts: ViewportPart[]): boolean {
     this.lastParts = parts;
+    this.underlayDepthStale = true;
     this.lighting.invalidate();
     this.scene.remove(this.parts);
     disposeParts(this.parts);
