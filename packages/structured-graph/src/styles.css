@@ -59,8 +59,11 @@
 /* Zoom, pan, Reset view and Fit graph: one compact group at the end of the toolbar. */
 .ep-graph-view {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
   margin-left: auto;
 }
 .ep-graph-view > button {
