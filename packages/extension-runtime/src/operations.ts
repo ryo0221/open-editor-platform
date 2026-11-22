@@ -1,11 +1,13 @@
 /**
- * Data-only checks for the optional `operations@0-draft` add-on. Nothing here runs package code,
+ * Data-only checks for the optional `operations@0-draft` add-on (and the manifest shape of
+ * `create@0-draft`). Nothing here runs package code,
  * so a Host server can check a provider's proposal against a frozen declaration before any
  * browser loads the package. Limits bound the declaration (manifest complexity) separately from
  * one input (provider output).
  */
 import { canonicalJson } from '@editor-platform/artifact-core';
 import {
+  CREATE_ADDON,
   OPERATIONS_ADDON,
   type ManifestAddons,
   type OperationDeclaration,
@@ -186,11 +188,22 @@ export function operationDeclarationProblems(addon: unknown): string[] {
 
 /** Checked, frozen copy of manifest add-ons. Throws with the first problem. */
 export function parseAddons(input: unknown): ManifestAddons {
-  if (!plain(input) || Object.keys(input).some((k) => k !== 'operations'))
+  if (!plain(input) || Object.keys(input).some((k) => k !== 'operations' && k !== 'create'))
     throw new Error('Unsupported add-ons');
-  if (input.operations === undefined) throw new Error('Unsupported add-ons');
-  const problems = operationDeclarationProblems(input.operations);
-  if (problems.length) throw new Error(`Invalid operations add-on: ${problems[0]}`);
+  if (input.operations === undefined && input.create === undefined)
+    throw new Error('Unsupported add-ons');
+  if (input.operations !== undefined) {
+    const problems = operationDeclarationProblems(input.operations);
+    if (problems.length) throw new Error(`Invalid operations add-on: ${problems[0]}`);
+  }
+  // `create@0-draft` carries no data besides its exact version token.
+  if (
+    input.create !== undefined &&
+    (!plain(input.create) ||
+      Object.keys(input.create).length !== 1 ||
+      input.create.version !== CREATE_ADDON)
+  )
+    throw new Error('Unsupported create add-on');
   const copy = JSON.parse(canonicalJson(input)) as ManifestAddons;
   return deepFreeze(copy);
 }

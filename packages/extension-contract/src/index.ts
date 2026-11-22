@@ -62,11 +62,17 @@ export interface OperationDeclaration {
   title: string;
   inputSchema: OperationSchema;
 }
+/**
+ * Exact token for the optional create add-on: the package can make the first, empty content of
+ * its artifact kind, so a Host can start an artifact that has no file yet. Unknown versions are refused.
+ */
+export const CREATE_ADDON = 'create@0-draft' as const;
 export interface ManifestAddons {
   operations?: Readonly<{
     version: typeof OPERATIONS_ADDON;
     declarations: readonly OperationDeclaration[];
   }>;
+  create?: Readonly<{ version: typeof CREATE_ADDON }>;
 }
 /**
  * Package code for declared operations. `checkInput` covers rules the schema cannot express
@@ -93,6 +99,12 @@ export interface ExtensionDefinition<T> {
   mount?: (container: HTMLElement, host: ScopedHost<T>) => () => void;
   /** Present exactly when the manifest declares the operations add-on. */
   operations?: OperationsAdapter<T>;
+  /**
+   * Present exactly when the manifest declares the create add-on. Returns new content that holds
+   * no user data and passes `validate`. It takes no input and must not read Host state; the Host
+   * decides where the content goes and saves it through its own persistence.
+   */
+  create?: () => T;
 }
 /** Trusted adapter binds one artifact, owns session/history/persistence and final authorization. */
 export interface HostAdapter<T> {
