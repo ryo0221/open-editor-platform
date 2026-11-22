@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from 'react';
 import { descendantIds, type ElementAddress, type Annotation } from '@editor-platform/editor-core';
-import { isTextInput } from '@editor-platform/editor-ui';
+import { isTextInput, T, useWording } from '@editor-platform/editor-ui';
 import { DrawingView } from '@editor-platform/canvas-ui';
 import {
   designDrawingProjector,
@@ -290,6 +290,7 @@ function PrototypeToolbar({
   back: () => void;
   onClose?: () => void;
 }) {
+  const t = useWording();
   return (
     <div
       role="toolbar"
@@ -297,14 +298,14 @@ function PrototypeToolbar({
       style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: 8 }}
     >
       <label>
-        Start frame{' '}
+        <T>Start frame</T>{' '}
         <select
           aria-label="Prototype start frame"
           value={startingFrame ?? ''}
           onChange={(e) => restart({ frameId: e.target.value })}
         >
           <option value="" disabled>
-            Choose frame
+            {t('Choose frame')}
           </option>
           {frames.map((f) => (
             <option key={f.id} value={f.id}>
@@ -314,7 +315,7 @@ function PrototypeToolbar({
         </select>
       </label>
       <label>
-        Flow{' '}
+        <T>Flow</T>{' '}
         <select
           aria-label="Prototype flow"
           value={state?.flowId ?? ''}
@@ -322,7 +323,7 @@ function PrototypeToolbar({
             restart(e.target.value ? { flowId: e.target.value } : { frameId: state?.frameId })
           }
         >
-          <option value="">Explore freely</option>
+          <option value="">{t('Explore freely')}</option>
           {content.prototyping?.flows.map((f) => (
             <option key={f.id} value={f.id}>
               {f.name}
@@ -331,7 +332,7 @@ function PrototypeToolbar({
         </select>
       </label>
       <button disabled={!state?.history.length} onClick={back}>
-        Prototype back
+        <T>Prototype back</T>
       </button>
       <button
         disabled={!state}
@@ -339,14 +340,14 @@ function PrototypeToolbar({
           restart(state?.flowId ? { flowId: state.flowId } : { frameId: startingFrame })
         }
       >
-        Restart prototype
+        <T>Restart prototype</T>
       </button>
       <button aria-pressed={hotspots} onClick={() => setHotspots(!hotspots)}>
-        Show hotspots
+        <T>Show hotspots</T>
       </button>
       {canAnnotate && (
         <button aria-pressed={annotating} onClick={() => setAnnotating(!annotating)}>
-          Annotate prototype
+          <T>Annotate prototype</T>
         </button>
       )}
       {annotating && (
@@ -356,10 +357,14 @@ function PrototypeToolbar({
             checked={anyPosition}
             onChange={(e) => setAnyPosition(e.target.checked)}
           />
-          Annotate any position
+          <T>Annotate any position</T>
         </label>
       )}
-      {onClose && <button onClick={onClose}>Exit prototype</button>}
+      {onClose && (
+        <button onClick={onClose}>
+          <T>Exit prototype</T>
+        </button>
+      )}
     </div>
   );
 }
@@ -373,11 +378,13 @@ function FlowStatus({
   state?: DesignPrototypeState;
   frames: DesignElement[];
 }) {
+  const t = useWording();
   const index = state?.flowIndex ?? 0;
   const nextId = flow.frameIds[index + 1];
   return (
     <p role="status" style={{ margin: '4px 12px' }}>
-      {flow.name}: {state?.completed ? 'Completed' : `Step ${index + 1} / ${flow.frameIds.length}`}
+      {flow.name}:{' '}
+      {state?.completed ? t('Completed') : t('Step {0} / {1}', index + 1, flow.frameIds.length)}
       {!state?.completed && nextId
         ? ` · Next: ${frames.find((f) => f.id === nextId)?.name ?? nextId}`
         : ''}
@@ -408,9 +415,13 @@ function PrototypeCommentForm({
       }}
       style={{ padding: 8 }}
     >
-      {!available && <p>Comment submission unavailable. Your draft is retained.</p>}
+      {!available && (
+        <p>
+          <T>Comment submission unavailable. Your draft is retained.</T>
+        </p>
+      )}
       <label>
-        Prototype comment{' '}
+        <T>Prototype comment</T>{' '}
         <input
           aria-label="Prototype comment"
           value={comment}
@@ -418,7 +429,9 @@ function PrototypeCommentForm({
           onChange={(e) => setComment(e.target.value)}
         />
       </label>
-      <button disabled={!submittable}>Add prototype comment</button>
+      <button disabled={!submittable}>
+        <T>Add prototype comment</T>
+      </button>
     </form>
   );
 }
@@ -510,6 +523,7 @@ export function DesignPrototypeSurface({
   onClose,
   onCreateAnnotation,
 }: DesignPrototypeSurfaceProps) {
+  const t = useWording();
   const initialize = () => {
     try {
       return startDesignPrototype(content, { frameId: startFrameId, flowId });
@@ -641,7 +655,7 @@ export function DesignPrototypeSurface({
         onClose={onClose}
       />
       <h2 ref={focusFrame} tabIndex={-1} style={{ margin: '4px 12px', fontSize: 18 }}>
-        {current?.name ?? 'No prototype frame'}
+        {current?.name ?? t('No prototype frame')}
       </h2>
       {flow && <FlowStatus flow={flow} state={state} frames={frames} />}
       {error && <p role="alert">{error}</p>}

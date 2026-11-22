@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { canonicalJson } from '@editor-platform/artifact-core';
-import { EditorInputsContext, CommitInput } from '@editor-platform/editor-ui';
+import { EditorInputsContext, CommitInput, T, useWording } from '@editor-platform/editor-ui';
 import {
   PathHandles,
   type PathHandle,
@@ -30,6 +30,7 @@ export function useDesignPathEditor(options: {
   error(message: string): void;
   fit?(): boolean;
 }) {
+  const t = useWording();
   const [active, setActive] = useState<string>(),
     [selected, setSelected] = useState<string>(),
     [preview, setPreview] = useState<DesignEditablePath>();
@@ -260,7 +261,7 @@ export function useDesignPathEditor(options: {
             setSelected(pointKey(first.id, first.anchors[0].id));
           }}
         >
-          {editing ? 'Finish point editing' : 'Edit path points'}
+          {t(editing ? 'Finish point editing' : 'Edit path points')}
         </button>
         {editing && (
           <>
@@ -270,17 +271,19 @@ export function useDesignPathEditor(options: {
                 if (settle()) options.fit?.();
               }}
             >
-              Fit path points
+              <T>Fit path points</T>
             </button>
             {!drawing && (
-              <p role="status">Show the path and its parent frames before editing points.</p>
+              <p role="status">
+                <T>Show the path and its parent frames before editing points.</T>
+              </p>
             )}
             <p>
               Tab selects points; arrows move them. Escape finishes. Point insertion/deletion is not
               supported. Fit path points brings all anchors and handles into view.
             </p>
             <label>
-              Path point
+              <T>Path point</T>
               <select
                 aria-label="Path point"
                 value={selected ?? ''}
@@ -331,7 +334,7 @@ export function useDesignPathEditor(options: {
                 />
                 {'anchorId' in address && (
                   <label>
-                    Anchor mode
+                    <T>Anchor mode</T>
                     <select
                       aria-label="Anchor mode"
                       disabled={options.readOnly}
@@ -352,7 +355,9 @@ export function useDesignPathEditor(options: {
                       }}
                     >
                       {['corner', 'smooth', 'symmetric'].map((m) => (
-                        <option key={m}>{m}</option>
+                        <option key={m} value={m}>
+                          {t(m)}
+                        </option>
                       ))}
                     </select>
                   </label>

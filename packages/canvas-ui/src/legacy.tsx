@@ -1,3 +1,4 @@
+import { T } from '@editor-platform/editor-ui';
 import { useState } from 'react';
 import { imageImportLimits } from './export';
 import { type Bounds } from '@editor-platform/editor-core';
@@ -90,7 +91,7 @@ export function ImageProperty({
   const [error, setError] = useState('');
   return (
     <label className="image-property">
-      Image asset
+      <T>Image asset</T>
       <input
         aria-label="Canvas image file"
         type="file"

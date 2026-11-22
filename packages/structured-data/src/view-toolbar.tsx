@@ -1,5 +1,5 @@
 import { Plus, Columns3, Filter, Download, Upload, Save, Search } from 'lucide-react';
-import { CommitInput, IconButton, Menu } from '@editor-platform/editor-ui';
+import { CommitInput, IconButton, Menu, T, useWording } from '@editor-platform/editor-ui';
 import { type StructuredData } from './model';
 import { type DataProjection, type DataView } from './views';
 import { projectionChoices } from './view-model';
@@ -20,18 +20,24 @@ export function DataStatus({
   visibleRows: number;
   visibleColumns: number;
 }) {
+  const wording = useWording();
   return (
     <>
       <span>
-        {visibleRows} / {data.rows.length} records · {visibleColumns} visible fields
+        {wording('{0} / {1} records', visibleRows, data.rows.length)} ·{' '}
+        {wording('{0} visible fields', visibleColumns)}
       </span>
       <span className="ep-spacer" />
       {view.search || view.filters.length ? (
-        <button onClick={() => patch({ search: '', filters: [] })}>Filtered · Clear</button>
+        <button onClick={() => patch({ search: '', filters: [] })}>
+          <T>Filtered · Clear</T>
+        </button>
       ) : (
-        <span>All records</span>
+        <span>
+          <T>All records</T>
+        </span>
       )}
-      <span>{readOnly ? 'Read only' : view.projection}</span>
+      <span>{wording(readOnly ? 'Read only' : view.projection)}</span>
     </>
   );
 }
@@ -67,6 +73,7 @@ export function DataToolbar({
   exportVisual: (format: 'svg' | 'png') => Promise<void>;
   openCsv: (file: File) => Promise<void>;
 }) {
+  const wording = useWording();
   return (
     <>
       <select
@@ -75,7 +82,9 @@ export function DataToolbar({
         onChange={(e) => changeProjection(e.target.value as DataProjection)}
       >
         {projectionChoices(graph).map((p) => (
-          <option key={p}>{p}</option>
+          <option key={p} value={p}>
+            {wording(p)}
+          </option>
         ))}
       </select>
       <Menu label="Add records" icon={Plus}>
@@ -88,7 +97,7 @@ export function DataToolbar({
           onCommit={(v) => onRowCount(Number(v))}
         />
         <button disabled={readOnly} onClick={() => addRecords(rowCount)}>
-          Add {rowCount} record{rowCount === 1 ? '' : 's'}
+          {wording(rowCount === 1 ? 'Add {0} record' : 'Add {0} records', rowCount)}
         </button>
       </Menu>
       <IconButton icon={Columns3} label="Add field" disabled={readOnly} onClick={onAddField} />
@@ -99,22 +108,28 @@ export function DataToolbar({
         <Search size={16} />
         <input
           aria-label="Search records"
-          placeholder="Search records"
+          placeholder={wording('Search records')}
           value={view.search}
           onChange={(e) => patch({ search: e.target.value })}
         />
       </label>
       <IconButton icon={Save} label="Save named view" disabled={readOnly} onClick={onSaveView} />
       <Menu label="Export data" icon={Download}>
-        <button onClick={exportData}>Export CSV</button>
+        <button onClick={exportData}>
+          <T>Export CSV</T>
+        </button>
         {view.projection === 'Chart' && (
           <>
-            <button onClick={() => void exportVisual('svg')}>Export chart SVG</button>
-            <button onClick={() => void exportVisual('png')}>Export chart PNG</button>
+            <button onClick={() => void exportVisual('svg')}>
+              <T>Export chart SVG</T>
+            </button>
+            <button onClick={() => void exportVisual('png')}>
+              <T>Export chart PNG</T>
+            </button>
           </>
         )}
       </Menu>
-      <label className="ep-upload" title="Import CSV">
+      <label className="ep-upload" title={wording('Import CSV')}>
         <Upload size={19} />
         <input
           type="file"

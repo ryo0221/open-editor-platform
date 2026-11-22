@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Dialog } from '@editor-platform/editor-ui';
+import { Dialog, T, useWording } from '@editor-platform/editor-ui';
 import { downloadBlob } from '@editor-platform/canvas-ui';
 import { prepareCsvExport, type CsvExportScope } from './csv-transfer';
 import { type StructuredData } from './model';
@@ -21,12 +21,13 @@ export function CsvExportDialog({
     rowsScope: view ? 'filtered' : 'all',
     columnsScope: 'all',
   });
+  const t = useWording();
   const [error, setError] = useState('');
   const preview = prepareCsvExport(data, scope, view);
   return (
     <Dialog exportScope title="CSV export scope" onClose={onClose}>
       <label>
-        Rows
+        <T>Rows</T>
         <select
           aria-label="CSV rows scope"
           value={scope.rowsScope}
@@ -34,14 +35,14 @@ export function CsvExportDialog({
             setScope({ ...scope, rowsScope: event.target.value as CsvExportScope['rowsScope'] })
           }
         >
-          <option value="all">All records</option>
+          <option value="all">{t('All records')}</option>
           <option value="filtered" disabled={!view}>
-            Filtered records
+            {t('Filtered records')}
           </option>
         </select>
       </label>
       <label>
-        Columns
+        <T>Columns</T>
         <select
           aria-label="CSV columns scope"
           value={scope.columnsScope}
@@ -52,17 +53,17 @@ export function CsvExportDialog({
             })
           }
         >
-          <option value="all">All fields (including hidden)</option>
+          <option value="all">{t('All fields (including hidden)')}</option>
           <option value="visible" disabled={!view}>
-            Visible fields only
+            {t('Visible fields only')}
           </option>
         </select>
       </label>
       <p role="status">
-        {preview.rowCount} records · {preview.columnCount} fields · {scope.rowsScope} rows /{' '}
-        {scope.columnsScope} columns
+        {t('{0} records', preview.rowCount)} · {t('{0} fields', preview.columnCount)} ·{' '}
+        {t('{0} rows', t(scope.rowsScope))} / {t('{0} columns', t(scope.columnsScope))}
       </p>
-      <p>列順はデータの列順です。日本語・改行・引用符をUTF-8 / CRLFで出力します。</p>
+      <p>{t('列順はデータの列順です。日本語・改行・引用符をUTF-8 / CRLFで出力します。')}</p>
       <button
         onClick={() => {
           try {
@@ -75,9 +76,11 @@ export function CsvExportDialog({
           }
         }}
       >
-        Download CSV
+        <T>Download CSV</T>
       </button>
-      <button onClick={onClose}>Cancel CSV export</button>
+      <button onClick={onClose}>
+        <T>Cancel CSV export</T>
+      </button>
       {error && <p role="alert">{error}</p>}
     </Dialog>
   );

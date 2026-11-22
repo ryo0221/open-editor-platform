@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type EditorCommand } from '@editor-platform/editor-core';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, T, useWording } from '@editor-platform/editor-ui';
 import {
   DAY_MS,
   addMonths,
@@ -32,9 +32,10 @@ export function Calendar({
   readOnly: boolean;
   onSelect: (id: string) => void;
 }) {
+  const wording = useWording();
   const entries = rows.map((row) => ({
       row,
-      title: String(row.values[data.columns[0]?.id] ?? 'Record'),
+      title: String(row.values[data.columns[0]?.id] ?? wording('Record')),
       start: utcDay(String(row.values[config.start] ?? '')),
       end: utcDay(String(row.values[config.end] ?? '')),
     })),
@@ -50,7 +51,11 @@ export function Calendar({
     [endInput, setEndInput] = useState(''),
     [error, setError] = useState('');
   if (!config.start || !config.end)
-    return <p className="ep-data-empty">Choose start and end date fields in the inspector.</p>;
+    return (
+      <p className="ep-data-empty">
+        <T>Choose start and end date fields in the inspector.</T>
+      </p>
+    );
   const shown = month ?? monthStart(first),
     missing = entries.length - valid.length;
   return (
@@ -67,10 +72,15 @@ export function Calendar({
           label="Next month"
           onClick={() => setMonth(addMonths(shown, 1))}
         />
-        <span className="ep-calendar-zone">UTC dates</span>
+        <span className="ep-calendar-zone">
+          <T>UTC dates</T>
+        </span>
         {missing > 0 && (
           <span className="ep-field-error">
-            {missing} {missing === 1 ? 'record' : 'records'} without valid dates
+            {wording(
+              missing === 1 ? '{0} record without valid dates' : '{0} records without valid dates',
+              missing,
+            )}
           </span>
         )}
       </div>
@@ -131,7 +141,7 @@ export function Calendar({
             const s = utcDay(startInput),
               t = utcDay(endInput);
             if (s === null || t === null || t < s) {
-              setError('Choose valid dates with end on or after start');
+              setError(wording('Choose valid dates with end on or after start'));
               return;
             }
             try {
@@ -143,7 +153,7 @@ export function Calendar({
           }}
         >
           <label>
-            Start date
+            <T>Start date</T>
             <input
               aria-label="Calendar start date"
               type="date"
@@ -153,7 +163,7 @@ export function Calendar({
             />
           </label>
           <label>
-            End date
+            <T>End date</T>
             <input
               aria-label="Calendar end date"
               type="date"
@@ -162,9 +172,11 @@ export function Calendar({
               disabled={readOnly}
             />
           </label>
-          <button disabled={readOnly}>Apply dates</button>
+          <button disabled={readOnly}>
+            <T>Apply dates</T>
+          </button>
           <button type="button" onClick={() => setEditing(null)}>
-            Cancel dates
+            <T>Cancel dates</T>
           </button>
         </form>
       )}

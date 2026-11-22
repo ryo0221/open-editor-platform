@@ -18,7 +18,16 @@ import { useDesignStrokeInput } from './stroke-input';
 import { designStrokeParent } from './stroke-path';
 import { insertDesignPath, presetDesignPath } from './path-commands';
 import { guardDesignCommand } from './model';
-import { EditorInputsContext } from '@editor-platform/editor-ui';
+import {
+  EditorInputsContext,
+  EditorWordingProvider,
+  T,
+  editorUiWording,
+  type EditorWordingProps,
+} from '@editor-platform/editor-ui';
+import { canvasUiWording } from '@editor-platform/canvas-ui';
+import { designWording } from './wording';
+export { designWording } from './wording';
 import { assertReferenceItems } from '@editor-platform/artifact-references';
 import {
   ReferenceTools,
@@ -142,7 +151,10 @@ export interface DesignSurfaceExtension {
   /** An opaque Host element paints its slot subtree once; the native tree stays editable. */
   canvasOwner?(element: DesignElement): string | undefined;
 }
-export interface DesignSurfaceProps extends ReferenceSurfaceProps, DesignWorkspaceProps {
+export interface DesignSurfaceProps
+  extends ReferenceSurfaceProps,
+    DesignWorkspaceProps,
+    EditorWordingProps {
   /** Opt-in uniform-width native stroke input. Pressure/eraser/brush engines are not provided. */
   inkInput?: boolean;
   pageReview?: DesignPageReviewHost;
@@ -162,7 +174,9 @@ export interface DesignSurfaceProps extends ReferenceSurfaceProps, DesignWorkspa
   readOnly?: boolean;
   layout?: Partial<EditorLayoutProps>;
 }
-export function DesignSurface(props: DesignSurfaceProps) {
+const wordingSets = [editorUiWording, canvasUiWording, designWording];
+/** The Design Surface. `locale` and `labels` choose its visible wording. */
+export function DesignSurface({ locale, labels, ...props }: DesignSurfaceProps) {
   // A Host render is a revision boundary even if it mutates the same input object.
   // Local camera/panel state lives below this boundary and retains that snapshot.
   const renderContent = isDeepFrozen(props.content)
@@ -171,9 +185,11 @@ export function DesignSurface(props: DesignSurfaceProps) {
   const hostInputs = useContext(EditorInputsContext);
   const ownInputs = useMemo(() => new EditorInputs(), []);
   return (
-    <EditorInputsContext.Provider value={hostInputs ?? ownInputs}>
-      <DesignSurfaceEditor {...props} renderContent={renderContent} />
-    </EditorInputsContext.Provider>
+    <EditorWordingProvider locale={locale} sets={wordingSets} labels={labels}>
+      <EditorInputsContext.Provider value={hostInputs ?? ownInputs}>
+        <DesignSurfaceEditor {...props} renderContent={renderContent} />
+      </EditorInputsContext.Provider>
+    </EditorWordingProvider>
   );
 }
 function DesignSurfaceEditor({
@@ -589,7 +605,7 @@ function DesignSurfaceEditor({
             if (apply(insert)) choose([insert.elementId]);
           }}
         >
-          Add {kind} path
+          <T>{kind === 'line' ? 'Add line path' : 'Add cubic path'}</T>
         </button>
       ))}
       <InsertTools
@@ -672,7 +688,7 @@ function DesignSurfaceEditor({
                   )
                 }
               >
-                Open prototype
+                <T>Open prototype</T>
               </button>
             )}
             {work.displayed === 'manga' ? (
@@ -751,7 +767,8 @@ function DesignSurfaceEditor({
         status={
           <>
             <span>
-              {content.elements.length} elements · {ids.length} selected
+              <T args={[content.elements.length]}>{'{0} elements'}</T> ·{' '}
+              <T args={[ids.length]}>{'{0} selected'}</T>
             </span>
             <IconButton
               icon={Scan}
@@ -785,8 +802,10 @@ function DesignSurfaceEditor({
         <div ref={viewport} style={{ height: '100%', position: 'relative' }}>
           {error && (
             <div className="surface-error" role="alert">
-              {error}
-              <button onClick={() => setError('')}>Dismiss</button>
+              <T>{error}</T>
+              <button onClick={() => setError('')}>
+                <T>Dismiss</T>
+              </button>
             </div>
           )}
           <CanvasStage

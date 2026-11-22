@@ -80,6 +80,38 @@ Alerts keep `role=alert`.
 <CadSurface controller={binding.controller} statusRole="none" />
 ```
 
+## Surface wording: locale and Host replacements
+
+`DocumentSurface`, `DataSurface` and `DesignSurface` accept `locale` (`'ja'` or `'en'`) and
+`labels`. Visible text and tooltips are looked up in a wording dictionary keyed by the text
+written in the source: `documentWording`, `dataWording`, `designWording`, with the shared
+controls in `editorUiWording` and `canvasUiWording`. A text without an entry is shown as
+written, so a term that reads better untranslated (Mermaid, CSV, A4) simply has no entry.
+`labels` replaces any entry and wins over the locale. Without `locale` and `labels` the
+wording is unchanged. `{0}`, `{1}`… in a wording are filled with the counted values, so a
+language may reorder them.
+
+```tsx
+<DataSurface
+  content={data}
+  execute={execute}
+  select={select}
+  locale="ja"
+  labels={{ 'Add field': '欄を追加', '{0} records': '{0} 行' }}
+/>
+```
+
+Accessible names given by `aria-label` are not looked up and stay as written, so assistive
+technology and tests keep stable names; the tooltip of an icon button follows the locale.
+Controls whose name is their visible text (text buttons, checkbox labels) follow the locale.
+Not covered yet: the novel and manga workspaces (written in Japanese, no English entries),
+command and validation messages from the models, and the other Surfaces. `GraphSurface` keeps
+its typed `GraphSurfaceLabels`.
+
+A package adds wording by wrapping its views in `EditorWordingProvider` with its dictionary
+and reading it with `useWording()` or `<T>`; `scripts/tests/wording-keys.test.mjs` fails when
+a dictionary key is no longer text written in its package.
+
 ## Pending inputs and keyboard history (#44 / #47)
 
 Import `EditorInputs` from `@editor-platform/editor-core` and

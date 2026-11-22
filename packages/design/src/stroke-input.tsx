@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react';
-import { EditorInputsContext } from '@editor-platform/editor-ui';
+import { EditorInputsContext, T, useWording } from '@editor-platform/editor-ui';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type { DesignContent } from './model';
 import { designBrushLimits, insertDesignBrushStroke, insertDesignStroke } from './stroke-path';
@@ -22,6 +22,7 @@ export function useDesignStrokeInput(options: {
   created(id: string): void;
   error(message: string): void;
 }) {
+  const t = useWording();
   const [active, setActive] = useState(false),
     [preview, setPreview] = useState<{ x: number; y: number }[]>(),
     // 'brush' (#20): width follows pen pressure, ends taper; 'pen' keeps an even line.
@@ -224,20 +225,20 @@ export function useDesignStrokeInput(options: {
   const controls = options.enabled ? (
     <>
       <label>
-        Ink tool
+        <T>Ink tool</T>
         <select
           aria-label="Ink tool"
           value={tool}
           disabled={options.readOnly || options.blocked}
           onChange={(e) => setTool(e.target.value as 'pen' | 'brush')}
         >
-          <option value="pen">Pen (even line)</option>
-          <option value="brush">Brush (pressure, tapered ends)</option>
+          <option value="pen">{t('Pen (even line)')}</option>
+          <option value="brush">{t('Brush (pressure, tapered ends)')}</option>
         </select>
       </label>
       {tool === 'brush' && (
         <label>
-          Brush width
+          <T>Brush width</T>
           <input
             aria-label="Brush width"
             type="number"
@@ -265,7 +266,7 @@ export function useDesignStrokeInput(options: {
           }
         }}
       >
-        {active ? 'Finish drawing strokes' : 'Draw ink stroke'}
+        {t(active ? 'Finish drawing strokes' : 'Draw ink stroke')}
       </button>
     </>
   ) : undefined;
