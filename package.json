@@ -38,6 +38,7 @@
     "test:e2e": "playwright test",
     "test:e2e:affected": "node scripts/e2e/affected.mjs",
     "test:e2e:compare": "node scripts/e2e/compare.mjs",
+    "test:e2e:nightly": "node scripts/e2e/nightly.mjs",
     "check:areas": "node scripts/check-area-boundaries.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:e2e",
     "smoke": "node scripts/smoke.mjs",

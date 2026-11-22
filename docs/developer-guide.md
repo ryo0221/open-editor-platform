@@ -158,6 +158,21 @@ npm run test:e2e:compare -- work/e2e/branch.json work/e2e/main.json
 
 全件は`npm run test:e2e:affected -- --all`が示す`default`（または`office`・`engineering`・`engineering-heavy`）と名前付きスイートの合計で、変更ごとではなく夜間などにまとめて実行します。
 
+夜間の全件実行は[`scripts/e2e/nightly.mjs`](../scripts/e2e/nightly.mjs)の4つのグループに分かれ、別々のクラウド環境で同時に流します。4コアでそれぞれ約1.5時間です（2026-11-22にmain 96878abで`--trace off`で測定）。
+
+| グループ | 内容                                                                                           | 目安 |
+| -------- | ---------------------------------------------------------------------------------------------- | ---- |
+| 1        | `office`と`engineering`                                                                        | 63分 |
+| 2        | 名前付きスイート、`tests/e2e`の外にspecがあるスイート、`character-playground`                  | 67分 |
+| 3        | `cad-playground`の車1台分（テスト名`(CR7b`〜`(CR7g`）、`simulation-playground`、`drawing-sets` | 89分 |
+| 4        | `cad-playground`の残り（時計など）                                                             | 72分 |
+
+```sh
+npm run test:e2e:nightly -- 2 --setup --previous work/e2e/nightly/failures-2.txt
+```
+
+`--setup`は新しいcloneで、CAD kernel（`--source`付き）、FontTools 4.61.1、グループ2のビルドを用意します。結果は`work/e2e/nightly/summary-<group>.md`と失敗一覧`failures-<group>.txt`です。前の晩の一覧を`--previous`で渡すと、増えた失敗と直った失敗を分けて書きます。各段階は100分で打ち切り、残ったサーバーを止めてから次へ進みます。`tests/e2e`の外にspecがあるスイートを足したときは`packageSuites`に加えます（`npm run test:tooling`が検査します）。
+
 文書だけの変更では、記載したAPI・コマンド・リンク、format、公開snapshotへの収録と残留チェックを確認します。実施していないunit/browser検証を文書変更の結果として再掲しません。PRを作成したことや自動CIが存在することも検証の実施を意味しません。
 
 追加のperformance測定・tuningは停止中です。各checkpointの正式な受け入れ状況は、[React UIの固定条件の記録](verification/issue-24/README.md)など、実行sourceを明記した記録を確認してください。[状況](status.md)と[測定契約](reuse-performance-budgets.md)を確認してください。新しいEditorのworkloadとbudgetは測定前に設計しますが、停止中に追加測定を実施したり、未測定を合格と書いたりしません。
