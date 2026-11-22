@@ -8,6 +8,7 @@ import {
   formatLiveValue,
   updateLiveReference,
   validLiveReference,
+  verifyRetainedLiveReference,
   ReferenceError,
   type LiveReferenceProvider,
   type LiveSource,
@@ -181,6 +182,42 @@ describe('live references', () => {
     await expect(
       createLiveReference(source, { ...saved, content: { value: NaN } }, provider, format),
     ).rejects.toThrow();
+  });
+
+  it('rejects a saved version whose content or dependencies already carry a citation', async () => {
+    const inner = await createLiveReference(source, await snapshot(1), provider, format);
+    // An inner citation whose own snapshot hash is wrong: only the outer hash would be checked.
+    const tampered = { ...inner, snapshot: { ...inner.snapshot, contentHash: '0'.repeat(64) } };
+    const nestedContent = { value: 2, quote: tampered };
+    const nested = {
+      ...(await snapshot(2)),
+      content: nestedContent,
+      contentHash: await contentHash(nestedContent),
+    };
+    await expect(createLiveReference(source, nested, provider, format)).rejects.toThrow(
+      '参照元または保存版が不正です。',
+    );
+    const dependencyContent = { reference: tampered };
+    const inDependency = {
+      ...(await snapshot(2)),
+      dependencies: [
+        {
+          id: 'quoted',
+          content: dependencyContent,
+          contentHash: await contentHash(dependencyContent),
+        },
+      ],
+    };
+    await expect(createLiveReference(source, inDependency, provider, format)).rejects.toThrow(
+      '参照元または保存版が不正です。',
+    );
+    const retained = {
+      ...(await createLiveReference(source, await snapshot(2), provider, format)),
+    };
+    expect(validLiveReference({ ...retained, snapshot: nested })).toBe(false);
+    await expect(
+      verifyRetainedLiveReference({ ...retained, snapshot: nested }, 'deck'),
+    ).rejects.toThrow('参照元または保存版が不正です。');
   });
 
   it('rejects mismatched source identifiers and invalid dependency integrity', async () => {

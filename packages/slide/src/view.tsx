@@ -343,6 +343,7 @@ function SlideSurfaceEditor({
     ids,
     readOnly,
     references,
+    liveReferences,
     apply,
     choose,
     setError,

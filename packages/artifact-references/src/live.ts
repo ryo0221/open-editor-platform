@@ -1,5 +1,6 @@
 import { canonicalJson, clone, contentHash, deepFreeze } from '@editor-platform/artifact-core';
 import {
+  containsEmbeddedReference,
   ReferenceError,
   referenceLimits,
   validReferenceSnapshot,
@@ -65,6 +66,14 @@ const validTarget = (t: LiveTarget) =>
   (t.kind === 'value'
     ? identifier(t.targetId) && identifier(t.metricId)
     : t.kind === 'figure' && identifier(t.figureId));
+// References are depth one: a retained snapshot must not itself carry a citation,
+// because only the outer content and its direct dependencies are hashed.
+const nestedReference = (snapshot: ReferenceSnapshot) =>
+  [snapshot.content, ...snapshot.dependencies.map((d) => d.content)].some(
+    (content) => containsLiveReference(content) || containsEmbeddedReference(content),
+  );
+const liveSnapshot = (snapshot: unknown): snapshot is ReferenceSnapshot =>
+  validReferenceSnapshot(snapshot) && !nestedReference(snapshot);
 const fail = (message: string): never => {
   throw new ReferenceError('error', message);
 };
@@ -79,7 +88,7 @@ export function validLiveReference(value: unknown): value is LiveReference {
       identifier(r.source.artifactId) &&
       identifier(r.source.domain) &&
       validTarget(r.source.target) &&
-      validReferenceSnapshot(r.snapshot) &&
+      liveSnapshot(r.snapshot) &&
       r.snapshot.artifactId === r.source.artifactId &&
       r.snapshot.domain === r.source.domain &&
       !!r.presentation &&
@@ -124,7 +133,7 @@ async function verify(
     !identifier(source.artifactId) ||
     !identifier(source.domain) ||
     !validTarget(source.target) ||
-    !validReferenceSnapshot(snapshot) ||
+    !liveSnapshot(snapshot) ||
     source.artifactId !== snapshot.artifactId ||
     source.domain !== snapshot.domain ||
     source.artifactId === destinationArtifactId

@@ -63,6 +63,22 @@ async function fit(page: Page, selector: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
 
+test('slide draws a fixed figure in thumbnails and the presentation', async ({ page }) => {
+  await mount(page, 'slide');
+  const dialog = await picker(page, 'figure');
+  await dialog.getByRole('button', { name: '挿入する' }).click();
+  await expect(dialog).toBeHidden();
+  const figure = (scope: ReturnType<Page['locator']>) =>
+    scope.locator('.ep-slide-live-quote-copy image');
+  await expect(figure(page.locator('.slide-thumb')).first()).toHaveAttribute(
+    'href',
+    /^data:image\//,
+  );
+  await page.getByRole('button', { name: 'Present' }).click();
+  const presentation = page.getByRole('dialog', { name: 'Slide presentation' });
+  await expect(figure(presentation)).toHaveAttribute('href', /^data:image\//);
+});
+
 for (const kind of ['document', 'slide'] as const) {
   async function insertValue(page: Page, version = 'v1') {
     await mount(page, kind);

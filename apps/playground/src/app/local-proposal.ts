@@ -42,28 +42,38 @@ export function rejectLocalProposal(
   state.setError('');
 }
 
+// Slide object IDs are page-local, so a slide citation is keyed by its page and object.
 function citations(content: Content) {
-  if (isDocument(content)) return documentLiveCitationEntries(content.blocks);
+  if (isDocument(content))
+    return documentLiveCitationEntries(content.blocks).map(({ id, reference }) => ({
+      key: id,
+      id,
+      reference,
+    }));
   if (isDeck(content))
-    return content.slides.flatMap(({ objects }) =>
-      objects.flatMap(({ id, liveQuote }) => (liveQuote ? [{ id, reference: liveQuote }] : [])),
+    return content.slides.flatMap((page) =>
+      page.objects.flatMap(({ id, liveQuote }) =>
+        liveQuote ? [{ key: canonicalJson([page.id, id]), id, reference: liveQuote }] : [],
+      ),
     );
   return [];
 }
 
 function citationChanges(before: Content, after: Content) {
-  function byId(content: Content) {
+  function byKey(content: Content) {
     const entries = citations(content);
-    const indexed = new Map(entries.map(({ id, reference }) => [id, reference]));
+    const indexed = new Map(entries.map((entry) => [entry.key, entry]));
     if (indexed.size !== entries.length) throw new Error('引用のIDが重複しています。');
     return indexed;
   }
-  const previous = byId(before);
-  const proposed = byId(after);
-  return [...new Set([...previous.keys(), ...proposed.keys()])].flatMap((id) => {
-    const old = previous.get(id);
-    const next = proposed.get(id);
-    return canonicalJson(old) === canonicalJson(next) ? [] : [{ id, old, next }];
+  const previous = byKey(before);
+  const proposed = byKey(after);
+  return [...new Set([...previous.keys(), ...proposed.keys()])].flatMap((key) => {
+    const old = previous.get(key);
+    const next = proposed.get(key);
+    return canonicalJson(old?.reference) === canonicalJson(next?.reference)
+      ? []
+      : [{ id: (old ?? next)!.id, old: old?.reference, next: next?.reference }];
   });
 }
 

@@ -173,6 +173,31 @@ describe('TS-018 Host citation proposals', () => {
       },
     );
 
+  it('keys slide citations by page, so the same object ID on two slides can be proposed', async () => {
+    const { session, connection, draft, review, execute, old, next } = await setup(
+      'slide',
+      'value',
+    );
+    const deck = session.content as ReturnType<typeof createDeck>;
+    const first = deck.slides[0].id;
+    session.execute(insertSlideCitation(first, 'quote', old) as EditorCommand<Content>);
+    // An imported deck may repeat a page-local object ID on another page.
+    session.execute(
+      command('add-page', 'Add page', (content) => {
+        const d = content as ReturnType<typeof createDeck>;
+        return { ...d, slides: [...d.slides, { ...d.slides[0], id: 'second' }] };
+      }) as EditorCommand<Content>,
+    );
+    const proposal = review(
+      changeSlideCitation('second', 'quote', old, next) as EditorCommand<Content>,
+    );
+    expect(proposal.review.status).toBe('ready');
+    expect(await applyLocalProposal(proposal, draft, connection, execute)).toBe(true);
+    const [one, two] = (session.content as ReturnType<typeof createDeck>).slides;
+    expect(one.objects.find((o) => o.id === 'quote')?.liveQuote).toEqual(old);
+    expect(two.objects.find((o) => o.id === 'quote')?.liveQuote).toEqual(next);
+  });
+
   it('rechecks source access, edit access and draft revision before executing', async () => {
     const { session, connection, draft, execute, change, review, old } = await setup(
       'slide',

@@ -1,10 +1,10 @@
 import type { Dispatch, SetStateAction } from 'react';
 import { IconButton, useWording } from '@editor-platform/editor-ui';
-import { DrawingView } from '@editor-platform/canvas-ui';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { AnimationPresentationObject } from './animation';
-import { slideDrawing, slidePaintOrder } from './model';
-import { projectedReference, type SlideEditing } from './view-shared';
+import { SlideObjectDrawing } from './live-references';
+import { slidePaintOrder } from './model';
+import type { SlideEditing } from './view-shared';
 /** Full-screen presentation of the slides not skipped during presentation. */
 export function SlidePresentation({
   editing,
@@ -18,7 +18,7 @@ export function SlidePresentation({
   close(): void;
 }) {
   const t = useWording();
-  const { content, references } = editing;
+  const { content } = editing;
   const playable = content.slides.filter((s) => !s.hidden),
     present = playable[Math.min(presentIndex, playable.length - 1)];
   return (
@@ -45,10 +45,7 @@ export function SlidePresentation({
             o.type === 'animation' ? (
               <AnimationPresentationObject key={`${present.id}/${o.id}`} object={o} />
             ) : (
-              <DrawingView
-                key={`${present.id}/${o.id}`}
-                drawing={slideDrawing(projectedReference(o, references))}
-              />
+              <SlideObjectDrawing key={`${present.id}/${o.id}`} object={o} editing={editing} />
             ),
           )}
         </svg>
