@@ -1,6 +1,6 @@
 import console from 'node:console';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -131,24 +131,27 @@ export function suitePorts(root) {
   return [...new Set([...source.matchAll(/127\.0\.0\.1:(\d{4})/g)].map((match) => match[1]))];
 }
 
-/** Failure keys and counts of one Playwright JSON report. */
+/** Failure keys, passed keys and counts of one Playwright JSON report. */
 export function summarizeReport(report) {
   const counts = { expected: 0, unexpected: 0, flaky: 0, skipped: 0 };
   const failures = [];
+  const passed = [];
   for (const [key, status] of testStatuses(report)) {
     counts[status] = (counts[status] ?? 0) + 1;
     if (status === 'unexpected') failures.push(key);
+    // Only a test that ran and passed can count as fixed; a skipped one says nothing.
+    if (status === 'expected' || status === 'flaky') passed.push(key);
   }
-  return { counts, failures, errors: runErrors(report) };
+  return { counts, failures, passed, errors: runErrors(report) };
 }
 
-/** New and fixed failures against an earlier night's list (tests not run are not "fixed"). */
-export function compareFailures(failures, previous, ran) {
+/** New and fixed failures against an earlier night's list (only passing tests are "fixed"). */
+export function compareFailures(failures, previous, passed) {
   const before = new Set(previous);
   const now = new Set(failures);
   return {
     added: failures.filter((key) => !before.has(key)),
-    fixed: previous.filter((key) => !now.has(key) && ran.has(key)),
+    fixed: previous.filter((key) => !now.has(key) && passed.has(key)),
   };
 }
 
@@ -200,13 +203,13 @@ function main(argv) {
   if (argv.includes('--setup')) {
     const status = setup(root, group, kernel);
     lines.push(`Setup: ${status ? `failed (exit ${status})` : 'ok'}, ${minutes(started)} min`);
-    if (status) return finish(out, id, lines, [], argv, new Set());
+    if (status) return finish(out, id, lines, [], argv, new Set(), true);
   }
   // Each step stops after 100 minutes so a hung run cannot hold the group.
   const stepTimeout = Number(process.env.NIGHTLY_STEP_TIMEOUT ?? 6000);
   const ports = suitePorts(root);
   const failures = [];
-  const ran = new Set();
+  const passed = new Set();
   lines.push(
     ...(lines.length > 2 ? [''] : []),
     '| Step | Passed | Failed | Flaky | Skipped | Minutes |',
@@ -217,6 +220,8 @@ function main(argv) {
   for (const step of group.steps.filter((entry) => !only || only.includes(entry.name))) {
     freePorts(ports);
     const json = join(out, `${step.name}.json`);
+    // A step that dies before reporting must not leave an earlier night's report behind.
+    rmSync(json, { force: true });
     const stepStart = Date.now();
     const status = sh(
       'timeout',
@@ -249,7 +254,7 @@ function main(argv) {
     }
     const report = JSON.parse(readFileSync(json, 'utf8'));
     const summary = summarizeReport(report);
-    for (const key of testStatuses(report).keys()) ran.add(key);
+    for (const key of summary.passed) passed.add(key);
     const { expected, unexpected, flaky, skipped } = summary.counts;
     lines.push(`| ${step.name} | ${expected} | ${unexpected} | ${flaky} | ${skipped} | ${took} |`);
     if (status === 124) notes.push(`${step.name}: timed out after ${stepTimeout} s`);
@@ -258,14 +263,15 @@ function main(argv) {
   }
   lines.push('', `Total: ${minutes(started)} min`);
   if (notes.length) lines.push('', '**Run problems**', ...notes.map((note) => `- ${note}`));
-  return finish(out, id, lines, failures, argv, ran);
+  return finish(out, id, lines, failures, argv, passed, notes.length > 0);
 }
 
-function finish(out, id, lines, failures, argv, ran) {
+/** Writes the summary; exits 1 when the setup, a step or a test failed. */
+function finish(out, id, lines, failures, argv, passed, problems) {
   const previousFile = argv.includes('--previous') ? argv[argv.indexOf('--previous') + 1] : '';
   if (previousFile && existsSync(previousFile)) {
     const previous = readFileSync(previousFile, 'utf8').split('\n').filter(Boolean);
-    const { added, fixed } = compareFailures(failures, previous, ran);
+    const { added, fixed } = compareFailures(failures, previous, passed);
     lines.push(
       '',
       `**New failures since the last night: ${added.length}**`,
@@ -282,7 +288,7 @@ function finish(out, id, lines, failures, argv, ran) {
   writeFileSync(join(out, `failures-${id}.txt`), failures.map((key) => `${key}\n`).join(''));
   writeFileSync(join(out, `summary-${id}.md`), `${lines.join('\n')}\n`);
   console.log(lines.join('\n'));
-  return 0;
+  return problems || failures.length ? 1 : 0;
 }
 
 const minutes = (since) => Math.round((Date.now() - since) / 6000) / 10;

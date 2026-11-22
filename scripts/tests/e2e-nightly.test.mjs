@@ -108,18 +108,24 @@ test('a report summary counts statuses and keys failures', () => {
             title: 'two',
             tests: [{ projectName: 'desktop', status: 'expected' }],
           },
+          {
+            file: 'a.spec.ts',
+            title: 'three',
+            tests: [{ projectName: 'desktop', status: 'skipped' }],
+          },
         ],
       },
     ],
     errors: [{ message: 'web server\nstack' }],
   };
   const summary = summarizeReport(report);
-  assert.deepEqual(summary.counts, { expected: 1, unexpected: 1, flaky: 0, skipped: 0 });
+  assert.deepEqual(summary.counts, { expected: 1, unexpected: 1, flaky: 0, skipped: 1 });
   assert.deepEqual(summary.failures, ['desktop › a.spec.ts › one']);
+  assert.deepEqual(summary.passed, ['desktop › a.spec.ts › two']);
   assert.deepEqual(summary.errors, ['web server']);
 });
 
-test('new and fixed failures leave out tests that did not run', () => {
+test('new and fixed failures count only tests that passed as fixed', () => {
   const result = compareFailures(['a', 'b'], ['b', 'c', 'd'], new Set(['a', 'b', 'c']));
   assert.deepEqual(result, { added: ['a'], fixed: ['c'] });
 });
