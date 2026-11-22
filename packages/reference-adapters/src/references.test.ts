@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   clone,
   contentHash,
@@ -11,6 +11,8 @@ import {
   ReferenceError,
   ReferenceResolver,
   validEmbeddedReference,
+  formatLiveValue,
+  type LiveReference,
   type ReferenceHost,
   type ReferenceSnapshot,
   type ReferenceSource,
@@ -23,7 +25,13 @@ import {
   graphNodeIconPath,
   relationProfile,
 } from '@editor-platform/structured-graph/model';
-import { createDeck, insertObject, isDeck, slideDiff } from '@editor-platform/slide/model';
+import {
+  createDeck,
+  insertObject,
+  insertSlideCitation,
+  isDeck,
+  slideDiff,
+} from '@editor-platform/slide/model';
 import { createDesign, makeDesignElement, isDesign } from '@editor-platform/design/model';
 import {
   createWhiteboard,
@@ -32,9 +40,14 @@ import {
 } from '@editor-platform/whiteboard/model';
 import { createDocument, makeBlock, isDocument } from '@editor-platform/document/model';
 import { contentToNode, nodeToContent } from '@editor-platform/document/engine';
-import { captureSlideExportSnapshot, prepareSlidePptx } from '@editor-platform/slide-export';
+import {
+  captureSlideExportSnapshot,
+  encodeSlidePptx,
+  prepareSlidePptx,
+} from '@editor-platform/slide-export';
 import {
   captureDocumentExportSnapshot,
+  encodeDocumentDocx,
   prepareDocumentDocx,
 } from '@editor-platform/document-export';
 import {
@@ -836,3 +849,84 @@ it('applies generic image fit to each selected native reference without replacin
   expect(fixed.fit).toBe('contain');
   expect(follow.fit).toBe('contain');
 });
+
+it.each(['value', 'figure'] as const)(
+  'TS-020 blocks DOCX and PPTX containing only a %s citation',
+  async (kind) => {
+    const saved = await snapshot({ value: 42 });
+    const reference: LiveReference = {
+      schemaVersion: 2,
+      mode: 'fixed',
+      snapshot: saved,
+      source: {
+        artifactId: saved.artifactId,
+        domain: saved.domain,
+        target:
+          kind === 'value'
+            ? { kind, targetId: 'target', metricId: 'metric' }
+            : { kind, figureId: 'plot' },
+      },
+      presentation:
+        kind === 'value'
+          ? { kind, value: 42, format: { style: 'decimal', digits: 0, unit: '' } }
+          : { kind, label: 'Saved figure' },
+    };
+    const document = createDocument();
+    if (reference.presentation.kind === 'value') {
+      const text = formatLiveValue(reference.presentation);
+      const span = { text, liveQuote: { id: 'quote', reference } };
+      document.blocks = [{ ...makeBlock('paragraph'), text, rich: [span] }];
+    } else document.blocks.push({ ...makeBlock('image'), liveFigure: reference });
+
+    const deck = createDeck();
+    deck.slides.push({ ...deck.slides[0], id: 'other-slide', objects: [] });
+    const citedDeck = insertSlideCitation(deck.slides[0].id, 'quote', reference).apply(deck);
+    const basis = { kind: 'local-draft' as const, artifactId: 'destination' };
+    const resolveFont = vi.fn();
+    const slideSnapshot = await captureSlideExportSnapshot(citedDeck, basis);
+    const pptxPlans = [];
+    for (const pageIds of ['all', ['other-slide']] as const) {
+      pptxPlans.push(
+        await prepareSlidePptx(
+          slideSnapshot,
+          {
+            pageIds,
+            includeHiddenSlides: false,
+            includeNotes: false,
+            fontProfileId: 'unused',
+            fallback: 'element-png',
+          },
+          { resolveFont },
+        ),
+      );
+    }
+    const docx = await prepareDocumentDocx(
+      await captureDocumentExportSnapshot(document, basis),
+      {
+        fontProfileId: 'unused',
+        styleProfileId: 'document-ja-1',
+        mermaid: 'reject',
+        previewBlocks: 'reject',
+      },
+      { resolveFont },
+    );
+    for (const plan of [...pptxPlans, docx]) {
+      expect(plan.report.diagnostics).toEqual([
+        expect.objectContaining({
+          code: 'REFERENCE_EXPORT_UNSUPPORTED',
+          severity: 'error',
+          message: expect.stringContaining('引用を含む'),
+        }),
+      ]);
+    }
+    expect(resolveFont).not.toHaveBeenCalled();
+    for (const plan of pptxPlans) {
+      await expect(
+        encodeSlidePptx(plan, { planHash: plan.report.planHash, acceptedDiagnosticIds: [] }),
+      ).resolves.toMatchObject({ status: 'blocked' });
+    }
+    await expect(
+      encodeDocumentDocx(docx, { planHash: docx.report.planHash, acceptedDiagnosticIds: [] }),
+    ).resolves.toMatchObject({ status: 'blocked' });
+  },
+);

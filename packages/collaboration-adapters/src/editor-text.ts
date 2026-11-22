@@ -1,3 +1,4 @@
+import { assertNoSharedReference } from './reference-guard';
 import { EditorState, TextSelection, Plugin, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 import { collab, getVersion, receiveTransaction, sendableSteps } from 'prosemirror-collab';
@@ -211,6 +212,8 @@ export class EditorTextEngine<T> {
     if (transaction.docChanged && this.session.readOnly)
       fail('unauthorized', 'Text session is read only or expired');
     if (transaction.docChanged && this.conflict) fail('resync-required', this.conflict);
+    if (this.isDocument && transaction.docChanged)
+      assertNoSharedReference(transaction.steps.map((step) => step.toJSON()));
     this.state = this.state.applyTransaction(transaction).state;
     this.session.textSelection(this.target, this.state.selection.from, this.state.selection.to);
     this.notify();

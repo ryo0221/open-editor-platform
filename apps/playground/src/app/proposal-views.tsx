@@ -1,11 +1,8 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import type { Preview } from '@editor-platform/collaboration-core';
-import type {
-  ProposalReview,
-  ProposedCommands,
-  SemanticChange,
-} from '@editor-platform/editor-core';
+import type { SemanticChange } from '@editor-platform/editor-core';
+import type { LocalProposal } from './local-proposal';
 import { exportMarkdown, isDocument } from '@editor-platform/document';
 import type { SharedPlaygroundConnection } from './types';
 import type { Content } from '../model';
@@ -13,12 +10,6 @@ import type { Content } from '../model';
 export interface SharedPreviewState {
   id: string;
   preview: Preview<Content>;
-}
-
-export interface LocalProposal {
-  value: ProposedCommands<Content>;
-  base: string;
-  review: ProposalReview<Content>;
 }
 
 /** Proposal controls for a shared session; `request` discards responses superseded by newer clicks. */
@@ -186,11 +177,15 @@ export function ProposalDialog({
   content,
   onReject,
   onApply,
+  busy,
+  error,
 }: {
   proposal: LocalProposal;
   content: Content | undefined;
   onReject(): void;
   onApply(): void;
+  busy: boolean;
+  error: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -268,11 +263,12 @@ export function ProposalDialog({
           </section>
         </div>
       )}
+      {error && <p role="alert">{error}</p>}
       <footer>
         <button autoFocus onClick={onReject}>
           Reject proposal
         </button>
-        <button className="primary" disabled={!ready} onClick={onApply}>
+        <button className="primary" disabled={!ready || busy} onClick={onApply}>
           Apply proposal
         </button>
       </footer>

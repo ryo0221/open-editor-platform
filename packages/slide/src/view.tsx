@@ -1,15 +1,26 @@
 import { assertReferenceItems } from '@editor-platform/artifact-references';
 import {
+  LiveReferenceTools,
   ReferenceWarnings,
+  type LiveReferenceConnection,
   useReferenceItems,
   type ReferenceSurfaceProps,
 } from '@editor-platform/artifact-references/react';
-import { lazy, Suspense, useContext, useMemo, useLayoutEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useContext,
+  useMemo,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { EditorExportGuardContext, EditorInputsContext } from '@editor-platform/editor-ui';
 import './styles.css';
 import { flushSync } from 'react-dom';
 import { FileText } from 'lucide-react';
-import { deepFreeze, isDeepFrozen, newId } from '@editor-platform/artifact-core';
+import { canonicalJson, deepFreeze, isDeepFrozen, newId } from '@editor-platform/artifact-core';
 import type { PlayableAnimationEmbed } from '@editor-platform/animation-core/v2';
 import {
   AnimationChoiceDialog,
@@ -42,6 +53,8 @@ import {
 } from '@editor-platform/canvas-ui';
 import {
   updateObject,
+  insertSlideCitation,
+  changeSlideCitation,
   patchObjects,
   transformObjects,
   slidePaintOrder,
@@ -55,6 +68,7 @@ import {
   type SlideObject,
   type ChartSnapshot,
 } from './model';
+import { SlideLiveDrawing } from './live-references';
 import { objectActions, pageActions } from './view-actions';
 import { exportSlides } from './view-export';
 import { SlideInspector } from './view-inspector';
@@ -76,7 +90,7 @@ function canvasTarget(object: SlideObject, index: number): SlideCanvasTarget {
     textDrawing: slideDrawing(object),
     parentId: object.groupId,
     label: `${object.type} object ${index + 1}`,
-    editableText: object.type === 'text' || object.type === 'shape',
+    editableText: !object.liveQuote && (object.type === 'text' || object.type === 'shape'),
     hitBox: object.type === 'text',
     container: object.type === 'group',
   };
@@ -94,6 +108,7 @@ export interface SlideSurfaceProps
     EditorWordingProps {
   content: SlideContent;
   execute: (cmd: EditorCommand<SlideContent>) => void | boolean;
+  onCitationProposal?(command: EditorCommand<SlideContent>, label: string): void;
   select: (ids: string | string[], region?: Region, pageId?: string) => void;
   dataSnapshots?: ChartSnapshot[];
   readOnly?: boolean;
@@ -286,6 +301,8 @@ export function SlideSurface({ locale, labels, ...props }: SlideSurfaceProps) {
 }
 function SlideSurfaceEditor({
   references,
+  liveReferences,
+  onCitationProposal,
   content,
   execute,
   select,
@@ -330,6 +347,85 @@ function SlideSurfaceEditor({
     choose,
     setError,
   };
+  const citationItems = useMemo(
+    () =>
+      content.slides.flatMap((page, index) =>
+        page.objects.flatMap((object) =>
+          object.liveQuote
+            ? [
+                {
+                  id: JSON.stringify([page.id, object.id]),
+                  pageId: page.id,
+                  objectId: object.id,
+                  location: page.title || `スライド ${index + 1}`,
+                  reference: object.liveQuote,
+                },
+              ]
+            : [],
+        ),
+      ),
+    [content.slides],
+  );
+  const [newer, setNewer] = useState<ReadonlySet<string>>(() => new Set());
+  const citationContext = useLatest({ slide, chosen, apply, choose, onCitationProposal });
+  const citationTools = (
+    <LiveReferenceTools
+      connection={liveReferences}
+      items={citationItems}
+      selected={
+        chosen.length === 1
+          ? citationItems.find(
+              ({ pageId, objectId }) => pageId === slide?.id && objectId === chosen[0].id,
+            )
+          : undefined
+      }
+      readOnly={readOnly}
+      onNewer={setNewer}
+      canPropose={!!onCitationProposal}
+      captureInsert={() => {
+        if (!slide) throw new Error('挿入するスライドを選んでください。');
+        const pageId = slide.id;
+        const anchor = chosen.length === 1 ? chosen[0] : undefined;
+        return (reference, propose) => {
+          const current = citationContext.current;
+          if (
+            current.slide?.id !== pageId ||
+            (anchor &&
+              (current.chosen.length !== 1 ||
+                current.chosen[0].id !== anchor.id ||
+                canonicalJson(current.chosen[0].bounds) !== canonicalJson(anchor.bounds)))
+          )
+            throw new Error('挿入位置が変わりました。もう一度選んでください。');
+          const id = newId('object');
+          const cmd = insertSlideCitation(pageId, id, reference, anchor?.bounds);
+          if (propose) {
+            if (!current.onCitationProposal) throw new Error('引用を提案できません。');
+            current.onCitationProposal(cmd, cmd.label);
+            return;
+          }
+          if (!current.apply(cmd))
+            throw new Error('引用を確定できませんでした。状態を確認してください。');
+          current.choose([id], pageId);
+        };
+      }}
+      change={(expected, replacement, propose) => {
+        const item = citationItems.find(({ id }) => id === expected.id);
+        if (!item) throw new Error('対象引用が変わりました。もう一度確認してください。');
+        const cmd = changeSlideCitation(
+          item.pageId,
+          item.objectId,
+          expected.reference,
+          replacement,
+        );
+        const current = citationContext.current;
+        if (propose) {
+          if (!current.onCitationProposal) throw new Error('引用を提案できません。');
+          current.onCitationProposal(cmd, cmd.label);
+        } else if (!current.apply(cmd))
+          throw new Error('引用を確定できませんでした。状態を確認してください。');
+      }}
+    />
+  );
   const stableLayerActions = useStableLayerActions({
     choose,
     patch: (id, patch) => slide && apply(patchObjects(slide.id, [id], patch)),
@@ -411,7 +507,10 @@ function SlideSurfaceEditor({
         }
         {...layout}
       >
+        {citationTools}
         <SlideStage
+          liveReferences={liveReferences}
+          newer={liveReferences ? newer : undefined}
           editing={editing}
           error={error}
           view={view}
@@ -532,6 +631,8 @@ function SlideCanvas({
   view,
   setView,
   projected,
+  liveReferences,
+  newer,
   onAction,
   onImage,
   onPage,
@@ -543,6 +644,8 @@ function SlideCanvas({
   view: CanvasView;
   setView(view: CanvasView): void;
   projected: Map<string, SlideObject> | undefined;
+  liveReferences?: LiveReferenceConnection;
+  newer?: ReadonlySet<string>;
   onAction(action: string, value?: number): void;
   onImage(file: File, point: { x: number; y: number }): void;
   onPage(delta: number): void;
@@ -558,6 +661,21 @@ function SlideCanvas({
     const src = (projected?.get(o.id) ?? o).src;
     return canvasTarget(src === o.src ? o : { ...o, src }, objectIndex.get(o.id)!.index);
   });
+  const render = useCallback(
+    (target: CanvasTarget) => {
+      const object = target as SlideCanvasTarget;
+      return object.liveQuote ? (
+        <SlideLiveDrawing
+          object={{ ...object, liveQuote: object.liveQuote }}
+          connection={liveReferences}
+          newer={newer?.has(JSON.stringify([slide.id, object.id]))}
+        />
+      ) : (
+        renderCanvasTarget(target)
+      );
+    },
+    [liveReferences, newer, slide.id],
+  );
   return (
     <CanvasStage
       label="Slide canvas"
@@ -579,7 +697,7 @@ function SlideCanvas({
       readOnly={editing.readOnly}
       insertion={!!inserting}
       onInsert={onInsert}
-      render={renderCanvasTarget}
+      render={render}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { containsEmbeddedReference } from '@editor-platform/artifact-references';
+import { assertNoSharedReference, containsSharedReference } from './reference-guard';
 import { EditorState, type Transaction } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
 import { Step, Transform, Mapping } from 'prosemirror-transform';
@@ -138,7 +138,7 @@ export const documentCodec: DomainCodec<DocumentContent> = {
     try {
       // Ruby and 傍点 are ordinary marks and travel in engine steps; the writing mode is a page
       // setting that text steps never change (novel-creation design §9).
-      return isDocument(v) && validIds(v) && !containsEmbeddedReference(v);
+      return isDocument(v) && validIds(v) && !containsSharedReference(v);
     } catch {
       return false;
     }
@@ -198,6 +198,7 @@ export const documentCodec: DomainCodec<DocumentContent> = {
     ];
   },
   apply(content, action, version) {
+    assertNoSharedReference(action.payload);
     if (action.type === 'domain.restore')
       fail(
         'unsupported-operation',
@@ -328,6 +329,7 @@ export class DocumentReplica {
     });
   }
   dispatch(transaction: Transaction) {
+    assertNoSharedReference(transaction.steps.map((step) => step.toJSON()));
     this.state = this.state.applyTransaction(transaction).state;
     this.onChange();
   }

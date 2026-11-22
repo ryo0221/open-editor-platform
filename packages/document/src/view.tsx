@@ -1,3 +1,4 @@
+import { DocumentLiveReferences } from './live-references';
 import { createDocumentTextMetrics } from './text-metrics';
 import {
   ReferenceTools,
@@ -87,7 +88,8 @@ interface DocumentSurfaceBodyProps
     EditorWorkspaceProps<DocumentWorkspace> {
   textEngine?: DocumentTextBridge;
   content: DocumentContent;
-  execute: (command: EditorCommand<DocumentContent>) => void;
+  execute: (command: EditorCommand<DocumentContent>) => void | boolean;
+  onCitationProposal?(command: EditorCommand<DocumentContent>, label: string): void;
   select: (id: string, region?: Region) => void;
   selectedId?: string;
   annotations?: Annotation[];
@@ -110,8 +112,10 @@ export function DocumentSurface({ locale, labels, ...props }: DocumentSurfacePro
 }
 function DocumentSurfaceBody({
   references,
+  liveReferences,
   content: hostContent,
   execute,
+  onCitationProposal,
   select,
   selectedId,
   annotations = [],
@@ -163,6 +167,7 @@ function DocumentSurfaceBody({
       annotations,
       textEngine,
       references,
+      liveReferences,
       history,
     });
   callbacks.current = {
@@ -173,6 +178,7 @@ function DocumentSurfaceBody({
     annotations,
     textEngine,
     references,
+    liveReferences,
     history,
   };
   const embeddedViews = useRef(new Set<() => void>());
@@ -234,7 +240,7 @@ function DocumentSurfaceBody({
     actions,
     textEngine,
   });
-  useEmbeddedRefresh(embeddedViews, references);
+  useEmbeddedRefresh(embeddedViews, references, liveReferences);
   useAnnotationRefresh(view, annotations);
   useFocusAddress(view, content, focusAddress);
   useContentSync({ view, emitted, typing, setEngineState }, content, readOnly, textEngine);
@@ -440,6 +446,31 @@ function DocumentSurfaceBody({
           : {})}
       >
         {offerNovel && switchRow}
+        {(liveReferences || engineState?.doc) && (
+          <DocumentLiveReferences
+            state={engineState}
+            view={view}
+            connection={liveReferences}
+            readOnly={readOnly}
+            shared={!!textEngine}
+            active={!reading}
+            onProposal={
+              onCitationProposal &&
+              ((editor, tr, label) => {
+                const applied = editor.state.applyTransaction(tr.setMeta('explicit', true));
+                const proposed = localDocumentCommand(
+                  callbacks.current.content,
+                  applied.state.doc,
+                  {
+                    origin: 'proposal',
+                    transactionId: newId('transaction'),
+                  },
+                );
+                onCitationProposal(proposed.command, label);
+              })
+            }
+          />
+        )}
         {reading && <NovelReading reading={novel!.reading!} references={references} />}
         {/* The text engine stays mounted (only hidden) while the saved read-through is shown. */}
         <div

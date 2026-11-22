@@ -34,6 +34,8 @@ function SlideHost({ host, content }: HostSurfaceProps<KindContent<typeof slideK
           : undefined
       }
       references={sharedSession ? undefined : host.references}
+      liveReferences={host.shared ? undefined : host.liveReferences}
+      onCitationProposal={host.shared ? undefined : host.reviewCitationProposal}
       focusReferenceId={revealAddress?.elementId}
       focusAddress={revealAddress}
       content={content}

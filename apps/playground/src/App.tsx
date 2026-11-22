@@ -85,12 +85,9 @@ import {
 } from '@editor-platform/artifact-core';
 import {
   command,
-  reviewProposedCommands,
   EditorEventBus,
   EditorSession,
   EditorInputs,
-  transaction,
-  sameLocalRevision,
   type EditorCommand,
   type EditorExtensions,
   type Region,
@@ -137,14 +134,20 @@ import {
   WelcomePanel,
   type PrivateVideoLaunchers,
 } from './app/library-panel';
-import { ProposalDialog, SharedProposalInspector, type LocalProposal } from './app/proposal-views';
-import { mockProposal, proposalAdapter, proposalSupported } from './app/proposal-runtime';
+import { ProposalDialog, SharedProposalInspector } from './app/proposal-views';
+import {
+  applyLocalProposal,
+  rejectLocalProposal,
+  reviewLocalProposal,
+  type LocalProposal,
+} from './app/local-proposal';
+import { mockProposal, proposalSupported } from './app/proposal-runtime';
 import { CompareView, HistoryView, compareVersions } from './app/version-views';
 import { editedDraft, openStoredRecord, storage } from './app/records';
 import { deliverComment as deliverCommentTo, type CommentAttempt } from './app/comment-delivery';
 import { readIfcImport, readImportFiles } from './app/import-artifact';
 import type { BimIfcImportReport } from '@editor-platform/bim/ifc-import';
-import { savedRecordReferences } from './app/reference-source';
+import { savedExtensionReferences, savedRecordReferences } from './app/reference-source';
 import {
   ArtifactDialogs,
   SaveVersionDialog,
@@ -256,6 +259,7 @@ export default function App({
       ),
     [activeId],
   );
+  const liveReferences = useMemo(() => savedExtensionReferences(activeId), [activeId]);
 
   const inputs = useMemo(() => new EditorInputs(), [activeId]);
   const inputStatus = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot);
@@ -338,6 +342,10 @@ export default function App({
   const [beforeId, setBeforeId] = useState('');
   const [afterId, setAfterId] = useState('');
   const [proposal, setProposal] = useState<LocalProposal | null>(null);
+  const proposalGeneration = useRef(0);
+  const applyingProposal = useRef<number | undefined>(undefined);
+  const [proposalBusy, setProposalBusy] = useState(false);
+  const [proposalError, setProposalError] = useState('');
   /** An IFC import waiting for the user to see what it loses. */
   const [ifcLoss, setIfcLoss] = useState<{ file: File; report: BimIfcImportReport }>();
   const [contextMenu, setContextMenu] = useState(false);
@@ -624,7 +632,7 @@ export default function App({
     setSelection({ addresses: [] });
     setRevealAddress(undefined);
     setView('Editor');
-    setProposal(null);
+    rejectProposal();
     setNavOpen(false);
     setInspector(false);
     editorEvents.emit('artifact', { artifactId: id });
@@ -1192,55 +1200,108 @@ export default function App({
       setError((e as Error).message);
     }
   }
+  function rejectProposal() {
+    rejectLocalProposal(proposalGeneration, {
+      setProposal,
+      setBusy: setProposalBusy,
+      setError: setProposalError,
+    });
+  }
   /** Opens Host-built commands in the same review dialog; nothing is applied until accepted. */
   function reviewProposal(value: ProposedCommands<Content>) {
     if (!active) return;
     try {
+      if (sharedSession) throw new Error('Use the shared proposal review while collaborating.');
       if (!active.draft.baseVersionId)
         throw new Error('Save a version before requesting an external proposal');
-      const liveRevision = sessions.current.get(active.id)!.revision;
-      const review = reviewProposedCommands(
+      const local = sessions.current.get(active.id)!;
+      const pendingReview = reviewLocalProposal(
         {
-          content: active.draft.content,
+          content: local.content,
+          kind: active.kind,
           base: {
             artifactId: active.id,
             versionId: active.draft.baseVersionId,
-            revision: liveRevision,
+            revision: local.revision,
           },
         },
         value,
-        proposalAdapter(active.draft.content),
       );
-      setProposal({ value, base: canonicalJson(active.draft.content), review });
+      proposalGeneration.current++;
+      setProposal(pendingReview);
+      setProposalBusy(false);
+      setProposalError('');
       setError('');
     } catch (e) {
       setError((e as Error).message);
     }
   }
-  function applyProposal() {
-    if (!proposal || !active || readOnly) return;
-    if (
-      proposal.base !== canonicalJson(active.draft.content) ||
-      (proposal.value.baseLocalRevision &&
-        !sameLocalRevision(
-          proposal.value.baseLocalRevision,
-          sessions.current.get(active.id)!.revision,
-        ))
-    ) {
-      setError('The draft changed. Reject this stale proposal and request a new one.');
-      return;
+  function reviewCitationProposal<T extends Content>(cmd: EditorCommand<T>, label: string) {
+    const record = recordsRef.current.find((item) => item.id === active?.id);
+    const local = record && sessions.current.get(record.id);
+    if (!record?.draft.baseVersionId || !local)
+      throw new Error('引用の変更を提案する前に版を保存してください。');
+    reviewProposal({
+      id: newId('proposal'),
+      summary: label,
+      baseLocalRevision: local.revision,
+      reads: {
+        target: { artifactId: record.id, versionId: record.draft.baseVersionId },
+        references: [],
+      },
+      commands: [cmd as EditorCommand<Content>],
+    });
+  }
+  async function applyProposal() {
+    if (!proposal || !active) return;
+    const generation = proposalGeneration.current;
+    if (applyingProposal.current === generation) return;
+    applyingProposal.current = generation;
+    setProposalBusy(true);
+    setProposalError('');
+    try {
+      const applied = await applyLocalProposal(
+        proposal,
+        () => {
+          const target = currentTarget.current;
+          const record = recordsRef.current.find((item) => item.id === target.activeId);
+          const local = sessions.current.get(target.activeId);
+          const pending = target.inputs.getSnapshot();
+          if (
+            proposalGeneration.current !== generation ||
+            target.readOnly ||
+            target.shared ||
+            pending.dirty ||
+            pending.composing ||
+            !record ||
+            !local
+          )
+            throw new Error('編集できる状態に戻し、提案を開き直してください。');
+          return {
+            content: local.content,
+            kind: record.kind,
+            base: {
+              artifactId: record.id,
+              versionId: record.draft.baseVersionId ?? undefined,
+              revision: local.revision,
+            },
+          };
+        },
+        liveReferences,
+        (cmd) => currentActions.current.execute(cmd),
+      );
+      if (proposalGeneration.current !== generation) return;
+      if (!applied) throw new Error('提案を適用できませんでした。編集状態を確認してください。');
+      if (proposal.review.status === 'ready' && proposal.review.elementIds.length)
+        currentActions.current.select(proposal.review.elementIds);
+      rejectProposal();
+    } catch (error) {
+      if (proposalGeneration.current === generation)
+        setProposalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (applyingProposal.current === generation) applyingProposal.current = undefined;
+      if (proposalGeneration.current === generation) setProposalBusy(false);
     }
-    execute(
-      transaction(proposal.value.summary, proposal.value.commands, {
-        origin: 'proposal',
-        transactionId: newId('transaction'),
-        proposalId: proposal.value.id,
-      }),
-    );
-    // Select what changed so the Surface highlights it.
-    if (proposal.review.status === 'ready' && proposal.review.elementIds.length)
-      select(proposal.review.elementIds);
-    setProposal(null);
   }
   const content = sharedPreview?.preview.after ?? active?.draft.content;
   const exportContent = sharedSession?.confirmed.content ?? content;
@@ -1349,6 +1410,7 @@ export default function App({
     selection,
     revealAddress,
     references,
+    liveReferences,
     loadErrors,
     animationCatalog,
     dataViews,
@@ -1368,6 +1430,7 @@ export default function App({
     history,
     saveVersion,
     reviewProposal,
+    reviewCitationProposal,
     addComment,
     dataViewChanged,
     editPrivateSettings,
@@ -1470,7 +1533,7 @@ export default function App({
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     setNavOpen(false);
-                    setProposal(null);
+                    rejectProposal();
                     setContextMenu(false);
                   }
                 }}
@@ -1783,8 +1846,10 @@ export default function App({
                   <ProposalDialog
                     proposal={proposal}
                     content={content}
-                    onReject={() => setProposal(null)}
-                    onApply={applyProposal}
+                    onReject={rejectProposal}
+                    busy={proposalBusy}
+                    error={proposalError}
+                    onApply={() => void applyProposal()}
                   />
                 )}
               </div>

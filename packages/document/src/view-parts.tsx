@@ -2,6 +2,7 @@ import { useEffect, useState, memo, type ReactElement } from 'react';
 import {
   type ReferenceSurfaceProps,
   ReferenceImage,
+  useLiveFigure,
 } from '@editor-platform/artifact-references/react';
 import { IconButton, useWording, type Wording } from '@editor-platform/editor-ui';
 import { type DocumentBlock, type DocumentContent } from './model';
@@ -11,11 +12,17 @@ import { outlineIndent, outlineLabel } from './view-model';
 export function Embedded({
   block,
   references,
+  liveReferences,
 }: {
   block: DocumentBlock;
   references?: ReferenceSurfaceProps['references'];
+  liveReferences?: ReferenceSurfaceProps['liveReferences'];
 }) {
   const t = useWording();
+  if (block.liveFigure)
+    return (
+      <DocumentLiveFigure reference={block.liveFigure} block={block} connection={liveReferences} />
+    );
   return block.type === 'image' ? (
     <figure>
       <ReferenceImage item={block} resolver={references} width={block.width} />
@@ -30,6 +37,35 @@ export function Embedded({
       <strong>{t('Trusted React adapter')}</strong>
       <p>{block.text}</p>
     </div>
+  );
+}
+
+function DocumentLiveFigure({
+  reference,
+  block,
+  connection,
+}: {
+  reference: NonNullable<DocumentBlock['liveFigure']>;
+  block: DocumentBlock;
+  connection?: ReferenceSurfaceProps['liveReferences'];
+}) {
+  const projection = useLiveFigure(
+    reference,
+    connection?.provider,
+    connection?.destinationArtifactId,
+  );
+  const label = reference.presentation.kind === 'figure' ? reference.presentation.label : '';
+  return (
+    <figure className="ep-live-document-figure">
+      {projection?.src && (
+        <img src={projection.src} alt={block.alt ?? label} width={block.width ?? 600} />
+      )}
+      <figcaption>
+        <span className="ep-live-quote">引用 {label}</span>
+        {block.caption && <div>{block.caption}</div>}
+      </figcaption>
+      {projection?.error && <span role="status">{projection.error}</span>}
+    </figure>
   );
 }
 

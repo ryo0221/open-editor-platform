@@ -2,6 +2,10 @@ import type { SourceRef } from '@editor-platform/animation-core';
 import {
   validEmbeddedReference,
   validReferenceItems,
+  validLiveReference,
+  validLiveReferenceItems,
+  formatLiveValue,
+  type LiveReference,
   describeReference,
   type EmbeddedReference,
 } from '@editor-platform/artifact-references';
@@ -71,6 +75,7 @@ export interface ChartSnapshot {
 export interface SlideObject extends VisualStyle {
   /** Reference source is canonical; src is a retained rendering cache. */
   reference?: EmbeddedReference;
+  liveQuote?: LiveReference;
   animation?: PlayableAnimationEmbed;
   id: string;
   type: SlideObjectType;
@@ -558,7 +563,11 @@ export function slideDiff(a: SlideContent, b: SlideContent): CompareResult {
         old?.objects ?? [],
         next?.objects ?? [],
         (o) => `${next?.title ?? old!.title} / ${o.type}: ${o.text.slice(0, 40) || 'object'}`,
-        (o) => describeDrawing(slideDrawing(o)) + describeReference(o) + describeSlideAnimation(o),
+        (o) =>
+          describeDrawing(slideDrawing(o)) +
+          describeReference(o) +
+          describeSlideAnimation(o) +
+          (o.liveQuote ? ` [引用 ${o.liveQuote.snapshot.versionId}]` : ''),
       ),
     );
   }
@@ -576,12 +585,15 @@ export function slideDiff(a: SlideContent, b: SlideContent): CompareResult {
 export function slidePaintOrder(s: Slide) {
   return hierarchyPaintOrder(s.objects, (o) => o.groupId);
 }
-export function slideDrawing(o: SlideObject): Drawing {
+export function slideDrawing({ liveQuote, ...o }: SlideObject): Drawing {
   const animation =
     o.type === 'animation' && o.animation ? inspectPlayableAnimationEmbed(o.animation) : undefined;
   const poster = animation && slideAnimationPoster(animation.embed);
   return {
     ...o,
+    ...(liveQuote?.presentation.kind === 'value'
+      ? { text: formatLiveValue(liveQuote.presentation), runs: undefined }
+      : {}),
     ...(animation && poster
       ? {
           src: poster.src,
@@ -668,6 +680,11 @@ function validObject(o: SlideObject): boolean {
     typeof o.fill === 'string' &&
     validVisualStyle(o) &&
     (o.reference === undefined || (o.type === 'image' && validEmbeddedReference(o.reference))) &&
+    (o.liveQuote === undefined ||
+      (validLiveReference(o.liveQuote) &&
+        !o.reference &&
+        !o.src &&
+        (o.liveQuote.presentation.kind === 'value' ? o.type === 'text' : o.type === 'image'))) &&
     slideObjectTypes.includes(o.type) &&
     validAnimationObject(o) &&
     validBounds(o.bounds) &&
@@ -704,9 +721,109 @@ export function isDeck(value: unknown): value is SlideContent {
     validPageSize(d) &&
     new Set(d.slides.map((s) => s?.id)).size === d.slides.length &&
     d.slides.every(validSlide) &&
-    validReferenceItems(d.slides.flatMap((s) => s.objects)) &&
+    validSlideReferences(d.slides) &&
     validAnimationDeck(d.slides) &&
     (!hasSlideAnimations(d) || !hasSlideReuse(d))
+  );
+}
+
+function validSlideReferences(slides: Slide[]) {
+  const objects = slides.flatMap((slide) => slide.objects);
+  return (
+    validReferenceItems(objects) &&
+    validLiveReferenceItems(
+      objects.flatMap(({ liveQuote }) => (liveQuote ? [liveQuote] : [])),
+      objects,
+    )
+  );
+}
+
+export function insertSlideCitation(
+  slideId: string,
+  objectId: string,
+  reference: LiveReference,
+  anchor?: Bounds,
+): EditorCommand<SlideContent> {
+  return immutableCommand('slide.insert-citation', '引用を挿入', (deck: SlideContent) => {
+    const slide = deck.slides.find(({ id }) => id === slideId);
+    if (!slide || slideIds(deck).has(objectId)) throw new Error('挿入位置が変わりました。');
+    const object = baseSlideObject(
+      reference.presentation.kind === 'value' ? 'text' : 'image',
+      slide.objects.length,
+      () => objectId,
+    );
+    const width = Math.min(object.bounds.width, deck.width);
+    const height = Math.min(object.bounds.height, deck.height);
+    object.bounds = {
+      x: Math.max(0, Math.min(anchor?.x ?? object.bounds.x, deck.width - width)),
+      y: Math.max(
+        0,
+        Math.min(anchor ? anchor.y + anchor.height + 12 : object.bounds.y, deck.height - height),
+      ),
+      width,
+      height,
+    };
+    object.liveQuote = reference;
+    if (reference.presentation.kind === 'value') object.fill = '#174d37';
+    object.text =
+      reference.presentation.kind === 'value' ? formatLiveValue(reference.presentation) : '';
+    const next = {
+      ...deck,
+      slides: deck.slides.map((page) =>
+        page === slide ? { ...slide, objects: [...slide.objects, object] } : page,
+      ),
+    };
+    if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
+    return next;
+  });
+}
+
+export function changeSlideCitation(
+  slideId: string,
+  objectId: string,
+  expected: LiveReference,
+  replacement?: LiveReference,
+): EditorCommand<SlideContent> {
+  return immutableCommand(
+    'slide.change-citation',
+    replacement ? '引用を更新' : '引用を外す',
+    (deck: SlideContent) => {
+      const slide = deck.slides.find(({ id }) => id === slideId);
+      const object = slide?.objects.find(({ id }) => id === objectId);
+      if (
+        !slide ||
+        !object?.liveQuote ||
+        canonicalJson(object.liveQuote) !== canonicalJson(expected)
+      )
+        throw new Error('対象引用が変わりました。もう一度確認してください。');
+      assertEditable(geometry(slide), [objectId]);
+      const next = {
+        ...deck,
+        slides: deck.slides.map((page) =>
+          page === slide
+            ? {
+                ...slide,
+                objects: replacement
+                  ? slide.objects.map((item) =>
+                      item === object
+                        ? {
+                            ...item,
+                            liveQuote: replacement,
+                            text:
+                              replacement.presentation.kind === 'value'
+                                ? formatLiveValue(replacement.presentation)
+                                : '',
+                          }
+                        : item,
+                    )
+                  : slide.objects.filter((item) => item !== object),
+              }
+            : page,
+        ),
+      };
+      if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
+      return next;
+    },
   );
 }
 

@@ -83,6 +83,8 @@ function selectApplied(callbacks: DocumentCallbacks, state: EditorState) {
 function applyTransaction(ctx: DocumentEditorContext, editor: EditorView, tr: Transaction) {
   const previousPosition = editor.state.selection.from;
   const bridge = ctx.callbacks.current.textEngine;
+  const citation = tr.getMeta('liveReference');
+  if (citation && bridge) throw new Error('共有編集中は引用を編集できません。');
   const applied = bridge
     ? (bridge.dispatch(tr), { state: bridge.state, transactions: [] })
     : editor.state.applyTransaction(tr);
@@ -94,17 +96,20 @@ function applyTransaction(ctx: DocumentEditorContext, editor: EditorView, tr: Tr
     ctx.typing.current.position = tr.selection.from;
   }
   // Projection/reference validation above completes before any editor/native mutation.
+  if (citation && local && ctx.callbacks.current.execute(local.update.command) === false)
+    throw new Error('編集権限または文書の状態が変わりました。');
   editor.updateState(applied.state);
   ctx.setEngineState(applied.state);
   if (local) {
     const { update, updateTime } = local;
     ctx.emitted.current = { blocks: update.content.blocks, content: update.content };
     ctx.callbacks.current.content = update.content;
-    ctx.callbacks.current.execute(update.command);
+    if (!citation) ctx.callbacks.current.execute(update.command);
     ctx.typing.current.time = updateTime;
     ctx.typing.current.position = tr.selection.from;
     ctx.setError('');
   }
+  if (citation && local) citation.applied = true;
   selectApplied(ctx.callbacks.current, applied.state);
 }
 
@@ -113,7 +118,10 @@ function dispatchTransaction(ctx: DocumentEditorContext, editor: EditorView, tr:
   try {
     applyTransaction(ctx, editor, tr);
   } catch (e) {
-    ctx.setError((e as Error).message);
+    const error = (e as Error).message;
+    const citation = tr.getMeta('liveReference');
+    if (citation) citation.error = error;
+    else ctx.setError(error);
   }
 }
 

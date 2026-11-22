@@ -1,3 +1,4 @@
+import { assertNoSharedReference } from './reference-guard';
 import { deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import {
   canonical,
@@ -568,6 +569,7 @@ function editorCommandActions<T>(
   if (codec.domain === 'document') {
     const before = state.content as Root,
       after = command.apply(command.readonlyInput ? state.content : copy(state.content)) as Root;
+    assertNoSharedReference(after);
     if (!equal({ ...before, page: null }, { ...after, page: null }))
       fail('unsupported-operation', 'Document content edits require the text engine');
     if (equal(before.page, after.page)) return;
@@ -578,6 +580,7 @@ function editorCommandActions<T>(
   }
   const schema = schemaFor(codec),
     after = command.apply(command.readonlyInput ? state.content : copy(state.content));
+  if (codec.domain === 'slide') assertNoSharedReference(after);
   if (!codec.validate(after)) fail('invalid-operation', 'Command produced invalid domain content');
   const action = transactionAction(schema, state.content, after);
   if (!(action.payload.changes as EditorChange[]).length) return undefined;
@@ -880,6 +883,7 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
       return anchor;
     },
     apply(content, action, version, textVersions): Effect<T> {
+      if (base.domain === 'slide') assertNoSharedReference(action.payload);
       if (action.type === 'canvas.text-steps')
         return applyCanvasSteps(codec, content, action, textVersions);
       if (action.type === 'domain.restore') return base.apply(content, action, version);

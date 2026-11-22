@@ -2,13 +2,19 @@ import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { Transform } from 'prosemirror-transform';
 import { newId } from '@editor-platform/artifact-core';
 import type { EditorCommand, LocalCommandContext } from '@editor-platform/editor-core';
-import { contentToNode, documentSchema } from './engine';
+import {
+  contentToNode,
+  documentSchema,
+  documentLeafText,
+  documentTextPosition,
+  documentTextOffset,
+} from './engine';
 import { localDocumentCommand } from './local-engine-command';
 import type { DocumentContent } from './model';
 
 /** Plain text of every text-bearing element, in document order.
  * A native hard_break is '\n' inside its segment; segments are joined by a blank line.
- * Each character is exactly one engine position, so offsets map to native positions.
+ * A quoted value contributes its displayed text as a single native node.
  * Embedded blocks (image, Mermaid, HTML, references) contribute no segment. */
 export interface DocumentTextSegment {
   /** Stable ID of the paragraph, heading, code block, list paragraph or table-cell paragraph. */
@@ -24,7 +30,6 @@ export interface DocumentText {
 }
 export const documentTextSeparator = '\n\n';
 
-const leafText = (node: PMNode) => (node.type.name === 'hard_break' ? '\n' : '');
 /** Text blocks of an engine document with their stable and top-level block IDs. */
 export function documentTextblocks(doc: PMNode) {
   const found: { id: string; blockId: string; node: PMNode; pos: number }[] = [];
@@ -57,7 +62,7 @@ export function documentText(content: DocumentContent): DocumentText {
   let text = '';
   for (const block of documentTextblocks(contentToNode(content))) {
     if (segments.length) text += documentTextSeparator;
-    const value = block.node.textBetween(0, block.node.content.size, '', leafText);
+    const value = block.node.textBetween(0, block.node.content.size, '', documentLeafText);
     segments.push({
       id: block.id,
       blockId: block.blockId,
@@ -125,7 +130,7 @@ export function documentTextEditCommand(
   const ranges = edits.map((edit) => {
     const block = blocks.get(edit.segmentId);
     if (!block) throw new Error('Unknown text element: ' + edit.segmentId);
-    const size = block.node.content.size;
+    const size = documentTextOffset(block.node, block.node.content.size);
     if (
       !Number.isInteger(edit.start) ||
       !Number.isInteger(edit.end) ||
@@ -134,9 +139,16 @@ export function documentTextEditCommand(
       edit.end > size
     )
       throw new Error('Text range is outside ' + edit.segmentId);
-    const from = block.pos + 1 + edit.start,
-      to = block.pos + 1 + edit.end;
-    if (doc.textBetween(from, to, '', leafText) !== edit.expected)
+    const start = documentTextPosition(block.node, edit.start);
+    const end = documentTextPosition(block.node, edit.end, 'end');
+    if (
+      documentTextOffset(block.node, start) !== edit.start ||
+      documentTextOffset(block.node, end) !== edit.end
+    )
+      throw new Error('The range splits a quoted value');
+    const from = block.pos + 1 + start,
+      to = block.pos + 1 + end;
+    if (doc.textBetween(from, to, '', documentLeafText) !== edit.expected)
       throw new Error('The text changed after it was read: ' + edit.segmentId);
     return { edit, from, to, code: block.node.type.name === 'code_block' };
   });

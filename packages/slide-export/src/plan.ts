@@ -46,13 +46,6 @@ function validDeck(input: SlideExportSnapshot | undefined) {
 }
 /** Content-level diagnostics that do not depend on the page selection. */
 function auditDeck(p: PptxPlanner, deck: SlideContent) {
-  if (deck.slides.some((s) => s.objects.some((o) => o.reference)))
-    p.add(
-      'REFERENCE_EXPORT_UNSUPPORTED',
-      'error',
-      '参照埋め込みのPPTX出力は未対応です。SVG／PNG／PDFまたは参照付きnative JSONを使ってください。',
-      { domain: 'slide' },
-    );
   if (deck.reuse && (deck.reuse.instances.length || deck.reuse.artifactMode))
     p.add(
       'REUSABLE_LINKS_RESOLVED',
@@ -105,6 +98,12 @@ export async function prepareSlidePptx(
   const p = new PptxPlanner(settings, adapters, signal);
   if (!validDeck(input)) return invalidPlan('Invalid Slide content or export basis', input?.basis);
   const deck = input.content as SlideContent;
+  if (deck.slides.some((s) => s.objects.some((o) => o.reference || o.liveQuote)))
+    return invalidPlan(
+      '引用を含むスライドはPPTXに書き出せません。引用付きの内容はnative JSONで保存してください。',
+      input.basis,
+      'REFERENCE_EXPORT_UNSUPPORTED',
+    );
   if (hasSlideAnimations(deck))
     return invalidPlan(
       'Animation を含む Slide の PPTX 出力は未対応です。native JSON で保存してください。',
@@ -186,6 +185,7 @@ function register(state: OwnedPptxPlan): SlidePptxPlan {
 async function invalidPlan(
   message: string,
   origin?: SlideExportSnapshot['basis'],
+  code = 'INVALID_CONTENT',
 ): Promise<SlidePptxPlan> {
   const basis = validExportBasis(origin as never)
     ? clone(origin!)
@@ -194,12 +194,12 @@ async function invalidPlan(
         artifactId: 'invalid-input',
         contentHash: await contentHash(null),
       };
-  const diagnostics = [exportDiagnostic<SlideExportAddress>('INVALID_CONTENT', 'error', message)];
+  const diagnostics = [exportDiagnostic<SlideExportAddress>(code, 'error', message)];
   const report: SlidePptxReport = {
     schemaVersion: 1,
     exporterVersion: slidePptxExporterVersion,
     basis,
-    planHash: await contentHash({ basis, code: 'INVALID_CONTENT' }),
+    planHash: await contentHash({ basis, code }),
     diagnostics,
     selectedPageIds: [],
     elements: [],

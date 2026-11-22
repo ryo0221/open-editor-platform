@@ -1,3 +1,4 @@
+import { assertNoSharedReference } from './reference-guard';
 import { Transform } from 'prosemirror-transform';
 import { deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import { contentToNode } from '@editor-platform/document/engine';
@@ -31,6 +32,7 @@ const codec: DomainCodec<DocumentContent> = {
       };
     }
     if (action.type !== 'domain.restore') return documentCodec.apply(content, action, version);
+    assertNoSharedReference(action.payload);
     if (!documentCodec.validate(action.payload.content))
       fail('invalid-operation', 'Invalid Document version');
     const tr = new Transform(contentToNode(content)).replaceWith(

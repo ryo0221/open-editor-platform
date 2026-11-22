@@ -9,6 +9,7 @@ import { canonicalJson } from '@editor-platform/artifact-core';
 import {
   CREATE_ADDON,
   OPERATIONS_ADDON,
+  REFERENCES_ADDON,
   type ManifestAddons,
   type OperationDeclaration,
   type OperationSchema,
@@ -188,9 +189,16 @@ export function operationDeclarationProblems(addon: unknown): string[] {
 
 /** Checked, frozen copy of manifest add-ons. Throws with the first problem. */
 export function parseAddons(input: unknown): ManifestAddons {
-  if (!plain(input) || Object.keys(input).some((k) => k !== 'operations' && k !== 'create'))
+  if (
+    !plain(input) ||
+    Object.keys(input).some((k) => k !== 'operations' && k !== 'create' && k !== 'references')
+  )
     throw new Error('Unsupported add-ons');
-  if (input.operations === undefined && input.create === undefined)
+  if (
+    input.operations === undefined &&
+    input.create === undefined &&
+    input.references === undefined
+  )
     throw new Error('Unsupported add-ons');
   if (input.operations !== undefined) {
     const problems = operationDeclarationProblems(input.operations);
@@ -204,6 +212,13 @@ export function parseAddons(input: unknown): ManifestAddons {
       input.create.version !== CREATE_ADDON)
   )
     throw new Error('Unsupported create add-on');
+  if (
+    input.references !== undefined &&
+    (!plain(input.references) ||
+      Object.keys(input.references).length !== 1 ||
+      input.references.version !== REFERENCES_ADDON)
+  )
+    throw new Error('Unsupported references add-on');
   const copy = JSON.parse(canonicalJson(input)) as ManifestAddons;
   return deepFreeze(copy);
 }

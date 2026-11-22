@@ -606,3 +606,5 @@ export class ReferenceResolver {
     return owned;
   }
 }
+
+export * from './live';

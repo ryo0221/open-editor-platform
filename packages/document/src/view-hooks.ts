@@ -5,7 +5,7 @@ import { type EditorView } from 'prosemirror-view';
 import { canonicalJson, isDeepFrozen, newId } from '@editor-platform/artifact-core';
 import { type Annotation, type ElementAddress, type Region } from '@editor-platform/editor-core';
 import { downloadBlob } from '@editor-platform/canvas-ui';
-import { documentPlugins, contentToNode } from './engine';
+import { documentPlugins, contentToNode, documentTextPosition } from './engine';
 import { sameDocumentProjection } from './local-engine-command';
 import { exportHtml, exportMarkdown, resolveDocumentAddress, type DocumentContent } from './model';
 import { exportDocumentPdf, renderDocumentPages } from './print';
@@ -23,10 +23,11 @@ type ViewRef = { current: EditorView | null };
 export function useEmbeddedRefresh(
   embeddedViews: { current: Set<() => void> },
   references: unknown,
+  liveReferences?: unknown,
 ) {
   useEffect(() => {
     for (const render of embeddedViews.current) render();
-  }, [references]);
+  }, [references, liveReferences]);
 }
 
 export function useAnnotationRefresh(view: ViewRef, annotations: Annotation[]) {
@@ -65,9 +66,17 @@ function revealEmbedded(view: ViewRef, editor: EditorView, node: ProseMirrorNode
   };
 }
 
-function selectTextRegion(editor: EditorView, pos: number, range: Region | undefined) {
-  const start = range?.type === 'text' ? range.start : 0,
-    end = range?.type === 'text' ? range.end : 0;
+function selectTextRegion(
+  editor: EditorView,
+  node: ProseMirrorNode,
+  pos: number,
+  range: Region | undefined,
+) {
+  const start = range?.type === 'text' ? documentTextPosition(node, range.start) : 0,
+    end =
+      range?.type === 'text' && range.start !== range.end
+        ? documentTextPosition(node, range.end, 'end')
+        : start;
   editor.focus();
   editor.dispatch(
     editor.state.tr
@@ -95,7 +104,7 @@ export function useFocusAddress(
         return false;
       }
       if (!node.isTextblock) return;
-      selectTextRegion(editor, pos, range);
+      selectTextRegion(editor, node, pos, range);
     });
     return () => stopReveal?.();
   }, [focusAddress]);

@@ -2,11 +2,20 @@ import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import {
   commitVersion,
+  contentHash,
   createArtifact,
+  clone,
   serializeArtifact,
   type Artifact,
 } from '@editor-platform/artifact-core';
-import { ReferenceResolver, type EmbeddedReference } from '@editor-platform/artifact-references';
+import {
+  formatLiveValue,
+  ReferenceResolver,
+  type EmbeddedReference,
+  type LiveReference,
+} from '@editor-platform/artifact-references';
+import { createDocument, makeBlock } from '@editor-platform/document/model';
+import { createDeck, insertSlideCitation } from '@editor-platform/slide/model';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
 import { createSchedule, type ScheduleDocument } from '@editor-platform/schedule/model';
 import { makeRow, type StructuredData } from '@editor-platform/structured-data/model';
@@ -94,6 +103,83 @@ const context = () => ({
 });
 
 const lane = (content: unknown) => (content as ScheduleDocument).lanes[0].reference;
+
+it.each(['document', 'slide'] as const)(
+  'rejects altered fixed quotes on native %s import',
+  async (kind) => {
+    const content = { value: 12 };
+    const dependency = { unit: 'JPY' };
+    const snapshot = {
+      artifactId: 'source',
+      domain: 'counter',
+      versionId: 'saved',
+      revision: 1,
+      content,
+      contentHash: await contentHash(content),
+      dependencies: [
+        { id: 'units', content: dependency, contentHash: await contentHash(dependency) },
+      ],
+    };
+    const value = {
+      schemaVersion: 2,
+      mode: 'fixed',
+      snapshot: clone(snapshot),
+      source: {
+        artifactId: 'source',
+        domain: 'counter',
+        target: { kind: 'value', targetId: 'base', metricId: 'value' },
+      },
+      presentation: {
+        kind: 'value',
+        value: 12,
+        format: { style: 'decimal', digits: 0, unit: '円' },
+      },
+    } satisfies LiveReference;
+    const figure = {
+      ...value,
+      snapshot: clone(snapshot),
+      source: { ...value.source, target: { kind: 'figure', figureId: 'figure' } },
+      presentation: { kind: 'figure', label: '図' },
+    } satisfies LiveReference;
+    function nativeArtifact(): Artifact<unknown> {
+      if (kind === 'document') {
+        const doc = createDocument();
+        const text = formatLiveValue(value.presentation);
+        doc.blocks[1] = {
+          ...doc.blocks[1],
+          text,
+          rich: [{ text, liveQuote: { id: 'value', reference: value } }],
+        };
+        doc.blocks.push({ ...makeBlock('image'), liveFigure: figure });
+        return createArtifact(kind, 'Quotes', doc);
+      }
+      const deck = createDeck();
+      const slideId = deck.slides[0].id;
+      const withValue = insertSlideCitation(slideId, 'value', value).apply(deck);
+      return createArtifact(
+        kind,
+        'Quotes',
+        insertSlideCitation(slideId, 'figure', figure).apply(withValue),
+      );
+    }
+    const valid = await commitVersion(nativeArtifact(), null, 'first');
+    await expect(readImportFiles([file(valid)], context())).resolves.toHaveLength(1);
+    for (const reference of [value, figure]) {
+      reference.snapshot.content.value = 18;
+      await expect(readImportFiles([file(nativeArtifact())], context())).rejects.toThrow(
+        '参照元の内容が一致しません。',
+      );
+      reference.snapshot.content.value = 12;
+      reference.snapshot.dependencies[0].contentHash = '0'.repeat(64);
+      const badVersion = await commitVersion(nativeArtifact(), null, 'altered');
+      // Keep the draft valid and the outer version checksum consistent with the tampered version.
+      await expect(
+        readImportFiles([file({ ...badVersion, draft: valid.draft })], context()),
+      ).rejects.toThrow('参照依存の内容が一致しません。');
+      reference.snapshot.dependencies[0].contentHash = snapshot.dependencies[0].contentHash;
+    }
+  },
+);
 
 it('imports native JSON at the current byte boundary, preserves versions and rejects the next byte', async () => {
   const { data } = await exported();

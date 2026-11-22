@@ -1,6 +1,10 @@
 import {
   validEmbeddedReference,
   validReferenceItems,
+  validLiveReference,
+  validLiveReferenceItems,
+  formatLiveValue,
+  type LiveReference,
   describeReference,
   referenceExportManifest,
   type EmbeddedReference,
@@ -33,6 +37,7 @@ export type BlockType =
   | 'react-preview';
 export interface InlineSpan {
   text: string;
+  liveQuote?: { id: string; reference: LiveReference };
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -145,6 +150,7 @@ export function nestedLists(item: DocumentListItem): NonNullable<DocumentListIte
 }
 export interface DocumentBlock {
   reference?: EmbeddedReference;
+  liveFigure?: LiveReference;
   id: string;
   type: BlockType;
   text: string;
@@ -685,6 +691,13 @@ function validSpans(value: unknown): value is InlineSpan[] {
       (s) =>
         s &&
         typeof s.text === 'string' &&
+        (s.liveQuote === undefined ||
+          (s.liveQuote &&
+            typeof s.liveQuote.id === 'string' &&
+            !!s.liveQuote.id &&
+            validLiveReference(s.liveQuote.reference) &&
+            s.liveQuote.reference.presentation.kind === 'value' &&
+            s.text === formatLiveValue(s.liveQuote.reference.presentation))) &&
         ['bold', 'italic', 'underline', 'strike', 'code', 'emphasisDots'].every(
           (k) => s[k] === undefined || typeof s[k] === 'boolean',
         ) &&
@@ -810,8 +823,42 @@ export function isDocument(value: unknown): value is DocumentContent {
         d.page.margin <= 160 &&
         (d.page.writingMode === undefined || documentWritingModes.includes(d.page.writingMode)))) &&
     validBlocks(d.blocks) &&
-    validReferenceItems(d.blocks)
+    validReferenceItems(d.blocks) &&
+    validDocumentLiveReferences(d.blocks)
   );
+}
+export function validDocumentLiveReferences(blocks: DocumentBlock[]): boolean {
+  return validLiveReferenceItems(documentLiveReferences(blocks), blocks);
+}
+
+export function documentLiveReferences(blocks: DocumentBlock[]): LiveReference[] {
+  return documentLiveCitationEntries(blocks).map((item) => item.reference);
+}
+
+export function documentLiveCitationEntries(blocks: DocumentBlock[]) {
+  const references: { id: string; reference: LiveReference }[] = [];
+  function collect(spans: InlineSpan[]) {
+    for (const { liveQuote } of spans) if (liveQuote) references.push(liveQuote);
+  }
+  function collectList(items: DocumentListItem[]) {
+    for (const item of items) {
+      collect(item.rich);
+      for (const child of nestedLists(item)) collectList(child.items);
+    }
+  }
+  for (const block of blocks) {
+    if (block.liveFigure) references.push({ id: block.id, reference: block.liveFigure });
+    if (block.rich) collect(block.rich);
+    if (block.items) collectList(block.items);
+    for (const [row, cells] of (block.cells ?? []).entries()) {
+      for (const column of cells.keys()) {
+        const paragraphs = block.cellParagraphs?.[row]?.[column];
+        if (paragraphs) paragraphs.forEach(({ rich }) => collect(rich));
+        else collect(block.cellRich?.[row]?.[column] ?? []);
+      }
+    }
+  }
+  return references;
 }
 const checkedBlockLists = new WeakSet<DocumentBlock[]>();
 const textOnlyBlockTypes = ['paragraph', 'heading'];
@@ -864,6 +911,12 @@ function validSourceFields(b: DocumentBlock) {
   return (
     (b.src === undefined || (typeof b.src === 'string' && (!b.src || safeAssetUrl(b.src)))) &&
     (b.reference === undefined || (b.type === 'image' && validEmbeddedReference(b.reference))) &&
+    (b.liveFigure === undefined ||
+      (b.type === 'image' &&
+        !b.reference &&
+        !b.src &&
+        validLiveReference(b.liveFigure) &&
+        b.liveFigure.presentation.kind === 'figure')) &&
     knownBlockTypes.includes(b.type) &&
     (b.type !== 'table' || validTableDetails(b))
   );

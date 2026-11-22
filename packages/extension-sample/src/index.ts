@@ -1,5 +1,9 @@
 import { command } from '@editor-platform/editor-core';
-import { CONTRACT_VERSION, type ExtensionDefinition } from '@editor-platform/extension-contract';
+import {
+  CONTRACT_VERSION,
+  REFERENCES_ADDON,
+  type ExtensionDefinition,
+} from '@editor-platform/extension-contract';
 export interface Counter {
   id: 'counter';
   value: number;
@@ -67,6 +71,49 @@ export function counterExtension(packageHash: string): ExtensionDefinition<Count
       container.append(root);
       render();
       return () => root.remove();
+    },
+  };
+}
+
+function counterFigure(value: number) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 240;
+  canvas.height = 100;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('図を描画できません。');
+  context.fillStyle = '#f0f4f8';
+  context.fillRect(0, 0, 240, 100);
+  context.fillStyle = '#164877';
+  // A ten-column tally, one cell for each group of ten counts.
+  for (let cell = 0; cell < Math.ceil(value / 10); cell++)
+    context.fillRect(20 + (cell % 10) * 20, 10 + Math.floor(cell / 10) * 8, 16, 6);
+  return { kind: 'figure' as const, label: `Counter: ${value}`, src: canvas.toDataURL() };
+}
+
+/** Counter variant that exposes a calculated value and a browser-rendered figure. */
+export function counterReferenceExtension(packageHash: string): ExtensionDefinition<Counter> {
+  const base = counterExtension(packageHash);
+  return {
+    ...base,
+    manifest: { ...base.manifest, addons: { references: { version: REFERENCES_ADDON } } },
+    references: {
+      list: () => [
+        { kind: 'value', targetId: 'counter', metricId: 'double', label: 'Double' },
+        { kind: 'figure', figureId: 'tally', label: 'Counter tally' },
+      ],
+      resolve(snapshot, target) {
+        if (isCounter(snapshot.content)) {
+          if (
+            target.kind === 'value' &&
+            target.targetId === 'counter' &&
+            target.metricId === 'double'
+          )
+            return { kind: 'value', value: snapshot.content.value * 2 };
+          if (target.kind === 'figure' && target.figureId === 'tally')
+            return counterFigure(snapshot.content.value);
+        }
+        throw new Error('引用対象がありません。');
+      },
     },
   };
 }

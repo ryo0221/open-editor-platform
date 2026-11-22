@@ -663,6 +663,7 @@ function TextLayoutFields({
 }
 function TypographySection(props: {
   items: Drawing[];
+  textEditing: boolean;
   textBridge: React.ContextType<typeof CanvasTextContext>;
   onPatch(patch: InspectorPatch): void;
 }) {
@@ -674,21 +675,23 @@ function TypographySection(props: {
   const typography = (patch: Partial<typeof style>) => onPatch({ typography: patch });
   return (
     <Section title="Typography">
-      <CommitInput
-        label="Text"
-        value={mixedValue(items, 'text') ? '' : first.text}
-        placeholder="Mixed"
-        onCommit={(text) => {
-          if (!textBridge) onPatch({ text, runs: undefined });
-          else
-            for (const item of items) {
-              const engine = textBridge(item.id);
-              engine.dispatch(
-                canvasTextReplacement(engine.state, text, undefined, item.typography),
-              );
-            }
-        }}
-      />
+      {props.textEditing && (
+        <CommitInput
+          label="Text"
+          value={mixedValue(items, 'text') ? '' : first.text}
+          placeholder="Mixed"
+          onCommit={(text) => {
+            if (!textBridge) onPatch({ text, runs: undefined });
+            else
+              for (const item of items) {
+                const engine = textBridge(item.id);
+                engine.dispatch(
+                  canvasTextReplacement(engine.state, text, undefined, item.typography),
+                );
+              }
+          }}
+        />
+      )}
       <label className="ep-field">
         <T>Font family</T>
         <select
@@ -846,12 +849,14 @@ export function VisualInspector({
   onGeometry,
   onReplace,
   imageEditing = true,
+  textEditing = true,
 }: {
   items: Drawing[];
   onPatch: (patch: Partial<VisualStyle> & { text?: string; fill?: string; src?: string }) => void;
   onGeometry: (patch: Partial<Bounds>) => void;
   onReplace?: (file: File) => void;
   imageEditing?: boolean;
+  textEditing?: boolean;
 }) {
   const [ratio, setRatio] = useState(false);
   const textBridge = useContext(CanvasTextContext);
@@ -873,7 +878,12 @@ export function VisualInspector({
       />
       <AppearanceSection items={items} onPatch={onPatch} />
       {items.every((i) => i.kind !== 'image' && i.kind !== 'chart' && i.kind !== 'table') && (
-        <TypographySection items={items} textBridge={textBridge} onPatch={onPatch} />
+        <TypographySection
+          items={items}
+          textEditing={textEditing}
+          textBridge={textBridge}
+          onPatch={onPatch}
+        />
       )}
       {imageEditing && items.every((i) => i.kind === 'image') && (
         <ImageSection

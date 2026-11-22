@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
+import type { LiveReferenceConnection } from '@editor-platform/artifact-references/react';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type { Preview } from '@editor-platform/collaboration-core';
 import type {
@@ -38,6 +39,7 @@ export interface SurfaceHost {
   selection: Selection;
   revealAddress: ElementAddress | undefined;
   references: ReferenceResolver;
+  liveReferences: LiveReferenceConnection;
   loadErrors: Record<string, string>;
   animationCatalog: ReturnType<typeof savedAnimationCatalog>;
   dataViews: Record<string, DataView>;
@@ -62,6 +64,7 @@ export interface SurfaceHost {
   history(direction: 'undo' | 'redo'): void;
   saveVersion(): Promise<void>;
   /** Shows Host-built commands in the proposal review; the author applies or rejects them. */
+  reviewCitationProposal<T extends Content>(command: EditorCommand<T>, label: string): void;
   reviewProposal(value: ProposedCommands<Content>): void;
   addComment(selection: Selection, body: string): Promise<boolean | undefined>;
   dataViewChanged(view: DataView): void;

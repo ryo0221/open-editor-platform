@@ -8,6 +8,9 @@ import {
   type HostAdapter,
   type Permission,
   type ScopedHost,
+  type ReferenceSnapshot,
+  type ReferenceTarget,
+  type ReferencesAdapter,
 } from '@editor-platform/extension-contract';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import type { LocalCommandContext } from '@editor-platform/editor-core';
@@ -111,6 +114,8 @@ export interface Registration<T> {
    * refuses it. Nothing is opened, stored or saved.
    */
   readonly create?: () => T;
+  /** The caller must authenticate the saved version and current access. */
+  readonly references?: ReferencesAdapter;
   open(host: HostAdapter<T>): ExtensionHandle<T>;
   uninstall(): void;
 }
@@ -159,6 +164,15 @@ export class ExtensionRegistry {
     const makeEmpty = definition.create;
     if (!!manifest.addons?.create !== (typeof makeEmpty === 'function'))
       throw new Error('Create add-on/adapter mismatch');
+    const referencesAdapter = definition.references;
+    if (
+      !!manifest.addons?.references !== (referencesAdapter !== undefined) ||
+      (referencesAdapter !== undefined &&
+        (!referencesAdapter ||
+          typeof referencesAdapter.list !== 'function' ||
+          typeof referencesAdapter.resolve !== 'function'))
+    )
+      throw new Error('References add-on/adapter mismatch');
     const checkInput = operationsAdapter?.checkInput,
       makeCommand = operationsAdapter?.command;
     const trusted = admission.assertTrusted;
@@ -211,9 +225,70 @@ export class ExtensionRegistry {
           return deepFreeze(value);
         }
       : undefined;
+    const references: ReferencesAdapter | undefined = referencesAdapter
+      ? Object.freeze({
+          list: (snapshot: ReferenceSnapshot) => {
+            this.assertIdle();
+            assertActive();
+            const input = referenceInput(snapshot, manifest, validate);
+            const result = referencesAdapter.list(input);
+            if (
+              !Array.isArray(result) ||
+              result.length > 2000 ||
+              result.filter((item) => item?.kind === 'value').length > 1000 ||
+              result.filter((item) => item?.kind === 'figure').length > 1000 ||
+              result.some(
+                (item) =>
+                  !referenceTarget(item) ||
+                  typeof item.label !== 'string' ||
+                  item.label.length > 256,
+              )
+            )
+              throw new Error('Invalid reference list');
+            assertActive();
+            return deepFreeze(
+              result.map((item) =>
+                item.kind === 'value'
+                  ? {
+                      kind: 'value' as const,
+                      targetId: item.targetId,
+                      metricId: item.metricId,
+                      label: item.label,
+                    }
+                  : { kind: 'figure' as const, figureId: item.figureId, label: item.label },
+              ),
+            );
+          },
+          resolve: (snapshot: ReferenceSnapshot, target: ReferenceTarget) => {
+            this.assertIdle();
+            assertActive();
+            const input = referenceInput(snapshot, manifest, validate);
+            if (!referenceTarget(target)) throw new Error('Invalid reference target');
+            const result = referencesAdapter.resolve(input, structuredClone(target));
+            if (
+              !result ||
+              result.kind !== target.kind ||
+              (result.kind === 'value'
+                ? !Number.isFinite(result.value)
+                : typeof result.label !== 'string' ||
+                  result.label.length > 256 ||
+                  typeof result.src !== 'string' ||
+                  !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(result.src))
+            )
+              throw new Error('Invalid reference result');
+            assertActive();
+            return deepFreeze(
+              result.kind === 'value'
+                ? { kind: 'value' as const, value: result.value }
+                : { kind: 'figure' as const, label: result.label, src: result.src },
+            );
+          },
+        })
+      : undefined;
     return Object.freeze({
       manifest,
       ...(create ? { create } : {}),
+      ...(references ? { references } : {}),
       uninstall: () =>
         this.transition(() => {
           entry.revoke();
@@ -404,6 +479,39 @@ export class ExtensionRegistry {
       },
     });
   }
+}
+function referenceTarget(value: ReferenceTarget): boolean {
+  const id = (v: unknown) =>
+    typeof v === 'string' &&
+    v.length > 0 &&
+    v.length <= 512 &&
+    !['__proto__', 'prototype', 'constructor'].includes(v);
+  return (
+    !!value &&
+    (value.kind === 'value'
+      ? id(value.targetId) && id(value.metricId)
+      : value.kind === 'figure' && id(value.figureId))
+  );
+}
+function referenceInput<T>(
+  snapshot: ReferenceSnapshot,
+  manifest: ExtensionManifest,
+  validate: (value: unknown) => value is T,
+): ReferenceSnapshot {
+  if (
+    !snapshot ||
+    snapshot.domain !== manifest.artifactKind ||
+    !snapshot.artifactId ||
+    !snapshot.versionId ||
+    !Number.isSafeInteger(snapshot.revision) ||
+    snapshot.revision < 1 ||
+    !/^[a-f0-9]{64}$/.test(snapshot.contentHash) ||
+    !Array.isArray(snapshot.dependencies) ||
+    snapshot.dependencies.length > 8 ||
+    !validate(snapshot.content)
+  )
+    throw new Error('Invalid reference snapshot');
+  return deepFreeze(structuredClone(snapshot));
 }
 function deepFreeze<V>(value: V): V {
   if (value && typeof value === 'object') {
