@@ -1,3 +1,4 @@
+import { T } from '@editor-platform/editor-ui';
 import { deleteRows, pasteCells, tsv } from './views';
 import { useDataGrid, type DataGridProps } from './grid-hooks';
 import { handleGridKeyDown } from './grid-keys';
@@ -85,7 +86,9 @@ export function DataGrid(props: DataGridProps) {
       )}
       <div style={{ height: (entries.length - end) * 36, width: totalWidth }} />
       {!rows.length && (
-        <div className="ep-data-empty">No records. Add records or paste TSV into this grid.</div>
+        <div className="ep-data-empty">
+          <T>No records. Add records or paste TSV into this grid.</T>
+        </div>
       )}
       {context && <GridCellMenu grid={grid} props={props} context={context} />}
     </div>

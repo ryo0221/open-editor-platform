@@ -1,5 +1,5 @@
 import { newId } from '@editor-platform/artifact-core';
-import { Section } from '@editor-platform/editor-ui';
+import { Section, T, useWording } from '@editor-platform/editor-ui';
 import { type StructuredData } from './model';
 import { type DataView } from './views';
 import { Pick } from './view-fields';
@@ -20,12 +20,14 @@ function FilterRule({
   f: Filter;
   i: number;
 }) {
+  const t = useWording();
   const update = (next: Partial<Filter>) =>
     patch({ filters: view.filters.map((v) => (v.id === f.id ? { ...v, ...next } : v)) });
   return (
     <div className="ep-filter-rule">
       <Pick
         label={`Filter ${i + 1} field`}
+        display={t('Filter {0} field', i + 1)}
         value={f.columnId}
         columns={data.columns}
         onChange={(columnId) => update({ columnId })}
@@ -36,7 +38,9 @@ function FilterRule({
         onChange={(e) => update({ operator: e.target.value as typeof f.operator })}
       >
         {['contains', 'equals', 'not-equals', 'greater', 'less', 'empty', 'not-empty'].map((op) => (
-          <option key={op}>{op}</option>
+          <option key={op} value={op}>
+            {t(op)}
+          </option>
         ))}
       </select>
       <input
@@ -45,7 +49,7 @@ function FilterRule({
         onChange={(e) => update({ value: e.target.value })}
       />
       <button onClick={() => patch({ filters: view.filters.filter((v) => v.id !== f.id) })}>
-        Remove filter {i + 1}
+        {t('Remove filter {0}', i + 1)}
       </button>
     </div>
   );
@@ -64,10 +68,12 @@ function SortRule({
   s: DataView['sorts'][number];
   i: number;
 }) {
+  const t = useWording();
   return (
     <div className="ep-filter-rule">
       <Pick
         label={`Sort ${i + 1} field`}
+        display={t('Sort {0} field', i + 1)}
         value={s.columnId}
         columns={data.columns}
         onChange={(columnId) =>
@@ -85,11 +91,11 @@ function SortRule({
           })
         }
       >
-        <option value="asc">Ascending</option>
-        <option value="desc">Descending</option>
+        <option value="asc">{t('Ascending')}</option>
+        <option value="desc">{t('Descending')}</option>
       </select>
       <button onClick={() => patch({ sorts: view.sorts.filter((_, j) => j !== i) })}>
-        Remove sort {i + 1}
+        {t('Remove sort {0}', i + 1)}
       </button>
     </div>
   );
@@ -104,18 +110,19 @@ export function QuerySection({
   view: DataView;
   patch: Patch;
 }) {
+  const t = useWording();
   return (
     <>
       <Section title="Filter and sort">
         <label className="ep-field">
-          Match
+          <T>Match</T>
           <select
             aria-label="Filter combination"
             value={view.filterMode}
             onChange={(e) => patch({ filterMode: e.target.value as 'and' | 'or' })}
           >
-            <option value="and">All conditions (AND)</option>
-            <option value="or">Any condition (OR)</option>
+            <option value="and">{t('All conditions (AND)')}</option>
+            <option value="or">{t('Any condition (OR)')}</option>
           </select>
         </label>
         {view.filters.map((f, i) => (
@@ -136,7 +143,7 @@ export function QuerySection({
             })
           }
         >
-          Add filter
+          <T>Add filter</T>
         </button>
         {view.sorts.map((s, i) => (
           <SortRule key={i} data={data} view={view} patch={patch} s={s} i={i} />
@@ -148,7 +155,7 @@ export function QuerySection({
             })
           }
         >
-          Add sort
+          <T>Add sort</T>
         </button>
         <Pick
           label="Group field"
@@ -157,7 +164,7 @@ export function QuerySection({
           onChange={(groupBy) => patch({ groupBy })}
         />
         <button onClick={() => patch({ search: '', filters: [], sorts: [], groupBy: '' })}>
-          Clear filters and sort
+          <T>Clear filters and sort</T>
         </button>
       </Section>
     </>

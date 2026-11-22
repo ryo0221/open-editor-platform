@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { isDeepFrozen, newId } from '@editor-platform/artifact-core';
-import { Section, CommitInput } from '@editor-platform/editor-ui';
+import { Section, CommitInput, T, useWording } from '@editor-platform/editor-ui';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import type {
   DesignContent,
@@ -25,6 +25,7 @@ export function DesignInteractionSettings({
   onChange: (v: DesignInteraction[]) => void;
   onInherit?: () => void;
 }) {
+  const t = useWording();
   const frames = content.elements.filter((e) => e.type === 'frame');
   const effective = value ?? inherited ?? [];
   const actions: DesignPrototypeAction['type'][] = [
@@ -39,10 +40,12 @@ export function DesignInteractionSettings({
       <strong>{label}</strong>
       {onInherit && (
         <button onClick={onInherit} disabled={value === undefined}>
-          Use inherited interaction
+          <T>Use inherited interaction</T>
         </button>
       )}
-      {onInherit && <p>{value === undefined ? 'Inherited from component' : 'Instance override'}</p>}
+      {onInherit && (
+        <p>{t(value === undefined ? 'Inherited from component' : 'Instance override')}</p>
+      )}
       {(['click', 'tap'] as const).map((trigger) => {
         const interaction = effective.find((i) => i.trigger === trigger);
         const update = (action?: DesignPrototypeAction) =>
@@ -71,7 +74,7 @@ export function DesignInteractionSettings({
                     });
                 }}
               >
-                <option value="">No action</option>
+                <option value="">{t('No action')}</option>
                 {actions.map((action) => (
                   <option key={action} value={action}>
                     {action}
@@ -81,7 +84,7 @@ export function DesignInteractionSettings({
             </label>
             {interaction && 'frameId' in interaction.action && (
               <label>
-                Target frame{' '}
+                <T>Target frame</T>{' '}
                 <select
                   aria-label={`${label} ${trigger} target frame`}
                   value={interaction.action.frameId}
@@ -123,6 +126,7 @@ export function DesignPrototypeSettings({
   element?: DesignElement;
   apply: (c: EditorCommand<DesignContent>) => void;
 }) {
+  const t = useWording();
   const [flowId, setFlowId] = useState('');
   const frames = content.elements.filter((e) => e.type === 'frame');
   const prototype = content.prototyping ?? { schemaVersion: 1 as const, flows: [] };
@@ -145,7 +149,7 @@ export function DesignPrototypeSettings({
         />
       )}
       <label>
-        Saved start frame{' '}
+        <T>Saved start frame</T>{' '}
         <select
           aria-label="Saved prototype start frame"
           value={prototype.startFrameId ?? ''}
@@ -153,7 +157,7 @@ export function DesignPrototypeSettings({
             apply(setDesignPrototype({ ...prototype, startFrameId: e.target.value || undefined }))
           }
         >
-          <option value="">First visible frame</option>
+          <option value="">{t('First visible frame')}</option>
           {prototype.startFrameId && !frames.some((f) => f.id === prototype.startFrameId) && (
             <option value={prototype.startFrameId}>Missing: {prototype.startFrameId}</option>
           )}
@@ -165,13 +169,13 @@ export function DesignPrototypeSettings({
         </select>
       </label>
       <label>
-        Flow definition{' '}
+        <T>Flow definition</T>{' '}
         <select
           aria-label="Flow definition"
           value={flow?.id ?? ''}
           onChange={(e) => setFlowId(e.target.value)}
         >
-          <option value="">Choose flow</option>
+          <option value="">{t('Choose flow')}</option>
           {prototype.flows.map((f) => (
             <option key={f.id} value={f.id}>
               {f.name}
@@ -199,7 +203,7 @@ export function DesignPrototypeSettings({
           setFlowId(id);
         }}
       >
-        Add prototype flow
+        <T>Add prototype flow</T>
       </button>
       {flow && (
         <>
@@ -264,7 +268,7 @@ export function DesignPrototypeSettings({
                   )
                 }
               >
-                Remove
+                <T>Remove</T>
               </button>
             </div>
           ))}
@@ -281,7 +285,7 @@ export function DesignPrototypeSettings({
               )
             }
           >
-            Add flow step
+            <T>Add flow step</T>
           </button>
           <button
             onClick={() =>
@@ -293,7 +297,7 @@ export function DesignPrototypeSettings({
               )
             }
           >
-            Delete prototype flow
+            <T>Delete prototype flow</T>
           </button>
         </>
       )}

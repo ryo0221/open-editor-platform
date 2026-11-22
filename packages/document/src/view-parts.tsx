@@ -3,7 +3,7 @@ import {
   type ReferenceSurfaceProps,
   ReferenceImage,
 } from '@editor-platform/artifact-references/react';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, useWording, type Wording } from '@editor-platform/editor-ui';
 import { type DocumentBlock, type DocumentContent } from './model';
 import { MermaidPreview, HtmlPreview } from './previews';
 import { outlineIndent, outlineLabel } from './view-model';
@@ -15,6 +15,7 @@ export function Embedded({
   block: DocumentBlock;
   references?: ReferenceSurfaceProps['references'];
 }) {
+  const t = useWording();
   return block.type === 'image' ? (
     <figure>
       <ReferenceImage item={block} resolver={references} width={block.width} />
@@ -26,7 +27,7 @@ export function Embedded({
     <HtmlPreview source={block.text} />
   ) : (
     <div className="trusted-demo">
-      <strong>Trusted React adapter</strong>
+      <strong>{t('Trusted React adapter')}</strong>
       <p>{block.text}</p>
     </div>
   );
@@ -35,17 +36,20 @@ export function Embedded({
 export function SourceInput({
   value,
   label,
+  display,
   onCommit,
 }: {
   value: string;
   label: string;
+  /** Visible wording when it differs from the accessible name. */
+  display?: string;
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   return (
     <label className="ep-field">
-      {label}
+      {display ?? label}
       <textarea
         aria-label={label}
         value={draft}
@@ -137,6 +141,7 @@ export function documentStatus(
   textMetrics: { words: number; characters: number; cjkCharacters?: number },
   content: DocumentContent,
   readOnly: boolean,
+  t: Wording,
 ) {
   return (
     <>
@@ -144,11 +149,11 @@ export function documentStatus(
         {/* Mostly Japanese, Chinese or Korean text is measured in characters, not words. */}
         {(textMetrics.cjkCharacters ?? 0) * 2 > textMetrics.characters
           ? ''
-          : `${textMetrics.words} words · `}
-        {textMetrics.characters} characters · {content.blocks.length} blocks
+          : `${t('{0} words', textMetrics.words)} · `}
+        {t('{0} characters', textMetrics.characters)} · {t('{0} blocks', content.blocks.length)}
       </span>
       <span className="ep-spacer" />
-      <span>{readOnly ? 'Read only' : 'Rich text · / to insert'}</span>
+      <span>{t(readOnly ? 'Read only' : 'Rich text · / to insert')}</span>
     </>
   );
 }

@@ -1,6 +1,6 @@
 import { pinDataCommand } from './session';
 import { useEffect, useState, useRef, useContext } from 'react';
-import { EditorInputsContext } from '@editor-platform/editor-ui';
+import { EditorInputsContext, T, useWording } from '@editor-platform/editor-ui';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { type StructuredData, type DataRow, displayCell, parseCell, validateData } from './model';
@@ -26,6 +26,7 @@ export function RecordForm({
   drafts?: Map<string, RecordDraft>;
 }) {
   const inputs = useContext(EditorInputsContext);
+  const wording = useWording();
   const composing = useRef(false);
   const [base, setBase] = useState(drafts?.get(row.id)?.base ?? canonicalJson(row)),
     [draft, setDraft] = useState<Record<string, string>>(
@@ -145,9 +146,9 @@ export function RecordForm({
         }
       }}
     >
-      <h2>{String(row.values[data.columns[0]?.id] ?? 'Record')}</h2>
+      <h2>{String(row.values[data.columns[0]?.id] ?? wording('Record'))}</h2>
       <p className="ep-muted">
-        {changed ? 'Unsaved form changes' : 'Values from the shared dataset'}
+        {wording(changed ? 'Unsaved form changes' : 'Values from the shared dataset')}
       </p>
       <div className="ep-record-fields">
         {data.columns.map((c) => (
@@ -190,7 +191,7 @@ export function RecordForm({
       )}
       <div className="ep-record-actions">
         <button type="submit" disabled={readOnly || !changed}>
-          Save record
+          <T>Save record</T>
         </button>
         <button
           type="button"
@@ -199,7 +200,7 @@ export function RecordForm({
             onDone?.();
           }}
         >
-          Cancel changes
+          <T>Cancel changes</T>
         </button>
       </div>
     </form>

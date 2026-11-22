@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, Unlock, Layers } from 'lucide-react';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, T, useWording } from '@editor-platform/editor-ui';
 import { LayerWindow } from './layer-window';
 export interface LayerEntry {
   id: string;
@@ -66,6 +66,7 @@ const LayerTree = memo(
     readOnly = false,
     virtualize = false,
   }: LayerNavigatorProps) {
+    const t = useWording();
     const [query, setQuery] = useState(''),
       [collapsed, setCollapsed] = useState<string[]>([]),
       [rename, setRename] = useState<string>(),
@@ -125,7 +126,7 @@ const LayerTree = memo(
         <input
           className="layer-search"
           aria-label="Search layers"
-          placeholder="Search layers"
+          placeholder={t('Search layers')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -249,7 +250,7 @@ const LayerTree = memo(
             disabled={readOnly || !selected.length}
             onClick={() => selected.forEach((id) => onReparent(id, undefined))}
           >
-            Move selection to root
+            <T>Move selection to root</T>
           </button>
         )}
       </>
