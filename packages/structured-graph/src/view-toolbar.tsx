@@ -132,6 +132,8 @@ export interface GraphToolbarProps extends GraphSourceMenuProps {
   zoom: number;
   setZoom: Dispatch<SetStateAction<number>>;
   setPan: Dispatch<SetStateAction<Position>>;
+  /** Fit graph, shown at the end of the view controls. */
+  onFit?: () => void;
 }
 
 export function GraphToolbar(props: GraphToolbarProps) {
@@ -226,7 +228,9 @@ export function GraphToolbar(props: GraphToolbarProps) {
           )}
         </>
       )}
-      {show.zoom !== false && <GraphZoomControls zoom={zoom} setZoom={setZoom} setPan={setPan} />}
+      {show.zoom !== false && (
+        <GraphZoomControls zoom={zoom} setZoom={setZoom} setPan={setPan} onFit={props.onFit} />
+      )}
     </div>
   );
 }
@@ -235,16 +239,31 @@ function GraphZoomControls({
   zoom,
   setZoom,
   setPan,
-}: Pick<GraphToolbarProps, 'zoom' | 'setZoom' | 'setPan'>) {
+  onFit,
+}: Pick<GraphToolbarProps, 'zoom' | 'setZoom' | 'setPan' | 'onFit'>) {
   const t = useGraphLabels();
+  // Zoom, pan, Reset view and Fit graph share one compact group at the end of the toolbar, so
+  // the view controls no longer take a row of their own under it.
   return (
-    <>
+    <span className="ep-graph-view" role="group" aria-label="Graph view">
       <button aria-label="Zoom out" onClick={() => setZoom(zoomOutStep)}>
         −
       </button>
       <output aria-label="Graph zoom">{Math.round(zoom * 100)}%</output>
       <button aria-label="Zoom in" onClick={() => setZoom(zoomInStep)}>
         +
+      </button>
+      <button aria-label="Pan left" onClick={() => setPan((p) => ({ ...p, x: p.x - 50 }))}>
+        ←
+      </button>
+      <button aria-label="Pan up" onClick={() => setPan((p) => ({ ...p, y: p.y - 50 }))}>
+        ↑
+      </button>
+      <button aria-label="Pan down" onClick={() => setPan((p) => ({ ...p, y: p.y + 50 }))}>
+        ↓
+      </button>
+      <button aria-label="Pan right" onClick={() => setPan((p) => ({ ...p, x: p.x + 50 }))}>
+        →
       </button>
       <button
         onClick={() => {
@@ -254,16 +273,12 @@ function GraphZoomControls({
       >
         {t.resetView}
       </button>
-      <button aria-label="Pan left" onClick={() => setPan((p) => ({ ...p, x: p.x - 50 }))}>
-        ←
-      </button>
-      <button aria-label="Pan right" onClick={() => setPan((p) => ({ ...p, x: p.x + 50 }))}>
-        →
-      </button>
-    </>
+      {onFit && <button onClick={onFit}>{t.fitGraph}</button>}
+    </span>
   );
 }
 
+/** Pan up, Pan down and Fit graph on their own. GraphSurface now shows them in the toolbar group. */
 export function GraphViewControls({
   setPan,
   onFit,

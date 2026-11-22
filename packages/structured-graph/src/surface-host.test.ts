@@ -6,7 +6,7 @@ import { GraphSurface, type GraphSurfaceProps } from './view';
 
 /** The toolbar's markup alone; the Inspector repeats some wording. */
 const toolbarOf = (html: string) =>
-  html.slice(html.indexOf('role="toolbar"'), html.indexOf('ep-graph-view-controls'));
+  html.slice(html.indexOf('role="toolbar"'), html.indexOf('ep-graph-body'));
 const render = (props: Partial<GraphSurfaceProps> = {}) =>
   renderToStaticMarkup(
     createElement(GraphSurface, {
