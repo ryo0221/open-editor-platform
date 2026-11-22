@@ -53,7 +53,7 @@ import {
   focusGraphCanvas,
   handleGraphKeyDown,
 } from './view-gestures';
-import { GraphToolbar, GraphViewControls, type GraphToolbarOptions } from './view-toolbar';
+import { GraphToolbar, type GraphToolbarOptions } from './view-toolbar';
 import { GraphCanvas } from './view-canvas';
 import { GraphInspector } from './view-inspector';
 import { GraphDeletionDialog } from './view-dialog';
@@ -478,10 +478,8 @@ export function GraphSurface({
             zoom={zoom}
             setZoom={setZoom}
             setPan={setPan}
+            onFit={() => fit()}
           />
-        )}
-        {toolbar && toolbar.zoom !== false && (
-          <GraphViewControls setPan={setPan} onFit={() => fit()} />
         )}
         <div className="ep-graph-body">
           <GraphCanvas
