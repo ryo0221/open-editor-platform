@@ -1,6 +1,6 @@
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { isDeepFrozen, newId } from '@editor-platform/artifact-core';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, useWording } from '@editor-platform/editor-ui';
 import { DrawingView } from '@editor-platform/canvas-ui';
 import { ArrowDown, ArrowUp, Copy, EyeOff, Layers, Plus, Trash2 } from 'lucide-react';
 import {
@@ -35,15 +35,16 @@ export interface SlideNavigatorProps {
 }
 /** Slide thumbnails with page actions, or the current slide's layer list. */
 export function SlideNavigator(props: SlideNavigatorProps) {
+  const t = useWording();
   const { editing, layerActions, tab, setTab, dragged } = props;
   return (
     <>
       <div className="navigator-tabs">
         <button aria-pressed={tab === 'pages'} onClick={() => setTab('pages')}>
-          Slides
+          {t('Slides')}
         </button>
         <button aria-pressed={tab === 'layers'} onClick={() => setTab('layers')}>
-          Layers
+          {t('Layers')}
         </button>
       </div>
       {tab === 'pages' ? (
@@ -205,6 +206,7 @@ const LayerList = memo(
     choose: (ids: string[]) => void;
     onPatch: (id: string, patch: Partial<SlideObject>) => void;
   }) {
+    const t = useWording();
     const [query, setQuery] = useState('');
     const byId = new Map(objects.map((object) => [object.id, object]));
     const search = query.toLowerCase();
@@ -212,7 +214,7 @@ const LayerList = memo(
       <>
         <input
           aria-label="Search layers"
-          placeholder="Search layers"
+          placeholder={t('Search layers')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

@@ -94,7 +94,11 @@ export function DesignInspector({
       />
       <fieldset disabled={readOnly} className="inspector-fields">
         <ReferenceWarnings items={content.elements} resolver={references} />
-        {!manga && <DesignPrototypeSettings content={content} element={element} apply={apply} />}
+        {/* A paged (manga) document is read, not clicked through: its Prototype settings stay
+            hidden in either workspace unless it already has a prototype to keep editable. */}
+        {!manga && !(content.pagination?.pages.length && !content.prototyping) && (
+          <DesignPrototypeSettings content={content} element={element} apply={apply} />
+        )}
         <VisualInspector
           items={chosen.map((e) => {
             const first = designDrawings(content, e)[0];

@@ -9,3 +9,4 @@ export type {
   WhiteboardNodeRenderContext,
   WhiteboardInteractionMode,
 } from './node-content';
+export * from './wording';

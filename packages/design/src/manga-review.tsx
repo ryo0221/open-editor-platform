@@ -1,3 +1,4 @@
+import { useWording } from '@editor-platform/editor-ui';
 import { newId } from '@editor-platform/artifact-core';
 import { useState } from 'react';
 import type { DesignContent } from './model';
@@ -39,6 +40,7 @@ export function MangaReview({
   /** The panel being edited, for a panel-only redraw. */
   panelId?: string;
 }) {
+  const t = useWording();
   const [notes, setNotes] = useState('');
   const [raw, setRaw] = useState(''),
     [request, setRequest] = useState<DesignPageProposalRequest>(),
@@ -84,9 +86,9 @@ export function MangaReview({
   }
   return (
     <section className="manga-review" aria-label="漫画の変更提案">
-      <h3>変更提案</h3>
+      <h3>{t('変更提案')}</h3>
       {!host ? (
-        <p>このHostでは提案の採用を接続していません。</p>
+        <p>{t('このHostでは提案の採用を接続していません。')}</p>
       ) : (
         <>
           {host.requestProposals && (
@@ -105,13 +107,13 @@ export function MangaReview({
                 }
               }}
             >
-              Hostに提案を依頼
+              {t('Hostに提案を依頼')}
             </button>
           )}
           {host.requestPanelRedraw && panelId && (
             <div role="group" aria-label="このコマだけ描き直す">
               <label>
-                このコマで直すこと
+                {t('このコマで直すこと')}
                 <textarea
                   aria-label="このコマで直すこと"
                   value={notes}
@@ -138,12 +140,12 @@ export function MangaReview({
                   }
                 }}
               >
-                このコマだけ描き直しを頼む
+                {t('このコマだけ描き直しを頼む')}
               </button>
             </div>
           )}
           <details>
-            <summary>提案データを読み込む</summary>
+            <summary>{t('提案データを読み込む')}</summary>
             <button
               onClick={() =>
                 run(() => {
@@ -176,36 +178,36 @@ export function MangaReview({
                 })
               }
             >
-              現在の対象情報を表示
+              {t('現在の対象情報を表示')}
             </button>
             {contextJson && (
               <label>
-                提案の対象情報
+                {t('提案の対象情報')}
                 <textarea aria-label="提案の対象情報" readOnly value={contextJson} />
               </label>
             )}
-            {contextJson && <p>別の資料を参照した提案には、その資料の参照版も記録してください。</p>}
+            {contextJson && (
+              <p>{t('別の資料を参照した提案には、その資料の参照版も記録してください。')}</p>
+            )}
             <label>
-              提案JSON
+              {t('提案JSON')}
               <textarea
                 aria-label="提案JSON"
                 value={raw}
                 onChange={(e) => setRaw(e.target.value)}
               />
             </label>
-            <button onClick={() => run(() => load(JSON.parse(raw)))}>提案を読み込む</button>
+            <button onClick={() => run(() => load(JSON.parse(raw)))}>{t('提案を読み込む')}</button>
           </details>
           {request && (
             <>
               <p>{request.summary}</p>
               <p>
-                対象版: {request.reads.target.versionId} / draft{' '}
+                {t('対象版: {0} / draft', request.reads.target.versionId ?? '')}{' '}
                 {request.baseLocalRevision.sequence}
               </p>
               {request.reads.references.map((r) => (
-                <p key={r.artifactId}>
-                  参照: {r.artifactId} / {r.versionId}
-                </p>
+                <p key={r.artifactId}>{t('参照: {0} / {1}', r.artifactId, r.versionId)}</p>
               ))}
               {request.units.map((u) => (
                 <label key={u.id}>
@@ -222,7 +224,7 @@ export function MangaReview({
                     }}
                   />
                   {u.label}
-                  {u.requires.length > 0 && `（依存: ${u.requires.join(', ')}）`}
+                  {u.requires.length > 0 && t('（依存: {0}）', u.requires.join(', '))}
                 </label>
               ))}
               <button
@@ -244,14 +246,14 @@ export function MangaReview({
                   })
                 }
               >
-                選択した変更を再プレビュー
+                {t('選択した変更を再プレビュー')}
               </button>
             </>
           )}
           {plan && (
             <>
               <label>
-                比較するページ
+                {t('比較するページ')}
                 <select
                   aria-label="比較するページ"
                   value={pages[comparisonIndex]?.frameId ?? ''}
@@ -259,7 +261,7 @@ export function MangaReview({
                 >
                   {pages.map((p, i) => (
                     <option key={p.frameId} value={p.frameId}>
-                      ページ {i + 1}
+                      {t('ページ {0}', i + 1)}
                     </option>
                   ))}
                 </select>
@@ -268,13 +270,13 @@ export function MangaReview({
                 content={plan.before}
                 leftId={pair[0] ?? ''}
                 rightId={pair[1] ?? ''}
-                label="採用前"
+                label={t('採用前')}
               />
               <DesignPageComparison
                 content={plan.after}
                 leftId={pair[0] ?? ''}
                 rightId={pair[1] ?? ''}
-                label="採用後"
+                label={t('採用後')}
               />
               <ul>
                 {plan.diff.changes.map((c, i) => (
@@ -294,10 +296,12 @@ export function MangaReview({
                   })
                 }
               >
-                選択した変更を採用
+                {t('選択した変更を採用')}
               </button>
               {stale && (
-                <p role="status">原稿または参照版が変わりました。新しい提案で比較してください。</p>
+                <p role="status">
+                  {t('原稿または参照版が変わりました。新しい提案で比較してください。')}
+                </p>
               )}
             </>
           )}
@@ -309,7 +313,7 @@ export function MangaReview({
                 setRaw('');
               }}
             >
-              提案を破棄
+              {t('提案を破棄')}
             </button>
           )}
         </>

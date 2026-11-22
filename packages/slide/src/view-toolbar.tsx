@@ -1,6 +1,11 @@
 import { useContext, useId } from 'react';
 import { ReferenceTools } from '@editor-platform/artifact-references/react';
-import { EditorOfficeCapabilitiesContext, IconButton, Menu } from '@editor-platform/editor-ui';
+import {
+  EditorOfficeCapabilitiesContext,
+  IconButton,
+  Menu,
+  useWording,
+} from '@editor-platform/editor-ui';
 import {
   ArrangeMenu,
   CanvasControls,
@@ -155,6 +160,7 @@ function InsertOptionsMenu({
   setRepeat,
   dataSnapshots,
 }: SlideToolbarProps) {
+  const t = useWording();
   return (
     <Menu label="Slide insert options" icon={Plus}>
       <button
@@ -174,35 +180,37 @@ function InsertOptionsMenu({
         }
       >
         <Table2 size={18} />
-        Insert table
+        {t('Insert table')}
       </button>
       <button
         disabled={editing.readOnly}
         onClick={() => onAdd('chart', { bounds: { x: 120, y: 140, width: 720, height: 320 } })}
       >
         <ChartColumn size={18} />
-        Insert chart
+        {t('Insert chart')}
       </button>
       <label className="ep-field">
-        Draw a shape by dragging
+        {t('Draw a shape by dragging')}
         <select
           aria-label="Draw shape"
           value={inserting ?? ''}
           onChange={(e) => setInserting((e.target.value as ShapeKind) || undefined)}
         >
-          <option value="">Selection tool</option>
+          <option value="">{t('Selection tool')}</option>
           {drawableShapes.map((s) => (
-            <option key={s}>{s}</option>
+            <option key={s} value={s}>
+              {t(s)}
+            </option>
           ))}
         </select>
       </label>
       <button aria-pressed={repeat} onClick={() => setRepeat(!repeat)}>
         <Repeat size={17} />
-        Continuous creation
+        {t('Continuous creation')}
       </button>
       {dataSnapshots.map((d, i) => (
         <button key={i} onClick={() => onAdd('chart', { chart: d })}>
-          Insert snapshot: {d.label}
+          {t('Insert snapshot: {0}', d.label)}
         </button>
       ))}
     </Menu>
@@ -224,17 +232,19 @@ function SlideLayoutMenu({
   readOnly: boolean;
   onAddSlide(layout: SlideLayout): void;
 }) {
+  const t = useWording();
   return (
     <Menu label="Add slide layout" icon={LayoutTemplate}>
       {slideLayouts.map((l) => (
         <button key={l} disabled={readOnly} onClick={() => onAddSlide(l)}>
-          {l}
+          {t(l)}
         </button>
       ))}
     </Menu>
   );
 }
 function PptxExportButton({ editing, onPptx }: { editing: SlideEditing; onPptx(): void }) {
+  const t = useWording();
   const officeCapability = useContext(EditorOfficeCapabilitiesContext);
   const hasAnimations = editing.content.slides.some((page) =>
     page.objects.some((o) => o.type === 'animation'),
@@ -244,14 +254,16 @@ function PptxExportButton({ editing, onPptx }: { editing: SlideEditing; onPptx()
       disabled={!officeCapability.pptx || hasAnimations}
       title={
         hasAnimations
-          ? 'アニメーションを含む Slide の PPTX 出力は未対応です。native JSON で保存してください。'
+          ? t(
+              'アニメーションを含む Slide の PPTX 出力は未対応です。native JSON で保存してください。',
+            )
           : !officeCapability.pptx
-            ? (officeCapability.reason ?? 'Hostはこの形式の出力を提供していません。')
+            ? (officeCapability.reason ?? t('Hostはこの形式の出力を提供していません。'))
             : undefined
       }
       onClick={onPptx}
     >
-      Export PPTX
+      {t('Export PPTX')}
     </button>
   );
 }
@@ -270,6 +282,7 @@ export function SlideStatus({
   setView(view: CanvasView): void;
   navigate(index: number): unknown;
 }) {
+  const t = useWording();
   return (
     <>
       <IconButton
@@ -294,7 +307,7 @@ export function SlideStatus({
         onClick={() => navigate(index + 1)}
       />
       <span className="ep-spacer" />
-      <span>{selected} selected</span>
+      <span>{t('{0} selected', selected)}</span>
       <CanvasControls
         view={view}
         onChange={setView}

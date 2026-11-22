@@ -5,7 +5,7 @@ import {
 } from '@editor-platform/artifact-references/react';
 import { StickyNote, Frame, Pen, ArrowUpRight, Download, Layers } from 'lucide-react';
 import type { EditorCommand, ShapeKind } from '@editor-platform/editor-core';
-import { IconButton, Menu, CommitInput } from '@editor-platform/editor-ui';
+import { IconButton, Menu, CommitInput, useWording } from '@editor-platform/editor-ui';
 import { InsertTools, ArrangeMenu, EditMenu, type CanvasView } from '@editor-platform/canvas-ui';
 import {
   alignNodes,
@@ -41,6 +41,7 @@ export interface BoardToolbarProps {
 }
 
 export function BoardToolbar(props: BoardToolbarProps) {
+  const t = useWording();
   const { content, ids, chosen, readOnly, apply, add, action, reference } = props;
   const align = (mode: Parameters<typeof alignNodes>[1]) => {
     const parent = content.sections?.find(
@@ -101,7 +102,7 @@ export function BoardToolbar(props: BoardToolbarProps) {
         icon={ArrowUpRight}
         label="Connect selected"
         disabled={ids.length !== 2 || readOnly}
-        reason="Select two nodes"
+        reason={t('Select two nodes')}
         onClick={() => apply(connectNodes(ids[0], ids[1]))}
       />
       <ArrangeMenu
@@ -115,21 +116,21 @@ export function BoardToolbar(props: BoardToolbarProps) {
       <EditMenu onAction={action} readOnly={readOnly} />
       <Menu label="Board actions" icon={Layers}>
         <button disabled={!chosen.length || readOnly} onClick={() => action('frame')}>
-          Section around selected objects
+          {t('Section around selected objects')}
         </button>
-        <button onClick={() => props.fit()}>Fit all content</button>
+        <button onClick={() => props.fit()}>{t('Fit all content')}</button>
         {(['x', 'y'] as const).map((axis) => (
           <CameraCenterInput key={axis} {...props} axis={axis} />
         ))}
         <button disabled={!ids.length} onClick={() => props.fit(ids)}>
-          Fit selection
+          {t('Fit selection')}
         </button>
       </Menu>
       <Menu label="Export whiteboard" icon={Download}>
         {(['svg', 'png'] as const).map((format) =>
           ['all', 'selection', 'section'].map((scope) => (
             <button key={format + scope} onClick={() => props.output(format, scope)}>
-              Export {scope} {format.toUpperCase()}
+              {t(`Export ${scope} {0}`, format.toUpperCase())}
             </button>
           )),
         )}

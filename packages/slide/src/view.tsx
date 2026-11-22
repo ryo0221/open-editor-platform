@@ -23,10 +23,19 @@ import {
   type Region,
   type ElementAddress,
 } from '@editor-platform/editor-core';
-import { EditorLayout, type EditorLayoutProps } from '@editor-platform/editor-ui';
+import {
+  EditorLayout,
+  EditorWordingProvider,
+  editorUiWording,
+  useWording,
+  type EditorLayoutProps,
+  type EditorWordingProps,
+} from '@editor-platform/editor-ui';
+import { slideWording } from './wording';
 import {
   CanvasStage,
   DrawingView,
+  canvasUiWording,
   initialCanvasView,
   type CanvasView,
   type CanvasTarget,
@@ -79,7 +88,10 @@ function canvasTarget(object: SlideObject, index: number): SlideCanvasTarget {
 function renderCanvasTarget(target: CanvasTarget) {
   return <DrawingView drawing={slideDrawing(target as SlideCanvasTarget)} />;
 }
-export interface SlideSurfaceProps extends ReferenceSurfaceProps, SlideAnimationProps {
+export interface SlideSurfaceProps
+  extends ReferenceSurfaceProps,
+    SlideAnimationProps,
+    EditorWordingProps {
   content: SlideContent;
   execute: (cmd: EditorCommand<SlideContent>) => void | boolean;
   select: (ids: string | string[], region?: Region, pageId?: string) => void;
@@ -263,7 +275,16 @@ interface AnimationChoiceState {
   objectId?: string;
   current?: PlayableAnimationEmbed;
 }
-export function SlideSurface({
+const wordingSets = [editorUiWording, canvasUiWording, slideWording];
+/** The Slide Surface. `locale` and `labels` choose its visible wording. */
+export function SlideSurface({ locale, labels, ...props }: SlideSurfaceProps) {
+  return (
+    <EditorWordingProvider locale={locale} sets={wordingSets} labels={labels}>
+      <SlideSurfaceEditor {...props} />
+    </EditorWordingProvider>
+  );
+}
+function SlideSurfaceEditor({
   references,
   content,
   execute,
@@ -274,7 +295,7 @@ export function SlideSurface({
   focusAddress,
   animationSources,
   openAnimation,
-}: SlideSurfaceProps) {
+}: Omit<SlideSurfaceProps, 'locale' | 'labels'>) {
   const guardExport = useContext(EditorExportGuardContext);
   const inputs = useContext(EditorInputsContext);
   const overlays = useSlideOverlays();
@@ -424,6 +445,7 @@ function SlideStage({
   tools: ReturnType<typeof useSlideTools>;
   onAdd: ReturnType<typeof objectActions>['add'];
 }) {
+  const t = useWording();
   const { editing } = props;
   const onInsert = (bounds: Bounds) => {
     onAdd('shape', { shape: tools.inserting, bounds });
@@ -434,8 +456,8 @@ function SlideStage({
       <ReferenceWarnings items={editing.slide?.objects ?? []} resolver={editing.references} />
       {error && (
         <div role="alert" className="surface-error">
-          {error}
-          <button onClick={() => editing.setError('')}>Dismiss</button>
+          {t(error)}
+          <button onClick={() => editing.setError('')}>{t('Dismiss')}</button>
         </div>
       )}
       {editing.slide ? (
@@ -448,7 +470,7 @@ function SlideStage({
       ) : (
         <div className="empty">
           <FileText size={40} />
-          <p>Add a blank slide or choose a layout to start.</p>
+          <p>{t('Add a blank slide or choose a layout to start.')}</p>
         </div>
       )}
     </>
@@ -600,9 +622,10 @@ function PptxExport({
   setActiveId(id: string): void;
   close(): void;
 }) {
+  const t = useWording();
   const { content } = editing;
   return (
-    <Suspense fallback={<p role="status">Opening PPTX export…</p>}>
+    <Suspense fallback={<p role="status">{t('Opening PPTX export…')}</p>}>
       <SlidePptxDialog
         content={content}
         selectedPageIds={pages}

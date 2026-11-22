@@ -151,5 +151,103 @@ export const designWording: EditorWordingSet = {
     'React symbol': 'React の名前',
     'Save React publication settings': '公開の設定を保存',
     'Cancel publication settings': 'やめる',
+    'Native text and paths. Vertical writing (縦書き) is set per text box in the inspector; ruby is written as ｜漢字《かんじ》. Balloon paths require vector capture.':
+      '文字とパスはそのまま扱います。縦書きは設定で文字の枠ごとに決め、ルビは ｜漢字《かんじ》 と書きます。吹き出しのパスはベクターでの取り込みが必要です。',
+  },
+  en: {
+    // Manga workspace (source text is Japanese)
+    漫画: 'Manga',
+    単ページ: 'Single page',
+    見開き: 'Spread',
+    通読: 'Read through',
+    'ページ {0}': 'Page {0}',
+    'コマ {0}': 'Panel {0}',
+    '境界 {0}': 'Border {0}',
+    'コマの分割 → 境界の調整 → 台詞・作画 → 通読':
+      'Split panels → adjust borders → dialogue and art → read through',
+    コマ割り: 'Panel layout',
+    コマ間隔: 'Panel gap',
+    'ページ未設定です。下の「Add page」でページを用意できます。切替だけでは原稿を変更しません。':
+      'No page is set up. Use “Add page” below to add one. Switching alone does not change the manuscript.',
+    'ページ外にも要素があります。Designで詳細編集から確認できます。':
+      'There are elements outside the page. Check them in Design under detailed editing.',
+    '複数の既存コマは自動で分割木に変換しません。新しいページから始めてください。':
+      'Several existing panels are not turned into a split tree automatically. Start from a new page.',
+    'ページ全体のコマを共有境界で連動させます。':
+      'Link all panels on the page by their shared borders.',
+    連動コマ割りをプレビュー: 'Preview linked panel layout',
+    このページの連動解除をプレビュー: 'Preview unlinking this page',
+    このコマ割りを採用: 'Use this panel layout',
+    プレビューを取り消す: 'Cancel preview',
+    'プレビュー中。読み順の番号と切り取り範囲を確認してください。':
+      'Previewing. Check the reading order numbers and the crop area.',
+    分割するコマ: 'Panel to split',
+    境界の法線角度: 'Border normal angle',
+    '90°: 横に分割 / 0°: 縦に分割 / その他: 斜め':
+      '90°: split horizontally / 0°: split vertically / other: diagonal',
+    境界位置: 'Border position',
+    選んだコマの中央: 'Center of the selected panel',
+    絵を残す側: 'Side that keeps the art',
+    '上 / 左（a）': 'Top / left (a)',
+    '下 / 右（b）': 'Bottom / right (b)',
+    新コマの読み順: 'Reading order of the new panel',
+    元のコマの前: 'Before the original panel',
+    元のコマの後: 'After the original panel',
+    分割をプレビュー: 'Preview split',
+    線を引いて分割: 'Draw a line to split',
+    編集する境界: 'Border to edit',
+    境界の値を読み込む: 'Load border values',
+    境界変更をプレビュー: 'Preview border change',
+    選択コマへ結合をプレビュー: 'Preview merge into the selected panel',
+    '枠の変更では、中の絵・文字の位置を保ちます。':
+      'Changing a frame keeps the position of the art and text inside it.',
+    '角度は -360〜360 度です': 'The angle must be between -360 and 360 degrees',
+    // Manga review
+    変更提案: 'Change proposals',
+    提案の対象情報: 'Proposal target',
+    現在の対象情報を表示: 'Show current target',
+    このコマで直すこと: 'What to fix in this panel',
+    このコマだけ描き直しを頼む: 'Ask to redraw only this panel',
+    Hostに提案を依頼: 'Ask the Host for a proposal',
+    提案JSON: 'Proposal JSON',
+    提案データを読み込む: 'Load proposal data',
+    提案を読み込む: 'Load proposal',
+    提案を破棄: 'Discard proposal',
+    '対象版: {0} / draft': 'Target version: {0} / draft',
+    '参照: {0} / {1}': 'Reference: {0} / {1}',
+    '（依存: {0}）': ' (depends on: {0})',
+    比較するページ: 'Page to compare',
+    採用前: 'Before',
+    採用後: 'After',
+    選択した変更を再プレビュー: 'Preview selected changes again',
+    選択した変更を採用: 'Use selected changes',
+    'このHostでは提案の採用を接続していません。': 'This Host has not connected applying proposals.',
+    '別の資料を参照した提案には、その資料の参照版も記録してください。':
+      'A proposal that refers to other material must also record that material’s reference version.',
+    '原稿または参照版が変わりました。新しい提案で比較してください。':
+      'The manuscript or a reference version changed. Compare with a new proposal.',
+    // Manga reading
+    '見開き {0}': 'Spread {0}',
+    '見開き · 編集中の原稿': 'Spread · manuscript being edited',
+    '通読 · 編集中の原稿': 'Read through · manuscript being edited',
+    '読み方向: 右から左。出力には保存した版を選択してください。':
+      'Reading direction: right to left. Choose a saved version for export.',
+    '読み方向: 左から右。出力には保存した版を選択してください。':
+      'Reading direction: left to right. Choose a saved version for export.',
+    通読を閉じる: 'Close read-through',
+    // Page panel
+    台詞: 'Dialogue',
+    台詞を縦書きで入れる: 'Add vertical dialogue',
+    吹き出しをよける: 'Move balloons clear',
+    '吹き出しを避ける範囲にする（顔・人物）': 'Mark as an area balloons avoid (face or figure)',
+    吹き出しを避ける範囲から外す: 'Remove from the areas balloons avoid',
+    '吹き出しが顔・人物にかかっています（{0} 件）': 'Balloons overlap a face or figure ({0})',
+    '{0} 個の吹き出しはコマの中に空きがなく、動かせませんでした':
+      '{0} balloons could not be moved because there is no free space in the panel',
+    '{0} 個の吹き出しはロックか非表示のため、動かせませんでした':
+      '{0} balloons could not be moved because they are locked or hidden',
+    'このコマには顔や人物、ほかの吹き出しに重ならない空きがないため、吹き出しを入れませんでした':
+      'No balloon was added because this panel has no space clear of faces, figures and other balloons',
+    小さすぎるコマには台詞を配置できません: 'Dialogue cannot be placed in a panel this small',
   },
 };

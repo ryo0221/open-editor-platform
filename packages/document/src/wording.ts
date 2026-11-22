@@ -97,5 +97,50 @@ export const documentWording: EditorWordingSet = {
     'Hostはこの形式の出力を提供していません。': 'The Host does not provide this export format.',
     'PDFの本文・表は検索/コピーできます。図・画像内の文字は画像です。Tagged PDFは未対応です。大きい画像は1ページへ縮小し、表は行または文字行で分割します。':
       'Body text and tables in the PDF can be searched and copied. Text inside figures and images is an image. Tagged PDF is not supported. A large image is scaled down to one page, and a table is split by row or by line of text.',
+    // Novel workspace (source text is Japanese)
+    原稿: 'Manuscript',
+    文字数: 'Characters',
+    原稿用紙: 'Manuscript sheets',
+    '{0}字': '{0} chars',
+    '約{0}枚（{1}×{2}・{3}行）': 'About {0} sheets ({1}×{2}, {3} lines)',
+    '{0}・{1}・{2}。原稿用紙は{3}近似です。':
+      'Counted {0}, {1}, {2}. Manuscript sheets are an approximation {3}.',
+    空白を含む: 'with spaces',
+    空白を除く: 'without spaces',
+    改行を含む: 'with line breaks',
+    改行を除く: 'without line breaks',
+    非表示を含む: 'with hidden text',
+    非表示を除く: 'without hidden text',
+    '禁則・ぶら下げを考えた': 'that follows line-breaking rules and hanging punctuation',
+    禁則を考えない: 'that ignores line-breaking rules',
+    目標: 'Goal',
+    なし: 'None',
+    '達成（{0}%）': 'Reached ({0}%)',
+    '{0}%・残り{1}字': '{0}%, {1} chars to go',
+    '見出しを付けると章・シーンとして並びます。': 'Add headings to list chapters and scenes here.',
+    'ルビの確認（{0}件）': 'Ruby check ({0})',
+    '「{0}」のルビ「{1}」は「{2}」に付けた読みです':
+      'The ruby “{1}” on “{0}” is the reading given to “{2}”',
+    '文字を選んでルビを付け直すか、外してください。':
+      'Select the text and set the ruby again, or remove it.',
+    '表記の照合（{0}件）': 'Notation check ({0})',
+    '辞書と違う表記はありません。': 'No notation differs from the dictionary.',
+    '「{0}」→「{1}」': '“{0}” → “{1}”',
+    選んだ直しを提案: 'Propose the chosen fixes',
+    '本文は提案を採用するまで変わりません。':
+      'The text does not change until the proposal is accepted.',
+    '範囲の指摘（未解決{0}件）': 'Range remarks ({0} open)',
+    '（範囲の文が変わりました）': ' (the text in the range changed)',
+    '（ほか{0}件）': ' (+{0} more)',
+    '解決済み・': 'Resolved · ',
+    '「{0}」{1}：{2}': '“{0}”{1}: {2}',
+    '元の範囲がこの章にありません（削除されたか、別の章です）：{0}':
+      'The original range is not in this chapter (deleted or in another chapter): {0}',
+    '指摘は本文を変えません。付け方と解決はHostの注釈で行います。':
+      'Remarks do not change the text. Add and resolve them with the Host’s annotations.',
+    '保存した版を結合した通読です。': 'A read-through of the saved versions joined together.',
+    '編集中の内容は含みません。': 'Unsaved edits are not included.',
+    '画像参照のHostが接続されていません。': 'No Host is connected for image references.',
+    '（通読では表示しない要素）': '(not shown in the read-through)',
   },
 };

@@ -3,7 +3,7 @@ import {
   type ReferenceSurfaceProps,
 } from '@editor-platform/artifact-references/react';
 import { unionBounds, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
-import { Section, CommitInput } from '@editor-platform/editor-ui';
+import { Section, CommitInput, useWording } from '@editor-platform/editor-ui';
 import { VisualInspector, readImage } from '@editor-platform/canvas-ui';
 import {
   patchNodes,
@@ -83,6 +83,7 @@ function SectionInspector({
   apply,
   onExportSection,
 }: BoardInspectorProps & { section: WhiteboardSection }) {
+  const t = useWording();
   return (
     <Section title="Section">
       <CommitInput
@@ -91,7 +92,7 @@ function SectionInspector({
         onCommit={(title) => apply(updateSection(section.id, { title }))}
       />
       <label className="ep-field">
-        Section background
+        {t('Section background')}
         <input
           type="color"
           aria-label="Section background"
@@ -118,17 +119,18 @@ function SectionInspector({
           }
         />
       ))}
-      <p>{sectionMembers(content, section.id).length} members · no clipping</p>
-      <button onClick={() => apply(dissolveSection(section.id))}>Dissolve Section</button>
+      <p>{t('{0} members · no clipping', sectionMembers(content, section.id).length)}</p>
+      <button onClick={() => apply(dissolveSection(section.id))}>{t('Dissolve Section')}</button>
       <button onClick={() => apply(dissolveSection(section.id, true))}>
-        Delete Section and contents
+        {t('Delete Section and contents')}
       </button>
-      <button onClick={onExportSection}>Export Section SVG</button>
+      <button onClick={onExportSection}>{t('Export Section SVG')}</button>
     </Section>
   );
 }
 
 function ConnectorInspector(props: BoardInspectorProps & { connector: WhiteboardConnector }) {
+  const t = useWording();
   const { connector, apply } = props;
   const edit = (patch: Partial<WhiteboardConnector>) => apply(updateConnector(connector.id, patch));
   return (
@@ -140,14 +142,16 @@ function ConnectorInspector(props: BoardInspectorProps & { connector: Whiteboard
           onCommit={(label) => edit({ label })}
         />
         <label className="ep-field">
-          Routing
+          {t('Routing')}
           <select
             aria-label="Connector routing"
             value={connector.routing ?? 'straight'}
             onChange={(e) => edit({ routing: e.target.value as WhiteboardConnector['routing'] })}
           >
             {['straight', 'elbow', 'curve'].map((v) => (
-              <option key={v}>{v}</option>
+              <option key={v} value={v}>
+                {t(v)}
+              </option>
             ))}
           </select>
         </label>
@@ -164,7 +168,7 @@ function ConnectorInspector(props: BoardInspectorProps & { connector: Whiteboard
           onCommit={(v) => edit({ strokeWidth: Number(v) })}
         />
         <label className="ep-field">
-          Arrowheads
+          {t('Arrowheads')}
           <select
             aria-label="Connector arrowheads"
             value={connector.arrowhead ?? 'end'}
@@ -173,17 +177,20 @@ function ConnectorInspector(props: BoardInspectorProps & { connector: Whiteboard
             }
           >
             {['none', 'end', 'both'].map((v) => (
-              <option key={v}>{v}</option>
+              <option key={v} value={v}>
+                {t(v)}
+              </option>
             ))}
           </select>
         </label>
         {(['from', 'to'] as const).map((side) => (
           <ConnectorEndpointFields key={side} {...props} side={side} edit={edit} />
         ))}
-        <button onClick={props.onDeleteConnector}>Delete connector</button>
+        <button onClick={props.onDeleteConnector}>{t('Delete connector')}</button>
         <p className="hint">
-          Drag an endpoint onto a node edge to attach it. Dropping on empty space makes it a free
-          endpoint. Deleting a connected node removes incident connectors; Undo restores them.
+          {t(
+            'Drag an endpoint onto a node edge to attach it. Dropping on empty space makes it a free endpoint. Deleting a connected node removes incident connectors; Undo restores them.',
+          )}
         </p>
       </Section>
     </>
@@ -201,10 +208,11 @@ function ConnectorEndpointFields({
   side: 'from' | 'to';
   edit: (patch: Partial<WhiteboardConnector>) => boolean;
 }) {
+  const t = useWording();
   return (
     <div>
       <label className="ep-field">
-        {side} node
+        {t(side === 'from' ? 'from node' : 'to node')}
         <select
           aria-label={`${side} node`}
           value={connector[side]}
@@ -216,7 +224,7 @@ function ConnectorEndpointFields({
             })
           }
         >
-          <option value="">Free endpoint</option>
+          <option value="">{t('Free endpoint')}</option>
           {content.nodes
             .filter((n) => n.kind !== 'freehand')
             .map((n, i) => (
@@ -227,14 +235,16 @@ function ConnectorEndpointFields({
         </select>
       </label>
       <label className="ep-field">
-        {side} port
+        {t(side === 'from' ? 'from port' : 'to port')}
         <select
           aria-label={`${side} port`}
           value={connector[`${side}Port`] ?? 'auto'}
           onChange={(e) => edit({ [`${side}Port`]: e.target.value })}
         >
           {['auto', 'top', 'right', 'bottom', 'left'].map((v) => (
-            <option key={v}>{v}</option>
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
           ))}
           {nodes.get(connector[side])?.node.ports?.map((port) => (
             <option key={port.key} value={port.key}>
@@ -277,19 +287,20 @@ function NodeInspector({ ids, chosen, apply, setError }: BoardInspectorProps) {
 
 /** Section membership and ports for selected objects (not shown for connectors). */
 function NodeRelations({ content, ids, chosen, apply }: BoardInspectorProps) {
+  const t = useWording();
   if (!chosen.length) return null;
   const node = chosen[0];
   return (
     <>
       <Section title="Membership">
         <label className="ep-field">
-          Section
+          {t('Section')}
           <select
             aria-label="Object Section"
             value={nodeSection(content, node) ?? ''}
             onChange={(e) => apply(assignSection(ids, e.target.value || undefined))}
           >
-            <option value="">Outside Sections</option>
+            <option value="">{t('Outside Sections')}</option>
             {content.sections?.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.title}

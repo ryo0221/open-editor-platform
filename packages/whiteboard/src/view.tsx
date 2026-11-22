@@ -15,10 +15,20 @@ import {
   type Region,
   type TransformDelta,
 } from '@editor-platform/editor-core';
-import { EditorLayout, IconButton, type EditorLayoutProps } from '@editor-platform/editor-ui';
+import {
+  EditorLayout,
+  EditorWordingProvider,
+  IconButton,
+  editorUiWording,
+  useWording,
+  type EditorLayoutProps,
+  type EditorWordingProps,
+} from '@editor-platform/editor-ui';
+import { whiteboardWording } from './wording';
 import {
   CanvasStage,
   CanvasControls,
+  canvasUiWording,
   readImage,
   type CanvasView,
 } from '@editor-platform/canvas-ui';
@@ -55,7 +65,7 @@ import { BoardToolbar } from './board-toolbar';
 import { BoardConnectorLayer, useEndpointDrag } from './board-connectors';
 import { freeBounds } from './placement';
 import type { WhiteboardNodeRenderer, WhiteboardInteractionMode } from './node-content';
-export interface WhiteboardSurfaceProps extends ReferenceSurfaceProps {
+export interface WhiteboardSurfaceProps extends ReferenceSurfaceProps, EditorWordingProps {
   content: WhiteboardContent;
   execute: (command: EditorCommand<WhiteboardContent>) => void | boolean;
   select: (ids: string[], region?: Region) => void;
@@ -249,7 +259,16 @@ function useBoardSelection(
     chooseConnector,
   };
 }
-export function WhiteboardSurface({
+const wordingSets = [editorUiWording, canvasUiWording, whiteboardWording];
+/** The Whiteboard Surface. `locale` and `labels` choose its visible wording. */
+export function WhiteboardSurface({ locale, labels, ...props }: WhiteboardSurfaceProps) {
+  return (
+    <EditorWordingProvider locale={locale} sets={wordingSets} labels={labels}>
+      <WhiteboardSurfaceEditor {...props} />
+    </EditorWordingProvider>
+  );
+}
+function WhiteboardSurfaceEditor({
   references,
   focusReferenceId,
   content: source,
@@ -259,7 +278,8 @@ export function WhiteboardSurface({
   layout,
   renderNodeContent,
   interactionMode = 'layout',
-}: WhiteboardSurfaceProps) {
+}: Omit<WhiteboardSurfaceProps, 'locale' | 'labels'>) {
+  const t = useWording();
   const readOnly = sourceReadOnly || interactionMode === 'content';
   const board = useBoardContent(source, references);
   const { content, nodes, contentBounds, paintOrder } = board;
@@ -375,8 +395,8 @@ export function WhiteboardSurface({
         <ReferenceWarnings items={content.nodes} resolver={references} />
         {error && (
           <div className="surface-error" role="alert">
-            {error}
-            <button onClick={() => setError('')}>Dismiss</button>
+            {t(error)}
+            <button onClick={() => setError('')}>{t('Dismiss')}</button>
           </div>
         )}
         <CanvasStage
@@ -432,11 +452,16 @@ function BoardStatus({
   setView: (view: CanvasView) => void;
   fit: (ids?: string[]) => void;
 }) {
+  const t = useWording();
   return (
     <>
       <span className="ep-status-summary">
-        {content.nodes.length} nodes · {content.sections?.length ?? 0} Sections ·{' '}
-        {content.connectors.length} connections
+        {t(
+          '{0} nodes · {1} Sections · {2} connections',
+          content.nodes.length,
+          content.sections?.length ?? 0,
+          content.connectors.length,
+        )}
       </span>
       <IconButton
         icon={Scan}

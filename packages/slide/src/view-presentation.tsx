@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { IconButton } from '@editor-platform/editor-ui';
+import { IconButton, useWording } from '@editor-platform/editor-ui';
 import { DrawingView } from '@editor-platform/canvas-ui';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { AnimationPresentationObject } from './animation';
@@ -17,6 +17,7 @@ export function SlidePresentation({
   setPresentIndex: Dispatch<SetStateAction<number>>;
   close(): void;
 }) {
+  const t = useWording();
   const { content, references } = editing;
   const playable = content.slides.filter((s) => !s.hidden),
     present = playable[Math.min(presentIndex, playable.length - 1)];
@@ -52,7 +53,7 @@ export function SlidePresentation({
           )}
         </svg>
       ) : (
-        <p>No visible slides</p>
+        <p>{t('No visible slides')}</p>
       )}
       <footer>
         <IconButton
