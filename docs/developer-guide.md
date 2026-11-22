@@ -171,7 +171,7 @@ npm run test:e2e:compare -- work/e2e/branch.json work/e2e/main.json
 npm run test:e2e:nightly -- 2 --setup --previous work/e2e/nightly/failures-2.txt
 ```
 
-`--setup`は新しいcloneで、CAD kernel（`--source`付き）、FontTools 4.61.1、グループ2のビルドを用意します。結果は`work/e2e/nightly/summary-<group>.md`と失敗一覧`failures-<group>.txt`です。前の晩の一覧を`--previous`で渡すと、増えた失敗と直った失敗を分けて書きます。各段階は100分で打ち切り、残ったサーバーを止めてから次へ進みます。`tests/e2e`の外にspecがあるスイートを足したときは`packageSuites`に加えます（`npm run test:tooling`が検査します）。
+`--setup`は新しいcloneで、CAD kernel（`--source`付き）、Officeの固定フォント、FontTools 4.61.1、グループ2のビルドを用意します。結果は`work/e2e/nightly/summary-<group>.md`と失敗一覧`failures-<group>.txt`です。前の晩の一覧を`--previous`で渡すと、増えた失敗と直った失敗を分けて書きます。各段階は100分で打ち切り、残ったサーバーを止めてから次へ進みます。`tests/e2e`の外にspecがあるスイートを足したときは`packageSuites`に加えます（`npm run test:tooling`が検査します）。
 
 文書だけの変更では、記載したAPI・コマンド・リンク、format、公開snapshotへの収録と残留チェックを確認します。実施していないunit/browser検証を文書変更の結果として再掲しません。PRを作成したことや自動CIが存在することも検証の実施を意味しません。
 

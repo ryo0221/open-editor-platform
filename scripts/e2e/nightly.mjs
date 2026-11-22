@@ -164,6 +164,9 @@ function setup(root, group, kernel) {
   if (!existsSync(join(root, 'node_modules'))) sh('npm', ['ci'], { cwd: root });
   if (!existsSync(join(kernel, 'NOTICE.txt')))
     sh('node', ['scripts/cad-kernel/fetch.mjs', kernel, '--source'], { cwd: root });
+  // Office specs and the production builds use the pinned Office fonts (no fallback font).
+  if (sh('node', ['scripts/check-office-fonts.mjs'], { cwd: root, stdio: 'ignore' }))
+    sh('node', ['scripts/fetch-office-fonts.mjs'], { cwd: root });
   if (!group.builds) return 0;
   // animation-2d builds its font fixture with the FontTools the Office evidence pins.
   sh('python3', ['-m', 'pip', 'install', '--quiet', 'fonttools==4.61.1']);
