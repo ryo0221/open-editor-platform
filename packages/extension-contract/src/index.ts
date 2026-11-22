@@ -95,6 +95,11 @@ export interface ScopedHost<T> {
 }
 export interface ExtensionDefinition<T> {
   manifest: ExtensionManifest;
+  /**
+   * Pure check of saved content. A Host may run the package's entry and this function in a
+   * sandbox that has only the ECMAScript language (no DOM, `Intl`, `TextEncoder` or `crypto`), so
+   * loading the entry and calling `validate` must not need those APIs.
+   */
   validate(value: unknown): value is T;
   mount?: (container: HTMLElement, host: ScopedHost<T>) => () => void;
   /** Present exactly when the manifest declares the operations add-on. */

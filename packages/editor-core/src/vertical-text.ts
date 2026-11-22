@@ -1,3 +1,4 @@
+import { graphemeSegmenter } from './graphemes';
 import { breakJapaneseLines } from './japanese-lines';
 import type { Bounds } from './geometry';
 
@@ -65,7 +66,6 @@ export function verticalGlyphKind(g: string): Exclude<GridGlyphKind, 'upright'> 
         ? 'rotated'
         : 'plain';
 }
-const graphemes = new Intl.Segmenter('ja', { granularity: 'grapheme' });
 /** Latin and other narrow glyphs take part of a cell (the same estimate as horizontal text). */
 const narrowCells = (g: string) => (/[il.,' ]/.test(g) ? 0.3 : 0.58);
 
@@ -167,7 +167,10 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   const cuts = new Set([...ruby.flatMap((r) => [r.start, r.end]), ...(o.cuts ?? [])]);
   // Only digits that are whole graphemes of their own: a keycap such as 1️⃣ keeps its sequence
   // (Codex on #29).
-  const bounds = new Set([...Array.from(graphemes.segment(plain), (g) => g.index), plain.length]);
+  const bounds = new Set([
+    ...Array.from(graphemeSegmenter().segment(plain), (g) => g.index),
+    plain.length,
+  ]);
   const upright = o.vertical
     ? Array.from(plain.matchAll(/(?<![0-9])[0-9]{1,2}(?![0-9])/gu), (m) => ({
         start: m.index,
@@ -210,7 +213,9 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
   const lines: GridTextLayout['lines'] = broken.map((line) => {
     const glyphs: GridGlyph[] = [];
     let along = 0;
-    for (const { segment, index } of graphemes.segment(plain.slice(line.start, line.end))) {
+    for (const { segment, index } of graphemeSegmenter().segment(
+      plain.slice(line.start, line.end),
+    )) {
       const offset = line.start + index;
       if (uprightOf.has(offset) && !uprightAt.has(offset)) continue;
       const group = uprightAt.get(offset);
@@ -291,7 +296,7 @@ function layoutOnce(text: string, box: Bounds, o: GridTextOptions, size: number)
       const lastStart = [...positions.keys()].filter((k) => k < r.end).at(-1);
       if (!first || lastStart === undefined) continue;
       const to = positions.get(lastStart)!.to;
-      const chars = [...graphemes.segment(r.text)].map((s) => s.segment);
+      const chars = [...graphemeSegmenter().segment(r.text)].map((s) => s.segment);
       if (!chars.length) continue;
       const step = Math.min(
         rubySize,
