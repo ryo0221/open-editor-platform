@@ -1,3 +1,5 @@
+import { graphemeSegmenter } from './graphemes';
+
 // Japanese line breaking (kinsoku) shared by Document manuscripts and Design text: these
 // characters never start a line…
 export const kinsokuNoLineStart =
@@ -27,7 +29,6 @@ export interface JapaneseLine {
   hanging: boolean;
 }
 
-const graphemes = new Intl.Segmenter('ja', { granularity: 'grapheme' });
 type Atom = { start: number; end: number; first: string; last: string; width: number };
 
 function atoms(
@@ -38,7 +39,7 @@ function atoms(
 ): Atom[] {
   const measure = options.measure ?? (() => 1);
   const result: Atom[] = [];
-  for (const { segment, index } of graphemes.segment(text)) {
+  for (const { segment, index } of graphemeSegmenter().segment(text)) {
     const start = offset + index,
       end = start + segment.length,
       width = measure(segment, start);
