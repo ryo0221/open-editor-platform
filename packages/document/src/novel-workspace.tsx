@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import type { Annotation, EditorCommand } from '@editor-platform/editor-core';
-import { Section } from '@editor-platform/editor-ui';
+import { Section, useWording } from '@editor-platform/editor-ui';
 import {
   ReferenceImage,
   type ReferenceSurfaceProps,
@@ -70,6 +70,7 @@ export function NovelSceneList({
   selectedId?: string;
   choose(id: string): void;
 }) {
+  const t = useWording();
   const scenes = useMemo(() => {
     const count = documentCharacterCount(content, options?.characterCount);
     const byBlock = new Map<string, number>();
@@ -85,7 +86,7 @@ export function NovelSceneList({
     return found;
   }, [content, options?.characterCount]);
   if (!scenes.length)
-    return <p className="ep-novel-empty">見出しを付けると章・シーンとして並びます。</p>;
+    return <p className="ep-novel-empty">{t('見出しを付けると章・シーンとして並びます。')}</p>;
   return (
     <nav aria-label="章・シーン">
       {scenes.map((scene) => (
@@ -96,7 +97,9 @@ export function NovelSceneList({
           onClick={() => choose(scene.id)}
         >
           <span>{scene.label}</span>
-          <small className="ep-novel-count">{scene.count.toLocaleString('ja-JP')}字</small>
+          <small className="ep-novel-count">
+            {t('{0}字', scene.count.toLocaleString('ja-JP'))}
+          </small>
         </button>
       ))}
     </nav>
@@ -118,6 +121,7 @@ export function NovelManuscriptPanel({
   /** The Host's range annotations (reader remarks). Shown and followed; never edited here. */
   annotations?: readonly Annotation[];
 }) {
+  const t = useWording();
   const summary = useMemo(() => {
     try {
       return {
@@ -161,14 +165,19 @@ export function NovelManuscriptPanel({
   };
   return (
     <div className="ep-novel-panel">
-      <Section title="原稿">
+      <Section title={t('原稿')}>
         <dl className="ep-novel-stats">
-          <dt>文字数</dt>
-          <dd aria-label="文字数">{count.total.toLocaleString('ja-JP')}字</dd>
-          <dt>原稿用紙</dt>
+          <dt>{t('文字数')}</dt>
+          <dd aria-label="文字数">{t('{0}字', count.total.toLocaleString('ja-JP'))}</dd>
+          <dt>{t('原稿用紙')}</dt>
           <dd aria-label="原稿用紙換算">
-            約{paper.sheets.toLocaleString('ja-JP')}枚（{paper.columns}×{paper.rows}・
-            {paper.lines.toLocaleString('ja-JP')}行）
+            {t(
+              '約{0}枚（{1}×{2}・{3}行）',
+              paper.sheets.toLocaleString('ja-JP'),
+              paper.columns,
+              paper.rows,
+              paper.lines.toLocaleString('ja-JP'),
+            )}
           </dd>
           {(options?.goal !== undefined || options?.onGoalChange) && (
             <NovelGoal
@@ -179,33 +188,39 @@ export function NovelManuscriptPanel({
           )}
         </dl>
         <p className="ep-novel-note">
-          {count.rule.whitespace ? '空白を含む' : '空白を除く'}・
-          {count.rule.lineBreaks ? '改行を含む' : '改行を除く'}・
-          {count.rule.hidden ? '非表示を含む' : '非表示を除く'}
-          。原稿用紙は
-          {paper.lineBreaking === 'kinsoku' ? '禁則・ぶら下げを考えた' : '禁則を考えない'}
-          近似です。
+          {t(
+            '{0}・{1}・{2}。原稿用紙は{3}近似です。',
+            t(count.rule.whitespace ? '空白を含む' : '空白を除く'),
+            t(count.rule.lineBreaks ? '改行を含む' : '改行を除く'),
+            t(count.rule.hidden ? '非表示を含む' : '非表示を除く'),
+            t(paper.lineBreaking === 'kinsoku' ? '禁則・ぶら下げを考えた' : '禁則を考えない'),
+          )}
         </p>
       </Section>
       <NovelAnnotations content={content} annotations={annotations} choose={choose} />
       {rubies.length > 0 && (
-        <Section title={`ルビの確認（${rubies.length}件）`}>
+        <Section title={t('ルビの確認（{0}件）', rubies.length)}>
           <ul className="ep-novel-findings">
             {rubies.map((ruby) => (
               <li key={`${ruby.segmentId}:${ruby.start}`}>
                 <button type="button" onClick={() => choose(ruby.blockId)}>
-                  「{ruby.found}」のルビ「{ruby.ruby.text}」は「{ruby.ruby.base}」に付けた読みです
+                  {t(
+                    '「{0}」のルビ「{1}」は「{2}」に付けた読みです',
+                    ruby.found,
+                    ruby.ruby.text,
+                    ruby.ruby.base,
+                  )}
                 </button>
               </li>
             ))}
           </ul>
-          <p className="ep-novel-note">文字を選んでルビを付け直すか、外してください。</p>
+          <p className="ep-novel-note">{t('文字を選んでルビを付け直すか、外してください。')}</p>
         </Section>
       )}
       {findings && (
-        <Section title={`表記の照合（${findings.length}件）`}>
+        <Section title={t('表記の照合（{0}件）', findings.length)}>
           {findings.length === 0 ? (
-            <p className="ep-novel-note">辞書と違う表記はありません。</p>
+            <p className="ep-novel-note">{t('辞書と違う表記はありません。')}</p>
           ) : (
             <ul className="ep-novel-findings">
               {findings.map((finding) => {
@@ -227,7 +242,7 @@ export function NovelManuscriptPanel({
                       />
                     )}
                     <button type="button" onClick={() => choose(finding.blockId)}>
-                      「{finding.found}」→「{finding.preferred}」
+                      {t('「{0}」→「{1}」', finding.found, finding.preferred)}
                     </button>
                   </li>
                 );
@@ -236,7 +251,7 @@ export function NovelManuscriptPanel({
           )}
           {options?.onNotationProposal && findings.length > 0 && (
             <button type="button" disabled={readOnly || !selected.length} onClick={propose}>
-              選んだ直しを提案
+              {t('選んだ直しを提案')}
             </button>
           )}
           {error && (
@@ -244,7 +259,7 @@ export function NovelManuscriptPanel({
               {error}
             </p>
           )}
-          <p className="ep-novel-note">本文は提案を採用するまで変わりません。</p>
+          <p className="ep-novel-note">{t('本文は提案を採用するまで変わりません。')}</p>
         </Section>
       )}
     </div>
@@ -261,6 +276,7 @@ function NovelGoal({
   goal?: number;
   onChange?(goal: number | undefined): void;
 }) {
+  const t = useWording();
   const valid = goal !== undefined && Number.isSafeInteger(goal) && goal > 0;
   const [text, setText] = useState<string>();
   const shown = text ?? (valid ? String(goal) : '');
@@ -274,7 +290,7 @@ function NovelGoal({
   };
   return (
     <>
-      <dt>目標</dt>
+      <dt>{t('目標')}</dt>
       <dd>
         {onChange ? (
           <input
@@ -284,7 +300,7 @@ function NovelGoal({
             max={novelGoalLimit}
             step={1}
             aria-label="文字数の目標"
-            placeholder="なし"
+            placeholder={t('なし')}
             value={shown}
             onChange={(event) => setText(event.currentTarget.value)}
             onBlur={commit}
@@ -294,15 +310,19 @@ function NovelGoal({
             }}
           />
         ) : valid ? (
-          `${goal.toLocaleString('ja-JP')}字`
+          t('{0}字', goal.toLocaleString('ja-JP'))
         ) : (
-          'なし'
+          t('なし')
         )}
         {valid && (
           <span aria-label="目標までの進み具合" className="ep-novel-goal">
             {total >= goal
-              ? `達成（${Math.floor((total / goal) * 100)}%）`
-              : `${Math.floor((total / goal) * 100)}%・残り${(goal - total).toLocaleString('ja-JP')}字`}
+              ? t('達成（{0}%）', Math.floor((total / goal) * 100))
+              : t(
+                  '{0}%・残り{1}字',
+                  Math.floor((total / goal) * 100),
+                  (goal - total).toLocaleString('ja-JP'),
+                )}
           </span>
         )}
       </dd>
@@ -320,12 +340,13 @@ function NovelAnnotations({
   annotations: readonly Annotation[];
   choose(id: string): void;
 }) {
+  const t = useWording();
   if (!annotations.length) return null;
   const blocks = new Map(content.blocks.map((block) => [block.id, block]));
   const open = annotations.filter((a) => !a.resolved).length;
   const ordered = [...annotations].sort((a, b) => Number(a.resolved) - Number(b.resolved));
   return (
-    <Section title={`範囲の指摘（未解決${open}件）`}>
+    <Section title={t('範囲の指摘（未解決{0}件）', open)}>
       <ul className="ep-novel-findings" aria-label="範囲の指摘">
         {ordered.map((annotation) => {
           // As the editor's highlights do, follow the range only while it still resolves.
@@ -336,27 +357,30 @@ function NovelAnnotations({
             }))
             .find((r) => r.block && r.state !== 'Orphan');
           const target = found?.block;
-          const changed = found?.state === 'Outdated' ? '（範囲の文が変わりました）' : '';
+          const changed = found?.state === 'Outdated' ? t('（範囲の文が変わりました）') : '';
           const first = annotation.comments[0];
-          const label = `${first?.body ?? ''}${annotation.comments.length > 1 ? `（ほか${annotation.comments.length - 1}件）` : ''}`;
+          const label = `${first?.body ?? ''}${annotation.comments.length > 1 ? t('（ほか{0}件）', annotation.comments.length - 1) : ''}`;
           const where = target ? headingText(target).slice(0, 24) : undefined;
           return (
             <li key={annotation.id} data-resolved={annotation.resolved || undefined}>
               {target ? (
                 <button type="button" onClick={() => choose(target.id)}>
-                  {annotation.resolved ? '解決済み・' : ''}「{where}」{changed}：{label}
+                  {annotation.resolved ? t('解決済み・') : ''}
+                  {t('「{0}」{1}：{2}', where ?? '', changed, label)}
                 </button>
               ) : (
                 <span>
-                  {annotation.resolved ? '解決済み・' : ''}
-                  元の範囲がこの章にありません（削除されたか、別の章です）：{label}
+                  {annotation.resolved ? t('解決済み・') : ''}
+                  {t('元の範囲がこの章にありません（削除されたか、別の章です）：{0}', label)}
                 </span>
               )}
             </li>
           );
         })}
       </ul>
-      <p className="ep-novel-note">指摘は本文を変えません。付け方と解決はHostの注釈で行います。</p>
+      <p className="ep-novel-note">
+        {t('指摘は本文を変えません。付け方と解決はHostの注釈で行います。')}
+      </p>
     </Section>
   );
 }
@@ -402,6 +426,7 @@ export function NovelReading({
   reading: NonNullable<DocumentNovelOptions['reading']>;
   references?: ReferenceSurfaceProps['references'];
 }) {
+  const t = useWording();
   const blocks = reading.content.blocks.filter((block) => !block.hidden);
   return (
     <article
@@ -410,14 +435,15 @@ export function NovelReading({
       data-writing-mode={isVerticalDocument(reading.content) ? 'vertical-rl' : undefined}
     >
       <p className="ep-novel-note">
-        {reading.label ?? '保存した版を結合した通読です。'}編集中の内容は含みません。
+        {reading.label ?? t('保存した版を結合した通読です。')}
+        {t('編集中の内容は含みません。')}
       </p>
       {blocks.map((block) => {
         if (block.type === 'image')
           return (
             <figure key={block.id} className="ep-novel-reading-image">
               {block.reference && !references ? (
-                <p role="status">画像参照のHostが接続されていません。</p>
+                <p role="status">{t('画像参照のHostが接続されていません。')}</p>
               ) : (
                 <ReferenceImage item={block} resolver={references} width={block.width} />
               )}
@@ -427,7 +453,7 @@ export function NovelReading({
         if (!readable.has(block.type))
           return (
             <p key={block.id} className="ep-novel-note">
-              （通読では表示しない要素）
+              {t('（通読では表示しない要素）')}
             </p>
           );
         if (block.items)

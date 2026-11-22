@@ -1,6 +1,6 @@
 import type { RefObject } from 'react';
 import { descendantIds, type Bounds, type EditorCommand } from '@editor-platform/editor-core';
-import { Section } from '@editor-platform/editor-ui';
+import { Section, useWording } from '@editor-platform/editor-ui';
 import { LayerNavigator, type CanvasView } from '@editor-platform/canvas-ui';
 import { arrangeBoard, patchNodes, type WhiteboardContent, type WhiteboardNode } from './model';
 import { sectionMembers } from './sections';
@@ -23,6 +23,7 @@ export interface BoardNavigatorProps {
 }
 
 export function BoardNavigator(props: BoardNavigatorProps) {
+  const t = useWording();
   const { content, ids, readOnly, apply, choose, fit, setError } = props;
   const reparent = (id: string, parentId?: string) => {
     const all = descendantIds(
@@ -64,7 +65,7 @@ export function BoardNavigator(props: BoardNavigatorProps) {
             {section.title} · {sectionMembers(content, section.id).length}
           </button>
         ))}
-        <p className="hint">Sections organize objects. Resize changes the region only.</p>
+        <p className="hint">{t('Sections organize objects. Resize changes the region only.')}</p>
       </Section>
       <Section title="Overview">
         <BoardOverview {...props} />
@@ -76,7 +77,7 @@ export function BoardNavigator(props: BoardNavigatorProps) {
             aria-pressed={c.id === props.connectorId}
             onClick={() => props.chooseConnector(c.id)}
           >
-            {c.label || `Connection ${i + 1}`}
+            {c.label || t('Connection {0}', i + 1)}
           </button>
         ))}
       </Section>

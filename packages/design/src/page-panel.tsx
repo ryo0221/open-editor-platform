@@ -150,7 +150,7 @@ export function DesignPagePanel({
               disabled={readOnly}
               onChange={(e) => setVertical(e.target.checked)}
             />
-            台詞を縦書きで入れる
+            {t('台詞を縦書きで入れる')}
           </label>
           <ol>
             {pagination.pages.map((p, index) => (
@@ -233,13 +233,13 @@ export function DesignPagePanel({
               onClick={() => apply(setMangaKeepOut(markable.id, !isMangaKeepOut(markable)))}
             >
               {isMangaKeepOut(markable)
-                ? '吹き出しを避ける範囲から外す'
-                : '吹き出しを避ける範囲にする（顔・人物）'}
+                ? t('吹き出しを避ける範囲から外す')
+                : t('吹き出しを避ける範囲にする（顔・人物）')}
             </button>
           )}
           {!!overlaps.length && (
             <div role="alert" aria-label="Balloon overlaps">
-              <p>{`吹き出しが顔・人物にかかっています（${overlaps.length} 件）`}</p>
+              <p>{t('吹き出しが顔・人物にかかっています（{0} 件）', overlaps.length)}</p>
               <ul>
                 {overlaps.map((o) => (
                   <li key={`${o.balloonId}:${o.keepOutId}`}>
@@ -252,24 +252,31 @@ export function DesignPagePanel({
                 ))}
               </ul>
               <button disabled={readOnly} onClick={moveBalloons}>
-                吹き出しをよける
+                {t('吹き出しをよける')}
               </button>
             </div>
           )}
           {!!stuck && (
-            <p role="status">{`${stuck} 個の吹き出しはコマの中に空きがなく、動かせませんでした`}</p>
+            <p role="status">
+              {t('{0} 個の吹き出しはコマの中に空きがなく、動かせませんでした', stuck)}
+            </p>
           )}
           {!!locked && (
-            <p role="status">{`${locked} 個の吹き出しはロックか非表示のため、動かせませんでした`}</p>
+            <p role="status">
+              {t('{0} 個の吹き出しはロックか非表示のため、動かせませんでした', locked)}
+            </p>
           )}
           {noRoom && (
             <p role="status">
-              このコマには顔や人物、ほかの吹き出しに重ならない空きがないため、吹き出しを入れませんでした
+              {t(
+                'このコマには顔や人物、ほかの吹き出しに重ならない空きがないため、吹き出しを入れませんでした',
+              )}
             </p>
           )}
           <p>
-            Native text and paths. Vertical writing (縦書き) is set per text box in the inspector;
-            ruby is written as ｜漢字《かんじ》. Balloon paths require vector capture.
+            {t(
+              'Native text and paths. Vertical writing (縦書き) is set per text box in the inspector; ruby is written as ｜漢字《かんじ》. Balloon paths require vector capture.',
+            )}
           </p>
         </>
       )}

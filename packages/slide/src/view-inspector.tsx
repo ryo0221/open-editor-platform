@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ReferenceInspector } from '@editor-platform/artifact-references/react';
-import { CommitInput, Section } from '@editor-platform/editor-ui';
+import { CommitInput, Section, useWording } from '@editor-platform/editor-ui';
 import { readImage, VisualInspector } from '@editor-platform/canvas-ui';
 import type { Bounds } from '@editor-platform/editor-core';
 import type { PlayableAnimationEmbed } from '@editor-platform/animation-core/v2';
@@ -117,6 +117,7 @@ function PageSettings({
   slide: Slide;
   open: boolean;
 }) {
+  const t = useWording();
   const { content, apply } = editing;
   return (
     <Section title="Page settings" open={open}>
@@ -126,7 +127,7 @@ function PageSettings({
         onCommit={(title) => apply(updateSlide(slide.id, { title }))}
       />
       <label className="ep-field">
-        Page size
+        {t('Page size')}
         <select
           aria-label="Slide size"
           value={`${content.width}x${content.height}`}
@@ -163,8 +164,9 @@ function PageSettings({
         ))}
       </div>
       <p className="ep-muted">
-        Changing page size keeps object positions and sizes. Content outside the page is clipped in
-        presentation and export.
+        {t(
+          'Changing page size keeps object positions and sizes. Content outside the page is clipped in presentation and export.',
+        )}
       </p>
       <CommitInput
         label="Slide background"
@@ -177,7 +179,7 @@ function PageSettings({
           checked={slide.hidden ?? false}
           onChange={(e) => apply(updateSlide(slide.id, { hidden: e.target.checked }))}
         />{' '}
-        Skip during presentation
+        {t('Skip during presentation')}
       </label>
     </Section>
   );
@@ -193,11 +195,12 @@ function ChartDataSection({
   object: SlideObject;
   chart: ChartSnapshot;
 }) {
+  const t = useWording();
   const { apply } = editing;
   return (
     <Section title="Chart data">
       <label className="ep-field">
-        Chart type
+        {t('Chart type')}
         <select
           aria-label="Chart type"
           value={chart.type ?? 'bar'}
@@ -209,8 +212,10 @@ function ChartDataSection({
             )
           }
         >
-          {['bar', 'line', 'pie'].map((t) => (
-            <option key={t}>{t}</option>
+          {['bar', 'line', 'pie'].map((type) => (
+            <option key={type} value={type}>
+              {t(type)}
+            </option>
           ))}
         </select>
       </label>
@@ -219,8 +224,9 @@ function ChartDataSection({
         onChange={(chart) => apply(updateObject(slide.id, object.id, { chart }))}
       />
       <p className="hint">
-        Imported charts are static snapshots. Edit these values explicitly; source data changes do
-        not alter this slide.
+        {t(
+          'Imported charts are static snapshots. Edit these values explicitly; source data changes do not alter this slide.',
+        )}
       </p>
     </Section>
   );
@@ -232,6 +238,7 @@ function ChartEditor({
   chart: ChartSnapshot;
   onChange: (c: ChartSnapshot) => void;
 }) {
+  const t = useWording();
   const [draft, setDraft] = useState(
       chart.labels.map((label, i) => `${label}\t${chart.values[i]}`).join('\n'),
     ),
@@ -244,7 +251,7 @@ function ChartEditor({
         onCommit={(label) => onChange({ ...chart, label })}
       />
       <label className="ep-field">
-        Label and value (tab-separated)
+        {t('Label and value (tab-separated)')}
         <textarea
           aria-label="Chart data"
           rows={6}
@@ -271,9 +278,9 @@ function ChartEditor({
           setError('');
         }}
       >
-        Apply chart data
+        {t('Apply chart data')}
       </button>
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{t(error)}</p>}
     </>
   );
 }
@@ -284,6 +291,7 @@ function TableInspector({
   object: SlideObject;
   onChange: (table: NonNullable<SlideObject['table']>) => void;
 }) {
+  const t = useWording();
   const table = object.table!,
     [row, setRow] = useState(0),
     [col, setCol] = useState(0),
@@ -321,14 +329,14 @@ function TableInspector({
           })
         }
       >
-        Add table row
+        {t('Add table row')}
       </button>
       <button
         onClick={() =>
           onChange({ ...table, rows: table.rows.map((r) => [...r, '']), columnWidths: undefined })
         }
       >
-        Add table column
+        {t('Add table column')}
       </button>
       <div className="ep-fields">
         <CommitInput
@@ -373,7 +381,7 @@ function TableInspector({
           })
         }
       >
-        Delete table row
+        {t('Delete table row')}
       </button>
       <button
         disabled={table.rows[0].length <= 1}
@@ -386,7 +394,7 @@ function TableInspector({
           })
         }
       >
-        Delete table column
+        {t('Delete table column')}
       </button>
       <button
         onClick={() =>
@@ -404,7 +412,7 @@ function TableInspector({
           })
         }
       >
-        Merge cells
+        {t('Merge cells')}
       </button>
       <button
         onClick={() =>
@@ -414,7 +422,7 @@ function TableInspector({
           })
         }
       >
-        Split cell
+        {t('Split cell')}
       </button>
     </Section>
   );

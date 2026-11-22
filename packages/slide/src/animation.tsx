@@ -10,7 +10,7 @@ import {
 } from '@editor-platform/animation-core/v2';
 import { AnimationViewer } from '@editor-platform/animation/viewer';
 import { slideAnimationPoster } from './animation-poster';
-import { Dialog, CommitInput } from '@editor-platform/editor-ui';
+import { Dialog, CommitInput, useWording } from '@editor-platform/editor-ui';
 import type { SlideAnimationSource, SlideObject } from './model';
 export interface SlideAnimationProps {
   animationSources?: readonly SlideAnimationSource[];
@@ -60,15 +60,16 @@ export function AnimationChoiceDialog({
   apply(value: PlayableAnimationEmbed): boolean;
   close(): void;
 }) {
+  const t = useWording();
   const [selected, setSelected] = useState(() => (sources[0] ? sourceChoiceKey(sources[0]) : '')),
     [error, setError] = useState('');
   const { candidate, candidateError } = animationCandidate(sources, selected, current);
   const preview = candidate && inspectPlayableAnimationEmbed(candidate);
   return (
     <Dialog title={current ? 'Animation の版を選ぶ' : 'Animation を配置'} onClose={close}>
-      {!sources.length && <p>Animation を作成し、版を保存するとここから配置できます。</p>}
+      {!sources.length && <p>{t('Animation を作成し、版を保存するとここから配置できます。')}</p>}
       <label>
-        保存した Animation
+        {t('保存した Animation')}
         <select
           aria-label="保存した Animation"
           value={sources.some((source) => sourceChoiceKey(source) === selected) ? selected : ''}
@@ -79,7 +80,7 @@ export function AnimationChoiceDialog({
           }}
         >
           <option value="" disabled>
-            保存した版を選択
+            {t('保存した版を選択')}
           </option>
           {sources.map((source) => (
             <option key={sourceChoiceKey(source)} value={sourceChoiceKey(source)}>
@@ -90,7 +91,7 @@ export function AnimationChoiceDialog({
       </label>
       {!!sources.length && !candidate && (
         <p role="alert">
-          {candidateError || '選択した保存版が利用できません。選び直してください。'}
+          {t(candidateError || '選択した保存版が利用できません。選び直してください。')}
         </p>
       )}
       {preview && (
@@ -106,7 +107,7 @@ export function AnimationChoiceDialog({
           }}
         />
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{t(error)}</p>}
     </Dialog>
   );
 }
@@ -119,14 +120,19 @@ function AnimationChoicePreview({
   current: PlayableAnimationEmbed | undefined;
   adopt(): void;
 }) {
+  const t = useWording();
   const poster = slideAnimationPoster(embed);
   if (!poster) return null;
   return (
     <>
-      <p>選択した保存版を固定して保持します。元の下書きの変更は自動反映されません。</p>
+      <p>{t('選択した保存版を固定して保持します。元の下書きの変更は自動反映されません。')}</p>
       {current && current.posterTick !== embed.posterTick && (
         <p>
-          ポスター時刻を新しい長さに合わせます: {current.posterTick} → {embed.posterTick}
+          {t(
+            'ポスター時刻を新しい長さに合わせます: {0} → {1}',
+            current.posterTick,
+            embed.posterTick,
+          )}
         </p>
       )}
       <img
@@ -136,7 +142,7 @@ function AnimationChoicePreview({
       />
       {poster.status === 'unavailable' && <p role="alert">{poster.message}</p>}
       <button disabled={poster.status !== 'ready'} onClick={adopt}>
-        この版を{current ? '採用' : '配置'}
+        {t(current ? 'この版を採用' : 'この版を配置')}
       </button>
     </>
   );
@@ -158,6 +164,7 @@ export function AnimationObjectInspector({
   preview(): void;
   openSource?: SlideAnimationProps['openAnimation'];
 }) {
+  const t = useWording();
   const [error, setError] = useState('');
   if (!object.animation) return null;
   const a = object.animation,
@@ -169,8 +176,8 @@ export function AnimationObjectInspector({
   return (
     <section aria-label="Animation settings">
       <h3>Animation</h3>
-      <p>保存した版を固定して再生します。</p>
-      <button onClick={preview}>Animation をプレビュー</button>
+      <p>{t('保存した版を固定して再生します。')}</p>
+      <button onClick={preview}>{t('Animation をプレビュー')}</button>
       {openSource && (
         <button
           onClick={() => {
@@ -182,21 +189,21 @@ export function AnimationObjectInspector({
             }
           }}
         >
-          元の Animation を開く
+          {t('元の Animation を開く')}
         </button>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{t(error)}</p>}
       {a.format === 'animation-embed-2' && animationSystemFontText2(a.snapshot, a.inputs) && (
-        <p role="note">{systemFontNote}</p>
+        <p role="note">{t(systemFontNote)}</p>
       )}
-      <p>PPTXへのアニメーション出力は未対応です。</p>
+      <p>{t('PPTXへのアニメーション出力は未対応です。')}</p>
       <fieldset disabled={readOnly}>
-        {choose && <button onClick={choose}>保存した別の版を選ぶ</button>}
+        {choose && <button onClick={choose}>{t('保存した別の版を選ぶ')}</button>}
         {a.format === 'animation-embed-2' &&
           publicInputs.map((input) => (
             <CommitInput
               key={input.id}
-              label={`Animation input: ${input.name}`}
+              label={t('Animation input: {0}', input.name)}
               type={input.kind === 'number' ? 'number' : 'text'}
               value={a.inputs.find((value) => value.inputId === input.id)?.value ?? input.default}
               onCommit={(value) =>
@@ -239,8 +246,8 @@ export function AnimationObjectInspector({
               patch({ ...a, trigger: e.target.value as PlayableAnimationEmbed['trigger'] })
             }
           >
-            <option value="on-enter">スライド表示時</option>
-            <option value="manual">手動</option>
+            <option value="on-enter">{t('スライド表示時')}</option>
+            <option value="manual">{t('手動')}</option>
           </select>
         </label>
         <label>
@@ -250,7 +257,7 @@ export function AnimationObjectInspector({
             checked={a.loop}
             onChange={(e) => patch({ ...a, loop: e.target.checked })}
           />
-          繰り返す
+          {t('繰り返す')}
         </label>
       </fieldset>
     </section>

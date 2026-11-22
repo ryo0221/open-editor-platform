@@ -1,0 +1,144 @@
+import { type EditorWordingSet } from '@editor-platform/editor-ui';
+
+/**
+ * Visible wording of the Slide Surface. Shared controls (insert tools, arrange, canvas controls,
+ * visual inspector, export menu) bring their own wording from editor-ui and canvas-ui.
+ */
+export const slideWording: EditorWordingSet = {
+  ja: {
+    'Slide navigator': 'スライドの一覧',
+    'Slide inspector': '設定',
+    Dismiss: '閉じる',
+    'Add a blank slide or choose a layout to start.':
+      '白紙のスライドを足すか、レイアウトを選んで始めます。',
+    'Opening PPTX export…': 'PPTX の書き出しを開いています…',
+    // Navigator
+    Slides: 'スライド',
+    Layers: 'レイヤー',
+    'Add slide': 'スライドを追加',
+    'Move slide up': 'スライドを上へ',
+    'Move slide down': 'スライドを下へ',
+    'Duplicate slide': 'スライドを複製',
+    'Delete slide': 'スライドを消す',
+    'Search layers': 'レイヤーを探す',
+    // Toolbar
+    Present: '発表する',
+    'Slide insert options': '入れる',
+    'Insert table': '表を入れる',
+    'Insert chart': 'グラフを入れる',
+    'Draw a shape by dragging': 'ドラッグして図形を描く',
+    'Selection tool': '選択',
+    rectangle: '四角',
+    'rounded-rectangle': '角丸の四角',
+    ellipse: '楕円',
+    triangle: '三角',
+    diamond: 'ひし形',
+    'arrow-right': '右向きの矢印',
+    'Continuous creation': '続けて描く',
+    'Insert snapshot: {0}': '{0} を入れる',
+    'Add slide layout': 'レイアウトからスライドを追加',
+    blank: '白紙',
+    title: 'タイトル',
+    'title-body': 'タイトルと本文',
+    'two-column': '2 段組み',
+    'image-caption': '画像と説明',
+    comparison: '比較',
+    chart: 'グラフ',
+    'Export PPTX': 'PPTX で書き出す',
+    'Hostはこの形式の出力を提供していません。': 'Host はこの形式の書き出しに対応していません。',
+    // Status and presentation
+    'Previous slide': '前のスライド',
+    'Next slide': '次のスライド',
+    '{0} selected': '{0} 個を選択中',
+    'No visible slides': '表示するスライドがありません',
+    'Exit presentation': '発表を終える',
+    // Inspector
+    'Speaker notes': '話す内容のメモ',
+    'Page settings': 'ページの設定',
+    'Slide title': 'タイトル',
+    'Page size': 'ページの大きさ',
+    'Page width (px)': '幅 (px)',
+    'Page height (px)': '高さ (px)',
+    'Changing page size keeps object positions and sizes. Content outside the page is clipped in presentation and export.':
+      'ページの大きさを変えても、ものの位置と大きさはそのままです。ページの外にある部分は、発表と書き出しでは切れます。',
+    'Slide background': '背景の色',
+    'Skip during presentation': '発表では飛ばす',
+    'Chart data': 'グラフのデータ',
+    'Chart type': 'グラフの種類',
+    bar: '棒',
+    line: '折れ線',
+    pie: '円',
+    'Imported charts are static snapshots. Edit these values explicitly; source data changes do not alter this slide.':
+      '取り込んだグラフはその時点の写しです。値はここで直してください。元のデータが変わってもこのスライドは変わりません。',
+    'Chart title': 'グラフの題',
+    'Label and value (tab-separated)': 'ラベルと値（タブで区切る）',
+    'Apply chart data': 'グラフに反映する',
+    'Each row needs a label, a tab and a finite number.': '各行に、ラベル・タブ・数値が必要です。',
+    Table: '表',
+    'Add table row': '行を足す',
+    'Add table column': '列を足す',
+    'Table row': '行',
+    'Table column': '列',
+    'Merge rows': 'つなぐ行の数',
+    'Merge columns': 'つなぐ列の数',
+    'Delete table row': '行を消す',
+    'Delete table column': '列を消す',
+    'Merge cells': 'セルをつなぐ',
+    'Split cell': 'セルを分ける',
+    // Errors
+    'Copy elements in this editor first.': '先にこの Editor でコピーしてください。',
+    'Select at least two objects': '2 つ以上選んでください',
+    'Page dimensions must be between 100 and 6000 pixels':
+      'ページの大きさは 100〜6000 px にしてください',
+  },
+  en: {
+    // Animation (source text is Japanese)
+    'Animation の版を選ぶ': 'Choose an Animation version',
+    'Animation を配置': 'Place an Animation',
+    'Animation を作成し、版を保存するとここから配置できます。':
+      'Create an Animation and save a version to place it from here.',
+    '保存した Animation': 'Saved Animation',
+    保存した版を選択: 'Choose a saved version',
+    '選択した保存版が利用できません。選び直してください。':
+      'The chosen saved version is not available. Choose again.',
+    '選択した保存版を固定して保持します。元の下書きの変更は自動反映されません。':
+      'The chosen saved version is kept as it is. Later changes to the draft are not applied.',
+    'ポスター時刻を新しい長さに合わせます: {0} → {1}':
+      'The poster time is fitted to the new length: {0} → {1}',
+    この版を採用: 'Use this version',
+    この版を配置: 'Place this version',
+    '保存した版を固定して再生します。': 'Plays the saved version as it is.',
+    'Animation をプレビュー': 'Preview Animation',
+    '元の Animation を開く': 'Open the original Animation',
+    '端末のフォントで仮表示しています。見た目を固定するには、元の Animation で text にフォントを指定してください。':
+      'Shown with this device’s fonts for now. To fix the look, set a font on the text in the original Animation.',
+    'PPTXへのアニメーション出力は未対応です。': 'Animations are not exported to PPTX.',
+    保存した別の版を選ぶ: 'Choose another saved version',
+    スライド表示時: 'When the slide appears',
+    手動: 'Manually',
+    繰り返す: 'Loop',
+    'Animation プレビュー': 'Animation preview',
+    'アニメーションを含む Slide の PPTX 出力は未対応です。native JSON で保存してください。':
+      'A Slide with animations cannot be exported to PPTX. Save it as native JSON.',
+    'Hostはこの形式の出力を提供していません。': 'The Host does not provide this export format.',
+    '配置先のページが削除されました。': 'The page to place it on was deleted.',
+    'アニメーションの形式または保持上限が不正です。':
+      'The animation format or retention limit is not valid.',
+    '配置済みアニメーションが変更されました。選び直してください。':
+      'The placed animation changed. Choose again.',
+    'Animation の配置には保存版と placeSlideAnimation が必要です。':
+      'Placing an Animation needs a saved version and placeSlideAnimation.',
+    'オブジェクトの種類と Animation の保存版は専用コマンドで変更してください。':
+      'Change the object type and the Animation’s saved version with their own commands.',
+    'Animation オブジェクトに画像専用のプロパティは設定できません。':
+      'Image-only properties cannot be set on an Animation object.',
+    'Animation の複製が Slide の保持契約または上限を満たしません。':
+      'The Animation copy does not meet the Slide’s retention contract or limits.',
+    '参照付きの出力には参照接続が必要です。':
+      'An export with references needs a reference connection.',
+    '取得中に参照接続が変わりました。再実行してください。':
+      'The reference connection changed while loading. Try again.',
+    '取得中に入力が変わりました。再実行してください。':
+      'The input changed while loading. Try again.',
+  },
+};
