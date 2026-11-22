@@ -163,19 +163,28 @@ function freePorts(ports) {
   spawnSync('fuser', ['-k', ...ports.map((port) => `${port}/tcp`)], { stdio: 'ignore' });
 }
 
+/** Prepares a fresh clone; returns the first failing command's status, or 0. */
 function setup(root, group, kernel) {
-  if (!existsSync(join(root, 'node_modules'))) sh('npm', ['ci'], { cwd: root });
+  const at = { cwd: root };
+  const steps = [];
+  if (!existsSync(join(root, 'node_modules'))) steps.push(() => sh('npm', ['ci'], at));
   if (!existsSync(join(kernel, 'NOTICE.txt')))
-    sh('node', ['scripts/cad-kernel/fetch.mjs', kernel, '--source'], { cwd: root });
+    steps.push(() => sh('node', ['scripts/cad-kernel/fetch.mjs', kernel, '--source'], at));
   // Office specs and the production builds use the pinned Office fonts (no fallback font).
-  if (sh('node', ['scripts/check-office-fonts.mjs'], { cwd: root, stdio: 'ignore' }))
-    sh('node', ['scripts/fetch-office-fonts.mjs'], { cwd: root });
-  if (!group.builds) return 0;
-  // animation-2d builds its font fixture with the FontTools the Office evidence pins.
-  sh('python3', ['-m', 'pip', 'install', '--quiet', 'fonttools==4.61.1']);
-  const env = { ...process.env, CAD_OCCT_DIST: kernel };
-  for (const args of productionBuilds) {
-    const status = sh('npx', ['vite', 'build', ...args], { cwd: root, env });
+  steps.push(() =>
+    sh('node', ['scripts/check-office-fonts.mjs'], { ...at, stdio: 'ignore' })
+      ? sh('node', ['scripts/fetch-office-fonts.mjs'], at)
+      : 0,
+  );
+  if (group.builds) {
+    // animation-2d builds its font fixture with the FontTools the Office evidence pins.
+    steps.push(() => sh('python3', ['-m', 'pip', 'install', '--quiet', 'fonttools==4.61.1']));
+    const env = { ...process.env, CAD_OCCT_DIST: kernel };
+    for (const args of productionBuilds)
+      steps.push(() => sh('npx', ['vite', 'build', ...args], { ...at, env }));
+  }
+  for (const step of steps) {
+    const status = step();
     if (status) return status;
   }
   return 0;
