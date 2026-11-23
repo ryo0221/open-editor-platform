@@ -265,4 +265,31 @@ describe('live references', () => {
       '保存版が逆行または矛盾しています。',
     );
   });
+
+  it('formats values with digit grouping and a power-of-ten scale (finding 81)', async () => {
+    const at = (value: number, f: Record<string, unknown>) =>
+      formatLiveValue({
+        kind: 'value',
+        value,
+        format: { style: 'decimal', digits: 0, unit: '', ...f } as never,
+      });
+    expect(at(-1281385168, { grouping: true, unit: ' 円' })).toBe('-1,281,385,168 円');
+    expect(at(-1281385168, { scale: 8, digits: 1, unit: '億円' })).toBe('-12.8億円');
+    expect(at(1234567.891, { grouping: true, digits: 2 })).toBe('1,234,567.89');
+    expect(at(12345678, { scale: 4, grouping: true, unit: '万円' })).toBe('1,235万円');
+    expect(at(999, { grouping: true })).toBe('999');
+    expect(at(-0.081484, { style: 'percent', digits: 1 })).toBe('-8.1%');
+    const first = await snapshot(1);
+    const scaled = await createLiveReference(source, first, provider, {
+      ...format,
+      scale: 3,
+      grouping: true,
+    });
+    expect(validLiveReference(scaled)).toBe(true);
+    expect(() => at(1, { scale: 5 })).toThrow('表示形式が不正です。');
+    expect(() => at(1, { grouping: 'yes' })).toThrow('表示形式が不正です。');
+    await expect(
+      createLiveReference(source, first, provider, { ...format, scale: 7 as never }),
+    ).rejects.toThrow();
+  });
 });

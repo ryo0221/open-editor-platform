@@ -10,6 +10,8 @@ import {
   type PreparedLiveReference,
   type ReferenceSnapshot,
   type ValueFormat,
+  type ValueScale,
+  VALUE_SCALES,
 } from './index';
 import {
   LiveReferenceDetails,
@@ -20,6 +22,8 @@ import {
   type LiveReviewProps,
 } from './live-review';
 import './live-tools.css';
+
+const SCALE_LABELS: Record<ValueScale, string> = { 3: '千', 4: '万', 6: '百万', 8: '億', 12: '兆' };
 
 export interface LiveArtifactOption {
   artifactId: string;
@@ -296,6 +300,43 @@ function LiveReferencePicker({
                     <option key={digits}>{digits}</option>
                   ))}
                 </select>
+              </label>
+              <label>
+                倍率
+                <select
+                  value={format.scale ?? ''}
+                  onChange={(e) =>
+                    revise(() => {
+                      const { scale: _scale, ...rest } = format;
+                      const scale = Number(e.target.value) as ValueScale;
+                      setFormat(
+                        (VALUE_SCALES as readonly number[]).includes(scale)
+                          ? { ...rest, scale }
+                          : rest,
+                      );
+                    })
+                  }
+                >
+                  <option value="">なし</option>
+                  {VALUE_SCALES.map((scale) => (
+                    <option key={scale} value={scale}>
+                      {SCALE_LABELS[scale]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!format.grouping}
+                  onChange={(e) =>
+                    revise(() => {
+                      const { grouping: _grouping, ...rest } = format;
+                      setFormat(e.target.checked ? { ...rest, grouping: true } : rest);
+                    })
+                  }
+                />
+                桁区切り
               </label>
               <label>
                 単位
