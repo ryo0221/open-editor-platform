@@ -17,6 +17,8 @@
     "@editor-platform/structured-data": "*",
     "@editor-platform/review-surfaces": "*",
     "@editor-platform/whiteboard": "*",
+    "@editor-platform/mindmap": "*",
+    "@editor-platform/mindmap-core": "*",
     "@editor-platform/design": "*",
     "@editor-platform/slide": "*",
     "@editor-platform/editor-ui": "*",

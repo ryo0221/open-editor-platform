@@ -13,6 +13,7 @@ import type { LadderDocument } from '@editor-platform/ladder-core';
 import type { CosimDocument } from '@editor-platform/cosim-core';
 import type { DrawingDocument } from '@editor-platform/drawing-core';
 import type { FactoryDocument } from '@editor-platform/factory-core';
+import type { MindmapContent } from '@editor-platform/mindmap-core';
 import type { AnimationHostContent } from '@editor-platform/animation-core/v2';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
 import type { GeoDocument } from '@editor-platform/geo-core';
@@ -38,6 +39,7 @@ export type NativeContent = Exclude<
   | CharacterDocument
   | SimulationDocument
   | ConstructionDocument
+  | MindmapContent
   | PcbDocument
   | SchematicDocument
   | LadderDocument
@@ -71,6 +73,7 @@ export function nativeContent(content: Content): NativeContent {
     throw new Error('Co-simulation has no template/reuse adapter');
   if (validContent('drawing', content)) throw new Error('Drawing has no template/reuse adapter');
   if (validContent('factory', content)) throw new Error('Factory has no template/reuse adapter');
+  if (validContent('mindmap', content)) throw new Error('Mind Map has no template/reuse adapter');
   if (validContent('react-ui', content))
     throw new Error('React UI uses its Host registrations, not native reusable definitions');
   return content as NativeContent;

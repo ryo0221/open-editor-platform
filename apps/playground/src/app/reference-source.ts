@@ -15,6 +15,7 @@ import { counterReferenceExtension } from '@editor-platform/extension-sample';
 import counterEntrySource from '@editor-platform/extension-sample?raw';
 import type { GeoDocument } from '@editor-platform/geo-core';
 import { isStructuredData } from '@editor-platform/structured-data';
+import { isMindmap } from '@editor-platform/mindmap-core';
 import {
   upgradeGraphDocument,
   relationProfile,
@@ -297,6 +298,24 @@ export function savedRecordReferences(context: {
                 artifactId: a.id,
                 domain: 'fiction-map',
                 target: { kind: 'fiction-map-view', viewId: view.id },
+              },
+            });
+        } else if (a.kind === 'mindmap' && isMindmap(content)) {
+          options.push({
+            label: `${a.name} · 地図全体 · Mind Map`,
+            source: {
+              artifactId: a.id,
+              domain: 'mindmap',
+              target: { kind: 'mindmap', viewId: 'map' },
+            },
+          });
+          for (const id of content.nodes[content.rootId].children)
+            options.push({
+              label: `${a.name} · ${content.nodes[id].text || '（無題）'} · 枝`,
+              source: {
+                artifactId: a.id,
+                domain: 'mindmap',
+                target: { kind: 'mindmap-branch', viewId: 'map', nodeIds: [id] },
               },
             });
         } else if (a.kind === 'geo' && validContent('geo', content)) {

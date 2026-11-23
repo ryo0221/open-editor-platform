@@ -1,0 +1,22 @@
+[
+  {
+    "file": "cycle.json",
+    "reason": "循環"
+  },
+  {
+    "file": "two-parents.json",
+    "reason": "親"
+  },
+  {
+    "file": "missing-root.json",
+    "reason": "根"
+  },
+  {
+    "file": "over-limit.json",
+    "reason": "本文"
+  },
+  {
+    "file": "wrong-version.json",
+    "reason": "版"
+  }
+]

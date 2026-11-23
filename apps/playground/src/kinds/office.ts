@@ -8,6 +8,7 @@ import { documentKind } from '@editor-platform/document/kind';
 import { estimateKind } from '@editor-platform/estimate/kind';
 import { fictionMapKind } from '@editor-platform/fiction-map/kind';
 import { geoKind } from '@editor-platform/geo-inspector/kind';
+import { mindmapKind } from '@editor-platform/mindmap/kind';
 import { reactUiKind } from '@editor-platform/react-ui/kind';
 import { fileKind, reviewKind } from '@editor-platform/review-surfaces/kind';
 import { scheduleKind } from '@editor-platform/schedule/kind';
@@ -42,6 +43,7 @@ export const officeDefinitions: readonly KindDefinition<unknown>[] = [
   reviewKind,
   fileKind,
   whiteboardKind,
+  mindmapKind,
   designKind,
   slideKind,
   scheduleDefinition,

@@ -11,6 +11,7 @@ import {
 } from '@editor-platform/fiction-map/host';
 import { fictionMapKind } from '@editor-platform/fiction-map/kind';
 import { geoKind } from '@editor-platform/geo-inspector/kind';
+import { mindmapKind } from '@editor-platform/mindmap/kind';
 import { fileKind, reviewKind } from '@editor-platform/review-surfaces/kind';
 import { hasSlideAnimations } from '@editor-platform/slide';
 import { slideKind } from '@editor-platform/slide/kind';
@@ -60,6 +61,7 @@ export const officeRecords = [
   recordKind(reviewKind),
   recordKind(fileKind),
   recordKind(whiteboardKind),
+  recordKind(mindmapKind, { reusableAdapter: noReusable }),
   recordKind(designKind, { storedVersionHashes: true }),
   recordKind(slideKind, { reusableAdapter: (content) => !hasSlideAnimations(content) }),
   recordKind(scheduleDefinition, { reusableAdapter: noReusable }),

@@ -6,6 +6,7 @@ import { isFile, isReview, reviewDiff } from '@editor-platform/review-surfaces';
 import { isWhiteboard, whiteboardDiff } from '@editor-platform/whiteboard';
 import { isDesignWithPaths, designDiff } from '@editor-platform/design';
 import { isDeck, slideDiff } from '@editor-platform/slide';
+import { isMindmap, mindmapDiff } from '@editor-platform/mindmap-core';
 import type { StoredArtifact } from '../model';
 
 type Version = StoredArtifact['versions'][number];
@@ -30,6 +31,7 @@ const domainDiffs = [
   domainDiff(isWhiteboard, whiteboardDiff),
   domainDiff(isDesignWithPaths, designDiff),
   domainDiff(isDeck, slideDiff),
+  domainDiff(isMindmap, mindmapDiff),
 ];
 
 /** Domain diff of two saved versions; an empty selection falls back to the last two. */

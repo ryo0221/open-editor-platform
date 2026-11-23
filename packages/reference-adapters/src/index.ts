@@ -1,5 +1,7 @@
 import { fictionMapReferenceAdapter } from './fiction-map';
 export { fictionMapReferenceAdapter } from './fiction-map';
+import { mindmapReferenceAdapter } from './mindmap';
+export { mindmapReferenceAdapter } from './mindmap';
 import { assertGeo, renderGeoSvg, fitGeoExtent, type GeoDocument } from '@editor-platform/geo-core';
 import { resolveGeoBackgrounds } from '@editor-platform/geo-core/backgrounds';
 import {
@@ -328,4 +330,5 @@ export const nativeReferenceAdapters = [
   dataReferenceAdapter,
   graphReferenceAdapter,
   geoReferenceAdapter,
+  mindmapReferenceAdapter,
 ];
