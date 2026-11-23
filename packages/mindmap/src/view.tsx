@@ -141,7 +141,6 @@ export function MindmapSurface({
       if (!dirty) setDraft(next);
       setBase(next);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, current]);
 
   useEffect(() => {
