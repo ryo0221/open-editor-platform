@@ -10,6 +10,7 @@ import {
 } from '@editor-platform/artifact-references';
 import { insertDocumentCitation } from './citation-command';
 import { contentToNode, nodeToContent } from './engine';
+import { createLocalDocumentCommand } from './local-engine-command';
 import {
   createDocument,
   documentLiveReferences,
@@ -81,6 +82,12 @@ describe('document citations keep one copy per version (finding 79)', () => {
 
     // The editor's own projection round-trips the stored form.
     expect(nodeToContent(contentToNode(three), three)).toEqual(three);
+    // The editor view's cached per-block projection packs the same table (e2e: document insert).
+    const local = createLocalDocumentCommand()(three, contentToNode(three), {
+      origin: 'local',
+      transactionId: 't',
+    });
+    expect(local.content).toEqual(three);
     session.undo();
     session.undo();
     session.undo();

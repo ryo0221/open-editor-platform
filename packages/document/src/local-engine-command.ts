@@ -1,9 +1,14 @@
-import { assertReferenceItems } from '@editor-platform/artifact-references';
+import { assertReferenceItems, unpackLiveReferences } from '@editor-platform/artifact-references';
 import type { Node as PMNode } from 'prosemirror-model';
 import { canonicalJson, clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import { immutableCommand, type LocalCommandContext } from '@editor-platform/editor-core';
 import { nodeToContent, projectedSchemaVersion } from './engine';
-import { validDocumentLiveReferences, type DocumentBlock, type DocumentContent } from './model';
+import {
+  packDocumentLiveReferences,
+  validDocumentLiveReferences,
+  type DocumentBlock,
+  type DocumentContent,
+} from './model';
 
 // Compare the complete native projection before retaining an old block. Unlike
 // a JSON fingerprint this keeps signed zero, holes and property presence distinct.
@@ -97,18 +102,30 @@ export function localDocumentCommand(
  * Never share this cache with the mutable-attrs one-shot or wire codec boundary.
  */
 export function createLocalDocumentCommand() {
+  // Each node's block as the editor holds it: citations with their versions. The document's
+  // table (finding 79) is packed again from all blocks, so it always matches the citations.
   const retained = new WeakMap<PMNode, DocumentBlock>();
-  return (base: DocumentContent, doc: PMNode, context: LocalCommandContext) => {
-    const result = prepareLocalDocumentCommand(base, doc, context, (node, basis) => {
-      const blocks: DocumentBlock[] = [];
+  return (base: DocumentContent, doc: PMNode, context: LocalCommandContext) =>
+    prepareLocalDocumentCommand(base, doc, context, (node, basis) => {
+      const working: DocumentBlock[] = [];
       node.forEach((child) => {
-        blocks.push(
-          retained.get(child) ?? nodeToContent(node.type.create(null, [child]), basis).blocks[0],
-        );
+        let block = retained.get(child);
+        if (!block) {
+          const one = nodeToContent(node.type.create(null, [child]), basis);
+          block = one.liveSnapshots
+            ? unpackLiveReferences(one.blocks[0], one.liveSnapshots)
+            : one.blocks[0];
+          retained.set(child, block);
+        }
+        working.push(block);
       });
-      return { ...basis, schemaVersion: projectedSchemaVersion(basis, blocks), blocks };
+      const { liveSnapshots: previous, ...rest } = basis;
+      const packed = packDocumentLiveReferences(working, previous);
+      return {
+        ...rest,
+        schemaVersion: projectedSchemaVersion(basis, packed.blocks),
+        blocks: packed.blocks,
+        ...(packed.liveSnapshots ? { liveSnapshots: packed.liveSnapshots } : {}),
+      };
     });
-    doc.forEach((child, _offset, index) => retained.set(child, result.content.blocks[index]));
-    return result;
-  };
 }
