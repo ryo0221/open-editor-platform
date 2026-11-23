@@ -1,5 +1,4 @@
 import {
-  cellValue,
   defaultView,
   isStructuredData,
   validateData,
