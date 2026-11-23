@@ -12,6 +12,7 @@
     "./schema-edit-experiment": "./src/schema-edit-experiment.ts",
     "./package": "./src/package.ts",
     "./operations": "./src/operations.ts",
+    "./items": "./src/items.ts",
     "./editor-host": "./src/editor-host.ts",
     "./package-store": "./src/package-store.ts"
   },
