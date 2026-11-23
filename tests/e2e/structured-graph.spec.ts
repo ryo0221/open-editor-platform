@@ -1635,3 +1635,64 @@ test('#8 node icons: the category picks the corner badge, which follows edits an
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await expect(research).toHaveAttribute('data-icon', 'cube');
 });
+
+/** Cross-domain analysis starters remain native Graphs; these are prototype acceptance smokes. */
+for (const analysis of [
+  { template: 'fishbone', profile: 'analysis-fishbone', label: '設備温度の変動' },
+  { template: 'fta', profile: 'analysis-fault-tree', label: '電源故障' },
+] as const) {
+  test(`analysis prototype ${analysis.template}: create, native roundtrip, undo and retained version`, async ({
+    page,
+  }) => {
+    await page.goto('/');
+    if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+      await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+    await page.getByLabel('Artifact type', { exact: true }).selectOption('structured-graph');
+    await page.getByLabel('Graph template', { exact: true }).selectOption(analysis.template);
+    await page.getByRole('button', { name: 'New artifact' }).click();
+    await expect(page.getByLabel('Artifact name')).toBeVisible();
+    const original = (await nativeArtifact(page)).draft.content as GraphDocument;
+    expect(original.profile.id).toBe(analysis.profile);
+    expect(original.nodes.length).toBeGreaterThan(2);
+    if (analysis.template === 'fta')
+      await expect(page.getByRole('status', { name: 'FTA evaluation (prototype)' })).toContainText(
+        '2.9800%',
+      );
+
+    await page.getByRole('button', { name: `Select node ${analysis.label}`, exact: true }).click();
+    await page.keyboard.press('ArrowRight');
+    const moved = (await nativeArtifact(page)).draft.content as GraphDocument;
+    const targetId = analysis.template === 'fta' ? 'power' : 'temperature';
+    expect(moved.presentation.nodes[targetId]).not.toEqual(original.presentation.nodes[targetId]);
+    await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+    expect((await nativeArtifact(page)).draft.content).toEqual(original);
+    await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+    expect((await nativeArtifact(page)).draft.content).toEqual(moved);
+
+    await save(page, 1);
+    await page.reload();
+    const reloaded = await nativeArtifact(page);
+    expect(reloaded.draft.content).toEqual(moved);
+    expect(reloaded.versions).toHaveLength(1);
+    expect(reloaded.versions[0].content).toEqual(moved);
+  });
+}
+
+test('FTA prototype refuses a disconnected basic event, and Undo restores the calculation', async ({
+  page,
+}) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('structured-graph');
+  await page.getByLabel('Graph template', { exact: true }).selectOption('fta');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  const banner = page.getByRole('status', { name: 'FTA evaluation (prototype)' });
+  await expect(banner).toContainText('2.9800%');
+  await page.getByRole('button', { name: 'Select node 電源故障', exact: true }).click();
+  await page.keyboard.press('Delete');
+  await page.getByRole('button', { name: '削除する', exact: true }).click();
+  await expect(banner).toContainText('計算不可');
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await expect(banner).toContainText('2.9800%');
+});

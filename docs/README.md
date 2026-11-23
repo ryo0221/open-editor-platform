@@ -31,6 +31,7 @@ Slideの動き・書き出し・文書からの作成の設計：[スライド�
 | Editorを追加・拡張する          | [Editor開発ガイド](editor-development.md)・[受け入れ条件](editor-acceptance.md)・[Extensionのadd-on](extension-addons.md)                              |
 | Fiction Mapの操作・pure native  | [操作ガイド](fiction-map/user-guide.md) / [headless model API](../packages/fiction-map/README.md) / 設定から作る制作デモ計画                           |
 | Designのパス編集・曲線APIを使う | [操作ガイド](vector-authoring/guide.md)・[設計と受け入れ条件](vector-authoring/design.md)・[実装計画](vector-authoring/implementation-plan.md)         |
+| 分析手法を試す（試作）          | [Fishbone・FTA](prototypes/fishbone-fta.md)・[FMEA](prototypes/fmea.md)                                                                                |
 | 設計・検証を記録する            | [設計テンプレート](editor-proposal-template.md)・[検証報告テンプレート](editor-verification-template.md)・[記載先と更新ルール](documentation-guide.md) |
 
 ## 検証・運用・履歴

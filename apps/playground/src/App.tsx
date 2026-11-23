@@ -173,6 +173,7 @@ import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
+import { inspectFmeaData, isFmeaData, type FmeaTemplateId } from './app/fmea-templates';
 export const editorEvents = new EditorEventBus();
 export type { SharedPlaygroundConnection };
 export interface PlaygroundProps {
@@ -279,6 +280,7 @@ export default function App({
   const [loaded, setLoaded] = useState(false);
   const [kind, setKind] = useState<Kind>('document');
   const [graphTemplate, setGraphTemplate] = useState<GraphTemplateId>('relations');
+  const [dataTemplate, setDataTemplate] = useState<FmeaTemplateId>('blank');
   const [pcbTemplate, setPcbTemplate] = useState<PcbTemplateId>('empty');
   const [navOpen, setNavOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -790,6 +792,7 @@ export default function App({
       nextKind === 'structured-graph' ? graphTemplate : undefined,
       source,
       nextKind === 'pcb' ? pcbTemplate : undefined,
+      nextKind === 'data' ? dataTemplate : undefined,
     );
     sessions.current.set(a.id, createLocalSession(a.draft.content));
     persist(a);
@@ -915,6 +918,16 @@ export default function App({
     if (isStructuredData(saved.draft.content) && validateData(saved.draft.content).length) {
       setError('Fix data validation errors before saving a version. Your draft is retained.');
       return;
+    }
+    if (isStructuredData(saved.draft.content) && isFmeaData(saved.draft.content)) {
+      const inspection = inspectFmeaData(saved.draft.content);
+      if (inspection.issues.length) {
+        setError(
+          'Fix FMEA S/O/D ratings before saving a version. Your draft is retained. ' +
+            inspection.issues[0],
+        );
+        return;
+      }
     }
     setBusy(true);
     savingVersion.current = true;
@@ -1897,6 +1910,8 @@ export default function App({
                   onKindChange={setKind}
                   graphTemplate={graphTemplate}
                   onGraphTemplateChange={setGraphTemplate}
+                  dataTemplate={dataTemplate}
+                  onDataTemplateChange={setDataTemplate}
                   pcbTemplate={pcbTemplate}
                   onPcbTemplateChange={setPcbTemplate}
                   onCreate={create}

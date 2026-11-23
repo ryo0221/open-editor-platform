@@ -1512,3 +1512,13 @@ small,
 .character-host > .character-surface {
   flex: 1;
 }
+
+/* Prototype analysis banners above the Graph and Data Surfaces (docs/prototypes/). */
+.analysis-banner {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ep-line, #dfe2e6);
+}
+.analysis-banner-note {
+  font-size: 0.8em;
+  color: var(--ep-muted, #666e79);
+}

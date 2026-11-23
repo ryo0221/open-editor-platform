@@ -9,6 +9,7 @@ import { containsEmbeddedReference } from '@editor-platform/artifact-references'
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { guardDataCommand, assertDataReadable } from '@editor-platform/structured-data/session';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
+import type { FmeaTemplateId } from './app/fmea-templates';
 import {
   isGraphDocument,
   relationProfile,
@@ -231,13 +232,16 @@ export function makeArtifact(
    */
   source?: SimulationSourceChoice | ConstructionSourceChoice,
   pcbTemplate: PcbTemplateId = 'empty',
+  dataTemplate: FmeaTemplateId = 'blank',
 ): StoredArtifact {
   const options =
     kind === 'structured-graph'
       ? { template: graphTemplate }
       : kind === 'pcb'
         ? { template: pcbTemplate }
-        : source;
+        : kind === 'data'
+          ? { template: dataTemplate }
+          : source;
   const { name, content, extras } = kindRegistry.get(kind)!.create(count, options);
   return {
     ...createArtifact<Content>(kind, name, content as Content),

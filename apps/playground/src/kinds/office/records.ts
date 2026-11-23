@@ -15,11 +15,10 @@ import { mindmapKind } from '@editor-platform/mindmap/kind';
 import { fileKind, reviewKind } from '@editor-platform/review-surfaces/kind';
 import { hasSlideAnimations } from '@editor-platform/slide';
 import { slideKind } from '@editor-platform/slide/kind';
-import { dataKind } from '@editor-platform/structured-data/kind';
 import { graphSchemaMessage, readGraphDocument } from '@editor-platform/structured-graph/model';
 import { whiteboardKind } from '@editor-platform/whiteboard/kind';
 import { validateGeoRecord } from '../../geo/resources';
-import { graphDefinition, reactUiDefinition, scheduleDefinition } from '../office';
+import { dataDefinition, graphDefinition, reactUiDefinition, scheduleDefinition } from '../office';
 import { recordKind } from '../record-kind';
 
 // Kinds without a reusable-definition adapter are not checked for one on import.
@@ -57,7 +56,7 @@ export const officeRecords = [
   }),
   recordKind(reactUiDefinition, { reusableAdapter: noReusable }),
   recordKind(documentKind),
-  recordKind(dataKind),
+  recordKind(dataDefinition),
   recordKind(reviewKind),
   recordKind(fileKind),
   recordKind(whiteboardKind),

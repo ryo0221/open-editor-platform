@@ -6,6 +6,7 @@ import { serializeArtifact } from '@editor-platform/artifact-core';
 import { IconButton } from '@editor-platform/editor-ui';
 import type { PrivateVideoEntry } from '../private-video/catalog';
 import { graphTemplates, type GraphTemplateId } from './graph-templates';
+import { fmeaTemplateOptions, type FmeaTemplateId } from './fmea-templates';
 import { simulationSourceChoices, type SimulationSourceChoice } from '../simulation/source';
 import { constructionSourceChoices, type ConstructionSourceChoice } from '../construction/source';
 import {
@@ -84,6 +85,8 @@ export function LibraryPanel({
   onKindChange,
   graphTemplate,
   onGraphTemplateChange,
+  dataTemplate,
+  onDataTemplateChange,
   pcbTemplate,
   onPcbTemplateChange,
   onCreate,
@@ -110,6 +113,8 @@ export function LibraryPanel({
   onKindChange(kind: Kind): void;
   graphTemplate: GraphTemplateId;
   onGraphTemplateChange(template: GraphTemplateId): void;
+  dataTemplate: FmeaTemplateId;
+  onDataTemplateChange(template: FmeaTemplateId): void;
   pcbTemplate: PcbTemplateId;
   onPcbTemplateChange(template: PcbTemplateId): void;
   onCreate(kind: Kind, source?: SimulationSourceChoice | ConstructionSourceChoice): void;
@@ -190,6 +195,22 @@ export function LibraryPanel({
             {graphTemplates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {kind === 'data' && (
+        <label className="create-type">
+          Data template
+          <select
+            aria-label="Data template"
+            value={dataTemplate}
+            onChange={(e) => onDataTemplateChange(e.target.value as FmeaTemplateId)}
+          >
+            {fmeaTemplateOptions.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.label}
               </option>
             ))}
           </select>

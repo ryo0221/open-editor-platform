@@ -1,5 +1,5 @@
-import { test, expect, nativeArtifact } from './fixtures';
-import type { StructuredData } from '@editor-platform/structured-data';
+import { test, expect, nativeArtifact, save } from './fixtures';
+import { cellValue, type StructuredData } from '@editor-platform/structured-data/model';
 import { readFile } from 'node:fs/promises';
 async function field(
   page: import('@playwright/test').Page,
@@ -196,4 +196,75 @@ test('H3 fifty records stay consistent across grid, form, kanban, timeline, dash
     '10',
   );
   await page.screenshot({ path: info.outputPath('data-grid.png') });
+});
+
+test('PFMEA prototype: typed ratings, RPN, Undo and retained-version rejection', async ({
+  page,
+}) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('data');
+  await page.getByLabel('Data template', { exact: true }).selectOption('pfmea');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  const banner = page.getByRole('status', { name: 'FMEA inspection (prototype)' });
+  await expect(banner).toContainText('FMEA試作 / 3件');
+  const initial = await nativeArtifact(page);
+  expect(initial.name).toContain('PFMEA');
+  expect((initial.draft.content as StructuredData).rows).toHaveLength(3);
+
+  // The wide FMEA grid virtualizes offscreen columns. Form editing and native values
+  // verify the exact same Data model without assuming RPN is visible in the viewport.
+  await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
+  await page.getByLabel('Record S', { exact: true }).fill('8');
+  await page.getByRole('button', { name: 'Save record', exact: true }).click();
+  const changed = (await nativeArtifact(page)).draft.content as StructuredData;
+  const rpn = changed.columns.find((column) => column.id === 'rpn')!;
+  expect(changed.rows[0].values.s).toBe(8);
+  expect(cellValue(changed, changed.rows[0], rpn)).toBe(240);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  const undone = (await nativeArtifact(page)).draft.content as StructuredData;
+  expect(undone.rows[0].values.s).toBe(7);
+  await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+  const redone = (await nativeArtifact(page)).draft.content as StructuredData;
+  expect(redone.rows[0].values.s).toBe(8);
+
+  await save(page, 1);
+  await page.reload();
+  await expect(banner).toContainText('FMEA試作 / 3件');
+  const reloaded = await nativeArtifact(page);
+  expect(reloaded.versions).toHaveLength(1);
+  expect((reloaded.draft.content as StructuredData).rows[0].values.s).toBe(8);
+
+  await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
+  await page.getByLabel('Record S', { exact: true }).fill('11');
+  await page.getByRole('button', { name: 'Save record', exact: true }).click();
+  await expect(banner).toContainText('入力要確認');
+  await page.getByRole('button', { name: 'Save version', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Save immutable version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
+    .click();
+  await expect(page.getByText(/Fix FMEA S\/O\/D ratings/)).toBeVisible();
+  const refused = await nativeArtifact(page);
+  expect(refused.versions).toHaveLength(1);
+  expect((refused.draft.content as StructuredData).rows[0].values.s).toBe(11);
+});
+
+test('DFMEA prototype can create distinct native Data without linked fault event assumptions', async ({
+  page,
+}) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('data');
+  await page.getByLabel('Data template', { exact: true }).selectOption('dfmea');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  const record = await nativeArtifact(page);
+  expect(record.name).toContain('DFMEA');
+  expect((record.draft.content as StructuredData).rows).toHaveLength(3);
+  await expect(page.getByRole('status', { name: 'FMEA inspection (prototype)' })).toContainText(
+    'AP未評価 3件',
+  );
 });
