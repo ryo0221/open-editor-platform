@@ -240,16 +240,16 @@ export function createFmeaData(which: FmeaExampleId): StructuredData {
   return data;
 }
 
-/** A conservative marker for the prototype, based on an exact field signature. */
+/**
+ * A conservative marker for the prototype: the template's stable column IDs, with RPN as a
+ * formula. Column names and the formula text may be edited without losing the rating checks;
+ * columns a user adds get generated IDs, so ordinary Data does not match by accident.
+ */
 export function isFmeaData(data: StructuredData): boolean {
   return (
     ['failure', 'effect', 'cause', 's', 'o', 'd', 'rpn', 'ap', 'action', 'status'].every((id) =>
       data.columns.some((column) => column.id === id),
-    ) &&
-    data.columns.some(
-      (column) =>
-        column.id === 'rpn' && column.type === 'formula' && column.formula === 'S * O * D',
-    )
+    ) && data.columns.some((column) => column.id === 'rpn' && column.type === 'formula')
   );
 }
 
@@ -279,4 +279,15 @@ export function inspectFmeaData(data: StructuredData): FmeaInspection {
     if (row.values.ap === '未評価' || row.values.ap == null) apPending++;
   }
   return { rowCount: data.rows.length, apPending, issues };
+}
+
+/** The name and content a new FMEA Data Artifact starts with. */
+export function createFmeaArtifact(which: FmeaExampleId): {
+  name: string;
+  content: StructuredData;
+} {
+  return {
+    name: which === 'pfmea' ? 'PFMEA: 製造工程（試作）' : 'DFMEA: 製品設計（試作）',
+    content: createFmeaData(which),
+  };
 }

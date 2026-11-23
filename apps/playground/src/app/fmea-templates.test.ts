@@ -6,6 +6,7 @@ import {
   validateData,
 } from '@editor-platform/structured-data';
 import { createFmeaData, fmeaTemplateOptions, inspectFmeaData, isFmeaData } from './fmea-templates';
+import { makeArtifact } from '../model';
 
 describe('FMEA Structured Data templates', () => {
   it.each(['pfmea', 'dfmea'] as const)(
@@ -57,5 +58,34 @@ describe('FMEA Structured Data templates', () => {
     expect(
       isFmeaData({ ...data, columns: data.columns.filter((column) => column.id !== 'ap') }),
     ).toBe(false);
+  });
+
+  it('keeps the FMEA checks after the RPN formula or a rating column name is edited', () => {
+    const data = createFmeaData('pfmea');
+    const edited = {
+      ...data,
+      columns: data.columns.map((column) =>
+        column.id === 'rpn'
+          ? { ...column, formula: 'O * S * D' }
+          : column.id === 's'
+            ? { ...column, name: '重大度' }
+            : column,
+      ),
+    };
+    expect(isFmeaData(edited)).toBe(true);
+    const invalid = setCell(edited.rows[0].id, 's', 11).apply(edited);
+    expect(inspectFmeaData(invalid).issues.some((issue) => issue.includes('/ S:'))).toBe(true);
+  });
+
+  it('creates PFMEA, DFMEA and blank Data through the registered Data kind', () => {
+    const pfmea = makeArtifact('data', 1, 'relations', undefined, 'empty', 'pfmea');
+    expect(pfmea.kind).toBe('data');
+    expect(pfmea.name).toBe('PFMEA: 製造工程（試作）');
+    expect(isFmeaData(pfmea.draft.content as never)).toBe(true);
+    const dfmea = makeArtifact('data', 2, 'relations', undefined, 'empty', 'dfmea');
+    expect(dfmea.name).toBe('DFMEA: 製品設計（試作）');
+    const blank = makeArtifact('data', 3);
+    expect(blank.name).toBe('Structured Data 3');
+    expect(isFmeaData(blank.draft.content as never)).toBe(false);
   });
 });

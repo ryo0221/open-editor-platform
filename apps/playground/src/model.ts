@@ -9,7 +9,7 @@ import { containsEmbeddedReference } from '@editor-platform/artifact-references'
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { guardDataCommand, assertDataReadable } from '@editor-platform/structured-data/session';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
-import { createFmeaData, type FmeaTemplateId } from './app/fmea-templates';
+import type { FmeaTemplateId } from './app/fmea-templates';
 import {
   isGraphDocument,
   relationProfile,
@@ -234,19 +234,14 @@ export function makeArtifact(
   pcbTemplate: PcbTemplateId = 'empty',
   dataTemplate: FmeaTemplateId = 'blank',
 ): StoredArtifact {
-  if (kind === 'data' && dataTemplate !== 'blank') {
-    const name = dataTemplate === 'pfmea' ? 'PFMEA: 製造工程（試作）' : 'DFMEA: 製品設計（試作）';
-    return {
-      ...createArtifact<Content>('data', name, createFmeaData(dataTemplate)),
-      annotations: [],
-    };
-  }
   const options =
     kind === 'structured-graph'
       ? { template: graphTemplate }
       : kind === 'pcb'
         ? { template: pcbTemplate }
-        : source;
+        : kind === 'data'
+          ? { template: dataTemplate }
+          : source;
   const { name, content, extras } = kindRegistry.get(kind)!.create(count, options);
   return {
     ...createArtifact<Content>(kind, name, content as Content),

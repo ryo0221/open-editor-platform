@@ -18,12 +18,23 @@ import { structuredGraphKind } from '@editor-platform/structured-graph/kind';
 import { whiteboardKind } from '@editor-platform/whiteboard/kind';
 import { createReferenceDocument } from '../../../react-ui-reference/src/catalog';
 import { graphProfileFor, graphTemplates } from '../app/graph-templates';
+import { createFmeaArtifact, type FmeaTemplateId } from '../app/fmea-templates';
 
 /** The kinds built from Host data; kinds/office/*.tsx pairs these same objects with Surfaces. */
 export const graphDefinition = structuredGraphKind({
   create: (template = 'relations') => graphTemplates.find((t) => t.id === template)!.create(),
   profileFor: graphProfileFor,
 });
+/** Structured Data with the Host's prototype FMEA presets (docs/prototypes/fmea.md). */
+export const dataDefinition: typeof dataKind = {
+  ...dataKind,
+  create: (count, options) => {
+    const template = (options as { template?: FmeaTemplateId } | undefined)?.template;
+    return template && template !== 'blank'
+      ? createFmeaArtifact(template)
+      : dataKind.create(count, options);
+  },
+};
 export const reactUiDefinition = reactUiKind(() => createReferenceDocument());
 export const scheduleDefinition = scheduleKind(
   () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -39,7 +50,7 @@ export const officeDefinitions: readonly KindDefinition<unknown>[] = [
   graphDefinition,
   reactUiDefinition,
   documentKind,
-  dataKind,
+  dataDefinition,
   reviewKind,
   fileKind,
   whiteboardKind,
