@@ -436,7 +436,11 @@ export function initial<T>(
   content: T,
   threads: Thread[] = [],
 ): Snapshot<T> {
-  if (!codec.validate(content)) fail('invalid-operation', 'Invalid initial domain content');
+  if (!codec.validate(content))
+    fail(
+      'invalid-operation',
+      codec.unsupportedContentReason?.(content) ?? 'Invalid initial domain content',
+    );
   if (!threads.every((t) => t.anchor.orphan || codec.validateAnchor(content, t.anchor)))
     fail('invalid-operation', 'Invalid initial annotations');
   return {
@@ -452,6 +456,8 @@ export function initial<T>(
 }
 
 export function validateSnapshot<T>(codec: DomainCodec<T>, value: Snapshot<T>) {
+  const unsupported = codec.unsupportedContentReason?.(value?.content);
+  if (unsupported) fail('schema-mismatch', unsupported);
   if (
     !value ||
     value.protocol !== 1 ||

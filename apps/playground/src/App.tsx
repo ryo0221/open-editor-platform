@@ -134,7 +134,20 @@ import {
   WelcomePanel,
   type PrivateVideoLaunchers,
 } from './app/library-panel';
-import { ProposalDialog, SharedProposalInspector } from './app/proposal-views';
+import {
+  ProposalDialog,
+  SharedProposalInspector,
+  SlideDocumentProposalDialog,
+} from './app/proposal-views';
+import { isDeck, type SlideContent } from '@editor-platform/slide/model';
+import type { SlideDocumentHost, SlideDocumentPreview } from '@editor-platform/slide';
+import {
+  prepareSlideDocumentImport,
+  prepareSlideDocumentProposal,
+  slideDocumentFileVersions,
+  slideDocuments,
+  type SlideDocumentAccess,
+} from './app/slide-document';
 import {
   applyLocalProposal,
   rejectLocalProposal,
@@ -342,6 +355,12 @@ export default function App({
   const [beforeId, setBeforeId] = useState('');
   const [afterId, setAfterId] = useState('');
   const [proposal, setProposal] = useState<LocalProposal | null>(null);
+  const [slideDocumentProposal, setSlideDocumentProposal] = useState<{
+    id: string;
+    preview: SlideDocumentPreview;
+    controller: AbortController;
+  }>();
+  const slideDocumentRequest = useRef<AbortController | undefined>(undefined);
   const proposalGeneration = useRef(0);
   const applyingProposal = useRef<number | undefined>(undefined);
   const [proposalBusy, setProposalBusy] = useState(false);
@@ -351,6 +370,7 @@ export default function App({
   const [contextMenu, setContextMenu] = useState(false);
   const sessions = useRef(new Map<string, EditorSession<Content>>());
   const writeQueue = useRef(Promise.resolve());
+  const slideDocumentWrite = useRef<string | undefined>(undefined);
   const privateTransition = useRef(false);
   const failedWrites = useRef(new Set<string>());
   const submittingComments = useRef(new Set<string>());
@@ -561,8 +581,10 @@ export default function App({
   async function applyReuseBatch(prepared: PreparedApplication) {
     const access = reuseBatchAccess.current;
     if (access.readOnly) throw new Error('Read only');
-    const id = prepared.proposal.artifactId,
-      fingerprint = canonicalJson(prepared.proposal);
+    const id = prepared.proposal.artifactId;
+    if (slideDocumentWrite.current === id)
+      throw new Error('文書から追加したページを保存しています。');
+    const fingerprint = canonicalJson(prepared.proposal);
     const old = reuseBatchReceipts.current.get(prepared.id);
     if (old && old.fingerprint !== fingerprint) throw new Error('更新要求の内容が一致しません。');
     const receipt = old ?? { fingerprint };
@@ -777,6 +799,7 @@ export default function App({
     if (
       !active ||
       readOnly ||
+      slideDocumentWrite.current === active.id ||
       (kindHooks(active.kind).holdsEditsWhileSaving && (savingVersion.current || busy))
     )
       return false;
@@ -803,6 +826,7 @@ export default function App({
       !active ||
       !session ||
       readOnly ||
+      slideDocumentWrite.current === active.id ||
       (hooks.holdsEditsWhileSaving && (savingVersion.current || busy))
     )
       return;
@@ -857,7 +881,8 @@ export default function App({
     next.addresses.forEach((address) => extensions.externalReference?.(address));
   }
   async function saveVersion() {
-    if (!active || savingVersion.current || readOnly) return;
+    if (!active || savingVersion.current || readOnly || slideDocumentWrite.current === active.id)
+      return;
     if (!flushInputs({ keepEditor: true })) return;
     const saved = sharedSession
       ? active
@@ -1178,8 +1203,186 @@ export default function App({
       }
     }
   }
+  const slideDocumentOptions =
+    active?.kind === 'slide' ? slideDocuments(referenceSavedRecords.current.values()) : [];
+  function slideDocumentAccess(targetId: string): SlideDocumentAccess {
+    const assertWorkspace = () => {
+      const current = currentTarget.current;
+      const pending = current.inputs.getSnapshot();
+      if (
+        !loaded ||
+        current.shared ||
+        current.activeId !== targetId ||
+        current.inputs !== inputs ||
+        pending.dirty ||
+        pending.composing ||
+        savingVersion.current ||
+        privateTransition.current
+      )
+        throw new Error(
+          '作成先：成果物や入力の状態が変わりました。もう一度プレビューしてください。',
+        );
+    };
+    return {
+      readDocument: (id) =>
+        recordsRef.current.some((record) => record.id === id)
+          ? referenceSavedRecords.current.get(id)
+          : undefined,
+      readTarget() {
+        assertWorkspace();
+        const record = recordsRef.current.find((record) => record.id === targetId);
+        const local = sessions.current.get(targetId);
+        const content = local?.content;
+        if (
+          currentTarget.current.readOnly ||
+          !record ||
+          record.kind !== 'slide' ||
+          !local ||
+          !isDeck(content)
+        )
+          throw new Error('追加先：編集できるデッキを開き直してください。');
+        return { record, content, revision: local.revision };
+      },
+      assertCanCreate: assertWorkspace,
+      provider: liveReferences.provider,
+      storage,
+      created(record) {
+        if (!sessions.current.has(record.id))
+          sessions.current.set(record.id, createLocalSession(record.draft.content));
+        void persist(record, true);
+        if (
+          currentTarget.current.activeId === targetId &&
+          currentTarget.current.inputs === inputs &&
+          !currentTarget.current.shared
+        )
+          activate(record.id);
+      },
+      async append(command, firstPage, beforeWrite) {
+        if (slideDocumentWrite.current) throw new Error('文書から追加したページを保存しています。');
+        slideDocumentWrite.current = targetId;
+        try {
+          const write = writeQueue.current.then(async () => {
+            beforeWrite();
+            const record = recordsRef.current.find(({ id }) => id === targetId)!;
+            const local = sessions.current.get(targetId)!;
+            const content = command.apply(local.content as SlideContent);
+            const next = editedDraft(record, content);
+            serializeHostNativeArtifact(next);
+            try {
+              await storage.put(next);
+            } catch (error) {
+              throw new Error(`追加先「${record.name}」：保存できませんでした。 ${String(error)}`);
+            }
+            // The local mutation paths are locked while storage owns this write.
+            local.executeView({ ...command, readonlyInput: true, apply: () => content });
+            void persist(next, true);
+            editorEvents.emit('command', {
+              artifactId: targetId,
+              type: command.type,
+              label: command.label,
+            });
+            if (currentTarget.current.activeId === targetId)
+              setRevealAddress({ artifactId: targetId, elementId: firstPage, pageId: firstPage });
+          });
+          writeQueue.current = write.then(
+            () => {},
+            () => {},
+          );
+          await write;
+        } finally {
+          slideDocumentWrite.current = undefined;
+        }
+      },
+    };
+  }
+  const slideDocument: SlideDocumentHost | undefined =
+    active?.kind === 'slide'
+      ? {
+          documents: slideDocumentOptions,
+          destination: `${active.name} ／ ${isDeck(active.draft.content) ? active.draft.content.slides.length + 1 : 1} 枚目から`,
+          canCreate: loaded && !shared,
+          canAppend: loaded && !shared && !readOnly,
+          appendReason: shared
+            ? '共同編集中は末尾に追加できません。'
+            : readOnly
+              ? '読み取り専用のデッキには追加できません。'
+              : undefined,
+          fileVersions: slideDocumentFileVersions,
+          prepare: (source, destination, name, signal) =>
+            prepareSlideDocumentImport(
+              source,
+              destination,
+              name,
+              signal,
+              slideDocumentAccess(active.id),
+            ),
+        }
+      : undefined;
+  async function reviewSlideDocument(value: unknown, targetId: string) {
+    rejectProposal();
+    const controller = new AbortController();
+    slideDocumentRequest.current = controller;
+    try {
+      const preview = await prepareSlideDocumentProposal(
+        value,
+        controller.signal,
+        slideDocumentAccess(targetId),
+      );
+      controller.signal.throwIfAborted();
+      setSlideDocumentProposal({ id: newId('proposal'), preview, controller });
+      setError('');
+    } catch (error) {
+      if (!controller.signal.aborted) setError((error as Error).message);
+    }
+  }
+  async function applySlideDocumentProposal() {
+    const proposal = slideDocumentProposal;
+    if (!proposal || applyingProposal.current !== undefined) return;
+    const generation = proposalGeneration.current;
+    applyingProposal.current = generation;
+    setProposalBusy(true);
+    try {
+      await proposal.preview.commit(proposal.controller.signal, { proposalId: proposal.id });
+      if (generation === proposalGeneration.current) rejectProposal();
+    } catch (error) {
+      if (!proposal.controller.signal.aborted) setProposalError((error as Error).message);
+    } finally {
+      if (applyingProposal.current === generation) applyingProposal.current = undefined;
+      if (generation === proposalGeneration.current) setProposalBusy(false);
+    }
+  }
+  function requestSlideDocumentProposal(mode: 'new' | 'append') {
+    if (!active || !flushInputs()) return;
+    try {
+      const document = slideDocumentOptions[0];
+      const version = document?.versions[0];
+      if (!version) throw new Error('先に元にする文書の版を保存してください。');
+      const source = { artifactId: document.id, versionId: version.id, contentHash: version.hash };
+      if (mode === 'new') {
+        void reviewSlideDocument(
+          { ...source, type: 'slide.document.create', name: document.name },
+          active.id,
+        );
+      } else {
+        const target = slideDocumentAccess(active.id).readTarget();
+        void reviewSlideDocument(
+          {
+            ...source,
+            type: 'slide.document.append',
+            targetId: target.record.id,
+            baseVersionId: target.record.draft.baseVersionId,
+            revision: target.revision,
+          },
+          active.id,
+        );
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }
   function requestProposal() {
     if (!active) return;
+    if (active.kind === 'slide') return requestSlideDocumentProposal('append');
     try {
       if (!active.draft.baseVersionId)
         throw new Error('Save a version before requesting an external proposal');
@@ -1201,6 +1404,9 @@ export default function App({
     }
   }
   function rejectProposal() {
+    slideDocumentRequest.current?.abort();
+    slideDocumentRequest.current = undefined;
+    setSlideDocumentProposal(undefined);
     rejectLocalProposal(proposalGeneration, {
       setProposal,
       setBusy: setProposalBusy,
@@ -1227,7 +1433,7 @@ export default function App({
         },
         value,
       );
-      proposalGeneration.current++;
+      rejectProposal();
       setProposal(pendingReview);
       setProposalBusy(false);
       setProposalError('');
@@ -1431,6 +1637,7 @@ export default function App({
     saveVersion,
     reviewProposal,
     reviewCitationProposal,
+    slideDocument,
     addComment,
     dataViewChanged,
     editPrivateSettings,
@@ -1556,7 +1763,10 @@ export default function App({
                       aria-label="Artifact name"
                       value={active.name}
                       readOnly={readOnly || !!shared}
-                      onChange={(e) => persist({ ...active, name: e.target.value })}
+                      onChange={(e) => {
+                        if (slideDocumentWrite.current !== active.id)
+                          void persist({ ...active, name: e.target.value });
+                      }}
                     />
                   ) : (
                     <strong>Editor Platform</strong>
@@ -1616,7 +1826,14 @@ export default function App({
                         selection={selection}
                         toolbar={extensions.toolbar}
                         externalProposal={
-                          !shared && proposalSupported(content) ? requestProposal : undefined
+                          !shared && (proposalSupported(content) || slideDocumentOptions.length > 0)
+                            ? requestProposal
+                            : undefined
+                        }
+                        externalSlideCreationProposal={
+                          !shared && slideDocumentOptions.length > 0
+                            ? () => requestSlideDocumentProposal('new')
+                            : undefined
                         }
                         flushInputs={flushInputs}
                         onAction={menuAction}
@@ -1841,6 +2058,15 @@ export default function App({
                       onCancel={() => setIfcLoss(undefined)}
                     />
                   </Suspense>
+                )}
+                {slideDocumentProposal && (
+                  <SlideDocumentProposalDialog
+                    preview={slideDocumentProposal.preview}
+                    busy={proposalBusy}
+                    error={proposalError}
+                    onApply={() => void applySlideDocumentProposal()}
+                    onReject={rejectProposal}
+                  />
                 )}
                 {proposal && (
                   <ProposalDialog

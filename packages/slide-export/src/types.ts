@@ -1,5 +1,10 @@
 import type { Bounds, Drawing, DrawingTextLayout } from '@editor-platform/editor-core';
-import type { SlideContent } from '@editor-platform/slide/model';
+import type {
+  SlideContent,
+  SlideEffect,
+  SlideTransition,
+  slideLiveReference,
+} from '@editor-platform/slide/model';
 import type { PptxImagePlacement } from './geometry';
 import type {
   ExportAsset,
@@ -31,7 +36,14 @@ export interface PptxRasterRequest {
 }
 export interface PptxAdapters extends Partial<ExportAssetAdapter>, Partial<ExportFontAdapter> {
   rasterize?(request: PptxRasterRequest, signal?: AbortSignal): Promise<PptxRasterResult>;
+  /** Verify and project this exact retained figure, then return decoded PNG or JPEG bytes. */
+  resolveReferenceImage?(
+    reference: PptxFigureReference,
+    signal?: AbortSignal,
+  ): Promise<ExportAsset>;
 }
+/** A fixed citation with its retained version (a packed citation is read through the deck). */
+export type PptxFigureReference = ReturnType<typeof slideLiveReference>;
 export interface PptxRasterResult extends ExportAsset {
   /** Optional measured paint region. It must contain the requested region, never crop it. */
   bounds?: Bounds;
@@ -107,7 +119,17 @@ export interface PptxPage {
   id: string;
   background: string;
   notes?: string;
+  referenceNotes?: string[];
+  steps?: PptxMotionEffect[][];
+  transition?: Exclude<SlideTransition, { kind: 'none' }>;
   elements: PptxElement[];
+}
+export interface PptxMotionEffect {
+  effect: SlideEffect;
+  startMs: number;
+  /** Absent for an object with no visible output. Its timing still consumes the click. */
+  bounds?: Bounds;
+  poses?: { offsetX: number; offsetY: number; scale: number }[];
 }
 export interface OwnedPptxPlan {
   report: ReadonlyTree<SlidePptxReport>;

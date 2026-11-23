@@ -4,6 +4,7 @@ export type {
   SlideExportSnapshot,
   SlidePptxOptions,
   PptxAdapters,
+  PptxFigureReference,
   PptxRasterRequest,
   PptxRasterResult,
   PptxRepresentation,

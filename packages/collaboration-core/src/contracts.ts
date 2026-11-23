@@ -128,6 +128,8 @@ export interface Effect<T> {
 export interface DomainCodec<T> {
   domain: Domain;
   validate(content: unknown): content is T;
+  /** Explains when otherwise native content is outside the shared editing scope. */
+  unsupportedContentReason?(content: unknown): string | undefined;
   resource(content: T, key: string): unknown;
   /** Optional call-scoped lookup index. Results must equal resource(content, key). */
   resources?(content: T, keys: readonly string[]): unknown[];

@@ -17,6 +17,7 @@ import {
   type SlideObject,
 } from './model';
 import type { SlideEditing } from './view-shared';
+import { SlideMotionInspector } from './view-motion';
 export interface SlideInspectorProps {
   editing: SlideEditing;
   chosen: SlideObject[];
@@ -61,6 +62,7 @@ export function SlideInspector(props: SlideInspectorProps) {
           )
         }
       />
+      <SlideMotionInspector editing={editing} />
       <fieldset disabled={readOnly} className="inspector-fields">
         {slide && <SlideFields {...props} slide={slide} object={object} />}
       </fieldset>

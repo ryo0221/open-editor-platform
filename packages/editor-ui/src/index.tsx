@@ -130,7 +130,7 @@ export function Menu({
       if (!root.current?.contains(e.target as Node)) setOpen(false);
     };
     const escape = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return;
       setOpen(false);
       // A dialog in front of this menu (a presentation) keeps its own Escape. Otherwise
       // Escape only closes the menu, so a focused field elsewhere keeps its draft.

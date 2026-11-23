@@ -192,3 +192,116 @@ test('G11 the worker owns previewed image bytes; refresh refetches and invalidat
     failed.diagnostics.some((d) => d.severity === 'error' && d.address?.elementId === 'image'),
   ).toBe(true);
 });
+
+test('the PPTX download preserves click timing and transition from the current slide deck', async ({
+  page,
+}, info) => {
+  const deck = officeDeck();
+  deck.schemaVersion = 3;
+  const first = deck.slides[0];
+  first.objects[0].text = '最初の行\n二番目の行';
+  first.steps = [
+    {
+      id: `step_${crypto.randomUUID()}`,
+      effects: [
+        {
+          id: `effect_${crypto.randomUUID()}`,
+          targetId: 'heading',
+          phase: 'enter',
+          effect: 'fade',
+          trigger: 'on-click',
+          delayMs: 125,
+          durationMs: 450,
+        },
+      ],
+    },
+  ];
+  deck.slides.push({
+    id: 'next-page',
+    title: '次のページ',
+    objects: [],
+    background: '#ffffff',
+    transition: { kind: 'push', direction: 'up', durationMs: 725 },
+  });
+  await importOfficeDeck(page, deck);
+  const before = await nativeArtifact(page);
+  const dialog = await openPptx(page);
+  await preparePptx(dialog);
+  await expect(dialog.getByLabel('PPTX counts')).toContainText('Errors: 0');
+  await acceptPptx(dialog);
+  const zip = unzipSync(await officeDownload(page, dialog, 'Download PPTX'));
+  const xml = strFromU8(zip['ppt/slides/slide1.xml']);
+  expect(xml.match(/transition="in" filter="fade"/g)).toHaveLength(2);
+  expect(xml).toContain('nodeType="clickEffect"');
+  expect(xml).toContain('nodeType="withEffect"');
+  expect(xml).toContain('<p:cond delay="125"/>');
+  expect(xml.match(/dur="450"/g)).toHaveLength(2);
+  expect(strFromU8(zip['ppt/slides/slide2.xml'])).toContain('p14:dur="725"><p:push dir="u"/>');
+  await page.screenshot({ path: info.outputPath('pptx-motion-download.png') });
+  await dialog.getByRole('button', { name: 'Close PPTX export', exact: true }).click();
+  expect(await nativeArtifact(page)).toEqual(before);
+});
+
+test('PPTX preflight locates included Animation and can export the other selected page', async ({
+  page,
+}, info) => {
+  const { createAnimationEmbed, createRectangleAnimation } = await import(
+    '@editor-platform/animation-core'
+  );
+  const { contentHash } = await import('@editor-platform/artifact-core');
+  const { placeSlideAnimation } = await import('@editor-platform/slide/model');
+  const content = createRectangleAnimation();
+  const embed = createAnimationEmbed(
+    {
+      artifactId: 'animation-source',
+      versionId: 'version-1',
+      contentHash: await contentHash(content),
+      compositionId: 'root',
+    },
+    content,
+    'Embedded animation',
+  );
+  const deck = officeDeck();
+  deck.schemaVersion = 3;
+  deck.slides.push({ id: 'animated-page', background: '#ffffff', title: 'Animated', objects: [] });
+  const animated = placeSlideAnimation('animated-page', embed, 'embedded-animation').apply(deck);
+  animated.slides[1].steps = [
+    {
+      id: `step_${crypto.randomUUID()}`,
+      effects: [
+        {
+          id: `effect_${crypto.randomUUID()}`,
+          targetId: 'embedded-animation',
+          phase: 'enter',
+          effect: 'zoom',
+          trigger: 'on-click',
+          delayMs: 0,
+          durationMs: 350,
+        },
+      ],
+    },
+  ];
+  await importOfficeDeck(page, animated);
+  const dialog = await openPptx(page);
+  await preparePptx(dialog);
+  await expect(dialog.getByRole('button', { name: 'Download PPTX', exact: true })).toBeDisabled();
+  const diagnostic = dialog.getByRole('listitem').filter({ hasText: 'PowerPoint cannot play' });
+  await expect(diagnostic).toContainText('step 1');
+  await expect(diagnostic.getByRole('button', { name: 'Go to page 2 / element' })).toBeVisible();
+  await diagnostic.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('animation-preflight-blocked.png') });
+
+  await diagnostic.getByRole('button', { name: 'Go to page 2 / element' }).click();
+  await expect(page.getByRole('button', { name: 'Slide 2: Animated' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.getByRole('button', { name: 'Slide 1: 出力テスト' }).click();
+  await dialog.getByLabel('PPTX pages').selectOption('selected');
+  await preparePptx(dialog);
+  await expect(dialog.getByLabel('PPTX counts')).toContainText('Errors: 0');
+  await acceptPptx(dialog);
+  const files = unzipSync(await officeDownload(page, dialog, 'Download PPTX'));
+  expect(files['ppt/slides/slide1.xml']).toBeDefined();
+  expect(files['ppt/slides/slide2.xml']).toBeUndefined();
+});

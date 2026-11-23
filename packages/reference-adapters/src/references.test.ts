@@ -40,11 +40,7 @@ import {
 } from '@editor-platform/whiteboard/model';
 import { createDocument, makeBlock, isDocument } from '@editor-platform/document/model';
 import { contentToNode, nodeToContent } from '@editor-platform/document/engine';
-import {
-  captureSlideExportSnapshot,
-  encodeSlidePptx,
-  prepareSlidePptx,
-} from '@editor-platform/slide-export';
+import { captureSlideExportSnapshot, prepareSlidePptx } from '@editor-platform/slide-export';
 import {
   captureDocumentExportSnapshot,
   encodeDocumentDocx,
@@ -851,7 +847,7 @@ it('applies generic image fit to each selected native reference without replacin
 });
 
 it.each(['value', 'figure'] as const)(
-  'TS-020 blocks DOCX and PPTX containing only a %s citation',
+  'TS-020 blocks DOCX citations and requires a fixed figure resolver only for included PPTX figures',
   async (kind) => {
     const saved = await snapshot({ value: 42 });
     const reference: LiveReference = {
@@ -884,22 +880,25 @@ it.each(['value', 'figure'] as const)(
     const basis = { kind: 'local-draft' as const, artifactId: 'destination' };
     const resolveFont = vi.fn();
     const slideSnapshot = await captureSlideExportSnapshot(citedDeck, basis);
-    const pptxPlans = [];
-    for (const pageIds of ['all', ['other-slide']] as const) {
-      pptxPlans.push(
-        await prepareSlidePptx(
-          slideSnapshot,
-          {
-            pageIds,
-            includeHiddenSlides: false,
-            includeNotes: false,
-            fontProfileId: 'unused',
-            fallback: 'element-png',
-          },
-          { resolveFont },
-        ),
-      );
-    }
+    const options = {
+      pageIds: 'all' as const,
+      includeHiddenSlides: false,
+      includeNotes: false,
+      fontProfileId: 'unused',
+      fallback: 'element-png' as const,
+    };
+    const included = await prepareSlidePptx(slideSnapshot, options, {});
+    const excluded = await prepareSlidePptx(
+      slideSnapshot,
+      { ...options, pageIds: ['other-slide'] },
+      {},
+    );
+    const citationCodes = (plan: typeof included) =>
+      plan.report.diagnostics.filter((d) => d.code.startsWith('REFERENCE_')).map((d) => d.code);
+    expect(citationCodes(included)).toEqual(
+      kind === 'figure' ? ['REFERENCE_IMAGE_UNAVAILABLE'] : [],
+    );
+    expect(citationCodes(excluded)).toEqual([]);
     const docx = await prepareDocumentDocx(
       await captureDocumentExportSnapshot(document, basis),
       {
@@ -910,21 +909,14 @@ it.each(['value', 'figure'] as const)(
       },
       { resolveFont },
     );
-    for (const plan of [...pptxPlans, docx]) {
-      expect(plan.report.diagnostics).toEqual([
-        expect.objectContaining({
-          code: 'REFERENCE_EXPORT_UNSUPPORTED',
-          severity: 'error',
-          message: expect.stringContaining('引用を含む'),
-        }),
-      ]);
-    }
+    expect(docx.report.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'REFERENCE_EXPORT_UNSUPPORTED',
+        severity: 'error',
+        message: expect.stringContaining('引用を含む'),
+      }),
+    ]);
     expect(resolveFont).not.toHaveBeenCalled();
-    for (const plan of pptxPlans) {
-      await expect(
-        encodeSlidePptx(plan, { planHash: plan.report.planHash, acceptedDiagnosticIds: [] }),
-      ).resolves.toMatchObject({ status: 'blocked' });
-    }
     await expect(
       encodeDocumentDocx(docx, { planHash: docx.report.planHash, acceptedDiagnosticIds: [] }),
     ).resolves.toMatchObject({ status: 'blocked' });

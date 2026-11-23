@@ -52,11 +52,19 @@ export interface SlideToolbarProps {
   onImage(file: File): void;
   onAction(action: string, value?: number): void;
   onAddSlide(layout: SlideLayout): void;
-  onPresent(): void;
-  onExport(format: 'svg' | 'png' | 'pdf', scope: string, scale: number): void;
+  onFromDocument?(trigger: HTMLButtonElement): void;
+  fromDocumentDisabledReason?: string;
+  onPresent(trigger: HTMLButtonElement): void;
+  onExport(
+    format: 'svg' | 'png' | 'pdf' | 'mp4',
+    scope: string,
+    scale: number,
+    trigger: HTMLButtonElement,
+  ): void;
   onPptx(): void;
 }
 export function SlideToolbar(props: SlideToolbarProps) {
+  const t = useWording();
   const { editing, onAdd, onAction, reference } = props;
   const { content, slide, ids, readOnly, apply } = editing;
   return (
@@ -110,15 +118,22 @@ export function SlideToolbar(props: SlideToolbarProps) {
         onReference={props.setReference}
       />
       <EditMenu onAction={onAction} readOnly={readOnly} />
-      <SlideLayoutMenu readOnly={readOnly} onAddSlide={props.onAddSlide} />
+      <SlideLayoutMenu
+        readOnly={readOnly}
+        onAddSlide={props.onAddSlide}
+        onFromDocument={props.onFromDocument}
+        fromDocumentDisabledReason={props.fromDocumentDisabledReason}
+      />
       <IconButton
         icon={Presentation}
         label="Present"
-        disabled={!content.slides.length}
-        onClick={props.onPresent}
+        onClick={(event) => props.onPresent(event.currentTarget)}
       />
-      <ExportMenu onExport={props.onExport}>
-        <PptxExportButton editing={editing} onPptx={props.onPptx} />
+      <ExportMenu onExport={props.onExport} closeOnSelect>
+        <button onClick={(event) => props.onExport('mp4', 'all', 1, event.currentTarget)}>
+          {t('Export MP4')}
+        </button>
+        <PptxExportButton onPptx={props.onPptx} />
       </ExportMenu>
     </>
   );
@@ -228,38 +243,51 @@ const slideLayouts: SlideLayout[] = [
 function SlideLayoutMenu({
   readOnly,
   onAddSlide,
+  onFromDocument,
+  fromDocumentDisabledReason,
 }: {
   readOnly: boolean;
   onAddSlide(layout: SlideLayout): void;
+  onFromDocument?: SlideToolbarProps['onFromDocument'];
+  fromDocumentDisabledReason?: string;
 }) {
   const t = useWording();
+  const reasonId = useId();
   return (
-    <Menu label="Add slide layout" icon={LayoutTemplate}>
+    <Menu label="Add slide layout" icon={LayoutTemplate} closeOnSelect>
       {slideLayouts.map((l) => (
         <button key={l} disabled={readOnly} onClick={() => onAddSlide(l)}>
           {t(l)}
         </button>
       ))}
+      {onFromDocument && (
+        <button
+          type="button"
+          disabled={!!fromDocumentDisabledReason}
+          aria-describedby={fromDocumentDisabledReason ? reasonId : undefined}
+          onClick={(event) => onFromDocument(event.currentTarget)}
+        >
+          文書から作る…
+        </button>
+      )}
+      {fromDocumentDisabledReason && (
+        <span id={reasonId} role="note">
+          {fromDocumentDisabledReason}
+        </span>
+      )}
     </Menu>
   );
 }
-function PptxExportButton({ editing, onPptx }: { editing: SlideEditing; onPptx(): void }) {
+function PptxExportButton({ onPptx }: { onPptx(): void }) {
   const t = useWording();
   const officeCapability = useContext(EditorOfficeCapabilitiesContext);
-  const hasAnimations = editing.content.slides.some((page) =>
-    page.objects.some((o) => o.type === 'animation'),
-  );
   return (
     <button
-      disabled={!officeCapability.pptx || hasAnimations}
+      disabled={!officeCapability.pptx}
       title={
-        hasAnimations
-          ? t(
-              'アニメーションを含む Slide の PPTX 出力は未対応です。native JSON で保存してください。',
-            )
-          : !officeCapability.pptx
-            ? (officeCapability.reason ?? t('Hostはこの形式の出力を提供していません。'))
-            : undefined
+        !officeCapability.pptx
+          ? (officeCapability.reason ?? t('Hostはこの形式の出力を提供していません。'))
+          : undefined
       }
       onClick={onPptx}
     >

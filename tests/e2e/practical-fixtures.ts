@@ -37,6 +37,14 @@ export async function download(page: Page, label: string, name: string) {
           .getByRole('dialog', { name: 'CSV export scope' })
           .getByRole('button', { name: 'Download CSV', exact: true })
           .click();
+      if (
+        label === 'Export PDF' &&
+        (await page.getByRole('dialog', { name: 'Slide export' }).isVisible())
+      )
+        await page
+          .getByRole('dialog', { name: 'Slide export' })
+          .getByRole('button', { name: 'Export file' })
+          .click();
     })(),
   ]);
   await file.saveAs(`${evidence}/${name}`);

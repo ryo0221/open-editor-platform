@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   Authority,
   initial,
@@ -13,17 +13,23 @@ import {
   addSlide,
   duplicateSlide,
   deleteObjects,
+  arrangeObjects,
+  slideMotionCommand,
+  type SlideContent,
+  type SlideMotionOperation,
 } from '@editor-platform/slide/model';
 import { createData, addRow, setCell, removeColumn } from '@editor-platform/structured-data/model';
 import { deleteRows, updateColumn } from '@editor-platform/structured-data/views';
-import { command } from '@editor-platform/editor-core';
+import { command, transaction } from '@editor-platform/editor-core';
 import {
+  createSharedSlideReferenceCodec,
   dataEditorCodec,
   prepareEditorCommand,
   slideEditorCodec,
   type EditorChange,
 } from './editor-transactions';
 import { SharedEditorSession, type EditorHostAdapter } from './editor-session';
+import { slideCodec } from './canvas';
 const actor = (actorId: string): Principal => ({
   actorId,
   clientId: actorId,
@@ -44,6 +50,134 @@ function fixture() {
     authority: new Authority(slideEditorCodec, initial('artifact', slideEditorCodec, d)),
   };
 }
+describe('shared Slide motion boundary', () => {
+  function motionFixture() {
+    const { d, page, authority } = fixture();
+    const targetId = d.slides[0].objects[0].id;
+    const value = {
+      targetId,
+      trigger: 'on-click',
+      phase: 'enter',
+      effect: 'fade',
+      durationMs: 300,
+      delayMs: 0,
+    } as const;
+    const insert: SlideMotionOperation = {
+      type: 'slide.step.insert',
+      slideId: page,
+      effects: [{ value }],
+    };
+    const motion = slideMotionCommand(insert).apply(d);
+    return { d, page, authority, targetId, value, insert, motion };
+  }
+
+  it('admits static v3 and gives a reason for each unsupported setting at shared start', () => {
+    const { d, page, motion } = motionFixture();
+    const transition = slideMotionCommand({
+      type: 'slide.transition.set',
+      slideId: page,
+      transition: { kind: 'fade', durationMs: 300 },
+    }).apply(d);
+    const exports = slideMotionCommand({
+      type: 'slide.export.pdf.page-mode',
+      pageMode: 'steps',
+    }).apply(d);
+    const emptySteps: SlideContent = {
+      ...d,
+      schemaVersion: 3,
+      slides: [{ ...d.slides[0], steps: [] }],
+    };
+    for (const codec of [
+      slideCodec,
+      slideEditorCodec,
+      createSharedSlideReferenceCodec({ authorize: () => true, authorizeDetachment: () => true }),
+    ]) {
+      const staticState = initial('static', codec, { ...d, schemaVersion: 3 });
+      for (const candidate of [motion, transition, exports, emptySteps]) {
+        expect(codec.validate(candidate)).toBe(false);
+        expect(() => initial('motion', codec, candidate)).toThrow('共同編集は未対応');
+        expect(() =>
+          operation(codec, staticState, A, [
+            { type: 'domain.restore', target: '*', payload: { content: candidate } },
+          ]),
+        ).toThrow('共同編集は未対応');
+      }
+    }
+  });
+
+  it('refuses a Document append in a shared command or proposal transaction before evaluation', () => {
+    const { d } = fixture();
+    const apply = vi.fn(() => d);
+    const append = command<SlideContent>('slide.document.append', 'Append a document', apply);
+    const snapshot = initial('slide', slideEditorCodec, d);
+    for (const candidate of [append, transaction('Proposal', [append])])
+      expect(() => prepareEditorCommand(slideEditorCodec, snapshot, A, candidate)).toThrow(
+        '文書からの末尾追加',
+      );
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('rejects motion commands and destructive edits of an affected view without queuing or changing history', async () => {
+    const { d, page, authority, targetId, value, insert, motion } = motionFixture();
+    const submit = vi.fn(localAdapter(authority, A).submit);
+    const adapter = {
+      ...localAdapter(authority, A),
+      submit,
+      versions: async () => [],
+    } as unknown as EditorHostAdapter<SlideContent>;
+    const session = new SharedEditorSession(slideEditorCodec, adapter);
+    await session.open();
+    const [
+      {
+        id: stepId,
+        effects: [{ id: effectId }],
+      },
+    ] = motion.slides[0].steps!;
+    const operations: SlideMotionOperation[] = [
+      insert,
+      { type: 'slide.step.delete', slideId: page, stepId },
+      { type: 'slide.step.move', slideId: page, stepId },
+      { type: 'slide.effect.insert', slideId: page, stepId, value },
+      { type: 'slide.effect.update', slideId: page, stepId, effectId, value },
+      { type: 'slide.effect.delete', slideId: page, stepId, effectId },
+      {
+        type: 'slide.effect.move',
+        slideId: page,
+        stepId,
+        effectId,
+        trigger: 'on-click',
+        destination: { newStep: {} },
+      },
+      { type: 'slide.transition.set', slideId: page, transition: { kind: 'none' } },
+      { type: 'slide.export.mp4.default-hold', holdSeconds: null },
+      { type: 'slide.export.mp4.state-hold', slideId: page, holdSeconds: null },
+      { type: 'slide.export.pdf.page-mode', pageMode: null },
+      { type: 'slide.motion.batch', operations: [insert] },
+    ];
+    const before = session.checkpoint();
+    for (const op of operations) {
+      expect(() => session.execute(slideMotionCommand(op))).toThrow('共同編集は未対応');
+    }
+    expect(() =>
+      session.execute(command('wrapped', 'Apply proposal', slideMotionCommand(insert).apply)),
+    ).toThrow('共同編集は未対応');
+    // Exercise the command boundary even if a stale Host view has motion data.
+    const view = vi.spyOn(session, 'viewContent', 'get').mockReturnValue(motion);
+    for (const cmd of [
+      deleteObjects(page, [targetId]),
+      arrangeObjects(page, [targetId], 'delete'),
+      duplicateSlide(page),
+    ]) {
+      expect(() => session.execute(cmd)).toThrow('共同編集は未対応');
+    }
+    view.mockRestore();
+    expect(session.checkpoint()).toEqual(before);
+    expect(session.viewContent).toEqual(d);
+    expect(authority.snapshot()).toEqual(before.client.confirmed);
+    expect(submit).not.toHaveBeenCalled();
+    session.close();
+  });
+});
 describe('normal editor prepared domain transactions', () => {
   it.each([false, true])(
     'merges a positioned row deletion with an independent peer position and selectively undoes it (reverse=%s)',

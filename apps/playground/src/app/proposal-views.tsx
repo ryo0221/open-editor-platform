@@ -3,6 +3,7 @@ import { canonicalJson } from '@editor-platform/artifact-core';
 import type { Preview } from '@editor-platform/collaboration-core';
 import type { SemanticChange } from '@editor-platform/editor-core';
 import type { LocalProposal } from './local-proposal';
+import { SlideDocumentPages, type SlideDocumentPreview } from '@editor-platform/slide';
 import { exportMarkdown, isDocument } from '@editor-platform/document';
 import type { SharedPlaygroundConnection } from './types';
 import type { Content } from '../model';
@@ -169,6 +170,60 @@ function ChangeItem({ change }: { change: SemanticChange }) {
         <MovePreview before={box(change.before)} after={box(change.after)} />
       )}
     </li>
+  );
+}
+
+export function SlideDocumentProposalDialog({
+  preview,
+  busy,
+  error,
+  onApply,
+  onReject,
+}: {
+  preview: SlideDocumentPreview;
+  busy: boolean;
+  error: string;
+  onApply(): void;
+  onReject(): void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const problem = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const modal = dialog.current;
+    modal?.showModal();
+    return () => modal?.close();
+  }, [preview]);
+  useEffect(() => {
+    if (error) problem.current?.focus();
+  }, [error]);
+  return (
+    <dialog
+      ref={dialog}
+      aria-label="External proposal preview"
+      className="proposal-dialog slide-document-dialog"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onReject();
+      }}
+    >
+      <h2>文書から作る提案</h2>
+      <section aria-label="プレビュー">
+        <SlideDocumentPages preview={preview} />
+      </section>
+      {error && (
+        <p ref={problem} role="alert" tabIndex={-1}>
+          {error}
+        </p>
+      )}
+      <footer>
+        <button type="button" autoFocus disabled={busy} onClick={onReject}>
+          Reject proposal
+        </button>
+        <button type="button" className="primary" disabled={busy || !!error} onClick={onApply}>
+          Apply proposal
+        </button>
+      </footer>
+    </dialog>
   );
 }
 

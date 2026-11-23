@@ -15,6 +15,7 @@ import {
 import type {
   PptxAdapters,
   PptxElement,
+  PptxFigureReference,
   PptxPage,
   PptxRasterResult,
   ResolvedPptxAsset,
@@ -95,7 +96,7 @@ export class PptxPlanner {
   readonly assets = new Map<string, ResolvedPptxAsset>();
   font: ExportFontProfile | undefined;
   private readonly diagnosticIds = new Set<string>();
-  private readonly services: Pick<PptxAdapters, 'resolveFont' | 'resolveAsset' | 'rasterize'>;
+  private readonly services: PptxAdapters;
   private assetBytes = 0;
   constructor(
     readonly settings: SlidePptxOptions,
@@ -106,6 +107,7 @@ export class PptxPlanner {
       resolveFont: adapters?.resolveFont?.bind(adapters),
       resolveAsset: adapters?.resolveAsset?.bind(adapters),
       rasterize: adapters?.rasterize?.bind(adapters),
+      resolveReferenceImage: adapters?.resolveReferenceImage?.bind(adapters),
     };
   }
   add(
@@ -198,6 +200,27 @@ export class PptxPlanner {
         'ASSET_INVALID',
         'error',
         'Image data, dimensions or byte limits are invalid',
+        address,
+      );
+    }
+  }
+  async resolveReferenceImage(reference: PptxFigureReference, address: SlideExportAddress) {
+    const key = `reference:${canonicalJson(address)}`;
+    try {
+      if (!this.services.resolveReferenceImage) throw Error('A fixed figure resolver is required');
+      const value = await this.services.resolveReferenceImage(reference, this.signal);
+      if (value.mime !== 'image/png' && value.mime !== 'image/jpeg')
+        throw Error('The resolver must return PNG or JPEG');
+      return { key, asset: await this.storeAsset(key, value) };
+    } catch (error) {
+      checkExportAbort(this.signal);
+      const { versionId } = reference.snapshot;
+      const source = reference.source.artifactId;
+      const reason = error instanceof Error ? ` ${error.message}` : '';
+      this.add(
+        'REFERENCE_IMAGE_UNAVAILABLE',
+        'error',
+        `Could not resolve the fixed figure (${source} / ${versionId}).${reason}`,
         address,
       );
     }

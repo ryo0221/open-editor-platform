@@ -9,6 +9,7 @@ export interface SlideEditing {
   /** Selected object IDs that exist on the current slide. */
   ids: string[];
   readOnly: boolean;
+  sharedEditing?: boolean;
   references?: ReferenceResolver;
   /** Saved versions for fixed citations, so every view can draw live figures. */
   liveReferences?: LiveReferenceConnection;

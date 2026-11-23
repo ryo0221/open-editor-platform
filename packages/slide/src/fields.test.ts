@@ -1,4 +1,6 @@
 import { expect, it } from 'vitest';
+import { newId } from '@editor-platform/artifact-core';
+import { isDeck } from './model';
 import { slideUnknownFields } from './fields';
 
 const deck = (objects: unknown[], extra: Record<string, unknown> = {}) => ({
@@ -60,4 +62,44 @@ it('reports unknown fields at every level, with hints only for known fields', ()
 it('reads malformed input without throwing', () => {
   expect(slideUnknownFields(null)).toEqual([]);
   expect(slideUnknownFields({ slides: [null, { objects: 'x' }] })).toEqual([]);
+});
+
+it('recognizes motion and export fields and reports unknown nested settings by path', () => {
+  const stepId = newId('step');
+  const moving = {
+    ...deck([text()], {
+      steps: [
+        {
+          id: stepId,
+          effects: [
+            {
+              id: newId('effect'),
+              targetId: 'o1',
+              phase: 'enter',
+              effect: 'slide-in',
+              direction: 'left',
+              trigger: 'on-click',
+              durationMs: 200,
+              delayMs: 0,
+            },
+          ],
+        },
+      ],
+      transition: { kind: 'push', durationMs: 300, direction: 'right' },
+    }),
+    schemaVersion: 3,
+    exportSettings: {
+      mp4: { defaultHoldSeconds: 1, holds: [{ slideId: 's1', stepId, holdSeconds: 2 }] },
+      pdf: { pageMode: 'steps' },
+    },
+  };
+  expect(isDeck(moving)).toBe(true);
+  expect(slideUnknownFields(moving)).toEqual([]);
+  Object.assign(moving.exportSettings.mp4.holds[0], { seconds: 2 });
+  const step = (moving.slides[0] as { steps?: { effects: object[] }[] }).steps![0];
+  Object.assign(step.effects[0], { time: 200 });
+  expect(slideUnknownFields(moving).map(({ path }) => path)).toEqual([
+    'exportSettings.mp4.holds[0].seconds',
+    'slides[0].steps[0].effects[0].time',
+  ]);
 });

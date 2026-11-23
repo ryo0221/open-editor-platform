@@ -1,3 +1,4 @@
+import { canonicalJson } from '@editor-platform/artifact-core';
 import {
   layoutDrawingText,
   shapeNames,
@@ -7,7 +8,10 @@ import {
 } from '@editor-platform/editor-core';
 import {
   slideDrawing,
+  slideEffectPose,
+  slideLiveReference,
   slidePaintOrder,
+  slideStepTiming,
   type Slide,
   type SlideContent,
 } from '@editor-platform/slide/model';
@@ -56,6 +60,7 @@ export async function planSlide(p: PptxPlanner, deck: SlideContent, slide: Slide
     background: slide.background,
     notes: settings.includeNotes ? slide.notes : undefined,
     elements: [],
+    transition: p.pages.length && slide.transition?.kind !== 'none' ? slide.transition : undefined,
   };
   if (!exportColor(page.background))
     p.add(
@@ -72,16 +77,8 @@ export async function planSlide(p: PptxPlanner, deck: SlideContent, slide: Slide
       pageAddress,
     );
   p.pages.push(page);
-  for (const drawing of pageDrawings(deck, slide)) {
-    checkExportAbort(p.signal);
-    await planElement(p, page, pageAddress, drawing);
-  }
-}
-/** Slide drawings in paint order, preceded by the page background image when present. */
-function pageDrawings(deck: SlideContent, slide: Slide) {
-  const drawings = slidePaintOrder(slide).map(slideDrawing);
   if (slide.backgroundImage)
-    drawings.unshift({
+    await planElement(p, page, pageAddress, {
       id: '',
       kind: 'image',
       text: '',
@@ -90,13 +87,51 @@ function pageDrawings(deck: SlideContent, slide: Slide) {
       bounds: { x: 0, y: 0, width: deck.width, height: deck.height },
       imageFit: 'fill',
     });
-  return drawings;
+  for (const object of slidePaintOrder(slide)) {
+    checkExportAbort(p.signal);
+    if (object.type === 'animation' && !object.hidden) {
+      const step = slide.steps?.findIndex((s) => s.effects.some((e) => e.targetId === object.id));
+      const stepNumber = step === undefined || step < 0 ? undefined : step + 1;
+      p.add(
+        'EMBEDDED_ANIMATION_UNSUPPORTED',
+        'error',
+        `PowerPoint cannot play this embedded Animation.${stepNumber ? ` Its placement is animated in step ${stepNumber}.` : ''}`,
+        { ...pageAddress, elementId: object.id },
+      );
+      continue;
+    }
+    await planElement(
+      p,
+      page,
+      pageAddress,
+      slideDrawing(object),
+      object.liveQuote && slideLiveReference(deck, object.liveQuote),
+    );
+  }
+  page.steps = planMotion(deck, slide, page);
+}
+function planMotion(deck: SlideContent, slide: Slide, page: PptxPage) {
+  const painted = new Set(
+    page.elements.filter((el) => el.representation !== 'omitted').map((el) => el.address.elementId),
+  );
+  const objects = new Map(slide.objects.map((object) => [object.id, object]));
+  return slide.steps?.map((step) =>
+    slideStepTiming(step).effects.map(({ effect, startMs }) => {
+      if (!painted.has(effect.targetId)) return { effect, startMs };
+      const object = objects.get(effect.targetId)!;
+      const poses = (effect.phase === 'emphasis' ? [0, 0.5, 1] : [0, 1]).map((progress) =>
+        slideEffectPose(deck, object, effect, progress),
+      );
+      return { effect, startMs, bounds: object.bounds, poses };
+    }),
+  );
 }
 async function planElement(
   p: PptxPlanner,
   page: PptxPage,
   pageAddress: SlideExportAddress,
   drawing: Drawing,
+  reference?: ReturnType<typeof slideLiveReference>,
 ) {
   const address: SlideExportAddress = {
     ...pageAddress,
@@ -105,7 +140,23 @@ async function planElement(
   const element: PptxElement = { address, drawing, representation: 'native' };
   page.elements.push(element);
   if (!drawing.hidden && drawing.kind !== 'group') auditPaint(p, element);
-  await convertElement(p, element);
+  if (reference?.presentation.kind === 'figure' && !drawing.hidden)
+    await planReferenceImage(p, element, reference);
+  else await convertElement(p, element);
+  if (reference && element.representation !== 'omitted') {
+    const { source, mode, snapshot } = reference;
+    const { versionId, revision, contentHash, dependencies } = snapshot;
+    (page.referenceNotes ??= []).push(
+      `引用元と版 ${canonicalJson({
+        source,
+        mode,
+        versionId,
+        revision,
+        contentHash,
+        dependencies: dependencies.map(({ id, contentHash }) => ({ id, contentHash })),
+      })}`,
+    );
+  }
   if (!drawing.hidden && (drawing.kind === 'text' || drawing.kind === 'shape') && drawing.text)
     await planTextFallbacks(p, element);
   if (
@@ -129,6 +180,17 @@ async function planElement(
     outputPartNames: [],
     counted: drawing.kind !== 'group',
   });
+}
+async function planReferenceImage(
+  p: PptxPlanner,
+  element: PptxElement,
+  reference: ReturnType<typeof slideLiveReference>,
+) {
+  const resolved = await p.resolveReferenceImage(reference, element.address);
+  if (!resolved) return;
+  const { key, asset } = resolved;
+  element.imageKey = key;
+  applyImagePlacement(p, element, asset);
 }
 const dashPattern = /^\s*\d+(?:\.\d+)?(?:[ ,]+\d+(?:\.\d+)?)*\s*$/;
 /** Colors, dashes, text layout and glyph coverage of a painted element. */
@@ -261,18 +323,7 @@ async function planImage(p: PptxPlanner, element: PptxElement) {
   const asset = await p.resolveAsset(drawing.src, address);
   if (!asset) return;
   element.imageKey = `source:${drawing.src}`;
-  element.imagePlacement = pptxImagePlacement(drawing, asset.width, asset.height);
-  if (!element.imagePlacement) {
-    element.representation = 'omitted';
-    p.add(
-      'IMAGE_EXCLUDED_BY_CROP',
-      'info',
-      'The crop places the entire bitmap outside its visible region',
-      address,
-      'omitted-by-choice',
-    );
-    return;
-  }
+  if (!applyImagePlacement(p, element, asset)) return;
   if (asset.mime !== 'image/webp' && asset.mime !== 'image/gif') return;
   if (asset.mime === 'image/gif')
     p.add(
@@ -283,6 +334,23 @@ async function planImage(p: PptxPlanner, element: PptxElement) {
       'appearance',
     );
   await p.fallback(element, 'Office does not retain this image format', asset);
+}
+function applyImagePlacement(
+  p: PptxPlanner,
+  element: PptxElement,
+  asset: { width: number; height: number },
+) {
+  element.imagePlacement = pptxImagePlacement(element.drawing, asset.width, asset.height);
+  if (element.imagePlacement) return true;
+  element.representation = 'omitted';
+  p.add(
+    'IMAGE_EXCLUDED_BY_CROP',
+    'info',
+    'The crop places the entire bitmap outside its visible region',
+    element.address,
+    'omitted-by-choice',
+  );
+  return false;
 }
 type TableContent = NonNullable<Drawing['table']>;
 const validTableRows = (table: Drawing['table']): table is TableContent =>

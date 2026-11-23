@@ -1,7 +1,8 @@
 import type { Page } from '@playwright/test';
 import { create, expect, nativeArtifact, save, test } from './fixtures';
 import { openDocx, prepareDocx } from './office-docx-fixtures';
-import { openPptx, preparePptx } from './office-fixtures';
+import { strFromU8, unzipSync } from 'fflate';
+import { acceptPptx, officeDownload, openPptx, preparePptx } from './office-fixtures';
 
 async function insertOldQuote(page: Page, kind: 'value' | 'figure', propose = false) {
   await page.getByRole('button', { name: '引用を挿入', exact: true }).click();
@@ -208,23 +209,52 @@ for (const kind of ['document', 'slide'] as const) {
   });
 
   for (const shape of ['value', 'figure'] as const) {
-    test(`TS-020 Playground refuses Office export of a ${kind} containing only a ${shape} quote`, async ({
+    test(`TS-020 ${kind === 'document' ? 'DOCX rejects' : 'PPTX embeds'} a fixed ${shape} quote`, async ({
       page,
-    }) => {
+    }, info) => {
       await page.goto('/');
       await create(page, kind);
       if (kind === 'document') await page.locator('.ProseMirror p').first().click();
       await insertOldQuote(page, shape);
-      const format = kind === 'document' ? 'DOCX' : 'PPTX';
-      const dialog = kind === 'document' ? await openDocx(page) : await openPptx(page);
-      await (kind === 'document' ? prepareDocx(dialog) : preparePptx(dialog));
-      await expect(
-        dialog.getByText(new RegExp(`引用を含む.*${format}に書き出せません`)),
-      ).toBeVisible();
-      await expect(dialog.getByLabel(`${format} counts`)).toContainText('Errors: 1');
-      await expect(
-        dialog.getByRole('button', { name: `Download ${format}`, exact: true }),
-      ).toBeDisabled();
+      if (kind === 'document') {
+        const dialog = await openDocx(page);
+        await prepareDocx(dialog);
+        await expect(dialog.getByText(/引用を含む.*DOCXに書き出せません/)).toBeVisible();
+        await expect(dialog.getByLabel('DOCX counts')).toContainText('Errors: 1');
+        await expect(
+          dialog.getByRole('button', { name: 'Download DOCX', exact: true }),
+        ).toBeDisabled();
+        return;
+      }
+      const before = await nativeArtifact(page);
+      const expectedPng =
+        shape === 'figure'
+          ? await page.locator('.ep-slide-live-quote image').getAttribute('href')
+          : undefined;
+      const dialog = await openPptx(page);
+      await preparePptx(dialog);
+      await expect(dialog.getByLabel('PPTX counts')).toContainText('Errors: 0');
+      await page.screenshot({ path: info.outputPath('fixed-quote-preflight.png') });
+      await acceptPptx(dialog);
+      const zip = unzipSync(await officeDownload(page, dialog, 'Download PPTX'));
+      const slide = strFromU8(zip['ppt/slides/slide1.xml']);
+      expect(slide).not.toMatch(/引用|e4f3ea|counter-v[12]/);
+      if (shape === 'value') expect(slide).toContain('<a:t>40.00</a:t>');
+      else {
+        expect(slide).toContain('<p:pic>');
+        expect(expectedPng).toMatch(/^data:image\/png;base64,/);
+        const bytes = Buffer.from(expectedPng!.split(',')[1], 'base64');
+        expect(
+          Object.entries(zip).some(
+            ([path, data]) => path.startsWith('ppt/media/') && Buffer.from(data).equals(bytes),
+          ),
+        ).toBe(true);
+      }
+      const notes = strFromU8(zip['ppt/notesSlides/notesSlide1.xml']);
+      expect(notes).toContain('counter-v1');
+      expect(notes).not.toContain('counter-v2');
+      await dialog.getByRole('button', { name: 'Close PPTX export', exact: true }).click();
+      expect(await nativeArtifact(page)).toEqual(before);
     });
   }
 }

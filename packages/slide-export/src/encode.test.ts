@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
 import { build } from 'esbuild';
 import { contentHash } from '@editor-platform/artifact-core';
+import { insertSlideCitation, slideMotionState } from '@editor-platform/slide/model';
 import { shapeNames, usesGridText, type Drawing } from '@editor-platform/editor-core';
 import {
   captureSlideExportSnapshot,
@@ -9,6 +10,7 @@ import {
   encodeSlidePptx,
   type SlidePptxPlan,
   type PptxAdapters,
+  type PptxFigureReference,
 } from '@editor-platform/slide-export';
 import { contractDeck, contractFont, contractOptions, contractPng } from './fixtures';
 import { ownedSlidePptxPlan } from './plan';
@@ -502,4 +504,328 @@ it('keeps every generated content-type override attached to an existing OPC part
   for (const part of declarations)
     expect(output.files[part], `Override resolves to ${part}`).toBeDefined();
   expect(declarations.filter((p) => /^ppt\/slideMasters\//.test(p))).toHaveLength(1);
+});
+
+function motionId(kind: 'step' | 'effect', number: number) {
+  return `${kind}_00000000-0000-4000-8000-${number.toString().padStart(12, '0')}`;
+}
+
+it('encodes click steps on all final text and shape parts and uses their shared playback pivots', async () => {
+  const deck = contractDeck();
+  deck.schemaVersion = 3;
+  const page = deck.slides[0];
+  const [text] = page.objects;
+  const box = {
+    ...text,
+    id: 'labeled-box',
+    type: 'shape' as const,
+    shape: 'rectangle' as const,
+    bounds: { x: 200, y: 260, width: 440, height: 150 },
+    rotation: 17,
+  };
+  page.objects.unshift({
+    id: 'table-before-text',
+    type: 'table',
+    text: '',
+    fill: '#fff',
+    bounds: { x: 730, y: 100, width: 160, height: 90 },
+    table: { rows: [['A']] },
+  });
+  page.objects.push(box, { ...text, id: 'hidden', hidden: true });
+  page.steps = [
+    {
+      id: motionId('step', 1),
+      effects: [
+        {
+          id: motionId('effect', 1),
+          targetId: text.id,
+          phase: 'enter',
+          effect: 'fade',
+          trigger: 'on-click',
+          delayMs: 35,
+          durationMs: 200,
+        },
+        {
+          id: motionId('effect', 2),
+          targetId: box.id,
+          phase: 'enter',
+          effect: 'zoom',
+          trigger: 'with-previous',
+          delayMs: 15,
+          durationMs: 500,
+        },
+        {
+          id: motionId('effect', 3),
+          targetId: 'hidden',
+          phase: 'enter',
+          effect: 'fade',
+          trigger: 'after-previous',
+          delayMs: 11,
+          durationMs: 50,
+        },
+      ],
+    },
+    {
+      id: motionId('step', 2),
+      effects: [
+        {
+          id: motionId('effect', 4),
+          targetId: text.id,
+          phase: 'emphasis',
+          effect: 'zoom',
+          trigger: 'on-click',
+          delayMs: 0,
+          durationMs: 301,
+        },
+        {
+          id: motionId('effect', 5),
+          targetId: box.id,
+          phase: 'exit',
+          effect: 'fade',
+          trigger: 'after-previous',
+          delayMs: 14,
+          durationMs: 290,
+        },
+      ],
+    },
+    {
+      id: motionId('step', 3),
+      effects: [
+        {
+          id: motionId('effect', 6),
+          targetId: box.id,
+          phase: 'enter',
+          effect: 'slide-in',
+          direction: 'right',
+          trigger: 'on-click',
+          delayMs: 0,
+          durationMs: 125,
+        },
+        {
+          id: motionId('effect', 7),
+          targetId: text.id,
+          phase: 'exit',
+          effect: 'zoom',
+          trigger: 'with-previous',
+          delayMs: 0,
+          durationMs: 382,
+        },
+      ],
+    },
+    {
+      id: motionId('step', 4),
+      effects: [
+        {
+          id: motionId('effect', 8),
+          targetId: box.id,
+          phase: 'exit',
+          effect: 'slide-out',
+          direction: 'up',
+          trigger: 'on-click',
+          delayMs: 0,
+          durationMs: 125,
+        },
+      ],
+    },
+  ];
+  const output = await encoded(await prepare(deck));
+  const xml = output.xml();
+  const shapeId = (name: string) =>
+    Number(xml.match(new RegExp('id="(\\d+)" name="' + name + '"'))?.[1]);
+  const parts = (objectId: string) =>
+    output.report.elements
+      .find(({ address }) => address.elementId === objectId)!
+      .outputPartNames.map((part) => shapeId(part.split('#')[1]));
+  const [line1, line2] = parts(text.id);
+  const [body, label1, label2] = parts(box.id);
+  expect(new Set([line1, line2, body, label1, label2]).size).toBe(5);
+  expect([line1, line2, body, label1, label2].every(Number.isSafeInteger)).toBe(true);
+  const timing = xml.slice(xml.indexOf('<p:timing>'));
+  expect(timing.match(/delay="indefinite"/g)).toHaveLength(4);
+  expect(timing.match(/nodeType="clickEffect"/g)).toHaveLength(4);
+  expect(timing.match(/nodeType="afterEffect"/g)).toHaveLength(2);
+  expect(timing.match(/nodeType="withEffect"/g)).toHaveLength(13);
+  expect(timing).toContain('delay="35"');
+  expect(timing).toContain('delay="50"');
+  expect(timing).toContain('delay="561"');
+  expect(timing).toContain('delay="315"');
+  expect(timing).toContain('evt="onPrev"');
+  expect(timing).toContain('evt="onNext"');
+  const nodes = [...timing.matchAll(/<p:cTn id="\d+" (presetID="[\s\S]*?)<\/p:childTnLst>/g)].map(
+    ([, contents]) => ({ contents, id: Number(contents.match(/<p:spTgt spid="(\d+)"/)?.[1]) }),
+  );
+  const affected = (match: string) =>
+    nodes.filter(({ contents }) => contents.includes(match)).map(({ id }) => id);
+  expect(affected('transition="in" filter="fade"')).toEqual([line1, line2]);
+  expect(affected('transition="out" filter="fade"')).toEqual([body, label1, label2]);
+  expect(affected('presetClass="emph" presetSubtype="0"')).toEqual([line1, line2]);
+  expect(affected('<p:from x="0" y="0"/>')).toEqual([body, label1, label2]);
+  expect(affected('<p:to x="0" y="0"/>')).toEqual([line1, line2]);
+  expect(affected('presetID="0"')).toEqual([shapeId('timing-marker')]);
+  expect(affected('presetID="2" presetClass="entr"')).toEqual([body, label1, label2]);
+  expect(affected('presetID="2" presetClass="exit"')).toEqual([body, label1, label2]);
+  const timeIds = [...timing.matchAll(/<p:cTn id="(\d+)"/g)].map((m) => m[1]);
+  expect(new Set(timeIds).size).toBe(timeIds.length);
+
+  // Recover each placed line center from the ZIP. At half zoom the XML translation
+  // must put it exactly where the presentation's transform about the whole object does.
+  for (const id of [body, label1, label2]) {
+    const shape = [...xml.matchAll(/<p:sp>[\s\S]*?<\/p:sp>/g)].find(([part]) =>
+      part.includes(`<p:cNvPr id="${id}"`),
+    )![0];
+    const [, x, y, w, h] = shape
+      .match(/<a:off x="(-?\d+)" y="(-?\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/)!
+      .map(Number);
+    const center = [(x + w / 2) / 9525, (y + h / 2) / 9525];
+    const zoom = nodes.find(
+      (node) => node.id === id && node.contents.includes('<p:animScale>'),
+    )!.contents;
+    const state = slideMotionState(deck, page, 1, 300).get(box.id)!;
+    expect(state.scale).toBe(0.5);
+    for (const [axis, attribute, size, pivot] of [
+      [0, 'ppt_x', deck.width, box.bounds.x + box.bounds.width / 2],
+      [1, 'ppt_y', deck.height, box.bounds.y + box.bounds.height / 2],
+    ] as const) {
+      const suffix = zoom.match(new RegExp('val="#' + attribute + '([+-][0-9.]+)"'))?.[1] ?? '0';
+      expect(center[axis] + (Number(suffix) * size) / 2).toBeCloseTo(
+        pivot + (center[axis] - pivot) * state.scale,
+        5,
+      );
+    }
+  }
+  expect(slideMotionState(deck, page, 0).get(box.id)?.visible).toBe(false);
+  expect(slideMotionState(deck, page, 1).get(box.id)?.visible).toBe(true);
+  expect(slideMotionState(deck, page, 2).get(box.id)?.visible).toBe(false);
+  expect(slideMotionState(deck, page, 3).get(text.id)?.visible).toBe(false);
+});
+
+it('keeps directional push and exact transition timing in selected slide order', async () => {
+  const deck = contractDeck();
+  deck.schemaVersion = 3;
+  const [first] = deck.slides;
+  first.transition = { kind: 'fade', durationMs: 777 };
+  deck.slides.push(
+    { ...first, id: 'excluded', hidden: true, objects: [] },
+    { ...first, id: 'fade', objects: [], transition: { kind: 'fade', durationMs: 275 } },
+    ...(['left', 'right', 'up', 'down'] as const).map((direction) => ({
+      ...first,
+      id: direction,
+      objects: [],
+      transition: { kind: 'push' as const, direction, durationMs: 711 },
+    })),
+  );
+  const output = await encoded(await prepare(deck));
+  expect(output.report.selectedPageIds).toEqual(['page-1', 'fade', 'left', 'right', 'up', 'down']);
+  expect(output.xml()).not.toContain('<p:transition');
+  expect(output.xml('ppt/slides/slide2.xml')).toContain('p14:dur="275"><p:fade thruBlk="0"/>');
+  for (const [i, dir] of ['l', 'r', 'u', 'd'].entries()) {
+    const xml = output.xml(`ppt/slides/slide${i + 3}.xml`);
+    expect(xml).toContain(`p14:dur="711"><p:push dir="${dir}"/>`);
+    expect(xml).toContain(`<mc:Fallback><p:transition spd="slow"><p:push dir="${dir}"/>`);
+  }
+});
+
+it('encodes the saved value format without applying additional number formatting from PPTX options', async () => {
+  const deck = contractDeck([]);
+  const source = { artifactId: 'saved-source', domain: 'analysis-notebook' };
+  const content = { value: 1500 };
+  const cited = insertSlideCitation(deck.slides[0].id, 'value-citation', {
+    schemaVersion: 2,
+    mode: 'fixed',
+    source: { ...source, target: { kind: 'value', targetId: 'summary', metricId: 'metric' } },
+    snapshot: {
+      ...source,
+      versionId: 'locked-v1',
+      revision: 1,
+      content,
+      contentHash: await contentHash(content),
+      dependencies: [],
+    },
+    presentation: {
+      kind: 'value',
+      value: 1500,
+      format: { style: 'decimal', digits: 1, unit: '' },
+    },
+  }).apply(deck);
+  const options = {
+    ...contractOptions,
+    format: { style: 'decimal', digits: 0, grouping: true, unit: '億' },
+  };
+  const plan = await prepare(cited, {}, options);
+  const result = await encodeSlidePptx(plan, consent(plan));
+  expect(result.status).toBe('ok');
+  if (result.status !== 'ok') throw Error('Output blocked');
+  const xml = strFromU8(unzipSync(result.bytes)['ppt/slides/slide1.xml']);
+  expect(xml).toContain('<a:t>1500.0</a:t>');
+  expect(xml).not.toContain('1,500億');
+});
+
+it('embeds the fixed value and verified figure bytes with citations in speaker notes', async () => {
+  const deck = contractDeck();
+  const { id } = deck.slides[0];
+  deck.slides[0].notes = 'Original speaker notes';
+  const source = { artifactId: 'saved-source', domain: 'analysis-notebook' };
+  const content = { value: 42 };
+  const snapshot = {
+    ...source,
+    versionId: 'locked-v7',
+    revision: 7,
+    content,
+    contentHash: await contentHash(content),
+    dependencies: [],
+  };
+  const common = { schemaVersion: 3, mode: 'fixed', snapshot } as const;
+  const figure: PptxFigureReference = {
+    ...common,
+    source: { ...source, target: { kind: 'figure', figureId: 'plot' } },
+    presentation: { kind: 'figure', label: 'Saved plot' },
+  };
+  const cited = insertSlideCitation(id, 'plot-citation', figure).apply(
+    insertSlideCitation(id, 'value-citation', {
+      ...common,
+      source: { ...source, target: { kind: 'value', targetId: 'summary', metricId: 'metric' } },
+      presentation: {
+        kind: 'value',
+        value: 42,
+        format: { style: 'decimal', digits: 1, unit: ' kg' },
+      },
+    }).apply(deck),
+  );
+  // Both citations name one retained version, stored once in the deck's table.
+  expect(Object.keys(cited.liveSnapshots ?? {})).toHaveLength(1);
+  const png = contractPng(4, 2);
+  const resolveReferenceImage = vi.fn(async () => png);
+  const resolveAsset = vi.fn();
+  const plan = await prepare(cited, { resolveReferenceImage, resolveAsset });
+  const output = await encoded(plan);
+  expect(resolveReferenceImage).toHaveBeenCalledExactlyOnceWith(figure, undefined);
+  expect(resolveAsset).not.toHaveBeenCalled();
+  expect(output.xml()).toContain('<a:t>42.0 kg</a:t>');
+  expect(output.xml()).toContain('<p:pic>');
+  expect(output.xml()).not.toMatch(/引用|saved-source|locked-v7|e4f3ea/);
+  const notes = output.xml('ppt/notesSlides/notesSlide1.xml');
+  expect(notes).toContain('saved-source');
+  expect(notes).toContain('locked-v7');
+  expect(notes).toContain(snapshot.contentHash);
+  expect(notes).not.toContain('Original speaker notes');
+  expect(
+    Object.entries(output.files).some(
+      ([path, bytes]) => path.startsWith('ppt/media/') && Buffer.from(bytes).equals(png.bytes),
+    ),
+  ).toBe(true);
+
+  const blocked = await prepare(cited, {
+    resolveReferenceImage: async () => {
+      throw Error('Saved version unavailable');
+    },
+  });
+  expect(blocked.report.diagnostics).toContainEqual(
+    expect.objectContaining({
+      address: { domain: 'slide', slideId: id, elementId: 'plot-citation' },
+      code: 'REFERENCE_IMAGE_UNAVAILABLE',
+      severity: 'error',
+      message: expect.stringContaining('Saved version unavailable'),
+    }),
+  );
+  expect(await encodeSlidePptx(blocked, consent(blocked))).toMatchObject({ status: 'blocked' });
 });

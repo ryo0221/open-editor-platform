@@ -21,6 +21,7 @@ export interface Mp4Video {
   /** The `AVCDecoderConfigurationRecord` (WebCodecs' `decoderConfig.description`). */
   avcC: Uint8Array;
   samples: readonly Mp4Sample[];
+  comment?: string;
 }
 
 /** The movie clock (`mvhd`, `tkhd`): milliseconds. */
@@ -77,8 +78,22 @@ const full = (type: string, flags: number, body: (o: Out) => void) =>
 const boxes = (type: string, children: Uint8Array[]) =>
   box(type, (o) => children.forEach((c) => o.raw(c)));
 
+/** MP4 comment metadata, as read by standard MP4 metadata tools. */
+export function mp4Comment(comment: string | undefined): Uint8Array {
+  if (!comment) return new Uint8Array();
+  const handler = full('hdlr', 0, (o) => o.u32(0).str('mdir').str('appl').zeros(9));
+  const data = full('data', 1, (o) => o.u32(0).raw(new TextEncoder().encode(comment)));
+  const items = boxes('ilst', [boxes('©cmt', [data])]);
+  return boxes('udta', [full('meta', 0, (o) => o.raw(handler).raw(items))]);
+}
+
 /** The moov box, with the first sample's file offset (`stco`). */
-function moov(v: Mp4Video, mediaDuration: number, dataOffset: number): Uint8Array {
+function moov(
+  v: Mp4Video,
+  mediaDuration: number,
+  dataOffset: number,
+  metadata: Uint8Array,
+): Uint8Array {
   const n = v.samples.length;
   const movieDuration = Math.round((mediaDuration * movieScale) / v.timescale);
   const mvhd = full('mvhd', 0, (o) => {
@@ -145,7 +160,7 @@ function moov(v: Mp4Video, mediaDuration: number, dataOffset: number): Uint8Arra
   const minf = boxes('minf', [vmhd, dinf, stbl]);
   const mdia = boxes('mdia', [mdhd, hdlr, minf]);
   const trak = boxes('trak', [tkhd, mdia]);
-  return boxes('moov', [mvhd, trak]);
+  return boxes('moov', [mvhd, trak, metadata]);
 }
 
 /** The whole file, as parts to hand to a `Blob` (the samples are not copied). */
@@ -156,15 +171,21 @@ export function writeMp4(v: Mp4Video): Uint8Array[] {
   const ftyp = box('ftyp', (o) =>
     o.str('isom').u32(0x200).str('isom').str('iso2').str('avc1').str('mp41'),
   );
+  const metadata = mp4Comment(v.comment);
   // The moov's size does not depend on the offset's value: measure it, then write it for real.
-  const moovSize = moov(v, mediaDuration, 0).length;
+  const moovSize = moov(v, mediaDuration, 0, metadata).length;
   const dataOffset = ftyp.length + moovSize + 8;
   const data = v.samples.reduce((s, x) => s + x.data.length, 0);
   const mdatHead = new Out()
     .u32(data + 8)
     .str('mdat')
     .bytes();
-  return [ftyp, moov(v, mediaDuration, dataOffset), mdatHead, ...v.samples.map((s) => s.data)];
+  return [
+    ftyp,
+    moov(v, mediaDuration, dataOffset, metadata),
+    mdatHead,
+    ...v.samples.map((s) => s.data),
+  ];
 }
 /** Bytes `writeMp4` adds around the samples, for the size cap before the samples are kept. */
 export function mp4Overhead(sampleCount: number, keyCount: number, avcC: number): number {

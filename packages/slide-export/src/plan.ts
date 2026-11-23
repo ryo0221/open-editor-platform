@@ -1,5 +1,5 @@
 import { clone, contentHash, deepFreeze } from '@editor-platform/artifact-core';
-import { isDeck, hasSlideAnimations, type SlideContent } from '@editor-platform/slide/model';
+import { isDeck, type SlideContent } from '@editor-platform/slide/model';
 import {
   captureExportSnapshot,
   checkExportAbort,
@@ -21,7 +21,7 @@ import {
 import { PptxPlanner } from './planner';
 import { planSlide } from './plan-page';
 
-export const slidePptxExporterVersion = '1.2.0';
+export const slidePptxExporterVersion = '1.3.0';
 const plans = new WeakMap<SlidePptxPlan, OwnedPptxPlan>();
 /** Package-private: consumers cannot manufacture or replace an encoding plan via JSON. */
 export function ownedSlidePptxPlan(plan: SlidePptxPlan): OwnedPptxPlan | undefined {
@@ -98,16 +98,11 @@ export async function prepareSlidePptx(
   const p = new PptxPlanner(settings, adapters, signal);
   if (!validDeck(input)) return invalidPlan('Invalid Slide content or export basis', input?.basis);
   const deck = input.content as SlideContent;
-  if (deck.slides.some((s) => s.objects.some((o) => o.reference || o.liveQuote)))
+  if (deck.slides.some((s) => s.objects.some((o) => o.reference)))
     return invalidPlan(
-      '引用を含むスライドはPPTXに書き出せません。引用付きの内容はnative JSONで保存してください。',
+      '従来の画像参照を含むスライドはPPTXに書き出せません。',
       input.basis,
       'REFERENCE_EXPORT_UNSUPPORTED',
-    );
-  if (hasSlideAnimations(deck))
-    return invalidPlan(
-      'Animation を含む Slide の PPTX 出力は未対応です。native JSON で保存してください。',
-      input.basis,
     );
   auditDeck(p, deck);
   if ((await contentHash(deck)) !== input.basis.contentHash)

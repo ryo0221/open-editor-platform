@@ -900,15 +900,22 @@ export function VisualInspector({
 export function ExportMenu({
   onExport,
   children,
+  closeOnSelect = false,
 }: {
-  onExport: (format: 'svg' | 'png' | 'pdf', scope: string, scale: number) => void;
+  onExport: (
+    format: 'svg' | 'png' | 'pdf',
+    scope: string,
+    scale: number,
+    trigger: HTMLButtonElement,
+  ) => void;
   children?: ReactNode;
+  closeOnSelect?: boolean;
 }) {
   const t = useWording();
   const [scope, setScope] = useState('current'),
     [scale, setScale] = useState(1);
   return (
-    <Menu label="Export visual" icon={Download} align="right">
+    <Menu label="Export visual" icon={Download} align="right" closeOnSelect={closeOnSelect}>
       <label className="ep-field">
         <T>Scope</T>
         <select aria-label="Export scope" value={scope} onChange={(e) => setScope(e.target.value)}>
@@ -929,7 +936,11 @@ export function ExportMenu({
         </select>
       </label>
       {(['svg', 'png', 'pdf'] as const).map((f) => (
-        <button key={f} onClick={() => onExport(f, scope, scale)}>
+        <button
+          key={f}
+          data-menu-keep-open={f === 'pdf' ? undefined : true}
+          onClick={(event) => onExport(f, scope, scale, event.currentTarget)}
+        >
           <Square size={16} />
           Export {f.toUpperCase()}
         </button>

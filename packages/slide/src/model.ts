@@ -61,6 +61,40 @@ import {
   type Bounds,
   type EditorCommand,
 } from '@editor-platform/editor-core';
+import type { SlideExportSettings, SlideStep, SlideTransition } from './motion';
+import { inspectSlideMotion, maxNativeSlideBytes, rejectSlide } from './motion-format';
+import {
+  promoteFirstEffect,
+  removeSlideHolds,
+  replaceSlideSteps,
+  withSlideHolds,
+} from './motion-edits';
+
+export type {
+  SlideEffect,
+  SlideEffectPhase,
+  SlideEffectTrigger,
+  SlideEffectValue,
+  SlideExportSettings,
+  SlideFollowingTrigger,
+  SlideMotionDirection,
+  SlideObjectMotionState,
+  SlidePdfPageMode,
+  SlideStateHold,
+  SlideStep,
+  SlideTransition,
+} from './motion';
+export {
+  defaultSlideHoldSeconds,
+  defaultSlidePdfPageMode,
+  slideEffectPose,
+  slideMotionState,
+  slidePlaybackPages,
+  slideStepTiming,
+} from './motion';
+export { maxSlideMotionInputBytes } from './motion-format';
+export * from './motion-commands';
+
 export type SlideObjectType =
   | 'text'
   | 'shape'
@@ -103,9 +137,12 @@ export interface Slide {
   notes?: string;
   hidden?: boolean;
   backgroundImage?: string;
+  steps?: SlideStep[];
+  transition?: SlideTransition;
 }
 export interface SlideContent {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
+  exportSettings?: SlideExportSettings;
   reuse?: ReuseState;
   theme?: { color: string; fontFamily: string };
   width: number;
@@ -249,7 +286,13 @@ function stableIds(): (taken: ReadonlySet<string>) => IdMint {
   };
 }
 function slideIds(d: SlideContent): Set<string> {
-  return new Set(d.slides.flatMap((s) => [s.id, ...s.objects.map((o) => o.id)]));
+  return new Set(
+    d.slides.flatMap((s) => [
+      s.id,
+      ...s.objects.map((o) => o.id),
+      ...(s.steps ?? []).flatMap((step) => [step.id, ...step.effects.map((effect) => effect.id)]),
+    ]),
+  );
 }
 export function makeSlide(index = 0, mint: IdMint = newId): Slide {
   return {
@@ -287,12 +330,15 @@ export const addSlide = (): EditorCommand<SlideContent> => {
   }));
 };
 export const deleteSlide = (id: string): EditorCommand<SlideContent> =>
-  command('slide.delete', 'Delete slide', (d) =>
-    normalizeSlideLiveSnapshots({
-      ...d,
-      slides: d.slides.filter((s) => s.id !== id),
-    }),
-  );
+  command('slide.delete', 'Delete slide', (d) => {
+    requireSlide(d, id);
+    inspectSlideDeck(d);
+    const next = removeSlideHolds(
+      { ...d, slides: d.slides.filter((s) => s.id !== id) },
+      (hold) => hold.slideId === id,
+    );
+    return validateSlideEdit(normalizeSlideLiveSnapshots(next));
+  });
 export const reorderSlide = (id: string, delta: number): EditorCommand<SlideContent> =>
   command('slide.reorder', 'Reorder slide', (d) => {
     const slides = [...d.slides],
@@ -437,17 +483,39 @@ export const transformObjects = (
     })),
     { geometry: ids },
   );
+function requireSlide(deck: SlideContent, id: string): Slide {
+  return deck.slides.find((page) => page.id === id) ?? rejectSlide('missing-slide', id);
+}
+
+function requireSlideObjects(slide: Slide, ids: string[]) {
+  const present = new Set(slide.objects.map((object) => object.id));
+  for (const id of ids) if (!present.has(id)) rejectSlide('missing-target', id);
+}
+
+function deleteSlideObjects(deck: SlideContent, slide: Slide, ids: ReadonlySet<string>) {
+  inspectSlideDeck(deck);
+  const page = { ...slide, objects: slide.objects.filter((object) => !ids.has(object.id)) };
+  if (!slide.steps?.length)
+    return validateSlideEdit(
+      normalizeSlideLiveSnapshots({
+        ...deck,
+        slides: deck.slides.map((s) => (s === slide ? page : s)),
+      }),
+    );
+  const steps = slide.steps.flatMap((step) => {
+    const effects = step.effects.filter((effect) => !ids.has(effect.targetId));
+    return effects.length ? [{ ...step, effects: promoteFirstEffect(effects) }] : [];
+  });
+  return validateSlideEdit(normalizeSlideLiveSnapshots(replaceSlideSteps(deck, page, steps)));
+}
+
 export const deleteObjects = (slideId: string, ids: string[]): EditorCommand<SlideContent> =>
-  command('slide.delete-object', 'Delete slide objects', (d) =>
-    normalizeSlideLiveSnapshots({
-      ...d,
-      slides: d.slides.map((s) =>
-        s.id === slideId
-          ? { ...s, objects: s.objects.filter((o) => !expanded(s, ids).has(o.id)) }
-          : s,
-      ),
-    }),
-  );
+  command('slide.delete-object', 'Delete slide objects', (d) => {
+    const slide = requireSlide(d, slideId);
+    requireSlideObjects(slide, ids);
+    assertEditable(geometry(slide), ids);
+    return deleteSlideObjects(d, slide, expanded(slide, ids));
+  });
 export const groupObjects = (slideId: string, ids: string[]): EditorCommand<SlideContent> => {
   const groupIds = stableIds();
   return withCommandReads<SlideContent>(
@@ -513,29 +581,60 @@ export const duplicateSlide = (
   const mapping = new Map<string, string>();
   return withCommandReads<SlideContent>(
     command('slide.duplicate', 'Duplicate slide', (d) => {
-      const slide = d.slides.find((s) => s.id === id);
-      if (!slide) return d;
-      if (d.slides.some((s) => s.id === copyId)) throw new Error('Slide ID already exists');
-      for (const object of slide.objects)
-        if (!mapping.has(object.id)) mapping.set(object.id, newId('object'));
-      const index = d.slides.indexOf(slide);
-      return admitAnimationCopy({
-        ...d,
-        slides: [
-          ...d.slides.slice(0, index + 1),
-          {
-            ...clone(slide),
-            id: copyId,
-            title: `${slide.title} copy`,
-            objects: slide.objects.map((o) => ({
-              ...clone(o),
-              id: mapping.get(o.id)!,
-              groupId: o.groupId ? mapping.get(o.groupId) : undefined,
+      const slide = requireSlide(d, id);
+      inspectSlideDeck(d);
+      const taken = slideIds(d);
+      if (taken.has(copyId)) throw new Error('Slide ID already exists');
+      taken.add(copyId);
+      const copyElement = (prefix: string, sourceId: string) => {
+        const key = prefix + ':' + sourceId;
+        const id = mapping.get(key) ?? newId(prefix);
+        if (taken.has(id)) rejectSlide('duplicate-id', id);
+        mapping.set(key, id);
+        taken.add(id);
+        return id;
+      };
+      const objects = new Map(slide.objects.map((o) => [o.id, copyElement('object', o.id)]));
+      const steps = new Map<string, string>();
+      const page: Slide = {
+        ...clone(slide),
+        id: copyId,
+        title: `${slide.title} copy`,
+        objects: slide.objects.map((o) => ({
+          ...clone(o),
+          id: objects.get(o.id)!,
+          groupId: o.groupId ? objects.get(o.groupId) : undefined,
+        })),
+      };
+      if (slide.steps) {
+        page.steps = slide.steps.map((step) => {
+          const stepId = copyElement('step', step.id);
+          steps.set(step.id, stepId);
+          return {
+            id: stepId,
+            effects: step.effects.map((effect) => ({
+              ...effect,
+              id: copyElement('effect', effect.id),
+              targetId: objects.get(effect.targetId)!,
             })),
-          },
-          ...d.slides.slice(index + 1),
-        ],
-      });
+          };
+        });
+      }
+      const index = d.slides.indexOf(slide);
+      let next = {
+        ...d,
+        slides: [...d.slides.slice(0, index + 1), page, ...d.slides.slice(index + 1)],
+      };
+      const holds = d.exportSettings?.mp4?.holds;
+      const copies = holds
+        ?.filter((hold) => hold.slideId === id)
+        .map((hold) => ({
+          ...hold,
+          slideId: copyId,
+          ...(hold.stepId === undefined ? {} : { stepId: steps.get(hold.stepId)! }),
+        }));
+      if (holds && copies?.length) next = withSlideHolds(next, [...holds, ...copies]);
+      return validateSlideEdit(admitAnimationCopy(next));
     }),
     { content: [id] },
   );
@@ -725,20 +824,45 @@ const validSlide = (s: Slide) =>
   validObjects(s.objects);
 const validPageSize = (d: SlideContent) =>
   Number.isFinite(d.width) && d.width > 0 && Number.isFinite(d.height) && d.height > 0;
-export function isDeck(value: unknown): value is SlideContent {
-  if (!value || typeof value !== 'object') return false;
+/** Validates a draft or retained Slide content and reports invalid motion data by location. */
+export function inspectSlideDeck(value: unknown) {
+  if (!value || typeof value !== 'object') rejectSlide('unsupported-version', 'content');
   const d = value as SlideContent;
-  return (
-    (d.schemaVersion === 1 || d.schemaVersion === 2) &&
-    Array.isArray(d.slides) &&
-    validNativeReuse(d.reuse, 'slide') &&
-    validPageSize(d) &&
-    new Set(d.slides.map((s) => s?.id)).size === d.slides.length &&
-    d.slides.every(validSlide) &&
-    validSlideReferences(d.slides, d.liveSnapshots) &&
-    validAnimationDeck(d.slides) &&
-    (!hasSlideAnimations(d) || !hasSlideReuse(d))
-  );
+  if (d.schemaVersion !== 1 && d.schemaVersion !== 2 && d.schemaVersion !== 3)
+    rejectSlide('unsupported-version', 'content');
+  if (
+    !Array.isArray(d.slides) ||
+    !validNativeReuse(d.reuse, 'slide') ||
+    !validPageSize(d) ||
+    new Set(d.slides.map((s) => s?.id)).size !== d.slides.length ||
+    !d.slides.every(validSlide) ||
+    !validSlideReferences(d.slides, d.liveSnapshots) ||
+    !validAnimationDeck(d.slides) ||
+    (hasSlideAnimations(d) && hasSlideReuse(d))
+  )
+    rejectSlide('invalid-deck', 'content');
+  return inspectSlideMotion(d);
+}
+
+export function isDeck(value: unknown): value is SlideContent {
+  try {
+    inspectSlideDeck(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The Host additionally checks the serialized artifact, including its retained versions. */
+export function validateSlideEdit(candidate: SlideContent): SlideContent {
+  inspectSlideDeck(candidate);
+  const json = JSON.stringify(candidate);
+  if (
+    json.length >= maxNativeSlideBytes ||
+    new TextEncoder().encode(json).byteLength >= maxNativeSlideBytes
+  )
+    rejectSlide('native-size-limit', 'content');
+  return candidate;
 }
 
 function validSlideReferences(slides: Slide[], liveSnapshots: LiveSnapshots | undefined) {
@@ -846,28 +970,27 @@ export function changeSlideCitation(
       if (!slide || !object?.liveQuote || !sameSlideCitation(deck, object.liveQuote, expected))
         throw new Error('対象引用が変わりました。もう一度確認してください。');
       assertEditable(geometry(slide), [objectId]);
+      if (!replacement) return deleteSlideObjects(deck, slide, new Set([objectId]));
       const changed = {
         ...deck,
         slides: deck.slides.map((page) =>
           page === slide
             ? {
                 ...slide,
-                objects: replacement
-                  ? slide.objects.map((item) =>
-                      item === object
-                        ? {
-                            ...item,
-                            liveQuote: options.inline
-                              ? { ...replacement, schemaVersion: 2 as const }
-                              : replacement,
-                            text:
-                              replacement.presentation.kind === 'value'
-                                ? formatLiveValue(replacement.presentation)
-                                : '',
-                          }
-                        : item,
-                    )
-                  : slide.objects.filter((item) => item !== object),
+                objects: slide.objects.map((item) =>
+                  item === object
+                    ? {
+                        ...item,
+                        liveQuote: options.inline
+                          ? { ...replacement, schemaVersion: 2 as const }
+                          : replacement,
+                        text:
+                          replacement.presentation.kind === 'value'
+                            ? formatLiveValue(replacement.presentation)
+                            : '',
+                      }
+                    : item,
+                ),
               }
             : page,
         ),
@@ -977,7 +1100,7 @@ function geometry(s: Slide): GeometryItem[] {
   return s.objects.map((o) => ({ ...o, parentId: o.groupId }));
 }
 export function migrateDeck(d: SlideContent): SlideContent {
-  return d.schemaVersion === 2 ? d : { ...clone(d), schemaVersion: 2 };
+  return d.schemaVersion === 1 ? { ...clone(d), schemaVersion: 2 } : d;
 }
 export type SlideLayout =
   | 'blank'
@@ -1250,7 +1373,6 @@ const flagActions = ['unlock', 'show', 'lock', 'hide'];
 const orderActions = ['front', 'back', 'forward', 'backward'];
 /** One `slide.arrange` action on one slide. */
 function arrangeSlide(
-  d: SlideContent,
   s: Slide,
   ids: string[],
   action: string,
@@ -1264,12 +1386,8 @@ function arrangeSlide(
       roots.map((o) => o.id),
     );
   if (!flagActions.includes(action)) assertEditable(items, ids, true);
-  if (action === 'duplicate') {
-    const copied = { ...s, objects: [...s.objects, ...copiedObjects(s, ids, 20, mint)] };
-    admitAnimationCopy({ ...d, slides: d.slides.map((page) => (page === s ? copied : page)) });
-    return copied;
-  }
-  if (action === 'delete') return { ...s, objects: s.objects.filter((o) => !all.has(o.id)) };
+  if (action === 'duplicate')
+    return { ...s, objects: [...s.objects, ...copiedObjects(s, ids, 20, mint)] };
   if (action === 'group') return groupSelection(s, roots, mint);
   if (action === 'ungroup') return ungroupObjects(s, ids);
   if (action.startsWith('distribute-') || action.startsWith('gap-'))
@@ -1294,15 +1412,25 @@ export const arrangeObjects = (
   const minted = stableIds();
   return withCommandReads<SlideContent>(
     command('slide.arrange', action, (d) => {
+      const structural = action === 'delete' || action === 'duplicate';
+      if (structural) {
+        const slide = requireSlide(d, slideId);
+        requireSlideObjects(slide, ids);
+        if (action === 'delete') {
+          assertEditable(geometry(slide), ids, true);
+          return deleteSlideObjects(d, slide, expanded(slide, ids));
+        }
+        inspectSlideDeck(d);
+      }
       const mint = minted(slideIds(d));
       const next = {
         ...d,
         slides: d.slides.map((s) =>
-          s.id === slideId ? arrangeSlide(d, s, ids, action, value, mint) : s,
+          s.id === slideId ? arrangeSlide(s, ids, action, value, mint) : s,
         ),
       };
-      return action === 'delete' || action === 'duplicate'
-        ? normalizeSlideLiveSnapshots(next)
+      return structural
+        ? validateSlideEdit(normalizeSlideLiveSnapshots(admitAnimationCopy(next)))
         : next;
     }),
     action === 'duplicate' ? { content: ids } : { geometry: ids },
