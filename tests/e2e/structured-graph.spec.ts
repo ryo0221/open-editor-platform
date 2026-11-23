@@ -1642,7 +1642,7 @@ for (const analysis of [
   { template: 'fishbone', profile: 'analysis-fishbone', label: '設備温度の変動' },
   { template: 'fta', profile: 'analysis-fault-tree', label: '電源故障' },
 ] as const) {
-  test(\`analysis prototype \${analysis.template}: create, native roundtrip, undo and retained version\`, async ({ page }) => {
+  test(`analysis prototype ${analysis.template}: create, native roundtrip, undo and retained version`, async ({ page }) => {
     await page.goto('/');
     if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
       await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
@@ -1656,7 +1656,7 @@ for (const analysis of [
     if (analysis.template === 'fta')
       await expect(page.getByRole('status', { name: 'FTA evaluation (prototype)' })).toContainText('2.9800%');
 
-    await page.getByRole('button', { name: \`Select node \${analysis.label}\`, exact: true }).click();
+    await page.getByRole('button', { name: `Select node ${analysis.label}`, exact: true }).click();
     await page.keyboard.press('ArrowRight');
     const moved = (await nativeArtifact(page)).draft.content as GraphDocument;
     const targetId = analysis.template === 'fta' ? 'power' : 'temperature';
