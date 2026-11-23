@@ -69,6 +69,12 @@ export interface OperationDeclaration {
 export const CREATE_ADDON = 'create@0-draft' as const;
 export const REFERENCES_ADDON = 'references@0-draft' as const;
 /**
+ * Exact token for the optional history add-on: data only. `keepHighest` names places (JSON
+ * Pointers, at most 16) whose numbers the Host's Undo/Redo never lower, such as the highest issued
+ * ID number. The Host passes them to its native session (`EditorSession` `keepHighest`).
+ */
+export const HISTORY_ADDON = 'history@0-draft' as const;
+/**
  * Exact token for the optional items add-on: data that tells a Host how to list the identified
  * items in saved content and the links between them, without running package code.
  */
@@ -121,6 +127,7 @@ export interface ManifestAddons {
   }>;
   create?: Readonly<{ version: typeof CREATE_ADDON }>;
   references?: Readonly<{ version: typeof REFERENCES_ADDON }>;
+  history?: Readonly<{ version: typeof HISTORY_ADDON; keepHighest: readonly string[] }>;
   items?: Readonly<{ version: typeof ITEMS_ADDON; collections: readonly ItemsCollection[] }>;
 }
 /**

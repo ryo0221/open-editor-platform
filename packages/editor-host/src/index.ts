@@ -93,6 +93,9 @@ export interface EditorHostAdapter<T> {
   /** Optional: stable IDs of the elements whose content differs between two contents. With it
    * an accepted proposal names the elements it changed (see `changedElementsFromDiff`). */
   changedElements?(before: T, after: T): string[];
+  /** Optional: places (JSON Pointers) whose numbers Undo/Redo never lower, such as the highest
+   * issued ID number (`EditorSession` `keepHighest`). */
+  keepHighest?: readonly string[];
 }
 /** Element IDs from a domain diff: each changed, added or removed element once, in diff order.
  * Artifact-level settings and saved view changes are not elements. A domain whose added or
@@ -370,8 +373,11 @@ export class ArtifactEditor<T> {
   ) {
     checkArtifact(artifact, adapter);
     this.persisted = clone(artifact);
-    this.session = new EditorSession(artifact.draft.content);
+    this.session = new EditorSession(artifact.draft.content, this.historyOptions());
     this.capabilities = clone(adapter.capabilities);
+  }
+  private historyOptions() {
+    return this.adapter.keepHighest ? { keepHighest: this.adapter.keepHighest } : {};
   }
   get id() {
     return this.persisted.id;
@@ -821,12 +827,7 @@ export class ArtifactEditor<T> {
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Undo is unsupported');
     const next = this.session.undo(
-      validateCandidate
-        ? (candidate) => {
-            validateCandidate(candidate);
-            this.requireEdit();
-          }
-        : undefined,
+      historyValidator(this.adapter, this.id, validateCandidate, () => this.requireEdit()),
     );
     this.notify();
     return next;
@@ -837,12 +838,7 @@ export class ArtifactEditor<T> {
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Redo is unsupported');
     const next = this.session.redo(
-      validateCandidate
-        ? (candidate) => {
-            validateCandidate(candidate);
-            this.requireEdit();
-          }
-        : undefined,
+      historyValidator(this.adapter, this.id, validateCandidate, () => this.requireEdit()),
     );
     this.notify();
     return next;
@@ -1002,9 +998,30 @@ export class ArtifactEditor<T> {
     this.buffers.clear();
     this.viewState.clear();
     this.selection = { addresses: [] };
-    this.session = new EditorSession(this.persisted.draft.content);
+    this.session = new EditorSession(this.persisted.draft.content, this.historyOptions());
   }
 }
 export * from './proposal';
 
 export * from './text-operations';
+/**
+ * The check Undo/Redo run before committing. With `keepHighest`, the restored content is adjusted
+ * and so is no longer an already-validated snapshot: the adapter validates it first, and a refusal
+ * leaves history and content as they were. A module function (not a method) so `ArtifactEditor`
+ * keeps its variance in `T`.
+ */
+function historyValidator<T>(
+  adapter: EditorHostAdapter<T>,
+  id: string,
+  validateCandidate: ((candidate: T) => void) | undefined,
+  requireEdit: () => void,
+): ((candidate: T) => void) | undefined {
+  const adjusts = !!adapter.keepHighest?.length;
+  if (!validateCandidate && !adjusts) return undefined;
+  return (candidate) => {
+    if (adjusts && !adapter.validate(candidate))
+      throw new EditorHostError('invalid-content', id, 'History produced invalid native content');
+    validateCandidate?.(candidate);
+    requireEdit();
+  };
+}

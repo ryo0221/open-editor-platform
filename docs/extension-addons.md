@@ -10,8 +10,9 @@ Extension の manifest は、必須の項目のほかに、版を完全一致で
 | `create`     | `create@0-draft`     | `create()`                              | `Registration.create()`                                   |
 | `references` | `references@0-draft` | `references`（`list`・`resolve`）       | `Registration.references`（list・resolve）                |
 | `items`      | `items@0-draft`      | なし（manifest の宣言だけ）             | `readItems`（`@editor-platform/extension-runtime/items`） |
+| `history`    | `history@0-draft`    | なし（manifest の data だけ）           | Host の session の `keepHighest`                          |
 
-manifest が add-on を宣言することと、definition がその関数を持つことは一致していなければなりません（`items` は関数を持たない宣言だけの add-on です）。
+manifest が add-on を宣言することと、definition がその関数を持つことは一致していなければなりません（`items` と `history` は関数を持たない宣言だけの add-on です）。
 片方だけのときは `install` が断ります（package の loader から登録するときも同じです）。
 
 ## create：最初の中身を作る
@@ -40,6 +41,21 @@ Host は呼び出し前に参照元への権限と保存版を認証し、draft 
 登録時には宣言と adapter の一致を検査し、未知の add-on や版は拒否します。
 サンプルの `counterReferenceExtension` は、保存版の counter の値を二倍にした数値と、カウントを十件ごとに一枠で示す PNG の図を提供します。
 値の固定と更新の扱いは[参照契約](artifact-references.md)を参照してください。
+
+## history：Undo で下げない値
+
+`history@0-draft` は、文書の中の「下げてはいけない数」（例：発行した ID の番号の上限 `lastIssued`）の場所を宣言する data だけの add-on です（#64）。
+
+```ts
+manifest.addons = { history: { version: HISTORY_ADDON, keepHighest: ['/lastIssued'] } };
+```
+
+- `keepHighest` は JSON Pointer（RFC 6901）の並びで、1〜16 件、1 件 256 文字まで、重なり無し。配列の中は添字（`/groups/0/lastIssued`）で指す。
+- Host は宣言を自分の session に渡します：`EditorHostAdapter.keepHighest`（`ArtifactEditor` が `EditorSession` の `keepHighest` に渡す）。package のコードは要りません。
+- Undo/Redo は今までどおり 1 つの履歴の操作で前の中身を戻します。ただし宣言した場所では、今の値と戻す値の大きい方を残します。数は大きい方、平らな object（数の表）は key ごとに大きい方（戻す版に無い key も、数だけなら残す）。ほかの形や、どちらかに無い場所は戻す値のままです。
+- 検証の callback（`undo(validate)`）が受け取るのも、`peekHistory` が返すのも、この調整のあとの中身です。
+- 調整した中身は、すでに検証した版ではありません。`ArtifactEditor` は、`keepHighest` があれば Undo/Redo のたびに adapter の `validate` で調べます。通らなければ履歴も中身も変えずに断ります（`invalid-content`）。
+- 守れるのは 1 つの session の中だけです。保存した版を開き直して Undo の履歴が無いときは、保存した値がそのまま上限です。
 
 ## items：中身の項目とつながりを宣言する
 
