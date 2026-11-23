@@ -197,3 +197,53 @@ test('H3 fifty records stay consistent across grid, form, kanban, timeline, dash
   );
   await page.screenshot({ path: info.outputPath('data-grid.png') });
 });
+
+
+test('PFMEA prototype: typed S/O/D, RPN calculation, Undo, save/reload and invalid save rejection', async ({ page }) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('data');
+  await page.getByLabel('Data template', { exact: true }).selectOption('pfmea');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  const banner = page.getByRole('status', { name: 'FMEA inspection (prototype)' });
+  await expect(banner).toContainText('FMEA試作 / 3件');
+  const initial = await nativeArtifact(page);
+  expect(initial.name).toContain('PFMEA');
+  expect((initial.draft.content as StructuredData).rows).toHaveLength(3);
+  await expect(page.getByRole('gridcell', { name: 'RPN（参考） · record 1', exact: true })).toHaveText('210');
+  await editCell(page, 'S', 1, '8');
+  await expect(page.getByRole('gridcell', { name: 'RPN（参考） · record 1', exact: true })).toHaveText('240');
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await expect(page.getByRole('gridcell', { name: 'RPN（参考） · record 1', exact: true })).toHaveText('210');
+  await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
+  await expect(page.getByRole('gridcell', { name: 'RPN（参考） · record 1', exact: true })).toHaveText('240');
+  await save(page, 1);
+  await page.reload();
+  await expect(banner).toContainText('FMEA試作 / 3件');
+  const reloaded = await nativeArtifact(page);
+  expect(reloaded.versions).toHaveLength(1);
+  expect((reloaded.draft.content as StructuredData).rows[0].values.s).toBe(8);
+  await editCell(page, 'S', 1, '11');
+  await expect(banner).toContainText('入力要確認');
+  await page.getByRole('button', { name: 'Save version', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Save immutable version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true }).click();
+  await expect(page.getByText(/Fix FMEA S\/O\/D ratings/)).toBeVisible();
+  const refused = await nativeArtifact(page);
+  expect(refused.versions).toHaveLength(1);
+  expect((refused.draft.content as StructuredData).rows[0].values.s).toBe(11);
+});
+
+test('DFMEA prototype can create distinct native Data without linked fault event assumptions', async ({ page }) => {
+  await page.goto('/');
+  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
+    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
+  await page.getByLabel('Artifact type', { exact: true }).selectOption('data');
+  await page.getByLabel('Data template', { exact: true }).selectOption('dfmea');
+  await page.getByRole('button', { name: 'New artifact' }).click();
+  const record = await nativeArtifact(page);
+  expect(record.name).toContain('DFMEA');
+  expect((record.draft.content as StructuredData).rows).toHaveLength(3);
+  await expect(page.getByRole('status', { name: 'FMEA inspection (prototype)' })).toContainText('AP未評価 3件');
+});
