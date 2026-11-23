@@ -29,6 +29,10 @@ input and scoped geometry dependencies, with explicit regression evidence.
 
 ## Capability states
 
+An opt-in Slide Host can use the [shared reference contract](shared-slide-references.md)
+to validate, show and edit retained image references and value/figure citations.
+The Host authorizes the source, rendered data and destination audience.
+
 Geometry writes require their target's geometry and relevant parent/subtree membership.
 Alignment/transform commands declare all selected references, including an unchanged
 alignment anchor; Design auto-layout includes ordered siblings and child geometry.

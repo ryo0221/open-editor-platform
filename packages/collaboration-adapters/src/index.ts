@@ -1,4 +1,4 @@
-export * from './canvas';
+export { slideCodec, designCodec, whiteboardCodec, setField, move } from './canvas';
 export * from './data';
 export * from './document';
 export * from './review';

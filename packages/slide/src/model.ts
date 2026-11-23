@@ -5,6 +5,7 @@ import {
   validLiveReference,
   validLiveReferenceItems,
   formatLiveValue,
+  safeLiveFigure,
   type LiveReference,
   describeReference,
   type EmbeddedReference,
@@ -825,6 +826,86 @@ export function changeSlideCitation(
       return next;
     },
   );
+}
+
+/** Replace an adopted image reference, preserving its mode, fit and placement. */
+export function replaceSlideImageReference(
+  slideId: string,
+  objectId: string,
+  expected: EmbeddedReference,
+  replacement: EmbeddedReference,
+  src: string,
+  label: string,
+): EditorCommand<SlideContent> {
+  return editSlideReference(
+    'slide.replace-image-reference',
+    '画像引用を更新',
+    slideId,
+    objectId,
+    (object) => {
+      if (
+        canonicalJson(object.reference) !== canonicalJson(expected) ||
+        canonicalJson(replacement.source) !== canonicalJson(expected.source) ||
+        replacement.snapshot.revision <= expected.snapshot.revision
+      )
+        throw new Error('対象引用または更新先が変わりました。');
+      return {
+        ...object,
+        reference: { ...replacement, mode: expected.mode, fit: expected.fit },
+        src,
+        alt: label,
+      };
+    },
+  );
+}
+
+/** Keep the cited value or verified image and remove its link to the source. */
+export function detachSlideReference(
+  slideId: string,
+  objectId: string,
+  expected: EmbeddedReference | LiveReference,
+  src?: string,
+): EditorCommand<SlideContent> {
+  return editSlideReference('slide.detach-reference', '引用を解除', slideId, objectId, (object) => {
+    if (canonicalJson(object.liveQuote ?? object.reference) !== canonicalJson(expected))
+      throw new Error('対象引用が変わりました。もう一度確認してください。');
+    const { reference, liveQuote, ...ordinary } = object;
+    if (liveQuote?.presentation.kind === 'value')
+      return { ...ordinary, text: formatLiveValue(liveQuote.presentation), runs: undefined };
+    if (!src || (liveQuote && !safeLiveFigure(src)))
+      throw new Error('保存版から画像を確認してから引用を解除してください。');
+    return {
+      ...ordinary,
+      src,
+      alt: liveQuote?.presentation.kind === 'figure' ? liveQuote.presentation.label : ordinary.alt,
+      ...(reference ? { imageFit: reference.fit === 'contain' ? 'fit' : 'fill' } : {}),
+    };
+  });
+}
+
+function editSlideReference(
+  type: string,
+  label: string,
+  slideId: string,
+  objectId: string,
+  edit: (object: SlideObject) => SlideObject,
+) {
+  return immutableCommand(type, label, (deck: SlideContent) => {
+    const slide = deck.slides.find((page) => page.id === slideId);
+    const object = slide?.objects.find((item) => item.id === objectId);
+    if (!slide || !object) throw new Error('対象引用が見つかりません。');
+    assertEditable(geometry(slide), [objectId]);
+    const next = {
+      ...deck,
+      slides: deck.slides.map((page) =>
+        page === slide
+          ? { ...page, objects: slide.objects.map((item) => (item === object ? edit(item) : item)) }
+          : page,
+      ),
+    };
+    if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
+    return next;
+  });
 }
 
 function geometry(s: Slide): GeometryItem[] {

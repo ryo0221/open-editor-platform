@@ -12,7 +12,7 @@ const bundled = build({
   target: 'es2022',
   define: { 'process.env.NODE_ENV': '"production"' },
 });
-async function mount(page: Page, kind: 'document' | 'slide') {
+async function mount(page: Page, kind: 'document' | 'slide' | 'shared-slide') {
   await page.route('**/live-quote-fixture.html*', (route) =>
     route.fulfill({
       contentType: 'text/html',
@@ -24,7 +24,9 @@ async function mount(page: Page, kind: 'document' | 'slide') {
     if (file.path.endsWith('.css')) await page.addStyleTag({ content: file.text });
     else await page.addScriptTag({ content: file.text, type: 'module' });
   }
-  await expect(page.getByRole('button', { name: '引用を挿入', exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '引用を挿入', exact: true }).filter({ visible: true }),
+  ).toBeVisible();
 }
 const snapshot = (page: Page) => page.evaluate(() => window.liveQuoteFixture.snapshot());
 const remove = (page: Page) => page.getByRole('button', { name: '引用を外す' });
@@ -78,6 +80,39 @@ test('slide draws a fixed figure in thumbnails and the presentation', async ({ p
   const presentation = page.getByRole('dialog', { name: 'Slide presentation' });
   await expect(figure(presentation)).toHaveAttribute('href', /^data:image\//);
 });
+
+for (const viewport of ['desktop', 'narrow'] as const)
+  test(`shared Slide surfaces adopt and detach fixed citations at the same revision (${viewport})`, async ({
+    page,
+  }, info) => {
+    if (viewport === 'narrow') await page.setViewportSize({ width: 390, height: 844 });
+    await mount(page, 'shared-slide');
+    const dialog = await picker(page, 'value');
+    await dialog.getByRole('button', { name: '挿入する' }).click();
+    const revision = page.getByLabel('Shared revision');
+    const quote = () => page.locator('.ep-slide-live-quote:visible');
+    await expect(revision).toHaveText('1');
+    await expect(quote()).toContainText('25.0%');
+    await page.getByRole('button', { name: 'Editor B', exact: true }).click();
+    await expect(quote()).toContainText('25.0%');
+    await page.getByRole('button', { name: '古い引用を確認' }).click();
+    await compare(page).click();
+    await expect(revision).toHaveText('1');
+    await update(page).click();
+    await expect(revision).toHaveText('2');
+    await expect(quote()).toContainText('50.0%');
+    await page.getByRole('button', { name: 'Editor A', exact: true }).click();
+    await expect(quote()).toContainText('50.0%');
+    await page.getByRole('button', { name: 'Editor B', exact: true }).click();
+    await quote().click();
+    await page.getByRole('button', { name: '値を残して引用を解除' }).click();
+    await expect(revision).toHaveText('3');
+    await expect(quote()).toHaveCount(0);
+    await page.getByRole('button', { name: 'Undo B', exact: true }).click();
+    await expect(revision).toHaveText('4');
+    await expect(quote()).toContainText('50.0%');
+    await page.screenshot({ path: info.outputPath('shared-slide-reference.png') });
+  });
 
 for (const kind of ['document', 'slide'] as const) {
   async function insertValue(page: Page, version = 'v1') {

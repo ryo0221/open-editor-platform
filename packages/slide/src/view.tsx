@@ -69,6 +69,7 @@ import {
   type ChartSnapshot,
 } from './model';
 import { SlideLiveDrawing } from './live-references';
+import { SharedReferenceActions } from './shared-reference-actions';
 import { objectActions, pageActions } from './view-actions';
 import { exportSlides } from './view-export';
 import { SlideInspector } from './view-inspector';
@@ -109,6 +110,7 @@ export interface SlideSurfaceProps
   content: SlideContent;
   execute: (cmd: EditorCommand<SlideContent>) => void | boolean;
   onCitationProposal?(command: EditorCommand<SlideContent>, label: string): void;
+  sharedReferences?: boolean;
   select: (ids: string | string[], region?: Region, pageId?: string) => void;
   dataSnapshots?: ChartSnapshot[];
   readOnly?: boolean;
@@ -300,9 +302,10 @@ export function SlideSurface({ locale, labels, ...props }: SlideSurfaceProps) {
   );
 }
 function SlideSurfaceEditor({
-  references,
+  references: resolver,
   liveReferences,
   onCitationProposal,
+  sharedReferences,
   content,
   execute,
   select,
@@ -314,6 +317,10 @@ function SlideSurfaceEditor({
   openAnimation,
 }: Omit<SlideSurfaceProps, 'locale' | 'labels'>) {
   const guardExport = useContext(EditorExportGuardContext);
+  const references = useMemo(
+    () => (sharedReferences ? resolver?.forRetainedVersions() : resolver),
+    [resolver, sharedReferences],
+  );
   const inputs = useContext(EditorInputsContext);
   const overlays = useSlideOverlays();
   const [activeId, setActiveId] = useState(content.slides[0]?.id ?? ''),
@@ -381,6 +388,7 @@ function SlideSurfaceEditor({
           : undefined
       }
       readOnly={readOnly}
+      removeLabel={sharedReferences ? '引用オブジェクトを削除' : undefined}
       onNewer={setNewer}
       canPropose={!!onCitationProposal}
       captureInsert={() => {
@@ -509,6 +517,19 @@ function SlideSurfaceEditor({
         {...layout}
       >
         {citationTools}
+        {sharedReferences &&
+          chosen.length === 1 &&
+          (chosen[0].liveQuote || chosen[0].reference) && (
+            <SharedReferenceActions
+              key={canonicalJson([
+                slide?.id,
+                chosen[0].id,
+                chosen[0].liveQuote ?? chosen[0].reference,
+              ])}
+              editing={editing}
+              object={chosen[0]}
+            />
+          )}
         <SlideStage
           liveReferences={liveReferences}
           newer={liveReferences ? newer : undefined}
