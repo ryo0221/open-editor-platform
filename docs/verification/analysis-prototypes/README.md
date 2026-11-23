@@ -29,8 +29,23 @@
 - Fishboneの見本は、原因・分類・問題を左から右へ並べ、線がノードを横切らない。問題ノードは1440幅の初期表示に収まる。
 - PFMEAを有効な値のまま版として保存するとHistoryが1件になる。Sを11にすると表示が「入力要確認 1件」に変わり、版の保存は拒否されてdraftが残る。再読み込み後もdraftの値と表示、History 1件が保たれる。
 
-## 未実施
+## 追加検証（2026-11-24、GitHub Actions上の隔離環境）
 
-- `npm run build`とPlaywrightのE2E suite（desktop・mobileの回帰）は実行していない。
-- Undo・import・共同編集、Fishbone・FTAの版保存と再読み込みは手動でも確認していない。
-- FTAの計算結果を外部のツールと突き合わせていない。手計算（OR = 1 − (1 − 0.01)(1 − 0.02) = 0.0298）とだけ一致を確認した。
+本リポジトリの通常のGitHub Actions設定は存在しなかったため、PRのブランチに**一時的な検証用workflow**を追加して実行した。検証後、workflowはPRから除去する。したがって通常の恒久CIが整備されたという意味ではない。
+
+| 対象commit | 検証と結果 | 証拠 |
+| --- | --- | --- |
+| `bc7f6a0fb83f11fcd9b022467efeab29e65a1824` | `npm run build` PASS、既存のGraph/Data関連Playwright 64件PASS（desktop/mobile含む） | [run 45204314114](https://github.com/ryo0221/open-editor-platform/actions/runs/45204314114) |
+| `ffda74c9b8c3cb4ae8732b91b2b06cc021b21f79` | `npm run build` PASS。新設の分析専用E2E 5件中4件PASS、PFMEAの仮想化列を直接探すテストがFAIL。テスト側を修正 | [run 45206032244](https://github.com/ryo0221/open-editor-platform/actions/runs/45206032244) |
+| `be2f5cab3bf5a722e810168779eb2c282b45a67b` | `npm run typecheck` PASS、分析専用E2E 5件PASS、変更したbrowser specのESLint・Prettier PASS | [run 45208285502](https://github.com/ryo0221/open-editor-platform/actions/runs/45208285502) |
+
+中間の失敗は記録を省略しない：`5d8f67f`で新規E2Eのテンプレート文字列構文ミス、`90203d6`でE2E fixtureのimport漏れ、`ffda74c`で仮想化列のLocator不一致、`a12d68f`でE2EからUI/CSS込みのエントリをimportしたことによる解析エラーがあった。いずれも**新規テストの問題**で、対象コードの変更を要さずテスト修正で解消した。失敗ジョブの実行履歴はGitHub Actionsに残す。
+
+分析専用E2Eでは、Fishbone/FTAの新規作成・要素移動・Undo/Redo・確定版保存・リロード・native JSON出力、FTAの入力不足エラーとUndo回復、PFMEAのForm編集・RPN再計算・S=11での確定版保存拒否・draft維持、DFMEA新規作成を検証した。既存のGraph/Data E2Eは通常のnative export/importなどを検証している。
+
+## 未実施・制限
+
+- Playwrightの**全E2Eスイート**は実行していない。検証したのは関連する既存64件と追加5件。試作に不要なEditorの全回帰は含まない。
+- Fishbone/FTA/FMEAという**新規Profileを含むArtifactをImportしたときの固有のroundtrip**、共有編集、外部Host統合、専門規格への適合、性能測定は確認していない。既存の通常Graph/Dataに対するImport検証とは区別する。
+- FTA確率は独立事象の手計算とは一致するが、外部の認証済み解析ツールとの突き合わせや独立性の実証は未実施。
+- この試作は`docs/editor-acceptance.md`に基づく正式Editorの受入や、安全解析の正当性を宣言しない。
