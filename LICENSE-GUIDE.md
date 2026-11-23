@@ -18,6 +18,8 @@ An AGPL source offer is made to the legally specified recipients/network users a
 
 **Do not state that private code or commercial business automatically triggers an OEM fee.** If AGPL permission covers the relevant activity and the conditions are satisfied, that activity can be free. A proprietary service or external API integration may be a separate work depending on the actual combination; no broad legal conclusion is promised.
 
+**Planned commercial beta offer (not yet operative):** Authorized separate beta agreements would have a JPY 0 license fee, without a predetermined beta end date; separate GA proprietary licenses would be paid after at least three calendar months/90 days of GA notice. A public policy is not a license agreement, and customers cannot assume proprietary permissions before signing an approved contract. [Beta policy](BETA-COMMERCIAL-POLICY.md) explains the prospective treatment of existing installations and the absence of retroactive fees. This does not change the AGPL, historical MIT grants or third-party permissions.
+
 The independent Editor additional-permission draft has not yet been adopted. [Commercial Licensing](COMMERCIAL-LICENSING.md), [Historical MIT](docs/legacy-mit.md), [Third-party licenses](LICENSE-SCOPE.md).
 
 This guide is informational. Applicable laws and the operative license text govern.
