@@ -27,7 +27,7 @@ Under the explicit independence assumption: AND = product of probabilities; OR =
 - Common-cause failures, dependence/correlation, repair processes, time-dependence, rates and time units, dynamic/voting gates, cut sets, uncertainty, sensitivity and certification are **not supported**.
 - The result must not be treated as a certified safety analysis or an approved quantitative assessment.
 - Editing uses the generic Graph Surface, not a bespoke fishbone or FTA interaction.
-- Local editing and save follow the existing Graph Host; shared editing, PaoBub workflow integration, and cross-Artifact conversion are out of scope.
+- Local editing and save follow the existing Graph Host; shared editing, product workflow integration, and cross-Artifact conversion are out of scope.
 
 ## Verification and next steps
 
