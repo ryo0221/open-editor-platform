@@ -208,7 +208,11 @@ function example(
   return graph;
 }
 
-/** Layout approximates a cause-and-effect map; no custom fishbone renderer is introduced. */
+/**
+ * Causes, categories and the problem are laid out left to right in category order so that no
+ * link crosses a node in the generic Graph Surface. This is a cause-and-effect map; no custom
+ * fishbone renderer is introduced.
+ */
 export function createFishboneGraph(): GraphDocument {
   return example(
     fishboneProfile,
@@ -218,13 +222,13 @@ export function createFishboneGraph(): GraphDocument {
         id: 'problem',
         type: 'problem',
         attributes: { name: '製品の不良率が上昇', metric: '不良率' },
-        x: 1190,
-        y: 335,
+        x: 720,
+        y: 330,
       },
-      { id: 'equipment', type: 'category', attributes: { name: '設備' }, x: 835, y: 110 },
-      { id: 'people', type: 'category', attributes: { name: '人' }, x: 835, y: 575 },
-      { id: 'method', type: 'category', attributes: { name: '方法' }, x: 480, y: 110 },
-      { id: 'material', type: 'category', attributes: { name: '材料' }, x: 480, y: 575 },
+      { id: 'equipment', type: 'category', attributes: { name: '設備' }, x: 380, y: 80 },
+      { id: 'people', type: 'category', attributes: { name: '人' }, x: 380, y: 520 },
+      { id: 'method', type: 'category', attributes: { name: '方法' }, x: 380, y: 330 },
+      { id: 'material', type: 'category', attributes: { name: '材料' }, x: 380, y: 650 },
       {
         id: 'temperature',
         type: 'cause',
@@ -233,8 +237,8 @@ export function createFishboneGraph(): GraphDocument {
           status: 'candidate',
           evidence: '温度ログを確認する',
         },
-        x: 160,
-        y: 25,
+        x: 40,
+        y: 20,
       },
       {
         id: 'calibration',
@@ -243,8 +247,8 @@ export function createFishboneGraph(): GraphDocument {
           name: 'センサー校正の不足',
           status: 'candidate',
         },
-        x: 160,
-        y: 150,
+        x: 40,
+        y: 140,
       },
       {
         id: 'instructions',
@@ -253,8 +257,8 @@ export function createFishboneGraph(): GraphDocument {
           name: '作業指示の曖昧さ',
           status: 'candidate',
         },
-        x: 160,
-        y: 290,
+        x: 40,
+        y: 270,
       },
       {
         id: 'training',
@@ -263,8 +267,8 @@ export function createFishboneGraph(): GraphDocument {
           name: '教育の不足',
           status: 'candidate',
         },
-        x: 160,
-        y: 435,
+        x: 40,
+        y: 520,
       },
       {
         id: 'inspection',
@@ -273,8 +277,8 @@ export function createFishboneGraph(): GraphDocument {
           name: '検査手順のばらつき',
           status: 'candidate',
         },
-        x: 160,
-        y: 575,
+        x: 40,
+        y: 390,
       },
       {
         id: 'lots',
@@ -283,8 +287,8 @@ export function createFishboneGraph(): GraphDocument {
           name: '材料ロット差',
           status: 'candidate',
         },
-        x: 160,
-        y: 700,
+        x: 40,
+        y: 650,
       },
     ],
     [
