@@ -363,6 +363,21 @@ async function deduplicateMedia(files: Record<string, Uint8Array>, signal?: Abor
       }),
     );
 }
+/**
+ * PptxGenJS 4.0.1 writes every East Asian font as GB2312 (`charset="-122"`) and every complex
+ * script font as Big5 (`charset="-120"`). When the named font is not installed, PowerPoint picks
+ * its substitute by that charset, so Japanese text can show as empty boxes. The decks are
+ * Japanese, so East Asian fonts declare Shift-JIS and complex script fonts the default charset.
+ */
+function japaneseFontCharsets(files: Record<string, Uint8Array>) {
+  for (const path of Object.keys(files).filter((p) => /^ppt\/.+\.xml$/.test(p))) {
+    const xml = strFromU8(files[path]);
+    const next = xml
+      .replace(/(<a:ea\b[^>]*\bcharset=")-122"/g, '$1-128"')
+      .replace(/(<a:cs\b[^>]*\bcharset=")-120"/g, '$10"');
+    if (next !== xml) files[path] = strToU8(next);
+  }
+}
 /** Applies each page's per-object XML patches and renumbers drawing ids. */
 function patchSlides(
   files: Record<string, Uint8Array>,
@@ -512,6 +527,7 @@ export async function encodeOwnedPptx(
   )
     throw new Error('Encoder added or removed pages');
   patchSlides(files, plan, patches);
+  japaneseFontCharsets(files);
   checkExportAbort(signal);
   const bytes = await new Promise<Uint8Array>((resolve, reject) =>
     zip(files, { level: 6 }, (err, result) => (err ? reject(err) : resolve(result))),
