@@ -173,7 +173,7 @@ import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
-import type { FmeaTemplateId } from './app/fmea-templates';
+import { inspectFmeaData, isFmeaData, type FmeaTemplateId } from './app/fmea-templates';
 export const editorEvents = new EditorEventBus();
 export type { SharedPlaygroundConnection };
 export interface PlaygroundProps {
@@ -918,6 +918,13 @@ export default function App({
     if (isStructuredData(saved.draft.content) && validateData(saved.draft.content).length) {
       setError('Fix data validation errors before saving a version. Your draft is retained.');
       return;
+    }
+    if (isStructuredData(saved.draft.content) && isFmeaData(saved.draft.content)) {
+      const inspection = inspectFmeaData(saved.draft.content);
+      if (inspection.issues.length) {
+        setError('FMEAのS/O/D・必須入力を確認してください。draftは保持されています: ' + inspection.issues[0]);
+        return;
+      }
     }
     setBusy(true);
     savingVersion.current = true;
