@@ -362,3 +362,21 @@ it('rejects missing or mistyped Artifact draft/version/provenance metadata', asy
   }
   await expect(loadHostArtifact(serializeArtifact(original), adapter)).resolves.toEqual(original);
 });
+
+describe('keepHighest on the adapter (#64)', () => {
+  type Counted = Content & { lastIssued?: number };
+  it('the native session keeps the declared numbers at their highest across Undo', () => {
+    const counted: EditorHostAdapter<Counted> = {
+      ...(adapter as EditorHostAdapter<Counted>),
+      keepHighest: ['/lastIssued'],
+    };
+    const editor = new ArtifactEditor<Counted>(
+      createArtifact('example', 'Example', { schemaVersion: 1 as const, text: 'a', lastIssued: 3 }),
+      counted,
+      new MemoryStorage(),
+    );
+    editor.execute(command<Counted>('issue', 'Issue', (c) => ({ ...c, text: 'b', lastIssued: 4 })));
+    editor.undo();
+    expect(editor.content).toEqual({ schemaVersion: 1, text: 'a', lastIssued: 4 });
+  });
+});

@@ -5,6 +5,8 @@ import {
   type ArtifactVersionRef,
   type ProposalReads,
 } from '@editor-platform/artifact-core';
+import { keepHighest, keepHighestProblems } from './keep-highest';
+export * from './keep-highest';
 export * from './text';
 export * from './japanese-lines';
 export * from './vertical-text';
@@ -138,8 +140,18 @@ export class EditorSession<T> {
   private mergeKey: string | undefined;
   private validatingHistory = false;
   private value: T;
-  constructor(content: T) {
+  private readonly keep: readonly string[];
+  /**
+   * `keepHighest`: places (JSON Pointers) whose numbers Undo/Redo never lower, such as the
+   * highest issued ID number. See `keepHighest` for the exact rule. Invalid lists throw.
+   */
+  constructor(content: T, options: { keepHighest?: readonly string[] } = {}) {
     this.value = clone(content);
+    if (options.keepHighest !== undefined) {
+      const problems = keepHighestProblems(options.keepHighest);
+      if (problems.length) throw new Error(problems[0]);
+    }
+    this.keep = Object.freeze([...(options.keepHighest ?? [])]);
   }
   /** Caller-owned snapshot; mutating it never changes this session or its history. */
   get content(): T {
@@ -250,7 +262,12 @@ export class EditorSession<T> {
     this.assertMutationAvailable();
     const source = direction === 'undo' ? this.past : this.future;
     const destination = direction === 'undo' ? this.future : this.past;
-    const candidate = source.length ? source[source.length - 1].content : this.value;
+    const entry = source.length ? source[source.length - 1].content : this.value;
+    // Declared places keep the larger of the current and the restored value (one history step).
+    const candidate =
+      source.length && this.keep.length
+        ? deepFreeze(keepHighest(entry, this.value, this.keep))
+        : entry;
     if (source.length) this.validateHistory(candidate, validateCandidate);
     // Own/freeze the result before changing history. Callers of the legacy
     // methods still receive independent mutable copies.
@@ -259,7 +276,7 @@ export class EditorSession<T> {
     if (source.length) {
       destination.push({ content: this.value, proposals: this.proposals });
       const restored = source.pop()!;
-      this.value = restored.content;
+      this.value = candidate;
       this.proposals = restored.proposals;
       this.sequence++;
     }

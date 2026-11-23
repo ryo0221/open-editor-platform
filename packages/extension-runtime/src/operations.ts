@@ -1,15 +1,17 @@
 /**
  * Data-only checks for the optional `operations@0-draft` add-on (and the manifest shape of
- * `create@0-draft`). Nothing here runs package code,
+ * `create@0-draft` and `history@0-draft`). Nothing here runs package code,
  * so a Host server can check a provider's proposal against a frozen declaration before any
  * browser loads the package. Limits bound the declaration (manifest complexity) separately from
  * one input (provider output).
  */
 import { canonicalJson } from '@editor-platform/artifact-core';
+import { keepHighestProblems } from '@editor-platform/editor-core/keep-highest';
 import {
   CREATE_ADDON,
   OPERATIONS_ADDON,
   REFERENCES_ADDON,
+  HISTORY_ADDON,
   type ManifestAddons,
   type OperationDeclaration,
   type OperationSchema,
@@ -191,13 +193,16 @@ export function operationDeclarationProblems(addon: unknown): string[] {
 export function parseAddons(input: unknown): ManifestAddons {
   if (
     !plain(input) ||
-    Object.keys(input).some((k) => k !== 'operations' && k !== 'create' && k !== 'references')
+    Object.keys(input).some(
+      (k) => k !== 'operations' && k !== 'create' && k !== 'references' && k !== 'history',
+    )
   )
     throw new Error('Unsupported add-ons');
   if (
     input.operations === undefined &&
     input.create === undefined &&
-    input.references === undefined
+    input.references === undefined &&
+    input.history === undefined
   )
     throw new Error('Unsupported add-ons');
   if (input.operations !== undefined) {
@@ -219,6 +224,18 @@ export function parseAddons(input: unknown): ManifestAddons {
       input.references.version !== REFERENCES_ADDON)
   )
     throw new Error('Unsupported references add-on');
+  // `history@0-draft` is data only: its version and the places whose numbers Undo never lowers.
+  if (input.history !== undefined) {
+    const h = input.history;
+    if (
+      !plain(h) ||
+      Object.keys(h).some((k) => k !== 'version' && k !== 'keepHighest') ||
+      h.version !== HISTORY_ADDON
+    )
+      throw new Error('Unsupported history add-on');
+    const problems = keepHighestProblems(h.keepHighest);
+    if (problems.length) throw new Error(`Invalid history add-on: ${problems[0]}`);
+  }
   const copy = JSON.parse(canonicalJson(input)) as ManifestAddons;
   return deepFreeze(copy);
 }

@@ -68,6 +68,12 @@ export interface OperationDeclaration {
  */
 export const CREATE_ADDON = 'create@0-draft' as const;
 export const REFERENCES_ADDON = 'references@0-draft' as const;
+/**
+ * Exact token for the optional history add-on: data only. `keepHighest` names places (JSON
+ * Pointers, at most 16) whose numbers the Host's Undo/Redo never lower, such as the highest issued
+ * ID number. The Host passes them to its native session (`EditorSession` `keepHighest`).
+ */
+export const HISTORY_ADDON = 'history@0-draft' as const;
 export type ReferenceTarget =
   | { kind: 'value'; targetId: string; metricId: string }
   | { kind: 'figure'; figureId: string };
@@ -96,6 +102,7 @@ export interface ManifestAddons {
   }>;
   create?: Readonly<{ version: typeof CREATE_ADDON }>;
   references?: Readonly<{ version: typeof REFERENCES_ADDON }>;
+  history?: Readonly<{ version: typeof HISTORY_ADDON; keepHighest: readonly string[] }>;
 }
 /**
  * Package code for declared operations. `checkInput` covers rules the schema cannot express
