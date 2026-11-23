@@ -68,6 +68,31 @@ export interface OperationDeclaration {
  */
 export const CREATE_ADDON = 'create@0-draft' as const;
 export const REFERENCES_ADDON = 'references@0-draft' as const;
+/**
+ * Exact token for the optional items add-on: data that tells a Host how to list the identified
+ * items in saved content and the links between them, without running package code.
+ */
+export const ITEMS_ADDON = 'items@0-draft' as const;
+/**
+ * Where an item's ID is. A string names the property that holds the whole ID. `leading-token`
+ * means the ID is written at the head of the named text property, before the first space; the
+ * Host decides which tokens are IDs with its own ID forms (the package gives no pattern).
+ */
+export type ItemIdSource = string | Readonly<{ field: string; from: 'leading-token' }>;
+/**
+ * One group of items in the content. `at` is a dotted path to an array (each element) or an
+ * object (each value). Elements without an ID are not items. Paths use `.` between property names.
+ */
+export interface ItemsCollection {
+  at: string;
+  id: ItemIdSource;
+  /** Property for the item's title. Without it, a `leading-token` ID uses the rest of that text. */
+  title?: string;
+  /** Paths (inside an element) holding the IDs this item uses: a string or an array of strings. */
+  refs?: readonly string[];
+  /** Presentation-only properties left out when a Host compares or fingerprints items. */
+  layout?: readonly string[];
+}
 export type ReferenceTarget =
   | { kind: 'value'; targetId: string; metricId: string }
   | { kind: 'figure'; figureId: string };
@@ -96,6 +121,7 @@ export interface ManifestAddons {
   }>;
   create?: Readonly<{ version: typeof CREATE_ADDON }>;
   references?: Readonly<{ version: typeof REFERENCES_ADDON }>;
+  items?: Readonly<{ version: typeof ITEMS_ADDON; collections: readonly ItemsCollection[] }>;
 }
 /**
  * Package code for declared operations. `checkInput` covers rules the schema cannot express
