@@ -584,8 +584,11 @@ export function gridTextLayout(d: Drawing) {
     fit: s.overflow === 'fit',
   });
 }
-/** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
-export function gridTextExtent(d: Drawing): Bounds {
+/**
+ * The centre and size of each glyph and reading a grid text box draws, each glyph at its run's
+ * size after any fit scaling, before rotation and clipping.
+ */
+export function gridTextCells(d: Drawing): { x: number; y: number; size: number }[] {
   const layout = gridTextLayout(d);
   const runs = gridPlainRuns(d);
   const scale = layout.fontSize / (d.typography?.fontSize ?? (d.kind === 'text' ? 28 : 18));
@@ -593,13 +596,17 @@ export function gridTextExtent(d: Drawing): Bounds {
     const own = runs[g.offset]?.fontSize;
     return own !== undefined ? own * scale : layout.fontSize;
   };
-  const cells = [
+  return [
     ...layout.lines.flatMap((line) =>
       // Each glyph at its run's size, as drawn (Codex on #38).
       line.glyphs.map((g) => ({ x: g.x, y: g.y, size: glyphSize(g) })),
     ),
     ...layout.ruby,
   ];
+}
+/** Where a grid text box's glyphs and readings reach, before rotation and clipping. */
+export function gridTextExtent(d: Drawing): Bounds {
+  const cells = gridTextCells(d);
   if (!cells.length) return d.bounds;
   return unionBounds([
     d.bounds,
