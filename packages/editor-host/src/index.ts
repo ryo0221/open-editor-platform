@@ -821,33 +821,14 @@ export class ArtifactEditor<T> {
     this.requireOpen();
     return this.session.peekHistory(direction);
   }
-  /**
-   * The check Undo/Redo run before committing. With `keepHighest`, the restored content is
-   * adjusted and so is no longer an already-validated snapshot: the adapter validates it first,
-   * and a refusal leaves history and content as they were.
-   */
-  private historyValidator(
-    validateCandidate?: (candidate: T) => void,
-  ): ((candidate: T) => void) | undefined {
-    const adjusts = !!this.adapter.keepHighest?.length;
-    if (!validateCandidate && !adjusts) return undefined;
-    return (candidate) => {
-      if (adjusts && !this.adapter.validate(candidate))
-        throw new EditorHostError(
-          'invalid-content',
-          this.id,
-          'History produced invalid native content',
-        );
-      validateCandidate?.(candidate);
-      this.requireEdit();
-    };
-  }
   undo(validateCandidate?: (candidate: T) => void): T {
     this.requireEdit();
     this.flushInputs();
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Undo is unsupported');
-    const next = this.session.undo(this.historyValidator(validateCandidate));
+    const next = this.session.undo(
+      historyValidator(this.adapter, this.id, validateCandidate, () => this.requireEdit()),
+    );
     this.notify();
     return next;
   }
@@ -856,7 +837,9 @@ export class ArtifactEditor<T> {
     this.flushInputs();
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Redo is unsupported');
-    const next = this.session.redo(this.historyValidator(validateCandidate));
+    const next = this.session.redo(
+      historyValidator(this.adapter, this.id, validateCandidate, () => this.requireEdit()),
+    );
     this.notify();
     return next;
   }
@@ -1021,3 +1004,24 @@ export class ArtifactEditor<T> {
 export * from './proposal';
 
 export * from './text-operations';
+/**
+ * The check Undo/Redo run before committing. With `keepHighest`, the restored content is adjusted
+ * and so is no longer an already-validated snapshot: the adapter validates it first, and a refusal
+ * leaves history and content as they were. A module function (not a method) so `ArtifactEditor`
+ * keeps its variance in `T`.
+ */
+function historyValidator<T>(
+  adapter: EditorHostAdapter<T>,
+  id: string,
+  validateCandidate: ((candidate: T) => void) | undefined,
+  requireEdit: () => void,
+): ((candidate: T) => void) | undefined {
+  const adjusts = !!adapter.keepHighest?.length;
+  if (!validateCandidate && !adjusts) return undefined;
+  return (candidate) => {
+    if (adjusts && !adapter.validate(candidate))
+      throw new EditorHostError('invalid-content', id, 'History produced invalid native content');
+    validateCandidate?.(candidate);
+    requireEdit();
+  };
+}
