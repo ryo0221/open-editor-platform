@@ -173,10 +173,22 @@ export async function loadVerifiedExtension<T>(
   const validate = returned.validate,
     mount = returned.mount,
     ops = returned.operations,
-    create = returned.create;
+    create = returned.create,
+    refs = returned.references;
   if (typeof validate !== 'function') throw Error('Missing domain validator');
   if (mount !== undefined && typeof mount !== 'function') throw Error('Invalid surface adapter');
   if (create !== undefined && typeof create !== 'function') throw Error('Invalid create adapter');
+  let references: ExtensionDefinition<T>['references'];
+  if (refs !== undefined) {
+    const list = refs?.list,
+      resolve = refs?.resolve;
+    if (typeof list !== 'function' || typeof resolve !== 'function')
+      throw Error('Invalid references adapter');
+    references = Object.freeze({
+      list: (...args: Parameters<typeof list>) => list.apply(refs, args),
+      resolve: (...args: Parameters<typeof resolve>) => resolve.apply(refs, args),
+    });
+  }
   let operations: ExtensionDefinition<T>['operations'];
   if (ops !== undefined) {
     const checkInput = ops?.checkInput,
@@ -193,6 +205,7 @@ export async function loadVerifiedExtension<T>(
     validate,
     ...(mount ? { mount } : {}),
     ...(operations ? { operations } : {}),
+    ...(references ? { references } : {}),
     ...(create ? { create: () => create.call(returned) } : {}),
   });
   const loaded: LoadedExtension<T> = Object.freeze({

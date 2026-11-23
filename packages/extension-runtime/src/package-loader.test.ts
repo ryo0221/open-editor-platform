@@ -7,6 +7,7 @@ import {
   CONTRACT_VERSION,
   CREATE_ADDON,
   OPERATIONS_ADDON,
+  REFERENCES_ADDON,
 } from '@editor-platform/extension-contract';
 import { counterExtension, createCounter, setCounter } from '@editor-platform/extension-sample';
 import { ExtensionRegistry } from './index';
@@ -171,6 +172,85 @@ export function definition(packageHash) {
     handle.operations!.prepare(op, { item: 'a' }).commit();
     expect(content.items[0].done).toBe(true);
     registration.uninstall();
+  });
+
+  it('carries the references add-on from verified bytes and lists and resolves saved versions', async () => {
+    const m = manifest({
+      id: 'example.checklist-references',
+      artifactKind: 'example.checklist',
+      addons: { references: { version: REFERENCES_ADDON } },
+    });
+    const source = `const manifest = ${JSON.stringify(m)};
+export function definition(packageHash) {
+  return {
+    manifest: { ...manifest, packageHash },
+    validate: (v) => !!v && Array.isArray(v.items),
+    references: {
+      list: () => [{ kind: 'value', targetId: 'all', metricId: 'done', label: 'Done' }],
+      resolve(snapshot, target) {
+        if (target.kind !== 'value' || target.targetId !== 'all' || target.metricId !== 'done')
+          throw new Error('missing target');
+        return { kind: 'value', value: snapshot.content.items.filter((i) => i.done).length };
+      },
+    },
+  };
+}`;
+    const input: ExtensionPackage = {
+      manifest: structuredClone(m),
+      entry: 'entry.js',
+      files: [{ path: 'entry.js', bytes: encode(source) }],
+    };
+    const { lookup } = await pinned(input);
+    const loaded = await loadVerifiedExtension<Checklist>(
+      await verifyExtensionPackage(input, lookup),
+      { importModule: importData },
+    );
+    expect(loaded.definition.references).toBeDefined();
+    const registration = installVerifiedExtension(new ExtensionRegistry(), loaded);
+    const saved = {
+      artifactId: 'list',
+      domain: 'example.checklist',
+      versionId: 'v1',
+      revision: 1,
+      contentHash: 'a'.repeat(64),
+      content: {
+        items: [
+          { id: 'a', done: true },
+          { id: 'b', done: false },
+        ],
+      },
+      dependencies: [],
+    };
+    const target = { kind: 'value' as const, targetId: 'all', metricId: 'done' };
+    expect(registration.references!.list(saved)).toEqual([{ ...target, label: 'Done' }]);
+    expect(registration.references!.resolve(saved, target)).toEqual({ kind: 'value', value: 1 });
+    expect(() =>
+      registration.references!.resolve(saved, { ...target, metricId: 'missing' }),
+    ).toThrow();
+    registration.uninstall();
+  });
+
+  it('refuses a packaged references adapter without list and resolve', async () => {
+    const m = manifest({
+      id: 'example.checklist-bad-references',
+      artifactKind: 'example.checklist',
+      addons: { references: { version: REFERENCES_ADDON } },
+    });
+    const source = `const manifest = ${JSON.stringify(m)};
+export function definition(packageHash) {
+  return { manifest: { ...manifest, packageHash }, validate: (v) => !!v, references: { list: () => [] } };
+}`;
+    const input: ExtensionPackage = {
+      manifest: structuredClone(m),
+      entry: 'entry.js',
+      files: [{ path: 'entry.js', bytes: encode(source) }],
+    };
+    const { lookup } = await pinned(input);
+    await expect(
+      loadVerifiedExtension(await verifyExtensionPackage(input, lookup), {
+        importModule: importData,
+      }),
+    ).rejects.toThrow('Invalid references adapter');
   });
 
   it('carries the create add-on from verified bytes and makes the first content through the registry', async () => {
