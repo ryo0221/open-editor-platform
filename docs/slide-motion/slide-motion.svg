@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="780" viewBox="0 0 1240 780" role="img" aria-labelledby="title desc" xmlns:c2pa="http://c2pa.org/manifest">
+  <title id="title">編集画面の「動き」</title>
+  <desc id="desc">スライド一覧とキャンバスの右に、クリック順の段、選択中の効果の編集、ページの切り替えが並ぶ。</desc>
+  <g font-family="IPAGothic, Noto Sans CJK JP, sans-serif">
+    <rect x="0" y="0" width="1240" height="780" rx="0" fill="#eef3fa" stroke="none"/>
+    <rect x="0" y="0" width="1240" height="64" rx="0" fill="#ffffff" stroke="none"/>
+    <path d="M0 64L1240 64" stroke="#cfdaea"/>
+    <text x="22" y="40" fill="#16243b" font-size="21" font-weight="700">新規事業計画</text>
+    <rect x="194" y="13" width="94" height="38" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="241" y="36" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">元に戻す</text>
+    <rect x="300" y="13" width="124" height="38" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="362" y="36" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">ページを追加 ▾</text>
+    <rect x="436" y="13" width="76" height="38" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="474" y="36" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">発表</text>
+    <rect x="524" y="13" width="106" height="38" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="577" y="36" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">書き出し ▾</text>
+    <rect x="0" y="65" width="174" height="675" rx="0" fill="#ffffff" stroke="none"/>
+    <path d="M174 65L174 740" stroke="#cfdaea"/>
+    <rect x="13" y="83" width="76" height="33" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="51" y="103" fill="#174ec2" font-size="13" font-weight="700" text-anchor="middle">スライド</text>
+    <rect x="95" y="83" width="66" height="33" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="128" y="103" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">レイヤー</text>
+    <rect x="13" y="131" width="147" height="125" rx="8" fill="#eef3fa" stroke="#cfdaea"/>
+    <rect x="25" y="141" width="123" height="70" rx="4" fill="#ffffff" stroke="#cfdaea"/>
+    <rect x="34" y="158" width="67" height="6" rx="2" fill="#2474ad" stroke="none"/>
+    <rect x="34" y="173" width="95" height="4" rx="2" fill="#cfdaea" stroke="none"/>
+    <rect x="34" y="183" width="77" height="4" rx="2" fill="#cfdaea" stroke="none"/>
+    <text x="26" y="236" fill="#16243b" font-size="14">1   導入</text>
+    <rect x="13" y="272" width="147" height="125" rx="8" fill="#eaf1ff" stroke="#174ec2"/>
+    <rect x="25" y="282" width="123" height="70" rx="4" fill="#ffffff" stroke="#cfdaea"/>
+    <rect x="25" y="282" width="122.88" height="69.12" rx="0" fill="#ffffff" stroke="none"/>
+    <rect x="25" y="282" width="122.88" height="1.536" rx="0" fill="#2474ad" stroke="none"/>
+    <text x="33.192" y="292.88" fill="#27638e" font-size="2.816" font-weight="700">新規事業の検討</text>
+    <text x="33.192" y="302.224" fill="#101b2e" font-size="7.168" font-weight="700">収支の見通し</text>
+    <text x="33.192" y="310.544" fill="#50627a" font-size="3.3280000000000003">3 年間の売上と利益の試算</text>
+    <rect x="33.192" y="317.072" width="51.2" height="20.096" rx="1.024" fill="#e9f4f9" stroke="none"/>
+    <text x="36.392" y="323.088" fill="#27638e" font-size="3.2" font-weight="700">売上</text>
+    <text x="36.392" y="332.048" fill="#101b2e" font-size="6.016" font-weight="700">1.2 億円</text>
+    <rect x="88.232" y="317.072" width="51.2" height="20.096" rx="1.024" fill="#eff3f9" stroke="none"/>
+    <text x="91.432" y="323.088" fill="#27638e" font-size="3.2" font-weight="700">営業利益</text>
+    <text x="91.432" y="332.048" fill="#101b2e" font-size="6.016" font-weight="700">2,400 万円</text>
+    <path d="M33.192 343.056L139.56 343.056" stroke="#cfdaea"/>
+    <text x="33.192" y="347.28" fill="#50627a" font-size="2.432">新規事業計画</text>
+    <text x="26" y="377" fill="#174ec2" font-size="14" font-weight="700">2   収支の見通し</text>
+    <rect x="13" y="413" width="147" height="125" rx="8" fill="#eef3fa" stroke="#cfdaea"/>
+    <rect x="25" y="423" width="123" height="70" rx="4" fill="#ffffff" stroke="#cfdaea"/>
+    <rect x="34" y="440" width="67" height="6" rx="2" fill="#2474ad" stroke="none"/>
+    <rect x="34" y="455" width="95" height="4" rx="2" fill="#cfdaea" stroke="none"/>
+    <rect x="34" y="465" width="77" height="4" rx="2" fill="#cfdaea" stroke="none"/>
+    <text x="26" y="518" fill="#16243b" font-size="14">3   次の進め方</text>
+    <rect x="194" y="214" width="670" height="381" rx="3" fill="#d4e1ef" stroke="none"/>
+    <rect x="192" y="209" width="667.1999999999999" height="375.29999999999995" rx="0" fill="#ffffff" stroke="none"/>
+    <rect x="192" y="209" width="667.1999999999999" height="8.34" rx="0" fill="#2474ad" stroke="none"/>
+    <text x="236.48" y="268.075" fill="#27638e" font-size="15.29" font-weight="700">新規事業の検討</text>
+    <text x="236.48" y="318.81" fill="#101b2e" font-size="38.919999999999995" font-weight="700">収支の見通し</text>
+    <text x="236.48" y="363.985" fill="#50627a" font-size="18.07">3 年間の売上と利益の試算</text>
+    <rect x="236.48" y="399.42999999999995" width="278.0" height="109.115" rx="5.56" fill="#e9f4f9" stroke="none"/>
+    <rect x="236.48" y="399.42999999999995" width="278.0" height="109.115" rx="5.56" fill="none" stroke="#174ec2"/>
+    <rect x="233.48" y="396.42999999999995" width="6" height="6" rx="0" fill="#ffffff" stroke="#174ec2"/>
+    <rect x="233.48" y="505.54499999999996" width="6" height="6" rx="0" fill="#ffffff" stroke="#174ec2"/>
+    <rect x="511.48" y="396.42999999999995" width="6" height="6" rx="0" fill="#ffffff" stroke="#174ec2"/>
+    <rect x="511.48" y="505.54499999999996" width="6" height="6" rx="0" fill="#ffffff" stroke="#174ec2"/>
+    <text x="253.855" y="432.09499999999997" fill="#27638e" font-size="17.375" font-weight="700">売上</text>
+    <text x="253.855" y="480.74499999999995" fill="#101b2e" font-size="32.665" font-weight="700">1.2 億円</text>
+    <rect x="535.3299999999999" y="399.42999999999995" width="278.0" height="109.115" rx="5.56" fill="#eff3f9" stroke="none"/>
+    <text x="552.7049999999999" y="432.09499999999997" fill="#27638e" font-size="17.375" font-weight="700">営業利益</text>
+    <text x="552.7049999999999" y="480.74499999999995" fill="#101b2e" font-size="32.665" font-weight="700">2,400 万円</text>
+    <path d="M236.48 540.515L814.025 540.515" stroke="#cfdaea"/>
+    <text x="236.48" y="563.45" fill="#50627a" font-size="13.204999999999998">新規事業計画</text>
+    <rect x="886" y="65" width="354" height="675" rx="0" fill="#ffffff" stroke="none"/>
+    <path d="M886 65L886 740" stroke="#cfdaea"/>
+    <text x="905" y="99" fill="#50627a" font-size="15" font-weight="700">インスペクター</text>
+    <rect x="904" y="112" width="84" height="34" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="946" y="133" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">プロパティ</text>
+    <rect x="998" y="112" width="76" height="34" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="1036" y="133" fill="#174ec2" font-size="14" font-weight="700" text-anchor="middle">動き</text>
+    <text x="904" y="176" fill="#16243b" font-size="16" font-weight="700">クリックで進む段</text>
+    <rect x="1106" y="151" width="115" height="33" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1163" y="171" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">＋ 段を追加</text>
+    <rect x="904" y="194" width="316" height="56" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="917" y="217" fill="#174ec2" font-size="15" font-weight="700">1   売上</text>
+    <text x="917" y="238" fill="#50627a" font-size="13">登場・フェード ／ クリックごと</text>
+    <rect x="904" y="257" width="316" height="46" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="917" y="277" fill="#16243b" font-size="14" font-weight="700">2   営業利益</text>
+    <text x="917" y="294" fill="#50627a" font-size="13">強調・ズーム ／ クリックごと</text>
+    <rect x="904" y="312" width="108" height="33" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="958" y="332" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">効果を追加</text>
+    <rect x="1022" y="312" width="73" height="33" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1058" y="332" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">下へ</text>
+    <rect x="1105" y="312" width="115" height="33" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1162" y="332" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">移動…</text>
+    <path d="M904 359L1220 359" stroke="#cfdaea"/>
+    <text x="904" y="384" fill="#16243b" font-size="16" font-weight="700">段 1 の効果</text>
+    <text x="904" y="407" fill="#50627a" font-size="13">対象</text>
+    <rect x="904" y="415" width="151" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="913" y="436" fill="#16243b" font-size="14">売上 ▾</text>
+    <text x="1067" y="407" fill="#50627a" font-size="13">きっかけ</text>
+    <rect x="1067" y="415" width="153" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1076" y="436" fill="#16243b" font-size="14">クリックごと</text>
+    <text x="904" y="462" fill="#50627a" font-size="13">用途</text>
+    <rect x="904" y="470" width="151" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="913" y="491" fill="#16243b" font-size="14">登場 ▾</text>
+    <text x="1067" y="462" fill="#50627a" font-size="13">種類</text>
+    <rect x="1067" y="470" width="153" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1076" y="491" fill="#16243b" font-size="14">フェード ▾</text>
+    <text x="904" y="516" fill="#50627a" font-size="13">遅れ（ms）</text>
+    <rect x="904" y="524" width="151" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="913" y="545" fill="#16243b" font-size="14">0</text>
+    <text x="1067" y="516" fill="#50627a" font-size="13">長さ（ms）</text>
+    <rect x="1067" y="524" width="153" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1076" y="545" fill="#16243b" font-size="14">500</text>
+    <rect x="1146" y="566" width="74" height="34" rx="7" fill="#174ec2" stroke="#174ec2"/>
+    <text x="1183" y="587" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">適用</text>
+    <path d="M904 612L1220 612" stroke="#cfdaea"/>
+    <text x="904" y="637" fill="#16243b" font-size="16" font-weight="700">ページの切り替え</text>
+    <text x="904" y="660" fill="#50627a" font-size="13">このページに入る効果</text>
+    <rect x="904" y="668" width="151" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="913" y="689" fill="#16243b" font-size="14">フェード ▾</text>
+    <text x="1067" y="660" fill="#50627a" font-size="13">長さ（ms）</text>
+    <rect x="1067" y="668" width="153" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1076" y="689" fill="#16243b" font-size="14">450</text>
+    <rect x="1146" y="704" width="74" height="29" rx="7" fill="#174ec2" stroke="#174ec2"/>
+    <text x="1183" y="722" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">適用</text>
+    <rect x="0" y="741" width="1240" height="39" rx="0" fill="#ffffff" stroke="none"/>
+    <path d="M0 741L1240 741" stroke="#cfdaea"/>
+    <text x="21" y="765" fill="#50627a" font-size="13">スライド 2 / 3　　1 オブジェクトを選択</text>
+    <text x="819" y="765" fill="#50627a" font-size="13">100%</text>
+  </g>
+<metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTo0Nzk1ZDU3NS02OWE1LTQ2OWEtYjJhNy05ZGFjMmQ5NjI3ODUAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaPFJvfWgQl8VzJKg3QvVX18AAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDozM2JiMDlkNS1kODRkLTRiYzktYTA1ZS1mNTk4MmE5NDhlOWJscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNo+gN59c979xy/FHQxu2EPGQAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFgg+ZoJiqQaLBcuuVEdEoc49tFasQuXLYXjoHoU22vX/pakZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaEEHrdA6ucPCiAxpJXuTVSoAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIDfkzjS15d4qTtBsYbEV1OUPbRGxea94ksLRPNLoqvVLZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GS7UZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjQ3OTVkNTc1LTY5YTUtNDY5YS1iMmE3LTlkYWMyZDk2Mjc4NS9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOmVlNjMxMTBlLWNjMDQtNGUzYS1hMjUwLWM0ODdiODg4YmFmN3JjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCD5mgmKpBosFy65UR0Shzj20VqxC5ctheOgehTba9f+lqJjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggCPSiF1nN6SNHPIQzSEAogrrtv9lU3D+y3Qe0cHX3QqaiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggdPjxZXItUjB5pQbF2tqGqMbvaTLyKYM2wghdYtjcWi90Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQJSH+uAHcRSDApQpBQeU8g/mUpmHO0YBWnyONjw5LMB9tCJLLVsUpME4he7TMf3mYeO7IS7QiSzk9I8kcXPLqH4=</c2pa:manifest></metadata></svg>

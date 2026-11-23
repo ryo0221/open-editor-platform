@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1224" height="630" viewBox="0 0 1224 630" role="img" aria-labelledby="title desc" xmlns:c2pa="http://c2pa.org/manifest">
+  <title id="title">書き出しの形式別表示</title>
+  <desc id="desc">同じ書き出し窓の三つの状態。MP4 の秒数、PDF のページ分け、埋め込み Animation の再生を理由に PPTX の書き出しを止めた例を示す。</desc>
+  <g font-family="IPAGothic, Noto Sans CJK JP, sans-serif">
+    <rect x="0" y="0" width="1224" height="630" rx="0" fill="#eef3fa" stroke="none"/>
+    <rect x="22" y="30" width="384" height="580" rx="14" fill="#d6e0ee" stroke="none"/>
+    <rect x="18" y="24" width="384" height="580" rx="14" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="40" y="61" fill="#16243b" font-size="21" font-weight="700">書き出し</text>
+    <rect x="348" y="37" width="33" height="34" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="364" y="58" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">×</text>
+    <path d="M18 83L402 83" stroke="#cfdaea"/>
+    <rect x="38" y="101" width="80" height="35" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="78" y="122" fill="#174ec2" font-size="14" font-weight="700" text-anchor="middle">MP4</text>
+    <rect x="126" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="166" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">PDF</text>
+    <rect x="214" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="254" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">PPTX</text>
+    <text x="38" y="167" fill="#50627a" font-size="14">対象　表示されるスライド 3 枚</text>
+    <path d="M38 185L382 185" stroke="#cfdaea"/>
+    <path d="M18 528L402 528" stroke="#cfdaea"/>
+    <rect x="38" y="545" width="85" height="42" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="80" y="570" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">閉じる</text>
+    <rect x="266" y="545" width="116" height="42" rx="7" fill="#174ec2" stroke="#174ec2"/>
+    <text x="324" y="570" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">書き出す</text>
+    <rect x="424" y="30" width="384" height="580" rx="14" fill="#d6e0ee" stroke="none"/>
+    <rect x="420" y="24" width="384" height="580" rx="14" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="442" y="61" fill="#16243b" font-size="21" font-weight="700">書き出し</text>
+    <rect x="750" y="37" width="33" height="34" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="766" y="58" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">×</text>
+    <path d="M420 83L804 83" stroke="#cfdaea"/>
+    <rect x="440" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="480" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">MP4</text>
+    <rect x="528" y="101" width="80" height="35" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="568" y="122" fill="#174ec2" font-size="14" font-weight="700" text-anchor="middle">PDF</text>
+    <rect x="616" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="656" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">PPTX</text>
+    <text x="440" y="167" fill="#50627a" font-size="14">対象　表示されるスライド 3 枚</text>
+    <path d="M440 185L784 185" stroke="#cfdaea"/>
+    <path d="M420 528L804 528" stroke="#cfdaea"/>
+    <rect x="440" y="545" width="85" height="42" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="482" y="570" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">閉じる</text>
+    <rect x="668" y="545" width="116" height="42" rx="7" fill="#174ec2" stroke="#174ec2"/>
+    <text x="726" y="570" fill="#ffffff" font-size="14" font-weight="700" text-anchor="middle">書き出す</text>
+    <rect x="826" y="30" width="384" height="580" rx="14" fill="#d6e0ee" stroke="none"/>
+    <rect x="822" y="24" width="384" height="580" rx="14" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="844" y="61" fill="#16243b" font-size="21" font-weight="700">書き出し</text>
+    <rect x="1152" y="37" width="33" height="34" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1168" y="58" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">×</text>
+    <path d="M822 83L1206 83" stroke="#cfdaea"/>
+    <rect x="842" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="882" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">MP4</text>
+    <rect x="930" y="101" width="80" height="35" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="970" y="122" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">PDF</text>
+    <rect x="1018" y="101" width="80" height="35" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <text x="1058" y="122" fill="#174ec2" font-size="14" font-weight="700" text-anchor="middle">PPTX</text>
+    <text x="842" y="167" fill="#50627a" font-size="14">対象</text>
+    <rect x="888" y="146" width="298" height="32" rx="6" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="901" y="167" fill="#16243b" font-size="14">表示されるスライド 3 枚 ▾</text>
+    <path d="M842 185L1186 185" stroke="#cfdaea"/>
+    <path d="M822 528L1206 528" stroke="#cfdaea"/>
+    <rect x="842" y="545" width="85" height="42" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="884" y="570" fill="#16243b" font-size="14" font-weight="700" text-anchor="middle">閉じる</text>
+    <rect x="1070" y="545" width="116" height="42" rx="7" fill="#edf1f6" stroke="#cfdaea"/>
+    <text x="1128" y="570" fill="#50627a" font-size="14" font-weight="700" text-anchor="middle">書き出す</text>
+    <text x="38" y="211" fill="#50627a" font-size="13">既定の待ち時間（秒）</text>
+    <rect x="38" y="219" width="95" height="31" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="47" y="240" fill="#16243b" font-size="14">1.000</text>
+    <rect x="258" y="219" width="124" height="31" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="320" y="238" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">デッキに保存</text>
+    <text x="38" y="285" fill="#16243b" font-size="16" font-weight="700">2　収支の見通し ▾</text>
+    <rect x="38" y="298" width="344" height="42" rx="6" fill="#eef3fa" stroke="#cfdaea"/>
+    <text x="48" y="324" fill="#16243b" font-size="14">初期</text>
+    <rect x="175" y="304" width="65" height="30" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="185" y="324" fill="#16243b" font-size="14">1.000</text>
+    <text x="247" y="324" fill="#50627a" font-size="13">既定</text>
+    <rect x="38" y="345" width="344" height="42" rx="6" fill="#eef3fa" stroke="#cfdaea"/>
+    <text x="48" y="371" fill="#16243b" font-size="14">段 1 の完了</text>
+    <rect x="175" y="351" width="65" height="30" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="185" y="371" fill="#16243b" font-size="14">2.500</text>
+    <text x="247" y="371" fill="#50627a" font-size="12">個別指定</text>
+    <rect x="304" y="352" width="73" height="28" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="340" y="369" fill="#16243b" font-size="11" font-weight="700" text-anchor="middle">既定を使う</text>
+    <rect x="38" y="392" width="344" height="42" rx="6" fill="#eef3fa" stroke="#cfdaea"/>
+    <text x="48" y="418" fill="#16243b" font-size="14">段 2 の完了</text>
+    <rect x="175" y="398" width="65" height="30" rx="5" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="185" y="418" fill="#16243b" font-size="14">1.000</text>
+    <text x="247" y="418" fill="#50627a" font-size="13">既定</text>
+    <text x="38" y="468" fill="#16243b" font-size="14" font-weight="700">見積もり　7.850 秒・236 フレーム</text>
+    <text x="38" y="492" fill="#50627a" font-size="14">960 × 540　／　30 fps</text>
+    <text x="440" y="214" fill="#16243b" font-size="16" font-weight="700">ページ分け</text>
+    <rect x="440" y="231" width="344" height="68" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <circle cx="460" cy="253" r="7" fill="#ffffff" stroke="#174ec2"/>
+    <text x="478" y="258" fill="#16243b" font-size="15" font-weight="700">最後の姿</text>
+    <text x="478" y="282" fill="#50627a" font-size="13">各スライドの最後の姿を一枚ずつ</text>
+    <rect x="440" y="310" width="344" height="68" rx="7" fill="#eaf1ff" stroke="#174ec2"/>
+    <circle cx="460" cy="332" r="7" fill="#174ec2" stroke="#174ec2"/>
+    <text x="478" y="337" fill="#16243b" font-size="15" font-weight="700">段ごと</text>
+    <text x="478" y="361" fill="#50627a" font-size="13">初期状態と各段の完了を一枚ずつ</text>
+    <text x="440" y="418" fill="#16243b" font-size="16" font-weight="700">出力 5 ページ</text>
+    <rect x="660" y="433" width="124" height="32" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="722" y="453" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">デッキに保存</text>
+    <text x="842" y="214" fill="#16243b" font-size="16" font-weight="700">事前確認</text>
+    <rect x="842" y="231" width="344" height="107" rx="8" fill="#fff0ef" stroke="#dfa29f"/>
+    <text x="855" y="256" fill="#942b24" font-size="15" font-weight="700">書き出しできません</text>
+    <text x="855" y="283" fill="#16243b" font-size="14">スライド 3 ／ 埋め込み Animation</text>
+    <text x="855" y="305" fill="#942b24" font-size="13">埋め込み Animation の再生を</text>
+    <text x="855" y="324" fill="#942b24" font-size="13">PowerPoint で再現できません。</text>
+    <rect x="842" y="355" width="140" height="37" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="912" y="377" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">該当箇所へ移動</text>
+    <rect x="996" y="355" width="111" height="37" rx="7" fill="#ffffff" stroke="#cfdaea"/>
+    <text x="1051" y="377" fill="#16243b" font-size="13" font-weight="700" text-anchor="middle">再確認する</text>
+  </g>
+<metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYToxMzdjODk0Mi0wMDYyLTQ5NGQtOTYwYy05Mjk1NzA0ZTNlODYAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaGmvmc+icKLGpoB0O5EK6jcAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDo3Zjk4ZWEzNC1mY2JiLTQxZDEtODNmNi01ZjYxZjRlZmE3NzZscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNoycvStcql8G/4YupaBIyKrgAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggN8Ed2uLADbYKjzAWiJrRfXDumcMZ7mQbFMruj2b3OB+kZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaPmizLIvoN5iNUxasv0WA+YAAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRMAAAAAAAAAAAAAAAAZGhhc2hYIHS3BEKrjGHxEwAjqzxBEDRRFftAHZ30DkTudI4XefNLZG5hbWVuanVtYmYgbWFuaWZlc3RqZXhjbHVzaW9uc4GiZXN0YXJ0GSgLZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjEzN2M4OTQyLTAwNjItNDk0ZC05NjBjLTkyOTU3MDRlM2U4Ni9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjc1MWQ3ZTg2LWY0NGQtNGIyOC1hNDI2LWE4NWYwZTFmOTBkYXJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCA3wR3a4sANtgqPMBaImtF9cO6ZwxnuZBsUyu6PZvc4H6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggl9Gi9EU7hhiR25XV04g33o9fwLyD9a+iXw1RJr9Q2H6iY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggasFRGMfFI/bKmMo7mfU91XWQ1BWQaoCFGE4QO/2BsNB0Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQDmU+eWofizMqRX4I+WLRK5T9NLpeeZA9iSd3GzeN/tJVoQpkv80OwWFc90rM/gycEzmTVRvZaNCOVM/pHvStK0=</c2pa:manifest></metadata></svg>
