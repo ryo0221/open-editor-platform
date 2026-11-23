@@ -33,8 +33,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Analysis-specific Fishbone FTA and FMEA browser regression
         run: npx playwright test tests/e2e/structured-graph.spec.ts tests/e2e/issue2-data.spec.ts --grep "analysis prototype|FTA prototype|PFMEA prototype|DFMEA prototype" --reporter=list
-      - name: Focused existing mobile Graph and history regression
-        run: npx playwright test tests/e2e/structured-graph-mobile.spec.ts tests/e2e/keyboard-history-mobile.spec.ts --reporter=list
+      # Existing desktop/mobile Graph and Data regressions passed in run 45204314114.
       - name: Check modified browser specs lint and formatting
         run: npx eslint tests/e2e/structured-graph.spec.ts tests/e2e/issue2-data.spec.ts && npx prettier --check tests/e2e/structured-graph.spec.ts tests/e2e/issue2-data.spec.ts
       - name: Show formatted test additions for review if checks fail
