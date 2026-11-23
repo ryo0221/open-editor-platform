@@ -1636,13 +1636,14 @@ test('#8 node icons: the category picks the corner badge, which follows edits an
   await expect(research).toHaveAttribute('data-icon', 'cube');
 });
 
-
 /** Cross-domain analysis starters remain native Graphs; these are prototype acceptance smokes. */
 for (const analysis of [
   { template: 'fishbone', profile: 'analysis-fishbone', label: '設備温度の変動' },
   { template: 'fta', profile: 'analysis-fault-tree', label: '電源故障' },
 ] as const) {
-  test(`analysis prototype ${analysis.template}: create, native roundtrip, undo and retained version`, async ({ page }) => {
+  test(`analysis prototype ${analysis.template}: create, native roundtrip, undo and retained version`, async ({
+    page,
+  }) => {
     await page.goto('/');
     if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
       await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
@@ -1654,7 +1655,9 @@ for (const analysis of [
     expect(original.profile.id).toBe(analysis.profile);
     expect(original.nodes.length).toBeGreaterThan(2);
     if (analysis.template === 'fta')
-      await expect(page.getByRole('status', { name: 'FTA evaluation (prototype)' })).toContainText('2.9800%');
+      await expect(page.getByRole('status', { name: 'FTA evaluation (prototype)' })).toContainText(
+        '2.9800%',
+      );
 
     await page.getByRole('button', { name: `Select node ${analysis.label}`, exact: true }).click();
     await page.keyboard.press('ArrowRight');
@@ -1675,7 +1678,9 @@ for (const analysis of [
   });
 }
 
-test('FTA prototype refuses a disconnected basic event, and Undo restores the calculation', async ({ page }) => {
+test('FTA prototype refuses a disconnected basic event, and Undo restores the calculation', async ({
+  page,
+}) => {
   await page.goto('/');
   if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
     await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
