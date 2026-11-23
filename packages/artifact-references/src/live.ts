@@ -11,7 +11,19 @@ export type LiveTarget =
   | { kind: 'value'; targetId: string; metricId: string }
   | { kind: 'figure'; figureId: string };
 export type LiveSource = { artifactId: string; domain: string; target: LiveTarget };
-export type ValueFormat = { style: 'decimal' | 'percent'; digits: number; unit: string };
+/**
+ * grouping: 3 桁ごとに「,」で区切る。scale: 10 の scale 乗で割ってから桁数で丸める（3 千・4 万・6 百万・8 億・12 兆）。
+ * 単位の字（「億円」など）は unit に書く。どちらも無ければ今までどおり。
+ */
+export type ValueFormat = {
+  style: 'decimal' | 'percent';
+  digits: number;
+  unit: string;
+  grouping?: boolean;
+  scale?: ValueScale;
+};
+export const VALUE_SCALES = [3, 4, 6, 8, 12] as const;
+export type ValueScale = (typeof VALUE_SCALES)[number];
 export type LivePresentation =
   | { kind: 'value'; value: number; format: ValueFormat }
   | { kind: 'figure'; label: string };
@@ -60,7 +72,9 @@ const validFormat = (f: ValueFormat) =>
   Number.isInteger(f.digits) &&
   f.digits >= 0 &&
   f.digits <= 6 &&
-  label(f.unit);
+  label(f.unit) &&
+  (f.grouping === undefined || typeof f.grouping === 'boolean') &&
+  (f.scale === undefined || (VALUE_SCALES as readonly number[]).includes(f.scale));
 const validTarget = (t: LiveTarget) =>
   !!t &&
   (t.kind === 'value'
@@ -329,8 +343,16 @@ export function formatLiveValue(
 ): string {
   if (!Number.isFinite(presentation.value) || !validFormat(presentation.format))
     return fail('表示形式が不正です。');
-  const { style, digits, unit } = presentation.format;
-  return `${(presentation.value * (style === 'percent' ? 100 : 1)).toFixed(digits)}${style === 'percent' ? '%' : ''}${unit}`;
+  const { style, digits, unit, grouping, scale } = presentation.format;
+  const shown = (presentation.value * (style === 'percent' ? 100 : 1)) / 10 ** (scale ?? 0);
+  let text = shown.toFixed(digits);
+  if (grouping) {
+    const [whole, fraction] = text.split('.');
+    const sign = whole.startsWith('-') ? '-' : '';
+    const grouped = whole.slice(sign.length).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    text = `${sign}${grouped}${fraction === undefined ? '' : `.${fraction}`}`;
+  }
+  return `${text}${style === 'percent' ? '%' : ''}${unit}`;
 }
 /** Preconditions make a single replacement/removal suitable for a native command. */
 export function changeLiveReference<T extends { id: string; reference: LiveReference }>(
