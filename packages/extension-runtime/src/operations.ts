@@ -6,6 +6,7 @@
  * one input (provider output).
  */
 import { canonicalJson } from '@editor-platform/artifact-core';
+import { itemsDeclarationProblems } from './items';
 import {
   CREATE_ADDON,
   OPERATIONS_ADDON,
@@ -191,13 +192,16 @@ export function operationDeclarationProblems(addon: unknown): string[] {
 export function parseAddons(input: unknown): ManifestAddons {
   if (
     !plain(input) ||
-    Object.keys(input).some((k) => k !== 'operations' && k !== 'create' && k !== 'references')
+    Object.keys(input).some(
+      (k) => k !== 'operations' && k !== 'create' && k !== 'references' && k !== 'items',
+    )
   )
     throw new Error('Unsupported add-ons');
   if (
     input.operations === undefined &&
     input.create === undefined &&
-    input.references === undefined
+    input.references === undefined &&
+    input.items === undefined
   )
     throw new Error('Unsupported add-ons');
   if (input.operations !== undefined) {
@@ -219,6 +223,10 @@ export function parseAddons(input: unknown): ManifestAddons {
       input.references.version !== REFERENCES_ADDON)
   )
     throw new Error('Unsupported references add-on');
+  if (input.items !== undefined) {
+    const problems = itemsDeclarationProblems(input.items);
+    if (problems.length) throw new Error(`Invalid items add-on: ${problems[0]}`);
+  }
   const copy = JSON.parse(canonicalJson(input)) as ManifestAddons;
   return deepFreeze(copy);
 }
