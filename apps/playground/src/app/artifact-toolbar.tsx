@@ -45,6 +45,7 @@ const templateExcludedKinds = [
   'cosim',
   'drawing',
   'factory',
+  'mindmap',
 ];
 const nonNativeKinds = [
   'analysis',
@@ -65,6 +66,7 @@ const nonNativeKinds = [
   'cosim',
   'drawing',
   'factory',
+  'mindmap',
 ];
 
 export interface HistoryControls {

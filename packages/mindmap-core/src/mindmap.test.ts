@@ -143,6 +143,38 @@ describe('commands', () => {
   });
 });
 
+describe('combined field edits', () => {
+  it('validates the combined result, not each field on its own, near the size limit', () => {
+    const d = doc();
+    const root = d.rootId;
+    const size = (c: MindmapContent) => Buffer.byteLength(JSON.stringify(c));
+    let i = 2;
+    const add = (note: string) => {
+      d.nodes[id(i)] = { id: id(i), text: 'x', children: [], note };
+      d.nodes[root].children.push(id(i++));
+    };
+    while (524288 - 50 - size(d) > 7900) add('a'.repeat(4000));
+    // Fill to 50 bytes under the limit with two more notes.
+    const [p, q] = [i, i + 1];
+    add('');
+    add('');
+    const gap = 524288 - 50 - size(d);
+    d.nodes[id(p)].note = 'b'.repeat(Math.floor(gap / 2));
+    d.nodes[id(q)].note = 'b'.repeat(gap - Math.floor(gap / 2));
+    expect(size(d)).toBe(524288 - 50);
+    validateMindmap(d);
+    const target = d.nodes[id(2)];
+    const after = editMindmapNodeFields(id(2), target, {
+      text: target.text + 'y'.repeat(100),
+      note: target.note!.slice(200),
+    }).apply(d);
+    expect(size(after)).toBe(524288 - 150);
+    expect(() =>
+      editMindmapNodeFields(id(2), target, { text: target.text + 'y'.repeat(100) }).apply(d),
+    ).toThrow('上限');
+  });
+});
+
 describe('proposals', () => {
   it('applies a sequence as one command and refuses a changed base', () => {
     const before = doc(),
@@ -223,6 +255,9 @@ describe('compare, items, layout and export', () => {
       ]),
     );
     expect(mindmapDiff(a, a).changes).toEqual([]);
+    expect(
+      mindmapDiff(a, collapseMindmapNode(root, true).apply(a)).changes.map((c) => c.kind),
+    ).toEqual(['changed']);
     // A sibling reorder alone is a change; an added sibling does not reorder the others.
     const reordered = reorderMindmapNode(id(4), 0).apply(a);
     expect(

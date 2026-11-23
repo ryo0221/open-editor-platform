@@ -6,6 +6,7 @@ const title = (n: MindmapNode | undefined) => (n ? n.text || '（無題）' : '�
 const details = (n: MindmapNode) =>
   [
     n.side ? `左右: ${n.side === 'left' ? '左' : '右'}` : '',
+    n.collapsed ? '畳んで保存' : '',
     n.color ? `色: ${n.color}` : '',
     n.marks?.length ? `印: ${n.marks.map((m) => MINDMAP_MARK_NAMES[m]).join('、')}` : '',
     n.note ? `メモ: ${n.note}` : '',

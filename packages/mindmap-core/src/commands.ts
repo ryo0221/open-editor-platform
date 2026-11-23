@@ -174,22 +174,36 @@ export function editMindmapNodeFields(
   fields: MindmapNodeFields,
 ): EditorCommand<MindmapContent> {
   const expected = JSON.stringify(before);
-  const steps: EditorCommand<MindmapContent>[] = [];
-  if (fields.text !== undefined && fields.text !== before.text)
-    steps.push(renameMindmapNode(id, fields.text));
-  if (fields.color !== undefined && fields.color !== (before.color ?? ''))
-    steps.push(colorMindmapNode(id, fields.color || undefined));
-  if (
+  const text = fields.text !== undefined && fields.text !== before.text;
+  const color = fields.color !== undefined && fields.color !== (before.color ?? '');
+  const marks =
     fields.marks !== undefined &&
-    JSON.stringify(fields.marks) !== JSON.stringify(before.marks ?? [])
-  )
-    steps.push(markMindmapNode(id, fields.marks.length ? fields.marks : undefined));
-  if (fields.note !== undefined && fields.note !== (before.note ?? ''))
-    steps.push(noteMindmapNode(id, fields.note || undefined));
+    JSON.stringify(fields.marks) !== JSON.stringify(before.marks ?? []);
+  const note = fields.note !== undefined && fields.note !== (before.note ?? '');
+  const next = structuredClone(fields);
+  const markList = next.marks ?? [];
+  // All fields change on one private copy and the combined result is validated once, so a
+  // valid edit is not refused for an intermediate state (e.g. near the size limit).
+  const change = edit('mindmap.fields', '枝の情報を編集', (c) => {
+    const n = node(c, id);
+    if (text) n.text = next.text!;
+    if (color) {
+      if (next.color) n.color = next.color;
+      else delete n.color;
+    }
+    if (marks) {
+      if (markList.length) n.marks = [...markList];
+      else delete n.marks;
+    }
+    if (note) {
+      if (next.note) n.note = next.note;
+      else delete n.note;
+    }
+  });
   return immutableCommand<MindmapContent>('mindmap.fields', '枝の情報を編集', (current) => {
-    if (!steps.length) throw new MindmapError('変更がありません。');
+    if (!(text || color || marks || note)) throw new MindmapError('変更がありません。');
     if (!current.nodes[id] || JSON.stringify(current.nodes[id]) !== expected)
       throw new MindmapError('編集中にこの枝が変更されました。');
-    return steps.reduce((c, step) => step.apply(c), current);
+    return change.apply(current);
   });
 }

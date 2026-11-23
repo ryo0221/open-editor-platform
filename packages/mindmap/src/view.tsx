@@ -295,7 +295,7 @@ export function MindmapSurface({
   // refuse with the reason (the Host's input boundary).
   useEditorInput({
     label: '枝の情報',
-    read: () => ({ dirty: dirty && !readOnly, composing: composing.current }),
+    read: () => ({ dirty, composing: composing.current }),
     prepare: () => {
       const problem = conflict();
       if (problem) throw new Error(problem);

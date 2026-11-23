@@ -17,4 +17,8 @@ function MindmapHost({ host, content }: HostSurfaceProps<KindContent<typeof mind
   );
 }
 
-export const mindmapSurface = hostKind(mindmapKind, { Surface: MindmapHost });
+export const mindmapSurface = hostKind(mindmapKind, {
+  Surface: MindmapHost,
+  // Switching to read-only commits the unapplied node fields first.
+  hooks: { flushBeforeReadOnly: true },
+});
