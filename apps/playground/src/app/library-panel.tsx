@@ -209,7 +209,9 @@ export function LibraryPanel({
             onChange={(e) => onDataTemplateChange(e.target.value as FmeaTemplateId)}
           >
             {fmeaTemplateOptions.map((template) => (
-              <option key={template.id} value={template.id}>{template.label}</option>
+              <option key={template.id} value={template.id}>
+                {template.label}
+              </option>
             ))}
           </select>
         </label>

@@ -83,7 +83,13 @@ describe('fishbone and FTA structured analysis prototypes', () => {
     graph.presentation.nodes['extra-gate'] = { x: 200, y: 650 };
     graph.edges.push(
       { id: 'reuse-power', type: 'input', from: 'power', to: 'extra-gate', attributes: {} },
-      { id: 'reuse-controller', type: 'input', from: 'controller', to: 'extra-gate', attributes: {} },
+      {
+        id: 'reuse-controller',
+        type: 'input',
+        from: 'controller',
+        to: 'extra-gate',
+        attributes: {},
+      },
       { id: 'reuse-gate', type: 'input', from: 'extra-gate', to: 'gate-or', attributes: {} },
     );
     const result = evaluateFta(graph);

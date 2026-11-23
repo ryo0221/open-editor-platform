@@ -20,7 +20,10 @@ export const fishboneProfile: GraphProfile = {
       title: { type: 'string', required: true },
       notes: { type: 'string' },
     },
-    ui: { order: ['title', 'notes'], fields: { title: { label: '問題' }, notes: { label: '前提' } } },
+    ui: {
+      order: ['title', 'notes'],
+      fields: { title: { label: '問題' }, notes: { label: '前提' } },
+    },
   },
   nodes: {
     problem: {
@@ -65,11 +68,14 @@ export const fishboneProfile: GraphProfile = {
         order: ['name', 'status', 'evidence'],
         fields: {
           name: { label: '原因' },
-          status: { label: '調査状態', options: [
-            { value: 'candidate', label: '仮説' },
-            { value: 'confirmed', label: '確認済み' },
-            { value: 'excluded', label: '除外' },
-          ] },
+          status: {
+            label: '調査状態',
+            options: [
+              { value: 'candidate', label: '仮説' },
+              { value: 'confirmed', label: '確認済み' },
+              { value: 'excluded', label: '除外' },
+            ],
+          },
           evidence: { label: '根拠・参照' },
         },
       },
@@ -204,59 +210,134 @@ function example(
 
 /** Layout approximates a cause-and-effect map; no custom fishbone renderer is introduced. */
 export function createFishboneGraph(): GraphDocument {
-  return example(fishboneProfile, '製品の不良率が上昇', [
-    { id: 'problem', type: 'problem', attributes: { name: '製品の不良率が上昇', metric: '不良率' }, x: 1190, y: 335 },
-    { id: 'equipment', type: 'category', attributes: { name: '設備' }, x: 835, y: 110 },
-    { id: 'people', type: 'category', attributes: { name: '人' }, x: 835, y: 575 },
-    { id: 'method', type: 'category', attributes: { name: '方法' }, x: 480, y: 110 },
-    { id: 'material', type: 'category', attributes: { name: '材料' }, x: 480, y: 575 },
-    { id: 'temperature', type: 'cause', attributes: {
-      name: '設備温度の変動', status: 'candidate', evidence: '温度ログを確認する',
-    }, x: 160, y: 25 },
-    { id: 'calibration', type: 'cause', attributes: {
-      name: 'センサー校正の不足', status: 'candidate',
-    }, x: 160, y: 150 },
-    { id: 'instructions', type: 'cause', attributes: {
-      name: '作業指示の曖昧さ', status: 'candidate',
-    }, x: 160, y: 290 },
-    { id: 'training', type: 'cause', attributes: {
-      name: '教育の不足', status: 'candidate',
-    }, x: 160, y: 435 },
-    { id: 'inspection', type: 'cause', attributes: {
-      name: '検査手順のばらつき', status: 'candidate',
-    }, x: 160, y: 575 },
-    { id: 'lots', type: 'cause', attributes: {
-      name: '材料ロット差', status: 'candidate',
-    }, x: 160, y: 700 },
-  ], [
-    ['temperature', 'equipment'],
-    ['calibration', 'equipment'],
-    ['instructions', 'method'],
-    ['training', 'people'],
-    ['inspection', 'method'],
-    ['lots', 'material'],
-    ['equipment', 'problem'],
-    ['people', 'problem'],
-    ['method', 'problem'],
-    ['material', 'problem'],
-  ]);
+  return example(
+    fishboneProfile,
+    '製品の不良率が上昇',
+    [
+      {
+        id: 'problem',
+        type: 'problem',
+        attributes: { name: '製品の不良率が上昇', metric: '不良率' },
+        x: 1190,
+        y: 335,
+      },
+      { id: 'equipment', type: 'category', attributes: { name: '設備' }, x: 835, y: 110 },
+      { id: 'people', type: 'category', attributes: { name: '人' }, x: 835, y: 575 },
+      { id: 'method', type: 'category', attributes: { name: '方法' }, x: 480, y: 110 },
+      { id: 'material', type: 'category', attributes: { name: '材料' }, x: 480, y: 575 },
+      {
+        id: 'temperature',
+        type: 'cause',
+        attributes: {
+          name: '設備温度の変動',
+          status: 'candidate',
+          evidence: '温度ログを確認する',
+        },
+        x: 160,
+        y: 25,
+      },
+      {
+        id: 'calibration',
+        type: 'cause',
+        attributes: {
+          name: 'センサー校正の不足',
+          status: 'candidate',
+        },
+        x: 160,
+        y: 150,
+      },
+      {
+        id: 'instructions',
+        type: 'cause',
+        attributes: {
+          name: '作業指示の曖昧さ',
+          status: 'candidate',
+        },
+        x: 160,
+        y: 290,
+      },
+      {
+        id: 'training',
+        type: 'cause',
+        attributes: {
+          name: '教育の不足',
+          status: 'candidate',
+        },
+        x: 160,
+        y: 435,
+      },
+      {
+        id: 'inspection',
+        type: 'cause',
+        attributes: {
+          name: '検査手順のばらつき',
+          status: 'candidate',
+        },
+        x: 160,
+        y: 575,
+      },
+      {
+        id: 'lots',
+        type: 'cause',
+        attributes: {
+          name: '材料ロット差',
+          status: 'candidate',
+        },
+        x: 160,
+        y: 700,
+      },
+    ],
+    [
+      ['temperature', 'equipment'],
+      ['calibration', 'equipment'],
+      ['instructions', 'method'],
+      ['training', 'people'],
+      ['inspection', 'method'],
+      ['lots', 'material'],
+      ['equipment', 'problem'],
+      ['people', 'problem'],
+      ['method', 'problem'],
+      ['material', 'problem'],
+    ],
+  );
 }
 
 export function createFtaGraph(): GraphDocument {
-  const graph = example(ftaProfile, '設備停止のFTA（独立事象の例）', [
-    { id: 'top', type: 'top', attributes: { name: '設備が停止' }, x: 600, y: 45 },
-    { id: 'gate-or', type: 'or', attributes: { name: 'OR' }, x: 600, y: 215 },
-    { id: 'power', type: 'basic', attributes: {
-      name: '電源故障', probability: 0.01, evidence: '説明用の仮定値',
-    }, x: 300, y: 395 },
-    { id: 'controller', type: 'basic', attributes: {
-      name: '制御装置故障', probability: 0.02, evidence: '説明用の仮定値',
-    }, x: 900, y: 395 },
-  ], [
-    ['power', 'gate-or'],
-    ['controller', 'gate-or'],
-    ['gate-or', 'top'],
-  ]);
+  const graph = example(
+    ftaProfile,
+    '設備停止のFTA（独立事象の例）',
+    [
+      { id: 'top', type: 'top', attributes: { name: '設備が停止' }, x: 600, y: 45 },
+      { id: 'gate-or', type: 'or', attributes: { name: 'OR' }, x: 600, y: 215 },
+      {
+        id: 'power',
+        type: 'basic',
+        attributes: {
+          name: '電源故障',
+          probability: 0.01,
+          evidence: '説明用の仮定値',
+        },
+        x: 300,
+        y: 395,
+      },
+      {
+        id: 'controller',
+        type: 'basic',
+        attributes: {
+          name: '制御装置故障',
+          probability: 0.02,
+          evidence: '説明用の仮定値',
+        },
+        x: 900,
+        y: 395,
+      },
+    ],
+    [
+      ['power', 'gate-or'],
+      ['controller', 'gate-or'],
+      ['gate-or', 'top'],
+    ],
+  );
   graph.attributes.assumptions = '基本事象の独立性を仮定。共通原因故障・時間依存を扱わない。';
   return graph;
 }
@@ -273,11 +354,9 @@ export function evaluateFta(graph: GraphDocument): FtaResult {
   if (graph.profile.id !== ftaProfile.id || graph.profile.version !== ftaProfile.version)
     return { ok: false, issues: ['FTAのProfileではありません。'] };
   const diagnostics = validateGraph(graph, ftaProfile).filter((item) => item.blocking);
-  if (diagnostics.length)
-    return { ok: false, issues: diagnostics.map((item) => item.message) };
+  if (diagnostics.length) return { ok: false, issues: diagnostics.map((item) => item.message) };
   const tops = graph.nodes.filter((node) => node.type === 'top');
-  if (tops.length !== 1)
-    return { ok: false, issues: ['トップ事象を1つ指定してください。'] };
+  if (tops.length !== 1) return { ok: false, issues: ['トップ事象を1つ指定してください。'] };
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const inputs = new Map(graph.nodes.map((node) => [node.id, [] as string[]]));
   for (const edge of graph.edges) inputs.get(edge.to)?.push(edge.from);
@@ -296,7 +375,12 @@ export function evaluateFta(graph: GraphDocument): FtaResult {
       if (node.type === 'basic') {
         if (children.length) throw Error('基本事象には入力を接続できません。');
         const probability = node.attributes.probability;
-        if (typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1)
+        if (
+          typeof probability !== 'number' ||
+          !Number.isFinite(probability) ||
+          probability < 0 ||
+          probability > 1
+        )
           throw Error('基本事象の発生確率は0～1の数値で指定してください。');
         return { probability, leaves: new Set([id]) };
       }
@@ -336,6 +420,9 @@ export function evaluateFta(graph: GraphDocument): FtaResult {
       basicEventIds: [...evaluated.leaves].sort(),
     };
   } catch (error) {
-    return { ok: false, issues: [error instanceof Error ? error.message : 'FTAを評価できません。'] };
+    return {
+      ok: false,
+      issues: [error instanceof Error ? error.message : 'FTAを評価できません。'],
+    };
   }
 }

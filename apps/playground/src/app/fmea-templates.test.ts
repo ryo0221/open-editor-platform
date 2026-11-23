@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { cellValue, isStructuredData, setCell, validateData } from '@editor-platform/structured-data';
 import {
-  createFmeaData,
-  fmeaTemplateOptions,
-  inspectFmeaData,
-  isFmeaData,
-} from './fmea-templates';
+  cellValue,
+  isStructuredData,
+  setCell,
+  validateData,
+} from '@editor-platform/structured-data';
+import { createFmeaData, fmeaTemplateOptions, inspectFmeaData, isFmeaData } from './fmea-templates';
 
 describe('FMEA Structured Data templates', () => {
   it.each(['pfmea', 'dfmea'] as const)(
-    '%s uses native Data with stable row IDs, valid views and editable ratings', (which) => {
+    '%s uses native Data with stable row IDs, valid views and editable ratings',
+    (which) => {
       const data = createFmeaData(which);
       expect(isStructuredData(data)).toBe(true);
       expect(isFmeaData(data)).toBe(true);
@@ -53,6 +54,8 @@ describe('FMEA Structured Data templates', () => {
   it('does not confuse a regular Data artifact with FMEA', () => {
     expect(fmeaTemplateOptions.map((option) => option.id)).toEqual(['blank', 'pfmea', 'dfmea']);
     const data = createFmeaData('pfmea');
-    expect(isFmeaData({ ...data, columns: data.columns.filter((column) => column.id !== 'ap') })).toBe(false);
+    expect(
+      isFmeaData({ ...data, columns: data.columns.filter((column) => column.id !== 'ap') }),
+    ).toBe(false);
   });
 });

@@ -922,7 +922,10 @@ export default function App({
     if (isStructuredData(saved.draft.content) && isFmeaData(saved.draft.content)) {
       const inspection = inspectFmeaData(saved.draft.content);
       if (inspection.issues.length) {
-        setError('FMEAのS/O/D・必須入力を確認してください。draftは保持されています: ' + inspection.issues[0]);
+        setError(
+          'FMEAのS/O/D・必須入力を確認してください。draftは保持されています: ' +
+            inspection.issues[0],
+        );
         return;
       }
     }

@@ -33,33 +33,39 @@ function DataHost({ host, content }: { host: SurfaceHost; content: StructuredDat
   return (
     <>
       {inspection && (
-        <section aria-label="FMEA inspection (prototype)" role="status" style={{ padding: '8px 12px', borderBottom: '1px solid #94a3b8' }}>
+        <section
+          aria-label="FMEA inspection (prototype)"
+          role="status"
+          style={{ padding: '8px 12px', borderBottom: '1px solid #94a3b8' }}
+        >
           <strong>FMEA試作 / {inspection.rowCount}件</strong>
-          {' · '}RPN = S × O × D（参考値） / AP未評価 {inspection.apPending}件
-          {' · '}{inspection.issues.length ? `入力要確認 ${inspection.issues.length}件: ${inspection.issues.slice(0, 2).join(' / ')}` : 'S/O/D: 1～10を確認'}
+          {' · '}RPN = S × O × D（参考値） / AP未評価 {inspection.apPending}件{' · '}
+          {inspection.issues.length
+            ? `入力要確認 ${inspection.issues.length}件: ${inspection.issues.slice(0, 2).join(' / ')}`
+            : 'S/O/D: 1～10を確認'}
           <div style={{ fontSize: '0.8em' }}>
             APは自動判定しません。尺度・評価根拠・対策後の再評価は担当者による確認が必要です。
           </div>
         </section>
       )}
       <MemoDataSurface
-      content={content}
-      initialView={retainedDataView(content, host.dataViews[host.active.id])}
-      onViewChange={host.dataViewChanged}
-      renderGraph={
-        host.shared
-          ? undefined
-          : (props) => (
-              <DataGraphSurface
-                {...props}
-                sourceRevision={canonicalJson((session as EditorSession<Content>).revision)}
-              />
-            )
-      }
-      readOnly={host.readOnly}
-      execute={host.execute}
-      select={host.select}
-    />
+        content={content}
+        initialView={retainedDataView(content, host.dataViews[host.active.id])}
+        onViewChange={host.dataViewChanged}
+        renderGraph={
+          host.shared
+            ? undefined
+            : (props) => (
+                <DataGraphSurface
+                  {...props}
+                  sourceRevision={canonicalJson((session as EditorSession<Content>).revision)}
+                />
+              )
+        }
+        readOnly={host.readOnly}
+        execute={host.execute}
+        select={host.select}
+      />
     </>
   );
 }

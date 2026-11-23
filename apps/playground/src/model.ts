@@ -236,7 +236,10 @@ export function makeArtifact(
 ): StoredArtifact {
   if (kind === 'data' && dataTemplate !== 'blank') {
     const name = dataTemplate === 'pfmea' ? 'PFMEA: 製造工程（試作）' : 'DFMEA: 製品設計（試作）';
-    return { ...createArtifact<Content>('data', name, createFmeaData(dataTemplate)), annotations: [] };
+    return {
+      ...createArtifact<Content>('data', name, createFmeaData(dataTemplate)),
+      annotations: [],
+    };
   }
   const options =
     kind === 'structured-graph'

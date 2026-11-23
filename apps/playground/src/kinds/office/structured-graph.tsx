@@ -14,11 +14,16 @@ import { readGraphDocument } from '@editor-platform/structured-graph';
 import { clone } from '@editor-platform/artifact-core';
 
 function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphDefinition>>) {
-  const evaluation = content.profile.id === 'analysis-fault-tree' ? evaluateFta(content) : undefined;
+  const evaluation =
+    content.profile.id === 'analysis-fault-tree' ? evaluateFta(content) : undefined;
   return (
     <>
       {evaluation && (
-        <section aria-label="FTA evaluation (prototype)" role="status" style={{ padding: '8px 12px', borderBottom: '1px solid #94a3b8' }}>
+        <section
+          aria-label="FTA evaluation (prototype)"
+          role="status"
+          style={{ padding: '8px 12px', borderBottom: '1px solid #94a3b8' }}
+        >
           <strong>FTA試算（静的・独立事象の仮定）: </strong>
           {evaluation.ok
             ? `トップ事象の確率 ${(evaluation.probability * 100).toFixed(4)}% / 基本事象 ${evaluation.basicEventIds.length}件`
@@ -29,14 +34,14 @@ function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphD
         </section>
       )}
       <NativeGraphSurface
-      content={content}
-      profile={graphProfileFor(content) ?? relationProfile}
-      sourceRevision={canonicalJson((host.session as EditorSession<Content>).revision)}
-      execute={host.execute}
-      select={host.select}
-      selectedId={host.selection.addresses[0]?.elementId}
-      readOnly={host.readOnly}
-    />
+        content={content}
+        profile={graphProfileFor(content) ?? relationProfile}
+        sourceRevision={canonicalJson((host.session as EditorSession<Content>).revision)}
+        execute={host.execute}
+        select={host.select}
+        selectedId={host.selection.addresses[0]?.elementId}
+        readOnly={host.readOnly}
+      />
     </>
   );
 }

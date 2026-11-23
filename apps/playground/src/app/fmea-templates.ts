@@ -45,7 +45,9 @@ const processExample: FmeaRecord[] = [
     cause: '金型温度の変動',
     prevention: '温度設定の標準化',
     detectionControl: '抜取寸法検査',
-    s: 7, o: 5, d: 6,
+    s: 7,
+    o: 5,
+    d: 6,
     proposed: '温度ログ監視と工程能力検証',
     owner: '生産技術',
     note: 'Fishbone: 設備温度の変動（文字列メモ・未リンク）',
@@ -59,7 +61,9 @@ const processExample: FmeaRecord[] = [
     cause: 'トルク工具の校正漏れ',
     prevention: '工具点検ルール',
     detectionControl: '締付け記録の監査',
-    s: 9, o: 3, d: 6,
+    s: 9,
+    o: 3,
+    d: 6,
     proposed: '締付け値の自動記録と異常停止',
     owner: '製造',
     note: '校正記録と締付け履歴を確認',
@@ -73,7 +77,9 @@ const processExample: FmeaRecord[] = [
     cause: '判定基準の不統一',
     prevention: '検査員の判定訓練',
     detectionControl: '目視と照明治具',
-    s: 5, o: 6, d: 7,
+    s: 5,
+    o: 6,
+    d: 7,
     proposed: '標準画像による判定と抜取監査',
     owner: '品質保証',
     note: '不良画像は未添付',
@@ -90,7 +96,9 @@ const designExample: FmeaRecord[] = [
     cause: '過大負荷・潤滑不足',
     prevention: '負荷余裕と潤滑設計',
     detectionControl: '寿命試験',
-    s: 9, o: 4, d: 6,
+    s: 9,
+    o: 4,
+    d: 6,
     proposed: '過負荷保護と寿命試験条件の追加',
     owner: '機構設計',
     note: 'FTA基本事象への対応付けは未実装',
@@ -104,7 +112,9 @@ const designExample: FmeaRecord[] = [
     cause: '通信・配線の異常',
     prevention: '配線保護と冗長監視',
     detectionControl: '更新周期の検査',
-    s: 10, o: 2, d: 7,
+    s: 10,
+    o: 2,
+    d: 7,
     proposed: 'Watchdogと異常時の安全停止',
     owner: '電装設計',
     note: '高い重大度をRPNだけで軽視しない',
@@ -118,7 +128,9 @@ const designExample: FmeaRecord[] = [
     cause: 'タスク競合',
     prevention: '優先度・実行時間の設計',
     detectionControl: 'HIL試験',
-    s: 10, o: 3, d: 5,
+    s: 10,
+    o: 3,
+    d: 5,
     proposed: '最悪実行時間の測定と保護監視',
     owner: '制御設計',
     note: '試験根拠は別成果物で確認する',
@@ -195,10 +207,23 @@ export function createFmeaData(which: FmeaExampleId): StructuredData {
   };
   const base = defaultView(data);
   const widths = {
-    item: 180, function: 180, failure: 180, effect: 200, cause: 200,
-    prevention: 180, detectionControl: 180, s: 90, o: 90, d: 90,
-    rpn: 130, ap: 135, action: 220, owner: 130,
-    due: 115, status: 120, evidence: 250,
+    item: 180,
+    function: 180,
+    failure: 180,
+    effect: 200,
+    cause: 200,
+    prevention: 180,
+    detectionControl: 180,
+    s: 90,
+    o: 90,
+    d: 90,
+    rpn: 130,
+    ap: 135,
+    action: 220,
+    owner: 130,
+    due: 115,
+    status: 120,
+    evidence: 250,
   };
   data.views = [
     { ...base, id: 'fmea-risk', name: 'リスク分析', frozen: 3, widths },
@@ -217,10 +242,15 @@ export function createFmeaData(which: FmeaExampleId): StructuredData {
 
 /** A conservative marker for the prototype, based on an exact field signature. */
 export function isFmeaData(data: StructuredData): boolean {
-  return ['failure', 'effect', 'cause', 's', 'o', 'd', 'rpn', 'ap', 'action', 'status']
-    .every((id) => data.columns.some((column) => column.id === id))
-    && data.columns.some((column) => column.id === 'rpn'
-      && column.type === 'formula' && column.formula === 'S * O * D');
+  return (
+    ['failure', 'effect', 'cause', 's', 'o', 'd', 'rpn', 'ap', 'action', 'status'].every((id) =>
+      data.columns.some((column) => column.id === id),
+    ) &&
+    data.columns.some(
+      (column) =>
+        column.id === 'rpn' && column.type === 'formula' && column.formula === 'S * O * D',
+    )
+  );
 }
 
 export interface FmeaInspection {
