@@ -4,7 +4,8 @@
  * step, but at each declared place the larger of the current and the restored value is kept, so an
  * ID that was issued once is never issued again for something else.
  *
- * A place is a JSON Pointer (RFC 6901) such as `/lastIssued`. At that place a number keeps the
+ * A place is a JSON Pointer (RFC 6901) such as `/lastIssued` or `/groups/0/lastIssued` (array
+ * steps are indexes). At that place a number keeps the
  * larger value; a plain object keeps, key by key, the larger number (keys from either side are
  * kept; nested objects are walked the same way). Any other shape, or a place missing on one side,
  * leaves the restored value as it is.
@@ -52,12 +53,16 @@ function higher(restored: unknown, current: unknown): unknown {
       if (!Object.hasOwn(out, k)) {
         // A key only the current side has (a prefix first issued after the restored version):
         // keep it only when it holds numbers, so other data is never carried across history.
-        if (finite(v) || (plain(v) && onlyNumbers(v))) out[k] = structuredClone(v);
-      } else out[k] = higher(out[k], v);
+        if (finite(v) || (plain(v) && onlyNumbers(v))) own(out, k, structuredClone(v));
+      } else own(out, k, higher(out[k], v));
     }
     return out;
   }
   return restored;
+}
+/** Sets an own data property, so a JSON key such as `__proto__` stays an ordinary key. */
+function own(obj: Record<string, unknown>, k: string, v: unknown) {
+  Object.defineProperty(obj, k, { value: v, writable: true, enumerable: true, configurable: true });
 }
 function onlyNumbers(v: Record<string, unknown>): boolean {
   return Object.values(v).every((x) => finite(x) || (plain(x) && onlyNumbers(x)));
@@ -74,12 +79,12 @@ export function keepHighest<T>(restored: T, current: T, paths: readonly string[]
     let r: unknown = result;
     let c: unknown = current;
     for (const k of keys) {
-      if (!plain(r) || !plain(c) || !Object.hasOwn(r, k) || !Object.hasOwn(c, k)) {
+      if (!has(r, k) || !has(c, k)) {
         r = undefined;
         break;
       }
-      r = r[k];
-      c = c[k];
+      r = (r as Record<string, unknown>)[k];
+      c = (c as Record<string, unknown>)[k];
     }
     if (r === undefined) continue;
     const next = higher(r, c);
@@ -88,9 +93,21 @@ export function keepHighest<T>(restored: T, current: T, paths: readonly string[]
   }
   return result as T;
 }
+/** Whether a step of the pointer exists: an own key of a plain object, or an index of an array. */
+function has(v: unknown, k: string): boolean {
+  if (Array.isArray(v)) return /^(0|[1-9]\d*)$/.test(k) && Number(k) < v.length;
+  return plain(v) && Object.hasOwn(v, k);
+}
 function setAt(root: unknown, keys: string[], value: unknown): unknown {
   if (!keys.length) return value;
   const [k, ...rest] = keys;
+  if (Array.isArray(root)) {
+    const copy = [...root];
+    copy[Number(k)] = setAt(root[Number(k)], rest, value);
+    return copy;
+  }
   const obj = root as Record<string, unknown>;
-  return { ...obj, [k]: setAt(obj[k], rest, value) };
+  const copy = { ...obj };
+  own(copy, k, setAt(obj[k], rest, value));
+  return copy;
 }

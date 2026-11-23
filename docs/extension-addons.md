@@ -49,8 +49,8 @@ Host は呼び出し前に参照元への権限と保存版を認証し、draft 
 manifest.addons = { history: { version: HISTORY_ADDON, keepHighest: ['/lastIssued'] } };
 ```
 
-- `keepHighest` は JSON Pointer（RFC 6901）の並びで、1〜16 件、1 件 256 文字まで、重なり無し。
+- `keepHighest` は JSON Pointer（RFC 6901）の並びで、1〜16 件、1 件 256 文字まで、重なり無し。配列の中は添字（`/groups/0/lastIssued`）で指す。
 - Host は宣言を自分の session に渡します：`EditorHostAdapter.keepHighest`（`ArtifactEditor` が `EditorSession` の `keepHighest` に渡す）。package のコードは要りません。
 - Undo/Redo は今までどおり 1 つの履歴の操作で前の中身を戻します。ただし宣言した場所では、今の値と戻す値の大きい方を残します。数は大きい方、平らな object（数の表）は key ごとに大きい方（戻す版に無い key も、数だけなら残す）。ほかの形や、どちらかに無い場所は戻す値のままです。
-- 検証の callback（`undo(validate)`）が受け取るのは、この調整のあとの中身です。
+- 検証の callback（`undo(validate)`）が受け取るのも、`peekHistory` が返すのも、この調整のあとの中身です。
 - 守れるのは 1 つの session の中だけです。保存した版を開き直して Undo の履歴が無いときは、保存した値がそのまま上限です。

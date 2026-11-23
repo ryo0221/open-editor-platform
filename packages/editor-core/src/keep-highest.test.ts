@@ -86,3 +86,60 @@ describe('keepHighest (#64: Undo never lowers an issued ID number)', () => {
     expect(() => new EditorSession({}, { keepHighest: ['bad'] })).toThrow();
   });
 });
+
+describe('keepHighest review fixes (#73)', () => {
+  it('walks array indexes and keeps arrays as arrays', () => {
+    const out = keepHighest(
+      { groups: [{ lastIssued: 1 }, { lastIssued: 9 }] },
+      { groups: [{ lastIssued: 4 }, { lastIssued: 2 }] },
+      ['/groups/0/lastIssued', '/groups/1/lastIssued'],
+    );
+    expect(out).toEqual({ groups: [{ lastIssued: 4 }, { lastIssued: 9 }] });
+    expect(Array.isArray(out.groups)).toBe(true);
+    // Non-index steps, out-of-range indexes and "-" leave the restored value as it is.
+    for (const p of [
+      '/groups/x/lastIssued',
+      '/groups/5/lastIssued',
+      '/groups/-/lastIssued',
+      '/groups/01/lastIssued',
+    ]) {
+      const r = { groups: [{ lastIssued: 1 }] };
+      expect(keepHighest(r, { groups: [{ lastIssued: 4 }] }, [p])).toBe(r);
+    }
+  });
+
+  it('keeps a numeric key named __proto__ as an ordinary own key', () => {
+    const current = JSON.parse('{"lastIssued":{"__proto__":7,"FA":3,"x":{"__proto__":{"n":2}}}}');
+    const out = keepHighest({ lastIssued: {} as Record<string, unknown> }, current, [
+      '/lastIssued',
+    ]);
+    expect(Object.hasOwn(out.lastIssued, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(out.lastIssued, '__proto__')?.value).toBe(7);
+    expect(out.lastIssued.FA).toBe(3);
+    expect(Object.getPrototypeOf(out.lastIssued)).toBe(Object.prototype);
+    const x = out.lastIssued.x as Record<string, unknown>;
+    expect(Object.getPrototypeOf(x)).toBe(Object.prototype);
+    expect(Object.hasOwn(x, '__proto__')).toBe(true);
+  });
+
+  it('peekHistory returns what Undo/Redo will commit, with stable identity', () => {
+    const s = new EditorSession<{ count: number; n: number }>(
+      { count: 1, n: 0 },
+      { keepHighest: ['/count'] },
+    );
+    s.execute(command('set', 'set', (d) => ({ ...d, count: 4, n: 1 })));
+    const peeked = s.peekHistory('undo')!;
+    expect(peeked).toEqual({ count: 4, n: 0 });
+    expect(s.peekHistory('undo')).toBe(peeked);
+    let seen: unknown;
+    const view = s.undoView((candidate) => {
+      seen = candidate;
+    });
+    expect(seen).toEqual(peeked);
+    expect(view).toBe(peeked);
+    expect(s.content).toEqual({ count: 4, n: 0 });
+    const redo = s.peekHistory('redo')!;
+    expect(redo).toEqual({ count: 4, n: 1 });
+    expect(s.peekHistory('redo')).toBe(redo);
+  });
+});

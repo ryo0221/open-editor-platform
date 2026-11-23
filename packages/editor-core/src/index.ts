@@ -236,7 +236,19 @@ export class EditorSession<T> {
    * it has already checked. */
   peekHistory(direction: 'undo' | 'redo'): T | undefined {
     const source = direction === 'undo' ? this.past : this.future;
-    return source.length ? deepFreeze(source[source.length - 1].content) : undefined;
+    return source.length ? this.candidateOf(source[source.length - 1].content) : undefined;
+  }
+  private kept?: { entry: T; current: T; candidate: T };
+  /** The content Undo/Redo would commit for a history entry: the entry with the declared
+   * places raised to the current values. Stable identity while entry and current stay the same;
+   * the entry itself when nothing is raised. */
+  private candidateOf(entry: T): T {
+    if (!this.keep.length) return deepFreeze(entry);
+    const k = this.kept;
+    if (k && k.entry === entry && k.current === this.value) return k.candidate;
+    const candidate = deepFreeze(keepHighest(entry, this.value, this.keep));
+    this.kept = { entry, current: this.value, candidate };
+    return candidate;
   }
   /** Optional synchronous pre-commit validation; throws leave all history state untouched. */
   undo(validateCandidate?: (candidate: T) => void) {
@@ -264,10 +276,7 @@ export class EditorSession<T> {
     const destination = direction === 'undo' ? this.future : this.past;
     const entry = source.length ? source[source.length - 1].content : this.value;
     // Declared places keep the larger of the current and the restored value (one history step).
-    const candidate =
-      source.length && this.keep.length
-        ? deepFreeze(keepHighest(entry, this.value, this.keep))
-        : entry;
+    const candidate = source.length && this.keep.length ? this.candidateOf(entry) : entry;
     if (source.length) this.validateHistory(candidate, validateCandidate);
     // Own/freeze the result before changing history. Callers of the legacy
     // methods still receive independent mutable copies.
