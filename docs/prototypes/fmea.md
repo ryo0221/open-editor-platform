@@ -27,10 +27,11 @@ FMEA starts as a table of failure modes, effects, causes, controls, ratings, act
 - No AIAG/VDA AP lookup, DFMEA/PFMEA process step hierarchy, post-action reassessment, multi-party approval, controlled rating-table version or review evidence closure in this prototype.
 - Cross-artifact references to the related Fishbone/FTA remain ordinary notes and are **not verified live links**.
 - The prototype detects out-of-range S/O/D at the Playground banner and retained-version save. It does not change the generic Structured Data schema.
+- A Data table is treated as FMEA when it keeps the template's column IDs (`failure`, `effect`, `cause`, `s`, `o`, `d`, `rpn`, `ap`, `action`, `status`) and `rpn` is a formula. Renaming columns or editing the formula keeps the checks; deleting one of those columns turns the banner and the S/O/D save check off.
 - AP H/M/L values are unverified manual classifications; no approval is implied.
 
 ## Verification
 
-Automated sample/unit tests: `apps/playground/src/app/fmea-templates.test.ts`. Relevant full checks: repo lint, typecheck, build, Data creation/editing/save/reload/import/desktop/mobile regressions. Until executed, report them as NOT RUN. Do not treat a structurally valid Data table as a certified FMEA.
+Automated sample/unit tests: `apps/playground/src/app/fmea-templates.test.ts`. Relevant full checks: repo lint, typecheck, build, Data creation/editing/save/reload/import/desktop/mobile regressions. Results are recorded in [the verification record](../verification/analysis-prototypes/README.md). Do not treat a structurally valid Data table as a certified FMEA.
 
 Design decision: use a Host-owned Data template while validating UX. Reassess a dedicated FMEA Surface only if the Domain requires operations that the generic Data projections cannot safely express.

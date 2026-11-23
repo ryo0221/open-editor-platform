@@ -31,6 +31,6 @@ Under the explicit independence assumption: AND = product of probabilities; OR =
 
 ## Verification and next steps
 
-Relevant automated tests: apps/playground/src/app/analysis-graph-templates.test.ts and apps/playground/src/app/graph-templates.test.ts. Also run repository lint, typecheck, build, and relevant desktop/mobile Graph E2E scenarios. Unexecuted checks must be reported as NOT RUN.
+Relevant automated tests: apps/playground/src/app/analysis-graph-templates.test.ts and apps/playground/src/app/graph-templates.test.ts. Also run repository lint, typecheck, build, and relevant desktop/mobile Graph E2E scenarios. Results are recorded in [the verification record](../verification/analysis-prototypes/README.md); unexecuted checks are reported as NOT RUN.
 
 Use this prototype to evaluate the user experience of creating and linking causes, attaching evidence, editing fault-tree gates, understanding invalid input, and preserving structured data. Do not add a new Editor kind without demonstrating a semantic need under docs/editor-development.md and docs/editor-acceptance.md.
