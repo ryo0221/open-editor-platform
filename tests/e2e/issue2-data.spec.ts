@@ -1,5 +1,5 @@
 import { test, expect, nativeArtifact, save } from './fixtures';
-import { cellValue, type StructuredData } from '@editor-platform/structured-data';
+import { cellValue, type StructuredData } from '@editor-platform/structured-data/model';
 import { readFile } from 'node:fs/promises';
 async function field(
   page: import('@playwright/test').Page,
@@ -198,7 +198,6 @@ test('H3 fifty records stay consistent across grid, form, kanban, timeline, dash
   await page.screenshot({ path: info.outputPath('data-grid.png') });
 });
 
-
 test('PFMEA prototype: typed ratings, RPN, Undo and retained-version rejection', async ({
   page,
 }) => {
@@ -253,7 +252,9 @@ test('PFMEA prototype: typed ratings, RPN, Undo and retained-version rejection',
   expect((refused.draft.content as StructuredData).rows[0].values.s).toBe(11);
 });
 
-test('DFMEA prototype can create distinct native Data without linked fault event assumptions', async ({ page }) => {
+test('DFMEA prototype can create distinct native Data without linked fault event assumptions', async ({
+  page,
+}) => {
   await page.goto('/');
   if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
     await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
@@ -263,5 +264,7 @@ test('DFMEA prototype can create distinct native Data without linked fault event
   const record = await nativeArtifact(page);
   expect(record.name).toContain('DFMEA');
   expect((record.draft.content as StructuredData).rows).toHaveLength(3);
-  await expect(page.getByRole('status', { name: 'FMEA inspection (prototype)' })).toContainText('AP未評価 3件');
+  await expect(page.getByRole('status', { name: 'FMEA inspection (prototype)' })).toContainText(
+    'AP未評価 3件',
+  );
 });
