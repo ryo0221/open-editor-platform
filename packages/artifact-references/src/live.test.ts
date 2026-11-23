@@ -288,6 +288,7 @@ describe('live references', () => {
     expect(validLiveReference(scaled)).toBe(true);
     expect(() => at(1, { scale: 5 })).toThrow('表示形式が不正です。');
     expect(() => at(1, { grouping: 'yes' })).toThrow('表示形式が不正です。');
+    expect(() => at(1, { style: 'percent', scale: 3 })).toThrow('表示形式が不正です。');
     await expect(
       createLiveReference(source, first, provider, { ...format, scale: 7 as never }),
     ).rejects.toThrow();
