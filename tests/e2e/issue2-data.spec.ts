@@ -1,4 +1,4 @@
-import { test, expect, nativeArtifact } from './fixtures';
+import { test, expect, nativeArtifact, editCell, save } from './fixtures';
 import type { StructuredData } from '@editor-platform/structured-data';
 import { readFile } from 'node:fs/promises';
 async function field(
