@@ -46,6 +46,16 @@ async function encoded(plan: SlidePptxPlan) {
   return { ...result, files, xml: (path = 'ppt/slides/slide1.xml') => strFromU8(files[path]) };
 }
 
+it('declares Japanese charsets so PowerPoint substitutes a Japanese font, not a Chinese one', async () => {
+  const output = await encoded(await prepare());
+  const xmlParts = Object.keys(output.files).filter((path) => /^ppt\/.+\.xml$/.test(path));
+  const all = xmlParts.map((path) => output.xml(path)).join('\n');
+  expect(output.xml()).toMatch(/<a:ea typeface="Noto Sans CJK JP"[^>]*charset="-128"\/>/);
+  expect(output.xml()).toMatch(/<a:cs typeface="Noto Sans CJK JP"[^>]*charset="0"\/>/);
+  expect(all).not.toMatch(/<a:ea\b[^>]*charset="-122"/);
+  expect(all).not.toMatch(/<a:cs\b[^>]*charset="-120"/);
+});
+
 it('G01/G02/G07 emits native rich Japanese text, exact page/table dimensions and complete mappings', async () => {
   const deck = contractDeck();
   deck.slides[0].objects.push({
