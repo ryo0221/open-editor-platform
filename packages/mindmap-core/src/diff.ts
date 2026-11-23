@@ -5,6 +5,7 @@ import { MINDMAP_MARK_NAMES, mindmapParent, type MindmapContent, type MindmapNod
 const title = (n: MindmapNode | undefined) => (n ? n.text || '（無題）' : 'なし');
 const details = (n: MindmapNode) =>
   [
+    n.side ? `左右: ${n.side === 'left' ? '左' : '右'}` : '',
     n.color ? `色: ${n.color}` : '',
     n.marks?.length ? `印: ${n.marks.map((m) => MINDMAP_MARK_NAMES[m]).join('、')}` : '',
     n.note ? `メモ: ${n.note}` : '',
@@ -14,7 +15,7 @@ const details = (n: MindmapNode) =>
     .join('\n');
 
 /**
- * Added, removed, renamed and moved nodes, then other field changes. A node renamed and moved
+ * Added, removed, renamed, moved and reordered nodes, then other field changes. A node renamed and moved
  * gets both. Changes are in the order of the newer version's tree, removed nodes last.
  */
 export function mindmapDiff(before: MindmapContent, after: MindmapContent): CompareResult {
@@ -57,6 +58,20 @@ export function mindmapDiff(before: MindmapContent, after: MindmapContent): Comp
         before: `${title(a)}\n親: ${title(pb)}`,
         after: `${title(a)}\n親: ${title(pa)}`,
       });
+    else if (pa && pb) {
+      // Same parent: a reorder moves the node among the siblings present in both versions.
+      const kept = (list: string[], other: string[]) => list.filter((k) => other.includes(k));
+      const was = kept(pb.children, pa.children),
+        now = kept(pa.children, pb.children);
+      if (was.indexOf(id) !== now.indexOf(id))
+        changes.push({
+          elementId: id,
+          path: `nodes.${id}.order`,
+          kind: 'moved',
+          before: `${title(a)}\n${title(pa)} の ${was.indexOf(id) + 1} 番目`,
+          after: `${title(a)}\n${title(pa)} の ${now.indexOf(id) + 1} 番目`,
+        });
+    }
     if (details(b) !== details(a))
       changes.push({
         elementId: id,

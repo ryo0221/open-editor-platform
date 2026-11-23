@@ -41,6 +41,17 @@ test('create a Mind Map, grow branches, edit fields, Undo, export and compare ve
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(surface(page).getByLabel('配置', { exact: true })).toHaveValue('radial');
 
+  // Undo of an add while its name is unapplied keeps the input and refuses to write it elsewhere.
+  await node(page, '中心のテーマ').click();
+  await surface(page).getByRole('button', { name: '子を足す', exact: true }).click();
+  await surface(page).getByLabel('名前', { exact: true }).fill('消える枝');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await surface(page).getByRole('button', { name: '適用', exact: true }).click();
+  await expect(surface(page).getByRole('status')).toContainText('変更または削除');
+  await expect(node(page, '消える枝')).toHaveCount(0);
+  await expect(node(page, '中心のテーマ')).toBeVisible();
+  await surface(page).getByRole('button', { name: '取消', exact: true }).click();
+
   // Markdown export holds the outline.
   const download = page.waitForEvent('download');
   await surface(page).getByRole('button', { name: 'Markdown', exact: true }).click();

@@ -115,6 +115,8 @@ export function MindmapSurface({
   const [zoom, setZoom] = useState(1);
   const [fit, setFit] = useState(false);
   const [status, setStatus] = useState('');
+  // The node the form's draft belongs to, and that node's fields when the draft started.
+  const [draftFor, setDraftFor] = useState(content.rootId);
   const [base, setBase] = useState<Draft>(() => draftOf(content, content.rootId));
   const [draft, setDraft] = useState<Draft>(base);
   const [moveTarget, setMoveTarget] = useState('');
@@ -134,15 +136,29 @@ export function MindmapSurface({
   const placement = useMemo(() => layoutMindmap(content, folded), [content, folded]);
   const visible = placement.boxes;
 
-  // The selected node changed outside (proposal, Undo): an untouched draft follows it.
+  // The selected node changed outside (proposal, Undo): an untouched draft follows it. A dirty
+  // draft keeps its node and base, so Apply and the Host boundary report the conflict instead of
+  // writing stale fields onto another node.
   useEffect(() => {
-    if (!content.nodes[current]) return;
+    if (dirty) return;
     const next = draftOf(content, current);
-    if (!sameDraft(next, base)) {
-      if (!dirty) setDraft(next);
+    if (draftFor !== current || !sameDraft(next, base)) {
+      // The selected node went away (Undo of its add): the Host follows the fallback selection.
+      if (current !== selected) {
+        setSelected(current);
+        select?.([current]);
+      }
+      setDraftFor(current);
       setBase(next);
+      setDraft(next);
     }
-  }, [content, current]);
+  }, [content, current, dirty]);
+
+  /** Why the draft can no longer be applied, or undefined. */
+  const conflict = () =>
+    draftFor !== current || !content.nodes[current] || !sameDraft(draftOf(content, current), base)
+      ? '編集中にこの枝が変更または削除されました。入力を保持しています。'
+      : undefined;
 
   useEffect(() => {
     if (!dirty) return;
@@ -193,6 +209,7 @@ export function MindmapSurface({
     }
     const next = draftOf(content, id);
     setSelected(id);
+    setDraftFor(id);
     setBase(next);
     setDraft(next);
     setStatus('');
@@ -226,6 +243,7 @@ export function MindmapSurface({
       setFolded((f) => new Map(f).set(parent.id, false));
       const fresh = { text: '', color: '', marks: [], note: '' };
       setSelected(id);
+      setDraftFor(id);
       setBase(fresh);
       setDraft(fresh);
       select?.([id]);
@@ -235,13 +253,19 @@ export function MindmapSurface({
 
   function remove() {
     if (readOnly || current === content.rootId) return;
+    if (dirty) {
+      setStatus('未確定の入力を適用または取り消してください。');
+      return;
+    }
     const parent = mindmapParent(content, current);
     const count = mindmapSubtree(content, current).length;
     if (run(deleteMindmapNode(current)) && parent) {
       const next = draftOf(content, parent.id);
       setSelected(parent.id);
+      setDraftFor(parent.id);
       setBase(next);
       setDraft(next);
+      select?.([parent.id]);
       setStatus(count > 1 ? `子孫を含む ${count} 個の枝を消しました（Undo で戻せます）。` : '');
     }
   }
@@ -254,11 +278,12 @@ export function MindmapSurface({
 
   function applyDraft() {
     if (readOnly || composing.current) return;
-    const latest = content.nodes[current];
-    if (!latest || !sameDraft(draftOf(content, current), base)) {
-      setStatus('編集中にこの枝が変更または削除されました。入力を保持しています。');
+    const problem = conflict();
+    if (problem) {
+      setStatus(problem);
       return;
     }
+    const latest = content.nodes[current];
     if (!dirty) {
       setStatus('変更がありません。');
       return;
@@ -272,9 +297,9 @@ export function MindmapSurface({
     label: '枝の情報',
     read: () => ({ dirty: dirty && !readOnly, composing: composing.current }),
     prepare: () => {
+      const problem = conflict();
+      if (problem) throw new Error(problem);
       const latest = content.nodes[current];
-      if (!latest || !sameDraft(draftOf(content, current), base))
-        throw new Error('編集中にこの枝が変更または削除されました。入力を保持しています。');
       const command = editMindmapNodeFields(current, latest, draft);
       command.apply(content);
       return () => {

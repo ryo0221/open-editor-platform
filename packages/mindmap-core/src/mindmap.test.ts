@@ -223,6 +223,14 @@ describe('compare, items, layout and export', () => {
       ]),
     );
     expect(mindmapDiff(a, a).changes).toEqual([]);
+    // A sibling reorder alone is a change; an added sibling does not reorder the others.
+    const reordered = reorderMindmapNode(id(4), 0).apply(a);
+    expect(
+      mindmapDiff(a, reordered).changes.filter((c) => c.path.endsWith('.order')).length,
+    ).toBeGreaterThan(0);
+    expect(
+      mindmapDiff(a, addMindmapNode(root, 0, id(6), '先頭').apply(a)).changes.map((c) => c.kind),
+    ).toEqual(['added']);
   });
 
   it('declares leading-token items with link refs', () => {
