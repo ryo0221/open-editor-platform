@@ -9,6 +9,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import type { EditorCommand } from '@editor-platform/editor-core';
+import { useEditorInput } from '@editor-platform/editor-ui';
 import {
   MINDMAP_LIMITS,
   MINDMAP_MARK_NAMES,
@@ -264,6 +265,26 @@ export function MindmapSurface({
     }
     if (run(editMindmapNodeFields(current, latest, draft))) setBase(draft);
   }
+
+  // Save, History and switching artifacts first commit the unapplied fields as one command, or
+  // refuse with the reason (the Host's input boundary).
+  useEditorInput({
+    label: '枝の情報',
+    read: () => ({ dirty: dirty && !readOnly, composing: composing.current }),
+    prepare: () => {
+      const latest = content.nodes[current];
+      if (!latest || !sameDraft(draftOf(content, current), base))
+        throw new Error('編集中にこの枝が変更または削除されました。入力を保持しています。');
+      const command = editMindmapNodeFields(current, latest, draft);
+      command.apply(content);
+      return () => {
+        if (!execute(command)) return false;
+        setBase(draft);
+        setStatus('');
+      };
+    },
+    focus: () => nameRef.current?.focus(),
+  });
 
   function onNodeKey(event: KeyboardEvent<HTMLButtonElement>, index: number, id: string) {
     if (event.nativeEvent.isComposing || composing.current) return;

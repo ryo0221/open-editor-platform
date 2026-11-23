@@ -6,6 +6,7 @@ import { isAnnotation } from '@editor-platform/editor-core';
 import { isDesignWithPaths } from '@editor-platform/design';
 import { importMarkdown } from '@editor-platform/document';
 import { importCsv, isStructuredData } from '@editor-platform/structured-data';
+import { MINDMAP_ARTIFACT_KIND, mindmapProblem } from '@editor-platform/mindmap-core';
 import { validateNativeReusableDefinitions, type Domain } from '@editor-platform/templates';
 import { artifactReferenceItems, validateArtifactReferenceHistory } from '../artifact-references';
 import { assertBimNativeFits, bimPartHashes, validateBimParts } from '../bim/parts';
@@ -91,7 +92,7 @@ interface ImportContext {
 }
 
 /**
- * Reads a Markdown, CSV, bare data/Design JSON or native artifact export into a new
+ * Reads a Markdown, CSV, bare data/Design/Mind Map JSON or native artifact export into a new
  * record. Everything is validated before the caller adopts it; nothing is stored here.
  */
 async function readImportFile(
@@ -123,6 +124,16 @@ async function readImportFile(
     if (isStructuredData(value)) {
       record = makeArtifact('data', 1);
       record.draft.content = value;
+    } else if (
+      value !== null &&
+      typeof value === 'object' &&
+      (value as { artifactKind?: unknown }).artifactKind === MINDMAP_ARTIFACT_KIND
+    ) {
+      // A bare Mind Map: its own JSON export, or a file of the external mindmap-editor 0.1.5.
+      const problem = mindmapProblem(value);
+      if (problem) throw new Error(`Invalid Mind Map: ${problem}`);
+      record = makeArtifact('mindmap', 1);
+      record.draft.content = value as Content;
     } else if (isDesignWithPaths(value)) {
       // React bundles retain ordinary native Design content as native.json.
       record = makeArtifact('design', 1);

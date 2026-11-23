@@ -192,11 +192,21 @@ export function layoutMindmap(
         nextY[side] += box.height + MINDMAP_BOX.rowGap;
         return [box.y, box.y + box.height];
       }
+      const first = boxes.length;
       const spans = kids.map((c) => visit(c, depth + 1, side, id));
       const top = spans[0][0],
         bottom = spans[spans.length - 1][1];
+      if (box.height > bottom - top) {
+        // A parent taller than its children reserves its own height: the children are centred
+        // on it, and the next sibling subtree starts below the parent.
+        const down = (box.height - (bottom - top)) / 2;
+        for (const b of boxes.slice(first)) b.y += down;
+        box.y = top;
+        nextY[side] = Math.max(nextY[side], top + box.height + MINDMAP_BOX.rowGap);
+        return [top, top + box.height];
+      }
       box.y = (top + bottom) / 2 - box.height / 2;
-      return [Math.min(top, box.y), Math.max(bottom, box.y + box.height)];
+      return [top, bottom];
     };
     const root = place(rootId, 0, 1);
     const kids = root.folded ? [] : nodes[rootId].children;

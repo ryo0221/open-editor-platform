@@ -257,6 +257,32 @@ describe('compare, items, layout and export', () => {
     }
   });
 
+  it('reserves the height of a parent taller than its children', () => {
+    for (const layout of ['right', 'radial', 'tree'] as const) {
+      let d = doc();
+      const root = d.rootId;
+      for (const [i, parent, leaf] of [
+        [0, id(2), id(3)],
+        [1, id(4), id(5)],
+        [2, id(6), id(7)],
+      ] as const) {
+        d = addMindmapNode(root, i, parent, '長'.repeat(200), 'right').apply(d);
+        d = addMindmapNode(parent, 0, leaf, '短').apply(d);
+      }
+      if (d.layout !== layout) d = setMindmapLayout(layout).apply(d);
+      const { boxes } = layoutMindmap(d);
+      for (const [i, p] of boxes.entries())
+        for (const q of boxes.slice(i + 1))
+          expect(
+            p.x + p.width <= q.x ||
+              q.x + q.width <= p.x ||
+              p.y + p.height <= q.y ||
+              q.y + q.height <= p.y,
+            `${layout}: ${p.id} overlaps ${q.id}`,
+          ).toBe(true);
+    }
+  });
+
   it('writes SVG and a Markdown outline with escaped text', () => {
     let d = doc();
     d = addMindmapNode(d.rootId, 0, id(2), '<b> & "x"').apply(d);

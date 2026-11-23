@@ -70,7 +70,7 @@ describe('a new Artifact of every kind (KR4 baseline)', () => {
     vi.restoreAllMocks();
   });
   const all = Object.keys(kinds) as Kind[];
-  it('covers all 26 kinds', () => expect(all).toHaveLength(26));
+  it('covers all 27 kinds', () => expect(all).toHaveLength(27));
   for (const kind of all)
     it(`${kind}: name, content and extras, then save and reload`, async () => {
       const record = await create(kind);

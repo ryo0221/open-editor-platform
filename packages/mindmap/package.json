@@ -10,6 +10,7 @@
   "dependencies": {
     "@editor-platform/artifact-kinds": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-ui": "*",
     "@editor-platform/mindmap-core": "*"
   },
   "peerDependencies": {

@@ -216,10 +216,8 @@ export function mindmapProblem(value: unknown): string | undefined {
   }
 }
 
-const hex32 = () =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) =>
-    n.toString(16).padStart(2, '0'),
-  ).join('');
+/** 32 random hex digits (a v4 UUID without its dashes). */
+const hex32 = () => crypto.randomUUID().replaceAll('-', '');
 
 /** A fresh node id in the stored form (`n-` and 32 hex digits). */
 export const newMindmapNodeId = () => `n-${hex32()}`;
