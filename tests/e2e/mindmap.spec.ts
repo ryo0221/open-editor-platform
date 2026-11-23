@@ -29,6 +29,11 @@ test('create a Mind Map, grow branches, edit fields, Undo, export and compare ve
   await surface(page).getByLabel('メモ', { exact: true }).fill('東南アジア');
   await node(page, '顧客').click();
   await expect(surface(page).getByRole('status')).toContainText('未確定の入力');
+  await surface(page).getByRole('button', { name: 'JSON', exact: true }).click();
+  await expect(surface(page).getByRole('status')).toContainText('書き出してください');
+  // Only the selected node is in the tab order, so keys never act on another node.
+  await expect(node(page, '市場')).toHaveAttribute('tabindex', '0');
+  await expect(node(page, '顧客')).toHaveAttribute('tabindex', '-1');
   for (const mark of ['疑問', 'アイデア', '決定', 'リスク'])
     await surface(page).getByLabel(mark, { exact: true }).check();
   await expect(surface(page).getByLabel('重要', { exact: true })).toBeDisabled();

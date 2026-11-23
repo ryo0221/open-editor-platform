@@ -313,6 +313,16 @@ export function MindmapSurface({
 
   function onNodeKey(event: KeyboardEvent<HTMLButtonElement>, index: number, id: string) {
     if (event.nativeEvent.isComposing || composing.current) return;
+    // Shortcuts act on the selected node; a focused node that is not selected (a click refused
+    // while input is unapplied) only takes them once it is selected.
+    if (
+      (id !== current && ['Enter', 'F2', 'Delete', ' '].includes(event.key)) ||
+      (id !== current && event.key === 'Tab' && !event.shiftKey)
+    ) {
+      event.preventDefault();
+      choose(id);
+      return;
+    }
     if (event.key === 'Tab' && !event.shiftKey && !readOnly) {
       event.preventDefault();
       add(true);
@@ -337,6 +347,11 @@ export function MindmapSurface({
   }
 
   async function exportAs(kind: 'svg' | 'png' | 'md' | 'json') {
+    // An export holds the content only: unapplied fields would be silently left out.
+    if (dirty || composing.current) {
+      setStatus('未確定の入力を適用または取り消してから書き出してください。');
+      return;
+    }
     try {
       if (kind === 'svg')
         download(`${fileName}.svg`, exportMindmapSvg(content, { folded }), 'image/svg+xml');
@@ -355,6 +370,9 @@ export function MindmapSurface({
     }
   }
 
+  // One node in the tab order (the selected one, or the centre when it is folded away); arrow
+  // keys move the selection and the focus together.
+  const focusable = visible.some((b) => b.id === current) ? current : content.rootId;
   const parent = mindmapParent(content, current);
   const siblingIndex = parent ? parent.children.indexOf(current) : -1;
   const inside = new Set(mindmapSubtree(content, current));
@@ -474,6 +492,7 @@ export function MindmapSurface({
                     type="button"
                     key={box.id}
                     data-node-id={box.id}
+                    tabIndex={box.id === focusable ? 0 : -1}
                     className={`mindmap-node${box.id === content.rootId ? ' mindmap-root' : ''}`}
                     aria-pressed={box.id === current}
                     title={
