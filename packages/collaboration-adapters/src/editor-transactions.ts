@@ -35,7 +35,7 @@ import {
   type SlideReferenceObject,
   type SlideReferencePolicy,
 } from './slide-reference-edit';
-import { editorAssetCodec } from './editor-assets';
+import { editorAssetCodec, type EditorAssetCache } from './editor-assets';
 import { withNativeReuse } from './reuse';
 import { reactUiPatchAction } from './react-ui';
 import { prepareAnimationEditorActions } from './animation-command';
@@ -1198,7 +1198,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           for (const field of referenceFields) {
             if (value[field] === null) delete item[field];
             else item[field] = copy(value[field]);
-            invalidates.add(`${key}/${field}`);
+            touched.add(`${key}/${field}`);
           }
         } else if (change.kind === 'field') {
           if (!item) fail('target-deleted', 'Edited element is missing');
@@ -1296,9 +1296,13 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
 export const slideEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(slideSchema)));
 export type { SlideReferenceObject, SlideReferencePolicy } from './slide-reference-edit';
 /** For a trusted authority, policy must resolve and authorize the exact native source. */
-export function createSharedSlideReferenceCodec(policy: SlideReferencePolicy) {
+export function createSharedSlideReferenceCodec(
+  policy: SlideReferencePolicy,
+  options: { assets?: EditorAssetCache | false } = {},
+) {
+  const codec = withNativeReuse(editorCodec(slideReferenceSchema, policy));
   return {
-    ...editorAssetCodec(withNativeReuse(editorCodec(slideReferenceSchema, policy))),
+    ...(options.assets === false ? codec : editorAssetCodec(codec, options.assets)),
     [referenceCapability]: true as const,
   };
 }

@@ -133,6 +133,29 @@ async function setup() {
 }
 
 describe('opt-in Slide reference transactions', () => {
+  it('carries verified image bytes across distinct inline client and authority codecs', async () => {
+    const source = legacy(await saved(1));
+    const authorize = () => true;
+    const policy = { authorize, authorizeDetachment: authorize };
+    const client = createSharedSlideReferenceCodec(policy, { assets: false });
+    const trusted = createSharedSlideReferenceCodec(policy, { assets: false });
+    const deck = createDeck(),
+      page = deck.slides[0].id;
+    const state = initial('destination', trusted, deck);
+    const authority = new Authority(trusted, state);
+    const operation = prepareEditorCommand(
+      client,
+      state,
+      a,
+      insertObject(page, 'image', { reference: source, src: figure }),
+    )!;
+    expect(authority.commit(a, JSON.parse(JSON.stringify(operation))).status).toBe('accepted');
+    expect(authority.snapshot().content.slides[0].objects[0]).toMatchObject({
+      reference: source,
+      src: figure,
+    });
+  });
+
   it.each(['value', 'figure'] as const)(
     'shares a %s update with a peer move and text and undoes only the reference',
     async (kind) => {
@@ -229,6 +252,27 @@ describe('opt-in Slide reference transactions', () => {
     expect(codec.validate(authority.snapshot().content)).toBe(false);
     expect(authority.commit(a, update)).toMatchObject({ status: 'rejected', code: 'unauthorized' });
     expect(authority.snapshot().revision).toBe(1);
+  });
+
+  it('keeps another editor’s description of a detached image when Undo would replace it', async () => {
+    const { versions, page, authority, prepare } = await setup();
+    const quote = legacy(versions[0]);
+    const inserted = prepare(
+      a,
+      insertObject(page, 'image', { reference: quote, src: figure, alt: 'Original figure' }),
+    );
+    expect(authority.commit(a, inserted).status).toBe('accepted');
+    const object = authority.snapshot().content.slides[0].objects.at(-1)!;
+    const detach = prepare(a, detachSlideReference(page, object.id, quote, figure));
+    expect(authority.commit(a, detach).status).toBe('accepted');
+    const peer = prepare(b, updateObject(page, object.id, { alt: 'A description from B' }));
+    expect(authority.commit(b, peer).status).toBe('accepted');
+    expect(authority.undo(a, detach.operationId)).toMatchObject({
+      status: 'rejected',
+      code: 'undo-conflict',
+    });
+    expect(authority.snapshot().content.slides[0].objects.at(-1)?.alt).toBe('A description from B');
+    expect(authority.snapshot().revision).toBe(3);
   });
 
   it('distinguishes deleting an object from detaching it and restores the exact quote with Undo', async () => {

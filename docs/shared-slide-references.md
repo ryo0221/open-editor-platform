@@ -41,6 +41,11 @@ not fetch arbitrary URLs or decide artifact permissions. Both fixed and follow
 images render the adopted retained snapshot in shared editing. A notice about a
 newer source neither replaces that snapshot nor changes shared or saved content.
 
+The codec accepts a Host-provided asset cache. Hosts without an asset-ID
+transport can choose `{ assets: false }` to retain native image bytes in
+operations. Apply the same asset transport on both ends and enforce the
+Host's upload and operation limits.
+
 ## Verification
 
 Use the ordinary Slide commands and the authority directly for the acceptance
