@@ -127,7 +127,10 @@ function GridCell({
         if (editingHere) return;
         e.preventDefault();
         if (editing && !grid.commit()) return;
-        grid.choose(r, c, e.shiftKey);
+        // The pointer is already over a visible cell. Focusing or scrolling it
+        // into view here can put a different row under the second click.
+        grid.choose(r, c, e.shiftKey, false);
+        root.current?.focus({ preventScroll: true });
       }}
       onDoubleClick={() => grid.edit(undefined, { rowId: row.id, columnId: column.id })}
       title={formatCell(data, row, column)}
