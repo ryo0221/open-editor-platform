@@ -210,8 +210,10 @@ resolver差替え時は発見済みのsource名・選択を破棄し、以前の
 
 ## 対応範囲と上限
 
-localの4 Surfaceとheadless/proposal経路に対応する。**共有参照編集は未対応**で、trusted codecが
-参照付きcontentとoperationを拒否する。既存の非参照Artifactの共有編集は変わらない。
+localの4 Surfaceとheadless/proposal経路に対応する。Slideは、引用元と宛先を検証するHostが
+`createSharedSlideReferenceCodec` と `SlideSurface` の `sharedReferences` を使う場合に共同編集できる。
+既存の共有codecでは参照付きcontentとoperationを拒否する。
+[共有Slideの引用契約](shared-slide-references.md)を参照。
 Template／linked reuseでの新規参照authoring、任意domainの再帰参照、双方向同期、
 distributed transactionはこのsliceの宣言能力に含めない。
 Template／linked reuse authoringは選択範囲を確定してから参照を検出して拒否する。

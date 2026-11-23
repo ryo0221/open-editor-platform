@@ -26,7 +26,15 @@ import {
   type StructuredData,
   type DataGraphView,
 } from '@editor-platform/structured-data/model';
-import { slideCodec, designCodec, whiteboardCodec } from './canvas';
+import { slideCodec, slideCanvasCodec, designCodec, whiteboardCodec } from './canvas';
+import {
+  referenceFields,
+  slideReferenceFields,
+  validDetachedSlideValue,
+  validSharedSlideReferences,
+  type SlideReferenceObject,
+  type SlideReferencePolicy,
+} from './slide-reference-edit';
 import { editorAssetCodec } from './editor-assets';
 import { withNativeReuse } from './reuse';
 import { reactUiPatchAction } from './react-ui';
@@ -59,12 +67,14 @@ interface Collection {
 interface Schema<T> {
   base: DomainCodec<T>;
   root: readonly string[];
+  slideReferences?: true;
   collections(content: T): Collection[];
 }
 export type EditorChange =
   | { kind: 'insert'; collection: string; id: string; value: RecordValue }
   | { kind: 'remove'; collection: string; id: string }
   | { kind: 'field'; collection: string; id: string; field: string; value: unknown }
+  | { kind: 'slide-reference'; collection: string; id: string; value: Root }
   | { kind: 'order'; collection: string; ids: string[] }
   | { kind: 'empty'; collection: string; present: boolean }
   | { kind: 'root'; field: string; value: unknown }
@@ -168,20 +178,33 @@ function collection(
     },
   };
 }
-const slideSchema: Schema<SlideContent> = {
-  base: slideCodec,
-  root: ['schemaVersion', 'width', 'height', 'theme'],
-  collections: (d) => [
-    collection(
-      d,
-      'slides',
-      ['title', 'background', 'notes', 'hidden', 'backgroundImage'],
-      'pages',
-      'objects',
-    ),
-    ...d.slides.map((s) => collection(s, 'objects', objectFields, `objects@${s.id}`)),
-  ],
-};
+const referenceCapability = Symbol('slide-reference-capability');
+function slideEditorSchema(allowReferences: boolean): Schema<SlideContent> {
+  return {
+    base: allowReferences ? slideCanvasCodec(true) : slideCodec,
+    ...(allowReferences ? { slideReferences: true } : {}),
+    root: ['schemaVersion', 'width', 'height', 'theme'],
+    collections: (d) => [
+      collection(
+        d,
+        'slides',
+        ['title', 'background', 'notes', 'hidden', 'backgroundImage'],
+        'pages',
+        'objects',
+      ),
+      ...d.slides.map((s) =>
+        collection(
+          s,
+          'objects',
+          allowReferences ? [...objectFields, 'reference', 'liveQuote'] : objectFields,
+          `objects@${s.id}`,
+        ),
+      ),
+    ],
+  };
+}
+const slideSchema = slideEditorSchema(false);
+const slideReferenceSchema = slideEditorSchema(true);
 const designSchema: Schema<DesignContent> = {
   base: designCodec,
   root: ['schemaVersion', 'web', 'prototyping'],
@@ -251,7 +274,7 @@ const dataSchema: Schema<StructuredData> = {
 };
 function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
   const schema = {
-    slide: slideSchema,
+    slide: referenceCapability in codec ? slideReferenceSchema : slideSchema,
     design: designSchema,
     whiteboard: boardSchema,
     data: dataSchema,
@@ -462,6 +485,10 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
       if (!prev)
         changes.push({ kind: 'insert', collection: next.key, id: item.id, value: copy(item) });
       else {
+        const relatedReference =
+          schema.slideReferences &&
+          next.key.startsWith('objects@') &&
+          (prev.reference || prev.liveQuote || item.reference || item.liveQuote);
         for (const field of new Set([...Object.keys(prev), ...Object.keys(item)]))
           if (
             field !== 'id' &&
@@ -471,7 +498,10 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
           )
             fail('unsupported-operation', `Unknown element property: ${field}`);
         for (const field of next.fields)
-          if (!equal(prev[field], item[field]))
+          if (
+            (!relatedReference || !referenceFields.some((key) => key === field)) &&
+            !equal(prev[field], item[field])
+          )
             changes.push({
               kind: 'field',
               collection: next.key,
@@ -479,6 +509,11 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
               field,
               value: item[field] ?? null,
             });
+        if (relatedReference) {
+          const value = slideReferenceFields(item);
+          if (!equal(slideReferenceFields(prev), value))
+            changes.push({ kind: 'slide-reference', collection: next.key, id: item.id, value });
+        }
         if (next.key === 'rows') {
           const a = prev.values as Root,
             b = item.values as Root;
@@ -580,7 +615,7 @@ function editorCommandActions<T>(
   }
   const schema = schemaFor(codec),
     after = command.apply(command.readonlyInput ? state.content : copy(state.content));
-  if (codec.domain === 'slide') assertNoSharedReference(after);
+  if (codec.domain === 'slide' && !schema.slideReferences) assertNoSharedReference(after);
   if (!codec.validate(after)) fail('invalid-operation', 'Command produced invalid domain content');
   const action = transactionAction(schema, state.content, after);
   if (!(action.payload.changes as EditorChange[]).length) return undefined;
@@ -654,7 +689,11 @@ function forkEditedContent<T>(schema: Schema<T>, source: T, changes: EditorChang
   const fields = new Map<string, Set<string>>();
   for (const change of changes) {
     const collection =
-      change.kind === 'cell' ? 'rows' : change.kind === 'field' ? change.collection : undefined;
+      change.kind === 'cell'
+        ? 'rows'
+        : change.kind === 'field' || change.kind === 'slide-reference'
+          ? change.collection
+          : undefined;
     if (collection) {
       const ids = fields.get(collection) ?? new Set<string>();
       ids.add(change.kind === 'cell' ? change.rowId : (change as { id: string }).id);
@@ -688,13 +727,16 @@ function forkEditedContent<T>(schema: Schema<T>, source: T, changes: EditorChang
   }
   return next;
 }
-function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
+function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolicy): DomainCodec<T> {
   const base = schema.base;
   // Only domain content is cached. Snapshot metadata, permissions, operation
   // preconditions and asset checks keep their independent validation boundaries.
   const validContents = new WeakSet<object>();
+  const authorizedReferences = (value: T) =>
+    !slideReferences || validSharedSlideReferences(value as SlideContent, slideReferences);
   const valid = (value: unknown): value is T => {
-    if (value && typeof value === 'object' && validContents.has(value)) return true;
+    if (value && typeof value === 'object' && validContents.has(value))
+      return authorizedReferences(value as T);
     if (!base.validate(value)) return false;
     const collections = schema.collections(value),
       ids = collections.flatMap((c) => c.items.map((e) => e.id));
@@ -771,7 +813,7 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
       }
     }
     if (value && typeof value === 'object' && isDeepFrozen(value)) validContents.add(value);
-    return true;
+    return authorizedReferences(value);
   };
   type ResourceIndex = {
     collections: Map<string, Collection>;
@@ -817,6 +859,8 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
             .collections(d)
             .find((c) => c.key === collection)
             ?.items.find((e) => e.id === id);
+      if (field === 'slide-reference' && schema.slideReferences && item)
+        return slideReferenceFields(item);
       return field === 'values' && columnId
         ? (item?.values as Root | undefined)?.[columnId]
         : field
@@ -883,10 +927,17 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
       return anchor;
     },
     apply(content, action, version, textVersions): Effect<T> {
-      if (base.domain === 'slide') assertNoSharedReference(action.payload);
+      if (base.domain === 'slide' && !schema.slideReferences)
+        assertNoSharedReference(action.payload);
+      if (!authorizedReferences(content))
+        fail('unauthorized', 'A Slide reference is no longer authorized');
       if (action.type === 'canvas.text-steps')
         return applyCanvasSteps(codec, content, action, textVersions);
-      if (action.type === 'domain.restore') return base.apply(content, action, version);
+      if (action.type === 'domain.restore') {
+        if (schema.slideReferences && !valid(action.payload.content))
+          fail('invalid-operation', 'The restored Slide or its source references are invalid');
+        return base.apply(content, action, version);
+      }
       if (action.type !== `${base.domain}.edit`)
         fail('unsupported-operation', 'Use the normal editor transaction or text engine API');
       const before = content,
@@ -1106,6 +1157,49 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
           invalidates.add('geometry');
           c.set(c.items.filter((e) => e.id !== change.id));
           byId.delete(change.id);
+        } else if (change.kind === 'slide-reference') {
+          if (!slideReferences || !c.key.startsWith('objects@'))
+            fail('unsupported-operation', 'This editor does not support shared Slide references');
+          if (!item) fail('target-deleted', 'Edited element is missing');
+          if (item.locked) fail('unauthorized', 'Element is locked');
+          const value = change.value;
+          if (
+            !value ||
+            Object.keys(value).length !== referenceFields.length ||
+            !referenceFields.every((field) => Object.hasOwn(value, field)) ||
+            (!item.reference && !item.liveQuote && !value.reference && !value.liveQuote)
+          )
+            fail('schema-mismatch', 'Invalid Slide reference change');
+          const beforeHasReference = !!(item.reference || item.liveQuote);
+          const afterHasReference = !!(value.reference || value.liveQuote);
+          if (beforeHasReference !== afterHasReference) {
+            const changed = { ...item };
+            for (const field of referenceFields) {
+              if (value[field] === null) delete changed[field];
+              else changed[field] = value[field];
+            }
+            const [quoted, ordinary] = beforeHasReference ? [item, changed] : [changed, item];
+            if (
+              !validDetachedSlideValue(quoted, ordinary) ||
+              !slideReferences.authorizeDetachment(
+                quoted as unknown as SlideReferenceObject,
+                ordinary as unknown as SlideReferenceObject,
+                c.key.slice(8),
+              )
+            )
+              fail(
+                'invalid-operation',
+                'Detached Slide value or image does not match the authorized reference',
+              );
+          }
+          const referenceKey = `${key}/slide-reference`;
+          required.add(referenceKey);
+          touched.add(referenceKey);
+          for (const field of referenceFields) {
+            if (value[field] === null) delete item[field];
+            else item[field] = copy(value[field]);
+            invalidates.add(`${key}/${field}`);
+          }
         } else if (change.kind === 'field') {
           if (!item) fail('target-deleted', 'Edited element is missing');
           if (!c.fields.includes(change.field))
@@ -1113,6 +1207,14 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
           if (item.locked && change.field !== 'locked') fail('unauthorized', 'Element is locked');
           if (['text', 'runs'].includes(change.field))
             fail('unsupported-operation', 'Shared text requires text engine steps');
+          if (
+            schema.slideReferences &&
+            c.key.startsWith('objects@') &&
+            (['reference', 'liveQuote'].includes(change.field) ||
+              ((item.reference || item.liveQuote) &&
+                (change.field === 'type' || referenceFields.some((key) => key === change.field))))
+          )
+            fail('invalid-operation', 'Use an atomic Slide reference change');
           const fieldKey = `${key}/${change.field}`;
           required.add(fieldKey);
           touched.add(fieldKey);
@@ -1163,7 +1265,7 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
       for (const key of new Set([...oldChildren.keys(), ...nextChildren.keys()]))
         if (!equal(oldChildren.get(key) ?? [], nextChildren.get(key) ?? []))
           invalidates.add(`children:${key}`);
-      if (!base.validate(content))
+      if (!base.validate(content) || !authorizedReferences(content))
         fail('invalid-operation', 'Transaction violates domain invariants');
       if (base.domain === 'data' && validateData(content as StructuredData).length)
         fail('invalid-operation', 'Transaction violates cell types, constraints or formulas');
@@ -1192,6 +1294,14 @@ function editorCodec<T>(schema: Schema<T>): DomainCodec<T> {
   return codec;
 }
 export const slideEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(slideSchema)));
+export type { SlideReferenceObject, SlideReferencePolicy } from './slide-reference-edit';
+/** For a trusted authority, policy must resolve and authorize the exact native source. */
+export function createSharedSlideReferenceCodec(policy: SlideReferencePolicy) {
+  return {
+    ...editorAssetCodec(withNativeReuse(editorCodec(slideReferenceSchema, policy))),
+    [referenceCapability]: true as const,
+  };
+}
 export const designEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(designSchema)));
 export const whiteboardEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(boardSchema)));
 export const dataEditorCodec = withNativeReuse(editorCodec(dataSchema));

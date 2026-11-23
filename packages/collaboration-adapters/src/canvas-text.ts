@@ -68,12 +68,15 @@ export function canvasTextItem<T>(
   if (domain === 'slide')
     for (const page of (content as SlideContent).slides) {
       const item = page.objects.find((e) => e.id === id);
-      if (item)
+      if (item) {
+        if (item.liveQuote || item.reference)
+          fail('invalid-operation', 'A quoted value must be detached before text editing');
         return {
           item,
           key: `entity:objects@${page.id}:${id}`,
           style: slideDrawing(item).typography ?? {},
         };
+      }
     }
   const collection = domain === 'design' ? 'elements' : 'nodes';
   const items =

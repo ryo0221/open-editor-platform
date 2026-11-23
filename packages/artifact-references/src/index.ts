@@ -330,11 +330,27 @@ export class ReferenceResolver {
     public readonly host: ReferenceHost,
     adapters: ReferenceAdapter[],
     public readonly destinationArtifactId?: string,
+    public readonly retainedOnly = false,
   ) {
     this.adapters = new Map(adapters.map((a) => [a.domain, a]));
   }
   forDestination(artifactId: string) {
-    return new ReferenceResolver(this.host, [...this.adapters.values()], artifactId);
+    return new ReferenceResolver(
+      this.host,
+      [...this.adapters.values()],
+      artifactId,
+      this.retainedOnly,
+    );
+  }
+  forRetainedVersions() {
+    return this.retainedOnly
+      ? this
+      : new ReferenceResolver(
+          this.host,
+          [...this.adapters.values()],
+          this.destinationArtifactId,
+          true,
+        );
   }
   private adapter(domain: string) {
     const adapter = this.adapters.get(domain);
@@ -478,26 +494,24 @@ export class ReferenceResolver {
         throw new ReferenceError('error', '参照情報が不正です。');
       this.assertMode(reference);
       await this.host.checkAccess?.(reference.source);
-      const retained =
-        reference.mode === 'follow'
-          ? await this.verify(reference.snapshot, reference.source)
-          : undefined;
+      const following = !this.retainedOnly && reference.mode === 'follow';
+      const retained = following
+        ? await this.verify(reference.snapshot, reference.source)
+        : undefined;
       const snapshot = await this.verify(
-        reference.mode === 'fixed'
-          ? reference.snapshot
-          : await this.host.read(reference.source, request.signal),
+        !following ? reference.snapshot : await this.host.read(reference.source, request.signal),
         reference.source,
       );
       await this.host.checkSnapshot?.(reference.source, snapshot, request.signal);
       await this.host.checkAccess?.(reference.source);
       if (this.generations.get(key) !== generation) return this.get(reference);
-      if (reference.mode === 'follow') {
+      if (following) {
         if (snapshot.revision < reference.snapshot.revision)
           throw new ReferenceError('stale', '保持版より古い応答です。');
       }
       const projection = this.project(snapshot, reference.source.target);
       if (retained) this.accept(retained, false);
-      this.accept(snapshot, reference.mode === 'follow');
+      this.accept(snapshot, following);
       state = {
         status: 'ready',
         snapshot,
@@ -512,7 +526,7 @@ export class ReferenceResolver {
               error instanceof Error ? error.message : '参照を解決できません。',
             );
       state = { status: failure.status, message: failure.message };
-      if (failure.status === 'offline') {
+      if (failure.status === 'offline' && !this.retainedOnly) {
         try {
           const cached = this.get(reference).snapshot ?? reference.snapshot;
           const snapshot = await this.verify(cached, reference.source);
@@ -579,14 +593,15 @@ export class ReferenceResolver {
       this.assertMode(r);
       await this.host.checkAccess?.(r.source);
       const key = canonicalJson([r.source.artifactId, r.source.domain]);
-      const following = live && r.mode === 'follow';
+      const following = live && !this.retainedOnly && r.mode === 'follow';
       const retained = following ? await this.verify(r.snapshot, r.source) : undefined;
       if (following && !reads.has(key))
         reads.set(key, this.host.read(r.source, new AbortController().signal));
       // Never deduplicate retained closures: each one must be hash-checked and
       // compared even when version IDs and content hashes happen to match.
       const snapshot = await this.verify(following ? await reads.get(key)! : r.snapshot, r.source);
-      if (live) await this.host.checkSnapshot?.(r.source, snapshot, new AbortController().signal);
+      if (live || this.retainedOnly)
+        await this.host.checkSnapshot?.(r.source, snapshot, new AbortController().signal);
       await this.host.checkAccess?.(r.source);
       if (following) {
         if (snapshot.revision < r.snapshot.revision)

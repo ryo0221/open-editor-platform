@@ -36,10 +36,12 @@ function canvas<T>(
   domain: Domain,
   validateNative: (v: unknown) => v is T,
   access: Access<T>,
+  allowSlideReferences = false,
 ): DomainCodec<T> {
   const supportsLiveReferences = domain === 'slide';
   const validate = (value: unknown): value is T =>
-    validateNative(value) && !containsSharedReference(value, supportsLiveReferences);
+    validateNative(value) &&
+    (allowSlideReferences || !containsSharedReference(value, supportsLiveReferences));
   const resource = (content: T, key: string): unknown => {
     const [id, field] = key.split('/');
     return field
@@ -74,8 +76,10 @@ function canvas<T>(
       return ids.has(anchor.elementId) ? { ...anchor, orphan: true } : anchor;
     },
     apply(content, action): Effect<T> {
-      assertNoSharedReference(content, supportsLiveReferences);
-      assertNoSharedReference(action.payload, supportsLiveReferences);
+      if (!allowSlideReferences) {
+        assertNoSharedReference(content, supportsLiveReferences);
+        assertNoSharedReference(action.payload, supportsLiveReferences);
+      }
       if (action.type === 'domain.restore') {
         if (!validate(action.payload.content)) fail('invalid-operation', 'Invalid restore content');
         return {
@@ -268,32 +272,38 @@ function canvas<T>(
     },
   };
 }
-export const slideCodec = canvas<SlideContent>(
-  'slide',
-  (v): v is SlideContent =>
-    isDeck(v) &&
-    !hasLegacySlideAnimations(v) &&
-    new Set(v.slides.flatMap((s) => s.objects.map((o) => o.id))).size ===
-      v.slides.reduce((n, s) => n + s.objects.length, 0) &&
-    v.slides.every((s) => {
-      const groups = new Set(s.objects.filter((o) => o.type === 'group').map((o) => o.id));
-      return s.objects.every((o) => !o.groupId || groups.has(o.groupId));
-    }),
-  {
-    entities: (d) => d.slides.flatMap((s) => s.objects) as unknown as Entity[],
-    replace: (d, entities) => {
-      for (const s of d.slides) {
-        const ids = new Set(s.objects.map((o) => o.id));
-        s.objects = entities.filter((e) => ids.has(e.id)) as unknown as typeof s.objects;
-      }
+export const slideCodec = slideCanvasCodec();
+
+/** Native canvas mechanics for the opt-in Slide reference editor codec. */
+export function slideCanvasCodec(allowSlideReferences = false) {
+  return canvas<SlideContent>(
+    'slide',
+    (v): v is SlideContent =>
+      isDeck(v) &&
+      !hasLegacySlideAnimations(v) &&
+      new Set(v.slides.flatMap((s) => s.objects.map((o) => o.id))).size ===
+        v.slides.reduce((n, s) => n + s.objects.length, 0) &&
+      v.slides.every((s) => {
+        const groups = new Set(s.objects.filter((o) => o.type === 'group').map((o) => o.id));
+        return s.objects.every((o) => !o.groupId || groups.has(o.groupId));
+      }),
+    {
+      entities: (d) => d.slides.flatMap((s) => s.objects) as unknown as Entity[],
+      replace: (d, entities) => {
+        for (const s of d.slides) {
+          const ids = new Set(s.objects.map((o) => o.id));
+          s.objects = entities.filter((e) => ids.has(e.id)) as unknown as typeof s.objects;
+        }
+      },
+      parent: 'groupId',
+      ids: (d) => [
+        ...d.slides.map((s) => s.id),
+        ...d.slides.flatMap((s) => s.objects.map((o) => o.id)),
+      ],
     },
-    parent: 'groupId',
-    ids: (d) => [
-      ...d.slides.map((s) => s.id),
-      ...d.slides.flatMap((s) => s.objects.map((o) => o.id)),
-    ],
-  },
-);
+    allowSlideReferences,
+  );
+}
 export const designCodec = canvas<DesignContent>(
   'design',
   (v): v is DesignContent => {

@@ -385,6 +385,7 @@ export function LiveReferenceTools({
   captureInsert,
   change,
   canPropose,
+  removeLabel = '引用を外す',
   onNewer,
 }: {
   connection?: LiveReferenceConnection;
@@ -395,6 +396,7 @@ export function LiveReferenceTools({
   captureInsert(): Insert;
   change(item: LiveReviewItem, replacement?: LiveReference, propose?: boolean): void;
   canPropose?: boolean;
+  removeLabel?: string;
   onNewer: NonNullable<LiveReviewProps['onNewer']>;
 }) {
   const [picker, setPicker] = useState<{ connection: LiveReferenceConnection; insert: Insert }>();
@@ -434,7 +436,7 @@ export function LiveReferenceTools({
           })
         }
       >
-        引用を外す
+        {removeLabel}
       </button>
       {canPropose && (
         <button
