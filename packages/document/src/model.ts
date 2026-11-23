@@ -4,7 +4,13 @@ import {
   validLiveReference,
   validLiveReferenceItems,
   formatLiveValue,
+  isPackedLiveReference,
+  packLiveReferences,
+  hydrateLiveReference,
+  unpackLiveReferences,
+  type LiveCitation,
   type LiveReference,
+  type LiveSnapshots,
   describeReference,
   referenceExportManifest,
   type EmbeddedReference,
@@ -37,7 +43,7 @@ export type BlockType =
   | 'react-preview';
 export interface InlineSpan {
   text: string;
-  liveQuote?: { id: string; reference: LiveReference };
+  liveQuote?: { id: string; reference: LiveCitation };
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -150,7 +156,7 @@ export function nestedLists(item: DocumentListItem): NonNullable<DocumentListIte
 }
 export interface DocumentBlock {
   reference?: EmbeddedReference;
-  liveFigure?: LiveReference;
+  liveFigure?: LiveCitation;
   id: string;
   type: BlockType;
   text: string;
@@ -251,6 +257,8 @@ export interface DocumentContent {
     writingMode?: DocumentWritingMode;
   };
   blocks: DocumentBlock[];
+  /** finding 79: one retained version per (domain, artifact, version) for the document's citations. */
+  liveSnapshots?: LiveSnapshots;
 }
 /** Semantic text addresses include paragraphs inside lists/tables, without engine positions. */
 export function documentTextBlocks(d: DocumentContent): Map<string, string> {
@@ -695,7 +703,8 @@ function validSpans(value: unknown): value is InlineSpan[] {
           (s.liveQuote &&
             typeof s.liveQuote.id === 'string' &&
             !!s.liveQuote.id &&
-            validLiveReference(s.liveQuote.reference) &&
+            (isPackedLiveReference(s.liveQuote.reference) ||
+              validLiveReference(s.liveQuote.reference)) &&
             s.liveQuote.reference.presentation.kind === 'value' &&
             s.text === formatLiveValue(s.liveQuote.reference.presentation))) &&
         ['bold', 'italic', 'underline', 'strike', 'code', 'emphasisDots'].every(
@@ -824,19 +833,50 @@ export function isDocument(value: unknown): value is DocumentContent {
         (d.page.writingMode === undefined || documentWritingModes.includes(d.page.writingMode)))) &&
     validBlocks(d.blocks) &&
     validReferenceItems(d.blocks) &&
-    validDocumentLiveReferences(d.blocks)
+    validDocumentLiveReferences(d.blocks, d.liveSnapshots)
   );
 }
-export function validDocumentLiveReferences(blocks: DocumentBlock[]): boolean {
-  return validLiveReferenceItems(documentLiveReferences(blocks), blocks);
+export function validDocumentLiveReferences(
+  blocks: DocumentBlock[],
+  liveSnapshots?: LiveSnapshots,
+): boolean {
+  return validLiveReferenceItems(documentLiveReferences(blocks), blocks, liveSnapshots);
 }
 
-export function documentLiveReferences(blocks: DocumentBlock[]): LiveReference[] {
+/** The citations as stored (packed schema 3 or schema 2). */
+export function documentLiveReferences(blocks: DocumentBlock[]): LiveCitation[] {
   return documentLiveCitationEntries(blocks).map((item) => item.reference);
+}
+/** Every citation with its retained version, read from the document's table. */
+export function documentRetainedLiveReferences(content: DocumentContent): LiveReference[] {
+  return documentLiveReferences(content.blocks).map((r) =>
+    hydrateLiveReference(r, content.liveSnapshots),
+  );
+}
+/**
+ * finding 79: the stored citations of `blocks`. Schema 3 citations are packed with their version
+ * kept once in `liveSnapshots`; schema 2 citations of those versions move into the table; rows no
+ * citation names are dropped. A pure function of the blocks, so the editor's Undo/Redo restores
+ * citations and rows together.
+ */
+export function packDocumentLiveReferences(
+  blocks: DocumentBlock[],
+  previous?: LiveSnapshots,
+): { blocks: DocumentBlock[]; liveSnapshots?: LiveSnapshots } {
+  const { value, liveSnapshots } = packLiveReferences(blocks, previous ?? {});
+  return { blocks: value, ...(Object.keys(liveSnapshots).length ? { liveSnapshots } : {}) };
+}
+/** Blocks whose citations carry their version again (the editor's working form). */
+export const unpackDocumentLiveReferences = (content: DocumentContent): DocumentBlock[] =>
+  unpackLiveReferences(content.blocks, content.liveSnapshots);
+/** The same content with its citations packed and its table cleaned. */
+export function normalizeDocumentLiveSnapshots(content: DocumentContent): DocumentContent {
+  const { liveSnapshots: previous, ...rest } = content;
+  return { ...rest, ...packDocumentLiveReferences(content.blocks, previous) };
 }
 
 export function documentLiveCitationEntries(blocks: DocumentBlock[]) {
-  const references: { id: string; reference: LiveReference }[] = [];
+  const references: { id: string; reference: LiveCitation }[] = [];
   function collect(spans: InlineSpan[]) {
     for (const { liveQuote } of spans) if (liveQuote) references.push(liveQuote);
   }
@@ -915,7 +955,7 @@ function validSourceFields(b: DocumentBlock) {
       (b.type === 'image' &&
         !b.reference &&
         !b.src &&
-        validLiveReference(b.liveFigure) &&
+        (isPackedLiveReference(b.liveFigure) || validLiveReference(b.liveFigure)) &&
         b.liveFigure.presentation.kind === 'figure')) &&
     knownBlockTypes.includes(b.type) &&
     (b.type !== 'table' || validTableDetails(b))

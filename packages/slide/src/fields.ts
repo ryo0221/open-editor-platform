@@ -12,6 +12,7 @@ const deckFields = {
   width: true,
   height: true,
   slides: true,
+  liveSnapshots: true,
 } as const satisfies Record<keyof SlideContent, true>;
 const slideFields = {
   id: true,

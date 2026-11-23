@@ -52,6 +52,7 @@ import {
   type CanvasTarget,
 } from '@editor-platform/canvas-ui';
 import {
+  slideLiveReference,
   updateObject,
   insertSlideCitation,
   changeSlideCitation,
@@ -366,13 +367,13 @@ function SlideSurfaceEditor({
                   pageId: page.id,
                   objectId: object.id,
                   location: page.title || `スライド ${index + 1}`,
-                  reference: object.liveQuote,
+                  reference: slideLiveReference(content, object.liveQuote),
                 },
               ]
             : [],
         ),
       ),
-    [content.slides],
+    [content],
   );
   const [newer, setNewer] = useState<ReadonlySet<string>>(() => new Set());
   const citationContext = useLatest({ slide, chosen, apply, choose, onCitationProposal });
@@ -406,7 +407,10 @@ function SlideSurfaceEditor({
           )
             throw new Error('挿入位置が変わりました。もう一度選んでください。');
           const id = newId('object');
-          const cmd = insertSlideCitation(pageId, id, reference, anchor?.bounds);
+          // A shared deck keeps whole citations inline: its codec carries no table (finding 79).
+          const cmd = insertSlideCitation(pageId, id, reference, anchor?.bounds, {
+            inline: !!sharedReferences,
+          });
           if (propose) {
             if (!current.onCitationProposal) throw new Error('引用を提案できません。');
             current.onCitationProposal(cmd, cmd.label);
@@ -425,6 +429,7 @@ function SlideSurfaceEditor({
           item.objectId,
           expected.reference,
           replacement,
+          { inline: !!sharedReferences },
         );
         const current = citationContext.current;
         if (propose) {
@@ -688,7 +693,7 @@ function SlideCanvas({
       const object = target as SlideCanvasTarget;
       return object.liveQuote ? (
         <SlideLiveDrawing
-          object={{ ...object, liveQuote: object.liveQuote }}
+          object={{ ...object, liveQuote: slideLiveReference(content, object.liveQuote) }}
           connection={liveReferences}
           newer={newer?.has(JSON.stringify([slide.id, object.id]))}
         />
@@ -696,7 +701,7 @@ function SlideCanvas({
         renderCanvasTarget(target)
       );
     },
-    [liveReferences, newer, slide.id],
+    [content, liveReferences, newer, slide.id],
   );
   return (
     <CanvasStage

@@ -14,7 +14,12 @@ import {
   documentUpdateCommand,
 } from '@editor-platform/document/engine';
 import { command, type EditorCommand } from '@editor-platform/editor-core';
-import { changeSlideCitation, createDeck, insertSlideCitation } from '@editor-platform/slide/model';
+import {
+  changeSlideCitation,
+  createDeck,
+  insertSlideCitation,
+  slideLiveReference,
+} from '@editor-platform/slide/model';
 import { createLocalSession, type Content } from '../model';
 import {
   applyLocalProposal,
@@ -193,9 +198,14 @@ describe('TS-018 Host citation proposals', () => {
     );
     expect(proposal.review.status).toBe('ready');
     expect(await applyLocalProposal(proposal, draft, connection, execute)).toBe(true);
-    const [one, two] = (session.content as ReturnType<typeof createDeck>).slides;
-    expect(one.objects.find((o) => o.id === 'quote')?.liveQuote).toEqual(old);
-    expect(two.objects.find((o) => o.id === 'quote')?.liveQuote).toEqual(next);
+    const after = session.content as ReturnType<typeof createDeck>;
+    const [one, two] = after.slides;
+    const cited = (o?: { liveQuote?: Parameters<typeof slideLiveReference>[1] }) =>
+      o?.liveQuote && slideLiveReference(after, o.liveQuote);
+    expect(cited(one.objects.find((o) => o.id === 'quote'))).toEqual(old);
+    expect(cited(two.objects.find((o) => o.id === 'quote'))).toEqual(next);
+    // finding 79: the two versions are kept once each in the deck's table.
+    expect(Object.keys(after.liveSnapshots ?? {})).toHaveLength(2);
   });
 
   it('rechecks source access, edit access and draft revision before executing', async () => {

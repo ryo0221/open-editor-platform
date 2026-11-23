@@ -28,13 +28,37 @@ export type ValueScale = (typeof VALUE_SCALES)[number];
 export type LivePresentation =
   | { kind: 'value'; value: number; format: ValueFormat }
   | { kind: 'figure'; label: string };
+/**
+ * A fixed citation with its whole retained version. schema 2 is stored like this; schema 3 is
+ * this shape only while editing (finding 79): a document or deck stores it packed, its version
+ * kept once in `liveSnapshots`.
+ */
 export type LiveReference = {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   source: LiveSource;
   mode: 'fixed';
   snapshot: ReferenceSnapshot;
   presentation: LivePresentation;
 };
+/** The version a packed citation names; its content and dependencies live in `liveSnapshots`. */
+export type LiveSnapshotIdentity = Pick<
+  ReferenceSnapshot,
+  'versionId' | 'revision' | 'contentHash'
+>;
+export type PackedLiveReference = Omit<LiveReference, 'schemaVersion' | 'snapshot'> & {
+  schemaVersion: 3;
+  snapshot: LiveSnapshotIdentity;
+};
+/** What a document or deck stores: a schema 2 citation with its version, or a packed schema 3. */
+export type StoredLiveReference = (LiveReference & { schemaVersion: 2 }) | PackedLiveReference;
+/**
+ * One row per retained version (domain, artifact, version), however many citations name it.
+ * Keyed by `liveSnapshotKey`. A different version is another row even when its content hash is
+ * the same.
+ */
+export type LiveSnapshots = Record<string, ReferenceSnapshot>;
+/** A citation in either form: with its version (editing, schema 2) or packed (stored schema 3). */
+export type LiveCitation = LiveReference | PackedLiveReference;
 export type LiveOption = (
   | { kind: 'value'; targetId: string; metricId: string }
   | { kind: 'figure'; figureId: string }
@@ -98,7 +122,7 @@ export function validLiveReference(value: unknown): value is LiveReference {
     const r = value as LiveReference;
     return (
       !!r &&
-      r.schemaVersion === 2 &&
+      (r.schemaVersion === 2 || r.schemaVersion === 3) &&
       r.mode === 'fixed' &&
       !!r.source &&
       identifier(r.source.artifactId) &&
@@ -126,7 +150,7 @@ export function containsLiveReference(value: unknown): boolean {
     seen.add(item);
     const fields = Object.getOwnPropertyDescriptors(item);
     if (
-      fields.schemaVersion?.value === 2 &&
+      (fields.schemaVersion?.value === 2 || fields.schemaVersion?.value === 3) &&
       fields.mode?.value === 'fixed' &&
       ['source', 'snapshot', 'presentation'].every(
         (key) => fields[key]?.value && typeof fields[key].value === 'object',
@@ -171,11 +195,22 @@ async function verifyLiveSnapshotHashes(snapshot: ReferenceSnapshot): Promise<vo
 
 /** Verify a retained fixed reference without access to the source Editor. */
 export async function verifyRetainedLiveReference(
-  reference: LiveReference,
+  stored: LiveReference | StoredLiveReference,
   destinationArtifactId: string,
+  liveSnapshots?: LiveSnapshots,
 ): Promise<void> {
-  if (!validLiveReference(reference) || reference.source.artifactId === destinationArtifactId)
-    fail('参照元または保存版が不正です。');
+  let reference: LiveReference | undefined;
+  try {
+    reference = hydrateLiveReference(stored, liveSnapshots);
+  } catch {
+    reference = undefined;
+  }
+  if (
+    !reference ||
+    !validLiveReference(reference) ||
+    reference.source.artifactId === destinationArtifactId
+  )
+    return fail('参照元または保存版が不正です。');
   await verifyLiveSnapshotHashes(reference.snapshot);
 }
 function targetMatches(a: LiveTarget, b: LiveTarget) {
@@ -241,7 +276,7 @@ export async function prepareLiveReference(
   } else return fail('対象の解決結果または表示形式が不正です。');
   await provider.checkAccess(source);
   const result: LiveReference = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     source: clone(source),
     mode: 'fixed',
     snapshot: owned,
@@ -269,7 +304,10 @@ export async function projectLiveFigure(
     undefined,
     destinationArtifactId,
   );
-  if (!result.figureSrc || canonicalJson(reference) !== canonicalJson(result.reference))
+  if (
+    !result.figureSrc ||
+    canonicalJson({ ...reference, schemaVersion: 3 }) !== canonicalJson(result.reference)
+  )
     throw new ReferenceError('error', '保存版の図が引用時の内容と一致しません。');
   return result.figureSrc;
 }
@@ -324,20 +362,190 @@ export async function updateLiveReference(
   return (await prepareLiveReferenceUpdate(...args)).reference;
 }
 
+/**
+ * Count, validity and retained bytes of a surface's citations. Stored citations are checked
+ * against the surface's `liveSnapshots`; a version kept once in the table counts once.
+ */
 export function validLiveReferenceItems(
-  references: readonly LiveReference[],
+  references: readonly (LiveReference | StoredLiveReference)[],
   embedded: readonly { reference?: unknown }[],
+  liveSnapshots?: LiveSnapshots,
 ): boolean {
-  if (!references.length) return true;
+  if (!references.length)
+    return liveSnapshots === undefined || validLiveSnapshotRows(liveSnapshots, []);
   const all = [
     ...references,
     ...embedded.flatMap(({ reference }) => (reference ? [reference] : [])),
   ];
   return (
     all.length <= referenceLimits.references &&
-    references.every(validLiveReference) &&
-    new TextEncoder().encode(canonicalJson(all)).length <= referenceLimits.closureBytes
+    validLiveSnapshotRows(liveSnapshots ?? {}, references) &&
+    // Stored schema 3 is always packed; schema 2 keeps its version inline.
+    references.every((r) =>
+      r.schemaVersion === 2
+        ? validLiveReference(r)
+        : isPackedLiveReference(r) && validPackedLiveReference(r, liveSnapshots),
+    ) &&
+    new TextEncoder().encode(canonicalJson(all)).length +
+      new TextEncoder().encode(canonicalJson(liveSnapshots ?? {})).length <=
+      referenceLimits.closureBytes
   );
+}
+
+/** The `liveSnapshots` key: the version's domain, artifact and version ID, without collisions. */
+export const liveSnapshotKey = (
+  snapshot: Pick<ReferenceSnapshot, 'domain' | 'artifactId' | 'versionId'>,
+) => canonicalJson([snapshot.domain, snapshot.artifactId, snapshot.versionId]);
+const referenceKey = (r: { source: LiveSource; snapshot: { versionId: string } }) =>
+  liveSnapshotKey({ ...r.source, versionId: r.snapshot.versionId });
+const ownKey = (table: LiveSnapshots, key: string) =>
+  Object.prototype.hasOwnProperty.call(table, key);
+const sameIdentity = (a: LiveSnapshotIdentity, b: LiveSnapshotIdentity) =>
+  a.versionId === b.versionId && a.revision === b.revision && a.contentHash === b.contentHash;
+const identity = (s: LiveSnapshotIdentity): LiveSnapshotIdentity => ({
+  versionId: s.versionId,
+  revision: s.revision,
+  contentHash: s.contentHash,
+});
+
+export function isPackedLiveReference(value: unknown): value is PackedLiveReference {
+  const r = value as PackedLiveReference;
+  return !!r && r.schemaVersion === 3 && !!r.snapshot && !('content' in r.snapshot);
+}
+function validPackedLiveReference(r: PackedLiveReference, table: LiveSnapshots | undefined) {
+  if (!table || !r.source || !r.snapshot || typeof r.snapshot.versionId !== 'string') return false;
+  const key = referenceKey(r);
+  if (
+    !ownKey(table, key) ||
+    Object.keys(r.snapshot).sort().join() !== 'contentHash,revision,versionId'
+  )
+    return false;
+  const row = table[key];
+  return sameIdentity(r.snapshot, row) && validLiveReference({ ...r, snapshot: row });
+}
+/**
+ * Every row is a valid retained version under its own key and is named by a packed citation.
+ * A version is either packed or kept inline by schema 2 citations, never both.
+ */
+function validLiveSnapshotRows(
+  table: LiveSnapshots,
+  references: readonly (LiveReference | StoredLiveReference)[],
+): boolean {
+  if (!table || typeof table !== 'object' || Array.isArray(table)) return false;
+  const named = new Set(references.filter(isPackedLiveReference).map(referenceKey));
+  const inline = new Set(references.filter((r) => r.schemaVersion === 2).map(referenceKey));
+  return Object.entries(table).every(
+    ([key, row]) =>
+      liveSnapshot(row) && liveSnapshotKey(row) === key && named.has(key) && !inline.has(key),
+  );
+}
+
+/** A citation with its retained version, read from the surface's table when it is packed. */
+export function hydrateLiveReference(
+  reference: LiveReference | StoredLiveReference,
+  liveSnapshots?: LiveSnapshots,
+): LiveReference {
+  if (!isPackedLiveReference(reference)) return reference as LiveReference;
+  const key = referenceKey(reference);
+  const row = liveSnapshots && ownKey(liveSnapshots, key) ? liveSnapshots[key] : undefined;
+  if (!row || !sameIdentity(reference.snapshot, row)) return fail('引用の保存版がありません。');
+  return { ...reference, snapshot: row };
+}
+
+/**
+ * The stored form of a surface's citations (finding 79): each schema 3 citation is packed and its
+ * version kept once in the returned table; schema 2 citations of a version that a schema 3
+ * citation also names move into the table in the same edit, and rows no citation names are
+ * dropped. Schema 2 citations of other versions are left exactly as they are. Pure: the same
+ * editing state always gives the same stored form, so Undo/Redo restore citations and rows
+ * together. Rows of packed citations come from `previous`.
+ */
+export function packLiveReferences<T>(
+  value: T,
+  previous: LiveSnapshots = {},
+): { value: T; liveSnapshots: LiveSnapshots } {
+  const table: LiveSnapshots = {};
+  const packedKeys = new Set<string>();
+  const add = (key: string, row: ReferenceSnapshot) => {
+    if (ownKey(table, key)) {
+      if (canonicalJson(table[key]) !== canonicalJson(row)) fail('同じ版の内容が矛盾しています。');
+    } else table[key] = row;
+  };
+  const visit = (
+    item: unknown,
+    f: (r: LiveReference | PackedLiveReference) => unknown,
+  ): unknown => {
+    if (!item || typeof item !== 'object') return item;
+    if (Array.isArray(item)) {
+      let changed = false;
+      const next = item.map((child) => {
+        const v = visit(child, f);
+        if (v !== child) changed = true;
+        return v;
+      });
+      return changed ? next : item;
+    }
+    const r = item as LiveReference;
+    if (
+      (r.schemaVersion === 2 || r.schemaVersion === 3) &&
+      r.mode === 'fixed' &&
+      r.source &&
+      r.snapshot &&
+      r.presentation
+    )
+      return f(r);
+    let changed = false;
+    const next: Record<string, unknown> = {};
+    for (const [k, child] of Object.entries(item)) {
+      const v = visit(child, f);
+      if (v !== child) changed = true;
+      next[k] = v;
+    }
+    return changed ? next : item;
+  };
+  // First pass: the versions schema 3 citations name.
+  visit(value, (r) => {
+    if (r.schemaVersion === 3) packedKeys.add(referenceKey(r));
+    return r;
+  });
+  const out = visit(value, (r) => {
+    const key = referenceKey(r);
+    if (r.schemaVersion === 2 && !packedKeys.has(key)) return r;
+    if (isPackedLiveReference(r)) {
+      const row = ownKey(previous, key) ? previous[key] : undefined;
+      if (!row || !sameIdentity(r.snapshot, row)) fail('引用の保存版がありません。');
+      add(key, row!);
+      return r;
+    }
+    const hydrated = r as LiveReference;
+    if (!liveSnapshot(hydrated.snapshot) || liveSnapshotKey(hydrated.snapshot) !== key)
+      fail('参照元または保存版が不正です。');
+    add(key, hydrated.snapshot);
+    const packed: PackedLiveReference = {
+      ...hydrated,
+      schemaVersion: 3,
+      snapshot: identity(hydrated.snapshot),
+    };
+    return packed;
+  }) as T;
+  return { value: out, liveSnapshots: table };
+}
+
+/** The editing form: every packed citation carries its version again. Rows are checked. */
+export function unpackLiveReferences<T>(value: T, liveSnapshots: LiveSnapshots = {}): T {
+  const visit = (item: unknown): unknown => {
+    if (!item || typeof item !== 'object') return item;
+    if (Array.isArray(item)) return item.map(visit);
+    if (isPackedLiveReference(item) && (item as PackedLiveReference).mode === 'fixed')
+      return hydrateLiveReference(item as PackedLiveReference, liveSnapshots);
+    return Object.fromEntries(Object.entries(item).map(([k, v]) => [k, visit(v)]));
+  };
+  return visit(value) as T;
+}
+
+/** Re-checks a table row's hashes (a retained version read without its source Editor). */
+export async function verifyLiveSnapshots(liveSnapshots: LiveSnapshots): Promise<void> {
+  for (const row of Object.values(liveSnapshots)) await verifyLiveSnapshotHashes(row);
 }
 
 export function formatLiveValue(

@@ -5,7 +5,12 @@ import {
   type EmbeddedReference,
   type ReferenceProjection,
 } from '@editor-platform/artifact-references';
-import { detachSlideReference, replaceSlideImageReference, type SlideObject } from './model';
+import {
+  detachSlideReference,
+  replaceSlideImageReference,
+  slideLiveReference,
+  type SlideObject,
+} from './model';
 import type { SlideEditing } from './view-shared';
 
 export function SharedReferenceActions({
@@ -25,7 +30,8 @@ export function SharedReferenceActions({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   // The parent keys this selection by the native reference, so peer geometry changes keep the comparison open.
-  const { reference, liveQuote } = useRef(object).current;
+  const { reference, liveQuote: stored } = useRef(object).current;
+  const liveQuote = useRef(stored && slideLiveReference(editing.content, stored)).current;
   const active = useRef(true);
   const current = useRef(editing);
   current.current = editing;

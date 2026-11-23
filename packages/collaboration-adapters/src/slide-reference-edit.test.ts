@@ -337,4 +337,42 @@ describe('opt-in Slide reference transactions', () => {
     const [captured] = await retained.capture([{ id: 'image', reference }]);
     expect(captured.reference).toEqual(reference);
   });
+
+  it('keeps the shared boundary for packed citations (finding 79): a table never enters a shared deck', async () => {
+    const { versions, page, authority, prepare, codec } = await setup();
+    const quote = { ...live(versions[0], 'value'), schemaVersion: 3 as const };
+    // A local insert packs the citation into liveSnapshots; the shared codec refuses it.
+    let refused: unknown;
+    try {
+      const operation = prepareEditorCommand(
+        codec,
+        authority.snapshot(),
+        a,
+        insertSlideCitation(page, 'packed', quote),
+      );
+      refused = !operation || authority.commit(a, operation).status !== 'accepted';
+    } catch {
+      refused = true;
+    }
+    expect(refused).toBe(true);
+    expect(authority.snapshot().content.liveSnapshots).toBeUndefined();
+    // The shared Slide view inserts the whole citation inline as schema 2.
+    expect(
+      authority.commit(
+        a,
+        prepare(a, insertSlideCitation(page, 'inline', quote, undefined, { inline: true })),
+      ).status,
+    ).toBe('accepted');
+    const stored = authority.snapshot().content;
+    expect(stored.liveSnapshots).toBeUndefined();
+    expect(stored.slides[0].objects.find((o) => o.id === 'inline')?.liveQuote?.schemaVersion).toBe(
+      2,
+    );
+    expect(
+      codec.validate({
+        ...stored,
+        liveSnapshots: {},
+      }),
+    ).toBe(false);
+  });
 });

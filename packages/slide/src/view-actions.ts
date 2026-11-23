@@ -5,6 +5,7 @@ import { command, unionBounds, type Bounds, type EditorInputs } from '@editor-pl
 import {
   arrangeObjects,
   copiedObjects,
+  slideLiveReference,
   insertObject,
   insertSlideLayout,
   pasteObjects,
@@ -51,7 +52,11 @@ export function objectActions(
     if (!slide) return;
     if (action === 'copy' || action === 'cut') {
       // Copy pastes offset once; cut pastes back in place.
-      clipboard.current = copiedObjects(slide, ids, action === 'cut' ? 0 : 20);
+      // finding 79: the clipboard keeps each citation's version, so cut and paste survive the
+      // row being dropped from the deck's table.
+      clipboard.current = copiedObjects(slide, ids, action === 'cut' ? 0 : 20).map((o) =>
+        o.liveQuote ? { ...o, liveQuote: slideLiveReference(content, o.liveQuote) } : o,
+      );
       if (action === 'cut') apply(arrangeObjects(slide.id, ids, 'delete'));
       return;
     }

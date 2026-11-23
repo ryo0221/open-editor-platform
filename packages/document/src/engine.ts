@@ -52,6 +52,8 @@ import {
   documentStyleCss,
   isDocument,
   nestedLists,
+  packDocumentLiveReferences,
+  unpackDocumentLiveReferences,
   type DocumentBlock,
   type DocumentContent,
   type InlineSpan,
@@ -504,11 +506,11 @@ export function blockNode(b: DocumentBlock): PMNode {
   return s.nodes.embedded.create({ id: b.id, block: b });
 }
 export function contentToNode(content: DocumentContent): PMNode {
+  // The editor holds each citation with its version; nodeToContent packs them again.
+  const blocks = content.liveSnapshots ? unpackDocumentLiveReferences(content) : content.blocks;
   return documentSchema.nodes.doc.create(
     null,
-    content.blocks.length
-      ? content.blocks.map(blockNode)
-      : [paragraph([], { id: 'empty-document-paragraph' })],
+    blocks.length ? blocks.map(blockNode) : [paragraph([], { id: 'empty-document-paragraph' })],
   );
 }
 export const documentAttributeFields = [
@@ -788,7 +790,14 @@ export function nodeToContent(node: PMNode, base: DocumentContent): DocumentCont
         : textBlockFields(n, rich, type, sourceBlock(id))),
     });
   });
-  return { ...base, schemaVersion: projectedSchemaVersion(base, blocks), blocks };
+  const { liveSnapshots: previousRows, ...rest } = base;
+  const packed = packDocumentLiveReferences(blocks, previousRows);
+  return {
+    ...rest,
+    schemaVersion: projectedSchemaVersion(base, packed.blocks),
+    blocks: packed.blocks,
+    ...(packed.liveSnapshots ? { liveSnapshots: packed.liveSnapshots } : {}),
+  };
 }
 export const stableIds = new Plugin({
   appendTransaction(transactions, _old, state) {

@@ -13,7 +13,8 @@
     "./manuscript": "./src/manuscript.ts",
     "./native-host": "./src/native-host.ts",
     "./pdf-text": "./src/pdf-text.ts",
-    "./kind": "./src/kind.ts"
+    "./kind": "./src/kind.ts",
+    "./citations": "./src/citation-command.ts"
   },
   "dependencies": {
     "@editor-platform/artifact-kinds": "*",

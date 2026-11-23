@@ -1,6 +1,7 @@
 import { canonicalJson, newId } from '@editor-platform/artifact-core';
 import {
   formatLiveValue,
+  hydrateLiveReference,
   prepareLiveReference,
   prepareLiveReferenceUpdate,
   type LiveReference,
@@ -48,12 +49,20 @@ function citations(content: Content) {
     return documentLiveCitationEntries(content.blocks).map(({ id, reference }) => ({
       key: id,
       id,
-      reference,
+      reference: hydrateLiveReference(reference, content.liveSnapshots),
     }));
   if (isDeck(content))
     return content.slides.flatMap((page) =>
       page.objects.flatMap(({ id, liveQuote }) =>
-        liveQuote ? [{ key: canonicalJson([page.id, id]), id, reference: liveQuote }] : [],
+        liveQuote
+          ? [
+              {
+                key: canonicalJson([page.id, id]),
+                id,
+                reference: hydrateLiveReference(liveQuote, content.liveSnapshots),
+              },
+            ]
+          : [],
       ),
     );
   return [];
@@ -71,7 +80,9 @@ function citationChanges(before: Content, after: Content) {
   return [...new Set([...previous.keys(), ...proposed.keys()])].flatMap((key) => {
     const old = previous.get(key);
     const next = proposed.get(key);
-    return canonicalJson(old?.reference) === canonicalJson(next?.reference)
+    // Moving a schema 2 citation into the table (finding 79) is not a change of what it cites.
+    const same = (r: LiveReference | undefined) => canonicalJson(r && { ...r, schemaVersion: 3 });
+    return same(old?.reference) === same(next?.reference)
       ? []
       : [{ id: (old ?? next)!.id, old: old?.reference, next: next?.reference }];
   });

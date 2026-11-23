@@ -2,7 +2,7 @@
 
 ## 値と図の固定引用
 
-`@editor-platform/artifact-references` は、従来の画像引用とは別に schema 2 の固定引用を提供する。
+`@editor-platform/artifact-references` は、従来の画像引用とは別に schema 2・3 の固定引用を提供する。
 値は対象と指標、有限数、表示形式を保持し、図は対象とラベルを保持する。
 元の Editor の `references@0-draft` adapter が保存版の対象一覧と解決結果を提供する。
 Host は保存版と現在の閲覧権限を検証する。作成と更新は対象の存在と内容 hash を検査する。
@@ -18,6 +18,35 @@ Host は保存版と現在の閲覧権限を検証する。作成と更新は対
 サンプルの二つの保存版から値と図を引用し、古い版を選んだ場合は比較画面から新版へ更新できる。
 図の外部形式への出力は後続の対応範囲。
 [画面の検証記録](verification/artifact-live-quotes/README.md)を参照。
+
+### 同じ版の写しは 1 つ（schema 3・`liveSnapshots`）
+
+新しく作る・更新する固定引用は schema 3 になる。文書（`DocumentContent`）とスライド
+（`SlideContent`）は、引用が指す保存版の写しを表 `liveSnapshots` に 1 行ずつ持ち、引用は版の
+名乗り（`versionId`・`revision`・`contentHash`）だけを持つ（packed）。表の鍵は版の
+`(domain, artifactId, versionId)` を `liveSnapshotKey` で衝突なく符号化したもの。同じ版を何度
+引いても 1 行で、中身の hash が同じでも別の版は別の行になる。同じ鍵に違う revision・hash・中身が
+来たら「同じ版の内容が矛盾しています。」で断る。
+
+- 編集中（文書の ProseMirror の attrs、スライドのクリップボード）は引用に版を丸ごと持ち、
+  保存の形への射影（`nodeToContent`・`normalizeSlideLiveSnapshots`）が表を作り直す。表の行の
+  追加・掃除は引用を足す・変える・消す編集と同じ 1 手に入るので、Undo/Redo は引用と表を一緒に
+  戻す。
+- schema 2 の引用は読み込み・再保存では書き換えない（保存済みの版と hash は変わらない）。
+  同じ版を schema 3 で引いた編集の 1 手の中でだけ、その版の schema 2 の引用を表に移す。
+  別の版の schema 2 と schema 3 は 1 つの文書に混じってよい。同じ版が両方の形で残ることはない。
+- 確かめ（`isDocument`・`isDeck`）：packed の引用に行があり名乗りが合うこと、行が自分の鍵の正しい
+  保存版であること、どの引用も指さない行が無いこと。保持閉包の 4 MiB は表の行を 1 回ずつ数え、
+  引用の数の上限 64 は引用の件数のまま。行の hash は `verifyRetainedLiveReference(ref, id,
+  liveSnapshots)` が中身から計算し直して確かめる。
+- 版を丸ごと読むときは `hydrateLiveReference`（`slideLiveReference`・
+  `documentRetainedLiveReferences`）を使う。
+- headless で文書に入れるときは `@editor-platform/document/citations` の
+  `insertDocumentCitation(place, reference)`（値は段落の ID と文字の位置、図は段落のあと）。
+  スライドは `insertSlideCitation`。
+- 共同編集の codec は表を運ばない。共有中のスライドは引用を schema 2 のまま本文に持ち
+  （`insertSlideCitation(..., { inline: true })`）、表や packed の引用を含む共有の内容は断る。
+  共有中の文書は今までどおり引用を編集できない。
 
 この形式は既存の schema 1 の画像引用を置き換えない。図の表示用画像は adapter が提供する安全な
 画像投影を使い、任意の HTML として実行しない。[追加機能の契約](extension-addons.md)も参照。
