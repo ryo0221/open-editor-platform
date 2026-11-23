@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { counterExtension } from '@editor-platform/extension-sample';
 import { ITEMS_ADDON } from '@editor-platform/extension-contract';
 import { parseManifest } from './index';
-import { itemsDeclarationProblems, readItems, type ItemsAddon } from './items';
+import { ITEMS_LIMITS, itemsDeclarationProblems, readItems, type ItemsAddon } from './items';
 
 const hash = `sha256:${'4'.repeat(64)}`;
 const leading = (text: string) => /^[A-Z]{2}-\d{2}/.exec(text)?.[0];
@@ -134,5 +134,21 @@ describe('readItems', () => {
       'scenarios[0].assumptionIds: must be an ID or a list of IDs',
     ]);
     expect(readItems(model, {}, leading)).toEqual({ items: [], problems: [] });
+  });
+  it('counts only identified items toward the limit', () => {
+    const flat: ItemsAddon = {
+      version: ITEMS_ADDON,
+      collections: [
+        { at: 'a', id: 'id', title: 'id' },
+        { at: 'b', id: 'id', title: 'id' },
+      ],
+    };
+    const a = Array.from({ length: ITEMS_LIMITS.items }, (_, i) => ({ id: `X-${i}` }));
+    const ok = readItems(flat, { a: [...a, { name: 'no id' }], b: [{ name: 'no id' }] }, leading);
+    expect(ok.problems).toEqual([]);
+    expect(ok.items).toHaveLength(ITEMS_LIMITS.items);
+    const over = readItems(flat, { a, b: [{ id: 'Y-1' }, { id: 'Y-2' }] }, leading);
+    expect(over.problems).toEqual([`more than ${ITEMS_LIMITS.items} items`]);
+    expect(over.items).toHaveLength(ITEMS_LIMITS.items);
   });
 });

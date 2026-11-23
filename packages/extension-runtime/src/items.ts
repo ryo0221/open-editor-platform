@@ -129,6 +129,7 @@ export function readItems(
   const out: ReadItems = { items: [], problems: [] };
   const declared = itemsDeclarationProblems(addon);
   if (declared.length) return { items: [], problems: declared };
+  let full = false;
   addon.collections.forEach((c: ItemsCollection, ci) => {
     const where = c.at || '(whole content)';
     const box = dig(value, c.at);
@@ -139,13 +140,16 @@ export function readItems(
         ? Object.entries(box)
         : (out.problems.push(`${where}: is not an array or object`), []);
     for (const [key, e] of entries) {
-      if (out.items.length >= ITEMS_LIMITS.items) {
-        out.problems.push(`more than ${ITEMS_LIMITS.items} items`);
-        return;
-      }
+      if (full) return;
       if (!plain(e)) continue;
       const head = idOf(c.id, e, leadingId);
       if (!head) continue;
+      // 上限は、もう 1 つ項目が増えるときにだけ問題にする（ID の無い要素は数えない）
+      if (out.items.length >= ITEMS_LIMITS.items) {
+        out.problems.push(`more than ${ITEMS_LIMITS.items} items`);
+        full = true;
+        return;
+      }
       if (codePoints(head.id) > ITEMS_LIMITS.id) {
         out.problems.push(`${where}[${key}]: ID is too long`);
         continue;
