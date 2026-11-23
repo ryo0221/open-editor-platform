@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./document": "./src/from-document.ts",
     "./model": "./src/model.ts",
     "./kind": "./src/kind.ts",
     "./fields": "./src/fields.ts"
@@ -15,6 +16,8 @@
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/canvas-ui": "*",
+    "@editor-platform/character": "*",
+    "@editor-platform/document": "*",
     "@editor-platform/editor-ui": "*",
     "@editor-platform/office-export-ui": "*",
     "@editor-platform/artifact-references": "*",

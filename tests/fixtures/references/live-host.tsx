@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { contentHash } from '@editor-platform/artifact-core';
-import { ReferenceError, type ReferenceSnapshot } from '@editor-platform/artifact-references';
+import {
+  createLiveReference,
+  ReferenceError,
+  type ReferenceSnapshot,
+} from '@editor-platform/artifact-references';
 import { type LiveReferenceConnection } from '@editor-platform/artifact-references/react';
 import { EditorSession, type EditorCommand } from '@editor-platform/editor-core';
 import { DocumentSurface, createDocument } from '@editor-platform/document';
 import { SlideSurface, createDeck } from '@editor-platform/slide';
-import { Authority, initial, type Principal } from '@editor-platform/collaboration-core';
+import {
+  insertSlideCitation,
+  slideMotionCommand,
+  type SlideContent,
+} from '@editor-platform/slide/model';
+import { Authority, Conflict, initial, type Principal } from '@editor-platform/collaboration-core';
 import {
   createSharedSlideReferenceCodec,
   prepareEditorCommand,
@@ -137,27 +146,66 @@ function DocumentFixture() {
 function SlideFixture() {
   return <SlideSurface {...useFixture(slideSession)} />;
 }
-function SharedSlideFixture() {
-  const [state] = useState(() => {
-    const authorize = ({
-      liveQuote,
-    }: import('@editor-platform/collaboration-adapters').SlideReferenceObject) =>
-      !forbidden &&
-      !!liveQuote &&
-      snapshots.some(
-        (version) =>
-          version.versionId === liveQuote.snapshot.versionId &&
-          version.contentHash === liveQuote.snapshot.contentHash &&
-          JSON.stringify(version.content) === JSON.stringify(liveQuote.snapshot.content),
-      );
-    const codec = createSharedSlideReferenceCodec({ authorize, authorizeDetachment: authorize });
-    const authority = new Authority(codec, initial('destination', codec, createDeck()));
-    return { authority, codec };
-  });
-  const [snapshot, setSnapshot] = useState(() => state.authority.snapshot());
+async function sharedMotionDeck() {
+  const reference = await createLiveReference(
+    { ...artifact, target: { kind: 'value', targetId: 'base', metricId: 'npv' } },
+    snapshots[0],
+    connection.provider,
+    { style: 'percent', digits: 1, unit: '' },
+  );
+  const deck = createDeck();
+  const slideId = deck.slides[0].id;
+  const targetId = 'animated-fixed-quote';
+  return slideMotionCommand({
+    type: 'slide.step.insert',
+    slideId,
+    effects: [
+      {
+        value: {
+          targetId,
+          phase: 'enter',
+          effect: 'fade',
+          trigger: 'on-click',
+          delayMs: 200,
+          durationMs: 500,
+        },
+      },
+    ],
+  }).apply(insertSlideCitation(slideId, targetId, reference).apply(deck));
+}
+function sharedSlideFixture(content = createDeck()) {
+  const authorize = ({
+    liveQuote,
+  }: import('@editor-platform/collaboration-adapters').SlideReferenceObject) =>
+    !forbidden &&
+    !!liveQuote &&
+    snapshots.some(
+      (version) =>
+        version.versionId === liveQuote.snapshot.versionId &&
+        version.contentHash === liveQuote.snapshot.contentHash &&
+        JSON.stringify(version.content) === JSON.stringify(liveQuote.snapshot.content),
+    );
+  const codec = createSharedSlideReferenceCodec({ authorize, authorizeDetachment: authorize });
+  try {
+    const authority = new Authority(codec, initial('destination', codec, content));
+    return <SharedSlideEditors authority={authority} codec={codec} />;
+  } catch (error) {
+    if (error instanceof Conflict && error.message === codec.unsupportedContentReason?.(content))
+      return <p role="alert">{error.message}</p>;
+    throw error;
+  }
+}
+function SharedSlideEditors({
+  authority,
+  codec,
+}: {
+  authority: Authority<SlideContent>;
+  codec: ReturnType<typeof createSharedSlideReferenceCodec>;
+}) {
+  const [snapshot, setSnapshot] = useState(() => authority.snapshot());
   const [current, setCurrent] = useState('A');
   const [last, setLast] = useState('');
-  useEffect(() => state.authority.subscribe((event) => setSnapshot(event.snapshot)), [state]);
+  useEffect(() => authority.subscribe((event) => setSnapshot(event.snapshot)), [authority]);
   const principal = (actorId: string): Principal => ({
     actorId,
     clientId: actorId,
@@ -170,7 +218,7 @@ function SharedSlideFixture() {
       <div style={{ display: 'flex', gap: '0.5rem' }}>
         <button onClick={() => setCurrent('A')}>Editor A</button>
         <button onClick={() => setCurrent('B')}>Editor B</button>
-        <button onClick={() => state.authority.undo(principal('B'), last)}>Undo B</button>
+        <button onClick={() => authority.undo(principal('B'), last)}>Undo B</button>
         <output aria-label="Shared revision">{snapshot.revision}</output>
       </div>
       {['A', 'B'].map((editor) => (
@@ -182,9 +230,9 @@ function SharedSlideFixture() {
             select={() => {}}
             execute={(command) => {
               const actor = principal(editor);
-              const op = prepareEditorCommand(state.codec, snapshot, actor, command);
+              const op = prepareEditorCommand(codec, snapshot, actor, command);
               if (!op) return false;
-              const result = state.authority.commit(actor, op);
+              const result = authority.commit(actor, op);
               if (result.status !== 'accepted') return false;
               if (editor === 'B') setLast(op.operationId);
               return true;
@@ -195,10 +243,11 @@ function SharedSlideFixture() {
     </>
   );
 }
+const kind = params.get('kind');
 createRoot(document.getElementById('root')!).render(
-  params.get('kind') === 'shared-slide' ? (
-    <SharedSlideFixture />
-  ) : params.get('kind') === 'slide' ? (
+  kind === 'shared-slide' || kind === 'shared-slide-motion' ? (
+    sharedSlideFixture(kind === 'shared-slide-motion' ? await sharedMotionDeck() : undefined)
+  ) : kind === 'slide' ? (
     <SlideFixture />
   ) : (
     <DocumentFixture />

@@ -263,7 +263,13 @@ export function AnimationObjectInspector({
     </section>
   );
 }
-export function AnimationPresentationObject({ object }: { object: SlideObject }) {
+export function AnimationPresentationObject({
+  object,
+  inert,
+}: {
+  object: SlideObject;
+  inert?: boolean;
+}) {
   if (!object.animation || object.hidden) return null;
   const { x, y, width, height } = object.bounds;
   return (
@@ -272,7 +278,7 @@ export function AnimationPresentationObject({ object }: { object: SlideObject })
       transform={`translate(${x + width / 2} ${y + height / 2}) rotate(${object.rotation ?? 0}) scale(${object.flipX ? -1 : 1} ${object.flipY ? -1 : 1}) translate(${-width / 2} ${-height / 2})`}
     >
       <foreignObject width={width} height={height}>
-        <div style={{ width: '100%', height: '100%' }}>
+        <div inert={inert} style={{ width: '100%', height: '100%' }}>
           <AnimationViewer
             animation={object.animation}
             autoPlay={object.animation.trigger === 'on-enter'}

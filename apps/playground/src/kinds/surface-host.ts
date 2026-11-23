@@ -1,4 +1,5 @@
 import type { MutableRefObject } from 'react';
+import type { SlideDocumentHost } from '@editor-platform/slide';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import type { LiveReferenceConnection } from '@editor-platform/artifact-references/react';
 import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
@@ -35,6 +36,7 @@ export interface SurfaceHost {
   sharedPreview: { id: string; preview: Preview<Content> } | undefined;
   inputs: EditorInputs;
   readOnly: boolean;
+  slideDocument?: SlideDocumentHost;
   busy: boolean;
   selection: Selection;
   revealAddress: ElementAddress | undefined;

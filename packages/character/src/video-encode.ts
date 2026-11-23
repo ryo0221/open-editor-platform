@@ -1,6 +1,6 @@
 import type { Rational } from '@editor-platform/easing';
 import type { CharacterDocument } from '@editor-platform/character-core';
-import { mp4Overhead, writeMp4, type Mp4Sample } from './mp4-writer';
+import { mp4Comment, mp4Overhead, writeMp4, type Mp4Sample } from './mp4-writer';
 import {
   checkVideoSettings,
   videoFrameTicks,
@@ -160,6 +160,7 @@ export interface Mp4Frames {
   height: number;
   fps: Rational;
   ticks: readonly number[];
+  comment?: string;
 }
 
 /**
@@ -175,7 +176,8 @@ export async function encodeMp4(
   signal?: AbortSignal,
   maxBytes: number = videoLimits.maxOutputBytes,
 ): Promise<Blob> {
-  const { width, height, fps, ticks } = frames;
+  const { width, height, fps, ticks, comment } = frames;
+  const metadataBytes = mp4Comment(comment).length;
   const unsupported = () =>
     new VideoExportError(
       'video-encoder-unsupported',
@@ -239,7 +241,10 @@ export async function encodeMp4(
       const key = chunk.type === 'key';
       if (key) keys++;
       bytes += chunk.byteLength;
-      if (bytes + mp4Overhead(samples.length + 1, keys, avcC?.length ?? 0) > maxBytes) {
+      if (
+        bytes + mp4Overhead(samples.length + 1, keys, avcC?.length ?? 0) + metadataBytes >
+        maxBytes
+      ) {
         failure = new VideoExportError(
           'video-size',
           `The video would take more than ${Math.floor(maxBytes / 2 ** 20)} MB; export a shorter range or a smaller size.`,
@@ -264,8 +269,8 @@ export async function encodeMp4(
       // Closed by the browser after an error.
     }
   };
-  source.begin(width, height);
   try {
+    source.begin(width, height);
     try {
       encoder.configure(config);
     } catch {
@@ -325,6 +330,6 @@ export async function encodeMp4(
     source.end();
   }
   if (samples.length !== ticks.length || !avcC) throw unsupported();
-  const parts = writeMp4({ width, height, ...clock, avcC, samples });
+  const parts = writeMp4({ width, height, ...clock, avcC, samples, comment });
   return new Blob(parts as Uint8Array<ArrayBuffer>[], { type: 'video/mp4' });
 }

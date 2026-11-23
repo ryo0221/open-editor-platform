@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { blockyFigure } from '@editor-platform/character-core';
 import { inspectVideoFile } from '@editor-platform/video-metadata/file-admission';
 import {
+  encodeMp4,
   exportMp4,
   h264Codecs,
   mp4Clock,
@@ -304,6 +305,27 @@ describe('MP4 export (C8b, TS-1293)', () => {
     });
     expect(failing.closed).toBe(1);
     expect(s2.ended).toBe(1);
+  });
+
+  it('embeds an optional UTF-8 comment and includes it in the byte cap', async () => {
+    const frames = { width: 320, height: 180, fps: fps(30), ticks: [0] };
+    const comment = '固定版 v1 '.repeat(100);
+    const encode = (limit?: number) =>
+      encodeMp4(
+        { ...frames, comment },
+        new Source(),
+        new FakeEncoding(),
+        undefined,
+        undefined,
+        limit,
+      );
+    const blob = await encode();
+    expect(await blob.text()).toContain(comment);
+    await expect(
+      encode(blob.size - new TextEncoder().encode(comment).length),
+    ).rejects.toMatchObject({
+      code: 'video-size',
+    });
   });
 
   it('the writer: overhead estimate covers the boxes, and the first sample must be a key', () => {

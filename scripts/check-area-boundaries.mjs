@@ -24,6 +24,7 @@ const allowed = {
 export const knownCrossings = [
   'extension-sample -> animation-core', // the sample extension shows an Animation surface
   'extension-sample -> animation-player',
+  'slide -> character', // the shared H.264 writer at character/video
 ];
 
 /** Every `@editor-platform/*` dependency or peer dependency that leaves its area. */

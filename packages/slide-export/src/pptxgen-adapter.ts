@@ -12,6 +12,7 @@ import {
 } from '@editor-platform/editor-core';
 import { checkExportAbort, exportColor, hashExportBytes } from '@editor-platform/export-core';
 import { transformDrawingBox } from './geometry';
+import { pptxTiming, pptxTransition, type PptxShapePart } from './pptx-motion';
 import type { OwnedPptxPlan, PptxElement, SlidePptxReport, SlidePptxResult } from './types';
 
 const inch = (px: number) => px / 96;
@@ -35,6 +36,8 @@ function dataUri(asset: OwnedPptxPlan['assets'] extends Map<string, infer A> ? A
   return `data:${asset.mime};base64,${btoa(raw)}`;
 }
 type Patches = Map<string, (xml: string) => string>;
+type PagePatches = { drawing: Patches; motionTargets: Map<string, string[]> };
+const timingMarker = 'timing-marker';
 function once(xml: string, expression: RegExp, replace: string): string {
   if (!expression.test(xml)) throw new Error('Generated Office structure changed');
   return xml.replace(expression, replace);
@@ -361,9 +364,14 @@ async function deduplicateMedia(files: Record<string, Uint8Array>, signal?: Abor
     );
 }
 /** Applies each page's per-object XML patches and renumbers drawing ids. */
-function patchSlides(files: Record<string, Uint8Array>, patches: Patches[]) {
-  for (const [pageIndex, patch] of patches.entries()) {
+function patchSlides(
+  files: Record<string, Uint8Array>,
+  plan: OwnedPptxPlan,
+  patches: PagePatches[],
+) {
+  for (const [pageIndex, { drawing: patch, motionTargets }] of patches.entries()) {
     const path = `ppt/slides/slide${pageIndex + 1}.xml`;
+    const page = plan.pages[pageIndex];
     let xml = strFromU8(files[path]);
     const applied = new Set<string>();
     xml = xml.replace(/<p:(sp|pic|graphicFrame)>([\s\S]*?)<\/p:\1>/g, (object: string) => {
@@ -381,8 +389,50 @@ function patchSlides(files: Record<string, Uint8Array>, patches: Patches[]) {
       /<p:cNvPr\b([^>]*)\bid="\d+"/g,
       (_m, before: string) => `<p:cNvPr${before}id="${++id}"`,
     );
+    if (page.steps?.length) {
+      const parts = shapeParts(xml);
+      const byTarget = new Map(
+        [...motionTargets].map(([targetId, names]) => [
+          targetId,
+          names.map((name) => {
+            const part = parts.get(name);
+            if (!part) throw Error('Motion target part is missing');
+            return part;
+          }),
+        ]),
+      );
+      const timing = pptxTiming(
+        page.steps,
+        byTarget,
+        parts.get(timingMarker),
+        plan.width,
+        plan.height,
+      );
+      xml = once(xml, /<\/p:sld>$/, `${timing}</p:sld>`);
+    }
+    if (page.transition)
+      xml = once(xml, /<\/p:clrMapOvr>/, `</p:clrMapOvr>${pptxTransition(page.transition)}`);
     files[path] = strToU8(xml);
   }
+}
+/** Read final ids and the placed centers after all geometry and id patches. */
+function shapeParts(xml: string) {
+  const parts = new Map<string, PptxShapePart>();
+  for (const [shape] of xml.matchAll(/<p:(sp|pic|graphicFrame)>([\s\S]*?)<\/p:\1>/g)) {
+    const meta = /<p:cNvPr\b[^>]*\bid="(\d+)"[^>]*\bname="([^"]+)"/.exec(shape);
+    const placement =
+      /<(?:a|p):xfrm\b[^>]*>\s*<a:off x="(-?\d+)" y="(-?\d+)"\/>\s*<a:ext cx="(\d+)" cy="(\d+)"\/>/.exec(
+        shape,
+      );
+    if (!meta || !placement) continue;
+    const [, x, y, width, height] = placement.map(Number);
+    parts.set(meta[2], {
+      id: Number(meta[1]),
+      centerX: (x + width / 2) / 9525,
+      centerY: (y + height / 2) / 9525,
+    });
+  }
+  return parts;
 }
 function createPresentation(plan: OwnedPptxPlan, family: string) {
   const pptx = new PptxGenJS();
@@ -404,16 +454,21 @@ export async function encodeOwnedPptx(
   const pptx = createPresentation(plan, family);
   const report = clone(plan.report) as SlidePptxReport;
   const byAddress = new Map(report.elements.map((e) => [canonicalJson(e.address), e]));
-  const patches: Patches[] = [];
+  const patches: PagePatches[] = [];
   const encodedImages = new Map<string, string>();
   let processed = 0;
   for (const [pageIndex, page] of plan.pages.entries()) {
     checkExportAbort(signal);
     const slide = pptx.addSlide(),
       patch: Patches = new Map();
-    patches.push(patch);
+    const motionTargets = new Map<string, string[]>();
+    patches.push({ drawing: patch, motionTargets });
+    const animatedIds = new Set(
+      page.steps?.flatMap((step) => step.map(({ effect }) => effect.targetId)),
+    );
     slide.background = color(page.background);
-    if (page.notes) slide.addNotes(page.notes);
+    const notes = [page.notes, ...(page.referenceNotes ?? [])].filter(Boolean).join('\n');
+    if (notes) slide.addNotes(notes);
     for (const [elementIndex, e] of page.elements.entries()) {
       checkExportAbort(signal);
       if (++processed % 20 === 0) {
@@ -430,10 +485,19 @@ export async function encodeOwnedPptx(
         encodedImages,
         patch,
       );
+      if (e.address.elementId && animatedIds.has(e.address.elementId))
+        motionTargets.set(e.address.elementId, names);
       byAddress.get(canonicalJson(e.address))!.outputPartNames = names.map(
         (n) => `ppt/slides/slide${pageIndex + 1}.xml#${n}`,
       );
     }
+    if (page.steps?.some((step) => step.some((motion) => !motion.bounds)))
+      slide.addShape('rect', {
+        ...box({ x: 0, y: 0, width: 1, height: 1 }),
+        objectName: timingMarker,
+        fill: { color: 'FFFFFF', transparency: 100 },
+        line: { type: 'none' },
+      });
   }
   checkExportAbort(signal);
   // Patching requires unpacking anyway. Compress only the final, deduplicated package.
@@ -447,7 +511,7 @@ export async function encodeOwnedPptx(
     plan.pages.length
   )
     throw new Error('Encoder added or removed pages');
-  patchSlides(files, patches);
+  patchSlides(files, plan, patches);
   checkExportAbort(signal);
   const bytes = await new Promise<Uint8Array>((resolve, reject) =>
     zip(files, { level: 6 }, (err, result) => (err ? reject(err) : resolve(result))),

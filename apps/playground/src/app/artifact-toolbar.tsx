@@ -300,6 +300,7 @@ export function MoreActionsMenu({
   selection,
   toolbar,
   externalProposal,
+  externalSlideCreationProposal,
   flushInputs,
   onAction,
   onStartShared,
@@ -318,6 +319,7 @@ export function MoreActionsMenu({
   toolbar: ExtensionAction[] | undefined;
   /** Offers the local external proposal demo when set. */
   externalProposal?(): void;
+  externalSlideCreationProposal?(): void;
   flushInputs(): boolean;
   onAction(action: ArtifactMenuAction): void;
   /** Starts a shared session; absent when the Host does not offer one. */
@@ -382,6 +384,9 @@ export function MoreActionsMenu({
         <button disabled={readOnly} onClick={externalProposal}>
           External proposal demo
         </button>
+      )}
+      {externalSlideCreationProposal && (
+        <button onClick={externalSlideCreationProposal}>文書から新しいデッキを作る提案</button>
       )}
       {toolbar?.map((action) => (
         <button key={action.id} onClick={() => action.run(selection)}>

@@ -351,7 +351,11 @@ function SurfaceHost({
                   />
                 )}
                 {kind === 'slide' && (
-                  <SlideSurface {...common} content={content as ReturnType<typeof createDeck>} />
+                  <SlideSurface
+                    {...common}
+                    sharedEditing={!!shared}
+                    content={content as ReturnType<typeof createDeck>}
+                  />
                 )}
                 {kind === 'design' && (
                   <DesignSurface {...common} content={content as ReturnType<typeof createDesign>} />

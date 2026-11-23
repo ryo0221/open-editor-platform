@@ -5,7 +5,7 @@ import { isDeck, type SlideContent } from '@editor-platform/slide/model';
 import type { ReadonlyTree, SlideExportAddress } from '@editor-platform/export-core';
 import type { SlidePptxOptions, SlidePptxReport } from '@editor-platform/slide-export';
 import { OfficeExportContext } from './host';
-import { PptxExportJob } from './pptx-job';
+import { PptxExportJob, type PptxFigureSource } from './pptx-job';
 import './styles.css';
 
 function download(name: string, blob: Blob) {
@@ -19,11 +19,15 @@ function download(name: string, blob: Blob) {
 export function SlidePptxDialog({
   content,
   selectedPageIds,
+  resolveReference,
+  isComposing,
   onNavigate,
   onClose,
 }: {
   content: SlideContent;
   selectedPageIds: string[];
+  resolveReference?: PptxFigureSource;
+  isComposing?(): boolean;
   onNavigate(address: SlideExportAddress): void;
   onClose(): void;
 }) {
@@ -80,6 +84,7 @@ export function SlidePptxDialog({
       basis: { kind: 'local-draft' as const, artifactId: 'standalone-slide' },
       name: 'slide-deck',
     };
+    if (isComposing?.()) throw Error('Finish text composition before preparing an Office export.');
     if (!isDeck(value.content))
       throw Error('The active artifact is no longer a Slide. Reopen its export menu.');
     return { ...value, content: value.content };
@@ -101,6 +106,7 @@ export function SlidePptxDialog({
           pageIds: scope === 'all' ? 'all' : selectedPageIds,
         },
         new URL(host?.fontManifestUrl ?? '/office-fonts/manifest.json', location.href).href,
+        resolveReference,
       );
       capture.current = { source: content, name: current.name };
       setPhase('preparing');
@@ -170,11 +176,11 @@ export function SlidePptxDialog({
       aria-modal="false"
       className="office-export-dialog"
       onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          job.cancel();
-          onClose();
-        }
+        if (e.key !== 'Escape') return;
+        e.stopPropagation();
+        if (e.nativeEvent.isComposing || e.keyCode === 229 || isComposing?.()) return;
+        job.cancel();
+        onClose();
       }}
     >
       <header>

@@ -81,6 +81,9 @@ async function connect(
     throw new Error(
       'Legacy Animation in the draft or saved history does not support shared editing',
     );
+  const codec = editorAssetCodec(codecs[domain] as DomainCodec<Content>);
+  const reason = codec.unsupportedContentReason?.(initial?.draft.content);
+  if (reason) throw new Error(reason);
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {
@@ -88,7 +91,6 @@ async function connect(
   } catch {
     /* missing credential */
   }
-  const codec = editorAssetCodec(codecs[domain] as DomainCodec<Content>);
   if (credentials) {
     const adapter = new HttpEditorAdapter<Content>(credentials.identity, credentials.token, domain);
     try {

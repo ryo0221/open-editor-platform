@@ -12,7 +12,10 @@ const bundled = build({
   target: 'es2022',
   define: { 'process.env.NODE_ENV': '"production"' },
 });
-async function mount(page: Page, kind: 'document' | 'slide' | 'shared-slide') {
+async function mount(
+  page: Page,
+  kind: 'document' | 'slide' | 'shared-slide' | 'shared-slide-motion',
+) {
   await page.route('**/live-quote-fixture.html*', (route) =>
     route.fulfill({
       contentType: 'text/html',
@@ -24,9 +27,10 @@ async function mount(page: Page, kind: 'document' | 'slide' | 'shared-slide') {
     if (file.path.endsWith('.css')) await page.addStyleTag({ content: file.text });
     else await page.addScriptTag({ content: file.text, type: 'module' });
   }
-  await expect(
-    page.getByRole('button', { name: '引用を挿入', exact: true }).filter({ visible: true }),
-  ).toBeVisible();
+  if (kind !== 'shared-slide-motion')
+    await expect(
+      page.getByRole('button', { name: '引用を挿入', exact: true }).filter({ visible: true }),
+    ).toBeVisible();
 }
 const snapshot = (page: Page) => page.evaluate(() => window.liveQuoteFixture.snapshot());
 const remove = (page: Page) => page.getByRole('button', { name: '引用を外す' });
@@ -113,6 +117,20 @@ for (const viewport of ['desktop', 'narrow'] as const)
     await expect(quote()).toContainText('50.0%');
     await page.screenshot({ path: info.outputPath('shared-slide-reference.png') });
   });
+
+test('shared Slide refuses to start with an animated deck and explains why', async ({
+  page,
+}, info) => {
+  await mount(page, 'shared-slide-motion');
+  const rejection = page.getByRole('alert');
+  await expect(rejection).toBeVisible();
+  await expect(rejection).toHaveText(
+    '段・効果、ページの切り替え、書き出し設定を含むスライドの共同編集は未対応です。ローカルで編集してください。',
+  );
+  await expect(page.getByLabel('Shared revision')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Editor A', exact: true })).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath('shared-slide-motion-rejected.png') });
+});
 
 for (const kind of ['document', 'slide'] as const) {
   async function insertValue(page: Page, version = 'v1') {
@@ -338,5 +356,110 @@ test('an unavailable new target and revoked source access leave the fixed value 
   await page.evaluate(() => window.liveQuoteFixture.forbid());
   await review(page).click();
   await expect(page.getByText(/この引用元を閲覧する権限がありません/)).toBeVisible();
+  expect(await snapshot(page)).toEqual(inserted);
+});
+
+test('Slide PDF and MP4 export bake the fixed figure and embed its source version', async ({
+  page,
+}, info) => {
+  await mount(page, 'slide');
+  const pickerDialog = await picker(page, 'figure');
+  await pickerDialog.getByRole('button', { name: '挿入する' }).click();
+  await expect(pickerDialog).toBeHidden();
+  const inserted = await snapshot(page);
+  await page.evaluate(() => window.liveQuoteFixture.setReadOnly(true));
+
+  async function open(format: 'PDF' | 'MP4') {
+    await page.getByRole('button', { name: 'Export visual', exact: true }).click();
+    await page.getByRole('button', { name: `Export ${format}`, exact: true }).click();
+    return page.getByRole('dialog', { name: 'Slide export' });
+  }
+  async function exportBytes(dialog: ReturnType<Page['getByRole']>, fileName: string) {
+    const pending = page.waitForEvent('download');
+    await dialog.getByRole('button', { name: 'Export file' }).click();
+    const file = await pending;
+    const path = info.outputPath(fileName);
+    await file.saveAs(path);
+    const { readFile } = await import('node:fs/promises');
+    return readFile(path);
+  }
+
+  const { PDFDocument, PDFDict, PDFName, PDFArray, PDFRawStream, decodePDFRawStream } =
+    await import('pdf-lib');
+  const document = await PDFDocument.load(await exportBytes(await open('PDF'), 'fixed-figure.pdf'));
+  const fileEntry = document.catalog
+    .lookup(PDFName.of('Names'), PDFDict)
+    .lookup(PDFName.of('EmbeddedFiles'), PDFDict)
+    .lookup(PDFName.of('Names'), PDFArray)
+    .lookup(1, PDFDict)
+    .lookup(PDFName.of('EF'), PDFDict)
+    .lookup(PDFName.of('F'));
+  if (!(fileEntry instanceof PDFRawStream)) throw Error('Expected an embedded reference manifest.');
+  expect(JSON.parse(Buffer.from(decodePDFRawStream(fileEntry).decode()).toString())).toMatchObject({
+    sources: [{ source: { artifactId: 'budget', target: { figureId: 'map' } }, versionId: 'v1' }],
+  });
+  const images = document.getPage(0).node.Resources()!.lookup(PDFName.of('XObject'), PDFDict);
+  const bitmap = images.lookup(images.keys()[0]);
+  if (!(bitmap instanceof PDFRawStream)) throw Error('Expected an embedded page bitmap.');
+  const pixels = Buffer.from(decodePDFRawStream(bitmap).decode());
+  expect(pixels.indexOf(Buffer.from([0x26, 0x74, 0x53]))).toBeGreaterThanOrEqual(0);
+
+  const video = await open('MP4');
+  const hold = video.getByLabel('Default hold (seconds)');
+  await hold.fill('-1');
+  await expect(video.getByRole('button', { name: 'Export file' })).toBeDisabled();
+  await hold.fill('0.2');
+  await hold.press('Enter');
+  await expect(video.getByRole('status').first()).toHaveText('0.2 s · 6 frames · 960 × 540 px');
+  await expect(video.getByRole('button', { name: 'Save to deck' })).toBeDisabled();
+  await page.screenshot({ path: info.outputPath('slide-mp4-settings.png') });
+
+  const supportsH264 = await page.evaluate(async () => {
+    if (typeof VideoEncoder === 'undefined' || typeof VideoFrame === 'undefined') return false;
+    const candidates = await Promise.all(
+      ['avc1.64001f', 'avc1.4d001f', 'avc1.42e01f'].map((codec) =>
+        VideoEncoder.isConfigSupported({
+          codec,
+          width: 960,
+          height: 540,
+          bitrate: 1555200,
+          framerate: 30,
+          avc: { format: 'avc' },
+          latencyMode: 'quality',
+        }),
+      ),
+    );
+    return candidates.some((candidate) => candidate.supported);
+  });
+  if (supportsH264) {
+    const mp4 = await exportBytes(video, 'fixed-figure.mp4');
+    expect(mp4.subarray(4, 8).toString()).toBe('ftyp');
+    expect(mp4.toString()).toContain('"versionId":"v1"');
+    expect(mp4.toString()).toContain('"artifactId":"budget"');
+  } else {
+    await video.getByRole('button', { name: 'Export file' }).click();
+    await expect(video.getByRole('alert')).toContainText('H.264');
+    await video.getByRole('button', { name: 'Close', exact: true }).click();
+  }
+
+  const downloads: string[] = [];
+  page.on('download', (file) => downloads.push(file.suggestedFilename()));
+  await page.evaluate(() => {
+    if (typeof VideoEncoder !== 'undefined') {
+      VideoEncoder.isConfigSupported = async (config) => ({ config, supported: false });
+    }
+  });
+  const unsupported = await open('MP4');
+  await unsupported.getByRole('button', { name: 'Export file' }).click();
+  await expect(unsupported.getByRole('alert')).toContainText('H.264');
+  await unsupported.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.evaluate(() => window.liveQuoteFixture.forbid());
+  for (const format of ['PDF', 'MP4'] as const) {
+    const dialog = await open(format);
+    await dialog.getByRole('button', { name: 'Export file' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('budget / v1');
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  }
+  expect(downloads).toEqual([]);
   expect(await snapshot(page)).toEqual(inserted);
 });

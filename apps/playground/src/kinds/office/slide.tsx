@@ -40,6 +40,8 @@ function SlideHost({ host, content }: HostSurfaceProps<KindContent<typeof slideK
       focusAddress={revealAddress}
       content={content}
       readOnly={host.readOnly}
+      sharedEditing={!!sharedSession}
+      documentConversion={host.slideDocument}
       execute={host.execute}
       select={host.select}
       dataSnapshots={slideDataSnapshots(host.records)}

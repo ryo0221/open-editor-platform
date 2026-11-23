@@ -1,4 +1,4 @@
-import { assertReferenceItems } from '@editor-platform/artifact-references';
+import { assertReferenceItems, projectLiveFigure } from '@editor-platform/artifact-references';
 import {
   LiveReferenceTools,
   ReferenceWarnings,
@@ -72,10 +72,13 @@ import {
 import { SlideLiveDrawing } from './live-references';
 import { SharedReferenceActions } from './shared-reference-actions';
 import { objectActions, pageActions } from './view-actions';
-import { exportSlides } from './view-export';
+import { exportSlides, type SlideOutput } from './view-export';
+import { SlideExportDialog, type SlideExportDialogOpening } from './view-export-dialog';
 import { SlideInspector } from './view-inspector';
 import { SlideNavigator } from './view-navigator';
 import { SlidePresentation } from './view-presentation';
+import { useSlideInputGuard } from './view-input';
+import { SlideDocumentDialog, type SlideDocumentHost } from './view-from-document';
 import type { SlideEditing } from './view-shared';
 import { animationReuseReason, SlideStatus, SlideToolbar } from './view-toolbar';
 const SlidePptxDialog = lazy(() =>
@@ -115,6 +118,9 @@ export interface SlideSurfaceProps
   select: (ids: string | string[], region?: Region, pageId?: string) => void;
   dataSnapshots?: ChartSnapshot[];
   readOnly?: boolean;
+  /** Shared sessions can present, but cannot edit slide motion. */
+  sharedEditing?: boolean;
+  documentConversion?: SlideDocumentHost;
   layout?: Partial<EditorLayoutProps>;
   focusAddress?: ElementAddress;
 }
@@ -233,40 +239,49 @@ function useNavigatorState() {
 /** Open state of the animation, PPTX export and presentation overlays. */
 function useSlideOverlays() {
   const [pptxOpen, setPptxOpen] = useState(false);
+  const [exportOpening, setExportOpening] = useState<SlideExportDialogOpening>();
   const [animationChoice, setAnimationChoice] = useState<AnimationChoiceState>();
   const [animationPreview, setAnimationPreview] = useState<PlayableAnimationEmbed>();
-  const [presenting, setPresenting] = useState(false),
-    [presentIndex, setPresentIndex] = useState(0);
+  const [presentation, setPresentation] = useState<{
+    pageId?: string;
+    trigger: HTMLButtonElement;
+    menuTrigger?: HTMLButtonElement | null;
+  }>();
   return {
     pptxOpen,
     setPptxOpen,
+    exportOpening,
+    setExportOpening,
     animationChoice,
     setAnimationChoice,
     animationPreview,
     setAnimationPreview,
-    presenting,
-    setPresenting,
-    presentIndex,
-    setPresentIndex,
+    presentation,
+    setPresentation,
   };
 }
 type SlideOverlayState = ReturnType<typeof useSlideOverlays>;
 /** Raster/PDF export and the saved-animation chooser of the surface toolbar and inspector. */
 function surfaceCommands(
-  { slide, references, setError }: SlideEditing,
+  { slide, setError }: SlideEditing,
   context: {
-    guardExport: (() => void) | undefined;
-    inputs: Parameters<typeof exportSlides>[2];
+    guardExport(): void;
+    inputs: Parameters<typeof exportSlides>[1];
     exportState: Parameters<typeof exportSlides>[0];
     animationSources: SlideAnimationProps['animationSources'];
     setAnimationChoice(choice: AnimationChoiceState): void;
   },
 ) {
   const { guardExport, inputs, exportState, animationSources } = context;
-  async function output(format: 'svg' | 'png' | 'pdf', scope: string, scale: number) {
+  async function exportOutput(output: SlideOutput, lifecycle?: Parameters<typeof exportSlides>[3]) {
+    guardExport();
+    flushSync(() => inputs?.flush());
+    guardExport();
+    await exportSlides(exportState, inputs, output, { ...lifecycle, beforeDownload: guardExport });
+  }
+  async function output(format: 'svg' | 'png', scope: string, scale: number) {
     try {
-      guardExport?.();
-      await exportSlides(exportState, references, inputs, format, scope, scale);
+      await exportOutput({ format, scope, scale });
       setError('');
     } catch (e) {
       setError((e as Error).message);
@@ -286,7 +301,7 @@ function surfaceCommands(
       setError(String(error));
     }
   };
-  return { output, chooseAnimation };
+  return { output, exportOutput, chooseAnimation };
 }
 interface AnimationChoiceState {
   pageId: string;
@@ -312,18 +327,26 @@ function SlideSurfaceEditor({
   select,
   dataSnapshots = [],
   readOnly = false,
+  sharedEditing,
+  documentConversion,
   layout,
   focusAddress,
   animationSources,
   openAnimation,
 }: Omit<SlideSurfaceProps, 'locale' | 'labels'>) {
   const guardExport = useContext(EditorExportGuardContext);
+  const latestExportGuard = useLatest(guardExport);
   const references = useMemo(
     () => (sharedReferences ? resolver?.forRetainedVersions() : resolver),
     [resolver, sharedReferences],
   );
   const inputs = useContext(EditorInputsContext);
+  const inputGuard = useSlideInputGuard(inputs);
   const overlays = useSlideOverlays();
+  const [documentOpening, setDocumentOpening] = useState<{
+    opener?: HTMLButtonElement | null;
+    fallback?: HTMLButtonElement | null;
+  }>();
   const [activeId, setActiveId] = useState(content.slides[0]?.id ?? ''),
     [selected, setSelected] = useState<string[]>([]),
     [pages, setPages] = useState<string[]>([]),
@@ -339,7 +362,7 @@ function SlideSurfaceEditor({
     ids = selected.filter((id) => objects.some((o) => o.id === id)),
     chosen = objects.filter((o) => ids.includes(o.id));
   const projectedByPage = useProjectedObjects(content, references);
-  const exportState = useLatest({ content, slide, pages, references });
+  const exportState = useLatest({ content, slide, pages, references, liveReferences });
   const apply = checkedApply(content, readOnly, execute, setError);
   const choose = (next: string[], pageId = slide?.id) => {
     setSelected(next);
@@ -350,6 +373,7 @@ function SlideSurfaceEditor({
     slide,
     ids,
     readOnly,
+    sharedEditing,
     references,
     liveReferences,
     apply,
@@ -451,8 +475,8 @@ function SlideSurfaceEditor({
     setActiveId,
   );
   const { add, image, action, geometry } = objectActions(editing, chosen, clipboard);
-  const { output, chooseAnimation } = surfaceCommands(editing, {
-    guardExport,
+  const { output, exportOutput, chooseAnimation } = surfaceCommands(editing, {
+    guardExport: () => latestExportGuard.current?.(),
     inputs,
     exportState,
     animationSources,
@@ -468,11 +492,49 @@ function SlideSurfaceEditor({
       onImage={(f) => void image(f)}
       onAction={action}
       onAddSlide={addSlide}
-      onPresent={() => {
-        overlays.setPresentIndex(index);
-        overlays.setPresenting(true);
+      fromDocumentDisabledReason={
+        documentConversion && !documentConversion.canCreate && !documentConversion.canAppend
+          ? (documentConversion.appendReason ?? 'この作業場所では文書からデッキを作成できません。')
+          : undefined
+      }
+      onFromDocument={
+        documentConversion &&
+        ((trigger) => {
+          if (inputGuard.isComposing() || !flushSlideInputs()) return;
+          const opener = trigger
+            .closest('.ep-menu')
+            ?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+          const fallback = trigger
+            .closest('.ep-overflow-tools')
+            ?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+          setDocumentOpening({ opener, fallback });
+        })
+      }
+      onPresent={(trigger) => {
+        if (inputGuard.isComposing() || !flushSlideInputs()) return;
+        overlays.setPresentation({
+          pageId: slide?.id,
+          trigger,
+          menuTrigger: trigger
+            .closest('.ep-overflow-tools')
+            ?.querySelector<HTMLButtonElement>('button[aria-expanded]'),
+        });
       }}
-      onExport={(f, s, z) => void output(f, s, z)}
+      onExport={(format, scope, scale, trigger) => {
+        if (inputGuard.isComposing()) return;
+        if (format === 'svg' || format === 'png') {
+          void output(format, scope, scale);
+          return;
+        }
+        if (!flushSlideInputs()) return;
+        const opener = trigger
+          .closest('.ep-menu')
+          ?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+        const fallback = trigger
+          .closest('.ep-overflow-tools')
+          ?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+        overlays.setExportOpening({ format, scale, opener, fallback });
+      }}
       onPptx={() => overlays.setPptxOpen(true)}
     />
   );
@@ -502,61 +564,88 @@ function SlideSurfaceEditor({
   );
   return (
     <>
-      <EditorLayout
-        viewKey="slide"
-        leftLabel="Slide navigator"
-        inspectorLabel="Slide inspector"
-        toolbar={toolbar}
-        left={left}
-        inspector={inspector}
-        status={
-          <SlideStatus
-            index={index}
-            count={content.slides.length}
-            selected={ids.length}
+      <div className="slide-surface" {...inputGuard.events}>
+        <EditorLayout
+          viewKey="slide"
+          leftLabel="Slide navigator"
+          inspectorLabel="Slide inspector"
+          toolbar={toolbar}
+          left={left}
+          inspector={inspector}
+          status={
+            <SlideStatus
+              index={index}
+              count={content.slides.length}
+              selected={ids.length}
+              view={view}
+              setView={setView}
+              navigate={navigate}
+            />
+          }
+          {...layout}
+        >
+          {citationTools}
+          {sharedReferences &&
+            chosen.length === 1 &&
+            (chosen[0].liveQuote || chosen[0].reference) && (
+              <SharedReferenceActions
+                key={canonicalJson([
+                  slide?.id,
+                  chosen[0].id,
+                  chosen[0].liveQuote ?? chosen[0].reference,
+                ])}
+                editing={editing}
+                object={chosen[0]}
+              />
+            )}
+          <SlideStage
+            liveReferences={liveReferences}
+            newer={liveReferences ? newer : undefined}
+            editing={editing}
+            error={error}
             view={view}
             setView={setView}
-            navigate={navigate}
+            projected={slide && projectedByPage.get(slide.id)}
+            onAction={action}
+            onImage={(f, p) => void image(f, { ...p, width: 320, height: 220 })}
+            onPage={(delta) => navigate(index + delta)}
+            tools={tools}
+            onAdd={add}
           />
-        }
-        {...layout}
-      >
-        {citationTools}
-        {sharedReferences &&
-          chosen.length === 1 &&
-          (chosen[0].liveQuote || chosen[0].reference) && (
-            <SharedReferenceActions
-              key={canonicalJson([
-                slide?.id,
-                chosen[0].id,
-                chosen[0].liveQuote ?? chosen[0].reference,
-              ])}
-              editing={editing}
-              object={chosen[0]}
-            />
-          )}
-        <SlideStage
-          liveReferences={liveReferences}
-          newer={liveReferences ? newer : undefined}
+        </EditorLayout>
+        <SlideOverlays
           editing={editing}
-          error={error}
-          view={view}
-          setView={setView}
-          projected={slide && projectedByPage.get(slide.id)}
-          onAction={action}
-          onImage={(f, p) => void image(f, { ...p, width: 320, height: 220 })}
-          onPage={(delta) => navigate(index + delta)}
-          tools={tools}
-          onAdd={add}
+          animationSources={animationSources}
+          overlays={overlays}
+          isComposing={inputGuard.isComposing}
         />
-      </EditorLayout>
-      <SlideOverlays
-        editing={editing}
-        animationSources={animationSources}
-        overlays={overlays}
-        pages={pages}
-        setActiveId={setActiveId}
-      />
+        {documentOpening && documentConversion && (
+          <SlideDocumentDialog
+            opening={documentOpening}
+            host={documentConversion}
+            isComposing={inputGuard.isComposing}
+            close={() => setDocumentOpening(undefined)}
+          />
+        )}
+        {overlays.exportOpening && (
+          <SlideExportDialog
+            editing={editing}
+            opening={overlays.exportOpening}
+            start={exportOutput}
+            isComposing={inputGuard.isComposing}
+            close={() => overlays.setExportOpening(undefined)}
+          />
+        )}
+      </div>
+      {overlays.pptxOpen && (
+        <PptxExport
+          editing={editing}
+          pages={pages}
+          setActiveId={setActiveId}
+          isComposing={inputGuard.isComposing}
+          close={() => overlays.setPptxOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -602,19 +691,17 @@ function SlideStage({
     </>
   );
 }
-/** Animation, PPTX export and presentation dialogs over the editor. */
+/** Animation and presentation dialogs over the editor. */
 function SlideOverlays({
   overlays: props,
   editing,
   animationSources,
-  pages,
-  setActiveId,
+  isComposing,
 }: {
   overlays: SlideOverlayState;
   editing: SlideEditing;
   animationSources: SlideAnimationProps['animationSources'];
-  pages: string[];
-  setActiveId(id: string): void;
+  isComposing(): boolean;
 }) {
   const { animationChoice, animationPreview } = props;
   return (
@@ -633,20 +720,12 @@ function SlideOverlays({
           close={() => props.setAnimationPreview(undefined)}
         />
       )}
-      {props.pptxOpen && (
-        <PptxExport
-          editing={editing}
-          pages={pages}
-          setActiveId={setActiveId}
-          close={() => props.setPptxOpen(false)}
-        />
-      )}
-      {props.presenting && (
+      {props.presentation && (
         <SlidePresentation
           editing={editing}
-          presentIndex={props.presentIndex}
-          setPresentIndex={props.setPresentIndex}
-          close={() => props.setPresenting(false)}
+          {...props.presentation}
+          isComposing={isComposing}
+          close={() => props.setPresentation(undefined)}
         />
       )}
     </>
@@ -760,20 +839,32 @@ function PptxExport({
   editing,
   pages,
   setActiveId,
+  isComposing,
   close,
 }: {
   editing: SlideEditing;
   pages: string[];
   setActiveId(id: string): void;
+  isComposing(): boolean;
   close(): void;
 }) {
   const t = useWording();
-  const { content } = editing;
+  const { content, liveReferences } = editing;
   return (
     <Suspense fallback={<p role="status">{t('Opening PPTX export…')}</p>}>
       <SlidePptxDialog
         content={content}
         selectedPageIds={pages}
+        isComposing={isComposing}
+        resolveReference={
+          liveReferences &&
+          ((reference) =>
+            projectLiveFigure(
+              reference,
+              liveReferences.provider,
+              liveReferences.destinationArtifactId,
+            ))
+        }
         onClose={close}
         onNavigate={(address) => {
           if (!content.slides.some((s) => s.id === address.slideId)) return;

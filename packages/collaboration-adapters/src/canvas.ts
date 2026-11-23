@@ -76,12 +76,19 @@ function canvas<T>(
       return ids.has(anchor.elementId) ? { ...anchor, orphan: true } : anchor;
     },
     apply(content, action): Effect<T> {
+      const unsupported = domain === 'slide' ? unsupportedSlideContent(content) : undefined;
+      if (unsupported) fail('unsupported-operation', unsupported);
       if (!allowSlideReferences) {
         assertNoSharedReference(content, supportsLiveReferences);
         assertNoSharedReference(action.payload, supportsLiveReferences);
       }
       if (action.type === 'domain.restore') {
-        if (!validate(action.payload.content)) fail('invalid-operation', 'Invalid restore content');
+        if (!validate(action.payload.content))
+          fail(
+            'invalid-operation',
+            (domain === 'slide' && unsupportedSlideContent(action.payload.content)) ||
+              'Invalid restore content',
+          );
         return {
           content: copy(action.payload.content),
           required: ['*'],
@@ -272,13 +279,28 @@ function canvas<T>(
     },
   };
 }
+export const sharedSlideMotionReason =
+  '段・効果、ページの切り替え、書き出し設定を含むスライドの共同編集は未対応です。ローカルで編集してください。';
+
+export function unsupportedSlideContent(value: unknown) {
+  const deck = value as Partial<SlideContent> | null | undefined;
+  if (
+    deck?.schemaVersion === 3 &&
+    (deck.exportSettings !== undefined ||
+      (Array.isArray(deck.slides) &&
+        deck.slides.some((page) => page?.steps !== undefined || page?.transition !== undefined)))
+  )
+    return sharedSlideMotionReason;
+}
+
 export const slideCodec = slideCanvasCodec();
 
 /** Native canvas mechanics for the opt-in Slide reference editor codec. */
 export function slideCanvasCodec(allowSlideReferences = false) {
-  return canvas<SlideContent>(
+  const codec = canvas<SlideContent>(
     'slide',
     (v): v is SlideContent =>
+      !unsupportedSlideContent(v) &&
       isDeck(v) &&
       !hasLegacySlideAnimations(v) &&
       new Set(v.slides.flatMap((s) => s.objects.map((o) => o.id))).size ===
@@ -303,6 +325,7 @@ export function slideCanvasCodec(allowSlideReferences = false) {
     },
     allowSlideReferences,
   );
+  return { ...codec, unsupportedContentReason: unsupportedSlideContent };
 }
 export const designCodec = canvas<DesignContent>(
   'design',

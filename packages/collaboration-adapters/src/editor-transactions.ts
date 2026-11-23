@@ -15,7 +15,7 @@ import {
   type Origin,
   type Snapshot,
 } from '@editor-platform/collaboration-core';
-import type { EditorCommand } from '@editor-platform/editor-core';
+import { transactionCommands, type EditorCommand } from '@editor-platform/editor-core';
 import { isDeck, type SlideContent } from '@editor-platform/slide/model';
 import { isDesign, type DesignContent } from '@editor-platform/design/model';
 import { isWhiteboard, type WhiteboardContent } from '@editor-platform/whiteboard/model';
@@ -26,7 +26,14 @@ import {
   type StructuredData,
   type DataGraphView,
 } from '@editor-platform/structured-data/model';
-import { slideCodec, slideCanvasCodec, designCodec, whiteboardCodec } from './canvas';
+import {
+  slideCodec,
+  slideCanvasCodec,
+  designCodec,
+  whiteboardCodec,
+  sharedSlideMotionReason,
+  unsupportedSlideContent,
+} from './canvas';
 import {
   referenceFields,
   slideReferenceFields,
@@ -580,6 +587,13 @@ export function prepareEditorProjection<T>(
   if (!value) return;
   return prepareOperation(codec, state, identity, value.actions, value.origin, value.transactionId);
 }
+function assertSharedSlideCommand<T>(command: EditorCommand<T>): void {
+  if (command.type === 'slide.document.append')
+    fail('unsupported-operation', '文書からの末尾追加は共同編集中に使えません。');
+  if (/^slide\.(?:step\.|effect\.|transition\.|export\.|motion\.)/.test(command.type))
+    fail('unsupported-operation', sharedSlideMotionReason);
+  transactionCommands(command)?.forEach(assertSharedSlideCommand);
+}
 function editorCommandActions<T>(
   codec: DomainCodec<T>,
   state: Snapshot<T>,
@@ -613,9 +627,18 @@ function editorCommandActions<T>(
       origin: 'human',
     };
   }
+  if (codec.domain === 'slide') {
+    assertSharedSlideCommand(command);
+    const reason = unsupportedSlideContent(state.content);
+    if (reason) fail('unsupported-operation', reason);
+  }
   const schema = schemaFor(codec),
     after = command.apply(command.readonlyInput ? state.content : copy(state.content));
-  if (codec.domain === 'slide' && !schema.slideReferences) assertNoSharedReference(after);
+  if (codec.domain === 'slide') {
+    const reason = unsupportedSlideContent(after);
+    if (reason) fail('unsupported-operation', reason);
+    if (!schema.slideReferences) assertNoSharedReference(after);
+  }
   if (!codec.validate(after)) fail('invalid-operation', 'Command produced invalid domain content');
   const action = transactionAction(schema, state.content, after);
   if (!(action.payload.changes as EditorChange[]).length) return undefined;
@@ -927,13 +950,18 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
       return anchor;
     },
     apply(content, action, version, textVersions): Effect<T> {
-      if (base.domain === 'slide' && !schema.slideReferences)
-        assertNoSharedReference(action.payload);
+      if (base.domain === 'slide') {
+        const reason = unsupportedSlideContent(content);
+        if (reason) fail('unsupported-operation', reason);
+        if (!schema.slideReferences) assertNoSharedReference(action.payload);
+      }
       if (!authorizedReferences(content))
         fail('unauthorized', 'A Slide reference is no longer authorized');
       if (action.type === 'canvas.text-steps')
         return applyCanvasSteps(codec, content, action, textVersions);
       if (action.type === 'domain.restore') {
+        const reason = base.unsupportedContentReason?.(action.payload.content);
+        if (reason) fail('invalid-operation', reason);
         if (schema.slideReferences && !valid(action.payload.content))
           fail('invalid-operation', 'The restored Slide or its source references are invalid');
         return base.apply(content, action, version);

@@ -10,7 +10,13 @@ import {
   type LiveReferenceProvider,
   type ReferenceSnapshot,
 } from '@editor-platform/artifact-references';
-import { changeSlideCitation, createDeck, insertSlideCitation } from './model';
+import {
+  changeSlideCitation,
+  createDeck,
+  insertSlideCitation,
+  slideLiveReference,
+  slideMotionCommand,
+} from './model';
 
 const source = {
   artifactId: 'source',
@@ -41,6 +47,56 @@ async function snapshot(revision: number): Promise<ReferenceSnapshot> {
 type Item = { id: string; reference: LiveReference };
 
 describe('reference changes in local history', () => {
+  it('updates a fixed slide citation without changing its object ID or motion and undoes it in one step', async () => {
+    const original = await createLiveReference(source, await snapshot(1), provider, {
+      style: 'decimal',
+      digits: 0,
+      unit: '',
+    });
+    const updated = await updateLiveReference(original, await snapshot(2), provider);
+    const deck = createDeck();
+    const slideId = deck.slides[0].id;
+    const objectId = 'animated-quote';
+    const withCitation = insertSlideCitation(slideId, objectId, original).apply(deck);
+    const before = slideMotionCommand({
+      type: 'slide.step.insert',
+      slideId,
+      effects: [
+        {
+          value: {
+            targetId: objectId,
+            phase: 'enter',
+            effect: 'fade',
+            trigger: 'on-click',
+            delayMs: 200,
+            durationMs: 500,
+          },
+        },
+      ],
+    }).apply(withCitation);
+    const [beforePage] = before.slides;
+    expect(beforePage.steps?.[0].effects[0].targetId).toBe(objectId);
+    const session = new EditorSession(before);
+
+    session.execute(changeSlideCitation(slideId, objectId, original, updated));
+
+    const [afterPage] = session.content.slides;
+    // The deck stores the citation packed; read through the deck it is the updated version.
+    const [afterObject] = afterPage.objects;
+    expect(afterPage.objects).toHaveLength(1);
+    expect({ ...afterObject, liveQuote: undefined }).toEqual({
+      ...beforePage.objects[0],
+      id: objectId,
+      liveQuote: undefined,
+      text: '4',
+    });
+    expect(slideLiveReference(session.content, afterObject.liveQuote!)).toEqual(updated);
+    expect(afterPage.steps).toEqual(beforePage.steps);
+    expect(session.canUndo).toBe(true);
+    expect(session.undo()).toEqual(before);
+    expect(session.canUndo).toBe(false);
+  });
+
   it('rejects deferral and native slide removal for missing or changed citations without adding history', async () => {
     const original = await createLiveReference(source, await snapshot(1), provider, {
       style: 'decimal',

@@ -2,6 +2,7 @@ import {
   captureSlideExportSnapshot,
   prepareSlidePptx,
   encodeSlidePptx,
+  type PptxFigureReference,
   type SlidePptxPlan,
 } from '@editor-platform/slide-export';
 import { createPptxRasterAdapter } from '@editor-platform/slide-export/raster';
@@ -60,14 +61,36 @@ async function loadAdapters(url: string) {
 let adapters: { url: string; value: ReturnType<typeof loadAdapters> } | undefined;
 const send = (message: PptxJobResponse, transfer: Transferable[] = []) =>
   postMessage(message, { transfer });
+type FigureResult = Extract<PptxJobRequest, { action: 'reference-result' }>['result'];
+let pendingFigure: { id: number; resolve(result: FigureResult): void } | undefined;
+
+async function resolveFigure(id: number, reference: PptxFigureReference, signal?: AbortSignal) {
+  const result = await new Promise<FigureResult>((resolve) => {
+    pendingFigure = { id, resolve };
+    send({ id, status: 'reference-request', reference });
+  });
+  if ('error' in result) throw Error(result.error);
+  const asset = await fetchOfficeImage(result.src, signal);
+  return asset.mime === 'image/webp' ? browserOfficeImagePng(asset, signal) : asset;
+}
 onmessage = async ({ data }: MessageEvent<PptxJobRequest>) => {
+  if (data.action === 'reference-result') {
+    if (pendingFigure?.id === data.id) {
+      pendingFigure.resolve(data.result);
+      pendingFigure = undefined;
+    }
+    return;
+  }
   try {
     if (data.action === 'prepare') {
       plan = undefined;
       const snapshot = captureSlideExportSnapshot(data.content, data.basis);
       if (!adapters || adapters.url !== data.fontManifestUrl)
         adapters = { url: data.fontManifestUrl, value: loadAdapters(data.fontManifestUrl) };
-      plan = await prepareSlidePptx(await snapshot, data.options, await adapters.value);
+      plan = await prepareSlidePptx(await snapshot, data.options, {
+        ...(await adapters.value),
+        resolveReferenceImage: (reference, signal) => resolveFigure(data.id, reference, signal),
+      });
       send({ id: data.id, status: 'prepared', report: plan.report });
     } else {
       if (!plan) throw Error('Prepare the export again before downloading');
