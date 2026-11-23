@@ -9,6 +9,12 @@ import {
   type GraphProfile,
   type GraphSectionType,
 } from '@editor-platform/structured-graph/model';
+import {
+  createFishboneGraph,
+  createFtaGraph,
+  fishboneProfile,
+  ftaProfile,
+} from './analysis-graph-templates';
 
 /**
  * Playground diagram vocabulary (#396 Phase 3). The Graph package stays domain-neutral: the
@@ -162,6 +168,18 @@ function build(title: string, spec: Spec): GraphDocument {
 
 export const graphTemplates = [
   {
+    id: 'fishbone',
+    label: 'Fishbone / Cause analysis (prototype)',
+    profile: fishboneProfile,
+    create: createFishboneGraph,
+  },
+  {
+    id: 'fta',
+    label: 'FTA / Fault tree (prototype)',
+    profile: ftaProfile,
+    create: createFtaGraph,
+  },
+  {
     id: 'relations',
     label: 'Relation map',
     profile: relationProfile,
@@ -223,7 +241,12 @@ export const graphTemplates = [
 export type GraphTemplateId = (typeof graphTemplates)[number]['id'];
 
 /** Every Graph Profile this Playground Host registers. */
-export const graphProfiles: readonly GraphProfile[] = [relationProfile, diagramProfile];
+export const graphProfiles: readonly GraphProfile[] = [
+  relationProfile,
+  diagramProfile,
+  fishboneProfile,
+  ftaProfile,
+];
 /** The registered Profile a Graph names, or undefined when this Host does not know it. */
 export function graphProfileFor(graph: Pick<GraphDocument, 'profile'>): GraphProfile | undefined {
   return graphProfiles.find(
