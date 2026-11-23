@@ -1,6 +1,19 @@
 // Where each visible node is drawn. Pure: the screen, SVG export and references use the same
 // positions. Positions are computed from the tree and never stored.
-import type { MindmapContent, MindmapNode } from './model';
+import {
+  MINDMAP_MARK_NAMES,
+  type MindmapContent,
+  type MindmapMark,
+  type MindmapNode,
+} from './model';
+
+/** One mark badge inside a box: `x` from the text's left edge, `row` under the text. */
+export interface MindmapBadge {
+  mark: MindmapMark;
+  x: number;
+  row: number;
+  width: number;
+}
 
 export interface MindmapBox {
   id: string;
@@ -13,6 +26,7 @@ export interface MindmapBox {
   side: -1 | 1;
   /** The text broken into the lines drawn. */
   lines: string[];
+  badges: MindmapBadge[];
   parentId?: string;
   /** Whether the node has children that are hidden because it is folded. */
   folded: boolean;
@@ -30,14 +44,17 @@ export const MINDMAP_BOX = {
   padX: 12,
   padY: 8,
   lineHeight: 20,
-  markRow: 22,
+  badgeTop: 4,
+  badgeHeight: 16,
+  badgeGap: 3,
+  badgePad: 5,
   columnGap: 56,
   rowGap: 14,
   margin: 24,
 } as const;
 
 /** A rough advance width at 14 px: narrow for ASCII, full for CJK and others. */
-const advance = (c: string) => (c.codePointAt(0)! < 0x2e80 ? (/[A-Z]/.test(c) ? 9 : 7.5) : 14);
+const advance = (c: string) => (c.codePointAt(0)! < 0x2e80 ? (/[A-Z]/.test(c) ? 9.5 : 8) : 15);
 
 /** The node text broken into lines that fit the widest box. */
 export function mindmapTextLines(text: string): string[] {
@@ -59,18 +76,41 @@ export function mindmapTextLines(text: string): string[] {
   return lines;
 }
 
+/** The width of one mark badge (11 px text with 5 px padding on each side). */
+const badgeWidth = (mark: MindmapMark) =>
+  Math.ceil([...MINDMAP_MARK_NAMES[mark]].length * 12 + MINDMAP_BOX.badgePad * 2);
+
 function measure(n: MindmapNode) {
   const lines = mindmapTextLines(n.text);
   const textWidth = Math.max(...lines.map((l) => [...l].reduce((s, c) => s + advance(c), 0)));
+  const marks = n.marks ?? [];
+  const badgeRow = marks.reduce((s, m) => s + badgeWidth(m) + MINDMAP_BOX.badgeGap, 0);
   const width = Math.min(
     MINDMAP_BOX.maxWidth,
-    Math.max(MINDMAP_BOX.minWidth, Math.ceil(textWidth) + MINDMAP_BOX.padX * 2),
+    Math.max(MINDMAP_BOX.minWidth, Math.ceil(Math.max(textWidth, badgeRow)) + MINDMAP_BOX.padX * 2),
   );
+  // Badges wrap like the editor's flex row.
+  const inner = width - MINDMAP_BOX.padX * 2;
+  const badges: MindmapBadge[] = [];
+  let x = 0,
+    row = 0;
+  for (const mark of marks) {
+    const w = badgeWidth(mark);
+    if (x && x + w > inner) {
+      x = 0;
+      row++;
+    }
+    badges.push({ mark, x, row, width: w });
+    x += w + MINDMAP_BOX.badgeGap;
+  }
+  const rows = marks.length ? row + 1 : 0;
   const height =
     lines.length * MINDMAP_BOX.lineHeight +
     MINDMAP_BOX.padY * 2 +
-    (n.marks?.length ? MINDMAP_BOX.markRow : 0);
-  return { lines, width, height };
+    (rows
+      ? MINDMAP_BOX.badgeTop + rows * MINDMAP_BOX.badgeHeight + (rows - 1) * MINDMAP_BOX.badgeGap
+      : 0);
+  return { lines, width, height, badges };
 }
 
 /**
@@ -89,7 +129,7 @@ export function layoutMindmap(
 
   function place(id: string, depth: number, side: -1 | 1, parentId?: string): MindmapBox {
     const n = nodes[id];
-    const { lines, width, height } = measure(n);
+    const { lines, width, height, badges } = measure(n);
     const box: MindmapBox = {
       id,
       x: 0,
@@ -99,6 +139,7 @@ export function layoutMindmap(
       depth,
       side,
       lines,
+      badges,
       ...(parentId ? { parentId } : {}),
       folded: n.children.length > 0 && isFolded(n),
     };

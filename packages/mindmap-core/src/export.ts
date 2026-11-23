@@ -46,10 +46,15 @@ export function exportMindmapSvg(content: MindmapContent, options: MindmapSvgOpt
         `<text x="${box.x + MINDMAP_BOX.padX}" y="${box.y + MINDMAP_BOX.padY + (i + 1) * MINDMAP_BOX.lineHeight - 5}" fill="#17202c"${root ? ' font-weight="700"' : ''}>${escapeXml(line)}</text>`,
       ),
     );
-    if (n.marks?.length)
+    const badgeTop =
+      box.y + MINDMAP_BOX.padY + box.lines.length * MINDMAP_BOX.lineHeight + MINDMAP_BOX.badgeTop;
+    for (const b of box.badges) {
+      const x = box.x + MINDMAP_BOX.padX + b.x,
+        y = badgeTop + b.row * (MINDMAP_BOX.badgeHeight + MINDMAP_BOX.badgeGap);
       parts.push(
-        `<text x="${box.x + MINDMAP_BOX.padX}" y="${box.y + box.height - MINDMAP_BOX.padY - 4}" font-size="11" fill="#4a5668">${escapeXml(n.marks.map((m) => MINDMAP_MARK_NAMES[m]).join('・'))}</text>`,
+        `<rect x="${x}" y="${y}" width="${b.width}" height="${MINDMAP_BOX.badgeHeight}" rx="8" fill="#e7edf4"/><text x="${x + MINDMAP_BOX.badgePad}" y="${y + 12}" font-size="11" fill="#243449">${escapeXml(MINDMAP_MARK_NAMES[b.mark])}</text>`,
       );
+    }
     if (box.folded)
       parts.push(
         `<circle cx="${box.side === -1 && !tree ? box.x : tree ? box.x + box.width / 2 : box.x + box.width}" cy="${tree ? box.y + box.height : box.y + box.height / 2}" r="7" fill="#5b6b80"/>`,

@@ -41,7 +41,7 @@
 }
 .mindmap-status {
   min-height: 1.4em;
-  margin: 8px 0;
+  margin: 4px 0;
   color: #8a1f1f;
 }
 .mindmap-main {
@@ -193,8 +193,11 @@
   font-weight: 400;
 }
 .mindmap-badge {
+  box-sizing: border-box;
+  height: 16px;
+  white-space: nowrap;
   font-size: 11px;
-  line-height: 1.4;
+  line-height: 16px;
   padding: 0 5px;
   border-radius: 8px;
   background: #e7edf4;
