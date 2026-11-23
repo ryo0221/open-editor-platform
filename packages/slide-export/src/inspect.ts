@@ -92,35 +92,23 @@ const visibleDrawings = (slide: Slide) =>
   slidePaintOrder(slide)
     .filter((o) => !o.hidden)
     .map((o) => ({ object: o, drawing: slideDrawing(o) }));
+/** A list paints a bullet on every line, even an empty one. */
 const hasText = (object: SlideObject, drawing: Drawing) =>
-  (object.type === 'text' || object.type === 'shape') && !!drawing.text?.trim();
+  (object.type === 'text' || object.type === 'shape') &&
+  (!!drawing.text?.trim() || (!!drawing.typography?.list && drawing.text !== ''));
 function setFontSize(d: Drawing) {
   return d.typography?.fontSize ?? (d.kind === 'text' ? 28 : 18);
 }
 function drawnFontSize(d: Drawing) {
   return usesGridText(d) ? gridTextLayout(d).fontSize : layoutDrawingText(d).fontSize;
 }
-/** Only the text of a box, unclipped: a text drawing with the same box, padding and style. */
+/**
+ * The box as drawn but without its shape paint, so the measured extent is its text. Keeping the
+ * drawing kind and typography keeps every default and the layout engine (lines or grid) the
+ * renderer chooses; flips stay as drawn (rotation is not followed).
+ */
 function textOnly(d: Drawing): Drawing {
-  const padding = d.typography?.padding ?? (d.kind === 'text' ? 4 : 10);
-  return {
-    id: d.id,
-    kind: 'text',
-    bounds: d.bounds,
-    text: d.text,
-    runs: d.runs,
-    fill: d.typography?.color ?? (d.kind === 'text' ? d.fill : '#253044'),
-    // Flips move the text inside its box as the renderer reflects it (rotation is not followed).
-    flipX: d.flipX,
-    flipY: d.flipY,
-    typography: {
-      ...d.typography,
-      // Defaults depend on the drawing kind: keep the shape's own size and padding.
-      fontSize: setFontSize(d),
-      padding,
-      color: d.typography?.color ?? (d.kind === 'text' ? d.fill : '#253044'),
-    },
-  } as Drawing;
+  return d.kind === 'shape' ? { ...d, fill: 'none', stroke: 'none', strokeWidth: 0 } : d;
 }
 const unclipped = (svg: string) => svg.replace(/ clip-path="url\(#text-[^"]*\)"/g, '');
 function issuesFor(

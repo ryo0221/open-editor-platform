@@ -155,3 +155,21 @@ it('estimates vertical text at each run size', () => {
     'clipped',
   ]);
 });
+
+it('checks the bullets of an empty list, and keeps literal ruby notation as drawn', () => {
+  const list = box('list', '\n\n', {
+    bounds: { x: 40, y: 40, width: 300, height: 40 },
+    typography: { fontSize: 24, list: true },
+  });
+  expect(inspector.textOverflow(deck([list]), { slideId: 's1' }).map((i) => i.kind)).toEqual([
+    'clipped',
+  ]);
+  const ruby = box('ruby', '漢字《かんじ》', {
+    bounds: { x: 40, y: 40, width: 120, height: 65 },
+    typography: {},
+    runs: [{ text: '漢字《かんじ》', style: { fontSize: 28 } }],
+  });
+  expect(inspector.textOverflow(deck([ruby]), { slideId: 's1' }).map((i) => i.kind)).toEqual([
+    'clipped',
+  ]);
+});
