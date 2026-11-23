@@ -1,7 +1,9 @@
 import {
   drawingSvg,
+  gridTextCells,
   gridTextLayout,
   layoutDrawingText,
+  unionBounds,
   usesGridText,
   type Bounds,
   type Drawing,
@@ -171,19 +173,18 @@ export function estimateSlideTextOverflow(
       const b = drawing.bounds;
       let painted: Bounds;
       if (usesGridText(drawing)) {
-        // The cells the glyphs occupy (gridTextExtent is a conservative enclosure of the box).
-        const layout = gridTextLayout(drawing);
-        const cells = layout.lines.flatMap((l) => l.glyphs);
+        // The cells the glyphs occupy, each at its own size (gridTextExtent is a conservative
+        // enclosure of the box).
+        const cells = gridTextCells(drawing);
         if (!cells.length) return [];
-        const xs = cells.map((g) => g.x),
-          ys = cells.map((g) => g.y),
-          half = layout.fontSize / 2;
-        painted = {
-          x: Math.min(...xs) - half,
-          y: Math.min(...ys) - half,
-          width: Math.max(...xs) - Math.min(...xs) + layout.fontSize,
-          height: Math.max(...ys) - Math.min(...ys) + layout.fontSize,
-        };
+        painted = unionBounds(
+          cells.map((c) => ({
+            x: c.x - c.size / 2,
+            y: c.y - c.size / 2,
+            width: c.size,
+            height: c.size,
+          })),
+        );
       } else {
         const layout = layoutDrawingText(drawing);
         painted = { x: b.x, y: layout.startY, width: b.width, height: layout.totalHeight };

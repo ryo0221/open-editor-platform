@@ -142,3 +142,16 @@ it('paints the slide background image under the objects', () => {
     inspector.renderPng(plain, 's1', { scale: 0.25 }).png,
   );
 });
+
+it('estimates vertical text at each run size', () => {
+  const content = deck([
+    box('big', '売', {
+      bounds: { x: 40, y: 40, width: 300, height: 40 },
+      typography: { fontSize: 24, writingMode: 'vertical-rl' },
+      runs: [{ text: '売', style: { fontSize: 48 } }],
+    }),
+  ]);
+  expect(estimateSlideTextOverflow(content, { slideId: 's1' }).map((i) => i.kind)).toEqual([
+    'clipped',
+  ]);
+});
