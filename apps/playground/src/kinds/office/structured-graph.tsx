@@ -6,7 +6,7 @@ import {
   relationProfile,
 } from '@editor-platform/structured-graph';
 import { graphProfileFor } from '../../app/graph-templates';
-import { evaluateFta } from '../../app/analysis-graph-templates';
+import { evaluateFta, formatProbability } from '../../app/analysis-graph-templates';
 import type { Content } from '../../model';
 import { graphDefinition } from '../office';
 import { hostKind, type HostSurfaceProps, type KindContent } from '../host-kind';
@@ -19,16 +19,12 @@ function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphD
   return (
     <>
       {evaluation && (
-        <section
-          aria-label="FTA evaluation (prototype)"
-          role="status"
-          style={{ padding: '8px 12px', borderBottom: '1px solid #94a3b8' }}
-        >
+        <section aria-label="FTA evaluation (prototype)" role="status" className="analysis-banner">
           <strong>FTA試算（静的・独立事象の仮定）: </strong>
           {evaluation.ok
-            ? `トップ事象の確率 ${(evaluation.probability * 100).toFixed(4)}% / 基本事象 ${evaluation.basicEventIds.length}件`
+            ? `トップ事象の確率 ${formatProbability(evaluation.probability)} / 基本事象 ${evaluation.basicEventIds.length}件`
             : `計算不可: ${evaluation.issues.join(' / ')}`}
-          <div style={{ fontSize: '0.8em' }}>
+          <div className="analysis-banner-note">
             説明用の計算です。共通原因故障、時間依存、実証された独立性、認証済み安全解析には対応しません。
           </div>
         </section>

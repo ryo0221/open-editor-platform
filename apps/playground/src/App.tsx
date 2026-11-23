@@ -923,7 +923,7 @@ export default function App({
       const inspection = inspectFmeaData(saved.draft.content);
       if (inspection.issues.length) {
         setError(
-          'FMEAのS/O/D・必須入力を確認してください。draftは保持されています: ' +
+          'Fix FMEA S/O/D ratings before saving a version. Your draft is retained. ' +
             inspection.issues[0],
         );
         return;

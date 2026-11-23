@@ -346,6 +346,13 @@ export function createFtaGraph(): GraphDocument {
   return graph;
 }
 
+/** A percentage for the FTA banner; very small values keep significant digits instead of 0. */
+export function formatProbability(probability: number): string {
+  const percent = probability * 100;
+  if (percent === 0) return '0%';
+  return percent >= 0.0001 ? `${percent.toFixed(4)}%` : `${percent.toExponential(2)}%`;
+}
+
 export type FtaResult =
   | { ok: true; probability: number; topId: string; basicEventIds: string[] }
   | { ok: false; issues: string[] };

@@ -168,18 +168,6 @@ function build(title: string, spec: Spec): GraphDocument {
 
 export const graphTemplates = [
   {
-    id: 'fishbone',
-    label: 'Fishbone / Cause analysis (prototype)',
-    profile: fishboneProfile,
-    create: createFishboneGraph,
-  },
-  {
-    id: 'fta',
-    label: 'FTA / Fault tree (prototype)',
-    profile: ftaProfile,
-    create: createFtaGraph,
-  },
-  {
     id: 'relations',
     label: 'Relation map',
     profile: relationProfile,
@@ -236,6 +224,18 @@ export const graphTemplates = [
     label: 'Blank diagram',
     profile: diagramProfile,
     create: () => build('Diagram', { nodes: [], edges: [] }),
+  },
+  {
+    id: 'fishbone',
+    label: 'Fishbone / Cause analysis (prototype)',
+    profile: fishboneProfile,
+    create: createFishboneGraph,
+  },
+  {
+    id: 'fta',
+    label: 'FTA / Fault tree (prototype)',
+    profile: ftaProfile,
+    create: createFtaGraph,
   },
 ] as const;
 export type GraphTemplateId = (typeof graphTemplates)[number]['id'];

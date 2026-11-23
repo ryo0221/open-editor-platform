@@ -8,6 +8,7 @@ import {
   createFishboneGraph,
   createFtaGraph,
   evaluateFta,
+  formatProbability,
   fishboneProfile,
   ftaProfile,
 } from './analysis-graph-templates';
@@ -100,5 +101,11 @@ describe('fishbone and FTA structured analysis prototypes', () => {
   it('does not evaluate a Fishbone graph as an FTA', () => {
     const result = evaluateFta(createFishboneGraph());
     expect(result.ok).toBe(false);
+  });
+
+  it('formats very small top-event probabilities without rounding them to zero', () => {
+    expect(formatProbability(0.0298)).toBe('2.9800%');
+    expect(formatProbability(0)).toBe('0%');
+    expect(formatProbability(1e-9)).toBe('1.00e-7%');
   });
 });
