@@ -1,7 +1,12 @@
 import { expect, it } from 'vitest';
 import { clone, contentHash, deepFreeze } from '@editor-platform/artifact-core';
 import { createLiveReference } from '@editor-platform/artifact-references';
-import { createDeck, makeSlideObject, isDeck } from '@editor-platform/slide/model';
+import {
+  createDeck,
+  makeSlideObject,
+  isDeck,
+  normalizeSlideLiveSnapshots,
+} from '@editor-platform/slide/model';
 import { authorReusableComponent, saveAsTemplate } from './index';
 
 function fixture() {
@@ -96,8 +101,9 @@ for (const [kind, author] of Object.entries(authors)) {
       },
       { style: 'decimal', digits: 0, unit: '' },
     );
-    const source = fixture();
-    source.slides[0].objects[1] = { ...source.slides[0].objects[1], liveQuote: quote };
+    const unpacked = fixture();
+    unpacked.slides[0].objects[1] = { ...unpacked.slides[0].objects[1], liveQuote: quote };
+    const source = normalizeSlideLiveSnapshots(unpacked);
     expect(isDeck(source)).toBe(true);
     await expect(author(source)).rejects.toThrow('参照を含む範囲');
   });

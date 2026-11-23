@@ -52,11 +52,13 @@ function prepareLocalDocumentCommand(
   const basis = isDeepFrozen(base) ? base : deepFreeze(clone(base));
   const projected = project(doc, basis);
   assertReferenceItems(projected.blocks);
-  if (!validDocumentLiveReferences(projected.blocks))
+  if (!validDocumentLiveReferences(projected.blocks, projected.liveSnapshots))
     throw new Error('引用が不正か、件数または容量の上限を超えています。');
   const previous = new Map(basis.blocks.map((block) => [block.id, block]));
+  const { liveSnapshots: _previousRows, ...rest } = basis;
   const content: DocumentContent = deepFreeze({
-    ...basis,
+    ...rest,
+    ...(projected.liveSnapshots ? { liveSnapshots: projected.liveSnapshots } : {}),
     schemaVersion: projected.schemaVersion,
     blocks: projected.blocks.map((block) => {
       const before = previous.get(block.id);

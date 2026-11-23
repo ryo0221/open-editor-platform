@@ -26,7 +26,10 @@ export async function validateArtifactReferenceHistory(
             objects.flatMap(({ liveQuote }) => (liveQuote ? [liveQuote] : [])),
           )
         : [];
-    for (const reference of fixed) await verifyRetainedLiveReference(reference, artifact.id);
+    // finding 79: packed citations read their version from the surface's table.
+    const table = isDocument(content) || isDeck(content) ? content.liveSnapshots : undefined;
+    for (const reference of fixed)
+      await verifyRetainedLiveReference(reference, artifact.id, table);
   }
 }
 

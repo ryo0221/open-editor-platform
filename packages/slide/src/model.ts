@@ -6,7 +6,13 @@ import {
   validLiveReferenceItems,
   formatLiveValue,
   safeLiveFigure,
+  hydrateLiveReference,
+  isPackedLiveReference,
+  packLiveReferences,
   type LiveReference,
+  type LiveSnapshots,
+  type StoredLiveReference,
+  type LiveCitation,
   describeReference,
   type EmbeddedReference,
 } from '@editor-platform/artifact-references';
@@ -76,7 +82,8 @@ export interface ChartSnapshot {
 export interface SlideObject extends VisualStyle {
   /** Reference source is canonical; src is a retained rendering cache. */
   reference?: EmbeddedReference;
-  liveQuote?: LiveReference;
+  /** Stored form: schema 2 with its version, or schema 3 packed (its version in `liveSnapshots`). */
+  liveQuote?: LiveCitation;
   animation?: PlayableAnimationEmbed;
   id: string;
   type: SlideObjectType;
@@ -104,6 +111,8 @@ export interface SlideContent {
   width: number;
   height: number;
   slides: Slide[];
+  /** finding 79: one retained version per (domain, artifact, version) for the deck's citations. */
+  liveSnapshots?: LiveSnapshots;
 }
 export interface SlideAnimationSource {
   source: SourceRef;
@@ -278,10 +287,12 @@ export const addSlide = (): EditorCommand<SlideContent> => {
   }));
 };
 export const deleteSlide = (id: string): EditorCommand<SlideContent> =>
-  command('slide.delete', 'Delete slide', (d) => ({
-    ...d,
-    slides: d.slides.filter((s) => s.id !== id),
-  }));
+  command('slide.delete', 'Delete slide', (d) =>
+    normalizeSlideLiveSnapshots({
+      ...d,
+      slides: d.slides.filter((s) => s.id !== id),
+    }),
+  );
 export const reorderSlide = (id: string, delta: number): EditorCommand<SlideContent> =>
   command('slide.reorder', 'Reorder slide', (d) => {
     const slides = [...d.slides],
@@ -427,14 +438,16 @@ export const transformObjects = (
     { geometry: ids },
   );
 export const deleteObjects = (slideId: string, ids: string[]): EditorCommand<SlideContent> =>
-  command('slide.delete-object', 'Delete slide objects', (d) => ({
-    ...d,
-    slides: d.slides.map((s) =>
-      s.id === slideId
-        ? { ...s, objects: s.objects.filter((o) => !expanded(s, ids).has(o.id)) }
-        : s,
-    ),
-  }));
+  command('slide.delete-object', 'Delete slide objects', (d) =>
+    normalizeSlideLiveSnapshots({
+      ...d,
+      slides: d.slides.map((s) =>
+        s.id === slideId
+          ? { ...s, objects: s.objects.filter((o) => !expanded(s, ids).has(o.id)) }
+          : s,
+      ),
+    }),
+  );
 export const groupObjects = (slideId: string, ids: string[]): EditorCommand<SlideContent> => {
   const groupIds = stableIds();
   return withCommandReads<SlideContent>(
@@ -682,7 +695,7 @@ function validObject(o: SlideObject): boolean {
     validVisualStyle(o) &&
     (o.reference === undefined || (o.type === 'image' && validEmbeddedReference(o.reference))) &&
     (o.liveQuote === undefined ||
-      (validLiveReference(o.liveQuote) &&
+      ((isPackedLiveReference(o.liveQuote) || validLiveReference(o.liveQuote)) &&
         !o.reference &&
         !o.src &&
         (o.liveQuote.presentation.kind === 'value' ? o.type === 'text' : o.type === 'image'))) &&
@@ -722,28 +735,65 @@ export function isDeck(value: unknown): value is SlideContent {
     validPageSize(d) &&
     new Set(d.slides.map((s) => s?.id)).size === d.slides.length &&
     d.slides.every(validSlide) &&
-    validSlideReferences(d.slides) &&
+    validSlideReferences(d.slides, d.liveSnapshots) &&
     validAnimationDeck(d.slides) &&
     (!hasSlideAnimations(d) || !hasSlideReuse(d))
   );
 }
 
-function validSlideReferences(slides: Slide[]) {
+function validSlideReferences(slides: Slide[], liveSnapshots: LiveSnapshots | undefined) {
   const objects = slides.flatMap((slide) => slide.objects);
   return (
     validReferenceItems(objects) &&
     validLiveReferenceItems(
       objects.flatMap(({ liveQuote }) => (liveQuote ? [liveQuote] : [])),
       objects,
+      liveSnapshots,
     )
   );
 }
+
+/**
+ * finding 79: the deck's stored citations. Schema 3 citations are packed with their version kept
+ * once in `liveSnapshots`, schema 2 citations of those versions move into the table, and rows no
+ * citation names are dropped. Commands that add, change or remove citations end with this, so the
+ * citations and the table change in one history step.
+ */
+export function normalizeSlideLiveSnapshots(deck: SlideContent): SlideContent {
+  const { liveSnapshots: previous, ...rest } = deck;
+  const { value: slides, liveSnapshots } = packLiveReferences(deck.slides, previous ?? {});
+  return {
+    ...rest,
+    slides,
+    ...(Object.keys(liveSnapshots).length ? { liveSnapshots } : {}),
+  };
+}
+/** A citation with its retained version (from the deck's table when it is packed). */
+export const slideLiveReference = (
+  deck: SlideContent,
+  reference: StoredLiveReference | LiveReference,
+) => hydrateLiveReference(reference, deck.liveSnapshots);
+const sameSlideCitation = (
+  deck: SlideContent,
+  a: StoredLiveReference | LiveReference,
+  b: StoredLiveReference | LiveReference,
+) => {
+  try {
+    return (
+      canonicalJson(slideLiveReference(deck, a)) === canonicalJson(slideLiveReference(deck, b))
+    );
+  } catch {
+    return false;
+  }
+};
 
 export function insertSlideCitation(
   slideId: string,
   objectId: string,
   reference: LiveReference,
   anchor?: Bounds,
+  /** A shared deck keeps the whole citation inline as schema 2 (its codec carries no table). */
+  options: { inline?: boolean } = {},
 ): EditorCommand<SlideContent> {
   return immutableCommand('slide.insert-citation', '引用を挿入', (deck: SlideContent) => {
     const slide = deck.slides.find(({ id }) => id === slideId);
@@ -764,16 +814,17 @@ export function insertSlideCitation(
       width,
       height,
     };
-    object.liveQuote = reference;
+    object.liveQuote = options.inline ? { ...reference, schemaVersion: 2 } : reference;
     if (reference.presentation.kind === 'value') object.fill = '#174d37';
     object.text =
       reference.presentation.kind === 'value' ? formatLiveValue(reference.presentation) : '';
-    const next = {
+    const inserted = {
       ...deck,
       slides: deck.slides.map((page) =>
         page === slide ? { ...slide, objects: [...slide.objects, object] } : page,
       ),
     };
+    const next = options.inline ? inserted : normalizeSlideLiveSnapshots(inserted);
     if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
     return next;
   });
@@ -782,8 +833,9 @@ export function insertSlideCitation(
 export function changeSlideCitation(
   slideId: string,
   objectId: string,
-  expected: LiveReference,
+  expected: StoredLiveReference | LiveReference,
   replacement?: LiveReference,
+  options: { inline?: boolean } = {},
 ): EditorCommand<SlideContent> {
   return immutableCommand(
     'slide.change-citation',
@@ -791,14 +843,10 @@ export function changeSlideCitation(
     (deck: SlideContent) => {
       const slide = deck.slides.find(({ id }) => id === slideId);
       const object = slide?.objects.find(({ id }) => id === objectId);
-      if (
-        !slide ||
-        !object?.liveQuote ||
-        canonicalJson(object.liveQuote) !== canonicalJson(expected)
-      )
+      if (!slide || !object?.liveQuote || !sameSlideCitation(deck, object.liveQuote, expected))
         throw new Error('対象引用が変わりました。もう一度確認してください。');
       assertEditable(geometry(slide), [objectId]);
-      const next = {
+      const changed = {
         ...deck,
         slides: deck.slides.map((page) =>
           page === slide
@@ -809,7 +857,9 @@ export function changeSlideCitation(
                       item === object
                         ? {
                             ...item,
-                            liveQuote: replacement,
+                            liveQuote: options.inline
+                              ? { ...replacement, schemaVersion: 2 as const }
+                              : replacement,
                             text:
                               replacement.presentation.kind === 'value'
                                 ? formatLiveValue(replacement.presentation)
@@ -822,6 +872,7 @@ export function changeSlideCitation(
             : page,
         ),
       };
+      const next = options.inline ? changed : normalizeSlideLiveSnapshots(changed);
       if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
       return next;
     },
@@ -863,24 +914,35 @@ export function replaceSlideImageReference(
 export function detachSlideReference(
   slideId: string,
   objectId: string,
-  expected: EmbeddedReference | LiveReference,
+  expected: EmbeddedReference | LiveReference | StoredLiveReference,
   src?: string,
 ): EditorCommand<SlideContent> {
-  return editSlideReference('slide.detach-reference', '引用を解除', slideId, objectId, (object) => {
-    if (canonicalJson(object.liveQuote ?? object.reference) !== canonicalJson(expected))
-      throw new Error('対象引用が変わりました。もう一度確認してください。');
-    const { reference, liveQuote, ...ordinary } = object;
-    if (liveQuote?.presentation.kind === 'value')
-      return { ...ordinary, text: formatLiveValue(liveQuote.presentation), runs: undefined };
-    if (!src || (liveQuote && !safeLiveFigure(src)))
-      throw new Error('保存版から画像を確認してから引用を解除してください。');
-    return {
-      ...ordinary,
-      src,
-      alt: liveQuote?.presentation.kind === 'figure' ? liveQuote.presentation.label : ordinary.alt,
-      ...(reference ? { imageFit: reference.fit === 'contain' ? 'fit' : 'fill' } : {}),
-    };
-  });
+  return editSlideReference(
+    'slide.detach-reference',
+    '引用を解除',
+    slideId,
+    objectId,
+    (object, deck) => {
+      if (
+        object.liveQuote
+          ? !sameSlideCitation(deck, object.liveQuote, expected as LiveReference)
+          : canonicalJson(object.reference) !== canonicalJson(expected)
+      )
+        throw new Error('対象引用が変わりました。もう一度確認してください。');
+      const { reference, liveQuote, ...ordinary } = object;
+      if (liveQuote?.presentation.kind === 'value')
+        return { ...ordinary, text: formatLiveValue(liveQuote.presentation), runs: undefined };
+      if (!src || (liveQuote && !safeLiveFigure(src)))
+        throw new Error('保存版から画像を確認してから引用を解除してください。');
+      return {
+        ...ordinary,
+        src,
+        alt:
+          liveQuote?.presentation.kind === 'figure' ? liveQuote.presentation.label : ordinary.alt,
+        ...(reference ? { imageFit: reference.fit === 'contain' ? 'fit' : 'fill' } : {}),
+      };
+    },
+  );
 }
 
 function editSlideReference(
@@ -888,21 +950,24 @@ function editSlideReference(
   label: string,
   slideId: string,
   objectId: string,
-  edit: (object: SlideObject) => SlideObject,
+  edit: (object: SlideObject, deck: SlideContent) => SlideObject,
 ) {
   return immutableCommand(type, label, (deck: SlideContent) => {
     const slide = deck.slides.find((page) => page.id === slideId);
     const object = slide?.objects.find((item) => item.id === objectId);
     if (!slide || !object) throw new Error('対象引用が見つかりません。');
     assertEditable(geometry(slide), [objectId]);
-    const next = {
+    const next = normalizeSlideLiveSnapshots({
       ...deck,
       slides: deck.slides.map((page) =>
         page === slide
-          ? { ...page, objects: slide.objects.map((item) => (item === object ? edit(item) : item)) }
+          ? {
+              ...page,
+              objects: slide.objects.map((item) => (item === object ? edit(item, deck) : item)),
+            }
           : page,
       ),
-    };
+    });
     if (!isDeck(next)) throw new Error('引用が不正か、件数または容量の上限を超えています。');
     return next;
   });
@@ -1042,25 +1107,27 @@ export const pasteObjects = (
   const ids = stableIds();
   return command('slide.paste', 'Paste objects', (d) => {
     const mint = ids(slideIds(d));
-    return admitAnimationCopy({
-      ...d,
-      slides: d.slides.map((s) =>
-        s.id === slideId
-          ? {
-              ...s,
-              objects: [
-                ...s.objects,
-                ...copiedObjects(
-                  { ...s, objects },
-                  objects.map((o) => o.id),
-                  0,
-                  mint,
-                ),
-              ],
-            }
-          : s,
-      ),
-    });
+    return admitAnimationCopy(
+      normalizeSlideLiveSnapshots({
+        ...d,
+        slides: d.slides.map((s) =>
+          s.id === slideId
+            ? {
+                ...s,
+                objects: [
+                  ...s.objects,
+                  ...copiedObjects(
+                    { ...s, objects },
+                    objects.map((o) => o.id),
+                    0,
+                    mint,
+                  ),
+                ],
+              }
+            : s,
+        ),
+      }),
+    );
   });
 };
 export const patchObjects = (
@@ -1228,12 +1295,15 @@ export const arrangeObjects = (
   return withCommandReads<SlideContent>(
     command('slide.arrange', action, (d) => {
       const mint = minted(slideIds(d));
-      return {
+      const next = {
         ...d,
         slides: d.slides.map((s) =>
           s.id === slideId ? arrangeSlide(d, s, ids, action, value, mint) : s,
         ),
       };
+      return action === 'delete' || action === 'duplicate'
+        ? normalizeSlideLiveSnapshots(next)
+        : next;
     }),
     action === 'duplicate' ? { content: ids } : { geometry: ids },
   );

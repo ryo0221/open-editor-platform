@@ -4,6 +4,7 @@ import {
   ReferenceImage,
   useLiveFigure,
 } from '@editor-platform/artifact-references/react';
+import { hydrateLiveReference } from '@editor-platform/artifact-references';
 import { IconButton, useWording, type Wording } from '@editor-platform/editor-ui';
 import { type DocumentBlock, type DocumentContent } from './model';
 import { MermaidPreview, HtmlPreview } from './previews';
@@ -49,8 +50,9 @@ function DocumentLiveFigure({
   block: DocumentBlock;
   connection?: ReferenceSurfaceProps['liveReferences'];
 }) {
+  // The editor's node attrs carry each citation with its version (contentToNode unpacks them).
   const projection = useLiveFigure(
-    reference,
+    hydrateLiveReference(reference),
     connection?.provider,
     connection?.destinationArtifactId,
   );

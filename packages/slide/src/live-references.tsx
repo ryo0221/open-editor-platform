@@ -4,7 +4,8 @@ import {
   useLiveFigure,
   type LiveReferenceConnection,
 } from '@editor-platform/artifact-references/react';
-import { slideDrawing, type SlideObject } from './model';
+import type { LiveReference } from '@editor-platform/artifact-references';
+import { slideDrawing, slideLiveReference, type SlideObject } from './model';
 import { projectedReference, type SlideEditing } from './view-shared';
 
 /** One object as drawn in thumbnails and the presentation, including fixed citations. */
@@ -17,7 +18,7 @@ export function SlideObjectDrawing({
 }) {
   return object.liveQuote ? (
     <SlideLiveDrawing
-      object={{ ...object, liveQuote: object.liveQuote }}
+      object={{ ...object, liveQuote: slideLiveReference(editing.content, object.liveQuote) }}
       connection={editing.liveReferences}
       copy
     />
@@ -32,7 +33,8 @@ export function SlideLiveDrawing({
   newer,
   copy,
 }: {
-  object: SlideObject & { liveQuote: NonNullable<SlideObject['liveQuote']> };
+  /** The citation with its version (`slideLiveReference`). */
+  object: SlideObject & { liveQuote: LiveReference };
   connection?: LiveReferenceConnection;
   newer?: boolean;
   /** A thumbnail or presentation copy: drawn the same, but not the editable quote. */

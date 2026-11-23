@@ -1,11 +1,16 @@
-import { formatLiveValue, safeLiveFigure } from '@editor-platform/artifact-references';
+import {
+  formatLiveValue,
+  safeLiveFigure,
+  type LiveReference,
+} from '@editor-platform/artifact-references';
 import type { SlideContent, SlideObject } from '@editor-platform/slide/model';
 import { containsSharedReference } from './reference-guard';
 
+/** Shared decks keep whole schema 2 citations inline, so `liveQuote` carries its version. */
 export type SlideReferenceObject = Pick<
   SlideObject,
-  'id' | 'type' | 'reference' | 'liveQuote' | 'src' | 'text' | 'runs' | 'alt'
->;
+  'id' | 'type' | 'reference' | 'src' | 'text' | 'runs' | 'alt'
+> & { liveQuote?: LiveReference };
 export interface SlideReferencePolicy {
   authorize(reference: SlideReferenceObject, pageId: string): boolean;
   authorizeDetachment(
@@ -22,8 +27,9 @@ export function slideReferenceFields(item: Record<string, unknown>) {
 
 export function validSharedSlideReferences(content: SlideContent, authorize: SlideReferencePolicy) {
   const { slides, ...deck } = content;
-  // Only a Slide object's native reference fields can carry a source closure.
-  if (containsSharedReference(deck)) return false;
+  // Only a Slide object's native reference fields can carry a source closure. A shared deck keeps
+  // whole citations inline: packed citations and their table (finding 79) stay out of shared edits.
+  if (containsSharedReference(deck) || deck.liveSnapshots !== undefined) return false;
   return slides.every(
     ({ objects, ...page }) =>
       !containsSharedReference(page) &&
@@ -39,12 +45,15 @@ export function validSharedSlideReferences(content: SlideContent, authorize: Sli
         )
           return false;
         if (liveQuote) {
+          if (liveQuote.schemaVersion !== 2) return false;
           if (ordinary.runs?.length) return false;
           const expected =
             liveQuote.presentation.kind === 'value' ? formatLiveValue(liveQuote.presentation) : '';
           if (ordinary.text !== expected) return false;
         }
-        return !(reference || liveQuote) || authorize.authorize(object, page.id);
+        return (
+          !(reference || liveQuote) || authorize.authorize(object as SlideReferenceObject, page.id)
+        );
       }),
   );
 }
