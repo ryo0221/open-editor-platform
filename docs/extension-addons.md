@@ -4,14 +4,15 @@ Extension の manifest は、必須の項目のほかに、版を完全一致で
 宣言しない package の manifest は変わりません。知らない add-on・知らない版の宣言は、登録の時点で断ります。
 実装は `@editor-platform/extension-contract` と `@editor-platform/extension-runtime` にあります。
 
-| add-on       | 版の token           | package が渡すもの                      | Host が使う口                                  |
-| ------------ | -------------------- | --------------------------------------- | ---------------------------------------------- |
-| `operations` | `operations@0-draft` | `operations`（`checkInput`・`command`） | `ExtensionHandle.operations`（check・prepare） |
-| `create`     | `create@0-draft`     | `create()`                              | `Registration.create()`                        |
-| `references` | `references@0-draft` | `references`（`list`・`resolve`）       | `Registration.references`（list・resolve）     |
-| `history`    | `history@0-draft`    | なし（manifest の data だけ）           | Host の session の `keepHighest`               |
+| add-on       | 版の token           | package が渡すもの                      | Host が使う口                                             |
+| ------------ | -------------------- | --------------------------------------- | --------------------------------------------------------- |
+| `operations` | `operations@0-draft` | `operations`（`checkInput`・`command`） | `ExtensionHandle.operations`（check・prepare）            |
+| `create`     | `create@0-draft`     | `create()`                              | `Registration.create()`                                   |
+| `references` | `references@0-draft` | `references`（`list`・`resolve`）       | `Registration.references`（list・resolve）                |
+| `items`      | `items@0-draft`      | なし（manifest の宣言だけ）             | `readItems`（`@editor-platform/extension-runtime/items`） |
+| `history`    | `history@0-draft`    | なし（manifest の data だけ）           | Host の session の `keepHighest`                          |
 
-manifest が add-on を宣言することと、definition がその関数を持つことは一致していなければなりません（data だけの `history` を除く）。
+manifest が add-on を宣言することと、definition がその関数を持つことは一致していなければなりません（`items` と `history` は関数を持たない宣言だけの add-on です）。
 片方だけのときは `install` が断ります（package の loader から登録するときも同じです）。
 
 ## create：最初の中身を作る
@@ -54,3 +55,40 @@ manifest.addons = { history: { version: HISTORY_ADDON, keepHighest: ['/lastIssue
 - Undo/Redo は今までどおり 1 つの履歴の操作で前の中身を戻します。ただし宣言した場所では、今の値と戻す値の大きい方を残します。数は大きい方、平らな object（数の表）は key ごとに大きい方（戻す版に無い key も、数だけなら残す）。ほかの形や、どちらかに無い場所は戻す値のままです。
 - 検証の callback（`undo(validate)`）が受け取るのも、`peekHistory` が返すのも、この調整のあとの中身です。
 - 守れるのは 1 つの session の中だけです。保存した版を開き直して Undo の履歴が無いときは、保存した値がそのまま上限です。
+
+## items：中身の項目とつながりを宣言する
+
+`items@0-draft` は、保存した中身のどこに ID の付いた項目があり、どの欄が別の項目を指すかを、データだけで Host に伝える口です。Host は package のコードを読み込まず・動かさずに、項目の一覧・項目どうしのつながり・版の間の差を作れます。
+
+```ts
+manifest.addons = {
+  items: {
+    version: ITEMS_ADDON,
+    collections: [
+      { at: 'assumptions', id: 'id', title: 'name' },
+      { at: 'scenarios', id: 'id', title: 'name', refs: ['assumptionIds'] },
+    ],
+  },
+};
+// 名前の頭に ID を書く木：nodes は ID → 枝の object
+manifest.addons = {
+  items: {
+    version: ITEMS_ADDON,
+    collections: [
+      {
+        at: 'nodes',
+        id: { field: 'text', from: 'leading-token' },
+        refs: ['link.id'],
+        layout: ['side', 'collapsed'],
+      },
+    ],
+  },
+};
+```
+
+- `at` は中身の中の場所（`.` でたどる。空なら中身の全体）。配列なら要素、object なら値の 1 つずつが候補です。ID の無い要素は項目にしません。
+- `id` は ID の欄の名前か、`{ field, from: 'leading-token' }`。後者は「その欄の文字の頭に ID がある」という意味で、どの文字を ID と見るかは Host が自分の ID の形で決めます（package は正規表現を渡しません）。
+- `title` は題の欄。`leading-token` のときは省けて、欄の文字から ID を除いた残りが題になります。
+- `refs` はその項目が使う別の項目の ID を持つ欄（文字か文字の配列）。`layout` は見た目だけの欄で、Host が比べるときに除きます。
+- 宣言の形は登録の時点で確かめます（知らない欄、`leading-token` 以外の読み方、`__proto__` などの道筋、重なった道筋は断ります）。
+- `readItems(addon, value, leadingId)` は宣言で中身を読み、`{ items, problems }` を返します。形の違う中身は投げずに `problems` に入れます。上限は `ITEMS_LIMITS` です。

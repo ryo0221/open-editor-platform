@@ -7,6 +7,7 @@
  */
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { keepHighestProblems } from '@editor-platform/editor-core/keep-highest';
+import { itemsDeclarationProblems } from './items';
 import {
   CREATE_ADDON,
   OPERATIONS_ADDON,
@@ -194,7 +195,12 @@ export function parseAddons(input: unknown): ManifestAddons {
   if (
     !plain(input) ||
     Object.keys(input).some(
-      (k) => k !== 'operations' && k !== 'create' && k !== 'references' && k !== 'history',
+      (k) =>
+        k !== 'operations' &&
+        k !== 'create' &&
+        k !== 'references' &&
+        k !== 'history' &&
+        k !== 'items',
     )
   )
     throw new Error('Unsupported add-ons');
@@ -202,7 +208,8 @@ export function parseAddons(input: unknown): ManifestAddons {
     input.operations === undefined &&
     input.create === undefined &&
     input.references === undefined &&
-    input.history === undefined
+    input.history === undefined &&
+    input.items === undefined
   )
     throw new Error('Unsupported add-ons');
   if (input.operations !== undefined) {
@@ -235,6 +242,10 @@ export function parseAddons(input: unknown): ManifestAddons {
       throw new Error('Unsupported history add-on');
     const problems = keepHighestProblems(h.keepHighest);
     if (problems.length) throw new Error(`Invalid history add-on: ${problems[0]}`);
+  }
+  if (input.items !== undefined) {
+    const problems = itemsDeclarationProblems(input.items);
+    if (problems.length) throw new Error(`Invalid items add-on: ${problems[0]}`);
   }
   const copy = JSON.parse(canonicalJson(input)) as ManifestAddons;
   return deepFreeze(copy);
