@@ -1,6 +1,5 @@
 import {
   drawingSvg,
-  gridTextExtent,
   gridTextLayout,
   layoutDrawingText,
   usesGridText,
@@ -109,8 +108,13 @@ function textOnly(d: Drawing): Drawing {
     text: d.text,
     runs: d.runs,
     fill: d.typography?.color ?? (d.kind === 'text' ? d.fill : '#253044'),
+    // Flips move the text inside its box as the renderer reflects it (rotation is not followed).
+    flipX: d.flipX,
+    flipY: d.flipY,
     typography: {
       ...d.typography,
+      // Defaults depend on the drawing kind: keep the shape's own size and padding.
+      fontSize: setFontSize(d),
       padding,
       color: d.typography?.color ?? (d.kind === 'text' ? d.fill : '#253044'),
     },
@@ -166,8 +170,21 @@ export function estimateSlideTextOverflow(
       if (!hasText(object, drawing)) return [];
       const b = drawing.bounds;
       let painted: Bounds;
-      if (usesGridText(drawing)) painted = gridTextExtent(drawing);
-      else {
+      if (usesGridText(drawing)) {
+        // The cells the glyphs occupy (gridTextExtent is a conservative enclosure of the box).
+        const layout = gridTextLayout(drawing);
+        const cells = layout.lines.flatMap((l) => l.glyphs);
+        if (!cells.length) return [];
+        const xs = cells.map((g) => g.x),
+          ys = cells.map((g) => g.y),
+          half = layout.fontSize / 2;
+        painted = {
+          x: Math.min(...xs) - half,
+          y: Math.min(...ys) - half,
+          width: Math.max(...xs) - Math.min(...xs) + layout.fontSize,
+          height: Math.max(...ys) - Math.min(...ys) + layout.fontSize,
+        };
+      } else {
         const layout = layoutDrawingText(drawing);
         painted = { x: b.x, y: layout.startY, width: b.width, height: layout.totalHeight };
       }
@@ -195,12 +212,19 @@ export async function createSlideInspector(wasm: Uint8Array, fonts: OfficeFonts)
         );
       const width = Math.max(1, Math.round(d.width * scale)),
         height = Math.max(1, Math.round(d.height * scale));
-      const svg = drawingSvg(
-        visibleDrawings(slide).map((v) => v.drawing),
-        frame(d),
-        slide.background,
-        slide.title,
-      ).replace(
+      const drawings = visibleDrawings(slide).map((v) => v.drawing);
+      // The page background image first, as the static exports paint it.
+      if (slide.backgroundImage)
+        drawings.unshift({
+          id: '',
+          kind: 'image',
+          text: '',
+          fill: 'none',
+          src: slide.backgroundImage,
+          bounds: frame(d),
+          imageFit: 'fill',
+        });
+      const svg = drawingSvg(drawings, frame(d), slide.background, slide.title).replace(
         /<svg\b[^>]*>/,
         `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${d.width} ${d.height}" preserveAspectRatio="none">`,
       );

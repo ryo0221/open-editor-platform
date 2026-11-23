@@ -103,3 +103,42 @@ it('measures glyphs a line estimate cannot: one long word wider than its box', (
   expect(measured[0].painted.width).toBeGreaterThan(120);
   expect(estimateSlideTextOverflow(content, { slideId: 's1' })).toEqual([]);
 });
+
+it('does not report vertical text that fits its box', () => {
+  const content = deck([
+    box('tate', '売上', {
+      bounds: { x: 40, y: 40, width: 300, height: 200 },
+      typography: { fontSize: 24, writingMode: 'vertical-rl' },
+    }),
+  ]);
+  expect(estimateSlideTextOverflow(content, { slideId: 's1' })).toEqual([]);
+  expect(inspector.textOverflow(content, { slideId: 's1' })).toEqual([]);
+});
+
+it('measures a shape at its own default size, and flipped text where it is drawn', () => {
+  const shape = box('shape', '売上と営業利益', {
+    type: 'shape',
+    bounds: { x: 40, y: 40, width: 200, height: 40 },
+    typography: { overflow: 'clip' },
+  });
+  expect(inspector.textOverflow(deck([shape]), { slideId: 's1' })).toEqual([]);
+  const edge = { x: 900, y: 300, width: 300, height: 60 };
+  const label = box('label', '左', { bounds: edge, typography: { fontSize: 24, align: 'left' } });
+  expect(inspector.textOverflow(deck([label]), { slideId: 's1' })).toEqual([]);
+  expect(
+    inspector.textOverflow(deck([{ ...label, flipX: true }]), { slideId: 's1' }).map((i) => i.kind),
+  ).toEqual(['outside-slide']);
+});
+
+it('paints the slide background image under the objects', () => {
+  const red =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
+  const plain = deck([]);
+  const pictured: SlideContent = {
+    ...plain,
+    slides: plain.slides.map((s) => ({ ...s, backgroundImage: red })),
+  };
+  expect(inspector.renderPng(pictured, 's1', { scale: 0.25 }).png).not.toEqual(
+    inspector.renderPng(plain, 's1', { scale: 0.25 }).png,
+  );
+});
