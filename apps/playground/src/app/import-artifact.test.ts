@@ -286,3 +286,22 @@ it('admits Fiction Map native history without routing it through template adapte
   bad.versions[0].contentHash = '0'.repeat(64);
   await expect(readImportFiles([file(bad)], context())).rejects.toThrow('hash');
 });
+
+it('opens a bare Mind Map JSON (its own export or an external mindmap-editor 0.1.5 file)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const sample = JSON.parse(
+    readFileSync(
+      new URL('../../../../packages/mindmap-core/fixtures/valid-rich.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  const bare = (value: unknown) =>
+    new File([JSON.stringify(value)], 'map.json', { type: 'application/json' });
+  const [imported] = await readImportFiles([bare(sample)], context());
+  expect(imported.kind).toBe('mindmap');
+  expect(imported.name).toBe('map');
+  expect(imported.draft.content).toEqual(sample);
+  await expect(
+    readImportFiles([bare({ ...sample, rootId: 'n-missing' })], context()),
+  ).rejects.toThrow('Invalid Mind Map: 根が存在しない');
+});

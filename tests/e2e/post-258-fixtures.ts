@@ -80,7 +80,7 @@ export async function assertForeignVectorUpdate(
   const parts =
     domain === 'slide' && 'slides' in reopened.draft.content
       ? reopened.draft.content.slides.flatMap((slide) => slide.objects)
-      : 'nodes' in reopened.draft.content
+      : 'nodes' in reopened.draft.content && Array.isArray(reopened.draft.content.nodes)
         ? reopened.draft.content.nodes
         : [];
   expect(parts.find((part) => part.id === f.address)).toMatchObject({

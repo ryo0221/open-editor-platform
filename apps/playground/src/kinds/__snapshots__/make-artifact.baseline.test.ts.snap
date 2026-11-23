@@ -1437,6 +1437,35 @@ exports[`a new Artifact of every kind (KR4 baseline) > ladder: name, content and
 }
 `;
 
+exports[`a new Artifact of every kind (KR4 baseline) > mindmap: name, content and extras, then save and reload 1`] = `
+{
+  "annotations": [],
+  "content": {
+    "artifactKind": "mindmap",
+    "id": "d-00000000000040008000000000000006",
+    "layout": "radial",
+    "nodes": {
+      "n-00000000000040008000000000000005": {
+        "children": [],
+        "id": "n-00000000000040008000000000000005",
+        "text": "中心のテーマ",
+      },
+    },
+    "rootId": "n-00000000000040008000000000000005",
+    "schemaVersion": 1,
+  },
+  "extras": [
+    "provenance",
+    "schemaVersion",
+  ],
+  "extrasHash": "f897d77411e11a3cd850c7c5f6ba34b1d114de6d5818e9abdd02d29a0a38f6b3",
+  "id": "artifact_00000000-0000-4000-8000-000000000007",
+  "kind": "mindmap",
+  "name": "Mind Map 1",
+  "versions": 0,
+}
+`;
+
 exports[`a new Artifact of every kind (KR4 baseline) > pcb: name, content and extras, then save and reload 1`] = `
 {
   "annotations": [],

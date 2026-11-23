@@ -40,6 +40,7 @@ import {
   type ReviewContent,
 } from '@editor-platform/review-surfaces';
 import { isWhiteboard, type WhiteboardContent } from '@editor-platform/whiteboard';
+import { isMindmap, type MindmapContent } from '@editor-platform/mindmap-core';
 import { isDesignWithPaths, type DesignContent } from '@editor-platform/design';
 import { isCadDocument, type CadDocument } from '@editor-platform/cad-core';
 import { type BimDocument } from '@editor-platform/bim-core';
@@ -87,6 +88,7 @@ export type Content =
   | ReviewContent
   | FileContent
   | WhiteboardContent
+  | MindmapContent
   | DesignContent
   | SlideContent
   | ScheduleDocument
@@ -113,6 +115,7 @@ export type Kind =
   | 'review'
   | 'file'
   | 'whiteboard'
+  | 'mindmap'
   | 'design'
   | 'slide'
   | 'react-ui'
@@ -352,7 +355,9 @@ export function anchorState(
         ? [...content.nodes, ...content.connectors, ...(content.sections ?? [])].map((e) => e.id)
         : isSchedule(content)
           ? content.events.map((e) => e.id)
-          : [];
+          : isMindmap(content)
+            ? Object.keys(content.nodes)
+            : [];
   return ids.includes(address.elementId) ? 'Current' : 'Orphan';
 }
 
@@ -434,7 +439,9 @@ export function createLocalSession(content: Content): EditorSession<Content> {
                   ? isDesignWithPaths
                   : isWhiteboard(current)
                     ? isWhiteboard
-                    : undefined;
+                    : isMindmap(current)
+                      ? isMindmap
+                      : undefined;
       return super.executeView({
         ...cmd,
         apply(value) {

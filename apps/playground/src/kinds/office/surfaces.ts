@@ -11,6 +11,7 @@ import { estimateSurface } from './estimate';
 import { fictionMapSurface } from './fiction-map';
 import { fileSurface } from './file';
 import { geoSurface } from './geo';
+import { mindmapSurface } from './mindmap';
 import { graphSurface } from './structured-graph';
 import { reactUiSurface } from './react-ui';
 import { reviewSurface } from './review';
@@ -37,6 +38,7 @@ export function officeSurfaces({ estimateGeometry }: OfficeConnections) {
     reviewSurface,
     fileSurface,
     whiteboardSurface,
+    mindmapSurface,
     designSurface,
     slideSurface,
     scheduleSurface,

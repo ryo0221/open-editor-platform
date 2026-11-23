@@ -48,7 +48,7 @@ it('keeps the Playground behaviour each kind had in App.tsx', () => {
     ['fiction-map', 'geo', 'cad', 'character', 'bim'].sort(),
   );
   expect(where((h) => h.strictCapture)).toEqual(['geo']);
-  expect(where((h) => h.flushBeforeReadOnly).sort()).toEqual(['animation', 'schedule']);
+  expect(where((h) => h.flushBeforeReadOnly).sort()).toEqual(['animation', 'mindmap', 'schedule']);
   expect(where((h) => h.adoptsOpenedContent)).toEqual(['structured-graph']);
   expect(where((h) => h.feedsAnimationCatalog)).toEqual(['animation']);
   expect(where((h) => h.readsAnimationCatalog)).toEqual(['animation']);
