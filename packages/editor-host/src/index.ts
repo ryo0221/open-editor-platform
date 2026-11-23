@@ -821,19 +821,33 @@ export class ArtifactEditor<T> {
     this.requireOpen();
     return this.session.peekHistory(direction);
   }
+  /**
+   * The check Undo/Redo run before committing. With `keepHighest`, the restored content is
+   * adjusted and so is no longer an already-validated snapshot: the adapter validates it first,
+   * and a refusal leaves history and content as they were.
+   */
+  private historyValidator(
+    validateCandidate?: (candidate: T) => void,
+  ): ((candidate: T) => void) | undefined {
+    const adjusts = !!this.adapter.keepHighest?.length;
+    if (!validateCandidate && !adjusts) return undefined;
+    return (candidate) => {
+      if (adjusts && !this.adapter.validate(candidate))
+        throw new EditorHostError(
+          'invalid-content',
+          this.id,
+          'History produced invalid native content',
+        );
+      validateCandidate?.(candidate);
+      this.requireEdit();
+    };
+  }
   undo(validateCandidate?: (candidate: T) => void): T {
     this.requireEdit();
     this.flushInputs();
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Undo is unsupported');
-    const next = this.session.undo(
-      validateCandidate
-        ? (candidate) => {
-            validateCandidate(candidate);
-            this.requireEdit();
-          }
-        : undefined,
-    );
+    const next = this.session.undo(this.historyValidator(validateCandidate));
     this.notify();
     return next;
   }
@@ -842,14 +856,7 @@ export class ArtifactEditor<T> {
     this.flushInputs();
     if (!this.capabilities.undo)
       throw new EditorHostError('unsupported', this.id, 'Redo is unsupported');
-    const next = this.session.redo(
-      validateCandidate
-        ? (candidate) => {
-            validateCandidate(candidate);
-            this.requireEdit();
-          }
-        : undefined,
-    );
+    const next = this.session.redo(this.historyValidator(validateCandidate));
     this.notify();
     return next;
   }

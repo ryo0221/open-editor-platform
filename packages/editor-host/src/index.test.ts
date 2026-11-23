@@ -379,4 +379,28 @@ describe('keepHighest on the adapter (#64)', () => {
     editor.undo();
     expect(editor.content).toEqual({ schemaVersion: 1, text: 'a', lastIssued: 4 });
   });
+
+  it('the adapter validates the adjusted content; a refusal keeps history and content (#73)', () => {
+    type Range = Content & { min: number; max: number };
+    const ranged: EditorHostAdapter<Range> = {
+      ...(adapter as unknown as EditorHostAdapter<Range>),
+      validate: (v: unknown): v is Range =>
+        (adapter.validate as (x: unknown) => boolean)(v) && (v as Range).min <= (v as Range).max,
+      keepHighest: ['/min'],
+    };
+    const editor = new ArtifactEditor<Range>(
+      createArtifact('example', 'Example', {
+        schemaVersion: 1 as const,
+        text: 'a',
+        min: 1,
+        max: 2,
+      }),
+      ranged,
+      new MemoryStorage(),
+    );
+    editor.execute(command<Range>('move', 'Move', (c) => ({ ...c, min: 3, max: 4 })));
+    expect(() => editor.undo()).toThrow('History produced invalid native content');
+    expect(editor.content).toEqual({ schemaVersion: 1, text: 'a', min: 3, max: 4 });
+    expect(editor.canUndo).toBe(true);
+  });
 });

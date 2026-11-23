@@ -54,6 +54,7 @@ manifest.addons = { history: { version: HISTORY_ADDON, keepHighest: ['/lastIssue
 - Host は宣言を自分の session に渡します：`EditorHostAdapter.keepHighest`（`ArtifactEditor` が `EditorSession` の `keepHighest` に渡す）。package のコードは要りません。
 - Undo/Redo は今までどおり 1 つの履歴の操作で前の中身を戻します。ただし宣言した場所では、今の値と戻す値の大きい方を残します。数は大きい方、平らな object（数の表）は key ごとに大きい方（戻す版に無い key も、数だけなら残す）。ほかの形や、どちらかに無い場所は戻す値のままです。
 - 検証の callback（`undo(validate)`）が受け取るのも、`peekHistory` が返すのも、この調整のあとの中身です。
+- 調整した中身は、すでに検証した版ではありません。`ArtifactEditor` は、`keepHighest` があれば Undo/Redo のたびに adapter の `validate` で調べます。通らなければ履歴も中身も変えずに断ります（`invalid-content`）。
 - 守れるのは 1 つの session の中だけです。保存した版を開き直して Undo の履歴が無いときは、保存した値がそのまま上限です。
 
 ## items：中身の項目とつながりを宣言する
