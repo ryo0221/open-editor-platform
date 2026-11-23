@@ -1,0 +1,81 @@
+.ep-live-tools,
+.ep-live-picker {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.ep-live-tools {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--ep-border, #ccd6d2);
+}
+.ep-live-tools h2 {
+  font-size: 1rem;
+  margin: 0.5rem 0 0.3rem;
+}
+.ep-live-tools p {
+  margin: 0.25rem 0 0.45rem;
+}
+.ep-live-review ul {
+  margin: 0.35rem 0;
+  padding-inline-start: 1.25rem;
+}
+.ep-live-actions,
+.ep-live-compare {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: start;
+}
+.ep-live-compare > div {
+  flex: 1 1 8rem;
+  min-width: 0;
+  padding: 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.35rem;
+}
+.ep-live-picker img,
+.ep-live-compare img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.ep-live-picker fieldset {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  margin-bottom: 0.75rem;
+}
+.ep-live-picker label {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+.ep-live-picker :is(select, input) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+.ep-live-quote,
+.ep-live-badge {
+  background: #e4f3ea;
+  color: #174d37;
+  border-radius: 0.24rem;
+  padding-inline: 0.2em;
+}
+.ep-live-quote {
+  text-decoration: underline;
+}
+.ep-live-badge {
+  font-size: 0.8em;
+}
+
+.ep-dialog:has(.ep-live-picker) {
+  box-sizing: border-box;
+  max-inline-size: min(34rem, calc(100vw - 1rem));
+}
+
+.ep-live-compare img {
+  max-height: 8rem;
+  object-fit: contain;
+}

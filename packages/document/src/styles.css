@@ -474,3 +474,13 @@ ruby .ep-emphasis {
 .ep-novel-reading-image figcaption {
   font-size: 0.875rem;
 }
+
+.ep-document-column > .ep-live-tools {
+  flex: 0 1 auto;
+  max-height: 60%;
+  overflow: auto;
+}
+.ep-live-document-figure img {
+  max-width: 100%;
+  height: auto;
+}

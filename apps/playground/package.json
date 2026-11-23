@@ -42,6 +42,7 @@
     "@editor-platform/calculation-core": "*",
     "@editor-platform/reuse-core": "*",
     "@editor-platform/extension-runtime": "*",
+    "@editor-platform/extension-sample": "*",
     "lucide-react": "1.51.0",
     "react": "19.1.1",
     "react-dom": "19.1.1",

@@ -1,4 +1,7 @@
-import { containsEmbeddedReference } from '@editor-platform/artifact-references';
+import {
+  containsEmbeddedReference,
+  containsLiveReference,
+} from '@editor-platform/artifact-references';
 import { isDeck, hasSlideAnimations } from '@editor-platform/slide/model';
 import { clone, contentHash, newId } from '@editor-platform/artifact-core';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
@@ -76,7 +79,8 @@ function assertNoArtifactReferences(content: NativeContent): void {
       'unsupported-template',
       'Animation を含む範囲のテンプレート／再利用部品化は未対応です。',
     );
-  if (containsEmbeddedReference(content))
+  // A fixed citation keeps an exact saved version: remapping its IDs would break its hash.
+  if (containsEmbeddedReference(content) || containsLiveReference(content))
     problem(
       'unsupported-template',
       '参照を含む範囲はテンプレート／再利用部品にできません。参照を解除してから保存してください。',

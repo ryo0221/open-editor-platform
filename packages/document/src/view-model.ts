@@ -16,7 +16,12 @@ import {
   type Region,
 } from '@editor-platform/editor-core';
 import { type ReferenceSurfaceProps } from '@editor-platform/artifact-references/react';
-import { documentSchema, addTableRowAndSelect, nodeToContent } from './engine';
+import {
+  documentSchema,
+  addTableRowAndSelect,
+  nodeToContent,
+  documentTextPosition,
+} from './engine';
 import { uprightDigitDecorations } from './vertical';
 import {
   isVerticalDocument,
@@ -92,11 +97,15 @@ function annotationDecorations(
       state.doc.descendants((node, pos) => {
         if (node.isTextblock && node.attrs.id === original.elementId)
           decorations.push(
-            Decoration.inline(pos + 1 + region.start, pos + 1 + region.end, {
-              class: annotation.resolved ? 'ep-comment-range resolved' : 'ep-comment-range',
-              'data-annotation-id': annotation.id,
-              title: annotation.comments[0]?.body ?? '',
-            }),
+            Decoration.inline(
+              pos + 1 + documentTextPosition(node, region.start),
+              pos + 1 + documentTextPosition(node, region.end, 'end'),
+              {
+                class: annotation.resolved ? 'ep-comment-range resolved' : 'ep-comment-range',
+                'data-annotation-id': annotation.id,
+                title: annotation.comments[0]?.body ?? '',
+              },
+            ),
           );
       });
     }
@@ -214,12 +223,13 @@ export interface DocumentTextBridge {
 /** Latest props read by long-lived editor callbacks. */
 export interface DocumentCallbacks {
   content: DocumentContent;
-  execute: (command: EditorCommand<DocumentContent>) => void;
+  execute: (command: EditorCommand<DocumentContent>) => void | boolean;
   select: (id: string, region?: Region) => void;
   readOnly: boolean;
   annotations: Annotation[];
   textEngine?: DocumentTextBridge;
   references?: ReferenceSurfaceProps['references'];
+  liveReferences?: ReferenceSurfaceProps['liveReferences'];
   history?: { undo(): void; redo(): void };
 }
 

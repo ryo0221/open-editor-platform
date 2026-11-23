@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { LiveReferenceConnection } from './live-tools';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { EditorInputsContext, Menu, Section } from '@editor-platform/editor-ui';
 import {
@@ -12,6 +13,7 @@ import {
 
 export interface ReferenceSurfaceProps {
   references?: ReferenceResolver;
+  liveReferences?: LiveReferenceConnection;
   focusReferenceId?: string;
 }
 export function useReferenceItems<T extends ReferenceItem>(
@@ -378,3 +380,9 @@ export function ReferenceWarnings({
     </>
   );
 }
+
+export { LiveReferenceReview } from './live-review';
+export type { LiveReviewItem, LiveReviewProps } from './live-review';
+export { LiveReferenceTools } from './live-tools';
+export type { LiveReferenceConnection, LiveArtifactOption } from './live-tools';
+export { useLiveFigure, liveReferenceText } from './live-review';

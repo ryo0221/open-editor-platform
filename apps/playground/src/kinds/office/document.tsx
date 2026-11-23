@@ -22,6 +22,8 @@ function DocumentHost({ host, content }: HostSurfaceProps<KindContent<typeof doc
     <DocumentSurface
       {...novel}
       references={sharedSession ? undefined : host.references}
+      liveReferences={host.shared ? undefined : host.liveReferences}
+      onCitationProposal={host.shared ? undefined : host.reviewCitationProposal}
       focusReferenceId={revealAddress?.elementId}
       textEngine={sharedPreview ? undefined : sharedSession?.text('text')}
       content={content}

@@ -1,3 +1,4 @@
+import { formatLiveValue, type LiveReference } from '@editor-platform/artifact-references';
 import {
   Schema,
   Node as PMNode,
@@ -72,6 +73,19 @@ const tableSpecs = tableNodes({
 const nodes: Record<string, NodeSpec> = {
   doc: { content: 'block+' },
   text: { group: 'inline' },
+  live_quote: {
+    inline: true,
+    group: 'inline',
+    atom: true,
+    marks: '',
+    attrs: { id: {}, reference: {} },
+    leafText: (node) => liveQuoteText(node.attrs.reference),
+    toDOM: (node) => [
+      'span',
+      { class: 'ep-live-quote', 'data-live-quote': node.attrs.id },
+      `引用 ${liveQuoteText(node.attrs.reference)}`,
+    ],
+  },
   hard_break: {
     inline: true,
     group: 'inline',
@@ -285,10 +299,50 @@ const marks: Record<string, MarkSpec> = {
 };
 export const documentSchema = new Schema({ nodes, marks });
 const engineJson = createEngineJsonWriter(documentSchema);
+function liveQuoteText(reference: LiveReference) {
+  return reference?.presentation?.kind === 'value' ? formatLiveValue(reference.presentation) : '';
+}
+export function documentLeafText(node: PMNode) {
+  return node.type.name === 'live_quote'
+    ? liveQuoteText(node.attrs.reference)
+    : node.type.name === 'hard_break'
+      ? '\n'
+      : '';
+}
+
+/** A quote occupies one ProseMirror position and its full displayed length in plain text. */
+export function documentTextOffset(node: PMNode, position: number) {
+  let offset = position;
+  node.forEach((child, start) => {
+    if (child.type.name === 'live_quote' && start < position)
+      offset += documentLeafText(child).length - child.nodeSize;
+  });
+  return offset;
+}
+
+export function documentTextPosition(
+  node: PMNode,
+  offset: number,
+  edge: 'start' | 'end' = 'start',
+) {
+  let position = offset;
+  node.forEach((child, start) => {
+    if (child.type.name !== 'live_quote' || position <= start) return;
+    const length = documentLeafText(child).length;
+    position =
+      position < start + length
+        ? start + (edge === 'end' ? child.nodeSize : 0)
+        : position - length + child.nodeSize;
+  });
+  return Math.max(0, Math.min(position, node.content.size));
+}
+
 export function inlineNodes(rich: InlineSpan[], schema = documentSchema): PMNode[] {
   return rich
     .filter((s) => s.text)
     .flatMap((span) => {
+      if (span.liveQuote && schema.nodes.live_quote)
+        return [schema.nodes.live_quote.create(span.liveQuote)];
       const formatting = Object.entries(span)
         .filter(([k, v]) => k !== 'text' && v)
         .flatMap(([key, value]) => {
@@ -322,6 +376,13 @@ export function spansFromNode(node: PMNode): InlineSpan[] {
   node.forEach((child) => {
     if (child.type.name === 'hard_break') {
       spans.push({ text: '\n' });
+      return;
+    }
+    if (child.type.name === 'live_quote') {
+      spans.push({
+        text: liveQuoteText(child.attrs.reference),
+        liveQuote: { id: child.attrs.id, reference: child.attrs.reference },
+      });
       return;
     }
     if (!child.isText) return;
@@ -654,7 +715,8 @@ export function nodeToContent(node: PMNode, base: DocumentContent): DocumentCont
             rich: spansFromNode(p),
           }));
           cells[r][c] = text;
-          cellRich[r][c] = rich;
+          // cellParagraphs owns native quotes. Keep the flattened view for legacy text readers.
+          cellRich[r][c] = rich.map((span) => (span.liveQuote ? { text: span.text } : span));
           cellParagraphIds[r][c] = cell.firstChild!.attrs.id;
           cellHeaders[r][c] = cell.type.name === 'table_header';
           const rows = cell.attrs.rowspan ?? 1,
@@ -717,7 +779,7 @@ export function nodeToContent(node: PMNode, base: DocumentContent): DocumentCont
     blocks.push({
       id,
       type,
-      text: n.textBetween(0, n.content.size, '\n', '\n'),
+      text: n.type.name === 'code_block' ? n.textContent : rich.map((span) => span.text).join(''),
       ...(n.attrs.style ? { style: { ...n.attrs.style } } : {}),
       ...(n.attrs.styleName ? { styleName: n.attrs.styleName } : {}),
       ...(n.attrs.hidden ? { hidden: true } : {}),
@@ -938,8 +1000,11 @@ export function activeTextRange(
     start = $from.start(depth);
   return {
     id: node.attrs.id,
-    start: Math.max(0, state.selection.from - start),
-    end: Math.min(node.content.size, Math.max(0, state.selection.to - start)),
+    start: documentTextOffset(node, Math.max(0, state.selection.from - start)),
+    end: documentTextOffset(
+      node,
+      Math.min(node.content.size, Math.max(0, state.selection.to - start)),
+    ),
   };
 }
 export function activeBlock(

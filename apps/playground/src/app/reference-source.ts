@@ -2,12 +2,17 @@ import type { FictionMapContent } from '@editor-platform/fiction-map/model';
 import { isEstimate, makeEstimateBasis } from '@editor-platform/estimate-core';
 import { isAnalysis, makeBasis } from '@editor-platform/analysis-core';
 import type { MutableRefObject } from 'react';
-import { contentHash, canonicalJson } from '@editor-platform/artifact-core';
+import { contentHash, canonicalJson, deepFreeze } from '@editor-platform/artifact-core';
 import {
   ReferenceError,
   type ReferenceOption,
   type ReferenceResolver,
+  type ReferenceSnapshot,
 } from '@editor-platform/artifact-references';
+import type { LiveReferenceConnection } from '@editor-platform/artifact-references/react';
+import { ExtensionRegistry } from '@editor-platform/extension-runtime';
+import { counterReferenceExtension } from '@editor-platform/extension-sample';
+import counterEntrySource from '@editor-platform/extension-sample?raw';
 import type { GeoDocument } from '@editor-platform/geo-core';
 import { isStructuredData } from '@editor-platform/structured-data';
 import {
@@ -28,6 +33,95 @@ const graphProfileDependency = async (profile: GraphProfile) => [
 import { validContent, type StoredArtifact } from '../model';
 
 type ReferenceSource = ConstructorParameters<typeof ReferenceResolver>[0];
+
+const counterArtifactId = 'playground.sample-counter';
+let counterSource: ReturnType<typeof loadCounterSource> | undefined;
+
+async function loadCounterSource() {
+  // The Editor is a trusted static import. This pin fingerprints its bundled entry source.
+  const packageHash = `sha256:${await contentHash(counterEntrySource)}`;
+  const registration = new ExtensionRegistry().install(counterReferenceExtension(packageHash), {
+    trust: 'trusted',
+    verifiedPackageHash: packageHash,
+  });
+  const domain = registration.manifest.artifactKind;
+  const adapter = registration.references;
+  if (!adapter) throw new Error('引用元 Editor の引用機能が見つかりません。');
+  const artifact = { artifactId: counterArtifactId, domain, label: 'Counter サンプル' };
+  const versions = await Promise.all(
+    [20, 60].map(async (value, index): Promise<ReferenceSnapshot> => {
+      const revision = index + 1;
+      const content = { id: 'counter', value };
+      return deepFreeze({
+        artifactId: artifact.artifactId,
+        domain,
+        versionId: `counter-v${revision}`,
+        revision,
+        content,
+        contentHash: await contentHash(content),
+        dependencies: [],
+      });
+    }),
+  );
+  return { artifact, versions, adapter };
+}
+
+/** A local catalog of the bundled external Editor's immutable example versions. */
+export function savedExtensionReferences(destinationArtifactId: string): LiveReferenceConnection {
+  const load = () => (counterSource ??= loadCounterSource());
+  async function accessibleSource(source: { artifactId: string; domain: string }) {
+    const catalog = await load();
+    if (source.artifactId === destinationArtifactId)
+      throw new ReferenceError('forbidden', '同じ成果物からは引用できません。');
+    if (
+      source.artifactId !== catalog.artifact.artifactId ||
+      source.domain !== catalog.artifact.domain
+    )
+      throw new ReferenceError('missing-source', '保存済みの引用元が見つかりません。');
+    return catalog;
+  }
+  async function retainedVersion(snapshot: ReferenceSnapshot) {
+    const { versions, adapter } = await accessibleSource(snapshot);
+    const retained = versions.find((version) => version.versionId === snapshot.versionId);
+    if (!retained)
+      throw new ReferenceError('missing-target', '引用元の保存済み版が見つかりません。');
+    if (canonicalJson(retained) !== canonicalJson(snapshot))
+      throw new ReferenceError('stale', '引用元の保存済み版と内容が一致しません。');
+    return { retained, adapter };
+  }
+  return {
+    destinationArtifactId,
+    async listArtifacts() {
+      const { artifact } = await load();
+      return artifact.artifactId === destinationArtifactId ? [] : [{ ...artifact }];
+    },
+    async listVersions(artifact) {
+      return [...(await accessibleSource(artifact)).versions];
+    },
+    async latest(reference) {
+      const { versions } = await accessibleSource(reference.source);
+      return versions[versions.length - 1];
+    },
+    provider: {
+      async checkAccess(source) {
+        await accessibleSource(source);
+      },
+      async checkSnapshot(source, snapshot) {
+        if (source.artifactId !== snapshot.artifactId || source.domain !== snapshot.domain)
+          throw new ReferenceError('stale', '引用元と保存済み版が一致しません。');
+        await retainedVersion(snapshot);
+      },
+      async list(snapshot) {
+        const { retained, adapter } = await retainedVersion(snapshot);
+        return [...adapter.list(retained)];
+      },
+      async resolve(snapshot, target) {
+        const { retained, adapter } = await retainedVersion(snapshot);
+        return adapter.resolve(retained, target);
+      },
+    },
+  };
+}
 
 /**
  * Exposes the latest saved version of data, Geo and Graph artifacts as embeddable

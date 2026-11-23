@@ -67,12 +67,35 @@ export interface OperationDeclaration {
  * its artifact kind, so a Host can start an artifact that has no file yet. Unknown versions are refused.
  */
 export const CREATE_ADDON = 'create@0-draft' as const;
+export const REFERENCES_ADDON = 'references@0-draft' as const;
+export type ReferenceTarget =
+  | { kind: 'value'; targetId: string; metricId: string }
+  | { kind: 'figure'; figureId: string };
+export type ReferenceOption = ReferenceTarget & { label: string };
+export type ReferenceResolution =
+  | { kind: 'value'; value: number }
+  | { kind: 'figure'; label: string; src: string };
+/** Host-authenticated immutable saved version. */
+export interface ReferenceSnapshot {
+  artifactId: string;
+  domain: string;
+  versionId: string;
+  revision: number;
+  contentHash: string;
+  content: unknown;
+  dependencies: { id: string; contentHash: string; content: unknown }[];
+}
+export interface ReferencesAdapter {
+  list(snapshot: ReferenceSnapshot): readonly ReferenceOption[];
+  resolve(snapshot: ReferenceSnapshot, target: ReferenceTarget): ReferenceResolution;
+}
 export interface ManifestAddons {
   operations?: Readonly<{
     version: typeof OPERATIONS_ADDON;
     declarations: readonly OperationDeclaration[];
   }>;
   create?: Readonly<{ version: typeof CREATE_ADDON }>;
+  references?: Readonly<{ version: typeof REFERENCES_ADDON }>;
 }
 /**
  * Package code for declared operations. `checkInput` covers rules the schema cannot express
@@ -110,6 +133,8 @@ export interface ExtensionDefinition<T> {
    * decides where the content goes and saves it through its own persistence.
    */
   create?: () => T;
+  /** The Host authenticates saved snapshots and access before calling this adapter. */
+  references?: ReferencesAdapter;
 }
 /** Trusted adapter binds one artifact, owns session/history/persistence and final authorization. */
 export interface HostAdapter<T> {

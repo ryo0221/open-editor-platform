@@ -113,6 +113,11 @@ export const specRules = [
     owners: ['animation'],
     suite: 'animation-layer-actions',
   },
+  {
+    match: /^artifact-references-extension$/,
+    area: 'office',
+    owners: ['artifact-references', 'extension-runtime', 'extension-sample'],
+  },
   { match: /^artifact-references/, area: 'office', owners: ['artifact-references'] },
   {
     match: /^(editor-)?collaboration/,

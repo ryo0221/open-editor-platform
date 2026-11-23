@@ -1,7 +1,11 @@
 import { clone } from '@editor-platform/artifact-core';
-import { type ReferenceItem, type ReferenceResolver } from '@editor-platform/artifact-references';
+import {
+  verifyRetainedLiveReference,
+  type ReferenceItem,
+  type ReferenceResolver,
+} from '@editor-platform/artifact-references';
 import { isDeck } from '@editor-platform/slide/model';
-import { isDocument } from '@editor-platform/document/model';
+import { documentLiveReferences, isDocument } from '@editor-platform/document/model';
 import { isDesignWithPaths } from '@editor-platform/design/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { assertSchedule, isSchedule } from '@editor-platform/schedule/model';
@@ -13,9 +17,17 @@ export async function validateArtifactReferenceHistory(
   resolver: ReferenceResolver,
 ): Promise<void> {
   const scoped = resolver.forDestination(artifact.id);
-  await captureArtifactReferences(artifact.draft.content, scoped, false);
-  for (const version of artifact.versions)
-    await captureArtifactReferences(version.content, scoped, false);
+  for (const { content } of [artifact.draft, ...artifact.versions]) {
+    await captureArtifactReferences(content, scoped, false);
+    const fixed = isDocument(content)
+      ? documentLiveReferences(content.blocks)
+      : isDeck(content)
+        ? content.slides.flatMap(({ objects }) =>
+            objects.flatMap(({ liveQuote }) => (liveQuote ? [liveQuote] : [])),
+          )
+        : [];
+    for (const reference of fixed) await verifyRetainedLiveReference(reference, artifact.id);
+  }
 }
 
 export function artifactReferenceItems(content: Content): ReferenceItem[] {

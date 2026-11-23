@@ -1,5 +1,27 @@
 # 参照付き埋め込み
 
+## 値と図の固定引用
+
+`@editor-platform/artifact-references` は、従来の画像引用とは別に schema 2 の固定引用を提供する。
+値は対象と指標、有限数、表示形式を保持し、図は対象とラベルを保持する。
+元の Editor の `references@0-draft` adapter が保存版の対象一覧と解決結果を提供する。
+Host は保存版と現在の閲覧権限を検証する。作成と更新は対象の存在と内容 hash を検査する。
+最新版の比較は引用を変更しない。個別更新は新しい保存版の同じ対象を解決し、値の書式を維持する。
+見送りは内容と履歴を変更しない。Document と Slide では Host が `liveReferences` を渡すと、
+保存版と対象を選んでプレビューし、値や図を挿入できる。文書の値は本文に入り、図は選択ブロックの
+直後に置かれる。スライドの引用は選択箇所を基準に配置できる。新版がある引用は一覧から個別に
+比較でき、図は両版の投影を並べる。挿入・更新・削除は一件ずつ Undo で戻せる。
+
+`LiveReferenceConnection` は参照先の ID、閲覧可能な成果物・保存版の一覧、最新版の取得、
+保存版と権限を検証する provider を Host から受け取る。比較は編集画面内の状態として扱う。
+通常の Playground ではローカル編集中の文書とスライドから「Counter サンプル」を選べる。
+サンプルの二つの保存版から値と図を引用し、古い版を選んだ場合は比較画面から新版へ更新できる。
+図の外部形式への出力は後続の対応範囲。
+[画面の検証記録](verification/artifact-live-quotes/README.md)を参照。
+
+この形式は既存の schema 1 の画像引用を置き換えない。図の表示用画像は adapter が提供する安全な
+画像投影を使い、任意の HTML として実行しない。[追加機能の契約](extension-addons.md)も参照。
+
 Dataの表／chartとGraphを、Document・Slide・Design・Whiteboardへ配置するpublic API。
 作成時に**固定版**と**更新連動**を選ぶ。既存の画像・ChartSnapshotは固定のコピーのまま。
 設計は[設計書](artifact-reference-design.md)、実施結果は[検証報告](verification/issue-264/README.md)。

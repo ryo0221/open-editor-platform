@@ -3,7 +3,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { canonicalJson, clone, deepFreeze, isDeepFrozen } from '@editor-platform/artifact-core';
 import { immutableCommand, type LocalCommandContext } from '@editor-platform/editor-core';
 import { nodeToContent, projectedSchemaVersion } from './engine';
-import type { DocumentBlock, DocumentContent } from './model';
+import { validDocumentLiveReferences, type DocumentBlock, type DocumentContent } from './model';
 
 // Compare the complete native projection before retaining an old block. Unlike
 // a JSON fingerprint this keeps signed zero, holes and property presence distinct.
@@ -52,6 +52,8 @@ function prepareLocalDocumentCommand(
   const basis = isDeepFrozen(base) ? base : deepFreeze(clone(base));
   const projected = project(doc, basis);
   assertReferenceItems(projected.blocks);
+  if (!validDocumentLiveReferences(projected.blocks))
+    throw new Error('引用が不正か、件数または容量の上限を超えています。');
   const previous = new Map(basis.blocks.map((block) => [block.id, block]));
   const content: DocumentContent = deepFreeze({
     ...basis,

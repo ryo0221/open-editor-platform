@@ -19,7 +19,11 @@ export function embeddedNodeView(node: ProseMirrorNode, ctx: DocumentNodeViewCon
   ctx.roots.add(root);
   const render = () =>
     root.render(
-      <Embedded block={node.attrs.block} references={ctx.callbacks.current.references} />,
+      <Embedded
+        block={node.attrs.block}
+        references={ctx.callbacks.current.references}
+        liveReferences={ctx.callbacks.current.liveReferences}
+      />,
     );
   ctx.embeddedViews.current.add(render);
   render();

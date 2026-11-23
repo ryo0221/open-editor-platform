@@ -80,7 +80,8 @@ function SlideFields({
       <PageSettings editing={editing} slide={slide} open={!chosen.length} />
       <VisualInspector
         items={chosen.map(slideDrawing)}
-        imageEditing={!chosen.some((item) => item.type === 'animation')}
+        imageEditing={!chosen.some((item) => item.liveQuote || item.type === 'animation')}
+        textEditing={!chosen.some((item) => item.liveQuote)}
         onPatch={(patch) => apply(patchObjects(slide.id, ids, patch))}
         onGeometry={onGeometry}
         onReplace={(f) => {

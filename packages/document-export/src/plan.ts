@@ -1,5 +1,6 @@
 import { clone, contentHash, deepFreeze } from '@editor-platform/artifact-core';
 import {
+  documentLiveReferences,
   isDocument,
   nestedLists,
   rubyGroups,
@@ -778,15 +779,15 @@ export async function prepareDocumentDocx(
   const services = bindDocxServices(adapters);
   const invalid = invalidInputMessage(input, settings);
   if (invalid) return invalidPlan(invalid, input?.basis);
+  const blocks = (input.content as DocumentContent).blocks;
+  if (blocks.some((b) => b.reference) || documentLiveReferences(blocks).length)
+    return invalidPlan(
+      '引用を含む文書はDOCXに書き出せません。引用付きの内容はnative JSONで保存してください。',
+      input.basis,
+      'REFERENCE_EXPORT_UNSUPPORTED',
+    );
   const run = createPlanRun(input, settings, services, signal);
   const { content, add } = run;
-  if (content.blocks.some((b) => b.reference))
-    add(
-      'REFERENCE_EXPORT_UNSUPPORTED',
-      'error',
-      '参照埋め込みのDOCX出力は未対応です。HTML／Markdownまたは参照付きnative JSONを使ってください。',
-      { domain: 'document' },
-    );
   if ((await contentHash(content)) !== input.basis.contentHash)
     add('SNAPSHOT_HASH_MISMATCH', 'error', 'Captured content does not match its declared hash');
   addContentDiagnostics(run);
@@ -827,6 +828,7 @@ export async function prepareDocumentDocx(
 async function invalidPlan(
   message: string,
   origin?: DocumentExportSnapshot['basis'],
+  code = 'INVALID_CONTENT',
 ): Promise<DocumentDocxPlan> {
   const basis = validExportBasis(origin as never)
     ? clone(origin!)
@@ -840,12 +842,12 @@ async function invalidPlan(
     exporterVersion: documentDocxExporterVersion,
     planHash: await contentHash({
       basis,
-      code: 'INVALID_CONTENT',
+      code,
       exporterVersion: documentDocxExporterVersion,
     }),
     basis,
     styleProfileId: 'document-ja-1',
-    diagnostics: [exportDiagnostic<DocumentExportAddress>('INVALID_CONTENT', 'error', message)],
+    diagnostics: [exportDiagnostic<DocumentExportAddress>(code, 'error', message)],
     blocks: [],
     details: [],
     counts: { native: 0, converted: 0, rasterized: 0 },

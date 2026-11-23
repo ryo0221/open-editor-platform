@@ -1,20 +1,19 @@
 import { memo, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { isDeepFrozen, newId } from '@editor-platform/artifact-core';
 import { IconButton, useWording } from '@editor-platform/editor-ui';
-import { DrawingView } from '@editor-platform/canvas-ui';
 import { ArrowDown, ArrowUp, Copy, EyeOff, Layers, Plus, Trash2 } from 'lucide-react';
 import {
   deleteSlide,
   duplicateSlide,
   reorderSlide,
-  slideDrawing,
   slidePaintOrder,
   type Slide,
   type SlideLayout,
   type SlideObject,
   type SlideObjectType,
 } from './model';
-import { projectedReference, type SlideEditing } from './view-shared';
+import { SlideObjectDrawing } from './live-references';
+import type { SlideEditing } from './view-shared';
 export interface SlideNavigatorProps {
   editing: SlideEditing;
   objects: SlideObject[];
@@ -102,7 +101,7 @@ function SlideThumbnail({
   onDragStart(): void;
   onDrop(): void;
 }) {
-  const { content, references } = editing;
+  const { content } = editing;
   return (
     <div
       className="slide-thumb-row"
@@ -134,7 +133,7 @@ function SlideThumbnail({
         <svg viewBox={`0 0 ${content.width} ${content.height}`} aria-hidden="true">
           <rect width={content.width} height={content.height} fill={s.background} />
           {slidePaintOrder(s).map((o) => (
-            <DrawingView key={o.id} drawing={slideDrawing(projectedReference(o, references))} />
+            <SlideObjectDrawing key={o.id} object={o} editing={editing} />
           ))}
         </svg>
         <small>{s.title}</small>
