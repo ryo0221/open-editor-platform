@@ -13,7 +13,8 @@ export type LiveTarget =
 export type LiveSource = { artifactId: string; domain: string; target: LiveTarget };
 /**
  * grouping: 3 桁ごとに「,」で区切る。scale: 10 の scale 乗で割ってから桁数で丸める（3 千・4 万・6 百万・8 億・12 兆）。
- * 単位の字（「億円」など）は unit に書く。どちらも無ければ今までどおり。
+ * 単位の字（「億円」など）は unit に書く（倍率を選んでも単位は変えない）。倍率は小数（decimal）だけ。どちらも無ければ今までどおり。
+ * 絶対値が 1e21 以上は toFixed が指数の表記になり、桁区切りは付かない（千〜兆の金額の範囲では起きない）。
  */
 export type ValueFormat = {
   style: 'decimal' | 'percent';
@@ -74,7 +75,8 @@ const validFormat = (f: ValueFormat) =>
   f.digits <= 6 &&
   label(f.unit) &&
   (f.grouping === undefined || typeof f.grouping === 'boolean') &&
-  (f.scale === undefined || (VALUE_SCALES as readonly number[]).includes(f.scale));
+  (f.scale === undefined ||
+    (f.style === 'decimal' && (VALUE_SCALES as readonly number[]).includes(f.scale)));
 const validTarget = (t: LiveTarget) =>
   !!t &&
   (t.kind === 'value'

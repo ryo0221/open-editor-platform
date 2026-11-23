@@ -277,10 +277,14 @@ function LiveReferencePicker({
                   value={format.style}
                   onChange={(e) =>
                     revise(() =>
-                      setFormat({
-                        ...format,
-                        style: e.target.value === 'percent' ? 'percent' : 'decimal',
-                      }),
+                      setFormat(
+                        e.target.value === 'percent'
+                          ? (({ scale: _scale, ...rest }) => ({
+                              ...rest,
+                              style: 'percent' as const,
+                            }))(format)
+                          : { ...format, style: 'decimal' },
+                      ),
                     )
                   }
                 >
@@ -305,6 +309,7 @@ function LiveReferencePicker({
                 倍率
                 <select
                   value={format.scale ?? ''}
+                  disabled={format.style === 'percent'}
                   onChange={(e) =>
                     revise(() => {
                       const { scale: _scale, ...rest } = format;
@@ -346,6 +351,13 @@ function LiveReferencePicker({
                   onChange={(e) => revise(() => setFormat({ ...format, unit: e.target.value }))}
                 />
               </label>
+              {format.scale !== undefined &&
+                !format.unit.trim().startsWith(SCALE_LABELS[format.scale]) && (
+                  <p className="ep-live-hint" role="note">
+                    倍率を選んでも単位は変わりません。単位を「{SCALE_LABELS[format.scale]}
+                    円」のように書いてください。
+                  </p>
+                )}
             </>
           ) : (
             <label>

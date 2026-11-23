@@ -79,3 +79,9 @@
   max-height: 8rem;
   object-fit: contain;
 }
+
+.ep-live-hint {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--ep-muted);
+}
