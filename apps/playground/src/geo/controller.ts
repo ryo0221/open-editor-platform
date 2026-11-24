@@ -16,7 +16,7 @@ import {
 import type { LocalReadSnapshot } from '@editor-platform/extension-contract/draft2';
 export function geoController(options: {
   id: string;
-  session: EditorSession<GeoDocument>;
+  session: Pick<EditorSession<GeoDocument>, 'revision' | 'content'>;
   inputs: EditorInputs;
   canEdit(): boolean;
   execute(command: EditorCommand<GeoDocument>): boolean;

@@ -26,6 +26,13 @@ host.acceptProposal(proposalId);
 
 `ArtifactEditor` のpropose/accept/rejectはlocal target revisionとpermissionを検査します。adapterに `changedElements: documentChangedElementIds` を渡すと、採用の結果（`acceptProposal` の戻り値と `onProposalResolved`）の `changedElementIds` に、提案で変わった段落・見出し・リスト項目・表の段落のIDが入ります（追加・削除されたリストや表は中の項目・段落も）。どの段落が提案由来かの来歴はHostがこれと採否の記録から作り、Documentのcontentには保存しません。外部Artifactを読んだ提案は、既存 `previewHostProposal` / `applyHostProposal` と `checkProposalReads` にexact reference versionsを渡す経路を使ってください。local pending proposalだけでは外部参照の鮮度を保証しません。共有操作は既存Documentのauthority/text preparation subsetに限定します。
 
+### 章内の共同執筆
+
+参照 Host の共同編集リンクは章の Artifact ID と小説画面を開くための指定を渡します。
+本文は通常の Document と同じ共有テキストエンジンで編集します。縦書き・ルビ・傍点は
+原稿に保持し、小説画面と通常の Document 画面の切り替えや文字数目標は各参加者の
+表示設定です。作品の章一覧と章をまたぐ通読・書き出しは章の共有リンクの範囲外です。
+
 ### 章横断の派生出力
 
 `@editor-platform/document/sequence` の `composeDocumentSequence([{ artifact, versionId }, ...])` に確定版を順に渡します。全入力をawait前に所有し、kind/native content/version所属/hashを検証。失敗は `ok: false` とdiagnosticsを返し、部分的な `content` は返しません。成功時はreadonlyな `{ content, manifest }` を返します。正本として自動保存しません。

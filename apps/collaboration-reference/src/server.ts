@@ -22,7 +22,7 @@ import {
   reviewCodec,
   fileCodec,
   slideEditorCodec,
-  designEditorCodec,
+  mangaEditorCodec,
   whiteboardEditorCodec,
   dataEditorCodec,
   documentEditorCodec,
@@ -32,6 +32,19 @@ import {
   animationEditorCodec,
   mindmapEditorCodec,
   scheduleEditorCodec,
+  checksSharedNativeHistory,
+  structuredGraphEditorCodec,
+  analysisEditorCodec,
+  estimateEditorCodec,
+  fictionMapEditorCodec,
+  geoEditorCodec,
+  ladderEditorCodec,
+  schematicEditorCodec,
+  drawingEditorCodec,
+  pcbEditorCodec,
+  constructionEditorCodec,
+  factoryEditorCodec,
+  cosimEditorCodec,
 } from '@editor-platform/collaboration-adapters';
 import {
   slideFixture,
@@ -55,9 +68,21 @@ const editorCodecs = {
   animation: animationEditorCodec,
   mindmap: mindmapEditorCodec,
   schedule: scheduleEditorCodec,
+  'structured-graph': structuredGraphEditorCodec,
+  'analysis': analysisEditorCodec,
+  'estimate': estimateEditorCodec,
+  'fiction-map': fictionMapEditorCodec,
+  'geo': geoEditorCodec,
+  'ladder': ladderEditorCodec,
+  'schematic': schematicEditorCodec,
+  drawing: drawingEditorCodec,
+  pcb: pcbEditorCodec,
+  construction: constructionEditorCodec,
+  factory: factoryEditorCodec,
+  cosim: cosimEditorCodec,
   document: documentEditorCodec,
   slide: slideEditorCodec,
-  design: designEditorCodec,
+  design: mangaEditorCodec,
   whiteboard: whiteboardEditorCodec,
   data: dataEditorCodec,
 };
@@ -173,7 +198,9 @@ export function createReferenceServer() {
               version.schemaVersion !== 1 ||
               typeof version.versionId !== 'string' ||
               seeded.some((v) => v.version.versionId === version.versionId) ||
-              (codec.domain === 'schedule' && !codec.validate(version.content)) ||
+              ((checksSharedNativeHistory(codec.domain) ||
+                (codec.domain === 'design' && body.initial.content?.pagination !== undefined)) &&
+                !codec.validate(version.content)) ||
               (await contentHash(version.content)) !== version.contentHash
             )
               fail('schema-mismatch', 'Invalid immutable version or content hash');

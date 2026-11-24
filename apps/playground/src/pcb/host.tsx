@@ -1,10 +1,11 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { PcbController, PcbSurface, WorkerPcbKernel } from '@editor-platform/pcb';
 import '@editor-platform/pcb/style.css';
 import KernelWorker from '@editor-platform/pcb/worker?worker';
 import type { PcbDocument } from '@editor-platform/pcb-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
 import { createPcbBoardSource, createPcbSchematicSource } from './boards';
 
@@ -16,13 +17,15 @@ import { createPcbBoardSource, createPcbSchematicSource } from './boards';
 export default function PcbHost({
   artifact,
   session,
+  shared = false,
   readOnly,
   inputs,
   persist,
   records,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<PcbDocument>;
+  session: EditorDraftPort<PcbDocument>;
+  shared?: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: PcbDocument): void;
@@ -89,8 +92,8 @@ export default function PcbHost({
       hostHistory
       name={artifact.name}
       kernel={kernel}
-      boards={boards}
-      schematics={schematics}
+      boards={shared ? undefined : boards}
+      schematics={shared ? undefined : schematics}
     />
   );
 }

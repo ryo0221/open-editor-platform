@@ -28,11 +28,15 @@ export async function saveNewManga(artifact: StoredArtifact) {
   return createArtifactIfAbsent(storage, artifact, canonicalJson(artifact), canonicalJson);
 }
 const key = (id: string) => `editor-platform.workspace.${id}`;
-export function readMangaWorkspace(id: string): 'design' | 'manga' {
+export function readMangaWorkspace(
+  id: string,
+  fallback: 'design' | 'manga' = 'design',
+): 'design' | 'manga' {
   try {
-    return localStorage.getItem(key(id)) === 'manga' ? 'manga' : 'design';
+    const saved = localStorage.getItem(key(id));
+    return saved === 'design' || saved === 'manga' ? saved : fallback;
   } catch {
-    return 'design';
+    return fallback;
   }
 }
 export function writeMangaWorkspace(id: string, value: 'design' | 'manga') {

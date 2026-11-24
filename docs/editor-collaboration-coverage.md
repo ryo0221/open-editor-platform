@@ -31,6 +31,20 @@ input and scoped geometry dependencies, with explicit regression evidence.
 
 ## Capability states
 
+The Playground reference Host also connects the normal Drawing, PCB, Construction,
+Factory and CoSim surfaces:
+
+| Surface | Shared draft | Source or output handling |
+| --- | --- | --- |
+| Drawing | Sheet settings, title blocks, revision entries and sheet annotations | CAD/BIM projections and issued PDFs use the local workflow. |
+| PCB | Single-board outline, pads, components, nets, tracks, vias and zones | Board stacking and the schematic import workflow stay local. Fabrication export waits for a confirmed draft. |
+| Construction | Task dates, dependencies, progress, calendar and site settings | The initial BIM version stays fixed. Participants render the building from their own exact saved version or retained snapshot. |
+| Factory | Line objects, links, layout and run settings for a self-contained model | CAD/BIM appearances stay local. Each participant runs their own simulation. |
+| CoSim | Binding settings for the selected circuit and ladder versions | The source pointers stay fixed. Participants load the exact saved inputs independently. A change to the binding list conflicts with a competing change to that list. |
+
+The reference Host shares the document and its pinned identifiers for Construction
+and CoSim. It does not transfer the supporting BIM, circuit or ladder documents.
+
 Mind Map and Schedule use the existing native JSON and the reference Host's shared
 session. Mind Map names are applied as complete field values. A conflict keeps
 unapplied input in the branch panel. Zoom and folding are private. For Schedule,

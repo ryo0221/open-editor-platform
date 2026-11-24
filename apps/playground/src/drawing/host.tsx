@@ -1,3 +1,4 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { fixedPdfFont } from '@editor-platform/document/pdf-text';
 import { useEffect, useMemo, useRef } from 'react';
 import { canonicalJson, commitVersion } from '@editor-platform/artifact-core';
@@ -51,7 +52,7 @@ import {
   type DrawingViewState,
   type DrawingBimDrawing,
 } from '@editor-platform/drawing-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
 import { versionCommit } from '../app/version-commit';
 import { readBimPartShape } from '../bim/parts';
@@ -165,6 +166,7 @@ function cadAssetLookup(records: readonly StoredArtifact[]) {
 export default function DrawingHost({
   artifact,
   session,
+  shared = false,
   readOnly,
   inputs,
   persist,
@@ -173,7 +175,8 @@ export default function DrawingHost({
   persistRecord,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<DrawingDocument>;
+  session: EditorDraftPort<DrawingDocument>;
+  shared?: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: DrawingDocument): void;
@@ -435,7 +438,7 @@ export default function DrawingHost({
       // DW6: PDF text in the fixed font documents print with.
       pdfFont: fixedPdfFont,
       // DW6b: an issue is a saved version with its PDF kept beside it, never changed.
-      issues: {
+      issues: shared ? undefined : {
         list: () =>
           (recordRef.current()?.drawingIssues ?? []).map((i) => ({
             versionId: i.versionId,
@@ -504,7 +507,7 @@ export default function DrawingHost({
         applied.current = canonicalJson(session.revision);
         persistRef.current(content);
       },
-      sources,
+      sources: shared ? undefined : sources,
       derive: {
         key: (doc, view) => drawingDeriveKey(doc, view, sourceHash(doc, view) ?? ''),
         async run(doc, view, signal): Promise<DrawingViewState> {
@@ -594,7 +597,7 @@ export default function DrawingHost({
       },
     });
     // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
-  }, [session, services, bimDrawings]);
+  }, [session, services, bimDrawings, shared]);
   useEffect(() => () => controller.dispose(), [controller]);
   useEffect(() => controller.accessChanged(), [controller, readOnly]);
   // Edits apply at once, so nothing is pending for the Host's export and switch boundaries.

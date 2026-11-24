@@ -30,6 +30,7 @@ import {
   slideCodec,
   slideCanvasCodec,
   designCodec,
+  mangaDesignCodec,
   whiteboardCodec,
   sharedSlideMotionReason,
   unsupportedSlideContent,
@@ -56,6 +57,7 @@ import {
   canvasTextItem,
   mapCanvasTextAnchor,
 } from './canvas-text';
+import { nativeRecordSchemas } from './native-records';
 import { canvasTextReplacement } from '@editor-platform/canvas-ui/text-engine';
 import { designCommandReads } from './design-command-reads';
 import { EditorState } from 'prosemirror-state';
@@ -73,20 +75,22 @@ interface Collection {
   present: boolean;
   clear(): void;
 }
-interface Schema<T> {
+export interface Schema<T> {
   base: DomainCodec<T>;
   root: readonly string[];
   slideReferences?: true;
+  manga?: true;
+  recordRoots?: readonly string[];
   collections(content: T): Collection[];
 }
 export type EditorChange =
   | { kind: 'insert'; collection: string; id: string; value: RecordValue }
   | { kind: 'remove'; collection: string; id: string }
-  | { kind: 'field'; collection: string; id: string; field: string; value: unknown }
+  | { kind: 'field'; collection: string; id: string; field: string; value: unknown; present?: boolean }
   | { kind: 'slide-reference'; collection: string; id: string; value: Root }
   | { kind: 'order'; collection: string; ids: string[] }
   | { kind: 'empty'; collection: string; present: boolean }
-  | { kind: 'root'; field: string; value: unknown }
+  | { kind: 'root'; field: string; value: unknown; present?: boolean }
   | { kind: 'graph-settings'; value: Omit<DataGraphView, 'positions'> | null }
   | { kind: 'graph-position'; rowId: string; value: { x: number; y: number } | null }
   | { kind: 'cell'; rowId: string; columnId: string; value: unknown };
@@ -161,7 +165,7 @@ const layoutFields = new Set([
 ]);
 const entityKey = (collection: string, id: string) => `entity:${collection}:${id}`;
 const orderKey = (collection: string) => `order:${collection}`;
-function collection(
+export function collection(
   owner: object,
   field: string,
   fields: readonly string[],
@@ -221,6 +225,23 @@ const designSchema: Schema<DesignContent> = {
     collection(d, 'elements', elementFields),
     collection(d, 'components', ['name', 'elements', 'template', 'width', 'height', 'web']),
     collection(d, 'styles', ['name', 'appearance']),
+  ],
+};
+const mangaCapability = Symbol('manga-collaboration');
+const mangaSchema: Schema<DesignContent> = {
+  ...designSchema,
+  base: mangaDesignCodec,
+  manga: true,
+  root: [...designSchema.root, 'pagination'],
+  collections: (design) => [
+    collection(design, 'elements', [
+      ...elementFields,
+      'path',
+      'panelGeometry',
+      'mangaRole',
+      'provenance',
+    ]),
+    ...designSchema.collections(design).slice(1),
   ],
 };
 const boardSchema: Schema<WhiteboardContent> = {
@@ -314,11 +335,11 @@ const scheduleSchema: Schema<ScheduleDocument> = {
 function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
   const schema = {
     slide: referenceCapability in codec ? slideReferenceSchema : slideSchema,
-    design: designSchema,
+    design: mangaCapability in codec ? mangaSchema : designSchema,
     whiteboard: boardSchema,
     data: dataSchema,
     schedule: scheduleSchema,
-  }[codec.domain as 'slide'];
+  }[codec.domain as 'slide'] ?? nativeRecordSchemas[codec.domain as keyof typeof nativeRecordSchemas];
   if (!schema) fail('unsupported-operation', 'This editor uses its text or annotation engine');
   return schema as unknown as Schema<T>;
 }
@@ -391,6 +412,7 @@ function geometryReads<T>(
     const { item, key, collection } = entry;
     for (const field of [...layoutFields, 'id', 'type', 'kind', 'hidden', 'locked'])
       reads.add(`${key}/${field}`);
+    if (schema.manga && item.panelGeometry) reads.add(`${key}/panelGeometry`);
     if (item.sizing === 'hug')
       for (const field of ['text', 'typography']) reads.add(`${key}/${field}`);
     reads.add(`children:${key}`);
@@ -470,7 +492,7 @@ function contentReads<T>(schema: Schema<T>, content: T, ids: readonly string[]) 
 }
 function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] {
   const changes: EditorChange[] = [];
-  const roots = {
+  const roots = schema.recordRoots ?? {
     slide: ['slides'],
     design: ['elements', 'components', 'styles'],
     whiteboard: ['nodes', 'connectors', 'sections'],
@@ -486,7 +508,7 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
       fail('unsupported-operation', `Unknown domain property: ${field}`);
   for (const field of schema.root)
     if (!equal((before as Root)[field], (after as Root)[field]))
-      changes.push({ kind: 'root', field, value: (after as Root)[field] ?? null });
+      changes.push({ kind: 'root', field, value: (after as Root)[field] ?? null, ...(schema.recordRoots ? { present: Object.hasOwn(after as Root, field) } : {}) });
   if (schema.base.domain === 'data') {
     const old = (before as StructuredData).graphView,
       next = (after as StructuredData).graphView;
@@ -549,6 +571,7 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
               id: item.id,
               field,
               value: item[field] ?? null,
+              ...(schema.recordRoots ? { present: Object.hasOwn(item, field) } : {}),
             });
         if (relatedReference) {
           const value = slideReferenceFields(item);
@@ -689,6 +712,17 @@ function editorCommandActions<T>(
   if (!codec.validate(after)) fail('invalid-operation', 'Command produced invalid domain content');
   const action = transactionAction(schema, state.content, after);
   if (!(action.payload.changes as EditorChange[]).length) return undefined;
+  if (schema.recordRoots) {
+    action.payload.reads = (command.reads?.content ?? []).includes('*')
+      ? ['*']
+      : contentReads(schema, state.content, command.reads?.content ?? []);
+    return {
+      actions: [action],
+      origin: command.context?.origin === 'proposal' ? 'proposal' : 'human',
+      transactionId: command.context?.transactionId,
+    };
+  }
+
   const changes = action.payload.changes as EditorChange[],
     textIds = new Set(
       changes.flatMap((c) =>
@@ -1004,7 +1038,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
       }
       if (!authorizedReferences(content))
         fail('unauthorized', 'A Slide reference is no longer authorized');
-      if (action.type === 'canvas.text-steps')
+      if (action.type === 'canvas.text-steps' && !schema.recordRoots)
         return applyCanvasSteps(codec, content, action, textVersions);
       if (action.type === 'domain.restore') {
         const reason = base.unsupportedContentReason?.(action.payload.content);
@@ -1088,7 +1122,12 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           required.add(key);
           touched.add(key);
           targets.add('*');
-          (content as Root)[change.field] = copy(change.value);
+          if (
+            (schema.recordRoots && change.present === false) ||
+            (schema.manga && change.field === 'pagination' && change.value === null)
+          )
+            delete (content as Root)[change.field];
+          else (content as Root)[change.field] = copy(change.value);
           invalidates.add('geometry');
           continue;
         }
@@ -1280,7 +1319,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           if (!c.fields.includes(change.field))
             fail('unsupported-operation', 'Unknown domain field');
           if (item.locked && change.field !== 'locked') fail('unauthorized', 'Element is locked');
-          if (['text', 'runs'].includes(change.field))
+          if (!schema.recordRoots && ['text', 'runs'].includes(change.field))
             fail('unsupported-operation', 'Shared text requires text engine steps');
           if (
             schema.slideReferences &&
@@ -1296,7 +1335,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           if (layoutFields.has(change.field)) {
             invalidates.add('geometry');
           }
-          if (change.value === null) delete item[change.field];
+          if (schema.recordRoots ? change.present === false : change.value === null) delete item[change.field];
           else item[change.field] = copy(change.value);
         } else fail('schema-mismatch', 'Unknown domain change');
         if (c.key === 'pages' && (change.kind === 'insert' || change.kind === 'remove')) {
@@ -1311,8 +1350,22 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
         }
       }
       const geometryIds = changes.flatMap((change) =>
-        change.kind === 'field' && layoutFields.has(change.field) ? [change.id] : [],
+        change.kind === 'field' &&
+        (layoutFields.has(change.field) || (schema.manga && change.field === 'panelGeometry'))
+          ? [change.id]
+          : [],
       );
+      if (schema.manga) {
+        const oldPages = (before as DesignContent).pagination?.pages ?? [];
+        const newPages = (content as DesignContent).pagination?.pages ?? [];
+        if (!equal(oldPages, newPages)) {
+          const previous = new Map(oldPages.map((page) => [page.frameId, page]));
+          const next = new Map(newPages.map((page) => [page.frameId, page]));
+          for (const id of new Set([...previous.keys(), ...next.keys()])) {
+            if (!equal(previous.get(id), next.get(id))) geometryIds.push(id);
+          }
+        }
+      }
       if (base.domain === 'design') {
         const overrideIds = changes.flatMap((change) =>
           change.kind === 'field' &&
@@ -1382,6 +1435,11 @@ export function createSharedSlideReferenceCodec(
   };
 }
 export const designEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(designSchema)));
+/** Opt in on both peers and the authority before admitting Design manga pages. */
+export const mangaEditorCodec = Object.assign(
+  editorAssetCodec(withNativeReuse(editorCodec(mangaSchema))),
+  { [mangaCapability]: true },
+);
 export const whiteboardEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(boardSchema)));
 export const dataEditorCodec = withNativeReuse(editorCodec(dataSchema));
 export const scheduleEditorCodec = editorCodec(scheduleSchema);
@@ -1392,3 +1450,22 @@ export const editorValidators = {
   whiteboard: isWhiteboard,
   data: isStructuredData,
 };
+
+/** These domains also validate every retained version before sharing the archive. */
+export function checksSharedNativeHistory(domain: DomainCodec<unknown>['domain']): boolean {
+  return domain === 'schedule' || Object.hasOwn(nativeRecordSchemas, domain);
+}
+
+export const structuredGraphEditorCodec = editorCodec(nativeRecordSchemas['structured-graph']);
+export const analysisEditorCodec = editorCodec(nativeRecordSchemas.analysis);
+export const estimateEditorCodec = editorCodec(nativeRecordSchemas.estimate);
+export const fictionMapEditorCodec = editorCodec(nativeRecordSchemas['fiction-map']);
+export const geoEditorCodec = editorCodec(nativeRecordSchemas.geo);
+export const ladderEditorCodec = editorCodec(nativeRecordSchemas.ladder);
+export const schematicEditorCodec = editorCodec(nativeRecordSchemas.schematic);
+
+export const drawingEditorCodec = editorCodec(nativeRecordSchemas.drawing);
+export const pcbEditorCodec = editorCodec(nativeRecordSchemas.pcb);
+export const constructionEditorCodec = editorCodec(nativeRecordSchemas.construction);
+export const factoryEditorCodec = editorCodec(nativeRecordSchemas.factory);
+export const cosimEditorCodec = editorCodec(nativeRecordSchemas.cosim);

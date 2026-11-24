@@ -1,3 +1,4 @@
+import { readNovelChapters } from './app/novel-workspace';
 import { useEffect, useState } from 'react';
 import type { PrivateVideoEntry } from './private-video/catalog';
 import { createArtifact } from '@editor-platform/artifact-core';
@@ -6,7 +7,7 @@ import {
   HttpEditorAdapter,
   SharedEditorSession,
   slideEditorCodec,
-  designEditorCodec,
+  mangaEditorCodec,
   whiteboardEditorCodec,
   dataEditorCodec,
   documentEditorCodec,
@@ -16,6 +17,19 @@ import {
   animationEditorCodec,
   mindmapEditorCodec,
   scheduleEditorCodec,
+  checksSharedNativeHistory,
+  structuredGraphEditorCodec,
+  analysisEditorCodec,
+  estimateEditorCodec,
+  fictionMapEditorCodec,
+  geoEditorCodec,
+  ladderEditorCodec,
+  schematicEditorCodec,
+  drawingEditorCodec,
+  pcbEditorCodec,
+  constructionEditorCodec,
+  factoryEditorCodec,
+  cosimEditorCodec,
   annotationsToThreads,
   editorAssetCodec,
   type EditorConnectionCredentials,
@@ -34,8 +48,20 @@ const codecs = {
   animation: animationEditorCodec,
   mindmap: mindmapEditorCodec,
   schedule: scheduleEditorCodec,
+  'structured-graph': structuredGraphEditorCodec,
+  'analysis': analysisEditorCodec,
+  'estimate': estimateEditorCodec,
+  'fiction-map': fictionMapEditorCodec,
+  'geo': geoEditorCodec,
+  'ladder': ladderEditorCodec,
+  'schematic': schematicEditorCodec,
+  drawing: drawingEditorCodec,
+  pcb: pcbEditorCodec,
+  construction: constructionEditorCodec,
+  factory: factoryEditorCodec,
+  cosim: cosimEditorCodec,
   slide: slideEditorCodec,
-  design: designEditorCodec,
+  design: mangaEditorCodec,
   whiteboard: whiteboardEditorCodec,
   data: dataEditorCodec,
   document: documentEditorCodec,
@@ -64,7 +90,10 @@ async function connect(
   domain: Kind,
   actor: 'A' | 'B' | 'C',
   initial?: StoredArtifact,
+  chapterView = false,
 ) {
+  const novelChapter =
+    domain === 'document' && (chapterView || !!(initial && readNovelChapters(artifactId)));
   if (!supportsSharedKind(domain))
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))
@@ -74,11 +103,19 @@ async function connect(
   const codec = editorAssetCodec(codecs[domain] as DomainCodec<Content>);
   const reason = codec.unsupportedContentReason?.(initial?.draft.content);
   if (reason) throw new Error(reason);
-  if (
-    domain === 'schedule' &&
-    initial?.versions.some((v) => !scheduleEditorCodec.validate(v.content))
-  )
-    throw new Error('Data の参照レーンを持つ保存版がある予定表は共同編集を開始できません。');
+  if (domain === 'geo' && (initial?.geoResources?.length || initial?.geoDataInputs?.length))
+    throw new Error('元データを保持している地図は共同編集を開始できません。');
+  const initialContent = initial?.draft.content;
+  const manga = domain === 'design' && mangaEditorCodec.validate(initialContent) && initialContent.pagination;
+  if (checksSharedNativeHistory(domain) || manga) {
+    for (const version of initial?.versions ?? []) {
+      if (!codec.validate(version.content))
+        throw new Error(
+          codec.unsupportedContentReason?.(version.content) ??
+            '共同編集に対応していない保存版が含まれています。',
+        );
+    }
+  }
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {
@@ -169,11 +206,13 @@ async function connect(
     shared: artifactId,
     kind: domain,
     actor: actor === 'B' ? 'A' : 'B',
+    ...(novelChapter ? { workspace: 'novel' } : {}),
   });
   const connection: SharedPlaygroundConnection = {
     session,
     record,
     peerUrl: `/?${params}`,
+    novelChapter,
     leave: () => {
       stop();
       window.location.assign('/');
@@ -359,7 +398,9 @@ export function ReferencePlayground({
     }
     let disposed = false,
       stop: (() => void) | undefined;
-    void connect(id, kind, params.get('actor') === 'B' ? 'B' : 'A')
+    void connect(
+      id, kind, params.get('actor') === 'B' ? 'B' : 'A', undefined, params.get('workspace') === 'novel',
+    )
       .then((result) => {
         if (disposed) {
           result.stop();
@@ -415,7 +456,12 @@ export function ReferencePlayground({
         const result = await connect(record.id, record.kind as Kind, 'A', record);
         result.stop();
         window.location.assign(
-          `/?${new URLSearchParams({ shared: record.id, kind: record.kind, actor: 'A' })}`,
+          `/?${new URLSearchParams({
+            shared: record.id,
+            kind: record.kind,
+            actor: 'A',
+            ...(result.connection.novelChapter ? { workspace: 'novel' } : {}),
+          })}`,
         );
       }}
     />

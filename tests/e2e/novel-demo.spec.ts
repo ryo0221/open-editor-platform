@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, setDocumentText } from './fixtures';
 
 test.skip(({ baseURL }) => /:4177$/.test(baseURL ?? ''), 'Playground only');
 
@@ -13,6 +13,51 @@ async function closeInspector(page: import('@playwright/test').Page) {
   const close = page.getByRole('button', { name: 'Close 原稿と照合', exact: true });
   if ((await close.isVisible()) && (await page.viewportSize())!.width <= 800) await close.click();
 }
+
+test('two writers share a novel chapter, keep ruby and undo only their own edit', async ({
+  page: a,
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({ baseURL });
+  try {
+    await a.goto('/');
+    await a.getByRole('button', { name: '小説デモを作成', exact: true }).click();
+    await expect(a.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'novel');
+    const menu = a.getByRole('button', { name: 'More artifact actions', exact: true });
+    await menu.click();
+    await a.getByRole('button', { name: 'Open collaboratively', exact: true }).click();
+    await expect(a.locator('.save-status')).toContainText('Shared · confirmed');
+    await menu.click();
+    const link = await a.getByRole('link', { name: 'Open peer editor', exact: true }).getAttribute('href');
+    expect(link).toBeTruthy();
+    await a.keyboard.press('Escape');
+    const b = await context.newPage();
+    const errors: string[] = [];
+    b.on('pageerror', (error) => errors.push(error.message));
+    await b.goto(link!);
+    await expect(b.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'novel');
+    await expect(b.locator('.ProseMirror .ep-ruby[data-ruby="とうだい"]')).toBeVisible();
+    await expect(b.getByRole('button', { name: '縦書き', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await Promise.all([
+      setDocumentText(a, '[data-block-id="c1-p2"]', '葵が書いた一文。'),
+      setDocumentText(b, '[data-block-id="c1-p3"]', '亮が書いた一文。'),
+    ]);
+    await expect(a.locator('.ProseMirror')).toContainText('亮が書いた一文。');
+    await expect(b.locator('.ProseMirror')).toContainText('葵が書いた一文。');
+    await a.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(b.locator('.ProseMirror')).toContainText('不図、祖母の言葉');
+    await expect(b.locator('.ProseMirror')).toContainText('亮が書いた一文。');
+    await b.getByRole('button', { name: 'Documentで詳細編集', exact: true }).click();
+    await expect(b.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'document');
+    await expect(a.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'novel');
+    await b.reload();
+    await expect(b.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'document');
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
 
 test('novel demo: sample chapters open in the novel workspace with ruby, notation and 通読', async ({
   page,

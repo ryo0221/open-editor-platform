@@ -1,3 +1,4 @@
+import { useEditorDraftPort } from '../kinds/editor-draft-port';
 import { FictionMapNativeInput } from '@editor-platform/fiction-map/native-input';
 import { FictionMapSavedViews } from '@editor-platform/fiction-map/saved-views';
 import { FictionMapWorldPanel } from '@editor-platform/fiction-map/world-panel';
@@ -12,6 +13,7 @@ import {
   undoFictionMap,
   redoFictionMap,
   type FictionMapSession,
+  type FictionMapContent,
   type FictionMapBase,
   type FictionMapResult,
 } from '@editor-platform/fiction-map/model';
@@ -22,26 +24,27 @@ import { playgroundArtifactRefHost } from './artifact-refs';
 export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
   const latest = useRef(host);
   latest.current = host;
-  const session = host.sessions.current.get(host.active.id)!;
+  const draft = useEditorDraftPort<FictionMapContent>(host);
+  const session = host.sessions.current.get(host.active.id);
+  const shared = host.sharedSession;
   // The Host pins a native domain at Session creation and validates all commands.
   // This generic narrowing is not the owned snapshot: adopt performs real admission.
   const native = session as unknown as FictionMapSession;
-  const revision = session.revision;
+  const revision = draft.revision;
   const base = useMemo(
-    () => adoptFictionMapBase(native),
-    [session, revision.sessionId, revision.sequence],
+    () => adoptFictionMapBase(draft),
+    [draft, revision.sessionId, revision.sequence],
   );
   function gate() {
     const h = latest.current;
     return (
       !h.readOnly &&
-      !h.shared &&
       h.active.id === host.active.id &&
-      h.sessions.current.get(h.active.id) === session
+      (shared ? h.sharedSession === shared : h.sessions.current.get(h.active.id) === session)
     );
   }
   function publish(result: FictionMapResult<FictionMapBase & { changed: boolean }>) {
-    if (result.ok && result.value.changed) {
+    if (!shared && result.ok && result.value.changed) {
       const h = latest.current,
         a = h.recordsRef.current.find((a) => a.id === h.active.id)!;
       h.persist(editedDraft(a, result.value.content));
@@ -49,7 +52,7 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
     }
     return result;
   }
-  const saved = host.savedRecords.current.get(host.active.id);
+  const saved = shared ? host.active : host.savedRecords.current.get(host.active.id);
   const artifactRefs = useMemo(
     () =>
       playgroundArtifactRefHost({
@@ -60,6 +63,11 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
       }),
     [host.active.id],
   );
+  const history = (direction: 'undo' | 'redo') => {
+    if (!shared) return publish((direction === 'undo' ? undoFictionMap : redoFictionMap)(native, gate));
+    latest.current.history(direction);
+    return { ok: true, value: { ...base, changed: false } } as const;
+  };
   return (
     <>
       <FictionMapSurface
@@ -69,27 +77,27 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
           .filter((a) => a.artifactId === host.active.id)
           .map((a) => a.elementId)}
         onSelectionChange={(ids) => latest.current.select(ids)}
-        canUndo={session.canUndo}
-        canRedo={session.canRedo}
-        onCommit={(prepared) => publish(commitFictionMapChange(native, prepared, gate))}
-        onUndo={() => publish(undoFictionMap(native, gate))}
-        onRedo={() => publish(redoFictionMap(native, gate))}
-        artifactRefs={artifactRefs}
+        canUndo={shared?.canUndo ?? session?.canUndo ?? false}
+        canRedo={shared?.canRedo ?? session?.canRedo ?? false}
+        onCommit={(prepared) => publish(commitFictionMapChange(draft, prepared, gate))}
+        onUndo={() => history('undo')}
+        onRedo={() => history('redo')}
+        artifactRefs={shared ? undefined : artifactRefs}
       />
       <FictionMapNativeInput
         base={base}
         readOnly={host.readOnly}
-        onCommit={(p) => publish(commitFictionMapChange(native, p, gate))}
+        onCommit={(p) => publish(commitFictionMapChange(draft, p, gate))}
         onError={(m) => latest.current.setError(m)}
       />
       <FictionMapSavedViews
         base={base}
         readOnly={host.readOnly}
-        onCommit={(p) => publish(commitFictionMapChange(native, p, gate))}
+        onCommit={(p) => publish(commitFictionMapChange(draft, p, gate))}
         onError={(m) => latest.current.setError(m)}
       />
       <FictionMapWorldPanel content={base.content} />
-      {saved && (
+      {saved && (!shared || saved.versions.length > 0) ? (
         <FictionMapOutputPanel
           artifact={
             saved as unknown as import('@editor-platform/artifact-core').Artifact<
@@ -97,6 +105,7 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
             >
           }
           beforeOutput={() => {
+            latest.current.exportGuard?.();
             if (!latest.current.flushInputs()) throw Error('Apply or cancel pending map input.');
           }}
           isCurrent={() => {
@@ -105,14 +114,14 @@ export function PlaygroundFictionMap({ host }: { host: SurfaceHost }) {
             return (
               h.active.id === host.active.id &&
               h.readOnly === host.readOnly &&
-              sameLocalRevision(session.revision, revision) &&
+              sameLocalRevision(draft.revision, revision) &&
               !p.dirty &&
               !p.composing
             );
           }}
           onError={(message) => latest.current.setError(message)}
         />
-      )}
+      ) : null}
     </>
   );
 }

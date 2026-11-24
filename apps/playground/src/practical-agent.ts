@@ -8,7 +8,7 @@ import {
 import {
   prepareEditorCommand,
   slideEditorCodec,
-  designEditorCodec,
+  mangaEditorCodec,
   whiteboardEditorCodec,
   dataEditorCodec,
   documentEditorCodec,
@@ -77,7 +77,7 @@ export function practicalProposal(snapshot: Snapshot<unknown>, identity: Identit
         state.content.elements.find((e) => e.type === 'frame') ?? state.content.elements[0];
       if (!target) throw new Error('Insert an element before requesting this proposal');
       op = prepareEditorCommand(
-        designEditorCodec,
+        mangaEditorCodec,
         state,
         identity,
         updateElement(target.id, { fill: color(target.fill) }),

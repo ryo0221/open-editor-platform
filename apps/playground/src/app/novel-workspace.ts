@@ -174,11 +174,15 @@ export async function saveNewNovel(artifacts: StoredArtifact[]) {
 // View preferences and the chapter order are Host state; Documents store none of them.
 const workspaceKey = (id: string) => `editor-platform.workspace.${id}`;
 const chaptersKey = (id: string) => `editor-platform.novel-chapters.${id}`;
-export function readNovelWorkspace(id: string): 'document' | 'novel' {
+export function readNovelWorkspace(
+  id: string,
+  fallback: 'document' | 'novel' = 'document',
+): 'document' | 'novel' {
   try {
-    return localStorage.getItem(workspaceKey(id)) === 'novel' ? 'novel' : 'document';
+    const saved = localStorage.getItem(workspaceKey(id));
+    return saved === 'document' || saved === 'novel' ? saved : fallback;
   } catch {
-    return 'document';
+    return fallback;
   }
 }
 export function writeNovelWorkspace(id: string, value: 'document' | 'novel') {

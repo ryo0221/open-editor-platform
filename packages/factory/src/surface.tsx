@@ -1,3 +1,4 @@
+import { EditorExportGuardContext } from '@editor-platform/editor-ui';
 import {
   useCallback,
   useContext,
@@ -310,7 +311,16 @@ export function FactorySurface({
   const fresh = state.result?.key === state.key;
   const [view, setView] = useState<'plan' | '3d'>('plan');
   const places = useMemo(() => factoryAutoLayout(doc), [doc]);
+  const guardExport = useContext(EditorExportGuardContext);
+  const [exportError, setExportError] = useState('');
   const exportCsv = () => {
+    try {
+      guardExport?.();
+      setExportError('');
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : String(error));
+      return;
+    }
     const blob = new Blob([writeFactoryTimesCsv(doc)], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -320,6 +330,7 @@ export function FactorySurface({
   };
   return (
     <div className="fac-surface" data-testid="fac-surface">
+      {exportError && <p role="alert">{exportError}</p>}
       <EditorLayout
         viewKey="factory"
         leftLabel="Model"

@@ -697,7 +697,18 @@ function FabricationPanel({
   // The committed name, read after the inputs are settled (state updates are not yet rendered).
   const nameRef = useRef(name);
   const [files, setFiles] = useState<PcbFabFile[]>([]);
-  const exportZip = () => settle(writeZip);
+  const guardExport = useContext(EditorExportGuardContext);
+  const [exportError, setExportError] = useState('');
+  const exportZip = () =>
+    settle(() => {
+      try {
+        guardExport?.();
+        writeZip();
+        setExportError('');
+      } catch (error) {
+        setExportError(error instanceof Error ? error.message : String(error));
+      }
+    });
   const writeZip = () => {
     const stem = fileStem(nameRef.current);
     const doc = controller.state.content;
@@ -714,6 +725,7 @@ function FabricationPanel({
   };
   return (
     <Section title="Fabrication">
+      {exportError && <p role="alert">{exportError}</p>}
       <CommitInput
         label="File name"
         value={name}
@@ -2433,3 +2445,4 @@ function BoardCanvas({
     </div>
   );
 }
+import { EditorExportGuardContext } from '@editor-platform/editor-ui';

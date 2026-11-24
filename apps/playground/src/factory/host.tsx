@@ -1,3 +1,4 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { WorkerBimKernel } from '@editor-platform/bim';
 import KernelWorker from '@editor-platform/bim/worker?worker';
@@ -16,7 +17,7 @@ import { cadContentHash, type CadDocument } from '@editor-platform/cad-core';
 import '@editor-platform/factory/style.css';
 import '@editor-platform/ladder/style.css';
 import type { FactoryDocument } from '@editor-platform/factory-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
 import { factorySourceChoices, factorySourceOf, stageFactorySource } from './source';
 import { factoryLookChoices, stageFactoryLook } from './looks';
@@ -29,6 +30,7 @@ import { CharacterPropEvaluation } from '../character/props';
 export default function FactoryHost({
   artifact,
   session,
+  shared = false,
   readOnly,
   inputs,
   record,
@@ -37,7 +39,8 @@ export default function FactoryHost({
   persistRecord,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<FactoryDocument>;
+  session: EditorDraftPort<FactoryDocument>;
+  shared?: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   record(): StoredArtifact | undefined;
@@ -310,8 +313,8 @@ export default function FactoryHost({
       controller={controller}
       hostHistory
       name={artifact.name}
-      building={building}
-      looks={looks}
+      building={shared ? undefined : building}
+      looks={shared ? undefined : looks}
     />
   );
 }

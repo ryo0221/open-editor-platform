@@ -34,6 +34,7 @@ export interface SurfaceHost {
   sharedSession: SharedEditorSession<Content> | undefined;
   /** Shared connections render graphs without the local data-graph bridge. */
   shared: boolean;
+  novelChapter?: boolean;
   sharedPreview: { id: string; preview: Preview<Content> } | undefined;
   inputs: EditorInputs;
   readOnly: boolean;

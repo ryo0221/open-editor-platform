@@ -4,6 +4,7 @@ import type { Content, StoredArtifact } from '../model';
 export interface SharedPlaygroundConnection {
   session: SharedEditorSession<Content>;
   record: StoredArtifact;
+  novelChapter?: boolean;
   peerUrl: string;
   requestProposal(): Promise<string>;
   leave(): void;

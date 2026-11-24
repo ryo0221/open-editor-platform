@@ -29,10 +29,12 @@ import { geoSlideImageArtifact } from './geo-slide-transfer';
 import { closureFor, stageSource, validateGeoRecord } from './resources';
 import { geoController } from './controller';
 import { DataJoinTools } from './data-join';
-import type { Content, StoredArtifact } from '../model';
+import type { StoredArtifact } from '../model';
 export interface GeoSurfaceProps {
   artifact: StoredArtifact;
-  session: EditorSession<Content>;
+  session: Pick<EditorSession<GeoDocument>, 'revision' | 'content'>;
+  shared?: boolean;
+  guardExport?(): void;
   inputs: EditorInputs;
   readOnly: boolean;
   records: StoredArtifact[];
@@ -63,7 +65,7 @@ export function GeoSurface(props: GeoSurfaceProps) {
     const pendingResources = () => [...originals.values()];
     const bridge = geoController({
       id: props.artifact.id,
-      session: props.session as EditorSession<GeoDocument>,
+      session: props.session,
       inputs: props.inputs,
       canEdit: () => !latest.current.readOnly,
       execute: (cmd) => latest.current.execute(cmd, pendingResources()),
@@ -122,6 +124,7 @@ export function GeoSurface(props: GeoSurfaceProps) {
       stamp: bridge.stamp,
       inputChanged: bridge.inputChanged,
       async capture(versionId) {
+        latest.current.guardExport?.();
         const stamp = bridge.stamp(),
           record = structuredClone(latest.current.saved());
         await validateGeoRecord(record);
@@ -185,6 +188,7 @@ export function GeoSurface(props: GeoSurfaceProps) {
         return decodeOriginal(c.bytes);
       },
       async attachPhoto(asset, input, name) {
+        if (latest.current.shared) throw Error('共同編集中は写真を添付できません。');
         const stamp = bridge.stamp(),
           bytes = input.slice(),
           captured = structuredClone(asset),
@@ -365,7 +369,8 @@ export function GeoSurface(props: GeoSurfaceProps) {
     const stopImport = bridge.controller.subscribe(() => {
       if (bridge.snapshot().content.layers.length) importPanel.open = false;
     });
-    mount.current!.append(importPanel, surface.element, exportPanel);
+    if (!props.shared) mount.current!.append(importPanel);
+    mount.current!.append(surface.element, exportPanel);
     return () => {
       stop();
       stopImport();
@@ -378,15 +383,29 @@ export function GeoSurface(props: GeoSurfaceProps) {
       mount.current?.replaceChildren();
       adapter.current = undefined;
     };
-  }, [props.artifact.id, props.session, props.inputs]);
+  }, [props.artifact.id, props.session, props.inputs, props.shared]);
   useLayoutEffect(() => {
     adapter.current?.notify();
   }, [props.artifact.draft.content, props.artifact.versions, props.readOnly]);
+  const addLayer = () => {
+    const command = geoEditorCommand({
+      expectedRevision: props.session.revision,
+      actions: [{
+        type: 'createLayer',
+        layer: {
+          id: crypto.randomUUID(), name: 'New layer', crs: 'OGC:CRS84', axis: 'longitude-latitude',
+          fields: [], features: [],
+        },
+      }],
+    }, () => ({ revision: props.session.revision, canEdit: !props.readOnly, budgets: sourceBudgets }));
+    props.execute(command);
+  };
   return (
     <div className="playground-geo">
+      {props.shared && <button type="button" disabled={props.readOnly} onClick={addLayer}>Add layer</button>}
       <style>{`.playground-geo{padding:16px;max-width:100%;overflow-wrap:anywhere}.playground-geo details{background:white;border:1px solid #ccd8e0;border-radius:8px;padding:12px;margin:8px 0}.playground-geo summary{cursor:pointer;font-weight:600}.playground-geo .geo-import-workbench label{display:block;margin:8px 0}.playground-geo .geo-import-workbench fieldset{min-width:0}.playground-geo .geo-layout>section:last-child{max-height:65vh;overflow:auto;padding:0 8px}.playground-geo button,.playground-geo input,.playground-geo select{max-width:100%}`}</style>
       <div ref={mount} />
-      <DataJoinTools {...props} />
+      {!props.shared && <DataJoinTools {...props} />}
     </div>
   );
 }

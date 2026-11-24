@@ -57,21 +57,10 @@ it('keeps the Playground behaviour each kind had in App.tsx', () => {
   expect(where((h) => h.exports.download)).toEqual(['file']);
   expect(where((h) => !h.sharedSessions).sort()).toEqual(
     [
-      'structured-graph',
-      'analysis',
-      'estimate',
-      'geo',
       'cad',
       'bim',
       'character',
       'simulation',
-      'construction',
-      'pcb',
-      'schematic',
-      'ladder',
-      'cosim',
-      'drawing',
-      'factory',
     ].sort(),
   );
   expect(where((h) => h.annotationSurface).sort()).toEqual(['file', 'review']);

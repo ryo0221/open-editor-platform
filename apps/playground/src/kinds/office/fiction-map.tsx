@@ -11,7 +11,6 @@ import {
 
 export const fictionMapSurface = hostKind(fictionMapKind, {
   Surface: PlaygroundFictionMap,
-  session: 'local',
   hooks: {
     history({ session, direction, pending, canEdit }) {
       if (pending.dirty || pending.composing)

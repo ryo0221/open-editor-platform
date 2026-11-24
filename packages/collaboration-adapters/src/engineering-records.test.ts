@@ -1,0 +1,103 @@
+import { expect, it } from 'vitest';
+import { Authority, initial, type DomainCodec, type Principal } from '@editor-platform/collaboration-core';
+import { immutableCommand } from '@editor-platform/editor-core';
+import { drawingStarter } from '@editor-platform/drawing-core';
+import { pcbStarter } from '@editor-platform/pcb-core';
+import { newConstruction } from '@editor-platform/construction-core';
+import { newFactory } from '@editor-platform/factory-core';
+import { cosimStarter } from '@editor-platform/cosim-core';
+import {
+  constructionEditorCodec,
+  cosimEditorCodec,
+  drawingEditorCodec,
+  factoryEditorCodec,
+  pcbEditorCodec,
+  prepareEditorCommand,
+} from './index';
+
+const actor = (id: string): Principal => ({
+  actorId: id, clientId: id, sessionId: id, writable: true, scopes: ['*'],
+});
+const a = actor('a');
+const b = actor('b');
+const scenario = <T>(codec: DomainCodec<T>, document: T) => {
+  const snapshot = initial(codec.domain, codec, document);
+  return {
+    authority: new Authority(codec, snapshot),
+    edit: (author: Principal, apply: (content: T) => T) =>
+      prepareEditorCommand(codec, snapshot, author, immutableCommand('test-edit', 'Edit', apply))!,
+  };
+};
+
+it('combines Drawing sheet edits and preserves the peer edit when undoing', () => {
+  const document = drawingStarter();
+  const { authority, edit } = scenario(drawingEditorCodec, document);
+  const rename = edit(a, (doc) => ({
+    ...doc, sheets: doc.sheets.map((sheet) => ({ ...sheet, name: 'First drawing' })),
+  }));
+  const filing = edit(b, (doc) => ({
+    ...doc, sheets: doc.sheets.map((sheet) => ({ ...sheet, filing: !sheet.filing })),
+  }));
+  expect(authority.submit(a, rename).status).toBe('accepted');
+  expect(authority.submit(b, filing).status).toBe('accepted');
+  expect(authority.undo(a, rename.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.sheets[0]).toMatchObject({
+    name: document.sheets[0].name, filing: !document.sheets[0].filing,
+  });
+});
+
+it('updates a PCB rule and rejects a direct edit that would remove required net classes', () => {
+  const document = pcbStarter();
+  const { authority, edit } = scenario(pcbEditorCodec, document);
+  expect(authority.submit(a, edit(a, (doc) => ({
+    ...doc, netClasses: doc.netClasses.map((rule) => ({ ...rule, name: 'Signal' })),
+  }))).status).toBe('accepted');
+  expect(() => pcbEditorCodec.apply(document, {
+    type: 'pcb.edit', target: '*', payload: { reads: [], changes: document.netClasses.map((rule) => ({
+      kind: 'remove', collection: 'netClasses', id: rule.id,
+    })) },
+  }, 0)).toThrow(/invariants/);
+});
+
+const pin = { artifactId: 'source', versionId: 'v1', contentHash: 'a'.repeat(64) };
+
+it('shares Construction task changes and preserves the pinned Building version across restores', () => {
+  const document = newConstruction('Build', pin, '2026-07-01');
+  document.tasks.push({ id: 'task', name: 'Prepare', durationDays: 2, predecessors: [], action: 'construct', elementIds: [] });
+  const { authority, edit } = scenario(constructionEditorCodec, document);
+  expect(authority.submit(a, edit(a, (doc) => ({
+    ...doc, tasks: doc.tasks.map((task) => ({ ...task, durationDays: 3 })),
+  }))).status).toBe('accepted');
+  expect(authority.snapshot().content.tasks[0].durationDays).toBe(3);
+  expect(() => constructionEditorCodec.apply(document, {
+    type: 'domain.restore', target: '*',
+    payload: { content: { ...document, source: { ...pin, versionId: 'v2' } } },
+  }, 0)).toThrow(/参照元/);
+});
+
+it('shares independent equipment edits in a self-contained Factory line', () => {
+  const document = newFactory('Line');
+  document.objects.push({ id: 'one', name: 'One', kind: 'drain' }, { id: 'two', name: 'Two', kind: 'drain' });
+  const { authority, edit } = scenario(factoryEditorCodec, document);
+  const rename = (id: string) => (doc: typeof document) => ({
+    ...doc, objects: doc.objects.map((object) => object.id === id ? { ...object, name: object.name + ' edited' } : object),
+  });
+  const first = edit(a, rename('one'));
+  expect(authority.submit(a, first).status).toBe('accepted');
+  expect(authority.submit(b, edit(b, rename('two'))).status).toBe('accepted');
+  expect(authority.undo(a, first.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.objects.map((object) => object.name)).toEqual(['One', 'Two edited']);
+});
+
+it('shares CoSim bindings and refuses direct changes to pinned circuit or ladder versions', () => {
+  const document = { ...cosimStarter(), schematic: pin, ladder: { ...pin, artifactId: 'program' } };
+  const { authority, edit } = scenario(cosimEditorCodec, document);
+  const binding = { variable: 'Ready', net: 'Net1', kind: 'input' as const };
+  expect(authority.submit(a, edit(a, (doc) => ({ ...doc, bindings: [binding] }))).status).toBe('accepted');
+  expect(authority.snapshot().content.bindings).toEqual([binding]);
+  expect(() => cosimEditorCodec.apply(document, {
+    type: 'cosim.edit', target: '*', payload: { reads: [], changes: [{
+      kind: 'root', field: 'ladder', present: true, value: { ...document.ladder, versionId: 'v2' },
+    }] },
+  }, 0)).toThrow(/Unknown domain property/);
+});

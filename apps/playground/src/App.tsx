@@ -1727,6 +1727,7 @@ export default function App({
     session,
     sharedSession,
     shared: !!shared,
+    novelChapter: shared?.novelChapter,
     sharedPreview,
     inputs,
     readOnly,

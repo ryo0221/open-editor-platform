@@ -1,3 +1,4 @@
+import { EditorExportGuardContext } from '@editor-platform/editor-ui';
 import {
   useContext,
   useEffect,
@@ -363,6 +364,18 @@ export function DrawingSurface({
 }) {
   const state = useDrawingState(controller);
   const settle = useSettle();
+  const guardExport = useContext(EditorExportGuardContext);
+  const [exportError, setExportError] = useState('');
+  const permitExport = () => {
+    try {
+      guardExport?.();
+      setExportError('');
+      return true;
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  };
   const history = useContext(EditorHistoryContext);
   const locked = state.readOnly;
   const why = 'Read only';
@@ -643,6 +656,7 @@ export function DrawingSurface({
     `${(state.content.name || name).replace(/[\\/:*?"<>|]+/g, '_')}.${ext}`;
   const exportAll = (kind: 'pdf' | 'dxf') =>
     settle(() => {
+      if (!permitExport()) return;
       setExporting(true);
       void (async () => {
         if (kind === 'dxf')
@@ -704,6 +718,7 @@ export function DrawingSurface({
 
   return (
     <div className="drawing-surface" data-testid="drawing-surface">
+      {exportError && <p role="alert">{exportError}</p>}
       <EditorLayout
         viewKey="drawing"
         leftLabel="Sheets"
@@ -791,7 +806,9 @@ export function DrawingSurface({
               label="Export SVG"
               // Pending input (a field being typed in) is committed first, or blocks the export.
               onClick={() =>
-                settle(() => download(controller.sheetSvg(), fileName, 'image/svg+xml'))
+                settle(() => {
+                  if (permitExport()) download(controller.sheetSvg(), fileName, 'image/svg+xml');
+                })
               }
             />
             <IconButton
