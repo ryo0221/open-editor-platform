@@ -84,39 +84,74 @@ export interface ItemRefOccurrence {
   id: string;
 }
 
+const MARK = 'item-ref';
+type Mark = [typeof MARK, 'select', string, string] | [typeof MARK, 'drop', string];
+function readMark(m: string): Mark | undefined {
+  if (!m.startsWith(`["${MARK}"`)) return undefined;
+  try {
+    return JSON.parse(m) as Mark;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Selection evidence of one editing session (one person, one screen). A choice made through
- * `select` is kept until the next save. At a save, a citation that the saved content newly holds
- * (it was not in the previous save) carries its choice; every kept choice then ends: used ones are
- * consumed, and choices whose citation is not in the saved content are dropped, so removing a
- * citation, saving and adding it again needs a new `select`. Undo and Redo before the save keep
- * the choice because the citation is the same, and so does removing or replacing it through the
- * reference field and then undoing that. Typing or pasting an ID never makes a choice, and
- * changing a field by hand forgets the choices of that field (its IDs then go without evidence).
+ * Selection evidence of one editing session (one person, one artifact). A choice made through
+ * `select` becomes evidence only through the edit that adds that citation: the Host's session
+ * computes `marks` for every edit, and those marks follow Undo and Redo exactly (an
+ * `EditorSession` `marks` ancestry). An edit that removes a citation, by any path (the reference
+ * field, typing, paste, import or a proposal), ends its choice in that ancestry; Undo of that
+ * edit brings the choice back, and Undo of a later choice brings back the earlier one. Typing or
+ * pasting an ID never makes a choice. At a save, a citation the saved content newly holds (it was
+ * not in the previous save) carries the choice its ancestry ends with. The Host keeps a selection
+ * single-use, so removing, saving and adding a citation again needs a new `select`.
  */
 export class ItemSelectionLedger {
+  private readonly pending = new Map<string, ItemSelectionEvidence>();
   private readonly chosen = new Map<string, ItemSelectionEvidence>();
-  /** Keeps the choice of an accepted `select`. A refused one keeps nothing. */
+  /** Holds the choice of an accepted `select` for the next edit that adds this citation. */
   choose(from: ItemRefSource, id: string, result: ItemSelectionResult): void {
     if (!result.accepted) return;
-    this.chosen.set(key(from, id), { selectionId: result.selectionId, from: { ...from }, id });
+    this.pending.set(key(from, id), { selectionId: result.selectionId, from: { ...from }, id });
   }
-  /** A hand edit of the field: forget choices of these IDs (all IDs when omitted). */
-  forget(from: ItemRefSource, ids?: readonly string[]): void {
-    for (const [k, e] of this.chosen)
-      if (
-        e.from.artifactId === from.artifactId &&
-        e.from.elementId === from.elementId &&
-        e.from.field === from.field &&
-        (!ids || ids.includes(e.id))
-      )
-        this.chosen.delete(k);
+  /** Drops a held choice that no edit used (the edit was refused or never made). */
+  cancel(from: ItemRefSource, id: string): void {
+    this.pending.delete(key(from, id));
   }
-  /** Evidence to send with a save of `next`, given what the previous save held. Changes nothing. */
+  /**
+   * The marks of one edit, from the citations before and after it: a removed citation ends its
+   * choice; an added one takes the held choice, if any. Call it inside the session's edit.
+   */
+  marks(before: readonly ItemRefOccurrence[], after: readonly ItemRefOccurrence[]): string[] {
+    const was = new Set(before.map((o) => key(o.from, o.id)));
+    const now = new Set(after.map((o) => key(o.from, o.id)));
+    const out: string[] = [];
+    for (const k of was) if (!now.has(k)) out.push(JSON.stringify([MARK, 'drop', k]));
+    for (const k of now) {
+      if (was.has(k)) continue;
+      const e = this.pending.get(k);
+      if (!e) continue;
+      this.pending.delete(k);
+      this.chosen.set(e.selectionId, e);
+      out.push(JSON.stringify([MARK, 'select', k, e.selectionId]));
+    }
+    return out;
+  }
+  /**
+   * Evidence to send with a save of `next`, given the session's marks for that content and what
+   * the previous save held. Changes nothing.
+   */
   evidenceFor(
+    marks: readonly string[],
     saved: readonly ItemRefOccurrence[],
     next: readonly ItemRefOccurrence[],
   ): ItemSelectionEvidence[] {
+    const state = new Map<string, string>();
+    for (const m of marks) {
+      const r = readMark(m);
+      if (r?.[1] === 'select') state.set(r[2], r[3]);
+      else if (r?.[1] === 'drop') state.delete(r[2]);
+    }
     const before = new Set(saved.map((o) => key(o.from, o.id)));
     const out: ItemSelectionEvidence[] = [];
     const seen = new Set<string>();
@@ -124,28 +159,14 @@ export class ItemSelectionLedger {
       const k = key(o.from, o.id);
       if (before.has(k) || seen.has(k)) continue;
       seen.add(k);
-      const e = this.chosen.get(k);
+      const e = this.chosen.get(state.get(k) ?? '');
       if (e) out.push({ ...e, from: { ...e.from } });
     }
     return out;
   }
-  /** The choices kept now, to end with `saved` once the save that captured the content succeeds. */
-  snapshot(): ReadonlyMap<string, string> {
-    return new Map([...this.chosen].map(([k, e]) => [k, e.selectionId]));
-  }
-  /**
-   * After a successful save, the kept choices end (consumed or dropped). With a `snapshot` taken
-   * when the save captured its content, only those choices end: one made while the save was in
-   * flight stays for the next save.
-   */
-  saved(snapshot?: ReadonlyMap<string, string>): void {
-    if (!snapshot) return void this.chosen.clear();
-    for (const [k, selectionId] of snapshot)
-      if (this.chosen.get(k)?.selectionId === selectionId) this.chosen.delete(k);
-  }
-  /** Kept choices (for tests and diagnostics). */
-  get size(): number {
-    return this.chosen.size;
+  /** Held choices not yet used by an edit (for tests and diagnostics). */
+  get held(): number {
+    return this.pending.size;
   }
 }
 

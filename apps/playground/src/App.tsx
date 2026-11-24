@@ -428,6 +428,17 @@ export default function App({
     [activeItemId, shared, itemHost],
   );
   const session = sharedSession ?? (active ? sessions.current.get(active.id) : undefined);
+  // AR2: the active local session marks each edit's item reference choices (Undo/Redo follow them)
+  const markedSessions = useRef(new WeakSet<EditorSession<Content>>());
+  const localItemSession = activeItemId && !shared ? sessions.current.get(activeItemId) : undefined;
+  if (localItemSession && !markedSessions.current.has(localItemSession)) {
+    markedSessions.current.add(localItemSession);
+    const ledger = itemLedger(activeItemId!),
+      id = activeItemId!;
+    localItemSession.trackMarks((before, after) =>
+      ledger.marks(refOccurrences(id, before), refOccurrences(id, after)),
+    );
+  }
   const currentTarget = useRef({
     activeId: active?.id ?? activeId,
     shared,
@@ -974,15 +985,16 @@ export default function App({
     }
     setBusy(true);
     savingVersion.current = true;
-    // AR2: the choices that belong to this content; choices made while the save is in flight stay
+    // AR2: the evidence of this content's choices, from its session's marks (edits made while the
+    // save is in flight are not in this content and keep their marks for the next save)
     const savingLedger = itemLedgers.current.get(saved.id);
-    const itemChoices = savingLedger && {
-      snapshot: savingLedger.snapshot(),
-      evidence: savingLedger.evidenceFor(
+    const itemEvidence =
+      savingLedger &&
+      savingLedger.evidenceFor(
+        sessions.current.get(saved.id)?.marks ?? [],
         refOccurrences(saved.id, saved.versions.at(-1)?.content),
         refOccurrences(saved.id, saved.draft.content),
-      ),
-    };
+      );
     try {
       await verifyEstimateArtifact(saved);
       await verifyAnalysisArtifact(saved);
@@ -1023,10 +1035,8 @@ export default function App({
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
       // AR2: the version holds its citations; send the evidence of the choices newly saved
-      if (savingLedger && itemChoices) {
-        itemHost.committed(saved.id, itemChoices.evidence, refOccurrences(saved.id, captured));
-        savingLedger.saved(itemChoices.snapshot);
-      }
+      if (itemEvidence)
+        itemHost.committed(saved.id, itemEvidence, refOccurrences(saved.id, captured));
       setError('');
       setReason('');
       editorEvents.emit('version', {

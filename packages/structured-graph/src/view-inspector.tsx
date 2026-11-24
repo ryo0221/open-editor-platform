@@ -390,27 +390,7 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
         stamp={props.stamp}
         readOnly={readOnly || !!type.readOnly}
         viewOnly={readOnly}
-        onEdit={(intents, base) => {
-          const applied = props.apply(intents, base);
-          // A hand edit of a reference attribute carries no choice (docs/analysis-references-design.md)
-          const refs =
-            props.node && props.itemReferences
-              ? (profile.nodes[props.node.type]?.items?.refs ?? [])
-              : [];
-          if (applied)
-            for (const i of intents)
-              if (
-                (i.type === 'set-attribute' || i.type === 'remove-attribute') &&
-                i.scope === 'node' &&
-                refs.includes(i.path[0]!)
-              )
-                props.itemReferences!.ledger.forget({
-                  artifactId: props.itemReferences!.artifactId,
-                  elementId: i.id,
-                  field: i.path[0]!,
-                });
-          return applied;
-        }}
+        onEdit={props.apply}
         diagnostics={problems
           .filter((d) => d.elementId === id)
           .map((diagnostic) => ({

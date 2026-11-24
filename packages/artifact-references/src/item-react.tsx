@@ -114,13 +114,15 @@ export function ItemReferenceField({
         return void setMessage('選んでいる間に欄が変わりました。選び直してください');
       if (!r.accepted) return void setMessage(`選べません：${stateText(r.state)}`);
       const next = multiple ? [...ids.filter((x) => x !== id), id] : [id];
-      // The command goes in first; the choice is kept only when the edit was applied.
-      if (await change(next)) {
-        // Choices of replaced IDs stay until the save: Undo may bring them back, and a save
-        // sends evidence only for citations it holds
-        ledger.choose(at, id, r);
-        setCandidates(null);
-      } else setMessage('変更できませんでした');
+      // The choice is held for the edit that adds this citation; the Host's session records it
+      // in its marks, so Undo and Redo follow it. An unused choice is dropped.
+      ledger.choose(at, id, r);
+      try {
+        if (await change(next)) setCandidates(null);
+        else if (alive.current) setMessage('変更できませんでした');
+      } finally {
+        ledger.cancel(at, id);
+      }
     } catch {
       if (alive.current) setMessage('候補を確かめられませんでした');
     } finally {
@@ -128,7 +130,7 @@ export function ItemReferenceField({
     }
   }
   async function remove(id: string) {
-    // The choice stays until the save so that Undo of the removal keeps its evidence
+    // The removal is an edit: the Host's session marks the end of its choice, and Undo undoes that
     setMessage('');
     try {
       if (!(await change(ids.filter((x) => x !== id))) && alive.current)

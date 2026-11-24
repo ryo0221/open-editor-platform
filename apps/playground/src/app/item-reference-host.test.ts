@@ -81,8 +81,8 @@ describe('AR2 Playground の架空の ItemReferenceHost', () => {
       before,
     );
     const occ = refOccurrences('fmea', after);
-    host.committed('fmea', ledger.evidenceFor(refOccurrences('fmea', before), occ), occ);
-    ledger.saved();
+    const marks = ledger.marks(refOccurrences('fmea', before), occ);
+    host.committed('fmea', ledger.evidenceFor(marks, refOccurrences('fmea', before), occ), occ);
     // 引用先の Fishbone を保存し直して CC-01 と CC-02 を変える
     const changed = fishbone('接点の溶着（改）');
     changed.nodes.filter((n) => n.type === 'cause')[1]!.attributes.name = '別の名前';

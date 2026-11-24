@@ -41,7 +41,6 @@ import {
   FieldDefinitionDialog,
   RecordDetailsDialog,
 } from './view-dialogs';
-import { forgetHandEdits } from './item-references';
 import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import './styles.css';
 export type { DataProjection } from './views';
@@ -95,18 +94,15 @@ function DataSurfaceBody({
   const inputs = useContext(EditorInputsContext);
   const formDrafts = useRef(new Map<string, RecordDraft>());
   const [error, setError] = useState('');
-  function apply(cmd: EditorCommand<StructuredData>, fromReferences = false) {
+  function apply(cmd: EditorCommand<StructuredData>) {
     if (readOnly) {
       setError(wording('This surface is read only'));
       return false;
     }
     try {
       const guarded = guardDataCommand(cmd, () => !readOnly);
-      const next = guarded.apply(data);
+      guarded.apply(data);
       if (execute(guarded) === false) return false;
-      // Typed, pasted and imported IDs carry no selection evidence
-      if (itemReferences && !fromReferences)
-        forgetHandEdits(itemReferences.ledger, itemReferences.artifactId, data, next);
       setError('');
       return true;
     } catch (e) {
@@ -125,7 +121,7 @@ function DataSurfaceBody({
       setError(String(e instanceof Error ? e.message : e));
       return false;
     }
-    return apply(cmd, true);
+    return apply(cmd);
   }
   const draft = useDataViewDraft({
     data,

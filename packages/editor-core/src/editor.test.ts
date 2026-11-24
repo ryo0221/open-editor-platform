@@ -273,3 +273,38 @@ it('previews external commands without changing draft or undo history', async ()
   expect(session.content.text).toBe('after');
   expect(session.undo().text).toBe('before');
 });
+
+describe('EditorSession marks', () => {
+  it('keeps each edit’s marks as an ancestry that Undo and Redo restore', () => {
+    const session = new EditorSession<{ n: number }>(
+      { n: 0 },
+      { marks: (before, after) => [`${before.n}->${after.n}`] },
+    );
+    const set = (n: number) => command<{ n: number }>('set', 'set', () => ({ n }));
+    session.execute(set(1));
+    session.execute(set(2));
+    expect(session.marks).toEqual(['0->1', '1->2']);
+    session.undo();
+    expect(session.marks).toEqual(['0->1']);
+    session.redo();
+    expect(session.marks).toEqual(['0->1', '1->2']);
+    session.undo();
+    session.execute(set(3));
+    // A new edit after Undo drops the undone branch
+    expect(session.marks).toEqual(['0->1', '1->3']);
+    expect(new EditorSession({ n: 0 }).marks).toEqual([]);
+  });
+});
+
+describe('EditorSession trackMarks', () => {
+  it('marks only the edits after it is set, and stops when cleared', () => {
+    const session = new EditorSession<{ n: number }>({ n: 0 });
+    const set = (n: number) => command<{ n: number }>('set', 'set', () => ({ n }));
+    session.execute(set(1));
+    session.trackMarks((_, after) => [`to ${after.n}`]);
+    session.execute(set(2));
+    session.trackMarks(undefined);
+    session.execute(set(3));
+    expect(session.marks).toEqual(['to 2']);
+  });
+});
