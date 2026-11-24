@@ -305,3 +305,29 @@ it('opens a bare Mind Map JSON (its own export or an external mindmap-editor 0.1
     readImportFiles([bare({ ...sample, rootId: 'n-missing' })], context()),
   ).rejects.toThrow('Invalid Mind Map: 根が存在しない');
 });
+
+it('AR3 keeps item declarations and row references through native JSON export and import', async () => {
+  const content: StructuredData = {
+    schemaVersion: 3,
+    columns: [
+      { id: 'fcId', name: '故障原因の ID', type: 'text' },
+      { id: 'cause', name: '故障原因', type: 'text' },
+    ],
+    rows: [
+      {
+        id: 'r1',
+        values: { fcId: 'FC-01', cause: '接点の溶着' },
+        refs: { causeCandidates: ['CC-01'] },
+      },
+    ],
+    items: [{ kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['refs.causeCandidates'] }],
+  };
+  const saved = await commitVersion(createArtifact('data', 'DFMEA', content), null, 'first');
+  const json = serializeArtifact(saved);
+  const [imported] = await readImportFiles(
+    [new File([json], 'dfmea.json', { type: 'application/json' })],
+    context(),
+  );
+  expect(imported.draft.content).toEqual(content);
+  expect(imported.versions[0]!.content).toEqual(content);
+});

@@ -292,6 +292,14 @@ export default function App({
         saved: referenceSavedRecords,
         notifications: referenceNotifications,
         navigation: itemNavigation,
+        // A stand-in for states only a real Host reports (kept, forbidden, offline)
+        states: () => {
+          try {
+            return JSON.parse(sessionStorage.getItem('ep-item-ref-states') ?? 'null') ?? undefined;
+          } catch {
+            return undefined;
+          }
+        },
       }),
     [],
   );

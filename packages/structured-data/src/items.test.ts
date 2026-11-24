@@ -12,7 +12,7 @@ import {
   setRowRefs,
   type StructuredData,
 } from './model';
-import { saveView, updateColumn, defaultView } from './views';
+import { saveView, updateColumn, defaultView, deleteRows, reorderRow, setCells } from './views';
 import { dataItemsDeclaration, dataItemsProblems, itemsWithoutColumn } from './items';
 import { prepareCsvExport } from './csv-transfer';
 import { dataProposalDiff } from './proposal-diff';
@@ -133,6 +133,28 @@ describe('Data schema 3: item declarations and row references', () => {
     expect(canonicalJson(session.content)).toBe(canonicalJson(before));
     expect(itemsWithoutColumn(before.items, 'cause')![0]!.title).toBe('fcId');
     expect(itemsWithoutColumn([{ kind: 'x', id: 'fcId', title: 'cause' }], 'fcId')).toBeUndefined();
+  });
+
+  it('AR3 refuses a newer schema than this version reads, so it cannot drop fields it does not know', () => {
+    expect(isStructuredData({ ...table(), schemaVersion: 4 })).toBe(false);
+    expect(isStructuredData(table())).toBe(true);
+  });
+
+  it('AR3 keeps declarations and row references through edits made without a Host', () => {
+    // Without a Host there is no reference field; ordinary edits must not drop or move references
+    let d = setCells(
+      [{ rowId: 'r1', columnId: 'cause', value: '接点の溶着（直した）' }],
+      'Edit',
+    ).apply(table());
+    d = reorderRow('r2', 'r1').apply(d);
+    expect(d.rows.map((r) => r.id)).toEqual(['r2', 'r1']);
+    expect(d.rows.find((r) => r.id === 'r1')!.refs).toEqual({
+      causeCandidates: ['CC-01', 'CC-02'],
+    });
+    expect(d.items).toEqual(table().items);
+    d = deleteRows(['r2']).apply(d);
+    expect(d.rows[0]!.refs).toEqual({ causeCandidates: ['CC-01', 'CC-02'] });
+    expect(isStructuredData(d)).toBe(true);
   });
 
   it('keeps ID and title columns text, and keeps schema 3 through edits that write schema 2', () => {

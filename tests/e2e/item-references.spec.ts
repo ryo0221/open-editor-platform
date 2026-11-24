@@ -6,27 +6,7 @@ import { test, expect, nativeArtifact, save } from './fixtures';
 import type { StructuredData } from '@editor-platform/structured-data/model';
 import type { GraphDocument } from '@editor-platform/structured-graph/model';
 import type { Page } from '@playwright/test';
-
-async function create(page: Page, type: string, template: [string, string]) {
-  if (!(await page.getByLabel('Artifact type', { exact: true }).isVisible()))
-    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
-  await page.getByLabel('Artifact type', { exact: true }).selectOption(type);
-  await page.getByLabel(template[0], { exact: true }).selectOption(template[1]);
-  await page.getByRole('button', { name: 'New artifact' }).click();
-  await expect(page.getByLabel('Artifact name')).toBeVisible();
-}
-async function causeName(page: Page, from: string, id: string, name: string) {
-  await page.getByRole('button', { name: `Select node ${from}`, exact: true }).click();
-  const inspector = page.getByRole('complementary', { name: 'Graph Inspector' });
-  await inspector.getByLabel('業務 ID', { exact: true }).fill(id);
-  await inspector.getByLabel('原因', { exact: true }).fill(name);
-  await inspector.getByRole('button', { name: '属性を適用', exact: true }).click();
-}
-async function activate(page: Page, name: RegExp) {
-  if (!(await page.getByRole('navigation', { name: 'Artifacts' }).isVisible()))
-    await page.getByRole('button', { name: 'Toggle library', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Artifacts' }).getByRole('button', { name }).click();
-}
+import { activate, causeName, citedFmea, create } from './item-references-fixtures';
 
 test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで引用し、Undo/Redo でき、引用先が変わると古いと出る', async ({
   page,
@@ -136,4 +116,85 @@ test('AR2 FTA の基本事象で、適用していない属性の入力があっ
   await expect(details).toBeVisible();
   await expect(details.getByLabel('Record 故障原因の ID', { exact: true })).toHaveValue('FC-01');
   await expect(page.getByLabel('Data projection', { exact: true })).toHaveValue('Summary');
+});
+
+/** Opens the DFMEA's record form again (after a reload or another artifact). */
+async function fmeaForm(page: Page) {
+  await activate(page, /DFMEA/);
+  await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
+  return page.getByRole('region', { name: 'refs.causeCandidates', exact: true });
+}
+
+test('AR3 保存と再読み込みで引用が残り、残した・権限なし・確かめられない・重複・見つからないの状態を、値を変えずに出す', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await citedFmea(page);
+  await save(page, 1);
+  const refsOf = async () =>
+    ((await nativeArtifact(page)).draft.content as StructuredData).rows[0]!.refs;
+
+  // 再読み込みの後も、保存した引用と、その状態が出る
+  await page.reload();
+  let refs = await fmeaForm(page);
+  const item = refs.getByRole('listitem').filter({ hasText: 'CC-01' });
+  await expect(item).toContainText('設備温度の変動');
+  await expect(item).toHaveAttribute('data-status', 'ok');
+
+  // 本物の Host だけが返す状態は、Playground の差し替えで出し方を確かめる
+  const shown: [string, object, string][] = [
+    [
+      'kept',
+      { status: 'kept', title: '設備温度の変動', reason: '前の版のまま残す' },
+      '古いまま：設備温度の変動（前の版のまま残す）',
+    ],
+    [
+      'forbidden',
+      { status: 'forbidden', reason: '読む権限がありません' },
+      '権限なし：読む権限がありません',
+    ],
+    [
+      'offline',
+      { status: 'offline', reason: 'Host に届きません' },
+      '確かめられない：Host に届きません',
+    ],
+  ];
+  for (const [status, state, text] of shown) {
+    await page.evaluate(
+      (s) => sessionStorage.setItem('ep-item-ref-states', JSON.stringify({ 'CC-01': s })),
+      state,
+    );
+    await page.reload();
+    refs = await fmeaForm(page);
+    await expect(item).toHaveAttribute('data-status', status);
+    await expect(item).toContainText(text);
+    expect(await refsOf()).toEqual({ causeCandidates: ['CC-01'] });
+  }
+  // 権限がない引用先は開けず、理由を出す
+  await refs.getByRole('button', { name: 'CC-01 を開く', exact: true }).click();
+  await expect(refs.getByRole('alert')).toHaveText('開けません：確かめられない：Host に届きません');
+  await page.evaluate(() => sessionStorage.removeItem('ep-item-ref-states'));
+
+  // 同じ ID の原因がもう一つ保存されると、どちらとも決めずに「重複」と出す
+  await create(page, 'structured-graph', ['Graph template', 'fishbone']);
+  await causeName(page, '設備温度の変動', 'CC-01', '別の原因');
+  await save(page, 1);
+  refs = await fmeaForm(page);
+  await expect(item).toHaveAttribute('data-status', 'duplicate');
+  await expect(item).toContainText('重複');
+  // 重複を外すと、もう一度ひとつに決まる
+  await activate(page, /Structured Graph 2/);
+  await causeName(page, '別の原因', 'CC-09', '別の原因');
+  await save(page, 2);
+  refs = await fmeaForm(page);
+  await expect(item).toHaveAttribute('data-status', 'ok');
+
+  // 引用先から消えると「見つからない」と出て、値はそのまま残る
+  await activate(page, /Structured Graph 1/);
+  await causeName(page, '設備温度の変動', 'CC-05', '設備温度の変動');
+  await save(page, 2);
+  refs = await fmeaForm(page);
+  await expect(item).toHaveAttribute('data-status', 'unresolved');
+  await expect(item).toContainText('見つからない');
+  expect(await refsOf()).toEqual({ causeCandidates: ['CC-01'] });
 });

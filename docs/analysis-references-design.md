@@ -1,6 +1,6 @@
 # 分析間の要素参照の設計（Fishbone・FMEA・FTA）
 
-状態：**採用（2026-11-24、#86）**。AR1（宣言・schema 3・投影）は #87 で実装済み。AR2（`ItemReferenceHost`・選択の証跡・Inspector・Playground の架空の Host）を実装中、AR3 はまだ。追跡：[#85](https://github.com/ryo0221/open-editor-platform/issues/85)。
+状態：**採用（2026-11-24、#86）**。AR1（宣言・schema 3・投影）は #87 で実装済み。AR2（`ItemReferenceHost`・選択の証跡・Inspector・Playground の架空の Host）は #88 で実装済み。AR3（検証）は [検証の記録](verification/issue-85/README.md)。追跡：[#85](https://github.com/ryo0221/open-editor-platform/issues/85)。
 
 横断の決定は [tokiwa-ecosystem 0001](https://github.com/ryo0221/tokiwa-ecosystem/blob/main/docs/decisions/0001-analysis-element-references.md)（2026-11-24 採用）にあり、ここでは繰り返さない。この文書は、そのうち OEP が持つ部分（R1・R4・R6、保留事項 H4）の構成・代替案・決めてほしいことを置く。採用後の仕様は [Structured Graph 契約](structured-graph-contract.md)・[追加機能の契約](extension-addons.md)・[参照付き埋め込み](artifact-references.md)へ反映する。
 

@@ -117,6 +117,11 @@ export function playgroundItemHost(context: {
     (targetArtifactId: string, targetElementId: string, from: ItemRefSource) => boolean
   >;
   now?: () => number;
+  /**
+   * States a real Host would report that this Library cannot produce (kept, forbidden, offline),
+   * by cited ID, shown in place of the computed state. Used to check how the field shows them.
+   */
+  states?: () => Readonly<Record<string, ItemRefState>> | undefined;
 }): PlaygroundItemHost {
   const now = context.now ?? (() => Date.now());
   const selections = new Map<
@@ -157,6 +162,8 @@ export function playgroundItemHost(context: {
     id: string,
     found = catalog(from.artifactId),
   ): ItemRefState {
+    const forced = context.states?.()?.[id];
+    if (forced) return forced;
     const { items, duplicated } = found;
     if (duplicated.has(id)) return { status: 'duplicate', reason: `${id} が二つ以上あります` };
     const it = items.get(id)?.[0];
