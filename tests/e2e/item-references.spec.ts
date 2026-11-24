@@ -91,6 +91,7 @@ test('AR2 FTA の基本事象で、適用していない属性の入力があっ
   await page.getByLabel('Record 故障原因の ID', { exact: true }).fill('FC-01');
   await page.getByLabel('Record 故障原因', { exact: true }).fill('接点の溶着');
   await page.getByRole('button', { name: 'Save record', exact: true }).click();
+  await page.getByLabel('Data projection', { exact: true }).selectOption('Summary');
   await save(page, 1);
 
   await create(page, 'structured-graph', ['Graph template', 'fta']);
@@ -110,4 +111,11 @@ test('AR2 FTA の基本事象で、適用していない属性の入力があっ
     failureCauseRefs: ['FC-01'],
   });
   await expect(inspector.getByRole('alert')).toHaveCount(0);
+
+  // 開くと、集計の表示のままの FMEA で記録の詳細に引用先の行が出る（保存した表示は変えない）
+  await refs.getByRole('button', { name: 'FC-01 を開く', exact: true }).click();
+  const details = page.getByRole('dialog', { name: 'Record details' });
+  await expect(details).toBeVisible();
+  await expect(details.getByLabel('Record 故障原因の ID', { exact: true })).toHaveValue('FC-01');
+  await expect(page.getByLabel('Data projection', { exact: true })).toHaveValue('Summary');
 });

@@ -164,7 +164,14 @@ function DataSurfaceBody({
     select(id);
   }
   useEffect(() => {
-    if (focusRowId && data.rows.some((r) => r.id === focusRowId)) focusRow(focusRowId);
+    if (!focusRowId || !data.rows.some((r) => r.id === focusRowId)) return;
+    focusRow(focusRowId);
+    // Form shows the active record; Grid shows it unless the view filters it out. Elsewhere
+    // (Chart, Summary, Dashboard, ...) the record details show it, and the view stays as saved.
+    const shown =
+      view.projection === 'Form' ||
+      (view.projection === 'Grid' && rows.some((r) => r.id === focusRowId));
+    if (!shown) setRecordDialog(focusRowId);
     // Only a new request moves the focus; later edits keep the person's own selection
   }, [focusRowId]);
   useRecordDraftInput({
