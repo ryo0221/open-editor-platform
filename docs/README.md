@@ -5,19 +5,19 @@
 
 ## 利用・組み込み
 
-| 目的                                    | 文書                                                                                                                                                                               |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 操作の意味とEditorごとの違いを知る      | [Surface契約](surface-semantics.md)                                                                                                                                                |
-| アプリケーションへ埋め込む              | [埋め込みAPI](embedding.md)・[Host組み込み](host-integration.md)                                                                                                                   |
-| 共同編集を接続する                      | [接続手順](editor-collaboration-integration.md)・[対応範囲](editor-collaboration-coverage.md)・[Hostの責任](collaboration-host.md)                                                 |
-| テンプレート・再利用を使う              | [テンプレート操作](template-authoring.md)・[カタログ](template-catalog.md)・[再利用の構成](reuse-composition.md)                                                                   |
-| 成果物間の参照・ファイル出力を使う      | [参照契約](artifact-references.md)・[出力契約](artifact-output-contract.md)                                                                                                        |
-| Officeファイルを扱う                    | [出力UIと対応形式](office-export-ui.md)・[取り込み](office-import.md)                                                                                                              |
-| React UI・DesignのReact出力を使う       | [React UI組み込み](react-ui-integration.md)・[移植手順](react-ui-portability.md)・[Design連携](design-react-contract.md)                                                           |
-| 外部の参照元を読む（Geo・Data・GitHub） | 読取契約・ADR 016                                                                                                                                                                  |
-| 外部の提案をdomainの差分で確かめる      | [提案のdomain別の差分](proposal-review.md)                                                                                                                                         |
-| Graph・Designの機能を組み込む           | [Graph契約](structured-graph-contract.md)・[Graph表示設計](graph-reading-design.md)・[Design headless操作](design-headless-contract.md)・[prototype](design-prototype-contract.md) |
-| Animation・Geoを使う                    | [Animation 2D](animation/production-2d-design.md)・[Geoガイド](geo-guide.md)                                                                                                       |
+| 目的                                    | 文書                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 操作の意味とEditorごとの違いを知る      | [Surface契約](surface-semantics.md)                                                                                                                                                                   |
+| アプリケーションへ埋め込む              | [埋め込みAPI](embedding.md)・[Host組み込み](host-integration.md)                                                                                                                                      |
+| 共同編集を接続する                      | [接続手順](editor-collaboration-integration.md)・[対応範囲](editor-collaboration-coverage.md)・[Hostの責任](collaboration-host.md)・[外部Editorの共同編集（提案）](extension-collaboration-design.md) |
+| テンプレート・再利用を使う              | [テンプレート操作](template-authoring.md)・[カタログ](template-catalog.md)・[再利用の構成](reuse-composition.md)                                                                                      |
+| 成果物間の参照・ファイル出力を使う      | [参照契約](artifact-references.md)・[出力契約](artifact-output-contract.md)                                                                                                                           |
+| Officeファイルを扱う                    | [出力UIと対応形式](office-export-ui.md)・[取り込み](office-import.md)                                                                                                                                 |
+| React UI・DesignのReact出力を使う       | [React UI組み込み](react-ui-integration.md)・[移植手順](react-ui-portability.md)・[Design連携](design-react-contract.md)                                                                              |
+| 外部の参照元を読む（Geo・Data・GitHub） | 読取契約・ADR 016                                                                                                                                                                                     |
+| 外部の提案をdomainの差分で確かめる      | [提案のdomain別の差分](proposal-review.md)                                                                                                                                                            |
+| Graph・Designの機能を組み込む           | [Graph契約](structured-graph-contract.md)・[Graph表示設計](graph-reading-design.md)・[Design headless操作](design-headless-contract.md)・[prototype](design-prototype-contract.md)                    |
+| Animation・Geoを使う                    | [Animation 2D](animation/production-2d-design.md)・[Geoガイド](geo-guide.md)                                                                                                                          |
 
 ## 開発・設計
 
