@@ -9,6 +9,7 @@ import { canonicalJson } from '@editor-platform/artifact-core';
 import { keepHighestProblems } from '@editor-platform/editor-core/keep-highest';
 import { itemsDeclarationProblems } from './items';
 import {
+  COLLABORATION_ADDON,
   CREATE_ADDON,
   OPERATIONS_ADDON,
   REFERENCES_ADDON,
@@ -198,6 +199,7 @@ export function parseAddons(input: unknown): ManifestAddons {
       (k) =>
         k !== 'operations' &&
         k !== 'create' &&
+        k !== 'collaboration' &&
         k !== 'references' &&
         k !== 'history' &&
         k !== 'items',
@@ -215,6 +217,37 @@ export function parseAddons(input: unknown): ManifestAddons {
   if (input.operations !== undefined) {
     const problems = operationDeclarationProblems(input.operations);
     if (problems.length) throw new Error(`Invalid operations add-on: ${problems[0]}`);
+  }
+  if (input.collaboration !== undefined) {
+    const shared = input.collaboration;
+    if (
+      !plain(shared) ||
+      shared.version !== COLLABORATION_ADDON ||
+      Object.keys(shared).some((k) => !['version', 'entry', 'sha256', 'operations'].includes(k)) ||
+      typeof shared.entry !== 'string' ||
+      shared.entry.length > 200 ||
+      !/^(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:mjs|js)$/.test(shared.entry) ||
+      typeof shared.sha256 !== 'string' ||
+      !/^sha256:[a-f0-9]{64}$/.test(shared.sha256) ||
+      !Array.isArray(shared.operations) ||
+      !shared.operations.length ||
+      shared.operations.length > OPERATION_LIMITS.operations ||
+      !input.operations
+    )
+      throw new Error('Invalid collaboration declaration');
+    const { declarations } = input.operations as NonNullable<ManifestAddons['operations']>;
+    const seen = new Set<string>();
+    for (const ref of shared.operations) {
+      if (
+        !plain(ref) ||
+        Object.keys(ref).length !== 2 ||
+        typeof ref.id !== 'string' ||
+        seen.has(ref.id) ||
+        !declarations.some((d) => d.id === ref.id && d.version === ref.version)
+      )
+        throw new Error('Invalid shared operation reference');
+      seen.add(ref.id);
+    }
   }
   // `create@0-draft` carries no data besides its exact version token.
   if (

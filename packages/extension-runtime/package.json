@@ -14,13 +14,17 @@
     "./operations": "./src/operations.ts",
     "./items": "./src/items.ts",
     "./editor-host": "./src/editor-host.ts",
-    "./package-store": "./src/package-store.ts"
+    "./package-store": "./src/package-store.ts",
+    "./shared-draft": "./src/shared-draft.ts",
+    "./shared-edit": "./src/shared-edit.ts"
   },
   "dependencies": {
-    "@editor-platform/extension-contract": "*",
-    "@editor-platform/editor-core": "*",
     "@editor-platform/artifact-core": "*",
-    "@editor-platform/editor-host": "*"
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/extension-contract": "*",
+    "quickjs-emscripten": "0.32.0",
+    "@editor-platform/collaboration-core": "*"
   },
   "devDependencies": {
     "@editor-platform/extension-sample": "*"

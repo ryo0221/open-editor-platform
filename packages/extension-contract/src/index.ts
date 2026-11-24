@@ -138,7 +138,40 @@ export interface ReferencesAdapter {
   list(snapshot: ReferenceSnapshot): readonly ReferenceOption[];
   resolve(snapshot: ReferenceSnapshot, target: ReferenceTarget): ReferenceResolution;
 }
+export const COLLABORATION_ADDON = 'collaboration@0-draft' as const;
+
+/** Each operation refers to one exact declaration in the operations add-on. */
+export interface CollaborationDeclaration {
+  readonly version: typeof COLLABORATION_ADDON;
+  readonly entry: string;
+  readonly sha256: string;
+  readonly operations: readonly Readonly<Pick<OperationDeclaration, 'id' | 'version'>>[];
+}
+export interface SharedAction {
+  type: string;
+  target: string;
+  payload: Record<string, unknown>;
+}
+/** Synchronous functions exported by the separately pinned, closed shared codec module. */
+export interface SharedExtensionCodec<T> {
+  validate(value: unknown): boolean;
+  plan(id: string, version: string, input: unknown, base: T): SharedAction[];
+  resource(content: T, key: string): unknown;
+  apply(
+    content: T,
+    action: SharedAction,
+  ): {
+    content: T;
+    required: string[];
+    targets: string[];
+    touched: string[];
+    inverse: SharedAction[];
+  };
+  validateAnchor?(content: T, target: string): boolean;
+  migrate?(oldPin: string, content: unknown): T;
+}
 export interface ManifestAddons {
+  collaboration?: CollaborationDeclaration;
   operations?: Readonly<{
     version: typeof OPERATIONS_ADDON;
     declarations: readonly OperationDeclaration[];

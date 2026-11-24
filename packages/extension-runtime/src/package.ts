@@ -99,6 +99,13 @@ export async function describeExtensionPackage(input: ExtensionPackage) {
   const records = [];
   for (const file of files)
     records.push({ path: file.path, byteLength: file.bytes.length, sha256: await sha(file.bytes) });
+  const shared = manifest.addons?.collaboration;
+  if (
+    shared &&
+    (shared.entry === metadata.entry ||
+      records.find((file) => file.path === shared.entry)?.sha256 !== shared.sha256.slice(7))
+  )
+    throw Error('Invalid shared codec entry or hash');
   const descriptor: PackageDescriptor = {
     format: PACKAGE_DESCRIPTOR_FORMAT,
     manifest,
@@ -132,6 +139,28 @@ export async function verifyExtensionPackage(
       if (!file) throw Error('Missing package file');
       return Uint8Array.from(file.bytes);
     },
+  });
+}
+
+/** The authority has its own revocable admission, separate from the UI package pin. */
+export function admittedCodec(verified: VerifiedPackage, lookupCodec: PackagePinLookup) {
+  const { manifest } = verified;
+  const declaration = manifest.addons?.collaboration;
+  if (!declaration) throw Error('Shared editing is unavailable');
+  const assertTrusted = () => {
+    verified.assertTrusted();
+    if (lookupCodec(manifest.id, manifest.version) !== declaration.sha256)
+      throw Error('Untrusted shared codec');
+  };
+  assertTrusted();
+  return Object.freeze({
+    assertTrusted,
+    read() {
+      assertTrusted();
+      return verified.readFile(declaration.entry);
+    },
+    domain: `ext:${manifest.id}` as const,
+    declaration,
   });
 }
 

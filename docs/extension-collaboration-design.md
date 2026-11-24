@@ -1,5 +1,7 @@
 # 外部Editorの共同編集契約案
 
+[参照 Host の起動と接続](extension-collaboration-reference.md)
+
 対象は OEP `90ffea1b` と [open-editor-template `78f29d4`](https://github.com/ryo0221/open-editor-template/tree/78f29d4)。状態は提案です。以下は追加する契約と受入条件の案であり、実装・検証はこれからです。数値の上限と期間は、運用前に計測して決める初期値です。
 
 ## 宣言と共有操作の入口

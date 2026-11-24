@@ -46,7 +46,8 @@
     "collaboration:server": "node scripts/collaboration-server.mjs",
     "fiction-map:dev": "vite --config vite.fiction-map.config.ts",
     "fiction-map:build": "vite build --config vite.fiction-map.config.ts",
-    "fiction-map:preview": "vite preview --config vite.fiction-map.config.ts"
+    "fiction-map:preview": "vite preview --config vite.fiction-map.config.ts",
+    "collaboration:external": "node apps/collaboration-reference/external/server.mjs"
   },
   "dependencies": {
     "dompurify": "3.4.17",
