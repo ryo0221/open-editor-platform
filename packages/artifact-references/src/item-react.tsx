@@ -56,6 +56,9 @@ export function ItemReferenceField({
   const idsKey = JSON.stringify(ids);
   const fromKey = JSON.stringify([from.artifactId, from.elementId, from.field]);
   const alive = useRef(true);
+  // The field's current value, to refuse a choice that returns after the field changed
+  const current = useRef(idsKey);
+  current.current = idsKey;
   useEffect(() => {
     // Strict Mode runs setup, cleanup and setup again: the second setup must mark it mounted
     alive.current = true;
@@ -101,8 +104,11 @@ export function ItemReferenceField({
     setMessage('');
     try {
       const at = { ...from };
+      const startedWith = idsKey;
       const r = await host.select(at, id, new AbortController().signal);
       if (!alive.current) return;
+      if (current.current !== startedWith)
+        return void setMessage('選んでいる間に欄が変わりました。選び直してください');
       if (!r.accepted) return void setMessage(`選べません：${stateText(r.state)}`);
       const next = multiple ? [...ids.filter((x) => x !== id), id] : [id];
       // The command goes in first; the choice is kept only when the edit was applied.

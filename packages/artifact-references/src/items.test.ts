@@ -53,4 +53,18 @@ describe('ItemSelectionLedger: selection evidence of one editing session', () =>
       { selectionId: 's2', from: other, id: 'CC-01' },
     ]);
   });
+
+  it('a save ends only the choices it captured: a choice made while it was in flight stays', () => {
+    const l = new ItemSelectionLedger();
+    l.choose(from, 'CC-01', accepted('s1'));
+    const snapshot = l.snapshot();
+    l.choose(from, 'CC-02', accepted('s2'));
+    // CC-01 chosen again in flight: a new selection, so it stays too
+    l.choose(from, 'CC-01', accepted('s3'));
+    l.saved(snapshot);
+    expect(l.evidenceFor([], at('CC-01', 'CC-02'))).toEqual([
+      { selectionId: 's3', from, id: 'CC-01' },
+      { selectionId: 's2', from, id: 'CC-02' },
+    ]);
+  });
 });

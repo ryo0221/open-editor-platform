@@ -114,6 +114,19 @@ function DataSurfaceBody({
       return false;
     }
   }
+  /**
+   * A reference field's command. Pending record inputs are committed first so that the record
+   * form does not see the reference change as a conflicting row change.
+   */
+  function applyReference(cmd: EditorCommand<StructuredData>) {
+    try {
+      inputs?.flush();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+      return false;
+    }
+    return apply(cmd, true);
+  }
   const draft = useDataViewDraft({
     data,
     initialView,
@@ -313,7 +326,7 @@ function DataSurfaceBody({
           focusRow,
           drafts: formDrafts.current,
           itemReferences,
-          applyReference: (cmd) => apply(cmd, true),
+          applyReference,
           record,
           recordIndex,
           groups,
@@ -346,7 +359,7 @@ function DataSurfaceBody({
           apply={apply}
           select={select}
           itemReferences={itemReferences}
-          applyReference={(cmd) => apply(cmd, true)}
+          applyReference={applyReference}
           onClose={() => setRecordDialog(null)}
         />
       )}

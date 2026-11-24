@@ -129,9 +129,19 @@ export class ItemSelectionLedger {
     }
     return out;
   }
-  /** After a successful save, every kept choice ends (consumed or dropped). */
-  saved(): void {
-    this.chosen.clear();
+  /** The choices kept now, to end with `saved` once the save that captured the content succeeds. */
+  snapshot(): ReadonlyMap<string, string> {
+    return new Map([...this.chosen].map(([k, e]) => [k, e.selectionId]));
+  }
+  /**
+   * After a successful save, the kept choices end (consumed or dropped). With a `snapshot` taken
+   * when the save captured its content, only those choices end: one made while the save was in
+   * flight stays for the next save.
+   */
+  saved(snapshot?: ReadonlyMap<string, string>): void {
+    if (!snapshot) return void this.chosen.clear();
+    for (const [k, selectionId] of snapshot)
+      if (this.chosen.get(k)?.selectionId === selectionId) this.chosen.delete(k);
   }
   /** Kept choices (for tests and diagnostics). */
   get size(): number {

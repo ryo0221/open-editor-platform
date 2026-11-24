@@ -39,15 +39,18 @@ test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで�
   await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
   await page.getByLabel('Record 故障原因の ID', { exact: true }).fill('FC-01');
   await page.getByRole('button', { name: 'Save record', exact: true }).click();
+  // 記録の欄に打ちかけのまま引用を選ぶと、打った値を先に確定してから引用を足す
+  await page.getByLabel('Record 故障原因', { exact: true }).fill('接点の溶着');
   const refs = page.getByRole('region', { name: 'refs.causeCandidates', exact: true });
   await refs.getByRole('button', { name: '候補から選ぶ', exact: true }).click();
   await refs.getByRole('button', { name: /CC-01/ }).click();
   await expect(refs.getByRole('listitem').filter({ hasText: 'CC-01' })).toContainText(
     '設備温度の変動',
   );
-  const rowRefs = async () =>
-    ((await nativeArtifact(page)).draft.content as StructuredData).rows[0]!.refs;
+  const row = async () => ((await nativeArtifact(page)).draft.content as StructuredData).rows[0]!;
+  const rowRefs = async () => (await row()).refs;
   expect(await rowRefs()).toEqual({ causeCandidates: ['CC-01'] });
+  expect(Object.values((await row()).values)).toContain('接点の溶着');
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   expect(await rowRefs()).toBeUndefined();
   await page.getByRole('button', { name: 'Redo', exact: true }).first().click();

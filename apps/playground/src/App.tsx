@@ -974,6 +974,15 @@ export default function App({
     }
     setBusy(true);
     savingVersion.current = true;
+    // AR2: the choices that belong to this content; choices made while the save is in flight stay
+    const savingLedger = itemLedgers.current.get(saved.id);
+    const itemChoices = savingLedger && {
+      snapshot: savingLedger.snapshot(),
+      evidence: savingLedger.evidenceFor(
+        refOccurrences(saved.id, saved.versions.at(-1)?.content),
+        refOccurrences(saved.id, saved.draft.content),
+      ),
+    };
     try {
       await verifyEstimateArtifact(saved);
       await verifyAnalysisArtifact(saved);
@@ -1014,12 +1023,9 @@ export default function App({
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
       // AR2: the version holds its citations; send the evidence of the choices newly saved
-      const ledger = itemLedgers.current.get(saved.id);
-      if (ledger) {
-        const before = refOccurrences(saved.id, saved.versions.at(-1)?.content);
-        const after = refOccurrences(saved.id, captured);
-        itemHost.committed(saved.id, ledger.evidenceFor(before, after), after);
-        ledger.saved();
+      if (savingLedger && itemChoices) {
+        itemHost.committed(saved.id, itemChoices.evidence, refOccurrences(saved.id, captured));
+        savingLedger.saved(itemChoices.snapshot);
       }
       setError('');
       setReason('');
