@@ -193,3 +193,21 @@ export function declaredRefFields(data: Pick<StructuredData, 'items'>): string[]
 /** A row's IDs in one reference field, for CSV and display (`;` between IDs). */
 export const rowRefsText = (row: DataRow, field: string) =>
   (Object.hasOwn(row.refs ?? {}, field) ? row.refs![field]! : []).join(';');
+
+/** Reference entries (column IDs or `refs.<field>`) of the declarations this row is an item of. */
+export function rowReferenceEntries(data: StructuredData, row: DataRow): string[] {
+  const out: string[] = [];
+  for (const d of data.items ?? []) {
+    const id = row.values[d.id];
+    if (typeof id !== 'string' || !id) continue;
+    for (const r of d.refs ?? []) if (!out.includes(r)) out.push(r);
+  }
+  return out;
+}
+/** A row's cited IDs in one reference entry (one per column, several per reference field). */
+export function rowReferenceIds(row: DataRow, entry: string): string[] {
+  const f = refField(entry);
+  if (f !== undefined) return Object.hasOwn(row.refs ?? {}, f) ? [...row.refs![f]!] : [];
+  const v = row.values[entry];
+  return typeof v === 'string' && v ? [v] : [];
+}

@@ -66,3 +66,4 @@ test-results-office/
 
 # Workflow tables rendered for reading (node docs/workflow/tables.mjs render).
 /docs/workflow/views/
+*.tsbuildinfo

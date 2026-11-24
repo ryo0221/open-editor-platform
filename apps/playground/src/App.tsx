@@ -171,6 +171,13 @@ import {
 import { nativeContent, nativeShared } from './app/native';
 import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
+import {
+  ItemSelectionLedger,
+  type ItemRefOccurrence,
+  type ItemRefSource,
+  type ItemSelectionEvidence,
+} from '@editor-platform/artifact-references/items';
+import { playgroundItemHost, refOccurrences } from './app/item-reference-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
 import { inspectFmeaData, isFmeaData, type FmeaTemplateId } from './app/fmea-templates';
@@ -274,6 +281,26 @@ export default function App({
     [activeId],
   );
   const liveReferences = useMemo(() => savedExtensionReferences(activeId), [activeId]);
+  /** Opens a cited business item: focuses it in its artifact and returns to the citing element. */
+  const itemNavigation = useRef<
+    (targetArtifactId: string, targetElementId: string, from: ItemRefSource) => boolean
+  >(() => false);
+  // AR2: business item references between the saved Fishbone, FMEA and FTA of this Library
+  const itemHost = useMemo(
+    () =>
+      playgroundItemHost({
+        saved: referenceSavedRecords,
+        notifications: referenceNotifications,
+        navigation: itemNavigation,
+      }),
+    [],
+  );
+  const itemLedgers = useRef(new Map<string, ItemSelectionLedger>());
+  const itemLedger = (id: string) => {
+    let l = itemLedgers.current.get(id);
+    if (!l) itemLedgers.current.set(id, (l = new ItemSelectionLedger()));
+    return l;
+  };
 
   const inputs = useMemo(() => new EditorInputs(), [activeId]);
   const inputStatus = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot);
@@ -394,7 +421,26 @@ export default function App({
       : localActive && !loadErrors[localActive.id]
         ? localActive
         : undefined;
+  const activeItemId = active?.id;
+  const itemReferences = useMemo(
+    () =>
+      activeItemId && !shared
+        ? { host: itemHost, artifactId: activeItemId, ledger: itemLedger(activeItemId) }
+        : undefined,
+    [activeItemId, shared, itemHost],
+  );
   const session = sharedSession ?? (active ? sessions.current.get(active.id) : undefined);
+  // AR2: the active local session marks each edit's item reference choices (Undo/Redo follow them)
+  const markedSessions = useRef(new WeakSet<EditorSession<Content>>());
+  const localItemSession = activeItemId && !shared ? sessions.current.get(activeItemId) : undefined;
+  if (localItemSession && !markedSessions.current.has(localItemSession)) {
+    markedSessions.current.add(localItemSession);
+    const ledger = itemLedger(activeItemId!),
+      id = activeItemId!;
+    localItemSession.trackMarks((before, after) =>
+      ledger.marks(refOccurrences(id, before), refOccurrences(id, after)),
+    );
+  }
   const currentTarget = useRef({
     activeId: active?.id ?? activeId,
     shared,
@@ -472,6 +518,25 @@ export default function App({
     };
   }, []);
   /** `stored` is for a record already written, e.g. as part of an atomic import. */
+  /** AR2: item reference evidence of saved versions, waiting for a successful write. */
+  const pendingItemCommits = useRef(
+    new Map<
+      string,
+      { versionId: string; evidence: ItemSelectionEvidence[]; saved: ItemRefOccurrence[] }[]
+    >(),
+  );
+  function deliverItemCommits(record: StoredArtifact) {
+    const pending = pendingItemCommits.current.get(record.id);
+    if (!pending) return;
+    const stored = new Set(record.versions.map((v) => v.versionId));
+    const left = pending.filter((p) => {
+      if (!stored.has(p.versionId)) return true;
+      itemHost.committed(record.id, p.evidence, p.saved);
+      return false;
+    });
+    if (left.length) pendingItemCommits.current.set(record.id, left);
+    else pendingItemCommits.current.delete(record.id);
+  }
   function persist(record: StoredArtifact, stored = false) {
     const next = recordsRef.current.some((a) => a.id === record.id)
       ? recordsRef.current.map((a) => (a.id === record.id ? record : a))
@@ -496,6 +561,7 @@ export default function App({
         if (priorSource?.versions.at(-1)?.versionId !== record.versions.at(-1)?.versionId)
           for (const notify of referenceNotifications.current) notify(record.id);
         failedWrites.current.delete(record.id);
+        deliverItemCommits(record);
         if (generation === saveGeneration.current)
           setStatus(failedWrites.current.size ? 'Not saved' : 'Saved locally');
         if (!failedWrites.current.size)
@@ -680,6 +746,16 @@ export default function App({
     }
     referenceReturn.current = { artifactId: activeId, elementId, pageId };
     activate(sourceId);
+    return true;
+  };
+  itemNavigation.current = (targetArtifactId, targetElementId, from) => {
+    if (!flushInputs()) return false;
+    if (shared) throw new Error('引用先へ移動する前に共有接続を終了してください。');
+    if (!recordsRef.current.some((a) => a.id === targetArtifactId)) return false;
+    referenceReturn.current = { artifactId: from.artifactId, elementId: from.elementId };
+    activate(targetArtifactId);
+    if (targetElementId)
+      setRevealAddress({ artifactId: targetArtifactId, elementId: targetElementId });
     return true;
   };
   function returnFromReference() {
@@ -931,6 +1007,16 @@ export default function App({
     }
     setBusy(true);
     savingVersion.current = true;
+    // AR2: the evidence of this content's choices, from its session's marks (edits made while the
+    // save is in flight are not in this content and keep their marks for the next save)
+    const savingLedger = itemLedgers.current.get(saved.id);
+    const itemEvidence =
+      savingLedger &&
+      savingLedger.evidenceFor(
+        sessions.current.get(saved.id)?.marks ?? [],
+        refOccurrences(saved.id, saved.versions.at(-1)?.content),
+        refOccurrences(saved.id, saved.draft.content),
+      );
     try {
       await verifyEstimateArtifact(saved);
       await verifyAnalysisArtifact(saved);
@@ -968,6 +1054,17 @@ export default function App({
       serializeHostNativeArtifact(result, hostNativeLimitOf(result.kind));
       assertCadNativeFits(result, 'version');
       assertBimNativeFits(result, 'version');
+      // AR2: the version holds its citations; the evidence of the choices newly saved goes to the
+      // Host once a write of a record holding this version succeeds (a retry included)
+      if (itemEvidence)
+        pendingItemCommits.current.set(saved.id, [
+          ...(pendingItemCommits.current.get(saved.id) ?? []),
+          {
+            versionId: result.versions.at(-1)!.versionId,
+            evidence: itemEvidence,
+            saved: refOccurrences(saved.id, captured),
+          },
+        ]);
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
       setError('');
@@ -1630,6 +1727,7 @@ export default function App({
     revealAddress,
     references,
     liveReferences,
+    itemReferences,
     loadErrors,
     animationCatalog,
     dataViews,

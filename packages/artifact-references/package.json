@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./react": "./src/react.tsx"
+    "./react": "./src/react.tsx",
+    "./items": "./src/items.ts",
+    "./item-react": "./src/item-react.tsx"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",

@@ -56,6 +56,7 @@ import {
 import { GraphToolbar, type GraphToolbarOptions } from './view-toolbar';
 import { GraphCanvas } from './view-canvas';
 import { GraphInspector } from './view-inspector';
+import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import { GraphDeletionDialog } from './view-dialog';
 import './styles.css';
 export { graphSurfaceLabels, type GraphSurfaceLabels } from './labels';
@@ -77,6 +78,11 @@ export interface GraphSurfaceProps {
   visibleEdgeTypes?: string[];
   /** Show the built-in Inspector. Hosts may supply their own panel using selection notifications. */
   showInspector?: boolean;
+  /**
+   * Business item references (Profile `items.refs`): the Host's candidates, states and opening in
+   * the Inspector. Without it, reference attributes are ordinary text fields.
+   */
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
   /**
    * Applied once per graph after the canvas has a measurable size. Defaults to origin. `fit`
    * shows the whole drawing without magnifying it, a selected node only emphasized;
@@ -163,6 +169,7 @@ export function GraphSurface({
   shapeOnCreate = true,
   sectionEditing = true,
   sectionDropOutside = 'clear',
+  itemReferences,
 }: GraphSurfaceProps) {
   const labels = useMemo(
     () => resolveGraphSurfaceLabels(locale, labelOverrides),
@@ -518,6 +525,7 @@ export function GraphSurface({
             edge={edge}
             section={section}
             sectionEditing={sectionsEditable}
+            itemReferences={itemReferences}
             onFitSection={
               section
                 ? () =>

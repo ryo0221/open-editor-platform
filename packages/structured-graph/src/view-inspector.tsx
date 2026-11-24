@@ -1,7 +1,12 @@
 import { type ContextType, useEffect, useRef } from 'react';
+import type { GraphIntent } from './commands';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import { type GraphAttributeDraft } from './attribute-draft';
 import { GraphAttributes } from './attributes';
+import {
+  ItemReferenceField,
+  type ItemReferenceSurfaceProps,
+} from '@editor-platform/artifact-references/item-react';
 import { GraphDefinitionEditor } from './definition-editor';
 import { GraphNodeAppearance } from './view-appearance';
 import { GraphNodeSectionField, GraphSectionPanel } from './view-sections';
@@ -305,6 +310,86 @@ export interface GraphInspectorProps extends GraphConnectionFormProps, GraphOver
   section?: GraphSection;
   sectionEditing: boolean;
   onFitSection?: () => void;
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
+}
+
+const idsOf = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && v !== '')
+    : typeof value === 'string' && value
+      ? [value]
+      : [];
+
+/** Reference attributes of an item node type (Profile `items.refs`), with the Host's candidates and states. */
+function GraphItemReferences(props: GraphInspectorProps) {
+  const { node, type, itemReferences: ir, readOnly, profile, inputs, setError } = props;
+  // The latest render's apply: a command after committing pending inputs must see their result
+  const latest = useRef({ apply: props.apply, node, renders: 0 });
+  latest.current = { apply: props.apply, node, renders: latest.current.renders + 1 };
+  const refs = node ? profile.nodes[node.type]?.items?.refs : undefined;
+  if (!node || !ir || !refs?.length) return null;
+  async function change(
+    field: string,
+    multiple: boolean,
+    next: string[],
+    expected: readonly string[],
+  ) {
+    const intents: GraphIntent[] = [
+      next.length
+        ? {
+            type: 'set-attribute',
+            scope: 'node',
+            id: node!.id,
+            path: [field],
+            value: multiple ? next : next[0]!,
+          }
+        : { type: 'remove-attribute', scope: 'node', id: node!.id, path: [field] },
+    ];
+    // Pending attribute inputs are committed first, so the attribute draft does not see the
+    // reference change as a conflicting node change; the command then waits for their render
+    const pending = !!inputs?.getSnapshot().dirty;
+    const before = latest.current.renders;
+    try {
+      inputs?.flush();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+      return false;
+    }
+    if (pending)
+      for (let i = 0; i < 20 && latest.current.renders === before; i++)
+        await new Promise((r) => setTimeout(r, 0));
+    // The committed inputs may have changed this field: then the new value is out of date
+    const now = latest.current.node;
+    if (
+      now?.id !== node!.id ||
+      JSON.stringify(idsOf(now.attributes[field])) !== JSON.stringify(expected)
+    ) {
+      setError('入力を確定したら引用の欄が変わりました。もう一度選んでください');
+      return false;
+    }
+    return latest.current.apply(intents);
+  }
+  return (
+    <>
+      {refs.map((field) => {
+        const multiple = type.schema[field]?.type === 'array';
+        const ids = idsOf(node.attributes[field]);
+        return (
+          <ItemReferenceField
+            key={`${node.id}:${field}`}
+            host={ir.host}
+            ledger={ir.ledger}
+            from={{ artifactId: ir.artifactId, elementId: node.id, field }}
+            label={type.ui?.fields?.[field]?.label ?? field}
+            ids={ids}
+            multiple={multiple}
+            readOnly={readOnly || !!type.readOnly || !!type.schema[field]?.readOnly}
+            change={(next, expected) => change(field, multiple, next, expected)}
+          />
+        );
+      })}
+    </>
+  );
 }
 
 function GraphSelectionPanels(props: GraphInspectorProps) {
@@ -330,6 +415,7 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
           }))}
         drafts={props.drafts}
       />
+      <GraphItemReferences {...props} />
       {props.node && (
         <GraphNodeAppearance
           key={`appearance:${props.node.id}`}

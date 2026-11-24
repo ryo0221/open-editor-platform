@@ -26,7 +26,8 @@
     "lucide-react": "1.51.0",
     "@editor-platform/property-input": "*",
     "@editor-platform/time-axis": "*",
-    "@editor-platform/editor-host": "*"
+    "@editor-platform/editor-host": "*",
+    "@editor-platform/artifact-references": "*"
   },
   "peerDependencies": {
     "react": "^19.1.1"

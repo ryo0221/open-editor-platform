@@ -1,4 +1,4 @@
-import { useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { newId } from '@editor-platform/artifact-core';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
 import {
@@ -41,9 +41,10 @@ import {
   FieldDefinitionDialog,
   RecordDetailsDialog,
 } from './view-dialogs';
+import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import './styles.css';
 export type { DataProjection } from './views';
-interface DataSurfaceBodyProps {
+type DataSurfaceBodyProps = {
   content: StructuredData;
   execute: (c: EditorCommand<StructuredData>) => void | boolean;
   /** Optional independent projection; Data owns records, commands and history. */
@@ -60,9 +61,11 @@ interface DataSurfaceBodyProps {
     openDefinition: (columnId?: string) => void;
   }) => ReactNode;
   select: (id: string, region?: Region) => void;
+  /** A row the Host asks to show, for example the target of an opened item reference. */
+  focusRowId?: string;
   readOnly?: boolean;
   layout?: Pick<EditorLayoutProps, 'viewKey' | 'panels' | 'defaultPanels' | 'onPanelsChange'>;
-}
+} & ItemReferenceSurfaceProps;
 export type DataSurfaceProps = DataSurfaceBodyProps & EditorWordingProps;
 const wordingSets = [editorUiWording, dataWording];
 /** The Structured Data Surface. `locale` and `labels` choose its visible wording. */
@@ -83,6 +86,8 @@ function DataSurfaceBody({
   initialView,
   onViewChange,
   onViewDraftChange,
+  itemReferences,
+  focusRowId,
 }: DataSurfaceBodyProps) {
   const wording = useWording();
   const guardExport = useContext(EditorExportGuardContext);
@@ -104,6 +109,19 @@ function DataSurfaceBody({
       setError((e as Error).message);
       return false;
     }
+  }
+  /**
+   * A reference field's command. Pending record inputs are committed first so that the record
+   * form does not see the reference change as a conflicting row change.
+   */
+  function applyReference(cmd: EditorCommand<StructuredData>) {
+    try {
+      inputs?.flush();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+      return false;
+    }
+    return apply(cmd);
   }
   const draft = useDataViewDraft({
     data,
@@ -145,6 +163,15 @@ function DataSurfaceBody({
     setActive({ rowId: id, columnId: active?.columnId ?? columns[0]?.id ?? '' });
     select(id);
   }
+  useEffect(() => {
+    if (!focusRowId || !data.rows.some((r) => r.id === focusRowId)) return;
+    focusRow(focusRowId);
+    // Form shows the active record. Elsewhere (a Grid renders only its scrolled window and may
+    // filter the row out; Chart, Summary, Dashboard, ...) the record details show it, and the
+    // view stays as saved.
+    if (view.projection !== 'Form') setRecordDialog(focusRowId);
+    // Only a new request moves the focus; later edits keep the person's own selection
+  }, [focusRowId]);
   useRecordDraftInput({
     data,
     readOnly,
@@ -299,6 +326,8 @@ function DataSurfaceBody({
           changeProjection,
           focusRow,
           drafts: formDrafts.current,
+          itemReferences,
+          applyReference,
           record,
           recordIndex,
           groups,
@@ -330,6 +359,8 @@ function DataSurfaceBody({
           readOnly={readOnly}
           apply={apply}
           select={select}
+          itemReferences={itemReferences}
+          applyReference={applyReference}
           onClose={() => setRecordDialog(null)}
         />
       )}
