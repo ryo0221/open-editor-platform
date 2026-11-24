@@ -1,3 +1,4 @@
+import { declaredRefFields, rowRefsText } from './items';
 import {
   csvField,
   displayCell,
@@ -22,10 +23,15 @@ export function prepareCsvExport(data: StructuredData, scope: CsvExportScope, vi
   const columns = data.columns.filter(
     (column) => scope.columnsScope === 'all' || !view!.hidden.includes(column.id),
   );
+  // 行の参照の欄は読み取り専用の列として最後に置く（exportCsv と同じ。取り込みでは作らない）
+  const refs = declaredRefFields(data);
   const csv =
     [
-      columns.map((column) => column.name),
-      ...rows.map((row) => columns.map((column) => displayCell(data, row, column))),
+      [...columns.map((column) => column.name), ...refs.map((f) => `refs.${f}`)],
+      ...rows.map((row) => [
+        ...columns.map((column) => displayCell(data, row, column)),
+        ...refs.map((f) => rowRefsText(row, f)),
+      ]),
     ]
       .map((row) => row.map(csvField).join(','))
       .join('\r\n') + '\r\n';

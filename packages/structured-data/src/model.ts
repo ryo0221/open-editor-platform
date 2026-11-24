@@ -650,7 +650,8 @@ function rowDiff(a: StructuredData, b: StructuredData, changes: Change[]) {
       for (const f of new Set([...Object.keys(old.refs ?? {}), ...Object.keys(next.refs ?? {})])) {
         const before = rowRefsText(old, f),
           after = rowRefsText(next, f);
-        if (before !== after)
+        // 配列で比べる（ID が ; を含むと、つないだ文字だけでは違いが見えない）
+        if (JSON.stringify(old.refs?.[f] ?? []) !== JSON.stringify(next.refs?.[f] ?? []))
           changes.push({
             elementId: old.id,
             path: `${String(next.values[b.columns[0]?.id] ?? 'Record')} / refs.${f}`,

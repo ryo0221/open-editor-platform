@@ -232,4 +232,20 @@ describe('readItems with items@1-draft', () => {
       ['FC-01', undefined],
     ]);
   });
+
+  it('does not write into frozen content when merge paths overlap', () => {
+    const nested: ItemsAddon = {
+      version: ITEMS_ADDON_V1,
+      collections: [
+        { at: 'rows', id: 'id', title: 'name', merge: { equal: ['details', 'details.s'] } },
+      ],
+    };
+    const doc = Object.freeze({
+      rows: Object.freeze([
+        Object.freeze({ id: 'FM-01', name: 'a', details: Object.freeze({ s: 9, effect: 'x' }) }),
+      ]),
+    });
+    const r = readItems(nested, doc, none);
+    expect(r.items[0]!.body).toEqual({ details: { s: 9, effect: 'x' } });
+  });
 });

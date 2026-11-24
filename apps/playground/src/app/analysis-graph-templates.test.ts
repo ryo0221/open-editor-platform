@@ -193,6 +193,21 @@ describe('analysis items in the Fishbone and FTA Profiles (AR1)', () => {
     expect(bad((p) => (p.nodes.cause!.items!.id = 'status'))).toBe(false);
     expect(bad((p) => (p.nodes.cause!.items!.refs = ['status']))).toBe(false);
     expect(bad((p) => (p.nodes.cause!.items!.rootRefs = ['notes', 'missing']))).toBe(false);
+    // 業務 ID・題・引用の属性は items@1-draft の道筋の一つの区切りになれる名前だけ
+    for (const name of ['business.id', '業務ID']) {
+      expect(
+        bad((p) => {
+          p.nodes.cause!.schema[name] = { type: 'string' };
+          p.nodes.cause!.items!.id = name;
+        }),
+      ).toBe(false);
+      expect(
+        bad((p) => {
+          p.nodes.cause!.schema[name] = { type: 'string' };
+          p.nodes.cause!.items!.title = name;
+        }),
+      ).toBe(false);
+    }
     expect(bad((p) => Object.assign(p.nodes.cause!.items!, { where: { type: 'cause' } }))).toBe(
       false,
     );

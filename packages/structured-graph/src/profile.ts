@@ -301,11 +301,16 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
   const isString = (s: AttributeSchema | undefined) => s?.type === 'string';
   const isRef = (s: AttributeSchema | undefined) =>
     s?.type === 'string' || (s?.type === 'array' && s.items?.type === 'string');
+  /** Item attributes become one segment of an `items@1-draft` path, so they use its name rule. */
+  const segment = (n: unknown): n is string =>
+    typeof n === 'string' &&
+    /^[A-Za-z_$][A-Za-z0-9_$-]{0,63}$/.test(n) &&
+    !['__proto__', 'constructor', 'prototype'].includes(n);
   const names = (v: unknown) =>
     Array.isArray(v) &&
     v.length > 0 &&
     v.length <= 32 &&
-    v.every((n) => typeof n === 'string') &&
+    v.every(segment) &&
     new Set(v).size === v.length;
   /** Item attributes must exist on the type (refs: string or string array) and hold plain IDs. */
   const itemsValid = (items: unknown, schema: Record<string, AttributeSchema>): boolean => {
@@ -319,8 +324,8 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
       plainRecord(p.graph) && plainRecord(p.graph.schema) && Object.hasOwn(p.graph.schema, n)
         ? p.graph.schema[n]
         : undefined;
-    if (typeof items.id !== 'string' || !isString(own(items.id))) return false;
-    if (typeof items.title !== 'string' || !isString(own(items.title))) return false;
+    if (!segment(items.id) || !isString(own(items.id))) return false;
+    if (!segment(items.title) || !isString(own(items.title))) return false;
     if (items.refs !== undefined)
       if (
         !names(items.refs) ||

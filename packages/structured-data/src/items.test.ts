@@ -14,6 +14,7 @@ import {
 } from './model';
 import { saveView, updateColumn, defaultView } from './views';
 import { dataItemsDeclaration, dataItemsProblems, itemsWithoutColumn } from './items';
+import { prepareCsvExport } from './csv-transfer';
 
 const table = (): StructuredData => ({
   schemaVersion: 3,
@@ -164,5 +165,17 @@ describe('Data schema 3: item declarations and row references', () => {
         after: 'CC-02',
       }),
     ]);
+  });
+
+  it('shows a reference change even when an ID contains the CSV separator', () => {
+    const one = setRowRefs('r1', 'causeCandidates', ['CC-1;CC-2']).apply(table());
+    const two = setRowRefs('r1', 'causeCandidates', ['CC-1', 'CC-2']).apply(table());
+    expect(dataDiff(one, two).changes).toHaveLength(1);
+  });
+
+  it('writes reference fields in the scoped CSV download too', () => {
+    const out = prepareCsvExport(table(), { rowsScope: 'all', columnsScope: 'all' });
+    expect(out.csv.split('\r\n')[0]!.endsWith(',refs.causeCandidates')).toBe(true);
+    expect(out.csv.split('\r\n')[1]!.endsWith(',CC-01;CC-02')).toBe(true);
   });
 });
