@@ -61,7 +61,25 @@ test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで�
   expect(await rowRefs()).toBeUndefined();
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   expect(await rowRefs()).toEqual({ causeCandidates: ['CC-01'] });
-  await save(page, 1);
+  // 版の書き込みが失敗しても、やり直して書けたときに選んだ版の証跡が届く
+  await page.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args) {
+      if (sessionStorage.getItem('simulateQuota'))
+        throw new DOMException('Injected quota failure', 'QuotaExceededError');
+      return put.apply(this, args);
+    };
+    sessionStorage.setItem('simulateQuota', 'yes');
+  });
+  await page.getByRole('button', { name: 'Save version', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Save immutable version', exact: true })
+    .getByRole('button', { name: 'この版を保存', exact: true })
+    .click();
+  await expect(page.getByRole('status').first()).toHaveText('Not saved');
+  await page.evaluate(() => sessionStorage.removeItem('simulateQuota'));
+  await page.getByRole('button', { name: 'Retry local save', exact: true }).click();
+  await expect(page.getByRole('status').first()).toHaveText('Saved locally');
 
   // 開くと引用先の原因の候補が選ばれ、戻ると引用した故障原因へ戻る
   await refs.getByRole('button', { name: 'CC-01 を開く', exact: true }).click();

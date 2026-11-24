@@ -63,6 +63,9 @@ export function ItemReferenceField({
   // The field's current value, to refuse a choice that returns after the field changed
   const current = useRef(idsKey);
   current.current = idsKey;
+  // The latest render's writability and command: a response that returns later uses them
+  const latest = useRef({ readOnly, change });
+  latest.current = { readOnly, change };
   useEffect(() => {
     // Strict Mode runs setup, cleanup and setup again: the second setup must mark it mounted
     alive.current = true;
@@ -113,13 +116,14 @@ export function ItemReferenceField({
       if (!alive.current) return;
       if (current.current !== startedWith)
         return void setMessage('選んでいる間に欄が変わりました。選び直してください');
+      if (latest.current.readOnly) return void setMessage('この欄は今は変更できません');
       if (!r.accepted) return void setMessage(`選べません：${stateText(r.state)}`);
       const next = multiple ? [...ids.filter((x) => x !== id), id] : [id];
       // The choice is held for the edit that adds this citation; the Host's session records it
       // in its marks, so Undo and Redo follow it. An unused choice is dropped.
       ledger.choose(at, id, r);
       try {
-        if (await change(next, ids)) setCandidates(null);
+        if (await latest.current.change(next, ids)) setCandidates(null);
         else if (alive.current) setMessage('変更できませんでした');
       } finally {
         ledger.cancel(at, id);

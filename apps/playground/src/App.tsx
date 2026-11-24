@@ -173,7 +173,9 @@ import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
 import {
   ItemSelectionLedger,
+  type ItemRefOccurrence,
   type ItemRefSource,
+  type ItemSelectionEvidence,
 } from '@editor-platform/artifact-references/items';
 import { playgroundItemHost, refOccurrences } from './app/item-reference-host';
 import type { SharedPlaygroundConnection } from './app/types';
@@ -516,6 +518,25 @@ export default function App({
     };
   }, []);
   /** `stored` is for a record already written, e.g. as part of an atomic import. */
+  /** AR2: item reference evidence of saved versions, waiting for a successful write. */
+  const pendingItemCommits = useRef(
+    new Map<
+      string,
+      { versionId: string; evidence: ItemSelectionEvidence[]; saved: ItemRefOccurrence[] }[]
+    >(),
+  );
+  function deliverItemCommits(record: StoredArtifact) {
+    const pending = pendingItemCommits.current.get(record.id);
+    if (!pending) return;
+    const stored = new Set(record.versions.map((v) => v.versionId));
+    const left = pending.filter((p) => {
+      if (!stored.has(p.versionId)) return true;
+      itemHost.committed(record.id, p.evidence, p.saved);
+      return false;
+    });
+    if (left.length) pendingItemCommits.current.set(record.id, left);
+    else pendingItemCommits.current.delete(record.id);
+  }
   function persist(record: StoredArtifact, stored = false) {
     const next = recordsRef.current.some((a) => a.id === record.id)
       ? recordsRef.current.map((a) => (a.id === record.id ? record : a))
@@ -540,6 +561,7 @@ export default function App({
         if (priorSource?.versions.at(-1)?.versionId !== record.versions.at(-1)?.versionId)
           for (const notify of referenceNotifications.current) notify(record.id);
         failedWrites.current.delete(record.id);
+        deliverItemCommits(record);
         if (generation === saveGeneration.current)
           setStatus(failedWrites.current.size ? 'Not saved' : 'Saved locally');
         if (!failedWrites.current.size)
@@ -1032,11 +1054,19 @@ export default function App({
       serializeHostNativeArtifact(result, hostNativeLimitOf(result.kind));
       assertCadNativeFits(result, 'version');
       assertBimNativeFits(result, 'version');
+      // AR2: the version holds its citations; the evidence of the choices newly saved goes to the
+      // Host once a write of a record holding this version succeeds (a retry included)
+      if (itemEvidence)
+        pendingItemCommits.current.set(saved.id, [
+          ...(pendingItemCommits.current.get(saved.id) ?? []),
+          {
+            versionId: result.versions.at(-1)!.versionId,
+            evidence: itemEvidence,
+            saved: refOccurrences(saved.id, captured),
+          },
+        ]);
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
-      // AR2: the version holds its citations; send the evidence of the choices newly saved
-      if (itemEvidence)
-        itemHost.committed(saved.id, itemEvidence, refOccurrences(saved.id, captured));
       setError('');
       setReason('');
       editorEvents.emit('version', {
