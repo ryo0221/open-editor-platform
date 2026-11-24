@@ -193,6 +193,13 @@ describe('analysis items in the Fishbone and FTA Profiles (AR1)', () => {
     expect(bad((p) => (p.nodes.cause!.items!.id = 'status'))).toBe(false);
     expect(bad((p) => (p.nodes.cause!.items!.refs = ['status']))).toBe(false);
     expect(bad((p) => (p.nodes.cause!.items!.rootRefs = ['notes', 'missing']))).toBe(false);
+    // 項目の node type は items@1-draft のコレクションの上限（16）まで
+    const many = (n: number) =>
+      bad((p) => {
+        for (let i = 0; i < n; i++) p.nodes[`c${i}`] = clone(p.nodes.cause!);
+      });
+    expect(many(15)).toBe(true);
+    expect(many(16)).toBe(false);
     // 業務 ID・題・引用の属性は items@1-draft の道筋の一つの区切りになれる名前だけ
     for (const name of ['business.id', '業務ID']) {
       expect(

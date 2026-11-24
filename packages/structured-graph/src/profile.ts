@@ -337,7 +337,12 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
         return false;
     return true;
   };
+  // 項目の node type は、宣言にしたときの items@1-draft のコレクションの上限（16）まで
+  const itemTypes = plainRecord(p.nodes)
+    ? Object.values(p.nodes).filter((t) => plainRecord(t) && t.items !== undefined).length
+    : 0;
   return (
+    itemTypes <= 16 &&
     (p.schemaVersion === 2 || p.schemaVersion === 3) &&
     validGraphId(p.id) &&
     Number.isSafeInteger(p.version) &&

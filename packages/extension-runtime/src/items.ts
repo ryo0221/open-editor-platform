@@ -187,7 +187,11 @@ const pick = (v: unknown, list: readonly string[]): Record<string, unknown> => {
     // 写してから入れる（祖先と子孫の道筋が両方あるとき、元の中身に書き込まない）
     const segs = p.split('.');
     let o = out;
-    for (const k of segs.slice(0, -1)) o = (o[k] ??= {}) as Record<string, unknown>;
+    // 自分の欄だけをたどる（toString などの受け継いだ欄に書き込まない）
+    for (const k of segs.slice(0, -1)) {
+      if (!Object.hasOwn(o, k) || !plain(o[k])) o[k] = {};
+      o = o[k] as Record<string, unknown>;
+    }
     o[segs[segs.length - 1]!] = structuredClone(x);
   }
   return out;

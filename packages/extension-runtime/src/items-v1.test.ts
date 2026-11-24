@@ -248,4 +248,15 @@ describe('readItems with items@1-draft', () => {
     const r = readItems(nested, doc, none);
     expect(r.items[0]!.body).toEqual({ details: { s: 9, effect: 'x' } });
   });
+
+  it('builds merged bodies from own properties only, never through inherited ones', () => {
+    const decl: ItemsAddon = {
+      version: ITEMS_ADDON_V1,
+      collections: [{ at: 'rows', id: 'id', title: 'id', merge: { equal: ['toString.call'] } }],
+    };
+    const call = Object.prototype.toString.call;
+    const r = readItems(decl, { rows: [{ id: 'FM-01', toString: { call: 'x' } }] }, none);
+    expect(Object.prototype.toString.call).toBe(call);
+    expect(r.items[0]!.body).toEqual({ toString: { call: 'x' } });
+  });
 });
