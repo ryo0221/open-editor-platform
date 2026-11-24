@@ -45,8 +45,11 @@ export function ItemReferenceField({
   /** Whether the field holds several IDs (an array) or one (a string). */
   multiple: boolean;
   readOnly?: boolean;
-  /** Applies the new IDs as one command. Returns whether it was applied. */
-  change(ids: string[]): boolean;
+  /**
+   * Applies the new IDs as one command. Returns whether it was applied. It may wait, for example
+   * for pending inputs of the same element to be committed and shown first.
+   */
+  change(ids: string[]): boolean | Promise<boolean>;
 }) {
   const [states, setStates] = useState<ReadonlyMap<string, ItemRefState>>(new Map());
   const [tick, setTick] = useState(0);
@@ -112,7 +115,7 @@ export function ItemReferenceField({
       if (!r.accepted) return void setMessage(`選べません：${stateText(r.state)}`);
       const next = multiple ? [...ids.filter((x) => x !== id), id] : [id];
       // The command goes in first; the choice is kept only when the edit was applied.
-      if (change(next)) {
+      if (await change(next)) {
         // Choices of replaced IDs stay until the save: Undo may bring them back, and a save
         // sends evidence only for citations it holds
         ledger.choose(at, id, r);
@@ -124,9 +127,15 @@ export function ItemReferenceField({
       if (alive.current) setBusy(false);
     }
   }
-  function remove(id: string) {
+  async function remove(id: string) {
     // The choice stays until the save so that Undo of the removal keeps its evidence
-    change(ids.filter((x) => x !== id));
+    setMessage('');
+    try {
+      if (!(await change(ids.filter((x) => x !== id))) && alive.current)
+        setMessage('変更できませんでした');
+    } catch {
+      if (alive.current) setMessage('変更できませんでした');
+    }
   }
   async function open(id: string) {
     setMessage('');
@@ -151,7 +160,7 @@ export function ItemReferenceField({
                   開く
                 </button>
                 {!readOnly && (
-                  <button type="button" onClick={() => remove(id)} aria-label={`${id} を外す`}>
+                  <button type="button" onClick={() => void remove(id)} aria-label={`${id} を外す`}>
                     外す
                   </button>
                 )}

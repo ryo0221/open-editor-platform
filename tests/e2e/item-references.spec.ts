@@ -4,6 +4,7 @@
  */
 import { test, expect, nativeArtifact, save } from './fixtures';
 import type { StructuredData } from '@editor-platform/structured-data/model';
+import type { GraphDocument } from '@editor-platform/structured-graph/model';
 import type { Page } from '@playwright/test';
 
 async function create(page: Page, type: string, template: [string, string]) {
@@ -79,4 +80,34 @@ test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで�
   await activate(page, /DFMEA/);
   await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
   await expect(refs.getByRole('listitem').filter({ hasText: 'CC-01' })).toContainText('古い');
+});
+
+test('AR2 FTA の基本事象で、適用していない属性の入力があっても引用を選べ、入力も引用も残る', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await create(page, 'data', ['Data template', 'dfmea']);
+  await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
+  await page.getByLabel('Record 故障原因の ID', { exact: true }).fill('FC-01');
+  await page.getByLabel('Record 故障原因', { exact: true }).fill('接点の溶着');
+  await page.getByRole('button', { name: 'Save record', exact: true }).click();
+  await save(page, 1);
+
+  await create(page, 'structured-graph', ['Graph template', 'fta']);
+  await page.getByRole('button', { name: 'Select node 電源故障', exact: true }).click();
+  const inspector = page.getByRole('complementary', { name: 'Graph Inspector' });
+  await inspector.getByLabel('根拠', { exact: true }).fill('点検記録');
+  const refs = inspector.getByRole('region', { name: '故障原因の業務 ID', exact: true });
+  await refs.getByRole('button', { name: '候補から選ぶ', exact: true }).click();
+  await refs.getByRole('button', { name: /FC-01/ }).click();
+  await expect(refs.getByRole('listitem').filter({ hasText: 'FC-01' })).toContainText('接点の溶着');
+  const node = async () =>
+    ((await nativeArtifact(page)).draft.content as GraphDocument).nodes.find(
+      (n) => n.id === 'power',
+    )!;
+  expect((await node()).attributes).toMatchObject({
+    evidence: '点検記録',
+    failureCauseRefs: ['FC-01'],
+  });
+  await expect(inspector.getByRole('alert')).toHaveCount(0);
 });

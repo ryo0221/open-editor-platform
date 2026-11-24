@@ -1,4 +1,5 @@
 import { type ContextType, useEffect, useRef } from 'react';
+import type { GraphIntent } from './commands';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import { type GraphAttributeDraft } from './attribute-draft';
 import { GraphAttributes } from './attributes';
@@ -314,9 +315,39 @@ export interface GraphInspectorProps extends GraphConnectionFormProps, GraphOver
 
 /** Reference attributes of an item node type (Profile `items.refs`), with the Host's candidates and states. */
 function GraphItemReferences(props: GraphInspectorProps) {
-  const { node, type, itemReferences: ir, readOnly, apply, profile } = props;
+  const { node, type, itemReferences: ir, readOnly, profile, inputs, setError } = props;
+  // The latest render's apply: a command after committing pending inputs must see their result
+  const latest = useRef({ apply: props.apply, renders: 0 });
+  latest.current = { apply: props.apply, renders: latest.current.renders + 1 };
   const refs = node ? profile.nodes[node.type]?.items?.refs : undefined;
   if (!node || !ir || !refs?.length) return null;
+  async function change(field: string, multiple: boolean, next: string[]) {
+    const intents: GraphIntent[] = [
+      next.length
+        ? {
+            type: 'set-attribute',
+            scope: 'node',
+            id: node!.id,
+            path: [field],
+            value: multiple ? next : next[0]!,
+          }
+        : { type: 'remove-attribute', scope: 'node', id: node!.id, path: [field] },
+    ];
+    // Pending attribute inputs are committed first, so the attribute draft does not see the
+    // reference change as a conflicting node change; the command then waits for their render
+    const pending = !!inputs?.getSnapshot().dirty;
+    const before = latest.current.renders;
+    try {
+      inputs?.flush();
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+      return false;
+    }
+    if (pending)
+      for (let i = 0; i < 20 && latest.current.renders === before; i++)
+        await new Promise((r) => setTimeout(r, 0));
+    return latest.current.apply(intents);
+  }
   return (
     <>
       {refs.map((field) => {
@@ -337,19 +368,7 @@ function GraphItemReferences(props: GraphInspectorProps) {
             ids={ids}
             multiple={multiple}
             readOnly={readOnly || !!type.readOnly || !!type.schema[field]?.readOnly}
-            change={(next) =>
-              apply([
-                next.length
-                  ? {
-                      type: 'set-attribute',
-                      scope: 'node',
-                      id: node.id,
-                      path: [field],
-                      value: multiple ? next : next[0]!,
-                    }
-                  : { type: 'remove-attribute', scope: 'node', id: node.id, path: [field] },
-              ])
-            }
+            change={(next) => change(field, multiple, next)}
           />
         );
       })}
