@@ -107,7 +107,7 @@ interface ItemRefSource {
 interface ItemReferenceHost {
   /** この引用元で引ける候補（種類の決まりは Host が定義から決める）。表示の手がかりで、権限の約束ではない。 */
   candidates(from: ItemRefSource, signal: AbortSignal): Promise<readonly ItemCandidate[]>;
-  /** この引用元から見た、業務 ID ごとの今の状態。Host は引用元ごとの基準と今の引用先を比べる。 */
+  /** この引用元から見た、業務 ID ごとの今の状態。読むだけで、Host に何も記録しない（表示の更新・別の画面から何度呼んでもよい）。 */
   resolve(
     from: ItemRefSource,
     ids: readonly string[],
@@ -118,7 +118,26 @@ interface ItemReferenceHost {
     id: string,
     from: ItemRefSource,
   ): Promise<{ opened: true } | { opened: false; state: ItemRefState }>;
+  /**
+   * 利用者が候補から一つ選んだ操作の証跡を作る。その時点の引用先の保存版を Host が記録し、選択 ID を返す。
+   * 状態を確かめ直した結果も返すので、Editor は `resolve` を別に呼ばない。
+   */
+  select(from: ItemRefSource, id: string, signal: AbortSignal): Promise<ItemSelectionResult>;
   subscribe?(notify: () => void): () => void;
+}
+type ItemSelectionResult =
+  | {
+      accepted: true;
+      selectionId: string; // Host が振る。推測できない値
+      target: { artifactId: string; versionId: string; revision: number; contentHash: string };
+      state: ItemRefState; // ok か stale（基準とは別。選んだ時点の表示）
+    }
+  | { accepted: false; state: ItemRefState };
+/** 保存の口に添える。中身（native JSON）には入れない。 */
+interface ItemSelectionEvidence {
+  selectionId: string;
+  from: ItemRefSource;
+  id: string;
 }
 interface ItemCandidate {
   id: string;
@@ -148,7 +167,25 @@ type ItemRefState =
 
 責務の分け方：
 
-- **候補を選んだ後**：Editor は選んだ ID を `resolve(from, [id])` で確かめ直し、`ok` か `stale` のときだけ欄を変えるコマンドを入れる。`forbidden`・`missing-target`・`duplicate`・`unresolved` なら入れずに理由を出す（候補の一覧を取った後に権限や重複が変わる場合のため）。`offline` なら値の入力は許し、状態を「確かめられない」と出す。
+- **候補を選んだとき**：Editor は `select(from, id)` を呼ぶ。`accepted` のときだけ欄を変えるコマンドを入れ、そのコマンドに `selectionId` を持たせる。断られた（`forbidden`・`missing-target`・`duplicate`・`unresolved`）なら入れずに理由を出す（候補の一覧を取った後に権限や重複が変わる場合のため）。`offline` なら値の入力は許すが選択 ID は無く、状態を「確かめられない」と出す。
+- **`resolve` は読むだけ**：表示の更新、別の画面、再読み込みから何度呼ばれても、Host は何も記録しない。選んだ版の記録は `select` だけが作る。
+
+#### 選択の証跡（`select` と保存の対応）
+
+| 項目               | 約束                                                                                                                                                                                      |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 作る               | `select` 一回につき一つ。Host がその時点の引用先の保存版（`versionId`・`revision`・`contentHash`、Host の置き場では commit と項目の指紋も）を記録する                                     |
+| 運ぶ               | 欄を変えたコマンドが `selectionId` を持つ。保存のときに Editor は、保存する内容に新しく入った引用ごとに `ItemSelectionEvidence` を保存の口に添える。native JSON・エクスポートには入れない |
+| 範囲               | 一つの Host の、一人の利用者の、一つの編集の場（画面・セッション）。引用元（成果物・要素・欄）と引用先の業務 ID が保存の内容と合うときだけ使える                                          |
+| 期限               | Host が決める（PaoBub は 24 時間）。期限切れは証跡なし                                                                                                                                    |
+| 一回だけ           | 保存で使われたら消費済み。同じ `selectionId` をまた送っても、Host は使わない（証跡なし）                                                                                                  |
+| Undo／Redo         | 引用を入れたコマンドを Undo すると、保存前なら証跡は使われずに終わる。Redo はコマンドが持つ同じ `selectionId` をまた運ぶ。未消費なら使え、消費済みなら証跡なし                            |
+| 削除・付け直し     | 外して保存した後に付け直すには、また `select` が要る。値を手で打った・貼り付けた・取り込んだ引用は証跡なし                                                                                |
+| 別の画面           | 証跡は作った編集の場でだけ使える。別の画面で保存した引用は証跡なし                                                                                                                        |
+| 証跡なし・食い違い | Host は版を推測しない。PaoBub は「版不明」とし、受け入れで本人に比べさせる（#524 の H2）                                                                                                  |
+
+Host が無いときは `select` が無いので、値は文字列として入り、証跡は運ばない。
+
 - **競合**：欄の値は Editor の通常のコマンドで、保存の競合は今の保存の約束（版の比較）で扱う。Host は保存後に索引で全引用を読み直し、そこでの判定が正（Editor の表示は手がかり）。
 - **`stale`**：Host が引用元ごとの基準と今の引用先の指紋を比べて返す。基準の作り方・更新・見送りは Host（PaoBub #524 の H2）。比較・更新・見送りの操作は Host の画面で行い、Editor は「古い」と出して Host の画面へ移るだけ。
 - **`open`**：Host が開く時点で権限を確かめ直す。既存の `ReferenceHost.open` と同じ約束で、`forbidden` では題も出さない。
@@ -184,8 +221,8 @@ AI の提案は、既存の proposal（preview／apply／reject）で参照の�
 | 段  | 中身                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 依存 |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
 | AR1 | Graph Profile schema 3（node type の `items`、検証、1・2 からの読み替え、互換の試験）、旧い `analysis-*` Profile の登録を残すことと上げるコマンド・その回帰試験、Data schema 3（表の `items`、行の `refs`、列の削除と宣言、CSV の扱い）、`items@1-draft`（`where`・`rootRefs`・`merge`）と版の交渉、宣言から項目の一覧（FM の多対一の投影と、項目ごとの native 要素の集まり）を作る純粋な関数と、行の削除・並べ替え・追加で同じ FM が保たれる試験、Fishbone／FTA の Profile と FMEA テンプレートの更新 | なし |
-| AR2 | `ItemReferenceHost` の型と、Inspector の候補・状態・移動の画面、選択後の確かめ直し。Playground に架空の Host（同じ Library の三つの成果物から候補を出し、基準を覚えて `stale` を返す）                                                                                                                                                                                                                                                                                                                 | AR1  |
-| AR3 | 検証：引用・解除の Undo/Redo、保存と再読込、native JSON・CSV、FM の食い違いの診断、権限なし・欠落・重複・古い・残した（`kept`）・確かめられないの表示、Host なしの編集、`items@1-draft` を読めない Host、古い版での schema 3 の拒否、旧い Profile の成果物、desktop／mobile                                                                                                                                                                                                                            | AR2  |
+| AR2 | `ItemReferenceHost` の型（`select` と選択の証跡を含む）と、Inspector の候補・状態・移動の画面、コマンドに `selectionId` を持たせて保存で運ぶこと。Playground に架空の Host（同じ Library の三つの成果物から候補を出し、基準を覚えて `stale` を返す）                                                                                                                                                                                                                                                   | AR1  |
+| AR3 | 検証：引用・解除の Undo/Redo、選択の証跡（選んだ後に引用先が変わり表示が更新されても選んだ版のまま、Undo/Redo、消費済みの再送、期限切れ、別の画面での保存、再読み込み、手入力・取り込みは証跡なし）、保存と再読込、native JSON・CSV、FM の食い違いの診断、権限なし・欠落・重複・古い・残した（`kept`）・確かめられないの表示、Host なしの編集、`items@1-draft` を読めない Host、古い版での schema 3 の拒否、旧い Profile の成果物、desktop／mobile                                                     | AR2  |
 
 PaoBub 側の読み取り（`as: 'items'` と `items@1-draft`）、引用ごとの基準、統合試験は [paobub #523](https://github.com/ryo0221/paobub/issues/523)・[#524](https://github.com/ryo0221/paobub/pull/524)。`ok`・`kept`・`stale` の基準と、投影した項目の同一性（業務 ID）と native 要素の集まりの分け方は #524 の H2 と同じ定義を使う。
 
@@ -198,11 +235,11 @@ PaoBub 側の読み取り（`as: 'items'` と `items@1-draft`）、引用ごと�
 
 ## 6. 決めてほしいこと
 
-| #   | 問い                                 | 推奨                                                                                                                                |
-| --- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| U1  | 業務 ID と参照の欄の宣言             | A：今ある型の値と、`items@0-draft` と同じ形の宣言（Graph は Profile の node type、Data は表の宣言を列 ID で）。9 種類の対応は上の表 |
-| U2  | 一つの故障原因が複数の候補を引くとき | A：行の参照の欄 `refs`（配列）。行は分けない                                                                                        |
-| U3  | 引用の値に固定版を入れるか           | A：値は業務 ID だけ。引用ごとの基準は Host が記録する                                                                               |
-| U4  | Host の口                            | 引用元の文脈を渡す `ItemReferenceHost`。状態に `kept` を足す。選択後の確かめ直しは Editor、最終の判定は Host の索引                 |
-| U5  | 互換                                 | Graph Profile schema 3・Data schema 3・`items@1-draft`。古い版は開かずに誤りを出し、旧い Profile の登録は残す                       |
-| U6  | FMEA の FM と FC                     | A：1 行 = FC、FM は同じ `fmId` の行を一致を条件に 1 件へ投影                                                                        |
+| #   | 問い                                 | 推奨                                                                                                                                                       |
+| --- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| U1  | 業務 ID と参照の欄の宣言             | A：今ある型の値と、`items@0-draft` と同じ形の宣言（Graph は Profile の node type、Data は表の宣言を列 ID で）。9 種類の対応は上の表                        |
+| U2  | 一つの故障原因が複数の候補を引くとき | A：行の参照の欄 `refs`（配列）。行は分けない                                                                                                               |
+| U3  | 引用の値に固定版を入れるか           | A：値は業務 ID だけ。引用ごとの基準は Host が記録する                                                                                                      |
+| U4  | Host の口                            | 引用元の文脈を渡す `ItemReferenceHost`。`resolve` は読むだけ、選んだ版は `select` の証跡で保存と結び付ける。状態に `kept` を足す。最終の判定は Host の索引 |
+| U5  | 互換                                 | Graph Profile schema 3・Data schema 3・`items@1-draft`。古い版は開かずに誤りを出し、旧い Profile の登録は残す                                              |
+| U6  | FMEA の FM と FC                     | A：1 行 = FC、FM は同じ `fmId` の行を一致を条件に 1 件へ投影                                                                                               |
