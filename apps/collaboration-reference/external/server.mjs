@@ -124,7 +124,13 @@ const server = createServer(async (req, res) => {
         'Set-Cookie',
         'external_actor=' + cookie + '; Path=/; HttpOnly; SameSite=Strict',
       );
-      result = { token, ticket, namespace: session, domain: 'ext:' + pkg.manifest.id };
+      result = {
+        token,
+        ticket,
+        namespace: session,
+        domain: 'ext:' + pkg.manifest.id,
+        operations: pkg.manifest.addons.collaboration.operations,
+      };
     } else {
       const token = req.headers.authorization?.slice(7) ?? '';
       const principal = () => {
@@ -141,6 +147,9 @@ const server = createServer(async (req, res) => {
         };
       };
       const conn = { principal, readable: () => !!principal(), namespace: principal().sessionId };
+      sessions
+        .prepare('UPDATE reference_sessions SET expires=? WHERE token=?')
+        .run(Date.now() + 60_000, hash(token));
       const snap = host.snapshot(conn);
       for (const [id, pointer] of presence) {
         try {
@@ -194,6 +203,9 @@ const server = createServer(async (req, res) => {
       else if (path === '/save') result = host.save(conn, body);
       else if (path === '/changes') {
         const changed = () => {
+          sessions
+            .prepare('UPDATE reference_sessions SET expires=? WHERE token=?')
+            .run(Date.now() + 60_000, hash(token));
           const snap = host.snapshot(conn);
           return (
             snap.generation !== body.generation ||

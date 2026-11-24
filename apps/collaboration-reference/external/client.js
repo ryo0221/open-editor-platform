@@ -164,9 +164,11 @@ async function main() {
     async submit(revision, id, input) {
       const base = revisions.get(revision);
       if (!base) throw Error('元の版を開き直してください。');
+      const declaration = session.operations.find((op) => op.id === id);
+      if (!declaration) throw Error('unsupported-operation');
       const keys = new Set();
       let content = base.content;
-      for (const action of plan(id, '1.0.0', input, base.content)) {
+      for (const action of plan(id, declaration.version, input, base.content)) {
         const effect = apply(content, action);
         for (const key of effect.required) keys.add(key);
         content = effect.content;
@@ -187,7 +189,7 @@ async function main() {
         generation: base.generation,
         operationId: namespace + '/' + crypto.randomUUID(),
         baseRevision: base.revision,
-        declaration: { id, version: '1.0.0' },
+        declaration,
         input,
         conditions,
       });
