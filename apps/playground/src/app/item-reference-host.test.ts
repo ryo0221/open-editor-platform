@@ -92,6 +92,46 @@ describe('AR2 Playground の架空の ItemReferenceHost', () => {
     expect(s.get('CC-02')).toEqual({ status: 'ok', title: '別の名前' });
   });
 
+  it('AR3 選んだ後、保存の前に引用先の保存版が変わって表示が更新されても、基準は選んだ版のまま', async () => {
+    const { host, saved, from } = setup();
+    const ledger = new ItemSelectionLedger();
+    const r = await host.select(from, 'CC-01', signal);
+    ledger.choose(from, 'CC-01', r);
+    const before = fmea();
+    const after = setRowRefs(before.rows[0]!.id, 'causeCandidates', ['CC-01']).apply(before);
+    const occ = refOccurrences('fmea', after);
+    const marks = ledger.marks(refOccurrences('fmea', before), occ);
+    // 引用元を保存する前に、引用先の Fishbone が保存し直され、表示（resolve）も新しい版を見る
+    saved.current.set('fish', record('fish', '特性要因図', fishbone('接点の溶着（改）'), 2));
+    expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')).toEqual({
+      status: 'ok',
+      title: '接点の溶着（改）',
+    });
+    host.committed('fmea', ledger.evidenceFor(marks, refOccurrences('fmea', before), occ), occ);
+    // 基準は選んだ時の版なので、保存した直後から古い
+    expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('stale');
+  });
+
+  it('AR3 別の編集の場（別の画面・再読み込みの後）の保存は、ほかの場で選んだ証跡を持たない', async () => {
+    const { host, saved, from } = setup();
+    const here = new ItemSelectionLedger();
+    const r = await host.select(from, 'CC-01', signal);
+    here.choose(from, 'CC-01', r);
+    const before = fmea();
+    const after = setRowRefs(before.rows[0]!.id, 'causeCandidates', ['CC-01']).apply(before);
+    const occ = refOccurrences('fmea', after);
+    here.marks(refOccurrences('fmea', before), occ);
+    // 同じ中身を別の場（新しい台帳と、その場の編集の印）が保存する：証跡は無い
+    const there = new ItemSelectionLedger();
+    const theirMarks = there.marks(refOccurrences('fmea', before), occ);
+    const evidence = there.evidenceFor(theirMarks, refOccurrences('fmea', before), occ);
+    expect(evidence).toEqual([]);
+    host.committed('fmea', evidence, occ);
+    // 証跡の無い引用は基準を持たない（Playground は古いと言えない。PaoBub は「版不明」として比べさせる）
+    saved.current.set('fish', record('fish', '特性要因図', fishbone('変えた'), 2));
+    expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('ok');
+  });
+
   it('消費済み・期限切れ・食い違う証跡は使わず、外して保存すると基準も終わる', async () => {
     const { host, saved, from, tick } = setup();
     const occ = [{ from, id: 'CC-01' }];
