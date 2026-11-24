@@ -14,3 +14,4 @@ export * from './reuse';
 export * from './react-ui';
 
 export * from './animation';
+export { mindmapEditorCodec } from './mindmap';

@@ -30,6 +30,8 @@ import {
   EditorAssetCache,
   reactUiEditorCodec,
   animationEditorCodec,
+  mindmapEditorCodec,
+  scheduleEditorCodec,
 } from '@editor-platform/collaboration-adapters';
 import {
   slideFixture,
@@ -51,6 +53,8 @@ const editorCodecs = {
   ...codecs,
   'react-ui': reactUiEditorCodec,
   animation: animationEditorCodec,
+  mindmap: mindmapEditorCodec,
+  schedule: scheduleEditorCodec,
   document: documentEditorCodec,
   slide: slideEditorCodec,
   design: designEditorCodec,
@@ -169,6 +173,7 @@ export function createReferenceServer() {
               version.schemaVersion !== 1 ||
               typeof version.versionId !== 'string' ||
               seeded.some((v) => v.version.versionId === version.versionId) ||
+              (codec.domain === 'schedule' && !codec.validate(version.content)) ||
               (await contentHash(version.content)) !== version.contentHash
             )
               fail('schema-mismatch', 'Invalid immutable version or content hash');

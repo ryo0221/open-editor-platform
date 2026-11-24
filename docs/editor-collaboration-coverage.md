@@ -22,12 +22,20 @@ input and scoped geometry dependencies, with explicit regression evidence.
 | Data cells/Form/Kanban edits, rectangular paste, row insertion/deletion/reorder                                          | Grid keyboard/editors/paste/context, Form Save, Kanban move                  | Per-row/per-column cell resources; atomic multi-cell transaction; type/formula/read-only/schema validation               | EI-Q07; editor-transactions/editor-domains; existing Data tests |
 | Data column name/type/default/required/options/formula/format/order and named view save/delete                           | Field/schema menus, headers, view panel                                      | Schema dependency guards; invalid formulas/refs/types reject; named view values are shared                               | EI-Q07; editor-domains; existing Data tests                     |
 | Data active projection/search/filter/sort/group/chart settings before Save view; canvas camera/page/tool/panels          | View controls, page/outline rails, zoom/pan and panels                       | Private view state; explicit named view Save is the shared mutation                                                      | EI-Q05/07/13/14                                                 |
+| Mind Map branch fields, tree layout, add, delete, move and reorder | Mind Map canvas, branch panel and keyboard | Branch fields and child order use separate resources. The authority checks the entire tree and authorization for affected branches. Branch selection follows stable IDs. | mindmap unit tests, mindmap.spec.ts |
+| Schedule events, time range, notes, conference preference and default zone | Calendar, event details and keyboard | Independent event fields use separate resources. A time range, zone and DST fold are one value. Data reference lanes require a separate Host policy. | schedule unit tests |
 | Review/File add annotation/reply/resolve/reopen                                                                          | Side/line/page/region selection, comments panel                              | Shared threads; fixed source/version/side/page/region anchors; source bytes/content remain immutable                     | EI-Q08; #3 fixed-anchor and #2 PDF/image/review tests           |
 | Save/version history/restore/native and format export                                                                    | Header, Ctrl/Cmd+S, History, export menus                                    | Confirmed immutable versions; conditional restore; no remote snapshot Undo; ordinary exports omit sync/auth/presence     | EI-Q10/12; recovery tests                                       |
 | Human/agent/template operations, preview/apply/reject/cancel/retry                                                       | Public prepare/text API, normal preview panel, reference C demo              | Same checked operation boundary, reads/stamps/token, idempotent apply, explicit new proposal after dependency conflict   | EI-Q02/09/11; #3 proposal unit tests                            |
 | Read-only/revoked/expired writes, disconnect/reload/lost ack                                                             | All commands, text, shortcuts, proposals, assets, Undo and save              | Current trusted principal checked on commit; pending/rejected retained; same ID receipt recovery                         | EI-Q11/12; recovery/text/foundation tests                       |
 
 ## Capability states
+
+Mind Map and Schedule use the existing native JSON and the reference Host's shared
+session. Mind Map names are applied as complete field values. A conflict keeps
+unapplied input in the branch panel. Zoom and folding are private. For Schedule,
+display navigation is private and the draft or saved history with Data reference lanes
+is refused before sharing. Undo and save use the confirmed shared history.
 
 An opt-in Slide Host can use the [shared reference contract](shared-slide-references.md)
 to validate, show and edit retained image references and value/figure citations.

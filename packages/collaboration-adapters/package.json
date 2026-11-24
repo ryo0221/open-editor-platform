@@ -12,6 +12,8 @@
     "@editor-platform/react-ui-core": "*",
     "@editor-platform/collaboration-core": "*",
     "@editor-platform/document": "*",
+    "@editor-platform/mindmap-core": "*",
+    "@editor-platform/schedule": "*",
     "@editor-platform/slide": "*",
     "@editor-platform/design": "*",
     "@editor-platform/whiteboard": "*",

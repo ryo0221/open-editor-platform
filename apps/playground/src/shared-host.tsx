@@ -14,6 +14,8 @@ import {
   fileCodec,
   reactUiEditorCodec,
   animationEditorCodec,
+  mindmapEditorCodec,
+  scheduleEditorCodec,
   annotationsToThreads,
   editorAssetCodec,
   type EditorConnectionCredentials,
@@ -30,6 +32,8 @@ import {
 const codecs = {
   'react-ui': reactUiEditorCodec,
   animation: animationEditorCodec,
+  mindmap: mindmapEditorCodec,
+  schedule: scheduleEditorCodec,
   slide: slideEditorCodec,
   design: designEditorCodec,
   whiteboard: whiteboardEditorCodec,
@@ -38,6 +42,10 @@ const codecs = {
   review: reviewCodec,
   file: fileCodec,
 };
+function supportsSharedKind(kind: Kind): kind is keyof typeof codecs {
+  return Object.hasOwn(codecs, kind);
+}
+
 class ReferenceEditorAdapter extends HttpEditorAdapter<Content> {
   dropNextAcknowledgement = false;
   async submit(op: Operation) {
@@ -57,26 +65,7 @@ async function connect(
   actor: 'A' | 'B' | 'C',
   initial?: StoredArtifact,
 ) {
-  if (
-    domain === 'fiction-map' ||
-    domain === 'structured-graph' ||
-    domain === 'analysis' ||
-    domain === 'estimate' ||
-    domain === 'geo' ||
-    domain === 'schedule' ||
-    domain === 'cad' ||
-    domain === 'bim' ||
-    domain === 'character' ||
-    domain === 'simulation' ||
-    domain === 'construction' ||
-    domain === 'pcb' ||
-    domain === 'schematic' ||
-    domain === 'ladder' ||
-    domain === 'cosim' ||
-    domain === 'drawing' ||
-    domain === 'factory' ||
-    domain === 'mindmap'
-  )
+  if (!supportsSharedKind(domain))
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))
     throw new Error(
@@ -85,6 +74,11 @@ async function connect(
   const codec = editorAssetCodec(codecs[domain] as DomainCodec<Content>);
   const reason = codec.unsupportedContentReason?.(initial?.draft.content);
   if (reason) throw new Error(reason);
+  if (
+    domain === 'schedule' &&
+    initial?.versions.some((v) => !scheduleEditorCodec.validate(v.content))
+  )
+    throw new Error('Data の参照レーンを持つ保存版がある予定表は共同編集を開始できません。');
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {

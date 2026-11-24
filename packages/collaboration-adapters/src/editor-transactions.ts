@@ -48,6 +48,8 @@ import { reactUiPatchAction } from './react-ui';
 import { prepareAnimationEditorActions } from './animation-command';
 import type { ReactUiDocument } from '@editor-platform/react-ui-core';
 import { dataCodec } from './data';
+import { mindmapEditAction, mindmapEditorCodec } from './mindmap';
+import { isSchedule, type ScheduleDocument } from '@editor-platform/schedule/model';
 import {
   applyCanvasSteps,
   canvasEngineDocument,
@@ -279,12 +281,43 @@ const dataSchema: Schema<StructuredData> = {
     ]),
   ],
 };
+const scheduleReferenceReason = 'Data の参照レーンを持つ予定表は共同編集を開始できません。';
+const scheduleSchema: Schema<ScheduleDocument> = {
+  base: {
+    domain: 'schedule',
+    unsupportedContentReason: (value) =>
+      isSchedule(value) && value.lanes.length ? scheduleReferenceReason : undefined,
+    validate: (value): value is ScheduleDocument => isSchedule(value) && !value.lanes.length,
+    resource: () => undefined,
+    validateAnchor: (content, anchor) =>
+      anchor.type === 'element' &&
+      !anchor.region &&
+      content.events.some((event) => event.id === anchor.elementId),
+    apply(content, action) {
+      const next = action.payload.content;
+      if (action.type !== 'domain.restore' || !isSchedule(next) || next.lanes.length)
+        fail('invalid-operation', 'Invalid saved Schedule');
+      return {
+        content: copy(next),
+        required: ['*'],
+        touched: ['*'],
+        targets: ['*'],
+        inverse: [{ type: 'domain.restore', target: '*', payload: { content } }],
+      };
+    },
+  },
+  root: ['timeZone'],
+  collections: (content) => [
+    collection(content, 'events', ['title', 'notes', 'time', 'conference']),
+  ],
+};
 function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
   const schema = {
     slide: referenceCapability in codec ? slideReferenceSchema : slideSchema,
     design: designSchema,
     whiteboard: boardSchema,
     data: dataSchema,
+    schedule: scheduleSchema,
   }[codec.domain as 'slide'];
   if (!schema) fail('unsupported-operation', 'This editor uses its text or annotation engine');
   return schema as unknown as Schema<T>;
@@ -442,6 +475,7 @@ function differences<T>(schema: Schema<T>, before: T, after: T): EditorChange[] 
     design: ['elements', 'components', 'styles'],
     whiteboard: ['nodes', 'connectors', 'sections'],
     data: ['rows', 'columns', 'views', 'graphView'],
+    schedule: ['events'],
   }[schema.base.domain as 'slide'];
   for (const field of new Set([...Object.keys(before as Root), ...Object.keys(after as Root)]))
     if (
@@ -600,6 +634,19 @@ function editorCommandActions<T>(
   command: EditorCommand<T>,
 ): { actions: Action[]; origin: Origin; transactionId?: string } | undefined {
   if (codec.domain === 'animation') return prepareAnimationEditorActions(codec, state, command);
+  if (codec.domain === 'mindmap') {
+    const after = command.apply(command.readonlyInput ? state.content : copy(state.content));
+    if (!mindmapEditorCodec.validate(state.content) || !mindmapEditorCodec.validate(after))
+      fail('invalid-operation', 'Command produced an invalid Mind Map');
+    const action = mindmapEditAction(state.content, after);
+    return (
+      action && {
+        actions: [action],
+        origin: command.context?.origin === 'proposal' ? 'proposal' : 'human',
+        transactionId: command.context?.transactionId,
+      }
+    );
+  }
   if (codec.domain === 'react-ui') {
     const after = command.apply(command.readonlyInput ? state.content : copy(state.content));
     const action = reactUiPatchAction(
@@ -1337,6 +1384,7 @@ export function createSharedSlideReferenceCodec(
 export const designEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(designSchema)));
 export const whiteboardEditorCodec = editorAssetCodec(withNativeReuse(editorCodec(boardSchema)));
 export const dataEditorCodec = withNativeReuse(editorCodec(dataSchema));
+export const scheduleEditorCodec = editorCodec(scheduleSchema);
 // Keep schema imports in the public type graph; these validators also document ownership.
 export const editorValidators = {
   slide: isDeck,

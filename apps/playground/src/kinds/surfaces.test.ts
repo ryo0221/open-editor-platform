@@ -61,7 +61,6 @@ it('keeps the Playground behaviour each kind had in App.tsx', () => {
       'analysis',
       'estimate',
       'geo',
-      'schedule',
       'cad',
       'bim',
       'character',
