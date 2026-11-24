@@ -300,4 +300,29 @@ describe('readItems with items@1-draft', () => {
     };
     expect(itemsDeclarationProblems({ version: ITEMS_ADDON_V1, collections: [ok] })).toEqual([]);
   });
+
+  it('reports malformed refs or layout with a merge as problems instead of throwing', () => {
+    for (const c of [
+      {
+        at: 'rows',
+        id: 'id',
+        title: 'name',
+        refs: [null],
+        layout: ['x'],
+        merge: { equal: ['name'] },
+      },
+      {
+        at: 'rows',
+        id: 'id',
+        title: 'name',
+        refs: ['a'],
+        layout: [null],
+        merge: { equal: ['name'] },
+      },
+    ]) {
+      const addon = { version: ITEMS_ADDON_V1, collections: [c] } as unknown as ItemsAddon;
+      expect(itemsDeclarationProblems(addon).length).toBeGreaterThan(0);
+      expect(readItems(addon, {}, none).items).toEqual([]);
+    }
+  });
 });

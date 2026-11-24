@@ -143,18 +143,12 @@ export function itemsDeclarationProblems(addon: unknown): string[] {
       if (!plain(m) || Object.keys(m).some((k) => k !== 'equal') || !paths(m.equal, true))
         out.push(`${at}.merge: must be { equal: paths }`);
       // 見た目の欄は比べる前に除くので、比べる道筋（equal・refs）と重ねない
-      else if (Array.isArray(c.layout)) {
+      // 形を確かめた道筋どうしだけを比べる（形の違う refs・layout は上で問題にしてある）
+      else if (paths(c.layout, false) && (c.refs === undefined || paths(c.refs, false))) {
         const overlap = (a: string, b: string) =>
           a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
-        const compared = [
-          ...(m.equal as string[]),
-          ...(Array.isArray(c.refs) ? (c.refs as string[]) : []),
-        ];
-        if (
-          (c.layout as unknown[]).some(
-            (l) => typeof l === 'string' && compared.some((p) => overlap(l, p)),
-          )
-        )
+        const compared = [...(m.equal as string[]), ...((c.refs as string[] | undefined) ?? [])];
+        if ((c.layout as string[]).some((l) => compared.some((p) => overlap(l, p))))
           out.push(`${at}.layout: must not overlap merge.equal or refs paths`);
       }
     }
