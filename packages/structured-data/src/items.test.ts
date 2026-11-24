@@ -227,28 +227,43 @@ describe('Data schema 3: item declarations and row references', () => {
       expect(() => setRowRefs('r1', 'causeCandidates', ids)).toThrow(/distinct, non-empty/);
   });
 
-  it('shows references of added and removed records in the proposal diff', () => {
-    const d = table();
-    const added = {
-      ...d,
-      rows: [
-        ...d.rows,
-        { id: 'r3', values: { fcId: 'FC-03' }, refs: { causeCandidates: ['CC-09'] } },
-      ],
+  it('shows references of added and removed records in the proposal diff, apart from a refs column', () => {
+    const d = {
+      ...table(),
+      columns: [...table().columns, { id: 'refs', name: 'メモ', type: 'text' as const }],
     };
+    const row = {
+      id: 'r3',
+      values: { fcId: 'FC-03', refs: 'セルの値' },
+      refs: { causeCandidates: ['CC-09'] },
+    };
+    const added = { ...d, rows: [...d.rows, row] };
     expect(dataProposalDiff.diff(d, added).changes).toEqual([
       expect.objectContaining({
         kind: 'added',
         elementId: 'r3',
-        after: expect.objectContaining({ refs: { causeCandidates: ['CC-09'] } }),
+        property: 'record',
+        after: row.values,
+      }),
+      expect.objectContaining({
+        kind: 'added',
+        elementId: 'r3',
+        property: 'refs.causeCandidates',
+        after: ['CC-09'],
       }),
     ]);
-    const removed = { ...d, rows: [d.rows[1]!] };
-    expect(dataProposalDiff.diff(d, removed).changes).toEqual([
+    expect(dataProposalDiff.diff(added, d).changes).toEqual([
       expect.objectContaining({
         kind: 'removed',
-        elementId: 'r1',
-        before: expect.objectContaining({ refs: { causeCandidates: ['CC-01', 'CC-02'] } }),
+        elementId: 'r3',
+        property: 'record',
+        before: row.values,
+      }),
+      expect.objectContaining({
+        kind: 'removed',
+        elementId: 'r3',
+        property: 'refs.causeCandidates',
+        before: ['CC-09'],
       }),
     ]);
   });
