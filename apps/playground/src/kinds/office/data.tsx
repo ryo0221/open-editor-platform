@@ -61,6 +61,11 @@ function DataHost({ host, content }: { host: SurfaceHost; content: StructuredDat
         readOnly={host.readOnly}
         execute={host.execute}
         select={host.select}
+        focusRowId={
+          host.revealAddress?.artifactId === host.active.id
+            ? host.revealAddress.elementId
+            : undefined
+        }
         itemReferences={host.itemReferences}
       />
     </>

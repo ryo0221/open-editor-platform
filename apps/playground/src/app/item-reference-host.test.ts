@@ -42,11 +42,16 @@ function setup() {
   const saved = {
     current: new Map<string, StoredArtifact>([['fish', record('fish', '特性要因図', fishbone())]]),
   };
-  const opened: [string, string][] = [];
+  const opened: [string, string, string][] = [];
   const host = playgroundItemHost({
     saved,
     notifications: { current: new Set() },
-    navigation: { current: (a: string, e: string) => (opened.push([a, e]), true) },
+    navigation: {
+      current: (a: string, e: string, back: { elementId: string }) => (
+        opened.push([a, e, back.elementId]),
+        true
+      ),
+    },
     now: () => clock,
   });
   const from = { artifactId: 'fmea', elementId: fmea().rows[0]!.id, field: 'refs.causeCandidates' };
@@ -115,7 +120,7 @@ describe('AR2 Playground の架空の ItemReferenceHost', () => {
     const { host, saved, from, opened } = setup();
     expect(await host.open('CC-01', from)).toEqual({ opened: true });
     const node = fishbone().nodes.find((n) => n.attributes.itemId === 'CC-01')!.id;
-    expect(opened).toEqual([['fish', node]]);
+    expect(opened).toEqual([['fish', node, from.elementId]]);
     const dup = clone(fishbone());
     dup.nodes.filter((n) => n.type === 'cause')[1]!.attributes.itemId = 'CC-01';
     saved.current.set('fish', record('fish', '特性要因図', dup, 2));

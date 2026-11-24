@@ -35,7 +35,12 @@ function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphD
         sourceRevision={canonicalJson((host.session as EditorSession<Content>).revision)}
         execute={host.execute}
         select={host.select}
-        selectedId={host.selection.addresses[0]?.elementId}
+        selectedId={
+          host.selection.addresses[0]?.elementId ??
+          (host.revealAddress?.artifactId === host.active.id
+            ? host.revealAddress.elementId
+            : undefined)
+        }
         readOnly={host.readOnly}
         itemReferences={host.itemReferences}
       />

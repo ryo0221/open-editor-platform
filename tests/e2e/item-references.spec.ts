@@ -52,7 +52,22 @@ test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで�
   expect(await rowRefs()).toBeUndefined();
   await page.getByRole('button', { name: 'Redo', exact: true }).first().click();
   expect(await rowRefs()).toEqual({ causeCandidates: ['CC-01'] });
+  // 外してから Undo で戻した引用も、選んだ版の証跡を保存へ持っていく
+  await refs.getByRole('button', { name: 'CC-01 を外す', exact: true }).click();
+  expect(await rowRefs()).toBeUndefined();
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect(await rowRefs()).toEqual({ causeCandidates: ['CC-01'] });
   await save(page, 1);
+
+  // 開くと引用先の原因の候補が選ばれ、戻ると引用した故障原因へ戻る
+  await refs.getByRole('button', { name: 'CC-01 を開く', exact: true }).click();
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Graph Inspector' })
+      .getByLabel('業務 ID', { exact: true }),
+  ).toHaveValue('CC-01');
+  await page.getByRole('button', { name: '埋め込み先に戻る', exact: true }).click();
+  await expect(page.getByLabel('Record 故障原因の ID', { exact: true })).toHaveValue('FC-01');
 
   // 引用先の原因の候補を変えて保存し直すと、選んだ版から変わったので「古い」
   await activate(page, /Structured Graph 1/);

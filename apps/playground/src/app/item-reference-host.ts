@@ -112,7 +112,10 @@ export interface PlaygroundItemHost extends ItemReferenceHost {
 export function playgroundItemHost(context: {
   saved: MutableRefObject<Map<string, StoredArtifact>>;
   notifications: MutableRefObject<Set<(id: string) => void>>;
-  navigation: MutableRefObject<(sourceId: string, elementId: string, pageId?: string) => boolean>;
+  /** Opens the target artifact focused on the cited element; the return address is `from`. */
+  navigation: MutableRefObject<
+    (targetArtifactId: string, targetElementId: string, from: ItemRefSource) => boolean
+  >;
   now?: () => number;
 }): PlaygroundItemHost {
   const now = context.now ?? (() => Date.now());
@@ -177,7 +180,7 @@ export function playgroundItemHost(context: {
       if (state.status !== 'ok' && state.status !== 'stale' && state.status !== 'kept')
         return { opened: false, state };
       const it = catalog(from.artifactId).items.get(id)![0]!;
-      return context.navigation.current(it.artifactId, it.elements[0] ?? '')
+      return context.navigation.current(it.artifactId, it.elements[0] ?? '', { ...from })
         ? { opened: true }
         : { opened: false, state: { status: 'offline', reason: '開けませんでした' } };
     },

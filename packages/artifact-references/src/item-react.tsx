@@ -56,12 +56,13 @@ export function ItemReferenceField({
   const idsKey = JSON.stringify(ids);
   const fromKey = JSON.stringify([from.artifactId, from.elementId, from.field]);
   const alive = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Strict Mode runs setup, cleanup and setup again: the second setup must mark it mounted
+    alive.current = true;
+    return () => {
       alive.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   useEffect(() => host.subscribe?.(() => setTick((n) => n + 1)), [host]);
   useEffect(() => {
     if (!ids.length) return void setStates(new Map());
@@ -106,12 +107,9 @@ export function ItemReferenceField({
       const next = multiple ? [...ids.filter((x) => x !== id), id] : [id];
       // The command goes in first; the choice is kept only when the edit was applied.
       if (change(next)) {
+        // Choices of replaced IDs stay until the save: Undo may bring them back, and a save
+        // sends evidence only for citations it holds
         ledger.choose(at, id, r);
-        if (!multiple)
-          ledger.forget(
-            at,
-            ids.filter((x) => x !== id),
-          );
         setCandidates(null);
       } else setMessage('変更できませんでした');
     } catch {
@@ -121,7 +119,8 @@ export function ItemReferenceField({
     }
   }
   function remove(id: string) {
-    if (change(ids.filter((x) => x !== id))) ledger.forget(from, [id]);
+    // The choice stays until the save so that Undo of the removal keeps its evidence
+    change(ids.filter((x) => x !== id));
   }
   async function open(id: string) {
     setMessage('');

@@ -1,4 +1,4 @@
-import { useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { newId } from '@editor-platform/artifact-core';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
 import {
@@ -62,6 +62,8 @@ type DataSurfaceBodyProps = {
     openDefinition: (columnId?: string) => void;
   }) => ReactNode;
   select: (id: string, region?: Region) => void;
+  /** A row the Host asks to show, for example the target of an opened item reference. */
+  focusRowId?: string;
   readOnly?: boolean;
   layout?: Pick<EditorLayoutProps, 'viewKey' | 'panels' | 'defaultPanels' | 'onPanelsChange'>;
 } & ItemReferenceSurfaceProps;
@@ -86,6 +88,7 @@ function DataSurfaceBody({
   onViewChange,
   onViewDraftChange,
   itemReferences,
+  focusRowId,
 }: DataSurfaceBodyProps) {
   const wording = useWording();
   const guardExport = useContext(EditorExportGuardContext);
@@ -151,6 +154,10 @@ function DataSurfaceBody({
     setActive({ rowId: id, columnId: active?.columnId ?? columns[0]?.id ?? '' });
     select(id);
   }
+  useEffect(() => {
+    if (focusRowId && data.rows.some((r) => r.id === focusRowId)) focusRow(focusRowId);
+    // Only a new request moves the focus; later edits keep the person's own selection
+  }, [focusRowId]);
   useRecordDraftInput({
     data,
     readOnly,

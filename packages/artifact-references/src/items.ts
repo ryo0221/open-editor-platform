@@ -90,7 +90,8 @@ export interface ItemRefOccurrence {
  * (it was not in the previous save) carries its choice; every kept choice then ends: used ones are
  * consumed, and choices whose citation is not in the saved content are dropped, so removing a
  * citation, saving and adding it again needs a new `select`. Undo and Redo before the save keep
- * the choice because the citation is the same. Typing or pasting an ID never makes a choice, and
+ * the choice because the citation is the same, and so does removing or replacing it through the
+ * reference field and then undoing that. Typing or pasting an ID never makes a choice, and
  * changing a field by hand forgets the choices of that field (its IDs then go without evidence).
  */
 export class ItemSelectionLedger {

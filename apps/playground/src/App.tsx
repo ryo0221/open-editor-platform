@@ -171,7 +171,10 @@ import {
 import { nativeContent, nativeShared } from './app/native';
 import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
-import { ItemSelectionLedger } from '@editor-platform/artifact-references/items';
+import {
+  ItemSelectionLedger,
+  type ItemRefSource,
+} from '@editor-platform/artifact-references/items';
 import { playgroundItemHost, refOccurrences } from './app/item-reference-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
@@ -276,13 +279,17 @@ export default function App({
     [activeId],
   );
   const liveReferences = useMemo(() => savedExtensionReferences(activeId), [activeId]);
+  /** Opens a cited business item: focuses it in its artifact and returns to the citing element. */
+  const itemNavigation = useRef<
+    (targetArtifactId: string, targetElementId: string, from: ItemRefSource) => boolean
+  >(() => false);
   // AR2: business item references between the saved Fishbone, FMEA and FTA of this Library
   const itemHost = useMemo(
     () =>
       playgroundItemHost({
         saved: referenceSavedRecords,
         notifications: referenceNotifications,
-        navigation: referenceNavigation,
+        navigation: itemNavigation,
       }),
     [],
   );
@@ -706,6 +713,16 @@ export default function App({
     }
     referenceReturn.current = { artifactId: activeId, elementId, pageId };
     activate(sourceId);
+    return true;
+  };
+  itemNavigation.current = (targetArtifactId, targetElementId, from) => {
+    if (!flushInputs()) return false;
+    if (shared) throw new Error('引用先へ移動する前に共有接続を終了してください。');
+    if (!recordsRef.current.some((a) => a.id === targetArtifactId)) return false;
+    referenceReturn.current = { artifactId: from.artifactId, elementId: from.elementId };
+    activate(targetArtifactId);
+    if (targetElementId)
+      setRevealAddress({ artifactId: targetArtifactId, elementId: targetElementId });
     return true;
   };
   function returnFromReference() {
