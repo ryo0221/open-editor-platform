@@ -259,4 +259,45 @@ describe('readItems with items@1-draft', () => {
     expect(Object.prototype.toString.call).toBe(call);
     expect(r.items[0]!.body).toEqual({ toString: { call: 'x' } });
   });
+
+  it('treats null and missing compared values alike, so row order does not change a merged body', () => {
+    const decl: ItemsAddon = {
+      version: ITEMS_ADDON_V1,
+      collections: [
+        { at: 'rows', id: 'id', title: 'name', refs: ['fn'], merge: { equal: ['name'] } },
+      ],
+    };
+    const a = { id: 'FM-01', name: 'x', fn: null };
+    const b = { id: 'FM-01', name: 'x' };
+    const one = readItems(decl, { rows: [a, b] }, none).items[0]!;
+    const two = readItems(decl, { rows: [b, a] }, none).items[0]!;
+    expect(one.body).toEqual({ name: 'x' });
+    expect(two.body).toEqual(one.body);
+  });
+
+  it('refuses layout paths that overlap the compared paths of a merge', () => {
+    for (const layout of [['target'], ['name'], ['details'], ['details.s.x']]) {
+      const c = {
+        at: 'rows',
+        id: 'id',
+        title: 'name',
+        refs: ['target'],
+        layout,
+        merge: { equal: ['name', 'details.s'] },
+      };
+      expect(
+        itemsDeclarationProblems({ version: ITEMS_ADDON_V1, collections: [c] }),
+        JSON.stringify(layout),
+      ).toEqual(['items[0].layout: must not overlap merge.equal or refs paths']);
+    }
+    const ok = {
+      at: 'rows',
+      id: 'id',
+      title: 'name',
+      refs: ['target'],
+      layout: ['color'],
+      merge: { equal: ['name'] },
+    };
+    expect(itemsDeclarationProblems({ version: ITEMS_ADDON_V1, collections: [ok] })).toEqual([]);
+  });
 });

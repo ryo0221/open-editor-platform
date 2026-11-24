@@ -78,6 +78,20 @@ function rowChanges(
       ...(column?.type === 'date' ? dayUnits(column, x, y) : {}),
     });
   }
+  // 行の参照の欄（schema 3）も提案の差分に出す（参照だけの提案を「変更なし」にしない）
+  for (const f of new Set([...Object.keys(old.refs ?? {}), ...Object.keys(next.refs ?? {})])) {
+    const x = old.refs?.[f] ?? [],
+      y = next.refs?.[f] ?? [];
+    if (sameValue(x, y)) continue;
+    changes.push({
+      ...base,
+      kind: 'field',
+      property: `refs.${f}`,
+      propertyLabel: `refs.${f}`,
+      before: x,
+      after: y,
+    });
+  }
   return changes;
 }
 

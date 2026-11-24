@@ -103,7 +103,8 @@ export function dataItemsProblems(items: unknown, columns: readonly Column[]): s
         Array.isArray(m.equal) &&
         m.equal.length <= DATA_ITEMS_LIMITS.refs &&
         new Set(m.equal).size === m.equal.length &&
-        m.equal.every((c) => column(c) && c !== d.id);
+        // 式の列は保存したセルに値が無いので比べられない
+        m.equal.every((c) => column(c) && c !== d.id && byId.get(c as string)?.type !== 'formula');
       if (!ok) out.push(`${at}.merge: must be { equal: column IDs }`);
     }
   });
@@ -169,9 +170,14 @@ export function itemsWithoutColumn(
   return out.length ? out : undefined;
 }
 
-/** Whether a column is the ID or title of a declaration (it must stay a text column). */
+/** Whether a column is the ID, title or a cited column of a declaration (it must stay text). */
 export const itemsTextColumn = (data: Pick<StructuredData, 'items'>, columnId: string) =>
-  !!data.items?.some((d) => d.id === columnId || d.title === columnId);
+  !!data.items?.some(
+    (d) => d.id === columnId || d.title === columnId || !!d.refs?.includes(columnId),
+  );
+/** Whether a column is compared by a merge (it must not become a formula). */
+export const itemsMergeColumn = (data: Pick<StructuredData, 'items'>, columnId: string) =>
+  !!data.items?.some((d) => !!d.merge?.equal.includes(columnId));
 
 /** Reference fields declared by any declaration, in declaration order. */
 export function declaredRefFields(data: Pick<StructuredData, 'items'>): string[] {

@@ -2,7 +2,7 @@ import { newId, clone, canonicalJson } from '@editor-platform/artifact-core';
 import { dayString } from '@editor-platform/time-axis';
 import { command, immutableCommand, type EditorCommand } from '@editor-platform/editor-core';
 import { columnSchemaCommand } from './schema-command';
-import { itemsTextColumn } from './items';
+import { itemsMergeColumn, itemsTextColumn } from './items';
 import {
   atLeastSchema2,
   cellValue,
@@ -457,7 +457,11 @@ export function previewColumn(
     throw new Error('Field names must be unique and nonempty');
   // 業務 ID・題の列は文字列のまま（宣言が指す列の型を変えると項目が読めなくなる）
   if (updated.type !== 'text' && itemsTextColumn(data, id))
-    throw new Error(`${original.name} holds item IDs or titles and must stay a text field`);
+    throw new Error(
+      `${original.name} holds item IDs, titles or citations and must stay a text field`,
+    );
+  if (updated.type === 'formula' && itemsMergeColumn(data, id))
+    throw new Error(`${original.name} is compared to merge items and cannot become a formula`);
   const columns = data.columns.map((c) => {
     const frozen =
       c.type === 'formula' ? { ...c, formula: freezeFormulaReferences(data, c.formula ?? '') } : c;

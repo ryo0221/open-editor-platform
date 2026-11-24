@@ -15,6 +15,7 @@ import {
 import { saveView, updateColumn, defaultView } from './views';
 import { dataItemsDeclaration, dataItemsProblems, itemsWithoutColumn } from './items';
 import { prepareCsvExport } from './csv-transfer';
+import { dataProposalDiff } from './proposal-diff';
 
 const table = (): StructuredData => ({
   schemaVersion: 3,
@@ -177,5 +178,42 @@ describe('Data schema 3: item declarations and row references', () => {
     const out = prepareCsvExport(table(), { rowsScope: 'all', columnsScope: 'all' });
     expect(out.csv.split('\r\n')[0]!.endsWith(',refs.causeCandidates')).toBe(true);
     expect(out.csv.split('\r\n')[1]!.endsWith(',CC-01;CC-02')).toBe(true);
+  });
+
+  it('refuses formula columns in a merge, and keeps compared columns from becoming formulas', () => {
+    const d = table();
+    const columns = [
+      ...d.columns,
+      { id: 'rpn', name: 'RPN', type: 'formula' as const, formula: 'O * 2' },
+    ];
+    expect(
+      dataItemsProblems(
+        [{ kind: 'x', id: 'fmId', title: 'failure', merge: { equal: ['rpn'] } }],
+        columns,
+      ),
+    ).toEqual(['items[0].merge: must be { equal: column IDs }']);
+    expect(() => updateColumn('failure', { type: 'formula', formula: 'O' }).apply(d)).toThrow(
+      /must stay a text field|cannot become a formula/,
+    );
+    const withO = {
+      ...d,
+      items: [{ kind: 'x', id: 'fmId', title: 'failure', merge: { equal: ['o'] } }],
+    };
+    expect(() => updateColumn('o', { type: 'formula', formula: 'O' }).apply(withO)).toThrow(
+      /cannot become a formula/,
+    );
+  });
+
+  it('shows reference-only edits in the proposal diff', () => {
+    const after = setRowRefs('r1', 'causeCandidates', ['CC-02']).apply(table());
+    const diff = dataProposalDiff.diff(table(), after);
+    expect(diff.changes).toEqual([
+      expect.objectContaining({
+        elementId: 'r1',
+        property: 'refs.causeCandidates',
+        before: ['CC-01', 'CC-02'],
+        after: ['CC-02'],
+      }),
+    ]);
   });
 });

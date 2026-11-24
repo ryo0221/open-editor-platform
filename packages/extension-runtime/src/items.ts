@@ -142,6 +142,21 @@ export function itemsDeclarationProblems(addon: unknown): string[] {
       const m = c.merge;
       if (!plain(m) || Object.keys(m).some((k) => k !== 'equal') || !paths(m.equal, true))
         out.push(`${at}.merge: must be { equal: paths }`);
+      // 見た目の欄は比べる前に除くので、比べる道筋（equal・refs）と重ねない
+      else if (Array.isArray(c.layout)) {
+        const overlap = (a: string, b: string) =>
+          a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+        const compared = [
+          ...(m.equal as string[]),
+          ...(Array.isArray(c.refs) ? (c.refs as string[]) : []),
+        ];
+        if (
+          (c.layout as unknown[]).some(
+            (l) => typeof l === 'string' && compared.some((p) => overlap(l, p)),
+          )
+        )
+          out.push(`${at}.layout: must not overlap merge.equal or refs paths`);
+      }
     }
   });
   return out;
@@ -183,7 +198,8 @@ const pick = (v: unknown, list: readonly string[]): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
   for (const p of list) {
     const x = dig(v, p);
-    if (x === undefined) continue;
+    // 比べるときと同じく、null と欠けは同じ（どちらも中身に入れない）
+    if (x === undefined || x === null) continue;
     // 写してから入れる（祖先と子孫の道筋が両方あるとき、元の中身に書き込まない）
     const segs = p.split('.');
     let o = out;
