@@ -5,6 +5,7 @@ import { editedDraft } from '../../app/records';
 import { createLocalSession } from '../../model';
 import { cadDefinition } from '../engineering';
 import { hostKind, type HostSurfaceProps } from '../host-kind';
+import { useEditorDraftPort } from '../editor-draft-port';
 import { latestRecord } from '../surface-host';
 import { assertCadContentFits } from '../../cad/native-size';
 import { portableCadRecord, validateCadRecord } from '../../cad/resources';
@@ -13,18 +14,23 @@ import { portableCadRecord, validateCadRecord } from '../../cad/resources';
 const CadHost = lazy(() => import('../../cad/host'));
 
 function CadSurface({ host }: HostSurfaceProps<CadDocument>) {
+  const draft = useEditorDraftPort<CadDocument>(host);
+  const shared = !!host.sharedSession;
   return (
     <Suspense fallback={<p className="empty-state">Loading 3D CAD…</p>}>
       <CadHost
         artifact={host.active}
-        session={host.sessions.current.get(host.active.id) as unknown as EditorSession<CadDocument>}
+        session={draft}
+        localSession={shared ? undefined : host.sessions.current.get(host.active.id) as unknown as EditorSession<CadDocument>}
+        shared={shared}
         readOnly={host.readOnly}
         inputs={host.inputs}
         persist={(content) => {
+          if (shared) return;
           const latest = latestRecord(host);
           if (latest) host.persist(editedDraft(latest, content));
         }}
-        record={() => latestRecord(host)}
+        record={() => (shared ? host.active : latestRecord(host))}
         persistRecord={async (record) => (await host.persist(record)) !== false}
         createRecord={async (record) => {
           // CR3e: a part made from a body is a new Artifact beside this one, not opened.
@@ -40,9 +46,7 @@ function CadSurface({ host }: HostSurfaceProps<CadDocument>) {
 
 export const cadSurface = hostKind(cadDefinition, {
   Surface: CadSurface,
-  session: 'local',
   hooks: {
-    sharedSessions: false,
     commentsButton: 'disabled',
     // CAD Undo/Redo is admitted like an edit: the native file must still import (CAD23).
     // The history entry itself is checked, so content counted before is not encoded again.

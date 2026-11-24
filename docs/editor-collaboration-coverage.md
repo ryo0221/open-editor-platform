@@ -31,8 +31,7 @@ input and scoped geometry dependencies, with explicit regression evidence.
 
 ## Capability states
 
-The Playground reference Host also connects the normal Drawing, PCB, Construction,
-Factory and CoSim surfaces:
+The Playground reference Host connects these engineering and 3D surfaces:
 
 | Surface | Shared draft | Source or output handling |
 | --- | --- | --- |
@@ -41,9 +40,19 @@ Factory and CoSim surfaces:
 | Construction | Task dates, dependencies, progress, calendar and site settings | The initial BIM version stays fixed. Participants render the building from their own exact saved version or retained snapshot. |
 | Factory | Line objects, links, layout and run settings for a self-contained model | CAD/BIM appearances stay local. Each participant runs their own simulation. |
 | CoSim | Binding settings for the selected circuit and ladder versions | The source pointers stay fixed. Participants load the exact saved inputs independently. A change to the binding list conflicts with a competing change to that list. |
+| CAD | Native part parameters, profiles, sketches and features; part properties and named views | Recipe changes use a common conflict stamp. The reference authority validates the native recipe; each participant evaluates geometry using their installed kernel. Imported geometry, part assemblies, textures and underlays use local editing. |
+| BIM | Levels, grids, materials, building elements, joins, property sets and views | Buildings with placed CAD parts or texture sidecars use local editing. Geometry evaluation is local. |
+| Character | Part display and transforms, materials, pose, and action/keyframe editing with existing mesh and rig topology | Mesh and texture bytes are resolved by hash on each participant's device. New asset import, topology changes and external props use local editing. Competing edits to one action's tracks conflict. |
+| Simulation | Materials, loads, constraints, studies, preparation and mesh settings | The source CAD version stays fixed. Each participant resolves it locally. Solver runs and their results stay in the running browser; remote compute and recording runs in the draft are unavailable. |
 
-The reference Host shares the document and its pinned identifiers for Construction
-and CoSim. It does not transfer the supporting BIM, circuit or ladder documents.
+The reference Host sends the engineering document and pinned identifiers. BIM, circuit,
+ladder, or CAD source documents and Character asset bytes are resolved locally. A participant
+without required Character or Simulation resources can synchronize the draft but cannot export
+an incomplete native file. Character GLB and frame exports also use the shared export guard.
+
+The private Video validation runtime has a separate registration and native project store.
+It requires a separately declared shared operation contract for timeline edits and a media
+storage policy before it can participate in the shared workflow.
 
 Mind Map and Schedule use the existing native JSON and the reference Host's shared
 session. Mind Map names are applied as complete field values. A conflict keeps

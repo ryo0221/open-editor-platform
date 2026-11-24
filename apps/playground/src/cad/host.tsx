@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { CadSurface, cadInputState, createCadBinding } from '@editor-platform/cad';
 import '@editor-platform/cad/style.css';
-import type { CadDocument } from '@editor-platform/cad-core';
+import type { CadDocument, CadSession } from '@editor-platform/cad-core';
 import KernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
 import { EditorExportGuardContext } from '@editor-platform/editor-ui';
@@ -10,6 +10,7 @@ import { cadKernel, cadKernels, downloadBlob, type StoredArtifact } from '../mod
 import { cadNativeCounter, type CadSizeReceipt } from './native-size';
 import { createCadPartSource, createCadPartStore } from './parts';
 import { createCadAssetStore } from './resources';
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 
 /**
  * Playground binding for the CAD Surface. Edits go through the controller (async prepare, one
@@ -18,6 +19,8 @@ import { createCadAssetStore } from './resources';
 export default function CadHost({
   artifact,
   session,
+  localSession,
+  shared,
   readOnly,
   inputs,
   persist,
@@ -28,7 +31,9 @@ export default function CadHost({
   openArtifact,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<CadDocument>;
+  session: EditorDraftPort<CadDocument>;
+  localSession?: EditorSession<CadDocument>;
+  shared: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: CadDocument): void;
@@ -56,8 +61,17 @@ export default function CadHost({
       record: () => storage.current.record(),
       persist: (r) => storage.current.persistRecord(r),
     });
+    const boundSession: CadSession = localSession ?? {
+      get content() { return session.content; },
+      get revision() { return session.revision; },
+      execute: (command) => session.execute(command),
+      canUndo: false,
+      canRedo: false,
+      undo: () => { throw new Error('Shared history is managed by the Host'); },
+      redo: () => { throw new Error('Shared history is managed by the Host'); },
+    };
     return createCadBinding({
-      session,
+      session: boundSession,
       build: cadKernel,
       kernels: cadKernels,
       spawnWorker: () => new KernelWorker() as never,
@@ -68,14 +82,14 @@ export default function CadHost({
         persistRef.current(content);
       },
       // STEP originals and BRep live in the stored record and travel in its native file.
-      assets,
+      assets: shared ? undefined : assets,
       // R2b: placed part versions are kept in the record too (closure), read from other records.
-      parts: createCadPartStore({
+      parts: shared ? undefined : createCadPartStore({
         record: () => storage.current.record(),
         persist: (r) => storage.current.persistRecord(r),
         stageAssets: (staged) => assets.stage(staged),
       }),
-      partSource: createCadPartSource({
+      partSource: shared ? undefined : createCadPartSource({
         records: () => storage.current.records(),
         currentId: artifact.id,
         open: (id) => storage.current.openArtifact(id),
@@ -101,7 +115,7 @@ export default function CadHost({
       },
     });
     // One binding per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
-  }, [session]);
+  }, [session, localSession, shared]);
   const { controller } = binding;
   useEffect(() => () => binding.dispose(), [binding]);
   useEffect(() => controller.accessChanged(), [controller, readOnly]);
@@ -133,9 +147,13 @@ export default function CadHost({
   }, [controller, revision]);
   // Exports flush the same inputs as the Host's other exports. A file export keeps the editor open
   // and captures the confirmed content while an edit evaluates (CAD21).
+  const checkConfirmed = useContext(EditorExportGuardContext);
   const guardExport = useCallback(
-    (options?: { keepEditor?: boolean }) => inputs.flush(options),
-    [inputs],
+    (options?: { keepEditor?: boolean }) => {
+      inputs.flush(options);
+      checkConfirmed?.(options);
+    },
+    [inputs, checkConfirmed],
   );
   return (
     <EditorExportGuardContext.Provider value={guardExport}>

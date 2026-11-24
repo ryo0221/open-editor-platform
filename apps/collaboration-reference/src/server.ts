@@ -45,6 +45,10 @@ import {
   constructionEditorCodec,
   factoryEditorCodec,
   cosimEditorCodec,
+  cadEditorCodec,
+  bimEditorCodec,
+  characterEditorCodec,
+  simulationEditorCodec,
 } from '@editor-platform/collaboration-adapters';
 import {
   slideFixture,
@@ -80,6 +84,10 @@ const editorCodecs = {
   construction: constructionEditorCodec,
   factory: factoryEditorCodec,
   cosim: cosimEditorCodec,
+  cad: cadEditorCodec,
+  bim: bimEditorCodec,
+  character: characterEditorCodec,
+  simulation: simulationEditorCodec,
   document: documentEditorCodec,
   slide: slideEditorCodec,
   design: mangaEditorCodec,

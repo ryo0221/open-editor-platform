@@ -21,10 +21,16 @@ import { savedAnimationCatalog } from './animation-library';
 import {
   assertCadNativeFits,
   hostNativeLimitOf,
+  localCharacterResources,
   mergeCadResources,
   portableCadRecord,
+  validateCadRecord,
 } from './cad/resources';
-import { mergeSimulationSources, portableSimulationRecord } from './simulation/source';
+import {
+  mergeSimulationSources,
+  portableSimulationRecord,
+  sharedSimulationExport,
+} from './simulation/source';
 import { mergeConstructionSources, portableConstructionRecord } from './construction/source';
 import { mergeFactorySources, portableFactoryRecord } from './factory/source';
 import { mergeFactoryLooks, portableFactoryLooks } from './factory/looks';
@@ -1280,17 +1286,28 @@ export default function App({
       const confirmedRecord: StoredArtifact = {
         ...active,
         draft: { ...active.draft, content: sharedSession.confirmed.content },
+        versions: sharedSession.savedVersions.map((entry) => entry.version),
         annotations: threadsToAnnotations(
           active.id,
           sharedSession.confirmed.content,
           sharedSession.confirmed.threads,
         ),
       };
-      downloadText(
-        `${active.name}.artifact.json`,
-        serializeArtifact(confirmedRecord),
-        'application/json',
-      );
+      try {
+        let portable = confirmedRecord;
+        if (active.kind === 'simulation')
+          portable = sharedSimulationExport(confirmedRecord, recordsRef.current);
+        if (active.kind === 'character') {
+          portable = portableCadRecord({
+            ...confirmedRecord,
+            cadResources: localCharacterResources(confirmedRecord, recordsRef.current),
+          });
+          await validateCadRecord(portable);
+        }
+        downloadText(`${active.name}.artifact.json`, serializeArtifact(portable), 'application/json');
+      } catch (error) {
+        setError(error instanceof Error ? error.message : String(error));
+      }
       return;
     }
     if (active) {

@@ -20,6 +20,7 @@ import {
   mergeSimulationSources,
   newSimulation,
   portableSimulationRecord,
+  sharedSimulationExport,
   simulationSourceChoices,
   simulationSourceOf,
   simulationVersionChoices,
@@ -136,6 +137,22 @@ describe('structural analysis sources (R3e-4a)', () => {
     expect(simulationSourceOf(record, doc)).toEqual(f02Plate());
     expect(() => validateSimulationSources(record)).not.toThrow();
     expect(() => makeArtifact('simulation', 1)).toThrow('Choose a saved 3D CAD version');
+  });
+
+  it('exports the shared draft only with an exact CAD version available locally', async () => {
+    const plate = await stored('cad', 'Plate', f02Plate());
+    const local = makeArtifact('simulation', 1, undefined, simulationSourceChoices([plate])[0]);
+    const shared = { ...local, simulationSources: undefined };
+    expect(() => sharedSimulationExport(shared, [])).toThrow(/CAD/);
+    const changed = { ...plate, versions: plate.versions.map((version) => ({
+      ...version, content: f02Plate('edge'),
+    })) };
+    expect(() => sharedSimulationExport(shared, [changed])).toThrow(/CAD/);
+    for (const library of [[plate], [local]]) {
+      const exported = sharedSimulationExport(shared, library);
+      expect(exported.simulationSources).toEqual(local.simulationSources);
+      expect(() => validateSimulationSources(exported)).not.toThrow();
+    }
   });
 
   it('refuses a record whose kept versions are missing, altered, duplicated or unused', async () => {

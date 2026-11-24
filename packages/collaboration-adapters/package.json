@@ -8,6 +8,10 @@
     "./fixtures": "./src/fixtures.ts"
   },
   "dependencies": {
+    "@editor-platform/cad-core": "*",
+    "@editor-platform/bim-core": "*",
+    "@editor-platform/character-core": "*",
+    "@editor-platform/simulation-core": "*",
     "@editor-platform/drawing-core": "*",
     "@editor-platform/pcb-core": "*",
     "@editor-platform/construction-core": "*",

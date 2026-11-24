@@ -6,7 +6,15 @@ import { pcbStarter } from '@editor-platform/pcb-core';
 import { newConstruction } from '@editor-platform/construction-core';
 import { newFactory } from '@editor-platform/factory-core';
 import { cosimStarter } from '@editor-platform/cosim-core';
+import { applyCadOperation, f02Plate } from '@editor-platform/cad-core';
+import { applyBimOperation, bimStarter } from '@editor-platform/bim-core';
+import { applyCharacterOperation, blockyFigure } from '@editor-platform/character-core';
+import { applySimulationOperation, simulationFixture } from '@editor-platform/simulation-core';
 import {
+  bimEditorCodec,
+  cadEditorCodec,
+  characterEditorCodec,
+  simulationEditorCodec,
   constructionEditorCodec,
   cosimEditorCodec,
   drawingEditorCodec,
@@ -98,6 +106,80 @@ it('shares CoSim bindings and refuses direct changes to pinned circuit or ladder
   expect(() => cosimEditorCodec.apply(document, {
     type: 'cosim.edit', target: '*', payload: { reads: [], changes: [{
       kind: 'root', field: 'ladder', present: true, value: { ...document.ladder, versionId: 'v2' },
+    }] },
+  }, 0)).toThrow(/Unknown domain property/);
+});
+
+
+it('checks the CAD recipe as one dependency and allows independent part properties', () => {
+  const document = f02Plate();
+  const { authority, edit } = scenario(cadEditorCodec, document);
+  const dimension = edit(a, (doc) => applyCadOperation(doc, {
+    type: 'setParameter', parameterId: 'W', value: 100,
+  }));
+  const renameBody = edit(b, (doc) => applyCadOperation(doc, {
+    type: 'rename', targetId: doc.bodies[0]!.id, name: 'Plate edited by B',
+  }));
+  const inventory = edit(b, (doc) => ({
+    ...doc, partProperties: { ...doc.partProperties, partNumber: 'NEW-01' },
+  }));
+  expect(authority.submit(a, dimension).status).toBe('accepted');
+  expect(authority.submit(b, renameBody).status).toBe('rejected');
+  expect(authority.submit(b, inventory).status).toBe('accepted');
+  expect(authority.undo(a, dimension.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.partProperties.partNumber).toBe('NEW-01');
+  expect(authority.snapshot().content.parameters).toEqual(document.parameters);
+});
+
+it('merges edits on separate building levels and gives Undo to the author', () => {
+  const document = bimStarter();
+  const { authority, edit } = scenario(bimEditorCodec, document);
+  const rename = (index: number, name: string) => (doc: typeof document) =>
+    applyBimOperation(doc, { type: 'update', collection: 'levels', entity: { ...doc.levels[index]!, name } });
+  const first = edit(a, rename(0, 'Ground'));
+  expect(authority.submit(a, first).status).toBe('accepted');
+  expect(authority.submit(b, edit(b, rename(1, 'Upper'))).status).toBe('accepted');
+  expect(authority.undo(a, first.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.levels.map((level) => level.name)).toEqual(['1F', 'Upper', 'RF']);
+});
+
+it('keeps shared Character edits independent of fixed mesh topology', () => {
+  const { doc: document } = blockyFigure();
+  const part = document.parts[0]!;
+  const { authority, edit } = scenario(characterEditorCodec, document);
+  const rename = edit(a, (doc) => applyCharacterOperation(doc, {
+    type: 'rename', collection: 'parts', id: part.id, name: 'Renamed part',
+  }));
+  const visibility = edit(b, (doc) => applyCharacterOperation(doc, {
+    type: 'setPartVisible', id: part.id, visible: false,
+  }));
+  expect(authority.submit(a, rename).status).toBe('accepted');
+  expect(authority.submit(b, visibility).status).toBe('accepted');
+  expect(authority.undo(a, rename.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.parts[0]).toMatchObject({ name: part.name, visible: false });
+  expect(() => characterEditorCodec.apply(document, {
+    type: 'character.edit', target: '*', payload: { reads: [], changes: [{
+      kind: 'field', collection: 'parts', id: part.id, field: 'mesh', value: 'another-mesh',
+    }] },
+  }, 0)).toThrow(/Unknown domain field/);
+});
+
+it('edits Simulation inputs without moving the reference or persisting solver results', () => {
+  const { doc: document } = simulationFixture();
+  const { authority, edit } = scenario(simulationEditorCodec, document);
+  const mesh = edit(a, (doc) => applySimulationOperation(doc, {
+    type: 'setMeshSettings', mesh: { ...doc.mesh, size: doc.mesh.size * 2 },
+  }));
+  expect(authority.submit(a, mesh).status).toBe('accepted');
+  expect(authority.snapshot().content.mesh.size).toBe(document.mesh.size * 2);
+  expect(() => simulationEditorCodec.apply(document, {
+    type: 'domain.restore', target: '*', payload: {
+      content: { ...document, source: { ...document.source, versionId: 'changed-version' } },
+    },
+  }, 0)).toThrow(/参照元/);
+  expect(() => simulationEditorCodec.apply(document, {
+    type: 'simulation.edit', target: '*', payload: { reads: [], changes: [{
+      kind: 'root', field: 'runs', value: [],
     }] },
   }, 0)).toThrow(/Unknown domain property/);
 });

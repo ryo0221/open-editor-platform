@@ -55,14 +55,7 @@ it('keeps the Playground behaviour each kind had in App.tsx', () => {
   expect(where((h) => h.exports.documentText)).toEqual(['document']);
   expect(where((h) => h.exports.csv)).toEqual(['data']);
   expect(where((h) => h.exports.download)).toEqual(['file']);
-  expect(where((h) => !h.sharedSessions).sort()).toEqual(
-    [
-      'cad',
-      'bim',
-      'character',
-      'simulation',
-    ].sort(),
-  );
+  expect(where((h) => !h.sharedSessions)).toEqual([]);
   expect(where((h) => h.annotationSurface).sort()).toEqual(['file', 'review']);
   expect(where((h) => h.commentsButton === 'hidden')).toEqual(['animation']);
   expect(where((h) => h.commentsButton === 'disabled').sort()).toEqual(

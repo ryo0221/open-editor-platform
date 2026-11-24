@@ -145,8 +145,36 @@ export function validateSimulationSources(
 /** The retained CAD content a document analyses, if the record keeps it. */
 export const simulationSourceOf = (
   record: Pick<StoredArtifact, 'simulationSources'> | undefined,
-  doc: SimulationDocument,
+  doc: Pick<SimulationDocument, 'source'>,
 ) => record?.simulationSources?.find((p) => p.contentHash === doc.source.contentHash)?.content;
+
+/** Shared drafts resolve their original CAD version from the participant's local library. */
+export function localSimulationSource(
+  pin: SimulationDocument['source'],
+  record: Pick<StoredArtifact, 'id' | 'simulationSources'> | undefined,
+  library: readonly StoredArtifact[],
+): CadDocument | undefined {
+  const saved = library.find((a) => a.id === pin.artifactId && a.kind === 'cad')
+    ?.versions.find((v) => v.versionId === pin.versionId)?.content;
+  const localDraft = library.find((a) => a.id === record?.id && a.kind === 'simulation');
+  const kept = simulationSourceOf(record, { source: pin }) ?? simulationSourceOf(localDraft, { source: pin });
+  const source = kept ?? saved;
+  return isCadDocument(source) && !importsGeometry(source) && !source.parts.length &&
+    cadContentHash(source) === pin.contentHash &&
+    source.bodies.some((body) => body.id === pin.bodyId && body.state === 'active')
+    ? source : undefined;
+}
+
+/** Resolves the source for each exported version and refuses an incomplete native file. */
+export function sharedSimulationExport(record: StoredArtifact, library: readonly StoredArtifact[]) {
+  let exported = record;
+  for (const doc of roots(record)) {
+    const source = localSimulationSource(doc.source, record, library);
+    if (!source) throw new Error('書き出しに必要な CAD の保存版がこの端末にありません。');
+    exported = stageSimulationSource(exported, source);
+  }
+  return portableSimulationRecord(exported);
+}
 
 /**
  * A version save's record keeps every analysed CAD version either side holds: one staged by a

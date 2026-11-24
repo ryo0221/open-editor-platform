@@ -81,6 +81,9 @@ export interface Schema<T> {
   slideReferences?: true;
   manga?: true;
   recordRoots?: readonly string[];
+  /** Dependencies shared by separate fields that jointly describe one native model. */
+  atomicRoots?: readonly string[];
+  validateTransition?(before: T, after: T): void;
   collections(content: T): Collection[];
 }
 export type EditorChange =
@@ -1393,6 +1396,11 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
       for (const key of new Set([...oldChildren.keys(), ...nextChildren.keys()]))
         if (!equal(oldChildren.get(key) ?? [], nextChildren.get(key) ?? []))
           invalidates.add(`children:${key}`);
+      if (schema.atomicRoots?.some((key) => !equal((before as Root)[key], (content as Root)[key]))) {
+        required.add('native:model');
+        touched.add('native:model');
+      }
+      schema.validateTransition?.(before, content);
       if (!base.validate(content) || !authorizedReferences(content))
         fail('invalid-operation', 'Transaction violates domain invariants');
       if (base.domain === 'data' && validateData(content as StructuredData).length)
@@ -1469,3 +1477,7 @@ export const pcbEditorCodec = editorCodec(nativeRecordSchemas.pcb);
 export const constructionEditorCodec = editorCodec(nativeRecordSchemas.construction);
 export const factoryEditorCodec = editorCodec(nativeRecordSchemas.factory);
 export const cosimEditorCodec = editorCodec(nativeRecordSchemas.cosim);
+export const cadEditorCodec = editorCodec(nativeRecordSchemas.cad);
+export const bimEditorCodec = editorCodec(nativeRecordSchemas.bim);
+export const characterEditorCodec = editorCodec(nativeRecordSchemas.character);
+export const simulationEditorCodec = editorCodec(nativeRecordSchemas.simulation);

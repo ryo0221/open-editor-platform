@@ -24,7 +24,11 @@ export type Domain =
   | 'pcb'
   | 'construction'
   | 'factory'
-  | 'cosim';
+  | 'cosim'
+  | 'cad'
+  | 'bim'
+  | 'character'
+  | 'simulation';
 export type Origin = 'human' | 'agent' | 'proposal' | 'undo' | 'redo' | 'restore';
 export interface Identity {
   actorId: string;
@@ -288,6 +292,10 @@ export function validateOperation(value: unknown): asserts value is Operation {
       'construction',
       'factory',
       'cosim',
+      'cad',
+      'bim',
+      'character',
+      'simulation',
     ].includes(o.domain) ||
     !['human', 'agent', 'proposal', 'undo', 'redo', 'restore'].includes(o.origin)
   )

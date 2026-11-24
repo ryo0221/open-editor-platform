@@ -206,6 +206,8 @@ export interface SimulationSurfaceProps {
   registerInput?(boundary: EditorInputBoundary): () => void;
   /** R3e-4c: runs a study in the Host's Worker; without it there is no Run button. */
   runner?: SimulationRunner;
+  /** A Host may run studies locally while keeping results out of its shared draft. */
+  recordRuns?: boolean;
   /** R3e-5b: the analysed version's place ("v2"), when its CAD Artifact is still here. */
   version?: string;
   /** Other saved versions of the analysed CAD Artifact with the same body, newest first. */
@@ -1547,6 +1549,7 @@ export function SimulationSurface({
   apply,
   registerInput,
   runner,
+  recordRuns = true,
   version,
   versions,
   switchVersion,
@@ -3006,36 +3009,38 @@ export function SimulationSurface({
                 inputKey={JSON.stringify([doc.source, doc.bodies ?? null, study])}
               />
             )}
-            <RecordPanel
-              doc={doc}
-              studyId={study?.id}
-              run={lastRun?.run}
-              runCurrent={!!lastRun && lastRun.hash === hash}
-              readOnly={readOnly}
-              builds={
-                // VS4b: a wind tunnel's solver is the LBM here or OpenFOAM on the Host.
-                study?.kind === 'aero'
-                  ? [
-                      runner?.builds && { ...runner.builds, solver: aeroSolverBuild },
-                      runner?.host?.builds &&
-                        runner.host.aero && {
-                          ...runner.host.builds,
-                          solver: runner.host.aero.solverBuild,
-                        },
-                    ]
-                  : study?.kind === 'crash'
+            {recordRuns && (
+              <RecordPanel
+                doc={doc}
+                studyId={study?.id}
+                run={lastRun?.run}
+                runCurrent={!!lastRun && lastRun.hash === hash}
+                readOnly={readOnly}
+                builds={
+                  // VS4b: a wind tunnel's solver is the LBM here or OpenFOAM on the Host.
+                  study?.kind === 'aero'
                     ? [
-                        runner?.builds,
+                        runner?.builds && { ...runner.builds, solver: aeroSolverBuild },
                         runner?.host?.builds &&
-                          runner.host.crash && {
+                          runner.host.aero && {
                             ...runner.host.builds,
-                            solver: runner.host.crash.solverBuild,
+                            solver: runner.host.aero.solverBuild,
                           },
                       ]
-                    : [runner?.builds, runner?.host?.builds]
-              }
-              apply={run}
-            />
+                    : study?.kind === 'crash'
+                      ? [
+                          runner?.builds,
+                          runner?.host?.builds &&
+                            runner.host.crash && {
+                              ...runner.host.builds,
+                              solver: runner.host.crash.solverBuild,
+                            },
+                        ]
+                      : [runner?.builds, runner?.host?.builds]
+                }
+                apply={run}
+              />
+            )}
             {lastRun && lastRun.hash === hash && lastRun.run.failure?.code === 'mapping' && (
               <MappingIssues
                 doc={doc}

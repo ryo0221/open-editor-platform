@@ -11,6 +11,10 @@ import { isPcbDocument, type PcbDocument } from '@editor-platform/pcb-core';
 import { isConstructionDocument, type ConstructionDocument } from '@editor-platform/construction-core';
 import { isFactoryDocument, type FactoryDocument } from '@editor-platform/factory-core';
 import { isCosimDocument, type CosimDocument } from '@editor-platform/cosim-core';
+import { isCadDocument, type CadDocument } from '@editor-platform/cad-core';
+import { isBimDocument, type BimDocument } from '@editor-platform/bim-core';
+import { isCharacterDocument, type CharacterDocument } from '@editor-platform/character-core';
+import { isSimulationDocument, type SimulationDocument } from '@editor-platform/simulation-core';
 import { containsSharedReference } from './reference-guard';
 import { collection, type Schema } from './editor-transactions';
 
@@ -21,15 +25,29 @@ function records<T extends object>(
   fields: Partial<Record<keyof T & string, readonly string[]>>,
   refusal: (content: T) => string | undefined = () => undefined,
   fixedSources: readonly (keyof T & string)[] = [],
+  options?: {
+    atomicRoots?: readonly (keyof T & string)[];
+    fixedProjection?(content: T): unknown;
+  },
 ): Schema<T> {
   const unsupported = (value: T) =>
     refusal(value) ??
     (containsSharedReference(value) ? '成果物への参照を含む内容は共同編集できません。' : undefined);
   const validate = (value: unknown): value is T => isNative(value) && !unsupported(value);
   const collections = Object.keys(fields) as (keyof T & string)[];
+  function validateTransition(before: T, after: T) {
+    if (fixedSources.some((key) =>
+      before[key] !== after[key] && canonical(before[key]) !== canonical(after[key])))
+      fail('invalid-operation', '共同編集中は固定した参照元や素材を変更できません。');
+    if (options?.fixedProjection &&
+        canonical(options.fixedProjection(before)) !== canonical(options.fixedProjection(after)))
+      fail('invalid-operation', '共同編集中は固定したメッシュやリグの構造を変更できません。');
+  }
   return {
     root,
     recordRoots: collections,
+    atomicRoots: options?.atomicRoots,
+    validateTransition,
     collections: (content) =>
       collections.map((key) => collection(content, key, fields[key]!)),
     base: {
@@ -42,8 +60,7 @@ function records<T extends object>(
         const next = action.payload.content;
         if (action.type !== 'domain.restore' || !validate(next))
           fail('invalid-operation', 'この保存版を共同編集中に復元できません。');
-        if (fixedSources.some((key) => canonical(content[key]) !== canonical(next[key])))
-          fail('invalid-operation', '参照元が異なる保存版は共同編集中に復元できません。');
+        validateTransition(content, next);
         return {
           content: copy(next),
           required: ['*'],
@@ -66,7 +83,87 @@ function graphRefusal(graph: GraphDocument): string | undefined {
   }
 }
 
+const cadModelFields = [
+  'parameters', 'profiles', 'sketches', 'features', 'bodies', 'spotWelds', 'proportions',
+] as const;
+
+// Mesh bytes encode part/skin/morph relationships. Keep that topology fixed for this session.
+function characterMeshTopology(doc: CharacterDocument) {
+  return {
+    parts: Object.fromEntries(doc.parts.map((part) => [part.id, {
+      mesh: part.mesh, multires: part.multires, slots: part.materials.length,
+    }])),
+    skeletons: Object.fromEntries(doc.skeletons.map((rig) => [rig.id,
+      Object.fromEntries(rig.bones.map((bone) => [bone.id, bone.parentId])),
+    ])),
+    skins: doc.skins,
+    morphs: Object.fromEntries(doc.morphs.map((morph) => [morph.id, morph.partId])),
+  };
+}
+
 const nativeRecordSchemas = {
+  cad: records<CadDocument>(
+    'cad', isCadDocument,
+    [...cadModelFields, 'partProperties', 'designTargets', 'sightChecks', 'toleranceStacks', 'motions'],
+    { namedViews: ['name', 'bodyIds', 'camera', 'projection'] },
+    (doc) => doc.assets.length || doc.parts.length || doc.components.length || doc.underlays?.length
+      ? '取り込んだ形状・部品・素材を含む CAD は共同編集できません。'
+      : undefined,
+    ['kernelProfile', 'schemaVersion'],
+    { atomicRoots: cadModelFields },
+  ),
+  bim: records<BimDocument>(
+    'bim', isBimDocument, ['project', 'inhabitantHeightMm'],
+    {
+      levels: ['name', 'elevationMm'],
+      grids: ['label', 'start', 'end', 'bubbles'],
+      materials: ['name', 'category', 'appearance', 'densityKgM3', 'youngsModulusMPa', 'poissonsRatio'],
+      types: ['name', 'description', 'ifcGlobalId', 'properties', 'common', 'layers', 'profile', 'materialId', 'widthMm', 'heightMm'],
+      elements: [
+        'name', 'description', 'ifcGlobalId', 'properties', 'common', 'typeId', 'start', 'end', 'bulge',
+        'location', 'base', 'top', 'clipBy', 'lean', 'boundary', 'holes', 'slope', 'at', 'rotationRad',
+        'topAt', 'topScale', 'endTop', 'hostId', 'wall', 'slab', 'alongMm', 'flipFacing', 'flipHand',
+        'sillMm', 'shape', 'number', 'center', 'innerRadiusMm', 'outerRadiusMm', 'startAngleRad',
+        'sweepRad', 'side', 'heightMm', 'directionRad', 'widthMm', 'risers', 'treadMm',
+      ],
+      joins: ['walls', 'kind', 'through'],
+      views: ['name', 'level', 'cutHeightMm', 'scale', 'depthMm', 'line', 'direction'],
+      propertySets: ['name', 'properties'],
+      cameras: ['name', 'position', 'target', 'up', 'fovDeg'],
+    },
+    (doc) => doc.assets?.length || doc.types.some((type) => type.kind === 'part')
+      ? '外部部品や画像素材を含む BIM は共同編集できません。'
+      : undefined,
+  ),
+  character: records<CharacterDocument>(
+    'character', isCharacterDocument, ['name', 'retiredIds'],
+    {
+      materials: ['name', 'color', 'opacity', 'roughness', 'metalness', 'maps', 'doubleSided'],
+      parts: ['name', 'parentId', 'transform', 'materials', 'visible', 'subdivision'],
+      skeletons: ['name', 'parentPartId', 'bones', 'ik'],
+      morphs: ['name', 'weight'],
+      actions: ['name', 'duration', 'frameRate', 'tracks'],
+    },
+    (doc) => doc.props.length ? '外部の小道具を含む Character は共同編集できません。' : undefined,
+    ['assets', 'schemaVersion'],
+    { fixedProjection: characterMeshTopology },
+  ),
+  simulation: records<SimulationDocument>(
+    'simulation', isSimulationDocument,
+    ['name', 'materialId', 'bodies', 'preparation', 'mesh', 'overrides', 'sheets', 'retiredIds'],
+    {
+      materials: ['name', 'model', 'youngsModulus', 'poissonsRatio', 'density', 'conductivity', 'plasticity', 'specificHeat', 'expansion'],
+      loads: ['name', 'targets', 'force', 'pressure', 'acceleration', 'flux', 'amplitude', 'coefficient', 'ambient', 'emissivity'],
+      constraints: ['name', 'targets', 'displacement', 'temperature', 'amplitude'],
+      studies: ['name', 'loadIds', 'constraintIds', 'solver', 'convergence', 'idealisation', 'fatigue', 'test', 'modal', 'thermal', 'transient', 'aero', 'crash', 'seal', 'shower'],
+      bonds: ['name', 'follower', 'on', 'tolerance', 'contact'],
+      masses: ['name', 'targets', 'mass'],
+      spotWelds: ['name', 'weldId', 'follower', 'on', 'radiusMm', 'tolerance'],
+      seals: ['name', 'line', 'base', 'mating', 'insetMm', 'section', 'hinge'],
+    },
+    (doc) => doc.runs?.length ? '保存済みの解析結果を含む成果物は共同編集できません。' : undefined,
+    ['source', 'schemaVersion'],
+  ),
   'structured-graph': records('structured-graph', isGraphDocument, ['attributes', 'presentation'], {
     nodes: ['type', 'attributes', 'sectionId'],
     edges: ['type', 'from', 'to', 'attributes'],
