@@ -32,6 +32,6 @@ FMEA starts as a table of failure modes, effects, causes, controls, ratings, act
 
 ## Verification
 
-Automated sample/unit tests: `apps/playground/src/app/fmea-templates.test.ts`. Relevant full checks: repo lint, typecheck, build, Data creation/editing/save/reload/import/desktop/mobile regressions. Results are recorded in [the verification record](../verification/analysis-prototypes/README.md). Do not treat a structurally valid Data table as a certified FMEA.
+The templates live in `@editor-platform/analysis-templates` (`packages/analysis-templates/src/fmea.ts`). Automated sample/unit tests: `apps/playground/src/app/fmea-templates.test.ts` and `packages/analysis-templates/src/index.test.ts`. Relevant full checks: repo lint, typecheck, build, Data creation/editing/save/reload/import/desktop/mobile regressions. Results are recorded in [the verification record](../verification/analysis-prototypes/README.md). Do not treat a structurally valid Data table as a certified FMEA.
 
 Design decision: use a Host-owned Data template while validating UX. Reassess a dedicated FMEA Surface only if the Domain requires operations that the generic Data projections cannot safely express.

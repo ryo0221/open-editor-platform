@@ -2,7 +2,7 @@
 
 Status: **Prototype; not an accepted domain Editor or a certified safety/quality analysis tool.**
 
-This experiment reuses the existing Structured Graph kind, retained versions and commands. It adds two Host-owned Profiles and starter Graphs, without new Artifact kinds, servers or persistence.
+This experiment reuses the existing Structured Graph kind, retained versions and commands. It adds two Profiles and starter Graphs, without new Artifact kinds, servers or persistence. They live in `@editor-platform/analysis-templates` (`packages/analysis-templates/src/graph.ts`) so that the Playground and other Hosts open the same diagrams.
 
 ## Try in the Playground
 
