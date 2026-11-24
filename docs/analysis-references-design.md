@@ -31,7 +31,9 @@ OWD 側は [open-workflow-definitions #22](https://github.com/ryo0221/open-workf
 - **Graph**：Profile の node type に任意の欄 `items` を足す（例：`cause` に `{ id: 'itemId', title: 'name', refs: [], rootRefs: ['problemRef'] }`）。Host へは `{ at: 'nodes', where: { type: 'cause' }, id: 'attributes.itemId', title: 'attributes.name', rootRefs: ['attributes.problemRef'] }` に直して渡す。Profile の形が変わるので Profile schema を 3 に上げる（U5）。
 - **Data**：表の最上位に任意の欄 `items` を足し、列 ID で書く（列名ではない）。例：`items: [{ kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['fmId', 'refs.causeCandidates'] }, { kind: 'failure-mode', id: 'fmId', title: 'failure', refs: ['functionRef'], merge: { equal: ['failure', 'effect', 's', 'function'] } }]`。`Column` 自体には役割を書かない（一つの行から二つの項目を読むため、役割は列ではなく宣言に置く）。Data schema を 3 に上げる（U5）。
 - 宣言の `kind` は表示用の名前で、どの OWD の項目種類にあたるかは Host が業務 ID の形（`idForm`）で決める。OEP は ID の形を決めない。
-- `items@0-draft` には、次の三つの任意の欄を足す（下書きの add-on なので版はそのまま、外部パッケージにも同じ意味で使える）：`where`（配列の要素を属性で絞る）、`rootRefs`（内容の根からの道筋。そのコレクションの全項目が引く）、`merge`（U6）。PaoBub の `readItems` も同じ版で読めるようにする（[paobub #523](https://github.com/ryo0221/paobub/issues/523) の AR-P3）。
+- `items@0-draft` は未知の欄を拒否する（`itemsDeclarationProblems`）ので、次の三つの欄は**新しい版 `items@1-draft`** として足す：`where`（配列の要素を属性で絞る）、`rootRefs`（内容の根からの道筋。そのコレクションの全項目が引く）、`merge`（U6）。`items@0-draft` の宣言はそのまま有効で、意味は変えない。
+- **版の交渉**：Host は読める版の一覧を `ItemReferenceHost` と一緒に渡す（`itemsVersions`）。組み込みの Graph／Data は、Host が `items@1-draft` を読めるときだけその宣言を渡す。読めない Host には宣言を渡さず、Editor は「この Host は分析の項目を読めない」と出す（`0-draft` に落として一部だけ読ませることはしない）。旧い Host が `1-draft` を受け取ったときは、今の検査が「unsupported items add-on version」で断る（黙って読まない）。
+- PaoBub は OEP の依存版を固定し、`items@1-draft` を読めるようにしてから（[paobub #523](https://github.com/ryo0221/paobub/issues/523) の AR-P3）その版の OEP に上げる。
 
 #### OWD の 9 種類と OEP の構造の対応
 
@@ -63,6 +65,14 @@ OWD は故障モード（FM）と故障原因（FC）を別の項目種類にし
 - `merge` するコレクションでは、`refs` に挙げた欄は `merge.equal` に書かなくても必ず一致を求め、指紋にも入れる（行ごとに違う引用を 1 件にまとめると、どの引用か決まらないため）。
 - Editor は `merge.equal` の列か `refs` の欄が食い違う行に診断（「FM-03 の故障影響が行ごとに違う」）を出す。直すのは利用者（自動で揃えない）。
 - `merge` は `readItems` の約束として決め、OEP 単体でも同じ関数で試験する（宣言から投影した項目の一覧を作る純粋な関数を AR1 に置く）。
+
+#### 投影した項目の同一性（業務 ID）と native 要素（行 ID の集まり）
+
+- 投影した FM の**同一性は業務 ID**（`fmId`）で、固定版の基準・引用先・影響はすべてこの ID と項目の指紋で扱う。どの行から作ったかは同一性に入れない。
+- 投影の結果は、項目ごとに**その版で ID を持つ native 要素の集まり**（FM-01 なら `{row-1, row-2}`）を併せて返す。これは移動（`open` で選ぶ）と表示のための対応で、固定版の基準の同一性ではない。Host が基準と一緒に記録しても、比べるのは業務 ID と指紋だけ（paobub #524 の H2 と同じ）。
+- `missing-target` は、その業務 ID を持つ要素が一つも無くなったときだけ。row-1 を消しても row-2 に FM-01 が残れば FM-01 はあり、指紋が変わらなければ古くもならない。
+- 行の削除・並べ替え・追加（同じ `fmId` の行を足す）で同じ FM が保たれることを AR1 の試験に置く。`open` は今の版でその ID を持つ行をすべて選び、最初の行へ移る。
+- 1 node = 1 件の項目（CC・TE・BE）と 1 行 = 1 件の FC も同じ扱いで、native 要素の集まりが 1 つになるだけ。
 
 ### U2：一つの故障原因が複数の原因の候補を根拠にするとき
 
@@ -128,8 +138,13 @@ type ItemRefState =
         | 'duplicate'
         | 'stale';
       reason: string;
-    };
+    }
+  /** 引用先は基準の版から変わったが、古い版のまま残すと決めてある（理由つき）。 */
+  | { status: 'kept'; title: string; reason?: string };
 ```
+
+- `ok` は「基準の指紋と今の引用先が同じ」、`kept` は「違うが、今の引用先の版について古いまま残すと決めてある」、`stale` は「違い、まだ決めていない（または残すと決めた後にさらに変わった）」。三つの意味は paobub #524 の 4 と同じ。
+- `kept` の `reason` は、引用先を読める人にだけ Host が入れる。読めないときは `forbidden` を返し、題も理由も出さない。
 
 責務の分け方：
 
@@ -137,14 +152,16 @@ type ItemRefState =
 - **競合**：欄の値は Editor の通常のコマンドで、保存の競合は今の保存の約束（版の比較）で扱う。Host は保存後に索引で全引用を読み直し、そこでの判定が正（Editor の表示は手がかり）。
 - **`stale`**：Host が引用元ごとの基準と今の引用先の指紋を比べて返す。基準の作り方・更新・見送りは Host（PaoBub #524 の H2）。比較・更新・見送りの操作は Host の画面で行い、Editor は「古い」と出して Host の画面へ移るだけ。
 - **`open`**：Host が開く時点で権限を確かめ直す。既存の `ReferenceHost.open` と同じ約束で、`forbidden` では題も出さない。
-- 状態の名前は `ReferenceError.status` を使い、0001 の「未解決」「重複」だけを足す。候補の注意（例：除外された原因の候補）は Host が `note` で渡し、Editor は判断しない。
+- 状態の名前は `ReferenceError.status` を使い、0001 の「未解決」「重複」と、古い版を残す決定の `kept` だけを足す。候補の注意（例：除外された原因の候補）は Host が `note` で渡し、Editor は判断しない。
 - 既存の `ReferenceHost`（表示の埋め込み用）は「版を固定した値・図の写し」を扱い、これは「業務 ID の引用」なので別の口にする。移動と復帰の約束、権限の再確認の時点は同じにする。
 - Host が無いときは参照の欄を文字列として編集・保存でき、候補・状態・移動は出さない。
 
 ### U5：互換と版
 
 - **Graph Profile**：`items` を node type に足すので、`graphProfileSchemaVersion` を 3 に上げる。`upgradeGraphProfile` は schema 1・2 を `items` 無しの 3 として読む。schema 3 の Profile を今の版の OEP で開くと、今の「新しい schema」の誤りになる（黙って欄を落とさない）。`isGraphProfile` の検証に `items` の形（道筋が node type の schema にある属性を指すこと、`refs` の属性が string か string の配列であること）を足す。これを AR1 の必須作業にする。
-- **Graph の文書**（schema 3）：属性を足すだけなので形は変えない。`analysis-fishbone`・`analysis-fault-tree` の Profile の `version` を上げ、旧版の Profile で作った文書が新しい Profile で読めることを試験で確かめる。
+- **Graph の文書**（schema 3）：属性を足すだけなので形は変えない。
+- **旧い Profile の登録を残す**：`graphProfileFor` は Profile の ID と `version` の完全一致で引くので、`analysis-fishbone`・`analysis-fault-tree` の新しい `version`（`items` つき）を足しても、旧い `version` の Profile は登録から外さない。旧い成果物は旧い Profile で開き、表示・保存し、Profile の参照を勝手に書き換えない（項目にはならない）。新しい Profile へは「分析の項目を使う」の明示のコマンドで上げる（Profile の参照を変え、業務 ID の欄を空で足す。Undo で戻る）。
+- AR1 の回帰試験：旧い Profile の Fishbone／FTA を開く・表示する・保存して再読込すると、Profile の参照と中身が変わらない。上げるコマンドの後は新しい Profile で開き、Undo で旧い参照に戻る。
 - **Data**：表の `items` と行の `refs` を足すので schema を 3 に上げる。今の `isStructuredData` は未知の欄を拒否しないので、版を上げないと古い版が欄を黙って落として保存しうる。schema 3 を古い版では開けないようにする（今の版の判定は 1・2 だけを読む）。
 - **列の改名・削除**：宣言は列 ID で書くので、列名の変更は意味を変えない。宣言が指す列の削除は確認を出し、削除すると宣言からその列を外す（同じコマンドの中で。Undo で両方戻る）。業務 ID の列を消すとその項目は無くなり、Host では「消えた」として下流に要確認が出る。
 - **取り込み**：native JSON は宣言・参照の欄ごと運ぶ。CSV の取り込みは宣言・参照の欄を作らない（新しい表は項目にならない）。既存の表への CSV の取り込みは列 ID が残る列だけ値を変え、宣言はそのまま。
@@ -164,13 +181,13 @@ AI の提案は、既存の proposal（preview／apply／reject）で参照の�
 
 ## 4. 段階
 
-| 段  | 中身                                                                                                                                                                                                                                                                                                                               | 依存 |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| AR1 | Graph Profile schema 3（node type の `items`、検証、1・2 からの読み替え、互換の試験）、Data schema 3（表の `items`、行の `refs`、列の削除と宣言、CSV の扱い）、`items@0-draft` の `where`・`rootRefs`・`merge`、宣言から項目の一覧（FM の多対一の投影を含む）を作る純粋な関数、Fishbone／FTA の Profile と FMEA テンプレートの更新 | なし |
-| AR2 | `ItemReferenceHost` の型と、Inspector の候補・状態・移動の画面、選択後の確かめ直し。Playground に架空の Host（同じ Library の三つの成果物から候補を出し、基準を覚えて `stale` を返す）                                                                                                                                             | AR1  |
-| AR3 | 検証：引用・解除の Undo/Redo、保存と再読込、native JSON・CSV、FM の食い違いの診断、権限なし・欠落・重複・古い・確かめられないの表示、Host なしの編集、古い版での schema 3 の拒否、desktop／mobile                                                                                                                                  | AR2  |
+| 段  | 中身                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 依存 |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---- |
+| AR1 | Graph Profile schema 3（node type の `items`、検証、1・2 からの読み替え、互換の試験）、旧い `analysis-*` Profile の登録を残すことと上げるコマンド・その回帰試験、Data schema 3（表の `items`、行の `refs`、列の削除と宣言、CSV の扱い）、`items@1-draft`（`where`・`rootRefs`・`merge`）と版の交渉、宣言から項目の一覧（FM の多対一の投影と、項目ごとの native 要素の集まり）を作る純粋な関数と、行の削除・並べ替え・追加で同じ FM が保たれる試験、Fishbone／FTA の Profile と FMEA テンプレートの更新 | なし |
+| AR2 | `ItemReferenceHost` の型と、Inspector の候補・状態・移動の画面、選択後の確かめ直し。Playground に架空の Host（同じ Library の三つの成果物から候補を出し、基準を覚えて `stale` を返す）                                                                                                                                                                                                                                                                                                                 | AR1  |
+| AR3 | 検証：引用・解除の Undo/Redo、保存と再読込、native JSON・CSV、FM の食い違いの診断、権限なし・欠落・重複・古い・残した（`kept`）・確かめられないの表示、Host なしの編集、`items@1-draft` を読めない Host、古い版での schema 3 の拒否、旧い Profile の成果物、desktop／mobile                                                                                                                                                                                                                            | AR2  |
 
-PaoBub 側の読み取り（`as: 'items'` と `items@0-draft` の追加の欄）、引用ごとの基準、統合試験は [paobub #523](https://github.com/ryo0221/paobub/issues/523)・[#524](https://github.com/ryo0221/paobub/pull/524)。`stale` の基準は #524 の H2 と同じ定義を使う。
+PaoBub 側の読み取り（`as: 'items'` と `items@1-draft`）、引用ごとの基準、統合試験は [paobub #523](https://github.com/ryo0221/paobub/issues/523)・[#524](https://github.com/ryo0221/paobub/pull/524)。`ok`・`kept`・`stale` の基準と、投影した項目の同一性（業務 ID）と native 要素の集まりの分け方は #524 の H2 と同じ定義を使う。
 
 ## 5. 扱わないこと
 
@@ -186,6 +203,6 @@ PaoBub 側の読み取り（`as: 'items'` と `items@0-draft` の追加の欄）
 | U1  | 業務 ID と参照の欄の宣言             | A：今ある型の値と、`items@0-draft` と同じ形の宣言（Graph は Profile の node type、Data は表の宣言を列 ID で）。9 種類の対応は上の表 |
 | U2  | 一つの故障原因が複数の候補を引くとき | A：行の参照の欄 `refs`（配列）。行は分けない                                                                                        |
 | U3  | 引用の値に固定版を入れるか           | A：値は業務 ID だけ。引用ごとの基準は Host が記録する                                                                               |
-| U4  | Host の口                            | 引用元の文脈を渡す `ItemReferenceHost`。選択後の確かめ直しは Editor、最終の判定は Host の索引                                       |
-| U5  | 互換                                 | Graph Profile schema 3・Data schema 3。古い版は開かずに誤りを出す                                                                   |
+| U4  | Host の口                            | 引用元の文脈を渡す `ItemReferenceHost`。状態に `kept` を足す。選択後の確かめ直しは Editor、最終の判定は Host の索引                 |
+| U5  | 互換                                 | Graph Profile schema 3・Data schema 3・`items@1-draft`。古い版は開かずに誤りを出し、旧い Profile の登録は残す                       |
 | U6  | FMEA の FM と FC                     | A：1 行 = FC、FM は同じ `fmId` の行を一致を条件に 1 件へ投影                                                                        |
