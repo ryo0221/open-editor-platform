@@ -130,36 +130,45 @@ export function videoTimelineFixture(): VideoContentV3 {
   };
 }
 
-const fixture = videoTimelineFixture();
 const isID = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const clipResource = (id: string) => `clip:${id}`;
 const groupResource = (id: string) => `linked:${id}`;
 
-function validate(value: unknown): value is VideoContentV3 {
-  try {
-    assertVideoContentV3(value);
-    const { clips, ...sequence } = value.sequence;
-    const { clips: fixedClips, ...fixedSequence } = fixture.sequence;
-    return (
-      canonical(value.sources) === canonical(fixture.sources) &&
-      canonical(sequence) === canonical(fixedSequence) &&
-      clips.every(
-        (clip) =>
-          isID(clip.id) &&
-          (!clip.linkGroupId || isID(clip.linkGroupId)) &&
-          (clip.kind === 'video' || clip.kind === 'audio' || clip.kind === 'caption'),
-      ) &&
-      fixedClips
-        .filter((clip) => clip.trackId === 'locked-track')
-        .every(
-          (clip) => canonical(clip) === canonical(clips.find((item) => item.id === clip.id)),
-        ) &&
-      clips.filter((clip) => clip.trackId === 'locked-track').length === 1
-    );
-  } catch {
-    return false;
-  }
+/** Capture only the parts of the admitted project which timeline edits cannot replace. */
+function pinnedTimelineValidator(project: VideoContentV3) {
+  assertVideoContentV3(project);
+  const { clips, ...sequence } = project.sequence;
+  const sources = canonical(project.sources);
+  const settings = canonical(sequence);
+  const locked = new Set(sequence.tracks.filter((track) => track.locked).map((track) => track.id));
+  const kinds = new Set(clips.map((clip) => clip.kind));
+  const lockedClips = canonical(clips.filter((clip) => locked.has(clip.trackId)));
+  // An Animation clip contains a full native snapshot. A split may reuse an admitted
+  // snapshot, but a restore must never introduce a new source through its clip payload.
+  const embeds = new Set(
+    clips.flatMap((clip) => (clip.kind === 'animation' ? [canonical(clip.embed)] : [])),
+  );
+  return (value: unknown): value is VideoContentV3 => {
+    try {
+      assertVideoContentV3(value);
+      const { clips: current, ...currentSettings } = value.sequence;
+      return (
+        canonical(value.sources) === sources &&
+        canonical(currentSettings) === settings &&
+        canonical(current.filter((clip) => locked.has(clip.trackId))) === lockedClips &&
+        current.every(
+          (clip) =>
+            kinds.has(clip.kind) &&
+            isID(clip.id) &&
+            (!clip.linkGroupId || isID(clip.linkGroupId)) &&
+            (clip.kind !== 'animation' || embeds.has(canonical(clip.embed))),
+        )
+      );
+    } catch {
+      return false;
+    }
+  };
 }
 
 function exact(value: Record<string, unknown>, ...fields: string[]) {
@@ -276,83 +285,94 @@ function applyEdit(content: VideoContentV3, edit: SharedVideoEdit) {
   }
 }
 
-/** Shared v3 reference timeline. Physical originals and local Video project persistence are separate. */
-export const videoTimelineCodec: DomainCodec<VideoContentV3> = {
-  domain: 'video',
-  validate,
-  resource(content, key) {
-    if (key.startsWith('clip:'))
-      return content.sequence.clips.find((clip) => clip.id === key.slice(5));
-    if (key.startsWith('linked:'))
-      return content.sequence.clips
-        .filter((clip) => clip.linkGroupId === key.slice(7))
-        .map((clip) => clip.id)
-        .sort();
-  },
-  validateAnchor: () => false,
-  apply(content, action) {
-    if (action.type === 'domain.restore') {
-      const next = action.payload.content;
+/** Bind a timeline to the source declarations and track settings admitted by its Host. */
+export function createVideoTimelineCodec(project: VideoContentV3): DomainCodec<VideoContentV3> {
+  const validate = pinnedTimelineValidator(project);
+  if (!validate(project)) fail('schema-mismatch', 'Unsupported native Video timeline');
+  return {
+    domain: 'video',
+    validate,
+    resource(content, key) {
+      if (key.startsWith('clip:'))
+        return content.sequence.clips.find((clip) => clip.id === key.slice(5));
+      if (key.startsWith('linked:'))
+        return content.sequence.clips
+          .filter((clip) => clip.linkGroupId === key.slice(7))
+          .map((clip) => clip.id)
+          .sort();
+    },
+    validateAnchor: () => false,
+    apply(content, action) {
+      if (action.type === 'domain.restore') {
+        const next = action.payload.content;
+        if (!validate(next))
+          fail(
+            'invalid-operation',
+            'Saved timeline uses different sources, track settings or locked clips',
+          );
+        return {
+          content: copy(next),
+          required: ['*'],
+          touched: ['*'],
+          targets: ['*'],
+          inverse: [{ type: 'domain.restore', target: '*', payload: { content } }],
+        };
+      }
+      const required = new Set<string>();
+      let next: VideoContentV3;
+      if (action.type === 'video.timeline') {
+        const edit = parseEdit(action);
+        const selected = content.sequence.clips.find((clip) => clip.id === edit.clipId);
+        required.add(clipResource(edit.clipId));
+        if (selected?.linkGroupId && (edit.type === 'move' || edit.type === 'split'))
+          required.add(groupResource(selected.linkGroupId));
+        next = applyEdit(content, edit);
+      } else if (action.type === 'history.video-clips') {
+        const changes = action.payload.clips as ClipChange[];
+        if (
+          !Array.isArray(changes) ||
+          !changes.length ||
+          changes.some(
+            (change) =>
+              !change ||
+              !isID(change.id) ||
+              (change.value !== null && change.value?.id !== change.id),
+          )
+        )
+          fail('schema-mismatch', 'Invalid Video history');
+        next = replaceClips(content, changes);
+      } else fail('unsupported-operation', 'Unsupported Video action');
       if (!validate(next))
-        fail('invalid-operation', 'Saved timeline is outside the synthetic profile');
+        fail('invalid-operation', 'Timeline exceeds the fixed sequence or uses unsupported inputs');
+      const changes = clipDelta(content.sequence.clips, next.sequence.clips);
+      if (!changes.length) fail('invalid-operation', 'No timeline change');
+      const touched = new Set(changes.map((change) => clipResource(change.id)));
+      const groups = new Set(
+        changes.flatMap(({ before, after }) =>
+          before?.linkGroupId === after?.linkGroupId
+            ? []
+            : [before?.linkGroupId, after?.linkGroupId],
+        ),
+      );
+      for (const group of groups) if (group) touched.add(groupResource(group));
+      for (const key of touched) required.add(key);
       return {
         content: copy(next),
-        required: ['*'],
-        touched: ['*'],
-        targets: ['*'],
-        inverse: [{ type: 'domain.restore', target: '*', payload: { content } }],
-      };
-    }
-    const required = new Set<string>();
-    let next: VideoContentV3;
-    if (action.type === 'video.timeline') {
-      const edit = parseEdit(action);
-      const selected = content.sequence.clips.find((clip) => clip.id === edit.clipId);
-      required.add(clipResource(edit.clipId));
-      if (selected?.linkGroupId && (edit.type === 'move' || edit.type === 'split'))
-        required.add(groupResource(selected.linkGroupId));
-      next = applyEdit(content, edit);
-    } else if (action.type === 'history.video-clips') {
-      const changes = action.payload.clips as ClipChange[];
-      if (
-        !Array.isArray(changes) ||
-        !changes.length ||
-        changes.some(
-          (change) =>
-            !change ||
-            !isID(change.id) ||
-            (change.value !== null && change.value?.id !== change.id),
-        )
-      )
-        fail('schema-mismatch', 'Invalid Video history');
-      next = replaceClips(content, changes);
-    } else fail('unsupported-operation', 'Unsupported Video action');
-    if (!validate(next))
-      fail('invalid-operation', 'Timeline exceeds the fixed sequence or uses unsupported inputs');
-    const changes = clipDelta(content.sequence.clips, next.sequence.clips);
-    if (!changes.length) fail('invalid-operation', 'No timeline change');
-    const touched = new Set(changes.map((change) => clipResource(change.id)));
-    const groups = new Set(
-      changes.flatMap(({ before, after }) =>
-        before?.linkGroupId === after?.linkGroupId ? [] : [before?.linkGroupId, after?.linkGroupId],
-      ),
-    );
-    for (const group of groups) if (group) touched.add(groupResource(group));
-    for (const key of touched) required.add(key);
-    return {
-      content: copy(next),
-      required: [...required],
-      touched: [...touched],
-      targets: changes.map(({ id }) => id),
-      inverse: [
-        {
-          type: 'history.video-clips',
-          target: '*',
-          payload: {
-            clips: changes.map(({ id, before }) => ({ id, value: before ?? null })),
+        required: [...required],
+        touched: [...touched],
+        targets: changes.map(({ id }) => id),
+        inverse: [
+          {
+            type: 'history.video-clips',
+            target: '*',
+            payload: {
+              clips: changes.map(({ id, before }) => ({ id, value: before ?? null })),
+            },
           },
-        },
-      ],
-    };
-  },
-};
+        ],
+      };
+    },
+  };
+}
+
+export const videoTimelineCodec = createVideoTimelineCodec(videoTimelineFixture());

@@ -1,5 +1,5 @@
 import { canonical, copy, fail, type Domain } from '@editor-platform/collaboration-core';
-import { assertGraph, isGraphDocument, relationProfile, type GraphDocument } from '@editor-platform/structured-graph/model';
+import { assertGraph, isGraphDocument, relationProfile, type GraphProfile, type GraphDocument } from '@editor-platform/structured-graph/model';
 import { isAnalysis, type AnalysisDocument } from '@editor-platform/analysis-core';
 import { isEstimate, type EstimateDocument } from '@editor-platform/estimate-core';
 import { validateFictionMap, type FictionMapContent } from '@editor-platform/fiction-map/model';
@@ -73,14 +73,20 @@ function records<T extends object>(
   };
 }
 
-function graphRefusal(graph: GraphDocument): string | undefined {
-  if (graph.profile.id !== relationProfile.id || graph.profile.version !== relationProfile.version)
-    return 'このグラフのプロファイルは共同編集に対応していません。';
-  try {
-    assertGraph(graph, relationProfile);
-  } catch {
-    return 'グラフの関係や属性がプロファイルに合っていません。';
-  }
+export function structuredGraphSchema(profiles: readonly GraphProfile[]) {
+  return records<GraphDocument>('structured-graph', isGraphDocument, ['attributes', 'presentation'], {
+    nodes: ['type', 'attributes', 'sectionId'],
+    edges: ['type', 'from', 'to', 'attributes'],
+    sections: ['type', 'attributes', 'parentId'],
+  }, (graph) => {
+    const profile = profiles.find((p) => p.id === graph.profile.id && p.version === graph.profile.version);
+    if (!profile) return 'このグラフのプロファイルは共同編集に対応していません。';
+    try {
+      assertGraph(graph, profile);
+    } catch {
+      return 'グラフの関係や属性がプロファイルに合っていません。';
+    }
+  }, ['profile', 'id', 'schemaVersion']);
 }
 
 const cadModelFields = [
@@ -164,11 +170,7 @@ const nativeRecordSchemas = {
     (doc) => doc.runs?.length ? '保存済みの解析結果を含む成果物は共同編集できません。' : undefined,
     ['source', 'schemaVersion'],
   ),
-  'structured-graph': records('structured-graph', isGraphDocument, ['attributes', 'presentation'], {
-    nodes: ['type', 'attributes', 'sectionId'],
-    edges: ['type', 'from', 'to', 'attributes'],
-    sections: ['type', 'attributes', 'parentId'],
-  }, graphRefusal),
+  'structured-graph': structuredGraphSchema([relationProfile]),
   analysis: records<AnalysisDocument>('analysis', isAnalysis, ['title'], {
     blocks: ['kind', 'text', 'targetId'],
     parameters: ['label', 'type', 'value'],

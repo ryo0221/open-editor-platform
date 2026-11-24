@@ -1,3 +1,4 @@
+import { useSharedCharacterMedia } from './shared-media';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   besidePlacement,
@@ -76,6 +77,7 @@ const exposeProbe: NonNullable<Parameters<typeof CharacterSurface>[0]['onFrame']
 export default function CharacterHost({
   session,
   localSession,
+  mediaUrl,
   shared,
   readOnly,
   persist,
@@ -86,6 +88,7 @@ export default function CharacterHost({
 }: {
   session: EditorDraftPort<CharacterDocument>;
   localSession?: EditorSession<CharacterDocument>;
+  mediaUrl?(id: string): string;
   shared: boolean;
   readOnly: boolean;
   persist(content: CharacterDocument): void;
@@ -116,7 +119,9 @@ export default function CharacterHost({
   const refsKey = useMemo(() => JSON.stringify(session.content.assets), [session, sequence]);
   const characterRecord = shared ? record() : undefined;
   const library = shared ? records() : undefined;
+  const remote = useSharedCharacterMedia(mediaUrl, refsKey, sequence);
   const assets = useMemo(() => {
+    if (mediaUrl) return remote ?? new Map<string, Uint8Array>();
     const out = new Map<string, Uint8Array>();
     const resources = characterRecord && library
       ? localCharacterResources(characterRecord, library)
@@ -126,7 +131,7 @@ export default function CharacterHost({
       if (kept) out.set(ref.id, decodeBytes(kept.bytes));
     }
     return out;
-  }, [refsKey, stored, library, characterRecord?.cadResources]);
+  }, [refsKey, stored, library, characterRecord?.cadResources, mediaUrl, remote]);
   const [pending, setPending] = useState<{
     file: string;
     result: GltfImport;
@@ -442,7 +447,7 @@ export default function CharacterHost({
     <div className="character-host">
       {shared && assets.size !== session.content.assets.length && (
         <p role="status">
-          この端末にない素材があります。同じ素材を含む保存ファイルをこの端末に読み込んでから、共有を開き直してください。
+          {mediaUrl ? '表示できない素材があります。素材の閲覧権限と通信状態を確かめてください。' : 'この端末にない素材があります。同じ素材を含む保存ファイルをこの端末に読み込んでから、共有を開き直してください。'}
         </p>
       )}
       <CharacterSurface

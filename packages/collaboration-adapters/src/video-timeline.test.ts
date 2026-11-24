@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { Authority, initial, operation, type Principal } from '@editor-platform/collaboration-core';
 import { time } from '@editor-platform/video-core';
 import {
+  createVideoTimelineCodec,
   splitVideoTimeline,
   videoTimelineAction,
   videoTimelineCodec,
@@ -123,4 +124,21 @@ it('preserves track locks, validates the whole timeline, and fixes all source de
   ).toThrow(/Empty clip/);
   content.sources[0].asset.sha256 = 'f'.repeat(64);
   expect(videoTimelineCodec.validate(content)).toBe(false);
+});
+
+it('edits a Host-admitted project and keeps its original media pins after the caller mutates its input', () => {
+  const project = videoTimelineFixture();
+  project.sequence.id = 'client-film';
+  project.sources[0].asset.sha256 = 'a'.repeat(64);
+  const codec = createVideoTimelineCodec(project);
+  const basis = initial('film', codec, project);
+  const authority = new Authority(codec, basis);
+  project.sources[0].asset.sha256 = 'b'.repeat(64);
+  expect(codec.validate(project)).toBe(false);
+  expect(videoTimelineCodec.validate(basis.content)).toBe(false);
+  const edit = operation(codec, basis, a, [videoTimelineAction({ type: 'move', clipId: 'sample-picture', delta: time(1) })]);
+  expect(authority.submit(a, edit).status).toBe('accepted');
+  expect(authority.snapshot().content.sources[0].asset.sha256).toBe('a'.repeat(64));
+  expect(authority.undo(a, edit.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content).toEqual(basis.content);
 });

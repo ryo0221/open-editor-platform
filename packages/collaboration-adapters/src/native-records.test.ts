@@ -80,7 +80,7 @@ it('edits Analysis note text and preserves a peer change to the title', () => {
 it('keeps null as a native Estimate value', () => {
   const estimate = {
     ...createEstimate(),
-    quantities: [{ id: 'manual', name: 'Area', unit: 'm2', value: '1', quality: 'manual' as const, evidence: '', inclusion: 'include' as const, exclusionReason: '' }],
+    quantities: [{ id: 'manual', name: 'Area', unit: 'm2', value: '1', quality: 'manual' as const, evidence: 'Measured area', inclusion: 'include' as const, exclusionReason: '' }],
   };
   const { edit, authority } = scenario(estimateEditorCodec, estimate);
   expect(authority.submit(a, edit(a, (doc) => ({
@@ -90,7 +90,10 @@ it('keeps null as a native Estimate value', () => {
 });
 
 it('shares the name of a Fiction Map layer', () => {
-  const { edit, authority } = scenario(fictionMapEditorCodec, createFictionMap());
+  const { edit, authority } = scenario(fictionMapEditorCodec, {
+    ...createFictionMap(),
+    layers: [{ id: 'places', name: 'Locations', purpose: 'settlement', visibleByDefault: true }],
+  });
   const operation = edit(a, (map) => ({
     ...map, layers: map.layers.map((l, i) => i === 0 ? { ...l, name: 'Places' } : l),
   }));

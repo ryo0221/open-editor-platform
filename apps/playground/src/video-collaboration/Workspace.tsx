@@ -1,10 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   HttpEditorAdapter,
   SharedEditorSession,
   splitVideoTimeline,
   videoTimelineAction,
   videoTimelineCodec,
+  createVideoTimelineCodec,
   type EditorConnectionCredentials,
   type SharedVideoEdit,
 } from '@editor-platform/collaboration-adapters';
@@ -16,8 +17,9 @@ import {
   type Time,
   type VideoContentV3,
 } from '@editor-platform/video-core';
-import type { Snapshot } from '@editor-platform/collaboration-core';
+import { Conflict, type Snapshot } from '@editor-platform/collaboration-core';
 import './workspace.css';
+import { editedCharacters } from './typed-input';
 
 type Actor = 'A' | 'B' | 'C';
 type Session = SharedEditorSession<VideoContentV3>;
@@ -53,20 +55,24 @@ function link(id: string, actor: Actor) {
 
 async function connect(id: string, actor: Actor, signal: AbortSignal) {
   const key = `ep-video-collaboration:${id}:${actor}`;
-  let credentials = JSON.parse(
+  const hosted = id.startsWith('host-video-');
+  let credentials = hosted ? null : JSON.parse(
     sessionStorage.getItem(key) ?? 'null',
-  ) as EditorConnectionCredentials | null;
+  ) as (EditorConnectionCredentials & { generation?: string }) | null;
   if (!credentials) {
     const response = await fetch('/collaboration-api/editor/session', {
       method: 'POST',
       signal,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artifactId: id, actor, domain: 'video' }),
+      body: JSON.stringify({ artifactId: id, actor, domain: 'video', ...(hosted ? {
+        generation: new URLSearchParams(location.search).get('generation') ?? undefined,
+        expectedSeedHash: new URLSearchParams(location.search).get('expectedSeedHash') ?? undefined,
+      } : {}) }),
     });
-    const result = (await response.json()) as EditorConnectionCredentials & { error?: string };
+    const result = (await response.json()) as EditorConnectionCredentials & { generation?: string; error?: string };
     if (!response.ok) throw new Error(result.error ?? '共有セッションを開けませんでした。');
     credentials = result;
-    sessionStorage.setItem(key, JSON.stringify(credentials));
+    if (!hosted) sessionStorage.setItem(key, JSON.stringify(credentials));
   }
   const adapter = new HttpEditorAdapter<VideoContentV3>(
     credentials.identity,
@@ -75,15 +81,16 @@ async function connect(id: string, actor: Actor, signal: AbortSignal) {
     undefined,
     { immutableContent: true },
   );
-  const session = new SharedEditorSession(videoTimelineCodec, adapter);
+  const codec = hosted ? createVideoTimelineCodec((await adapter.open()).content) : videoTimelineCodec;
+  const session = new SharedEditorSession(codec, adapter);
   const backup = `${key}:checkpoint`;
   try {
-    const stored = sessionStorage.getItem(backup);
+    const stored = !hosted && sessionStorage.getItem(backup);
     if (stored) session.resume(JSON.parse(stored));
     await session.open();
     if (session.pendingCount) await session.reconnect();
     if (signal.aborted) throw new DOMException('Session closed', 'AbortError');
-    return { session, backup };
+    return { session, backup, generation: credentials.generation };
   } catch (error) {
     session.suspend(() => {});
     throw error;
@@ -105,7 +112,7 @@ export default function VideoCollaboration() {
         <a href="/">ライブラリへ戻る</a>
       </main>
     );
-  if (!id || !/^video-[a-f0-9-]{36}$/.test(id) || !actorIDs.includes(actor as Actor))
+  if (!id || !/^(?:video-[a-f0-9-]{36}|host-video-[A-Za-z0-9_-]{1,130})$/.test(id) || !actorIDs.includes(actor as Actor))
     return (
       <main className="video-coedit">
         <p role="alert">共同編集のリンクを開けませんでした。</p>
@@ -117,14 +124,19 @@ export default function VideoCollaboration() {
 
 function Room({ id, actor }: { id: string; actor: Actor }) {
   const [session, setSession] = useState<Session>();
+  const [generation, setGeneration] = useState<string>();
+  const [ownInput, setOwnInput] = useState('');
+  const hosted = id.startsWith('host-video-');
   const [error, setError] = useState('');
   const [, refresh] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     let dispose = () => {};
     void connect(id, actor, controller.signal)
-      .then(({ session, backup }) => {
+      .then(({ session, backup, generation }) => {
+        setGeneration(generation);
         const retain = () => {
+          if (hosted) return;
           try {
             sessionStorage.setItem(backup, JSON.stringify(session.captureCheckpoint()));
           } catch {
@@ -139,7 +151,13 @@ function Room({ id, actor }: { id: string; actor: Actor }) {
           try {
             await session.sync();
           } catch (cause) {
-            if (!controller.signal.aborted) setError(String(cause));
+            if (!controller.signal.aborted) {
+              if (hosted && cause instanceof Conflict && cause.code === 'unauthorized') {
+                dispose();
+                setSession(undefined);
+              }
+              setError(String(cause));
+            }
           } finally {
             polling = false;
           }
@@ -160,16 +178,17 @@ function Room({ id, actor }: { id: string; actor: Actor }) {
       controller.abort();
       dispose();
     };
-  }, [id, actor]);
+  }, [id, actor, hosted]);
   return (
     <main className="video-coedit">
       <header>
-        <h1>動画の共同編集デモ</h1>
+        <h1>{hosted ? '動画の共同編集' : '動画の共同編集デモ'}</h1>
         <a href="/">ライブラリへ戻る</a>
       </header>
       {error && <p role="alert">{error}</p>}
+      {!session && error && ownInput && <label>未反映の入力<textarea value={ownInput} readOnly /></label>}
       {session ? (
-        <Editor id={id} actor={actor} session={session} retry={() => setError('')} />
+        <Editor generation={generation} onInput={setOwnInput} id={id} actor={actor} session={session} retry={() => setError('')} />
       ) : (
         !error && <p role="status">共有セッションを開いています…</p>
       )}
@@ -182,30 +201,58 @@ function Editor({
   actor,
   session,
   retry,
+  generation,
+  onInput,
 }: {
+  generation?: string;
+  onInput(value: string): void;
   id: string;
   actor: Actor;
   session: Session;
   retry(): void;
 }) {
-  const [selectedId, setSelectedId] = useState('sample-picture');
+  const [selectedId, setSelectedId] = useState(() => session.viewContent.sequence.clips[0]?.id ?? '');
   const [mode, setMode] = useState<Mode>('move');
   const [input, setInput] = useState<Input>();
+  const typed = useRef<Partial<Record<'start' | 'end' | 'text', boolean[]>>>({});
   const [opId, setOpId] = useState<string>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [composing, setComposing] = useState(false);
   const document = session.viewContent;
   const selected = document.sequence.clips.find((clip) => clip.id === selectedId);
+  const source = selected && 'sourceId' in selected && document.sources.find(item => item.id === selected.sourceId);
+  const media = generation && source && '/collaboration-api/editor/media?' + new URLSearchParams({
+    artifactId: id, assetId: source.asset.assetId, generation, revision: String(session.confirmed.revision),
+  });
+  const [authorizedMedia, setAuthorizedMedia] = useState<string>();
+  useEffect(() => {
+    if (!media) return;
+    const url = media;
+    const controller = new AbortController();
+    let timer: number;
+    async function check() {
+      try {
+        const response = await fetch(url, {method: 'HEAD', cache: 'no-store', signal: controller.signal});
+        if (!controller.signal.aborted) setAuthorizedMedia(response.ok ? url : undefined);
+      } catch {
+        if (!controller.signal.aborted) setAuthorizedMedia(undefined);
+      } finally {
+        if (!controller.signal.aborted) timer = window.setTimeout(check, 2000);
+      }
+    }
+    void check();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [media]);
   const duration = seconds(document.sequence.duration);
   const latestSave = session.savedVersions.at(-1);
   const blocked = busy || session.pendingCount > 0 || session.rejected.length > 0;
   const fields = input ?? (selected && defaults(session.confirmed, selected));
   useEffect(() => {
     if (!opId || session.lastReceipt?.operationId !== opId) return;
-    if (session.lastReceipt.status === 'accepted') setInput(undefined);
+    if (session.lastReceipt.status === 'accepted') { setInput(undefined); typed.current = {}; onInput(''); }
     setOpId(undefined);
-  }, [session.lastReceipt, opId]);
+  }, [session.lastReceipt, opId, onInput]);
   useEffect(() => {
     if (!input && !session.pendingCount) return;
     const guard = (event: BeforeUnloadEvent) => {
@@ -222,7 +269,13 @@ function Editor({
     setError('');
   };
   function update(field: 'start' | 'end' | 'text', value: string) {
-    if (fields) setInput({ ...fields, [field]: value });
+    if (!fields) return;
+    const next = { ...fields, [field]: value };
+    typed.current[field] = editedCharacters(fields[field], value, typed.current[field]);
+    setInput(next);
+    const own = (['start', 'end', 'text'] as const).map(key =>
+      next[key].split('').filter((_, i) => typed.current[key]?.[i]).join(''));
+    onInput(own.filter(Boolean).join('\n'));
   }
   function apply(event: FormEvent) {
     event.preventDefault();
@@ -268,6 +321,7 @@ function Editor({
   function reset(keep: boolean) {
     session.discardRetained();
     setComposing(false);
+    if (!keep) { typed.current = {}; onInput(''); }
     setInput(keep && input ? { ...input, base: session.confirmed } : undefined);
     setError('');
   }
@@ -275,10 +329,10 @@ function Editor({
     <>
       <div className="video-coedit-toolbar">
         <p role="status">
-          参加者 {actor} · {session.status}
+          参加者 {session.adapter.identity.actorId} · {session.status}
         </p>
-        <a href={link(id, actor === 'A' ? 'B' : 'A')} target="_blank" rel="noreferrer">
-          別の参加者として開く
+        <a href={generation ? '/?' + new URLSearchParams({ videoCollaboration: id, generation }) : link(id, actor === 'A' ? 'B' : 'A')} target="_blank" rel="noreferrer">
+          {generation ? '共同編集のリンクを開く' : '別の参加者として開く'}
         </a>
         <button
           disabled={blocked || !!input || session.readOnly || !session.canUndo}
@@ -302,6 +356,9 @@ function Editor({
           再接続
         </button>
       </div>
+      {media && media === authorizedMedia && selected?.kind === 'video' && <video aria-label="選択した映像素材" controls preload="metadata" src={media} />}
+      {media && media === authorizedMedia && selected?.kind === 'audio' && <audio aria-label="選択した音声素材" controls preload="metadata" src={media} />}
+      {media && media === authorizedMedia && selected?.kind === 'image' && <img alt="選択した画像素材" src={media} />}
       {latestSave && <p>保存した版 r{latestSave.confirmedRevision}</p>}
       {(error || session.error) && <p role="alert">{error || session.error}</p>}
       <div className="video-coedit-grid">
@@ -314,7 +371,7 @@ function Editor({
           </div>
           {document.sequence.tracks.map((track) => (
             <div className="video-coedit-track" key={track.id}>
-              <span>{names[track.id]}</span>
+              <span>{names[track.id] ?? track.id}</span>
               <div className="video-coedit-lane" data-kind={track.kind}>
                 {document.sequence.clips
                   .filter((clip) => clip.trackId === track.id)

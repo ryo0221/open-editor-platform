@@ -5,8 +5,7 @@ test('manga peers share dialogue and linked panel changes', async ({ page: a, br
   const context = await browser.newContext({ baseURL });
   try {
     await a.goto('/');
-    await a.getByText('漫画を作成', { exact: true }).click();
-    await a.getByRole('button', { name: '漫画を新規作成', exact: true }).click();
+    await a.getByRole('main').getByRole('button', { name: '漫画を作成', exact: true }).click();
     await expect(a.locator('[data-workspace]')).toHaveAttribute('data-workspace', 'manga');
     const menu = a.getByRole('button', { name: 'More artifact actions', exact: true });
     await menu.click();

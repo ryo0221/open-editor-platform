@@ -42,15 +42,15 @@ The Playground reference Host connects these engineering and 3D surfaces:
 | CoSim | Binding settings for the selected circuit and ladder versions | The source pointers stay fixed. Participants load the exact saved inputs independently. A change to the binding list conflicts with a competing change to that list. |
 | CAD | Native part parameters, profiles, sketches and features; part properties and named views | Recipe changes use a common conflict stamp. The reference authority validates the native recipe; each participant evaluates geometry using their installed kernel. Imported geometry, part assemblies, textures and underlays use local editing. |
 | BIM | Levels, grids, materials, building elements, joins, property sets and views | Buildings with placed CAD parts or texture sidecars use local editing. Geometry evaluation is local. |
-| Character | Part display and transforms, materials, pose, and action/keyframe editing with existing mesh and rig topology | Mesh and texture bytes are resolved by hash on each participant's device. New asset import, topology changes and external props use local editing. Competing edits to one action's tracks conflict. |
+| Character | Part display and transforms, materials, pose, and action/keyframe editing with existing mesh and rig topology | A registered Host project can deliver pinned meshes and textures to authorized viewers. Local projects resolve bytes from the participant’s library. New asset import, topology changes and external props use local editing. Competing edits to one action's tracks conflict. |
 | Simulation | Materials, loads, constraints, studies, preparation and mesh settings | The source CAD version stays fixed. Each participant resolves it locally. Solver runs and their results stay in the running browser; remote compute and recording runs in the draft are unavailable. |
 
 The reference Host sends the engineering document and pinned identifiers. BIM, circuit,
-ladder, or CAD source documents and Character asset bytes are resolved locally. A participant
+ladder, and CAD source documents are resolved locally. A participant
 without required Character or Simulation resources can synchronize the draft but cannot export
 an incomplete native file. Character GLB and frame exports also use the shared export guard.
 
-### Video timeline demo
+### Video timeline and original media
 
 The development Playground Library links to the Video collaboration demo. The reference
 server creates a native v3 timeline from a synthetic fixture. Participant A then shares
@@ -60,16 +60,29 @@ supply operation preconditions. Edits to separate clips can commit independently
 retain the user's input for review. Undo and Redo apply to the actor and session that issued
 the change. Save creates a version of the confirmed timeline in the in-memory reference server.
 
-The demo represents media with fixed source declarations. It has no decoder, file upload,
-media transfer or rendered-video export. The server refuses user-supplied seed projects
-and the asset upload endpoint for Video. The local Video runtime and its project journal
-continue to own local import, playback, export and portable save.
+The public `nativeEditorCodecs` registry covers the 27 Playground kinds. Hosts can install their own admitted graph profiles with `createStructuredGraphEditorCodec`. Video uses `createVideoTimelineCodec` with the registered project’s pinned content.
 
-For a future media delivery capability, the proposed audience is the current readers of the
-shared artifact. Source content that belongs to another artifact also requires a current
-source grant or an explicitly authorized fixed release for that audience. The Host must
-check the same policy on fetch and when opening saved versions. Apply this policy before
-adding delivery for actual assets.
+The generated demo keeps synthetic sources. For a registered native v3 project, the Host
+loads the saved timeline and authenticates each session. A saved project can open the shared
+timeline from the private Video editor when the Host enables `VITE_HOSTED_VIDEO=1`.
+The handoff checks the saved content hash and generation. Editing fixes the source set, track
+settings, locked clips and embedded Animation content for the session. The private editor
+continues to handle file import and rendered movie export. A Host can similarly enable
+`VITE_HOSTED_CHARACTER=1` for registered Character projects.
+
+The reference server accepts `projects` and `media` adapters from a trusted Host.
+`GET` and `HEAD /collaboration-api/editor/media` resolve an asset of an exact shared
+generation/revision or saved version. The Host checks the viewer's current access to the
+destination and either current access to the source or a valid release for this version,
+destination and viewer. A cookie or other authenticated credential identifies the viewer.
+An invite URL and a demo actor label confer no media rights. The reader verifies length and
+SHA-256 before serving, checks access again during transfers and supports single byte ranges.
+Responses use private, no-store caching. Video and Character recheck open media and remove
+the preview on loss of access. Bytes already received by a viewer cannot be recalled.
+
+The reference service keeps shared projects and versions in memory. Its browser tests supply
+two authenticated test viewers, an actual WebM, and a native Character mesh. Production Hosts
+supply durable project/version lookup, authentication, source permissions and release terms.
 
 Mind Map and Schedule use the existing native JSON and the reference Host's shared
 session. Mind Map names are applied as complete field values. A conflict keeps

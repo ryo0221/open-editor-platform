@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./fixtures": "./src/fixtures.ts"
+    "./fixtures": "./src/fixtures.ts",
+    "./shared-media": "./src/shared-media.ts"
   },
   "dependencies": {
     "@editor-platform/video-core": "*",
@@ -48,6 +49,7 @@
     "prosemirror-commands": "1.7.2",
     "prosemirror-view": "1.42.6",
     "@editor-platform/reuse-core": "*",
-    "@editor-platform/artifact-references": "*"
+    "@editor-platform/artifact-references": "*",
+    "@noble/hashes": "1.8.0"
   }
 }

@@ -1,3 +1,6 @@
+import { graphProfiles } from '@editor-platform/playground/graph-templates';
+import { currentProjectAccess, hostedDomain, type HostedProjects, type HostedProjectAccess } from './hosted-projects';
+import { mediaRoute, type ReferenceMediaHost } from './shared-media';
 import { createServer } from 'node:http';
 import { contentHash, type ArtifactVersion } from '@editor-platform/artifact-core';
 import {
@@ -14,6 +17,7 @@ import {
   type ConfirmedVersion,
 } from '@editor-platform/collaboration-core';
 import {
+  nativeEditorCodecs,
   slideCodec,
   dataCodec,
   documentCodec,
@@ -21,34 +25,11 @@ import {
   whiteboardCodec,
   reviewCodec,
   fileCodec,
-  slideEditorCodec,
-  mangaEditorCodec,
-  whiteboardEditorCodec,
-  dataEditorCodec,
-  documentEditorCodec,
   editorAssetCodec,
   EditorAssetCache,
-  reactUiEditorCodec,
-  animationEditorCodec,
-  mindmapEditorCodec,
-  scheduleEditorCodec,
   checksSharedNativeHistory,
-  structuredGraphEditorCodec,
-  analysisEditorCodec,
-  estimateEditorCodec,
-  fictionMapEditorCodec,
-  geoEditorCodec,
-  ladderEditorCodec,
-  schematicEditorCodec,
-  drawingEditorCodec,
-  pcbEditorCodec,
-  constructionEditorCodec,
-  factoryEditorCodec,
-  cosimEditorCodec,
-  cadEditorCodec,
-  bimEditorCodec,
-  characterEditorCodec,
-  simulationEditorCodec,
+  createStructuredGraphEditorCodec,
+  createVideoTimelineCodec,
   videoTimelineCodec,
   videoTimelineFixture,
 } from '@editor-platform/collaboration-adapters';
@@ -68,35 +49,7 @@ const codecs = {
   review: reviewCodec,
   file: fileCodec,
 };
-const editorCodecs = {
-  ...codecs,
-  'react-ui': reactUiEditorCodec,
-  animation: animationEditorCodec,
-  mindmap: mindmapEditorCodec,
-  schedule: scheduleEditorCodec,
-  'structured-graph': structuredGraphEditorCodec,
-  'analysis': analysisEditorCodec,
-  'estimate': estimateEditorCodec,
-  'fiction-map': fictionMapEditorCodec,
-  'geo': geoEditorCodec,
-  'ladder': ladderEditorCodec,
-  'schematic': schematicEditorCodec,
-  drawing: drawingEditorCodec,
-  pcb: pcbEditorCodec,
-  construction: constructionEditorCodec,
-  factory: factoryEditorCodec,
-  cosim: cosimEditorCodec,
-  cad: cadEditorCodec,
-  bim: bimEditorCodec,
-  character: characterEditorCodec,
-  simulation: simulationEditorCodec,
-  video: videoTimelineCodec,
-  document: documentEditorCodec,
-  slide: slideEditorCodec,
-  design: mangaEditorCodec,
-  whiteboard: whiteboardEditorCodec,
-  data: dataEditorCodec,
-};
+const editorCodecs = { ...nativeEditorCodecs, 'structured-graph': createStructuredGraphEditorCodec(graphProfiles), video: videoTimelineCodec };
 const fixtures = () => ({
   slide: slideFixture(),
   data: dataFixture(),
@@ -127,16 +80,17 @@ const fixtures = () => ({
 });
 /** Loopback reference Host for the collaboration Lab. Rooms, identities and the
  * permission fault injection are demo fixtures, never production authorization. */
-export function createReferenceServer() {
+export function createReferenceServer(options: { media?: ReferenceMediaHost; projects?: HostedProjects } = {}) {
+  const serveMedia = mediaRoute(options.media);
   const rooms = new Map<string, Map<Domain, Authority<unknown>>>();
   const versions = new Map<string, ConfirmedVersion<unknown>[]>();
   // Saving reads the parent version across an await; one queue per artifact keeps the chain linear.
   const saving = new Map<string, Promise<unknown>>();
-  const artifacts = new Map<string, { name: string; authority: Authority<unknown> }>();
+  const artifacts = new Map<string, { name: string; authority: Authority<unknown>; projectGeneration?: string; seedHash?: string }>();
   const assetCaches = new Map<string, EditorAssetCache>();
   const connections = new Map<
     string,
-    { room?: string; artifactId?: string; principal: Principal }
+    { room?: string; artifactId?: string; principal: Principal; projectGrant?: HostedProjectAccess }
   >();
   function room(name: string) {
     let value = rooms.get(name);
@@ -156,8 +110,9 @@ export function createReferenceServer() {
     try {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1'),
         path = url.pathname.replace(/^\/collaboration-api/, '');
+      if (path === '/editor/media') return await serveMedia(request, response, url);
       if (path === '/health') {
-        response.end(JSON.stringify({ ready: true, durable: false }));
+        response.end(JSON.stringify({ ready: true, durable: false, ...(options.projects ? { hostedVideo: true } : {}) }));
         return;
       }
       let bytes = 0;
@@ -171,22 +126,41 @@ export function createReferenceServer() {
         chunks.push(chunk);
       }
       const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      if (path === '/editor/video-link' && request.method === 'POST') {
+        const id = body.artifactId;
+        if (typeof id !== 'string' || !/^host-video-[A-Za-z0-9_-]{1,130}$/.test(id) ||
+            typeof body.contentHash !== 'string') fail('invalid-operation', 'Invalid saved project');
+        const grant = await currentProjectAccess(options.projects, request, id);
+        const project = await options.projects!.load(id, grant.generation);
+        const existing = artifacts.get(id);
+        const hash = await contentHash(project.content);
+        await currentProjectAccess(options.projects, request, id, grant);
+        if (body.contentHash !== hash || (existing && (existing.projectGeneration !== grant.generation || existing.seedHash !== hash)))
+          fail('stale-precondition', 'The shared project and local saved version differ');
+        response.end(JSON.stringify({ artifactId: id, generation: grant.generation }));
+        return;
+      }
       if (path === '/editor/session' && request.method === 'POST') {
+        const hosted = typeof body.artifactId === 'string' ? hostedDomain(body.artifactId) : undefined;
         if (
-          !['A', 'B', 'C'].includes(body.actor) ||
+          (hosted ? body.domain !== hosted : !['A', 'B', 'C'].includes(body.actor)) ||
           typeof body.artifactId !== 'string' ||
           !/^[a-zA-Z0-9_-]{1,150}$/.test(body.artifactId) ||
           !Object.hasOwn(editorCodecs, body.domain)
         )
           fail('unauthorized', 'Invalid reference editor identity/artifact');
-        const videoDemo = body.domain === 'video';
+        const grant = hosted ? await currentProjectAccess(options.projects, request, body.artifactId) : undefined;
+        if (grant && body.generation !== undefined && body.generation !== grant.generation) fail('stale-precondition', 'Shared project generation changed');
+        if (grant && body.initial !== undefined) fail('invalid-operation', 'Shared project seeds come from Host storage');
+        const videoDemo = body.domain === 'video' && !hosted;
         if (videoDemo && (body.initial !== undefined || !/^video-[a-f0-9-]{36}$/.test(body.artifactId)))
           fail('invalid-operation', 'Video collaboration opens generated samples only');
         let artifact = artifacts.get(body.artifactId);
         if (!artifact) {
-          const seed = videoDemo && body.actor === 'A'
+          const project = grant && await options.projects!.load(body.artifactId, grant.generation);
+          const seed = project ?? (videoDemo && body.actor === 'A'
             ? { name: 'Video timeline demo', content: videoTimelineFixture() }
-            : body.initial;
+            : body.initial);
           if (!seed)
             fail(
               'target-deleted',
@@ -194,10 +168,13 @@ export function createReferenceServer() {
             );
           const assets = new EditorAssetCache();
           assets.encode(seed.content);
-          const nativeCodec = editorCodecs[body.domain as Domain] as DomainCodec<unknown>;
-          const codec = videoDemo ? nativeCodec : editorAssetCodec(nativeCodec, assets, true);
+          const nativeCodec = (project && hosted === 'video'
+            ? createVideoTimelineCodec(project.content as import('@editor-platform/video-core').VideoContentV3)
+            : editorCodecs[body.domain as Domain]) as DomainCodec<unknown>;
+          const codec = body.domain === 'video' ? nativeCodec : editorAssetCodec(nativeCodec, assets, true);
           const candidate = {
             name: String(seed.name ?? 'Shared artifact'),
+            ...(grant ? { projectGeneration: grant.generation, seedHash: await contentHash(seed.content) } : {}),
             authority: new Authority(
               codec,
               initial(body.artifactId, codec, seed.content, seed.threads ?? []),
@@ -220,6 +197,7 @@ export function createReferenceServer() {
               fail('schema-mismatch', 'Invalid immutable version or content hash');
             seeded.push({ schema: 1, confirmedRevision: 0, engineVersion: 0, version });
           }
+          if (grant) await currentProjectAccess(options.projects, request, body.artifactId, grant);
           // Hashing yields: another initializer may have won. Never overwrite that authority.
           artifact = artifacts.get(body.artifactId);
           if (!artifact) {
@@ -229,18 +207,21 @@ export function createReferenceServer() {
             versions.set(body.artifactId, seeded);
           }
         }
+        if (grant && (grant.generation !== artifact.projectGeneration ||
+          (body.expectedSeedHash !== undefined && body.expectedSeedHash !== artifact.seedHash)))
+          fail('stale-precondition', 'This draft belongs to another project version');
         if (artifact.authority.snapshot().domain !== body.domain)
           fail('schema-mismatch', 'Existing artifact has a different domain');
         // An existing authority is always retained; a stale local seed never overwrites it.
         const principal: Principal = {
-            actorId: body.actor,
+            actorId: grant?.viewerId ?? body.actor,
             clientId: uid(),
             sessionId: uid(),
-            writable: true,
+            writable: grant?.writable ?? true,
             scopes: ['*'],
           },
           token = uid();
-        connections.set(token, { artifactId: body.artifactId, principal });
+        connections.set(token, { artifactId: body.artifactId, principal, projectGrant: grant });
         response.end(
           JSON.stringify({
             token,
@@ -250,6 +231,7 @@ export function createReferenceServer() {
               sessionId: principal.sessionId,
             },
             name: artifact.name,
+            ...(grant ? { generation: grant.generation } : {}),
           }),
         );
         return;
@@ -294,7 +276,10 @@ export function createReferenceServer() {
       if (!authority) fail('schema-mismatch', 'Unknown domain');
       if (authority.snapshot().domain !== domain)
         fail('unauthorized', 'Session is bound to another domain');
-      const principal = connection.principal;
+      const verifyProjectAccess = () => currentProjectAccess(options.projects, request, connection.artifactId!, connection.projectGrant);
+      const principal = connection.projectGrant
+        ? { ...connection.principal, writable: (await verifyProjectAccess()).writable }
+        : connection.principal;
       if (domain === 'video' && principal.expiresAt !== undefined && principal.expiresAt <= Date.now())
         fail('unauthorized', 'Video session has expired');
       let result: unknown;
@@ -316,7 +301,7 @@ export function createReferenceServer() {
       } else if (request.method === 'POST') {
         if (path === '/editor/reference-permissions') {
           // Fault injection for this loopback reference Host only; never an Editor policy API.
-          if (!connection.artifactId || typeof body.writable !== 'boolean')
+          if (connection.projectGrant || !connection.artifactId || typeof body.writable !== 'boolean')
             fail('invalid-operation', 'Invalid reference permission change');
           principal.writable = body.writable;
           if (body.expiresAt !== undefined) {
@@ -326,7 +311,7 @@ export function createReferenceServer() {
           }
           result = principal;
         } else if (path === '/editor/asset') {
-          if (domain === 'video') fail('unsupported-operation', 'Video demo sources are fixed');
+          if (domain === 'video' || connection.projectGrant) fail('unsupported-operation', 'Shared project originals are fixed');
           if (
             !connection.artifactId ||
             !principal.writable ||
@@ -354,6 +339,8 @@ export function createReferenceServer() {
                 typeof body.reason === 'string' ? body.reason : 'Reference shared version',
                 current.at(-1)?.version.versionId ?? null,
               );
+              if (connection.projectGrant && !(await verifyProjectAccess()).writable)
+                fail('unauthorized', 'Video project is read only');
               versions.set(artifactId, [...(versions.get(artifactId) ?? []), saved]);
               return saved;
             });

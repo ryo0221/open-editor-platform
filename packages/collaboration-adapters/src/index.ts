@@ -16,3 +16,4 @@ export * from './react-ui';
 export * from './animation';
 export * from './video-timeline';
 export { mindmapEditorCodec } from './mindmap';
+export { nativeEditorCodecs } from './native-editor-codecs';

@@ -6,6 +6,7 @@
   "dependencies": {
     "@editor-platform/collaboration-core": "*",
     "@editor-platform/collaboration-adapters": "*",
-    "@editor-platform/artifact-core": "*"
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/playground": "*"
   }
 }

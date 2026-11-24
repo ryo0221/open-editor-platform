@@ -31,13 +31,14 @@ import {
   portableSimulationRecord,
   sharedSimulationExport,
 } from './simulation/source';
-import { mergeConstructionSources, portableConstructionRecord } from './construction/source';
+import { mergeConstructionSources, portableConstructionRecord, sharedConstructionExport } from './construction/source';
 import { mergeFactorySources, portableFactoryRecord } from './factory/source';
 import { mergeFactoryLooks, portableFactoryLooks } from './factory/looks';
 import { mergeDrawingSources, portableDrawingRecord } from './drawing/sources';
 import type { ConstructionSourceChoice } from './construction/source';
 import { assertBimNativeFits, portableBimRecord } from './bim/parts';
 import { mergeCadParts } from './cad/parts';
+import { sharedCharacterExportResources } from './character/shared-media';
 import { mergeBimParts } from './character/parts';
 import { ReferenceResolver } from '@editor-platform/artifact-references';
 import { nativeReferenceAdapters } from '@editor-platform/reference-adapters';
@@ -1295,12 +1296,16 @@ export default function App({
       };
       try {
         let portable = confirmedRecord;
+        if (active.kind === 'construction')
+          portable = sharedConstructionExport(confirmedRecord, recordsRef.current);
         if (active.kind === 'simulation')
           portable = sharedSimulationExport(confirmedRecord, recordsRef.current);
         if (active.kind === 'character') {
           portable = portableCadRecord({
             ...confirmedRecord,
-            cadResources: localCharacterResources(confirmedRecord, recordsRef.current),
+            cadResources: shared?.mediaUrl
+              ? await sharedCharacterExportResources(confirmedRecord, sharedSession.confirmed.revision, shared.mediaUrl)
+              : localCharacterResources(confirmedRecord, recordsRef.current),
           });
           await validateCadRecord(portable);
         }
@@ -1744,6 +1749,7 @@ export default function App({
     session,
     sharedSession,
     shared: !!shared,
+    mediaUrl: shared?.mediaUrl,
     novelChapter: shared?.novelChapter,
     sharedPreview,
     inputs,

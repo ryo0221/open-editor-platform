@@ -57,7 +57,8 @@ import {
   canvasTextItem,
   mapCanvasTextAnchor,
 } from './canvas-text';
-import { nativeRecordSchemas } from './native-records';
+import { nativeRecordSchemas, structuredGraphSchema } from './native-records';
+import type { GraphProfile } from '@editor-platform/structured-graph/model';
 import { canvasTextReplacement } from '@editor-platform/canvas-ui/text-engine';
 import { designCommandReads } from './design-command-reads';
 import { EditorState } from 'prosemirror-state';
@@ -332,7 +333,7 @@ const scheduleSchema: Schema<ScheduleDocument> = {
   },
   root: ['timeZone'],
   collections: (content) => [
-    collection(content, 'events', ['title', 'notes', 'time', 'conference']),
+    collection(content, 'events', ['title', 'notes', 'time', 'conference', 'links']),
   ],
 };
 function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
@@ -1462,6 +1463,11 @@ export const editorValidators = {
 /** These domains also validate every retained version before sharing the archive. */
 export function checksSharedNativeHistory(domain: DomainCodec<unknown>['domain']): boolean {
   return domain === 'schedule' || Object.hasOwn(nativeRecordSchemas, domain);
+}
+
+/** The authority and the Surface register their own trusted native profile catalogue. */
+export function createStructuredGraphEditorCodec(profiles: readonly GraphProfile[]) {
+  return editorCodec(structuredGraphSchema(profiles));
 }
 
 export const structuredGraphEditorCodec = editorCodec(nativeRecordSchemas['structured-graph']);

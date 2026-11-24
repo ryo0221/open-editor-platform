@@ -10,10 +10,10 @@ import { readM2Catalog } from './catalog';
 import { privateVideoM2, privateVideoM2Url } from './registration';
 import { scratchStatus } from '../../../../packages/video-metadata/host-media/indexed-media/scratch.mjs';
 import { acquireValidationOwner } from './validation-owner.mjs';
-async function mount(root, entryId, navigate = (url) => globalThis.location.assign(url)) {
+async function mount(root, entryId, navigate = (url) => globalThis.location.assign(url), openShared) {
   const owner = await acquireValidationOwner();
   const shadow = root.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `<style>:host{display:block;height:100dvh;overflow:auto;font:16px system-ui;color:#182333}*{box-sizing:border-box}[hidden]{display:none!important}section{max-width:1100px;margin:auto;padding:12px}button,input,select{font:inherit;max-width:100%}button{padding:8px;margin:4px}label{display:block;margin:8px 0}canvas{display:block;max-width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap}p[role=alert]{color:#a12626}</style><section><h1>Video</h1><p>Private local validation · desktop 1280 profile. Managed Video logical budget only; old builds and other writers must not share this validation origin. Shared editing unavailable. Current native Video format only. Older review formats are refused without modifying their stored data.</p><nav aria-label="Video M2 project navigation"></nav><p role="alert" id="notice"></p><div id="workspace"></div><div id="versions"></div></section>`;
+  shadow.innerHTML = `<style>:host{display:block;height:100dvh;overflow:auto;font:16px system-ui;color:#182333}*{box-sizing:border-box}[hidden]{display:none!important}section{max-width:1100px;margin:auto;padding:12px}button,input,select{font:inherit;max-width:100%}button{padding:8px;margin:4px}label{display:block;margin:8px 0}canvas{display:block;max-width:100%;height:auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap}p[role=alert]{color:#a12626}</style><section><h1>Video</h1><p>Private local validation · desktop 1280 profile. Managed Video logical budget only; old builds and other writers must not share this validation origin. Current native Video format only. Older review formats are refused without modifying their stored data.</p><nav aria-label="Video M2 project navigation"></nav><p role="alert" id="notice"></p><div id="workspace"></div><div id="versions"></div></section>`;
   const nav = shadow.querySelector('nav'),
     notice = shadow.querySelector('#notice');
   const versions = shadow.querySelector('#versions');
@@ -163,6 +163,15 @@ async function mount(root, entryId, navigate = (url) => globalThis.location.assi
     globalThis.removeEventListener('beforeunload', beforeUnload);
     navigate(destination);
   }
+  if (openShared) button('保存した動画を共同編集で開く', async () => {
+    const workspace = slot.current();
+    const adapter = adapters.get(workspace);
+    const { hash } = await workspace.host.snapshot();
+    if (!adapter?.savedHash || adapter.savedHash !== hash)
+      throw Error('共同編集を始める前に動画を保存してください。');
+    const destination = await openShared(adapter.id, hash);
+    await leave(destination);
+  });
   button('Return to Library', () => leave('/'));
   button('New Video project', () => replace());
   button('Reload saved Video project', () => leave(globalThis.location.href));

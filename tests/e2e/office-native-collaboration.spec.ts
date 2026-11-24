@@ -20,7 +20,7 @@ test('two Geo editors share a manually created layer and its Undo', async ({ pag
     await expect(other.locator('.save-status')).toContainText('Shared · confirmed');
     await page.getByRole('button', { name: 'Add layer', exact: true }).click();
     await expect(other.getByText('New layer', { exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await page.getByRole('banner').getByRole('button', { name: 'Undo', exact: true }).click();
     await expect(other.getByText('New layer', { exact: true })).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {

@@ -84,5 +84,8 @@
     "prosemirror-view": "1.42.6",
     "react": "19.1.1",
     "react-dom": "19.1.1"
+  },
+  "exports": {
+    "./graph-templates": "./src/app/graph-templates.ts"
   }
 }

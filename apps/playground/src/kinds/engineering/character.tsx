@@ -20,6 +20,7 @@ function CharacterSurface({ host }: HostSurfaceProps<CharacterDocument>) {
         session={draft}
         localSession={shared ? undefined : host.sessions.current.get(host.active.id) as unknown as EditorSession<CharacterDocument>}
         shared={shared}
+        mediaUrl={host.mediaUrl}
         readOnly={host.readOnly}
         persist={(content) => {
           if (shared) return;

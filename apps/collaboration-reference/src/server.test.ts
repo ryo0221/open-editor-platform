@@ -1,3 +1,6 @@
+import { graphProfiles, graphTemplates } from '@editor-platform/playground/graph-templates';
+import { immutableCommand } from '@editor-platform/editor-core';
+import type { GraphDocument } from '@editor-platform/structured-graph/model';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { commitVersion, createArtifact } from '@editor-platform/artifact-core';
@@ -14,6 +17,7 @@ import {
   SharedEditorSession,
   setField,
   slideCodec,
+  createStructuredGraphEditorCodec,
   videoTimelineAction,
   videoTimelineCodec,
 } from '@editor-platform/collaboration-adapters';
@@ -269,6 +273,40 @@ describe('reference editor artifacts', () => {
     });
   }
   const fileApi = (path: string) => `${path}?domain=file`;
+  it.each(graphTemplates)('edits, undoes and saves a $id diagram in two registered sessions', async (template) => {
+    const domain = 'structured-graph';
+    const artifactId = 'graph-' + template.id;
+    const content = template.create();
+    const codec = createStructuredGraphEditorCodec(graphProfiles);
+    const sessions: SharedEditorSession<GraphDocument>[] = [];
+    try {
+      for (const actor of ['A', 'B']) {
+        const credentials = await open(actor, artifactId, actor === 'A' ? { content } : undefined, domain);
+        expect(credentials.status).toBe(200);
+        const { token, identity } = credentials.body;
+        const session = new SharedEditorSession(codec, new HttpEditorAdapter<GraphDocument>(identity, token, domain, base));
+        sessions.push(session);
+        await session.open();
+      }
+      const [author, peer] = sessions;
+      author.execute(immutableCommand('graph.edit', 'Edit title', (doc) => ({
+        ...doc, attributes: { ...doc.attributes, title: 'Shared title' },
+      })));
+      await author.flush();
+      await peer.sync();
+      expect(peer.confirmed.content.attributes.title).toBe('Shared title');
+      await author.history('undo');
+      await peer.sync();
+      expect(peer.confirmed.content).toEqual(content);
+      await author.history('redo');
+      const saved = await author.save('Diagram');
+      await peer.sync();
+      expect(peer.savedVersions.at(-1)).toEqual(saved);
+      expect(saved.version.content.attributes.title).toBe('Shared title');
+    } finally {
+      sessions.forEach(session => session.suspend(() => {}));
+    }
+  });
   it('creates once from a verified seed and never overwrites an existing authority', async () => {
     expect(await open('Z', 'doc-1')).toMatchObject({ status: 400, body: { code: 'unauthorized' } });
     expect(await open('A', 'bad id')).toMatchObject({ status: 400 });
