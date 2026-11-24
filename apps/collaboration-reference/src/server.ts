@@ -49,6 +49,8 @@ import {
   bimEditorCodec,
   characterEditorCodec,
   simulationEditorCodec,
+  videoTimelineCodec,
+  videoTimelineFixture,
 } from '@editor-platform/collaboration-adapters';
 import {
   slideFixture,
@@ -88,6 +90,7 @@ const editorCodecs = {
   bim: bimEditorCodec,
   character: characterEditorCodec,
   simulation: simulationEditorCodec,
+  video: videoTimelineCodec,
   document: documentEditorCodec,
   slide: slideEditorCodec,
   design: mangaEditorCodec,
@@ -176,38 +179,41 @@ export function createReferenceServer() {
           !Object.hasOwn(editorCodecs, body.domain)
         )
           fail('unauthorized', 'Invalid reference editor identity/artifact');
+        const videoDemo = body.domain === 'video';
+        if (videoDemo && (body.initial !== undefined || !/^video-[a-f0-9-]{36}$/.test(body.artifactId)))
+          fail('invalid-operation', 'Video collaboration opens generated samples only');
         let artifact = artifacts.get(body.artifactId);
         if (!artifact) {
-          if (!body.initial)
+          const seed = videoDemo && body.actor === 'A'
+            ? { name: 'Video timeline demo', content: videoTimelineFixture() }
+            : body.initial;
+          if (!seed)
             fail(
               'target-deleted',
               'Shared artifact is unavailable; initialize from its local draft',
             );
           const assets = new EditorAssetCache();
-          assets.encode(body.initial.content);
-          const codec = editorAssetCodec(
-            editorCodecs[body.domain as Domain] as DomainCodec<unknown>,
-            assets,
-            true,
-          );
+          assets.encode(seed.content);
+          const nativeCodec = editorCodecs[body.domain as Domain] as DomainCodec<unknown>;
+          const codec = videoDemo ? nativeCodec : editorAssetCodec(nativeCodec, assets, true);
           const candidate = {
-            name: String(body.initial.name ?? 'Shared artifact'),
+            name: String(seed.name ?? 'Shared artifact'),
             authority: new Authority(
               codec,
-              initial(body.artifactId, codec, body.initial.content, body.initial.threads ?? []),
+              initial(body.artifactId, codec, seed.content, seed.threads ?? []),
             ),
           };
           const seeded: ConfirmedVersion<unknown>[] = [];
-          if (!Array.isArray(body.initial.versions ?? []))
+          if (!Array.isArray(seed.versions ?? []))
             fail('schema-mismatch', 'Invalid version archive');
-          for (const version of (body.initial.versions ?? []) as ArtifactVersion<unknown>[]) {
+          for (const version of (seed.versions ?? []) as ArtifactVersion<unknown>[]) {
             if (
               version.artifactId !== body.artifactId ||
               version.schemaVersion !== 1 ||
               typeof version.versionId !== 'string' ||
               seeded.some((v) => v.version.versionId === version.versionId) ||
               ((checksSharedNativeHistory(codec.domain) ||
-                (codec.domain === 'design' && body.initial.content?.pagination !== undefined)) &&
+                (codec.domain === 'design' && seed.content?.pagination !== undefined)) &&
                 !codec.validate(version.content)) ||
               (await contentHash(version.content)) !== version.contentHash
             )
@@ -289,6 +295,8 @@ export function createReferenceServer() {
       if (authority.snapshot().domain !== domain)
         fail('unauthorized', 'Session is bound to another domain');
       const principal = connection.principal;
+      if (domain === 'video' && principal.expiresAt !== undefined && principal.expiresAt <= Date.now())
+        fail('unauthorized', 'Video session has expired');
       let result: unknown;
       if (request.method === 'GET') {
         if (path === '/versions') result = versions.get(authority.snapshot().artifactId) ?? [];
@@ -318,6 +326,7 @@ export function createReferenceServer() {
           }
           result = principal;
         } else if (path === '/editor/asset') {
+          if (domain === 'video') fail('unsupported-operation', 'Video demo sources are fixed');
           if (
             !connection.artifactId ||
             !principal.writable ||

@@ -6,6 +6,7 @@ import {
   copy,
   fail,
   operation,
+  prepareOperation,
   uid,
   type Action,
   type ConfirmedVersion,
@@ -190,6 +191,16 @@ export class SharedEditorSession<T> {
     this.applyCommand(command);
     return this.viewContent;
   }
+  /** Submit serializable native intent using the revision the input was edited against. */
+  executeActions(actions: Action[], basis: Snapshot<T> = this.confirmed): Operation {
+    this.assertActive();
+    if (this.readOnly) fail('unauthorized', 'Shared session is read only or expired');
+    if (basis.artifactId !== this.confirmed.artifactId || basis.domain !== this.codec.domain)
+      fail('schema-mismatch', 'Input belongs to another artifact');
+    const prepared = prepareOperation(this.codec, basis, this.adapter.identity, actions);
+    this.enqueueProjection(prepared);
+    return copy(prepared.operation);
+  }
   private applyCommand(command: EditorCommand<T>) {
     this.assertActive();
     if (this.readOnly) fail('unauthorized', 'Shared session is read only or expired');
@@ -200,12 +211,15 @@ export class SharedEditorSession<T> {
       command,
     );
     if (!prepared) return;
+    this.enqueueProjection(prepared);
+    return prepared.operation;
+  }
+  private enqueueProjection(prepared: ReturnType<typeof prepareOperation<T>>) {
     this.client.enqueuePrepared(prepared);
     this.queue.push({ op: prepared.operation, sent: false, content: this.viewContent });
     this.error = '';
     this.onChange();
     void this.flush();
-    return prepared.operation;
   }
   text(target: string) {
     let engine = this.textEngines.get(target);

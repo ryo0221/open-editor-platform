@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import build from 'virtual:private-video-m2-build';
 import { readM2Catalog, type PrivateVideoM2Entry } from '../private-video-m2/catalog';
 import {
@@ -7,6 +7,8 @@ import {
   privateVideoM2Url,
 } from '../private-video-m2/registration';
 import { ReferencePlayground } from '../shared-host';
+const VideoCollaboration = lazy(() => import('../video-collaboration/Workspace'));
+
 interface PrivateHandle {
   close(): Promise<void>;
   inspection(): Promise<unknown>;
@@ -116,6 +118,8 @@ export function NormalHost() {
     );
   }
   if (route) return <Workspace key={navigation} entryId={route.entryId} navigate={navigate} />;
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('videoCollaboration'))
+    return <Suspense fallback={<main>動画の共同編集を開いています…</main>}><VideoCollaboration /></Suspense>;
   if (build.enabled)
     try {
       entries = readM2Catalog();

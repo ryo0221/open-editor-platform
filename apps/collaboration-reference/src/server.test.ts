@@ -9,7 +9,14 @@ import {
   type Receipt,
   type Snapshot,
 } from '@editor-platform/collaboration-core';
-import { setField, slideCodec } from '@editor-platform/collaboration-adapters';
+import {
+  HttpEditorAdapter,
+  SharedEditorSession,
+  setField,
+  slideCodec,
+  videoTimelineAction,
+  videoTimelineCodec,
+} from '@editor-platform/collaboration-adapters';
 import { slideFixture } from '@editor-platform/collaboration-adapters/fixtures';
 import { createReferenceServer } from './server';
 
@@ -440,5 +447,51 @@ describe('reference editor artifacts', () => {
         })
       ).body.state,
     ).toBe('rejected');
+  });
+});
+
+
+describe('synthetic Video shared sessions', () => {
+  it('seeds only the reference timeline, retains a stale edit and saves the confirmed revision', async () => {
+    const artifactId = `video-${crypto.randomUUID()}`;
+    const join = (actor: string, seed?: unknown) => call<{ token: string; identity: Identity }>('/editor/session', {
+      body: { actor, artifactId, domain: 'video', ...(seed === undefined ? {} : { initial: seed }) },
+    });
+    expect((await join('A', { content: {} })).status).toBe(400);
+    expect((await join('B')).status).toBe(400);
+    const connect = async (actor: string) => {
+      const { status, body } = await join(actor);
+      expect(status).toBe(200);
+      const adapter = new HttpEditorAdapter<Parameters<typeof videoTimelineCodec.resource>[0]>(
+        body.identity, body.token, 'video', base, { immutableContent: true },
+      );
+      const session = new SharedEditorSession(videoTimelineCodec, adapter);
+      await session.open();
+      return { session, token: body.token };
+    };
+    const { session: a, token } = await connect('A');
+    const { session: b } = await connect('B');
+    try {
+      expect((await call('/editor/asset?domain=video', { token, body: {} })).status).toBe(400);
+      const basis = b.confirmed;
+      const move = videoTimelineAction({ type: 'move', clipId: 'sample-picture', delta: { value: 1, timescale: 1 } });
+      a.executeActions([move]);
+      await a.flush();
+      expect(a.lastReceipt?.status).toBe('accepted');
+      await b.sync();
+      expect(b.confirmed.revision).toBe(1);
+      b.executeActions([move], basis);
+      await b.flush();
+      expect(b.lastReceipt).toMatchObject({ status: 'rejected', code: 'stale-precondition' });
+      expect(b.rejected[0].operation.actions).toEqual([move]);
+      b.discardRetained();
+      const saved = await a.save('Video acceptance');
+      await b.sync();
+      expect(saved.confirmedRevision).toBe(1);
+      expect(b.savedVersions).toEqual([saved]);
+    } finally {
+      a.suspend(() => {});
+      b.suspend(() => {});
+    }
   });
 });

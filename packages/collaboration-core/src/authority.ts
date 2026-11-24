@@ -146,6 +146,9 @@ export class Authority<T> {
     const proposal = !!op.proposalId && this.applyingProposal === op.proposalId;
     if (op.operationId.startsWith('proposal:') && !proposal)
       fail('protocol-error', 'Proposal operation IDs are reserved for the authority');
+    if (op.actions.some((action) => action.type.startsWith('history.')) &&
+        this.applyingInverse !== op.operationId)
+      fail('unauthorized', 'History actions require the authority Undo API');
     if (proposal) {
       if (
         op.origin !== 'proposal' ||

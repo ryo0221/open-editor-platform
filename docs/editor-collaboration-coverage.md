@@ -50,9 +50,26 @@ ladder, or CAD source documents and Character asset bytes are resolved locally. 
 without required Character or Simulation resources can synchronize the draft but cannot export
 an incomplete native file. Character GLB and frame exports also use the shared export guard.
 
-The private Video validation runtime has a separate registration and native project store.
-It requires a separately declared shared operation contract for timeline edits and a media
-storage policy before it can participate in the shared workflow.
+### Video timeline demo
+
+The development Playground Library links to the Video collaboration demo. The reference
+server creates a native v3 timeline from a synthetic fixture. Participant A then shares
+an invite link for participant B. The timeline supports moving linked clips, independent
+trim, linked split and caption text edits. Stable clip IDs and link-group membership
+supply operation preconditions. Edits to separate clips can commit independently. Conflicts
+retain the user's input for review. Undo and Redo apply to the actor and session that issued
+the change. Save creates a version of the confirmed timeline in the in-memory reference server.
+
+The demo represents media with fixed source declarations. It has no decoder, file upload,
+media transfer or rendered-video export. The server refuses user-supplied seed projects
+and the asset upload endpoint for Video. The local Video runtime and its project journal
+continue to own local import, playback, export and portable save.
+
+For a future media delivery capability, the proposed audience is the current readers of the
+shared artifact. Source content that belongs to another artifact also requires a current
+source grant or an explicitly authorized fixed release for that audience. The Host must
+check the same policy on fetch and when opening saved versions. Apply this policy before
+adding delivery for actual assets.
 
 Mind Map and Schedule use the existing native JSON and the reference Host's shared
 session. Mind Map names are applied as complete field values. A conflict keeps

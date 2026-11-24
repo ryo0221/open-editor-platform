@@ -231,6 +231,7 @@ export const specRules = [
     owners: ['design', 'document'],
   },
   { match: /^novel-/, area: 'office', owners: ['document'] },
+  { match: /^video-collaboration$/, area: 'office', owners: ['video-core', 'collaboration-adapters'] },
   {
     match: /^(canvas-|issue2-(arrange|canvas|geometry|group-review|layout|rich-canvas)$)/,
     area: 'office',

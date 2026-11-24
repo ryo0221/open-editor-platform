@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@editor-platform/video-core": "*",
     "@editor-platform/animation-adapters": "*",
     "@editor-platform/animation": "*",
     "@editor-platform/animation-core": "*",

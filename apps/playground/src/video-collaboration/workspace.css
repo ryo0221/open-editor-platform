@@ -1,0 +1,89 @@
+.video-coedit {
+  max-width: 1180px;
+  margin: 36px auto;
+  padding: 0 24px;
+}
+.video-coedit header,
+.video-coedit-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.video-coedit header {
+  justify-content: space-between;
+}
+.video-coedit-toolbar p {
+  margin-right: auto;
+}
+.video-coedit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(205px, 250px);
+  gap: 24px;
+  margin-top: 16px;
+}
+.video-coedit-ruler {
+  display: grid;
+  grid-template-columns: 74px repeat(6, 1fr);
+  font-variant-numeric: tabular-nums;
+}
+.video-coedit-ruler span:last-child {
+  text-align: right;
+}
+.video-coedit-track {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  min-height: 50px;
+}
+.video-coedit-lane {
+  position: relative;
+  min-height: 46px;
+  border-radius: 5px;
+  background: #e6edf5;
+}
+.video-coedit-lane button {
+  position: absolute;
+  top: 5px;
+  height: 36px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: #aac7ed;
+  color: #10213f;
+  padding: 0 6px;
+}
+.video-coedit-lane[data-kind='audio'] button {
+  background: #a0d7b9;
+}
+.video-coedit-lane button[aria-pressed='true'] {
+  outline: 2px solid #1a589a;
+  outline-offset: 1px;
+}
+.video-coedit form {
+  border: 1px solid #a5b2c1;
+  padding: 14px;
+  border-radius: 6px;
+}
+.video-coedit form label,
+.video-coedit form label > * {
+  display: block;
+  width: 100%;
+}
+.video-coedit form label {
+  margin-bottom: 10px;
+}
+.video-coedit fieldset {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.video-coedit :is(button, a) + a,
+.video-coedit form button {
+  margin: 4px;
+}
+@media (max-width: 680px) {
+  .video-coedit-grid {
+    grid-template-columns: 1fr;
+  }
+}
