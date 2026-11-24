@@ -53,8 +53,17 @@ const api = async (path, body = {}) => {
   }
   return value;
 };
+let submitting = false;
+function historyControls() {
+  for (const direction of ['undo', 'redo'])
+    document.querySelector('#' + direction).disabled =
+      !snapshot || submitting || !!sessionStorage.getItem(pendingKey) || !history?.[direction];
+}
+let lifecycle = 0;
 const refresh = async () => {
+  const epoch = lifecycle;
   const state = await api('/open');
+  if (epoch !== lifecycle) return;
   if (
     snapshot &&
     state.snapshot.generation === snapshot.generation &&
@@ -65,8 +74,7 @@ const refresh = async () => {
   ({ snapshot, history, parent } = state);
   revisions.set(snapshot.generation + '/' + snapshot.revision, snapshot);
   while (revisions.size > 256) revisions.delete(revisions.keys().next().value);
-  document.querySelector('#undo').disabled = !history.undo;
-  document.querySelector('#redo').disabled = !history.redo;
+  historyControls();
   presenceRevision = state.presenceRevision;
   for (const fn of listeners) fn();
   for (const fn of pointerListeners) fn(state.presence);
@@ -74,19 +82,23 @@ const refresh = async () => {
 
 async function send(path, request) {
   const pending = sessionStorage.getItem(pendingKey);
-  if (pending) throw Error('前の操作の結果を確かめてください。');
+  if (pending || submitting) throw Error('前の操作の結果を確かめてください。');
   sessionStorage.setItem(pendingKey, JSON.stringify({ path, request }));
-  let receipt;
+  submitting = true;
+  historyControls();
   try {
-    receipt = await api(path, request);
+    const receipt = await api(path, request);
+    sessionStorage.removeItem(pendingKey);
+    await refresh();
+    if (receipt.status !== 'accepted') throw Error(receipt.code);
   } catch (error) {
     if (error.definite) sessionStorage.removeItem(pendingKey);
-    else recover();
+    if (sessionStorage.getItem(pendingKey)) recover();
     throw error;
+  } finally {
+    submitting = false;
+    historyControls();
   }
-  sessionStorage.removeItem(pendingKey);
-  await refresh();
-  if (receipt.status !== 'accepted') throw Error(receipt.code);
 }
 async function main() {
   let worker;
@@ -221,23 +233,42 @@ async function main() {
     await refresh();
     status.textContent = '保存した版 r' + saved.confirmedRevision;
   });
+  await poll(lifecycle);
+}
+async function poll(epoch) {
   connected = true;
-  while (connected) {
+  while (connected && epoch === lifecycle) {
     try {
       await api('/changes', {
         generation: snapshot.generation,
         revision: snapshot.revision,
         presenceRevision,
       });
+      if (epoch !== lifecycle) return;
       await refresh();
     } catch (e) {
+      if (epoch !== lifecycle) return;
       status.textContent = e.message;
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
 }
 window.addEventListener('pagehide', () => {
+  lifecycle++;
   connected = false;
+  document.querySelector('main').inert = true;
+});
+window.addEventListener('pageshow', async (event) => {
+  if (!event.persisted) return;
+  const epoch = lifecycle;
+  try {
+    await refresh();
+    if (epoch !== lifecycle || !snapshot) return;
+    document.querySelector('main').inert = false;
+    await poll(epoch);
+  } catch (error) {
+    status.textContent = error.message;
+  }
 });
 main().catch((e) => {
   status.textContent = e.message;

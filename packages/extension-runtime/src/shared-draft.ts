@@ -9,6 +9,7 @@ import {
 } from '@editor-platform/collaboration-core';
 import { admittedCodec, type VerifiedPackage, type PackagePinLookup } from './package';
 import {
+  CodecUnavailable,
   validateSharedContent,
   sharedAnchorExists,
   evaluateShared,
@@ -69,6 +70,7 @@ export class SharedDraft<T> {
       CREATE TABLE IF NOT EXISTS snapshots(revision INTEGER PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS receipts(generation TEXT,id TEXT,actor TEXT,digest TEXT,result TEXT,expires INTEGER, PRIMARY KEY(generation,id));
       CREATE INDEX IF NOT EXISTS actor_receipts ON receipts(generation,actor);
+      CREATE TABLE IF NOT EXISTS effects(revision INTEGER PRIMARY KEY,id TEXT NOT NULL,actor TEXT NOT NULL,session TEXT NOT NULL,inverseOf TEXT,keys TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS history(id TEXT PRIMARY KEY, actor TEXT, session TEXT, direction TEXT, revision INTEGER, base TEXT, inverse TEXT);
       CREATE TABLE IF NOT EXISTS migration(id INTEGER PRIMARY KEY CHECK(id=1), token TEXT, expires INTEGER);
       CREATE TABLE IF NOT EXISTS proposals(id TEXT PRIMARY KEY, generation TEXT, author TEXT, request TEXT, accepted TEXT, adopter TEXT);
@@ -192,7 +194,9 @@ export class SharedDraft<T> {
       .prepare('UPDATE receipts SET expires=? WHERE generation=?')
       .run(Date.now() + 7 * DAY, old);
     this.db.prepare('DELETE FROM rates WHERE generation=?').run(old);
-    this.db.exec('DELETE FROM snapshots; DELETE FROM history; DELETE FROM proposals');
+    this.db.exec(
+      'DELETE FROM snapshots; DELETE FROM effects; DELETE FROM history; DELETE FROM proposals',
+    );
     this.db
       .prepare('INSERT INTO snapshots VALUES(?,?)')
       .run(snapshot.revision, JSON.stringify({ ...snapshot, generation }));
@@ -263,6 +267,33 @@ export class SharedDraft<T> {
       if (!connection.canMigrate?.()) throw Error('unauthorized');
       this.rotate(this.read());
     });
+  }
+  // Prove that all intervening changes to this resource are inverse pairs belonging
+  // to this session. Ordinary edits and proposals always use the real live stamps.
+  private inverseProof(owner: Principal, base: number, current: number) {
+    const events = this.db
+      .prepare('SELECT * FROM effects WHERE revision>? AND revision<=? ORDER BY revision')
+      .all(base, current)
+      .map((row) => ({
+        ...row,
+        touched: JSON.parse(String(row.keys)) as string[],
+        id: String(row.id),
+        inverseOf: row.inverseOf,
+        actor: row.actor,
+        session: row.session,
+      }));
+    return (key: string) => {
+      if (events.length !== current - base) return false;
+      const active = new Set<string>();
+      for (const event of events) {
+        if (!event.touched.some((changed) => changed === key || changed.startsWith(key + '/')))
+          continue;
+        if (event.actor !== owner.actorId || event.session !== owner.sessionId) return false;
+        if (typeof event.inverseOf === 'string' && active.delete(event.inverseOf)) continue;
+        active.add(event.id);
+      }
+      return !active.size;
+    };
   }
   history(connection: SharedConnection) {
     const p = this.auth(connection);
@@ -356,6 +387,7 @@ export class SharedDraft<T> {
       let next: SharedSnapshot<T> | undefined;
       let inverse: unknown[] = [];
       let targets: string[] = [];
+      let touched: string[] = [];
       let receipt: Receipt;
       try {
         const write = () => this.auth(connection, true);
@@ -366,7 +398,7 @@ export class SharedDraft<T> {
           )
             throw Error('undo-conflict');
           const row = this.db
-            .prepare('SELECT inverse,base FROM history WHERE id=?')
+            .prepare('SELECT inverse,base,revision FROM history WHERE id=?')
             .get(req.target);
           if (!row) throw Error('undo-conflict');
           try {
@@ -376,11 +408,15 @@ export class SharedDraft<T> {
               { inverse: JSON.parse(String(row.inverse)) },
               JSON.parse(String(row.base)),
               current,
+              undefined,
+              this.inverseProof(p, Number(row.revision), current.revision),
             );
             next = result.snapshot;
             inverse = result.inverse;
             targets = result.targets;
+            touched = result.touched;
           } catch (error) {
+            if (error instanceof CodecUnavailable) throw error;
             if (error instanceof Error && error.message === 'unauthorized') throw error;
             throw Error('undo-conflict');
           }
@@ -396,9 +432,11 @@ export class SharedDraft<T> {
           next = result.snapshot;
           inverse = result.inverse;
           targets = result.targets;
+          touched = result.touched;
         } else throw Error('protocol-error');
         receipt = { status: 'accepted', operationId: id, revision: next.revision, durable: false };
       } catch (error) {
+        if (error instanceof CodecUnavailable) throw error;
         const message = error instanceof Error ? error.message : 'invalid-operation';
         const known = [
           'stale-precondition',
@@ -440,6 +478,16 @@ export class SharedDraft<T> {
           if (adopted.changes !== 1) throw Error('stale-precondition');
         }
         if (next) {
+          this.db
+            .prepare('INSERT INTO effects VALUES(?,?,?,?,?,?)')
+            .run(
+              next.revision,
+              id,
+              p.actorId,
+              p.sessionId,
+              history && 'direction' in req ? req.target : null,
+              JSON.stringify(touched),
+            );
           if (history && 'direction' in req)
             this.db.prepare('DELETE FROM history WHERE id=?').run(req.target);
           else
@@ -516,12 +564,14 @@ export class SharedDraft<T> {
       const saved = {
         generation: snapshot.generation,
         confirmedRevision: snapshot.revision,
+        contentSchemaVersion: this.verified.manifest.schemaVersion,
         domain: `ext:${this.verified.manifest.id}`,
         manifest: this.verified.manifest,
         version: {
           artifactId: this.artifactId,
           versionId,
           parentVersionId: request.parentVersionId,
+          // artifact-core.deserializeArtifact checks this version-envelope field.
           schemaVersion: 1,
           createdAt: new Date().toISOString(),
           createdBy: p.actorId,

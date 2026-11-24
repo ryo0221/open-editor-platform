@@ -1,42 +1,8 @@
-// Executed in a disposable child. Package code runs only inside the QuickJS VM.
+// A dedicated child owns the WASM engine. Every transaction gets an empty runtime and heap.
 import { getQuickJS } from 'quickjs-emscripten';
-import { readFileSync } from 'node:fs';
 import process from 'node:process';
 
-const { source, request } = JSON.parse(readFileSync(0, 'utf8'));
 const engine = await getQuickJS();
-const runtime = engine.newRuntime();
-runtime.setMemoryLimit(16 * 1024 * 1024);
-runtime.setMaxStackSize(256 * 1024);
-const vm = runtime.newContext({
-  intrinsics: {
-    BaseObjects: true,
-    Promise: true,
-    Eval: true,
-    JSON: true,
-    MapSet: true,
-    RegExp: true,
-    RegExpCompiler: true,
-  },
-});
-let started = (process.threadCpuUsage ?? process.cpuUsage)();
-function exhausted() {
-  const cpu = (process.threadCpuUsage ?? process.cpuUsage)(started);
-  return cpu.user + cpu.system > 50_000;
-}
-runtime.setInterruptHandler(exhausted);
-function take(result) {
-  if (result.error) {
-    const exception = vm.dump(result.error);
-    result.error.dispose();
-    if (['target-deleted', 'stale-precondition', 'undo-conflict'].includes(exception?.message)) {
-      process.stdout.write(JSON.stringify({ code: exception.message }));
-      process.exit(0);
-    }
-    throw Error('Codec execution failed');
-  }
-  return result.value;
-}
 // This function is compiled as the trusted driver in QuickJS; its only input is copied JSON.
 function transaction(api, request) {
   const call = (method, ...args) =>
@@ -125,9 +91,42 @@ function transaction(api, request) {
   });
 }
 
-try {
-  take(
-    vm.evalCode(`
+function evaluate(source, request) {
+  const runtime = engine.newRuntime();
+  runtime.setMemoryLimit(16 * 1024 * 1024);
+  runtime.setMaxStackSize(256 * 1024);
+  const vm = runtime.newContext({
+    intrinsics: {
+      BaseObjects: true,
+      Promise: true,
+      Eval: true,
+      JSON: true,
+      MapSet: true,
+      RegExp: true,
+      RegExpCompiler: true,
+    },
+  });
+  let started = (process.threadCpuUsage ?? process.cpuUsage)();
+  function exhausted() {
+    const cpu = (process.threadCpuUsage ?? process.cpuUsage)(started);
+    return cpu.user + cpu.system > 50_000;
+  }
+  runtime.setInterruptHandler(exhausted);
+  function take(result) {
+    if (result.error) {
+      const exception = vm.dump(result.error);
+      result.error.dispose();
+      if (['target-deleted', 'stale-precondition', 'undo-conflict'].includes(exception?.message)) {
+        throw Error(exception.message);
+      }
+      throw Error('Codec execution failed');
+    }
+    return result.value;
+  }
+
+  try {
+    take(
+      vm.evalCode(`
     delete Math.random;
     delete String.prototype.localeCompare;
     for (const proto of [String.prototype, Array.prototype, Number.prototype, Object.prototype])
@@ -138,28 +137,41 @@ try {
       delete Object.getPrototypeOf(fn).constructor;
     delete globalThis.Function;
   `),
-  ).dispose();
-  runtime.setModuleLoader((name) => {
-    if (name !== 'codec') throw Error('External module');
-    return source;
-  });
-  const program = `import * as codec from 'codec'; export const output = (${transaction.toString()})(codec,JSON.parse(${JSON.stringify(JSON.stringify(request))}));`;
-  started = (process.threadCpuUsage ?? process.cpuUsage)();
-  const api = take(vm.evalCode(program, 'transaction.mjs', { type: 'module' }));
-  try {
-    const value = vm.getProp(api, 'output');
+    ).dispose();
+    runtime.setModuleLoader((name) => {
+      if (name !== 'codec') throw Error('External module');
+      return source;
+    });
+    const program = `import * as codec from 'codec'; export const output = (${transaction.toString()})(codec,JSON.parse(${JSON.stringify(JSON.stringify(request))}));`;
+    started = (process.threadCpuUsage ?? process.cpuUsage)();
+    const api = take(vm.evalCode(program, 'transaction.mjs', { type: 'module' }));
     try {
-      if (vm.typeof(value) !== 'string') throw Error('Invalid codec result');
-      const output = vm.getString(value);
-      if (exhausted() || output.length > 1_000_000) throw Error('Codec budget exceeded');
-      process.stdout.write(output);
+      const value = vm.getProp(api, 'output');
+      try {
+        if (vm.typeof(value) !== 'string') throw Error('Invalid codec result');
+        const output = vm.getString(value);
+        if (exhausted() || output.length > 1_000_000) throw Error('Codec budget exceeded');
+        return output;
+      } finally {
+        value.dispose();
+      }
     } finally {
-      value.dispose();
+      api.dispose();
     }
   } finally {
-    api.dispose();
+    vm.dispose();
+    runtime.dispose();
   }
-} finally {
-  vm.dispose();
-  runtime.dispose();
 }
+process.on('message', ({ source, request }) => {
+  try {
+    process.send({ output: evaluate(source, request) });
+  } catch (error) {
+    process.send({
+      code: ['target-deleted', 'stale-precondition', 'undo-conflict'].includes(error.message)
+        ? error.message
+        : 'invalid-operation',
+    });
+  }
+});
+process.on('disconnect', () => process.exit(0));

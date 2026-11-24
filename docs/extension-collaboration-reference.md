@@ -19,6 +19,6 @@ npm run collaboration:external -- \
 - Node 用の公開入口は `@editor-platform/extension-runtime/shared-draft`。UI パッケージを `verifyExtensionPackage` で検証し、別の codec pin 検索関数を渡して `SharedDraft.open` する。既存 DB は成果物・パッケージ pin が一致したときに開く。
 - 接続の `principal()`・`readable()` は、実行時点の認証、対象成果物への権限、接続の有効性を Host が返す。参照 Host はローカルの参加者に全カードの編集を許可する。製品側には利用者・Room の認証と scope の発行が必要になる。
 - `submit`、`undoRedo`、`receipt`、`save` が確定・再照合・指定版保存を扱う。`previewProposal` と `adoptProposal` は提案時に読んだ条件を保持する。移行は明示的な管理権限で `previewMigration` し、比較後に `commit` または `cancel` する。
-- codec は各評価につき別プロセスの QuickJS で実行する。この参照実装の編集遅延にはプロセス起動時間も含まれる。ブラウザー側の予測は確定時に再計算する。
+- codec は専用プロセスで実行し、各評価に新しい QuickJS runtime とヒープを割り当てる。初回とアイドル終了後の編集にはプロセス起動時間も含まれる。ブラウザー側の予測は確定時に再計算する。
 
 [設計と受入条件](extension-collaboration-design.md)

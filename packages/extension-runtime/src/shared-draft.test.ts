@@ -34,7 +34,7 @@ async function fixture(source = codec) {
       contractVersion: CONTRACT_VERSION,
       artifactKind: 'test.counter',
       version: '1.0.0',
-      schemaVersion: 1,
+      schemaVersion: 2,
       permissions: ['artifact:read', 'artifact:write'],
       capabilities: ['local-edit'],
       licenseNotices: ['test'],
@@ -140,6 +140,8 @@ it('commits independent fields, rejects stale input and retains receipts after r
     requestId: randomUUID(),
   };
   const version = f.host.save(a, saved);
+  expect(version.contentSchemaVersion).toBe(2);
+  expect(version.version.schemaVersion).toBe(1);
   expect(version.version.content).toEqual({ a: 0, b: 0 });
   await f.restart();
   expect(f.host.save(a, saved)).toEqual(version);
@@ -245,4 +247,37 @@ it('stops editing during migration preview and releases a cancelled migration', 
   const confirmed = await f.host.previewMigration(admin, pkg, lookup);
   confirmed.commit();
   expect(() => f.host.snapshot(f.a)).toThrow('schema-mismatch');
+});
+
+it('cancels only proven inverse pairs when undoing successive edits on one field', async () => {
+  const { a, b, host, request } = await fixture();
+  const submit = async (c: SharedConnection) => {
+    const op = request(c, 'a');
+    expect(await host.submit(c, op)).toMatchObject({ status: 'accepted' });
+    return op;
+  };
+  const reverse = async (c: SharedConnection, target: string, direction: 'undo' | 'redo') => {
+    const op = {
+      generation: host.snapshot(c).generation,
+      operationId: c.namespace + '/' + randomUUID(),
+      target,
+      direction,
+    };
+    return host.undoRedo(c, op);
+  };
+  const first = await submit(a),
+    second = await submit(a);
+  const rb = await reverse(a, second.operationId, 'undo'),
+    ra = await reverse(a, first.operationId, 'undo');
+  expect([rb.status, ra.status]).toEqual(['accepted', 'accepted']);
+  expect(host.snapshot(a).content.a).toBe(0);
+  expect((await reverse(a, ra.operationId, 'redo')).status).toBe('accepted');
+  const redo = await reverse(a, rb.operationId, 'redo');
+  expect(redo.status).toBe('accepted');
+  const foreign = await submit(b);
+  expect((await reverse(b, foreign.operationId, 'undo')).status).toBe('accepted');
+  expect(await reverse(a, redo.operationId, 'undo')).toMatchObject({
+    status: 'rejected',
+    code: 'undo-conflict',
+  });
 });

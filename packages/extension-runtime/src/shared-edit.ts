@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { fork, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   canonical,
@@ -43,36 +43,90 @@ interface Evaluation<T> {
   before: unknown[];
   now: unknown[];
 }
-function runCodec<T>(bytes: Uint8Array, request: unknown): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      process.execPath,
-      // Compile the VM before starting the guest CPU meter. Lazy Wasm compilation
-      // otherwise charges cold native compiler work to the first editor operation.
-      [
+// Reference Host serializes work in one OS process. Isolated transactions have
+// independent VM globals, memory limits and CPU meters. The host kills a wedged process.
+let worker: ChildProcess | undefined;
+let idle: ReturnType<typeof setTimeout> | undefined;
+let tail: Promise<void> = Promise.resolve();
+let queued = 0;
+export class CodecUnavailable extends Error {
+  constructor() {
+    super('codec-unavailable');
+  }
+}
+function dispatch<T>(source: string, request: unknown): Promise<T> {
+  clearTimeout(idle);
+  if (!worker?.connected) {
+    worker = fork(fileURLToPath(new URL('./shared-codec-worker.mjs', import.meta.url)), [], {
+      execArgv: [
+        '--v8-pool-size=1',
+        '--wasm-num-compilation-tasks=1',
         '--no-wasm-async-compilation',
         '--no-wasm-lazy-compilation',
         '--no-wasm-tier-up',
-        fileURLToPath(new URL('./shared-codec-worker.mjs', import.meta.url)),
       ],
-      { env: {}, timeout: 5000, killSignal: 'SIGKILL', maxBuffer: 4_000_000 },
-      (error, stdout) => {
-        if (error) return reject(new Error('Shared codec rejected the transaction'));
-        try {
-          const output = JSON.parse(stdout);
-          if (!serializable(output)) throw Error('Invalid codec response');
-          if (output?.code) throw Error(output.code);
-          resolve(output);
-        } catch (e) {
-          reject(e);
+      env: { UV_THREADPOOL_SIZE: '1' },
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+  }
+  const child = worker;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('message', reply);
+      child.off('exit', failed);
+      child.off('error', failed);
+    };
+    const failed = () => {
+      cleanup();
+      if (worker === child) worker = undefined;
+      child.kill('SIGKILL');
+      reject(new CodecUnavailable());
+    };
+    const reply = (msg: unknown) => {
+      cleanup();
+      idle = setTimeout(() => {
+        if (worker === child) {
+          worker = undefined;
+          child.disconnect();
         }
-      },
-    );
-    child.stdin!.on('error', reject);
-    child.stdin!.end(
-      JSON.stringify({ source: new TextDecoder('utf-8', { fatal: true }).decode(bytes), request }),
-    );
+      }, 30_000);
+      idle.unref();
+      try {
+        const value = msg as { output?: string; code?: string };
+        if (value.code) throw Error(value.code);
+        if (typeof value.output !== 'string' || value.output.length > 1_000_000)
+          throw Error('Invalid codec result');
+        const parsed = JSON.parse(value.output);
+        if (!serializable(parsed)) throw Error('Invalid codec result');
+        resolve(parsed);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    const timer = setTimeout(failed, 5000);
+    child.once('message', reply);
+    child.once('exit', failed);
+    child.once('error', failed);
+    child.send({ source, request }, (err) => {
+      if (err && worker === child) failed();
+    });
   });
+}
+function runCodec<T>(bytes: Uint8Array, request: unknown): Promise<T> {
+  if (queued >= 64) return Promise.reject(new CodecUnavailable());
+  const source = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  queued++;
+  const next = tail
+    .then(() => dispatch<T>(source, request))
+    .finally(() => {
+      queued--;
+    });
+  tail = next.then(
+    () => {},
+    () => {},
+  );
+  return next;
 }
 export async function validateSharedContent<T>(
   verified: VerifiedPackage,
@@ -192,6 +246,7 @@ export async function evaluateShared<T>(
   base: SharedSnapshot<T>,
   current: SharedSnapshot<T>,
   conditions?: Condition[],
+  restoredByOwner?: (key: string) => boolean,
 ) {
   const evaluated = await runCodec<Evaluation<T>>(codec.read(), {
     ...intent,
@@ -218,13 +273,14 @@ export async function evaluateShared<T>(
         (!condition ||
           condition.stamp !== stamp(base.stamps, key) ||
           condition.fingerprint !== fingerprint(before[i]))) ||
-      stamp(base.stamps, key) !== stamp(current.stamps, key) ||
+      (stamp(base.stamps, key) !== stamp(current.stamps, key) && !restoredByOwner?.(key)) ||
       fingerprint(before[i]) !== fingerprint(now[i])
     )
       throw Error('stale-precondition');
   }
   const revision = current.revision + 1;
   return {
+    touched: result.touched,
     targets: result.targets,
     expectedRevision: current.revision,
     snapshot: {

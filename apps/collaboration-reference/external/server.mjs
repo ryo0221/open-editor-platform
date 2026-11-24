@@ -222,7 +222,8 @@ const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify(result));
   } catch (error) {
-    res.statusCode = error.message === 'unauthorized' ? 403 : 409;
+    res.statusCode =
+      error.message === 'codec-unavailable' ? 503 : error.message === 'unauthorized' ? 403 : 409;
     res.end(JSON.stringify({ error: error.message }));
   }
 });
