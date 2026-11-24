@@ -1,4 +1,4 @@
-/* global self, URL, indexedDB, Date */
+/* global self, URL, indexedDB */
 // Persist the browser's reload evidence and the last owner's ticket across worker restarts.
 let database;
 function openTickets() {
