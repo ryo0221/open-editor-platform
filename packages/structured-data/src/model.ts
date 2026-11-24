@@ -9,6 +9,14 @@ import {
 } from '@editor-platform/artifact-core';
 import { command, immutableCommand, type EditorCommand } from '@editor-platform/editor-core';
 import { columnSchemaCommand } from './schema-command';
+import {
+  dataItemsProblems,
+  declaredRefFields,
+  itemsWithoutColumn,
+  rowRefsText,
+  validRowRefs,
+  type DataItemsDeclaration,
+} from './items';
 export type ColumnType = 'text' | 'number' | 'boolean' | 'date' | 'select' | 'relation' | 'formula';
 export type Cell = string | number | boolean | null;
 export interface Column {
@@ -27,6 +35,11 @@ export interface Column {
 export interface DataRow {
   id: string;
   values: Record<string, Cell>;
+  /**
+   * Schema 3 only: reference fields (name → business IDs) for an item that cites several items
+   * (docs/analysis-references-design.md U2). Not cells: cell types, formulas and sorting ignore it.
+   */
+  refs?: Record<string, string[]>;
 }
 export interface DataGraphView {
   schemaVersion: 1;
@@ -37,11 +50,17 @@ export interface StructuredData {
   /** Explicit graph display settings, never a copy of records or relations. */
   graphView?: DataGraphView;
   reuse?: ReuseState;
-  schemaVersion: 1 | 2;
+  /** 3 adds `items` and row `refs`; this version reads 1–3. */
+  schemaVersion: 1 | 2 | 3;
   views?: DataView[];
   columns: Column[];
   rows: DataRow[];
+  /** Schema 3 only: which columns hold business item IDs and citations (see ./items). */
+  items?: DataItemsDeclaration[];
 }
+/** The schema a table keeps after an edit that needs at least schema 2 (3 stays 3). */
+export const atLeastSchema2 = (d: Pick<StructuredData, 'schemaVersion'>): 2 | 3 =>
+  d.schemaVersion === 3 ? 3 : 2;
 export interface ValidationError {
   rowId: string;
   columnId: string;
@@ -118,6 +137,33 @@ export const setCell = (
       r.id === rowId ? { ...r, values: { ...r.values, [columnId]: value } } : r,
     ),
   }));
+/**
+ * Sets one reference field of a row (schema 3). An empty list removes the field. One command per
+ * pick or removal, so Undo/Redo follow the user's steps.
+ */
+export const setRowRefs = (
+  rowId: string,
+  field: string,
+  ids: readonly string[],
+): EditorCommand<StructuredData> => {
+  const fixed = [...ids];
+  return immutableCommand('data.update-row-refs', 'Edit references', (d) => {
+    if (d.schemaVersion !== 3) throw new Error('References need a schema 3 table');
+    if (!declaredRefFields(d).includes(field))
+      throw new Error('The reference field is not declared');
+    if (!d.rows.some((r) => r.id === rowId)) throw new Error('A target record was deleted');
+    return {
+      ...d,
+      rows: d.rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const { [field]: _old, ...others } = r.refs ?? {};
+        const refs = fixed.length ? { ...others, [field]: fixed } : others;
+        const { refs: _r, ...row } = r;
+        return Object.keys(refs).length ? { ...row, refs } : row;
+      }),
+    };
+  });
+};
 export const addColumn = (column: Column): EditorCommand<StructuredData> =>
   command('data.insert-column', 'Add column', (d) => {
     if (
@@ -158,8 +204,12 @@ export const removeColumn = (id: string): EditorCommand<StructuredData> =>
           `Update dependent formulas before deleting this field: ${dependent.map((c) => c.name).join(', ')}`,
         );
       const columns = d.columns.filter((c) => c.id !== id);
+      // 宣言が指す列を消すと、同じコマンドの中で宣言からも外す（Undo で両方戻る）
+      const items = itemsWithoutColumn(d.items, id);
+      const { items: _old, ...rest } = d;
       return {
-        ...d,
+        ...rest,
+        ...(items ? { items } : {}),
         columns,
         ...(d.graphView
           ? {
@@ -500,10 +550,15 @@ export function parseCsvText(source: string, options: CsvImportOptions = {}): st
   return options.decodeFormulaGuard ? rows.map((row) => row.map(csvText)) : rows;
 }
 export function exportCsv(data: StructuredData): string {
+  // 行の参照の欄は、読み取り専用の列（ID を ; で区切る）として最後に書き出す。取り込みでは作らない
+  const refs = declaredRefFields(data);
   return (
     [
-      data.columns.map((c) => c.name),
-      ...data.rows.map((r) => data.columns.map((c) => displayCell(data, r, c))),
+      [...data.columns.map((c) => c.name), ...refs.map((f) => `refs.${f}`)],
+      ...data.rows.map((r) => [
+        ...data.columns.map((c) => displayCell(data, r, c)),
+        ...refs.map((f) => rowRefsText(r, f)),
+      ]),
     ]
       .map((r) => r.map(csvField).join(','))
       .join('\r\n') + '\r\n'
@@ -589,6 +644,19 @@ function rowDiff(a: StructuredData, b: StructuredData, changes: Change[]) {
             kind: 'changed',
             before: String(before ?? ''),
             after: String(after ?? ''),
+          });
+      }
+    if (next)
+      for (const f of new Set([...Object.keys(old.refs ?? {}), ...Object.keys(next.refs ?? {})])) {
+        const before = rowRefsText(old, f),
+          after = rowRefsText(next, f);
+        if (before !== after)
+          changes.push({
+            elementId: old.id,
+            path: `${String(next.values[b.columns[0]?.id] ?? 'Record')} / refs.${f}`,
+            kind: 'changed',
+            before,
+            after,
           });
       }
   }
@@ -677,7 +745,8 @@ function validRowStructure(row: DataRow): boolean {
     typeof row.values === 'object' &&
     Object.values(row.values).every(
       (value) => value === null || ['string', 'number', 'boolean'].includes(typeof value),
-    )
+    ) &&
+    (row.refs === undefined || validRowRefs(row.refs))
   );
   if (valid && isDeepFrozen(row)) validRowStructures.add(row);
   return valid;
@@ -724,14 +793,18 @@ export function isStructuredData(value: unknown): value is StructuredData {
   if (validDataStructures.has(value)) return true;
   const d = value as StructuredData;
   const valid =
-    (d.schemaVersion === 1 || d.schemaVersion === 2) &&
+    (d.schemaVersion === 1 || d.schemaVersion === 2 || d.schemaVersion === 3) &&
     Array.isArray(d.columns) &&
     Array.isArray(d.rows) &&
     validNativeReuse(d.reuse, 'data') &&
     (d.views === undefined || (Array.isArray(d.views) && d.views.every(validView))) &&
     validColumns(d.columns) &&
     validRows(d.rows) &&
-    (d.graphView === undefined || validDataGraphView(d.graphView, d));
+    (d.graphView === undefined || validDataGraphView(d.graphView, d)) &&
+    // 宣言と行の参照は schema 3 だけが持つ（古い版が黙って落とさないよう、版で分ける）
+    (d.schemaVersion === 3
+      ? d.items === undefined || dataItemsProblems(d.items, d.columns).length === 0
+      : d.items === undefined && d.rows.every((r) => r.refs === undefined));
   // Only structurally certified immutable data can reuse a result. Mutable import
   // input and shallow freezes are checked on every call; new rows/columns/views
   // get their own validation even when other branches are shared.

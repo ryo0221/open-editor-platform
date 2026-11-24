@@ -13,7 +13,9 @@ import {
   createFishboneGraph,
   createFtaGraph,
   fishboneProfile,
+  fishboneProfileV1,
   ftaProfile,
+  ftaProfileV1,
 } from './analysis-graph-templates';
 
 /**
@@ -246,6 +248,9 @@ export const graphProfiles: readonly GraphProfile[] = [
   diagramProfile,
   fishboneProfile,
   ftaProfile,
+  // 旧い分析の Profile：保存済みの図をそのまま開き、項目にはしない（「分析の項目を使う」で上げる）
+  fishboneProfileV1,
+  ftaProfileV1,
 ];
 /** The registered Profile a Graph names, or undefined when this Host does not know it. */
 export function graphProfileFor(graph: Pick<GraphDocument, 'profile'>): GraphProfile | undefined {

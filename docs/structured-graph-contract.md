@@ -46,8 +46,8 @@ required欠落は未完成draftのdiagnostics（公開/版保存はHostが判断
 
 2026-11-14からStructured Graphは互換を守る保存形式として扱う（Preview・Experimental・pre-1.0の扱いを外した。Ryoさんの判断）。
 
-- **番号**：Graphの保存形式を変えたら `schemaVersion` を上げる。現在はGraph schema 3（`graphSchemaVersion`）、Profile schema 2（`graphProfileSchemaVersion`）、presentation sidecar schema 2。Section（#396）とSectionにつなぐ接続（#594）は、それまでschema 2のまま書いていたので、schema 3で区別する。
-- **新しい版は古い番号を読む**：`upgradeGraphDocument`・`readGraphDocument` はschema 1（位置は `layout`、Section無し）とschema 2を、入力を変えずにschema 3として返す。schema 2として保存されたSectionへの接続もそのまま読む。Profile schema 1（Section型無し）は `upgradeGraphProfile`・`readGraphProfile` でschema 2として、sidecar schema 1（`positions`）はschema 2のnode presentationとして読む。
+- **番号**：Graphの保存形式を変えたら `schemaVersion` を上げる。現在はGraph schema 3（`graphSchemaVersion`）、Profile schema 3（`graphProfileSchemaVersion`）、presentation sidecar schema 2。Profile schema 3はnode typeの任意の `items`（業務IDの属性 `id`・題 `title`・引用の属性 `refs`・図の属性 `rootRefs`。どれもそのtypeまたはGraph typeのschemaにある属性で、`id`・`title` はstring、引用はstringかstringの配列）を足し、`graphItemsDeclaration` で `items@1-draft` の宣言にする（[分析間の要素参照](analysis-references-design.md) U1）。schema 2のProfileは `items` を持てない。Section（#396）とSectionにつなぐ接続（#594）は、それまでschema 2のまま書いていたので、schema 3で区別する。
+- **新しい版は古い番号を読む**：`upgradeGraphDocument`・`readGraphDocument` はschema 1（位置は `layout`、Section無し）とschema 2を、入力を変えずにschema 3として返す。schema 2として保存されたSectionへの接続もそのまま読む。Profile schema 1（Section型無し）とschema 2（`items` 無し）は `upgradeGraphProfile`・`readGraphProfile` でschema 3として、sidecar schema 1（`positions`）はschema 2のnode presentationとして読む。
 - **保存済みの版は書き換えない**：Playgroundは古いschemaの下書きを開く・取り込むときに現在のschemaへ移す。保存済みの版はbytesとhashを保ち、表示・参照・版の復元のときに読み替える。復元した下書きと次の版はschema 3になる。
 - **古い版は新しい番号を理由付きで断る**：この版から、読めるより新しい番号は「Graph schema N is newer than this version reads」で断る（不正なデータとは区別する）。これより前の版はschema 3を「Invalid Graph schema…」で断る。
 - **今後**：保存形式を変える変更は、番号を上げ、旧番号の読み込み（または明示的な移行）と試験を同じ変更に入れる。読み込みを外すときは[変更の記録](structured-graph/changes.md)に書き、少なくとも1つ前の番号は読み続ける。APIはpackageの版に従い、破壊的な変更は変更の記録に書く。

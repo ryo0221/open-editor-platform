@@ -1,3 +1,5 @@
+import { clone } from '@editor-platform/artifact-core';
+import { command, type EditorCommand } from '@editor-platform/editor-core';
 import {
   createGraph,
   validateGraph,
@@ -11,7 +13,7 @@ import {
  * model and editor instead of introducing new Artifact kinds or a second persistence path.
  * Neither profile is an industry-standard certified analysis implementation.
  */
-export const fishboneProfile: GraphProfile = {
+export const fishboneProfileV1: GraphProfile = {
   schemaVersion: 2,
   id: 'analysis-fishbone',
   version: 1,
@@ -101,7 +103,7 @@ export const fishboneProfile: GraphProfile = {
   sections: {},
 };
 
-export const ftaProfile: GraphProfile = {
+export const ftaProfileV1: GraphProfile = {
   schemaVersion: 2,
   id: 'analysis-fault-tree',
   version: 1,
@@ -185,6 +187,102 @@ export const ftaProfile: GraphProfile = {
   },
   sections: {},
 };
+
+const itemIdField = { label: '業務 ID', description: '例：CC-01。分析の項目として引用されます' };
+/** Adds a business ID attribute (first in the Inspector) and the given fields to a node type. */
+function withItems(
+  profile: GraphProfile,
+  type: string,
+  items: NonNullable<GraphProfile['nodes'][string]['items']>,
+  extra: Record<string, { schema: GraphProfile['nodes'][string]['schema'][string]; label: string }>,
+) {
+  const t = profile.nodes[type]!;
+  t.schema = { itemId: { type: 'string', maxLength: 128 }, ...t.schema };
+  const ui = (t.ui ??= {});
+  ui.fields = { itemId: itemIdField, ...ui.fields };
+  for (const [name, f] of Object.entries(extra)) {
+    t.schema[name] = f.schema;
+    ui.fields[name] = { label: f.label };
+  }
+  ui.order = ['itemId', ...(ui.order ?? Object.keys(t.schema).filter((k) => k !== 'itemId'))];
+  for (const name of Object.keys(extra)) if (!ui.order.includes(name)) ui.order.push(name);
+  t.items = items;
+}
+
+/**
+ * Profile version 2 (Profile schema 3): causes are analysis items with a business ID, and the
+ * diagram cites the problem it analyses (docs/analysis-references-design.md U1). Version 1 stays
+ * registered so older diagrams open unchanged; `useAnalysisItems` moves one to this version.
+ */
+export const fishboneProfile: GraphProfile = (() => {
+  const p = clone(fishboneProfileV1);
+  p.schemaVersion = 3;
+  p.version = 2;
+  p.graph.schema.problemRef = { type: 'string', maxLength: 128 };
+  p.graph.ui!.order = [...p.graph.ui!.order!, 'problemRef'];
+  p.graph.ui!.fields!.problemRef = { label: '問題の業務 ID' };
+  withItems(p, 'cause', { id: 'itemId', title: 'name', rootRefs: ['problemRef'] }, {});
+  return p;
+})();
+
+/**
+ * Profile version 2 (Profile schema 3): the top event cites the problem and each basic event
+ * may cite failure causes of an FMEA by business ID.
+ */
+export const ftaProfile: GraphProfile = (() => {
+  const p = clone(ftaProfileV1);
+  p.schemaVersion = 3;
+  p.version = 2;
+  withItems(
+    p,
+    'top',
+    { id: 'itemId', title: 'name', refs: ['problemRef'] },
+    { problemRef: { schema: { type: 'string', maxLength: 128 }, label: '問題の業務 ID' } },
+  );
+  withItems(
+    p,
+    'basic',
+    { id: 'itemId', title: 'name', refs: ['failureCauseRefs'] },
+    {
+      failureCauseRefs: {
+        schema: { type: 'array', maxItems: 500, items: { type: 'string', maxLength: 128 } },
+        label: '故障原因の業務 ID',
+      },
+    },
+  );
+  return p;
+})();
+
+const analysisUpgrades = [
+  [fishboneProfileV1, fishboneProfile],
+  [ftaProfileV1, ftaProfile],
+] as const;
+
+/**
+ * The explicit 「分析の項目を使う」 command for a diagram of an older analysis Profile: it moves
+ * the Profile reference to the version with items and adds an empty business ID to each node of
+ * a type that has items. Undo restores the old reference and attributes. Undefined when the
+ * diagram is not of an older analysis Profile.
+ */
+export function useAnalysisItems(
+  graph: Pick<GraphDocument, 'profile'>,
+): EditorCommand<GraphDocument> | undefined {
+  const pair = analysisUpgrades.find(
+    ([old]) => old.id === graph.profile.id && old.version === graph.profile.version,
+  );
+  if (!pair) return undefined;
+  const [old, next] = pair;
+  return command('analysis.use-items', '分析の項目を使う', (current) => {
+    if (current.profile.id !== old.id || current.profile.version !== old.version)
+      throw new Error('The diagram no longer uses the older analysis Profile');
+    const out = clone(current);
+    out.profile = { id: next.id, version: next.version };
+    for (const n of out.nodes)
+      if (next.nodes[n.type]?.items && n.attributes.itemId === undefined)
+        n.attributes = { itemId: '', ...n.attributes };
+    return out;
+  });
+}
 
 type PositionedNode = GraphNode & { x: number; y: number };
 
@@ -362,9 +460,12 @@ export type FtaResult =
  * treating two dependent branches as independent. No evidence verifies independence for users.
  */
 export function evaluateFta(graph: GraphDocument): FtaResult {
-  if (graph.profile.id !== ftaProfile.id || graph.profile.version !== ftaProfile.version)
-    return { ok: false, issues: ['FTAのProfileではありません。'] };
-  const diagnostics = validateGraph(graph, ftaProfile).filter((item) => item.blocking);
+  // 旧い版（項目なし）の FTA も同じ計算で読む
+  const profile = [ftaProfile, ftaProfileV1].find(
+    (p) => p.id === graph.profile.id && p.version === graph.profile.version,
+  );
+  if (!profile) return { ok: false, issues: ['FTAのProfileではありません。'] };
+  const diagnostics = validateGraph(graph, profile).filter((item) => item.blocking);
   if (diagnostics.length) return { ok: false, issues: diagnostics.map((item) => item.message) };
   const tops = graph.nodes.filter((node) => node.type === 'top');
   if (tops.length !== 1) return { ok: false, issues: ['トップ事象を1つ指定してください。'] };

@@ -80,6 +80,15 @@ export const HISTORY_ADDON = 'history@0-draft' as const;
  */
 export const ITEMS_ADDON = 'items@0-draft' as const;
 /**
+ * Next version of the items add-on. It adds `where`, `rootRefs` and `merge` to a collection
+ * (docs/analysis-references-design.md U1・U6). A `0-draft` declaration keeps its meaning; a Host
+ * that reads only `0-draft` refuses a `1-draft` declaration instead of reading part of it.
+ */
+export const ITEMS_ADDON_V1 = 'items@1-draft' as const;
+/** Items add-on versions this OEP reads, oldest first. */
+export const ITEMS_ADDON_VERSIONS = [ITEMS_ADDON, ITEMS_ADDON_V1] as const;
+export type ItemsAddonVersion = (typeof ITEMS_ADDON_VERSIONS)[number];
+/**
  * Where an item's ID is. A string names the property that holds the whole ID. `leading-token`
  * means the ID is written at the head of the named text property, before the first space; the
  * Host decides which tokens are IDs with its own ID forms (the package gives no pattern).
@@ -98,6 +107,15 @@ export interface ItemsCollection {
   refs?: readonly string[];
   /** Presentation-only properties left out when a Host compares or fingerprints items. */
   layout?: readonly string[];
+  /** `items@1-draft` only: elements are items only when each path holds the given value. */
+  where?: Readonly<Record<string, string | number | boolean>>;
+  /** `items@1-draft` only: paths from the content root whose IDs every item of the collection uses. */
+  rootRefs?: readonly string[];
+  /**
+   * `items@1-draft` only: elements with the same ID are one item when the `equal` paths and the
+   * `refs` paths hold the same values in all of them; otherwise the ID is a duplicate.
+   */
+  merge?: Readonly<{ equal: readonly string[] }>;
 }
 export type ReferenceTarget =
   | { kind: 'value'; targetId: string; metricId: string }
@@ -128,7 +146,7 @@ export interface ManifestAddons {
   create?: Readonly<{ version: typeof CREATE_ADDON }>;
   references?: Readonly<{ version: typeof REFERENCES_ADDON }>;
   history?: Readonly<{ version: typeof HISTORY_ADDON; keepHighest: readonly string[] }>;
-  items?: Readonly<{ version: typeof ITEMS_ADDON; collections: readonly ItemsCollection[] }>;
+  items?: Readonly<{ version: ItemsAddonVersion; collections: readonly ItemsCollection[] }>;
 }
 /**
  * Package code for declared operations. `checkInput` covers rules the schema cannot express
