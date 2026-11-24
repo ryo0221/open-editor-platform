@@ -119,7 +119,7 @@ export const dataProposalDiff: ProposalDiffAdapter<StructuredData> = {
           elementId: row.id,
           elementLabel: rowLabel(before, row),
           property: 'record',
-          before: row.values,
+          before: row.refs ? { ...row.values, refs: row.refs } : row.values,
         });
     for (const row of after.rows) {
       const old = am.get(row.id);
@@ -130,7 +130,7 @@ export const dataProposalDiff: ProposalDiffAdapter<StructuredData> = {
           elementId: row.id,
           elementLabel: rowLabel(after, row),
           property: 'record',
-          after: row.values,
+          after: row.refs ? { ...row.values, refs: row.refs } : row.values,
         });
       else changes.push(...rowChanges(before, after, old, row));
     }

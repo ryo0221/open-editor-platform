@@ -147,6 +147,9 @@ export const setRowRefs = (
   ids: readonly string[],
 ): EditorCommand<StructuredData> => {
   const fixed = [...ids];
+  // 保存の検証と同じ決まり（重ならない・空でない・長さと件数の上限）を、中身を変える前に確かめる
+  if (!validRowRefs({ [field]: fixed }))
+    throw new Error('References must be distinct, non-empty IDs');
   return immutableCommand('data.update-row-refs', 'Edit references', (d) => {
     if (d.schemaVersion !== 3) throw new Error('References need a schema 3 table');
     if (!declaredRefFields(d).includes(field))

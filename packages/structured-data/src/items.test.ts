@@ -216,4 +216,40 @@ describe('Data schema 3: item declarations and row references', () => {
       }),
     ]);
   });
+
+  it('refuses reference lists that saved tables would reject, before changing content', () => {
+    for (const ids of [
+      ['CC-01', 'CC-01'],
+      [''],
+      ['x'.repeat(129)],
+      Array.from({ length: 501 }, (_, i) => `CC-${i}`),
+    ])
+      expect(() => setRowRefs('r1', 'causeCandidates', ids)).toThrow(/distinct, non-empty/);
+  });
+
+  it('shows references of added and removed records in the proposal diff', () => {
+    const d = table();
+    const added = {
+      ...d,
+      rows: [
+        ...d.rows,
+        { id: 'r3', values: { fcId: 'FC-03' }, refs: { causeCandidates: ['CC-09'] } },
+      ],
+    };
+    expect(dataProposalDiff.diff(d, added).changes).toEqual([
+      expect.objectContaining({
+        kind: 'added',
+        elementId: 'r3',
+        after: expect.objectContaining({ refs: { causeCandidates: ['CC-09'] } }),
+      }),
+    ]);
+    const removed = { ...d, rows: [d.rows[1]!] };
+    expect(dataProposalDiff.diff(d, removed).changes).toEqual([
+      expect.objectContaining({
+        kind: 'removed',
+        elementId: 'r1',
+        before: expect.objectContaining({ refs: { causeCandidates: ['CC-01', 'CC-02'] } }),
+      }),
+    ]);
+  });
 });
