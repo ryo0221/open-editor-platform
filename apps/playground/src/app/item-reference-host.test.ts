@@ -149,4 +149,16 @@ describe('AR2 Playground の架空の ItemReferenceHost', () => {
     saved.current.set('fish', record('fish', '特性要因図', withProblem('PS-02'), 2));
     expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('stale');
   });
+
+  it('多くの ID の resolve でも Library の項目は一度だけ読む', async () => {
+    const { host, saved, from } = setup();
+    let reads = 0;
+    const values = saved.current.values.bind(saved.current);
+    saved.current.values = () => (reads++, values());
+    const ids = Array.from({ length: 50 }, (_, i) => `CC-${i}`);
+    const states = await host.resolve(from, ['CC-01', ...ids], signal);
+    expect(reads).toBe(1);
+    expect(states.get('CC-01')?.status).toBe('ok');
+    expect(states.size).toBe(51);
+  });
 });

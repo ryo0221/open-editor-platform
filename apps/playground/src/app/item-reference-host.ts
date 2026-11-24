@@ -151,8 +151,13 @@ export function playgroundItemHost(context: {
     for (const [id, list] of items) if (list.length > 1) duplicated.add(id);
     return { items, duplicated };
   }
-  function stateOf(from: ItemRefSource, id: string): ItemRefState {
-    const { items, duplicated } = catalog(from.artifactId);
+  /** `found` is the catalog for `from`'s artifact; a resolve builds it once for all its IDs. */
+  function stateOf(
+    from: ItemRefSource,
+    id: string,
+    found = catalog(from.artifactId),
+  ): ItemRefState {
+    const { items, duplicated } = found;
     if (duplicated.has(id)) return { status: 'duplicate', reason: `${id} が二つ以上あります` };
     const it = items.get(id)?.[0];
     if (!it) return { status: 'unresolved', reason: `${id} は Library の保存した版にありません` };
@@ -174,21 +179,24 @@ export function playgroundItemHost(context: {
       return out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     },
     async resolve(from, ids) {
-      return new Map(ids.map((id) => [id, stateOf(from, id)]));
+      const found = catalog(from.artifactId);
+      return new Map(ids.map((id) => [id, stateOf(from, id, found)]));
     },
     async open(id, from) {
-      const state = stateOf(from, id);
+      const found = catalog(from.artifactId);
+      const state = stateOf(from, id, found);
       if (state.status !== 'ok' && state.status !== 'stale' && state.status !== 'kept')
         return { opened: false, state };
-      const it = catalog(from.artifactId).items.get(id)![0]!;
+      const it = found.items.get(id)![0]!;
       return context.navigation.current(it.artifactId, it.elements[0] ?? '', { ...from })
         ? { opened: true }
         : { opened: false, state: { status: 'offline', reason: '開けませんでした' } };
     },
     async select(from, id) {
-      const state = stateOf(from, id);
+      const found = catalog(from.artifactId);
+      const state = stateOf(from, id, found);
       if (state.status !== 'ok' && state.status !== 'stale') return { accepted: false, state };
-      const it = catalog(from.artifactId).items.get(id)![0]!;
+      const it = found.items.get(id)![0]!;
       const record = context.saved.current.get(it.artifactId)!;
       const version = record.versions.at(-1)!;
       const selectionId = newId('selection');
