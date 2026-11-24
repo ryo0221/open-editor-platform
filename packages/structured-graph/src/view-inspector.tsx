@@ -313,15 +313,27 @@ export interface GraphInspectorProps extends GraphConnectionFormProps, GraphOver
   itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
 }
 
+const idsOf = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string' && v !== '')
+    : typeof value === 'string' && value
+      ? [value]
+      : [];
+
 /** Reference attributes of an item node type (Profile `items.refs`), with the Host's candidates and states. */
 function GraphItemReferences(props: GraphInspectorProps) {
   const { node, type, itemReferences: ir, readOnly, profile, inputs, setError } = props;
   // The latest render's apply: a command after committing pending inputs must see their result
-  const latest = useRef({ apply: props.apply, renders: 0 });
-  latest.current = { apply: props.apply, renders: latest.current.renders + 1 };
+  const latest = useRef({ apply: props.apply, node, renders: 0 });
+  latest.current = { apply: props.apply, node, renders: latest.current.renders + 1 };
   const refs = node ? profile.nodes[node.type]?.items?.refs : undefined;
   if (!node || !ir || !refs?.length) return null;
-  async function change(field: string, multiple: boolean, next: string[]) {
+  async function change(
+    field: string,
+    multiple: boolean,
+    next: string[],
+    expected: readonly string[],
+  ) {
     const intents: GraphIntent[] = [
       next.length
         ? {
@@ -346,18 +358,22 @@ function GraphItemReferences(props: GraphInspectorProps) {
     if (pending)
       for (let i = 0; i < 20 && latest.current.renders === before; i++)
         await new Promise((r) => setTimeout(r, 0));
+    // The committed inputs may have changed this field: then the new value is out of date
+    const now = latest.current.node;
+    if (
+      now?.id !== node!.id ||
+      JSON.stringify(idsOf(now.attributes[field])) !== JSON.stringify(expected)
+    ) {
+      setError('入力を確定したら引用の欄が変わりました。もう一度選んでください');
+      return false;
+    }
     return latest.current.apply(intents);
   }
   return (
     <>
       {refs.map((field) => {
-        const value = node.attributes[field];
         const multiple = type.schema[field]?.type === 'array';
-        const ids = Array.isArray(value)
-          ? value.filter((v): v is string => typeof v === 'string' && v !== '')
-          : typeof value === 'string' && value
-            ? [value]
-            : [];
+        const ids = idsOf(node.attributes[field]);
         return (
           <ItemReferenceField
             key={`${node.id}:${field}`}
@@ -368,7 +384,7 @@ function GraphItemReferences(props: GraphInspectorProps) {
             ids={ids}
             multiple={multiple}
             readOnly={readOnly || !!type.readOnly || !!type.schema[field]?.readOnly}
-            change={(next) => change(field, multiple, next)}
+            change={(next, expected) => change(field, multiple, next, expected)}
           />
         );
       })}

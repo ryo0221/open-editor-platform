@@ -141,7 +141,8 @@ export function playgroundItemHost(context: {
           artifactId: a.id,
           artifactTitle: a.name,
           elements: (it.elements ?? [it.key]).flatMap((k) => found.native(k) ?? []),
-          fingerprint: canonicalJson(it.body),
+          // The projected references (for example a Fishbone cause's problem) are part of the item
+          fingerprint: canonicalJson({ body: it.body, refs: it.refs ?? [] }),
         });
         items.set(it.id, list);
       }

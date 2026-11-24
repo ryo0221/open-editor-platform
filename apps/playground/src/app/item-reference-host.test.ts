@@ -128,4 +128,25 @@ describe('AR2 Playground の架空の ItemReferenceHost', () => {
     expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('duplicate');
     expect((await host.candidates(from, signal)).map((c) => c.id)).not.toContain('CC-01');
   });
+
+  it('引用した原因の候補の問題（図の problemRef）が変わっても古い', async () => {
+    const { host, saved, from } = setup();
+    const ledger = new ItemSelectionLedger();
+    const withProblem = (problem: string) => {
+      const g = fishbone();
+      g.attributes = { ...g.attributes, problemRef: problem };
+      return g;
+    };
+    saved.current.set('fish', record('fish', '特性要因図', withProblem('PS-01')));
+    const r = await host.select(from, 'CC-01', signal);
+    ledger.choose(from, 'CC-01', r);
+    const before = fmea();
+    const after = setRowRefs(before.rows[0]!.id, 'causeCandidates', ['CC-01']).apply(before);
+    const occ = refOccurrences('fmea', after);
+    const marks = ledger.marks(refOccurrences('fmea', before), occ);
+    host.committed('fmea', ledger.evidenceFor(marks, refOccurrences('fmea', before), occ), occ);
+    expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('ok');
+    saved.current.set('fish', record('fish', '特性要因図', withProblem('PS-02'), 2));
+    expect((await host.resolve(from, ['CC-01'], signal)).get('CC-01')?.status).toBe('stale');
+  });
 });

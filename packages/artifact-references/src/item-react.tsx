@@ -47,9 +47,10 @@ export function ItemReferenceField({
   readOnly?: boolean;
   /**
    * Applies the new IDs as one command. Returns whether it was applied. It may wait, for example
-   * for pending inputs of the same element to be committed and shown first.
+   * for pending inputs of the same element to be committed and shown first; it must refuse when
+   * the field no longer holds `expected` (the IDs the new value was made from).
    */
-  change(ids: string[]): boolean | Promise<boolean>;
+  change(ids: string[], expected: readonly string[]): boolean | Promise<boolean>;
 }) {
   const [states, setStates] = useState<ReadonlyMap<string, ItemRefState>>(new Map());
   const [tick, setTick] = useState(0);
@@ -118,7 +119,7 @@ export function ItemReferenceField({
       // in its marks, so Undo and Redo follow it. An unused choice is dropped.
       ledger.choose(at, id, r);
       try {
-        if (await change(next)) setCandidates(null);
+        if (await change(next, ids)) setCandidates(null);
         else if (alive.current) setMessage('変更できませんでした');
       } finally {
         ledger.cancel(at, id);
@@ -133,7 +134,13 @@ export function ItemReferenceField({
     // The removal is an edit: the Host's session marks the end of its choice, and Undo undoes that
     setMessage('');
     try {
-      if (!(await change(ids.filter((x) => x !== id))) && alive.current)
+      if (
+        !(await change(
+          ids.filter((x) => x !== id),
+          ids,
+        )) &&
+        alive.current
+      )
         setMessage('変更できませんでした');
     } catch {
       if (alive.current) setMessage('変更できませんでした');
