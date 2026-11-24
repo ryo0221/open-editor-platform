@@ -5,7 +5,15 @@ import {
   setCell,
   validateData,
 } from '@editor-platform/structured-data';
-import { createFmeaData, fmeaTemplateOptions, inspectFmeaData, isFmeaData } from './fmea-templates';
+import { readItems } from '@editor-platform/extension-runtime/items';
+import { dataItemsDeclaration, removeRow, setRowRefs } from '@editor-platform/structured-data';
+import {
+  createFmeaData,
+  fmeaItemIssues,
+  fmeaTemplateOptions,
+  inspectFmeaData,
+  isFmeaData,
+} from './fmea-templates';
 import { makeArtifact } from '../model';
 
 describe('FMEA Structured Data templates', () => {
@@ -87,5 +95,84 @@ describe('FMEA Structured Data templates', () => {
     const blank = makeArtifact('data', 3);
     expect(blank.name).toBe('Structured Data 3');
     expect(isFmeaData(blank.draft.content as never)).toBe(false);
+  });
+});
+
+describe('FMEA analysis items (AR1)', () => {
+  /** The process example with business IDs: rows 1 and 2 share failure mode FM-01. */
+  const withIds = () => {
+    const data = createFmeaData('pfmea');
+    const ids: [string, string, string][] = [
+      ['FN-01', 'FM-01', 'FC-01'],
+      ['FN-01', 'FM-01', 'FC-02'],
+      ['FN-02', 'FM-02', 'FC-03'],
+    ];
+    data.rows.forEach((row, i) => {
+      const [fn, fm, fc] = ids[i]!;
+      Object.assign(row.values, { functionRef: fn, fmId: fm, fcId: fc });
+    });
+    // FM-01 の 2 行は、故障モード・故障影響・S・要求機能を揃える
+    Object.assign(data.rows[1]!.values, {
+      function: data.rows[0]!.values.function,
+      failure: data.rows[0]!.values.failure,
+      effect: data.rows[0]!.values.effect,
+      s: data.rows[0]!.values.s,
+    });
+    return data;
+  };
+  const items = (data: ReturnType<typeof createFmeaData>) =>
+    readItems(dataItemsDeclaration(data)!, data, () => undefined);
+
+  it('declares failure causes per row and failure modes projected from rows, with no IDs in the template', () => {
+    const data = createFmeaData('dfmea');
+    expect(data.schemaVersion).toBe(3);
+    expect(data.items!.map((d) => d.kind)).toEqual(['failure-cause', 'failure-mode']);
+    expect(items(data).items).toEqual([]);
+  });
+
+  it('reads FC → FM and FC → CC citations, and one FM for rows that share its ID', () => {
+    let data = withIds();
+    data = setRowRefs(data.rows[0]!.id, 'causeCandidates', ['CC-01', 'CC-02']).apply(data);
+    expect(isStructuredData(data)).toBe(true);
+    const r = items(data);
+    expect(r.duplicates).toEqual([]);
+    expect(r.items.map((i) => [i.id, i.refs, i.elements])).toEqual([
+      ['FC-01', ['FM-01', 'CC-01', 'CC-02'], ['0']],
+      ['FC-02', ['FM-01'], ['1']],
+      ['FC-03', ['FM-02'], ['2']],
+      ['FM-01', ['FN-01'], ['0', '1']],
+      ['FM-02', ['FN-02'], ['2']],
+    ]);
+    expect(fmeaItemIssues(data)).toEqual([]);
+  });
+
+  it('keeps FM-01 when one of its rows is deleted, and changes nothing in FM-01 when only O or D changes', () => {
+    const data = withIds();
+    const fm = (d: typeof data) => items(d).items.find((i) => i.id === 'FM-01')!;
+    const before = fm(data);
+    const rest = removeRow(data.rows[0]!.id).apply(data);
+    expect(fm(rest).body).toEqual(before.body);
+    expect(fm(rest).elements).toEqual(['0']);
+    const rated = setCell(data.rows[1]!.id, 'o', 9).apply(data);
+    expect(fm(rated).body).toEqual(before.body);
+  });
+
+  it('diagnoses an FM whose rows disagree and leaves the cells for the user to fix', () => {
+    const data = setCell(withIds().rows[1]!.id, 'effect', '別の影響').apply(withIds());
+    expect(fmeaItemIssues(data)).toEqual([
+      'FM-01 の故障影響が行ごとに違います（pfmea-001・pfmea-002）。',
+    ]);
+    expect(inspectFmeaData(data).issues).toContain(
+      'FM-01 の故障影響が行ごとに違います（pfmea-001・pfmea-002）。',
+    );
+    expect(items(data).items.map((i) => i.id)).not.toContain('FM-01');
+  });
+
+  it('opens an older FMEA table without declarations as it is: no items', () => {
+    const data = createFmeaData('pfmea');
+    const { items: _i, ...old } = { ...data, schemaVersion: 2 as const };
+    expect(isStructuredData(old)).toBe(true);
+    expect(isFmeaData(old)).toBe(true);
+    expect(fmeaItemIssues(old)).toEqual([]);
   });
 });

@@ -42,7 +42,21 @@ export interface GraphType {
   ui?: AttributeUi;
   readOnly?: boolean;
 }
+/**
+ * Profile schema 3: which attributes of a node type hold a business item ID and the IDs it cites
+ * (docs/analysis-references-design.md U1). Names are attributes of the type's schema; `rootRefs`
+ * are attributes of the Graph type's schema that every item of this type cites. Values stay
+ * ordinary string or string-array attributes; OEP does not decide the form of an ID.
+ */
+export interface GraphNodeItems {
+  id: string;
+  title: string;
+  refs?: string[];
+  rootRefs?: string[];
+}
 export interface GraphNodeType extends GraphType {
+  /** Schema 3 only. */
+  items?: GraphNodeItems;
   ui?: AttributeUi & {
     /** Type default shape; a node's saved presentation may override it. */
     shape?: GraphNodeShape;
@@ -95,7 +109,8 @@ export interface GraphSectionType extends GraphType {
   contains?: { nodes?: string[]; sections?: string[] };
 }
 export interface GraphProfile extends ProfileRef {
-  schemaVersion: 2;
+  /** 3 adds node type `items`; 2 is still read as it is (without them). */
+  schemaVersion: 2 | 3;
   graph: GraphType;
   nodes: Record<string, GraphNodeType>;
   edges: Record<string, GraphEdgeType>;
@@ -241,6 +256,7 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
             'readOnly',
             ...(edge ? ['connection'] : []),
             ...(section ? ['contains'] : []),
+            ...(scope === 'node' && p.schemaVersion === 3 ? ['items'] : []),
           ].includes(k),
       ) ||
       !Object.entries(t.schema).every(([k, s]) => validGraphId(k) && schemaValid(s)) ||
@@ -254,6 +270,12 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
       if (icons !== undefined && iconBy === undefined) return false;
       if (iconBy !== undefined && !Object.hasOwn(t.schema, iconBy as string)) return false;
     }
+    if (
+      scope === 'node' &&
+      t.items !== undefined &&
+      !itemsValid(t.items, t.schema as Record<string, AttributeSchema>)
+    )
+      return false;
     if (section) return t.contains === undefined || containsValid(t.contains);
     if (!edge || t.connection === undefined) return true;
     const c = t.connection;
@@ -276,8 +298,52 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
       })
     );
   };
+  const isString = (s: AttributeSchema | undefined) => s?.type === 'string';
+  const isRef = (s: AttributeSchema | undefined) =>
+    s?.type === 'string' || (s?.type === 'array' && s.items?.type === 'string');
+  /** Item attributes become one segment of an `items@1-draft` path, so they use its name rule. */
+  const segment = (n: unknown): n is string =>
+    typeof n === 'string' &&
+    /^[A-Za-z_$][A-Za-z0-9_$-]{0,63}$/.test(n) &&
+    !['__proto__', 'constructor', 'prototype'].includes(n);
+  const names = (v: unknown) =>
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.length <= 32 &&
+    v.every(segment) &&
+    new Set(v).size === v.length;
+  /** Item attributes must exist on the type (refs: string or string array) and hold plain IDs. */
+  const itemsValid = (items: unknown, schema: Record<string, AttributeSchema>): boolean => {
+    if (
+      !plainRecord(items) ||
+      Object.keys(items).some((k) => !['id', 'title', 'refs', 'rootRefs'].includes(k))
+    )
+      return false;
+    const own = (n: string) => (Object.hasOwn(schema, n) ? schema[n] : undefined);
+    const root = (n: string) =>
+      plainRecord(p.graph) && plainRecord(p.graph.schema) && Object.hasOwn(p.graph.schema, n)
+        ? p.graph.schema[n]
+        : undefined;
+    if (!segment(items.id) || !isString(own(items.id))) return false;
+    if (!segment(items.title) || !isString(own(items.title))) return false;
+    if (items.refs !== undefined)
+      if (
+        !names(items.refs) ||
+        !(items.refs as string[]).every((n) => n !== items.id && isRef(own(n)))
+      )
+        return false;
+    if (items.rootRefs !== undefined)
+      if (!names(items.rootRefs) || !(items.rootRefs as string[]).every((n) => isRef(root(n))))
+        return false;
+    return true;
+  };
+  // 項目の node type は、宣言にしたときの items@1-draft のコレクションの上限（16）まで
+  const itemTypes = plainRecord(p.nodes)
+    ? Object.values(p.nodes).filter((t) => plainRecord(t) && t.items !== undefined).length
+    : 0;
   return (
-    p.schemaVersion === 2 &&
+    itemTypes <= 16 &&
+    (p.schemaVersion === 2 || p.schemaVersion === 3) &&
     validGraphId(p.id) &&
     Number.isSafeInteger(p.version) &&
     p.version > 0 &&
@@ -292,7 +358,7 @@ export function isGraphProfile(value: unknown): value is GraphProfile {
   );
 }
 /** The Profile schema this version writes. It is raised whenever the Profile format changes. */
-export const graphProfileSchemaVersion = 2;
+export const graphProfileSchemaVersion = 3;
 const graphProfileMessage = (value: unknown) =>
   plainRecord(value) &&
   typeof value.schemaVersion === 'number' &&
@@ -305,15 +371,53 @@ export function assertGraphProfile(value: unknown): asserts value is GraphProfil
 }
 /**
  * A Profile of any readable schema as the current schema, or undefined. Pure. Schema 1 had no
- * Section types; it reads as schema 2 with none. A current Profile is returned as it is.
+ * Section types; it reads as schema 2 with none. Schema 2 had no node type `items`; it reads as
+ * schema 3 without them. A current Profile is returned as it is.
  */
 export function upgradeGraphProfile(value: unknown): GraphProfile | undefined {
   if (!isGraphJson(value) || !plainRecord(value)) return undefined;
-  const next =
-    value.schemaVersion === 1 && !('sections' in value)
-      ? { ...value, schemaVersion: 2, sections: {} }
-      : value;
-  return isGraphProfile(next) ? next : undefined;
+  let next: Record<string, unknown> = value;
+  if (next.schemaVersion === 1 && !('sections' in next))
+    next = { ...next, schemaVersion: 2, sections: {} };
+  // 2 を 3 として読む前に 2 として確かめる（2 の Profile が items を持っていれば読まない）
+  if (next.schemaVersion === 2) next = isGraphProfile(next) ? { ...next, schemaVersion: 3 } : next;
+  return isGraphProfile(next) && next.schemaVersion === 3 ? next : undefined;
+}
+
+/**
+ * The `items@1-draft` declaration for a Graph document of this Profile: one collection per node
+ * type with `items`, or undefined when no type declares any. Paths address the saved Graph
+ * (`nodes[].attributes`, the Graph's `attributes`). Element keys in what `readItems` returns are
+ * node indexes in `nodes`.
+ */
+export function graphItemsDeclaration(profile: GraphProfile):
+  | {
+      version: 'items@1-draft';
+      collections: {
+        at: 'nodes';
+        where: { type: string };
+        id: string;
+        title: string;
+        refs?: string[];
+        rootRefs?: string[];
+      }[];
+    }
+  | undefined {
+  const collections = Object.entries(profile.nodes).flatMap(([type, t]) => {
+    const items = t.items;
+    if (!items) return [];
+    return [
+      {
+        at: 'nodes' as const,
+        where: { type },
+        id: `attributes.${items.id}`,
+        title: `attributes.${items.title}`,
+        ...(items.refs ? { refs: items.refs.map((n) => `attributes.${n}`) } : {}),
+        ...(items.rootRefs ? { rootRefs: items.rootRefs.map((n) => `attributes.${n}`) } : {}),
+      },
+    ];
+  });
+  return collections.length ? { version: 'items@1-draft', collections } : undefined;
 }
 /** `upgradeGraphProfile` that throws the reason for an unreadable value. */
 export function readGraphProfile(value: unknown): GraphProfile {

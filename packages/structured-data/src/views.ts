@@ -2,7 +2,9 @@ import { newId, clone, canonicalJson } from '@editor-platform/artifact-core';
 import { dayString } from '@editor-platform/time-axis';
 import { command, immutableCommand, type EditorCommand } from '@editor-platform/editor-core';
 import { columnSchemaCommand } from './schema-command';
+import { itemsMergeColumn, itemsTextColumn } from './items';
 import {
+  atLeastSchema2,
   cellValue,
   displayCell,
   parseCell,
@@ -281,7 +283,7 @@ export function setCells(
     }
     const next = {
       ...data,
-      schemaVersion: 2 as const,
+      schemaVersion: atLeastSchema2(data),
       rows: rows.map((r) =>
         patches.has(r.id) ? { ...r, values: { ...r.values, ...patches.get(r.id) } } : r,
       ),
@@ -453,6 +455,13 @@ export function previewColumn(
     )
   )
     throw new Error('Field names must be unique and nonempty');
+  // 業務 ID・題の列は文字列のまま（宣言が指す列の型を変えると項目が読めなくなる）
+  if (updated.type !== 'text' && itemsTextColumn(data, id))
+    throw new Error(
+      `${original.name} holds item IDs, titles or citations and must stay a text field`,
+    );
+  if (updated.type === 'formula' && itemsMergeColumn(data, id))
+    throw new Error(`${original.name} is compared to merge items and cannot become a formula`);
   const columns = data.columns.map((c) => {
     const frozen =
       c.type === 'formula' ? { ...c, formula: freezeFormulaReferences(data, c.formula ?? '') } : c;
@@ -477,7 +486,7 @@ export function previewColumn(
   const previousErrors = new Set(
     validateData(data).map((e) => `${e.rowId}:${e.columnId}:${e.message}`),
   );
-  const content = { ...data, schemaVersion: 2 as const, columns, rows },
+  const content = { ...data, schemaVersion: atLeastSchema2(data), columns, rows },
     errors = validateData(content)
       .filter(
         (e) => e.columnId === id || !previousErrors.has(`${e.rowId}:${e.columnId}:${e.message}`),
@@ -518,7 +527,7 @@ export function saveView(view: DataView) {
   const fixed = clone(view);
   return command<StructuredData>('data.save-view', 'Save named view', (d) => ({
     ...d,
-    schemaVersion: 2,
+    schemaVersion: atLeastSchema2(d),
     views: [...(d.views ?? []).filter((v) => v.id !== fixed.id), fixed],
   }));
 }

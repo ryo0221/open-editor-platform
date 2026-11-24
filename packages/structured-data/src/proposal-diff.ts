@@ -78,6 +78,20 @@ function rowChanges(
       ...(column?.type === 'date' ? dayUnits(column, x, y) : {}),
     });
   }
+  // 行の参照の欄（schema 3）も提案の差分に出す（参照だけの提案を「変更なし」にしない）
+  for (const f of new Set([...Object.keys(old.refs ?? {}), ...Object.keys(next.refs ?? {})])) {
+    const x = old.refs?.[f] ?? [],
+      y = next.refs?.[f] ?? [];
+    if (sameValue(x, y)) continue;
+    changes.push({
+      ...base,
+      kind: 'field',
+      property: `refs.${f}`,
+      propertyLabel: `refs.${f}`,
+      before: x,
+      after: y,
+    });
+  }
   return changes;
 }
 
@@ -97,27 +111,46 @@ export const dataProposalDiff: ProposalDiffAdapter<StructuredData> = {
       fallback: FallbackChange[] = [];
     const am = new Map(before.rows.map((r) => [r.id, r])),
       bm = new Map(after.rows.map((r) => [r.id, r]));
+    // 追加・削除する行の参照の欄は、セルと混ぜずに欄ごとの変更として出す（列 ID が refs でも隠さない）
+    const refChanges = (data: StructuredData, row: DataRow, kind: 'added' | 'removed') =>
+      Object.entries(row.refs ?? {}).map(
+        ([f, ids]): SemanticChange => ({
+          domain: 'data',
+          kind,
+          elementId: row.id,
+          elementLabel: rowLabel(data, row),
+          property: `refs.${f}`,
+          propertyLabel: `refs.${f}`,
+          ...(kind === 'added' ? { after: ids } : { before: ids }),
+        }),
+      );
     for (const row of before.rows)
       if (!bm.has(row.id))
-        changes.push({
-          domain: 'data',
-          kind: 'removed',
-          elementId: row.id,
-          elementLabel: rowLabel(before, row),
-          property: 'record',
-          before: row.values,
-        });
+        changes.push(
+          {
+            domain: 'data',
+            kind: 'removed',
+            elementId: row.id,
+            elementLabel: rowLabel(before, row),
+            property: 'record',
+            before: row.values,
+          },
+          ...refChanges(before, row, 'removed'),
+        );
     for (const row of after.rows) {
       const old = am.get(row.id);
       if (!old)
-        changes.push({
-          domain: 'data',
-          kind: 'added',
-          elementId: row.id,
-          elementLabel: rowLabel(after, row),
-          property: 'record',
-          after: row.values,
-        });
+        changes.push(
+          {
+            domain: 'data',
+            kind: 'added',
+            elementId: row.id,
+            elementLabel: rowLabel(after, row),
+            property: 'record',
+            after: row.values,
+          },
+          ...refChanges(after, row, 'added'),
+        );
       else changes.push(...rowChanges(before, after, old, row));
     }
     const cm = new Map(before.columns.map((c) => [c.id, c]));

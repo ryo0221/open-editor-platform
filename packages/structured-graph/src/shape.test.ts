@@ -210,16 +210,19 @@ describe('schema 2 presentation', () => {
     );
   });
 
-  it('reads a schema 1 Profile as schema 2 with no Section types, and refuses newer Profiles', () => {
+  it('reads schema 1 and 2 Profiles as schema 3 (no Section types, no items), and refuses newer Profiles', () => {
     const v1 = { ...clone(relationProfile), schemaVersion: 1 } as Record<string, unknown>;
     delete v1.sections;
     expect(isGraphProfile(v1)).toBe(false);
-    expect(readGraphProfile(v1)).toEqual({ ...relationProfile, sections: {} });
+    expect(readGraphProfile(v1)).toEqual({ ...relationProfile, schemaVersion: 3, sections: {} });
     expect(v1.schemaVersion).toBe(1);
-    expect(upgradeGraphProfile(relationProfile)).toBe(relationProfile);
-    const newer = { ...clone(relationProfile), schemaVersion: 3 };
-    expect(() => readGraphProfile(newer)).toThrow(/Profile schema 3 is newer/);
-    expect(() => assertGraphProfile(newer)).toThrow(/Profile schema 3 is newer/);
+    expect(upgradeGraphProfile(relationProfile)).toEqual({ ...relationProfile, schemaVersion: 3 });
+    expect(relationProfile.schemaVersion).toBe(2);
+    const current = { ...clone(relationProfile), schemaVersion: 3 as const };
+    expect(upgradeGraphProfile(current)).toBe(current);
+    const newer = { ...clone(relationProfile), schemaVersion: 4 };
+    expect(() => readGraphProfile(newer)).toThrow(/Profile schema 4 is newer/);
+    expect(() => assertGraphProfile(newer)).toThrow(/Profile schema 4 is newer/);
   });
 
   it.each([

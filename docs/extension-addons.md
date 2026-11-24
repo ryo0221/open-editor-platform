@@ -4,13 +4,13 @@ Extension の manifest は、必須の項目のほかに、版を完全一致で
 宣言しない package の manifest は変わりません。知らない add-on・知らない版の宣言は、登録の時点で断ります。
 実装は `@editor-platform/extension-contract` と `@editor-platform/extension-runtime` にあります。
 
-| add-on       | 版の token           | package が渡すもの                      | Host が使う口                                             |
-| ------------ | -------------------- | --------------------------------------- | --------------------------------------------------------- |
-| `operations` | `operations@0-draft` | `operations`（`checkInput`・`command`） | `ExtensionHandle.operations`（check・prepare）            |
-| `create`     | `create@0-draft`     | `create()`                              | `Registration.create()`                                   |
-| `references` | `references@0-draft` | `references`（`list`・`resolve`）       | `Registration.references`（list・resolve）                |
-| `items`      | `items@0-draft`      | なし（manifest の宣言だけ）             | `readItems`（`@editor-platform/extension-runtime/items`） |
-| `history`    | `history@0-draft`    | なし（manifest の data だけ）           | Host の session の `keepHighest`                          |
+| add-on       | 版の token                       | package が渡すもの                      | Host が使う口                                             |
+| ------------ | -------------------------------- | --------------------------------------- | --------------------------------------------------------- |
+| `operations` | `operations@0-draft`             | `operations`（`checkInput`・`command`） | `ExtensionHandle.operations`（check・prepare）            |
+| `create`     | `create@0-draft`                 | `create()`                              | `Registration.create()`                                   |
+| `references` | `references@0-draft`             | `references`（`list`・`resolve`）       | `Registration.references`（list・resolve）                |
+| `items`      | `items@0-draft`・`items@1-draft` | なし（manifest の宣言だけ）             | `readItems`（`@editor-platform/extension-runtime/items`） |
+| `history`    | `history@0-draft`                | なし（manifest の data だけ）           | Host の session の `keepHighest`                          |
 
 manifest が add-on を宣言することと、definition がその関数を持つことは一致していなければなりません（`items` と `history` は関数を持たない宣言だけの add-on です）。
 片方だけのときは `install` が断ります（package の loader から登録するときも同じです）。
@@ -93,3 +93,14 @@ manifest.addons = {
 - `refs` はその項目が使う別の項目の ID を持つ欄（文字か文字の配列）。`layout` は見た目だけの欄で、Host が比べるときに除きます。
 - 宣言の形は登録の時点で確かめます（知らない欄、`leading-token` 以外の読み方、`__proto__` などの道筋、重なった道筋は断ります）。
 - `readItems(addon, value, leadingId)` は宣言で中身を読み、`{ items, problems }` を返します。形の違う中身は投げずに `problems` に入れます。上限は `ITEMS_LIMITS` です。
+
+### items@1-draft
+
+`items@1-draft`（`ITEMS_ADDON_V1`）は、組み込みの Graph／Data の分析の項目（[分析間の要素参照の設計](analysis-references-design.md) U1・U6）のために、コレクションへ三つの欄を足した版です。`items@0-draft` の宣言はそのまま有効で、意味は変えません（0-draft の宣言にこの三つの欄を書くと断ります）。
+
+- `where`：要素を欄の値で絞ります（例：`{ type: 'cause' }`）。1〜8 個の道筋 → 文字・数・真偽。
+- `rootRefs`：中身の根からの道筋。そのコレクションのすべての項目が、そこにある ID を引きます（例：図の属性 `attributes.problemRef`）。
+- `merge: { equal }`：同じ ID の要素を 1 件の項目にまとめます（FMEA の行から故障モードを多対一で投影する）。`equal` の道筋と、そのコレクションの `refs` の道筋が全要素で同じときだけ 1 件で、項目の `body` はその道筋だけを持ちます。違えばその ID は重複です。
+- 1-draft の `readItems` は、項目ごとに `elements`（その ID を持つ要素の key、内容の順）を返し、二つ以上の項目が同じ ID を名乗るとき（merge の無い 2 要素、merge で食い違う要素、二つのコレクション）は `items` から外して `duplicates`（`same-id`／`merge-mismatch` と、食い違った道筋）に入れます。項目の同一性は ID で、`elements` は移動と表示のための対応です。
+- 版の交渉：Host が読める版の一覧を渡し、`itemsDeclarationFor(declaration, hostVersions)` はその版を読める Host にだけ宣言を返します（0-draft に落として一部だけ渡すことはしません）。0-draft だけを読む Host は 1-draft を「unsupported items add-on version」で断ります。
+- 組み込みの宣言：Graph は Profile schema 3 の node type `items` から `graphItemsDeclaration(profile)`、Data は schema 3 の表の `items`（列 ID で書く）から `dataItemsDeclaration(data)` で作ります。

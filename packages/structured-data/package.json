@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./model": "./src/model.ts",
+    "./items": "./src/items.ts",
     "./views": "./src/views.ts",
     "./session": "./src/session.ts",
     "./charts": "./src/charts.ts",
@@ -29,5 +30,8 @@
   },
   "peerDependencies": {
     "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@editor-platform/extension-runtime": "*"
   }
 }

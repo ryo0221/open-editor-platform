@@ -1,4 +1,5 @@
 export * from './model';
+export * from './items';
 export * from './view';
 export * from './views';
 export * from './session';

@@ -1,9 +1,12 @@
+import { readItems } from '@editor-platform/extension-runtime/items';
 import {
+  dataItemsDeclaration,
   defaultView,
   isStructuredData,
   validateData,
   type Cell,
   type Column,
+  type DataItemsDeclaration,
   type DataRow,
   type StructuredData,
 } from '@editor-platform/structured-data';
@@ -139,9 +142,12 @@ const designExample: FmeaRecord[] = [
 
 const columns: Column[] = [
   { id: 'item', name: '対象 / 工程', type: 'text', required: true },
+  { id: 'functionRef', name: '要求機能の ID', type: 'text' },
   { id: 'function', name: '要求機能', type: 'text', required: true },
+  { id: 'fmId', name: '故障モードの ID', type: 'text' },
   { id: 'failure', name: '故障モード', type: 'text', required: true },
   { id: 'effect', name: '故障影響', type: 'text', required: true },
+  { id: 'fcId', name: '故障原因の ID', type: 'text' },
   { id: 'cause', name: '故障原因', type: 'text', required: true },
   { id: 'prevention', name: '予防管理', type: 'text' },
   { id: 'detectionControl', name: '検出管理', type: 'text' },
@@ -169,12 +175,33 @@ const columns: Column[] = [
   { id: 'evidence', name: '根拠・参照メモ', type: 'text' },
 ];
 
+/**
+ * Analysis items of the FMEA (docs/analysis-references-design.md U1・U2・U6): one row is one
+ * failure cause; failure modes are projected many-to-one from rows with the same ID, which must
+ * agree on the failure mode, its effect, S and the required function. A row may cite several
+ * cause candidates of a cause diagram in its reference field `causeCandidates`. Rows whose ID
+ * cells are empty are not items.
+ */
+export const fmeaItems: DataItemsDeclaration[] = [
+  { kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['fmId', 'refs.causeCandidates'] },
+  {
+    kind: 'failure-mode',
+    id: 'fmId',
+    title: 'failure',
+    refs: ['functionRef'],
+    merge: { equal: ['failure', 'effect', 's', 'function'] },
+  },
+];
+
 function asRow(record: FmeaRecord): DataRow {
   const values: Record<string, Cell> = {
     item: record.item,
+    functionRef: null,
     function: record.function,
+    fmId: null,
     failure: record.failure,
     effect: record.effect,
+    fcId: null,
     cause: record.cause,
     prevention: record.prevention,
     detectionControl: record.detectionControl,
@@ -198,19 +225,23 @@ function asRow(record: FmeaRecord): DataRow {
 export function createFmeaData(which: FmeaExampleId): StructuredData {
   const records = which === 'pfmea' ? processExample : designExample;
   const data: StructuredData = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     columns: columns.map((column) => ({
       ...column,
       ...(column.options ? { options: [...column.options] } : {}),
     })),
     rows: records.map(asRow),
+    items: structuredClone(fmeaItems),
   };
   const base = defaultView(data);
   const widths = {
     item: 180,
+    functionRef: 120,
     function: 180,
+    fmId: 120,
     failure: 180,
     effect: 200,
+    fcId: 120,
     cause: 200,
     prevention: 180,
     detectionControl: 180,
@@ -234,7 +265,7 @@ export function createFmeaData(which: FmeaExampleId): StructuredData {
       frozen: 2,
       groupBy: 'status',
       widths,
-      hidden: ['function', 'prevention', 'detectionControl'],
+      hidden: ['functionRef', 'function', 'fmId', 'prevention', 'detectionControl'],
     },
   ];
   return data;
@@ -278,6 +309,7 @@ export function inspectFmeaData(data: StructuredData): FmeaInspection {
     }
     if (row.values.ap === '未評価' || row.values.ap == null) apPending++;
   }
+  issues.push(...fmeaItemIssues(data));
   return { rowCount: data.rows.length, apPending, issues };
 }
 
@@ -290,4 +322,29 @@ export function createFmeaArtifact(which: FmeaExampleId): {
     name: which === 'pfmea' ? 'PFMEA: 製造工程（試作）' : 'DFMEA: 製品設計（試作）',
     content: createFmeaData(which),
   };
+}
+
+/**
+ * Diagnostics for the declared items: an ID used by two rows of a kind without a merge, or a
+ * failure mode whose rows disagree on a compared column (「FM-03 の故障影響が行ごとに違う」).
+ * The user fixes them; nothing is aligned automatically. Empty when the table declares no items.
+ */
+export function fmeaItemIssues(data: StructuredData): string[] {
+  const declaration = dataItemsDeclaration(data);
+  if (!declaration) return [];
+  const read = readItems(declaration, data, () => undefined);
+  const name = (path: string) =>
+    path.startsWith('values.')
+      ? (data.columns.find((c) => c.id === path.slice(7))?.name ?? path)
+      : path;
+  const rowsOf = (d: { elements: readonly { key: string }[] }) =>
+    d.elements.map((e) => data.rows[Number(e.key)]?.id ?? e.key).join('・');
+  return [
+    ...read.problems,
+    ...(read.duplicates ?? []).map((d) =>
+      d.reason === 'merge-mismatch'
+        ? `${d.id} の${(d.paths ?? []).map(name).join('・')}が行ごとに違います（${rowsOf(d)}）。`
+        : `${d.id} が複数の行にあります（${rowsOf(d)}）。`,
+    ),
+  ];
 }
