@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { DataItemReferences } from './item-references';
+import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import { ArrowUp, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { type EditorCommand, type Region } from '@editor-platform/editor-core';
 import { IconButton, useWording, T } from '@editor-platform/editor-ui';
@@ -41,6 +43,9 @@ export interface DataProjectionProps {
   changeProjection: (projection: DataProjection) => boolean;
   focusRow: (id: string) => void;
   drafts: Map<string, RecordDraft>;
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
+  /** Applies a command from the reference fields (keeps their selection evidence). */
+  applyReference: Apply;
   record: DataRow | undefined;
   recordIndex: number;
   groups: DataGroups;
@@ -243,6 +248,13 @@ function formContent(p: DataProjectionProps, record: DataRow) {
         readOnly={p.readOnly}
         apply={p.apply}
         select={(columnId) => p.select(record.id, { type: 'cell', columnId })}
+      />
+      <DataItemReferences
+        data={data}
+        row={record}
+        readOnly={p.readOnly}
+        apply={p.applyReference}
+        itemReferences={p.itemReferences}
       />
     </>
   );

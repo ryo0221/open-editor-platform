@@ -41,9 +41,11 @@ import {
   FieldDefinitionDialog,
   RecordDetailsDialog,
 } from './view-dialogs';
+import { forgetHandEdits } from './item-references';
+import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import './styles.css';
 export type { DataProjection } from './views';
-interface DataSurfaceBodyProps {
+type DataSurfaceBodyProps = {
   content: StructuredData;
   execute: (c: EditorCommand<StructuredData>) => void | boolean;
   /** Optional independent projection; Data owns records, commands and history. */
@@ -62,7 +64,7 @@ interface DataSurfaceBodyProps {
   select: (id: string, region?: Region) => void;
   readOnly?: boolean;
   layout?: Pick<EditorLayoutProps, 'viewKey' | 'panels' | 'defaultPanels' | 'onPanelsChange'>;
-}
+} & ItemReferenceSurfaceProps;
 export type DataSurfaceProps = DataSurfaceBodyProps & EditorWordingProps;
 const wordingSets = [editorUiWording, dataWording];
 /** The Structured Data Surface. `locale` and `labels` choose its visible wording. */
@@ -83,21 +85,25 @@ function DataSurfaceBody({
   initialView,
   onViewChange,
   onViewDraftChange,
+  itemReferences,
 }: DataSurfaceBodyProps) {
   const wording = useWording();
   const guardExport = useContext(EditorExportGuardContext);
   const inputs = useContext(EditorInputsContext);
   const formDrafts = useRef(new Map<string, RecordDraft>());
   const [error, setError] = useState('');
-  function apply(cmd: EditorCommand<StructuredData>) {
+  function apply(cmd: EditorCommand<StructuredData>, fromReferences = false) {
     if (readOnly) {
       setError(wording('This surface is read only'));
       return false;
     }
     try {
       const guarded = guardDataCommand(cmd, () => !readOnly);
-      guarded.apply(data);
+      const next = guarded.apply(data);
       if (execute(guarded) === false) return false;
+      // Typed, pasted and imported IDs carry no selection evidence
+      if (itemReferences && !fromReferences)
+        forgetHandEdits(itemReferences.ledger, itemReferences.artifactId, data, next);
       setError('');
       return true;
     } catch (e) {
@@ -299,6 +305,8 @@ function DataSurfaceBody({
           changeProjection,
           focusRow,
           drafts: formDrafts.current,
+          itemReferences,
+          applyReference: (cmd) => apply(cmd, true),
           record,
           recordIndex,
           groups,
@@ -330,6 +338,8 @@ function DataSurfaceBody({
           readOnly={readOnly}
           apply={apply}
           select={select}
+          itemReferences={itemReferences}
+          applyReference={(cmd) => apply(cmd, true)}
           onClose={() => setRecordDialog(null)}
         />
       )}

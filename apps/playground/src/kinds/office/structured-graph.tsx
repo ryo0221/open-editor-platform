@@ -37,6 +37,7 @@ function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphD
         select={host.select}
         selectedId={host.selection.addresses[0]?.elementId}
         readOnly={host.readOnly}
+        itemReferences={host.itemReferences}
       />
     </>
   );

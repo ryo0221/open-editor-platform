@@ -619,7 +619,7 @@ export const suites: Record<string, () => Suite> = {
   'graph.production': () =>
     production(
       '/tmp/editor-platform-graph-results',
-      /(^|\/)(?:structured-graph(?:-reading|-fractional-drag)?|issue2-data|issue2-embedding|practical-data)\.spec\.ts$/,
+      /(^|\/)(?:structured-graph(?:-reading|-fractional-drag)?|issue2-data|issue2-embedding|practical-data|item-references)\.spec\.ts$/,
       /(^|\/)(?:structured-graph(?:-reading)?-mobile|mobile)\.spec\.ts$/,
       { workers: 1 },
     ),

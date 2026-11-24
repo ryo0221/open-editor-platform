@@ -171,6 +171,8 @@ import {
 import { nativeContent, nativeShared } from './app/native';
 import { EditorSurfaces, checkedContent, kindHooks } from './kinds/surfaces';
 import type { SurfaceHost } from './kinds/surface-host';
+import { ItemSelectionLedger } from '@editor-platform/artifact-references/items';
+import { playgroundItemHost, refOccurrences } from './app/item-reference-host';
 import type { SharedPlaygroundConnection } from './app/types';
 import { graphProfileFor, type GraphTemplateId } from './app/graph-templates';
 import { inspectFmeaData, isFmeaData, type FmeaTemplateId } from './app/fmea-templates';
@@ -274,6 +276,22 @@ export default function App({
     [activeId],
   );
   const liveReferences = useMemo(() => savedExtensionReferences(activeId), [activeId]);
+  // AR2: business item references between the saved Fishbone, FMEA and FTA of this Library
+  const itemHost = useMemo(
+    () =>
+      playgroundItemHost({
+        saved: referenceSavedRecords,
+        notifications: referenceNotifications,
+        navigation: referenceNavigation,
+      }),
+    [],
+  );
+  const itemLedgers = useRef(new Map<string, ItemSelectionLedger>());
+  const itemLedger = (id: string) => {
+    let l = itemLedgers.current.get(id);
+    if (!l) itemLedgers.current.set(id, (l = new ItemSelectionLedger()));
+    return l;
+  };
 
   const inputs = useMemo(() => new EditorInputs(), [activeId]);
   const inputStatus = useSyncExternalStore(inputs.subscribe, inputs.getSnapshot);
@@ -394,6 +412,14 @@ export default function App({
       : localActive && !loadErrors[localActive.id]
         ? localActive
         : undefined;
+  const activeItemId = active?.id;
+  const itemReferences = useMemo(
+    () =>
+      activeItemId && !shared
+        ? { host: itemHost, artifactId: activeItemId, ledger: itemLedger(activeItemId) }
+        : undefined,
+    [activeItemId, shared, itemHost],
+  );
   const session = sharedSession ?? (active ? sessions.current.get(active.id) : undefined);
   const currentTarget = useRef({
     activeId: active?.id ?? activeId,
@@ -970,6 +996,14 @@ export default function App({
       assertBimNativeFits(result, 'version');
       if (!(await persist(result)))
         throw new Error('Versionを保存できませんでした。参照更新は通知されていません。');
+      // AR2: the version holds its citations; send the evidence of the choices newly saved
+      const ledger = itemLedgers.current.get(saved.id);
+      if (ledger) {
+        const before = refOccurrences(saved.id, saved.versions.at(-1)?.content);
+        const after = refOccurrences(saved.id, captured);
+        itemHost.committed(saved.id, ledger.evidenceFor(before, after), after);
+        ledger.saved();
+      }
       setError('');
       setReason('');
       editorEvents.emit('version', {
@@ -1630,6 +1664,7 @@ export default function App({
     revealAddress,
     references,
     liveReferences,
+    itemReferences,
     loadErrors,
     animationCatalog,
     dataViews,

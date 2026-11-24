@@ -1,4 +1,6 @@
 import { type Region, type EditorCommand, type EditorInputs } from '@editor-platform/editor-core';
+import { DataItemReferences } from './item-references';
+import { type ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import { Dialog, T, useWording } from '@editor-platform/editor-ui';
 import {
   addColumn,
@@ -197,6 +199,8 @@ export function RecordDetailsDialog({
   apply,
   select,
   onClose,
+  itemReferences,
+  applyReference,
 }: {
   data: StructuredData;
   rowId: string;
@@ -205,6 +209,8 @@ export function RecordDetailsDialog({
   apply: Apply;
   select: (id: string, region?: Region) => void;
   onClose: () => void;
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
+  applyReference: Apply;
 }) {
   return (
     <Dialog title="Record details" onClose={onClose}>
@@ -217,6 +223,13 @@ export function RecordDetailsDialog({
         apply={apply}
         select={(columnId) => select(rowId, { type: 'cell', columnId })}
         onDone={onClose}
+      />
+      <DataItemReferences
+        data={data}
+        row={data.rows.find((r) => r.id === rowId)!}
+        readOnly={readOnly}
+        apply={applyReference}
+        itemReferences={itemReferences}
       />
       <button
         disabled={readOnly}

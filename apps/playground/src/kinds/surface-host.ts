@@ -1,4 +1,5 @@
 import type { MutableRefObject } from 'react';
+import type { ItemReferenceSurfaceProps } from '@editor-platform/artifact-references/item-react';
 import type { SlideDocumentHost } from '@editor-platform/slide';
 import type { ReferenceResolver } from '@editor-platform/artifact-references';
 import type { LiveReferenceConnection } from '@editor-platform/artifact-references/react';
@@ -42,6 +43,8 @@ export interface SurfaceHost {
   revealAddress: ElementAddress | undefined;
   references: ReferenceResolver;
   liveReferences: LiveReferenceConnection;
+  /** AR2: business item references (Graph `items.refs`, Data reference fields). Not in shared sessions. */
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
   loadErrors: Record<string, string>;
   animationCatalog: ReturnType<typeof savedAnimationCatalog>;
   dataViews: Record<string, DataView>;

@@ -2,6 +2,10 @@ import { type ContextType, useEffect, useRef } from 'react';
 import { EditorInputsContext } from '@editor-platform/editor-ui';
 import { type GraphAttributeDraft } from './attribute-draft';
 import { GraphAttributes } from './attributes';
+import {
+  ItemReferenceField,
+  type ItemReferenceSurfaceProps,
+} from '@editor-platform/artifact-references/item-react';
 import { GraphDefinitionEditor } from './definition-editor';
 import { GraphNodeAppearance } from './view-appearance';
 import { GraphNodeSectionField, GraphSectionPanel } from './view-sections';
@@ -305,6 +309,52 @@ export interface GraphInspectorProps extends GraphConnectionFormProps, GraphOver
   section?: GraphSection;
   sectionEditing: boolean;
   onFitSection?: () => void;
+  itemReferences?: ItemReferenceSurfaceProps['itemReferences'];
+}
+
+/** Reference attributes of an item node type (Profile `items.refs`), with the Host's candidates and states. */
+function GraphItemReferences(props: GraphInspectorProps) {
+  const { node, type, itemReferences: ir, readOnly, apply, profile } = props;
+  const refs = node ? profile.nodes[node.type]?.items?.refs : undefined;
+  if (!node || !ir || !refs?.length) return null;
+  return (
+    <>
+      {refs.map((field) => {
+        const value = node.attributes[field];
+        const multiple = type.schema[field]?.type === 'array';
+        const ids = Array.isArray(value)
+          ? value.filter((v): v is string => typeof v === 'string' && v !== '')
+          : typeof value === 'string' && value
+            ? [value]
+            : [];
+        return (
+          <ItemReferenceField
+            key={`${node.id}:${field}`}
+            host={ir.host}
+            ledger={ir.ledger}
+            from={{ artifactId: ir.artifactId, elementId: node.id, field }}
+            label={type.ui?.fields?.[field]?.label ?? field}
+            ids={ids}
+            multiple={multiple}
+            readOnly={readOnly || !!type.readOnly || !!type.schema[field]?.readOnly}
+            change={(next) =>
+              apply([
+                next.length
+                  ? {
+                      type: 'set-attribute',
+                      scope: 'node',
+                      id: node.id,
+                      path: [field],
+                      value: multiple ? next : next[0]!,
+                    }
+                  : { type: 'remove-attribute', scope: 'node', id: node.id, path: [field] },
+              ])
+            }
+          />
+        );
+      })}
+    </>
+  );
 }
 
 function GraphSelectionPanels(props: GraphInspectorProps) {
@@ -321,7 +371,27 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
         stamp={props.stamp}
         readOnly={readOnly || !!type.readOnly}
         viewOnly={readOnly}
-        onEdit={props.apply}
+        onEdit={(intents, base) => {
+          const applied = props.apply(intents, base);
+          // A hand edit of a reference attribute carries no choice (docs/analysis-references-design.md)
+          const refs =
+            props.node && props.itemReferences
+              ? (profile.nodes[props.node.type]?.items?.refs ?? [])
+              : [];
+          if (applied)
+            for (const i of intents)
+              if (
+                (i.type === 'set-attribute' || i.type === 'remove-attribute') &&
+                i.scope === 'node' &&
+                refs.includes(i.path[0]!)
+              )
+                props.itemReferences!.ledger.forget({
+                  artifactId: props.itemReferences!.artifactId,
+                  elementId: i.id,
+                  field: i.path[0]!,
+                });
+          return applied;
+        }}
         diagnostics={problems
           .filter((d) => d.elementId === id)
           .map((diagnostic) => ({
@@ -330,6 +400,7 @@ function GraphSelectionPanels(props: GraphInspectorProps) {
           }))}
         drafts={props.drafts}
       />
+      <GraphItemReferences {...props} />
       {props.node && (
         <GraphNodeAppearance
           key={`appearance:${props.node.id}`}

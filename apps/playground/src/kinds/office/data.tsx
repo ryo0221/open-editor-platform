@@ -61,6 +61,7 @@ function DataHost({ host, content }: { host: SurfaceHost; content: StructuredDat
         readOnly={host.readOnly}
         execute={host.execute}
         select={host.select}
+        itemReferences={host.itemReferences}
       />
     </>
   );
