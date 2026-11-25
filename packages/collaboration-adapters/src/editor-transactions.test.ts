@@ -543,7 +543,9 @@ describe('normal editor prepared domain transactions', () => {
         { id: 'r1', values: { fcId: 'FC-01', cause: '接点の溶着' } },
         { id: 'r2', values: { fcId: 'FC-02', cause: '感知の遅れ' } },
       ],
-      items: [{ kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['refs.causeCandidates'] }],
+      items: [
+        { kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['refs.causeCandidates'] },
+      ],
     };
     const authority = new Authority(dataEditorCodec, initial('refs', dataEditorCodec, d)),
       state = authority.snapshot();
