@@ -41,7 +41,7 @@ export async function citedFmea(page: Page) {
   await projection(page, 'Form');
   await page.getByLabel('Record 故障原因の ID', { exact: true }).fill('FC-01');
   await page.getByRole('button', { name: 'Save record', exact: true }).click();
-  const refs = page.getByRole('region', { name: 'refs.causeCandidates', exact: true });
+  const refs = page.getByRole('region', { name: '原因の候補', exact: true });
   await refs.getByRole('button', { name: '候補から選ぶ', exact: true }).click();
   await refs.getByRole('button', { name: /CC-01/ }).click();
   await expect(refs.getByRole('listitem').filter({ hasText: 'CC-01' })).toContainText(

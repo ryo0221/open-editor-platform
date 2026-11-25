@@ -13,7 +13,12 @@ import {
   type StructuredData,
 } from './model';
 import { saveView, updateColumn, defaultView, deleteRows, reorderRow, setCells } from './views';
-import { dataItemsDeclaration, dataItemsProblems, itemsWithoutColumn } from './items';
+import {
+  dataItemsDeclaration,
+  dataItemsProblems,
+  itemsWithoutColumn,
+  refFieldLabel,
+} from './items';
 import { prepareCsvExport } from './csv-transfer';
 import { dataProposalDiff } from './proposal-diff';
 
@@ -288,5 +293,54 @@ describe('Data schema 3: item declarations and row references', () => {
         before: ['CC-09'],
       }),
     ]);
+  });
+});
+
+describe('names of row reference fields', () => {
+  const labelled = (): StructuredData => {
+    const d = table();
+    d.items![0] = { ...d.items![0]!, labels: { 'refs.causeCandidates': '原因の候補' } };
+    return d;
+  };
+
+  it('shows the declared name, else the field name, never the refs. path', () => {
+    expect(refFieldLabel(labelled(), 'causeCandidates')).toBe('原因の候補');
+    expect(refFieldLabel(table(), 'causeCandidates')).toBe('causeCandidates');
+  });
+
+  it('accepts names only for refs.<field> entries of the same declaration', () => {
+    const d = labelled();
+    expect(isStructuredData(d)).toBe(true);
+    const bad = [
+      { 'refs.other': '他' },
+      { fmId: '故障モード' },
+      { 'refs.causeCandidates': '' },
+      { 'refs.causeCandidates': 'x'.repeat(65) },
+      { 'refs.causeCandidates': 3 },
+      '原因の候補',
+    ];
+    for (const labels of bad) {
+      const items = [{ ...d.items![0]!, labels }, d.items![1]!];
+      expect(dataItemsProblems(items, d.columns).length, JSON.stringify(labels)).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the names when a column is deleted and the field stays', () => {
+    const kept = itemsWithoutColumn(labelled().items, 'o');
+    expect(kept?.[0]).toMatchObject({ labels: { 'refs.causeCandidates': '原因の候補' } });
+  });
+
+  it('labels a reference change in proposal reviews with the declared name', () => {
+    const before = labelled();
+    const after = labelled();
+    after.rows[0] = { ...after.rows[0]!, refs: { causeCandidates: ['CC-01'] } };
+    const change = dataProposalDiff
+      .diff(before, after)
+      .changes.find((c) => c.property === 'refs.causeCandidates');
+    expect(change).toMatchObject({
+      propertyLabel: '原因の候補',
+      before: ['CC-01', 'CC-02'],
+      after: ['CC-01'],
+    });
   });
 });

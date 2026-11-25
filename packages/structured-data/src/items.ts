@@ -18,6 +18,11 @@ export interface DataItemsDeclaration {
   /** Columns (text) or row reference fields (`refs.<field>`) holding cited IDs. */
   refs?: string[];
   /**
+   * Display names of row reference fields, keyed by their `refs.<field>` entry (columns show their
+   * column name). A field without a name shows its field name.
+   */
+  labels?: Record<string, string>;
+  /**
    * Rows with the same ID are one item when these columns and the `refs` entries hold the same
    * values in every row; otherwise the ID is a duplicate (U6).
    */
@@ -73,9 +78,9 @@ export function dataItemsProblems(items: unknown, columns: readonly Column[]): s
     const at = `items[${i}]`;
     if (
       !plain(d) ||
-      Object.keys(d).some((k) => !['kind', 'id', 'title', 'refs', 'merge'].includes(k))
+      Object.keys(d).some((k) => !['kind', 'id', 'title', 'refs', 'labels', 'merge'].includes(k))
     )
-      return void out.push(`${at}: must be { kind, id, title, refs?, merge? }`);
+      return void out.push(`${at}: must be { kind, id, title, refs?, labels?, merge? }`);
     if (typeof d.kind !== 'string' || !d.kind.trim() || d.kind.length > 64)
       out.push(`${at}.kind: must be a name of 1-64 characters`);
     if (!text(d.id) || !safe(d.id as string)) out.push(`${at}.id: must be a text column`);
@@ -94,6 +99,21 @@ export function dataItemsProblems(items: unknown, columns: readonly Column[]): s
         });
       if (!ok)
         out.push(`${at}.refs: must list text columns or refs.<field>, without the ID column`);
+    }
+    if (d.labels !== undefined) {
+      const refs = Array.isArray(d.refs) ? d.refs : [];
+      const ok =
+        plain(d.labels) &&
+        Object.entries(d.labels).every(
+          ([entry, label]) =>
+            refs.includes(entry) &&
+            refField(entry) !== undefined &&
+            typeof label === 'string' &&
+            !!label.trim() &&
+            [...label].length <= 64,
+        );
+      if (!ok)
+        out.push(`${at}.labels: must name refs.<field> entries of refs with 1-64 characters`);
     }
     if (d.merge !== undefined) {
       const m = d.merge;
@@ -164,6 +184,7 @@ export function itemsWithoutColumn(
         id: d.id,
         title: d.title === columnId ? d.id : d.title,
         ...(refs?.length ? { refs } : {}),
+        ...(refs?.length && d.labels ? { labels: d.labels } : {}),
         ...(equal ? { merge: { equal } } : {}),
       };
     });
@@ -188,6 +209,16 @@ export function declaredRefFields(data: Pick<StructuredData, 'items'>): string[]
       if (f !== undefined && !out.includes(f)) out.push(f);
     }
   return out;
+}
+
+/** The display name of a row reference field (`refs.<field>`): its declared name, else the field name. */
+export function refFieldLabel(data: Pick<StructuredData, 'items'>, field: string): string {
+  const entry = `refs.${field}`;
+  for (const d of data.items ?? []) {
+    const label = d.labels?.[entry];
+    if (label) return label;
+  }
+  return field;
 }
 
 /** A row's IDs in one reference field, for CSV and display (`;` between IDs). */

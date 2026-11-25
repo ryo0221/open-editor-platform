@@ -4,7 +4,7 @@ import {
 } from '@editor-platform/artifact-references/item-react';
 import type { EditorCommand } from '@editor-platform/editor-core';
 import { setRowRefs, type DataRow, type StructuredData } from './model';
-import { refField, rowReferenceEntries, rowReferenceIds } from './items';
+import { refField, refFieldLabel, rowReferenceEntries, rowReferenceIds } from './items';
 import { setCells } from './views';
 
 type Apply = (cmd: EditorCommand<StructuredData>) => boolean;
@@ -58,7 +58,7 @@ export function DataItemReferences({
             host={ir.host}
             ledger={ir.ledger}
             from={{ artifactId: ir.artifactId, elementId: row.id, field: entry }}
-            label={column?.name ?? entry}
+            label={column?.name ?? (f !== undefined ? refFieldLabel(data, f) : entry)}
             ids={rowReferenceIds(row, entry)}
             multiple={f !== undefined}
             readOnly={readOnly || !!column?.readOnly}

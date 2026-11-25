@@ -23,7 +23,9 @@ export interface ItemCandidate {
 /**
  * State of one cited ID from this citing element. `ok`: the target matches the basis; `kept`: it
  * differs but was kept on purpose (reason only for readers of the target); `stale`: it differs
- * and nobody decided yet. The status names extend `ReferenceError.status`.
+ * and nobody decided yet; `not-citable`: the definition does not allow this citing field to cite
+ * that kind of item (the Host stops it at acceptance). The status names extend
+ * `ReferenceError.status`.
  */
 export type ItemRefState =
   | { status: 'ok'; title: string }
@@ -35,6 +37,7 @@ export type ItemRefState =
         | 'offline'
         | 'unresolved'
         | 'duplicate'
+        | 'not-citable'
         | 'stale';
       reason: string;
     }
@@ -181,4 +184,5 @@ export const itemRefStatusLabel: Record<ItemRefStatus, string> = {
   offline: '確かめられない',
   unresolved: '見つからない',
   duplicate: '重複',
+  'not-citable': '引けない種類',
 };
