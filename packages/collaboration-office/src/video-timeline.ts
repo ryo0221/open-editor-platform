@@ -1,6 +1,7 @@
 import {
   assertVideoContentV3,
   isTime,
+  isVideoId,
   time,
   videoCommandV3,
   type ClipV3,
@@ -130,8 +131,6 @@ export function videoTimelineFixture(): VideoContentV3 {
   };
 }
 
-const isID = (value: unknown): value is string =>
-  typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 const clipResource = (id: string) => `clip:${id}`;
 const groupResource = (id: string) => `linked:${id}`;
 
@@ -160,8 +159,8 @@ function pinnedTimelineValidator(project: VideoContentV3) {
         current.every(
           (clip) =>
             kinds.has(clip.kind) &&
-            isID(clip.id) &&
-            (!clip.linkGroupId || isID(clip.linkGroupId)) &&
+            isVideoId(clip.id) &&
+            (!clip.linkGroupId || isVideoId(clip.linkGroupId)) &&
             (clip.kind !== 'animation' || embeds.has(canonical(clip.embed))),
         )
       );
@@ -179,7 +178,7 @@ function exact(value: Record<string, unknown>, ...fields: string[]) {
 
 function parseEdit(action: Action): SharedVideoEdit {
   const raw = action.payload.edit as Record<string, unknown> | undefined;
-  if (!raw || !isID(raw.clipId) || action.target !== raw.clipId || !exact(action.payload, 'edit'))
+  if (!raw || !isVideoId(raw.clipId) || action.target !== raw.clipId || !exact(action.payload, 'edit'))
     fail('schema-mismatch', 'Invalid Video clip operation');
   const clipId = raw.clipId;
   if (raw.type === 'move' && exact(raw, 'type', 'clipId', 'delta') && isTime(raw.delta))
@@ -206,10 +205,10 @@ function parseEdit(action: Action): SharedVideoEdit {
     raw.rightIds &&
     typeof raw.rightIds === 'object' &&
     !Array.isArray(raw.rightIds) &&
-    (raw.rightLinkGroupId === undefined || isID(raw.rightLinkGroupId))
+    (raw.rightLinkGroupId === undefined || isVideoId(raw.rightLinkGroupId))
   ) {
     const pairs = Object.entries(raw.rightIds);
-    if (pairs.length && pairs.every(([left, right]) => isID(left) && isID(right)))
+    if (pairs.length && pairs.every(([left, right]) => isVideoId(left) && isVideoId(right)))
       return {
         type: 'split',
         clipId,
@@ -335,7 +334,7 @@ export function createVideoTimelineCodec(project: VideoContentV3): DomainCodec<V
           changes.some(
             (change) =>
               !change ||
-              !isID(change.id) ||
+              !isVideoId(change.id) ||
               (change.value !== null && change.value?.id !== change.id),
           )
         )

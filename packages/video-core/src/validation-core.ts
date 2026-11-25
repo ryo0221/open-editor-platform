@@ -30,11 +30,11 @@ export function list(value: unknown, max: number): unknown[] {
   requireValue(Array.isArray(value) && value.length <= max, 'Invalid collection or limit');
   return value;
 }
+export function isVideoId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
 export function id(value: unknown): asserts value is string {
-  requireValue(
-    typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value),
-    'Invalid ID',
-  );
+  requireValue(isVideoId(value), 'Invalid ID');
 }
 export function integer(
   value: unknown,

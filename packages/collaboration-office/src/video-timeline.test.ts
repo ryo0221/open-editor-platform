@@ -142,3 +142,31 @@ it('edits a Host-admitted project and keeps its original media pins after the ca
   expect(authority.undo(a, edit.operationId).status).toBe('accepted');
   expect(authority.snapshot().content).toEqual(basis.content);
 });
+
+it('admits imported media and caption IDs through linked split, caption edit and selective history', () => {
+  const project = videoTimelineFixture();
+  const [picture, sound, caption] = project.sequence.clips;
+  picture.id = 'asset.1:video:0';
+  sound.id = 'asset.1:audio:0';
+  picture.linkGroupId = sound.linkGroupId = 'asset.1:linked';
+  caption.id = 'text:caption.1';
+  const codec = createVideoTimelineCodec(project);
+  const basis = initial('film', codec, project);
+  const authority = new Authority(codec, basis);
+  const split = operation(codec, basis, a, [videoTimelineAction({
+    type: 'split', clipId: picture.id, at: time(2),
+    rightIds: { [picture.id]: 'part:video.2', [sound.id]: 'part:audio.2' },
+    rightLinkGroupId: 'part:linked.2',
+  })]);
+  const edit = operation(codec, basis, b, [videoTimelineAction({
+    type: 'caption-text', clipId: caption.id, text: '新版',
+  })]);
+  expect(authority.submit(a, split).status).toBe('accepted');
+  expect(authority.submit(b, edit).status).toBe('accepted');
+  const undo = authority.undo(a, split.operationId);
+  expect(undo.status).toBe('accepted');
+  expect(authority.snapshot().content.sequence.clips.map(c => c.id)).toEqual(project.sequence.clips.map(c => c.id));
+  expect(authority.snapshot().content.sequence.clips[2]).toMatchObject({ text: '新版' });
+  expect(authority.undo(a, undo.operationId, true).status).toBe('accepted');
+  expect(authority.snapshot().content.sequence.clips.map(c => c.id)).toEqual(expect.arrayContaining(['part:video.2', 'part:audio.2']));
+});
