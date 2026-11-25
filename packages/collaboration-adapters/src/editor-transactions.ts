@@ -273,7 +273,8 @@ const dataSchema: Schema<StructuredData> = {
   base: dataCodec,
   root: ['schemaVersion'],
   collections: (d) => [
-    collection(d, 'rows', [], 'rows', 'values'),
+    // refs: a record's item-reference fields (structured-data items); the whole field is one value.
+    collection(d, 'rows', ['refs'], 'rows', 'values'),
     collection(d, 'columns', [
       'name',
       'type',
