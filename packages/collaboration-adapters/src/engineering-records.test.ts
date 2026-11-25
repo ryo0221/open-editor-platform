@@ -4,7 +4,7 @@ import { immutableCommand } from '@editor-platform/editor-core';
 import { drawingStarter } from '@editor-platform/drawing-core';
 import { pcbStarter } from '@editor-platform/pcb-core';
 import { newConstruction } from '@editor-platform/construction-core';
-import { newFactory } from '@editor-platform/factory-core';
+import { applyFactoryOperation, newFactory } from '@editor-platform/factory-core';
 import { cosimStarter } from '@editor-platform/cosim-core';
 import { applyCadOperation, f02Plate } from '@editor-platform/cad-core';
 import { applyBimOperation, bimStarter, f31BoxBuilding } from '@editor-platform/bim-core';
@@ -245,4 +245,20 @@ it('removes the optional mass list when undoing the first shared Simulation v2 m
   expect(authority.submit(a, add).status).toBe('accepted');
   expect(authority.undo(a, add.operationId).status).toBe('accepted');
   expect(authority.snapshot().content).toEqual(doc);
+});
+
+it('retires deleted Factory object IDs and restores them with selective Undo', () => {
+  const doc = newFactory('Line');
+  doc.objects.push({ id: 'first', kind: 'drain', name: 'First' }, { id: 'second', kind: 'drain', name: 'Second' });
+  const { authority, edit } = scenario(factoryEditorCodec, doc);
+  const removal = edit(a, current => applyFactoryOperation(current, { type: 'removeObject', id: 'first' }));
+  expect(authority.submit(a, removal).status).toBe('accepted');
+  expect(authority.snapshot().content.retiredIds).toContain('first');
+  const rename = edit(b, current => ({
+    ...current, objects: current.objects.map(o => o.id === 'second' ? { ...o, name: 'Updated' } : o),
+  }));
+  expect(authority.submit(b, rename).status).toBe('accepted');
+  expect(authority.undo(a, removal.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.retiredIds).toEqual(doc.retiredIds);
+  expect(authority.snapshot().content.objects.map(o => [o.id,o.name])).toEqual([['first','First'],['second','Updated']]);
 });

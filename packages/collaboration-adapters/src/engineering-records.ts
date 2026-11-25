@@ -143,7 +143,7 @@ export const engineeringSchemas = {
   ),
   factory: records<FactoryDocument>(
     'factory', isFactoryDocument,
-    ['name', 'calendars', 'workerPools', 'paths', 'fleets', 'control', 'run', 'experiment'],
+    ['name', 'calendars', 'workerPools', 'paths', 'fleets', 'control', 'run', 'experiment', 'retiredIds'],
     {
       products: ['name'],
       objects: [
