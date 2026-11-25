@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CharacterAssetRef, CharacterDocument } from '@editor-platform/character-core';
 import { encodeBytes, sha256Ref, type CadResource } from '../cad/resources';
 import type { StoredArtifact } from '../model';
@@ -59,66 +59,74 @@ export function useSharedCharacterMedia(
   refsKey: string,
   revision: number,
 ) {
+  const refreshForRevision = useRef<() => void>(undefined);
   const [loaded, setLoaded] = useState<{
     urlFor: CharacterMediaUrl;
     refsKey: string;
-    revision: number;
     assets: Map<string, Uint8Array>;
   }>();
   useEffect(() => {
+    setLoaded(undefined);
     if (!urlFor) return;
     const refs: CharacterAssetRef[] = JSON.parse(refsKey);
     const controller = new AbortController();
     let assets = new Map<string, Uint8Array>();
+    let published: Map<string, Uint8Array> | undefined;
     let running = false;
+    let pending = false;
     async function refresh() {
-      if (running || controller.signal.aborted) return;
+      if (controller.signal.aborted) return;
+      if (running) {
+        pending = true;
+        return;
+      }
       running = true;
       try {
-        const next = new Map<string, Uint8Array>();
-        for (const ref of refs) {
-          try {
-            const url = urlFor!(ref.id);
-            const previous = assets.get(ref.id);
-            if (previous) {
-              const r = await fetch(url, {
-                method: 'HEAD',
-                cache: 'no-store',
-                signal: controller.signal,
-              });
-              if (r.ok) next.set(ref.id, previous);
-            } else {
-              next.set(ref.id, await readCharacterOriginal(url, ref, controller.signal));
+        do {
+          pending = false;
+          const next = new Map<string, Uint8Array>();
+          for (const ref of refs) {
+            if (controller.signal.aborted) return;
+            try {
+              const url = urlFor!(ref.id);
+              const previous = assets.get(ref.id);
+              if (previous) {
+                const r = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+                if (r.ok && r.headers.get('Content-Length') === String(ref.byteLength))
+                  next.set(ref.id, previous);
+              } else {
+                next.set(ref.id, await readCharacterOriginal(url, ref, controller.signal));
+              }
+            } catch {
+              /* Drop this original when its current grant or bytes are unavailable. */
             }
-          } catch {
-            /* A withheld or unavailable original is omitted independently. */
           }
-        }
-        if (
-          !controller.signal.aborted &&
-          (next.size !== assets.size || [...next].some(([id, bytes]) => bytes !== assets.get(id)))
-        ) {
-          assets = next;
-          setLoaded({ urlFor: urlFor!, refsKey, revision, assets });
-        }
-      } catch {
-        assets = new Map();
-        if (!controller.signal.aborted) setLoaded(undefined);
+          if (controller.signal.aborted) return;
+          const lost = [...assets.keys()].some(id => !next.has(id));
+          if (lost || next.size !== assets.size || [...next].some(([id, bytes]) => assets.get(id) !== bytes))
+            assets = next;
+          // Withhold newly downloaded bytes until a revision seen during the GET is checked too.
+          if (lost && pending && published) {
+            published = new Map([...published].filter(([id]) => assets.has(id)));
+            setLoaded({ urlFor: urlFor!, refsKey, assets: published });
+          } else if (!pending && assets !== published) {
+            published = assets;
+            setLoaded({ urlFor: urlFor!, refsKey, assets });
+          }
+        } while (pending);
       } finally {
         running = false;
       }
     }
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
+    refreshForRevision.current = () => void refresh();
+    const timer = window.setInterval(() => { if (!running) void refresh(); }, 2000);
     return () => {
+      refreshForRevision.current = undefined;
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [urlFor, refsKey, revision]);
-  return urlFor &&
-    loaded?.urlFor === urlFor &&
-    loaded.refsKey === refsKey &&
-    loaded.revision === revision
-    ? loaded.assets
-    : undefined;
+  }, [urlFor, refsKey]);
+
+  useEffect(() => { refreshForRevision.current?.(); }, [urlFor, refsKey, revision]);
+  return urlFor && loaded?.urlFor === urlFor && loaded.refsKey === refsKey ? loaded.assets : undefined;
 }

@@ -27,10 +27,13 @@ test('two authorized viewers edit a native Video, play the original, and open a 
   const fixture = await start(encoded);
   const guest = await browser.newContext({ baseURL });
   const errors: string[] = [];
+  const meshRequests: { who: string; revision: string | null; method: string }[] = [];
   const wire = async (context: BrowserContext, who: string) => {
     await context.addCookies([{ name: 'fixture', value: who, url: baseURL!, httpOnly: true }]);
     await context.route('**/collaboration-api/**', async (route) => {
       const url = new URL(route.request().url());
+      if (url.pathname.endsWith('/editor/media') && url.searchParams.get('assetId') === 'mesh-body')
+        meshRequests.push({ who, revision: url.searchParams.get('revision'), method: route.request().method() });
       const response = await route.fetch({ url: fixture.base + url.pathname + url.search });
       await route.fulfill({ response });
       await response.dispose();
@@ -76,10 +79,15 @@ test('two authorized viewers edit a native Video, play the original, and open a 
       if (!(await parts.isVisible())) await participant.getByRole('button', { name: 'Toggle Parts', exact: true }).click();
     }
     const body = (participant: typeof page) => participant.getByRole('checkbox', { name: 'Show Body', exact: true });
+    const originals = meshRequests.filter(r => r.method === 'GET').length;
     await body(page).uncheck();
     await expect(body(b)).not.toBeChecked();
     await page.getByRole('banner').getByRole('button', {name: 'Undo', exact: true}).click();
     await expect(body(b)).toBeChecked();
+    for (const who of ['author', 'recipient']) {
+      await expect.poll(() => meshRequests.some(r => r.who === who && r.method === 'HEAD' && r.revision === '2')).toBe(true);
+    }
+    expect(meshRequests.filter(r => r.method === 'GET')).toHaveLength(originals);
     const exported = await nativeArtifact(b);
     expect(
       exported.cadResources?.some((r) => (r.kind as string) === 'mesh-epm' && r.byteLength > 100),

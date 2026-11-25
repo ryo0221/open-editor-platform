@@ -5,6 +5,7 @@ import {
   time,
   videoCommandV3,
   type ClipV3,
+  type DissolveV3,
   type Time,
   type VideoContentV3,
   type VideoEditV3,
@@ -137,7 +138,10 @@ const groupResource = (id: string) => `linked:${id}`;
 /** Capture only the parts of the admitted project which timeline edits cannot replace. */
 function pinnedTimelineValidator(project: VideoContentV3) {
   assertVideoContentV3(project);
-  const { clips, ...sequence } = project.sequence;
+  const { clips, transitions, ...sequence } = project.sequence;
+  const fixedEdges = (edges: DissolveV3[] = []) =>
+    canonical(edges.map(edge => [edge.id, edge.kind, edge.rightClipId, edge.duration]));
+  const edgeSettings = fixedEdges(transitions);
   const sources = canonical(project.sources);
   const settings = canonical(sequence);
   const locked = new Set(sequence.tracks.filter((track) => track.locked).map((track) => track.id));
@@ -151,10 +155,11 @@ function pinnedTimelineValidator(project: VideoContentV3) {
   return (value: unknown): value is VideoContentV3 => {
     try {
       assertVideoContentV3(value);
-      const { clips: current, ...currentSettings } = value.sequence;
+      const { clips: current, transitions: currentEdges, ...currentSettings } = value.sequence;
       return (
         canonical(value.sources) === sources &&
         canonical(currentSettings) === settings &&
+        fixedEdges(currentEdges) === edgeSettings &&
         canonical(current.filter((clip) => locked.has(clip.trackId))) === lockedClips &&
         current.every(
           (clip) =>
@@ -292,6 +297,8 @@ export function createVideoTimelineCodec(project: VideoContentV3): DomainCodec<V
     domain: 'video',
     validate,
     resource(content, key) {
+      if (key.startsWith('dissolve:'))
+        return content.sequence.transitions?.find(edge => edge.id === key.slice(9))?.leftClipId;
       if (key.startsWith('clip:'))
         return content.sequence.clips.find((clip) => clip.id === key.slice(5));
       if (key.startsWith('linked:'))
@@ -340,7 +347,21 @@ export function createVideoTimelineCodec(project: VideoContentV3): DomainCodec<V
         )
           fail('schema-mismatch', 'Invalid Video history');
         next = replaceClips(content, changes);
+        if (action.payload.retarget !== undefined) {
+          const retarget = action.payload.retarget;
+          if (!Array.isArray(retarget) || !retarget.every(entry => entry && exact(entry, 'id', 'leftClipId') &&
+              isVideoId(entry.id) && isVideoId(entry.leftClipId)))
+            fail('schema-mismatch', 'Invalid Video dissolve history');
+          const byId = new Map(retarget.map(entry => [entry.id, entry.leftClipId as string]));
+          const edges = next.sequence.transitions ?? [];
+          if (byId.size !== retarget.length || [...byId.keys()].some(id => !edges.some(edge => edge.id === id)))
+            fail('schema-mismatch', 'Unknown or duplicate Video dissolve');
+          next.sequence.transitions = edges.map(edge =>
+            byId.has(edge.id) ? { ...edge, leftClipId: byId.get(edge.id)! } : edge);
+        }
       } else fail('unsupported-operation', 'Unsupported Video action');
+      if (content.sequence.transitions?.length === 0 && !next.sequence.transitions)
+        next.sequence.transitions = [];
       if (!validate(next))
         fail('invalid-operation', 'Timeline exceeds the fixed sequence or uses unsupported inputs');
       const changes = clipDelta(content.sequence.clips, next.sequence.clips);
@@ -354,17 +375,29 @@ export function createVideoTimelineCodec(project: VideoContentV3): DomainCodec<V
         ),
       );
       for (const group of groups) if (group) touched.add(groupResource(group));
+      const targets = new Set(changes.map(({ id }) => id));
+      const previousEdges = new Map(content.sequence.transitions?.map(edge => [edge.id, edge]));
+      const retarget: { id: string; leftClipId: string }[] = [];
+      for (const edge of next.sequence.transitions ?? []) {
+        const previous = previousEdges.get(edge.id)!;
+        if (edge.leftClipId === previous.leftClipId) continue;
+        touched.add('dissolve:' + edge.id);
+        targets.add(edge.id);
+        targets.add(edge.rightClipId);
+        retarget.push({ id: edge.id, leftClipId: previous.leftClipId });
+      }
       for (const key of touched) required.add(key);
       return {
         content: copy(next),
         required: [...required],
         touched: [...touched],
-        targets: changes.map(({ id }) => id),
+        targets: [...targets],
         inverse: [
           {
             type: 'history.video-clips',
             target: '*',
             payload: {
+              ...(retarget.length ? { retarget } : {}),
               clips: changes.map(({ id, before }) => ({ id, value: before ?? null })),
             },
           },

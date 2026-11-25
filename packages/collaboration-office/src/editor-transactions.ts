@@ -64,31 +64,9 @@ import { designCommandReads } from './design-command-reads';
 import { EditorState } from 'prosemirror-state';
 import type { TextRun } from '@editor-platform/editor-core';
 
-// Temporary accessors into each existing schema. This is never a stored content model.
-type RecordValue = Record<string, unknown> & { id: string };
-type Root = Record<string, unknown>;
-interface Collection {
-  key: string;
-  fields: readonly string[];
-  items: RecordValue[];
-  set(items: RecordValue[]): void;
-  nested?: string;
-  present: boolean;
-  clear(): void;
-}
-export interface Schema<T> {
-  base: DomainCodec<T>;
-  root: readonly string[];
-  slideReferences?: true;
-  manga?: true;
-  recordRoots?: readonly string[];
-  /** Native discriminators that may be supplied when inserting a record, including Undo. */
-  taggedCollections?: readonly string[];
-  /** Dependencies shared by separate fields that jointly describe one native model. */
-  atomicRoots?: readonly string[];
-  validateTransition?(before: T, after: T): void;
-  collections(content: T): Collection[];
-}
+import { collection, type Schema, type Collection, type Root, type RecordValue } from './record-schema';
+export { collection, type Schema } from './record-schema';
+
 export type EditorChange =
   | { kind: 'insert'; collection: string; id: string; value: RecordValue }
   | { kind: 'remove'; collection: string; id: string }
@@ -171,32 +149,6 @@ const layoutFields = new Set([
 ]);
 const entityKey = (collection: string, id: string) => `entity:${collection}:${id}`;
 const orderKey = (collection: string) => `order:${collection}`;
-export function collection(
-  owner: object,
-  field: string,
-  fields: readonly string[],
-  key = field,
-  nested?: string,
-): Collection {
-  const root = owner as Root;
-  return {
-    key,
-    fields,
-    get items() {
-      return (root[field] ?? []) as RecordValue[];
-    },
-    nested,
-    get present() {
-      return root[field] !== undefined;
-    },
-    clear: () => {
-      delete root[field];
-    },
-    set: (items) => {
-      root[field] = items;
-    },
-  };
-}
 const referenceCapability = Symbol('slide-reference-capability');
 function slideEditorSchema(allowReferences: boolean): Schema<SlideContent> {
   return {
@@ -226,6 +178,7 @@ const slideSchema = slideEditorSchema(false);
 const slideReferenceSchema = slideEditorSchema(true);
 const designSchema: Schema<DesignContent> = {
   base: designCodec,
+  optionalCollections: ['styles'],
   root: ['schemaVersion', 'web', 'prototyping'],
   collections: (d) => [
     collection(d, 'elements', elementFields),
@@ -252,6 +205,7 @@ const mangaSchema: Schema<DesignContent> = {
 };
 const boardSchema: Schema<WhiteboardContent> = {
   base: whiteboardCodec,
+  optionalCollections: ['sections'],
   root: ['schemaVersion'],
   collections: (d) => [
     collection(d, 'nodes', nodeFields),
@@ -273,6 +227,7 @@ const boardSchema: Schema<WhiteboardContent> = {
 };
 const dataSchema: Schema<StructuredData> = {
   base: dataCodec,
+  optionalCollections: ['views'],
   root: ['schemaVersion'],
   collections: (d) => [
     // refs: a record's item-reference fields (structured-data items); the whole field is one value.
@@ -1222,7 +1177,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           invalidates.add(`${entityKey('pages', c.key.slice(8))}/objects`);
         if (change.kind === 'empty') {
           if (
-            !['views', 'styles', 'sections'].includes(c.key) ||
+            !schema.optionalCollections?.includes(c.key) ||
             c.items.length ||
             typeof change.present !== 'boolean'
           )

@@ -216,3 +216,33 @@ function checkTaggedInsertAndUndo<T>(codec: DomainCodec<T>, before: T, after: T,
     reads: [], changes: [{ kind: 'field', collection, id, field: 'kind', value: 'different' }],
   } }, 0)).toThrow(/Unknown domain field/);
 }
+
+it('restores the absence of optional BIM cameras on Undo and native removal', () => {
+  const doc = bimStarter();
+  const { authority, edit } = scenario(bimEditorCodec, doc);
+  const add = edit(a, current => applyBimOperation(current, { type: 'setCameras', cameras: [{
+    id: 'cam', name: 'Entrance', position: [-12000, -16000, 9000], target: [0, 0, 1500], up: [0, 0, 1], fovDeg: 45,
+  }] }));
+  expect(authority.submit(a, add).status).toBe('accepted');
+  const undo = authority.undo(a, add.operationId);
+  expect(undo.status).toBe('accepted');
+  expect(authority.snapshot().content).not.toHaveProperty('cameras');
+  expect(authority.undo(a, undo.operationId, true).status).toBe('accepted');
+  const remove = prepareEditorCommand(bimEditorCodec, authority.snapshot(), a,
+    immutableCommand('clear', 'Clear cameras', current => applyBimOperation(current, { type: 'setCameras', cameras: [] })))!;
+  expect(authority.submit(a, remove).status).toBe('accepted');
+  expect(authority.snapshot().content).not.toHaveProperty('cameras');
+});
+
+it('removes the optional mass list when undoing the first shared Simulation v2 mass', () => {
+  const doc = { ...simulationFixture().doc, schemaVersion: 2 as const };
+  const load = doc.loads[0];
+  if (load.kind !== 'force') throw Error('Expected force fixture');
+  const { authority, edit } = scenario(simulationEditorCodec, doc);
+  const add = edit(a, current => applySimulationOperation(current, {
+    type: 'addMass', mass: { id: 'motor', name: 'Motor', mass: 0.1, targets: [load.targets[0]] },
+  }));
+  expect(authority.submit(a, add).status).toBe('accepted');
+  expect(authority.undo(a, add.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content).toEqual(doc);
+});

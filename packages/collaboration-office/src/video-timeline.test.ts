@@ -170,3 +170,31 @@ it('admits imported media and caption IDs through linked split, caption edit and
   expect(authority.undo(a, undo.operationId, true).status).toBe('accepted');
   expect(authority.snapshot().content.sequence.clips.map(c => c.id)).toEqual(expect.arrayContaining(['part:video.2', 'part:audio.2']));
 });
+
+it('splits a dissolve endpoint and restores its edge with the clip on Undo and Redo', () => {
+  const project = videoTimelineFixture();
+  const picture = project.sequence.clips[0];
+  if (picture.kind !== 'video') throw Error('Expected video');
+  delete picture.linkGroupId;
+  picture.start = time(0);
+  picture.sourceIn = time(1);
+  picture.sourceOut = time(3);
+  const right = { ...picture, id: 'next:clip', start: time(2), sourceIn: time(4), sourceOut: time(6) };
+  project.sequence.clips = [picture, right, project.sequence.clips[2]];
+  project.sequence.transitions = [{ id: 'blend', kind: 'cross-dissolve', leftClipId: picture.id, rightClipId: right.id, duration: time(1) }];
+  const codec = createVideoTimelineCodec(project);
+  const basis = initial('cut', codec, project);
+  const authority = new Authority(codec, basis);
+  const split = operation(codec, basis, a, [videoTimelineAction({ type: 'split', clipId: picture.id,
+    at: time(1), rightIds: { [picture.id]: 'split:edge' } })]);
+  expect(authority.submit(a, split).status).toBe('accepted');
+  expect(authority.snapshot().content.sequence.transitions![0].leftClipId).toBe('split:edge');
+  const caption = operation(codec, basis, b, [videoTimelineAction({ type: 'caption-text', clipId: 'sample-caption', text: '別の編集' })]);
+  expect(authority.submit(b, caption).status).toBe('accepted');
+  const undo = authority.undo(a, split.operationId);
+  expect(undo.status).toBe('accepted');
+  expect(authority.snapshot().content.sequence.transitions).toEqual(project.sequence.transitions);
+  expect(authority.snapshot().content.sequence.clips.find(c => c.kind === 'caption')).toMatchObject({ text: '別の編集' });
+  expect(authority.undo(a, undo.operationId, true).status).toBe('accepted');
+  expect(authority.snapshot().content.sequence.transitions![0].leftClipId).toBe('split:edge');
+});

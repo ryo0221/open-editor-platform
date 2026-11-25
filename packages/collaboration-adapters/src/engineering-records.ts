@@ -62,7 +62,7 @@ export const engineeringSchemas = {
     (doc) => doc.assets?.length || doc.types.some((type) => type.kind === 'part')
       ? '外部部品や画像素材を含む BIM は共同編集できません。'
       : undefined,
-    [], { taggedCollections: ['types', 'elements', 'views'] },
+    [], { taggedCollections: ['types', 'elements', 'views'], optionalCollections: ['cameras'] },
   ),
   character: records<CharacterDocument>(
     'character', isCharacterDocument, ['name', 'retiredIds'],
@@ -92,7 +92,7 @@ export const engineeringSchemas = {
     },
     (doc) => doc.runs?.length ? '保存済みの解析結果を含む成果物は共同編集できません。' : undefined,
     ['source', 'schemaVersion'],
-    { taggedCollections: ['loads', 'constraints', 'studies'] },
+    { taggedCollections: ['loads', 'constraints', 'studies'], optionalCollections: ['bonds', 'masses', 'spotWelds', 'seals'] },
   ),
   ladder: records<LadderDocument>('ladder', isLadderDocument, ['name', 'scanMs', 'variables'], {
     rungs: ['comment', 'network', 'coils'],

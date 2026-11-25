@@ -5,7 +5,7 @@ import { isEstimate, type EstimateDocument } from '@editor-platform/estimate-cor
 import { validateFictionMap, type FictionMapContent } from '@editor-platform/fiction-map/model';
 import { geoKind } from '@editor-platform/geo-inspector/kind';
 import { containsSharedReference } from './reference-guard';
-import { collection, type Schema } from './editor-transactions';
+import { collection, type Schema } from './record-schema';
 
 export function records<T extends object>(
   domain: Domain,
@@ -16,6 +16,7 @@ export function records<T extends object>(
   fixedSources: readonly (keyof T & string)[] = [],
   options?: {
     atomicRoots?: readonly (keyof T & string)[];
+    optionalCollections?: readonly (keyof T & string)[];
     taggedCollections?: readonly (keyof T & string)[];
     fixedProjection?(content: T): unknown;
   },
@@ -37,6 +38,7 @@ export function records<T extends object>(
     root,
     recordRoots: collections,
     taggedCollections: options?.taggedCollections,
+    optionalCollections: options?.optionalCollections,
     atomicRoots: options?.atomicRoots,
     validateTransition,
     collections: (content) =>
