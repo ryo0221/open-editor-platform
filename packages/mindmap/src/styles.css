@@ -228,3 +228,12 @@
     min-height: 300px;
   }
 }
+
+.mindmap-peer {
+  margin-inline-start: 0.3em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.35em;
+  background: #dce6ff;
+  color: #1e3c7a;
+  font-size: 0.75em;
+}

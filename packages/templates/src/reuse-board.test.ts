@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { clone } from '@editor-platform/artifact-core';
 import { command } from '@editor-platform/editor-core';
 import { Authority, initial, type Identity } from '@editor-platform/collaboration-core';
-import { prepareEditorCommand } from '@editor-platform/collaboration-adapters';
+import { prepareEditorCommand } from '@editor-platform/collaboration-office';
 import {
   isWhiteboard,
   connectorGeometry,

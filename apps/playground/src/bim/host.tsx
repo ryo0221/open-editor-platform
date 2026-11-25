@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { BimController, BimSurface, WorkerBimKernel } from '@editor-platform/bim';
 import '@editor-platform/bim/style.css';
 import KernelWorker from '@editor-platform/bim/worker?worker';
 import type { BimDocument } from '@editor-platform/bim-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
+import { EditorExportGuardContext } from '@editor-platform/editor-ui';
 import { cadKernel, type StoredArtifact } from '../model';
 import { createCadAssetStore, portableCadRecord } from '../cad/resources';
 import { createBimPartSource, portableBimRecord } from './parts';
 import { partKernel } from './part-kernel';
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 
 /**
  * Playground binding for the building Surface. An edit is one session command applied at once;
@@ -20,6 +22,7 @@ import { partKernel } from './part-kernel';
 export default function BimHost({
   artifact,
   session,
+  shared,
   readOnly,
   inputs,
   persist,
@@ -28,7 +31,8 @@ export default function BimHost({
   records,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<BimDocument>;
+  session: EditorDraftPort<BimDocument>;
+  shared: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: BimDocument): void;
@@ -50,18 +54,18 @@ export default function BimHost({
       spawn: () => new KernelWorker() as never,
       build: cadKernel ?? undefined,
     });
-    const parts = cadKernel ? partKernel(cadKernel) : undefined;
+    const parts = !shared && cadKernel ? partKernel(cadKernel) : undefined;
     const controller = new BimController({
       session,
       kernel,
-      parts: createBimPartSource({
+      parts: shared ? undefined : createBimPartSource({
         records: () => storage.current.records(),
         record: () => storage.current.record(),
         persist: (r) => storage.current.persistRecord(r),
         kernel: parts,
       }),
       // #662: materials' texture images, kept in the record beside the content.
-      textures: createCadAssetStore({
+      textures: shared ? undefined : createCadAssetStore({
         record: () => storage.current.record(),
         persist: (r) => storage.current.persistRecord(r),
         portable: (r) => portableBimRecord(portableCadRecord(r)),
@@ -74,7 +78,7 @@ export default function BimHost({
     });
     return { controller, kernel, parts };
     // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
-  }, [session]);
+  }, [session, shared]);
   useEffect(
     () => () => {
       controller.dispose();
@@ -100,16 +104,23 @@ export default function BimHost({
   useEffect(() => {
     if (revision !== applied.current) controller.sync();
   }, [controller, revision]);
+  const checkConfirmed = useContext(EditorExportGuardContext);
+  const guardExport = useCallback((options?: { keepEditor?: boolean }) => {
+    inputs.flush(options);
+    checkConfirmed?.(options);
+  }, [inputs, checkConfirmed]);
   return (
-    <BimSurface
-      controller={controller}
-      hostHistory
-      name={artifact.name}
-      ifc={() => ({
-        artifactId: artifact.id,
-        // The time of the content the file holds: the stored draft's.
-        timeStamp: (storage.current.record() ?? artifact).draft.updatedAt,
-      })}
-    />
+    <EditorExportGuardContext.Provider value={shared ? guardExport : checkConfirmed}>
+      <BimSurface
+        controller={controller}
+        hostHistory
+        name={artifact.name}
+        ifc={() => ({
+          artifactId: artifact.id,
+          // The time of the content the file holds: the stored draft's.
+          timeStamp: (storage.current.record() ?? artifact).draft.updatedAt,
+        })}
+      />
+    </EditorExportGuardContext.Provider>
   );
 }

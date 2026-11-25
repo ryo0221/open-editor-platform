@@ -1,7 +1,8 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { WorkerBimKernel } from '@editor-platform/bim';
 import KernelWorker from '@editor-platform/bim/worker?worker';
-import { bimContentHash } from '@editor-platform/bim-core';
+import { bimContentHash, isBimDocument } from '@editor-platform/bim-core';
 import computeHost from 'virtual:simulation-compute-host';
 import { ConstructionSurface, type FrameSolver } from '@editor-platform/construction';
 import '@editor-platform/construction/style.css';
@@ -14,7 +15,6 @@ import {
 import type {
   EditorInputBoundary,
   EditorInputs,
-  EditorSession,
 } from '@editor-platform/editor-core';
 import { cadKernel, type StoredArtifact } from '../model';
 import {
@@ -44,6 +44,7 @@ const frameSolver = computeHost ? hostSolver(computeHost) : undefined;
  */
 export default function ConstructionHost({
   session,
+  shared = false,
   readOnly,
   inputs,
   record,
@@ -51,7 +52,8 @@ export default function ConstructionHost({
   persist,
   persistRecord,
 }: {
-  session: EditorSession<ConstructionDocument>;
+  session: EditorDraftPort<ConstructionDocument>;
+  shared?: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   record(): StoredArtifact | undefined;
@@ -64,9 +66,13 @@ export default function ConstructionHost({
   // Re-read on every session revision (Host Undo/Redo, restore).
   const [, setTick] = useState(0);
   const doc = session.content;
-  const bim = constructionSourceOf(record(), doc);
   const building = records().find((r) => r.id === doc.source.artifactId);
   const at = building?.versions.findIndex((v) => v.versionId === doc.source.versionId) ?? -1;
+  const localVersion = shared && at >= 0 ? building?.versions[at]?.content : undefined;
+  const bim = constructionSourceOf(record(), doc) ??
+    (isBimDocument(localVersion) && bimContentHash(localVersion) === doc.source.contentHash
+      ? localVersion
+      : undefined);
   const sourceLabel =
     building && at >= 0 ? `${building.name} · v${at + 1}` : 'A saved Building version';
   const kernel = useMemo(
@@ -100,8 +106,9 @@ export default function ConstructionHost({
       return e instanceof Error ? e.message : String(e);
     }
   };
-  const choices = building ? constructionVersionChoices([building], doc) : [];
+  const choices = !shared && building ? constructionVersionChoices([building], doc) : [];
   const switchVersion = async (versionId: string) => {
+    if (shared) return '共同編集では建物の参照版を固定します。';
     const choice = choices.find((c) => c.versionId === versionId);
     const latest = record();
     if (!choice || !latest) return 'The version is no longer available.';
@@ -130,10 +137,10 @@ export default function ConstructionHost({
         versionId: c.versionId,
         label: c.label,
       }))}
-      switchVersion={switchVersion}
+      switchVersion={shared ? undefined : switchVersion}
       registerInput={registerInput}
       inputsChanged={inputs.changed}
-      frameSolver={frameSolver}
+      frameSolver={shared ? undefined : frameSolver}
       artifactId={record()?.id}
     />
   );

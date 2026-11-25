@@ -1,3 +1,4 @@
+import { useSharedCharacterMedia } from './shared-media';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   besidePlacement,
@@ -29,12 +30,18 @@ import {
 import type { EditorSession } from '@editor-platform/editor-core';
 import type { CadAssetRef, CadDocument } from '@editor-platform/cad-core';
 import type { StoredArtifact } from '../model';
-import { createCadAssetStore, decodeBytes, portableCadRecord } from '../cad/resources';
+import {
+  createCadAssetStore,
+  decodeBytes,
+  localCharacterResources,
+  portableCadRecord,
+} from '../cad/resources';
 import { assertCharacterHistoryFits, assertCharacterImportFits } from './import-fit';
 import { characterMeshRecord } from './mesh-assets';
 import { CharacterImportReview } from './import-review';
 import { carryProps } from './carry-props';
 import { characterPropChoices, retainCharacterProp } from './parts';
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { CharacterBimPropEvaluation, CharacterPropEvaluation, propVersionJoints } from './props';
 
 /** #718: how long a new prop waits for its version to be drawn before it is placed unmeasured. */
@@ -69,6 +76,9 @@ const exposeProbe: NonNullable<Parameters<typeof CharacterSurface>[0]['onFrame']
  */
 export default function CharacterHost({
   session,
+  localSession,
+  mediaUrl,
+  shared,
   readOnly,
   persist,
   record,
@@ -76,7 +86,10 @@ export default function CharacterHost({
   records,
   history,
 }: {
-  session: EditorSession<CharacterDocument>;
+  session: EditorDraftPort<CharacterDocument>;
+  localSession?: EditorSession<CharacterDocument>;
+  mediaUrl?(id: string): string;
+  shared: boolean;
   readOnly: boolean;
   persist(content: CharacterDocument): void;
   record(): StoredArtifact | undefined;
@@ -104,15 +117,21 @@ export default function CharacterHost({
   // read). An edit that keeps them (visibility, names) keeps the same map below, so the Surface
   // neither decodes again nor refits the camera the user moved.
   const refsKey = useMemo(() => JSON.stringify(session.content.assets), [session, sequence]);
+  const characterRecord = shared ? record() : undefined;
+  const library = shared ? records() : undefined;
+  const remote = useSharedCharacterMedia(mediaUrl, refsKey, sequence);
   const assets = useMemo(() => {
+    if (mediaUrl) return remote ?? new Map<string, Uint8Array>();
     const out = new Map<string, Uint8Array>();
-    const resources = storage.current.record()?.cadResources ?? [];
+    const resources = characterRecord && library
+      ? localCharacterResources(characterRecord, library)
+      : storage.current.record()?.cadResources ?? [];
     for (const ref of JSON.parse(refsKey) as CharacterDocument['assets']) {
       const kept = resources.find((r) => r.kind === ref.kind && r.sha256 === ref.sha256);
       if (kept) out.set(ref.id, decodeBytes(kept.bytes));
     }
     return out;
-  }, [refsKey, stored]);
+  }, [refsKey, stored, library, characterRecord?.cadResources, mediaUrl, remote]);
   const [pending, setPending] = useState<{
     file: string;
     result: GltfImport;
@@ -388,20 +407,20 @@ export default function CharacterHost({
     asset: { ref: CharacterAssetRef; bytes: Uint8Array },
     more?: readonly { ref: CharacterAssetRef; bytes: Uint8Array }[],
   ) => {
-    if (readOnlyNow.current) throw new Error('permission-denied');
+    if (!localSession || readOnlyNow.current) throw new Error('permission-denied');
     const latest = storage.current.record();
     if (!latest) throw new Error('no record to save into');
     const { record: next, forget } = characterMeshRecord({
       record: latest,
       content: session.content,
-      undo: session.historyEntries('undo'),
-      redo: session.historyEntries('redo'),
+      undo: localSession.historyEntries('undo'),
+      redo: localSession.historyEntries('redo'),
       ...asset,
       ...(more?.length ? { more } : {}),
     });
     // The Undo entries whose bytes the record drops are forgotten before it is written: none can
     // be restored while the write is pending (or after it), whatever the write's outcome.
-    if (forget) session.forgetOldestUndo(forget);
+    if (forget) localSession.forgetOldestUndo(forget);
     if (!(await storage.current.persistRecord(next)))
       throw new Error('the browser did not save the mesh');
     setStored((n) => n + 1);
@@ -426,22 +445,27 @@ export default function CharacterHost({
 
   return (
     <div className="character-host">
+      {shared && assets.size !== session.content.assets.length && (
+        <p role="status">
+          {mediaUrl ? '表示できない素材があります。素材の閲覧権限と通信状態を確かめてください。' : 'この端末にない素材があります。同じ素材を含む保存ファイルをこの端末に読み込んでから、共有を開き直してください。'}
+        </p>
+      )}
       <CharacterSurface
-        session={session}
+        session={localSession ?? session}
         assets={assets}
         readOnly={readOnly}
         canEdit={() => !readOnlyNow.current}
-        {...(readOnly ? {} : { onImport: (file: File) => void read(file) })}
+        {...(shared || readOnly ? {} : { onImport: (file: File) => void read(file) })}
         onExport={saveFile}
         onExportMedia={(file) => download(file.name, file.data)}
         {...(importError ? { importError } : {})}
         {...(report ? { report } : {})}
         props={views}
-        propChoices={propChoices}
-        onAddProp={(c, beside) => void addProp(c, beside)}
-        onPreparePropVersion={preparePropVersion}
+        propChoices={shared ? [] : propChoices}
+        onAddProp={shared ? undefined : (c, beside) => void addProp(c, beside)}
+        onPreparePropVersion={shared ? undefined : preparePropVersion}
         placingProp={placing}
-        {...(readOnly ? {} : { onMeshAsset: keepMesh })}
+        {...(!localSession || readOnly ? {} : { onMeshAsset: keepMesh })}
         onApplied={(content) => persist(content)}
         {...(import.meta.env.DEV ? { onFrame: exposeProbe } : {})}
         // An edit is admitted like Undo: the record must stay exportable and storable with it.

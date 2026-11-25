@@ -1,5 +1,4 @@
 import { canonicalJson } from '@editor-platform/artifact-core';
-import type { EditorSession } from '@editor-platform/editor-core';
 import {
   NativeGraphSurface,
   isGraphDocument,
@@ -7,13 +6,14 @@ import {
 } from '@editor-platform/structured-graph';
 import { graphProfileFor } from '../../app/graph-templates';
 import { evaluateFta, formatProbability } from '../../app/analysis-graph-templates';
-import type { Content } from '../../model';
+import { useEditorDraftPort } from '../editor-draft-port';
 import { graphDefinition } from '../office';
 import { hostKind, type HostSurfaceProps, type KindContent } from '../host-kind';
 import { readGraphDocument } from '@editor-platform/structured-graph';
 import { clone } from '@editor-platform/artifact-core';
 
 function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphDefinition>>) {
+  const session = useEditorDraftPort(host);
   const evaluation =
     content.profile.id === 'analysis-fault-tree' ? evaluateFta(content) : undefined;
   return (
@@ -32,7 +32,7 @@ function GraphHost({ host, content }: HostSurfaceProps<KindContent<typeof graphD
       <NativeGraphSurface
         content={content}
         profile={graphProfileFor(content) ?? relationProfile}
-        sourceRevision={canonicalJson((host.session as EditorSession<Content>).revision)}
+        sourceRevision={canonicalJson(session.revision)}
         execute={host.execute}
         select={host.select}
         selectedId={
@@ -53,7 +53,6 @@ export const graphSurface = hostKind(graphDefinition, {
   // Older stored schemas validate because they upgrade; the Surface opens only the current one.
   accepts: isGraphDocument,
   hooks: {
-    sharedSessions: false,
     commentsButton: 'disabled',
     // An older Graph version is restored as the current schema.
     restore: (_record, content) => readGraphDocument(clone(content)),

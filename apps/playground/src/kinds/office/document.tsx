@@ -41,8 +41,11 @@ function DocumentHost({ host, content }: HostSurfaceProps<KindContent<typeof doc
 function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurface>> {
   const { active, records } = host;
   const chapterIds = host.shared ? undefined : readNovelChapters(active.id);
+  const sharedChapter = host.novelChapter === true;
   const [choice, setChoice] = useState<{ id: string; workspace: 'document' | 'novel' }>();
-  const workspace = choice?.id === active.id ? choice.workspace : readNovelWorkspace(active.id);
+  const workspace = choice?.id === active.id
+    ? choice.workspace
+    : readNovelWorkspace(active.id, sharedChapter ? 'novel' : 'document');
   // The character goal is Host view state per chapter, like the workspace choice.
   const [goalChoice, setGoalChoice] = useState<{ id: string; goal: number | undefined }>();
   const goal = goalChoice?.id === active.id ? goalChoice.goal : readNovelGoal(active.id);
@@ -92,7 +95,7 @@ function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurf
     };
     // savedKey names every input that changes the read-through.
   }, [savedKey, workspace, host.references]);
-  if (!chapterIds) return {};
+  if (!chapterIds && !sharedChapter) return {};
   const current = reading?.key === savedKey ? reading : undefined;
   return {
     workspace,
@@ -111,11 +114,11 @@ function useNovel(host: SurfaceHost): Partial<ComponentProps<typeof DocumentSurf
         ? {
             reading: {
               content: current.content,
-              label: `保存した${chapterIds.length}章を章順に結合した通読です。`,
+              label: `保存した${chapterIds?.length}章を章順に結合した通読です。`,
             },
           }
-        : { readingUnavailable: current?.problem ?? '通読を準備しています。' }),
-      onNotationProposal: ({ command, findings }) => {
+        : { readingUnavailable: sharedChapter ? '作品全体の通読は、章の一覧を開いて行ってください。' : current?.problem ?? '通読を準備しています。' }),
+      onNotationProposal: host.shared ? undefined : ({ command, findings }) => {
         const session = host.sessions.current.get(active.id);
         if (!session || !active.draft.baseVersionId || !host.flushInputs()) return;
         host.reviewProposal({

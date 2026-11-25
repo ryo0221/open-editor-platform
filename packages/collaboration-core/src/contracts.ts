@@ -10,7 +10,26 @@ export type Domain =
   | 'review'
   | 'file'
   | 'react-ui'
-  | 'animation';
+  | 'animation'
+  | 'mindmap'
+  | 'schedule'
+  | 'structured-graph'
+  | 'analysis'
+  | 'estimate'
+  | 'fiction-map'
+  | 'geo'
+  | 'ladder'
+  | 'schematic'
+  | 'drawing'
+  | 'pcb'
+  | 'construction'
+  | 'factory'
+  | 'cosim'
+  | 'cad'
+  | 'bim'
+  | 'character'
+  | 'simulation'
+  | 'video';
 export type Origin = 'human' | 'agent' | 'proposal' | 'undo' | 'redo' | 'restore';
 export interface Identity {
   actorId: string;
@@ -260,6 +279,25 @@ export function validateOperation(value: unknown): asserts value is Operation {
       'file',
       'react-ui',
       'animation',
+      'mindmap',
+      'schedule',
+      'structured-graph',
+      'analysis',
+      'estimate',
+      'fiction-map',
+      'geo',
+      'ladder',
+      'schematic',
+      'drawing',
+      'pcb',
+      'construction',
+      'factory',
+      'cosim',
+      'cad',
+      'bim',
+      'character',
+      'simulation',
+      'video',
     ].includes(o.domain) ||
     !['human', 'agent', 'proposal', 'undo', 'redo', 'restore'].includes(o.origin)
   )

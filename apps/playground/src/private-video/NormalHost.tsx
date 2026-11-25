@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import build from 'virtual:private-video-m2-build';
 import { readM2Catalog, type PrivateVideoM2Entry } from '../private-video-m2/catalog';
 import {
@@ -7,6 +7,8 @@ import {
   privateVideoM2Url,
 } from '../private-video-m2/registration';
 import { ReferencePlayground } from '../shared-host';
+const VideoCollaboration = lazy(() => import('../video-collaboration/Workspace'));
+
 interface PrivateHandle {
   close(): Promise<void>;
   inspection(): Promise<unknown>;
@@ -17,6 +19,7 @@ interface PrivateRuntime {
     root: HTMLElement,
     entryId?: string,
     navigate?: (url: string) => void,
+    openShared?: (project: string, hash: string) => Promise<string>,
   ): Promise<PrivateHandle>;
 }
 declare global {
@@ -56,7 +59,13 @@ function Workspace({ entryId, navigate }: { entryId?: string; navigate: (url: st
     void loadRuntime()
       .then(async (runtime) => {
         if (cancelled) return;
-        handle = await runtime.mount(root.current!, entryId, navigate);
+        handle = await runtime.mount(root.current!, entryId, navigate, import.meta.env.VITE_HOSTED_VIDEO === '1' ? async (project, hash) => {
+          const r = await fetch('/collaboration-api/editor/video-link', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artifactId: 'host-video-' + project, contentHash: hash }) });
+          if (!r.ok) throw Error('この保存版の共同編集を開始できません。動画の版と閲覧権限を確かめてください。');
+          const { artifactId, generation } = await r.json();
+          return '/?' + new URLSearchParams({ videoCollaboration: artifactId, generation, expectedSeedHash: hash });
+        } : undefined);
         if (cancelled) await handle.close();
         else window.editorPrivateVideoHandle = handle;
       })
@@ -116,6 +125,9 @@ export function NormalHost() {
     );
   }
   if (route) return <Workspace key={navigation} entryId={route.entryId} navigate={navigate} />;
+  const videoId = new URLSearchParams(location.search).get('videoCollaboration');
+  if (videoId && (import.meta.env.DEV || videoId.startsWith('host-video-')))
+    return <Suspense fallback={<main>動画の共同編集を開いています…</main>}><VideoCollaboration /></Suspense>;
   if (build.enabled)
     try {
       entries = readM2Catalog();

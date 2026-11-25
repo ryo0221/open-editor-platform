@@ -238,7 +238,7 @@ function permission(
   if (!result) fail('permission-denied', '');
 }
 function currentBase(
-  session: FictionMapSession,
+  session: Pick<FictionMapSession, 'content' | 'revision' | 'execute'>,
   state: PreparedState,
   current: FictionMapContent,
 ): void {
@@ -255,7 +255,7 @@ function finalCheck(state: PreparedState): void {
   checkReferences(state.candidate);
 }
 export function commitFictionMapChange(
-  session: FictionMapSession,
+  session: Pick<FictionMapSession, 'content' | 'revision' | 'execute'>,
   value: PreparedFictionMapChange,
   canEdit: FictionMapPermission,
 ): FictionMapResult<FictionMapBase & { readonly changed: boolean }> {

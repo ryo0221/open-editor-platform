@@ -1,3 +1,4 @@
+import { useEditorDraftPort } from '../kinds/editor-draft-port';
 import { useCallback, useRef } from 'react';
 import {
   canonicalJson,
@@ -12,6 +13,9 @@ import { storage } from './records';
 import type { SurfaceHost } from '../kinds/surface-host';
 import type { StoredArtifact } from '../model';
 export function PlaygroundAnalysis({ host }: { host: SurfaceHost }) {
+  const draft = useEditorDraftPort(host);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const latest = useRef(host);
   latest.current = host;
   const permission = useRef({ value: host.readOnly, generation: 0 });
@@ -23,12 +27,18 @@ export function PlaygroundAnalysis({ host }: { host: SurfaceHost }) {
       if (!isAnalysis(content)) throw Error('Not Analysis');
       return content;
     },
-    revision: () =>
-      canonicalJson(latest.current.sessions.current.get(latest.current.active.id)!.revision),
+    revision: () => canonicalJson(draftRef.current.revision),
     generation: () => permission.current.generation,
-    canEdit: () => !latest.current.readOnly && !latest.current.shared,
+    canEdit: () => !latest.current.readOnly,
     canRead: () => true,
-    canExport: () => true,
+    canExport: () => {
+      try {
+        latest.current.exportGuard?.();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     inputsReady: () => !latest.current.inputs.getSnapshot().composing,
     flush: () => {
       if (!latest.current.flushInputs()) throw Error('入力を確定してください。');
@@ -45,12 +55,17 @@ export function PlaygroundAnalysis({ host }: { host: SurfaceHost }) {
   return (
     <AnalysisSurface
       port={port}
-      sources={analysisSources([...host.savedRecords.current.values()])}
+      canAdoptResults={!host.shared}
+      sources={host.shared ? [] : analysisSources([...host.savedRecords.current.values()])}
       registerInput={registerInput}
       save={async () => {
-        const before = host.savedRecords.current.get(host.active.id)?.versions.length ?? 0;
+        const versionCount = () =>
+          host.sharedSession?.savedVersions.length ??
+          host.savedRecords.current.get(host.active.id)?.versions.length ??
+          0;
+        const before = versionCount();
         await host.saveVersion();
-        if ((host.savedRecords.current.get(host.active.id)?.versions.length ?? 0) <= before)
+        if (versionCount() <= before)
           throw Error('保存できませんでした。内容を保持して再試行してください。');
       }}
       history={(direction) => host.history(direction)}

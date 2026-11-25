@@ -44,6 +44,9 @@ export interface MindmapSurfaceProps {
   select?(ids: string[]): void;
   /** The file name (without extension) used for exports. */
   fileName?: string;
+  /** The Host may refuse export while shared operations are unresolved. */
+  guardExport?(): void;
+  presences?: readonly { elementId: string; name: string; clientId: string }[];
 }
 
 const LAYOUTS: readonly (readonly [MindmapLayout, string])[] = [
@@ -109,6 +112,8 @@ export function MindmapSurface({
   execute,
   select,
   fileName = 'mindmap',
+  guardExport,
+  presences,
 }: MindmapSurfaceProps) {
   const [selected, setSelected] = useState(content.rootId);
   const [folded, setFolded] = useState<ReadonlyMap<string, boolean>>(new Map());
@@ -353,6 +358,7 @@ export function MindmapSurface({
       return;
     }
     try {
+      guardExport?.();
       if (kind === 'svg')
         download(`${fileName}.svg`, exportMindmapSvg(content, { folded }), 'image/svg+xml');
       else if (kind === 'png')
@@ -512,6 +518,17 @@ export function MindmapSurface({
                     onKeyDown={(e) => onNodeKey(e, index, box.id)}
                   >
                     <span className="mindmap-node-text">{n.text || '（無題）'}</span>
+                    {presences
+                      ?.filter((peer) => peer.elementId === box.id)
+                      .map((peer) => (
+                        <span
+                          key={peer.clientId}
+                          className="mindmap-peer"
+                          aria-label={`共同編集者 ${peer.name}`}
+                        >
+                          {peer.name}
+                        </span>
+                      ))}
                     {marks.length ? (
                       <span className="mindmap-badges" aria-hidden="true">
                         {marks.map((m) => (

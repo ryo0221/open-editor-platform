@@ -1,16 +1,11 @@
-export { slideCodec, designCodec, whiteboardCodec, setField, move } from './canvas';
-export * from './data';
-export * from './document';
-export * from './review';
-export * from './assets';
-export * from './http';
-export * from './editor-transactions';
-export * from './editor-session';
-export * from './editor-http';
-export * from './editor-annotations';
-export * from './editor-assets';
-export * from './document-editor';
-export * from './reuse';
-export * from './react-ui';
+import { checksOfficeNativeHistory } from '@editor-platform/collaboration-office';
+import type { Domain } from '@editor-platform/collaboration-core';
+import { engineeringSchemas } from './engineering-records';
 
-export * from './animation';
+export * from '@editor-platform/collaboration-office';
+export * from './engineering-records';
+export { nativeEditorCodecs } from './native-editor-codecs';
+
+export function checksSharedNativeHistory(domain: Domain): boolean {
+  return checksOfficeNativeHistory(domain) || Object.hasOwn(engineeringSchemas, domain);
+}

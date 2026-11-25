@@ -1,9 +1,10 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { SchematicController, SchematicSurface } from '@editor-platform/schematic';
 import '@editor-platform/schematic/style.css';
 import type { SchematicDocument } from '@editor-platform/schematic-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import type { StoredArtifact } from '../model';
 
 /**
@@ -18,7 +19,7 @@ export default function SchematicHost({
   persist,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<SchematicDocument>;
+  session: EditorDraftPort<SchematicDocument>;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: SchematicDocument): void;

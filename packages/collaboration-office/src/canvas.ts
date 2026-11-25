@@ -8,7 +8,7 @@ import {
   type Effect,
 } from '@editor-platform/collaboration-core';
 import { isDeck, hasLegacySlideAnimations, type SlideContent } from '@editor-platform/slide/model';
-import { isDesign, type DesignContent } from '@editor-platform/design/model';
+import { isDesign, isDesignWithPaths, type DesignContent } from '@editor-platform/design/model';
 import { isWhiteboard, type WhiteboardContent } from '@editor-platform/whiteboard/model';
 // These are transient accessors over existing, distinct schemas, not a stored node model.
 type Entity = {
@@ -327,30 +327,35 @@ export function slideCanvasCodec(allowSlideReferences = false) {
   );
   return { ...codec, unsupportedContentReason: unsupportedSlideContent };
 }
-export const designCodec = canvas<DesignContent>(
-  'design',
-  (v): v is DesignContent => {
-    if (!isDesign(v)) return false;
-    const components = new Set(v.components.map((c) => c.id));
-    if (components.size !== v.components.length) return false;
-    const parents = new Set(
-      v.elements.filter((e) => e.type === 'group' || e.type === 'frame').map((e) => e.id),
-    );
-    return v.elements.every(
-      (e) =>
-        (!e.parentId || parents.has(e.parentId)) &&
-        (!e.componentId || components.has(e.componentId)),
-    );
-  },
-  {
-    entities: (d) => d.elements as unknown as Entity[],
-    replace: (d, e) => {
-      d.elements = e as unknown as typeof d.elements;
+function designCanvasCodec(allowManga: boolean) {
+  return canvas<DesignContent>(
+    'design',
+    (v): v is DesignContent => {
+      if (!isDesign(v) && !(allowManga && isDesignWithPaths(v) && v.pagination && !v.reuse))
+        return false;
+      const components = new Set(v.components.map((c) => c.id));
+      if (components.size !== v.components.length) return false;
+      const parents = new Set(
+        v.elements.filter((e) => e.type === 'group' || e.type === 'frame').map((e) => e.id),
+      );
+      return v.elements.every(
+        (e) =>
+          (!e.parentId || parents.has(e.parentId)) &&
+          (!e.componentId || components.has(e.componentId)),
+      );
     },
-    parent: 'parentId',
-    ids: (d) => d.elements.map((e) => e.id),
-  },
-);
+    {
+      entities: (d) => d.elements as unknown as Entity[],
+      replace: (d, e) => {
+        d.elements = e as unknown as typeof d.elements;
+      },
+      parent: 'parentId',
+      ids: (d) => d.elements.map((e) => e.id),
+    },
+  );
+}
+export const designCodec = designCanvasCodec(false);
+export const mangaDesignCodec = designCanvasCodec(true);
 export const whiteboardCodec = canvas<WhiteboardContent>('whiteboard', isWhiteboard, {
   entities: (d) => d.nodes as unknown as Entity[],
   replace: (d, e) => {

@@ -140,6 +140,8 @@ export function hostKind<C>(definition: KindDefinition<C>, parts: HostKindParts<
 - office → engineering
 - engineering → office（engineering → core は可）
 
+共同編集の Host は `collaboration-adapters` から Office・Engineering の codec を登録します。この Host 向けのパッケージを core・Office・Engineering のパッケージから参照すると検査に失敗します。Office のテンプレートは `collaboration-office` の操作変換を使います。
+
 あわせて次を確認します。
 
 - `<package>/kind` が React と他の Editor package を import していない（KR4）。

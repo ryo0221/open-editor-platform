@@ -13,6 +13,12 @@ function MindmapHost({ host, content }: HostSurfaceProps<KindContent<typeof mind
       execute={host.execute}
       select={host.select}
       fileName={host.active.name}
+      guardExport={host.exportGuard}
+      presences={host.sharedSession?.presences.flatMap((peer) =>
+        peer.anchor?.type === 'element' && !peer.anchor.orphan
+          ? [{ elementId: peer.anchor.elementId, name: peer.name, clientId: peer.clientId }]
+          : [],
+      )}
     />
   );
 }

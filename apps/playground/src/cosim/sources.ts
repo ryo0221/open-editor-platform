@@ -13,9 +13,11 @@ function savedVersions<T>(options: {
   records(): StoredArtifact[];
   kind: 'schematic' | 'ladder';
   valid(content: unknown): boolean;
+  allowSelection: boolean;
 }): CosimSource<T> {
   return {
     async list(): Promise<CosimSourceEntry[]> {
+      if (!options.allowSelection) return [];
       return options
         .records()
         .filter((r) => r.kind === options.kind && r.versions.length)
@@ -47,15 +49,17 @@ function savedVersions<T>(options: {
   };
 }
 
-export function createCosimSources(records: () => StoredArtifact[]) {
+export function createCosimSources(records: () => StoredArtifact[], allowSelection = true) {
   return {
     schematics: savedVersions<SchematicDocument>({
       records,
+      allowSelection,
       kind: 'schematic',
       valid: isSchematicDocument,
     }),
     ladders: savedVersions<LadderDocument>({
       records,
+      allowSelection,
       kind: 'ladder',
       valid: (c) => !validateLadder(c).some((d) => d.severity === 'error'),
     }),

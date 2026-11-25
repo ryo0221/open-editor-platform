@@ -12,6 +12,7 @@ import { packageArea } from './e2e/areas.mjs';
 
 /** Which areas each area may depend on. */
 const allowed = {
+  host: ['core', 'office', 'engineering'],
   core: ['core'],
   office: ['core', 'office'],
   engineering: ['core', 'engineering'],
@@ -27,6 +28,9 @@ export const knownCrossings = [
   'slide -> character', // the shared H.264 writer at character/video
 ];
 
+// This public Host catalogue composes the two editor areas. Neither area may import it.
+const dependencyArea = (dir) => dir === 'collaboration-adapters' ? 'host' : packageArea(dir);
+
 /** Every `@editor-platform/*` dependency or peer dependency that leaves its area. */
 export function areaCrossings(root) {
   const crossings = [];
@@ -34,12 +38,12 @@ export function areaCrossings(root) {
     const file = join(root, 'packages', dir, 'package.json');
     if (!existsSync(file)) continue;
     const manifest = JSON.parse(readFileSync(file, 'utf8'));
-    const from = packageArea(dir);
+    const from = dependencyArea(dir);
     const names = Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies });
     for (const name of names.filter((entry) => entry.startsWith('@editor-platform/')).sort()) {
       const to = name.slice('@editor-platform/'.length);
-      if (!allowed[from].includes(packageArea(to)))
-        crossings.push({ edge: `${dir} -> ${to}`, from, to: packageArea(to) });
+      if (!allowed[from].includes(dependencyArea(to)))
+        crossings.push({ edge: `${dir} -> ${to}`, from, to: dependencyArea(to) });
     }
   }
   return crossings;
@@ -84,7 +88,7 @@ export function officeKindImports(root) {
         const name = relative(root, file).split(sep).join('/');
         if (specifier.startsWith('@editor-platform/')) {
           const pkg = specifier.slice('@editor-platform/'.length).split('/')[0];
-          if (packageArea(pkg) === 'engineering') found.push(`${name} -> ${specifier}`);
+          if (!allowed.office.includes(dependencyArea(pkg))) found.push(`${name} -> ${specifier}`);
           continue;
         }
         if (!specifier.startsWith('.')) continue;

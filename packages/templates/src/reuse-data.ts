@@ -1,5 +1,5 @@
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
-import { reuseInstanceKey } from '@editor-platform/collaboration-adapters';
+import { reuseInstanceKey } from '@editor-platform/collaboration-office';
 import type { Action } from '@editor-platform/collaboration-core';
 import {
   definitionRef,

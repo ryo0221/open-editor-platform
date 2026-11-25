@@ -23,7 +23,7 @@ import {
   type NativeContent,
 } from './index';
 import { initial, Authority, type Principal } from '@editor-platform/collaboration-core';
-import { prepareEditorCommand } from '@editor-platform/collaboration-adapters';
+import { prepareEditorCommand } from '@editor-platform/collaboration-office';
 import { createDeck } from '@editor-platform/slide/model';
 import { command } from '@editor-platform/editor-core';
 import { createData } from '@editor-platform/structured-data/model';

@@ -1,3 +1,4 @@
+import { useEditorDraftPort } from '../editor-draft-port';
 import { useCallback, useRef } from 'react';
 import {
   canonicalJson,
@@ -28,6 +29,9 @@ function PlaygroundEstimate({
   host: SurfaceHost;
   geometry: GeometryQuantitySources | undefined;
 }) {
+  const draft = useEditorDraftPort(host);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const latest = useRef(host);
   latest.current = host;
   const permission = useRef({ value: host.readOnly, generation: 0 });
@@ -40,12 +44,18 @@ function PlaygroundEstimate({
       if (!isEstimate(content)) throw Error('Not Estimate');
       return content;
     },
-    revision: () =>
-      canonicalJson(latest.current.sessions.current.get(latest.current.active.id)!.revision),
+    revision: () => canonicalJson(draftRef.current.revision),
     generation: () => permission.current.generation,
-    canEdit: () => !latest.current.readOnly && !latest.current.shared,
+    canEdit: () => !latest.current.readOnly,
     canRead: () => true,
-    canExport: () => true,
+    canExport: () => {
+      try {
+        latest.current.exportGuard?.();
+        return true;
+      } catch {
+        return false;
+      }
+    },
     inputsReady: () => !latest.current.inputs.getSnapshot().composing,
     flush: () => {
       if (!latest.current.flushInputs()) throw Error('入力を確定してください。');
@@ -62,16 +72,21 @@ function PlaygroundEstimate({
   return (
     <EstimateSurface
       port={port}
-      publication={estimateWorkPublication(() => latest.current, port)}
-      sources={estimateSources([...host.savedRecords.current.values()])}
-      quantitySources={estimateCadSources([...host.savedRecords.current.values()])}
-      bimSources={estimateBimSources([...host.savedRecords.current.values()])}
-      geometry={geometry}
+      canAdoptResults={!host.shared}
+      publication={host.shared ? undefined : estimateWorkPublication(() => latest.current, port)}
+      sources={host.shared ? [] : estimateSources([...host.savedRecords.current.values()])}
+      quantitySources={host.shared ? [] : estimateCadSources([...host.savedRecords.current.values()])}
+      bimSources={host.shared ? [] : estimateBimSources([...host.savedRecords.current.values()])}
+      geometry={host.shared ? undefined : geometry}
       registerInput={registerInput}
       save={async () => {
-        const before = host.savedRecords.current.get(host.active.id)?.versions.length ?? 0;
+        const versionCount = () =>
+          host.sharedSession?.savedVersions.length ??
+          host.savedRecords.current.get(host.active.id)?.versions.length ??
+          0;
+        const before = versionCount();
         await host.saveVersion();
-        if ((host.savedRecords.current.get(host.active.id)?.versions.length ?? 0) <= before)
+        if (versionCount() <= before)
           throw Error('保存できませんでした。内容を保持して再試行してください。');
       }}
       history={(direction) => host.history(direction)}
@@ -106,10 +121,8 @@ function PlaygroundEstimate({
 export function estimateSurface(geometry: GeometryQuantitySources | undefined) {
   return hostKind(estimateKind, {
     Surface: ({ host }) => <PlaygroundEstimate host={host} geometry={geometry} />,
-    session: 'local',
-    hooks: {
-      sharedSessions: false,
-      comments: false,
+      hooks: {
+        comments: false,
     },
   });
 }

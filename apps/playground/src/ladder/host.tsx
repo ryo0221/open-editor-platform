@@ -1,9 +1,10 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { LadderController, LadderSurface } from '@editor-platform/ladder';
 import '@editor-platform/ladder/style.css';
 import type { LadderDocument } from '@editor-platform/ladder-core';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import type { StoredArtifact } from '../model';
 
 /**
@@ -18,7 +19,7 @@ export default function LadderHost({
   persist,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<LadderDocument>;
+  session: EditorDraftPort<LadderDocument>;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: LadderDocument): void;

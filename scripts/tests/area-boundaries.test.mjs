@@ -34,6 +34,16 @@ test('a crossing is reported, and a resolved known crossing too', () => {
     ['document -> cad-core'],
   );
   assert.deepEqual(result.resolved, ['cad-core -> slide']);
+
+  manifest('collaboration-adapters', {
+    '@editor-platform/cad-core': '*',
+    '@editor-platform/collaboration-office': '*',
+  });
+  manifest('templates', { '@editor-platform/collaboration-adapters': '*' });
+  assert.deepEqual(areaCrossings(dir).map((entry) => entry.edge), [
+    'document -> cad-core',
+    'templates -> collaboration-adapters',
+  ]);
 });
 
 test('office kinds import no engineering code', () => {
@@ -55,6 +65,7 @@ test('an office kind importing engineering code is reported', () => {
     'apps/host/src/kinds/office/estimate.tsx',
     [
       "import type { CadDocument } from '@editor-platform/cad-core';",
+      "import { nativeEditorCodecs } from '@editor-platform/collaboration-adapters';",
       "import { storage } from '../../app/records';",
       "import { playgroundEstimateGeometry } from '../../app/estimate-bim';",
       "import { cadDefinition } from '../engineering';",
@@ -70,6 +81,7 @@ test('an office kind importing engineering code is reported', () => {
   assert.deepEqual(officeKindImports(dir), [
     'apps/host/src/kinds/office.ts -> @editor-platform/cad/kind',
     'apps/host/src/kinds/office/estimate.tsx -> @editor-platform/cad-core',
+    'apps/host/src/kinds/office/estimate.tsx -> @editor-platform/collaboration-adapters',
     'apps/host/src/kinds/office/estimate.tsx -> ../../app/estimate-bim',
     'apps/host/src/kinds/office/estimate.tsx -> ../engineering',
     'apps/host/src/kinds/office/estimate.tsx -> ../engineering/cad',

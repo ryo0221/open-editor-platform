@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Dialog } from '@editor-platform/editor-ui';
 import { clone } from '@editor-platform/artifact-core';
-import type { SharedEditorSession } from '@editor-platform/collaboration-adapters';
+import type { SharedEditorSession } from '@editor-platform/collaboration-office';
 import {
   TemplateCatalog,
   type StructureLayout,

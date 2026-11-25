@@ -1,4 +1,6 @@
-import type { EditorCommand, EditorSession } from '@editor-platform/editor-core';
+import { useEditorDraftPort } from '../editor-draft-port';
+import type { GeoDocument } from '@editor-platform/geo-core';
+import type { EditorCommand } from '@editor-platform/editor-core';
 import { geoKind } from '@editor-platform/geo-inspector/kind';
 import { editedDraft } from '../../app/records';
 import { GeoSurface } from '../../geo/surface';
@@ -9,20 +11,30 @@ import { validateGeoRecord } from '../../geo/resources';
 
 function GeoHost({ host }: { host: SurfaceHost }) {
   const { active, savedRecords, readOnly } = host;
+  const session = useEditorDraftPort<GeoDocument>(host);
   return (
     <GeoSurface
       artifact={active}
-      session={host.session as EditorSession<Content>}
+      session={session}
+      shared={host.shared}
+      guardExport={host.exportGuard}
       inputs={host.inputs}
       readOnly={readOnly}
       records={[...savedRecords.current.values()]}
       saved={() => {
-        const a = savedRecords.current.get(active.id);
+        const a = host.shared ? active : savedRecords.current.get(active.id);
         if (!a) throw Error('Geo artifact not saved');
         return a;
       }}
       execute={(cmd, resources, dataInputs) => {
         if (readOnly) return false;
+        if (host.shared) {
+          if (resources?.length || dataInputs?.length) {
+            host.setError('共同編集中は元データや他の成果物を読み込めません。');
+            return false;
+          }
+          return host.execute(cmd);
+        }
         try {
           const s = host.sessions.current.get(active.id)!,
             a = latestRecord(host)!;
@@ -46,9 +58,7 @@ function GeoHost({ host }: { host: SurfaceHost }) {
 
 export const geoSurface = hostKind(geoKind, {
   Surface: GeoHost,
-  session: 'local',
   hooks: {
-    sharedSessions: false,
     beforeVersion: validateGeoRecord,
     // Geo resource admission keeps strict identity checks on every version.
     strictCapture: true,

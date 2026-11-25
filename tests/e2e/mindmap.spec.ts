@@ -15,6 +15,68 @@ async function addChild(page: Page, parent: string, name: string) {
   await expect(node(page, name)).toBeVisible();
 }
 
+test('two Mind Map editors share branches, keep conflicting input and undo their own edits', async ({
+  page: a,
+  browser,
+  baseURL,
+}) => {
+  const peerContext = await browser.newContext({ baseURL });
+  try {
+    await a.goto('/');
+    await create(a, 'mindmap');
+    await addChild(a, '中心のテーマ', '市場');
+    await addChild(a, '中心のテーマ', '顧客');
+    const menu = a.getByRole('button', { name: 'More artifact actions', exact: true });
+    await menu.click();
+    await a.getByRole('button', { name: 'Open collaboratively', exact: true }).click();
+    await expect(a.locator('.save-status')).toContainText('Shared · confirmed');
+    await menu.click();
+    const peer = await a.getByRole('link', { name: 'Open peer editor' }).getAttribute('href');
+    expect(peer).toBeTruthy();
+    await a.keyboard.press('Escape');
+    const b = await peerContext.newPage();
+    const peerErrors: string[] = [];
+    b.on('pageerror', (error) => peerErrors.push(error.message));
+    await b.goto(peer!);
+    await expect(b.locator('.save-status')).toContainText('Shared · confirmed');
+    const name = (page: Page) => surface(page).getByLabel('名前', { exact: true });
+    const apply = (page: Page) => surface(page).getByRole('button', { name: '適用', exact: true });
+
+    await node(a, '市場').click();
+    await node(b, '顧客').click();
+    await expect(node(a, '顧客').locator('.mindmap-peer')).toBeVisible();
+    await Promise.all([name(a).fill('新市場'), name(b).fill('新顧客')]);
+    await Promise.all([apply(a).click(), apply(b).click()]);
+    await expect(node(a, '新顧客')).toBeVisible();
+    await expect(node(b, '新市場')).toBeVisible();
+    await a.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(node(b, '新市場')).toHaveCount(0);
+    await expect(node(b, '市場')).toBeVisible();
+    await expect(node(a, '新顧客')).toBeVisible();
+
+    await node(b, '市場').click();
+    await name(b).fill('残す入力');
+    await node(a, '市場').click();
+    await name(a).fill('採用した名前');
+    await apply(a).click();
+    await expect(node(b, '採用した名前')).toBeVisible();
+    await apply(b).click();
+    await expect(surface(b).getByRole('status')).toContainText('入力を保持しています');
+    await expect(name(b)).toHaveValue('残す入力');
+    await expect(a.locator('.save-status')).toContainText('Shared · confirmed');
+    await a.getByRole('button', { name: 'Save version', exact: true }).click();
+    await a
+      .getByRole('dialog', { name: 'Save immutable version', exact: true })
+      .getByRole('button', { name: 'この版を保存', exact: true })
+      .click();
+    await a.getByRole('button', { name: 'History and compare', exact: true }).click();
+    await expect(a.getByRole('tab', { name: 'History (1)', exact: true })).toBeVisible();
+    expect(peerErrors).toEqual([]);
+  } finally {
+    await peerContext.close();
+  }
+});
+
 test('create a Mind Map, grow branches, edit fields, Undo, export and compare versions', async ({
   page,
 }) => {

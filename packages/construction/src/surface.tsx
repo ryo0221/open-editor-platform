@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { EditorExportGuardContext } from '@editor-platform/editor-ui';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import {
   BimEvaluator,
@@ -695,7 +696,14 @@ export function ConstructionSurface({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   /** True (and says so) while a form holds unsaved input the file would leave out. */
+  const guardExport = useContext(EditorExportGuardContext);
   const formsHeld = () => {
+    try {
+      guardExport?.();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+      return true;
+    }
     if (recordingNow.current) {
       setError('A video is being recorded: wait for it, or cancel it, first.');
       return true;

@@ -18,7 +18,14 @@ import {
   type SlideContent,
   type SlideMotionOperation,
 } from '@editor-platform/slide/model';
-import { createData, addRow, setCell, removeColumn } from '@editor-platform/structured-data/model';
+import {
+  createData,
+  addRow,
+  setCell,
+  removeColumn,
+  setRowRefs,
+  type StructuredData,
+} from '@editor-platform/structured-data/model';
 import { deleteRows, updateColumn } from '@editor-platform/structured-data/views';
 import { command, transaction } from '@editor-platform/editor-core';
 import {
@@ -524,6 +531,39 @@ describe('normal editor prepared domain transactions', () => {
     )!;
     expect(op.actions.every((a) => a.type === 'canvas.text-steps')).toBe(true);
     expect(authority.commit(A, op).status).toBe('accepted');
+  });
+  it('shares a row reference change and merges it with an independent cell edit', () => {
+    const d: StructuredData = {
+      schemaVersion: 3,
+      columns: [
+        { id: 'fcId', name: '故障原因の ID', type: 'text' },
+        { id: 'cause', name: '故障原因', type: 'text' },
+      ],
+      rows: [
+        { id: 'r1', values: { fcId: 'FC-01', cause: '接点の溶着' } },
+        { id: 'r2', values: { fcId: 'FC-02', cause: '感知の遅れ' } },
+      ],
+      items: [
+        { kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['refs.causeCandidates'] },
+      ],
+    };
+    const authority = new Authority(dataEditorCodec, initial('refs', dataEditorCodec, d)),
+      state = authority.snapshot();
+    const pick = prepareEditorCommand(
+      dataEditorCodec,
+      state,
+      A,
+      setRowRefs('r1', 'causeCandidates', ['CC-01']),
+    )!;
+    const edit = prepareEditorCommand(dataEditorCodec, state, B, setCell('r2', 'cause', '遅れ'))!;
+    expect(authority.commit(B, edit).status).toBe('accepted');
+    expect(authority.commit(A, pick).status).toBe('accepted');
+    const rows = authority.snapshot().content.rows;
+    expect(rows[0].refs).toEqual({ causeCandidates: ['CC-01'] });
+    expect(rows[1].values.cause).toBe('遅れ');
+    expect(authority.undo(A, pick.operationId).status).toBe('accepted');
+    expect(authority.snapshot().content.rows[0].refs).toBeUndefined();
+    expect(authority.snapshot().content.rows[1].values.cause).toBe('遅れ');
   });
   it('independent Data cells merge while an invalid multi-cell transaction is atomic', () => {
     let d = createData();

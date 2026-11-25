@@ -22,12 +22,73 @@ input and scoped geometry dependencies, with explicit regression evidence.
 | Data cells/Form/Kanban edits, rectangular paste, row insertion/deletion/reorder                                          | Grid keyboard/editors/paste/context, Form Save, Kanban move                  | Per-row/per-column cell resources; atomic multi-cell transaction; type/formula/read-only/schema validation               | EI-Q07; editor-transactions/editor-domains; existing Data tests |
 | Data column name/type/default/required/options/formula/format/order and named view save/delete                           | Field/schema menus, headers, view panel                                      | Schema dependency guards; invalid formulas/refs/types reject; named view values are shared                               | EI-Q07; editor-domains; existing Data tests                     |
 | Data active projection/search/filter/sort/group/chart settings before Save view; canvas camera/page/tool/panels          | View controls, page/outline rails, zoom/pan and panels                       | Private view state; explicit named view Save is the shared mutation                                                      | EI-Q05/07/13/14                                                 |
+| Mind Map branch fields, tree layout, add, delete, move and reorder | Mind Map canvas, branch panel and keyboard | Branch fields and child order use separate resources. The authority checks the entire tree and authorization for affected branches. Branch selection follows stable IDs. | mindmap unit tests, mindmap.spec.ts |
+| Schedule events, time range, notes, conference preference and default zone | Calendar, event details and keyboard | Independent event fields use separate resources. A time range, zone and DST fold are one value. Data reference lanes require a separate Host policy. | schedule unit tests |
 | Review/File add annotation/reply/resolve/reopen                                                                          | Side/line/page/region selection, comments panel                              | Shared threads; fixed source/version/side/page/region anchors; source bytes/content remain immutable                     | EI-Q08; #3 fixed-anchor and #2 PDF/image/review tests           |
 | Save/version history/restore/native and format export                                                                    | Header, Ctrl/Cmd+S, History, export menus                                    | Confirmed immutable versions; conditional restore; no remote snapshot Undo; ordinary exports omit sync/auth/presence     | EI-Q10/12; recovery tests                                       |
 | Human/agent/template operations, preview/apply/reject/cancel/retry                                                       | Public prepare/text API, normal preview panel, reference C demo              | Same checked operation boundary, reads/stamps/token, idempotent apply, explicit new proposal after dependency conflict   | EI-Q02/09/11; #3 proposal unit tests                            |
 | Read-only/revoked/expired writes, disconnect/reload/lost ack                                                             | All commands, text, shortcuts, proposals, assets, Undo and save              | Current trusted principal checked on commit; pending/rejected retained; same ID receipt recovery                         | EI-Q11/12; recovery/text/foundation tests                       |
 
 ## Capability states
+
+The Playground reference Host connects these engineering and 3D surfaces:
+
+| Surface | Shared draft | Source or output handling |
+| --- | --- | --- |
+| Drawing | Sheet settings, title blocks, revision entries and sheet annotations | CAD/BIM projections and issued PDFs use the local workflow. |
+| PCB | Single-board outline, pads, components, nets, tracks, vias and zones | Board stacking and the schematic import workflow stay local. Fabrication export waits for a confirmed draft. |
+| Construction | Task dates, dependencies, progress, calendar and site settings | The initial BIM version stays fixed. Participants render the building from their own exact saved version or retained snapshot. |
+| Factory | Line objects, links, layout and run settings for a self-contained model | CAD/BIM appearances stay local. Each participant runs their own simulation. |
+| CoSim | Binding settings for the selected circuit and ladder versions | The source pointers stay fixed. Participants load the exact saved inputs independently. A change to the binding list conflicts with a competing change to that list. |
+| CAD | Native part parameters, profiles, sketches and features; part properties and named views | Recipe changes use a common conflict stamp. The reference authority validates the native recipe; each participant evaluates geometry using their installed kernel. Imported geometry, part assemblies, textures and underlays use local editing. |
+| BIM | Levels, grids, materials, building elements, joins, property sets and views | Buildings with placed CAD parts or texture sidecars use local editing. Geometry evaluation is local. |
+| Character | Part display and transforms, materials, pose, and action/keyframe editing with existing mesh and rig topology | A registered Host project can deliver pinned meshes and textures to authorized viewers. Local projects resolve bytes from the participant’s library. New asset import, topology changes and external props use local editing. Competing edits to one action's tracks conflict. |
+| Simulation | Materials, loads, constraints, studies, preparation and mesh settings | The source CAD version and native schema stay fixed. Masses, bonds, spot welds and seals can be added in a schema 2 session. Each participant resolves the source locally. Solver runs and their results stay in the running browser; remote compute and recording runs in the draft are unavailable. |
+
+The reference Host sends the engineering document and pinned identifiers. BIM, circuit,
+ladder, and CAD source documents are resolved locally. A participant
+without required Character or Simulation resources can synchronize the draft but cannot export
+an incomplete native file. Character GLB and frame exports also use the shared export guard.
+
+### Video timeline and original media
+
+The development Playground Library links to the Video collaboration demo. The reference
+server creates a native v3 timeline from a synthetic fixture. Participant A then shares
+an invite link for participant B. The timeline supports moving linked clips, independent
+trim, linked split and caption text edits. Stable clip IDs and link-group membership
+supply operation preconditions. Edits to separate clips can commit independently. Conflicts
+retain the user's input for review. Undo and Redo apply to the actor and session that issued
+the change. Save creates a version of the confirmed timeline in the in-memory reference server.
+
+The public `nativeEditorCodecs` registry covers the 27 Playground kinds. Hosts can install their own admitted graph profiles with `createStructuredGraphEditorCodec`. Video uses `createVideoTimelineCodec` with the registered project’s pinned content.
+
+The generated demo keeps synthetic sources. For a registered native v3 project, the Host
+loads the saved timeline and authenticates each session. A saved project can open the shared
+timeline from the private Video editor when the Host enables `VITE_HOSTED_VIDEO=1`.
+The handoff checks the saved content hash and generation. Editing fixes the source set, track
+settings, locked clips and embedded Animation content for the session. The private editor
+continues to handle file import and rendered movie export. A Host can similarly enable
+`VITE_HOSTED_CHARACTER=1` for registered Character projects.
+
+The reference server accepts `projects` and `media` adapters from a trusted Host.
+`GET` and `HEAD /collaboration-api/editor/media` resolve an asset of an exact shared
+generation/revision or saved version. The Host checks the viewer's current access to the
+destination and either current access to the source or a valid release for this version,
+destination and viewer. A cookie or other authenticated credential identifies the viewer.
+An invite URL and a demo actor label confer no media rights. The reader verifies length and
+SHA-256 before serving, checks access again during transfers and supports single byte ranges.
+Responses use private, no-store caching. Video and Character recheck open media and remove
+the preview on loss of access. Bytes already received by a viewer cannot be recalled.
+
+The reference service keeps shared projects and versions in memory. Its browser tests supply
+two authenticated test viewers, an actual WebM, and a native Character mesh. Production Hosts
+supply durable project/version lookup, authentication, source permissions and release terms.
+
+Mind Map and Schedule use the existing native JSON and the reference Host's shared
+session. Mind Map names are applied as complete field values. A conflict keeps
+unapplied input in the branch panel. Zoom and folding are private. For Schedule,
+display navigation is private and the draft or saved history with Data reference lanes
+is refused before sharing. Undo and save use the confirmed shared history.
 
 An opt-in Slide Host can use the [shared reference contract](shared-slide-references.md)
 to validate, show and edit retained image references and value/figure citations.

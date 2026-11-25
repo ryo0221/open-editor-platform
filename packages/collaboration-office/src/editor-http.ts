@@ -40,6 +40,7 @@ export class HttpEditorAdapter<T> extends HttpSyncAdapter<T> implements EditorHo
   }
 }
 export interface EditorConnectionCredentials {
+  generation?: string;
   token: string;
   identity: Identity;
   name: string;

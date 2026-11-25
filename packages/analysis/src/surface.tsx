@@ -31,6 +31,7 @@ import {
 import { type AnalysisSourceOption } from './sources';
 export interface AnalysisSurfaceProps {
   port: AnalysisPort;
+  canAdoptResults?: boolean;
   sources: AnalysisSourceOption[];
   worker?: AnalysisWorkerFactory;
   registerInput?(boundary: EditorInputBoundary): () => void;
@@ -442,6 +443,7 @@ export function AnalysisSurface(props: AnalysisSurfaceProps) {
       <header>
         <h2>{document.title}</h2>
         <p>保存したDataの版に固定して計算します。新版は試算・確認後に採用します。</p>
+        {props.canAdoptResults === false && <p>共同編集中は入力を編集できます。計算結果は単独編集で採用できます。</p>}
         <div
           className="analysis-actions"
           // Keep the native input focused until the action flushes its registered boundary.
@@ -449,7 +451,7 @@ export function AnalysisSurface(props: AnalysisSurfaceProps) {
           onMouseDown={(event) => event.preventDefault()}
         >
           <button
-            disabled={readOnly || busy}
+            disabled={readOnly || busy || props.canAdoptResults === false}
             onClick={() =>
               void attempt(async () => {
                 setBusy(true);

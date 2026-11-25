@@ -1,19 +1,16 @@
+import { graphProfiles } from './app/graph-templates';
+import { readNovelChapters } from './app/novel-workspace';
 import { useEffect, useState } from 'react';
 import type { PrivateVideoEntry } from './private-video/catalog';
-import { createArtifact } from '@editor-platform/artifact-core';
-import { type DomainCodec, type Operation } from '@editor-platform/collaboration-core';
+import { createArtifact, contentHash } from '@editor-platform/artifact-core';
+import { Conflict, type DomainCodec, type Operation } from '@editor-platform/collaboration-core';
 import {
+  nativeEditorCodecs,
   HttpEditorAdapter,
   SharedEditorSession,
-  slideEditorCodec,
-  designEditorCodec,
-  whiteboardEditorCodec,
-  dataEditorCodec,
-  documentEditorCodec,
-  reviewCodec,
-  fileCodec,
-  reactUiEditorCodec,
-  animationEditorCodec,
+  mangaEditorCodec,
+  checksSharedNativeHistory,
+  createStructuredGraphEditorCodec,
   annotationsToThreads,
   editorAssetCodec,
   type EditorConnectionCredentials,
@@ -27,17 +24,11 @@ import {
   type Kind,
   type StoredArtifact,
 } from './model';
-const codecs = {
-  'react-ui': reactUiEditorCodec,
-  animation: animationEditorCodec,
-  slide: slideEditorCodec,
-  design: designEditorCodec,
-  whiteboard: whiteboardEditorCodec,
-  data: dataEditorCodec,
-  document: documentEditorCodec,
-  review: reviewCodec,
-  file: fileCodec,
-};
+const codecs = { ...nativeEditorCodecs, 'structured-graph': createStructuredGraphEditorCodec(graphProfiles) };
+function supportsSharedKind(kind: Kind): kind is keyof typeof codecs {
+  return Object.hasOwn(codecs, kind);
+}
+
 class ReferenceEditorAdapter extends HttpEditorAdapter<Content> {
   dropNextAcknowledgement = false;
   async submit(op: Operation) {
@@ -56,27 +47,14 @@ async function connect(
   domain: Kind,
   actor: 'A' | 'B' | 'C',
   initial?: StoredArtifact,
+  chapterView = false,
+  onRevoked?: () => void,
+  generation?: string,
 ) {
-  if (
-    domain === 'fiction-map' ||
-    domain === 'structured-graph' ||
-    domain === 'analysis' ||
-    domain === 'estimate' ||
-    domain === 'geo' ||
-    domain === 'schedule' ||
-    domain === 'cad' ||
-    domain === 'bim' ||
-    domain === 'character' ||
-    domain === 'simulation' ||
-    domain === 'construction' ||
-    domain === 'pcb' ||
-    domain === 'schematic' ||
-    domain === 'ladder' ||
-    domain === 'cosim' ||
-    domain === 'drawing' ||
-    domain === 'factory' ||
-    domain === 'mindmap'
-  )
+  const hosted = domain === 'character' && artifactId.startsWith('host-character-');
+  const novelChapter =
+    domain === 'document' && (chapterView || !!(initial && readNovelChapters(artifactId)));
+  if (!supportsSharedKind(domain))
     throw new Error('This domain is local-only; shared editing is not supported');
   if (initial && hasUnsupportedSharedAnimation(initial))
     throw new Error(
@@ -85,10 +63,23 @@ async function connect(
   const codec = editorAssetCodec(codecs[domain] as DomainCodec<Content>);
   const reason = codec.unsupportedContentReason?.(initial?.draft.content);
   if (reason) throw new Error(reason);
+  if (domain === 'geo' && (initial?.geoResources?.length || initial?.geoDataInputs?.length))
+    throw new Error('元データを保持している地図は共同編集を開始できません。');
+  const initialContent = initial?.draft.content;
+  const manga = domain === 'design' && mangaEditorCodec.validate(initialContent) && initialContent.pagination;
+  if (checksSharedNativeHistory(domain) || manga) {
+    for (const version of initial?.versions ?? []) {
+      if (!codec.validate(version.content))
+        throw new Error(
+          codec.unsupportedContentReason?.(version.content) ??
+            '共同編集に対応していない保存版が含まれています。',
+        );
+    }
+  }
   const storageKey = `ep-shared-host:${artifactId}:${actor}`;
   let credentials: EditorConnectionCredentials | undefined;
   try {
-    credentials = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') ?? undefined;
+    if (!hosted) credentials = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') ?? undefined;
   } catch {
     /* missing credential */
   }
@@ -110,7 +101,9 @@ async function connect(
         actor,
         artifactId,
         domain,
-        ...(initial
+        ...(hosted && generation ? { generation } : {}),
+        ...(hosted && initial ? { expectedSeedHash: await contentHash(initial.draft.content) } : {}),
+        ...(!hosted && initial
           ? {
               initial: {
                 name: initial.name,
@@ -131,7 +124,7 @@ async function connect(
     if (!result) throw new Error(unavailable);
     if (!response.ok) throw new Error(result.error ?? unavailable);
     credentials = result;
-    sessionStorage.setItem(storageKey, JSON.stringify(credentials));
+    if (!hosted) sessionStorage.setItem(storageKey, JSON.stringify(credentials));
   }
   const adapter = new ReferenceEditorAdapter(
     credentials.identity,
@@ -142,12 +135,12 @@ async function connect(
   );
   const session = new SharedEditorSession(codec, adapter);
   const checkpointKey = `ep-shared-pending:${artifactId}:${actor}`;
-  const recovery = await ReferenceRecoveryStore.open<ReturnType<typeof session.checkpoint>>(
+  const recovery = hosted ? undefined : await ReferenceRecoveryStore.open<ReturnType<typeof session.checkpoint>>(
     checkpointKey,
     sessionStorage,
   );
   try {
-    const checkpoint = await recovery.load();
+    const checkpoint = await recovery?.load();
     if (checkpoint !== undefined) {
       try {
         session.resume(checkpoint);
@@ -160,7 +153,7 @@ async function connect(
     await session.open();
     if (session.pendingCount) await session.reconnect();
   } catch (error) {
-    recovery.close();
+    recovery?.close();
     // All input came from the checkpoint still retained on disk. No live session
     // was exposed: detach resources without overwriting a failed/foreign recovery.
     session.suspend(() => {});
@@ -170,21 +163,27 @@ async function connect(
     ...createArtifact(domain, credentials.name, session.content),
     id: artifactId,
     annotations: [],
+    ...((!hosted && domain === 'character' && initial?.cadResources) ? { cadResources: initial.cadResources } : {}),
+    ...((domain === 'simulation' && initial?.simulationSources) ? { simulationSources: initial.simulationSources } : {}),
   };
   const params = new URLSearchParams({
     shared: artifactId,
     kind: domain,
-    actor: actor === 'B' ? 'A' : 'B',
+    ...(hosted ? { generation: credentials.generation! } : { actor: actor === 'B' ? 'A' : 'B' }),
+    ...(novelChapter ? { workspace: 'novel' } : {}),
   });
   const connection: SharedPlaygroundConnection = {
     session,
     record,
     peerUrl: `/?${params}`,
+    ...(hosted && credentials.generation ? { mediaUrl: (assetId, version = {revision: session.confirmed.revision}) =>
+      '/collaboration-api/editor/media?' + new URLSearchParams({ artifactId, assetId, ...('versionId' in version ? {versionId: version.versionId} : {generation: credentials!.generation!, revision: String(version.revision)}) }) } : {}),
+    novelChapter,
     leave: () => {
       stop();
       window.location.assign('/');
     },
-    hostActions: [
+    hostActions: hosted ? [] : [
       {
         label: 'Pause transport (reference)',
         run: () => {
@@ -257,7 +256,7 @@ async function connect(
   const retain = async () => {
     const revision = session.recoveryRevision;
     if (revision === retainedRevision) return;
-    await recovery.write(session.captureCheckpoint());
+    await recovery?.write(session.captureCheckpoint());
     retainedRevision = revision;
     if (!stopped && recoveryError && session.error === recoveryError) {
       session.error = '';
@@ -297,6 +296,11 @@ async function connect(
       .sync()
       .catch((error) => {
         if (stopped) return;
+        if (hosted && error instanceof Conflict && error.code === 'unauthorized') {
+          stop();
+          onRevoked?.();
+          return;
+        }
         session.error = String(error);
         session.client.status = 'disconnected';
         session.onChange();
@@ -316,7 +320,7 @@ async function connect(
   const beforeUnload = (event: BeforeUnloadEvent) => {
     let failed = false;
     try {
-      if (session.recoveryRevision !== retainedRevision) recovery.retainSync(session.checkpoint());
+      if (session.recoveryRevision !== retainedRevision) recovery?.retainSync(session.checkpoint());
     } catch (error) {
       failed = true;
       reportRecoveryError(error);
@@ -329,15 +333,16 @@ async function connect(
   window.addEventListener('beforeunload', beforeUnload);
   function stop() {
     if (stopped) return;
-    session.suspend((checkpoint) => recovery.retainSync(checkpoint));
+    session.suspend((checkpoint) => recovery?.retainSync(checkpoint));
     stopped = true;
     cancelPreparation?.();
     clearInterval(timer);
     window.removeEventListener('beforeunload', beforeUnload);
-    recovery.close();
+    recovery?.close();
   }
   return {
     connection,
+    generation: credentials.generation,
     stop,
   };
 }
@@ -365,7 +370,11 @@ export function ReferencePlayground({
     }
     let disposed = false,
       stop: (() => void) | undefined;
-    void connect(id, kind, params.get('actor') === 'B' ? 'B' : 'A')
+    void connect(
+      id, kind, params.get('actor') === 'B' ? 'B' : 'A', undefined, params.get('workspace') === 'novel',
+      () => { setShared(undefined); setError('この成果物の閲覧権限がありません。'); },
+      params.get('generation') ?? undefined,
+    )
       .then((result) => {
         if (disposed) {
           result.stop();
@@ -389,7 +398,7 @@ export function ReferencePlayground({
     return (
       <main>
         <p role="alert">{error}</p>
-        <button
+        {!new URLSearchParams(location.search).get('shared')?.startsWith('host-character-') && <button
           onClick={() => {
             void downloadRecoveryEntries(sessionStorage)
               .then((data) => {
@@ -406,7 +415,7 @@ export function ReferencePlayground({
           }}
         >
           Download retained checkpoints
-        </button>
+        </button>}
         <a href="/">Return to local library</a>
       </main>
     );
@@ -418,10 +427,17 @@ export function ReferencePlayground({
       onOpenPrivateEditor={onOpenPrivateEditor}
       shared={shared}
       onStartShared={async (record) => {
-        const result = await connect(record.id, record.kind as Kind, 'A', record);
+        const artifactId = import.meta.env.VITE_HOSTED_CHARACTER === '1' && record.kind === 'character'
+          ? 'host-character-' + record.id : record.id;
+        const result = await connect(artifactId, record.kind as Kind, 'A', record);
         result.stop();
         window.location.assign(
-          `/?${new URLSearchParams({ shared: record.id, kind: record.kind, actor: 'A' })}`,
+          `/?${new URLSearchParams({
+            shared: artifactId,
+            kind: record.kind,
+            ...(result.generation ? {generation: result.generation} : {actor: 'A'}),
+            ...(result.connection.novelChapter ? { workspace: 'novel' } : {}),
+          })}`,
         );
       }}
     />

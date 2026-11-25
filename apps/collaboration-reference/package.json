@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/character-core": "*",
     "@editor-platform/collaboration-adapters": "*",
-    "@editor-platform/artifact-core": "*"
+    "@editor-platform/collaboration-core": "*",
+    "@editor-platform/playground": "*",
+    "@editor-platform/video-core": "*"
   }
 }

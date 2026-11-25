@@ -2,6 +2,7 @@
 export * from './time';
 export * from './model';
 export * from './validation';
+export { isVideoId } from './validation-core';
 export * from './commands';
 export * from './evaluate';
 export * from './media';

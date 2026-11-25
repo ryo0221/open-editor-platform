@@ -430,6 +430,7 @@ export function LibraryPanel({
           open={(id) => openPrivate(id, true)}
         />
       )}
+      {import.meta.env.DEV && !shared && <a href="/?videoCollaboration=new">動画の共同編集デモ</a>}
       <nav aria-label="Artifacts">
         {records.map((a) => (
           <button

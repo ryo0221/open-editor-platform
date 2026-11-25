@@ -82,6 +82,22 @@ export function cadClosure(record: StoredArtifact): Map<string, CadAssetRef> {
   return refs;
 }
 
+/** Resolve only the exact assets the Character already names, from this browser's library. */
+export function localCharacterResources(record: StoredArtifact, library: readonly StoredArtifact[]) {
+  const needed = cadClosure(record);
+  const found = new Map<string, CadResource>();
+  for (const local of [record, ...library]) {
+    if (local.kind !== 'character') continue;
+    for (const asset of local.cadResources ?? []) {
+      const id = key(asset.kind, asset.sha256);
+      const ref = needed.get(id);
+      if (ref && ref.byteLength === asset.byteLength && ref.mediaType === asset.mediaType && !found.has(id))
+        found.set(id, asset);
+    }
+  }
+  return [...found.values()];
+}
+
 export function encodeBytes(bytes: Uint8Array): string {
   let raw = '';
   for (let i = 0; i < bytes.length; i += 0x8000)

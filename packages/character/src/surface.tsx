@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -52,10 +53,10 @@ import {
   type Quat,
   type Vec3,
   exportGlb,
-  GltfExportError,
 } from '@editor-platform/character-core';
 import type { EditorSession } from '@editor-platform/editor-core';
 import {
+  EditorExportGuardContext,
   EditorLayout,
   IconButton,
   isTextInput,
@@ -205,8 +206,12 @@ export interface CharacterImportReport {
   /** VRM terms of use, shown as they are; the Host decides what they allow. */
   vrm?: { version: '0' | '1'; meta: Record<string, string> };
 }
+type CharacterSession = Pick<EditorSession<CharacterDocument>, 'content' | 'revision' | 'execute'> &
+  Partial<Pick<EditorSession<CharacterDocument>, 'canUndo' | 'canRedo' | 'undo' | 'redo' |
+    'historyEntries' | 'forgetOldestUndo'>>;
+
 export interface CharacterSurfaceProps {
-  session: EditorSession<CharacterDocument>;
+  session: CharacterSession;
   /** Asset bytes by asset ID, kept by the Host; checked against the document before use. */
   assets: ReadonlyMap<string, Uint8Array>;
   readOnly?: boolean;
@@ -330,17 +335,18 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const [exported, setExported] = useState<
     { name: string; losses: string[] } | { error: string }
   >();
+  const guardExport = useContext(EditorExportGuardContext);
   const exportFile = () => {
-    const content = session.content;
     try {
+      guardExport?.();
+      const content = session.content;
       const images = new Map([...decoded.images].map(([id, x]) => [id, x.bytes]));
       const out = exportGlb(content, decoded.meshes, images);
       const name = `${content.name.replace(/[\\/:*?"<>|\p{Cc}]+/gu, '_').trim() || 'character'}.glb`;
       props.onExport?.({ name, ...out });
       setExported({ name, losses: out.losses });
     } catch (e) {
-      if (!(e instanceof GltfExportError)) throw e;
-      setExported({ error: e.message });
+      setExported({ error: e instanceof Error ? e.message : String(e) });
     }
   };
   const prepared = useMemo(() => {
@@ -685,6 +691,12 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const exportFrames = async (settings: VideoSettings, kind: VideoKind) => {
     const view = viewport.current;
     if (!view || busy || videoAbort.current) return;
+    try {
+      guardExport?.();
+    } catch (e) {
+      setVideoReport({ error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     const shownDoc = display.doc;
     const meshes = display.meshes;
     const chosen = shownDoc.actions.find((a) => a.id === settings.actionId) ?? null;
@@ -957,7 +969,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const stroke = useRef<{
     pointerId: number;
     /** The document and cage it was started on: a stroke on another one is refused. */
-    session: EditorSession<CharacterDocument>;
+    session: CharacterSession;
     base: string;
     cage: EpmMesh;
     bone: string;
@@ -1107,7 +1119,7 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   }, [sculptShown, sculptMatrix, viewReady, sculptTool.matcap, sculptVisible]);
   const sculptStroke = useRef<{
     pointerId: number;
-    session: EditorSession<CharacterDocument>;
+    session: CharacterSession;
     base: string;
     sculpt: SculptSession;
     invert: boolean;
@@ -1669,17 +1681,17 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
   const currentSession = useRef(session);
   currentSession.current = session;
   const keepHistoryBudget = () => {
-    const drop = characterHistoryOverflow(session.historyEntries('undo'), [
+    const drop = characterHistoryOverflow((session.historyEntries?.('undo') ?? []), [
       session.content,
-      ...session.historyEntries('redo'),
+      ...(session.historyEntries?.('redo') ?? []),
     ]);
-    if (drop) session.forgetOldestUndo(drop);
+    if (drop) session.forgetOldestUndo?.(drop);
     // Bytes no content of the history names any more are not kept for it.
     const named = new Set<string>();
     for (const d of [
       session.content,
-      ...session.historyEntries('undo'),
-      ...session.historyEntries('redo'),
+      ...(session.historyEntries?.('undo') ?? []),
+      ...(session.historyEntries?.('redo') ?? []),
     ])
       for (const a of d.assets) named.add(a.sha256);
     for (const sha of [...staged.current.keys()]) if (!named.has(sha)) staged.current.delete(sha);
@@ -2157,8 +2169,8 @@ export function CharacterSurface(props: CharacterSurfaceProps) {
     const own = direction === 'undo' ? props.onUndo : props.onRedo;
     if (own) own();
     else if (direction === 'undo' ? session.canUndo : session.canRedo) {
-      if (direction === 'undo') session.undo();
-      else session.redo();
+      if (direction === 'undo') session.undo?.();
+      else session.redo?.();
     }
     refresh();
   };

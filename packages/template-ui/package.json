@@ -15,7 +15,7 @@
     "@editor-platform/design": "*",
     "@editor-platform/document": "*",
     "@editor-platform/structured-data": "*",
-    "@editor-platform/collaboration-adapters": "*",
+    "@editor-platform/collaboration-office": "*",
     "@editor-platform/collaboration-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/reuse-core": "*",

@@ -126,6 +126,20 @@ export const constructionSourceOf = (
   doc: ConstructionDocument,
 ) => record?.constructionSources?.find((p) => p.contentHash === doc.source.contentHash)?.content;
 
+export function sharedConstructionExport(record: StoredArtifact, library: readonly StoredArtifact[]) {
+  let exported = record;
+  for (const doc of roots(record)) {
+    const artifact = library.find(r => r.kind === 'bim' && r.id === doc.source.artifactId);
+    const saved = artifact?.versions.find(v => v.versionId === doc.source.versionId)?.content;
+    const retained = constructionSourceOf(record, doc) ?? constructionSourceOf(library.find(r => r.id === record.id), doc);
+    const source = retained ?? saved;
+    if (!isBimDocument(source) || bimContentHash(source) !== doc.source.contentHash)
+      throw new Error('書き出しに必要な建物の保存版がこの端末にありません。');
+    exported = stageConstructionSource(exported, source);
+  }
+  return portableConstructionRecord(exported);
+}
+
 /** A version save's record keeps every scheduled BIM version either side holds. */
 export function mergeConstructionSources(
   saved: Pick<StoredArtifact, 'constructionSources'>,

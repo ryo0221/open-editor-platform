@@ -4,6 +4,7 @@ import type { EditorSession } from '@editor-platform/editor-core';
 import { characterKind } from '@editor-platform/character/kind';
 import { editedDraft } from '../../app/records';
 import { hostKind, type HostSurfaceProps } from '../host-kind';
+import { useEditorDraftPort } from '../editor-draft-port';
 import { latestRecord } from '../surface-host';
 import { portableCadRecord, validateCadRecord } from '../../cad/resources';
 import { assertCharacterHistoryFits } from '../../character/import-fit';
@@ -11,18 +12,22 @@ import { assertCharacterHistoryFits } from '../../character/import-fit';
 const CharacterHost = lazy(() => import('../../character/host'));
 
 function CharacterSurface({ host }: HostSurfaceProps<CharacterDocument>) {
+  const draft = useEditorDraftPort<CharacterDocument>(host);
+  const shared = !!host.sharedSession;
   return (
     <Suspense fallback={<p className="empty-state">Loading Character…</p>}>
       <CharacterHost
-        session={
-          host.sessions.current.get(host.active.id) as unknown as EditorSession<CharacterDocument>
-        }
+        session={draft}
+        localSession={shared ? undefined : host.sessions.current.get(host.active.id) as unknown as EditorSession<CharacterDocument>}
+        shared={shared}
+        mediaUrl={host.mediaUrl}
         readOnly={host.readOnly}
         persist={(content) => {
+          if (shared) return;
           const latest = latestRecord(host);
           if (latest) host.persist(editedDraft(latest, content));
         }}
-        record={() => latestRecord(host)}
+        record={() => (shared ? host.active : latestRecord(host))}
         persistRecord={async (record) => (await host.persist(record)) !== false}
         records={() => host.recordsRef.current}
         history={host.history}
@@ -33,9 +38,7 @@ function CharacterSurface({ host }: HostSurfaceProps<CharacterDocument>) {
 
 export const characterSurface = hostKind(characterKind, {
   Surface: CharacterSurface,
-  session: 'local',
   hooks: {
-    sharedSessions: false,
     commentsButton: 'disabled',
     history({ session, direction, record }) {
       try {

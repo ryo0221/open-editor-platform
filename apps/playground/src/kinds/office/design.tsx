@@ -128,7 +128,9 @@ function DesignHost({ host, content }: HostSurfaceProps<KindContent<typeof desig
     workspace: 'design' | 'manga';
   }>();
   const workspace =
-    workspaceChoice?.id === active.id ? workspaceChoice.workspace : readMangaWorkspace(active.id);
+    workspaceChoice?.id === active.id
+      ? workspaceChoice.workspace
+      : readMangaWorkspace(active.id, host.shared && content.pagination ? 'manga' : 'design');
   const [inkFocus, setInkFocus] = useState<{ artifactId: string; id: string }>();
   const inkTools = useRef<DesignInkToolsControl>(null);
   const [rasterSelection, setRasterSelection] = useState<
@@ -171,10 +173,7 @@ function DesignHost({ host, content }: HostSurfaceProps<KindContent<typeof desig
           writeMangaWorkspace(active.id, workspace);
         }}
         pageReview={host.shared ? undefined : designPageReviewHost(latest, active.id)}
-        mangaReadOnlyReason={
-          host.shared ? '共有セッションでは漫画のページ編集に対応していません。' : undefined
-        }
-        inkInput={!host.shared}
+        inkInput={!host.shared || !!content.pagination}
         rasterInput={!host.shared}
         onRasterSelection={(selection) =>
           setRasterSelection({ ...selection, artifactId: active.id })
@@ -221,7 +220,7 @@ function DesignHost({ host, content }: HostSurfaceProps<KindContent<typeof desig
             ? '共有Hostはnative React公開設定を受け付けません。編集可能なローカル成果物で設定してください。'
             : undefined
         }
-        readOnly={readOnly || (host.shared && workspace === 'manga')}
+        readOnly={readOnly}
         execute={host.execute}
         select={host.select}
       />

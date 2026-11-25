@@ -8,11 +8,13 @@ import {
 import {
   prepareEditorCommand,
   slideEditorCodec,
-  designEditorCodec,
+  mangaEditorCodec,
   whiteboardEditorCodec,
   dataEditorCodec,
   documentEditorCodec,
   reactUiEditorCodec,
+  mindmapEditorCodec,
+  scheduleEditorCodec,
 } from '@editor-platform/collaboration-adapters';
 import { updateObject, type SlideContent } from '@editor-platform/slide/model';
 import { updateElement, type DesignContent } from '@editor-platform/design/model';
@@ -22,6 +24,10 @@ import { contentToNode, documentSchema } from '@editor-platform/document/engine'
 import type { DocumentContent } from '@editor-platform/document/model';
 import { Transform } from 'prosemirror-transform';
 import { reactUiCommand, type ReactUiDocument } from '@editor-platform/react-ui-core';
+
+import { colorMindmapNode, type MindmapContent } from '@editor-platform/mindmap-core';
+
+import { updateEventText, type ScheduleDocument } from '@editor-platform/schedule/model';
 
 /** Reference Host/Runtime only: no provider, prompt or agent behavior in Editor packages. */
 export function practicalProposal(snapshot: Snapshot<unknown>, identity: Identity): Proposal {
@@ -71,7 +77,7 @@ export function practicalProposal(snapshot: Snapshot<unknown>, identity: Identit
         state.content.elements.find((e) => e.type === 'frame') ?? state.content.elements[0];
       if (!target) throw new Error('Insert an element before requesting this proposal');
       op = prepareEditorCommand(
-        designEditorCodec,
+        mangaEditorCodec,
         state,
         identity,
         updateElement(target.id, { fill: color(target.fill) }),
@@ -104,6 +110,33 @@ export function practicalProposal(snapshot: Snapshot<unknown>, identity: Identit
         setCell(row.id, field.id, String(row.values[field.id] ?? '') + '／確認済み'),
       );
       summary = '先頭の課題名に確認結果を追記';
+      break;
+    }
+    case 'schedule': {
+      const state = snapshot as Snapshot<ScheduleDocument>;
+      const target = state.content.events[0];
+      if (!target) throw new Error('提案を確認するには予定を追加してください。');
+      op = prepareEditorCommand(
+        scheduleEditorCodec,
+        state,
+        identity,
+        updateEventText(target.id, {
+          title: target.title === '日程を確定' ? '日程を調整' : '日程を確定',
+        }),
+      );
+      summary = '先頭の予定の名前を変更';
+      break;
+    }
+    case 'mindmap': {
+      const state = snapshot as Snapshot<MindmapContent>;
+      const target = state.content.nodes[state.content.rootId];
+      op = prepareEditorCommand(
+        mindmapEditorCodec,
+        state,
+        identity,
+        colorMindmapNode(target.id, color(target.color ?? '')),
+      );
+      summary = '中心の枝の色を変更';
       break;
     }
     case 'document': {

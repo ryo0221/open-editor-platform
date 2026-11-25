@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cadContentHash, type CadDocument } from '@editor-platform/cad-core';
 import {
   resolveKernelBuild,
@@ -10,7 +10,6 @@ import KernelWorker from '@editor-platform/cad-kernel-occt/worker?worker';
 import type {
   EditorInputBoundary,
   EditorInputs,
-  EditorSession,
 } from '@editor-platform/editor-core';
 import {
   simulationContentHash,
@@ -31,7 +30,10 @@ import mesher from 'virtual:fem-mesher-build';
 import computeHost from 'virtual:simulation-compute-host';
 import '@editor-platform/simulation/style.css';
 import { cadKernel, cadKernels, type StoredArtifact } from '../model';
-import { simulationSourceOf, simulationVersionChoices, stageSimulationSource } from './source';
+import {
+  localSimulationSource, simulationSourceOf, simulationVersionChoices, stageSimulationSource,
+} from './source';
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 
 /**
  * The exact kernel build the analysed version names, from the Host's catalog (current or
@@ -200,6 +202,7 @@ function useSourceShape(
  */
 export default function SimulationHost({
   session,
+  shared,
   readOnly,
   inputs,
   record,
@@ -207,7 +210,8 @@ export default function SimulationHost({
   persist,
   persistRecord,
 }: {
-  session: EditorSession<SimulationDocument>;
+  session: EditorDraftPort<SimulationDocument>;
+  shared: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   record(): StoredArtifact | undefined;
@@ -220,9 +224,17 @@ export default function SimulationHost({
   // Re-read on every session revision (Host Undo/Redo, restore).
   const [, setTick] = useState(0);
   const doc = session.content;
-  const kept = simulationSourceOf(record(), doc);
+  const library = records();
+  const cad = library.find((r) => r.id === doc.source.artifactId);
+  const current = record();
+  const source = doc.source;
+  const sources = current?.simulationSources;
+  const currentId = current?.id;
+  const kept = useMemo(() => {
+    const record = currentId ? { id: currentId, simulationSources: sources } : undefined;
+    return shared ? localSimulationSource(source, record, library) : simulationSourceOf(record, { source });
+  }, [source, currentId, sources, shared, library]);
   const body = kept?.bodies.find((b) => b.id === doc.source.bodyId);
-  const cad = records().find((r) => r.id === doc.source.artifactId);
   const at = cad?.versions.findIndex((v) => v.versionId === doc.source.versionId) ?? -1;
   // The CAD Artifact may since be renamed, changed or deleted: the kept version still evaluates.
   const shape = useSourceShape(kept, doc.source.bodyId, body?.resultFeatureId);
@@ -261,7 +273,7 @@ export default function SimulationHost({
   const switchVersion = async (versionId: string) => {
     const choice = versionChoices.find((c) => c.versionId === versionId);
     const latest = record();
-    if (!choice || !latest) return 'The version is no longer available.';
+    if (shared || !choice || !latest) return 'The version is no longer available.';
     if (readOnlyNow.current) return 'The analysis is read only.';
     // Kept first, so the edit that names it is never saved without it.
     if (!(await persistRecord(stageSimulationSource(latest, choice.content))))
@@ -316,7 +328,7 @@ export default function SimulationHost({
             mesher: mesher.buildHash,
             solver: simulationSolverBuild,
           },
-    host: computeHost
+    host: !shared && computeHost
       ? {
           label: computeHost.label,
           destination: computeHost.destination,
@@ -381,7 +393,7 @@ export default function SimulationHost({
           moduleUrl: new URL(mesher.moduleUrl, location.href).href,
           wasmUrl: new URL(mesher.wasmUrl, location.href).href,
         },
-        ...(options?.onHost && computeHost
+        ...(!shared && options?.onHost && computeHost
           ? {
               compute: {
                 ...computeHost,
@@ -412,8 +424,9 @@ export default function SimulationHost({
       readOnly={readOnly}
       apply={apply}
       version={at >= 0 ? `v${at + 1}` : undefined}
-      versions={readOnly ? [] : versions}
-      switchVersion={switchVersion}
+      versions={readOnly || shared ? [] : versions}
+      switchVersion={shared ? undefined : switchVersion}
+      recordRuns={!shared}
       registerInput={registerInput}
       runner={runner}
     />

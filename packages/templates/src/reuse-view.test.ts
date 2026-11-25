@@ -6,7 +6,7 @@ import { Authority, initial, operation } from '@editor-platform/collaboration-co
 import {
   annotationsToThreads,
   threadsToAnnotations,
-} from '@editor-platform/collaboration-adapters';
+} from '@editor-platform/collaboration-office';
 import {
   createFile,
   originalBytes,

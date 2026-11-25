@@ -128,8 +128,8 @@ export function editorAssetCodec<T>(
           },
         }
       : {}),
-    mapAnchor: (anchor, content, action) =>
-      codec.mapAnchor?.(anchor, content, assets.decode(action, strict) as Action) ?? anchor,
+    mapAnchor: (anchor, content, action, after) =>
+      codec.mapAnchor?.(anchor, content, assets.decode(action, strict) as Action, after) ?? anchor,
   };
 }
 export function encodeEditorOperation<T>(codec: DomainCodec<T>, op: Operation): Operation {

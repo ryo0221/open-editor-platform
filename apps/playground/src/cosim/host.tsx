@@ -1,3 +1,4 @@
+import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { useEffect, useMemo, useRef } from 'react';
 import { canonicalJson } from '@editor-platform/artifact-core';
 import { CosimController, CosimSurface } from '@editor-platform/cosim';
@@ -5,7 +6,7 @@ import '@editor-platform/cosim/style.css';
 import type { CosimDocument } from '@editor-platform/cosim-core';
 import '@editor-platform/ladder/style.css';
 import '@editor-platform/schematic/style.css';
-import type { EditorInputs, EditorSession } from '@editor-platform/editor-core';
+import type { EditorInputs } from '@editor-platform/editor-core';
 import type { StoredArtifact } from '../model';
 import { createCosimSources } from './sources';
 
@@ -17,13 +18,15 @@ import { createCosimSources } from './sources';
 export default function CosimHost({
   artifact,
   session,
+  shared = false,
   readOnly,
   inputs,
   persist,
   records,
 }: {
   artifact: StoredArtifact;
-  session: EditorSession<CosimDocument>;
+  session: EditorDraftPort<CosimDocument>;
+  shared?: boolean;
   readOnly: boolean;
   inputs: EditorInputs;
   persist(content: CosimDocument): void;
@@ -42,14 +45,14 @@ export default function CosimHost({
       new CosimController({
         session,
         canEdit: () => !access.current,
-        sources: createCosimSources(() => recordsRef.current()),
+        sources: createCosimSources(() => recordsRef.current(), !shared),
         onApplied: (content) => {
           applied.current = canonicalJson(session.revision);
           persistRef.current(content);
         },
       }),
     // One controller per artifact: the Surface is keyed by it (kinds/host-kind.tsx).
-    [session],
+    [session, shared],
   );
   useEffect(() => controller.accessChanged(), [controller, readOnly]);
   // Edits apply at once, so nothing is pending for the Host's export and switch boundaries.

@@ -37,6 +37,7 @@ const EstimateBimPanel = lazy(() =>
 );
 export interface EstimateSurfaceProps {
   port: EstimatePort;
+  canAdoptResults?: boolean;
   /** Stable calculation scope identity. For document/session replacement, also remount
    * with a React key so private form/candidate state cannot cross sessions. */
   instanceKey?: object | string;
@@ -485,10 +486,11 @@ function Surface(props: Omit<EstimateSurfaceProps, 'statusRole'>) {
           KiB。置換は成功の採用時だけ行い、Undoできます。過去の結果を残すには先に保存してください。保存済み版は変更しません。
         </p>
         <div className="estimate-actions">
-          <button disabled={readOnly || busy} onClick={() => void attempt(() => execute(false))}>
+          {props.canAdoptResults === false && <p>共同編集中は入力を編集できます。計算結果は単独編集で採用できます。</p>}
+          <button disabled={readOnly || busy || props.canAdoptResults === false} onClick={() => void attempt(() => execute(false))}>
             計算して採用
           </button>
-          <button disabled={readOnly || busy} onClick={() => void attempt(() => execute(true))}>
+          <button disabled={readOnly || busy || props.canAdoptResults === false} onClick={() => void attempt(() => execute(true))}>
             試算して比較
           </button>
           <button

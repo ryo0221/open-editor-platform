@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { clone, deepFreeze } from '@editor-platform/artifact-core';
 import { command } from '@editor-platform/editor-core';
 import { Authority, initial, type Identity } from '@editor-platform/collaboration-core';
-import { prepareEditorCommand } from '@editor-platform/collaboration-adapters';
+import { prepareEditorCommand } from '@editor-platform/collaboration-office';
 import { exportSlideSvg, isDeck, type SlideContent } from '@editor-platform/slide/model';
 import {
   definitionRef,
