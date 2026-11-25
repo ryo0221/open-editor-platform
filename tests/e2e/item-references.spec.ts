@@ -22,7 +22,7 @@ test('AR2 FMEA の故障原因が特性要因図の原因の候補を選んで�
   await page.getByRole('button', { name: 'Save record', exact: true }).click();
   // 記録の欄に打ちかけのまま引用を選ぶと、打った値を先に確定してから引用を足す
   await page.getByLabel('Record 故障原因', { exact: true }).fill('接点の溶着');
-  const refs = page.getByRole('region', { name: 'refs.causeCandidates', exact: true });
+  const refs = page.getByRole('region', { name: '原因の候補', exact: true });
   await refs.getByRole('button', { name: '候補から選ぶ', exact: true }).click();
   await refs.getByRole('button', { name: /CC-01/ }).click();
   await expect(refs.getByRole('listitem').filter({ hasText: 'CC-01' })).toContainText(
@@ -122,10 +122,10 @@ test('AR2 FTA の基本事象で、適用していない属性の入力があっ
 async function fmeaForm(page: Page) {
   await activate(page, /DFMEA/);
   await page.getByLabel('Data projection', { exact: true }).selectOption('Form');
-  return page.getByRole('region', { name: 'refs.causeCandidates', exact: true });
+  return page.getByRole('region', { name: '原因の候補', exact: true });
 }
 
-test('AR3 保存と再読み込みで引用が残り、残した・権限なし・確かめられない・重複・見つからないの状態を、値を変えずに出す', async ({
+test('AR3 保存と再読み込みで引用が残り、残した・権限なし・確かめられない・引けない種類・重複・見つからないの状態を、値を変えずに出す', async ({
   page,
 }) => {
   await page.goto('/');
@@ -158,6 +158,11 @@ test('AR3 保存と再読み込みで引用が残り、残した・権限なし�
       { status: 'offline', reason: 'Host に届きません' },
       '確かめられない：Host に届きません',
     ],
+    [
+      'not-citable',
+      { status: 'not-citable', reason: '故障原因は原因の候補だけを引けます' },
+      '引けない種類：故障原因は原因の候補だけを引けます',
+    ],
   ];
   for (const [status, state, text] of shown) {
     await page.evaluate(
@@ -170,7 +175,13 @@ test('AR3 保存と再読み込みで引用が残り、残した・権限なし�
     await expect(item).toContainText(text);
     expect(await refsOf()).toEqual({ causeCandidates: ['CC-01'] });
   }
-  // 権限がない引用先は開けず、理由を出す
+  // 確かめられない引用先は開けず、理由を出す
+  await page.evaluate(
+    (s) => sessionStorage.setItem('ep-item-ref-states', JSON.stringify({ 'CC-01': s })),
+    { status: 'offline', reason: 'Host に届きません' },
+  );
+  await page.reload();
+  refs = await fmeaForm(page);
   await refs.getByRole('button', { name: 'CC-01 を開く', exact: true }).click();
   await expect(refs.getByRole('alert')).toHaveText('開けません：確かめられない：Host に届きません');
   await page.evaluate(() => sessionStorage.removeItem('ep-item-ref-states'));

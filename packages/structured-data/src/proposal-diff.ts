@@ -7,6 +7,7 @@ import {
   type SemanticChange,
 } from '@editor-platform/editor-core';
 import type { Column, DataRow, StructuredData } from './model';
+import { refFieldLabel } from './items';
 import { defaultView } from './views';
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
@@ -87,7 +88,7 @@ function rowChanges(
       ...base,
       kind: 'field',
       property: `refs.${f}`,
-      propertyLabel: `refs.${f}`,
+      propertyLabel: refFieldLabel(after, f),
       before: x,
       after: y,
     });
@@ -120,7 +121,7 @@ export const dataProposalDiff: ProposalDiffAdapter<StructuredData> = {
           elementId: row.id,
           elementLabel: rowLabel(data, row),
           property: `refs.${f}`,
-          propertyLabel: `refs.${f}`,
+          propertyLabel: refFieldLabel(data, f),
           ...(kind === 'added' ? { after: ids } : { before: ids }),
         }),
       );

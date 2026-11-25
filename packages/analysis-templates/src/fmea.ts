@@ -1,15 +1,18 @@
 import { readItems } from '@editor-platform/extension-runtime/items';
+// 画面（CSS）を読まない入口だけを使う（#93：tsx の API や Playwright の spec からも読める）
 import {
   dataItemsDeclaration,
-  defaultView,
+  type DataItemsDeclaration,
+} from '@editor-platform/structured-data/items';
+import {
   isStructuredData,
   validateData,
   type Cell,
   type Column,
-  type DataItemsDeclaration,
   type DataRow,
   type StructuredData,
-} from '@editor-platform/structured-data';
+} from '@editor-platform/structured-data/model';
+import { defaultView } from '@editor-platform/structured-data/views';
 
 export const fmeaTemplateOptions = [
   { id: 'blank', label: 'Blank data table' },
@@ -183,7 +186,13 @@ const columns: Column[] = [
  * cells are empty are not items.
  */
 export const fmeaItems: DataItemsDeclaration[] = [
-  { kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['fmId', 'refs.causeCandidates'] },
+  {
+    kind: 'failure-cause',
+    id: 'fcId',
+    title: 'cause',
+    refs: ['fmId', 'refs.causeCandidates'],
+    labels: { 'refs.causeCandidates': '原因の候補' },
+  },
   {
     kind: 'failure-mode',
     id: 'fmId',

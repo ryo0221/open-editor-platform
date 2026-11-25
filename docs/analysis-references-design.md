@@ -30,6 +30,7 @@ OWD 側は [open-workflow-definitions #22](https://github.com/ryo0221/open-workf
 
 - **Graph**：Profile の node type に任意の欄 `items` を足す（例：`cause` に `{ id: 'itemId', title: 'name', refs: [], rootRefs: ['problemRef'] }`）。Host へは `{ at: 'nodes', where: { type: 'cause' }, id: 'attributes.itemId', title: 'attributes.name', rootRefs: ['attributes.problemRef'] }` に直して渡す。Profile の形が変わるので Profile schema を 3 に上げる（U5）。
 - **Data**：表の最上位に任意の欄 `items` を足し、列 ID で書く（列名ではない）。例：`items: [{ kind: 'failure-cause', id: 'fcId', title: 'cause', refs: ['fmId', 'refs.causeCandidates'] }, { kind: 'failure-mode', id: 'fmId', title: 'failure', refs: ['functionRef'], merge: { equal: ['failure', 'effect', 's', 'function'] } }]`。`Column` 自体には役割を書かない（一つの行から二つの項目を読むため、役割は列ではなく宣言に置く）。Data schema を 3 に上げる（U5）。
+  - 行の参照の欄（`refs.<field>`）には列名が無いので、宣言の任意の欄 `labels`（`{ 'refs.causeCandidates': '原因の候補' }`）で画面に出す名前を付ける。名前の無い欄は欄の名前（`causeCandidates`）で出し、`refs.` の道筋は出さない。参照の欄の見出しと、提案の差分の欄の名前に使う（tokiwa-ecosystem#8 の dogfooding で、見出しが `refs.causeCandidates` のまま出ていた）。
 - 宣言の `kind` は表示用の名前で、どの OWD の項目種類にあたるかは Host が業務 ID の形（`idForm`）で決める。OEP は ID の形を決めない。
 - `items@0-draft` は未知の欄を拒否する（`itemsDeclarationProblems`）ので、次の三つの欄は**新しい版 `items@1-draft`** として足す：`where`（配列の要素を属性で絞る）、`rootRefs`（内容の根からの道筋。そのコレクションの全項目が引く）、`merge`（U6）。`items@0-draft` の宣言はそのまま有効で、意味は変えない。
 - **版の交渉**：Host は読める版の一覧を `ItemReferenceHost` と一緒に渡す（`itemsVersions`）。組み込みの Graph／Data は、Host が `items@1-draft` を読めるときだけその宣言を渡す。読めない Host には宣言を渡さず、Editor は「この Host は分析の項目を読めない」と出す（`0-draft` に落として一部だけ読ませることはしない）。旧い Host が `1-draft` を受け取ったときは、今の検査が「unsupported items add-on version」で断る（黙って読まない）。
@@ -189,7 +190,7 @@ Host が無いときは `select` が無いので、値は文字列として入�
 - **競合**：欄の値は Editor の通常のコマンドで、保存の競合は今の保存の約束（版の比較）で扱う。Host は保存後に索引で全引用を読み直し、そこでの判定が正（Editor の表示は手がかり）。
 - **`stale`**：Host が引用元ごとの基準と今の引用先の指紋を比べて返す。基準の作り方・更新・見送りは Host（PaoBub #524 の H2）。比較・更新・見送りの操作は Host の画面で行い、Editor は「古い」と出して Host の画面へ移るだけ。
 - **`open`**：Host が開く時点で権限を確かめ直す。既存の `ReferenceHost.open` と同じ約束で、`forbidden` では題も出さない。
-- 状態の名前は `ReferenceError.status` を使い、0001 の「未解決」「重複」と、古い版を残す決定の `kept` だけを足す。候補の注意（例：除外された原因の候補）は Host が `note` で渡し、Editor は判断しない。
+- 状態の名前は `ReferenceError.status` を使い、0001 の「未解決」「重複」と、古い版を残す決定の `kept` だけを足す。定義の `cites` の規則に無い種類の組（例：故障原因 → 基本事象）を Host が止める定義では、その引用を `not-citable`（「引けない種類」）として返し、Editor はほかの状態と同じく出すだけで値を書き換えない。候補の注意（例：除外された原因の候補）は Host が `note` で渡し、Editor は判断しない。
 - 既存の `ReferenceHost`（表示の埋め込み用）は「版を固定した値・図の写し」を扱い、これは「業務 ID の引用」なので別の口にする。移動と復帰の約束、権限の再確認の時点は同じにする。
 - Host が無いときは参照の欄を文字列として編集・保存でき、候補・状態・移動は出さない。
 
