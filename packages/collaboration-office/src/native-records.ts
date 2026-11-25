@@ -18,6 +18,7 @@ export function records<T extends object>(
     atomicRoots?: readonly (keyof T & string)[];
     optionalCollections?: readonly (keyof T & string)[];
     taggedCollections?: readonly (keyof T & string)[];
+    validRecordId?(value: unknown): boolean;
     fixedProjection?(content: T): unknown;
   },
 ): Schema<T> {
@@ -37,6 +38,7 @@ export function records<T extends object>(
   return {
     root,
     recordRoots: collections,
+    validRecordId: options?.validRecordId,
     taggedCollections: options?.taggedCollections,
     optionalCollections: options?.optionalCollections,
     atomicRoots: options?.atomicRoots,

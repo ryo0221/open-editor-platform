@@ -8,7 +8,7 @@ import { applyFactoryOperation, newFactory } from '@editor-platform/factory-core
 import { cosimStarter } from '@editor-platform/cosim-core';
 import { applyCadOperation, f02Plate } from '@editor-platform/cad-core';
 import { applyBimOperation, bimStarter, f31BoxBuilding } from '@editor-platform/bim-core';
-import { applyCharacterOperation, blockyFigure } from '@editor-platform/character-core';
+import { applyCharacterOperation, blockyFigure, importGltf } from '@editor-platform/character-core';
 import { applySimulationOperation, simulationFixture } from '@editor-platform/simulation-core';
 import {
   bimEditorCodec,
@@ -162,6 +162,32 @@ it('keeps shared Character edits independent of fixed mesh topology', () => {
       kind: 'field', collection: 'parts', id: part.id, field: 'mesh', value: 'another-mesh',
     }] },
   }, 0)).toThrow(/Unknown domain field/);
+});
+
+it('shares imported glTF identifiers without confusing punctuation with resource boundaries', () => {
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  const { doc } = importGltf(new TextEncoder().encode(JSON.stringify({
+    asset: { version: '2.0' },
+    buffers: [{ byteLength: positions.byteLength, uri: 'data:application/octet-stream;base64,' + Buffer.from(positions.buffer).toString('base64') }],
+    bufferViews: [{ buffer: 0, byteLength: positions.byteLength }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3' }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    nodes: [{ mesh: 0, name: 'Part/@s' }], scenes: [{ nodes: [0] }], scene: 0,
+  })));
+  expect(doc.materials[0].id).toBe('material:default');
+  const { authority, edit } = scenario(characterEditorCodec, doc);
+  const part = doc.parts[0];
+  const rename = edit(a, (d) => applyCharacterOperation(d, { type: 'rename', collection: 'parts', id: part.id, name: 'Arm' }));
+  expect(part.id).toBe('part:Part/@s');
+  const nameKey = rename.conditions.find(({ key }) => key.endsWith('/name'))!.key;
+  expect(characterEditorCodec.resource(doc, nameKey)).toBe(part.name);
+  expect(characterEditorCodec.resources!(doc, [nameKey])).toEqual([part.name]);
+  const peer = edit(b, (d) => applyCharacterOperation(d, { type: 'rename', collection: 'materials', id: doc.materials[0].id, name: 'Silver' }));
+  expect(authority.submit(a, rename).status).toBe('accepted');
+  expect(authority.submit(b, peer).status).toBe('accepted');
+  expect(authority.undo(a, rename.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.parts[0].name).toBe(part.name);
+  expect(authority.snapshot().content.materials[0].name).toBe('Silver');
 });
 
 it('edits Simulation inputs without moving the reference or persisting solver results', () => {

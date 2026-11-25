@@ -7,7 +7,7 @@ import { isFactoryDocument, type FactoryDocument } from '@editor-platform/factor
 import { isCosimDocument, type CosimDocument } from '@editor-platform/cosim-core';
 import { isCadDocument, type CadDocument } from '@editor-platform/cad-core';
 import { isBimDocument, type BimDocument } from '@editor-platform/bim-core';
-import { isCharacterDocument, type CharacterDocument } from '@editor-platform/character-core';
+import { characterId, isCharacterDocument, type CharacterDocument } from '@editor-platform/character-core';
 import { isSimulationDocument, type SimulationDocument } from '@editor-platform/simulation-core';
 import { records, createRecordEditorCodec } from '@editor-platform/collaboration-office/records';
 
@@ -75,7 +75,7 @@ export const engineeringSchemas = {
     },
     (doc) => doc.props.length ? '外部の小道具を含む Character は共同編集できません。' : undefined,
     ['assets', 'schemaVersion'],
-    { fixedProjection: characterMeshTopology },
+    { fixedProjection: characterMeshTopology, validRecordId: characterId },
   ),
   simulation: records<SimulationDocument>(
     'simulation', isSimulationDocument,

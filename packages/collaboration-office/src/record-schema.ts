@@ -15,6 +15,7 @@ export interface Collection {
 export interface Schema<T> {
   base: DomainCodec<T>;
   root: readonly string[];
+  validRecordId?(value: unknown): boolean;
   slideReferences?: true;
   manga?: true;
   recordRoots?: readonly string[];

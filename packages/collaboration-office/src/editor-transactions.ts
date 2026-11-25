@@ -147,7 +147,13 @@ const layoutFields = new Set([
   'width',
   'height',
 ]);
-const entityKey = (collection: string, id: string) => `entity:${collection}:${id}`;
+// Keep old resource keys intact and escape native ID separators as one reversible segment.
+const idEscapes: Record<string, string> = { '@': '@@', ':': '@c', '/': '@s' };
+const escapedIds: Record<string, string> = { '@': '@', c: ':', s: '/' };
+const entityKey = (collection: string, id: string) => {
+  const segment = /[@:/]/.test(id) ? id.replace(/[@:/]/g, (match) => idEscapes[match]) : id;
+  return `entity:${collection}:${segment}`;
+};
 const orderKey = (collection: string) => `order:${collection}`;
 const referenceCapability = Symbol('slide-reference-capability');
 function slideEditorSchema(allowReferences: boolean): Schema<SlideContent> {
@@ -316,8 +322,8 @@ function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
 function equal(a: unknown, b: unknown) {
   return a === b || canonical(a) === canonical(b);
 }
-function safeId(id: unknown): asserts id is string {
-  if (typeof id !== 'string' || !id || /[/:@]/.test(id) || id.length > 200)
+function safeId(id: unknown, nativeId?: (value: unknown) => boolean): asserts id is string {
+  if (nativeId ? !nativeId(id) : typeof id !== 'string' || !id || /[/:@]/.test(id) || id.length > 200)
     fail('schema-mismatch', 'Invalid stable identifier');
 }
 function projection<T>(schema: Schema<T>, d: T) {
@@ -814,7 +820,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
     if (!base.validate(value)) return false;
     const collections = schema.collections(value),
       ids = collections.flatMap((c) => c.items.map((e) => e.id));
-    if (new Set(ids).size !== ids.length || ids.some((id) => !id || /[/:@]/.test(id))) return false;
+    if (new Set(ids).size !== ids.length || ids.some((id) => schema.validRecordId ? !schema.validRecordId(id) : !id || /[/:@]/.test(id))) return false;
     if (base.domain === 'design') {
       const d = value as DesignContent;
       if (
@@ -926,7 +932,8 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
     }
     if (key.startsWith('entity:')) {
       const [collection, part] = key.slice(7).split(':'),
-        [id, field, columnId] = part.split('/');
+        [segment, field, columnId] = part.split('/'),
+        id = segment.includes('@') ? segment.replace(/@([@cs])/g, (_, code: string) => escapedIds[code]) : segment;
       const item = index
         ? index.items.get(collection)?.get(id)
         : schema
@@ -1204,7 +1211,7 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
           c.set(change.ids.map((id) => byId.get(id)!));
           continue;
         }
-        safeId(change.id);
+        safeId(change.id, schema.validRecordId);
         const item = byId.get(change.id),
           key = entityKey(c.key, change.id);
         targets.add(change.id);
