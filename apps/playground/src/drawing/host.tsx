@@ -1,6 +1,6 @@
 import type { EditorDraftPort } from '../kinds/editor-draft-port';
 import { fixedPdfFont } from '@editor-platform/document/pdf-text';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { canonicalJson, commitVersion } from '@editor-platform/artifact-core';
 import {
   cadContentHash,
@@ -611,9 +611,9 @@ export default function DrawingHost({
       }),
     [inputs],
   );
-  // Host Undo/Redo or restore changed the session: show it.
+  // The Surface subscribes to the controller. Publish a changed Host revision before paint.
   const revision = canonicalJson(session.revision);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (revision !== applied.current) controller.sync();
   }, [controller, revision]);
   return <DrawingSurface controller={controller} hostHistory name={artifact.name} />;
