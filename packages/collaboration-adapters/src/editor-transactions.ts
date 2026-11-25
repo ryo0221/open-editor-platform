@@ -82,6 +82,8 @@ export interface Schema<T> {
   slideReferences?: true;
   manga?: true;
   recordRoots?: readonly string[];
+  /** Native discriminators that may be supplied when inserting a record, including Undo. */
+  taggedCollections?: readonly string[];
   /** Dependencies shared by separate fields that jointly describe one native model. */
   atomicRoots?: readonly string[];
   validateTransition?(before: T, after: T): void;
@@ -1254,7 +1256,8 @@ function editorCodec<T>(schema: Schema<T>, slideReferences?: SlideReferencePolic
             !change.value ||
             change.value.id !== change.id ||
             Object.keys(change.value).some(
-              (k) => k !== 'id' && k !== c.nested && !c.fields.includes(k),
+              (k) => k !== 'id' && k !== c.nested && !c.fields.includes(k) &&
+                !(k === 'kind' && schema.taggedCollections?.includes(c.key)),
             )
           )
             fail('schema-mismatch', 'Invalid inserted domain fields');

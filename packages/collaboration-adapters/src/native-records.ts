@@ -27,6 +27,7 @@ function records<T extends object>(
   fixedSources: readonly (keyof T & string)[] = [],
   options?: {
     atomicRoots?: readonly (keyof T & string)[];
+    taggedCollections?: readonly (keyof T & string)[];
     fixedProjection?(content: T): unknown;
   },
 ): Schema<T> {
@@ -46,6 +47,7 @@ function records<T extends object>(
   return {
     root,
     recordRoots: collections,
+    taggedCollections: options?.taggedCollections,
     atomicRoots: options?.atomicRoots,
     validateTransition,
     collections: (content) =>
@@ -140,6 +142,7 @@ const nativeRecordSchemas = {
     (doc) => doc.assets?.length || doc.types.some((type) => type.kind === 'part')
       ? '外部部品や画像素材を含む BIM は共同編集できません。'
       : undefined,
+    [], { taggedCollections: ['types', 'elements', 'views'] },
   ),
   character: records<CharacterDocument>(
     'character', isCharacterDocument, ['name', 'retiredIds'],
@@ -169,6 +172,7 @@ const nativeRecordSchemas = {
     },
     (doc) => doc.runs?.length ? '保存済みの解析結果を含む成果物は共同編集できません。' : undefined,
     ['source', 'schemaVersion'],
+    { taggedCollections: ['loads', 'constraints', 'studies'] },
   ),
   'structured-graph': structuredGraphSchema([relationProfile]),
   analysis: records<AnalysisDocument>('analysis', isAnalysis, ['title'], {

@@ -7,7 +7,7 @@ import { newConstruction } from '@editor-platform/construction-core';
 import { newFactory } from '@editor-platform/factory-core';
 import { cosimStarter } from '@editor-platform/cosim-core';
 import { applyCadOperation, f02Plate } from '@editor-platform/cad-core';
-import { applyBimOperation, bimStarter } from '@editor-platform/bim-core';
+import { applyBimOperation, bimStarter, f31BoxBuilding } from '@editor-platform/bim-core';
 import { applyCharacterOperation, blockyFigure } from '@editor-platform/character-core';
 import { applySimulationOperation, simulationFixture } from '@editor-platform/simulation-core';
 import {
@@ -183,3 +183,36 @@ it('edits Simulation inputs without moving the reference or persisting solver re
     }] },
   }, 0)).toThrow(/Unknown domain property/);
 });
+
+
+it('inserts tagged BIM types, walls and views and restores them on deletion Undo', () => {
+  const doc = bimStarter();
+  const type = { ...doc.types.find(t => t.kind === 'wall')!, id: 'new-wall-type' };
+  const wall = { ...f31BoxBuilding().elements[0]!, id: 'new-wall', typeId: type.id };
+  const view = { id: 'new-plan', kind: 'plan' as const, name: 'Plan', level: doc.levels[0]!.id,
+    cutHeightMm: 1200, depthMm: 1000, scale: 100 as const };
+  const next = { ...doc, types: [...doc.types, type], elements: [...doc.elements, wall], views: [...doc.views, view] };
+  checkTaggedInsertAndUndo(bimEditorCodec, doc, next, 'views', view.id);
+});
+
+it('inserts tagged simulation loads, constraints and studies and restores them on deletion Undo', () => {
+  const { doc } = simulationFixture();
+  const load = { ...doc.loads[0]!, id: 'new-load' };
+  const constraint = { ...doc.constraints[0]!, id: 'new-constraint' };
+  const study = { ...doc.studies[0]!, id: 'new-study', loadIds: [load.id], constraintIds: [constraint.id] };
+  const next = { ...doc, loads: [...doc.loads, load], constraints: [...doc.constraints, constraint],
+    studies: [...doc.studies, study] };
+  checkTaggedInsertAndUndo(simulationEditorCodec, doc, next, 'loads', load.id);
+});
+
+function checkTaggedInsertAndUndo<T>(codec: DomainCodec<T>, before: T, after: T, collection: string, id: string) {
+  const { authority, edit } = scenario(codec, before);
+  expect(authority.submit(a, edit(a, () => after)).status).toBe('accepted');
+  const removal = prepareEditorCommand(codec, authority.snapshot(), a, immutableCommand('remove', 'Remove', () => before))!;
+  expect(authority.submit(a, removal).status).toBe('accepted');
+  expect(authority.undo(a, removal.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content).toEqual(after);
+  expect(() => codec.apply(after, { type: codec.domain + '.edit', target: '*', payload: {
+    reads: [], changes: [{ kind: 'field', collection, id, field: 'kind', value: 'different' }],
+  } }, 0)).toThrow(/Unknown domain field/);
+}
