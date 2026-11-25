@@ -37,7 +37,10 @@ test('every e2e spec has an area, known owners and a suite for extra servers', (
 });
 
 test('an engineering change runs its own specs, not the office ones', () => {
-  assert.deepEqual(names(plan('packages/pcb/src/index.ts').run), ['pcb-playground']);
+  assert.deepEqual(names(plan('packages/pcb/src/index.ts').run), [
+    'native-domain-collaboration',
+    'pcb-playground',
+  ]);
   const cad = plan('packages/cad-core/src/index.ts');
   const run = names(cad.run);
   for (const name of ['cad-playground', 'simulation-playground', 'estimate-editor'])
@@ -61,7 +64,10 @@ test('a core change runs every light spec and leaves heavy specs to the full run
 test('specs, helpers, Playground sources, shared configuration and documents', () => {
   assert.deepEqual(names(plan('tests/e2e/v1.spec.ts').run), ['v1']);
   assert(plan('tests/e2e/fixtures.ts').run.length > 100);
-  assert.deepEqual(names(plan('apps/playground/src/pcb/host.tsx').run), ['pcb-playground']);
+  assert.deepEqual(names(plan('apps/playground/src/pcb/host.tsx').run), [
+    'native-domain-collaboration',
+    'pcb-playground',
+  ]);
   assert(names(plan('apps/playground/src/cad-host.tsx').run).includes('cad-playground'));
   const shared = plan('tests/playwright/suites.ts');
   assert.equal(shared.run.length + shared.deferred.length, specs.length);

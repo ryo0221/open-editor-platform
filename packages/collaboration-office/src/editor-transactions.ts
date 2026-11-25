@@ -339,7 +339,15 @@ const scheduleSchema: Schema<ScheduleDocument> = {
     collection(content, 'events', ['title', 'notes', 'time', 'conference', 'links']),
   ],
 };
+const recordSchema = Symbol('native-record-schema');
+
+/** Carry the exact trusted schema through codec decorators (including scoped graph profiles). */
+export function createRecordEditorCodec<T>(schema: Schema<T>): DomainCodec<T> {
+  return Object.assign(editorCodec(schema), { [recordSchema]: schema });
+}
+
 function schemaFor<T>(codec: DomainCodec<T>): Schema<T> {
+  if (recordSchema in codec) return codec[recordSchema] as Schema<T>;
   const schema = {
     slide: referenceCapability in codec ? slideReferenceSchema : slideSchema,
     design: mangaCapability in codec ? mangaSchema : designSchema,
@@ -1465,13 +1473,13 @@ export const editorValidators = {
 };
 
 /** These domains also validate every retained version before sharing the archive. */
-export function checksSharedNativeHistory(domain: DomainCodec<unknown>['domain']): boolean {
+export function checksOfficeNativeHistory(domain: DomainCodec<unknown>['domain']): boolean {
   return domain === 'schedule' || Object.hasOwn(nativeRecordSchemas, domain);
 }
 
 /** The authority and the Surface register their own trusted native profile catalogue. */
 export function createStructuredGraphEditorCodec(profiles: readonly GraphProfile[]) {
-  return editorCodec(structuredGraphSchema(profiles));
+  return createRecordEditorCodec(structuredGraphSchema(profiles));
 }
 
 export const structuredGraphEditorCodec = editorCodec(nativeRecordSchemas['structured-graph']);
@@ -1479,15 +1487,3 @@ export const analysisEditorCodec = editorCodec(nativeRecordSchemas.analysis);
 export const estimateEditorCodec = editorCodec(nativeRecordSchemas.estimate);
 export const fictionMapEditorCodec = editorCodec(nativeRecordSchemas['fiction-map']);
 export const geoEditorCodec = editorCodec(nativeRecordSchemas.geo);
-export const ladderEditorCodec = editorCodec(nativeRecordSchemas.ladder);
-export const schematicEditorCodec = editorCodec(nativeRecordSchemas.schematic);
-
-export const drawingEditorCodec = editorCodec(nativeRecordSchemas.drawing);
-export const pcbEditorCodec = editorCodec(nativeRecordSchemas.pcb);
-export const constructionEditorCodec = editorCodec(nativeRecordSchemas.construction);
-export const factoryEditorCodec = editorCodec(nativeRecordSchemas.factory);
-export const cosimEditorCodec = editorCodec(nativeRecordSchemas.cosim);
-export const cadEditorCodec = editorCodec(nativeRecordSchemas.cad);
-export const bimEditorCodec = editorCodec(nativeRecordSchemas.bim);
-export const characterEditorCodec = editorCodec(nativeRecordSchemas.character);
-export const simulationEditorCodec = editorCodec(nativeRecordSchemas.simulation);

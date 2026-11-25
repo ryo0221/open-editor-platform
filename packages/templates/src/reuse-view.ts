@@ -1,6 +1,6 @@
 import { canonicalJson, clone, contentHash, newId } from '@editor-platform/artifact-core';
 import { addAnnotation, type Annotation, type ElementAddress } from '@editor-platform/editor-core';
-import { editorAnchor } from '@editor-platform/collaboration-adapters';
+import { editorAnchor } from '@editor-platform/collaboration-office';
 import type { Identity, Snapshot } from '@editor-platform/collaboration-core';
 import {
   isFile,

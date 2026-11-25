@@ -1,6 +1,4 @@
 import type { Domain } from '@editor-platform/collaboration-core';
-import { animationEditorCodec } from './animation';
-import { documentEditorCodec } from './document-editor';
 import {
   scheduleEditorCodec,
   structuredGraphEditorCodec,
@@ -8,6 +6,18 @@ import {
   estimateEditorCodec,
   fictionMapEditorCodec,
   geoEditorCodec,
+  slideEditorCodec,
+  mangaEditorCodec,
+  whiteboardEditorCodec,
+  dataEditorCodec,
+  animationEditorCodec,
+  documentEditorCodec,
+  mindmapEditorCodec,
+  reactUiEditorCodec,
+  reviewCodec,
+  fileCodec,
+} from '@editor-platform/collaboration-office';
+import {
   ladderEditorCodec,
   schematicEditorCodec,
   drawingEditorCodec,
@@ -19,14 +29,7 @@ import {
   bimEditorCodec,
   characterEditorCodec,
   simulationEditorCodec,
-  slideEditorCodec,
-  mangaEditorCodec,
-  whiteboardEditorCodec,
-  dataEditorCodec,
-} from './editor-transactions';
-import { mindmapEditorCodec } from './mindmap';
-import { reactUiEditorCodec } from './react-ui';
-import { reviewCodec, fileCodec } from './review';
+} from './engineering-records';
 
 /** Standard native documents. Hosts register their trusted graph profiles, reference resolvers and pinned Video timelines separately. */
 export const nativeEditorCodecs = {

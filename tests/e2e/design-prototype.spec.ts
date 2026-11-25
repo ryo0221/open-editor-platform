@@ -535,7 +535,7 @@ async function retainedCheckpoint(page: import('@playwright/test').Page) {
   const file = await download;
   await page.keyboard.press('Escape');
   return JSON.parse(await readFile((await file.path())!, 'utf8')) as ReturnType<
-    import('@editor-platform/collaboration-adapters').SharedEditorSession<DesignContent>['checkpoint']
+    import('@editor-platform/collaboration-office').SharedEditorSession<DesignContent>['checkpoint']
   >;
 }
 

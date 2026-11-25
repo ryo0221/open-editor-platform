@@ -66,7 +66,7 @@ workspacesは`private: true`でTypeScript sourceを公開entrypointから渡し�
 | [`apps/playground/src/model.ts`](../apps/playground/src/model.ts) / [`App.tsx`](../apps/playground/src/App.tsx)               | Hostのkind一覧、factory、入力検証、保存・import/exportの接続        |
 | [`apps/playground/src/embed.tsx`](../apps/playground/src/embed.tsx)                                                           | public packageだけを使う独立Host                                    |
 | [`packages/collaboration-core/src/contracts.ts`](../packages/collaboration-core/src/contracts.ts)                             | Serializable operation、codec、authorityの契約                      |
-| [`packages/collaboration-adapters/src/editor-transactions.ts`](../packages/collaboration-adapters/src/editor-transactions.ts) | 通常Editor commandとshared operationの接続                          |
+| [`packages/collaboration-office/src/editor-transactions.ts`](../packages/collaboration-office/src/editor-transactions.ts) | 通常Editor commandとshared operationの接続                          |
 | [`packages/templates/src/types.ts`](../packages/templates/src/types.ts)                                                       | Templateのdomain、native content、入力契約                          |
 | [`packages/reuse-core/src/contracts.ts`](../packages/reuse-core/src/contracts.ts)                                             | 再利用定義、exact version、依存関係、上限                           |
 | [`tests/e2e/fixtures.ts`](../tests/e2e/fixtures.ts)                                                                           | browser errorを失敗にする共通fixture                                |

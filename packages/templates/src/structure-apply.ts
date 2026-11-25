@@ -1,6 +1,6 @@
 import { ownReuseOptions } from './reuse-owned';
 import { clone, canonicalJson } from '@editor-platform/artifact-core';
-import { reuseInstanceKey } from '@editor-platform/collaboration-adapters';
+import { reuseInstanceKey } from '@editor-platform/collaboration-office';
 import type { Action, Identity, Snapshot } from '@editor-platform/collaboration-core';
 import { isDocument, type DocumentContent } from '@editor-platform/document/model';
 import { contentToNode } from '@editor-platform/document/engine';

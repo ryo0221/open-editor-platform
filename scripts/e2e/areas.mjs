@@ -231,7 +231,7 @@ export const specRules = [
     owners: ['design', 'document'],
   },
   { match: /^novel-/, area: 'office', owners: ['document'] },
-  { match: /^native-domain-collaboration$/, area: 'engineering', owners: ['collaboration-adapters', 'cad', 'pcb', 'schematic', 'ladder', 'factory', 'analysis', 'estimate', 'fiction-map'] },
+  { match: /^native-domain-collaboration$/, area: 'engineering', owners: ['collaboration-adapters', 'cad', 'simulation', 'construction', 'cosim', 'pcb', 'schematic', 'ladder', 'factory', 'analysis', 'estimate', 'fiction-map'] },
   { match: /^hosted-media-collaboration$/, area: 'engineering', owners: ['character', 'video-core', 'collaboration-adapters'] },
   { match: /^video-collaboration$/, area: 'office', owners: ['video-core', 'collaboration-adapters'] },
   {
@@ -298,6 +298,8 @@ export const hostConnectionFiles = ['app/estimate-bim.ts', 'estimate-bim.ts'];
  * the specs that reached it only through `user`; a change to `to` must select both sides.
  */
 export const removedDependencies = [
+  { stage: 'native collaboration', user: 'templates', from: 'collaboration-adapters', to: 'collaboration-office' },
+  { stage: 'native collaboration', user: 'template-ui', from: 'collaboration-adapters', to: 'collaboration-office' },
   { stage: 'KR2', user: 'character', from: 'animation-core', to: 'easing' },
   { stage: 'KR3', user: 'estimate', from: 'cad-core', to: 'estimate-engineering' },
   { stage: 'KR3', user: 'estimate', from: 'bim-core', to: 'estimate-engineering' },

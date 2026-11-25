@@ -18,7 +18,7 @@ import {
   SharedEditorSession,
   type EditorHostAdapter,
   type AssetEditorCodec,
-} from '@editor-platform/collaboration-adapters';
+} from '@editor-platform/collaboration-office';
 import { command } from '@editor-platform/editor-core';
 import {
   saveAsTemplate,

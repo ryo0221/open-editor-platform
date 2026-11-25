@@ -40,7 +40,7 @@ import {
   encodeEditorOperation,
   type SharedEditorSession,
   type AssetEditorCodec,
-} from '@editor-platform/collaboration-adapters';
+} from '@editor-platform/collaboration-office';
 import { isDeck } from '@editor-platform/slide/model';
 import { isWhiteboard } from '@editor-platform/whiteboard/model';
 import { isDesign } from '@editor-platform/design/model';

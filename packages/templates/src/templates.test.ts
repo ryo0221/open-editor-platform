@@ -32,7 +32,7 @@ import {
 import {
   SharedEditorSession,
   type EditorHostAdapter,
-} from '@editor-platform/collaboration-adapters';
+} from '@editor-platform/collaboration-office';
 import { type Domain, type NativeContent } from './types';
 import { createDeck, updateObject, insertObject } from '@editor-platform/slide/model';
 import { contentToNode, nodeToContent } from '@editor-platform/document/engine';

@@ -2,7 +2,7 @@ import { ownReuseOptions, cloneReuseNative } from './reuse-owned';
 import { applicationSnapshot, exposeApplicationContent } from './reuse-preparation';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import { immutableCommand } from '@editor-platform/editor-core';
-import { prepareEditorCommand } from '@editor-platform/collaboration-adapters';
+import { prepareEditorCommand } from '@editor-platform/collaboration-office';
 import { type Action, type Identity, type Snapshot } from '@editor-platform/collaboration-core';
 import { isDocument } from '@editor-platform/document/model';
 import { isStructuredData } from '@editor-platform/structured-data/model';

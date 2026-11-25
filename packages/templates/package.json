@@ -10,7 +10,7 @@
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
     "@editor-platform/collaboration-core": "*",
-    "@editor-platform/collaboration-adapters": "*",
+    "@editor-platform/collaboration-office": "*",
     "@editor-platform/slide": "*",
     "@editor-platform/whiteboard": "*",
     "@editor-platform/design": "*",

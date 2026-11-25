@@ -1,7 +1,7 @@
 import { ownReuseOptions, cloneReuseNative } from './reuse-owned';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import type { Action, Identity, Snapshot } from '@editor-platform/collaboration-core';
-import { documentAttributeKey, reuseInstanceKey } from '@editor-platform/collaboration-adapters';
+import { documentAttributeKey, reuseInstanceKey } from '@editor-platform/collaboration-office';
 import { isDocument } from '@editor-platform/document/model';
 import { isDesign, type DesignContent, type DesignElement } from '@editor-platform/design/model';
 import { isDeck } from '@editor-platform/slide/model';
