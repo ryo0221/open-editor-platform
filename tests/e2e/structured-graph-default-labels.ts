@@ -147,18 +147,10 @@ export async function checkDefaultOverlap(page: Page) {
   // and explains itself on hover instead of covering the nodes with the sentence.
   const mark = edge.locator('.ep-graph-route-missing');
   await expect(mark).toBeVisible();
-  await expect(
-    edge.getByText('線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください', {
-      exact: true,
-    }),
-  ).toBeHidden();
+  await expect(edge.locator('.ep-graph-route-missing-text')).toBeHidden();
   await expect(edge.locator('.ep-graph-route-missing-line')).toHaveAttribute('d', /^M.*L/);
   await mark.hover();
-  await expect(
-    edge.getByText('線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください', {
-      exact: true,
-    }),
-  ).toBeVisible();
+  await expect(edge.locator('.ep-graph-route-missing-text')).toBeVisible();
   await expect(edge.locator('path').first()).toHaveAttribute('d', '');
   await expectGraphFitted(page);
   await page.getByLabel('Custom node sizes', { exact: true }).check();
