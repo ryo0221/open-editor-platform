@@ -130,13 +130,58 @@ function GraphEdgeView(props: GraphEdgeViewProps) {
           </text>
         </g>
       )}
-      {!route.path && (
-        <text x={route.label.x} y={route.label.y - 18}>
-          ノードの重なりを解消してください
-        </text>
-      )}
+      {!route.path && <GraphRouteMissing route={route} text={displayText} />}
       {selected && props.editable && <GraphEdgeEndpoints {...props} />}
     </g>
+  );
+}
+
+/**
+ * A connection without an orthogonal route: a red dashed straight line still shows which nodes it
+ * joins, and a red mark at its middle explains why on hover, focus or tap instead of covering nodes
+ * with the sentence.
+ */
+function GraphRouteMissing({ route, text }: { route: GraphRoute; text: string }) {
+  const t = useGraphLabels();
+  const mid = {
+    x: (route.source.x + route.target.x) / 2,
+    y: (route.source.y + route.target.y) / 2,
+  };
+  return (
+    <>
+      <path
+        className="ep-graph-route-missing-line"
+        d={`M${route.source.x},${route.source.y} L${route.target.x},${route.target.y}`}
+        fill="none"
+        stroke="#dc2626"
+        strokeWidth="2"
+        strokeDasharray="4 4"
+        pointerEvents="none"
+      />
+      <g
+        className="ep-graph-route-missing"
+        transform={`translate(${mid.x} ${mid.y})`}
+        tabIndex={0}
+        role="img"
+        aria-label={`No route: ${text}`}
+        aria-description={t.routeMissing}
+      >
+        <title>{t.routeMissing}</title>
+        <circle r="10" fill="#dc2626" />
+        <text
+          className="ep-graph-route-missing-mark"
+          x={0}
+          y={5}
+          textAnchor="middle"
+          fill="#ffffff"
+        >
+          !
+        </text>
+        <text className="ep-graph-route-missing-text" x={16} y={5}>
+          {t.routeMissing}
+        </text>
+      </g>
+    </>
   );
 }
 

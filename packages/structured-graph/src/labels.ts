@@ -25,6 +25,8 @@ export interface GraphSurfaceLabels {
   deleteSelection: string;
   resetView: string;
   fitGraph: string;
+  /** Shown from the red mark on a connection that has no orthogonal route between its nodes. */
+  routeMissing: string;
   typeDefault: string;
   typeDefaultShape: (shape: string) => string;
   shapes: Record<GraphNodeShape, string>;
@@ -106,6 +108,7 @@ const en: GraphSurfaceLabels = {
   deleteSelection: 'Delete selection',
   resetView: 'Reset view',
   fitGraph: 'Fit graph',
+  routeMissing: 'No route for this connection. Move the nodes apart or arrange the drawing.',
   typeDefault: 'Type default',
   typeDefaultShape: (shape) => `Type default (${shape})`,
   shapes: {
@@ -198,6 +201,7 @@ const ja: GraphSurfaceLabels = {
   deleteSelection: '選択を削除',
   resetView: '表示を戻す',
   fitGraph: '全体を表示',
+  routeMissing: '線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください',
   typeDefault: '種類の既定',
   typeDefaultShape: (shape) => `種類の既定（${shape}）`,
   shapes: {

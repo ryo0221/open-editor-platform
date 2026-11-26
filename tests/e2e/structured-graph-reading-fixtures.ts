@@ -304,7 +304,7 @@ export async function checkUnmeasurableFit(
   if (mode === 'refused') {
     await expect(page.locator('[data-edge-id="probe"] .ep-graph-edge-label text')).toHaveCount(0);
     await expect(page.locator('[data-edge-id="probe"]')).toContainText(
-      'ノードの重なりを解消してください',
+      '線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください',
     );
   } else
     await expect(page.locator('[data-edge-id="probe"] .ep-graph-edge-label text')).toHaveCount(1);
@@ -317,6 +317,6 @@ export async function checkUnmeasurableFit(
   expect(await readingSnapshot(page)).toEqual(original);
   if (mode === 'refused')
     await expect(page.locator('[data-edge-id="probe"]')).toContainText(
-      'ノードの重なりを解消してください',
+      '線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください',
     );
 }

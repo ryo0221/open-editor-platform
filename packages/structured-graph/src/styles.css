@@ -529,3 +529,35 @@
   font-size: 12px;
   color: var(--ep-graph-muted-text, #475569);
 }
+
+/* A connection without a route: the mark explains itself on hover, focus or tap. */
+.ep-graph-route-missing {
+  cursor: help;
+  outline: none;
+  /* The graph's svg layer ignores the pointer; the mark itself must take hover and tap. */
+  pointer-events: auto;
+}
+.ep-graph-route-missing circle {
+  pointer-events: all;
+}
+.ep-graph-route-missing-mark {
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.ep-graph-route-missing-text {
+  display: none;
+  fill: #b91c1c;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 4px;
+}
+.ep-graph-route-missing:hover .ep-graph-route-missing-text,
+.ep-graph-route-missing:focus .ep-graph-route-missing-text {
+  display: inline;
+}
+.ep-graph-route-missing:focus circle {
+  stroke: #111827;
+  stroke-width: 2;
+}
