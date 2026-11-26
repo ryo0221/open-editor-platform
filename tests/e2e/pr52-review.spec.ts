@@ -89,7 +89,7 @@ test('PR #52 filtered Data Graph ignores an invisible node overlapping the visib
     exact: true,
   });
   await expect(connection).toHaveAttribute('d', /M.*L/);
-  await expect(page.getByText('ノードの重なりを解消してください', { exact: true })).toHaveCount(0);
+  await expect(page.locator('.ep-graph-route-missing')).toHaveCount(0);
   expect(((await nativeArtifact(page)).draft.content as StructuredData).graphView).toEqual(
     data.graphView,
   );

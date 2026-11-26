@@ -143,13 +143,29 @@ export async function checkDefaultOverlap(page: Page) {
   await mountReadingGraphHost(page, '?default-labels&default-overlap');
   const original = await readingSnapshot(page);
   const edge = page.locator('[data-edge-id="labels01"]');
-  await expect(edge.getByText('ノードの重なりを解消してください', { exact: true })).toBeVisible();
+  // A connection without a route keeps its path empty, shows a red mark and a red dashed line,
+  // and explains itself on hover instead of covering the nodes with the sentence.
+  const mark = edge.locator('.ep-graph-route-missing');
+  await expect(mark).toBeVisible();
+  await expect(
+    edge.getByText('線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください', {
+      exact: true,
+    }),
+  ).toBeHidden();
+  await expect(edge.locator('.ep-graph-route-missing-line')).toHaveAttribute('d', /^M.*L/);
+  await mark.hover();
+  await expect(
+    edge.getByText('線の通り道が見つかりません。ノードを少し離すか、図を並べ直してください', {
+      exact: true,
+    }),
+  ).toBeVisible();
   await expect(edge.locator('path').first()).toHaveAttribute('d', '');
   await expectGraphFitted(page);
   await page.getByLabel('Custom node sizes', { exact: true }).check();
   await expect(edge.locator('path').first()).not.toHaveAttribute('d', '');
   await expect(page.locator('[data-node-id="n0"]')).toHaveCSS('height', '140px');
+  await expect(mark).toHaveCount(0);
   await page.getByLabel('Custom node sizes', { exact: true }).uncheck();
-  await expect(edge.getByText('ノードの重なりを解消してください', { exact: true })).toBeVisible();
+  await expect(mark).toBeVisible();
   expect(await readingSnapshot(page)).toEqual(original);
 }
