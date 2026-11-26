@@ -534,6 +534,11 @@
 .ep-graph-route-missing {
   cursor: help;
   outline: none;
+  /* The graph's svg layer ignores the pointer; the mark itself must take hover and tap. */
+  pointer-events: auto;
+}
+.ep-graph-route-missing circle {
+  pointer-events: all;
 }
 .ep-graph-route-missing-mark {
   font-size: 14px;
