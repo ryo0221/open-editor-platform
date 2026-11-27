@@ -55,14 +55,16 @@ async function images(scope: Locator) {
       : decodeURIComponent(src.slice(src.indexOf(',') + 1)),
   );
 }
+// On a phone the toolbar keeps some actions under More editor tools.
+async function toolbarAction(page: Page, name: string) {
+  const action = page.getByRole('button', { name, exact: true });
+  if (!(await action.isVisible()))
+    await page.getByRole('button', { name: 'More editor tools', exact: true }).click();
+  await action.click();
+}
 async function work(page: Page, workspace: Workspace) {
   await closePanels(page);
-  await page
-    .getByRole('button', {
-      name: workspace === 'novel' ? '小説ワークスペース' : '漫画ワークスペース',
-      exact: true,
-    })
-    .click();
+  await toolbarAction(page, workspace === 'novel' ? '小説ワークスペース' : '漫画ワークスペース');
   await expect(page.locator('[data-workspace]')).toHaveAttribute('data-workspace', workspace);
 }
 for (const workspace of ['novel', 'manga'] as const) {
@@ -92,7 +94,7 @@ for (const workspace of ['novel', 'manga'] as const) {
     await expect(page.locator('[data-workspace]')).toHaveAttribute('data-workspace', workspace);
     await closePanels(page);
     if (workspace === 'manga') {
-      await page.getByRole('button', { name: 'Designで詳細編集', exact: true }).click();
+      await toolbarAction(page, 'Designで詳細編集');
     } else {
       const inspector = page.getByRole('complementary', { name: '原稿と照合', exact: true });
       if (!(await inspector.isVisible()))
