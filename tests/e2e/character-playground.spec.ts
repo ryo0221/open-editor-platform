@@ -639,9 +639,23 @@ test('CH80: a figure and a building animated into a 720p MP4 and a PNG sequence 
   let downloads = 0;
   page.on('download', () => downloads++);
   await video.getByLabel('Frame rate').selectOption('60');
+  // The encoder's check waits until Cancel is clicked: a fast machine cannot finish the
+  // export before the click lands.
+  await page.evaluate(() => {
+    const encoder = (window as unknown as { VideoEncoder: typeof VideoEncoder }).VideoEncoder;
+    const check = encoder.isConfigSupported.bind(encoder);
+    const held = new Promise<void>((resolve) => {
+      (window as unknown as { releaseExport: () => void }).releaseExport = resolve;
+    });
+    encoder.isConfigSupported = async (config) => {
+      await held;
+      return check(config);
+    };
+  });
   await video.getByRole('button', { name: 'Export video' }).click();
   await expect(video.getByRole('status')).toContainText('Exporting video…');
   await video.getByRole('button', { name: 'Cancel export' }).click();
+  await page.evaluate(() => (window as unknown as { releaseExport: () => void }).releaseExport());
   await expect(video.getByTestId('video-report')).toHaveText(
     'Export cancelled; nothing was saved.',
   );

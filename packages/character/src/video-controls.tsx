@@ -77,13 +77,14 @@ export function VideoControls({
   if (running)
     return (
       <div className="character-mesh-row" role="group" aria-label="Video export">
+        {/* First, so the growing count does not move or wrap it while the person aims. */}
+        <button type="button" onClick={onCancel}>
+          Cancel export
+        </button>
         <span className="character-hint" role="status">
           {running.kind === 'mp4' ? 'Exporting video…' : 'Exporting frames…'} {running.done} of{' '}
           {running.total}
         </span>
-        <button type="button" onClick={onCancel}>
-          Cancel export
-        </button>
       </div>
     );
   const off = busy || !!disabled;
