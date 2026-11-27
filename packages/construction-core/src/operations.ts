@@ -38,6 +38,7 @@ export type ConstructionOperation =
   | { type: 'setCalendar'; calendar: ConstructionCalendar }
   /** Added at `index` (default: the end). */
   | { type: 'addTask'; task: ConstructionTask; index?: number }
+  | { type: 'setTaskNameAndDuration'; id: string; name: string; durationDays: number }
   | { type: 'updateTask'; task: ConstructionTask }
   /** Refused while another task follows it (`task-in-use`). */
   | { type: 'removeTask'; id: string }
@@ -115,6 +116,12 @@ export function applyConstructionOperation(
       if (!Number.isInteger(index) || index < 0 || index > next.tasks.length)
         fail('index', 'no such position');
       next.tasks.splice(index, 0, structuredClone(op.task));
+      break;
+    }
+    case 'setTaskNameAndDuration': {
+      const task = next.tasks[at(op.id)];
+      task.name = op.name;
+      task.durationDays = op.durationDays;
       break;
     }
     case 'updateTask':
@@ -275,6 +282,7 @@ const labels: Record<ConstructionOperationType, string> = {
   setStartDate: 'Set start date',
   setCalendar: 'Set calendar',
   addTask: 'Add task',
+  setTaskNameAndDuration: 'Edit task',
   updateTask: 'Edit task',
   removeTask: 'Remove task',
   replaceTasks: 'Import tasks',
@@ -317,5 +325,8 @@ export function constructionEditorCommand(
   const cmd = options.context
     ? immutableCommand(`construction.${op.type}`, labels[op.type], run, options.context)
     : immutableCommand(`construction.${op.type}`, labels[op.type], run);
-  return withCommandReads(cmd, { content: ['*'] });
+  // Literal task fields need only their source task. Imports, schedule dependencies
+  // and compound commands still depend on the complete plan they were prepared from.
+  const reads = prepared.length === 1 && op.type === 'setTaskNameAndDuration' ? [op.id] : ['*'];
+  return withCommandReads(cmd, { content: reads });
 }

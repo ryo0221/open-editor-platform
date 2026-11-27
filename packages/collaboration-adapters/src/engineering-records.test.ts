@@ -3,7 +3,7 @@ import { Authority, initial, type DomainCodec, type Principal } from '@editor-pl
 import { immutableCommand } from '@editor-platform/editor-core';
 import { drawingStarter } from '@editor-platform/drawing-core';
 import { pcbStarter } from '@editor-platform/pcb-core';
-import { newConstruction } from '@editor-platform/construction-core';
+import { constructionContentHash, constructionEditorCommand, newConstruction } from '@editor-platform/construction-core';
 import { applyFactoryOperation, newFactory } from '@editor-platform/factory-core';
 import { cosimStarter } from '@editor-platform/cosim-core';
 import { applyCadOperation, f02Plate } from '@editor-platform/cad-core';
@@ -81,6 +81,35 @@ it('shares Construction task changes and preserves the pinned Building version a
     type: 'domain.restore', target: '*',
     payload: { content: { ...document, source: { ...pin, versionId: 'v2' } } },
   }, 0)).toThrow(/参照元/);
+});
+
+it('commits independent task form edits from one revision and detects competing edits to the same task', () => {
+  const plan = newConstruction('Build', pin, '2026-07-01');
+  for (const id of ['ground', 'frame', 'roof'])
+    plan.tasks.push({ id, name: id, durationDays: 1, predecessors: [], action: 'construct', elementIds: [] });
+  const initialState = initial(constructionEditorCodec.domain, constructionEditorCodec, plan);
+  const authority = new Authority(constructionEditorCodec, initialState);
+  const options = { expectedHash: constructionContentHash(plan), canEdit: () => true };
+  const edit = (author: Principal, id: string, name: string, durationDays: number) =>
+    prepareEditorCommand(constructionEditorCodec, initialState, author,
+      constructionEditorCommand({ type: 'setTaskNameAndDuration', id, name, durationDays }, options))!;
+  const c = actor('c');
+  const ground = edit(a, 'ground', 'Prepare ground', 2);
+  const frame = edit(b, 'frame', 'Build frame', 3);
+  const roof = edit(c, 'roof', 'Install roof', 4);
+  const competing = edit(b, 'ground', 'Different name', 1);
+  const update = constructionEditorCommand({ type: 'updateTask', task: { ...plan.tasks[2], predecessors: [{ taskId: 'frame', lagDays: 0 }] } }, options);
+  const structural = prepareEditorCommand(constructionEditorCodec, initialState, a, update)!;
+  expect(authority.submit(a, ground).status).toBe('accepted');
+  expect(authority.submit(b, frame).status).toBe('accepted');
+  expect(authority.submit(c, roof).status).toBe('accepted');
+  expect(authority.submit(b, competing)).toMatchObject({ status: 'rejected', code: 'stale-precondition' });
+  expect(authority.submit(a, structural).status).toBe('rejected');
+  expect(authority.submit(a, ground)).toMatchObject({ status: 'accepted', revision: 1 });
+  expect(authority.undo(b, frame.operationId).status).toBe('accepted');
+  expect(authority.snapshot().content.tasks.map(t => [t.id, t.name, t.durationDays])).toEqual([
+    ['ground', 'Prepare ground', 2], ['frame', 'frame', 1], ['roof', 'Install roof', 4],
+  ]);
 });
 
 it('shares independent equipment edits in a self-contained Factory line', () => {

@@ -1243,9 +1243,7 @@ export function ConstructionSurface({
               readOnly={readOnly}
               // A save that normalizes to the stored task (`03` days) leaves the key as it was:
               // start the form again from the stored task so nothing stays pending.
-              save={(t) =>
-                run({ type: 'updateTask', task: t }) && (setTaskEpoch((n) => n + 1), true)
-              }
+              save={(operation) => run(operation) && (setTaskEpoch((n) => n + 1), true)}
             />
           )}
           <CalendarForm
@@ -1790,7 +1788,7 @@ function TaskForm({
   span: { start: string; finish: string } | undefined;
   picked: string[];
   readOnly: boolean;
-  save(task: ConstructionTask): boolean;
+  save(operation: Extract<ConstructionOperation, { type: 'setTaskNameAndDuration' | 'updateTask' }>): boolean;
 }) {
   const [name, setName] = useState(task.name);
   const [days, setDays] = useState(String(task.durationDays));
@@ -1802,9 +1800,7 @@ function TaskForm({
   const [actualFinish, setActualFinish] = useState(task.actual?.finish ?? '');
   const [percent, setPercent] = useState(task.actual?.percent?.toString() ?? '');
   const [problem, setProblem] = useState('');
-  const dirty =
-    name !== task.name ||
-    days !== String(task.durationDays) ||
+  const otherFieldsChanged =
     links !== formatLinks(task.predecessors) ||
     action !== task.action ||
     raise !== (task.raiseMm?.toString() ?? '') ||
@@ -1812,6 +1808,8 @@ function TaskForm({
     actualStart !== (task.actual?.start ?? '') ||
     actualFinish !== (task.actual?.finish ?? '') ||
     percent !== (task.actual?.percent?.toString() ?? '');
+  const basicFieldsChanged = name !== task.name || days !== String(task.durationDays);
+  const dirty = basicFieldsChanged || otherFieldsChanged;
   useDirty(report, dirty);
   const submit = () => {
     // Unchanged links are kept as they are: an ID like `a(2)` would read back as a lag.
@@ -1829,7 +1827,11 @@ function TaskForm({
       ...(percent.trim() ? { percent: Number(percent) } : {}),
     };
     setProblem('');
-    save({
+    if (basicFieldsChanged && !otherFieldsChanged) {
+      save({ type: 'setTaskNameAndDuration', id: task.id, name, durationDays: Number(days) });
+      return;
+    }
+    const updated: ConstructionTask = {
       id: task.id,
       name,
       durationDays: Number(days),
@@ -1838,7 +1840,8 @@ function TaskForm({
       elementIds: elements,
       ...(Object.keys(actual).length ? { actual } : {}),
       ...(action === 'raise' ? { raiseMm: Number(raise) } : {}),
-    });
+    };
+    save({ type: 'updateTask', task: updated });
   };
   return (
     <form
