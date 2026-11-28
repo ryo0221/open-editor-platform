@@ -509,7 +509,7 @@ describe('adapter presentation modes', () => {
       ],
       stamp,
     );
-    expect(h.sidecar?.schemaVersion).toBe(2);
+    expect(h.sidecar?.schemaVersion).toBe(3);
     expect(h.sidecar?.presentation.nodes.a).toEqual({ x: 40, y: 40, shape: 'cylinder' });
     expect(h.content).toEqual({ names: { a: 'A', b: 'B' } });
     expect(h.binding.project().graph.presentation.nodes.a.shape).toBe('cylinder');
@@ -545,12 +545,12 @@ describe('adapter presentation modes', () => {
         h.binding.project().stamp,
       ),
     ).toThrow(/cannot save node shapes/);
-    expect(() => binding('sidecar', true)).toThrow(/sections need/i);
     expect(() => binding('none', true)).toThrow(/sections need/i);
+    expect(() => binding('sidecar', true)).not.toThrow();
     expect(() => binding('source', true)).not.toThrow();
   });
 
-  it('reads a schema 1 layout sidecar as node presentation', () => {
+  it('reads schema 1 and 2 sidecars as schema 3 node presentation', () => {
     const h = binding('sidecar'),
       { stamp } = h.binding.project();
     h.binding.apply([{ type: 'move-node', id: 'a', position: { x: 1, y: 1 } }], stamp);
@@ -562,6 +562,17 @@ describe('adapter presentation modes', () => {
       getPresentation: () => v1 as unknown as PresentationSidecar,
     });
     expect(other.project().graph.presentation.nodes.a).toEqual({ x: 7, y: 8 });
+    const v2 = { ...rest, schemaVersion: 2, presentation: { nodes: { a: { x: 3, y: 4 } } } };
+    const two = new GraphBinding<Source>({
+      ...h.binding.options,
+      getPresentation: () => v2 as unknown as PresentationSidecar,
+    });
+    expect(two.project().graph.presentation.nodes.a).toEqual({ x: 3, y: 4 });
+    // The next presentation change writes schema 3.
+    two.apply([{ type: 'move-node', id: 'b', position: { x: 5, y: 5 } }], two.project().stamp);
+    expect(h.sidecar?.schemaVersion).toBe(3);
+    expect(h.sidecar?.presentation.nodes.a).toEqual({ x: 3, y: 4 });
+    expect(h.sidecar?.presentation.sections).toEqual({});
   });
 
   it('refuses a malformed presentation sidecar', () => {
@@ -572,7 +583,13 @@ describe('adapter presentation modes', () => {
     for (const bad of [
       { ...saved, schemaVersion: 1 },
       { ...saved, presentation: { nodes: { a: { x: 1, y: 1, shape: 'star' } } } },
-      { ...saved, presentation: { nodes: {}, sections: {} } },
+      { ...saved, presentation: { nodes: {} } },
+      { ...saved, schemaVersion: 2, presentation: { nodes: {}, sections: {} } },
+      // Section frames need an adapter that declares sections.
+      {
+        ...saved,
+        presentation: { nodes: {}, sections: { s: { x: 0, y: 0, width: 80, height: 80 } } },
+      },
       { ...saved, positions: {} },
     ]) {
       const other = new GraphBinding<Source>({
