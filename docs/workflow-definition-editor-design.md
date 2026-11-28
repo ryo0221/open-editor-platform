@@ -133,7 +133,7 @@ ID の付け方：ID は人が読む英小文字の語（`concept`・`process.co
 
 ## 7. マインドマップとの対応
 
-- 対応はマインドマップの枝の `link: {namespace: 'owd:<定義の id>', id: <要素の id>}` に持つ。定義の側に対応表は持たない（正本は一か所。0002 の「ノードから定義の ID への対応を明示的に持つ」）。
+- 対応はマインドマップの枝の `link: {namespace: 'owd:<定義の id>', id: '<種類>:<要素の id>'}`（例：`phase:concept`。種類は `phase`・`section`・`deliverable`・`acceptance`・`role`・`item`・`rule`。§6 の名前空間で同じ ID が別の種類にありうるので、Graph の投影と同じ前置きを付けて、対象を一つに決める。ID の変更・削除の照らし合わせも種類ごとに行う） に持つ。定義の側に対応表は持たない（正本は一か所。0002 の「ノードから定義の ID への対応を明示的に持つ」）。
 - 定義の Editor の「マインドマップから足す」は、Host が `ItemReferenceHost` と同じ形で渡す枝の候補（題・link の有無）を並べる。枝を選んで種類を選ぶと、名前を枝の題にした要素を足す（ID は入力）。続けて Host へ「この枝に link を付ける」要求を返し、Host がマインドマップの提案（OP-06）として適用する。二つの成果物の編集なので、それぞれ別の Undo になる。片方だけ通ったときは Host が「対応が付いていない」と示す。
 - **Mind Map 側の口が要る**。今の提案（OP-06）の操作の種類（`add`・`rename`・`reorder`・`move`・`delete`・`collapse`・`color`・`marks`・`note`・`layout`）と `MindmapNodeFields` には `link` が無く、parser は未知の操作を断る。そこで WD4 で `mindmap-core` に次を足す。
   - command `setNodeLink(id, link | null)`：link の設定・置き換え・解除。`link` の各部 1〜128 字の今の上限を守り、中心の枝にも付けられる。一つの Undo。
