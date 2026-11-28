@@ -1,11 +1,15 @@
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
 import { classifySpecs, developmentSpecs } from '../e2e/areas.mjs';
 import {
   cadCar,
   compareFailures,
+  femMesherProblem,
   nightlyGroups,
   packageSuites,
   skippedSuites,
@@ -128,4 +132,22 @@ test('a report summary counts statuses and keys failures', () => {
 test('new and fixed failures count only tests that passed as fixed', () => {
   const result = compareFailures(['a', 'b'], ['b', 'c', 'd'], new Set(['a', 'b', 'c']));
   assert.deepEqual(result, { added: ['a'], fixed: ['c'] });
+});
+
+test('the mesher dist is served only when it holds the pinned build', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'fem-mesher-'));
+  const sha = (text) => createHash('sha256').update(text).digest('hex');
+  const spec = {
+    js: 'fem-mesher.mjs',
+    wasm: 'fem-mesher.wasm',
+    jsSha256: sha('js'),
+    wasmSha256: sha('wasm'),
+  };
+  assert.match(femMesherProblem(dist, spec), /fem-mesher\.mjs is missing/);
+  writeFileSync(join(dist, 'fem-mesher.mjs'), 'js');
+  assert.match(femMesherProblem(dist, spec), /fem-mesher\.wasm is missing/);
+  writeFileSync(join(dist, 'fem-mesher.wasm'), 'other');
+  assert.match(femMesherProblem(dist, spec), /fem-mesher\.wasm is not the pinned build/);
+  writeFileSync(join(dist, 'fem-mesher.wasm'), 'wasm');
+  assert.equal(femMesherProblem(dist, spec), undefined);
 });

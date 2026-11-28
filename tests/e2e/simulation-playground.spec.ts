@@ -809,7 +809,7 @@ test('solve a study on the reference Host, cancel one, and solve one too large f
 
   const onHost = 'Run on Reference Host (CalculiX)';
   await expect(surface.getByLabel('What a Host run sends', { exact: true })).toHaveText(
-    /sends this development server the mesh \(node coordinates and elements\), E and ν, the held nodes and the nodal forces, nothing else: no CAD document, names or sign-in\. It takes up to 200,000 nodes and 140,000 elements\./,
+    /sends this development server the mesh \(node coordinates and elements\), E and ν, the held nodes and the nodal forces, nothing else: no CAD document, names or sign-in\. It takes up to 1,500,000 nodes and 1,000,000 elements\./,
   );
   const state = surface
     .getByRole('status')
