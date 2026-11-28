@@ -1,0 +1,1473 @@
+{
+  "format": 1,
+  "id": "fiction-manga",
+  "version": "1.6.0",
+  "title": "漫画の制作",
+  "purpose": "漫画を、企画と画作りの決まりから、人物・世界と舞台・筋・脚本の設計、ネーム、ラフ・線画・仕上げと写植、通読を経て出版準備まで、作者が工程ごとに成果物を確かめて受け入れながら、AI の提案を採否して作る。",
+  "phases": [
+    {
+      "id": "process",
+      "name": "進め方",
+      "purpose": "この作品で通る工程と省く工程、工程ごとの成果物と確かめる人、AI に頼むことの範囲、作品の出口を決める。",
+      "after": [],
+      "deliverables": [
+        "process-map"
+      ],
+      "acceptance": [
+        "process.complete",
+        "process.ai-scope",
+        "process.approved"
+      ]
+    },
+    {
+      "id": "concept",
+      "name": "企画",
+      "purpose": "何を誰に向けて描くか、読後に何を残すか、どの長さでどこへ出すかを決め、絵の決まり・レイヤーの決まり・採用見本をまとめた画作りガイドを作る。",
+      "after": [
+        "process"
+      ],
+      "deliverables": [
+        "concept-doc",
+        "art-guide"
+      ],
+      "acceptance": [
+        "concept.complete",
+        "concept.approved",
+        "art.layers-defined",
+        "art.samples-sourced",
+        "art.approved"
+      ]
+    },
+    {
+      "id": "character",
+      "name": "人物",
+      "purpose": "人物の欲求・傷・口調・変えない外見と、人物どうしの関係を決め、人物の設定画を描く。",
+      "after": [
+        "concept"
+      ],
+      "deliverables": [
+        "character-sheet",
+        "relationship-map",
+        "character-art"
+      ],
+      "acceptance": [
+        "character.complete",
+        "character.art-covered",
+        "character.art-turnaround",
+        "character.approved",
+        "character.art-approved"
+      ]
+    },
+    {
+      "id": "stage",
+      "name": "世界と舞台",
+      "purpose": "物語の世界の決まりと世界線、場所の配置・向き・縮尺を地図に、場所の見え方を舞台の設定画に、固有名詞とその表記を辞書に決める。",
+      "after": [
+        "concept"
+      ],
+      "deliverables": [
+        "stage-notes",
+        "stage-map",
+        "stage-art",
+        "stage-model",
+        "term-dictionary"
+      ],
+      "acceptance": [
+        "stage.map-traced",
+        "stage.art-covered",
+        "stage.terms-unique",
+        "stage.approved",
+        "stage.map-approved",
+        "stage.art-approved"
+      ]
+    },
+    {
+      "id": "story",
+      "name": "筋と構成",
+      "purpose": "筋・出来事・伏線を置き、出来事の作中の時刻と人物ごとの経験の順を決め、構成の型と山場の配置、話の区切りを決める。読者への提示順は、シーンができてから構成図の提示位置で決める。",
+      "after": [
+        "character",
+        "stage"
+      ],
+      "deliverables": [
+        "story-ledger",
+        "structure-map"
+      ],
+      "acceptance": [
+        "story.threads-themed",
+        "story.foreshadowing-traced",
+        "story.approved"
+      ]
+    },
+    {
+      "id": "script",
+      "name": "脚本",
+      "purpose": "シーンごとに目的・視点・葛藤・変化・登場人物・場所と台詞を書き、構成図の提示位置に並べて話へ割り当てる。",
+      "after": [
+        "story"
+      ],
+      "deliverables": [
+        "script-doc"
+      ],
+      "acceptance": [
+        "script.traced",
+        "script.threads-covered",
+        "script.occurrences-traced",
+        "script.speakers",
+        "script.continuity",
+        "script.approved"
+      ]
+    },
+    {
+      "id": "storyboard",
+      "name": "ネーム",
+      "purpose": "ページとコマを割り、コマごとに人物の配置とカメラの位置・注視点・画角を舞台の3Dモデルの上で決め、そのカメラから見た絵でコマに何がどう入るかを確かめて、場所・台詞・間を決める。",
+      "after": [
+        "script"
+      ],
+      "deliverables": [
+        "storyboard-pages"
+      ],
+      "acceptance": [
+        "storyboard.traced",
+        "storyboard.staged",
+        "storyboard.subjects-framed",
+        "storyboard.scenes-covered",
+        "storyboard.figures-posed",
+        "storyboard.reading-direction",
+        "storyboard.approved"
+      ]
+    },
+    {
+      "id": "rough",
+      "name": "ラフ",
+      "purpose": "ネームのページごとに、構図・ポーズ・接触・背景の位置をラフに描き、もとにする設定画・見本と作画の方法を決める。",
+      "after": [
+        "storyboard"
+      ],
+      "deliverables": [
+        "rough-pages"
+      ],
+      "acceptance": [
+        "rough.layers",
+        "rough.sources",
+        "rough.figures-drawn",
+        "rough.lettering-clear",
+        "rough.framing",
+        "rough.approved"
+      ]
+    },
+    {
+      "id": "ink",
+      "name": "線画",
+      "purpose": "ラフのページごとに線画を描く。",
+      "after": [
+        "rough"
+      ],
+      "deliverables": [
+        "ink-pages"
+      ],
+      "acceptance": [
+        "ink.layers",
+        "ink.backgrounds",
+        "ink.approved"
+      ]
+    },
+    {
+      "id": "finish",
+      "name": "仕上げと写植",
+      "purpose": "線画のページごとにトーン・塗り・影・効果を仕上げ、吹き出しと文字を入れる。",
+      "after": [
+        "ink"
+      ],
+      "deliverables": [
+        "finished-pages",
+        "lettering-record"
+      ],
+      "acceptance": [
+        "finish.layers",
+        "finish.generated-sourced",
+        "lettering.traced",
+        "lettering.covered",
+        "lettering.clear",
+        "finish.approved",
+        "lettering.approved"
+      ]
+    },
+    {
+      "id": "read",
+      "name": "通読",
+      "purpose": "固定した版を通して読み、指摘ごとに直すかを決め、作品の完成を判断する。",
+      "after": [
+        "finish"
+      ],
+      "deliverables": [
+        "editorial-record"
+      ],
+      "acceptance": [
+        "read.fixed-version",
+        "read.traced",
+        "read.approved"
+      ]
+    },
+    {
+      "id": "output",
+      "name": "出版準備",
+      "purpose": "出口に合わせた形式で出力し、書誌情報と紹介文、AI の関わりの記録をそろえる。",
+      "after": [
+        "read"
+      ],
+      "deliverables": [
+        "output-record"
+      ],
+      "acceptance": [
+        "output.from-fixed",
+        "output.approved"
+      ]
+    },
+    {
+      "id": "learning",
+      "name": "学び",
+      "purpose": "この作品で得たことのうち、次の作品で変えることを選んで残す。",
+      "after": [
+        "output"
+      ],
+      "deliverables": [
+        "learning-record"
+      ],
+      "acceptance": [
+        "learning.chosen"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "plan",
+      "name": "企画",
+      "icon": "lightbulb",
+      "phases": [
+        "process",
+        "concept"
+      ]
+    },
+    {
+      "id": "design",
+      "name": "物語設計",
+      "icon": "book-open",
+      "phases": [
+        "character",
+        "stage",
+        "story",
+        "script"
+      ]
+    },
+    {
+      "id": "draw",
+      "name": "ネームと作画",
+      "icon": "pen-tool",
+      "phases": [
+        "storyboard",
+        "rough",
+        "ink",
+        "finish"
+      ]
+    },
+    {
+      "id": "finish-and-publish",
+      "name": "仕上げと公開",
+      "icon": "send",
+      "phases": [
+        "read",
+        "output",
+        "learning"
+      ]
+    }
+  ],
+  "deliverables": [
+    {
+      "id": "process-map",
+      "name": "進め方",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "工程の順",
+          "describe": "通る工程と、その順とつながり"
+        },
+        {
+          "heading": "工程ごとの成果物と確かめる人",
+          "describe": "工程ごとに、作る成果物・達成条件・確かめる人"
+        },
+        {
+          "heading": "省く工程",
+          "describe": "省く工程と省く成果物（舞台の3Dモデルなど）と、その理由と代わりの確かめ方"
+        },
+        {
+          "heading": "AI に頼むこと",
+          "describe": "作品全体の既定として、AI に絵や台詞を描かせるか、提案だけか、読むだけかの範囲を工程ごとに。話やページごとに変えてよいかと、その決め方。AI に絵を生成させるときは、使う道具と、生成を断られた・失敗したときの代わり（指示を変える・人が描く・その絵を省く）"
+        },
+        {
+          "heading": "出口",
+          "describe": "描き上げた作品をどこに出すか（投稿・公募・連載・同人・私家版など）と、その規定"
+        }
+      ]
+    },
+    {
+      "id": "concept-doc",
+      "name": "企画書",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "ログライン",
+          "describe": "作品を一文で言うと何か"
+        },
+        {
+          "heading": "テーマ",
+          "describe": "作品が扱う問いと、読後に残したいもの",
+          "item": "theme"
+        },
+        {
+          "heading": "読者",
+          "describe": "想定する読者と、その読者が作品に求めるもの"
+        },
+        {
+          "heading": "長さ",
+          "describe": "目標のページ数と話の数の目安"
+        },
+        {
+          "heading": "結末までのあらすじ",
+          "describe": "始まりから結末までの流れ。結末を伏せずに書く"
+        },
+        {
+          "heading": "出口と規定",
+          "describe": "出す先の規定（ページ数・判型・原稿の形式・AI の利用の申告など）"
+        }
+      ]
+    },
+    {
+      "id": "art-guide",
+      "name": "画作りガイド",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "画作りの決まり",
+          "describe": "線・形の誇張・配色・陰影・密度・カメラと演出・人物の固定した外見・許す例外など、守る決まり",
+          "item": "art-rule"
+        },
+        {
+          "heading": "レイヤーの決まり",
+          "describe": "レイヤーごとに、名前・重ね順・描く中身（下描き・線画・塗り・影・背景・効果・吹き出し・文字など）・使う段階（設定画・ラフ・線画・仕上げ）・分けたまま残すか、まとめてよいか・人と AI のどちらが描いてよいか。段階ごとに要るレイヤーと、ラフから線画・仕上げへ引き継ぐレイヤーも書く",
+          "item": "layer"
+        },
+        {
+          "heading": "採用見本",
+          "describe": "見本ごとに、何の見本か・出典・利用条件・外へ送ってよいか・固定した版",
+          "item": "sample"
+        },
+        {
+          "heading": "文字の決まり",
+          "describe": "台詞・擬音・手書き文字の書体と大きさ、縦書き・横書き、ルビの決まり。ページとコマを読む方向（右から左か左から右か）"
+        }
+      ],
+      "uses": [
+        "concept-doc"
+      ]
+    },
+    {
+      "id": "character-sheet",
+      "name": "人物表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "人物",
+          "describe": "人物ごとに、欲求・傷・口調・他の人物との関係・初めて出る場面・変えない外見",
+          "item": "character"
+        }
+      ],
+      "uses": [
+        "concept-doc"
+      ]
+    },
+    {
+      "id": "relationship-map",
+      "name": "相関図",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "関係",
+          "describe": "人物どうしの関係と、その関係が物語の中でどう変わるか"
+        }
+      ],
+      "uses": [
+        "character-sheet"
+      ]
+    },
+    {
+      "id": "character-art",
+      "name": "人物の設定画",
+      "form": "漫画ページ",
+      "outline": [
+        {
+          "heading": "人物ごとの設定画",
+          "describe": "人物（CH）ごとに、正面・側面・背面（三面図）・表情・衣装・持ち物と、背の違う人物を同じ縮尺で並べた比べ。人物の3Dモデルがあるときは、同じ向きで書き出した下絵に合わせて描き、下絵の版を書く。主要な人物どうしは髪型・体格・シルエットで見分けられるようにする。双子や正体を隠す人物のように意図して似せるときは、その設定と演出上の扱いを書く。時期や世界で外見が変わるときは、変わる前と後を分けて描く"
+        },
+        {
+          "heading": "レイヤー",
+          "describe": "設定画ごとに、使ったレイヤーを画作りガイドのレイヤーの決まりの名前で書く。決まりに無いレイヤーを足したときと、決まりで分けておくレイヤーをまとめたときは、その理由。人が描いた・直したレイヤーと、AI の提案を採ったレイヤー。AI が生成した画像を採ったレイヤーには、生成に使った道具と版・渡した参照（設定画・ネーム・採用見本の固定した版）・出典と利用条件"
+        }
+      ],
+      "uses": [
+        "character-sheet",
+        "art-guide"
+      ]
+    },
+    {
+      "id": "stage-notes",
+      "name": "世界の覚え書き",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "世界の決まり",
+          "describe": "物語の世界で成り立つこと・成り立たないこと"
+        },
+        {
+          "heading": "世界線と時計",
+          "describe": "作品の中の世界ごとに、親の世界（一つだけ）と、親から受け継ぐ出来事の集合とその固定した版、分岐を見せる時点、使う時計。時計ごとに、原点と、別の時計との整数日の差"
+        },
+        {
+          "heading": "世界間の移送",
+          "describe": "人物や物が世界をまたぐごとに、どの個体が、どの出来事で、どの世界からどの世界へ移るか。時刻の計算とは別に書く"
+        }
+      ],
+      "uses": [
+        "concept-doc"
+      ]
+    },
+    {
+      "id": "stage-map",
+      "name": "地図",
+      "form": "物語の地図",
+      "outline": [
+        {
+          "heading": "場所",
+          "describe": "場所ごとに、様子・位置・向き・縮尺・そこで起きうること。時点や世界線で様子が変わる場所は、変わる前と後を分けて書き、どの出来事で変わるかを書く",
+          "item": "location"
+        },
+        {
+          "heading": "道",
+          "describe": "場所と場所のつながりごとに、道のりと、移動にかかる時間の目安",
+          "item": "route"
+        }
+      ],
+      "uses": [
+        "stage-notes"
+      ],
+      "view": {
+        "as": "graph",
+        "nodes": [
+          "location"
+        ],
+        "edges": [
+          "route"
+        ]
+      }
+    },
+    {
+      "id": "stage-art",
+      "name": "舞台の設定画",
+      "form": "漫画ページ",
+      "outline": [
+        {
+          "heading": "場所ごとの設定画",
+          "describe": "場所（LO）ごとに、全景・主な向きからの見え方・時代と建築・明るさ。地図と同じ向きと縮尺で描く"
+        },
+        {
+          "heading": "レイヤー",
+          "describe": "設定画ごとに、使ったレイヤーを画作りガイドのレイヤーの決まりの名前で書く。決まりに無いレイヤーを足したときと、決まりで分けておくレイヤーをまとめたときは、その理由。人が描いた・直したレイヤーと、AI の提案を採ったレイヤー。AI が生成した画像を採ったレイヤーには、生成に使った道具と版・渡した参照（設定画・ネーム・採用見本の固定した版）・出典と利用条件"
+        }
+      ],
+      "uses": [
+        "stage-map",
+        "art-guide"
+      ]
+    },
+    {
+      "id": "stage-model",
+      "name": "舞台の3Dモデル",
+      "form": "3Dモデル",
+      "outline": [
+        {
+          "heading": "場所ごとの3Dモデル",
+          "describe": "場所（LO）ごとの、地図と同じ向きと縮尺の 3D モデル。ネームで人物とカメラを置き、ラフの下絵に使う。作らない作品では、進め方で省くと決めて空にしてよい"
+        },
+        {
+          "heading": "使う資料",
+          "describe": "場所ごとに、もとにした地図と舞台の設定画の固定した版"
+        }
+      ],
+      "uses": [
+        "stage-map",
+        "stage-art"
+      ]
+    },
+    {
+      "id": "term-dictionary",
+      "name": "固有名詞と表記の辞書",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "用語",
+          "describe": "用語ごとに、正しい表記・読み・ルビの有無・使わない表記",
+          "item": "term"
+        }
+      ],
+      "uses": [
+        "stage-notes",
+        "character-sheet"
+      ]
+    },
+    {
+      "id": "story-ledger",
+      "name": "筋の台帳",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "筋",
+          "describe": "物語を貫く筋ごとに、始まり・転機・決着",
+          "item": "plot-thread"
+        },
+        {
+          "heading": "出来事",
+          "describe": "出来事ごとに、作中の時刻（未定・日・期間・幅、ほかの出来事からの日数）と、関わる人物の個体と場所、誰が何を知り・信じ・言ったか。シーンが無い出来事も書いてよい。読者への提示順はここに書かない",
+          "item": "event"
+        },
+        {
+          "heading": "伏線",
+          "describe": "伏線ごとに、張る場所・回収する場所。回収しないときは理由（次の話への持ち越し・意図したミスリードなど）",
+          "item": "foreshadowing"
+        }
+      ],
+      "uses": [
+        "concept-doc",
+        "character-sheet",
+        "stage-notes",
+        "stage-map"
+      ]
+    },
+    {
+      "id": "structure-map",
+      "name": "構成図",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "構成の型",
+          "describe": "選んだ構成の型（起承転結・三幕・序破急・独自など）と、話の区切り"
+        },
+        {
+          "heading": "山場の配置",
+          "describe": "山場と転機を、全体と話のどこに置くか"
+        },
+        {
+          "heading": "提示位置",
+          "describe": "作品の中でシーンを読者に示す一回ごとに、示すシーン（固定した版）・並び・話。同じシーンをもう一度示すときは提示位置を別に作る。読者への提示順はここだけに書く",
+          "item": "occurrence"
+        },
+        {
+          "heading": "人物の経験の順",
+          "describe": "人物の個体ごとに、本人が経験する出来事の順。作中の時刻や提示順とは別に書く"
+        }
+      ],
+      "uses": [
+        "story-ledger"
+      ]
+    },
+    {
+      "id": "script-doc",
+      "name": "脚本",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "シーン",
+          "describe": "シーンごとに、目的・視点人物・葛藤・変化・登場人物・場所と、描く出来事（固定した版）。番号は話に依らず作品の中で固定し、使い回さない",
+          "item": "scene",
+          "children": [
+            {
+              "heading": "台詞",
+              "describe": "台詞ごとに、話す人物・言い方・心の声か声か。ト書きは台詞と分けて書く",
+              "item": "dialogue"
+            }
+          ]
+        },
+        {
+          "heading": "続く状態",
+          "describe": "シーンごとに、コマをまたいで続く状態（持ち物・服の乱れ・傷・縛られ方・天気と時刻など）と、どのシーンで変わるか。ネーム・ラフ・線画の指示はこれを引用する。続く状態の無いシーンは、その旨を書く"
+        }
+      ],
+      "uses": [
+        "story-ledger",
+        "structure-map",
+        "character-sheet",
+        "term-dictionary"
+      ]
+    },
+    {
+      "id": "storyboard-pages",
+      "name": "ネーム",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "ページ",
+          "describe": "ページごとに、見開きか片ページか、めくりの位置。番号は作品の中で固定し、使い回さない",
+          "item": "page"
+        },
+        {
+          "heading": "コマ",
+          "describe": "コマごとに、入るページ・枠の形と大きさ・読む順・描く場所・入れる台詞・間と、カメラの位置・注視点・画角（舞台の3Dモデルの固定した版の座標で。3Dモデルの無い場所は地図の上で決め、モデルを使わない理由を書く）。3Dモデルの上で決めたコマには、そのカメラから見た3Dの絵を、コマの枠の形と大きさに合わせて切り取ってコマに重ね、コマに入る範囲と切れる範囲が分かるようにする。舞台を上から見た配置図に、人物の配置・カメラの位置と視野を描く。描く内容に書いた主役が、カメラの絵の枠に入っているかを人物の配置ごとに書く。コマはページを ID の親にしない。別のページへ移しても ID を保つ",
+          "item": "panel",
+          "children": [
+            {
+              "heading": "人物の配置",
+              "describe": "コマに描く人物ごとに、どの人物か・舞台のどこ（3D モデルの座標か地図の上の位置）にいるか・向き・姿勢。3D モデルの上で決めたコマでは、人物の3Dモデルをその位置・向き・姿勢で舞台に置き、カメラの絵に写す。コマの上に、そのコマで描写する範囲のアタリ（頭の向きが分かる十字・胴・関節の分かる腕と脚の簡単な形と、見えるときは目と口）を描き、描写する範囲の向き・姿勢と要る表情が読めるようにする。顔のアップ・後ろ姿・手元だけ・シルエットのように、画角の外・隠れる・意図して描かない部分は描かず、その構図か省いた理由を書く。アタリの名前に、どの人物の配置（FG）か・ポーズの意図を書く",
+              "item": "figure"
+            }
+          ]
+        }
+      ],
+      "uses": [
+        "script-doc",
+        "character-art",
+        "stage-art",
+        "stage-map",
+        "stage-model"
+      ],
+      "view": {
+        "as": "graph",
+        "sections": [
+          "page",
+          "panel"
+        ],
+        "nodes": [
+          "figure"
+        ],
+        "colorBy": "who"
+      }
+    },
+    {
+      "id": "rough-pages",
+      "name": "ラフ",
+      "form": "漫画ページ",
+      "outline": [
+        {
+          "heading": "ページごとのラフ",
+          "describe": "ネームのページ（PG）ごとのラフ。コマ（PN）はネームと同じ ID のまま。構図・ポーズ・人物どうしの接触・背景の位置を決める。人物の配置（FG）ごとに、そのコマのアングル・ポーズ・表情で人物を描く。同じ絵を別のコマで使うときは、その理由を書く。吹き出し・ナレーションの枠・文字を仮に置き、人物の顔と、そのコマで見せるポーズ・接触・表情の要所を避ける。顔はコマの枠や絵の切り取りで意図せず切らない（顔の一部だけを見せる寄りは、その構図の意図を書く）"
+        },
+        {
+          "heading": "使う資料",
+          "describe": "ページごとに、もとにした人物・舞台の設定画と採用見本の固定した版、作画の方法（手描き・3D の下絵・写真の加工など）"
+        },
+        {
+          "heading": "レイヤー",
+          "describe": "ページごとに、使ったレイヤーを画作りガイドのレイヤーの決まりの名前で書く。決まりに無いレイヤーを足したときと、決まりで分けておくレイヤーをまとめたときは、その理由。人が描いた・直したレイヤーと、AI の提案を採ったレイヤー。AI が生成した画像を採ったレイヤーには、生成に使った道具と版・渡した参照（設定画・ネーム・採用見本の固定した版）・出典と利用条件"
+        }
+      ],
+      "uses": [
+        "storyboard-pages",
+        "art-guide",
+        "character-art",
+        "stage-art",
+        "stage-model"
+      ]
+    },
+    {
+      "id": "ink-pages",
+      "name": "線画",
+      "form": "漫画ページ",
+      "outline": [
+        {
+          "heading": "ページごとの線画",
+          "describe": "ラフのページごとの線画。線・細部・人物の比率・コマどうしのつながりを描く"
+        },
+        {
+          "heading": "レイヤー",
+          "describe": "ページごとに、使ったレイヤーを画作りガイドのレイヤーの決まりの名前で書く。決まりに無いレイヤーを足したときと、決まりで分けておくレイヤーをまとめたときは、その理由。人が描いた・直したレイヤーと、AI の提案を採ったレイヤー。AI が生成した画像を採ったレイヤーには、生成に使った道具と版・渡した参照（設定画・ネーム・採用見本の固定した版）・出典と利用条件"
+        },
+        {
+          "heading": "背景の線の無いコマ",
+          "describe": "背景の線を描かなかったコマの一覧と、それぞれの理由（人物だけの寄り、意図した白地など）。作者は線画の確認でこの一覧を見て、描き足すかを決める"
+        }
+      ],
+      "uses": [
+        "rough-pages",
+        "art-guide"
+      ]
+    },
+    {
+      "id": "finished-pages",
+      "name": "仕上げ",
+      "form": "漫画ページ",
+      "outline": [
+        {
+          "heading": "ページごとの仕上げ",
+          "describe": "線画のページごとの、トーン・塗り・影・効果・背景の仕上げ"
+        },
+        {
+          "heading": "レイヤー",
+          "describe": "ページごとに、使ったレイヤーを画作りガイドのレイヤーの決まりの名前で書く。決まりに無いレイヤーを足したときと、決まりで分けておくレイヤーをまとめたときは、その理由。人が描いた・直したレイヤーと、AI の提案を採ったレイヤー。AI が生成した画像を採ったレイヤーには、生成に使った道具と版・渡した参照（設定画・ネーム・採用見本の固定した版）・出典と利用条件"
+        }
+      ],
+      "uses": [
+        "ink-pages",
+        "art-guide"
+      ]
+    },
+    {
+      "id": "lettering-record",
+      "name": "写植の記録",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "吹き出し",
+          "describe": "吹き出しや文字ごとに、入るコマ・入れる台詞（固定した版）・吹き出しの形・書体・縦書きか横書きか。台詞を書き換えたときは脚本の台詞を直し、ここは引用し直す。吹き出しと文字は、人物の顔と、そのコマで見せるポーズ・接触・表情の要所を避けて置く。被せるときは意図を書く",
+          "item": "balloon"
+        }
+      ],
+      "uses": [
+        "script-doc",
+        "storyboard-pages",
+        "finished-pages",
+        "term-dictionary",
+        "art-guide"
+      ]
+    },
+    {
+      "id": "editorial-record",
+      "name": "編集の記録",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "通読した版",
+          "describe": "通して読んだ原稿の固定した版"
+        },
+        {
+          "heading": "指摘",
+          "describe": "指摘ごとに、対象・出し手・判断（直す・直さない・意図として残す）とその理由。直したときは直した後の版を見直す",
+          "item": "review"
+        },
+        {
+          "heading": "判断",
+          "describe": "作品として完成とするかと、その理由"
+        },
+        {
+          "heading": "残した例外",
+          "describe": "意図して残した矛盾・語りの仕掛け・未回収の伏線と、その理由"
+        }
+      ],
+      "uses": [
+        "finished-pages",
+        "lettering-record",
+        "script-doc"
+      ]
+    },
+    {
+      "id": "output-record",
+      "name": "出力の記録",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "出力物",
+          "describe": "出力した形式ごとに、出力物と、出力のもとにした固定した版。レイヤーを残した元の原稿と、まとめた出力物を分ける"
+        },
+        {
+          "heading": "書誌情報と紹介文",
+          "describe": "題・著者名・あらすじ・紹介文"
+        },
+        {
+          "heading": "AI の関わり",
+          "describe": "どの工程で AI に何を頼み、どの絵・レイヤー・台詞に AI の提案を採ったか。出口の規定が求める申告"
+        }
+      ],
+      "uses": [
+        "editorial-record",
+        "concept-doc"
+      ]
+    },
+    {
+      "id": "learning-record",
+      "name": "学びの記録",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "学び",
+          "describe": "学びごとに、題に学んだことを 1 行、本文に根拠",
+          "item": "learning"
+        }
+      ],
+      "uses": [
+        "output-record",
+        "editorial-record"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "theme",
+      "name": "テーマ",
+      "idForm": "TH-{nn}"
+    },
+    {
+      "id": "art-rule",
+      "name": "画作りの決まり",
+      "idForm": "AR-{nn}"
+    },
+    {
+      "id": "layer",
+      "name": "レイヤー",
+      "idForm": "LY-{nn}"
+    },
+    {
+      "id": "sample",
+      "name": "採用見本",
+      "idForm": "SM-{nn}"
+    },
+    {
+      "id": "character",
+      "name": "人物",
+      "idForm": "CH-{nn}"
+    },
+    {
+      "id": "location",
+      "name": "場所",
+      "idForm": "LO-{nn}"
+    },
+    {
+      "id": "route",
+      "name": "道",
+      "idForm": "RT-{nn}"
+    },
+    {
+      "id": "term",
+      "name": "用語",
+      "idForm": "TE-{nn}"
+    },
+    {
+      "id": "plot-thread",
+      "name": "筋",
+      "idForm": "PT-{nn}"
+    },
+    {
+      "id": "event",
+      "name": "出来事",
+      "idForm": "EV-{nnn}"
+    },
+    {
+      "id": "foreshadowing",
+      "name": "伏線",
+      "idForm": "FS-{nn}"
+    },
+    {
+      "id": "occurrence",
+      "name": "提示位置",
+      "idForm": "OC-{nnn}"
+    },
+    {
+      "id": "scene",
+      "name": "シーン",
+      "idForm": "SC-{nnn}"
+    },
+    {
+      "id": "dialogue",
+      "name": "台詞",
+      "idForm": "DL-{nnn}"
+    },
+    {
+      "id": "page",
+      "name": "ページ",
+      "idForm": "PG-{nnn}"
+    },
+    {
+      "id": "panel",
+      "name": "コマ",
+      "idForm": "PN-{nnn}"
+    },
+    {
+      "id": "figure",
+      "name": "人物の配置",
+      "idForm": "FG-{nnn}"
+    },
+    {
+      "id": "balloon",
+      "name": "吹き出し",
+      "idForm": "BL-{nnn}"
+    },
+    {
+      "id": "review",
+      "name": "指摘",
+      "idForm": "RV-{nnn}"
+    },
+    {
+      "id": "learning",
+      "name": "学び",
+      "idForm": "LE-{nn}"
+    }
+  ],
+  "rules": [
+    {
+      "id": "plot-thread-cites-theme",
+      "type": "cites",
+      "from": "plot-thread",
+      "to": [
+        "theme"
+      ],
+      "min": 1
+    },
+    {
+      "id": "foreshadowing-cites-thread",
+      "type": "cites",
+      "from": "foreshadowing",
+      "to": [
+        "plot-thread"
+      ],
+      "min": 1
+    },
+    {
+      "id": "route-cites-location",
+      "type": "cites",
+      "from": "route",
+      "to": [
+        "location"
+      ],
+      "min": 1
+    },
+    {
+      "id": "occurrence-cites-scene",
+      "type": "cites",
+      "from": "occurrence",
+      "to": [
+        "scene"
+      ],
+      "min": 1
+    },
+    {
+      "id": "scene-cites-story",
+      "type": "cites",
+      "from": "scene",
+      "to": [
+        "event",
+        "plot-thread"
+      ],
+      "min": 1
+    },
+    {
+      "id": "scene-cites-cast",
+      "type": "cites",
+      "from": "scene",
+      "to": [
+        "character",
+        "location"
+      ],
+      "min": 1
+    },
+    {
+      "id": "scene-cites-foreshadowing",
+      "type": "cites",
+      "from": "scene",
+      "to": [
+        "foreshadowing"
+      ],
+      "min": 0
+    },
+    {
+      "id": "dialogue-cites-speaker",
+      "type": "cites",
+      "from": "dialogue",
+      "to": [
+        "character"
+      ],
+      "min": 1
+    },
+    {
+      "id": "panel-cites-scene",
+      "type": "cites",
+      "from": "panel",
+      "to": [
+        "scene"
+      ],
+      "min": 1
+    },
+    {
+      "id": "panel-cites-dialogue",
+      "type": "cites",
+      "from": "panel",
+      "to": [
+        "dialogue"
+      ],
+      "min": 0
+    },
+    {
+      "id": "figure-cites-character",
+      "type": "cites",
+      "from": "figure",
+      "to": [
+        "character"
+      ],
+      "min": 1
+    },
+    {
+      "id": "balloon-cites-dialogue",
+      "type": "cites",
+      "from": "balloon",
+      "to": [
+        "dialogue"
+      ],
+      "min": 1
+    },
+    {
+      "id": "balloon-cites-panel",
+      "type": "cites",
+      "from": "balloon",
+      "to": [
+        "panel"
+      ],
+      "min": 1
+    },
+    {
+      "id": "review-cites-target",
+      "type": "cites",
+      "from": "review",
+      "to": [
+        "page",
+        "panel",
+        "scene",
+        "dialogue"
+      ],
+      "min": 1
+    },
+    {
+      "id": "learning-cites-review",
+      "type": "cites",
+      "from": "learning",
+      "to": [
+        "review"
+      ],
+      "min": 0
+    },
+    {
+      "id": "thread-covered",
+      "type": "covered",
+      "of": "plot-thread",
+      "by": [
+        "scene"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "foreshadowing-covered",
+      "type": "covered",
+      "of": "foreshadowing",
+      "by": [
+        "scene"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "scene-covered",
+      "type": "covered",
+      "of": "scene",
+      "by": [
+        "panel"
+      ]
+    },
+    {
+      "id": "dialogue-covered",
+      "type": "covered",
+      "of": "dialogue",
+      "by": [
+        "balloon"
+      ],
+      "exempt": true
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "process.complete",
+      "text": "どの工程にも、成果物と達成条件と確かめる人がある。省く工程には理由と代わりの確かめ方がある。",
+      "checkedBy": "AI",
+      "target": "process-map"
+    },
+    {
+      "id": "process.ai-scope",
+      "text": "AI に頼むことの範囲と、話やページごとに変えるときの決め方が書いてある。AI に絵を生成させる工程には、使う道具と、生成を断られた・失敗したときの代わりが書いてある。",
+      "checkedBy": "AI",
+      "target": "process-map"
+    },
+    {
+      "id": "process.approved",
+      "text": "作者が工程の順と AI に頼むことの範囲を読み、承認している。",
+      "checkedBy": "人",
+      "target": "process-map"
+    },
+    {
+      "id": "concept.complete",
+      "text": "ログライン・テーマ・読者・長さ・結末までのあらすじ・出口と規定が書いてある。",
+      "checkedBy": "AI",
+      "target": "concept-doc"
+    },
+    {
+      "id": "concept.approved",
+      "text": "作者が企画書を読み、作品の核として承認している。",
+      "checkedBy": "人",
+      "target": "concept-doc"
+    },
+    {
+      "id": "art.layers-defined",
+      "text": "どのレイヤーにも、名前・重ね順・描く中身・使う段階・分けたまま残すかが書いてあり、名前と重ね順が重なっていない。設定画・ラフ・線画・仕上げのどの段階にも、要るレイヤーが決まっている。",
+      "checkedBy": "AI",
+      "target": "art-guide"
+    },
+    {
+      "id": "art.samples-sourced",
+      "text": "どの採用見本にも、出典・利用条件・外へ送ってよいか・固定した版が書いてある。",
+      "checkedBy": "AI",
+      "target": "art-guide"
+    },
+    {
+      "id": "art.approved",
+      "text": "作者が画作りの決まり・レイヤーの決まり・採用見本を読み、承認している。",
+      "checkedBy": "人",
+      "target": "art-guide"
+    },
+    {
+      "id": "character.complete",
+      "text": "主要な人物に、欲求・傷・口調・関係・変えない外見が書いてある。",
+      "checkedBy": "AI",
+      "target": "character-sheet"
+    },
+    {
+      "id": "character.art-covered",
+      "text": "主要な人物のどれにも設定画がある。どの設定画も、レイヤーの決まりで設定画に要るレイヤーがそろい、決まりに無いレイヤーには理由がある。AI が生成した画像を採ったどのレイヤーにも、生成に使った道具と版・渡した参照の固定した版・出典と利用条件が書いてある。",
+      "checkedBy": "AI",
+      "target": "character-art"
+    },
+    {
+      "id": "character.art-turnaround",
+      "text": "主要な人物のどれにも、正面・側面・背面の設定画と、背の違う人物を同じ縮尺で並べた比べの設定画がある。人物の3Dモデルがあるときは、どの設定画も、その3Dモデルの固定した版から同じ向きで書き出した下絵に合わせて描いてあり、下絵の版が書いてある。",
+      "checkedBy": "AI",
+      "target": "character-art"
+    },
+    {
+      "id": "character.approved",
+      "text": "作者が主要な人物と関係を承認している。",
+      "checkedBy": "人",
+      "target": "relationship-map"
+    },
+    {
+      "id": "character.art-approved",
+      "text": "作者が設定画を見て、人物の外見と、画作りの決まりに合っていること、主要な人物どうしが髪型・体格・シルエットで見分けられること（意図して似せた人物は、その設定と演出上の扱い）を確かめている。三面図と背の比べで、人物ごとの頭身と背の差が画作りの決まりと人物表のとおりかを見ている。",
+      "checkedBy": "人",
+      "target": "character-art"
+    },
+    {
+      "id": "stage.map-traced",
+      "text": "地図のどの道も、つなぐ場所を引用している。",
+      "checkedBy": "AI",
+      "target": "stage-map",
+      "rules": [
+        "route-cites-location"
+      ]
+    },
+    {
+      "id": "stage.art-covered",
+      "text": "物語に出る主な場所のどれにも設定画がある。どの設定画も、レイヤーの決まりで設定画に要るレイヤーがそろい、決まりに無いレイヤーには理由がある。AI が生成した画像を採ったどのレイヤーにも、生成に使った道具と版・渡した参照の固定した版・出典と利用条件が書いてある。",
+      "checkedBy": "AI",
+      "target": "stage-art"
+    },
+    {
+      "id": "stage.terms-unique",
+      "text": "用語に、同じものを指す別の表記や、重なった用語がない。",
+      "checkedBy": "AI",
+      "target": "term-dictionary"
+    },
+    {
+      "id": "stage.approved",
+      "text": "作者が世界の決まりと世界線を承認している。",
+      "checkedBy": "人",
+      "target": "stage-notes"
+    },
+    {
+      "id": "stage.map-approved",
+      "text": "作者が地図の配置・向き・縮尺と、演出のために省いたところを確かめている。",
+      "checkedBy": "人",
+      "target": "stage-map"
+    },
+    {
+      "id": "stage.art-approved",
+      "text": "作者が舞台の設定画を見て、地図と画作りの決まりに合っていることを確かめている。",
+      "checkedBy": "人",
+      "target": "stage-art"
+    },
+    {
+      "id": "story.threads-themed",
+      "text": "どの筋も、テーマのどれかに結び付いている。",
+      "checkedBy": "AI",
+      "target": "story-ledger",
+      "rules": [
+        "plot-thread-cites-theme"
+      ]
+    },
+    {
+      "id": "story.foreshadowing-traced",
+      "text": "どの伏線も筋に結び付き、回収する場所か、回収しない理由がある。",
+      "checkedBy": "AI",
+      "target": "story-ledger",
+      "rules": [
+        "foreshadowing-cites-thread"
+      ]
+    },
+    {
+      "id": "story.approved",
+      "text": "作者が筋と結末と構成を承認している。",
+      "checkedBy": "人",
+      "target": "structure-map"
+    },
+    {
+      "id": "script.traced",
+      "text": "どのシーンも、出来事か筋と、人物か場所に結び付いている。",
+      "checkedBy": "AI",
+      "target": "script-doc",
+      "rules": [
+        "scene-cites-story",
+        "scene-cites-cast"
+      ]
+    },
+    {
+      "id": "script.threads-covered",
+      "text": "どの筋と伏線も、どれかのシーンで扱われている。扱わないものには理由がある。",
+      "checkedBy": "AI",
+      "target": "script-doc",
+      "rules": [
+        "thread-covered",
+        "foreshadowing-covered"
+      ]
+    },
+    {
+      "id": "script.occurrences-traced",
+      "text": "構成図のどの提示位置も、示すシーンを引用している。",
+      "checkedBy": "AI",
+      "target": "script-doc",
+      "rules": [
+        "occurrence-cites-scene"
+      ]
+    },
+    {
+      "id": "script.speakers",
+      "text": "どの台詞も、話す人物を引用している。台詞に、辞書で使わないと決めた表記がない。",
+      "checkedBy": "AI",
+      "target": "script-doc",
+      "rules": [
+        "dialogue-cites-speaker"
+      ]
+    },
+    {
+      "id": "script.continuity",
+      "text": "どのシーンにも、コマをまたいで続く状態（持ち物・服の乱れ・傷・縛られ方・天気と時刻など）が書いてある。続く状態の無いシーンには、その旨が書いてある。",
+      "checkedBy": "AI",
+      "target": "script-doc"
+    },
+    {
+      "id": "script.approved",
+      "text": "作者がシーンと台詞と、提示位置での並び・話への割り当てを承認している。",
+      "checkedBy": "人",
+      "target": "script-doc"
+    },
+    {
+      "id": "storyboard.traced",
+      "text": "どのコマも、描くシーンを引用している。どの人物の配置も、どの人物かを引用している。どのコマにもカメラの位置・向き・画角が書いてある。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages",
+      "rules": [
+        "panel-cites-scene",
+        "figure-cites-character"
+      ]
+    },
+    {
+      "id": "storyboard.staged",
+      "text": "舞台の3Dモデルがある場所のコマには、どれにも、使った3Dモデルの固定した版と、その座標でのカメラの位置・注視点・画角と、人物の配置ごとの位置・向き・姿勢が書いてあり、そのカメラから見た3Dの絵がコマの枠の形と大きさに合わせて重ねてあり、舞台を上から見た配置図に人物の配置とカメラの位置と視野が描いてある。3Dモデルの無い場所のコマには、地図の上の位置と、モデルを使わない理由が書いてある。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages"
+    },
+    {
+      "id": "storyboard.subjects-framed",
+      "text": "3Dの舞台で組んだどのコマも、描く内容に書いた主役（人物と物）が、そのカメラの絵の枠に入っているかを人物の配置ごとに確かめて書いてある。枠に入らない主役には、描かない理由か、カメラを直したことが書いてある。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages"
+    },
+    {
+      "id": "storyboard.scenes-covered",
+      "text": "どのシーンも、どれかのコマで描かれている。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages",
+      "rules": [
+        "scene-covered"
+      ]
+    },
+    {
+      "id": "storyboard.figures-posed",
+      "text": "どの人物の配置にも、コマの上に、そのコマで描写する範囲のアタリ（頭の向きが分かる十字・胴・関節の分かる腕と脚のうち画角に入る部分と、見えるときは表情の目と口）が描いてある。画角の外・隠れる・後ろ姿・意図して描かない部分には、その構図か省いた理由が書いてある。どのアタリの名前にも、どの人物の配置（FG）か・ポーズの意図が書いてある。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages"
+    },
+    {
+      "id": "storyboard.reading-direction",
+      "text": "どのページも、コマを読む順と方向が画作りガイドの文字の決まりの読む方向と合っている。",
+      "checkedBy": "AI",
+      "target": "storyboard-pages"
+    },
+    {
+      "id": "storyboard.approved",
+      "text": "作者がコマ割り・人物の配置とカメラ・カメラの絵がコマにどう入るか・アタリで示した人物のポーズと表情・構図と省いた部分・間・台詞の量・読む順・ページのめくりを確かめ、承認している。扉と大きなコマは、ラフに進む前に先に見ている。",
+      "checkedBy": "人",
+      "target": "storyboard-pages"
+    },
+    {
+      "id": "rough.layers",
+      "text": "どのページも、画作りガイドのレイヤーの決まりでこの段階に要るレイヤーがそろっている。決まりに無いレイヤーや、分けておくレイヤーをまとめたところには理由がある。",
+      "checkedBy": "AI",
+      "target": "rough-pages"
+    },
+    {
+      "id": "rough.sources",
+      "text": "どのページにも、もとにした設定画と採用見本の固定した版が書いてある。AI が生成した画像を採ったどのレイヤーにも、生成に使った道具と版・渡した参照の固定した版・出典と利用条件が書いてある。",
+      "checkedBy": "AI",
+      "target": "rough-pages"
+    },
+    {
+      "id": "rough.figures-drawn",
+      "text": "どの人物の配置（FG）にも、そのコマ用に描いた人物の絵がある。同じ絵を複数のコマで使っているところには理由がある。",
+      "checkedBy": "AI",
+      "target": "rough-pages"
+    },
+    {
+      "id": "rough.lettering-clear",
+      "text": "どのページも、仮の吹き出し・ナレーションの枠・文字が、人物の顔と、そのコマで見せるポーズ・接触・表情の要所に被っていない。被せるところ（手前の人物の陰に置くなど）には、その意図が書いてある。",
+      "checkedBy": "AI",
+      "target": "rough-pages"
+    },
+    {
+      "id": "rough.framing",
+      "text": "どの人物の絵も、顔がコマの枠や絵の切り取りで意図せず切れていない。顔の一部だけを見せる寄りのコマには、その構図の意図が書いてある。",
+      "checkedBy": "AI",
+      "target": "rough-pages"
+    },
+    {
+      "id": "rough.approved",
+      "text": "作者がラフを見て、構図・ポーズ・接触とラフの意図と、人物の絵が場面ごとのアングル・ポーズ・表情で描き分けられていること、吹き出しと文字が人物の顔と見せたいところに被っていないこと、顔が意図せず切れていないことを確かめている。",
+      "checkedBy": "人",
+      "target": "rough-pages"
+    },
+    {
+      "id": "ink.layers",
+      "text": "どのページも、画作りガイドのレイヤーの決まりでこの段階に要るレイヤーがそろっている。決まりに無いレイヤーや、分けておくレイヤーをまとめたところには理由がある。AI が生成した画像を採ったどのレイヤーにも、生成に使った道具と版・渡した参照の固定した版・出典と利用条件が書いてある。",
+      "checkedBy": "AI",
+      "target": "ink-pages"
+    },
+    {
+      "id": "ink.backgrounds",
+      "text": "背景の線の無いコマが一覧になっていて、どれにも理由（人物だけの寄り、意図した白地など）が書いてある。続く状態（脚本のシーンごとの表）が、どのコマの線画にも引き継がれている。",
+      "checkedBy": "AI",
+      "target": "ink-pages"
+    },
+    {
+      "id": "ink.approved",
+      "text": "作者が線画を見て、線・細部・人物の比率・コマどうしのつながりを確かめている。背景の線の無いコマの一覧を見て、描き足すかを決めている。",
+      "checkedBy": "人",
+      "target": "ink-pages"
+    },
+    {
+      "id": "finish.layers",
+      "text": "どのページも、画作りガイドのレイヤーの決まりでこの段階に要るレイヤーがそろっている。決まりに無いレイヤーや、分けておくレイヤーをまとめたところには理由がある。",
+      "checkedBy": "AI",
+      "target": "finished-pages"
+    },
+    {
+      "id": "lettering.traced",
+      "text": "どの吹き出しも、入れる台詞と入るコマを引用している。",
+      "checkedBy": "AI",
+      "target": "lettering-record",
+      "rules": [
+        "balloon-cites-dialogue",
+        "balloon-cites-panel"
+      ]
+    },
+    {
+      "id": "lettering.covered",
+      "text": "脚本のどの台詞も、どれかの吹き出しに入っている。入れないものには理由がある。吹き出しの文字に、辞書で使わないと決めた表記がない。",
+      "checkedBy": "AI",
+      "target": "lettering-record",
+      "rules": [
+        "dialogue-covered"
+      ]
+    },
+    {
+      "id": "finish.generated-sourced",
+      "text": "AI が生成した画像を採ったどのレイヤーにも、生成に使った道具と版・渡した参照の固定した版・出典と利用条件が書いてある。",
+      "checkedBy": "AI",
+      "target": "finished-pages"
+    },
+    {
+      "id": "finish.approved",
+      "text": "作者が仕上げを見て、トーン・塗り・影・効果を確かめている。",
+      "checkedBy": "人",
+      "target": "finished-pages"
+    },
+    {
+      "id": "lettering.clear",
+      "text": "どの吹き出しと文字も、人物の顔と、そのコマで見せるポーズ・接触・表情の要所に被っていない。被せるところには、その意図が書いてある。",
+      "checkedBy": "AI",
+      "target": "lettering-record"
+    },
+    {
+      "id": "lettering.approved",
+      "text": "作者が台詞の全文と吹き出しの形・書体・位置を確かめている。仕上げとは別に確かめる。",
+      "checkedBy": "人",
+      "target": "lettering-record"
+    },
+    {
+      "id": "read.fixed-version",
+      "text": "通読した原稿の固定した版が記録されている。",
+      "checkedBy": "AI",
+      "target": "editorial-record"
+    },
+    {
+      "id": "read.traced",
+      "text": "どの指摘も、対象のページ・コマ・シーン・台詞のどれかに結び付いている。",
+      "checkedBy": "AI",
+      "target": "editorial-record",
+      "rules": [
+        "review-cites-target"
+      ]
+    },
+    {
+      "id": "read.approved",
+      "text": "作者がすべての指摘について直すかを決め、固定した版を通して読み、完成と判断している。",
+      "checkedBy": "人",
+      "target": "editorial-record"
+    },
+    {
+      "id": "output.from-fixed",
+      "text": "どの出力物も、通読で完成とした固定した版から作られている。レイヤーを残した元の原稿が記録されている。",
+      "checkedBy": "AI",
+      "target": "output-record"
+    },
+    {
+      "id": "output.approved",
+      "text": "作者が出力物・書誌情報・AI の関わりの記録を確かめている。",
+      "checkedBy": "人",
+      "target": "output-record"
+    },
+    {
+      "id": "learning.chosen",
+      "text": "作者が次の作品で変えることを選んで残している。",
+      "checkedBy": "人",
+      "target": "learning-record"
+    }
+  ]
+}

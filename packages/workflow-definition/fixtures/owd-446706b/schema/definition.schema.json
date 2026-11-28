@@ -1,0 +1,802 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "definition.schema.json",
+  "title": "ワークフローの定義",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "id",
+    "version",
+    "title",
+    "purpose",
+    "phases",
+    "deliverables",
+    "acceptance"
+  ],
+  "properties": {
+    "format": {
+      "const": 1,
+      "description": "定義の形の版"
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "description": "この定義で何を作るか"
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "purpose",
+          "after",
+          "deliverables",
+          "acceptance"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "after": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "先に終えている工程"
+          },
+          "deliverables": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "acceptance": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "この工程を終える条件"
+          },
+          "icon": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+            "description": "画面で工程やまとまりの横に出すアイコンの名前（英小文字の語をハイフンでつなぐ。例 lightbulb・ruler・file-text）。使う側が知らない名前なら、出さずに名前だけを見せてよい"
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "description": "工程のまとまりの既定の分け方。どの工程もちょうど 1 つのまとまりに入り、まとまりの並びと中の工程の並びは工程の順に従う。使う側はこれを出発点に分け方を変えてよい",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "phases"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "phases": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "このまとまりに入る工程。工程の順に並べる"
+          },
+          "icon": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+            "description": "画面で工程やまとまりの横に出すアイコンの名前（英小文字の語をハイフンでつなぐ。例 lightbulb・ruler・file-text）。使う側が知らない名前なら、出さずに名前だけを見せてよい"
+          }
+        }
+      }
+    },
+    "deliverables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "form",
+          "outline"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "form": {
+            "type": "string",
+            "minLength": 1,
+            "description": "成果物の表現形態。表示用の分類でありEditor kindや出力形式を固定しない。編集・出力の可否はEditor Platformの公開capabilitiesに従う"
+          },
+          "outline": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/section"
+            },
+            "description": "見出しの並び。人が確かめる順"
+          },
+          "uses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "もとにする成果物"
+          },
+          "view": {
+            "$ref": "#/$defs/view"
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "ID を持つ項目の種類。影響と網羅はこの表と rules だけで決める",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "idForm"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "idForm": {
+            "type": "string",
+            "description": "項目の ID の形。{nn}・{nnn} は桁をそろえた連番、{n} は連番、{parent} は親の項目の ID"
+          },
+          "parent": {
+            "$ref": "#/$defs/id",
+            "description": "親の項目の種類。ID は親の ID から作る"
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "description": "引用と網羅の規則",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "type": {
+            "enum": [
+              "cites",
+              "covered"
+            ]
+          },
+          "from": {
+            "$ref": "#/$defs/id",
+            "description": "cites：引用する側の項目の種類"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "cites：引用できる先の項目の種類"
+          },
+          "min": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "cites：少なくともいくつ引用するか。0 なら、引けるが引かなくてよい"
+          },
+          "of": {
+            "$ref": "#/$defs/id",
+            "description": "covered：引用される側の項目の種類"
+          },
+          "by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "covered：引用する側の項目の種類"
+          },
+          "exempt": {
+            "const": true,
+            "description": "covered：理由を書けば除ける"
+          }
+        }
+      }
+    },
+    "strictCites": {
+      "const": true,
+      "description": "true なら、引用は cites 規則が許す種類の組だけ。規則に無い組（向きが逆・種類が違う）の引用を、使う側は違反として出し、その引用を持つ工程の受け入れを止め、Editor の候補から選ぶ口でも断る。書かなければ、規則に無い組の扱いは使う側に任せる（見本の検査は、どの定義でも規則に無い組を落とす）"
+    },
+    "roles": {
+      "type": "array",
+      "description": "人の達成条件を確かめる役割。人の名前は書かず、どの人が役割を持つかは使う側が決める",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "役割の説明"
+          }
+        }
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "checkedBy",
+          "target"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "checkedBy": {
+            "enum": [
+              "人",
+              "AI"
+            ]
+          },
+          "target": {
+            "$ref": "#/$defs/id",
+            "description": "確かめる成果物"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/id"
+            },
+            "description": "この条件を機械で確かめる規則"
+          },
+          "approvers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "roles"
+            ],
+            "description": "人の条件を確かめる人の決まり（人の条件だけ）。どれかの役割を持つ、違う人の確かめが count 人分あれば満たす",
+            "properties": {
+              "roles": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/id"
+                },
+                "description": "確かめる役割（roles の id）"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "要る人数（既定 1）"
+              }
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "array",
+      "description": "既定のゲート。工程の作業のあとに利用側の道具が流す検査のコマンド。Project を始めるときに利用側の設定へ写し、利用側が自分の道具に合わせて変えてよい",
+      "items": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "placements": {
+      "type": "array",
+      "minItems": 1,
+      "description": "置き場所の形（任意）。同じ工程のまま、作るものを置くリポジトリの形ごとに、既定のゲートと成果物の置き場所を変える。利用側は Project を始めるときに 1 つ選ぶ（最初のものが既定）。選んだ形の gates は定義の gates の代わりに写し、paths は成果物の置き場所を変える",
+      "items": {
+        "$ref": "#/$defs/placement"
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*$"
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "heading",
+        "describe"
+      ],
+      "properties": {
+        "heading": {
+          "type": "string",
+          "minLength": 1
+        },
+        "describe": {
+          "type": "string",
+          "minLength": 1,
+          "description": "この見出しの下に書くこと"
+        },
+        "repeat": {
+          "const": true,
+          "description": "項目ごとに繰り返す見出し（ストーリーごと・画面ごとなど）。見出しの文字は項目の名前に置き換える"
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/section"
+          }
+        },
+        "item": {
+          "$ref": "#/$defs/id",
+          "description": "この見出しの下の一つ一つが、この種類の項目になる"
+        }
+      }
+    },
+    "view": {
+      "description": "成果物の見せ方（任意）。図・カンバン・タイムライン・カレンダー・表・フォーム・マトリクスを 1 つか、配列で幾つでも（as ごとに 1 つまで）。道具は見せ方ごとに見え方を出し、最初の見せ方で開く。決めない成果物は、道具が中身の形から開き方を決める",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/oneView"
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/oneView"
+          }
+        }
+      ]
+    },
+    "graphView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "nodes"
+      ],
+      "description": "図（as: graph）。成果物の項目の種類ごとに、点・線・枠のどれで描くかを決める。項目の欄 in は入る枠の ID、at は点の場所 [x, y]、frame は枠の場所と大きさ [x, y, 幅, 高さ]（どれも入っている枠の左上から。無ければ道具が並べる）",
+      "properties": {
+        "as": {
+          "const": "graph"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "点にする項目の種類"
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "線にする項目の種類。項目は from・to に点の ID を持つ"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "枠にする項目の種類。枠の中の枠は in に外の枠の ID"
+        },
+        "colorBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "点と枠の色を分ける欄。値ごとに色を変える（枠は、自分の ID がその値のときもその色）"
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "description": "colorBy の値 → 色。無い値は道具が選ぶ"
+        },
+        "edgeColorBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "線の色を分ける欄"
+        },
+        "edgeColors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "description": "edgeColorBy の値 → 色。無い値は道具が選ぶ"
+        }
+      }
+    },
+    "kanbanView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "items",
+        "groupBy"
+      ],
+      "description": "カンバン（as: kanban）。1 つの項目の種類を、欄 groupBy の値ごとの列にカードで並べる。カードを別の列に動かすと、その欄の値が変わる",
+      "properties": {
+        "as": {
+          "const": "kanban"
+        },
+        "items": {
+          "$ref": "#/$defs/id",
+          "description": "カードにする項目の種類"
+        },
+        "groupBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "列を分ける欄"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "列の並び（値）。書かない値の列は、そのあとに出る"
+        },
+        "card": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "カードに出す欄。書かなければ道具が選ぶ"
+        }
+      }
+    },
+    "timelineView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "items",
+        "start",
+        "end"
+      ],
+      "description": "タイムライン（as: timeline）。1 つの項目の種類を、欄 start から欄 end までの帯で日付の軸に並べる（日付は YYYY-MM-DD）",
+      "properties": {
+        "as": {
+          "const": "timeline"
+        },
+        "items": {
+          "$ref": "#/$defs/id",
+          "description": "帯にする項目の種類"
+        },
+        "start": {
+          "type": "string",
+          "minLength": 1,
+          "description": "始まりの日付の欄"
+        },
+        "end": {
+          "type": "string",
+          "minLength": 1,
+          "description": "終わりの日付の欄"
+        },
+        "groupBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "帯の行を分ける欄"
+        },
+        "scale": {
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ],
+          "description": "軸の目盛り"
+        }
+      }
+    },
+    "calendarView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "items",
+        "date"
+      ],
+      "description": "カレンダー（as: calendar）。1 つの項目の種類を、欄 date の日（end があれば date から end まで）に月の暦で並べる（日付は YYYY-MM-DD）。期限のように日付が 1 つの項目に向く",
+      "properties": {
+        "as": {
+          "const": "calendar"
+        },
+        "items": {
+          "$ref": "#/$defs/id",
+          "description": "暦に置く項目の種類"
+        },
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "description": "日付の欄（始まりの日）"
+        },
+        "end": {
+          "type": "string",
+          "minLength": 1,
+          "description": "終わりの日付の欄。無ければ date の日だけ"
+        }
+      }
+    },
+    "tableView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "items"
+      ],
+      "description": "表（as: table）。1 つの項目の種類を表で開くときの、欄の並び・並べ替え・まとめ方・隠す欄を決める。決めなければ道具が決める",
+      "properties": {
+        "as": {
+          "const": "table"
+        },
+        "items": {
+          "$ref": "#/$defs/id",
+          "description": "表にする項目の種類"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "欄の並び。書かない欄は、そのあとに出る"
+        },
+        "sort": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "by"
+            ],
+            "properties": {
+              "by": {
+                "type": "string",
+                "minLength": 1,
+                "description": "並べ替える欄"
+              },
+              "desc": {
+                "type": "boolean",
+                "description": "大きい順（新しい順）。無ければ小さい順"
+              }
+            }
+          },
+          "description": "並べ替え。前のものほど先に効く"
+        },
+        "groupBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "行をまとめる欄"
+        },
+        "hide": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "隠す欄"
+        }
+      }
+    },
+    "formView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "items"
+      ],
+      "description": "フォーム（as: form）。1 つの項目の種類を、1 件ずつの入力の画面で開く。欄の多い台帳に向く",
+      "properties": {
+        "as": {
+          "const": "form"
+        },
+        "items": {
+          "$ref": "#/$defs/id",
+          "description": "1 件ずつ開く項目の種類"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "欄の並び。書かない欄は、そのあとに出る"
+        }
+      }
+    },
+    "matrixView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as",
+        "rows",
+        "columns"
+      ],
+      "description": "マトリクス（as: matrix）。行の項目の種類と列の項目の種類を並べ、引用の表にある組のます目に印を付ける。ます目を切り替えると、引用の表の組が増える・減る。行と列の種類の間には、どちら向きかの引用の規則（cites）が要る",
+      "properties": {
+        "as": {
+          "const": "matrix"
+        },
+        "rows": {
+          "$ref": "#/$defs/id",
+          "description": "行の項目の種類（この成果物の項目）"
+        },
+        "columns": {
+          "$ref": "#/$defs/id",
+          "description": "列の項目の種類（定義のどの項目でもよい）"
+        }
+      }
+    },
+    "oneView": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/graphView"
+        },
+        {
+          "$ref": "#/$defs/kanbanView"
+        },
+        {
+          "$ref": "#/$defs/timelineView"
+        },
+        {
+          "$ref": "#/$defs/calendarView"
+        },
+        {
+          "$ref": "#/$defs/tableView"
+        },
+        {
+          "$ref": "#/$defs/formView"
+        },
+        {
+          "$ref": "#/$defs/matrixView"
+        }
+      ]
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "run"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ゲートの名前（結果に出る）"
+        },
+        "run": {
+          "type": "string",
+          "minLength": 1,
+          "description": "流すコマンド（作業の場所で shell が流す）"
+        },
+        "limitSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "制限時間（秒）"
+        },
+        "phases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "流す工程。無ければどの工程でも流す"
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "どんなときに選ぶか"
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/gate"
+          },
+          "description": "この形の既定のゲート。書けば定義の gates の代わりに写す。書かなければ定義の gates"
+        },
+        "paths": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?![\\s\\S]*\\.\\.)[^\\\\\\r\\n\\u2028\\u2029]+$"
+          },
+          "description": "成果物の ID → 置き場所（リポジトリの中の相対の path。.. と \\ と改行を含まない。/ で終われば場所の下のファイル全部）。書かない成果物は利用側の既定の置き場所"
+        }
+      }
+    }
+  }
+}

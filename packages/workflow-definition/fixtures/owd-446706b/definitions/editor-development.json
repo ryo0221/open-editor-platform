@@ -1,0 +1,967 @@
+{
+  "format": 1,
+  "id": "editor-development",
+  "version": "1.5.0",
+  "title": "新しい Editor の開発",
+  "purpose": "Editor のテンプレートから（または Open Editor Platform に足して）、ひとつの題材を編集する Editor を作る。目的と範囲・データ形式・操作・画面を人が工程ごとに確かめて受け入れ、試験を対応させ、package として Host に取り込んで使えるところまで進める。",
+  "phases": [
+    {
+      "id": "process",
+      "name": "進め方",
+      "purpose": "この Editor づくりで通る工程、確かめる人、外へ出すもの（package・リポジトリ・取り込む Host）を決める。",
+      "after": [],
+      "deliverables": [
+        "process-map"
+      ],
+      "acceptance": [
+        "process.complete",
+        "process.approved"
+      ]
+    },
+    {
+      "id": "purpose",
+      "name": "目的と範囲",
+      "purpose": "誰が何のために使い、どの操作ができればよいかを決める。既存の Editor や表示の切り替えで足りない理由と、扱わないことも書く。",
+      "after": [
+        "process"
+      ],
+      "deliverables": [
+        "purpose-note",
+        "capability-matrix"
+      ],
+      "acceptance": [
+        "purpose.users",
+        "purpose.reason",
+        "purpose.capabilities",
+        "purpose.approved"
+      ]
+    },
+    {
+      "id": "format",
+      "name": "データ形式",
+      "purpose": "保存するデータの形（形式の名前と版・値・ID・上限・不変条件）を決め、見本のデータで検証できるようにする。",
+      "after": [
+        "purpose"
+      ],
+      "deliverables": [
+        "format-spec"
+      ],
+      "acceptance": [
+        "format.complete",
+        "format.validated",
+        "format.approved"
+      ]
+    },
+    {
+      "id": "commands",
+      "name": "操作と履歴",
+      "purpose": "データを変える操作を一件ずつ決める。人の操作と外からの提案が同じ操作を通り、Undo の単位と拒否の条件が決まっている。",
+      "after": [
+        "format"
+      ],
+      "deliverables": [
+        "command-table"
+      ],
+      "acceptance": [
+        "commands.trace",
+        "commands.safe",
+        "commands.ai",
+        "commands.approved"
+      ]
+    },
+    {
+      "id": "screen",
+      "name": "画面と入力",
+      "purpose": "画面・キーボード・狭い画面・読み取り専用のときの振る舞いを決める。",
+      "after": [
+        "commands"
+      ],
+      "deliverables": [
+        "screen-design"
+      ],
+      "acceptance": [
+        "screen.trace",
+        "screen.inputs",
+        "screen.approved"
+      ]
+    },
+    {
+      "id": "build",
+      "name": "実装",
+      "purpose": "テンプレートから作ったリポジトリ（または Open Editor Platform）で、決めた形式・操作・画面を実装し、置き場所の形の検査（テンプレートなら型・試験・ビルド・package の検証）を通す。",
+      "after": [
+        "screen"
+      ],
+      "deliverables": [
+        "code"
+      ],
+      "acceptance": [
+        "build.gates",
+        "build.declared",
+        "build.approved"
+      ]
+    },
+    {
+      "id": "verify",
+      "name": "検証",
+      "purpose": "代表操作・操作・不変条件・上限・能力ごとに試験を対応させ、結果を「通った・落ちた・未実施」で残す。",
+      "after": [
+        "build"
+      ],
+      "deliverables": [
+        "test-trace"
+      ],
+      "acceptance": [
+        "verify.trace",
+        "verify.results",
+        "verify.approved"
+      ]
+    },
+    {
+      "id": "package",
+      "name": "配布と取り込み",
+      "purpose": "package を作り、運用者が中身と版を確かめて Host に登録し、Host の成果物から開いて編集・保存・再読込できることを確かめる。",
+      "after": [
+        "verify"
+      ],
+      "deliverables": [
+        "release-record"
+      ],
+      "acceptance": [
+        "package.trace",
+        "package.pin",
+        "package.approved"
+      ]
+    },
+    {
+      "id": "learning",
+      "name": "学び",
+      "purpose": "作って使ってわかったこと、次の版や定義・テンプレートへの直しを残す。",
+      "after": [
+        "package"
+      ],
+      "deliverables": [
+        "learning-notes"
+      ],
+      "acceptance": [
+        "learning.complete",
+        "learning.approved"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "decide",
+      "name": "決める",
+      "icon": "target",
+      "phases": [
+        "process",
+        "purpose",
+        "format",
+        "commands",
+        "screen"
+      ]
+    },
+    {
+      "id": "make",
+      "name": "作って確かめる",
+      "icon": "hammer",
+      "phases": [
+        "build",
+        "verify"
+      ]
+    },
+    {
+      "id": "deliver",
+      "name": "届ける",
+      "icon": "package",
+      "phases": [
+        "package",
+        "learning"
+      ]
+    }
+  ],
+  "deliverables": [
+    {
+      "id": "process-map",
+      "name": "工程の表",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "工程",
+          "describe": "名前・目的・先に終える工程。省く工程は理由"
+        },
+        {
+          "heading": "確かめる人",
+          "describe": "工程ごとに、人が承認するか AI が検査するか"
+        },
+        {
+          "heading": "外へ出すもの",
+          "describe": "Editor のリポジトリ、配布する package、取り込む Host と、その確認の仕方"
+        }
+      ]
+    },
+    {
+      "id": "purpose-note",
+      "name": "目的と代表操作",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "利用者",
+          "describe": "使う人と、その人が達成したいこと",
+          "item": "user"
+        },
+        {
+          "heading": "代表操作",
+          "describe": "正常な操作と、拒否する操作。それぞれ一件ずつ、誰の操作か（利用者）と、結果がどうなるか",
+          "item": "operation"
+        },
+        {
+          "heading": "新しい Editor が要る理由",
+          "describe": "既存の Editor・既存の形式の別の見せ方では足りない理由"
+        },
+        {
+          "heading": "扱わないこと",
+          "describe": "この Editor では扱わず、Host や別の道具に残すもの",
+          "item": "exclude"
+        }
+      ]
+    },
+    {
+      "id": "capability-matrix",
+      "name": "能力の表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "能力",
+          "describe": "表示・編集・Undo・保存・取り込みと書き出し・操作提案・共同編集など、一件ずつ「対応する／しない」と範囲・上限。しないものは入口をどう止めるか",
+          "item": "capability"
+        }
+      ],
+      "view": {
+        "as": "table",
+        "items": "capability",
+        "columns": [
+          "対応",
+          "範囲・上限",
+          "しない理由・止め方"
+        ]
+      },
+      "uses": [
+        "purpose-note"
+      ]
+    },
+    {
+      "id": "format-spec",
+      "name": "データ形式の仕様",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "形式の名前と版",
+          "describe": "ファイル自身から形式がわかる名前（artifactKind など）と schema の版。古い版・新しすぎる版の扱い"
+        },
+        {
+          "heading": "保存する値",
+          "describe": "値ごとに、型・単位・必須か・ID の作り方と再利用しない決まり",
+          "item": "field"
+        },
+        {
+          "heading": "上限",
+          "describe": "要素の数・文字数・深さ・バイト数など。超えたら全体を拒否する",
+          "item": "limit"
+        },
+        {
+          "heading": "不変条件",
+          "describe": "必ず守ること（参照の切れ・重複・循環の禁止など）と、破れた入力の扱い",
+          "item": "invariant"
+        },
+        {
+          "heading": "保存しないもの",
+          "describe": "選択・表示の位置・開いている panel など、版に入れない表示の状態"
+        },
+        {
+          "heading": "見本のデータ",
+          "describe": "検証を通る最小の見本と、拒否される見本"
+        }
+      ]
+    },
+    {
+      "id": "command-table",
+      "name": "操作の表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "編集の操作",
+          "describe": "操作ごとに、もとになる代表操作、変える値、1 回の Undo になる単位、拒否する条件と拒否したとき何も変えないこと、外からの提案に出すか",
+          "item": "command"
+        }
+      ],
+      "view": {
+        "as": "table",
+        "items": "command",
+        "columns": [
+          "変える値",
+          "Undo の単位",
+          "拒否の条件",
+          "提案に出すか"
+        ]
+      },
+      "uses": [
+        "purpose-note",
+        "format-spec"
+      ]
+    },
+    {
+      "id": "screen-design",
+      "name": "画面の設計",
+      "form": "画面",
+      "outline": [
+        {
+          "heading": "画面",
+          "describe": "画面や状態ごとに、何が見え、どの操作が呼べるか。キーボード・日本語入力（IME）・狭い画面・読み取り専用のときの振る舞い",
+          "item": "screen"
+        }
+      ],
+      "uses": [
+        "purpose-note",
+        "command-table"
+      ]
+    },
+    {
+      "id": "code",
+      "name": "コード",
+      "form": "コード",
+      "outline": [
+        {
+          "heading": "コード",
+          "describe": "Editor のリポジトリの今の版（commit）"
+        },
+        {
+          "heading": "ゲートの結果",
+          "describe": "型の検査・単体の試験・ビルド・package の検証・ブラウザでの通し確認の結果と、実行した環境"
+        }
+      ],
+      "uses": [
+        "format-spec",
+        "command-table",
+        "screen-design"
+      ]
+    },
+    {
+      "id": "test-trace",
+      "name": "試験の対応表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "試験",
+          "describe": "試験ごとに、確かめる代表操作・操作・不変条件・上限・能力・画面、方法（単体・ブラウザ・手で）、結果（通った・落ちた・未実施）と環境。未実施は理由",
+          "item": "test"
+        }
+      ],
+      "view": {
+        "as": "table",
+        "items": "test",
+        "columns": [
+          "方法",
+          "結果",
+          "環境",
+          "未実施の理由"
+        ]
+      },
+      "uses": [
+        "capability-matrix",
+        "format-spec",
+        "command-table",
+        "screen-design"
+      ]
+    },
+    {
+      "id": "release-record",
+      "name": "配布と取り込みの記録",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "配布版",
+          "describe": "Editor の ID・版・hash、もとにした commit、ライセンスと通知",
+          "item": "release"
+        },
+        {
+          "heading": "取り込みの確認",
+          "describe": "どの Host のどの成果物で、開く・編集・保存・再読込・読み取り専用を確かめたか。配布版の pin を運用者が自分で確かめたこと",
+          "item": "host-check"
+        }
+      ],
+      "uses": [
+        "code",
+        "test-trace"
+      ]
+    },
+    {
+      "id": "learning-notes",
+      "name": "学び",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "学び",
+          "describe": "わかったことと、次にどこを直すか（Editor・テンプレート・Host・この定義）",
+          "item": "learning"
+        }
+      ],
+      "view": {
+        "as": "table",
+        "items": "learning",
+        "columns": [
+          "わかったこと",
+          "直す先",
+          "次の一手"
+        ]
+      },
+      "uses": [
+        "release-record"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "user",
+      "name": "利用者",
+      "idForm": "UR-{nn}"
+    },
+    {
+      "id": "operation",
+      "name": "代表操作",
+      "idForm": "OP-{nn}"
+    },
+    {
+      "id": "exclude",
+      "name": "扱わないこと",
+      "idForm": "EX-{nn}"
+    },
+    {
+      "id": "capability",
+      "name": "能力",
+      "idForm": "CA-{nn}"
+    },
+    {
+      "id": "field",
+      "name": "保存する値",
+      "idForm": "FD-{nn}"
+    },
+    {
+      "id": "limit",
+      "name": "上限",
+      "idForm": "LM-{nn}"
+    },
+    {
+      "id": "invariant",
+      "name": "不変条件",
+      "idForm": "IV-{nn}"
+    },
+    {
+      "id": "command",
+      "name": "編集の操作",
+      "idForm": "CM-{nn}"
+    },
+    {
+      "id": "screen",
+      "name": "画面",
+      "idForm": "SC-{nn}"
+    },
+    {
+      "id": "test",
+      "name": "試験",
+      "idForm": "TS-{nnn}"
+    },
+    {
+      "id": "release",
+      "name": "配布版",
+      "idForm": "RL-{nn}"
+    },
+    {
+      "id": "host-check",
+      "name": "取り込みの確認",
+      "idForm": "HC-{nn}"
+    },
+    {
+      "id": "learning",
+      "name": "学び",
+      "idForm": "LE-{nn}"
+    }
+  ],
+  "rules": [
+    {
+      "id": "operation-cites-user",
+      "type": "cites",
+      "from": "operation",
+      "to": [
+        "user"
+      ],
+      "min": 1
+    },
+    {
+      "id": "capability-cites-operation",
+      "type": "cites",
+      "from": "capability",
+      "to": [
+        "operation"
+      ],
+      "min": 0
+    },
+    {
+      "id": "limit-cites-field",
+      "type": "cites",
+      "from": "limit",
+      "to": [
+        "field"
+      ],
+      "min": 1
+    },
+    {
+      "id": "invariant-cites-field",
+      "type": "cites",
+      "from": "invariant",
+      "to": [
+        "field"
+      ],
+      "min": 1
+    },
+    {
+      "id": "command-cites-operation",
+      "type": "cites",
+      "from": "command",
+      "to": [
+        "operation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "command-cites-field",
+      "type": "cites",
+      "from": "command",
+      "to": [
+        "field",
+        "invariant"
+      ],
+      "min": 0
+    },
+    {
+      "id": "screen-cites-operation",
+      "type": "cites",
+      "from": "screen",
+      "to": [
+        "operation",
+        "command"
+      ],
+      "min": 1
+    },
+    {
+      "id": "test-cites-target",
+      "type": "cites",
+      "from": "test",
+      "to": [
+        "operation",
+        "command",
+        "invariant",
+        "limit",
+        "capability",
+        "screen"
+      ],
+      "min": 1
+    },
+    {
+      "id": "host-check-cites-release",
+      "type": "cites",
+      "from": "host-check",
+      "to": [
+        "release"
+      ],
+      "min": 1
+    },
+    {
+      "id": "host-check-cites-operation",
+      "type": "cites",
+      "from": "host-check",
+      "to": [
+        "operation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "learning-cites",
+      "type": "cites",
+      "from": "learning",
+      "to": [
+        "operation",
+        "command",
+        "capability",
+        "test",
+        "host-check"
+      ],
+      "min": 0
+    },
+    {
+      "id": "operation-covered-by-command",
+      "type": "covered",
+      "of": "operation",
+      "by": [
+        "command"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "operation-covered-by-test",
+      "type": "covered",
+      "of": "operation",
+      "by": [
+        "test"
+      ]
+    },
+    {
+      "id": "command-covered-by-test",
+      "type": "covered",
+      "of": "command",
+      "by": [
+        "test"
+      ]
+    },
+    {
+      "id": "invariant-covered-by-test",
+      "type": "covered",
+      "of": "invariant",
+      "by": [
+        "test"
+      ]
+    },
+    {
+      "id": "limit-covered-by-test",
+      "type": "covered",
+      "of": "limit",
+      "by": [
+        "test"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "capability-covered-by-test",
+      "type": "covered",
+      "of": "capability",
+      "by": [
+        "test"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "release-covered-by-host-check",
+      "type": "covered",
+      "of": "release",
+      "by": [
+        "host-check"
+      ],
+      "exempt": true
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "process.complete",
+      "text": "どの工程にも、成果物と達成条件と確かめる人がある。",
+      "checkedBy": "AI",
+      "target": "process-map"
+    },
+    {
+      "id": "process.approved",
+      "text": "人が全体を読み、この進め方で始めると承認している。",
+      "checkedBy": "人",
+      "target": "process-map"
+    },
+    {
+      "id": "purpose.users",
+      "text": "どの代表操作も利用者に結び付き、正常な操作と拒否する操作の両方がある。",
+      "checkedBy": "AI",
+      "target": "purpose-note",
+      "rules": [
+        "operation-cites-user"
+      ]
+    },
+    {
+      "id": "purpose.reason",
+      "text": "既存の Editor で足りない理由と、扱わないことが具体的に書かれている。",
+      "checkedBy": "AI",
+      "target": "purpose-note"
+    },
+    {
+      "id": "purpose.capabilities",
+      "text": "能力ごとに対応するかしないかと範囲が決まり、しない能力の入口の止め方がある。",
+      "checkedBy": "AI",
+      "target": "capability-matrix"
+    },
+    {
+      "id": "purpose.approved",
+      "text": "人が目的・代表操作・能力の範囲を読み、この範囲で作ると承認している。",
+      "checkedBy": "人",
+      "target": "capability-matrix"
+    },
+    {
+      "id": "format.complete",
+      "text": "上限と不変条件が、どれも保存する値に結び付いている。",
+      "checkedBy": "AI",
+      "target": "format-spec",
+      "rules": [
+        "limit-cites-field",
+        "invariant-cites-field"
+      ]
+    },
+    {
+      "id": "format.validated",
+      "text": "見本のデータが検証を通り、拒否される見本が理由付きで拒否される。形式の名前と版をファイルが持つ。",
+      "checkedBy": "AI",
+      "target": "format-spec"
+    },
+    {
+      "id": "format.approved",
+      "text": "人が形式と上限を読み、保存した後に変えにくいことを理解したうえで承認している。",
+      "checkedBy": "人",
+      "target": "format-spec"
+    },
+    {
+      "id": "commands.trace",
+      "text": "どの操作も代表操作に結び付き、データを変える代表操作にはそれを実現する操作がある。",
+      "checkedBy": "AI",
+      "target": "command-table",
+      "rules": [
+        "command-cites-operation",
+        "operation-covered-by-command"
+      ]
+    },
+    {
+      "id": "commands.safe",
+      "text": "どの操作も、拒否したときと取り消したときに内容と履歴を変えないことが書かれている。",
+      "checkedBy": "AI",
+      "target": "command-table"
+    },
+    {
+      "id": "commands.ai",
+      "text": "AI が成果物を作り、直すのに要る編集（項目を足す・消す・値を変える・まとめて変える）が、Host に出す操作として操作の表にそろっている。入力の上限は成果物の大きさに足り、出さない編集には理由が書かれている。",
+      "checkedBy": "AI",
+      "target": "command-table"
+    },
+    {
+      "id": "commands.approved",
+      "text": "人が操作の表を読み、Undo の単位と拒否の条件を承認している。",
+      "checkedBy": "人",
+      "target": "command-table"
+    },
+    {
+      "id": "screen.trace",
+      "text": "どの画面も、呼べる代表操作か編集の操作に結び付いている。",
+      "checkedBy": "AI",
+      "target": "screen-design",
+      "rules": [
+        "screen-cites-operation"
+      ]
+    },
+    {
+      "id": "screen.inputs",
+      "text": "日本語入力の確定前に操作を実行しないこと、読み取り専用で編集の入口が止まること、狭い画面での配置が書かれている。",
+      "checkedBy": "AI",
+      "target": "screen-design"
+    },
+    {
+      "id": "screen.approved",
+      "text": "人が画面の絵か試作を見て、承認している。",
+      "checkedBy": "人",
+      "target": "screen-design"
+    },
+    {
+      "id": "build.gates",
+      "text": "選んだ置き場所の形のゲートがすべて通る（テンプレートの形なら型の検査・すべての単体の試験・ビルド・package の検証、Open Editor Platform の形なら型の検査と、変わったところで絞った lint と単体の試験）。",
+      "checkedBy": "AI",
+      "target": "code"
+    },
+    {
+      "id": "build.declared",
+      "text": "Editor が「新しく作る」（create）を宣言して実装し、Host で空の成果物から始められる。Host に出す操作の宣言は、操作の表で出すと決めた操作と同じである。",
+      "checkedBy": "AI",
+      "target": "code"
+    },
+    {
+      "id": "build.approved",
+      "text": "人が手元の開発 Host で代表操作を触り、承認している。",
+      "checkedBy": "人",
+      "target": "code"
+    },
+    {
+      "id": "verify.trace",
+      "text": "どの試験も確かめる対象に結び付き、代表操作・操作・不変条件のどれにも試験がある。",
+      "checkedBy": "AI",
+      "target": "test-trace",
+      "rules": [
+        "test-cites-target",
+        "operation-covered-by-test",
+        "command-covered-by-test",
+        "invariant-covered-by-test",
+        "limit-covered-by-test",
+        "capability-covered-by-test"
+      ]
+    },
+    {
+      "id": "verify.results",
+      "text": "対応すると決めた範囲に「落ちた」も「未実施」も残っていない。残すなら、その範囲を対応済みと言わない。",
+      "checkedBy": "AI",
+      "target": "test-trace"
+    },
+    {
+      "id": "verify.approved",
+      "text": "人が結果と未実施の理由を読み、この範囲で受け入れると承認している。",
+      "checkedBy": "人",
+      "target": "test-trace"
+    },
+    {
+      "id": "package.trace",
+      "text": "どの取り込みの確認も配布版と代表操作に結び付き、どの配布版にも通った取り込みの確認がある。使わなかった版は、使わなかった理由を書いて除ける。",
+      "checkedBy": "AI",
+      "target": "release-record",
+      "rules": [
+        "host-check-cites-release",
+        "host-check-cites-operation",
+        "release-covered-by-host-check"
+      ]
+    },
+    {
+      "id": "package.pin",
+      "text": "運用者が、受け取った package の版と hash を自分で確かめてから信頼に登録した。同梱の pin をそのまま信頼していない。",
+      "checkedBy": "人",
+      "target": "release-record"
+    },
+    {
+      "id": "package.approved",
+      "text": "人が Host の成果物から Editor を開き、編集・保存・再読込を確かめて承認している。",
+      "checkedBy": "人",
+      "target": "release-record"
+    },
+    {
+      "id": "learning.complete",
+      "text": "学びごとに直す先と次の一手がある。",
+      "checkedBy": "AI",
+      "target": "learning-notes"
+    },
+    {
+      "id": "learning.approved",
+      "text": "人が学びを読み、残すと承認している。",
+      "checkedBy": "人",
+      "target": "learning-notes"
+    }
+  ],
+  "gates": [
+    {
+      "name": "依存を入れる",
+      "run": "npm ci --no-audit --no-fund",
+      "limitSeconds": 600,
+      "phases": [
+        "format",
+        "build",
+        "verify",
+        "package"
+      ]
+    },
+    {
+      "name": "型の検査",
+      "run": "npm run check",
+      "limitSeconds": 300,
+      "phases": [
+        "build",
+        "verify",
+        "package"
+      ]
+    },
+    {
+      "name": "単体の試験",
+      "run": "npm test",
+      "limitSeconds": 600,
+      "phases": [
+        "format",
+        "build",
+        "verify",
+        "package"
+      ]
+    },
+    {
+      "name": "ビルド",
+      "run": "npm run build:extension",
+      "limitSeconds": 600,
+      "phases": [
+        "build",
+        "verify",
+        "package"
+      ]
+    },
+    {
+      "name": "package の検証",
+      "run": "npm run verify:package",
+      "limitSeconds": 300,
+      "phases": [
+        "build",
+        "verify",
+        "package"
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "id": "template",
+      "name": "テンプレートから作る",
+      "text": "Editor のテンプレートから新しいリポジトリを作る。ゲートと置き場所は定義の既定のまま"
+    },
+    {
+      "id": "open-editor-platform",
+      "name": "Open Editor Platform に足す",
+      "text": "Open Editor Platform のリポジトリに、新しい Editor か機能を足す。ゲートは変わったところで絞った lint と単体の試験（scripts/gates/affected.mjs）と型の検査。コードは packages/ の下",
+      "gates": [
+        {
+          "name": "依存を入れる",
+          "run": "npm ci --no-audit --no-fund && npm run fonts:fetch",
+          "limitSeconds": 900,
+          "phases": [
+            "format",
+            "build",
+            "verify",
+            "package"
+          ]
+        },
+        {
+          "name": "型の検査",
+          "run": "npm run typecheck",
+          "limitSeconds": 600,
+          "phases": [
+            "build",
+            "verify",
+            "package"
+          ]
+        },
+        {
+          "name": "lint",
+          "run": "node scripts/gates/affected.mjs lint",
+          "limitSeconds": 300,
+          "phases": [
+            "build",
+            "verify",
+            "package"
+          ]
+        },
+        {
+          "name": "単体の試験",
+          "run": "node scripts/gates/affected.mjs unit",
+          "limitSeconds": 1800,
+          "phases": [
+            "format",
+            "build",
+            "verify",
+            "package"
+          ]
+        }
+      ],
+      "paths": {
+        "code": "packages/"
+      }
+    }
+  ]
+}

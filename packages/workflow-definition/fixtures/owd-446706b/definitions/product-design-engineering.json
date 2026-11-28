@@ -1,0 +1,2036 @@
+{
+  "format": 1,
+  "id": "product-design-engineering",
+  "version": "1.1.0",
+  "title": "メカニカル製品の開発",
+  "purpose": "腕時計や自動車のように機構と外装を持つ組立製品を、企画から設計・試作検証・調達・生産準備・量産と振り返りまで、ゲートで判定しながら進める。要求から3Dモデル・図面・解析・試験・工程の管理までを項目の引用でつなぐ。",
+  "phases": [
+    {
+      "id": "process",
+      "name": "進め方",
+      "purpose": "対象の製品、通る工程と省く工程、ゲートの判定者と判定の物差し、段階の分け方、AIに頼む範囲、成果物の置き場と版の固め方を決める。",
+      "after": [],
+      "deliverables": [
+        "process-map"
+      ],
+      "acceptance": [
+        "process.complete",
+        "process.approved"
+      ]
+    },
+    {
+      "id": "planning",
+      "name": "製品企画",
+      "purpose": "誰が何のために使う製品かを決め、市場・法規・事業の前提から、目標値と優先度のある要求に落とす。",
+      "after": [
+        "process"
+      ],
+      "deliverables": [
+        "product-plan",
+        "requirement-list"
+      ],
+      "acceptance": [
+        "planning.complete",
+        "planning.requirements-measurable",
+        "planning.approved"
+      ]
+    },
+    {
+      "id": "concept",
+      "name": "コンセプト設計",
+      "purpose": "機構の方式と外装の方向を複数案で比べて一つに絞り、動かせない寸法と位置（ハードポイント）と、先に潰すリスクを決める。",
+      "after": [
+        "planning"
+      ],
+      "deliverables": [
+        "concept-study",
+        "hard-points",
+        "risk-register"
+      ],
+      "acceptance": [
+        "concept.alternatives",
+        "concept.hard-points",
+        "concept.risks",
+        "concept.approved"
+      ]
+    },
+    {
+      "id": "system-design",
+      "name": "基本設計",
+      "purpose": "製品を部分と部品に分けてつなぎ目を決め、配置の3Dモデルで空間・可動範囲を確かめ、質量・原価・公差を割り付け、工法と調達の方針と設計の故障モードを決める。",
+      "after": [
+        "concept"
+      ],
+      "deliverables": [
+        "architecture",
+        "layout-model",
+        "budget",
+        "ebom",
+        "dfmea",
+        "sourcing-plan"
+      ],
+      "acceptance": [
+        "system-design.architecture",
+        "system-design.layout",
+        "system-design.budget",
+        "system-design.ebom",
+        "system-design.dfmea",
+        "system-design.sourcing",
+        "system-design.approved"
+      ]
+    },
+    {
+      "id": "detail-design",
+      "name": "詳細設計",
+      "purpose": "各部品を、作れて検査できる形まで決める。詳細の3Dモデル・図面・重要特性・解析・面品質と意匠・製造性の確認をそろえ、試作に出せる版を出図する。",
+      "after": [
+        "system-design"
+      ],
+      "deliverables": [
+        "detail-model",
+        "drawings",
+        "key-characteristics",
+        "analysis-report",
+        "appearance-review",
+        "dfm-review"
+      ],
+      "acceptance": [
+        "detail-design.model",
+        "detail-design.drawings",
+        "detail-design.key-characteristics",
+        "detail-design.analysis",
+        "detail-design.appearance",
+        "detail-design.appearance-approved",
+        "detail-design.dfm",
+        "detail-design.approved"
+      ]
+    },
+    {
+      "id": "design-verification",
+      "name": "試作・設計検証",
+      "purpose": "出図した版で試作し、要求を満たすことを実物の試験で確かめる。解析との差を説明し、量産型に進んでよいかを決める。",
+      "after": [
+        "detail-design"
+      ],
+      "deliverables": [
+        "dv-plan",
+        "dv-report"
+      ],
+      "acceptance": [
+        "design-verification.plan",
+        "design-verification.results",
+        "design-verification.approved"
+      ]
+    },
+    {
+      "id": "sourcing",
+      "name": "調達・取引先開発",
+      "purpose": "部品ごとに、品質・原価・納期を守って続けて納められる取引先を決め、型と治具を発注し、取引先の初物を承認する。",
+      "after": [
+        "detail-design"
+      ],
+      "deliverables": [
+        "quote-comparison",
+        "part-approval"
+      ],
+      "acceptance": [
+        "sourcing.quotes",
+        "sourcing.approvals",
+        "sourcing.approved"
+      ]
+    },
+    {
+      "id": "process-design",
+      "name": "生産準備",
+      "purpose": "決めたタクトと品質で作れる工程を用意する。工程の流れ、工程の故障モード、管理の計画、作業標準、治具・検査具・設備をそろえる。",
+      "after": [
+        "detail-design"
+      ],
+      "deliverables": [
+        "process-flow",
+        "control-plan"
+      ],
+      "acceptance": [
+        "process-design.flow",
+        "process-design.control",
+        "process-design.approved"
+      ]
+    },
+    {
+      "id": "production-validation",
+      "name": "量産試作・工程検証",
+      "purpose": "量産の型・工程・作業者で作ったものが要求を満たし続けることを、工程能力と量産品の試験と認証で確かめ、量産に移ってよいかを決める。",
+      "after": [
+        "design-verification",
+        "sourcing",
+        "process-design"
+      ],
+      "deliverables": [
+        "pv-report"
+      ],
+      "acceptance": [
+        "production-validation.capability",
+        "production-validation.certified",
+        "production-validation.approved"
+      ]
+    },
+    {
+      "id": "launch",
+      "name": "量産立上げ",
+      "purpose": "量産を始め、初期の変動を管理を厚くして抑え込み、取扱説明・整備の文書とサービス部品を出す。",
+      "after": [
+        "production-validation"
+      ],
+      "deliverables": [
+        "launch-record"
+      ],
+      "acceptance": [
+        "launch.complete",
+        "launch.approved"
+      ]
+    },
+    {
+      "id": "sustain",
+      "name": "量産・振り返り",
+      "purpose": "量産中の変更と市場の品質を管理し、学びを次の製品と工程の定義に戻す。",
+      "after": [
+        "launch"
+      ],
+      "deliverables": [
+        "learning-record"
+      ],
+      "acceptance": [
+        "sustain.complete",
+        "sustain.approved"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "plan",
+      "name": "企画",
+      "icon": "lightbulb",
+      "phases": [
+        "process",
+        "planning"
+      ]
+    },
+    {
+      "id": "design",
+      "name": "設計",
+      "icon": "ruler",
+      "phases": [
+        "concept",
+        "system-design",
+        "detail-design"
+      ]
+    },
+    {
+      "id": "verify",
+      "name": "設計検証",
+      "icon": "flask-conical",
+      "phases": [
+        "design-verification"
+      ]
+    },
+    {
+      "id": "industrialize",
+      "name": "調達と生産準備",
+      "icon": "truck",
+      "phases": [
+        "sourcing",
+        "process-design",
+        "production-validation"
+      ]
+    },
+    {
+      "id": "produce",
+      "name": "量産",
+      "icon": "factory",
+      "phases": [
+        "launch",
+        "sustain"
+      ]
+    }
+  ],
+  "deliverables": [
+    {
+      "id": "process-map",
+      "name": "工程計画",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "対象と出口",
+          "describe": "対象の製品（機構と外装の範囲、電子・ソフトを含むか）、どの工程まで進めるか、出口で使える状態"
+        },
+        {
+          "heading": "工程の取捨",
+          "describe": "通る工程・省く工程と理由、省いたときの代わりの確かめ方。製品の種類に合わせて深さを変えるところ"
+        },
+        {
+          "heading": "ゲート",
+          "describe": "各工程の終わりのゲートごとに、判定者、判定の物差し（数値と単位、比べる画像）、通過・条件付き通過・差戻しの扱い",
+          "item": "gate"
+        },
+        {
+          "heading": "段階と受入",
+          "describe": "大きな工程を小さな段階に分ける方針、まとめて受け入れる区切り、受け入れた版の固め方"
+        },
+        {
+          "heading": "AIに頼む範囲",
+          "describe": "調査・設計案・形状の作成・解析・確認のそれぞれで、AIが提案できること、人が決めること、使う道具と断られたときの代わり"
+        },
+        {
+          "heading": "置き場と版",
+          "describe": "成果物と3Dモデル・図面・解析結果の置き場、版の付け方、ゲートを通った版を固めたあとの変更の扱い"
+        }
+      ]
+    },
+    {
+      "id": "product-plan",
+      "name": "企画書",
+      "form": "文書",
+      "uses": [
+        "process-map"
+      ],
+      "outline": [
+        {
+          "heading": "製品の狙い",
+          "describe": "一文の製品の説明、誰に何を届けるか、他と区別する点"
+        },
+        {
+          "heading": "使われ方",
+          "describe": "使う人・場面・頻度・環境（温度・水・衝撃など）。一つずつ",
+          "item": "use-case"
+        },
+        {
+          "heading": "比べる製品",
+          "describe": "比べる既存の製品と、その寸法・性能・価格など比べる数値。出典",
+          "item": "benchmark"
+        },
+        {
+          "heading": "法規と規格",
+          "describe": "守る法規・規格と、適用する条項・試験。一つずつ",
+          "item": "regulation"
+        },
+        {
+          "heading": "事業の前提",
+          "describe": "目標の価格と原価、年間の数量と生産する年数、発売の時期、投資の上限"
+        }
+      ]
+    },
+    {
+      "id": "requirement-list",
+      "name": "要求一覧",
+      "form": "表",
+      "uses": [
+        "product-plan"
+      ],
+      "outline": [
+        {
+          "heading": "要求",
+          "describe": "一行に一つの要求。区分（機能・性能・意匠・法規・原価・質量・製造）、内容、目標値と単位、優先度（必須・目標・あれば良い）、確かめ方（解析・試験・検査・見て判定）、出どころ",
+          "item": "requirement"
+        }
+      ]
+    },
+    {
+      "id": "concept-study",
+      "name": "コンセプト検討",
+      "form": "文書",
+      "uses": [
+        "requirement-list"
+      ],
+      "outline": [
+        {
+          "heading": "方式の案",
+          "describe": "機構の方式と全体の構成の案。一案ずつ、仕組み、主要な寸法の概算、長所と短所、使う技術の成熟度",
+          "item": "concept"
+        },
+        {
+          "heading": "外装の方向",
+          "describe": "外装の案。一案ずつ、シルエット・比率・キーライン・色と素材と仕上げの方向と、それを示す絵",
+          "item": "design-theme"
+        },
+        {
+          "heading": "評価",
+          "describe": "案ごとに要求に対する点数と重み、外装と機構の組み合わせで成り立つか"
+        },
+        {
+          "heading": "選んだ案",
+          "describe": "選んだ方式と外装の組み合わせ、理由、捨てた案から残す考え"
+        }
+      ]
+    },
+    {
+      "id": "hard-points",
+      "name": "ハードポイント",
+      "form": "表",
+      "uses": [
+        "concept-study"
+      ],
+      "outline": [
+        {
+          "heading": "ハードポイント",
+          "describe": "動かせない寸法・位置・角度。値と単位、許す幅、機構と外装のどちらが決めたか、根拠の要求",
+          "item": "hard-point"
+        }
+      ]
+    },
+    {
+      "id": "risk-register",
+      "name": "リスク一覧",
+      "form": "表",
+      "uses": [
+        "concept-study"
+      ],
+      "outline": [
+        {
+          "heading": "リスク",
+          "describe": "技術・調達・法規・日程のリスク。起きること、影響、起きやすさ、先に潰す手と期限、担当",
+          "item": "risk"
+        }
+      ]
+    },
+    {
+      "id": "architecture",
+      "name": "アーキテクチャ",
+      "form": "図",
+      "uses": [
+        "concept-study",
+        "hard-points"
+      ],
+      "view": {
+        "as": "graph",
+        "nodes": [
+          "subsystem"
+        ],
+        "edges": [
+          "interface"
+        ]
+      },
+      "outline": [
+        {
+          "heading": "部分",
+          "describe": "製品を分けた部分（サブシステム）。役割、受け持つ要求、機構か外装か",
+          "item": "subsystem"
+        },
+        {
+          "heading": "つなぎ目",
+          "describe": "部分と部分のつなぎ目。from・to の部分、伝えるもの（力・回転・位置・水・熱・信号）、固定のしかた、守る寸法",
+          "item": "interface"
+        }
+      ]
+    },
+    {
+      "id": "layout-model",
+      "name": "配置の3Dモデル",
+      "form": "CAD",
+      "uses": [
+        "hard-points",
+        "architecture"
+      ],
+      "outline": [
+        {
+          "heading": "配置の寸法",
+          "describe": "ハードポイントと主要寸法を、名前の付いた寸法として持つ。ハードポイントから来た寸法はその ID を引く",
+          "item": "parameter"
+        },
+        {
+          "heading": "配置の形",
+          "describe": "部分ごとの占める空間を、簡単な形で寸法から作る。可動部は動く範囲も形にする",
+          "item": "envelope"
+        }
+      ]
+    },
+    {
+      "id": "budget",
+      "name": "割付け",
+      "form": "表",
+      "uses": [
+        "requirement-list",
+        "architecture"
+      ],
+      "outline": [
+        {
+          "heading": "割付け",
+          "describe": "質量・原価・公差・消費（電力・トルクなど）を部分に割り付けた行。割り付けた値、合計と目標、余裕、公差は積み上げの方式（最悪値・統計）",
+          "item": "budget"
+        }
+      ]
+    },
+    {
+      "id": "ebom",
+      "name": "部品表（設計）",
+      "form": "表",
+      "uses": [
+        "architecture"
+      ],
+      "outline": [
+        {
+          "heading": "部品",
+          "describe": "一行に一つの部品。部品番号、名前、属する部分、数量、材料、内製・購入・標準品、質量の見込み",
+          "item": "part"
+        }
+      ]
+    },
+    {
+      "id": "dfmea",
+      "name": "設計FMEA",
+      "form": "表",
+      "uses": [
+        "architecture",
+        "ebom"
+      ],
+      "outline": [
+        {
+          "heading": "故障モード",
+          "describe": "部分・部品ごとの故障のしかた、影響、原因、深刻さ・起きやすさ・見つけやすさの点、対策と期限",
+          "item": "failure-mode"
+        }
+      ]
+    },
+    {
+      "id": "sourcing-plan",
+      "name": "工法と調達の方針",
+      "form": "表",
+      "uses": [
+        "ebom"
+      ],
+      "outline": [
+        {
+          "heading": "方針",
+          "describe": "部品ごとの工法（プレス・射出・切削・鍛造・鋳造など）、内製か外注か、取引先の候補、型や長納期の品と発注の目安",
+          "item": "sourcing-decision"
+        }
+      ]
+    },
+    {
+      "id": "detail-model",
+      "name": "詳細の3Dモデル",
+      "form": "CAD",
+      "uses": [
+        "layout-model",
+        "ebom"
+      ],
+      "outline": [
+        {
+          "heading": "部品の寸法",
+          "describe": "部品の形を決める名前の付いた寸法。配置の寸法から引き継ぐものはその ID を引く",
+          "item": "detail-parameter"
+        },
+        {
+          "heading": "部品の形",
+          "describe": "部品の詳細な形（肉厚・リブ・抜き勾配・面取り・結合部）。部品表の部品を引く",
+          "item": "body"
+        }
+      ]
+    },
+    {
+      "id": "drawings",
+      "name": "図面",
+      "form": "文書",
+      "uses": [
+        "detail-model",
+        "key-characteristics"
+      ],
+      "outline": [
+        {
+          "heading": "図面",
+          "describe": "部品・組立ごとの図面。図番、版、寸法と公差、幾何公差、表面と仕上げ、材料と熱処理、重要特性の印。3Dモデルに製品製造情報を持たせるときはその置き場",
+          "item": "drawing"
+        }
+      ]
+    },
+    {
+      "id": "key-characteristics",
+      "name": "重要特性",
+      "form": "表",
+      "uses": [
+        "detail-model",
+        "dfmea"
+      ],
+      "outline": [
+        {
+          "heading": "重要特性",
+          "describe": "安全・機能・組立・外観に効く寸法や性状。値と公差、根拠の要求、測り方",
+          "item": "key-characteristic"
+        }
+      ]
+    },
+    {
+      "id": "analysis-report",
+      "name": "解析報告",
+      "form": "文書",
+      "uses": [
+        "detail-model",
+        "requirement-list"
+      ],
+      "outline": [
+        {
+          "heading": "解析",
+          "describe": "一件ずつ、確かめる要求、モデルの版、条件（荷重・拘束・材料・メッシュ・時間）、結果の数値と図、判定、既知解との照合と誤差",
+          "item": "analysis"
+        },
+        {
+          "heading": "残る課題",
+          "describe": "解析で確かめきれない点と、試作の試験に回すこと"
+        }
+      ]
+    },
+    {
+      "id": "appearance-review",
+      "name": "面品質と意匠の確認",
+      "form": "文書",
+      "uses": [
+        "detail-model",
+        "concept-study"
+      ],
+      "outline": [
+        {
+          "heading": "確認",
+          "describe": "一件ずつ、見た面と方法（ゼブラ・曲率・ハイライト・レンダリング・シルエット比較）、モデルの版、画像、判定と判定者",
+          "item": "appearance"
+        },
+        {
+          "heading": "隙間と面差",
+          "describe": "外装の部品どうしの隙間と面差の目標と、確かめた値"
+        }
+      ]
+    },
+    {
+      "id": "dfm-review",
+      "name": "製造性の確認",
+      "form": "表",
+      "uses": [
+        "detail-model",
+        "sourcing-plan"
+      ],
+      "outline": [
+        {
+          "heading": "指摘",
+          "describe": "工法の条件（抜き勾配・肉厚・アンダーカット・工具の入り・組立順）に対する指摘、出した人、直し方と結果",
+          "item": "dfm-finding"
+        }
+      ]
+    },
+    {
+      "id": "dv-plan",
+      "name": "設計検証の計画",
+      "form": "表",
+      "uses": [
+        "requirement-list",
+        "analysis-report"
+      ],
+      "outline": [
+        {
+          "heading": "試験",
+          "describe": "要求ごとの試験。方法、試料の数と版、判定の基準、設備、日程",
+          "item": "test"
+        }
+      ]
+    },
+    {
+      "id": "dv-report",
+      "name": "設計検証の報告",
+      "form": "文書",
+      "uses": [
+        "dv-plan"
+      ],
+      "outline": [
+        {
+          "heading": "結果",
+          "describe": "試験ごとの結果。測った値、判定、解析との差と理由、写真",
+          "item": "test-result"
+        },
+        {
+          "heading": "不具合と対策",
+          "describe": "見つかった不具合、原因、設計の変更、変更後の確かめ"
+        },
+        {
+          "heading": "量産型への判断",
+          "describe": "量産の型に進んでよいかの判断と、条件付きの場合の残り"
+        }
+      ]
+    },
+    {
+      "id": "quote-comparison",
+      "name": "見積と取引先",
+      "form": "表",
+      "uses": [
+        "sourcing-plan",
+        "drawings"
+      ],
+      "outline": [
+        {
+          "heading": "取引先",
+          "describe": "候補の取引先。工場の監査の結果、品質の仕組み、生産能力",
+          "item": "supplier"
+        },
+        {
+          "heading": "見積",
+          "describe": "部品ごとの見積。取引先、単価、型の費用、納期、比べた結果と決めた取引先",
+          "item": "quote"
+        }
+      ]
+    },
+    {
+      "id": "part-approval",
+      "name": "部品の承認",
+      "form": "表",
+      "uses": [
+        "quote-comparison",
+        "key-characteristics"
+      ],
+      "outline": [
+        {
+          "heading": "承認",
+          "describe": "部品ごとの初物の承認。初物検査の結果、工程能力、管理の計画、限度見本、承認日",
+          "item": "part-approval"
+        }
+      ]
+    },
+    {
+      "id": "process-flow",
+      "name": "工程の流れ",
+      "form": "図",
+      "uses": [
+        "ebom",
+        "drawings"
+      ],
+      "view": {
+        "as": "graph",
+        "nodes": [
+          "operation"
+        ]
+      },
+      "outline": [
+        {
+          "heading": "作業",
+          "describe": "工程の作業。順、使う設備と治具、作業時間、扱う部品",
+          "item": "operation"
+        },
+        {
+          "heading": "工程の故障モード",
+          "describe": "作業ごとの故障のしかた、影響、原因、点、対策",
+          "item": "process-failure"
+        },
+        {
+          "heading": "ラインと設備",
+          "describe": "ラインの配置、タクトの釣り合い、治具・検査具・設備の手配"
+        }
+      ]
+    },
+    {
+      "id": "control-plan",
+      "name": "管理の計画",
+      "form": "表",
+      "uses": [
+        "process-flow",
+        "key-characteristics"
+      ],
+      "outline": [
+        {
+          "heading": "管理の項目",
+          "describe": "重要特性ごとの管理。どの作業で、測り方、頻度、管理の限界、外れたときの処置、測定系の確かさ",
+          "item": "control"
+        }
+      ]
+    },
+    {
+      "id": "pv-report",
+      "name": "工程検証の報告",
+      "form": "文書",
+      "uses": [
+        "control-plan",
+        "dv-plan",
+        "part-approval"
+      ],
+      "outline": [
+        {
+          "heading": "量産試作",
+          "describe": "量産試作の台数と版、出た不具合と対策"
+        },
+        {
+          "heading": "工程能力",
+          "describe": "重要特性ごとの工程能力の値と判定",
+          "item": "capability"
+        },
+        {
+          "heading": "量産品の試験",
+          "describe": "量産品で行った試験と結果。設計検証の試験を引く"
+        },
+        {
+          "heading": "認証",
+          "describe": "法規・規格の認証や検定と、その結果",
+          "item": "certification"
+        },
+        {
+          "heading": "量産移行の判断",
+          "describe": "量産に移ってよいかの判断、タクトと直行率、条件付きの場合の残り"
+        }
+      ]
+    },
+    {
+      "id": "launch-record",
+      "name": "立上げの記録",
+      "form": "文書",
+      "uses": [
+        "pv-report"
+      ],
+      "outline": [
+        {
+          "heading": "初期管理",
+          "describe": "初期流動の管理の中身と、解く条件"
+        },
+        {
+          "heading": "不具合",
+          "describe": "立上げで出た不具合、原因、対策と効果",
+          "item": "launch-issue"
+        },
+        {
+          "heading": "出した文書",
+          "describe": "取扱説明・整備の文書、サービス部品の手配"
+        }
+      ]
+    },
+    {
+      "id": "learning-record",
+      "name": "学びの記録",
+      "form": "文書",
+      "uses": [
+        "launch-record"
+      ],
+      "outline": [
+        {
+          "heading": "変更と市場の品質",
+          "describe": "量産中の変更（人・機械・材料・方法）と、市場の品質の記録"
+        },
+        {
+          "heading": "学び",
+          "describe": "次の製品と工程の定義に戻す学び。起きたこと、原因、直す先",
+          "item": "learning"
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "gate",
+      "name": "ゲート",
+      "idForm": "GT-{nn}"
+    },
+    {
+      "id": "use-case",
+      "name": "使われ方",
+      "idForm": "UC-{nn}"
+    },
+    {
+      "id": "benchmark",
+      "name": "比べる製品",
+      "idForm": "BM-{nn}"
+    },
+    {
+      "id": "regulation",
+      "name": "法規・規格",
+      "idForm": "RG-{nn}"
+    },
+    {
+      "id": "requirement",
+      "name": "要求",
+      "idForm": "RQ-{nn}"
+    },
+    {
+      "id": "concept",
+      "name": "方式の案",
+      "idForm": "CN-{nn}"
+    },
+    {
+      "id": "design-theme",
+      "name": "外装の方向",
+      "idForm": "DT-{nn}"
+    },
+    {
+      "id": "hard-point",
+      "name": "ハードポイント",
+      "idForm": "HP-{nn}"
+    },
+    {
+      "id": "risk",
+      "name": "リスク",
+      "idForm": "RK-{nn}"
+    },
+    {
+      "id": "subsystem",
+      "name": "部分",
+      "idForm": "SS-{nn}"
+    },
+    {
+      "id": "interface",
+      "name": "つなぎ目",
+      "idForm": "IF-{nn}"
+    },
+    {
+      "id": "parameter",
+      "name": "配置の寸法",
+      "idForm": "PR-{nn}"
+    },
+    {
+      "id": "envelope",
+      "name": "配置の形",
+      "idForm": "EN-{nnn}"
+    },
+    {
+      "id": "budget",
+      "name": "割付け",
+      "idForm": "BG-{nn}"
+    },
+    {
+      "id": "part",
+      "name": "部品",
+      "idForm": "PT-{nnn}"
+    },
+    {
+      "id": "failure-mode",
+      "name": "設計の故障モード",
+      "idForm": "FM-{nn}"
+    },
+    {
+      "id": "sourcing-decision",
+      "name": "工法と調達の方針",
+      "idForm": "SP-{nn}"
+    },
+    {
+      "id": "detail-parameter",
+      "name": "部品の寸法",
+      "idForm": "DP-{nn}"
+    },
+    {
+      "id": "body",
+      "name": "部品の形",
+      "idForm": "BD-{nnn}"
+    },
+    {
+      "id": "drawing",
+      "name": "図面",
+      "idForm": "DW-{nn}"
+    },
+    {
+      "id": "key-characteristic",
+      "name": "重要特性",
+      "idForm": "KC-{nn}"
+    },
+    {
+      "id": "analysis",
+      "name": "解析",
+      "idForm": "AN-{nn}"
+    },
+    {
+      "id": "appearance",
+      "name": "面品質と意匠の確認",
+      "idForm": "AP-{nn}"
+    },
+    {
+      "id": "dfm-finding",
+      "name": "製造性の指摘",
+      "idForm": "DM-{nn}"
+    },
+    {
+      "id": "test",
+      "name": "試験",
+      "idForm": "TS-{nn}"
+    },
+    {
+      "id": "test-result",
+      "name": "試験の結果",
+      "idForm": "TR-{nn}"
+    },
+    {
+      "id": "quote",
+      "name": "見積",
+      "idForm": "QT-{nn}"
+    },
+    {
+      "id": "supplier",
+      "name": "取引先",
+      "idForm": "SU-{nn}"
+    },
+    {
+      "id": "part-approval",
+      "name": "部品の承認",
+      "idForm": "PA-{nn}"
+    },
+    {
+      "id": "operation",
+      "name": "工程の作業",
+      "idForm": "OP-{nn}"
+    },
+    {
+      "id": "process-failure",
+      "name": "工程の故障モード",
+      "idForm": "PF-{nn}"
+    },
+    {
+      "id": "control",
+      "name": "管理の項目",
+      "idForm": "CP-{nn}"
+    },
+    {
+      "id": "capability",
+      "name": "工程能力",
+      "idForm": "CK-{nn}"
+    },
+    {
+      "id": "certification",
+      "name": "認証",
+      "idForm": "CE-{nn}"
+    },
+    {
+      "id": "launch-issue",
+      "name": "立上げの不具合",
+      "idForm": "LI-{nn}"
+    },
+    {
+      "id": "learning",
+      "name": "学び",
+      "idForm": "LE-{nn}"
+    }
+  ],
+  "rules": [
+    {
+      "id": "requirement-cites-source",
+      "type": "cites",
+      "from": "requirement",
+      "to": [
+        "use-case",
+        "regulation",
+        "benchmark"
+      ],
+      "min": 1
+    },
+    {
+      "id": "concept-cites-requirement",
+      "type": "cites",
+      "from": "concept",
+      "to": [
+        "requirement"
+      ],
+      "min": 1
+    },
+    {
+      "id": "design-theme-cites-requirement",
+      "type": "cites",
+      "from": "design-theme",
+      "to": [
+        "requirement"
+      ],
+      "min": 1
+    },
+    {
+      "id": "hard-point-cites-source",
+      "type": "cites",
+      "from": "hard-point",
+      "to": [
+        "requirement",
+        "concept",
+        "design-theme"
+      ],
+      "min": 1
+    },
+    {
+      "id": "risk-cites-source",
+      "type": "cites",
+      "from": "risk",
+      "to": [
+        "requirement",
+        "concept",
+        "design-theme"
+      ],
+      "min": 1
+    },
+    {
+      "id": "subsystem-cites-source",
+      "type": "cites",
+      "from": "subsystem",
+      "to": [
+        "concept",
+        "design-theme"
+      ],
+      "min": 1
+    },
+    {
+      "id": "interface-cites-subsystem",
+      "type": "cites",
+      "from": "interface",
+      "to": [
+        "subsystem"
+      ],
+      "min": 2
+    },
+    {
+      "id": "parameter-cites-hard-point",
+      "type": "cites",
+      "from": "parameter",
+      "to": [
+        "hard-point"
+      ],
+      "min": 0
+    },
+    {
+      "id": "envelope-cites-subsystem",
+      "type": "cites",
+      "from": "envelope",
+      "to": [
+        "subsystem"
+      ],
+      "min": 1
+    },
+    {
+      "id": "budget-cites-requirement",
+      "type": "cites",
+      "from": "budget",
+      "to": [
+        "requirement"
+      ],
+      "min": 1
+    },
+    {
+      "id": "part-cites-subsystem",
+      "type": "cites",
+      "from": "part",
+      "to": [
+        "subsystem"
+      ],
+      "min": 1
+    },
+    {
+      "id": "failure-mode-cites-source",
+      "type": "cites",
+      "from": "failure-mode",
+      "to": [
+        "subsystem",
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "sourcing-decision-cites-part",
+      "type": "cites",
+      "from": "sourcing-decision",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "detail-parameter-cites-parameter",
+      "type": "cites",
+      "from": "detail-parameter",
+      "to": [
+        "parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "envelope-cites-parameter",
+      "type": "cites",
+      "from": "envelope",
+      "to": [
+        "parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "envelope-cites-hard-point",
+      "type": "cites",
+      "from": "envelope",
+      "to": [
+        "hard-point"
+      ],
+      "min": 0
+    },
+    {
+      "id": "body-cites-detail-parameter",
+      "type": "cites",
+      "from": "body",
+      "to": [
+        "detail-parameter",
+        "parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "body-cites-part",
+      "type": "cites",
+      "from": "body",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "drawing-cites-part",
+      "type": "cites",
+      "from": "drawing",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "drawing-cites-body",
+      "type": "cites",
+      "from": "drawing",
+      "to": [
+        "body"
+      ],
+      "min": 0
+    },
+    {
+      "id": "drawing-cites-detail",
+      "type": "cites",
+      "from": "drawing",
+      "to": [
+        "detail-parameter",
+        "key-characteristic"
+      ],
+      "min": 0
+    },
+    {
+      "id": "key-characteristic-cites-part",
+      "type": "cites",
+      "from": "key-characteristic",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "analysis-cites-requirement",
+      "type": "cites",
+      "from": "analysis",
+      "to": [
+        "requirement"
+      ],
+      "min": 1
+    },
+    {
+      "id": "appearance-cites-design-theme",
+      "type": "cites",
+      "from": "appearance",
+      "to": [
+        "design-theme"
+      ],
+      "min": 1
+    },
+    {
+      "id": "dfm-finding-cites-part",
+      "type": "cites",
+      "from": "dfm-finding",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "dfm-finding-cites-geometry",
+      "type": "cites",
+      "from": "dfm-finding",
+      "to": [
+        "body",
+        "detail-parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "test-cites-requirement",
+      "type": "cites",
+      "from": "test",
+      "to": [
+        "requirement"
+      ],
+      "min": 1
+    },
+    {
+      "id": "test-cites-analysis",
+      "type": "cites",
+      "from": "test",
+      "to": [
+        "analysis"
+      ],
+      "min": 0
+    },
+    {
+      "id": "test-result-cites-test",
+      "type": "cites",
+      "from": "test-result",
+      "to": [
+        "test"
+      ],
+      "min": 1
+    },
+    {
+      "id": "quote-cites-part",
+      "type": "cites",
+      "from": "quote",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "part-approval-cites-part",
+      "type": "cites",
+      "from": "part-approval",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "operation-cites-part",
+      "type": "cites",
+      "from": "operation",
+      "to": [
+        "part"
+      ],
+      "min": 1
+    },
+    {
+      "id": "operation-cites-drawing",
+      "type": "cites",
+      "from": "operation",
+      "to": [
+        "drawing"
+      ],
+      "min": 0
+    },
+    {
+      "id": "process-failure-cites-operation",
+      "type": "cites",
+      "from": "process-failure",
+      "to": [
+        "operation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "control-cites-key-characteristic",
+      "type": "cites",
+      "from": "control",
+      "to": [
+        "key-characteristic"
+      ],
+      "min": 1
+    },
+    {
+      "id": "capability-cites-key-characteristic",
+      "type": "cites",
+      "from": "capability",
+      "to": [
+        "key-characteristic"
+      ],
+      "min": 1
+    },
+    {
+      "id": "capability-cites-control",
+      "type": "cites",
+      "from": "capability",
+      "to": [
+        "control",
+        "part-approval"
+      ],
+      "min": 0
+    },
+    {
+      "id": "certification-cites-regulation",
+      "type": "cites",
+      "from": "certification",
+      "to": [
+        "regulation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "certification-cites-test",
+      "type": "cites",
+      "from": "certification",
+      "to": [
+        "test"
+      ],
+      "min": 0
+    },
+    {
+      "id": "launch-issue-cites-source",
+      "type": "cites",
+      "from": "launch-issue",
+      "to": [
+        "part",
+        "operation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "learning-cites-source",
+      "type": "cites",
+      "from": "learning",
+      "to": [
+        "launch-issue",
+        "test-result",
+        "risk",
+        "failure-mode"
+      ],
+      "min": 0
+    },
+    {
+      "id": "key-characteristic-cites-reason",
+      "type": "cites",
+      "from": "key-characteristic",
+      "to": [
+        "requirement",
+        "failure-mode"
+      ],
+      "min": 1
+    },
+    {
+      "id": "key-characteristic-cites-geometry",
+      "type": "cites",
+      "from": "key-characteristic",
+      "to": [
+        "body",
+        "detail-parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "analysis-cites-model",
+      "type": "cites",
+      "from": "analysis",
+      "to": [
+        "body",
+        "envelope"
+      ],
+      "min": 1
+    },
+    {
+      "id": "analysis-cites-detail-parameter",
+      "type": "cites",
+      "from": "analysis",
+      "to": [
+        "detail-parameter"
+      ],
+      "min": 0
+    },
+    {
+      "id": "appearance-cites-body",
+      "type": "cites",
+      "from": "appearance",
+      "to": [
+        "body"
+      ],
+      "min": 1
+    },
+    {
+      "id": "appearance-cites-detail",
+      "type": "cites",
+      "from": "appearance",
+      "to": [
+        "detail-parameter",
+        "concept"
+      ],
+      "min": 0
+    },
+    {
+      "id": "quote-cites-supplier",
+      "type": "cites",
+      "from": "quote",
+      "to": [
+        "supplier"
+      ],
+      "min": 1
+    },
+    {
+      "id": "quote-cites-drawing",
+      "type": "cites",
+      "from": "quote",
+      "to": [
+        "drawing",
+        "sourcing-decision"
+      ],
+      "min": 0
+    },
+    {
+      "id": "part-approval-cites-supplier",
+      "type": "cites",
+      "from": "part-approval",
+      "to": [
+        "supplier"
+      ],
+      "min": 1
+    },
+    {
+      "id": "part-approval-cites-key-characteristic",
+      "type": "cites",
+      "from": "part-approval",
+      "to": [
+        "key-characteristic",
+        "quote"
+      ],
+      "min": 0
+    },
+    {
+      "id": "control-cites-operation",
+      "type": "cites",
+      "from": "control",
+      "to": [
+        "operation"
+      ],
+      "min": 1
+    },
+    {
+      "id": "control-cites-process-failure",
+      "type": "cites",
+      "from": "control",
+      "to": [
+        "process-failure"
+      ],
+      "min": 0
+    },
+    {
+      "id": "failure-mode-cites-requirement",
+      "type": "cites",
+      "from": "failure-mode",
+      "to": [
+        "requirement"
+      ],
+      "min": 0
+    },
+    {
+      "id": "failure-mode-cites-interface",
+      "type": "cites",
+      "from": "failure-mode",
+      "to": [
+        "interface"
+      ],
+      "min": 0
+    },
+    {
+      "id": "budget-cites-subsystem",
+      "type": "cites",
+      "from": "budget",
+      "to": [
+        "subsystem"
+      ],
+      "min": 1
+    },
+    {
+      "id": "requirement-verified",
+      "type": "covered",
+      "of": "requirement",
+      "by": [
+        "analysis",
+        "test"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "requirement-traced",
+      "type": "covered",
+      "of": "requirement",
+      "by": [
+        "concept",
+        "design-theme",
+        "hard-point",
+        "budget"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "use-case-covered",
+      "type": "covered",
+      "of": "use-case",
+      "by": [
+        "requirement"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "regulation-covered",
+      "type": "covered",
+      "of": "regulation",
+      "by": [
+        "requirement"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "hard-point-modelled",
+      "type": "covered",
+      "of": "hard-point",
+      "by": [
+        "parameter"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "subsystem-placed",
+      "type": "covered",
+      "of": "subsystem",
+      "by": [
+        "envelope"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "subsystem-covered",
+      "type": "covered",
+      "of": "subsystem",
+      "by": [
+        "part"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "part-modelled",
+      "type": "covered",
+      "of": "part",
+      "by": [
+        "body"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "part-drawn",
+      "type": "covered",
+      "of": "part",
+      "by": [
+        "drawing"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "part-sourced",
+      "type": "covered",
+      "of": "part",
+      "by": [
+        "sourcing-decision"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "part-approved",
+      "type": "covered",
+      "of": "part",
+      "by": [
+        "part-approval"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "design-theme-reviewed",
+      "type": "covered",
+      "of": "design-theme",
+      "by": [
+        "appearance"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "test-done",
+      "type": "covered",
+      "of": "test",
+      "by": [
+        "test-result"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "key-characteristic-controlled",
+      "type": "covered",
+      "of": "key-characteristic",
+      "by": [
+        "control"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "key-characteristic-capable",
+      "type": "covered",
+      "of": "key-characteristic",
+      "by": [
+        "capability"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "regulation-certified",
+      "type": "covered",
+      "of": "regulation",
+      "by": [
+        "certification"
+      ],
+      "exempt": true
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "process.complete",
+      "text": "対象と出口、通る工程と省く理由、ゲートごとの判定者と物差し、段階と受入の区切り、AIに頼む範囲、置き場と版の固め方が書かれている。",
+      "checkedBy": "AI",
+      "target": "process-map"
+    },
+    {
+      "id": "process.approved",
+      "text": "製品の責任者が、工程の取捨・ゲートの判定者・AIに頼む範囲を確かめ、開始を承認している。",
+      "checkedBy": "人",
+      "target": "process-map"
+    },
+    {
+      "id": "planning.complete",
+      "text": "使われ方・比べる製品・法規と規格・事業の前提（目標の価格と原価、数量、時期）が書かれている。",
+      "checkedBy": "AI",
+      "target": "product-plan"
+    },
+    {
+      "id": "planning.requirements-measurable",
+      "text": "すべての要求に、目標値と単位（見て判定するものは比べる基準と判定者）、優先度、確かめ方がある。",
+      "checkedBy": "AI",
+      "target": "requirement-list",
+      "rules": [
+        "requirement-cites-source",
+        "use-case-covered",
+        "regulation-covered"
+      ]
+    },
+    {
+      "id": "planning.approved",
+      "text": "製品の責任者が、狙いと要求の優先度と事業の前提を承認している。",
+      "checkedBy": "人",
+      "target": "requirement-list"
+    },
+    {
+      "id": "concept.alternatives",
+      "text": "機構の方式と外装の方向のそれぞれに比べた案があり、評価と選んだ理由が書かれている。一案しか作らないときは理由がある。",
+      "checkedBy": "AI",
+      "target": "concept-study",
+      "rules": [
+        "concept-cites-requirement",
+        "design-theme-cites-requirement"
+      ]
+    },
+    {
+      "id": "concept.hard-points",
+      "text": "ハードポイントに値・許す幅・決めた側（機構か外装か）があり、外装の案と機構の案の両方で矛盾しない。",
+      "checkedBy": "AI",
+      "target": "hard-points",
+      "rules": [
+        "hard-point-cites-source"
+      ]
+    },
+    {
+      "id": "concept.risks",
+      "text": "必須の要求と新しい技術ごとに、リスクと先に潰す手・期限がある。",
+      "checkedBy": "AI",
+      "target": "risk-register",
+      "rules": [
+        "risk-cites-source"
+      ]
+    },
+    {
+      "id": "concept.approved",
+      "text": "製品の責任者が、選んだ方式と外装の組み合わせと、ハードポイントを承認している（外装は絵で見て判定する）。",
+      "checkedBy": "人",
+      "target": "concept-study"
+    },
+    {
+      "id": "system-design.architecture",
+      "text": "すべての部分に役割と受け持つ要求があり、つなぎ目は両端の部分と伝えるものが書かれている。",
+      "checkedBy": "AI",
+      "target": "architecture",
+      "rules": [
+        "subsystem-cites-source",
+        "interface-cites-subsystem",
+        "subsystem-covered"
+      ]
+    },
+    {
+      "id": "system-design.layout",
+      "text": "配置の3Dモデルで、すべての部分が空間に収まり、可動部が動く範囲で互いにぶつからず、決めた最小の隙間を守る。ハードポイントが寸法としてモデルにある。",
+      "checkedBy": "AI",
+      "target": "layout-model",
+      "rules": [
+        "parameter-cites-hard-point",
+        "envelope-cites-parameter",
+        "envelope-cites-subsystem",
+        "hard-point-modelled",
+        "subsystem-placed",
+        "envelope-cites-hard-point"
+      ]
+    },
+    {
+      "id": "system-design.budget",
+      "text": "質量・原価の割付けの合計が目標内で、公差の積み上げで組立の不良が目標内に収まる。",
+      "checkedBy": "AI",
+      "target": "budget",
+      "rules": [
+        "budget-cites-requirement",
+        "budget-cites-subsystem"
+      ]
+    },
+    {
+      "id": "system-design.ebom",
+      "text": "部品表のすべての部品が部分に属し、内製・購入・標準品と材料が決まっている。",
+      "checkedBy": "AI",
+      "target": "ebom",
+      "rules": [
+        "part-cites-subsystem"
+      ]
+    },
+    {
+      "id": "system-design.dfmea",
+      "text": "深刻さの高い故障モードに対策と期限がある。",
+      "checkedBy": "AI",
+      "target": "dfmea",
+      "rules": [
+        "failure-mode-cites-source",
+        "failure-mode-cites-interface"
+      ]
+    },
+    {
+      "id": "system-design.sourcing",
+      "text": "すべての部品に工法と調達の方針があり、型や長納期の品が分かっている。",
+      "checkedBy": "AI",
+      "target": "sourcing-plan",
+      "rules": [
+        "sourcing-decision-cites-part",
+        "part-sourced"
+      ]
+    },
+    {
+      "id": "system-design.approved",
+      "text": "設計の責任者と製品の責任者が、配置・割付け・設計FMEAを確かめ、詳細設計に進むことを承認している。",
+      "checkedBy": "人",
+      "target": "layout-model"
+    },
+    {
+      "id": "detail-design.model",
+      "text": "部品表の部品ごとに詳細の形があり、組んだ状態と可動の範囲で干渉が無い。",
+      "checkedBy": "AI",
+      "target": "detail-model",
+      "rules": [
+        "body-cites-part",
+        "detail-parameter-cites-parameter",
+        "body-cites-detail-parameter",
+        "part-modelled"
+      ]
+    },
+    {
+      "id": "detail-design.drawings",
+      "text": "内製と特注のすべての部品に、版の付いた図面（または製品製造情報の付いた3Dモデル）と公差がある。",
+      "checkedBy": "AI",
+      "target": "drawings",
+      "rules": [
+        "drawing-cites-part",
+        "drawing-cites-body",
+        "part-drawn",
+        "drawing-cites-detail"
+      ]
+    },
+    {
+      "id": "detail-design.key-characteristics",
+      "text": "重要特性ごとに根拠の要求か故障モードと、測り方がある。",
+      "checkedBy": "AI",
+      "target": "key-characteristics",
+      "rules": [
+        "key-characteristic-cites-part",
+        "key-characteristic-cites-reason",
+        "key-characteristic-cites-geometry"
+      ]
+    },
+    {
+      "id": "detail-design.analysis",
+      "text": "解析で確かめる要求ごとに、条件・結果・判定・既知解との照合がある。判定が不合格のものは対策か試験への申し送りがある。",
+      "checkedBy": "AI",
+      "target": "analysis-report",
+      "rules": [
+        "analysis-cites-requirement",
+        "analysis-cites-model",
+        "analysis-cites-detail-parameter"
+      ]
+    },
+    {
+      "id": "detail-design.appearance",
+      "text": "外装の方向ごとに、面品質と意匠の確認がある（曲率の連続、映り込み、比率、隙間と面差）。",
+      "checkedBy": "AI",
+      "target": "appearance-review",
+      "rules": [
+        "appearance-cites-design-theme",
+        "appearance-cites-body",
+        "design-theme-reviewed",
+        "appearance-cites-detail"
+      ]
+    },
+    {
+      "id": "detail-design.appearance-approved",
+      "text": "意匠の責任者が、レンダリングと面の確認の画像を見て外装を承認している。",
+      "checkedBy": "人",
+      "target": "appearance-review"
+    },
+    {
+      "id": "detail-design.dfm",
+      "text": "製造性の指摘がすべて直されたか、直さない理由と責任者の判断がある。",
+      "checkedBy": "AI",
+      "target": "dfm-review",
+      "rules": [
+        "dfm-finding-cites-part",
+        "dfm-finding-cites-geometry"
+      ]
+    },
+    {
+      "id": "detail-design.approved",
+      "text": "設計の責任者が、図面・解析・製造性の確認を見て出図を承認している。",
+      "checkedBy": "人",
+      "target": "drawings"
+    },
+    {
+      "id": "design-verification.plan",
+      "text": "必須の要求ごとに、解析・試験・見て判定のどれかで確かめる計画がある。",
+      "checkedBy": "AI",
+      "target": "dv-plan",
+      "rules": [
+        "test-cites-requirement",
+        "requirement-verified",
+        "test-cites-analysis"
+      ]
+    },
+    {
+      "id": "design-verification.results",
+      "text": "すべての試験に結果と判定があり、解析との差が説明されている。",
+      "checkedBy": "AI",
+      "target": "dv-report",
+      "rules": [
+        "test-result-cites-test",
+        "test-done"
+      ]
+    },
+    {
+      "id": "design-verification.approved",
+      "text": "製品の責任者が、試験の結果を見て量産型に進むことを承認している。",
+      "checkedBy": "人",
+      "target": "dv-report"
+    },
+    {
+      "id": "sourcing.quotes",
+      "text": "部品ごとに見積の比較と決めた取引先がある。",
+      "checkedBy": "AI",
+      "target": "quote-comparison",
+      "rules": [
+        "quote-cites-part",
+        "quote-cites-supplier",
+        "quote-cites-drawing"
+      ]
+    },
+    {
+      "id": "sourcing.approvals",
+      "text": "購入と外注のすべての部品に、初物の承認がある。",
+      "checkedBy": "AI",
+      "target": "part-approval",
+      "rules": [
+        "part-approval-cites-part",
+        "part-approval-cites-supplier",
+        "part-approved",
+        "part-approval-cites-key-characteristic"
+      ]
+    },
+    {
+      "id": "sourcing.approved",
+      "text": "調達と品質の責任者が、取引先と部品の承認を確かめている。",
+      "checkedBy": "人",
+      "target": "part-approval"
+    },
+    {
+      "id": "process-design.flow",
+      "text": "すべての部品が工程のどこかの作業で扱われ、作業ごとに工程の故障モードと対策がある。",
+      "checkedBy": "AI",
+      "target": "process-flow",
+      "rules": [
+        "operation-cites-part",
+        "process-failure-cites-operation",
+        "operation-cites-drawing"
+      ]
+    },
+    {
+      "id": "process-design.control",
+      "text": "すべての重要特性が、どれかの作業で管理されている。",
+      "checkedBy": "AI",
+      "target": "control-plan",
+      "rules": [
+        "control-cites-key-characteristic",
+        "control-cites-operation",
+        "key-characteristic-controlled",
+        "control-cites-process-failure"
+      ]
+    },
+    {
+      "id": "process-design.approved",
+      "text": "生産技術と品質の責任者が、工程・管理の計画・設備を確かめている。",
+      "checkedBy": "人",
+      "target": "control-plan"
+    },
+    {
+      "id": "production-validation.capability",
+      "text": "すべての重要特性に工程能力の値があり、工程計画で決めた基準を満たす。",
+      "checkedBy": "AI",
+      "target": "pv-report",
+      "rules": [
+        "capability-cites-key-characteristic",
+        "key-characteristic-capable",
+        "capability-cites-control"
+      ]
+    },
+    {
+      "id": "production-validation.certified",
+      "text": "守る法規・規格ごとに認証か検定の結果がある。",
+      "checkedBy": "AI",
+      "target": "pv-report",
+      "rules": [
+        "certification-cites-regulation",
+        "regulation-certified",
+        "certification-cites-test"
+      ]
+    },
+    {
+      "id": "production-validation.approved",
+      "text": "製品の責任者が、量産品の試験・工程能力・認証を見て量産への移行を承認している。",
+      "checkedBy": "人",
+      "target": "pv-report"
+    },
+    {
+      "id": "launch.complete",
+      "text": "初期管理を解く条件と、立上げの不具合の対策が書かれている。",
+      "checkedBy": "AI",
+      "target": "launch-record",
+      "rules": [
+        "launch-issue-cites-source"
+      ]
+    },
+    {
+      "id": "launch.approved",
+      "text": "品質の責任者が、初期管理を解いてよいと判断している。",
+      "checkedBy": "人",
+      "target": "launch-record"
+    },
+    {
+      "id": "sustain.complete",
+      "text": "学びに直す先（設計の基準・工程の定義・次の製品）が書かれている。",
+      "checkedBy": "AI",
+      "target": "learning-record"
+    },
+    {
+      "id": "sustain.approved",
+      "text": "製品の責任者が、学びの直す先を確かめている。",
+      "checkedBy": "人",
+      "target": "learning-record"
+    }
+  ]
+}
