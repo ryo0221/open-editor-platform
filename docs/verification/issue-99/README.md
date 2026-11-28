@@ -43,7 +43,16 @@ e2e は既定の suite（開発サーバ）の desktop と mobile で、変え�
 
 ## 実行結果
 
-RESULTS
+試験した source：`65e49ae`（WD2 の `fb1077b` の上に WD3・WD4・WD5）。この後の commit はこの節だけ。
+
+| 実行                                                                                                | 結果                                                                                                                                             |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| vitest：workflow-definition・structured-graph・mindmap-core・mindmap・collaboration-office・scripts | 54 files・599 件が通った                                                                                                                         |
+| `tsc --noEmit`、`eslint`（変えたファイル）、`prettier`、`check:files`、`check:areas`                | 通った                                                                                                                                           |
+| `vite build`（Playground と `/workflow-definition-host.html`）                                      | 通った                                                                                                                                           |
+| e2e：`workflow-definition*.spec.ts`（desktop 6・mobile 1）                                          | 7 件が通った                                                                                                                                     |
+| e2e 回帰：`structured-graph*.spec.ts`・`mindmap*.spec.ts`（desktop・mobile）                        | 97 件が通り 1 件が落ちた。落ちたのは `structured-graph.spec.ts:100`（「Open collaboratively」の数）で、main `edbcb7b` でも同じく落ちる既存の失敗 |
+| 全体の vitest と全 e2e                                                                              | NOT RUN（自動の Actions は止めてあり、クラウドでは変えたところに絞る）                                                                           |
 
 ## 見つけたことと範囲の外
 
