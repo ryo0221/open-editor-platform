@@ -12,3 +12,6 @@ packages/geo-core/data/*.json
 workflow.json
 # A fixed snapshot of stage 1 e2e selection, one package per line (scripts/tests/e2e-areas.test.mjs).
 scripts/tests/e2e-stage1-selection.json
+
+# A pinned, unmodified copy of open-workflow-definitions (packages/workflow-definition/fixtures/owd-446706b/README.md).
+packages/workflow-definition/fixtures/
