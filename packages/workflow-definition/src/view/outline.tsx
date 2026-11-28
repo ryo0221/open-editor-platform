@@ -11,6 +11,7 @@ function at(outline: Entry[], path: number[]): Entry[] {
   for (const i of path) {
     const entry = list[i];
     entry.children ??= [];
+    if (!Array.isArray(entry.children)) throw new Error('見出しの下が一覧ではありません');
     list = entry.children;
   }
   return list;
@@ -22,7 +23,11 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
   const outline = (Array.isArray(deliverable.outline) ? deliverable.outline : []) as Entry[];
   const change = (update: (copy: Entry[]) => void) => {
     const copy = clone(outline);
-    update(copy);
+    try {
+      update(copy);
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
     // An emptied children list is removed: OWD needs at least one child when the field is there.
     const prune = (list: Entry[]) =>
       list.forEach((e) => {
@@ -58,6 +63,8 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
               )}
             </li>
           );
+        // Children that are there but not a list (an imported draft) are shown, never added to.
+        const brokenChildren = entry.children !== undefined && !Array.isArray(entry.children);
         const field = (key: string, label: string, multiline = false) => (
           <TextField
             label={`${label} of ${name}`}
@@ -131,7 +138,7 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
                   <button
                     type="button"
                     aria-label={`Add a heading inside ${name}`}
-                    disabled={here.length >= 4}
+                    disabled={here.length >= 4 || brokenChildren}
                     onClick={() =>
                       change(
                         (c) =>
@@ -151,6 +158,20 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
                 </span>
               )}
             </div>
+            {brokenChildren && (
+              <p className="ep-wd-blocking">
+                壊れた下の見出し：{JSON.stringify(entry.children)?.slice(0, 80) ?? ''}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    aria-label={`Remove broken headings inside ${name}`}
+                    onClick={() => change((c) => void delete at(c, path)[i].children)}
+                  >
+                    外す
+                  </button>
+                )}
+              </p>
+            )}
             {Array.isArray(entry.children) &&
               entry.children.length > 0 &&
               render(entry.children, here)}

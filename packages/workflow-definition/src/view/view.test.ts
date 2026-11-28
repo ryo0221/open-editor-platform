@@ -143,5 +143,26 @@ describe('the workflow definition Surface', () => {
     expect(html).toContain('壊れた見出し：null');
     expect(html).toContain('aria-label="Delete heading 1"');
     expect(html).toContain('残る');
+    // Children that are not a list are shown with a repair, and nothing can be added inside.
+    deliverable.outline = [{ heading: '章', describe: '', children: {} as never }];
+    const broken = renderToStaticMarkup(
+      createElement(
+        WorkflowContext.Provider,
+        {
+          value: {
+            definition: d,
+            readOnly: false,
+            edit: () => undefined,
+            select: () => undefined,
+            diagnostics: [],
+            notify: () => undefined,
+          },
+        },
+        createElement(OutlineEditor, { deliverable }),
+      ),
+    );
+    expect(broken).toContain('壊れた下の見出し：{}');
+    expect(broken).toContain('aria-label="Remove broken headings inside heading 1"');
+    expect(broken).toMatch(/aria-label="Add a heading inside heading 1"[^>]*disabled/);
   });
 });

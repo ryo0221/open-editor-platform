@@ -87,6 +87,18 @@ test('#99 WD4 proposals: preview, apply as one edit, refuse a stale one, reject'
   await expect(proposal.getByRole('button', { name: '提案を適用' })).toBeDisabled();
   await proposal.getByRole('button', { name: '提案を断る' }).click();
   await expect(page.getByLabel('Host status')).toHaveText('Proposal rejected');
+  // An edit made while a proposal is open is never overwritten by it.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Propose', exact: true }).click();
+  await expect(proposal).toContainText('追加 達成条件 review.ok');
+  await workflowTab(page, '一覧');
+  await page.getByLabel('Add to Acceptance of review').selectOption('notes.ok');
+  await expect(proposal.getByRole('alert')).toContainText('提案のあとに定義が変わりました');
+  await expect(proposal.getByRole('button', { name: '提案を適用' })).toBeDisabled();
+  expect((await hostJson(page)).phases.find((p) => p.id === 'review')).toMatchObject({
+    acceptance: expect.arrayContaining(['notes.ok']),
+  });
+  await proposal.getByRole('button', { name: '提案を断る' }).click();
   // Read only: a proposal cannot be applied.
   await page.getByLabel('Read only', { exact: true }).check();
   await page.getByRole('button', { name: 'Propose', exact: true }).click();
