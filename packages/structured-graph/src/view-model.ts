@@ -487,7 +487,8 @@ export function graphDropSection(
 
 /**
  * A node drop as one edit: the move, plus the membership of the frame its centre lands in. Outside
- * every frame the membership is cleared, or kept with `outside: 'keep'`. A membership the Profile
+ * every frame the membership is cleared, or kept with `outside: 'keep'`; with `mode: 'move-only'`
+ * the membership never changes. A membership the Profile
  * or a read-only Section refuses leaves the node in its Section and only moves it; `refused` says
  * why.
  */
@@ -500,7 +501,12 @@ export function graphNodeDropIntents(input: {
   /** The node's drawn size; its centre decides the frame. */
   size: GraphNodeSize;
   outside?: 'clear' | 'keep';
-}): { intents: GraphIntent[]; target: string | null; refused?: unknown } {
+  /**
+   * `'move-only'` never changes the membership: the drop is only the move, and `moveOnly` says that
+   * the membership would otherwise have changed. Default `'membership'`.
+   */
+  mode?: 'membership' | 'move-only';
+}): { intents: GraphIntent[]; target: string | null; refused?: unknown; moveOnly?: true } {
   const { graph, profile, sections, id, position, size, outside = 'clear' } = input;
   const move: GraphIntent = { type: 'move-node', id, position };
   const node = graph.nodes.find((n) => n.id === id);
@@ -510,6 +516,7 @@ export function graphNodeDropIntents(input: {
   });
   if (!node || target === (node.sectionId ?? null) || (target === null && outside === 'keep'))
     return { intents: [move], target };
+  if (input.mode === 'move-only') return { intents: [move], target, moveOnly: true };
   const intents: GraphIntent[] = [move, { type: 'set-node-section', id, sectionId: target }];
   try {
     graphCommand(profile, intents).apply(graph);

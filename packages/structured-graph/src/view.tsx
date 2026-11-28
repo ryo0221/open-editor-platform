@@ -138,6 +138,13 @@ export interface GraphSurfaceProps {
    * (`'clear'`, the default) or keeps it (`'keep'`).
    */
   sectionDropOutside?: 'clear' | 'keep';
+  /**
+   * `'move-only'`: a drop only moves the node and never changes its Section; dropped on another
+   * Section's frame, the Surface says to use the Section property instead. For a sidecar Host
+   * that cannot save the move and the membership as one edit (`GraphBinding.sectionDrop`).
+   * Default `'membership'`.
+   */
+  sectionDrop?: 'membership' | 'move-only';
 }
 export function GraphSurface({
   content: graph,
@@ -169,6 +176,7 @@ export function GraphSurface({
   shapeOnCreate = true,
   sectionEditing = true,
   sectionDropOutside = 'clear',
+  sectionDrop = 'membership',
   itemReferences,
 }: GraphSurfaceProps) {
   const labels = useMemo(
@@ -301,7 +309,7 @@ export function GraphSurface({
     setError,
     drop: sectionsEditable
       ? (id, position) => {
-          const { intents, target, refused } = graphNodeDropIntents({
+          const drop = graphNodeDropIntents({
             graph,
             profile,
             sections: scene.sections,
@@ -309,7 +317,10 @@ export function GraphSurface({
             position,
             size: scene.sizeOf(graph.nodes.find((n) => n.id === id)!),
             outside: sectionDropOutside,
+            mode: sectionDrop,
           });
+          if (drop.moveOnly) return { intents: drop.intents, notice: labels.sectionDropMoveOnly };
+          const { intents, target, refused } = drop;
           const notice =
             refused === undefined
               ? undefined

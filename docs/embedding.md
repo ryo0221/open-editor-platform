@@ -263,7 +263,8 @@ Graph reading Hosts can configure these public props (also accepted by `NativeGr
 | `highlightAdjacent` | `false`                                  | Emphasize the selected node and its direct neighbors/edges in the complete graph.                                                                                                                                                                                                                                        |
 | `shapeEditing`      | `true`                                   | Offer the toolbar `New node shape` and the Inspector `Appearance` choices. Pass `false` when the source has nowhere to save node shapes and styles.                                                                                                                                                                      |
 | `shapeOnCreate`     | `true`                                   | Offer a shape for new nodes, applied in the same edit as the node. Pass `false` for a presentation sidecar, which refuses mixed presentation and semantic batches.                                                                                                                                                       |
-| `sectionEditing`    | `true`                                   | Offer `Section type`/`Add section`, Section frames with move, resize and collapse, and the Inspector `Node section`/`Section settings`. Pass `false` for sources that cannot save Sections (Data, sidecar adapters).                                                                                                     |
+| `sectionEditing`    | `true`                                   | Offer `Section type`/`Add section`, Section frames with move, resize and collapse, and the Inspector `Node section`/`Section settings`. Pass `false` for sources that cannot save Sections (Data, adapters without `sections`).                                                                                          |
+| `sectionDrop`       | `'membership'`                           | `'move-only'`: a node drop only moves it and never changes its Section; on another Section's frame the Surface says to use the Section property. Pass `binding.sectionDrop` for a sidecar Host without `commitWithPresentation`.                                                                                         |
 
 | Prop      | Default | Behavior                                                                                                                                                                                                                                                |
 | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -352,12 +353,17 @@ copy. Always supply a source revision and enforce access at execute; proposal ap
 also rechecks source bytes, Profile/Adapter pins and the presentation sidecar. Use the
 trusted Adapter's `diagnostics` to connect the domain validator. The Adapter declares
 `presentationMode`: `'sidecar'` keeps positions, shapes and styles in a Host-owned
-`PresentationSidecar` (schema 2) read and written through `getPresentation`/`setPresentation`;
-`'source'` keeps them in the source itself (refuse what it cannot save, as Data does for
-shapes); `'none'` refuses shape and style intents. `sections: true` requires `'source'`;
-without it every batch with a Section intent is refused with
-`This source cannot represent Graph sections`. Presentation-only batches cannot be mixed with semantic edits. Overlay/camera/selection
-remain private view state.
+`PresentationSidecar` (schema 3; schemas 1 and 2 are read as it) read and written through
+`getPresentation`/`setPresentation`; `'source'` keeps them in the source itself (refuse what it
+cannot save, as Data does for shapes); `'none'` refuses shape and style intents. `sections: true`
+works with `'source'` (frames in the source) or `'sidecar'` (frames in `presentation.sections` of
+the sidecar; the Adapter gives every Section a default frame); without it every batch with a
+Section intent is refused with `This source cannot represent Graph sections`. A sidecar batch
+that mixes presentation and semantic intents (a node dropped into a Section) needs the optional
+Host hook `commitWithPresentation({command, presentation, base})`: the Host applies the command,
+then writes the sidecar, both or neither, as one Undo record. Without the hook such a batch is
+refused; pass `sectionDrop={binding.sectionDrop}` (`'move-only'`) to the Surface so a drop only
+moves. Overlay/camera/selection remain private view state.
 
 For Data use `DataSession` (or `guardDataCommand` at every canonical apply boundary)
 and register `DataSurface.renderGraph` with `DataGraphSurface` from

@@ -46,8 +46,8 @@ required欠落は未完成draftのdiagnostics（公開/版保存はHostが判断
 
 2026-11-14からStructured Graphは互換を守る保存形式として扱う（Preview・Experimental・pre-1.0の扱いを外した。Ryoさんの判断）。
 
-- **番号**：Graphの保存形式を変えたら `schemaVersion` を上げる。現在はGraph schema 3（`graphSchemaVersion`）、Profile schema 3（`graphProfileSchemaVersion`）、presentation sidecar schema 2。Profile schema 3はnode typeの任意の `items`（業務IDの属性 `id`・題 `title`・引用の属性 `refs`・図の属性 `rootRefs`。どれもそのtypeまたはGraph typeのschemaにある属性で、`id`・`title` はstring、引用はstringかstringの配列）を足し、`graphItemsDeclaration` で `items@1-draft` の宣言にする（[分析間の要素参照](analysis-references-design.md) U1）。schema 2のProfileは `items` を持てない。Section（#396）とSectionにつなぐ接続（#594）は、それまでschema 2のまま書いていたので、schema 3で区別する。
-- **新しい版は古い番号を読む**：`upgradeGraphDocument`・`readGraphDocument` はschema 1（位置は `layout`、Section無し）とschema 2を、入力を変えずにschema 3として返す。schema 2として保存されたSectionへの接続もそのまま読む。Profile schema 1（Section型無し）とschema 2（`items` 無し）は `upgradeGraphProfile`・`readGraphProfile` でschema 3として、sidecar schema 1（`positions`）はschema 2のnode presentationとして読む。
+- **番号**：Graphの保存形式を変えたら `schemaVersion` を上げる。現在はGraph schema 3（`graphSchemaVersion`）、Profile schema 3（`graphProfileSchemaVersion`）、presentation sidecar schema 3（`presentationSidecarSchemaVersion`、#99 WD1でSectionの枠を足した）。Profile schema 3はnode typeの任意の `items`（業務IDの属性 `id`・題 `title`・引用の属性 `refs`・図の属性 `rootRefs`。どれもそのtypeまたはGraph typeのschemaにある属性で、`id`・`title` はstring、引用はstringかstringの配列）を足し、`graphItemsDeclaration` で `items@1-draft` の宣言にする（[分析間の要素参照](analysis-references-design.md) U1）。schema 2のProfileは `items` を持てない。Section（#396）とSectionにつなぐ接続（#594）は、それまでschema 2のまま書いていたので、schema 3で区別する。
+- **新しい版は古い番号を読む**：`upgradeGraphDocument`・`readGraphDocument` はschema 1（位置は `layout`、Section無し）とschema 2を、入力を変えずにschema 3として返す。schema 2として保存されたSectionへの接続もそのまま読む。Profile schema 1（Section型無し）とschema 2（`items` 無し）は `upgradeGraphProfile`・`readGraphProfile` でschema 3として、sidecar schema 1（`positions`）とschema 2（`presentation.nodes`）はSectionの枠の無いschema 3として読み、次の見た目の変更でschema 3として書く。
 - **保存済みの版は書き換えない**：Playgroundは古いschemaの下書きを開く・取り込むときに現在のschemaへ移す。保存済みの版はbytesとhashを保ち、表示・参照・版の復元のときに読み替える。復元した下書きと次の版はschema 3になる。
 - **古い版は新しい番号を理由付きで断る**：この版から、読めるより新しい番号は「Graph schema N is newer than this version reads」で断る（不正なデータとは区別する）。これより前の版はschema 3を「Invalid Graph schema…」で断る。
 - **今後**：保存形式を変える変更は、番号を上げ、旧番号の読み込み（または明示的な移行）と試験を同じ変更に入れる。読み込みを外すときは[変更の記録](structured-graph/changes.md)に書き、少なくとも1つ前の番号は読み続ける。APIはpackageの版に従い、破壊的な変更は変更の記録に書く。
@@ -116,9 +116,23 @@ readOnlyの型のSectionは、新規作成・属性・枠・親・存在・中�
 外との関係は（相手・向き・種類）ごとに1本の線へまとめ「種類名 ×件数」を出す。まとめた線は編集できない。
 参照のSVGはSectionの枠と名前を外側から順にノードの下に描き、ノードを絞った参照では所属の祖先だけを描く。
 
-Sectionを保存できるのは `presentationMode: 'source'` で `sections: true` を宣言したadapterだけ。それ以外のadapter・DataのGraph・
-参照Definitionは、Sectionのintentを含むbatchを「This source cannot represent Graph sections」で拒否し、`GraphSurface` に
-`sectionEditing={false}` を渡して道具を出さない。
+Sectionを保存できるのは `sections: true` を宣言したadapterだけで、`presentationMode` は `'source'`（枠もsourceに置く）か
+`'sidecar'`（枠はsidecarの `presentation.sections`、#99 WD1）。`'none'` との組み合わせは `GraphBinding` の作成時に拒否する。
+`sections` を宣言しないadapter・DataのGraph・参照Definitionは、Sectionのintentを含むbatchを
+「This source cannot represent Graph sections」で拒否し、`GraphSurface` に `sectionEditing={false}` を渡して道具を出さない。
+
+`'sidecar'` の Section：adapterの `project` はSectionごとに既定の枠を返し、`GraphBinding` がsidecarに保存した枠で置き換える。
+sourceに無いSectionの枠は無視し、次にsidecarを書くときに落とす。`move-section`・`resize-section`・`set-section-style` は
+見た目なのでsidecarへ、`add-section`・`set-node-section`・`set-section-parent`・`delete-section` は意味なのでadapterの `prepare` へ送る。
+見た目と意味を混ぜたbatch（枠へのドラッグの `[move-node, set-node-section]`）と、置き場所を持つ `add-node`・`add-section` は、
+Hostの任意の口 `commitWithPresentation({command, presentation, base})` があれば一つの変更にする。Hostは `command` をsourceへ
+適用してから（`command` は適用時にstamp `base` を確かめる）sidecarを書き、**両方とも適用するか、どちらも適用しない**。
+Undo／Redoは一つの記録として両方を戻す・進める。書き込みに失敗したらHostは両方を元に戻して例外を返す。
+口の無いHostでは混在batchを「Sidecar presentation and semantic edits require separate transactions」で拒否し、
+`add-node`・`add-section` はsourceだけを変えて既定の位置・枠を使う。`GraphBinding.sectionDrop` は口の無いsidecarのHostで
+`'move-only'` を返し、Hostはそれを `GraphSurface` の `sectionDrop` に渡す。ドラッグは位置だけを動かし、所属が変わるはずの
+ドロップでは「位置だけを動かしました。まとまりを変えるには、設定の『まとまり』を使います。」を示す。所属の変更はInspectorの
+`Node section` などの明示の操作だけになる。既定の `sectionDrop` は `'membership'` で、既存のGraphの動作は変えない。
 
 Sectionを編集できるSurfaceでノードをドラッグして離すと、ノードの中心がある枠のうち最も内側の
 （同じ深さなら後に描く）Sectionへ、`move-node` と `set-node-section` を一つのbatch（一つのUndo）で入れる（#448）。
@@ -178,7 +192,7 @@ Nativeは `GraphSession` が既存 `EditorSession<GraphDocument>` を所有す�
 
 外部は `GraphAdapter<Source>` と `GraphBinding<Source>`。Hostが `read()`（content/revision/readOnly）とcanonical `execute(command)` を渡す。AdapterがProfile/project/prepare/domain diagnosticsを提供する。GraphBindingはsource Session/Undoを持たず、毎回再投影する。stampはsource revision・canonical fingerprint・adapter ID/version・Profile全体・presentation sidecarをpinし、apply時に最新readとcommand inputで照合。外部更新/対象削除/版変更/権限剥奪/presentation更新は古いpreviewのapplyを拒否する。proposal previewは正本と履歴を変えず、採用は一command。semantic previewも現sidecar配置を渡し、提案sourceからProfile・domain diagnosticsを再計算する。変更bufferのstaleも同じ境界で拒否する。
 
-Adapterは `presentationMode` で見た目の保存先を宣言する。`sidecar` はHost所有の `PresentationSidecar`（schema 2/source ID/adapter・Profile pins/source revision/`presentation.nodes`）に配置・形・塗りを保存する。欠落IDは無視して決定的初期位置を使い、消えたnodeの値は保存時に落とし、未知schema/pinは拒否する。`source` は配置を正本側（Dataのview設定など）に置き、形・塗りの保存先が無い場合はadapterが理由付きで拒否する。`none` は形・塗りのintentを拒否する。`sections: true` は `source` とだけ組み合わせられる。見た目だけのbatchだけsidecarへ適用し、semantic batchとの混在は原子性を保証できないため拒否。Definitionの値/順序/版/semantic Undoには入れない。sidecarに別のデータ編集Undoは作らない。runtime overlayはpropsのみ。
+Adapterは `presentationMode` で見た目の保存先を宣言する。`sidecar` はHost所有の `PresentationSidecar`（schema 3/source ID/adapter・Profile pins/source revision/`presentation.nodes`・`presentation.sections`）に配置・形・塗りとSectionの枠を保存する。欠落IDは無視して決定的初期位置を使い、消えたnodeの値は保存時に落とし、未知schema/pinは拒否する。`source` は配置を正本側（Dataのview設定など）に置き、形・塗りの保存先が無い場合はadapterが理由付きで拒否する。`none` は形・塗りのintentを拒否する。`sections: true` は `source` か `sidecar` と組み合わせる。見た目だけのbatchはsidecarへ適用し、semantic batchとの混在はHostの `commitWithPresentation` があるときだけ一つの変更にする（無ければ拒否。[Section](#section-396-phase-2-preview)）。Definitionの値/順序/版/semantic Undoには入れない。sidecarに別のデータ編集Undoは作らない。runtime overlayはpropsのみ。
 
 参照Definition Adapterは `apps/graph-reference` に置く。実Framework型ではなく架空の公開fixture（phases/shapes/gates/components/global settings + 未表示field）を使用。object編集は宣言した子だけをmergeし、未宣言の子を保持する。未宣言データを失うnull化・属性削除・array置換はbatch全体を理由付き拒否し、正本と履歴を変えない。未宣言データを含まない属性のclear/removeは可能。phasesの配列順を示すedgeは導出readOnly、順序変更は明示操作。ProfileとAdapterの差替え、domain診断mapping、immutable原本とdraftの分離を検証する。実 `parseDefinition` は利用側注入validatorの例であり、このrepoに業務検証を転載しない。
 

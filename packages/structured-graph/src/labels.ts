@@ -55,6 +55,8 @@ export interface GraphSurfaceLabels {
   /** Shown when connections end at the Section itself (#594): they are deleted with it. */
   deleteSectionConnections: (connections: number) => string;
   cancelSectionDeletion: string;
+  /** With `sectionDrop: 'move-only'`: a drop on another Section's frame only moved the node. */
+  sectionDropMoveOnly: string;
   connectNodes: string;
   retargetConnection: string;
   relationType: string;
@@ -149,6 +151,7 @@ const en: GraphSurfaceLabels = {
   deleteSectionConnections: (connections) =>
     `${plural(connections, 'connection')} to this section will be deleted with it.`,
   cancelSectionDeletion: 'Cancel section deletion',
+  sectionDropMoveOnly: 'Only moved. To change its section, use Section in the properties.',
   connectNodes: 'Connect nodes',
   retargetConnection: 'Retarget connection',
   relationType: 'Relation type',
@@ -240,6 +243,8 @@ const ja: GraphSurfaceLabels = {
   deleteSectionConnections: (connections) =>
     `このまとまりにつながる接続 ${connections} 本も一緒に削除されます。`,
   cancelSectionDeletion: 'まとまりの削除をやめる',
+  sectionDropMoveOnly:
+    '位置だけを動かしました。まとまりを変えるには、設定の「まとまり」を使います。',
   connectNodes: 'ノードを接続',
   retargetConnection: '接続先を変更',
   relationType: '関係の種類',
