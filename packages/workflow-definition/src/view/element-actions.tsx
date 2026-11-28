@@ -18,17 +18,29 @@ export function ElementActions({
   index: number;
   count: number;
 }) {
-  const { definition, readOnly, edit, mindmap } = useWorkflow();
+  const { definition, readOnly, edit, mindmap, notify } = useWorkflow();
   const [confirm, setConfirm] = useState<string[]>(),
     [renaming, setRenaming] = useState<string>(),
     [error, setError] = useState<string>();
   if (readOnly) return null;
   const label = `${kindLabels[target.kind]} ${target.id}`;
+  const usersNow = () =>
+    workflowDefinitionReferrers(definition, target).map((u) => `${kindLabels[u.kind]} ${u.id}`);
   const remove = () => {
-    const users = workflowDefinitionReferrers(definition, target);
+    const users = usersNow();
     const free = target.kind === 'phase' || target.kind === 'section';
-    if (users.length && !free) return setConfirm(users.map((u) => `${kindLabels[u.kind]} ${u.id}`));
+    if (users.length && !free) return setConfirm(users);
     setError(edit([{ type: 'delete', kind: target.kind, id: target.id }]));
+  };
+  const confirmRemove = () => {
+    // The references may have changed while the confirmation was open: confirm the new ones.
+    const users = usersNow();
+    if (JSON.stringify(users) !== JSON.stringify(confirm)) {
+      setError('参照が変わりました。もう一度確かめてください');
+      return setConfirm(users.length ? users : undefined);
+    }
+    setConfirm(undefined);
+    setError(edit([{ type: 'delete', kind: target.kind, id: target.id, cascade: true }]));
   };
   const rename = () => {
     const to = renaming ?? '';
@@ -41,9 +53,10 @@ export function ElementActions({
     if (failed) return setError(failed);
     setRenaming(undefined);
     const linkFailed = requests.length ? mindmap!.requestLinks(requests) : undefined;
-    setError(
+    // This row is remounted under the new ID, so the notice goes to the Surface.
+    notify(
       linkFailed &&
-        `ID は変えました。マインドマップの枝の対応は古い ID のままです（${linkFailed}）`,
+        `${kindLabels[target.kind]} ${to}：ID は変えました。マインドマップの枝の対応は古い ID のままです（${linkFailed}）`,
     );
   };
   return (
@@ -82,7 +95,7 @@ export function ElementActions({
             aria-label={`New ID of ${label}`}
             value={renaming}
             onChange={(e) => setRenaming(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && rename()}
+            onKeyDown={(e) => e.key === 'Enter' && !e.nativeEvent.isComposing && rename()}
           />
           <button type="button" onClick={rename}>
             変える
@@ -100,13 +113,7 @@ export function ElementActions({
           <p>
             {label} は {confirm.join('、')} から使われています。参照も外して削除しますか。
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setConfirm(undefined);
-              setError(edit([{ type: 'delete', kind: target.kind, id: target.id, cascade: true }]));
-            }}
-          >
+          <button type="button" onClick={confirmRemove}>
             参照も外して削除
           </button>
           <button type="button" onClick={() => setConfirm(undefined)}>

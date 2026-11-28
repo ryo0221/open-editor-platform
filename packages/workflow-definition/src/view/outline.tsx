@@ -4,6 +4,7 @@ import { choicesOf, useWorkflow } from './context';
 import { SelectField, TextField } from './fields';
 
 type Entry = OwdRecord & { children?: Entry[] };
+const isEntry = (v: unknown): v is Entry => !!v && typeof v === 'object' && !Array.isArray(v);
 /** The list at `path` (indexes of parents) inside a copy of the outline. */
 function at(outline: Entry[], path: number[]): Entry[] {
   let list = outline;
@@ -25,7 +26,7 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
     // An emptied children list is removed: OWD needs at least one child when the field is there.
     const prune = (list: Entry[]) =>
       list.forEach((e) => {
-        if (Array.isArray(e.children)) {
+        if (isEntry(e) && Array.isArray(e.children)) {
           prune(e.children);
           if (!e.children.length) delete e.children;
         }
@@ -41,6 +42,22 @@ export function OutlineEditor({ deliverable }: { deliverable: OwdRecord }) {
       {list.map((entry, i) => {
         const here = [...path, i],
           name = `heading ${here.map((n) => n + 1).join('.')}`;
+        // A malformed entry (an imported draft) is shown and can be removed, never read as fields.
+        if (!isEntry(entry))
+          return (
+            <li key={i} className="ep-wd-blocking">
+              <span>壊れた見出し：{JSON.stringify(entry)?.slice(0, 80) ?? String(entry)}</span>
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label={`Delete ${name}`}
+                  onClick={() => change((c) => void at(c, path).splice(i, 1))}
+                >
+                  削除
+                </button>
+              )}
+            </li>
+          );
         const field = (key: string, label: string, multiline = false) => (
           <TextField
             label={`${label} of ${name}`}

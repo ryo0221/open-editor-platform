@@ -11,6 +11,8 @@ import {
   type WorkflowDefinitionTab,
   type WorkflowMindmapConnection,
 } from './index';
+import { WorkflowContext } from './context';
+import { OutlineEditor } from './outline';
 
 function render(
   tab: WorkflowDefinitionTab,
@@ -117,5 +119,29 @@ describe('the workflow definition Surface', () => {
       intents: [{ type: 'delete' as const, kind: 'role' as const, id: 'nobody' }],
     };
     expect(render('lists', { proposal: stale })).toContain('適用できません');
+  });
+  it('shows a malformed outline entry as broken and offers to remove it', () => {
+    const d = sampleDefinition();
+    const deliverable = d.deliverables[0];
+    deliverable.outline = [null as never, { heading: '残る', describe: '', item: 'fact' }];
+    const html = renderToStaticMarkup(
+      createElement(
+        WorkflowContext.Provider,
+        {
+          value: {
+            definition: d,
+            readOnly: false,
+            edit: () => undefined,
+            select: () => undefined,
+            diagnostics: [],
+            notify: () => undefined,
+          },
+        },
+        createElement(OutlineEditor, { deliverable }),
+      ),
+    );
+    expect(html).toContain('壊れた見出し：null');
+    expect(html).toContain('aria-label="Delete heading 1"');
+    expect(html).toContain('残る');
   });
 });

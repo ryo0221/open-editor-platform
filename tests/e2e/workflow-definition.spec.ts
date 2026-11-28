@@ -55,6 +55,13 @@ test('#99 workflow definition: add, edit in lists and matrix, cascade delete, Un
   await page.getByRole('button', { name: 'Delete 成果物 notes', exact: true }).click();
   const confirm = page.getByRole('alertdialog', { name: 'Confirm deleting 成果物 notes' });
   await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText('工程 scope');
+  // A reference removed while the confirmation is open: the new scope is confirmed first.
+  await page.getByRole('button', { name: 'Remove notes from Deliverables of scope' }).click();
+  await confirm.getByRole('button', { name: '参照も外して削除' }).click();
+  await expect(page.getByText('参照が変わりました')).toBeVisible();
+  await expect(confirm).not.toContainText('工程 scope');
+  expect((await hostJson(page)).deliverables.map((d) => d.id)).toContain('notes');
   await confirm.getByRole('button', { name: '参照も外して削除' }).click();
   json = await hostJson(page);
   expect(json.deliverables.map((d) => d.id)).not.toContain('notes');

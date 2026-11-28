@@ -11,6 +11,7 @@ import {
   owdIdTaken,
   parseOwdElementKey,
   validOwdId,
+  owdRenamedPresentation,
   workflowDefinitionCommand,
   workflowDefinitionDiagnostics,
   workflowDefinitionDiff,
@@ -356,6 +357,7 @@ export function WorkflowDefinitionSurface({
   proposal,
   onProposal,
 }: WorkflowDefinitionSurfaceProps) {
+  const [notice, setNotice] = useState<string>();
   const [tab, setTab] = useState<Tab>(
       (initialTab === 'changes' && !baseline) || (initialTab === 'mindmap' && !mindmap)
         ? 'flow'
@@ -382,12 +384,24 @@ export function WorkflowDefinitionSurface({
     select,
     diagnostics,
     mindmap,
+    notify: setNotice,
     edit: (intents: WorkflowDefinitionIntent[]) => {
       const latest = binding.options.read();
       try {
-        binding.options.execute(
-          workflowDefinitionCommand(intents, { base: latest.content, readOnly: latest.readOnly }),
-        );
+        const command = workflowDefinitionCommand(intents, {
+          base: latest.content,
+          readOnly: latest.readOnly,
+        });
+        const { commitWithPresentation, getPresentation, setPresentation } = binding.options;
+        // A changed ID takes its saved place and frame along, in the same Undo record when the
+        // Host can write both together.
+        const moved = owdRenamedPresentation(getPresentation?.(), intents, !commitWithPresentation);
+        if (moved && commitWithPresentation)
+          commitWithPresentation({ command, presentation: moved, base: binding.project().stamp });
+        else {
+          binding.options.execute(command);
+          if (moved) setPresentation?.(moved);
+        }
         return undefined;
       } catch (e) {
         return e instanceof Error ? e.message : String(e);
@@ -413,6 +427,14 @@ export function WorkflowDefinitionSurface({
           </span>
           <Diagnostics />
         </header>
+        {notice && (
+          <p role="alert" className="ep-wd-error ep-wd-notice">
+            {notice}{' '}
+            <button type="button" aria-label="Dismiss notice" onClick={() => setNotice(undefined)}>
+              ×
+            </button>
+          </p>
+        )}
         {proposal && <ProposalPanel proposal={proposal} resolve={(d) => onProposal?.(d)} />}
         <AddElement />
         <div role="tablist" aria-label="Workflow definition views" className="ep-wd-tabs">

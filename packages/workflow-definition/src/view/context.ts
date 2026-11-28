@@ -28,6 +28,8 @@ export interface WorkflowViewContext {
   selected?: OwdElementRef;
   select: (ref: OwdElementRef | undefined) => void;
   diagnostics: WorkflowDefinitionDiagnostic[];
+  /** Shows a notice that outlives the row it came from (a row is remounted when its ID changes). */
+  notify: (message: string | undefined) => void;
   /** The Host's Mind Map branches and its link requests, when the Host connects a Mind Map. */
   mindmap?: WorkflowMindmapConnection;
 }

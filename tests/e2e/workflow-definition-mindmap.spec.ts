@@ -47,7 +47,16 @@ test('#99 WD4 Mind Map links: add from a branch, separate Undo, rename follows, 
   await panel.getByRole('button', { name: 'Add branch Pilot' }).click();
   await expect(panel.getByRole('alert')).toContainText('枝の対応は付いていません');
   expect((await hostJson(page)).phases.map((p) => p.id)).toContain('pilot');
+  // A refused rename link is reported by the Surface, after the row is remounted under the new ID.
+  await workflowTab(page, '一覧');
+  await page.getByRole('button', { name: 'Change ID of 工程 survey', exact: true }).click();
+  await page.getByLabel('New ID of 工程 survey', { exact: true }).fill('trial');
+  await page.getByRole('button', { name: '変える', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: '古い ID のまま' })).toContainText(
+    '工程 trial',
+  );
   await page.getByLabel('Mind Map refuses links').uncheck();
+  await workflowTab(page, 'マインドマップ');
 
   // The Mind Map Surface shows a link and removes it.
   await page.locator(`[data-node-id="${n(2)}"]`).click();

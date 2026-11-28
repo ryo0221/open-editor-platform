@@ -34,6 +34,8 @@ export function TextField(props: {
       onChange={setDraft}
       onBlur={commit}
       onKeyDown={(e) => {
+        // Enter and Escape belong to the IME while a conversion is open.
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === 'Enter' && !props.multiline) {
           e.preventDefault();
           commit();
