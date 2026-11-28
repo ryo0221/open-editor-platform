@@ -1,0 +1,14 @@
+{
+  "name": "@editor-platform/workflow-definition",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./model": "./src/model/index.ts"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/structured-graph": "*"
+  }
+}
