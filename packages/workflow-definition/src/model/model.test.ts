@@ -263,6 +263,33 @@ describe('add, delete, rename and move', () => {
     // No gate is left with an empty phase list, which would widen it to every phase.
     expect(text).not.toMatch(/"phases":\[\]/);
   });
+  it('follows item kinds named by deliverable views through rename and delete', () => {
+    const d = fixture('editor-development');
+    const renamed = apply(d, [
+      { type: 'rename-id', kind: 'item', id: 'capability', to: 'feature' },
+    ]);
+    expect(owdCheck(renamed)).toEqual([]);
+    expect(JSON.stringify(renamed.deliverables)).not.toMatch(/"capability"/);
+    // A view that loses its item kind goes with it, so no view is left pointing at nothing.
+    const removed = apply(d, [{ type: 'delete', kind: 'item', id: 'capability', cascade: true }]);
+    expect(removed.deliverables.find((x) => x.id === 'capability-matrix')?.view).toBeUndefined();
+    expect(owdCheck(removed).filter((m) => /view/.test(m))).toEqual([]);
+  });
+  it('refuses an outline item that is not a string', () => {
+    const d = fixture('editor-development');
+    const outline = clone(d.deliverables[0].outline) as { item?: unknown }[];
+    outline[0].item = 42;
+    expect(() =>
+      apply(d, [
+        {
+          type: 'set-fields',
+          kind: 'deliverable',
+          id: d.deliverables[0].id,
+          fields: { outline: outline as never },
+        },
+      ]),
+    ).toThrow(/heading/);
+  });
   it('adds at an index and moves within the order', () => {
     const d = sampleDefinition();
     const next = apply(d, [

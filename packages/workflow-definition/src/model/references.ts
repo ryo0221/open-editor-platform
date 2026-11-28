@@ -66,6 +66,49 @@ function outline(owner: OwdElementRef, entries: OwdJson, path: (string | number)
     outline(owner, entry.children, [...at, 'children'], edit);
   });
 }
+/** A graph view names item kinds in lists; the other views in one field each. */
+const viewLists = ['nodes', 'edges', 'sections'];
+/**
+ * References from a deliverable's `view` (one view or a list) to item kinds. A view that loses an
+ * item kind it needs (a single field, or every node of a graph) is removed with it; an emptied
+ * list of views removes the field.
+ */
+function views(owner: OwdElementRef, record: OwdRecord, edit: Edit) {
+  const value = record.view;
+  const many = Array.isArray(value);
+  const list = (many ? value : [value]) as OwdJson[];
+  if (!list.some(isRecord)) return;
+  const kept = list.filter((view, index) => {
+    if (!isRecord(view)) return true;
+    const at: (string | number)[] = many ? ['view', index] : ['view'];
+    // The graph view's `edges` are a field name in a table view; only read lists for a graph.
+    const keys = view.as === 'graph' ? [] : view.as === 'matrix' ? ['rows', 'columns'] : ['items'];
+    for (const key of keys) {
+      const id = view[key];
+      if (typeof id !== 'string' || id === '') continue;
+      const next = edit({ owner, path: [...at, key], target: { kind: 'item', id } });
+      if (next === null) return false;
+      if (next !== undefined) view[key] = next;
+    }
+    if (view.as === 'graph')
+      for (const key of viewLists) {
+        const ids = view[key];
+        if (!Array.isArray(ids)) continue;
+        const after: OwdJson[] = [];
+        ids.forEach((id, i) => {
+          if (typeof id !== 'string' || id === '') return void after.push(id);
+          const next = edit({ owner, path: [...at, key, i], target: { kind: 'item', id } });
+          if (next !== null) after.push(next ?? id);
+        });
+        if (after.length !== ids.length || after.some((v, i) => v !== ids[i])) view[key] = after;
+        if (key === 'nodes' && !after.length) return false;
+      }
+    return true;
+  });
+  if (kept.length === list.length) return;
+  if (!kept.length) delete record.view;
+  else record.view = many ? kept : kept[0];
+}
 /**
  * Walks every reference of the definition in a fixed order. With an `edit`, the definition is
  * changed in place, so callers pass a clone.
@@ -84,6 +127,7 @@ export function walkOwdReferences(definition: OwdDefinition, edit: Edit) {
   each('deliverable', (owner, r) => {
     list(owner, r, ['uses'], 'deliverable', edit);
     outline(owner, r.outline, ['outline'], edit);
+    views(owner, r, edit);
   });
   each('acceptance', (owner, r) => {
     single(owner, r, 'target', 'deliverable', edit);

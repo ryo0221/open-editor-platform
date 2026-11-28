@@ -11,7 +11,13 @@ import {
   type GraphProfile,
   type GraphSectionPresentation,
 } from '@editor-platform/structured-graph/model';
-import { owdElementKey, owdElements, parseOwdElementKey, type OwdElementRef } from './ids';
+import {
+  owdElementKey,
+  owdElements,
+  parseOwdElementKey,
+  type OwdElementKind,
+  type OwdElementRef,
+} from './ids';
 import {
   cycleDiagnostics,
   structureDiagnostics,
@@ -236,17 +242,26 @@ export function projectOwdGraph(
     if (!has(a) || !has(b) || edges.some((e) => e.id === id)) return;
     edges.push({ id, type, from: a, to: b, attributes: {} });
   };
-  for (const p of owdElements(def, 'phase')) {
+  // Like the nodes, relations come from the first element of a duplicated ID only.
+  const firsts = (kind: OwdElementKind) => {
+    const seen = new Set<string>();
+    return owdElements(def, kind).filter((e) => {
+      if (seen.has(e.id as string)) return false;
+      seen.add(e.id as string);
+      return true;
+    });
+  };
+  for (const p of firsts('phase')) {
     const self = { kind: 'phase' as const, id: p.id as string };
     for (const a of p.after as string[]) edge('after', { kind: 'phase', id: a }, self);
     for (const d of p.deliverables as string[]) edge('makes', self, { kind: 'deliverable', id: d });
     for (const a of p.acceptance as string[])
       edge('ends-with', self, { kind: 'acceptance', id: a });
   }
-  for (const d of owdElements(def, 'deliverable'))
+  for (const d of firsts('deliverable'))
     for (const u of (d.uses as string[]) ?? [])
       edge('uses', { kind: 'deliverable', id: d.id as string }, { kind: 'deliverable', id: u });
-  for (const a of owdElements(def, 'acceptance')) {
+  for (const a of firsts('acceptance')) {
     const self = { kind: 'acceptance' as const, id: a.id as string };
     if (typeof a.target === 'string' && a.target)
       edge('checks', self, { kind: 'deliverable', id: a.target });

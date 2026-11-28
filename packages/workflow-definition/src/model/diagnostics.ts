@@ -94,13 +94,14 @@ function outlineProblems(
       !isString(e.heading) ||
       !isString(e.describe) ||
       (e.repeat !== undefined && e.repeat !== true) ||
+      (e.item !== undefined && !isString(e.item)) ||
       (e.children !== undefined && !Array.isArray(e.children))
     )
       out.push({
         target,
         path: p,
         code: 'outline-entry',
-        message: `Deliverable ${target.id}: a heading needs text heading and describe`,
+        message: `Deliverable ${target.id}: a heading needs text heading and describe (and a text item)`,
         source: 'structure',
         blocking: true,
       });

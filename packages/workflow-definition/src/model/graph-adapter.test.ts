@@ -252,6 +252,17 @@ describe('editing through the Graph', () => {
     expect(phase(h.source, 'plan').deliverables).not.toContain('notes');
     expect(phase(h.source, 'review').deliverables).toContain('notes');
   });
+  it('projects relations of a duplicated acceptance from its first record only', () => {
+    const d = fixture('editor-development');
+    const copy = clone(d.acceptance[0]);
+    copy.target = d.deliverables.find((x) => x.id !== copy.target)!.id;
+    d.acceptance.push(copy);
+    const { graph, diagnostics } = host(d).binding.project();
+    expect(
+      graph.edges.filter((e) => e.from === `acceptance:${copy.id}` && e.type === 'checks'),
+    ).toHaveLength(1);
+    expect(diagnostics.some((x) => x.code === 'duplicate-id')).toBe(true);
+  });
   it('allows a cycle and shows it as a warning', () => {
     const h = host();
     h.edit([
