@@ -91,6 +91,18 @@ test('#99 workflow definition: OWD check diagnostics, outline editing and JSON i
 }) => {
   await openWorkflowHost(page);
   await expect(page.getByRole('button', { name: /^診断 0 件/ })).toBeVisible();
+  // A rule change that would allow a pair twice is refused with its reason.
+  await workflowTab(page, 'マトリクス');
+  await page.getByRole('button', { name: 'Allow cites req → req', exact: true }).click();
+  const pair = page.getByRole('group', { name: 'New cites req → req' });
+  await pair.getByLabel('New rule ID for req → req').fill('req-cites-req');
+  await pair.getByRole('button', { name: '新しい規則' }).click();
+  await page.getByRole('button', { name: 'Select rule req-cites-req' }).first().click();
+  const rule = page.getByRole('region', { name: 'Rule req-cites-req' });
+  await rule.getByLabel('Add to To of rule req-cites-req').selectOption('fact');
+  await expect(rule.getByRole('alert')).toBeVisible();
+  expect(JSON.stringify(await hostJson(page))).not.toMatch(/"req-cites-req"[^}]*"fact"/);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
   // An empty section is an incomplete draft that the OWD check reports, without blocking.
   await workflowTab(page, '一覧');
   await page

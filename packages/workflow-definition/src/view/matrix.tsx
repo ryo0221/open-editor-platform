@@ -152,11 +152,15 @@ function EmptyPair({
 function RuleEditor({ rule }: { rule: OwdRecord }) {
   const { definition, readOnly, edit } = useWorkflow();
   const items = choicesOf(definition, 'item');
+  const [error, setError] = useState<string>();
   const { id, ...content } = rule;
+  // A refused change (for example a second cites rule for the same pair) is said, not dropped.
   const set = (patch: OwdRecord) => {
     const next: OwdRecord = { ...content, ...patch };
     for (const [k, v] of Object.entries(patch)) if (v === null) delete next[k];
-    return edit([{ type: 'set-rule', id: id as string, rule: next }]);
+    const reason = edit([{ type: 'set-rule', id: id as string, rule: next }]);
+    setError(reason);
+    return reason;
   };
   return (
     <section className="ep-wd-rule-editor" aria-label={`Rule ${String(id)}`}>
@@ -228,6 +232,11 @@ function RuleEditor({ rule }: { rule: OwdRecord }) {
             理由を書けば除ける
           </label>
         </>
+      )}
+      {error && (
+        <p role="alert" className="ep-wd-error">
+          {error}
+        </p>
       )}
     </section>
   );
