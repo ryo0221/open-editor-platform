@@ -1,12 +1,14 @@
 import console from 'node:console';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { classifySpecs, workspaceGraph } from './areas.mjs';
 import { planCommands, planRun } from './affected.mjs';
 import { runErrors, testStatuses } from './compare.mjs';
+import { femMesherBuild } from '../fem-mesher/build.mjs';
 
 // The nightly full browser run, in four groups that each fit in about 90 minutes on a
 // 4-core cloud machine (measured 2026-11-22 on main 96878ab with --trace off). The groups
@@ -15,7 +17,8 @@ import { runErrors, testStatuses } from './compare.mjs';
 //   node scripts/e2e/nightly.mjs <group> [--setup] [--previous <failures.txt>] [--out <dir>]
 //     [--only <step,...>]
 //
-// --setup fetches the CAD kernel, FontTools and the builds the group needs (a fresh clone).
+// --setup fetches the CAD kernel, the Netgen mesher, FontTools and the builds the group needs
+// (a fresh clone).
 // --previous names the failure list an earlier night wrote; the summary then lists the
 // failures that are new and the ones that were fixed since.
 
@@ -163,13 +166,53 @@ function freePorts(ports) {
   spawnSync('fuser', ['-k', ...ports.map((port) => `${port}/tcp`)], { stdio: 'ignore' });
 }
 
+/**
+ * Why the fem-mesher dist (Netgen's volume mesher as Wasm) cannot be served, or undefined when
+ * it holds the build scripts/fem-mesher/build.mjs pins. Without it the Playground's studies
+ * cannot run in the browser (the Run study button stays disabled until the test times out).
+ * @param {string} dist directory with fem-mesher.mjs and fem-mesher.wasm
+ * @param {typeof femMesherBuild} [spec]
+ * @returns {string | undefined}
+ */
+export function femMesherProblem(dist, spec = femMesherBuild) {
+  const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  for (const [file, expected] of [
+    [spec.js, spec.jsSha256],
+    [spec.wasm, spec.wasmSha256],
+  ]) {
+    const path = join(dist, file);
+    if (!existsSync(path)) return `${path} is missing`;
+    if (sha256(path) !== expected) return `${path} is not the pinned build`;
+  }
+  return undefined;
+}
+
+/**
+ * Where --setup copies the fem-mesher dist from. The build is not released yet; it sits in the
+ * project's shared files under its hash (scripts/fem-mesher/README.md).
+ */
+export const femMesherSource = () =>
+  process.env.FEM_MESHER_SOURCE ??
+  `/mnt/project-files/kernels/fem-mesher-${femMesherBuild.wasmSha256.slice(0, 12)}`;
+
+/** Copies the pinned fem-mesher dist into `dist` when it is not there yet. */
+function fetchMesher(dist) {
+  if (!femMesherProblem(dist)) return;
+  const source = femMesherSource();
+  if (femMesherProblem(source)) return;
+  mkdirSync(dist, { recursive: true });
+  for (const file of [femMesherBuild.js, femMesherBuild.wasm, 'NOTICE.txt'])
+    if (existsSync(join(source, file))) cpSync(join(source, file), join(dist, file));
+}
+
 /** Prepares a fresh clone; returns the first failing command's status, or 0. */
-function setup(root, group, kernel) {
+function setup(root, group, kernel, mesher) {
   const at = { cwd: root };
   const steps = [];
   if (!existsSync(join(root, 'node_modules'))) steps.push(() => sh('npm', ['ci'], at));
   if (!existsSync(join(kernel, 'NOTICE.txt')))
     steps.push(() => sh('node', ['scripts/cad-kernel/fetch.mjs', kernel, '--source'], at));
+  steps.push(() => (fetchMesher(mesher), 0));
   // Office specs and the production builds use the pinned Office fonts (no fallback font).
   steps.push(() =>
     sh('node', ['scripts/check-office-fonts.mjs'], { ...at, stdio: 'ignore' })
@@ -207,13 +250,21 @@ function main(argv) {
   const out = resolve(value('--out') ?? 'work/e2e/nightly');
   mkdirSync(out, { recursive: true });
   const kernel = resolve(process.env.CAD_OCCT_DIST ?? 'work/cad-kernel');
+  const mesher = resolve(process.env.FEM_MESHER_DIST ?? 'work/fem-mesher');
   const started = Date.now();
   const lines = [`## Nightly e2e group ${id}`, ''];
   if (argv.includes('--setup')) {
-    const status = setup(root, group, kernel);
+    const status = setup(root, group, kernel, mesher);
     lines.push(`Setup: ${status ? `failed (exit ${status})` : 'ok'}, ${minutes(started)} min`);
     if (status) return finish(out, id, lines, [], argv, new Set(), true);
   }
+  // A study test without the mesher only waits for its timeout: say so above the results.
+  const mesherProblem = femMesherProblem(mesher);
+  if (mesherProblem)
+    lines.push(
+      ...(lines.length > 2 ? [''] : []),
+      `Mesher: not served (${mesherProblem}); studies that run in the browser fail.`,
+    );
   // Each step stops after 100 minutes so a hung run cannot hold the group.
   const stepTimeout = Number(process.env.NIGHTLY_STEP_TIMEOUT ?? 6000);
   const ports = suitePorts(root);
@@ -250,6 +301,8 @@ function main(argv) {
           ...process.env,
           E2E_SUITE: step.suite,
           CAD_OCCT_DIST: kernel,
+          // Empty when unusable: the dev server refuses a dist that is not the pinned build.
+          FEM_MESHER_DIST: mesherProblem ? '' : mesher,
           PLAYWRIGHT_JSON_OUTPUT_NAME: json,
         },
       },
