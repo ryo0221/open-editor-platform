@@ -200,7 +200,7 @@ interface PresentationSidecar {
 ```
 
 - **sidecar**：nodeの位置・形状・styleをsidecarに保存する。見た目だけのbatchはsidecarへ、意味の編集はadapterの`prepare`へ送る。両方を混ぜたbatchは、今と同じく原子性を保証できないので拒否する。sidecarは`stamp`に入り、古いpreviewのapplyを拒否する。sourceから消えたnodeのsidecarの値は今と同じく無視し、次にsidecarを書くときに落とす。
-- **Sectionはsourceのadapterだけ**：`sections: true`は`presentationMode: 'source'`と組み合わせたときだけ認め、`sidecar`・`none`との組み合わせは`GraphBinding`の作成時に拒否する。Sectionの作成・削除は意味（Section）と見た目（範囲）を同時に変えるので、sidecarでは二つの保存先にまたがる。分散transactionを作らず、Sectionの範囲もsourceが一つのcommandで保存する。sidecarでSectionを扱う必要が出たら、範囲の既定値と孤立した値の扱いを決めてから別に設計する。
+- **Sectionはsourceのadapterだけ**：`sections: true`は`presentationMode: 'source'`と組み合わせたときだけ認め、`sidecar`・`none`との組み合わせは`GraphBinding`の作成時に拒否する。Sectionの作成・削除は意味（Section）と見た目（範囲）を同時に変えるので、sidecarでは二つの保存先にまたがる。分散transactionを作らず、Sectionの範囲もsourceが一つのcommandで保存する。sidecarでSectionを扱う必要が出たら、範囲の既定値と孤立した値の扱いを決めてから別に設計する（2026-11-28 #99 WD1 で設計した。sidecar schema 3 と `commitWithPresentation`。[工程定義の Editor の設計](../workflow-definition-editor-design.md) §4、[契約](../structured-graph-contract.md)）。
 - **source**：adapterの`prepare`が見た目のintentも受けるか、理由付きで拒否する。
 - **none**：見た目のintentを拒否する。表示はProfileの既定だけを使う。
 - `sections: false`のadapterでは、Sectionのintentを`This source cannot represent Graph sections`の趣旨の理由で拒否し、正本と履歴を変えない。

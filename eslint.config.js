@@ -11,6 +11,8 @@ export default tseslint.config(
       '.playwright/**',
       '.tools/**',
       '.npm-cache/**',
+      // Pinned third-party copies used by tests only (open-workflow-definitions, MIT).
+      'packages/workflow-definition/fixtures/**',
     ],
   },
   js.configs.recommended,

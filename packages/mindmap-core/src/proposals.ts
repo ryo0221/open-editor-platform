@@ -13,6 +13,8 @@ import {
   renameMindmapNode,
   reorderMindmapNode,
   setMindmapLayout,
+  setMindmapNodeLink,
+  type MindmapLink,
 } from './commands';
 import {
   MINDMAP_MARKS,
@@ -36,6 +38,7 @@ export const MINDMAP_STEP_KINDS = [
   'marks',
   'note',
   'layout',
+  'link',
 ] as const;
 export type MindmapStepKind = (typeof MINDMAP_STEP_KINDS)[number];
 
@@ -48,6 +51,8 @@ export interface MindmapStep {
   side?: 'left' | 'right';
   collapsed?: boolean;
   marks?: MindmapMark[];
+  /** `link`: the node's new link, or `null` to remove it. */
+  link?: MindmapLink | null;
 }
 
 export interface MindmapProposalInput {
@@ -72,6 +77,12 @@ const stepSchema = {
       maxItems: 4,
       items: { type: 'string' as const, maxLength: 8, enum: [...MINDMAP_MARKS] },
     },
+    link: {
+      type: ['object', 'null'] as ['object', 'null'],
+      properties: { namespace: text(128), id: text(128) },
+      required: ['namespace', 'id'],
+      additionalProperties: false as const,
+    },
   },
   required: ['kind'],
   additionalProperties: false as const,
@@ -80,7 +91,7 @@ const stepSchema = {
 /** The closed JSON schema of a proposal, as a Host publishes it to proposal authors. */
 export const mindmapProposalDeclaration = {
   id: 'edit-branch',
-  version: '1.0.0',
+  version: '1.1.0',
   title: '枝の操作',
   inputSchema: {
     type: 'object' as const,
@@ -104,6 +115,7 @@ const specs: Record<MindmapStepKind, { required: string[]; optional?: string[] }
   marks: { required: ['id'], optional: ['marks'] },
   note: { required: ['id'], optional: ['text'] },
   layout: { required: ['text'] },
+  link: { required: ['id', 'link'] },
 };
 
 function parse(value: unknown): MindmapProposalInput {
@@ -148,6 +160,17 @@ function parse(value: unknown): MindmapProposalInput {
       (!Array.isArray(s.marks) || s.marks.length > 4 || s.marks.some((m) => typeof m !== 'string'))
     )
       throw new MindmapError('印が不正です。');
+    if (
+      'link' in s &&
+      s.link !== null &&
+      (!s.link ||
+        typeof s.link !== 'object' ||
+        Array.isArray(s.link) ||
+        Object.keys(s.link).length !== 2 ||
+        typeof (s.link as Record<string, unknown>).namespace !== 'string' ||
+        typeof (s.link as Record<string, unknown>).id !== 'string')
+    )
+      throw new MindmapError('つながりが不正です。');
   }
   return {
     before: typeof v.before === 'string' ? v.before : undefined,
@@ -200,6 +223,8 @@ function stepCommand(s: MindmapStep): EditorCommand<MindmapContent> {
       return noteMindmapNode(s.id!, s.text);
     case 'layout':
       return setMindmapLayout(s.text as MindmapLayout);
+    case 'link':
+      return setMindmapNodeLink(s.id!, s.link!);
   }
 }
 

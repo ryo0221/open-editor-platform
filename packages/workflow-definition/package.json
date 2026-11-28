@@ -1,0 +1,20 @@
+{
+  "name": "@editor-platform/workflow-definition",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/view/index.ts",
+    "./model": "./src/model/index.ts",
+    "./styles.css": "./src/view/styles.css"
+  },
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/property-input": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
+  }
+}

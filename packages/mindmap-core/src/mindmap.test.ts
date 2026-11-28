@@ -24,6 +24,7 @@ import {
   renameMindmapNode,
   reorderMindmapNode,
   setMindmapLayout,
+  setMindmapNodeLink,
   validateMindmap,
   type MindmapContent,
 } from './index';
@@ -231,6 +232,62 @@ describe('proposals', () => {
       mindmapProposalProblems({ steps: [{ kind: 'delete', id: before.rootId }] }, before),
     ).not.toEqual([]);
     expect(before).toEqual(doc());
+  });
+});
+
+describe('links (#99 WD4)', () => {
+  const link = { namespace: 'owd:sample-plan', id: 'phase:concept' };
+  it('sets, replaces and removes a link as one command each, the root too', () => {
+    const a = doc(),
+      root = a.rootId;
+    const b = setMindmapNodeLink(root, link).apply(a);
+    expect(b.nodes[root].link).toEqual(link);
+    expect(a.nodes[root].link).toBeUndefined();
+    const c = setMindmapNodeLink(root, { ...link, id: 'phase:design' }).apply(b);
+    expect(c.nodes[root].link?.id).toBe('phase:design');
+    expect(setMindmapNodeLink(root, null).apply(c).nodes[root].link).toBeUndefined();
+    // No change, a missing link, a missing node or a part over the limit changes nothing.
+    expect(() => setMindmapNodeLink(root, link).apply(b)).toThrow('変更がありません');
+    expect(() => setMindmapNodeLink(root, null).apply(a)).toThrow('つながりはありません');
+    expect(() => setMindmapNodeLink('n-missing', link).apply(a)).toThrow();
+    expect(() => setMindmapNodeLink(root, { ...link, id: 'x'.repeat(129) }).apply(a)).toThrow();
+    expect(() => setMindmapNodeLink(root, { ...link, id: '' }).apply(a)).toThrow();
+    expect(() => setMindmapNodeLink(root, { ...link, extra: 1 } as unknown as typeof link)).toThrow(
+      'つながりが不正',
+    );
+    expect(mindmapDiff(a, b).changes.map((x) => [x.kind, x.after])).toEqual([
+      ['changed', 'つながり: owd:sample-plan/phase:concept'],
+    ]);
+  });
+  it('applies link steps in proposals, refusing stale or malformed ones', () => {
+    const a = doc(),
+      root = a.rootId;
+    const input = {
+      before: mindmapFingerprint(a),
+      steps: [
+        { kind: 'add', id: 'new-1', parentId: root, text: '構想' },
+        { kind: 'link', id: 'new-1', link },
+      ],
+    };
+    const b = mindmapProposalCommand(input, a).apply(a);
+    const added = b.nodes[root].children.at(-1)!;
+    expect(b.nodes[added].link).toEqual(link);
+    expect(() => mindmapProposalCommand(input, a).apply(b)).toThrow('基準');
+    const removed = mindmapProposalCommand(
+      { steps: [{ kind: 'link', id: added, link: null }] },
+      b,
+    ).apply(b);
+    expect(removed.nodes[added].link).toBeUndefined();
+    for (const bad of [
+      { kind: 'link', id: root },
+      { kind: 'link', id: root, link: { namespace: 'x' } },
+      { kind: 'link', id: root, link: 'phase:concept' },
+      { kind: 'link', id: root, link: { ...link, extra: 'y' } },
+    ])
+      expect(mindmapProposalProblems({ steps: [bad] }, a)).not.toEqual([]);
+    expect(
+      mindmapProposalDeclaration.inputSchema.properties.steps.items.properties.kind.enum,
+    ).toContain('link');
   });
 });
 

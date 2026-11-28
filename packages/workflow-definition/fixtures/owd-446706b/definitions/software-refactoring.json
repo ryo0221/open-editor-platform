@@ -1,0 +1,847 @@
+{
+  "format": 1,
+  "id": "software-refactoring",
+  "version": "1.1.0",
+  "title": "ソフトウェアのリファクタリング",
+  "purpose": "既存のソフトウェアを調査し、保つ契約と意図して変える振る舞いを区別しながら、不要なコード・複雑な依存・古い検証を整理する。変更単位ごとに人が確かめて受け入れ、元の製品の正本へ結果を反映する。",
+  "phases": [
+    {
+      "id": "inventory",
+      "name": "現状と対象",
+      "purpose": "対象の版と範囲を固定し、実際に使われる経路・依存・試験・データと、問題の根拠・未確認事項を調べる。",
+      "after": [],
+      "deliverables": [
+        "baseline-note",
+        "inventory-report"
+      ],
+      "acceptance": [
+        "inventory.baseline",
+        "inventory.findings",
+        "inventory.approved"
+      ]
+    },
+    {
+      "id": "contracts",
+      "name": "守る契約と意図する変更",
+      "purpose": "外から見える振る舞い、版、権限、データ、障害時の回復を、維持する契約と承認を得て変更する契約に分ける。既存の不具合を無条件に守らない。",
+      "after": [
+        "inventory"
+      ],
+      "deliverables": [
+        "contract-ledger"
+      ],
+      "acceptance": [
+        "contracts.classified",
+        "contracts.traced",
+        "contracts.approved"
+      ]
+    },
+    {
+      "id": "plan",
+      "name": "改修設計と実施順",
+      "purpose": "対象の責務と依存方向を見直し、分けて実装・検証できる変更単位、削除するもの、順番、失敗時の扱いを決める。",
+      "after": [
+        "contracts"
+      ],
+      "deliverables": [
+        "change-plan",
+        "dependency-map",
+        "design-review"
+      ],
+      "acceptance": [
+        "plan.traced",
+        "plan.sliced",
+        "plan.structure",
+        "plan.rationale",
+        "plan.approved",
+        "plan.design-approved"
+      ]
+    },
+    {
+      "id": "implement",
+      "name": "改修と不要な経路の終了",
+      "purpose": "承認された変更単位で実装を置き換え、不要な互換・重複コードや旧試験を整理し、現在の保証が失われないようにする。",
+      "after": [
+        "plan"
+      ],
+      "deliverables": [
+        "code-refactor",
+        "implementation-record"
+      ],
+      "acceptance": [
+        "implement.scoped",
+        "implement.protected",
+        "implement.recorded",
+        "implement.approved"
+      ]
+    },
+    {
+      "id": "verify",
+      "name": "回帰と改善効果の確認",
+      "purpose": "守る契約と変更した振る舞いを現在の経路で検証し、改善の前後を同じ条件で比べ、失敗・省略・未実施を区別する。",
+      "after": [
+        "implement"
+      ],
+      "deliverables": [
+        "verification-ledger",
+        "improvement-report",
+        "improvement-assessment"
+      ],
+      "acceptance": [
+        "verify.covered",
+        "verify.measured",
+        "verify.ledger-approved",
+        "verify.assessed",
+        "verify.approved"
+      ]
+    },
+    {
+      "id": "adopt",
+      "name": "受入と正本への反映",
+      "purpose": "改善結果を受け入れるか判断し、設計・試験・運用の正本と参照を更新する。残る問題と継続する作業を明示する。",
+      "after": [
+        "verify"
+      ],
+      "deliverables": [
+        "completion-record"
+      ],
+      "acceptance": [
+        "adopt.integrated",
+        "adopt.residual",
+        "adopt.approved"
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "id": "understand",
+      "name": "調べて決める",
+      "icon": "search",
+      "phases": [
+        "inventory",
+        "contracts"
+      ]
+    },
+    {
+      "id": "change",
+      "name": "設計して直す",
+      "icon": "wrench",
+      "phases": [
+        "plan",
+        "implement"
+      ]
+    },
+    {
+      "id": "confirm",
+      "name": "確かめて受け入れる",
+      "icon": "badge-check",
+      "phases": [
+        "verify",
+        "adopt"
+      ]
+    }
+  ],
+  "deliverables": [
+    {
+      "id": "baseline-note",
+      "name": "調査基準と限界の記録",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "基準と対象",
+          "describe": "BL-{nn} を先頭に記し、対象の製品・版・固定した参照・実行環境・機能・データ・試験・調査範囲・対象外と根拠を記録する。",
+          "item": "baseline"
+        },
+        {
+          "heading": "調査の限界",
+          "describe": "未調査の経路、静的推定のみの箇所、再現できた問題、実行していない検査とその理由・次に確認する方法を記す。"
+        }
+      ]
+    },
+    {
+      "id": "inventory-report",
+      "name": "現状と指摘の台帳",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "指摘",
+          "describe": "FD-{nnn} ごとに「症状」「根拠」「影響範囲」「利用経路」「確認方法（静的推定／実行再現／未確認）」「不確実性」「優先度」「対応方針（対応／保留／除外）」「状態」を区別する。",
+          "item": "finding"
+        }
+      ],
+      "view": {
+        "as": "table",
+        "items": "finding",
+        "columns": [
+          "症状",
+          "根拠",
+          "影響範囲",
+          "利用経路",
+          "確認方法",
+          "不確実性",
+          "優先度",
+          "対応方針",
+          "状態"
+        ]
+      },
+      "uses": [
+        "baseline-note"
+      ]
+    },
+    {
+      "id": "contract-ledger",
+      "name": "維持と変更の契約表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "契約",
+          "describe": "CT-{nnn} ごとに「種類（維持／意図して変更）」「現在」「変更後」「理由」「確認者」「検証方法」「境界（権限・保存・承認・監査・版・再送・失効・復旧など）」「対象外」を記す。バグを守る契約にしない。",
+          "item": "contract"
+        }
+      ],
+      "uses": [
+        "baseline-note",
+        "inventory-report"
+      ],
+      "view": {
+        "as": "table",
+        "items": "contract",
+        "columns": [
+          "種類",
+          "現在",
+          "変更後",
+          "理由",
+          "確認者",
+          "検証方法",
+          "境界",
+          "対象外"
+        ]
+      }
+    },
+    {
+      "id": "change-plan",
+      "name": "変更単位と実施計画",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "変更単位",
+          "describe": "RF-{nnn} ごとに「目的」「対象」「依存（先に直すRF等）」「リスク」「担当」「状態」「廃止する経路」「成功条件」「切り戻し」を記す。契約と指摘は引用表で結ぶ。",
+          "item": "change"
+        }
+      ],
+      "uses": [
+        "inventory-report",
+        "contract-ledger"
+      ],
+      "view": [
+        {
+          "as": "kanban",
+          "items": "change",
+          "groupBy": "状態",
+          "columns": [
+            "未着手",
+            "実装中",
+            "検証中",
+            "完了"
+          ],
+          "card": [
+            "目的",
+            "担当",
+            "依存"
+          ]
+        },
+        {
+          "as": "table",
+          "items": "change",
+          "columns": [
+            "目的",
+            "対象",
+            "依存",
+            "リスク",
+            "担当",
+            "状態",
+            "廃止する経路",
+            "成功条件",
+            "切り戻し"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dependency-map",
+      "name": "改修後の構成と依存図",
+      "form": "図",
+      "outline": [
+        {
+          "heading": "構成要素",
+          "describe": "CP-{nnn} ごとに「名前」「役割」「責務」「入出力」「境界」「改修対象」「状態」とレイアウト位置 at を持ち、改修後の目標構成を描く。改修対象がある構成要素は、該当する変更単位を CP → RF の向きで引用表に記録する。背景として載せる構成要素には引用を強制しない。",
+          "item": "component"
+        },
+        {
+          "heading": "依存",
+          "describe": "DP-{nnn} ごとに「from」「to」で構成要素のIDを指定し、「目的」「契約」「依存方向」「状態」を記す。依存が契約に関わるときは、該当する契約を DP → CT の向きで引用表に記録する。「契約」欄に名前を書くだけでは引用にならない。",
+          "item": "dependency"
+        }
+      ],
+      "uses": [
+        "contract-ledger",
+        "change-plan"
+      ],
+      "view": {
+        "as": "graph",
+        "nodes": [
+          "component"
+        ],
+        "edges": [
+          "dependency"
+        ]
+      }
+    },
+    {
+      "id": "design-review",
+      "name": "構成変更の設計判断",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "変更前後の構成比較",
+          "describe": "変更前と変更後の責務・境界・依存方向を比較し、依存図と変更単位を参照して説明する。循環や二重の正本を増やさない。"
+        },
+        {
+          "heading": "実施順と隔離",
+          "describe": "前提と順序、並行作業との衝突、保存済みと未保存の作業を守る方法を記す。"
+        },
+        {
+          "heading": "削除と保持の判断",
+          "describe": "旧互換・重複・使われない試験を削除できる根拠と、現在必要な経路を残す根拠を記す。"
+        },
+        {
+          "heading": "失敗時の対応",
+          "describe": "切り戻し、部分失敗時のデータと監査、残るリスクを記す。"
+        }
+      ],
+      "uses": [
+        "change-plan",
+        "dependency-map"
+      ]
+    },
+    {
+      "id": "code-refactor",
+      "name": "改修したソースコード",
+      "form": "コード",
+      "outline": [
+        {
+          "heading": "改修の対象",
+          "describe": "承認された変更単位で実装した本体。維持する契約と変更する契約を守る。"
+        },
+        {
+          "heading": "不要な経路の終了",
+          "describe": "現行の保証を残して、旧コード・互換・試験を置き換える。"
+        }
+      ],
+      "uses": [
+        "change-plan",
+        "dependency-map",
+        "design-review"
+      ]
+    },
+    {
+      "id": "implementation-record",
+      "name": "改修の変更記録",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "改修した部分",
+          "describe": "変更単位のID、固定した実装版、責務・入出力・内部依存の差を記す。"
+        },
+        {
+          "heading": "取り除いた部分",
+          "describe": "旧互換・重複・試験・参照を消した根拠と、残した理由、保証を移した先を記す。"
+        },
+        {
+          "heading": "保存と切り戻し",
+          "describe": "中断・部分失敗・復旧・未保存作業の保護、権限と監査を守る手順。"
+        },
+        {
+          "heading": "局所検査",
+          "describe": "変更単位別の型・試験・静的検査の版・結果・未実施理由。"
+        }
+      ],
+      "uses": [
+        "code-refactor",
+        "change-plan"
+      ]
+    },
+    {
+      "id": "verification-ledger",
+      "name": "検証と契約の対応表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "検証",
+          "describe": "VE-{nnn} ごとに「対象」「方法（静的／実行／人の確認）」「条件（版・環境・入力・手順）」「結果（合格／失敗／未実施／保留）」「根拠」「異常系（競合・再送・権限失効・途中失敗など）」「未実施理由（次の確認者）」を記す。",
+          "item": "check"
+        }
+      ],
+      "uses": [
+        "contract-ledger",
+        "code-refactor",
+        "implementation-record"
+      ],
+      "view": [
+        {
+          "as": "matrix",
+          "rows": "check",
+          "columns": "contract"
+        },
+        {
+          "as": "table",
+          "items": "check",
+          "columns": [
+            "対象",
+            "方法",
+            "条件",
+            "結果",
+            "根拠",
+            "異常系",
+            "未実施理由"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "improvement-report",
+      "name": "改善効果の測定表",
+      "form": "表",
+      "outline": [
+        {
+          "heading": "改善の測定",
+          "describe": "ME-{nn} ごとに「指標」「変更前」「変更後」「条件（入力・環境・負荷・版・分母）」「結論」「測定不能の理由」を記す。改善しなかった結果も残す。",
+          "item": "measurement"
+        }
+      ],
+      "uses": [
+        "code-refactor",
+        "verification-ledger"
+      ],
+      "view": {
+        "as": "table",
+        "items": "measurement",
+        "columns": [
+          "指標",
+          "変更前",
+          "変更後",
+          "条件",
+          "結論",
+          "測定不能の理由"
+        ]
+      }
+    },
+    {
+      "id": "improvement-assessment",
+      "name": "改善の評価と副作用",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "比較の条件",
+          "describe": "変更前後の入力・環境・負荷・版・分母、指標の妥当性と不確実性。"
+        },
+        {
+          "heading": "結果の解釈",
+          "describe": "改善した点・改善しなかった点、負荷の移動、観測できなかった問題、副作用を検証・測定の結果に結び付ける。"
+        },
+        {
+          "heading": "残る危険と採用の判断",
+          "describe": "失敗・保留・未実施と、次の判断に必要な情報。"
+        }
+      ],
+      "uses": [
+        "verification-ledger",
+        "improvement-report"
+      ]
+    },
+    {
+      "id": "completion-record",
+      "name": "受入と反映の記録",
+      "form": "文書",
+      "outline": [
+        {
+          "heading": "正本への反映",
+          "describe": "受け入れた版、元の製品の設計・依存・試験対応・運用への反映先、古い参照や二重の正本がないことを記す。"
+        },
+        {
+          "heading": "残件",
+          "describe": "RS-{nn} ごとに「内容」「理由」「担当」「次の確認」「保留した根拠」を記し、指摘や変更単位との引用を残す。",
+          "item": "residual"
+        },
+        {
+          "heading": "受入の判断",
+          "describe": "変更対象・維持した契約と意図的な変更・検証結果・改善効果・副作用・保留を読み、受入／保留／差し戻しを明記する。"
+        }
+      ],
+      "uses": [
+        "change-plan",
+        "design-review",
+        "verification-ledger",
+        "improvement-report",
+        "improvement-assessment"
+      ]
+    }
+  ],
+  "items": [
+    {
+      "id": "baseline",
+      "name": "固定した基準と対象",
+      "idForm": "BL-{nn}"
+    },
+    {
+      "id": "finding",
+      "name": "指摘",
+      "idForm": "FD-{nnn}"
+    },
+    {
+      "id": "contract",
+      "name": "維持または承認した変更の契約",
+      "idForm": "CT-{nnn}"
+    },
+    {
+      "id": "change",
+      "name": "変更単位",
+      "idForm": "RF-{nnn}"
+    },
+    {
+      "id": "check",
+      "name": "検証",
+      "idForm": "VE-{nnn}"
+    },
+    {
+      "id": "measurement",
+      "name": "改善の測定",
+      "idForm": "ME-{nn}"
+    },
+    {
+      "id": "residual",
+      "name": "残件",
+      "idForm": "RS-{nn}"
+    },
+    {
+      "id": "component",
+      "name": "構成要素",
+      "idForm": "CP-{nnn}"
+    },
+    {
+      "id": "dependency",
+      "name": "依存",
+      "idForm": "DP-{nnn}"
+    }
+  ],
+  "rules": [
+    {
+      "id": "finding-cites-baseline",
+      "type": "cites",
+      "from": "finding",
+      "to": [
+        "baseline"
+      ],
+      "min": 1
+    },
+    {
+      "id": "contract-cites-baseline",
+      "type": "cites",
+      "from": "contract",
+      "to": [
+        "baseline"
+      ],
+      "min": 1
+    },
+    {
+      "id": "change-cites-finding",
+      "type": "cites",
+      "from": "change",
+      "to": [
+        "finding"
+      ],
+      "min": 1
+    },
+    {
+      "id": "change-cites-contract",
+      "type": "cites",
+      "from": "change",
+      "to": [
+        "contract"
+      ],
+      "min": 1
+    },
+    {
+      "id": "check-cites-change",
+      "type": "cites",
+      "from": "check",
+      "to": [
+        "change"
+      ],
+      "min": 1
+    },
+    {
+      "id": "check-cites-contract",
+      "type": "cites",
+      "from": "check",
+      "to": [
+        "contract"
+      ],
+      "min": 1
+    },
+    {
+      "id": "measurement-cites-change",
+      "type": "cites",
+      "from": "measurement",
+      "to": [
+        "change"
+      ],
+      "min": 1
+    },
+    {
+      "id": "residual-cites-finding",
+      "type": "cites",
+      "from": "residual",
+      "to": [
+        "finding"
+      ],
+      "min": 0
+    },
+    {
+      "id": "residual-cites-change",
+      "type": "cites",
+      "from": "residual",
+      "to": [
+        "change"
+      ],
+      "min": 0
+    },
+    {
+      "id": "finding-covered",
+      "type": "covered",
+      "of": "finding",
+      "by": [
+        "change"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "change-covered-by-check",
+      "type": "covered",
+      "of": "change",
+      "by": [
+        "check"
+      ]
+    },
+    {
+      "id": "contract-covered-by-check",
+      "type": "covered",
+      "of": "contract",
+      "by": [
+        "check"
+      ]
+    },
+    {
+      "id": "change-covered-by-measurement",
+      "type": "covered",
+      "of": "change",
+      "by": [
+        "measurement"
+      ],
+      "exempt": true
+    },
+    {
+      "id": "component-cites-change",
+      "type": "cites",
+      "from": "component",
+      "to": [
+        "change"
+      ],
+      "min": 0
+    },
+    {
+      "id": "dependency-cites-contract",
+      "type": "cites",
+      "from": "dependency",
+      "to": [
+        "contract"
+      ],
+      "min": 0
+    }
+  ],
+  "acceptance": [
+    {
+      "id": "inventory.baseline",
+      "text": "対象にする版、部品、試験、データと対象外の範囲が明確で、根拠を再確認できる。",
+      "checkedBy": "AI",
+      "target": "baseline-note"
+    },
+    {
+      "id": "inventory.findings",
+      "text": "各指摘は確認できる基準に結び付き、未使用の推定と実行で確認した事実を区別している。",
+      "checkedBy": "AI",
+      "target": "inventory-report",
+      "rules": [
+        "finding-cites-baseline"
+      ]
+    },
+    {
+      "id": "inventory.approved",
+      "text": "人が調査基準と限界・指摘の根拠・優先順位と保留を確認し、この対象で改善を始めると承認している。",
+      "checkedBy": "人",
+      "target": "inventory-report"
+    },
+    {
+      "id": "contracts.classified",
+      "text": "維持する契約と、意図的に変える契約が区別され、後者には変更する理由・新しい期待・承認する人がある。現在の不具合を無条件に維持しない。",
+      "checkedBy": "AI",
+      "target": "contract-ledger"
+    },
+    {
+      "id": "contracts.traced",
+      "text": "どの契約にも根拠となる固定版があり、認可・データ・承認・監査・失敗時の扱いのうち対象に必要な境界を確認した。",
+      "checkedBy": "AI",
+      "target": "contract-ledger",
+      "rules": [
+        "contract-cites-baseline"
+      ]
+    },
+    {
+      "id": "contracts.approved",
+      "text": "人が維持する動作と意図的に変更する動作を読み、変更してよい範囲を承認している。",
+      "checkedBy": "人",
+      "target": "contract-ledger"
+    },
+    {
+      "id": "plan.traced",
+      "text": "各変更単位が指摘と契約を引用し、各指摘に変更単位があるか、保留・除外する理由がある。",
+      "checkedBy": "AI",
+      "target": "change-plan",
+      "rules": [
+        "change-cites-finding",
+        "change-cites-contract",
+        "finding-covered"
+      ]
+    },
+    {
+      "id": "plan.sliced",
+      "text": "変更単位に対象・依存・リスク・成功条件・切り戻しがあり、機能追加と大規模な移動を一度に混ぜていない。",
+      "checkedBy": "AI",
+      "target": "change-plan"
+    },
+    {
+      "id": "plan.approved",
+      "text": "人が変更単位と影響・順序を読み、維持する契約に照らして承認している。",
+      "checkedBy": "人",
+      "target": "change-plan"
+    },
+    {
+      "id": "implement.scoped",
+      "text": "変更は承認された対象と単位に従い、不要になったコード・型・試験・参照を残した理由か撤去した結果がある。",
+      "checkedBy": "AI",
+      "target": "code-refactor"
+    },
+    {
+      "id": "implement.protected",
+      "text": "現行の保存と再読込み、途中失敗、未保存の作業、権限と監査について、関係する保証を弱めていない。",
+      "checkedBy": "AI",
+      "target": "code-refactor"
+    },
+    {
+      "id": "implement.approved",
+      "text": "人がコードと変更記録・撤去した経路・局所検査の結果を照合し、承認している。",
+      "checkedBy": "人",
+      "target": "implementation-record"
+    },
+    {
+      "id": "verify.covered",
+      "text": "すべての変更単位と契約が対応する検証に結び付く。静的解析・実行・人の確認を区別し、失敗や未実施を成功へ読み替えない。",
+      "checkedBy": "AI",
+      "target": "verification-ledger",
+      "rules": [
+        "check-cites-change",
+        "check-cites-contract",
+        "change-covered-by-check",
+        "contract-covered-by-check"
+      ]
+    },
+    {
+      "id": "verify.measured",
+      "text": "各変更の改善効果を測り、測れない場合は理由がある。同じ条件で変更前後を比較し、目的と異なる指標だけで成功としない。",
+      "checkedBy": "AI",
+      "target": "improvement-report",
+      "rules": [
+        "measurement-cites-change",
+        "change-covered-by-measurement"
+      ]
+    },
+    {
+      "id": "verify.approved",
+      "text": "人が比較条件・改善効果・副作用・未実施範囲を確認し、採用の判断に足ると認めている。",
+      "checkedBy": "人",
+      "target": "improvement-assessment"
+    },
+    {
+      "id": "adopt.integrated",
+      "text": "受け入れた改修が元の製品の版と設計・試験・運用の正本に反映され、古い参照や二重の正本を新たに作っていない。",
+      "checkedBy": "AI",
+      "target": "completion-record"
+    },
+    {
+      "id": "adopt.residual",
+      "text": "保留・残件・再評価が必要な理由と担当があり、関係する指摘や変更単位を引用できる。",
+      "checkedBy": "AI",
+      "target": "completion-record",
+      "rules": [
+        "residual-cites-finding",
+        "residual-cites-change"
+      ]
+    },
+    {
+      "id": "adopt.approved",
+      "text": "人が改善の成果と残件を読み、受入・保留・やり直しを明示している。",
+      "checkedBy": "人",
+      "target": "completion-record"
+    },
+    {
+      "id": "plan.structure",
+      "text": "構成図は構成要素と参照方向をfrom/toで区別し、改修対象の構成要素から変更単位への引用と、契約に関わる依存から契約への引用を記録している。背景として載せる構成要素と区別し、循環・二重の正本を確認できる。",
+      "checkedBy": "AI",
+      "target": "dependency-map",
+      "rules": [
+        "component-cites-change",
+        "dependency-cites-contract"
+      ]
+    },
+    {
+      "id": "plan.rationale",
+      "text": "構成比較・実施順・削除根拠・失敗時の扱いを、図と変更単位を参照して説明している。",
+      "checkedBy": "AI",
+      "target": "design-review"
+    },
+    {
+      "id": "plan.design-approved",
+      "text": "人が構成・依存・削除判断と安全な順序を確認し、設計判断を承認している。",
+      "checkedBy": "人",
+      "target": "design-review"
+    },
+    {
+      "id": "implement.recorded",
+      "text": "変更単位ごとに修正・削除の根拠、局所検査、残す保証と切り戻しを記録している。",
+      "checkedBy": "AI",
+      "target": "implementation-record"
+    },
+    {
+      "id": "verify.ledger-approved",
+      "text": "人が契約・変更単位への検証台帳、証拠、失敗・保留・未実施を確認している。",
+      "checkedBy": "人",
+      "target": "verification-ledger"
+    },
+    {
+      "id": "verify.assessed",
+      "text": "測定の比較条件と改善・副作用・未実施の限界が評価に記録されている。",
+      "checkedBy": "AI",
+      "target": "improvement-assessment"
+    }
+  ]
+}

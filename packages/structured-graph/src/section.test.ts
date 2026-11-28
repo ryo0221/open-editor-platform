@@ -397,11 +397,11 @@ describe('adapters and Sections', () => {
       expect(() => b.apply(intents, b.project().stamp)).toThrow(/cannot represent Graph sections/);
     expect(canonicalJson(get())).toBe(before);
   });
-  it('refuses sections with a sidecar when the binding is created', () => {
+  it('refuses sections without a place for their frames when the binding is created', () => {
     expect(
       () =>
         new GraphBinding<Source>({
-          adapter: adapter(true, 'sidecar'),
+          adapter: { ...adapter(true), presentationMode: 'none' },
           sourceId: 'src',
           read: () => ({ content: { graph: sectionGraph() }, revision: '1', readOnly: false }),
           execute: () => undefined,
@@ -521,7 +521,12 @@ describe('Dropping a node into a Section frame (#448)', () => {
     g: GraphDocument,
     id: string,
     position: { x: number; y: number },
-    extra: { profile?: GraphProfile; collapsed?: Set<string>; outside?: 'clear' | 'keep' } = {},
+    extra: {
+      profile?: GraphProfile;
+      collapsed?: Set<string>;
+      outside?: 'clear' | 'keep';
+      mode?: 'membership' | 'move-only';
+    } = {},
   ) => {
     const profile = extra.profile ?? sectionProfile();
     return graphNodeDropIntents({
@@ -533,8 +538,25 @@ describe('Dropping a node into a Section frame (#448)', () => {
       // A 0×0 node: the saved position is its centre.
       size: { width: 0, height: 0 },
       outside: extra.outside,
+      mode: extra.mode,
     });
   };
+
+  it('only moves in move-only mode and says when the membership would have changed', () => {
+    const g = sectionGraph(),
+      move = { type: 'move-node', id: 'resource-b', position: { x: 100, y: 100 } };
+    expect(drop(g, 'resource-b', { x: 100, y: 100 }, { mode: 'move-only' })).toEqual({
+      intents: [move],
+      target: 'backend',
+      moveOnly: true,
+    });
+    // Leaving every frame would clear the membership: also only moved.
+    expect(drop(g, 'resource-a', { x: 2000, y: 2000 }, { mode: 'move-only' }).moveOnly).toBe(true);
+    // A move within the node's own Section changes nothing else, so there is nothing to say.
+    expect(
+      drop(g, 'resource-a', { x: 300, y: 300 }, { mode: 'move-only' }).moveOnly,
+    ).toBeUndefined();
+  });
 
   it('joins the innermost frame in the same edit as the move', () => {
     const g = sectionGraph();

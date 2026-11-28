@@ -3,6 +3,21 @@
 Structured Graph は互換を守る保存形式です（2026-11-14 から。[互換性の約束](../structured-graph-contract.md#互換性)）。
 保存形式を変えるときは schema の番号を上げ、古い番号の読み込みを残します。
 
+## sidecar の Section（#99 WD1）
+
+- **変更：** presentation sidecar は schema 3 になりました。`presentation` に `sections`（Section の ID → 枠）が加わります。
+  schema 1（`positions`）と schema 2（`presentation.nodes`）の sidecar は、枠の無い schema 3 として読み、次の見た目の変更で schema 3 に書きます。
+  `presentationSidecarSchemaVersion`。
+- **変更：** `sections: true` を `presentationMode: 'sidecar'` と組めるようになりました（`'none'` とは引き続き組めません）。
+  adapter はSectionごとに既定の枠を返し、`GraphBinding` が sidecar の枠で置き換えます。
+- **追加：** `GraphBinding` の任意の Host の口 `commitWithPresentation({command, presentation, base})`（`GraphPresentationCommit`）。
+  見た目と意味を混ぜた batch（Section の枠へのドラッグ）と、置き場所を持つ `add-node`・`add-section` を、source と sidecar の
+  両方か無しかの一つの変更にします。口の無い Host では、これまでどおり混在 batch を断ります。
+- **追加：** `GraphBinding.sectionDrop` と `GraphSurface` の `sectionDrop`（`'membership'`（既定）・`'move-only'`）、
+  `graphNodeDropIntents` の `mode`、文言 `sectionDropMoveOnly`。
+- **互換：** これより前の版は schema 3 の sidecar を「Unknown or incompatible Graph presentation sidecar」で断ります。
+  既存の Graph（native・Data・今の adapter）の動作は変わりません。
+
 ## 互換を守る形式へ（schema 3）
 
 - **変更：** Graph は schema 3 になりました。中身は schema 2 と同じで、Section につなぐ線（#594）を含む形式に番号を付け直したものです。
