@@ -204,6 +204,32 @@ describe('editing through the Graph', () => {
     h.edit([{ type: 'delete-edge', id: 'approved-by|acceptance:plan.ok|role:lead' }]);
     expect(h.source.acceptance[1].approvers).toBeUndefined();
   });
+  it('refuses to move a check to another acceptance', () => {
+    const d = sampleDefinition();
+    // An acceptance without a target yet (an incomplete draft) has no checks relation.
+    d.acceptance.find((a) => a.id === 'notes.ok')!.target = '';
+    const h = host(d);
+    expect(() =>
+      h.edit([
+        {
+          type: 'reconnect-edge',
+          id: 'checks|acceptance:plan.ok|deliverable:plan-doc',
+          from: 'acceptance:notes.ok',
+          to: 'deliverable:plan-doc',
+        },
+      ]),
+    ).toThrow(/stays with its acceptance/);
+  });
+  it('still projects a phase that comes after itself', () => {
+    const d = sampleDefinition();
+    d.phases[0].after = [d.phases[0].id];
+    const h = host(d);
+    const { diagnostics, graph } = h.binding.project();
+    expect(
+      graph.edges.some((e) => e.id === `after|phase:${d.phases[0].id}|phase:${d.phases[0].id}`),
+    ).toBe(true);
+    expect(diagnostics.some((x) => x.code === 'phase-cycle' && !x.blocking)).toBe(true);
+  });
   it('allows a cycle and shows it as a warning', () => {
     const h = host();
     h.edit([
@@ -295,6 +321,25 @@ describe('sections', () => {
     h.undo();
     expect(sectionsOf(h.source)[1].phases).toEqual(['review']);
     expect(h.sidecar).toBeUndefined();
+  });
+  it('adds a phase inside a section in the same edit', () => {
+    const h = host(sampleDefinition(), { commit: true });
+    h.edit([
+      {
+        type: 'add-node',
+        node: {
+          id: 'phase:scope',
+          type: 'phase',
+          sectionId: 'section:late',
+          attributes: { name: '範囲', purpose: '範囲を決める' },
+        },
+        position: { x: 0, y: 0 },
+      },
+    ]);
+    expect(sectionsOf(h.source)[1].phases).toContain('scope');
+    expect(h.binding.project().graph.nodes.find((n) => n.id === 'phase:scope')?.sectionId).toBe(
+      'section:late',
+    );
   });
   it('adds a section with its frame and removes it again', () => {
     const h = host(sampleDefinition(), { commit: true });

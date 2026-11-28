@@ -115,7 +115,9 @@ export const owdGraphProfile: GraphProfile = {
     after: {
       schema: {},
       ui: { label: '先に終える' },
-      connection: { from: ['phase'], to: ['phase'], allowSelf: false, allowParallel: false },
+      // A phase after itself is a cycle: shown by the non-blocking cycle diagnostic, not refused,
+      // so a draft that has one still opens in the flow view.
+      connection: { from: ['phase'], to: ['phase'], allowSelf: true, allowParallel: false },
     },
     makes: {
       schema: {},
@@ -352,6 +354,23 @@ function referenceEdit(
       throw new Error(`Unknown relation ${type}`);
   }
 }
+/** Adds the phase to the section, keeping members in phase order as OWD sections require. */
+function joinSection(
+  def: OwdDefinition,
+  out: WorkflowDefinitionIntent[],
+  phase: string,
+  sectionId: string,
+) {
+  const section = refOf(sectionId, ['section']);
+  const current = applyAll(def, out);
+  const record = owdElements(current, 'section').find((s) => s.id === section.id);
+  if (!record) throw new Error(`section ${section.id} does not exist`);
+  const order = owdElements(current, 'phase').map((p) => p.id as string);
+  const phases = [...(record.phases as string[]), phase].sort(
+    (a, b) => order.indexOf(a) - order.indexOf(b),
+  );
+  out.push({ type: 'set-fields', kind: 'section', id: section.id, fields: { phases } });
+}
 /** Graph intents as workflow definition intents (design §4). Presentation stays in the sidecar. */
 export function owdIntentsFromGraph(
   definition: OwdDefinition,
@@ -368,6 +387,11 @@ export function owdIntentsFromGraph(
         for (const [key, value] of Object.entries(intent.node.attributes))
           if (key !== 'id' && value !== '' && value !== null) fields[key] = value as OwdJson;
         out.push({ type: 'add', kind: ref.kind, id: ref.id, fields });
+        // A phase created inside a section joins it in the same command.
+        if (intent.node.sectionId !== undefined) {
+          if (ref.kind !== 'phase') throw new Error('Only phases belong to sections');
+          joinSection(def, out, ref.id, intent.node.sectionId);
+        }
         break;
       }
       case 'add-section': {
@@ -427,14 +451,17 @@ export function owdIntentsFromGraph(
         const from = refOf(intent.from, nodeKinds),
           to = refOf(intent.to, nodeKinds);
         const current = applyAll(def, out);
-        if (parsed.type === 'checks')
+        if (parsed.type === 'checks') {
+          // An acceptance needs its target, so the edge can move to another deliverable only.
+          if (from.id !== parsed.from.id)
+            throw new Error('A check stays with its acceptance; change the target instead');
           out.push({
             type: 'set-fields',
             kind: 'acceptance',
             id: from.id,
             fields: { target: to.id },
           });
-        else if (
+        } else if (
           // The owner of the reference stays: replace the entry in place, keeping its order.
           (parsed.type === 'after' && to.id === parsed.to.id) ||
           (parsed.type !== 'after' && from.id === parsed.from.id)
@@ -457,7 +484,7 @@ export function owdIntentsFromGraph(
       }
       case 'set-node-section': {
         const phase = refOf(intent.id, ['phase']);
-        let current = applyAll(def, out);
+        const current = applyAll(def, out);
         for (const s of owdElements(current, 'section'))
           if ((s.phases as string[]).includes(phase.id)) {
             out.push({
@@ -467,18 +494,7 @@ export function owdIntentsFromGraph(
               fields: { phases: (s.phases as string[]).filter((p) => p !== phase.id) },
             });
           }
-        if (intent.sectionId !== null) {
-          const section = refOf(intent.sectionId, ['section']);
-          current = applyAll(def, out);
-          const record = owdElements(current, 'section').find((s) => s.id === section.id);
-          if (!record) throw new Error(`section ${section.id} does not exist`);
-          // Members stay in phase order, as OWD sections require.
-          const order = owdElements(current, 'phase').map((p) => p.id as string);
-          const phases = [...(record.phases as string[]), phase.id].sort(
-            (a, b) => order.indexOf(a) - order.indexOf(b),
-          );
-          out.push({ type: 'set-fields', kind: 'section', id: section.id, fields: { phases } });
-        }
+        if (intent.sectionId !== null) joinSection(def, out, phase.id, intent.sectionId);
         break;
       }
       case 'set-section-parent':

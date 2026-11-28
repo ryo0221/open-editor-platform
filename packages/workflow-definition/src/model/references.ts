@@ -108,3 +108,59 @@ export const owdReferrers = (definition: OwdDefinition, target: OwdElementRef) =
   owdReferences(definition).filter(
     (r) => r.target.kind === target.kind && r.target.id === target.id,
   );
+/**
+ * References from the parts the Editor shows read only: `gates[].phases`,
+ * `placements[].gates[].phases` and the deliverable keys of `placements[].paths`. A rename or a
+ * delete follows them so that it never leaves them dangling. `edit` works as in
+ * {@link walkOwdReferences}; a gate left with no phases is removed (an empty list would widen it to
+ * every phase), and a removed path key goes with its path.
+ */
+export function walkOwdGateReferences(
+  definition: OwdDefinition,
+  edit: (target: OwdElementRef) => string | null | undefined,
+) {
+  const gates = (holder: OwdRecord, key: string) => {
+    const values = holder[key];
+    if (!Array.isArray(values)) return;
+    const kept = values.filter((gate) => {
+      if (!isRecord(gate) || !Array.isArray(gate.phases)) return true;
+      const before = gate.phases;
+      if (!before.length) return true;
+      const after: OwdJson[] = [];
+      for (const id of before) {
+        if (typeof id !== 'string' || id === '') {
+          after.push(id);
+          continue;
+        }
+        const next = edit({ kind: 'phase', id });
+        if (next !== null) after.push(next ?? id);
+      }
+      if (after.length !== before.length || after.some((v, i) => v !== before[i]))
+        gate.phases = after;
+      return after.length > 0;
+    });
+    if (kept.length !== values.length) holder[key] = kept;
+  };
+  gates(definition as OwdRecord, 'gates');
+  const placements = definition.placements;
+  if (!Array.isArray(placements)) return;
+  for (const placement of placements) {
+    if (!isRecord(placement)) continue;
+    gates(placement, 'gates');
+    const paths = placement.paths;
+    if (!isRecord(paths)) continue;
+    const entries = Object.entries(paths);
+    let changed = false;
+    const next: OwdRecord = {};
+    for (const [id, path] of entries) {
+      const to = id === '' ? undefined : edit({ kind: 'deliverable', id });
+      if (to === null) changed = true;
+      else {
+        if (to !== undefined && to !== id) changed = true;
+        next[to ?? id] = path;
+      }
+    }
+    // Rebuilt in the same key order, so a rename does not move the entry.
+    if (changed) placement.paths = next;
+  }
+}

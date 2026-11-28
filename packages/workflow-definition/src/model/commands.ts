@@ -10,8 +10,8 @@ import {
   type OwdElementKind,
   type OwdElementRef,
 } from './ids';
-import { owdReferrers, walkOwdReferences } from './references';
-import { diagnosticKey, structureDiagnostics } from './diagnostics';
+import { owdReferrers, walkOwdGateReferences, walkOwdReferences } from './references';
+import { newDiagnostic, structureDiagnostics } from './diagnostics';
 import { readOwdDefinition } from './read';
 import { type OwdDefinition, type OwdJson, type OwdRecord } from './types';
 
@@ -144,6 +144,9 @@ function remove(definition: OwdDefinition, ref: OwdElementRef, cascade: boolean)
   walkOwdReferences(definition, (r) =>
     r.target.kind === ref.kind && r.target.id === ref.id ? null : undefined,
   );
+  walkOwdGateReferences(definition, (t) =>
+    t.kind === ref.kind && t.id === ref.id ? null : undefined,
+  );
   for (const d of dependents) if (findOwdElement(definition, d)) remove(definition, d, true);
 }
 function rename(definition: OwdDefinition, ref: OwdElementRef, to: unknown) {
@@ -154,6 +157,9 @@ function rename(definition: OwdDefinition, ref: OwdElementRef, to: unknown) {
     throw new Error(`The ID ${to} is already used (${owdNamespace(ref.kind)} IDs)`);
   walkOwdReferences(definition, (r) =>
     r.target.kind === ref.kind && r.target.id === ref.id ? to : undefined,
+  );
+  walkOwdGateReferences(definition, (t) =>
+    t.kind === ref.kind && t.id === ref.id ? to : undefined,
   );
   found.id = to;
 }
@@ -232,8 +238,7 @@ export function applyWorkflowDefinitionIntents(
   const next = clone(before);
   for (const intent of intents) applyIntent(next, intent);
   readOwdDefinition(next);
-  const had = new Set(structureDiagnostics(before).map(diagnosticKey));
-  const added = structureDiagnostics(next).find((d) => !had.has(diagnosticKey(d)));
+  const added = newDiagnostic(structureDiagnostics(before), structureDiagnostics(next));
   if (added) throw new Error(added.message);
   return next;
 }

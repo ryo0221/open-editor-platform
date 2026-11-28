@@ -29,9 +29,31 @@ export interface WorkflowDefinitionDiagnostic {
 const at = (target: OwdElementRef | undefined, path: (string | number)[]) =>
   `${target ? `${target.kind}:${target.id}` : 'definition'}/${path.join('/')}`;
 
-/** A key that names the same problem in two versions of a definition (for "new problem" checks). */
+/**
+ * A key that names the same problem in two versions of a definition (for "new problem" checks).
+ * List indices are left out, so a problem keeps its key when an entry before it is removed or
+ * moved; compare keys with their counts (see {@link newDiagnostic}).
+ */
 export const diagnosticKey = (d: WorkflowDefinitionDiagnostic) =>
-  `${d.code}|${at(d.target, d.path)}|${JSON.stringify(d.args ?? {})}`;
+  `${d.code}|${at(
+    d.target,
+    d.path.map((p) => (typeof p === 'number' ? '*' : p)),
+  )}|${JSON.stringify(d.args ?? {})}`;
+/** The first problem of `after` that `before` did not have, counting repeated keys. */
+export function newDiagnostic(
+  before: readonly WorkflowDefinitionDiagnostic[],
+  after: readonly WorkflowDefinitionDiagnostic[],
+) {
+  const had = new Map<string, number>();
+  for (const d of before) had.set(diagnosticKey(d), (had.get(diagnosticKey(d)) ?? 0) + 1);
+  for (const d of after) {
+    const key = diagnosticKey(d),
+      left = had.get(key) ?? 0;
+    if (!left) return d;
+    had.set(key, left - 1);
+  }
+  return undefined;
+}
 
 const isString = (v: unknown) => typeof v === 'string';
 /** Fields of each kind that must be strings (when present, for optional ones). */

@@ -113,6 +113,25 @@ describe('structure checks', () => {
     ]);
     expect(structureDiagnostics(fixed)).toEqual([]);
   });
+  it('repairs one of several broken references even when the list shifts', () => {
+    const d = sampleDefinition();
+    d.phases[1].after = ['missing-a', 'missing-b'];
+    const partly = apply(d, [
+      { type: 'set-fields', kind: 'phase', id: d.phases[1].id, fields: { after: ['missing-b'] } },
+    ]);
+    expect(partly.phases[1].after).toEqual(['missing-b']);
+    // Adding a second copy of a broken reference is still a new problem.
+    expect(() =>
+      apply(d, [
+        {
+          type: 'set-fields',
+          kind: 'phase',
+          id: d.phases[1].id,
+          fields: { after: ['missing-a', 'missing-b', 'missing-b'] },
+        },
+      ]),
+    ).toThrow(/does not exist/);
+  });
   it('allows a cyclic draft and reports the cycle without blocking', () => {
     const d = apply(sampleDefinition(), [
       { type: 'set-fields', kind: 'phase', id: 'research', fields: { after: ['review'] } },
@@ -192,6 +211,36 @@ describe('add, delete, rename and move', () => {
     expect(() => apply(d, [{ type: 'rename-id', kind: 'phase', id: 'plan', to: 'notes' }])).toThrow(
       /already used/,
     );
+  });
+  it('renames and deletes through gates and placements too', () => {
+    const d = fixture('editor-development');
+    expect(owdCheck(d)).toEqual([]);
+    const gated = (d.gates as { phases?: string[] }[]).find((g) => g.phases?.length)!.phases![0];
+    const path = Object.keys(
+      (d.placements as { paths?: Record<string, string> }[]).find((p) => p.paths)!.paths!,
+    )[0];
+    const renamed = apply(d, [
+      { type: 'rename-id', kind: 'phase', id: gated, to: 'renamed-phase' },
+      { type: 'rename-id', kind: 'deliverable', id: path, to: 'renamed-deliverable' },
+    ]);
+    expect(owdCheck(renamed)).toEqual([]);
+    expect(JSON.stringify([renamed.gates, renamed.placements])).not.toMatch(
+      new RegExp(`"${gated}"`),
+    );
+    const keys = (x: OwdDefinition) =>
+      (x.placements as { paths?: Record<string, string> }[]).map((p) => Object.keys(p.paths ?? {}));
+    expect(keys(renamed)).toEqual(
+      keys(d).map((k) => k.map((id) => (id === path ? 'renamed-deliverable' : id))),
+    );
+    const removed = apply(d, [
+      { type: 'delete', kind: 'phase', id: gated, cascade: true },
+      { type: 'delete', kind: 'deliverable', id: path, cascade: true },
+    ]);
+    const text = JSON.stringify([removed.gates, removed.placements]);
+    expect(text).not.toMatch(new RegExp(`"${gated}"`));
+    expect(text).not.toMatch(new RegExp(`"${path}"`));
+    // No gate is left with an empty phase list, which would widen it to every phase.
+    expect(text).not.toMatch(/"phases":\[\]/);
   });
   it('adds at an index and moves within the order', () => {
     const d = sampleDefinition();
