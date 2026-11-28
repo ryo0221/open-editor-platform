@@ -229,3 +229,36 @@
   flex-wrap: wrap;
   gap: 4px;
 }
+.ep-wd-mindmap ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ep-wd-branch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid #ddd;
+  padding: 6px;
+}
+.ep-wd-branch-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ep-wd-branch-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ep-wd-proposal {
+  border: 1px solid #b6c8e6;
+  background: #f3f7fd;
+  padding: 8px;
+}
+.ep-wd-proposal h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}

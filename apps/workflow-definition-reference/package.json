@@ -6,6 +6,8 @@
   "dependencies": {
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
+    "@editor-platform/mindmap": "*",
+    "@editor-platform/mindmap-core": "*",
     "@editor-platform/structured-graph": "*",
     "@editor-platform/workflow-definition": "*"
   },

@@ -237,3 +237,6 @@
   color: #1e3c7a;
   font-size: 0.75em;
 }
+.mindmap-link code {
+  overflow-wrap: anywhere;
+}

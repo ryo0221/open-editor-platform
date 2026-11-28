@@ -7,7 +7,7 @@ import {
   workflowTab,
 } from './workflow-definition-fixtures';
 
-test('#99 mobile workflow definition: flow, lists and matrix fit, add and Undo', async ({
+test('#99 mobile workflow definition: flow, lists, matrix and Mind Map fit, add and Undo', async ({
   page,
 }, info) => {
   await openWorkflowHost(page);
@@ -22,6 +22,9 @@ test('#99 mobile workflow definition: flow, lists and matrix fit, add and Undo',
   await workflowTab(page, 'マトリクス');
   expect(await noPageOverflow(page)).toBe(true);
   await page.screenshot({ path: info.outputPath('workflow-matrix-mobile.png') });
+  await workflowTab(page, 'マインドマップ');
+  expect(await noPageOverflow(page)).toBe(true);
+  await page.screenshot({ path: info.outputPath('workflow-mindmap-mobile.png') });
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   expect(JSON.stringify(await hostJson(page))).not.toContain('reviewer');
 });

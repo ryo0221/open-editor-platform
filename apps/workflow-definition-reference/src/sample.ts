@@ -1,5 +1,7 @@
 /** A fictional public definition for the reference Host (not one of the published OWD ones). */
 import { deepFreeze } from '@editor-platform/artifact-core';
+import { type MindmapContent } from '@editor-platform/mindmap-core';
+import { type WorkflowDefinitionProposal } from '@editor-platform/workflow-definition';
 import { type OwdDefinition } from '@editor-platform/workflow-definition/model';
 
 export const sampleDefinition = deepFreeze({
@@ -89,3 +91,48 @@ export const sampleDefinition = deepFreeze({
     },
   ],
 } as unknown as OwdDefinition);
+
+const node = (n: number) => `n-${n.toString(16).padStart(32, '0')}`;
+/** The Mind Map the sample was worked out in: two branches are linked, two are not yet. */
+export const sampleMindmap = deepFreeze({
+  artifactKind: 'mindmap',
+  schemaVersion: 1,
+  id: `d-${'a'.repeat(32)}`,
+  rootId: node(1),
+  layout: 'right',
+  nodes: {
+    [node(1)]: { id: node(1), text: '見本の計画', children: [node(2), node(3), node(4), node(5)] },
+    [node(2)]: {
+      id: node(2),
+      text: '調べる',
+      children: [],
+      link: { namespace: 'owd:sample-plan', id: 'phase:research' },
+    },
+    [node(3)]: {
+      id: node(3),
+      text: '計画書',
+      children: [],
+      link: { namespace: 'owd:sample-plan', id: 'deliverable:plan-doc' },
+    },
+    [node(4)]: { id: node(4), text: 'Pilot', children: [] },
+    [node(5)]: { id: node(5), text: '関係者の合意', children: [] },
+  },
+} as unknown as MindmapContent);
+/** An outside draft (as an AI would make it), proposed as definition intents. */
+export const sampleProposal: WorkflowDefinitionProposal = {
+  label: '振り返りの条件を足す',
+  intents: [
+    {
+      type: 'add',
+      kind: 'acceptance',
+      id: 'review.ok',
+      fields: { text: '振り返りが計画書に残っている', checkedBy: '人', target: 'plan-doc' },
+    },
+    {
+      type: 'set-fields',
+      kind: 'phase',
+      id: 'review',
+      fields: { acceptance: ['plan.ok', 'review.ok'] },
+    },
+  ],
+};

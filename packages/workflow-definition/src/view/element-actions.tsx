@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { owdIdTaken, validOwdId, workflowDefinitionReferrers, type OwdElementRef } from '../model';
+import {
+  owdIdTaken,
+  owdRenameLinkRequests,
+  validOwdId,
+  workflowDefinitionReferrers,
+  type OwdElementRef,
+} from '../model';
 import { kindLabels, useWorkflow } from './context';
 
 /** Delete with the cascade confirmation (design §1 refusal 2), and the explicit ID change. */
@@ -12,7 +18,7 @@ export function ElementActions({
   index: number;
   count: number;
 }) {
-  const { definition, readOnly, edit } = useWorkflow();
+  const { definition, readOnly, edit, mindmap } = useWorkflow();
   const [confirm, setConfirm] = useState<string[]>(),
     [renaming, setRenaming] = useState<string>(),
     [error, setError] = useState<string>();
@@ -29,9 +35,16 @@ export function ElementActions({
     if (!validOwdId(to)) return setError('ID は英小文字の語を - と . でつなぎます');
     if (to !== target.id && owdIdTaken(definition, target.kind, to))
       return setError(`ID ${to} はもう使われています`);
+    // Branches linked to the old ID are asked to follow, after the definition took the change.
+    const requests = mindmap ? owdRenameLinkRequests(definition, mindmap.branches, target, to) : [];
     const failed = edit([{ type: 'rename-id', kind: target.kind, id: target.id, to }]);
-    setError(failed);
-    if (!failed) setRenaming(undefined);
+    if (failed) return setError(failed);
+    setRenaming(undefined);
+    const linkFailed = requests.length ? mindmap!.requestLinks(requests) : undefined;
+    setError(
+      linkFailed &&
+        `ID は変えました。マインドマップの枝の対応は古い ID のままです（${linkFailed}）`,
+    );
   };
   return (
     <div className="ep-wd-actions">

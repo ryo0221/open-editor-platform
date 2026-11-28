@@ -27,3 +27,11 @@ body {
   min-height: 240px;
   font-family: monospace;
 }
+.wd-host-mindmap {
+  border-top: 1px solid #ccc;
+  padding-top: 8px;
+}
+.wd-host-mindmap h2 {
+  font-size: 1rem;
+  margin: 0 0 4px;
+}

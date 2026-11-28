@@ -25,6 +25,9 @@ ID namespaces follow OWD's check: phases, sections, deliverables and acceptance 
 kinds, rules and roles each have their own.
 
 - `workflowDefinitionDiff`: what changed from a version to the draft, by element ID.
+- `owdMindmapLink`, `owdBranchStatus`, `owdLinkedBranches`, `owdRenameLinkRequests`: the Mind Map
+  branch link (`owd:<definition id>` / `<kind>:<id>`), its state against the definition (linked,
+  missing, other, unlinked) and the link requests that follow an ID change.
 
 ## `.` (React views)
 
@@ -35,6 +38,13 @@ roles), matrices (item kinds, rules, phases × deliverables, citations, coverage
 rules), the definition's own fields (gates and placements read only), and the changes from
 `baseline`. Every edit goes through `binding.options.execute` as one `workflowDefinitionCommand`,
 so the Host's one Undo covers all views. Elements are added with a shared form that asks for the ID.
+
+With `mindmap: {branches, requestLinks}`, a Mind Map tab lists the Host's branches: an unlinked
+branch becomes an element (its title as the name, the ID typed), then the Surface asks the Host to
+link the branch; an ID change asks the linked branches to follow. The two are separate edits with
+separate Undo, so the tab shows drift (a link to a missing element) instead of fixing it. With
+`proposal: {label, intents}` and `onProposal`, an outside draft is previewed as changes and enters
+the definition only when the person applies it, as one command.
 The Surface imports its own stylesheet, also exported as `./styles.css`.
 
 The reference Host is `apps/workflow-definition-reference` (Playground

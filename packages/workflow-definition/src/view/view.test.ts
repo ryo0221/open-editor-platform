@@ -5,7 +5,12 @@ import { clone } from '@editor-platform/artifact-core';
 import { GraphBinding } from '@editor-platform/structured-graph/model';
 import { createOwdGraphAdapter, type OwdDefinition } from '../model';
 import { owdCheck, sampleDefinition } from '../model/fixtures';
-import { WorkflowDefinitionSurface, type WorkflowDefinitionTab } from './index';
+import {
+  WorkflowDefinitionSurface,
+  type WorkflowDefinitionProposal,
+  type WorkflowDefinitionTab,
+  type WorkflowMindmapConnection,
+} from './index';
 
 function render(
   tab: WorkflowDefinitionTab,
@@ -14,6 +19,8 @@ function render(
     readOnly?: boolean;
     checked?: boolean;
     baseline?: OwdDefinition;
+    mindmap?: WorkflowMindmapConnection;
+    proposal?: WorkflowDefinitionProposal;
   } = {},
 ) {
   const source = options.definition ?? sampleDefinition();
@@ -30,6 +37,8 @@ function render(
       check: options.checked === false ? undefined : owdCheck,
       baseline: options.baseline,
       initialTab: tab,
+      mindmap: options.mindmap,
+      proposal: options.proposal,
     }),
   );
 }
@@ -77,5 +86,36 @@ describe('the workflow definition Surface', () => {
     expect(html).toContain('読み取り専用');
     expect(html).not.toMatch(/<button[^>]*>削除/);
     expect(html).not.toMatch(/aria-label="New element ID"(?![^>]*disabled)/);
+  });
+  it('shows Mind Map branches with their link state only when the Host connects one', () => {
+    const mindmap: WorkflowMindmapConnection = {
+      branches: [
+        {
+          nodeId: 'a',
+          title: '調べる',
+          link: { namespace: 'owd:sample-plan', id: 'phase:research' },
+        },
+        { nodeId: 'b', title: '消えた', link: { namespace: 'owd:sample-plan', id: 'phase:gone' } },
+        { nodeId: 'c', title: '未対応' },
+      ],
+      requestLinks: () => undefined,
+    };
+    const html = render('mindmap', { mindmap });
+    expect(html).toContain('対応あり 1・対応先が無い 1・対応が付いていない 1');
+    expect(html).toContain('Add branch 未対応');
+    expect(render('mindmap', { mindmap, readOnly: true })).not.toContain('Add branch');
+    expect(render('mindmap')).not.toContain('マインドマップ');
+  });
+  it('previews a proposal and refuses one that does not apply', () => {
+    const proposal: WorkflowDefinitionProposal = {
+      label: '役割を足す',
+      intents: [{ type: 'add', kind: 'role', id: 'owner', fields: { name: '責任者' } }],
+    };
+    expect(render('lists', { proposal })).toContain('追加 役割 owner');
+    const stale = {
+      ...proposal,
+      intents: [{ type: 'delete' as const, kind: 'role' as const, id: 'nobody' }],
+    };
+    expect(render('lists', { proposal: stale })).toContain('適用できません');
   });
 });

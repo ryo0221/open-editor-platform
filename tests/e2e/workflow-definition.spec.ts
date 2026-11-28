@@ -113,7 +113,10 @@ test('#99 workflow definition: OWD check diagnostics, outline editing and JSON i
   await expect(outline.getByLabel('Heading of heading 2', { exact: true })).toHaveValue('根拠');
 
   // A JSON that is not an OWD definition is refused and changes nothing.
-  await page.getByRole('button', { name: 'JSON', exact: true }).click();
+  await page
+    .getByRole('toolbar', { name: 'Host', exact: true })
+    .getByRole('button', { name: 'JSON', exact: true })
+    .click();
   await page.getByLabel('Definition JSON text').fill('{"format": 2}');
   await page.getByRole('button', { name: 'Import', exact: true }).click();
   await expect(page.getByLabel('Host status')).toContainText('Import refused');

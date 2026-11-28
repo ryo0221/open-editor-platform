@@ -4,6 +4,8 @@ import {
   type OwdDefinition,
   type OwdElementKind,
   type OwdElementRef,
+  type OwdMindmapBranch,
+  type OwdMindmapLinkRequest,
   type WorkflowDefinitionDiagnostic,
   type WorkflowDefinitionIntent,
 } from '../model';
@@ -26,6 +28,16 @@ export interface WorkflowViewContext {
   selected?: OwdElementRef;
   select: (ref: OwdElementRef | undefined) => void;
   diagnostics: WorkflowDefinitionDiagnostic[];
+  /** The Host's Mind Map branches and its link requests, when the Host connects a Mind Map. */
+  mindmap?: WorkflowMindmapConnection;
+}
+/**
+ * A Host's Mind Map, as the definition Editor sees it (design §7). `requestLinks` applies the
+ * requests to the Mind Map as its own proposal and Undo; it returns the reason when it refused.
+ */
+export interface WorkflowMindmapConnection {
+  branches: readonly OwdMindmapBranch[];
+  requestLinks(requests: OwdMindmapLinkRequest[]): string | undefined;
 }
 export const WorkflowContext = createContext<WorkflowViewContext | undefined>(undefined);
 export function useWorkflow() {

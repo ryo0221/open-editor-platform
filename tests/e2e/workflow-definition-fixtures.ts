@@ -19,7 +19,10 @@ export async function addElement(page: Page, kind: string, id: string, name: str
 }
 /** The Host's current definition JSON, read through its JSON panel. */
 export async function hostJson(page: Page) {
-  await page.getByRole('button', { name: 'JSON', exact: true }).click();
+  await page
+    .getByRole('toolbar', { name: 'Host', exact: true })
+    .getByRole('button', { name: 'JSON', exact: true })
+    .click();
   const text = await page.getByLabel('Definition JSON text').inputValue();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   return JSON.parse(text) as {

@@ -5,7 +5,17 @@ import { createRoot } from 'react-dom/client';
 import { canonicalJson, clone } from '@editor-platform/artifact-core';
 import { type EditorCommand } from '@editor-platform/editor-core';
 import { GraphBinding, type PresentationSidecar } from '@editor-platform/structured-graph/model';
-import { WorkflowDefinitionSurface } from '@editor-platform/workflow-definition';
+import { MindmapSurface } from '@editor-platform/mindmap';
+import {
+  mindmapFingerprint,
+  mindmapProposalCommand,
+  type MindmapContent,
+} from '@editor-platform/mindmap-core';
+import {
+  WorkflowDefinitionSurface,
+  type WorkflowDefinitionProposal,
+  type WorkflowMindmapConnection,
+} from '@editor-platform/workflow-definition';
 import {
   createOwdGraphAdapter,
   readOwdDefinition,
@@ -14,7 +24,7 @@ import {
 } from '@editor-platform/workflow-definition/model';
 import { check as owdCheck } from '../../../packages/workflow-definition/fixtures/owd-446706b/src/check.mjs';
 import '@editor-platform/structured-graph/styles.css';
-import { sampleDefinition } from './sample';
+import { sampleDefinition, sampleMindmap, sampleProposal } from './sample';
 import './host.css';
 
 interface State {
@@ -44,6 +54,59 @@ export function WorkflowDefinitionHost() {
     flags = useRef({ readOnly });
   current.current = state;
   flags.current = { readOnly };
+  // The Mind Map is another artifact with its own Undo (design §7: two edits, two records).
+  const [mindmap, setMindmap] = useState<MindmapContent>(clone(sampleMindmap)),
+    [mindmapStatus, setMindmapStatus] = useState(''),
+    [mindmapRefuses, setMindmapRefuses] = useState(false),
+    [proposal, setProposal] = useState<WorkflowDefinitionProposal>();
+  const mindmapNow = useRef(mindmap),
+    mindmapPast = useRef<MindmapContent[]>([]);
+  mindmapNow.current = mindmap;
+  /** Runs a Mind Map command; the reason when it was refused. */
+  const runMindmap = (cmd: EditorCommand<MindmapContent>): string | undefined => {
+    try {
+      const before = mindmapNow.current;
+      const next = cmd.apply(before);
+      mindmapPast.current.push(before);
+      mindmapNow.current = next;
+      setMindmap(next);
+      setMindmapStatus(cmd.label);
+      return undefined;
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      setMindmapStatus(reason);
+      return reason;
+    }
+  };
+  const branches: WorkflowMindmapConnection['branches'][number][] = [];
+  (function walk(id: string) {
+    const n = mindmap.nodes[id];
+    if (!n) return;
+    if (id !== mindmap.rootId)
+      branches.push({ nodeId: id, title: n.text, ...(n.link ? { link: n.link } : {}) });
+    n.children.forEach(walk);
+  })(mindmap.rootId);
+  const connection: WorkflowMindmapConnection = {
+    branches,
+    // Applied as the Mind Map's own proposal, checked against the content it was made from.
+    requestLinks: (requests) => {
+      if (mindmapRefuses) return 'The Mind Map is read only';
+      const now = mindmapNow.current;
+      try {
+        return runMindmap(
+          mindmapProposalCommand(
+            {
+              before: mindmapFingerprint(now),
+              steps: requests.map((r) => ({ kind: 'link', id: r.nodeId, link: r.link })),
+            },
+            now,
+          ),
+        );
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+  };
   const commit = (next: State, record?: Record, message = 'Unsaved draft') => {
     if (record) {
       past.current.push(record);
@@ -164,6 +227,17 @@ export function WorkflowDefinitionHost() {
           <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />{' '}
           OWD check
         </label>
+        <button type="button" onClick={() => setProposal(sampleProposal)}>
+          Propose
+        </button>
+        <label>
+          <input
+            type="checkbox"
+            checked={mindmapRefuses}
+            onChange={(e) => setMindmapRefuses(e.target.checked)}
+          />{' '}
+          Mind Map refuses links
+        </label>
         <button
           type="button"
           onClick={() => setJson(JSON.stringify(current.current.source, null, 2))}
@@ -193,7 +267,38 @@ export function WorkflowDefinitionHost() {
         revision={canonicalJson([revision, readOnly])}
         check={checked ? check : undefined}
         baseline={baseline}
+        mindmap={connection}
+        proposal={proposal}
+        onProposal={(decision) => {
+          setProposal(undefined);
+          setStatus(decision === 'applied' ? 'Proposal applied' : 'Proposal rejected');
+        }}
       />
+      <section aria-label="Mind Map" className="wd-host-mindmap">
+        <h2>Mind Map</h2>
+        <div className="wd-host-bar" role="toolbar" aria-label="Mind Map Host">
+          <button
+            type="button"
+            disabled={!mindmapPast.current.length}
+            onClick={() => {
+              const before = mindmapPast.current.pop();
+              if (!before) return;
+              mindmapNow.current = before;
+              setMindmap(before);
+              setMindmapStatus('Undone');
+            }}
+          >
+            Mind Map Undo
+          </button>
+          <output aria-label="Mind Map status">{mindmapStatus}</output>
+        </div>
+        <MindmapSurface
+          content={mindmap}
+          readOnly={mindmapRefuses}
+          execute={(cmd) => runMindmap(cmd) === undefined}
+          fileName="sample"
+        />
+      </section>
     </main>
   );
 }

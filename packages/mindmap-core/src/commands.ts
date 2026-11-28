@@ -147,6 +147,39 @@ export function noteMindmapNode(id: string, note?: string): EditorCommand<Mindma
   });
 }
 
+/** A node's link to an element elsewhere (for example `owd:<definition id>` / `phase:concept`). */
+export interface MindmapLink {
+  namespace: string;
+  id: string;
+}
+/**
+ * Sets, replaces or removes (`null`) a node's link, the root's too; one Undo step. Each part is 1
+ * to {@link MINDMAP_LIMITS.linkPart} characters, as the content validation requires.
+ */
+export function setMindmapNodeLink(
+  id: string,
+  link: MindmapLink | null,
+): EditorCommand<MindmapContent> {
+  if (
+    link !== null &&
+    (!link ||
+      typeof link !== 'object' ||
+      Object.keys(link).some((k) => k !== 'namespace' && k !== 'id') ||
+      typeof link.namespace !== 'string' ||
+      typeof link.id !== 'string')
+  )
+    throw new MindmapError('つながりが不正です。');
+  const copy = link && { namespace: link.namespace, id: link.id };
+  return edit('mindmap.link', copy ? 'つながりを付ける' : 'つながりを外す', (c) => {
+    const n = node(c, id);
+    if (copy) n.link = { ...copy };
+    else {
+      if (!n.link) throw new MindmapError('つながりはありません。');
+      delete n.link;
+    }
+  });
+}
+
 export function setMindmapLayout(layout: MindmapLayout): EditorCommand<MindmapContent> {
   return edit('mindmap.layout', '配置を切り替える', (c) => {
     c.layout = layout;

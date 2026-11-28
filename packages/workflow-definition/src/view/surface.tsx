@@ -26,8 +26,11 @@ import {
   sameRef,
   useWorkflow,
   WorkflowContext,
+  type WorkflowMindmapConnection,
   type WorkflowViewContext,
 } from './context';
+import { WorkflowMindmap } from './mindmap';
+import { ProposalPanel, type WorkflowDefinitionProposal } from './proposal';
 import { TextField } from './fields';
 import { WorkflowLists } from './lists';
 import { WorkflowMatrices } from './matrix';
@@ -47,14 +50,21 @@ export interface WorkflowDefinitionSurfaceProps {
   baseline?: OwdDefinition;
   /** The view shown first (the flow by default). */
   initialTab?: WorkflowDefinitionTab;
+  /** The Host's Mind Map: its branches and link requests; shows the Mind Map tab. */
+  mindmap?: WorkflowMindmapConnection;
+  /** An edit proposed from outside, shown for preview, apply or reject. */
+  proposal?: WorkflowDefinitionProposal;
+  /** The person applied (through the Host's `execute`) or rejected the proposal. */
+  onProposal?(decision: 'applied' | 'rejected'): void;
 }
-export type WorkflowDefinitionTab = 'flow' | 'lists' | 'matrix' | 'info' | 'changes';
+export type WorkflowDefinitionTab = 'flow' | 'lists' | 'matrix' | 'info' | 'mindmap' | 'changes';
 type Tab = WorkflowDefinitionTab;
 const tabLabels: Record<Tab, string> = {
   flow: '流れ',
   lists: '一覧',
   matrix: 'マトリクス',
   info: '定義の情報',
+  mindmap: 'マインドマップ',
   changes: '差分',
 };
 const graphKinds = new Set<OwdElementKind>([
@@ -342,8 +352,15 @@ export function WorkflowDefinitionSurface({
   check,
   baseline,
   initialTab = 'flow',
+  mindmap,
+  proposal,
+  onProposal,
 }: WorkflowDefinitionSurfaceProps) {
-  const [tab, setTab] = useState<Tab>(initialTab === 'changes' && !baseline ? 'flow' : initialTab),
+  const [tab, setTab] = useState<Tab>(
+      (initialTab === 'changes' && !baseline) || (initialTab === 'mindmap' && !mindmap)
+        ? 'flow'
+        : initialTab,
+    ),
     [selected, select] = useState<OwdElementRef>();
   const source = binding.options.read();
   const { projection, error } = useMemo(() => {
@@ -364,6 +381,7 @@ export function WorkflowDefinitionSurface({
     selected,
     select,
     diagnostics,
+    mindmap,
     edit: (intents: WorkflowDefinitionIntent[]) => {
       const latest = binding.options.read();
       try {
@@ -376,9 +394,14 @@ export function WorkflowDefinitionSurface({
       }
     },
   };
-  const tabs: Tab[] = baseline
-    ? ['flow', 'lists', 'matrix', 'info', 'changes']
-    : ['flow', 'lists', 'matrix', 'info'];
+  const tabs: Tab[] = [
+    'flow',
+    'lists',
+    'matrix',
+    'info',
+    ...(mindmap ? (['mindmap'] as const) : []),
+    ...(baseline ? (['changes'] as const) : []),
+  ];
   return (
     <WorkflowContext.Provider value={context}>
       <div className="ep-wd" data-read-only={source.readOnly || undefined}>
@@ -390,6 +413,7 @@ export function WorkflowDefinitionSurface({
           </span>
           <Diagnostics />
         </header>
+        {proposal && <ProposalPanel proposal={proposal} resolve={(d) => onProposal?.(d)} />}
         <AddElement />
         <div role="tablist" aria-label="Workflow definition views" className="ep-wd-tabs">
           {tabs.map((t) => (
@@ -409,6 +433,7 @@ export function WorkflowDefinitionSurface({
           {tab === 'lists' && <WorkflowLists />}
           {tab === 'matrix' && <WorkflowMatrices />}
           {tab === 'info' && <Info />}
+          {tab === 'mindmap' && <WorkflowMindmap />}
           {tab === 'changes' && baseline && <Changes baseline={baseline} />}
         </div>
       </div>
