@@ -205,6 +205,20 @@ function fetchMesher(dist) {
     if (existsSync(join(source, file))) cpSync(join(source, file), join(dist, file));
 }
 
+/** Whether CalculiX (`ccx`) answers with its version: the Playground's Host runs need it. */
+const hasCalculix = () =>
+  /Version \d/.test(spawnSync('ccx', ['-v'], { encoding: 'utf8' }).stdout ?? '');
+
+/** Installs CalculiX from the distribution when it is missing (best effort, as root). */
+function installCalculix() {
+  if (hasCalculix()) return;
+  const apt = (args) => sh('apt-get', args, { stdio: 'ignore' });
+  if (apt(['install', '-y', '--no-install-recommends', 'calculix-ccx'])) {
+    apt(['update', '-qq']);
+    apt(['install', '-y', '--no-install-recommends', 'calculix-ccx']);
+  }
+}
+
 /** Prepares a fresh clone; returns the first failing command's status, or 0. */
 function setup(root, group, kernel, mesher) {
   const at = { cwd: root };
@@ -213,6 +227,7 @@ function setup(root, group, kernel, mesher) {
   if (!existsSync(join(kernel, 'NOTICE.txt')))
     steps.push(() => sh('node', ['scripts/cad-kernel/fetch.mjs', kernel, '--source'], at));
   steps.push(() => (fetchMesher(mesher), 0));
+  steps.push(() => (installCalculix(), 0));
   // Office specs and the production builds use the pinned Office fonts (no fallback font).
   steps.push(() =>
     sh('node', ['scripts/check-office-fonts.mjs'], { ...at, stdio: 'ignore' })
@@ -260,11 +275,13 @@ function main(argv) {
   }
   // A study test without the mesher only waits for its timeout: say so above the results.
   const mesherProblem = femMesherProblem(mesher);
-  if (mesherProblem)
-    lines.push(
-      ...(lines.length > 2 ? [''] : []),
-      `Mesher: not served (${mesherProblem}); studies that run in the browser fail.`,
-    );
+  const missing = [
+    ...(mesherProblem
+      ? [`Mesher: not served (${mesherProblem}); studies that run in the browser fail.`]
+      : []),
+    ...(hasCalculix() ? [] : ['CalculiX: `ccx` is not installed; Host runs are not offered.']),
+  ];
+  if (missing.length) lines.push(...(lines.length > 2 ? [''] : []), ...missing);
   // Each step stops after 100 minutes so a hung run cannot hold the group.
   const stepTimeout = Number(process.env.NIGHTLY_STEP_TIMEOUT ?? 6000);
   const ports = suitePorts(root);
