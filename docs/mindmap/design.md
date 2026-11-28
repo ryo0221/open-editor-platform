@@ -44,7 +44,9 @@ Playground は `kinds/office.ts`・`records.ts`・`surfaces.ts` に登録し、�
 
 すべての編集は `@editor-platform/editor-core` の command で、適用の前後に検証し、入力を変えず、変化のない command は拒否します。名前・色・印・メモの同時適用は `editMindmapNodeFields` の一つの command（Undo 一回）です。
 
-外部提案は `mindmapProposalDeclaration`（閉じた JSON schema、手順 100 件まで）に従うデータです。`mindmapProposalCommand` が手順を同じ command に変え、一つの command にまとめます。足す枝の ID は省略か仮の名前（`new-1` など）でよく、新しい ID に置き換えます。`before` に内容の指紋（32 桁）があれば照合し、作った時点の内容と違う内容には適用しません。Playground の提案レビューへの接続は今回の範囲外です。
+枝の `link`（他の成果物の要素への対応）は `setMindmapNodeLink(id, link | null)` で付ける・置き換える・外す（中心の枝にも付けられる。Undo 一回）。Surface の枝の情報は link を見せて外せますが、付けるのは Host が渡す候補からです（#99 工程定義の Editor の「マインドマップから足す」）。
+
+外部提案は `mindmapProposalDeclaration`（閉じた JSON schema、手順 100 件まで）に従うデータです。`mindmapProposalCommand` が手順を同じ command に変え、一つの command にまとめます。足す枝の ID は省略か仮の名前（`new-1` など）でよく、新しい ID に置き換えます。操作の種類 `link`（`{kind: 'link', id, link: {namespace, id} | null}`）は宣言 1.1.0 で足しました。`before` に内容の指紋（32 桁）があれば照合し、作った時点の内容と違う内容には適用しません。Playground の提案レビューへの接続は今回の範囲外です。
 
 ## 対応しないこと
 

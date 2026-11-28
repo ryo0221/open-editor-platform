@@ -12,6 +12,7 @@ import {
   createOwdGraphAdapter,
   owdGraphAdapter,
   owdGraphProfile,
+  owdRenamedPresentation,
   projectOwdGraph,
   type OwdDefinition,
   type OwdSection,
@@ -412,5 +413,39 @@ describe('sections', () => {
     ).toThrow(/separate transactions/);
     h.edit([{ type: 'set-node-section', id: 'phase:review', sectionId: 'section:early' }]);
     expect(sectionsOf(h.source)[0].phases).toEqual(['research', 'plan', 'review']);
+  });
+});
+
+describe('renamed elements keep their saved places', () => {
+  it('moves node places and section frames to the new IDs', () => {
+    const h = host(sampleDefinition(), { commit: true });
+    h.edit([
+      { type: 'move-node', id: 'phase:research', position: { x: 410, y: 220 } },
+      {
+        type: 'resize-section',
+        id: 'section:early',
+        bounds: { x: 0, y: 0, width: 900, height: 400 },
+      },
+    ]);
+    const before = h.sidecar!;
+    const intents = [
+      { type: 'rename-id' as const, kind: 'phase' as const, id: 'research', to: 'survey' },
+      { type: 'rename-id' as const, kind: 'section' as const, id: 'early', to: 'first' },
+    ];
+    const moved = owdRenamedPresentation(before, intents)!;
+    expect(moved.presentation.nodes['phase:survey']).toEqual({ x: 410, y: 220 });
+    expect(moved.presentation.nodes['phase:research']).toBeUndefined();
+    expect(moved.presentation.sections['section:first']).toMatchObject({ width: 900, height: 400 });
+    expect(moved.presentation.sections['section:early']).toBeUndefined();
+    // The input is not changed; `keep` leaves the old entries for a Host without the joint write.
+    expect(before.presentation.nodes['phase:research']).toEqual({ x: 410, y: 220 });
+    const kept = owdRenamedPresentation(before, intents, true)!;
+    expect(kept.presentation.nodes['phase:research']).toEqual({ x: 410, y: 220 });
+    expect(kept.presentation.nodes['phase:survey']).toEqual({ x: 410, y: 220 });
+    // Not a drawn kind, or no sidecar yet: no sidecar write.
+    expect(
+      owdRenamedPresentation(before, [{ type: 'rename-id', kind: 'item', id: 'fact', to: 'f2' }]),
+    ).toBeUndefined();
+    expect(owdRenamedPresentation(undefined, intents)).toBeUndefined();
   });
 });

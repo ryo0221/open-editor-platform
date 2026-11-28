@@ -1,0 +1,18 @@
+{
+  "name": "@editor-platform/workflow-definition-reference",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@editor-platform/artifact-core": "*",
+    "@editor-platform/editor-core": "*",
+    "@editor-platform/mindmap": "*",
+    "@editor-platform/mindmap-core": "*",
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/workflow-definition": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  }
+}

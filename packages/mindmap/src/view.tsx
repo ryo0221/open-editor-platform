@@ -29,6 +29,7 @@ import {
   newMindmapNodeId,
   reorderMindmapNode,
   setMindmapLayout,
+  setMindmapNodeLink,
   type MindmapContent,
   type MindmapLayout,
   type MindmapMark,
@@ -650,6 +651,26 @@ export function MindmapSurface({
             >
               取消
             </button>
+          </div>
+          <div className="mindmap-link" role="group" aria-label="つながり">
+            <h3>つながり</h3>
+            {content.nodes[current]?.link ? (
+              <>
+                <p>
+                  <code>{content.nodes[current].link!.namespace}</code> の{' '}
+                  <code>{content.nodes[current].link!.id}</code>
+                </p>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => run(setMindmapNodeLink(current, null))}
+                >
+                  つながりを外す
+                </button>
+              </>
+            ) : (
+              <p>なし（付けるのは Host の候補から）</p>
+            )}
           </div>
           {parent ? (
             <div className="mindmap-branch-actions">

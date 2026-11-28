@@ -84,6 +84,9 @@ export default defineConfig({
           new URL('./apps/playground/analysis-host.html', import.meta.url),
         ),
         graphHost: fileURLToPath(new URL('./apps/playground/graph-host.html', import.meta.url)),
+        workflowDefinitionHost: fileURLToPath(
+          new URL('./apps/playground/workflow-definition-host.html', import.meta.url),
+        ),
         embed: fileURLToPath(new URL('./apps/playground/embed.html', import.meta.url)),
         cadHost: fileURLToPath(new URL('./apps/playground/cad-host.html', import.meta.url)),
         scheduleHost: fileURLToPath(

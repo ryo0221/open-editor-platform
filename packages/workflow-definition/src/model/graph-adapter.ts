@@ -10,6 +10,7 @@ import {
   type GraphNodePresentations,
   type GraphProfile,
   type GraphSectionPresentation,
+  type PresentationSidecar,
 } from '@editor-platform/structured-graph/model';
 import {
   owdElementKey,
@@ -598,3 +599,36 @@ export function createOwdGraphAdapter(
   };
 }
 export const owdGraphAdapter = createOwdGraphAdapter();
+/**
+ * The sidecar with the places and frames of renamed elements moved to their new IDs (phases,
+ * deliverables, acceptance and roles are nodes, sections are frames). `undefined` when no saved
+ * place changes, so the edit needs no sidecar write. With `keep`, the old entries stay too: a Host
+ * that writes the sidecar as a separate Undo step keeps the place when the rename alone is undone.
+ */
+export function owdRenamedPresentation(
+  sidecar: PresentationSidecar | undefined,
+  intents: readonly WorkflowDefinitionIntent[],
+  keep = false,
+): PresentationSidecar | undefined {
+  if (!sidecar?.presentation) return undefined;
+  const next = clone(sidecar);
+  let changed = false;
+  for (const i of intents) {
+    if (i.type !== 'rename-id' || i.id === i.to) continue;
+    const maps =
+      i.kind === 'section'
+        ? [next.presentation.sections]
+        : (nodeKinds as readonly string[]).includes(i.kind)
+          ? [next.presentation.nodes]
+          : [];
+    for (const map of maps as Record<string, unknown>[]) {
+      const from = owdElementKey({ kind: i.kind, id: i.id }),
+        to = owdElementKey({ kind: i.kind, id: i.to });
+      if (!map || !Object.hasOwn(map, from)) continue;
+      map[to] = map[from];
+      if (!keep) delete map[from];
+      changed = true;
+    }
+  }
+  return changed ? next : undefined;
+}

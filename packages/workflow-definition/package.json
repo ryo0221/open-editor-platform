@@ -4,11 +4,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./model": "./src/model/index.ts"
+    ".": "./src/view/index.ts",
+    "./model": "./src/model/index.ts",
+    "./styles.css": "./src/view/styles.css"
   },
   "dependencies": {
     "@editor-platform/artifact-core": "*",
     "@editor-platform/editor-core": "*",
-    "@editor-platform/structured-graph": "*"
+    "@editor-platform/structured-graph": "*",
+    "@editor-platform/property-input": "*"
+  },
+  "peerDependencies": {
+    "react": "^19.1.1"
   }
 }

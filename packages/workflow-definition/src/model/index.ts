@@ -6,3 +6,5 @@ export * from './diagnostics';
 export * from './commands';
 export * from './check';
 export * from './graph-adapter';
+export * from './diff';
+export * from './mindmap';
