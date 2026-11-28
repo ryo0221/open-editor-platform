@@ -116,9 +116,9 @@ Host（PaoBub／参照 Host）
 - **規則はセルではなく `rule.id` が単位**。OWD の規則は一つで複数の組を持つ。例：`requirement-cites-source` は `to: [use-case, regulation, benchmark], min: 1` で、「三つの種類からの引用を合わせて 1 件以上」という意味になる。これをセルごとの `min: 1` の規則に分けると「それぞれの種類を 1 件以上」に意味が変わる。`covered.by` も、集合のどれかからの引用で満たす。そこで次のようにする。
   - セルは、その組を持つ規則を選ぶ入口にする。同じ規則のセルは同じ色と ID で示し、選ぶとその規則の全部のセルを強調する。
   - 編集は規則ごとの intent `set-rule {id, rule}` で、`from`・`to` の集合と共通の `min`（cites）、`of`・`by` の集合と `exempt`（covered）を一つの command で書き換える。規則の ID と、`acceptance.rules` からの参照はそのまま残す。
-  - 空のセルを押すと「既存の規則（同じ `from` の cites、または同じ `of` の covered）にこの種類を足す」か「新しい規則を作る（ID を入力）」を選ぶ。OWD の「組ごとに規則は 1 つ」に反する作り方（同じ組を二つの規則に入れる）は、その場で断る。
+  - 空のセルを押すと「既存の規則（同じ `from` の cites、または同じ `of` の covered）にこの種類を足す」か「新しい規則を作る（ID を入力）」を選ぶ。**組の重複を断るのは `cites` だけ**：OWD の `check` は同じ `from → to` の組を二つの `cites` 規則が許すことを断る（引用は規則の ID を持たず、どちらの意味か決まらないため）ので、その作り方はその場で断る。`covered` は規則ごとに独立して判定され、対象が重なってよい（例：`of: requirement, by: [analysis, test]` と別 ID の `of: requirement, by: [analysis, concept]` を両方とも条件から引く定義は `check` が `[]`）。そのため `covered` のセルは、その組を含む複数の `rule.id` を一覧して選べるようにし、二つの集合を一つにまとめない（まとめると「それぞれの規則を満たす」意味が変わる）。
   - 規則の削除は、`acceptance.rules` から参照されていれば cascade の確認が要る（参照も同じ command で外す）。
-  - 試験：既存の定義の複数対象の規則（`product-design-engineering` など）を読み、無関係な編集をして書いた結果で、規則の `to`・`by`・`min`・`exempt` と ID と参照が変わらないこと。
+  - 試験：既存の定義の複数対象の規則（`product-design-engineering` など）を読み、無関係な編集をして書いた結果で、規則の `to`・`by`・`min`・`exempt` と ID と参照が変わらないこと。 あわせて、同じ組を含む二つの `covered` 規則を作る・編集する・保存する試験と、同じ組を二つの `cites` 規則に入れる操作が断られる試験を入れる。
 
 ## 6. 検査と診断
 
