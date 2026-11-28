@@ -145,7 +145,8 @@ export const owdGraphProfile: GraphProfile = {
       connection: {
         from: ['deliverable'],
         to: ['deliverable'],
-        allowSelf: false,
+        // A deliverable that uses itself is a draft to repair, not a reason to close the view.
+        allowSelf: true,
         allowParallel: false,
       },
     },
@@ -182,6 +183,8 @@ function attributesOf(kind: NodeKind | 'section', record: OwdRecord): Attributes
   }
   return out;
 }
+/** The projected Graph's ID; definition-level diagnostics are addressed to it. */
+const owdGraphId = (def: OwdDefinition) => `owd:${String(def.id)}`.slice(0, 512);
 const edgeId = (type: string, from: string, to: string) => `${type}|${from}|${to}`;
 function parseEdgeId(id: string) {
   const [type, from, to, ...rest] = id.split('|');
@@ -270,7 +273,7 @@ export function projectOwdGraph(
   if (def.strictCites === true) graphAttributes.strictCites = true;
   return {
     schemaVersion: 3,
-    id: `owd:${def.id}`.slice(0, 512),
+    id: owdGraphId(def),
     profile: { id: owdGraphProfile.id, version: owdGraphProfile.version },
     attributes: graphAttributes,
     nodes,
@@ -378,6 +381,9 @@ export function owdIntentsFromGraph(
 ): WorkflowDefinitionIntent[] {
   const def = readOwdDefinition(definition);
   const out: WorkflowDefinitionIntent[] = [];
+  // Relations added or moved earlier in the batch, by the ID the batch uses for them.
+  const moved = new Map<string, NonNullable<ReturnType<typeof parseEdgeId>>>();
+  const edgeOf = (id: string) => moved.get(id) ?? parseEdgeId(id);
   for (const intent of intents)
     switch (intent.type) {
       case 'add-node': {
@@ -437,16 +443,18 @@ export function owdIntentsFromGraph(
         const from = refOf(intent.edge.from, nodeKinds),
           to = refOf(intent.edge.to, nodeKinds);
         out.push(referenceEdit(applyAll(def, out), intent.edge.type, from, to, 'add'));
+        moved.set(intent.edge.id, { type: intent.edge.type, from, to });
         break;
       }
       case 'delete-edge': {
-        const parsed = parseEdgeId(intent.id);
+        const parsed = edgeOf(intent.id);
         if (!parsed) throw new Error('Unknown relation');
         out.push(referenceEdit(applyAll(def, out), parsed.type, parsed.from, parsed.to, 'remove'));
+        moved.delete(intent.id);
         break;
       }
       case 'reconnect-edge': {
-        const parsed = parseEdgeId(intent.id);
+        const parsed = edgeOf(intent.id);
         if (!parsed) throw new Error('Unknown relation');
         const from = refOf(intent.from, nodeKinds),
           to = refOf(intent.to, nodeKinds);
@@ -480,6 +488,7 @@ export function owdIntentsFromGraph(
           out.push(referenceEdit(current, parsed.type, parsed.from, parsed.to, 'remove'));
           out.push(referenceEdit(applyAll(def, out), parsed.type, from, to, 'add'));
         }
+        moved.set(intent.id, { type: parsed.type, from, to });
         break;
       }
       case 'set-node-section': {
@@ -511,27 +520,29 @@ export interface OwdGraphAdapterOptions {
   /** The Host's OWD check; without it the diagnostics say that this Host does not check. */
   check?: WorkflowDefinitionCheck;
 }
-const graphDiagnostic = (d: WorkflowDefinitionDiagnostic): GraphDiagnostic => {
-  const key = d.target && owdElementKey(d.target);
-  const scope = !d.target
-    ? 'graph'
-    : d.target.kind === 'section'
-      ? 'section'
-      : nodeKinds.includes(d.target.kind as NodeKind)
-        ? 'node'
-        : 'graph';
-  return {
-    scope,
-    elementId: scope === 'graph' ? 'graph' : key!,
-    path: d.path.map(String),
-    code: d.code,
-    ...(d.args ? { args: d.args } : {}),
-    message:
-      scope === 'graph' && d.target ? `${d.target.kind} ${d.target.id}: ${d.message}` : d.message,
-    severity: d.blocking ? 'error' : 'warning',
-    blocking: false,
+const graphDiagnostic =
+  (graphId: string) =>
+  (d: WorkflowDefinitionDiagnostic): GraphDiagnostic => {
+    const key = d.target && owdElementKey(d.target);
+    const scope = !d.target
+      ? 'graph'
+      : d.target.kind === 'section'
+        ? 'section'
+        : nodeKinds.includes(d.target.kind as NodeKind)
+          ? 'node'
+          : 'graph';
+    return {
+      scope,
+      elementId: scope === 'graph' ? graphId : key!,
+      path: d.path.map(String),
+      code: d.code,
+      ...(d.args ? { args: d.args } : {}),
+      message:
+        scope === 'graph' && d.target ? `${d.target.kind} ${d.target.id}: ${d.message}` : d.message,
+      severity: d.blocking ? 'error' : 'warning',
+      blocking: false,
+    };
   };
-};
 /** Every diagnostic of the definition: structure, cycles and the Host's OWD check. */
 export function workflowDefinitionDiagnostics(
   definition: OwdDefinition,
@@ -568,7 +579,7 @@ export function createOwdGraphAdapter(
         base: source,
       }),
     diagnostics: (source) =>
-      workflowDefinitionDiagnostics(source, options.check).map(graphDiagnostic),
+      workflowDefinitionDiagnostics(source, options.check).map(graphDiagnostic(owdGraphId(source))),
   };
 }
 export const owdGraphAdapter = createOwdGraphAdapter();

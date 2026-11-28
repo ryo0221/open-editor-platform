@@ -261,19 +261,37 @@ export function structureDiagnostics(definition: OwdDefinition): WorkflowDefinit
 export function cycleDiagnostics(definition: OwdDefinition): WorkflowDefinitionDiagnostic[] {
   const phases = owdElements(definition, 'phase'),
     after = new Map(phases.map((p) => [p.id as string, (p.after as string[]) ?? []]));
-  const state = new Map<string, 1 | 2>(),
+  // Strongly connected components (Tarjan): every phase on some cycle, also where cycles overlap.
+  const index = new Map<string, number>(),
+    low = new Map<string, number>(),
+    stack: string[] = [],
+    onStack = new Set<string>(),
     inCycle = new Set<string>();
-  const visit = (id: string, path: string[]) => {
-    if (state.get(id) === 2 || !after.has(id)) return;
-    if (state.get(id) === 1) {
-      for (const p of path.slice(path.indexOf(id))) inCycle.add(p);
-      return;
+  let next = 0;
+  const visit = (id: string) => {
+    index.set(id, next);
+    low.set(id, next++);
+    stack.push(id);
+    onStack.add(id);
+    for (const a of after.get(id)!) {
+      if (!after.has(a)) continue;
+      if (!index.has(a)) {
+        visit(a);
+        low.set(id, Math.min(low.get(id)!, low.get(a)!));
+      } else if (onStack.has(a)) low.set(id, Math.min(low.get(id)!, index.get(a)!));
     }
-    state.set(id, 1);
-    for (const a of after.get(id)!) visit(a, [...path, id]);
-    state.set(id, 2);
+    if (low.get(id) !== index.get(id)) return;
+    const component: string[] = [];
+    let member: string;
+    do {
+      member = stack.pop()!;
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== id);
+    if (component.length > 1 || after.get(id)!.includes(id))
+      for (const m of component) inCycle.add(m);
   };
-  for (const id of after.keys()) visit(id, []);
+  for (const id of after.keys()) if (!index.has(id)) visit(id);
   return [...inCycle].map((id) => ({
     target: { kind: 'phase' as const, id },
     path: ['after'],

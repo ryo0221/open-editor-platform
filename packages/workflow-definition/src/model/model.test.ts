@@ -132,6 +132,27 @@ describe('structure checks', () => {
       ]),
     ).toThrow(/does not exist/);
   });
+  it('renames an element that already has a problem', () => {
+    const d = sampleDefinition();
+    d.phases[1].after = ['missing'];
+    const next = apply(d, [
+      { type: 'rename-id', kind: 'phase', id: d.phases[1].id, to: 'renamed' },
+    ]);
+    expect(next.phases[1]).toMatchObject({ id: 'renamed', after: ['missing'] });
+  });
+  it('reports every phase of overlapping cycles', () => {
+    const d = sampleDefinition();
+    const [a, b, c] = d.phases;
+    a.after = [b.id, c.id];
+    b.after = [a.id];
+    c.after = [b.id];
+    expect(
+      workflowDefinitionDiagnostics(d)
+        .filter((x) => x.code === 'phase-cycle')
+        .map((x) => x.target?.id)
+        .sort(),
+    ).toEqual([a.id, b.id, c.id].sort());
+  });
   it('allows a cyclic draft and reports the cycle without blocking', () => {
     const d = apply(sampleDefinition(), [
       { type: 'set-fields', kind: 'phase', id: 'research', fields: { after: ['review'] } },

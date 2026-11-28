@@ -230,6 +230,28 @@ describe('editing through the Graph', () => {
     ).toBe(true);
     expect(diagnostics.some((x) => x.code === 'phase-cycle' && !x.blocking)).toBe(true);
   });
+  it('still projects a deliverable that uses itself', () => {
+    const d = fixture('editor-development');
+    d.deliverables[0].uses = [d.deliverables[0].id];
+    expect(() => host(d).binding.project()).not.toThrow();
+  });
+  it('addresses definition-level problems to the projected graph', () => {
+    const d = sampleDefinition();
+    d.version = 'broken';
+    const { graph, diagnostics } = host(d).binding.project();
+    expect(diagnostics.find((x) => x.code === 'version-form')?.elementId).toBe(graph.id);
+  });
+  it('follows a relation moved twice in one batch', () => {
+    const h = host();
+    const edge = 'makes|phase:research|deliverable:notes';
+    h.edit([
+      { type: 'reconnect-edge', id: edge, from: 'phase:plan', to: 'deliverable:notes' },
+      { type: 'reconnect-edge', id: edge, from: 'phase:review', to: 'deliverable:notes' },
+    ]);
+    expect(phase(h.source, 'research').deliverables).not.toContain('notes');
+    expect(phase(h.source, 'plan').deliverables).not.toContain('notes');
+    expect(phase(h.source, 'review').deliverables).toContain('notes');
+  });
   it('allows a cycle and shows it as a warning', () => {
     const h = host();
     h.edit([

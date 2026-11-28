@@ -238,7 +238,18 @@ export function applyWorkflowDefinitionIntents(
   const next = clone(before);
   for (const intent of intents) applyIntent(next, intent);
   readOwdDefinition(next);
-  const added = newDiagnostic(structureDiagnostics(before), structureDiagnostics(next));
+  // A problem the definition had keeps its identity when its element's ID is changed.
+  const renames = intents.filter(
+    (i): i is Extract<WorkflowDefinitionIntent, { type: 'rename-id' }> => i.type === 'rename-id',
+  );
+  const had = structureDiagnostics(before).map((d) => {
+    let target = d.target;
+    for (const r of renames)
+      if (target && target.kind === r.kind && target.id === r.id && typeof r.to === 'string')
+        target = { kind: target.kind, id: r.to };
+    return target === d.target ? d : { ...d, target };
+  });
+  const added = newDiagnostic(had, structureDiagnostics(next));
   if (added) throw new Error(added.message);
   return next;
 }
